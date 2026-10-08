@@ -8,7 +8,9 @@ rustup target add aarch64-apple-ios aarch64-apple-ios-sim >/dev/null
 cargo build --release --target aarch64-apple-ios -p varsto-ffi
 cargo build --release --target aarch64-apple-ios-sim -p varsto-ffi
 cd "$root/apps/ios" && xcodegen generate
+# -quiet prints only warnings, errors and the result; the full log goes to build/xcodebuild.log.
+mkdir -p build
 xcodebuild -project Varsto.xcodeproj -scheme Varsto -sdk iphonesimulator -configuration Release \
-  -derivedDataPath build CODE_SIGNING_ALLOWED=NO build | tail -3
+  -derivedDataPath build CODE_SIGNING_ALLOWED=NO -quiet build 2>&1 | tee build/xcodebuild.log
 echo "app: apps/ios/build/Build/Products/Release-iphonesimulator/Varsto.app"
 echo "Open apps/ios/Varsto.xcodeproj in Xcode to run on a device (signing needed)."
