@@ -3,6 +3,7 @@
 > **Alpha software — do not use for production data.**
 > Varsto is in early development. Bugs can cause data loss or corruption, file formats and protocols may change without a migration path, and the cryptography has not been independently audited yet.
 > Do not use it as the only copy of anything. You are responsible for keeping your own backups and for checking that you can restore from them.
+> Each released storage-format version keeps a reader; see [docs/spec/format-versions.md](docs/spec/format-versions.md).
 
 *"Varsto" is a working name and may change before the first public release.*
 
