@@ -16,9 +16,16 @@ Format: JSON lines (UTC timestamp, level, component, event, operation id, fields
 
 Enforcement: secrets are distinct types with no loggable form; logging macros accept only allowed field types; a lint and code review check this; **canary tests** feed known sentinel values as passwords, file names and keys through full scenarios and assert that none appears in any log, crash dump, diagnostics bundle or network traffic.
 
+## Phases
+
+- **Phase 1 (alpha):** logs are essential and always on. They are stored locally **without encryption at rest**, but the redaction rules above always apply: no secrets, no clear-text names, no content. Because of that, the alpha warning tells users that logs contain keyed hashes, event types, sizes and timestamps from which a usage pattern can be inferred.
+- **Phase 2 (later):** logs are also **encrypted at rest** to the same standard as other data (on mobile at the latest before a real release). Encryption is added **on top of** redaction, never instead of it: a diagnostics bundle must still contain no secrets even if the log key leaks.
+
+Design notes for phase 2: a separate log key so that logging works while the vault is locked (rows encrypted to a public key or a session key wrapped by the vault key; reading needs unlock); row- or block-level encryption so the last line survives a crash; decrypt for search and export; re-encrypt exports for the recipient; no names for Strongroom items even when encrypted.
+
 ## Storage and size
 
-- Logs stay on the device in the application's private directory (encrypted or free of anything forbidden by the "no clear-text data on mobile" rule). They are excluded from backups and never synchronised.
+- Logs stay on the device in the application's private directory. They are excluded from backups and never synchronised.
 - Rotation by age (default 14 to 30 days) and size; errors and warnings are kept longer than routine events. Smaller limits on mobile.
 - Asynchronous, buffered writes; logging must not noticeably slow synchronisation.
 - Levels: error, warn, info, debug, trace. Debug is the default; trace is off by default.
