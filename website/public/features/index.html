@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Features: Varsto</title>
+<meta name="description" content="What Varsto does, with the use cases behind each feature: your own storage, signed bookkeeping, transferrer disks, untrusted replicas, selective sync, sharing.">
+<meta name="robots" content="noindex, nofollow">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../blog/feed.xml">
+<link rel="stylesheet" href="../assets/css/site.css">
+<script src="../assets/js/theme.js"></script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="alpha" role="note">
+  <div class="wrap"><strong>Alpha software, not for production data.</strong> Bugs can cause data loss, formats may change without migration, and the cryptography has not been independently audited. Keep your own backups and check that you can restore from them.</div>
+</div>
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="../"><img src="../assets/img/logo.svg" alt="" width="28" height="28"><span>Varsto</span></a>
+    <nav class="main" aria-label="Main">
+      <a href="../">Project</a>
+      <a href="../features/" aria-current="page">Features</a>
+      <a href="../use-cases/">Use cases</a>
+      <a href="../screenshots/">Screenshots</a>
+      <a href="../docs/">Docs</a>
+      <a href="../downloads/">Downloads</a>
+      <a href="../blog/">Blog</a>
+      <a href="../forum/">Forum</a>
+      <button class="theme" id="theme-toggle" type="button" aria-label="Change colour theme">Theme: auto</button>
+    </nav>
+  </div>
+</header>
+<main id="main">
+  <div class="wrap">
+    <h1>Features</h1>
+    <p class="lead">Varsto is built around one idea: your files live on devices and storage you choose, every copy is ciphertext, and the app keeps honest, signed bookkeeping of where every block is. The features below follow from that. Items marked <span class="badge">alpha-0</span> exist today; the rest are designed and documented, not built. The <a href="../use-cases/">Use cases</a> page tells the same story from the user's side, one situation at a time.</p>
+
+    <section class="feature">
+      <img src="../assets/img/features/ledger.svg" alt="Two devices and a storage; a signed ledger lists which device stored and which verified a block." width="640" height="320" loading="lazy">
+      <div>
+        <h2>Devices that are never online together still converge <span class="badge">alpha-0</span></h2>
+        <p>There is no server. Each device writes encrypted blocks into storage you own and, next to them, a signed and encrypted ledger of what it did. Another device reads the ledger when it reaches the same storage, verifies the signatures and knows what exists, where it is and which copies were checked by someone else. <code>varsto fsck --verify</code> re-hashes every object and reports claims the storage cannot back. A device restored from an old backup is detected and fenced.</p>
+        <p class="note">Use case: a laptop that is on the road for a week and a desktop at home. Both write to the same bucket or NAS share whenever they can; they never need to be on at the same time.</p>
+      </div>
+    </section>
+
+    <section class="feature">
+      <img src="../assets/img/features/transferrer.svg" alt="A USB stick marked as transferrer between a home PC and an office PC." width="640" height="320" loading="lazy">
+      <div>
+        <h2>Transferrer: a disk that travels between two devices <span class="badge">alpha-0</span></h2>
+        <p>Mark a USB stick or an external disk as a transferrer. It only receives the encrypted blocks that the other device still lacks, and once both ends hold a block it is removed from the stick. For gigabytes of video between home and office this is faster than any upload, and it works with no internet at all.</p>
+        <p class="note">Use case: edit footage at the office, carry the stick home, plug it in; the home machine catches up in minutes and the stick empties itself for the next trip.</p>
+      </div>
+    </section>
+
+    <section class="feature">
+      <img src="../assets/img/features/untrusted.svg" alt="You with the keys, a shared storage, and a friend's NAS that stores verified encrypted copies it cannot open." width="640" height="320" loading="lazy">
+      <div>
+        <h2>Untrusted replicas: backup space you do not have to trust <span class="badge">alpha-0</span></h2>
+        <p>Give a friend, a relative or a rented box a <em>replica token</em>. Their device copies your encrypted objects from a shared location to its own disk, verifies every hash, and reports the copies into your ledger. It never receives a key that could open anything; it learns object names and sizes, exactly what a storage provider learns. Two users can host each other's backups this way.</p>
+        <p class="note">Use case: you and a friend each keep a copy of the other's vault on a NAS in your homes. Neither can read the other's files; both see in their own app that the copies exist and are verified.</p>
+      </div>
+    </section>
+
+    <section class="feature">
+      <img src="../assets/img/features/selective.svg" alt="A phone showing a file list where large files are placeholders and small ones are downloaded." width="640" height="320" loading="lazy">
+      <div>
+        <h2>Selective sync with placeholders <span class="badge">alpha-0</span></h2>
+        <p>Every device can keep a folder in selective mode: the full tree is visible as placeholders, a file is downloaded when you ask for it, and <em>Free up space</em> turns it back into a placeholder once it is safely stored elsewhere. Placeholders are never mistaken for deletions. Operating-system integration (Finder, Explorer, Files) comes later; the mechanism is the same as in Resilio Sync's selective sync.</p>
+      </div>
+    </section>
+
+    <section class="feature">
+      <img src="../assets/img/features/sharing.svg" alt="Two users; a folder key is handed over so the other user can sync and read the folder." width="640" height="320" loading="lazy">
+      <div>
+        <h2>Share a folder with another Varsto user <span class="badge">alpha-0</span></h2>
+        <p>Sharing is key sharing: the owner hands over a token with the folder key, the recipient accepts it on their own device and syncs the folder through storage both can reach. Their devices write their own signed ledgers under that folder key, so the owner sees their copies too. The token opens that folder and nothing else of the vault. Key exchange over a secure channel, invitations with QR codes and revocation are the next steps.</p>
+      </div>
+    </section>
+
+    <section class="feature">
+      <img src="../assets/img/features/background.svg" alt="A tray menu: status, open, sync now, pause, check for updates." width="640" height="320" loading="lazy">
+      <div>
+        <h2>A real background app on macOS, Windows and Linux <span class="badge">alpha-0</span></h2>
+        <p>A menu-bar or tray app runs the background service, watches your folders and syncs changes within seconds, with a periodic catch-up for changes made elsewhere. The same small binary provides the command line and the local interface in your browser, served only to your computer. Updates: one click in the app, or <code>varsto update</code>, with a checksum check.</p>
+      </div>
+    </section>
+
+    <section class="feature">
+      <img src="../assets/img/features/cold.svg" alt="Laptop, hot storage and a cold archive with a note that cold storage is never read by surprise." width="640" height="320" loading="lazy">
+      <div>
+        <h2>Cold storage and cost-aware placement <span class="badge">alpha-0, partly</span></h2>
+        <p>Any directory is a storage today; S3-compatible buckets and rclone remotes follow. Each storage carries its own prices for upload, download and restore, so the app knows where a read is cheap and where it is expensive. Cold storage such as Glacier is written but never read without an explicit confirmation that shows the cost and the delay. Alpha-0 implements the never-read rule; the price model and S3 are in the plan.</p>
+      </div>
+    </section>
+
+    <section class="feature">
+      <img src="../assets/img/features/disks.svg" alt="Hard drives on a shelf next to a PC with a USB dock." width="640" height="320" loading="lazy">
+      <div>
+        <h2>Old disks on a shelf as counted, verified copies <span class="badge">designed</span></h2>
+        <p>Attach a disk from a USB dock, let the app fill it with the data that has the fewest copies, eject it when told, and store it anywhere. Next time it is attached the app verifies it, repairs what rotted and loads what is new. Disks belong to groups and places, so a policy can require one copy at home and one elsewhere. A folder can be kept only on disks, replicated as many times as you choose, with no cloud copy at all.</p>
+      </div>
+    </section>
+
+    <section class="feature">
+      <img src="../assets/img/features/mobile.svg" alt="A phone and a tablet syncing through storage; the phone stores nothing in clear text." width="640" height="320" loading="lazy">
+      <div>
+        <h2>Mobile apps that keep nothing in clear text <span class="badge">in progress</span></h2>
+        <p>Android and iOS run the same encrypted core. Files stay encrypted on the device and are decrypted when you open them; thumbnails are generated once, encrypted and shared with your other devices. The Android alpha is a sideloadable APK; iOS needs a Mac to build and will follow.</p>
+      </div>
+    </section>
+
+    <h2>Also in the design</h2>
+    <ul>
+      <li><strong>Post-quantum hybrid cryptography</strong> everywhere a public key is used, so that data stored today stays private for decades. Alpha-0 signs with Ed25519 only; every object carries an algorithm identifier so the switch needs no rewrite of your data.</li>
+      <li><strong>Security keys and Strongroom folders</strong>: folders that open only with a touch of your FIDO2 key, enforced cryptographically, not by a dialog.</li>
+      <li><strong>Durability policies with alerts</strong>: "at least two cloud copies and one at home, verified within 30 days", and the app tells you before it can no longer be true.</li>
+      <li><strong>Peer-to-peer transfer</strong> on the local network, torrent-style, with every block encrypted.</li>
+      <li><strong>A recovery kit</strong> you keep on paper or metal, in several places, and test once a year.</li>
+      <li><strong>An MCP server</strong> so an AI assistant of your choice can organise files and answer "where is this cheapest to keep?" with only the access you grant.</li>
+    </ul>
+    <p class="note">Every design document on the <a href="../docs/">Docs</a> page says which parts exist. Nothing has been audited yet.</p>
+
+  </div>
+</main>
+<footer class="site">
+  <div class="wrap">
+    <span>Varsto is a working name. Source will be published under the PolyForm Shield License 1.0.0 with the first public alpha.</span>
+    <span>No cookies, no tracking. The web server keeps a standard access log for at most seven days.</span>
+    <span><a href="../docs/security-policy.html">Security policy</a> · <a href="../docs/licence.html">Licence</a> · <a href="../docs/trademark.html">Trademark</a></span>
+  </div>
+</footer>
+</body>
+</html>

@@ -22,7 +22,7 @@ None of this is finished. See [docs/architecture](docs/architecture/README.md) f
 
 ## Status
 
-Alpha-0: the first vertical slice works on Linux, macOS and Windows (macOS and Windows builds are cross-compiled and not yet tested there) from the command line and from a local desktop interface (`varsto desktop`). It chunks and encrypts files, stores them in a local-directory storage (a disk, a removable disk or a network mount), keeps a signed per-device ledger in that storage, and syncs a folder between devices that are never online at the same time, with conflict copies and a trash. See [docs/spec/alpha-0-format.md](docs/spec/alpha-0-format.md) for what it does and does not do. There is no sharing, no peer-to-peer transfer, no post-quantum hybrid yet, no mobile app and no audit.
+Alpha (0.0.1-alpha.2): the core works on Linux, macOS and Windows (macOS and Windows builds are cross-compiled and not yet tested there) as a background service with a tray or menu-bar app, a local desktop interface, a command line, and an Android shell (sideloadable APK). Implemented: encrypted chunked sync through any directory, signed per-device ledger and convergence between devices that are never online together, conflict copies and trash, selective sync with placeholders, transferrer disks, untrusted replica devices, folder sharing with another user by key, encrypted thumbnails, self-update. It chunks and encrypts files, stores them in a local-directory storage (a disk, a removable disk or a network mount), keeps a signed per-device ledger in that storage, and syncs a folder between devices that are never online at the same time, with conflict copies and a trash. See [docs/spec/alpha-0-format.md](docs/spec/alpha-0-format.md) for what it does and does not do. There is no sharing, no peer-to-peer transfer, no post-quantum hybrid yet, no mobile app and no audit.
 
 ### Quick start (alpha-0)
 
@@ -34,6 +34,8 @@ varsto --home ~/.varsto-laptop init --name laptop            # prints the vault 
 varsto --home ~/.varsto-laptop storage add-local box /mnt/box
 varsto --home ~/.varsto-laptop folder add docs ~/Documents/synced
 varsto --home ~/.varsto-laptop sync
+varsto tray                                # Linux/Windows: tray icon + background service (macOS: Varsto.app)
+varsto update --check                      # self-update from the download page
 
 # on another device that can reach the same storage:
 varsto --home ~/.varsto-desk join --name desk --vault-key <hex> --storage-path /mnt/box
@@ -41,6 +43,14 @@ varsto --home ~/.varsto-desk folder attach docs ~/synced
 varsto --home ~/.varsto-desk sync
 varsto --home ~/.varsto-desk status --json
 varsto --home ~/.varsto-desk fsck --verify
+
+# selective sync, transferrer disks, replicas and sharing:
+varsto folder attach docs ~/synced --selective && varsto folder files docs && varsto folder fetch docs big.mp4
+varsto storage add-local stick /media/usb --carrier       # carries only what the other device lacks
+varsto replica token                                      # give to an untrusted backup device
+varsto --home ~/.varsto-replica replica init --name nas --token <t> --source /mnt/shared --target /mnt/nas/varsto
+varsto share create docs                                  # token for another Varsto user
+varsto --home ~/.varsto-shared share accept --name laptop --token <t> --storage-path /mnt/shared
 ```
 
 Test data only. Keep your own backups.
@@ -49,7 +59,8 @@ Test data only. Keep your own backups.
 
 | Path | Purpose |
 |---|---|
-| `crates/` | Rust workspace: `varsto-core` (library) and `varsto-cli` (the `varsto` binary) |
+| `crates/` | Rust workspace: `varsto-core` (library), `varsto-cli` (the `varsto` binary: CLI, service, tray, desktop interface), `varsto-ffi` (C ABI for mobile) |
+| `apps/` | `macos` (menu-bar app, Swift), `android` (foreground service + WebView), `ios` (SwiftUI shell, build on a Mac) |
 | `docs/` | Architecture, specifications, testing guides |
 | `tests/` | Test matrix and shared test assets |
 | `scripts/test/` | Scripts used by the testing instructions |

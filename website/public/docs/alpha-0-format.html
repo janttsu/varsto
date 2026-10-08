@@ -22,6 +22,9 @@
     <a class="brand" href="../"><img src="../assets/img/logo.svg" alt="" width="28" height="28"><span>Varsto</span></a>
     <nav class="main" aria-label="Main">
       <a href="../">Project</a>
+      <a href="../features/">Features</a>
+      <a href="../use-cases/">Use cases</a>
+      <a href="../screenshots/">Screenshots</a>
       <a href="../docs/" aria-current="page">Docs</a>
       <a href="../downloads/">Downloads</a>
       <a href="../blog/">Blog</a>
@@ -47,6 +50,7 @@
 <li>Two-way folder sync between devices with version vectors; concurrent edits produce a deterministic winner and a conflict copy; deletions go to a local trash.</li>
 <li><code>fsck</code>: compares the ledger with what the storages actually hold and can verify every object by hash.</li>
 <li>Cold storages are written but never read (requirement F-043 default).</li>
+<li>A local desktop interface (<code>varsto desktop</code>): a web page served from the binary on 127.0.0.1 with a per-session token and a Host check, the first shape of the local control API (plan 6.8, 6.32).</li>
 </ul>
 <p>Not in alpha-0: sharing with other users, peer-to-peer transfer, hybrid post-quantum signatures and key agreement, FIDO2 security keys, Strongroom, placeholders, policies and alerts, packs, mobile, MCP, daemon. Keys are shared between devices out of band (the "vault key").</p>
 <h2 id="2-identifiers">2. Identifiers</h2>
@@ -289,6 +293,23 @@ trash/          deleted files</code></pre>
 <li>Verification of cold copies, policies, placeholders, sharing and P2P are not implemented.</li>
 <li>Logging and the redaction rules of <code>docs/architecture/logging.md</code> are not implemented; the CLI prints only aggregate counts and identifiers.</li>
 </ul>
+<h2 id="10-additions-in-001-alpha2">10. Additions in 0.0.1-alpha.2</h2>
+<h3 id="background-service-tray-and-menu-bar-apps">Background service, tray and menu-bar apps</h3>
+<p><code>varsto service run</code> watches attached folders (inotify, kqueue, FSEvents or ReadDirectoryChangesW through the <code>notify</code> crate), syncs within seconds of a change and on a timer, serves the local interface and writes <code>service.json</code> (<code>pid</code>, <code>port</code>, <code>token</code>, mode 0600) so that the tray app, the CLI and the mobile shells can find it. <code>varsto tray</code> (Linux: StatusNotifier over D-Bus; Windows: system tray) and the macOS menu-bar app supervise the service as a child process and restart it after a self-update (exit code 75). <code>varsto service install</code> registers a login item (LaunchAgent, autostart entry, Startup folder).</p>
+<h3 id="self-update">Self-update</h3>
+<p><code>varsto update</code> and the "Check for updates" buttons fetch <code>manifest.json</code> and <code>SHA256SUMS</code> from the download page with the system <code>curl</code>, verify the SHA-256 of the platform archive and replace the running binary (rename-over on Unix, rename-aside on Windows). The checksum comes from the same site as the archive; signed releases and a second channel are planned.</p>
+<h3 id="selective-sync-and-placeholders-f-039">Selective sync and placeholders (F-039)</h3>
+<p>A folder mount can be <em>selective</em>. Files the device has not fetched exist as <code>&lt;name&gt;.varsto-placeholder</code> (a few bytes of JSON: size and time). Placeholders are never treated as deletions; <code>fetch</code> downloads one file and pins it so later updates are downloaded too; <code>free</code> replaces a local file with a placeholder, but only when every chunk is on a storage that is not a carrier (or on a replica). The interface lists files with their state and shows encrypted thumbnails.</p>
+<h3 id="transferrer-disks-f-048">Transferrer disks (F-048)</h3>
+<p>A local-directory storage can be marked <code>carrier</code>. The engine writes to it only chunks that no other device holds yet, and after every pull it deletes from the carrier the chunks that both this device and another device hold. Carriers are ignored by <code>fsck</code>'s "claim without object" check and never count as the only durable copy for <code>free</code>.</p>
+<h3 id="untrusted-replicas-f-045">Untrusted replicas (F-045)</h3>
+<p>A replica device holds a <em>replica token</em> (<code>&lt;vault-id&gt;.&lt;key&gt;</code>), where the key is <code>derive(K3, "replica-ledger")</code>. It mirrors every object from a source directory to a target directory, verifies chunk objects against their names, and records claims in its own ledger batches, sealed under the replica key with <code>key_id = "replica"</code> and signed with its own Ed25519 key. Its device record is published at <code>vault/replicas/&lt;device&gt;.enc</code> under the same key. Owner devices read those batches, fold the claims into the chunk records by object name (the replica cannot know chunk ids), and count them as verified copies. The replica never holds a key that opens content, names or manifests.</p>
+<h3 id="shared-folders-f-047">Shared folders (F-047)</h3>
+<p>A share token is <code>&lt;vault-id&gt;.&lt;folder-id&gt;.&lt;folder-key&gt;.&lt;name&gt;</code>. The recipient creates a <em>member</em> device: a device directory with a local random root key, the owner's vault id and that one folder record. Member records live at <code>vault/shares/&lt;folder&gt;/&lt;device&gt;.enc</code> under <code>derive(folder key, "share-registry")</code>; member batches are sealed per folder under <code>derive(folder key, "share-ledger")</code> with <code>key_id = "share:&lt;folder&gt;"</code>. Owner devices and members resolve those keys from the folder key, so everyone holding the folder key sees everyone's claims for that folder and nothing else. Members cannot create folders, issue replica tokens or read the owner's device registry. Limitation: one device directory per shared vault; key exchange is manual.</p>
+<h3 id="encrypted-thumbnails-f-046">Encrypted thumbnails (F-046)</h3>
+<p>For image and video files, the device that holds the plaintext generates a JPEG thumbnail (longest side 256 px; videos through <code>ffmpeg</code> when installed), encrypts it under the folder metadata key with associated data (<code>thumbnail</code>, vault, folder, content hash) and stores it at <code>thumbs/&lt;folder&gt;/&lt;content hash&gt;.enc</code> on every hot, non-carrier storage. Any device with the folder key can show the preview, including for placeholders it never fetched. No thumbnail is written in clear text on disk.</p>
+<h3 id="mobile-shells">Mobile shells</h3>
+<p>Android: a foreground service runs the same <code>varsto service</code> binary (shipped as <code>libvarsto.so</code>), the activity shows the local interface in a WebView. iOS: <code>varsto-ffi</code> exposes <code>varsto_start</code> and <code>varsto_url</code> for an in-process service behind a <code>WKWebView</code>; the Xcode project is generated with xcodegen on a Mac.</p>
 
 </article>
   </div>

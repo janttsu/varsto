@@ -22,6 +22,9 @@
     <a class="brand" href="../"><img src="../assets/img/logo.svg" alt="" width="28" height="28"><span>Varsto</span></a>
     <nav class="main" aria-label="Main">
       <a href="../">Project</a>
+      <a href="../features/">Features</a>
+      <a href="../use-cases/">Use cases</a>
+      <a href="../screenshots/">Screenshots</a>
       <a href="../docs/">Docs</a>
       <a href="../downloads/">Downloads</a>
       <a href="../blog/" aria-current="page">Blog</a>
@@ -33,7 +36,7 @@
 <main id="main">
   <div class="wrap">
 <article class="prose"><h1>Alpha-0: the first vertical slice</h1><p class="note"><time datetime="2026-10-08">2026-10-08</time></p>
-<p>Alpha-0 is the first thing you can run. It is deliberately narrow: one storage backend (a directory), a command-line tool, and the smallest set of mechanisms that make the core idea real.</p>
+<p>Alpha-0 is the first thing you can run. It is deliberately narrow: one storage backend (a directory), a command-line tool with a small local desktop interface, and the smallest set of mechanisms that make the core idea real.</p>
 <h2 id="what-the-core-idea-is">What the core idea is</h2>
 <p>Most encrypted sync products run a server that at least sees who connects when, and usually sells the storage too. Varsto has no server. Your devices write encrypted objects into storage that you own, and they write a signed, encrypted record of what they did next to the data. Another device that reaches the same storage reads that record, verifies the signatures, and knows what exists, where it is and which copies have been checked. Two devices that are never online at the same time still end up with the same files.</p>
 <h2 id="what-alpha-0-does">What alpha-0 does</h2>
@@ -48,7 +51,7 @@
 <h2 id="what-it-does-not-do">What it does not do</h2>
 <p>No sharing with other people, no peer-to-peer transfer, no S3 or rclone yet, no security keys, no mobile apps, and the post-quantum hybrid of the design is not in the code yet (every object carries an algorithm identifier so it can be added without rewriting data). Nothing has been audited. Please use test data only.</p>
 <h2 id="how-to-try-it">How to try it</h2>
-<p>Download the Linux binary from the <a href="../docs/./">downloads page</a>, verify the checksum, and follow the quick start. Two directories on one machine are enough to see the ledger and the sync work; two machines with a shared USB disk or a network mount show the real thing.</p>
+<p>Download the Linux binary, the macOS app or the Windows zip from the <a href="../docs/./">downloads page</a>, verify the checksum, and follow the quick start. Two directories on one machine are enough to see the ledger and the sync work; two machines with a shared USB disk or a network mount show the real thing.</p>
 
 </article>
   </div>

@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 320" width="640" height="320" role="img" aria-label="A device decrypts on demand and shows thumbnails made once by another device">
+<defs>
+<g id="lock"><rect x="-8" y="-2" width="16" height="12" rx="3" fill="#2b57d6"/><path d="M-4.5 -2 V-6 a4.5 4.5 0 0 1 9 0 V-2" fill="none" stroke="#2b57d6" stroke-width="2.4"/><circle cx="0" cy="4" r="1.8" fill="#fff"/></g>
+<g id="device"><rect x="-44" y="-30" width="88" height="56" rx="6" fill="#fff" fill-opacity="0.95" stroke="#8aa9ff" stroke-width="2"/><rect x="-54" y="26" width="108" height="6" rx="3" fill="#8aa9ff"/></g>
+<g id="phone"><rect x="-20" y="-38" width="40" height="72" rx="7" fill="#fff" fill-opacity="0.95" stroke="#8aa9ff" stroke-width="2"/><circle cy="29" r="2.4" fill="#8aa9ff"/></g>
+<g id="disk"><rect x="-40" y="-16" width="80" height="32" rx="5" fill="#eef2ff" stroke="#8aa9ff" stroke-width="2"/><circle cx="28" cy="0" r="3" fill="#2bb673"/></g>
+<g id="cloud"><path d="M-40 10 a16 16 0 0 1 10 -30 a20 20 0 0 1 38 -4 a14 14 0 0 1 22 20 a12 12 0 0 1 -6 22 h-58 a13 13 0 0 1 -6 -8z" fill="#fff" fill-opacity="0.95" stroke="#8aa9ff" stroke-width="2"/></g>
+<g id="house"><path d="M-40 0 L0 -34 L40 0 V36 H-40 Z" fill="#fff" fill-opacity="0.95" stroke="#8aa9ff" stroke-width="2"/><rect x="-10" y="12" width="20" height="24" fill="#8aa9ff"/></g>
+<g id="file"><path d="M-14 -20 h18 l10 10 v30 h-28 z" fill="#fff" stroke="#8aa9ff" stroke-width="2"/><path d="M4 -20 v10 h10" fill="none" stroke="#8aa9ff" stroke-width="2"/></g>
+<g id="key"><circle r="7" fill="none" stroke="#2b57d6" stroke-width="3"/><path d="M6 2 L24 2 M18 2 v6 M22 2 v4" stroke="#2b57d6" stroke-width="3" fill="none"/></g>
+<g id="x"><circle r="10" fill="#e0535a"/><path d="M-4 -4 L4 4 M4 -4 L-4 4" stroke="#fff" stroke-width="2.5"/></g>
+<g id="ok"><circle r="10" fill="#2bb673"/><path d="M-5 0 L-1 4 L6 -4" stroke="#fff" stroke-width="2.5" fill="none"/></g>
+</defs>
+<style>text{font-family:system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif} .t{font-size:14px;font-weight:600;fill:#334155} .s{font-size:12px;fill:#6b7a90} .d{stroke:#8aa9ff;stroke-width:2.5;stroke-dasharray:6 6;fill:none} .l{stroke:#8aa9ff;stroke-width:2.5;fill:none}</style>
+
+<use href="#device" x="150" y="150"/><text x="150" y="205" text-anchor="middle" class="t">Desktop</text><text x="150" y="223" text-anchor="middle" class="s">has the photos, makes thumbnails</text>
+<path class="d" d="M205 140 C 250 100, 290 100, 300 110"/>
+<use href="#cloud" x="340" y="120"/><use href="#lock" x="372" y="102"/><text x="340" y="155" text-anchor="middle" class="s">thumbs/&lt;folder&gt;/&lt;hash&gt;.enc</text>
+<path class="d" d="M380 130 C 420 150, 450 160, 470 165"/>
+<use href="#phone" x="510" y="190"/><rect x="498" y="160" width="24" height="18" fill="#8aa9ff"/><rect x="498" y="182" width="24" height="18" fill="#8aa9ff" fill-opacity="0.6"/><text x="510" y="255" text-anchor="middle" class="t">Phone</text><text x="510" y="273" text-anchor="middle" class="s">previews, files are placeholders</text>
+<text x="200" y="285" text-anchor="middle" class="s">Thumbnails are encrypted under the folder key; the storage sees only ciphertext.</text>
+
+</svg>

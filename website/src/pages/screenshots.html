@@ -1,0 +1,28 @@
+---
+title: Screenshots
+nav: Screenshots
+output: screenshots/index.html
+description: What the alpha looks like: the desktop interface in light and dark mode, the file list with placeholders and encrypted thumbnails, and the Android app. With an honest list of what has not been captured yet.
+---
+    <h1>Screenshots</h1>
+    <p class="lead">Taken from version 0.0.1-alpha.2 with an invented demo vault: a laptop with two folders and a phone that holds the photo folder in selective mode. The desktop interface is the same page on Linux, macOS and Windows: it is served by the background service and rendered by your browser, so only the window frame differs. The tray and menu-bar icons are the only native parts.</p>
+
+    <h2>Desktop interface</h2>
+    <figure class="shot"><img src="../assets/img/screenshots/desktop-overview-light.png" alt="Desktop interface, light mode: service status with Pause and Check for updates, Sync all folders and fsck buttons, a folder table with files, size, chunks, copies without storage and copies verified elsewhere, and forms to add or attach a folder." width="1280" height="860" loading="lazy"><figcaption>Overview on the laptop: the background service is running and watching two folders; each folder shows how many chunks lack a storage copy and how many copies another device has verified.</figcaption></figure>
+    <figure class="shot"><img src="../assets/img/screenshots/desktop-overview-dark.png" alt="The same overview in dark mode." width="1280" height="860" loading="lazy"><figcaption>Dark mode follows the system setting.</figcaption></figure>
+    <figure class="shot"><img src="../assets/img/screenshots/desktop-files-light.png" alt="File list of a selective folder on the phone device: three photos with thumbnails, two are placeholders with a Download button, one is local with a Free up space button." width="1150" height="350" loading="lazy"><figcaption>The phone's view of the photo folder in selective mode: two files are placeholders, one has been fetched. The thumbnails were generated on the laptop, stored encrypted and decrypted here with the folder key; the phone never downloaded the pictures themselves.</figcaption></figure>
+    <figure class="shot"><img src="../assets/img/screenshots/desktop-files-dark.png" alt="The same file list in dark mode." width="1150" height="350" loading="lazy"><figcaption>The same list in dark mode.</figcaption></figure>
+
+    <h2>Android</h2>
+    <div class="shots-row">
+      <figure class="shot"><img src="../assets/img/screenshots/android-light.png" alt="Android app, light mode: first-run screen with Create a new vault and Join an existing vault forms." width="540" height="1200" loading="lazy"><figcaption>First start in the Android 15 emulator: the foreground service is running and the app shows the same interface in a WebView.</figcaption></figure>
+      <figure class="shot"><img src="../assets/img/screenshots/android-dark.png" alt="Android app, dark mode: the same first-run screen." width="540" height="1200" loading="lazy"><figcaption>Dark mode.</figcaption></figure>
+    </div>
+
+    <h2>Not captured yet</h2>
+    <ul>
+      <li><strong>macOS menu-bar app and Windows tray icon.</strong> Both are cross-compiled on Linux and have not been run on real hardware yet, so there is no honest screenshot to show. The interface they open is the one above.</li>
+      <li><strong>Linux tray icon.</strong> Built and tested headless; a capture of the StatusNotifier menu on a desktop session will follow.</li>
+      <li><strong>iOS.</strong> The SwiftUI shell exists in the repository but must be built on a Mac with Xcode; nothing has been captured.</li>
+    </ul>
+    <p class="note">The screenshots are from a demo vault with invented files. Paths and names on this page are not real data.</p>

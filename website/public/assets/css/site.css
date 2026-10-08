@@ -78,3 +78,14 @@ pre.licence { white-space: pre-wrap; }
 figure.hero { margin: 2rem 0 1rem; }
 figure.hero img { width: 100%; height: auto; display: block; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: .5rem; }
 figure.hero figcaption { color: var(--muted); font-size: .95rem; margin-top: .5rem; }
+.feature { display:grid; grid-template-columns: minmax(16rem, 1fr) 1.2fr; gap:1.5rem; align-items:start; margin:2.5rem 0; }
+.feature img { width:100%; height:auto; background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); }
+.feature h2 { margin-top:0; }
+.badge { display:inline-block; font-size:.7rem; font-weight:600; vertical-align:middle; background:var(--warn-bg); color:var(--warn-text); border:1px solid var(--warn-border); border-radius:6px; padding:.1rem .45rem; margin-left:.4rem; }
+@media (max-width: 48rem) { .feature { grid-template-columns: 1fr; } }
+
+.shot { margin:1.5rem 0; }
+.shot img { width:100%; height:auto; border:1px solid var(--border); border-radius:var(--radius); background:var(--surface); }
+.shot figcaption { font-size:.9rem; color:var(--muted); margin-top:.5rem; }
+.shots-row { display:grid; grid-template-columns:1fr 1fr; gap:1.5rem; max-width:40rem; }
+@media (max-width: 40rem) { .shots-row { grid-template-columns:1fr; } }

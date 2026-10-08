@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 320" width="640" height="320" role="img" aria-label="Transferrer: removable media carries what the other device lacks">
+<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#2f5fe0"/><stop offset="1" stop-color="#1b3a9a"/></linearGradient>
+<pattern id="blocks" width="12" height="12" patternUnits="userSpaceOnUse"><rect x="2" y="2" width="8" height="8" rx="2" fill="#8aa9ff" fill-opacity="0.45"/></pattern>
+<g id="lock"><rect x="-8" y="-2" width="16" height="12" rx="3" fill="#2b57d6"/><path d="M-4.5 -2 V-6 a4.5 4.5 0 0 1 9 0 V-2" fill="none" stroke="#2b57d6" stroke-width="2.4"/><circle cx="0" cy="4" r="1.8" fill="#fff"/></g>
+<g id="device"><rect x="-44" y="-30" width="88" height="56" rx="6" fill="#fff" fill-opacity="0.95" stroke="#8aa9ff" stroke-width="2"/><rect x="-54" y="26" width="108" height="6" rx="3" fill="#8aa9ff"/></g>
+<g id="phone"><rect x="-20" y="-38" width="40" height="72" rx="7" fill="#fff" fill-opacity="0.95" stroke="#8aa9ff" stroke-width="2"/><circle cy="29" r="2.4" fill="#8aa9ff"/></g>
+<g id="disk"><rect x="-40" y="-16" width="80" height="32" rx="5" fill="#eef2ff" stroke="#8aa9ff" stroke-width="2"/><circle cx="28" cy="0" r="3" fill="#2bb673"/></g>
+<g id="usb"><rect x="-30" y="-9" width="44" height="18" rx="4" fill="#eef2ff" stroke="#8aa9ff" stroke-width="2"/><rect x="14" y="-6" width="16" height="12" fill="#8aa9ff"/></g>
+<g id="cloud"><path d="M-40 10 a16 16 0 0 1 10 -30 a20 20 0 0 1 38 -4 a14 14 0 0 1 22 20 a12 12 0 0 1 -6 22 h-58 a13 13 0 0 1 -6 -8z" fill="#fff" fill-opacity="0.95" stroke="#8aa9ff" stroke-width="2"/></g>
+</defs>
+<style>text{font-family:system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif} .t{font-size:14px;font-weight:600;fill:#334155} .s{font-size:12px;fill:#6b7a90} .d{stroke:#8aa9ff;stroke-width:2.5;stroke-dasharray:6 6;fill:none}</style>
+
+<use href="#device" x="110" y="150"/><text x="110" y="205" text-anchor="middle" class="t">Home PC</text>
+<use href="#device" x="530" y="150"/><text x="530" y="205" text-anchor="middle" class="t">Office PC</text>
+<use href="#usb" x="320" y="100"/><use href="#lock" x="345" y="86"/><text x="320" y="135" text-anchor="middle" class="t">Transferrer</text>
+<text x="320" y="152" text-anchor="middle" class="s">USB stick or disk marked as carrier</text>
+<path class="d" d="M165 140 C 220 110, 260 105, 285 103"/><path class="d" d="M355 103 C 400 105, 440 110, 475 140"/>
+<text x="320" y="245" text-anchor="middle" class="s">Carries only the encrypted blocks the other device still lacks.</text>
+<text x="320" y="265" text-anchor="middle" class="s">Both ends have it? The block is removed from the stick. No cloud needed.</text>
+
+</svg>

@@ -12,7 +12,7 @@ root="$(cd "$(dirname "$0")/.." && pwd)"
 version="$(grep -m1 '^version' "$root/Cargo.toml" | sed 's/.*"\(.*\)".*/\1/')"
 out="$root/website/public/downloads"
 mkdir -p "$out"
-rm -f "$out"/varsto-"$version"-* "$out/Varsto-$version-macos.zip" "$out/SHA256SUMS" "$out/manifest.json"
+rm -f "$out"/varsto-"$version"-* "$out"/Varsto-"$version"-* "$out/SHA256SUMS" "$out/manifest.json"
 targets=("$@")
 have_zig=0
 command -v cargo-zigbuild >/dev/null 2>&1 && have_zig=1
@@ -50,40 +50,40 @@ for t in "${targets[@]}"; do
   case "$t" in
     *windows*)
       cp "$root/target/$t/release/varsto.exe" "$stage/$name/"
-      printf '@echo off\r\n"%%~dp0varsto.exe" desktop\r\n' > "$stage/$name/Varsto Desktop.cmd"
+      printf '@echo off\r\nstart "" /B "%%~dp0varsto.exe" tray --open\r\n' > "$stage/$name/Varsto.cmd"
+      printf 'Varsto for Windows (alpha, cross-compiled, not yet tested on Windows).\r\n\r\nDouble-click Varsto.cmd: a tray icon appears, the background service starts and the\r\nlocal interface opens in your browser. Start at login: varsto.exe service install\r\nCommand line: varsto.exe --help. Updates: tray menu or varsto.exe update.\r\n' > "$stage/$name/README-Windows.txt"
       (cd "$stage" && zip -qr "$out/$name.zip" "$name")
-      manifest+=", \"$name.zip\": {\"platform\": \"Windows x86_64\", \"note\": \"command line + desktop UI; cross-compiled, not tested on Windows\"}"
+      manifest+=", \"$name.zip\": {\"platform\": \"Windows x86_64\", \"note\": \"tray app + background service + command line; cross-compiled, not tested on Windows\"}"
       ;;
     *apple-darwin*)
       mac_bins+=("$root/target/$t/release/varsto")
       cp "$root/target/$t/release/varsto" "$stage/$name/"
       tar -C "$stage" -czf "$out/$name.tar.gz" "$name"
       arch="Apple Silicon"; [[ "$t" == x86_64* ]] && arch="Intel"
-      manifest+=", \"$name.tar.gz\": {\"platform\": \"macOS ($arch)\", \"note\": \"command line + desktop UI; cross-compiled, unsigned\"}"
+      manifest+=", \"$name.tar.gz\": {\"platform\": \"macOS ($arch) command line\", \"note\": \"service + browser interface; cross-compiled, unsigned\"}"
       ;;
     *)
       cp "$root/target/$t/release/varsto" "$stage/$name/"
       strip "$stage/$name/varsto" 2>/dev/null || true
+      cp "$root/brand/logo.svg" "$stage/$name/varsto.svg"
+      printf '[Desktop Entry]\nType=Application\nName=Varsto\nComment=Encrypted sync with your own storage\nExec=varsto tray --open\nIcon=varsto\nTerminal=false\nCategories=Network;Utility;\n' > "$stage/$name/varsto.desktop"
+      printf 'Varsto for Linux (alpha; static binary).\n\n./varsto            tray icon + background service (default)\n./varsto desktop    service + browser interface, no tray\n./varsto service install   start the tray app at login (autostart entry)\n./varsto update     self-update from the download page\nInstall: copy varsto to ~/.local/bin, varsto.desktop to ~/.local/share/applications and varsto.svg to ~/.local/share/icons/hicolor/scalable/apps/.\n' > "$stage/$name/README-Linux.txt"
       tar -C "$stage" -czf "$out/$name.tar.gz" "$name"
-      manifest+=", \"$name.tar.gz\": {\"platform\": \"Linux x86_64\", \"note\": \"command line + desktop UI; static binary (musl)\"}"
+      manifest+=", \"$name.tar.gz\": {\"platform\": \"Linux x86_64\", \"note\": \"tray app + background service + command line; static binary (musl)\"}"
       ;;
   esac
   rm -rf "$stage"
 done
 
-# macOS app bundle with a universal binary (Apple Silicon + Intel).
-if [ ${#mac_bins[@]} -gt 0 ]; then
-  echo "== Varsto.app"
+# macOS app bundles, one per architecture (cross-compiled: Rust binary only, no
+# menu bar; the native menu-bar app is built on a Mac with apps/macos/build.sh).
+for bin in "${mac_bins[@]}"; do
+  case "$bin" in *aarch64*) label=apple-silicon; arch_text="Apple Silicon" ;; *) label=intel; arch_text="Intel" ;; esac
+  echo "== Varsto.app ($label, cross-compiled)"
   stage="$(mktemp -d)"
   app="$stage/Varsto.app/Contents"
   mkdir -p "$app/MacOS" "$app/Resources"
-  if [ ${#mac_bins[@]} -ge 2 ] && command -v llvm-lipo >/dev/null 2>&1; then
-    llvm-lipo -create "${mac_bins[@]}" -output "$app/MacOS/varsto"
-    kind="universal (Apple Silicon + Intel)"
-  else
-    cp "${mac_bins[0]}" "$app/MacOS/varsto"; kind="single architecture"
-  fi
-  chmod 755 "$app/MacOS/varsto"
+  cp "$bin" "$app/MacOS/varsto"; chmod 755 "$app/MacOS/varsto"
   cat > "$app/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -96,6 +96,7 @@ if [ ${#mac_bins[@]} -gt 0 ]; then
   <key>CFBundleShortVersionString</key><string>$version</string>
   <key>CFBundleExecutable</key><string>varsto</string>
   <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleIconFile</key><string>Varsto</string>
   <key>LSMinimumSystemVersion</key><string>11.0</string>
   <key>NSHighResolutionCapable</key><true/>
   <key>LSApplicationCategoryType</key><string>public.app-category.utilities</string>
@@ -103,18 +104,27 @@ if [ ${#mac_bins[@]} -gt 0 ]; then
 </plist>
 PLIST
   cp "$root/README.md" "$root/LICENSE" "$root/NOTICE" "$root/TRADEMARK.md" "$app/Resources/"
+  [ -f "$root/brand/Varsto.icns" ] && cp "$root/brand/Varsto.icns" "$app/Resources/Varsto.icns"
   cat > "$stage/README-macOS.txt" <<TXT
-Varsto $version for macOS (alpha, $kind, unsigned).
+Varsto $version for macOS ($arch_text; alpha; unsigned; cross-compiled, no menu-bar icon).
 
 The app is not signed or notarised. The first time, right-click Varsto.app and
 choose Open, or run:  xattr -dr com.apple.quarantine Varsto.app
-Double-clicking opens the local desktop interface in your browser. For the
-command line, use Varsto.app/Contents/MacOS/varsto (for example: varsto --help).
-Cross-compiled on Linux; not yet tested on a Mac. Use test data only.
+Double-clicking starts the background service and opens the local interface in
+your browser. Command line: Varsto.app/Contents/MacOS/varsto --help
+To start at login: Varsto.app/Contents/MacOS/varsto service install
 TXT
-  (cd "$stage" && zip -qr "$out/Varsto-$version-macos.zip" Varsto.app README-macOS.txt)
-  manifest+=", \"Varsto-$version-macos.zip\": {\"platform\": \"macOS app\", \"note\": \"double-click to open the desktop UI; $kind; unsigned, not yet tested on a Mac\"}"
+  (cd "$stage" && zip -qr "$out/Varsto-$version-macos-$label-lite.zip" Varsto.app README-macOS.txt)
+  manifest+=", \"Varsto-$version-macos-$label-lite.zip\": {\"platform\": \"macOS app ($arch_text), lite\", \"note\": \"background service + browser interface, no menu-bar icon; unsigned, cross-compiled, not yet tested on a Mac\"}"
   rm -rf "$stage"
+done
+
+# Android APK, if the app has been built (apps/android/build.sh).
+apk="$root/apps/android/app/build/outputs/apk/debug/app-debug.apk"
+if [ -f "$apk" ]; then
+  echo "== Android APK"
+  cp "$apk" "$out/varsto-$version-android-debug.apk"
+  manifest+=", \"varsto-$version-android-debug.apk\": {\"platform\": \"Android (arm64, x86_64)\", \"note\": \"debug-signed APK for sideloading; foreground service + in-app interface; tested in the emulator only\"}"
 fi
 
 echo "== source archive"
@@ -122,5 +132,5 @@ if git -C "$root" rev-parse --verify -q "v$version" >/dev/null; then ref="v$vers
 git -C "$root" archive --format=tar.gz --prefix="varsto-$version/" -o "$out/varsto-$version-source.tar.gz" "$ref"
 manifest+=", \"varsto-$version-source.tar.gz\": {\"platform\": \"Source\", \"note\": \"git archive of $ref\"}}"
 echo "$manifest" | python3 -c "import json,sys; json.dump(json.load(sys.stdin), sys.stdout, indent=2)" > "$out/manifest.json"
-(cd "$out" && sha256sum varsto-"$version"-* Varsto-"$version"-macos.zip 2>/dev/null > SHA256SUMS)
+(cd "$out" && sha256sum varsto-"$version"-* Varsto-"$version"-* 2>/dev/null > SHA256SUMS)
 cat "$out/SHA256SUMS"

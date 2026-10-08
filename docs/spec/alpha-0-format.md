@@ -137,3 +137,37 @@ trash/          deleted files
 - Manifests are full views; very large folders will need incremental manifests and checkpoints (plan section 8, blocking question 1).
 - Verification of cold copies, policies, placeholders, sharing and P2P are not implemented.
 - Logging and the redaction rules of `docs/architecture/logging.md` are not implemented; the CLI prints only aggregate counts and identifiers.
+
+## 10. Additions in 0.0.1-alpha.2
+
+### Background service, tray and menu-bar apps
+
+`varsto service run` watches attached folders (inotify, kqueue, FSEvents or ReadDirectoryChangesW through the `notify` crate), syncs within seconds of a change and on a timer, serves the local interface and writes `service.json` (`pid`, `port`, `token`, mode 0600) so that the tray app, the CLI and the mobile shells can find it. `varsto tray` (Linux: StatusNotifier over D-Bus; Windows: system tray) and the macOS menu-bar app supervise the service as a child process and restart it after a self-update (exit code 75). `varsto service install` registers a login item (LaunchAgent, autostart entry, Startup folder).
+
+### Self-update
+
+`varsto update` and the "Check for updates" buttons fetch `manifest.json` and `SHA256SUMS` from the download page with the system `curl`, verify the SHA-256 of the platform archive and replace the running binary (rename-over on Unix, rename-aside on Windows). The checksum comes from the same site as the archive; signed releases and a second channel are planned.
+
+### Selective sync and placeholders (F-039)
+
+A folder mount can be *selective*. Files the device has not fetched exist as `<name>.varsto-placeholder` (a few bytes of JSON: size and time). Placeholders are never treated as deletions; `fetch` downloads one file and pins it so later updates are downloaded too; `free` replaces a local file with a placeholder, but only when every chunk is on a storage that is not a carrier (or on a replica). The interface lists files with their state and shows encrypted thumbnails.
+
+### Transferrer disks (F-048)
+
+A local-directory storage can be marked `carrier`. The engine writes to it only chunks that no other device holds yet, and after every pull it deletes from the carrier the chunks that both this device and another device hold. Carriers are ignored by `fsck`'s "claim without object" check and never count as the only durable copy for `free`.
+
+### Untrusted replicas (F-045)
+
+A replica device holds a *replica token* (`<vault-id>.<key>`), where the key is `derive(K3, "replica-ledger")`. It mirrors every object from a source directory to a target directory, verifies chunk objects against their names, and records claims in its own ledger batches, sealed under the replica key with `key_id = "replica"` and signed with its own Ed25519 key. Its device record is published at `vault/replicas/<device>.enc` under the same key. Owner devices read those batches, fold the claims into the chunk records by object name (the replica cannot know chunk ids), and count them as verified copies. The replica never holds a key that opens content, names or manifests.
+
+### Shared folders (F-047)
+
+A share token is `<vault-id>.<folder-id>.<folder-key>.<name>`. The recipient creates a *member* device: a device directory with a local random root key, the owner's vault id and that one folder record. Member records live at `vault/shares/<folder>/<device>.enc` under `derive(folder key, "share-registry")`; member batches are sealed per folder under `derive(folder key, "share-ledger")` with `key_id = "share:<folder>"`. Owner devices and members resolve those keys from the folder key, so everyone holding the folder key sees everyone's claims for that folder and nothing else. Members cannot create folders, issue replica tokens or read the owner's device registry. Limitation: one device directory per shared vault; key exchange is manual.
+
+### Encrypted thumbnails (F-046)
+
+For image and video files, the device that holds the plaintext generates a JPEG thumbnail (longest side 256 px; videos through `ffmpeg` when installed), encrypts it under the folder metadata key with associated data (`thumbnail`, vault, folder, content hash) and stores it at `thumbs/<folder>/<content hash>.enc` on every hot, non-carrier storage. Any device with the folder key can show the preview, including for placeholders it never fetched. No thumbnail is written in clear text on disk.
+
+### Mobile shells
+
+Android: a foreground service runs the same `varsto service` binary (shipped as `libvarsto.so`), the activity shows the local interface in a WebView. iOS: `varsto-ffi` exposes `varsto_start` and `varsto_url` for an in-process service behind a `WKWebView`; the Xcode project is generated with xcodegen on a Mac.
