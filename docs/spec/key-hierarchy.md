@@ -77,7 +77,7 @@ Every AEAD operation authenticates a header that binds the ciphertext to its pla
 | Chunk | Keyed-hash chunk ID (K11 over plaintext), chunk-key ID, plaintext length class. | Replacing a chunk with another chunk of the same folder; moving it to another folder. |
 | Pack | Pack ID, the ordered list of chunk IDs and their offsets (or its hash), writing device ID. | Reordering or dropping chunks inside a pack; passing a pack off as another. |
 | Manifest (file version) | File ID, version number or version vector, hash of the parent version, folder epoch. | Rolling a file back to an older version, or attaching a version to a different file. |
-| Ledger batch | Device ID, batch sequence number, first and last event sequence, hash of the previous batch, Merkle root. See `docs/spec/ledger-signing-notes.md` (separate change). | Reordering, replaying or truncating a device's ledger without the gap being detectable. |
+| Ledger batch | Device ID, batch sequence number, first and last event sequence, hash of the previous batch, Merkle root. See [ledger-signing-notes.md](ledger-signing-notes.md). | Reordering, replaying or truncating a device's ledger without the gap being detectable. |
 | Rendezvous record | Discovery epoch, device ID, record sequence number, expiry time. | Replaying an old presence record as current. |
 | Placeholder index | Device ID, folder ID, index generation number. | Showing a stale or foreign placeholder list. |
 | Key wrap | ID and epoch of the wrapped key, ID and epoch of the wrapping key, purpose string. | Unwrapping a key for the wrong purpose or in the wrong folder. |

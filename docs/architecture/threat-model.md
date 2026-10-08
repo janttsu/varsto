@@ -81,7 +81,7 @@ Encryption hides content and names. It does not hide that data exists, how much 
 | Peers in a swarm (A5) | Which chunk IDs a device has (bitfields) and transfer patterns. | Only members of the same folder join its swarm; chunk IDs are keyed hashes, so outsiders cannot test for known files. | Design intent. |
 | Shared-folder member (A6) | The folder's full history, member device IDs and times in the ledger; old chunk IDs after removal. | Names in ledger events are keyed hashes; cryptographic erasure of event payloads (plan section 8, "GDPR and append-only ledger"). | **TBD**. |
 | Holder of a removable disk (A13) | Pack sizes and counts, last write time, the disk's identity file. | Same encrypted pack format and padding as other storage. | Design intent. |
-| Anyone who can read the ledger objects (A1) | Activity level and number of devices, from ledger size and event rate. | Events are batched (ledger signing notes, `docs/spec/ledger-signing-notes.md`, separate change). | **TBD**. |
+| Anyone who can read the ledger objects (A1) | Activity level and number of devices, from ledger size and event rate. | Events are batched ([../spec/ledger-signing-notes.md](../spec/ledger-signing-notes.md)). | **TBD**. |
 
 ## 6. Mapping: adversary to requirements and plan sections
 
@@ -109,3 +109,4 @@ Logging rules (S-015, N-013, plan 6.40) apply to every adversary that can obtain
 - [logging.md](logging.md)
 - [../failure-model.md](../failure-model.md)
 - [../spec/key-hierarchy.md](../spec/key-hierarchy.md) (draft)
+- [../spec/ledger-signing-notes.md](../spec/ledger-signing-notes.md) (design notes)
