@@ -17,4 +17,6 @@ Status of the documents that will define formats and protocols. All are **not st
 | Local control API and MCP surface | not started |
 | Recovery kit | not started |
 
+Storage format version history (which releases read which formats): see [format-versions.md](format-versions.md).
+
 Failure model (what fails and what does not): see [../failure-model.md](../failure-model.md).
