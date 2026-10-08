@@ -6,10 +6,10 @@ description: Varsto: end-to-end encrypted file sync and backup on storage you al
 ---
     <h1>Your files. Your storage.</h1>
     <p class="lead">Varsto is an end-to-end encrypted sync and backup app that uses your own devices and storage services of your choice. A disk, a NAS share, an S3 bucket or any rclone remote; the app encrypts everything on your devices, keeps a signed record of where every block is, and lets devices that are never online at the same time stay in sync through that storage.</p>
-    <p><a class="button" href="downloads/">Download the alpha</a> <a class="button secondary" href="docs/quick-start.html">Quick start</a></p>
+    <p><a class="button" href="downloads/">Download the alpha</a> <a class="button secondary" href="docs/quick-start.html">Quick start</a> <a class="button secondary" href="https://github.com/janttsu/varsto" rel="noopener">Source on GitHub</a></p>
     <figure class="hero"><picture><source type="image/webp" srcset="assets/img/hero.webp"><img src="assets/img/hero.png" alt="Diagram: your keys in the centre, connected by encrypted links to an S3 bucket, a cold archive, hard drives on a shelf, a NAS, a laptop and a phone; every place holds only locked, encrypted blocks." width="1200" height="600"></picture><figcaption>Copies wherever you decide: a bucket, a cold archive, old disks on a shelf, your own machines. Every copy is ciphertext; the keys stay with you.</figcaption></figure>
 
-    <h2>What works today (alpha, 0.0.1-alpha.5)</h2>
+    <h2>What works today (alpha, 0.0.1-alpha.6)</h2>
     <div class="grid">
       <section class="card"><h3>Encrypted before it leaves your device</h3><p>Files are cut into content-defined chunks, each encrypted with XChaCha20-Poly1305 under keys derived from your vault. Storage sees opaque objects and sizes, never names, hashes or content. <a href="encryption/">How it all works</a>.</p></section>
       <section class="card"><h3>Bring your own storage</h3><p>Any directory this device can reach, any S3-compatible bucket (AWS, Scaleway, Hetzner, B2, R2, MinIO) with your own keys, or any rclone remote. Cold storages and archive classes are written but never read without your confirmation.</p></section>
@@ -33,7 +33,7 @@ description: Varsto: end-to-end encrypted file sync and backup on storage you al
     <ul>
       <li>The alpha is a first vertical slice: core library, CLI, background service, tray and menu-bar shells, Android shell, about 15 000 lines, 49 automated tests including two-device offline convergence, conflicts, a restored-device fence, replicas, sharing, policies, peers and Strongrooms. Use it with test data only.</li>
       <li>The cryptographic design has not been reviewed or audited. The <a href="docs/threat-model.html">threat model</a> and the <a href="docs/failure-model.html">failure model</a> say what the design intends and where it stops.</li>
-      <li>The source repository is private during the alpha; it will be published under the <a href="docs/licence.html">PolyForm Shield License 1.0.0</a> (source-available, not open source) with the first public alpha. The storage format is <a href="docs/alpha-0-format.html">documented</a> so that your data stays recoverable.</li>
+      <li>The source is public at <a href="https://github.com/janttsu/varsto" rel="noopener">github.com/janttsu/varsto</a> under the <a href="docs/licence.html">PolyForm Shield License 1.0.0</a> (source-available, not open source); bugs and questions go to the issue tracker there. The storage format is <a href="docs/alpha-0-format.html">documented</a> so that your data stays recoverable.</li>
       <li>The name is provisional and the site is kept out of search engines until it is settled.</li>
     </ul>
 

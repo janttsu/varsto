@@ -10,14 +10,14 @@ description: Download the Varsto alpha for Linux, macOS, Windows and Android, or
     {{DOWNLOADS}}
     <h2>Install and verify</h2>
     <pre><code>curl -O https://varsto.soderlund.in/downloads/SHA256SUMS
-curl -O https://varsto.soderlund.in/downloads/varsto-0.0.1-alpha.5-x86_64-unknown-linux-musl.tar.gz
+curl -O https://varsto.soderlund.in/downloads/varsto-0.0.1-alpha.6-x86_64-unknown-linux-musl.tar.gz
 sha256sum -c SHA256SUMS --ignore-missing
-tar xzf varsto-0.0.1-alpha.5-x86_64-unknown-linux-musl.tar.gz
-cd varsto-0.0.1-alpha.5-x86_64-unknown-linux-musl
+tar xzf varsto-0.0.1-alpha.6-x86_64-unknown-linux-musl.tar.gz
+cd varsto-0.0.1-alpha.6-x86_64-unknown-linux-musl
 ./varsto desktop        # opens the desktop interface in your browser
 ./varsto --help         # command line</code></pre>
     <h2>Build from source</h2>
-    <p>The source archive matches the tagged release. With a stable Rust toolchain (1.85 or newer): unpack, then <code>cargo build --release</code>; the binary is <code>target/release/varsto</code>. <code>cargo test --workspace</code> runs the test suite, including the two-device scenarios.</p>
+    <p>The source lives at <a href="https://github.com/janttsu/varsto" rel="noopener">github.com/janttsu/varsto</a>; every release is a tag there, and the source archive below matches it. With a stable Rust toolchain (1.85 or newer): <code>git clone https://github.com/janttsu/varsto.git</code> or unpack the archive, then <code>cargo build --release</code>; the binary is <code>target/release/varsto</code>. <code>cargo test --workspace</code> runs the test suite, including the two-device scenarios.</p>
     <h2>Desktop interface</h2>
     <p>On Linux and Windows the default is <code>varsto tray</code>: a tray icon that runs the background service, syncs changes within seconds, and offers open, sync now, pause and update. <code>varsto desktop</code> starts a small web server bound to 127.0.0.1 on a random port, prints a one-time link with a session token and opens it in your default browser. Only programs on this computer can reach it; the page refuses requests without the token and requests whose Host header is not the local address. From the interface you can create or join a vault, add storages and folders, sync, check the storage (fsck) and list duplicates. The app bundle and <code>Varsto Desktop.cmd</code> do exactly this.</p>
     <h2>Quick start (command line)</h2>

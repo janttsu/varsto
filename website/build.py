@@ -32,12 +32,13 @@ ALPHA = (
     "formats may change without migration, and the cryptography has not been independently "
     "audited. Keep your own backups and check that you can restore from them."
 )
+REPO = "https://github.com/janttsu/varsto"
 FOOTER = [
-    f"{BRAND} is a working name. Source will be published under the PolyForm Shield License 1.0.0 with the first public alpha.",
+    f'{BRAND} is a working name. Source: <a href="{REPO}">github.com/janttsu/varsto</a>, under the PolyForm Shield License 1.0.0 (source-available).',
     "No cookies, no tracking. The web server keeps a standard access log for at most seven days.",
     '<a href="{p}docs/security-policy.html">Security policy</a> · <a href="{p}docs/licence.html">Licence</a> · <a href="{p}docs/trademark.html">Trademark</a>',
 ]
-NAV = [("Project", ""), ("Features", "features/"), ("Use cases", "use-cases/"), ("Encryption", "encryption/"), ("Screenshots", "screenshots/"), ("Docs", "docs/"), ("Downloads", "downloads/"), ("Blog", "blog/"), ("Forum", "forum/")]
+NAV = [("Project", ""), ("Features", "features/"), ("Use cases", "use-cases/"), ("Encryption", "encryption/"), ("Screenshots", "screenshots/"), ("Docs", "docs/"), ("Downloads", "downloads/"), ("Blog", "blog/"), ("Forum", "forum/"), ("GitHub", REPO)]
 
 # Repository documents rendered under docs/: (source path, slug, title, group)
 DOCS = [
@@ -84,7 +85,7 @@ def asset_version(rel: str) -> str:
 def page(title: str, description: str, body: str, nav: str, depth: int) -> str:
     p = "../" * depth
     nav_html = "\n".join(
-        f'      <a href="{p}{href}"{" aria-current=\"page\"" if name == nav else ""}>{name}</a>' for name, href in NAV
+        f'      <a href="{href if href.startswith("http") else p + href}"{" aria-current=\"page\"" if name == nav else ""}{" rel=\"noopener\"" if href.startswith("http") else ""}>{name}</a>' for name, href in NAV
     )
     footer = "\n".join(f"    <span>{line.format(p=p)}</span>" for line in FOOTER)
     full_title = f"{BRAND}: your files, your storage" if nav == "Project" and depth == 0 else f"{title}: {BRAND}"

@@ -6,7 +6,7 @@
 #   website/publish-macos.sh apps/macos/dist/Varsto-<version>-macos.zip
 # Needs: pandoc (brew install pandoc), python3, rsync, SSH access to the
 # site host (DEPLOY_HOST, default "dedibox"; DEPLOY_PATH, default
-# sites/varsto/public).
+# sites/varsto/public, relative to the home directory on that host).
 set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 zip="${1:?usage: publish-macos.sh <Varsto-<version>-macos.zip>}"

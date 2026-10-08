@@ -1,0 +1,70 @@
+# The native macOS app on Apple Silicon, built and tested on GitHub's M-series
+# runners; the zip becomes a release asset when a v* tag is pushed. Linux and
+# Windows are built and tested on short-lived cloud machines (scripts/cloud-build).
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  macos:
+    name: macOS app (Apple Silicon)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --workspace
+      - name: Build Varsto.app
+        run: apps/macos/build.sh --out dist
+      - name: Smoke test the bundled command line
+        run: |
+          unzip -q dist/Varsto-*-macos.zip -d smoke
+          smoke/Varsto.app/Contents/Helpers/varsto --version
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Varsto-macos
+          path: dist/Varsto-*-macos.zip
+          if-no-files-found: error
+      - name: Attach to the release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="$GITHUB_REF_NAME"
+          gh release view "$tag" >/dev/null 2>&1 || gh release create "$tag" --draft --title "$tag" --generate-notes
+          gh release upload "$tag" dist/Varsto-*-macos.zip --clobber
+
+  ios:
+    name: iOS app (Simulator)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios, aarch64-apple-ios-sim
+      - uses: Swatinem/rust-cache@v2
+      - run: brew install xcodegen
+      - name: Build for the Simulator
+        run: apps/ios/build.sh
+      - name: Launch on the Simulator and take a screenshot
+        run: apps/ios/simshot.sh dist/ios
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Varsto-ios-simulator
+          path: dist/ios
+          if-no-files-found: error
