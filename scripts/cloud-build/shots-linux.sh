@@ -72,19 +72,12 @@ sleep 1
 { python3 -m venv /it/venv && /it/venv/bin/pip -q install playwright && /it/venv/bin/playwright install --with-deps chromium; } > /it/playwright-install.log 2>&1 || { echo "playwright install failed:"; tail -5 /it/playwright-install.log; }
 port="$(python3 -c "import json;print(json.load(open('/it/home/service.json'))['port'])")"
 token="$(python3 -c "import json;print(json.load(open('/it/home/service.json'))['token'])")"
-/it/venv/bin/python3 - "$port" "$token" > /it/app-window.log 2>&1 <<'PY' &
-import sys, time
-from playwright.sync_api import sync_playwright
-port, token = sys.argv[1], sys.argv[2]
-with sync_playwright() as p:
-    # Root needs --no-sandbox; the browser shows the interface in app mode (no tabs, no address bar).
-    try:
-        b = p.chromium.launch(headless=False, chromium_sandbox=False, args=["--no-sandbox", f"--app=http://127.0.0.1:{port}/?token={token}", "--window-size=1280,800", "--window-position=0,0"])
-        time.sleep(40)
-        b.close()
-    except Exception as e:
-        print("app window failed:", e, flush=True)
-PY
+# Launch the Playwright Chromium binary directly: errors land in the log, and
+# root needs --no-sandbox. App mode shows the page without tabs or address bar.
+chrome="$(ls -d /root/.cache/ms-playwright/chromium-*/chrome-linux*/chrome 2>/dev/null | head -1)"
+echo "chromium: ${chrome:-not found}"
+nohup "$chrome" --no-sandbox --disable-gpu --no-first-run --user-data-dir=/it/chrome-profile \
+  "--app=http://127.0.0.1:$port/?token=$token" --window-size=1280,800 --window-position=0,0 > /it/app-window.log 2>&1 &
 sleep 15
 xdotool key Escape 2>/dev/null || true   # close the tray menu left open by the capture above
 sleep 1
