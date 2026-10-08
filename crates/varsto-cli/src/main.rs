@@ -52,9 +52,23 @@ enum Cmd {
         /// Name for the storage on this device.
         #[arg(long, default_value = "primary")]
         storage_name: String,
-        /// Local directory of the storage.
+        /// Local directory of the storage that holds the vault (or use the --s3-* options).
+        #[arg(long, required_unless_present = "s3_bucket")]
+        storage_path: Option<PathBuf>,
+        /// Join through an S3-compatible bucket instead of a directory.
+        #[arg(long, requires = "s3_endpoint")]
+        s3_bucket: Option<String>,
         #[arg(long)]
-        storage_path: PathBuf,
+        s3_endpoint: Option<String>,
+        #[arg(long, default_value = "us-east-1")]
+        s3_region: String,
+        #[arg(long, default_value = "")]
+        s3_prefix: String,
+        #[arg(long)]
+        s3_access_key_id: Option<String>,
+        /// Secret access key; read from VARSTO_S3_SECRET if omitted.
+        #[arg(long, env = "VARSTO_S3_SECRET", hide_env_values = true)]
+        s3_secret_access_key: Option<String>,
     },
     /// Manage storages.
     Storage {
@@ -420,7 +434,7 @@ enum FolderCmd {
     List,
 }
 
-fn bail_usage(msg: &str) -> Result<String> {
+fn bail_usage<T>(msg: &str) -> Result<T> {
     Err(anyhow!("{msg}"))
 }
 
@@ -488,20 +502,58 @@ fn run(cli: &Cli) -> Result<()> {
             words,
             storage_name,
             storage_path,
+            s3_bucket,
+            s3_endpoint,
+            s3_region,
+            s3_prefix,
+            s3_access_key_id,
+            s3_secret_access_key,
         } => {
-            let spec = StorageSpec::LocalDir {
-                name: storage_name.clone(),
-                path: storage_path.clone(),
-                cold: false,
-                carrier: false,
-                place: String::new(),
+            let mut s3_secret: Option<String> = None;
+            let spec = match (s3_bucket, storage_path) {
+                (Some(bucket), _) => {
+                    let secret = s3_secret_access_key
+                        .clone()
+                        .ok_or_else(|| anyhow!("give --s3-secret-access-key or set VARSTO_S3_SECRET"))?;
+                    // The storage is opened before the vault exists, so the secret travels via the environment for this process.
+                    let env_name = format!(
+                        "VARSTO_S3_SECRET_{}",
+                        storage_name.to_uppercase().replace(|c: char| !c.is_ascii_alphanumeric(), "_")
+                    );
+                    std::env::set_var(env_name, &secret);
+                    s3_secret = Some(secret);
+                    StorageSpec::S3 {
+                        name: storage_name.clone(),
+                        endpoint: s3_endpoint.clone().unwrap_or_default().trim_end_matches('/').to_string(),
+                        region: s3_region.clone(),
+                        bucket: bucket.clone(),
+                        prefix: s3_prefix.trim_matches('/').to_string(),
+                        access_key_id: s3_access_key_id.clone().ok_or_else(|| anyhow!("give --s3-access-key-id"))?,
+                        secret_ref: String::new(),
+                        path_style: true,
+                        storage_class: None,
+                        cold: false,
+                        place: String::new(),
+                    }
+                }
+                (None, Some(path)) => StorageSpec::LocalDir {
+                    name: storage_name.clone(),
+                    path: path.clone(),
+                    cold: false,
+                    carrier: false,
+                    place: String::new(),
+                },
+                (None, None) => bail_usage("give --storage-path <dir> or --s3-bucket ...")?,
             };
             let key_hex = match (vault_key, words) {
                 (Some(k), _) => k.clone(),
                 (None, Some(w)) => varsto_core::recovery::key_from_words(w)?,
                 (None, None) => bail_usage("give --vault-key <hex> or --words \"<24 words>\"")?,
             };
-            let engine = Engine::join(&home, name, &passphrase()?, &key_hex, spec)?;
+            let mut engine = Engine::join(&home, name, &passphrase()?, &key_hex, spec)?;
+            if let Some(secret) = s3_secret {
+                engine.store_secret(storage_name, &secret)?;
+            }
             let folders = engine.folders();
             if cli.json {
                 println!(

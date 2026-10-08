@@ -600,6 +600,19 @@ impl Engine {
         spec.open_with(&|r| store.secrets.get(r).cloned())
     }
 
+    /// Keep a storage secret (S3 secret access key) in `secrets.enc`, for a
+    /// storage that was configured without one (for example at `join`).
+    pub fn store_secret(&mut self, reference: &str, secret: &str) -> Result<()> {
+        let mut store = self.secret_store()?;
+        store.secrets.insert(reference.to_string(), secret.to_string());
+        store.save(
+            &self.home,
+            &self.keys,
+            &self.vault.vault_id,
+            &self.vault.device_id,
+        )
+    }
+
     /// Add a storage; `secret` (for S3: the secret access key) is kept in
     /// `secrets.enc`, never in `config.json`.
     pub fn add_storage_with_secret(

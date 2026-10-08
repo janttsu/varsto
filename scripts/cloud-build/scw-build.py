@@ -233,6 +233,92 @@ def build_macos(args):
             subprocess.run(["scw", "apple-silicon", "server", "delete", sid, f"zone={zone}"], capture_output=True)
 
 
+# ----- cross-platform integration test -------------------------------------------
+
+def scw_s3_env():
+    """rclone environment for the Scaleway object storage of this project."""
+    access = scw("config", "get", "access-key", json_out=False).strip()
+    secret = scw("config", "get", "secret-key", json_out=False).strip()
+    env = dict(os.environ)
+    env.update({"RCLONE_CONFIG_SCW_TYPE": "s3", "RCLONE_CONFIG_SCW_PROVIDER": "Scaleway", "RCLONE_CONFIG_SCW_REGION": "fr-par",
+                "RCLONE_CONFIG_SCW_ENDPOINT": "s3.fr-par.scw.cloud", "RCLONE_CONFIG_SCW_ACCESS_KEY_ID": access,
+                "RCLONE_CONFIG_SCW_SECRET_ACCESS_KEY": secret})
+    return env, access, secret
+
+
+def integration(args):
+    """Linux and Windows machines share a temporary bucket: sync both ways through
+    S3, then fetch blocks peer-to-peer across the public internet."""
+    out = ROOT / "dist" / "cloud" / "integration"
+    out.mkdir(parents=True, exist_ok=True)
+    linux_tars = sorted((ROOT / "website/public/downloads").glob("varsto-*-x86_64-unknown-linux-musl.tar.gz"))
+    win_zips = sorted((ROOT / "website/public/downloads").glob("varsto-*-x86_64-pc-windows-gnu.zip"))
+    if not linux_tars or not win_zips:
+        raise SystemExit("need the Linux tarball and the Windows zip in website/public/downloads")
+    env, access, secret = scw_s3_env()
+    bucket = f"varsto-it-{int(time.time())}"
+    subprocess.run(["rclone", "mkdir", f"scw:{bucket}"], env=env, check=True)
+    log(f"bucket {bucket} created")
+    ud = ROOT / "dist" / "cloud" / "windows-userdata.ps1"
+    ud.write_text(WINDOWS_USERDATA.replace("__PUBKEYS__", local_pubkeys()).replace("C:\\build", "C:\\it"))
+    stamp = int(time.time())
+    lin = create_instance(f"{TAG}-it-linux-{stamp}", "POP2-2C-8G", "ubuntu_noble")
+    win = create_instance(f"{TAG}-it-windows-{stamp}", "POP2-2C-8G-WIN", "windows_server_2025", user_data=ud)
+    s3 = {"S3_ENDPOINT": "https://s3.fr-par.scw.cloud", "S3_REGION": "fr-par", "S3_BUCKET": bucket, "S3_KEY": access, "S3_SECRET": secret}
+    result = {"bucket": bucket}
+    try:
+        _, lip = wait_running(lin["id"])
+        log(f"linux at {lip}; waiting for SSH")
+        wait_ssh("root", lip)
+        run_ssh("root", lip, "mkdir -p /it && apt-get install -y -qq python3 >/dev/null 2>&1 || true")
+        scp(str(linux_tars[-1]), f"root@{lip}:/it/varsto.tar.gz")
+        scp(str(ROOT / "scripts/cloud-build/it-linux.sh"), f"root@{lip}:/it/it.sh")
+        envs = " ".join(f"{k}='{v}'" for k, v in s3.items())
+        run_ssh("root", lip, f"cd /it && VARSTO_IT_ROLE=owner PUBLIC_IP={lip} {envs} bash /it/it.sh")
+        vault_key = subprocess.run(ssh_base("root", lip) + ["cat /it/vault-key"], capture_output=True, text=True, check=True).stdout.strip()
+        result["linux_owner"] = "ok"
+
+        _, wip = wait_running(win["id"])
+        log(f"windows at {wip}; waiting for OpenSSH (a few minutes)")
+        wait_ssh("Administrator", wip, timeout=1500)
+        run_ssh("Administrator", wip, "powershell -Command \"New-Item -ItemType Directory -Force C:\\it | Out-Null\"")
+        scp(str(win_zips[-1]), f"Administrator@{wip}:C:/it/varsto-windows.zip")
+        scp(str(ROOT / "scripts/cloud-build/it-windows.ps1"), f"Administrator@{wip}:C:/it/it.ps1")
+        run_ssh("Administrator", wip, f"powershell -ExecutionPolicy Bypass -File C:\\it\\it.ps1 -VaultKey {vault_key} -S3Endpoint {s3['S3_ENDPOINT']} -S3Region fr-par -S3Bucket {bucket} -S3Key {access} -S3Secret {secret} -PublicIp {wip}")
+        result["windows_join_and_sync_via_s3"] = "ok"
+
+        # Linux pulls the Windows file through S3.
+        run_ssh("root", lip, "cd /it && ls -d varsto-*/ >/dev/null && b=$(ls -d /it/varsto-*/ | head -1)varsto && VARSTO_PASSPHRASE=integration-test-passphrase $b --home /it/home sync && test -f /it/files/from-windows.bin && sha256sum /it/files/from-windows.bin | cut -c1-64 > /it/from-windows.sha")
+        shas = {}
+        for host, user, path in ((lip, "root", "/it/from-windows.sha"), (wip, "Administrator", "C:/it/from-windows.sha"), (lip, "root", "/it/from-linux.sha"), (wip, "Administrator", "C:/it/from-linux.sha")):
+            shas[(host, path)] = subprocess.run(ssh_base(user, host) + [f"cat {path}" if user == "root" else f"type {path}"], capture_output=True, text=True).stdout.strip()
+        ok_w = shas[(lip, "/it/from-windows.sha")] == shas[(wip, "C:/it/from-windows.sha")] and shas[(lip, "/it/from-windows.sha")]
+        ok_l = shas[(lip, "/it/from-linux.sha")] == shas[(wip, "C:/it/from-linux.sha")] and shas[(lip, "/it/from-linux.sha")]
+        result["linux_to_windows_via_s3"] = "ok" if ok_l else "MISMATCH"
+        result["windows_to_linux_via_s3"] = "ok" if ok_w else "MISMATCH"
+
+        # Peer-to-peer across the internet: both services advertise public addresses;
+        # a second Linux device joins after the bucket's chunks are gone.
+        subprocess.run(["rclone", "purge", f"scw:{bucket}/chunks"], env=env, check=False)
+        run_ssh("root", lip, "cd /it && b=$(ls -d /it/varsto-*/ | head -1)varsto && export VARSTO_PASSPHRASE=integration-test-passphrase VARSTO_S3_SECRET='" + secret + "' && $b --home /it/home2 join --name linux-2 --vault-key " + vault_key + f" --storage-name cloud --s3-endpoint {s3['S3_ENDPOINT']} --s3-region fr-par --s3-bucket {bucket} --s3-access-key-id {access} && mkdir -p /it/files2 && $b --home /it/home2 folder attach shared /it/files2 && $b --home /it/home2 p2p enable --port 17894 && $b --home /it/home2 p2p status && $b --home /it/home2 pull shared --json > /it/pull2.json; cat /it/pull2.json")
+        pull2 = subprocess.run(ssh_base("root", lip) + ["cat /it/pull2.json"], capture_output=True, text=True).stdout
+        try:
+            pj = json.loads(pull2)
+            result["p2p_pull_after_bucket_emptied"] = {"chunks_from_peers": pj.get("chunks_from_peers"), "unavailable": pj.get("files_unavailable")}
+        except json.JSONDecodeError:
+            result["p2p_pull_after_bucket_emptied"] = pull2[-400:]
+        status = subprocess.run(ssh_base("root", lip) + ["cd /it && b=$(ls -d /it/varsto-*/ | head -1)varsto && VARSTO_PASSPHRASE=integration-test-passphrase $b --home /it/home2 p2p status --json"], capture_output=True, text=True).stdout
+        result["p2p_status_from_linux_2"] = status[-600:]
+    finally:
+        (out / "result.json").write_text(json.dumps(result, indent=2))
+        log(f"result: {json.dumps(result, indent=2)}")
+        if not args.keep:
+            delete_instance(lin["id"])
+            delete_instance(win["id"])
+            subprocess.run(["rclone", "purge", f"scw:{bucket}"], env=env, check=False)
+            log(f"bucket {bucket} removed")
+
+
 def cleanup(args):
     for s in scw("instance", "server", "list", f"zone={ZONE}", f"tags.0={TAG}"):
         delete_instance(s["id"])
@@ -246,7 +332,7 @@ def cleanup(args):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("target", choices=["linux", "windows", "macos", "cleanup", "mac-stock"])
+    ap.add_argument("target", choices=["linux", "windows", "macos", "integration", "cleanup", "mac-stock"])
     ap.add_argument("--keep", action="store_true", help="do not delete the machine afterwards")
     ap.add_argument("--type", help="instance type (POP2-4C-16G, POP2-2C-8G-WIN, M4-S, ...)")
     ap.add_argument("--zone", help="zone for Mac minis (fr-par-1 or fr-par-3)")
@@ -259,7 +345,7 @@ def main():
         for zone in ("fr-par-1", "fr-par-3"):
             print(zone, mac_stock(zone))
         return
-    {"linux": build_linux, "windows": build_windows, "macos": build_macos, "cleanup": cleanup}[args.target](args)
+    {"linux": build_linux, "windows": build_windows, "macos": build_macos, "integration": integration, "cleanup": cleanup}[args.target](args)
 
 
 if __name__ == "__main__":

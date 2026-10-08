@@ -138,9 +138,14 @@ if [ -f "$apk" ]; then
 fi
 
 echo "== source archive"
-if git -C "$root" rev-parse --verify -q "v$version" >/dev/null; then ref="v$version"; else ref="HEAD"; fi
-git -C "$root" archive --format=tar.gz --prefix="varsto-$version/" -o "$out/varsto-$version-source.tar.gz" "$ref"
-manifest+=", \"varsto-$version-source.tar.gz\": {\"platform\": \"Source\", \"note\": \"git archive of $ref\"}}"
+if git -C "$root" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  if git -C "$root" rev-parse --verify -q "v$version" >/dev/null; then ref="v$version"; else ref="HEAD"; fi
+  git -C "$root" archive --format=tar.gz --prefix="varsto-$version/" -o "$out/varsto-$version-source.tar.gz" "$ref"
+  manifest+=", \"varsto-$version-source.tar.gz\": {\"platform\": \"Source\", \"note\": \"git archive of $ref\"}}"
+else
+  echo "== source archive skipped (not a git checkout)"
+  manifest+="}"
+fi
 echo "$manifest" | python3 -c "import json,sys; json.dump(json.load(sys.stdin), sys.stdout, indent=2)" > "$out/manifest.json"
 (cd "$out" && sha256sum varsto-"$version"-* Varsto-"$version"-* 2>/dev/null > SHA256SUMS)
 cat "$out/SHA256SUMS"
