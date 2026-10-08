@@ -10,13 +10,19 @@ apt-get update -qq && apt-get install -y -qq xvfb freerdp2-x11 xdotool imagemagi
 Xvfb :98 -screen 0 1280x800x24 >/dev/null 2>&1 &
 sleep 2
 mkdir -p /it/shots
-xfreerdp /v:"$WIN_IP" /u:Administrator /p:"$WIN_PASS" /cert:ignore /size:1280x800 /bpp:16 +clipboard /sec:nla -decorations /log-level:ERROR >/it/rdp.log 2>&1 &
+RDPBIN="$(command -v xfreerdp3 || command -v xfreerdp)"
+echo "using $RDPBIN"
+"$RDPBIN" /v:"$WIN_IP" /u:Administrator /p:"$WIN_PASS" /cert:ignore /size:1280x800 /bpp:16 -decorations /log-level:WARN >/it/rdp.log 2>&1 &
 RDP=$!
-for i in $(seq 1 30); do sleep 2; xdotool search --class xfreerdp >/dev/null 2>&1 && break; done
+set +e
+for i in $(seq 1 40); do sleep 2; xdotool search --class xfreerdp >/dev/null 2>&1 && break; done
+if ! xdotool search --class xfreerdp >/dev/null 2>&1; then
+  echo "RDP window did not appear; xfreerdp log:"; tail -20 /it/rdp.log; exit 1
+fi
 sleep 25   # first login: desktop and Server Manager take a while
 import -window root /it/shots/windows-desktop-first.png
 win="$(xdotool search --class xfreerdp | head -1)"
-xdotool windowactivate --sync "$win" || true
+xdotool windowactivate --sync "$win" 2>/dev/null || true
 xdotool key --clearmodifiers super+r
 sleep 3
 cmd="powershell -NoProfile -ExecutionPolicy Bypass -Command \"Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0; Set-Service sshd -StartupType Automatic; Start-Service sshd; New-NetFirewallRule -Name sshd -DisplayName OpenSSH -Direction Inbound -Protocol TCP -LocalPort 22 -Action Allow; New-Item -ItemType Directory -Force C:\\ProgramData\\ssh | Out-Null; Set-Content -Path C:\\ProgramData\\ssh\\administrators_authorized_keys -Value '$PUBKEY' -Encoding ascii; icacls C:\\ProgramData\\ssh\\administrators_authorized_keys /inheritance:r /grant Administrators:F /grant SYSTEM:F; New-ItemProperty -Path HKLM:\\SOFTWARE\\OpenSSH -Name DefaultShell -Value C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe -PropertyType String -Force; Restart-Service sshd\""
@@ -27,6 +33,7 @@ sleep 5
 import -window root /it/shots/windows-desktop-after-command.png
 # Wait for OpenSSH from here (same network as the Windows machine).
 for i in $(seq 1 60); do nc -z -w2 "$WIN_IP" 22 && { echo "SSH_UP"; break; }; sleep 10; done
+tail -5 /it/rdp.log
 import -window root /it/shots/windows-desktop.png
 kill $RDP 2>/dev/null || true
 ls -la /it/shots

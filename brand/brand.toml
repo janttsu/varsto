@@ -9,3 +9,12 @@ tagline = "Your files. Your storage."
 # Decide late: app bundle ids cannot change after the first store release.
 android_application_id = ""
 ios_bundle_id = ""
+
+[mark]
+# "The dial": a round vault door, one ring broken into two arcs (the sync
+# loop) with a keyhole in the middle (the lock), white on a blue tile.
+# Geometry and every rendered file come from brand/render.py; see brand/README.md.
+tile = "#2b57d6"            # Signal blue, flat
+tile_gradient_end = "#2146b2"  # app icon at 128 px and above only (towards Vault blue #1b3a9a)
+glyph = "#ffffff"
+wordmark_font = "Inter SemiBold, outlined (website/tools/render/fonts/Inter-SemiBold.ttf)"
