@@ -22,7 +22,7 @@ Varsto is tested in layers. The goal is that cheaper AI systems and scripts can 
 6. Upgrade and migration tests, long soak tests, performance tests (very large files, millions of small files).
 7. CLI contract tests (JSON schema, exit codes).
 8. Security tests: fuzzing, dependency audit and licence checks, secret scanning, reproducible-build comparison.
-9. Mobile tests: see [docs/testing/mobile.md](docs/testing/mobile.md).
+9. Mobile tests: see [docs/testing/mobile.md](docs/testing/mobile.md). Devices: [docs/testing/devices.md](docs/testing/devices.md).
 10. Manual tests on Windows, macOS, Android and iOS: see [docs/testing/manual](docs/testing/manual).
 
 The matrix is defined in [tests/matrix.yaml](tests/matrix.yaml).
