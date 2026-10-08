@@ -8,7 +8,7 @@ Status of the documents that will define formats and protocols. All are **not st
 | Chunking and hashing | not started |
 | Key hierarchy and key wrapping (incl. FIDO2 `hmac-secret`) | draft, design stage: [key-hierarchy.md](key-hierarchy.md) |
 | Post-quantum hybrid handshakes and signatures | not started |
-| Event ledger and bookkeeping | not started |
+| Event ledger and bookkeeping | design notes on signing: [ledger-signing-notes.md](ledger-signing-notes.md) |
 | Peer discovery (LAN, storage rendezvous, DHT, relays) | not started |
 | Peer-to-peer transfer protocol | not started |
 | Version, trash and retention model | not started |
