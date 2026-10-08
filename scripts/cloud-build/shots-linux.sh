@@ -69,10 +69,10 @@ ls -la /it/shots; tail -3 /it/tray.log
 apt-get install -y -qq openbox python3-venv >/dev/null
 openbox >/dev/null 2>&1 &
 sleep 1
-python3 -m venv /it/venv && /it/venv/bin/pip -q install playwright >/dev/null && /it/venv/bin/playwright install --with-deps chromium >/dev/null 2>&1
+{ python3 -m venv /it/venv && /it/venv/bin/pip -q install playwright && /it/venv/bin/playwright install --with-deps chromium; } > /it/playwright-install.log 2>&1 || { echo "playwright install failed:"; tail -5 /it/playwright-install.log; }
 port="$(python3 -c "import json;print(json.load(open('/it/home/service.json'))['port'])")"
 token="$(python3 -c "import json;print(json.load(open('/it/home/service.json'))['token'])")"
-/it/venv/bin/python3 - "$port" "$token" <<'PY' &
+/it/venv/bin/python3 - "$port" "$token" > /it/app-window.log 2>&1 <<'PY' &
 import sys, time
 from playwright.sync_api import sync_playwright
 port, token = sys.argv[1], sys.argv[2]
@@ -89,5 +89,5 @@ sleep 15
 xdotool key Escape 2>/dev/null || true   # close the tray menu left open by the capture above
 sleep 1
 import -window root /it/shots/linux-app.png
-echo "app window captured"
+echo "app window captured; browser log:"; cat /it/app-window.log 2>/dev/null | tail -5
 ls -la /it/shots
