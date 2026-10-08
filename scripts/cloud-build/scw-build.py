@@ -172,9 +172,8 @@ def build_windows(args):
     srv = create_instance(name, args.type or "POP2-2C-8G-WIN", "windows_server_2025", user_data=ud)
     sid = srv["id"]
     try:
-        _, ip = wait_running(sid)
-        log(f"running at {ip}; waiting for Windows to boot and OpenSSH to come up (this takes a few minutes)")
-        wait_ssh("Administrator", ip, timeout=1500)
+        ip = ensure_windows_ssh(sid, out)
+        run_ssh("Administrator", ip, "powershell -Command \"New-Item -ItemType Directory -Force C:\\build | Out-Null\"")
         scp(str(zip_path), f"Administrator@{ip}:C:/build/varsto-windows.zip")
         scp(str(ROOT / "scripts/cloud-build/remote-windows.ps1"), f"Administrator@{ip}:C:/build/remote.ps1")
         run_ssh("Administrator", ip, "powershell -ExecutionPolicy Bypass -File C:\\build\\remote.ps1")
@@ -299,9 +298,7 @@ def integration(args):
         vault_key = subprocess.run(ssh_base("root", lip) + ["cat /it/vault-key"], capture_output=True, text=True, check=True).stdout.strip()
         result["linux_owner"] = "ok"
 
-        _, wip = wait_running(win["id"])
-        log(f"windows at {wip}; waiting for OpenSSH (a few minutes)")
-        wait_ssh("Administrator", wip, timeout=1500)
+        wip = ensure_windows_ssh(win["id"], out)
         run_ssh("Administrator", wip, "powershell -Command \"New-Item -ItemType Directory -Force C:\\it | Out-Null\"")
         scp(str(win_zips[-1]), f"Administrator@{wip}:C:/it/varsto-windows.zip")
         scp(str(ROOT / "scripts/cloud-build/it-windows.ps1"), f"Administrator@{wip}:C:/it/it.ps1")
@@ -371,6 +368,46 @@ def win_password(server_id):
     if not pw:
         raise SystemExit("no administrator password yet (cloudbase-init runs about 15 minutes after creation)")
     return pw
+
+
+def ensure_windows_ssh(win_id, out):
+    """Wait for Windows to boot; if OpenSSH is not up a few minutes after the
+    administrator password appears, enable it over RDP from a jump machine."""
+    s, wip = wait_running(win_id)
+    log(f"windows at {wip}; waiting for first boot (password appears after ~15 min)")
+    deadline = time.time() + 1800
+    pw = None
+    while time.time() < deadline:
+        try:
+            pw = win_password(win_id)
+            break
+        except SystemExit:
+            time.sleep(30)
+    if not pw:
+        raise SystemExit("Windows administrator password never appeared")
+    for _ in range(18):  # three minutes for cloud-init to have done it by itself
+        if subprocess.run(["nc", "-z", "-w2", wip, "22"], capture_output=True).returncode == 0:
+            log("OpenSSH came up by itself")
+            return wip
+        time.sleep(10)
+    log("OpenSSH not up; enabling it over RDP from a jump machine")
+    pub = next(iter(sorted(pathlib.Path.home().joinpath(".ssh").glob("id_ed25519.pub"))), None) or next(pathlib.Path.home().joinpath(".ssh").glob("*.pub"))
+    jump = create_instance(f"{TAG}-jump-{int(time.time())}", "POP2-2C-8G", "ubuntu_noble")
+    try:
+        _, jip = wait_running(jump["id"])
+        wait_ssh("root", jip)
+        run_ssh("root", jip, "mkdir -p /it")
+        scp(str(ROOT / "scripts/cloud-build/win-bootstrap.sh"), f"root@{jip}:/it/win-bootstrap.sh")
+        subprocess.run(ssh_base("root", jip) + [f"umask 077 && printf '%s' '{pw}' > /it/winpass"], check=True)
+        run_ssh("root", jip, f"export WIN_TOOL=winssh WIN_IP={wip} WIN_PASS=\"$(cat /it/winpass)\" PUBKEY='{pub.read_text().strip()}' && bash /it/win-bootstrap.sh")
+        try:
+            scp(f"root@{jip}:/it/shots/*", str(out))
+        except subprocess.CalledProcessError:
+            pass
+    finally:
+        delete_instance(jump["id"])
+    wait_ssh("Administrator", wip, timeout=300)
+    return wip
 
 
 def win_bootstrap(args):
