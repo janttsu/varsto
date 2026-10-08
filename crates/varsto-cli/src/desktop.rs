@@ -366,12 +366,43 @@ fn api_unlocked(
                 .get("carrier")
                 .and_then(|c| c.as_bool())
                 .unwrap_or(false);
-            engine.add_storage(StorageSpec::LocalDir {
-                name: s(input, "name")?,
-                path: PathBuf::from(s(input, "path")?),
-                cold,
-                carrier,
-            })?;
+            match opt(input, "kind").as_deref().unwrap_or("local-dir") {
+                "s3" => {
+                    let class = opt(input, "storage_class").filter(|c| !c.trim().is_empty());
+                    let cold = cold
+                        || class
+                            .as_deref()
+                            .is_some_and(|c| c.contains("GLACIER") || c.contains("ARCHIVE"));
+                    engine.add_storage_with_secret(
+                        StorageSpec::S3 {
+                            name: s(input, "name")?,
+                            endpoint: s(input, "endpoint")?.trim_end_matches('/').to_string(),
+                            region: opt(input, "region")
+                                .filter(|r| !r.trim().is_empty())
+                                .unwrap_or_else(|| "us-east-1".into()),
+                            bucket: s(input, "bucket")?,
+                            prefix: opt(input, "prefix").unwrap_or_default().trim_matches('/').to_string(),
+                            access_key_id: s(input, "access_key_id")?,
+                            secret_ref: String::new(),
+                            path_style: !input.get("virtual_host").and_then(|c| c.as_bool()).unwrap_or(false),
+                            storage_class: class,
+                            cold,
+                        },
+                        Some(s(input, "secret_access_key")?),
+                    )?;
+                }
+                "rclone" => engine.add_storage(StorageSpec::Rclone {
+                    name: s(input, "name")?,
+                    remote: s(input, "remote")?,
+                    cold,
+                })?,
+                _ => engine.add_storage(StorageSpec::LocalDir {
+                    name: s(input, "name")?,
+                    path: PathBuf::from(s(input, "path")?),
+                    cold,
+                    carrier,
+                })?,
+            }
             service.request_sync();
             Ok(json!({"ok": true}))
         }

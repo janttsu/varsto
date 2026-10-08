@@ -22,7 +22,7 @@ None of this is finished. See [docs/architecture](docs/architecture/README.md) f
 
 ## Status
 
-Alpha (0.0.1-alpha.2): the core works on Linux, macOS and Windows (macOS and Windows builds are cross-compiled and not yet tested there) as a background service with a tray or menu-bar app, a local desktop interface, a command line, and an Android shell (sideloadable APK). Implemented: encrypted chunked sync through any directory, signed per-device ledger and convergence between devices that are never online together, conflict copies and trash, selective sync with placeholders, transferrer disks, untrusted replica devices, folder sharing with another user by key, encrypted thumbnails, self-update. It chunks and encrypts files, stores them in a local-directory storage (a disk, a removable disk or a network mount), keeps a signed per-device ledger in that storage, and syncs a folder between devices that are never online at the same time, with conflict copies and a trash. See [docs/spec/alpha-0-format.md](docs/spec/alpha-0-format.md) for what it does and does not do. There is no sharing, no peer-to-peer transfer, no post-quantum hybrid yet, no mobile app and no audit.
+Alpha (0.0.1-alpha.2): the core works on Linux, macOS and Windows (macOS and Windows builds are cross-compiled and not yet tested there) as a background service with a tray or menu-bar app, a local desktop interface, a command line, and an Android shell (sideloadable APK). Implemented: encrypted chunked sync through any directory, S3-compatible bucket or rclone remote, signed per-device ledger and convergence between devices that are never online together, conflict copies and trash, selective sync with placeholders, transferrer disks, untrusted replica devices, folder sharing with another user by key, encrypted thumbnails, self-update. It chunks and encrypts files, stores them in a local-directory storage (a disk, a removable disk or a network mount), keeps a signed per-device ledger in that storage, and syncs a folder between devices that are never online at the same time, with conflict copies and a trash. See [docs/spec/alpha-0-format.md](docs/spec/alpha-0-format.md) for what it does and does not do. There is no sharing, no peer-to-peer transfer, no post-quantum hybrid yet, no mobile app and no audit.
 
 ### Quick start (alpha-0)
 
@@ -32,6 +32,8 @@ varsto desktop                             # local graphical interface in your b
 export VARSTO_PASSPHRASE='a long passphrase'
 varsto --home ~/.varsto-laptop init --name laptop            # prints the vault key once
 varsto --home ~/.varsto-laptop storage add-local box /mnt/box
+varsto --home ~/.varsto-laptop storage add-s3 cloud --endpoint https://s3.fr-par.scw.cloud --region fr-par --bucket my-bucket --access-key-id AK... --secret-access-key ...
+varsto --home ~/.varsto-laptop storage add-rclone hetzner storagebox:varsto   # any rclone remote
 varsto --home ~/.varsto-laptop folder add docs ~/Documents/synced
 varsto --home ~/.varsto-laptop sync
 varsto tray                                # Linux/Windows: tray icon + background service (macOS: Varsto.app)

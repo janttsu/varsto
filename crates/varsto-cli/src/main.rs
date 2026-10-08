@@ -211,6 +211,41 @@ enum StorageCmd {
         #[arg(long)]
         carrier: bool,
     },
+    /// Add an S3-compatible bucket (AWS, Scaleway, Hetzner, Backblaze B2, R2, MinIO, ...).
+    AddS3 {
+        name: String,
+        /// Endpoint, e.g. https://s3.eu-central-1.amazonaws.com or http://127.0.0.1:9000
+        #[arg(long)]
+        endpoint: String,
+        #[arg(long, default_value = "us-east-1")]
+        region: String,
+        #[arg(long)]
+        bucket: String,
+        /// Key prefix inside the bucket.
+        #[arg(long, default_value = "")]
+        prefix: String,
+        #[arg(long)]
+        access_key_id: String,
+        /// Secret access key; read from VARSTO_S3_SECRET if omitted. Stored encrypted in secrets.enc.
+        #[arg(long, env = "VARSTO_S3_SECRET", hide_env_values = true)]
+        secret_access_key: String,
+        /// Use virtual-host style URLs (bucket.host) instead of path style.
+        #[arg(long)]
+        virtual_host: bool,
+        /// Storage class for new objects (DEEP_ARCHIVE, GLACIER_IR, STANDARD_IA, ...).
+        #[arg(long)]
+        storage_class: Option<String>,
+        /// Cold storage: written, never read without confirmation.
+        #[arg(long)]
+        cold: bool,
+    },
+    /// Add any rclone remote (`remote:bucket/path`); credentials stay in rclone's own config.
+    AddRclone {
+        name: String,
+        remote: String,
+        #[arg(long)]
+        cold: bool,
+    },
     List,
 }
 
@@ -359,6 +394,46 @@ fn run(cli: &Cli) -> Result<()> {
                         path: path.clone(),
                         cold: *cold,
                         carrier: *carrier,
+                    })?;
+                    println!("storage {name} added");
+                }
+                StorageCmd::AddS3 {
+                    name,
+                    endpoint,
+                    region,
+                    bucket,
+                    prefix,
+                    access_key_id,
+                    secret_access_key,
+                    virtual_host,
+                    storage_class,
+                    cold,
+                } => {
+                    engine.add_storage_with_secret(
+                        StorageSpec::S3 {
+                            name: name.clone(),
+                            endpoint: endpoint.trim_end_matches('/').to_string(),
+                            region: region.clone(),
+                            bucket: bucket.clone(),
+                            prefix: prefix.trim_matches('/').to_string(),
+                            access_key_id: access_key_id.clone(),
+                            secret_ref: String::new(),
+                            path_style: !*virtual_host,
+                            storage_class: storage_class.clone(),
+                            cold: *cold
+                                || storage_class.as_deref().is_some_and(|c| {
+                                    c.contains("GLACIER") || c.contains("ARCHIVE")
+                                }),
+                        },
+                        Some(secret_access_key.clone()),
+                    )?;
+                    println!("storage {name} added (secret kept in secrets.enc)");
+                }
+                StorageCmd::AddRclone { name, remote, cold } => {
+                    engine.add_storage(StorageSpec::Rclone {
+                        name: name.clone(),
+                        remote: remote.clone(),
+                        cold: *cold,
                     })?;
                     println!("storage {name} added");
                 }

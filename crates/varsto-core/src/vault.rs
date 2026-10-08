@@ -561,6 +561,57 @@ pub struct FolderMount {
     pub selective: bool,
 }
 
+/// Storage credentials: `home/secrets.enc`, encrypted under a key derived
+/// from this device's master key, so they are only readable when the vault is
+/// unlocked. Keyed by secret reference (by default the storage name).
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+pub struct SecretStore {
+    pub secrets: BTreeMap<String, String>,
+}
+
+impl SecretStore {
+    const FILE: &'static str = "secrets.enc";
+    fn key(keys: &Keys) -> SecretKey {
+        keys.master.derive("storage-secrets", &[])
+    }
+    fn aad(vault: &VaultId, device: &DeviceId) -> Vec<u8> {
+        crypto::aad(
+            "storage-secrets",
+            &[vault.as_str().as_bytes(), device.as_str().as_bytes()],
+        )
+    }
+    pub fn load(home: &Path, keys: &Keys, vault: &VaultId, device: &DeviceId) -> Result<Self> {
+        let p = home.join(Self::FILE);
+        if !p.exists() {
+            return Ok(Self::default());
+        }
+        let plain = crypto::decrypt(
+            &Self::key(keys),
+            &Self::aad(vault, device),
+            &std::fs::read(&p)?,
+        )
+        .context("open secrets.enc")?;
+        Ok(serde_json::from_slice(&plain)?)
+    }
+    pub fn save(&self, home: &Path, keys: &Keys, vault: &VaultId, device: &DeviceId) -> Result<()> {
+        let blob = crypto::encrypt(
+            &Self::key(keys),
+            &Self::aad(vault, device),
+            &serde_json::to_vec(self)?,
+        )?;
+        util::write_atomic(&home.join(Self::FILE), &blob)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(
+                home.join(Self::FILE),
+                std::fs::Permissions::from_mode(0o600),
+            )?;
+        }
+        Ok(())
+    }
+}
+
 /// Local configuration: `home/config.json` (no secrets).
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
 pub struct Config {

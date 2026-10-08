@@ -25,7 +25,7 @@ use crate::replica::{self, ReplicaToken, REPLICA_PREFIX};
 use crate::storage::{Storage, StorageSpec};
 use crate::thumbs;
 use crate::util;
-use crate::vault::{self, ShareToken, SHARE_PREFIX};
+use crate::vault::{self, SecretStore, ShareToken, SHARE_PREFIX};
 use crate::vault::{
     Config, DeviceRecord, FolderKeys, FolderMount, FolderRecord, Keyring, Keys, LocalVault,
     VaultMeta,
@@ -522,10 +522,52 @@ impl Engine {
     // ----- storages and folders ---------------------------------------------
 
     pub fn add_storage(&mut self, spec: StorageSpec) -> Result<()> {
+        self.add_storage_with_secret(spec, None)
+    }
+
+    /// Resolve storage secrets (S3 secret access keys) from the encrypted
+    /// secret store of this device.
+    fn secret_store(&self) -> Result<SecretStore> {
+        SecretStore::load(
+            &self.home,
+            &self.keys,
+            &self.vault.vault_id,
+            &self.vault.device_id,
+        )
+    }
+
+    fn open_spec(&self, spec: &StorageSpec) -> Result<Box<dyn Storage>> {
+        let store = self.secret_store()?;
+        spec.open_with(&|r| store.secrets.get(r).cloned())
+    }
+
+    /// Add a storage; `secret` (for S3: the secret access key) is kept in
+    /// `secrets.enc`, never in `config.json`.
+    pub fn add_storage_with_secret(
+        &mut self,
+        spec: StorageSpec,
+        secret: Option<String>,
+    ) -> Result<()> {
         if self.config.storages.iter().any(|s| s.name() == spec.name()) {
             bail!("a storage named {} already exists", spec.name());
         }
-        let backend = spec.open()?;
+        if let Some(secret) = secret {
+            let reference = match &spec {
+                StorageSpec::S3 {
+                    secret_ref, name, ..
+                } if !secret_ref.is_empty() => secret_ref.clone(),
+                _ => spec.name().to_string(),
+            };
+            let mut store = self.secret_store()?;
+            store.secrets.insert(reference, secret);
+            store.save(
+                &self.home,
+                &self.keys,
+                &self.vault.vault_id,
+                &self.vault.device_id,
+            )?;
+        }
+        let backend = self.open_spec(&spec)?;
         let meta = VaultMeta {
             format_version: crate::FORMAT_VERSION,
             vault_id: self.vault.vault_id.clone(),
@@ -555,7 +597,7 @@ impl Engine {
             if spec.is_cold() && !include_cold {
                 continue;
             }
-            out.push((spec.clone(), spec.open()?));
+            out.push((spec.clone(), self.open_spec(spec)?));
         }
         Ok(out)
     }

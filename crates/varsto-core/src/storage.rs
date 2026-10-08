@@ -42,29 +42,149 @@ pub enum StorageSpec {
         #[serde(default)]
         carrier: bool,
     },
+    /// An S3-compatible bucket. The secret access key is not stored here
+    /// (config.json is plain text) but in the encrypted secret store under
+    /// `secret_ref`, or in the environment variable `VARSTO_S3_SECRET_<NAME>`.
+    S3 {
+        name: String,
+        endpoint: String,
+        region: String,
+        bucket: String,
+        #[serde(default)]
+        prefix: String,
+        access_key_id: String,
+        #[serde(default)]
+        secret_ref: String,
+        #[serde(default = "default_true")]
+        path_style: bool,
+        #[serde(default)]
+        storage_class: Option<String>,
+        #[serde(default)]
+        cold: bool,
+    },
+    /// Any rclone remote (`remote:bucket/path`); credentials stay in rclone's config.
+    Rclone {
+        name: String,
+        remote: String,
+        #[serde(default)]
+        cold: bool,
+    },
 }
+
+fn default_true() -> bool {
+    true
+}
+
+/// Resolves a secret by reference; `None` means "unknown".
+pub type SecretLookup<'a> = &'a dyn Fn(&str) -> Option<String>;
 
 impl StorageSpec {
     pub fn name(&self) -> &str {
         match self {
-            StorageSpec::LocalDir { name, .. } => name,
+            StorageSpec::LocalDir { name, .. }
+            | StorageSpec::S3 { name, .. }
+            | StorageSpec::Rclone { name, .. } => name,
+        }
+    }
+    pub fn kind(&self) -> &'static str {
+        match self {
+            StorageSpec::LocalDir { .. } => "local-dir",
+            StorageSpec::S3 { .. } => "s3",
+            StorageSpec::Rclone { .. } => "rclone",
+        }
+    }
+    /// One-line description for listings (no secrets).
+    pub fn describe(&self) -> String {
+        match self {
+            StorageSpec::LocalDir { path, .. } => path.display().to_string(),
+            StorageSpec::S3 {
+                endpoint,
+                bucket,
+                prefix,
+                storage_class,
+                ..
+            } => format!(
+                "{endpoint} bucket {bucket}{}{}",
+                if prefix.is_empty() {
+                    String::new()
+                } else {
+                    format!("/{prefix}")
+                },
+                storage_class
+                    .as_ref()
+                    .map(|c| format!(" class {c}"))
+                    .unwrap_or_default()
+            ),
+            StorageSpec::Rclone { remote, .. } => remote.clone(),
         }
     }
     pub fn is_cold(&self) -> bool {
         match self {
-            StorageSpec::LocalDir { cold, .. } => *cold,
+            StorageSpec::LocalDir { cold, .. }
+            | StorageSpec::S3 { cold, .. }
+            | StorageSpec::Rclone { cold, .. } => *cold,
         }
     }
     pub fn is_carrier(&self) -> bool {
         match self {
             StorageSpec::LocalDir { carrier, .. } => *carrier,
+            _ => false,
         }
     }
+    /// Open with secrets taken from the environment only.
     pub fn open(&self) -> Result<Box<dyn Storage>> {
+        self.open_with(&|_| None)
+    }
+    /// Open; `secrets` resolves `secret_ref` for backends that need one.
+    pub fn open_with(&self, secrets: SecretLookup) -> Result<Box<dyn Storage>> {
         match self {
             StorageSpec::LocalDir { name, path, .. } => {
                 Ok(Box::new(LocalDirStorage::new(name.clone(), path.clone())?))
             }
+            StorageSpec::S3 {
+                name,
+                endpoint,
+                region,
+                bucket,
+                prefix,
+                access_key_id,
+                secret_ref,
+                path_style,
+                storage_class,
+                ..
+            } => {
+                let reference = if secret_ref.is_empty() {
+                    name
+                } else {
+                    secret_ref
+                };
+                let env_name = format!(
+                    "VARSTO_S3_SECRET_{}",
+                    name.to_uppercase()
+                        .replace(|c: char| !c.is_ascii_alphanumeric(), "_")
+                );
+                let secret = secrets(reference)
+                    .or_else(|| std::env::var(&env_name).ok())
+                    .ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "no secret access key for storage {name}: unlock the vault that stored it or set {env_name}"
+                        )
+                    })?;
+                Ok(Box::new(crate::s3::S3Storage::new(crate::s3::S3Config {
+                    name: name.clone(),
+                    endpoint: endpoint.clone(),
+                    region: region.clone(),
+                    bucket: bucket.clone(),
+                    prefix: prefix.clone(),
+                    access_key_id: access_key_id.clone(),
+                    secret_access_key: secret,
+                    path_style: *path_style,
+                    storage_class: storage_class.clone(),
+                })?))
+            }
+            StorageSpec::Rclone { name, remote, .. } => Ok(Box::new(
+                crate::rclone::RcloneStorage::new(name.clone(), remote.clone())?,
+            )),
         }
     }
 }

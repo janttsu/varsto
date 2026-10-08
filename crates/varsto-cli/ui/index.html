@@ -95,11 +95,29 @@
     <h2>Storages</h2>
     <ul id="storages"></ul>
     <form id="addstorage" class="card narrow">
-      <h3>Add a storage directory</h3>
+      <h3>Add a storage</h3>
+      <label>Type <select name="kind" id="storagekind"><option value="local-dir">Directory (disk, removable disk, network mount)</option><option value="s3">S3-compatible bucket</option><option value="rclone">rclone remote</option></select></label>
       <label>Name <input name="name" placeholder="box" required></label>
-      <label>Directory (disk, removable disk, network mount) <input name="path" required></label>
-      <label class="inline"><input name="cold" type="checkbox"> cold storage: written, never read without confirmation</label>
+      <div data-kind="local-dir">
+        <label>Directory <input name="path"></label>
         <label class="inline"><input name="carrier" type="checkbox"> transferrer: removable media that carries only what other devices still lack, emptied once delivered</label>
+      </div>
+      <div data-kind="s3" class="hidden">
+        <label>Endpoint <input name="endpoint" placeholder="https://s3.eu-central-1.amazonaws.com"></label>
+        <label>Region <input name="region" placeholder="eu-central-1"></label>
+        <label>Bucket <input name="bucket"></label>
+        <label>Prefix (optional) <input name="prefix" placeholder="varsto"></label>
+        <label>Access key id <input name="access_key_id" autocomplete="off"></label>
+        <label>Secret access key <input name="secret_access_key" type="password" autocomplete="off"></label>
+        <label>Storage class (optional) <input name="storage_class" placeholder="DEEP_ARCHIVE, GLACIER_IR, STANDARD_IA"></label>
+        <label class="inline"><input name="virtual_host" type="checkbox"> virtual-host style URLs (bucket.host)</label>
+        <p class="muted">The secret is stored encrypted in this device's secrets.enc and never in config.json. Archive classes are treated as cold.</p>
+      </div>
+      <div data-kind="rclone" class="hidden">
+        <label>Remote (name:bucket/path) <input name="remote" placeholder="hetzner:backup/varsto"></label>
+        <p class="muted">Uses your rclone and its configuration; Varsto never sees the remote's credentials.</p>
+      </div>
+      <label class="inline"><input name="cold" type="checkbox"> cold storage: written, never read without confirmation</label>
       <button type="submit">Add</button>
     </form>
 

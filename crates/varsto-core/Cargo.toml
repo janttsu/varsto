@@ -20,11 +20,14 @@ rand_core.workspace = true
 zeroize.workspace = true
 argon2.workspace = true
 hex.workspace = true
+sha2.workspace = true
 walkdir.workspace = true
 image.workspace = true
 ml-dsa = "0.1.1"
 ml-kem = "0.3.2"
 x25519-dalek = { version = "3.0.0", features = ["static_secrets"] }
+ureq = "3"
+hmac = "0.12"
 
 [dev-dependencies]
 tempfile.workspace = true

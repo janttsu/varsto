@@ -54,7 +54,7 @@
       (function () {
       });
       var ul = $("storages"); ul.innerHTML = "";
-      s.storages.forEach(function (st) { var li = document.createElement("li"); li.textContent = st.name + " (" + st.kind + ": " + st.path + (st.cold ? ", cold" : "") + (st.carrier ? ", transferrer" : "") + ")"; ul.appendChild(li); });
+      s.storages.forEach(function (st) { var li = document.createElement("li"); var where = st.kind === "s3" ? st.endpoint + " bucket " + st.bucket + (st.prefix ? "/" + st.prefix : "") + (st.storage_class ? ", class " + st.storage_class : "") : (st.kind === "rclone" ? st.remote : st.path); li.textContent = st.name + " (" + st.kind + ": " + where + (st.cold ? ", cold" : "") + (st.carrier ? ", transferrer" : "") + ")"; ul.appendChild(li); });
       var names = Object.keys(s.devices).map(function (k) { return s.devices[k] + " (" + k.slice(0, 8) + ")"; });
       var reps = Object.keys(s.replicas || {}).map(function (k) { return s.replicas[k]; });
       var mems = Object.keys(s.members || {}).map(function (k) { return s.members[k]; });
@@ -139,6 +139,7 @@
   $("join").onsubmit = function (ev) { ev.preventDefault(); busy(true); api("POST", "/api/join", formData(ev.target)).then(function () { ev.target.reset(); log("joined the vault; attach folders below"); return refreshState(); }).catch(function (e) { alert(e.message); }).then(function () { busy(false); }); };
   $("replicatoken").onclick = function () { api("GET", "/api/replica/token").then(function (r) { $("replicaout").textContent = "Replica token (give to the device that will hold your encrypted copies without being able to open them): " + r.token; $("replicaout").classList.remove("hidden"); }).catch(function (e) { alert(e.message); }); };
   $("sharerequest").onclick = function () { api("POST", "/api/share/request", {}).then(function (r) { $("sharerequestout").textContent = r.request_code; $("sharerequestout").classList.remove("hidden"); }).catch(function (e) { alert(e.message); }); };
+  $("storagekind").onchange = function () { var k = this.value; document.querySelectorAll("#addstorage [data-kind]").forEach(function (d) { d.classList.toggle("hidden", d.getAttribute("data-kind") !== k); }); };
   $("acceptshare").onsubmit = function (ev) { ev.preventDefault(); busy(true); api("POST", "/api/share/accept", formData(ev.target)).then(function (r) { ev.target.reset(); log("accepted shared folder " + r.folder + "; attach it below"); return refreshState(); }).catch(function (e) { alert(e.message); }).then(function () { busy(false); }); };
   $("addfolder").onsubmit = function (ev) { ev.preventDefault(); api("POST", "/api/folder", formData(ev.target)).then(function () { ev.target.reset(); log("folder added"); return refreshStatus(); }).catch(function (e) { alert(e.message); }); };
   $("attachfolder").onsubmit = function (ev) { ev.preventDefault(); api("POST", "/api/folder/attach", formData(ev.target)).then(function () { ev.target.reset(); log("folder attached"); return refreshStatus(); }).catch(function (e) { alert(e.message); }); };

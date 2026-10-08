@@ -5,14 +5,14 @@ output: index.html
 description: Varsto: end-to-end encrypted file sync and backup on storage you already own. Alpha, working name.
 ---
     <h1>Your files. Your storage.</h1>
-    <p class="lead">Varsto is an end-to-end encrypted sync and backup app that uses your own devices and storage services of your choice. A disk, a NAS share or (soon) an S3 bucket; the app encrypts everything on your devices, keeps a signed record of where every block is, and lets devices that are never online at the same time stay in sync through that storage.</p>
+    <p class="lead">Varsto is an end-to-end encrypted sync and backup app that uses your own devices and storage services of your choice. A disk, a NAS share, an S3 bucket or any rclone remote; the app encrypts everything on your devices, keeps a signed record of where every block is, and lets devices that are never online at the same time stay in sync through that storage.</p>
     <p><a class="button" href="downloads/">Download the alpha</a> <a class="button secondary" href="docs/quick-start.html">Quick start</a></p>
     <figure class="hero"><img src="assets/img/hero.svg" alt="Diagram: your keys in the centre, connected by encrypted links to an S3 bucket, a cold archive, hard drives on a shelf, a NAS, a laptop and a phone; every place holds only locked, encrypted blocks." width="1200" height="600"><figcaption>Copies wherever you decide: a bucket, a cold archive, old disks on a shelf, your own machines. Every copy is ciphertext; the keys stay with you.</figcaption></figure>
 
     <h2>What works today (alpha, 0.0.1-alpha.3)</h2>
     <div class="grid">
       <section class="card"><h3>Encrypted before it leaves your device</h3><p>Files are cut into content-defined chunks, each encrypted with XChaCha20-Poly1305 under keys derived from your vault. Storage sees opaque objects and sizes, never names, hashes or content.</p></section>
-      <section class="card"><h3>Bring your own storage</h3><p>Any directory this device can reach: a local disk, a removable disk in a dock, a network mount. Cold storages are written but never read without your confirmation.</p></section>
+      <section class="card"><h3>Bring your own storage</h3><p>Any directory this device can reach, any S3-compatible bucket (AWS, Scaleway, Hetzner, B2, R2, MinIO) with your own keys, or any rclone remote. Cold storages and archive classes are written but never read without your confirmation.</p></section>
       <section class="card"><h3>Devices that never meet still converge</h3><p>Each device keeps a signed, encrypted ledger and publishes it through the storage. Edits, deletions and conflicts resolve deterministically; concurrent edits keep both versions, deletions go to a trash.</p></section>
       <section class="card"><h3>Background app on every desktop</h3><p>A tray or menu-bar app runs the service, watches folders and syncs within seconds; the interface opens in your browser, served only to this computer. One-click updates.</p></section>
       <section class="card"><h3>Selective sync, transferrer disks, untrusted replicas, sharing</h3><p>Placeholders until you fetch; a USB stick that carries only what the other device lacks; a friend's NAS that stores your copies without being able to open them; a folder shared with another user by its key. See <a href="features/">Features</a>, <a href="use-cases/">Use cases</a> and <a href="screenshots/">Screenshots</a>.</p></section>
@@ -23,7 +23,7 @@ description: Varsto: end-to-end encrypted file sync and backup on storage you al
     <h2>What is designed but not built yet</h2>
     <div class="grid">
       <section class="card todo"><h3>Security keys and Strongroom</h3><p>FIDO2 <code>hmac-secret</code> wrapping of the vault and folders that open only with a touch of your security key. Research on platform support is <a href="docs/fido2-platform-support.html">published</a>.</p></section>
-      <section class="card todo"><h3>S3, rclone, peer-to-peer, policies, MCP</h3><p>S3-compatible and rclone remotes, torrent-style transfer between devices on the LAN and over the internet, durability policies with alerts, and an MCP server for AI assistants are next, in that order. iOS needs a Mac to build.</p></section>
+      <section class="card todo"><h3>Peer-to-peer, policies, MCP, Strongroom</h3><p>Torrent-style transfer between devices on the LAN and over the internet, durability policies with alerts, an MCP server for AI assistants and Strongroom folders are next, in that order. iOS needs a Mac to build.</p></section>
     </div>
 
     <h2>Honest status</h2>
