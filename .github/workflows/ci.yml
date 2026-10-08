@@ -17,6 +17,11 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: false
 
+# bash with pipefail everywhere, so `cmd | tee log` fails when cmd fails.
+defaults:
+  run:
+    shell: bash
+
 env:
   CARGO_TERM_COLOR: always
 
@@ -39,7 +44,6 @@ jobs:
           file smoke/Varsto.app/Contents/Helpers/varsto
           codesign -dv smoke/Varsto.app
           smoke/Varsto.app/Contents/Helpers/varsto --version
-        shell: bash
       - name: Output to the job summary
         if: failure()
         run: |
