@@ -29,14 +29,47 @@ The matrix is defined in [tests/matrix.yaml](tests/matrix.yaml).
 
 ## Running tests (Linux)
 
-```
-scripts/test/provision-vm.sh <distro>      # create a disposable VM
+```bash
+scripts/test/provision-vm.sh <distro>      # create a disposable VM, prints its name
 scripts/test/run-suite.sh <suite> <vm>     # run a suite in that VM
 scripts/test/collect-logs.sh <vm>          # fetch logs and results
 scripts/test/destroy-vm.sh <vm>            # always destroy the VM afterwards
 ```
 
-The scripts are stubs at the moment; each prints what it will do and exits with a "not implemented" status.
+Every script accepts `--dry-run`, which prints the commands without executing them.
+
+Only the `smoke` suite and the `debian-stable` (x86_64) image exist so far. The smoke suite checks that the VM boots, accepts SSH, finished cloud-init, has a sane clock and has no route out of the test network.
+
+### Prerequisites
+
+- Linux with libvirt and QEMU/KVM (`virsh`, `qemu-img`, `/dev/kvm`), `ssh`, `ssh-keygen`, `curl`, `sha512sum`.
+- One of `xorriso`, `genisoimage`, `mkisofs` or `cloud-localds` to build the cloud-init seed.
+- Your user must be in the `libvirt` group; no root is needed. The scripts use `qemu:///system` and the storage pool `default`.
+- `shellcheck` if you change the scripts (`shellcheck -x scripts/test/*.sh scripts/test/lib/common.sh`).
+
+### What the scripts create and where
+
+- Base images are downloaded once from the distribution's official cloud-image site, verified against the published SHA-512 checksum, and cached in `~/.cache/varsto-test/images/` and in the libvirt pool.
+- Per-VM state (SSH key generated for that run, cloud-init files, generated XML) lives in `~/.cache/varsto-test/vms/<vm>/` and is removed by `destroy-vm.sh`.
+- Each VM gets a copy-on-write disk, a seed ISO and its own isolated libvirt network (no `<forward>`: no route to the LAN or the internet). All of these are named `varsto-test-<distro>-<id>`; the scripts refuse to touch anything else.
+- Results are written to `test-results/<vm>/` (`smoke.junit.xml`, `smoke.json`, `var-log.tar.gz`); the directory is git-ignored.
+
+Environment variables: `VARSTO_LIBVIRT_URI`, `VARSTO_POOL`, `VARSTO_CACHE_DIR`, `VARSTO_RESULTS_DIR`, `VARSTO_VM_CPUS`, `VARSTO_VM_MEM_MIB`, `VARSTO_VM_DISK_SIZE`, and `VARSTO_KEEP_ON_FAIL=1` (keep a half-created VM for debugging when provisioning fails).
+
+### Exit codes
+
+| Code | Meaning |
+| --- | --- |
+| 0 | Success; for `run-suite.sh`, the suite passed |
+| 1 | The suite ran and at least one test failed |
+| 2 | Usage error, unknown or not yet implemented distro or suite |
+| 3 | Environment problem: missing tool, failed download or checksum, VM did not accept SSH |
+
+`destroy-vm.sh` exits 0 even if the VM is already gone. If `provision-vm.sh` fails it cleans up after itself.
+
+### Result format
+
+`smoke.json` has the fields `suite`, `vm`, `commit`, `result` (`pass` or `fail`), `started_utc`, `finished_utc` and `tests` (a list of `name`, `status`, `seconds`, `message`). `smoke.junit.xml` is standard JUnit XML.
 
 ## Results and reports
 
