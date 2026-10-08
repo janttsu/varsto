@@ -9,6 +9,7 @@ Thanks for your interest. Varsto is pre-alpha and the contribution process is st
 - **No secrets.** Do not commit credentials, tokens, private keys or recovery phrases.
 - **Tests.** New behaviour needs tests. See [TESTING.md](TESTING.md).
 - **Security first.** Do not implement your own cryptographic primitives. Use reviewed libraries and document every choice.
+- **Logging.** Never log secrets, keys, file names or paths in clear text. Use the sanctioned logging macros and the secret wrapper types; see [docs/architecture/logging.md](docs/architecture/logging.md).
 - **One name in one place.** The product name lives in `brand/brand.toml`; do not hard-code it where it can be avoided, because the working name may change.
 
 ## Licence of contributions
