@@ -140,18 +140,23 @@ impl Backend {
         }
     }
     fn folders(&mut self) -> Result<Vec<Value>> {
-        match self {
-            Backend::Http { .. } => Ok(self
+        let all = match self {
+            Backend::Http { .. } => self
                 .call_json("GET", "/api/folders", None)?
                 .as_array()
                 .cloned()
-                .unwrap_or_default()),
-            Backend::Direct(e) => Ok(e
+                .unwrap_or_default(),
+            Backend::Direct(e) => e
                 .folders()
                 .into_iter()
-                .map(|(r, m)| json!({"id": r.folder_id.to_string(), "name": r.name, "path": m}))
-                .collect()),
-        }
+                .map(|(r, m)| json!({"id": r.folder_id.to_string(), "name": r.name, "path": m, "strongroom": r.is_strongroom()}))
+                .collect(),
+        };
+        // Strongroom folders are never visible to assistants (S-012).
+        Ok(all
+            .into_iter()
+            .filter(|f| !f["strongroom"].as_bool().unwrap_or(false))
+            .collect())
     }
     fn files(&mut self, folder: &str) -> Result<Value> {
         match self {

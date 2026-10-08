@@ -36,7 +36,7 @@
       s.folders.forEach(function (f) {
         var tr = document.createElement("tr");
         function td(text, cls) { var d = document.createElement("td"); d.textContent = text; if (cls) { d.className = cls; } tr.appendChild(d); }
-        td(f.name); td(f.path || "(not attached)"); td(f.files); td(fmtBytes(f.bytes)); td(f.chunks);
+        td(f.name + (f.strongroom ? " \uD83D\uDD12 Strongroom (" + f.strongroom + ")" : "")); td(f.path || "(not attached)"); td(f.files); td(fmtBytes(f.bytes)); td(f.chunks);
         td(f.chunks_without_storage_copy, f.chunks_without_storage_copy > 0 ? "bad" : ""); td(f.chunks_verified_elsewhere);
         var pc = document.createElement("td"); pc.dataset.policyFor = f.name; pc.textContent = f.policy || "none"; tr.appendChild(pc);
         var act = document.createElement("td");
@@ -49,6 +49,8 @@
           api("POST", "/api/policy", { folder: f.name, clear: clear, min_copies: +mc || 0, verified_within_days: +days || 0, places: { cloud: +cloud || 0, home: +home || 0 } }).then(function () { log(clear ? "policy cleared for " + f.name : "policy set for " + f.name); return refreshStatus(); }).catch(function (e) { alert(e.message); });
         }; act.appendChild(pb); }
         if (f.path) { var b = document.createElement("button"); b.className = "secondary"; b.textContent = "Sync"; b.onclick = function () { runSync(f.name); }; act.appendChild(b); }
+        if (f.strongroom && f.strongroom !== "locked") { var lk = document.createElement("button"); lk.className = "secondary"; lk.textContent = "Lock"; lk.onclick = function () { api("POST", "/api/strongroom/lock", { folder: f.name }).then(function () { log("locked " + f.name); return refreshStatus(); }).catch(function (e) { alert(e.message); }); }; act.appendChild(lk); }
+        if (f.strongroom === "locked") { var note = document.createElement("span"); note.className = "muted"; note.textContent = " unlock with: varsto strongroom unlock " + f.name; act.appendChild(note); }
         if (!s.member) { var sh = document.createElement("button"); sh.className = "secondary"; sh.textContent = f.shared ? "Share token" : "Share…"; sh.onclick = function () {
           if (!f.shared && !confirm("Share folder \"" + f.name + "\" with another Varsto user? Anyone holding the token can read and write it.")) { return; }
           var to = prompt("Paste the recipient's request code (vsr1…) to seal the token to their device. Leave empty for a plain token that carries the key itself.", "") || "";

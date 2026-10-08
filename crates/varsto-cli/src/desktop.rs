@@ -382,7 +382,7 @@ fn api_unlocked(
             engine
                 .folders()
                 .into_iter()
-                .map(|(r, m)| json!({"id": r.folder_id.to_string(), "name": r.name, "path": m}))
+                .map(|(r, m)| json!({"id": r.folder_id.to_string(), "name": r.name, "path": m, "strongroom": r.is_strongroom()}))
                 .collect(),
         )),
         (Method::Post, "/api/share/create") => {
@@ -494,6 +494,17 @@ fn api_unlocked(
         (Method::Post, "/api/fetch") => Ok(serde_json::to_value(
             engine.fetch_file(&s(input, "folder")?, &s(input, "path")?)?,
         )?),
+        (Method::Get, "/api/strongroom") => Ok(json!({"strongrooms": engine.strongrooms().into_iter().map(|(n, m, u)| json!({"folder": n, "method": m, "unlocked_until": u})).collect::<Vec<_>>()})),
+        (Method::Post, "/api/strongroom/unlock") => {
+            let minutes = input.get("minutes").and_then(|v| v.as_u64()).unwrap_or(15).clamp(1, 24 * 60);
+            engine.unlock_strongroom_with_key(&s(input, "folder")?, &s(input, "key_hex")?, minutes)?;
+            service.request_sync();
+            Ok(json!({"ok": true}))
+        }
+        (Method::Post, "/api/strongroom/lock") => {
+            engine.lock_strongroom(&s(input, "folder")?)?;
+            Ok(json!({"ok": true}))
+        }
         (Method::Get, "/api/p2p") => Ok(json!({"config": engine.p2p_config(), "listen": service.p2p_listen, "peers": service.p2p_peers, "lan_peers": service.p2p_lan_peers, "chunks_from_peers": service.p2p_chunks})),
         (Method::Post, "/api/p2p") => {
             let mut c = engine.p2p_config();

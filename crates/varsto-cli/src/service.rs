@@ -481,6 +481,9 @@ pub fn run(opts: Options) -> Result<()> {
             if let Some(p) = &p2p {
                 p.refresh_before_sync(&mut st);
             }
+            if let Some(e) = st.engine.as_mut() {
+                e.expire_strongrooms();
+            }
             let result = st.engine.as_mut().map(|e| e.sync(None));
             if let Some(p) = &p2p {
                 p.refresh_after_sync(&mut st);
@@ -557,7 +560,7 @@ pub fn http_post(url: &str, token: &str, body: &str) -> Result<String> {
     http_call("POST", url, token, Some(body))
 }
 
-fn http_call(method: &str, url: &str, token: &str, body: Option<&str>) -> Result<String> {
+pub fn http_call(method: &str, url: &str, token: &str, body: Option<&str>) -> Result<String> {
     use std::io::{Read, Write};
     let rest = url
         .strip_prefix("http://")

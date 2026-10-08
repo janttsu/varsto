@@ -145,6 +145,9 @@ pub struct FolderStatus {
     /// Durability policy, if one is set (human-readable).
     #[serde(default)]
     pub policy: Option<String>,
+    /// Strongroom state: "locked" or "unlocked until <utc>".
+    #[serde(default)]
+    pub strongroom: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -221,6 +224,8 @@ pub struct LedgerEntry {
 pub struct Engine {
     /// Peers to try before storages when downloading (set by the service).
     peers: Option<std::sync::Arc<crate::p2p::Peers>>,
+    /// Strongroom folder keys held in memory until the expiry time (UTC seconds).
+    unlocked: BTreeMap<FolderId, (SecretKey, i64)>,
     home: PathBuf,
     vault: LocalVault,
     keys: Keys,
@@ -330,6 +335,7 @@ impl Engine {
         util::write_json(&home.join("vault.json"), &vault)?;
         let mut engine = Engine {
             peers: None,
+            unlocked: BTreeMap::new(),
             home: home.to_path_buf(),
             vault,
             keys,
@@ -413,6 +419,7 @@ impl Engine {
             shared: true,
             policy: None,
             policy_updated_utc: 0,
+            strongroom: None,
         };
         engine.keyring.folders.insert(rec.folder_id.clone(), rec);
         engine.keyring.save(
@@ -434,6 +441,9 @@ impl Engine {
     pub fn share_create(&mut self, folder: &str) -> Result<ShareToken> {
         if self.vault.member {
             bail!("a member device cannot share folders further");
+        }
+        if self.keyring.find(folder).is_some_and(|r| r.is_strongroom()) {
+            bail!("a Strongroom folder cannot be shared");
         }
         let rec = self
             .keyring
@@ -487,6 +497,7 @@ impl Engine {
         let keyring = Keyring::load(home, &keys, &vault.vault_id, &vault.device_id)?;
         let mut engine = Engine {
             peers: None,
+            unlocked: BTreeMap::new(),
             config: Config::load(home)?,
             ledger: LedgerStore::open(&home.join("ledger"))?,
             clock: util::read_json_or_default(&home.join("clock.json"))?,
@@ -668,6 +679,7 @@ impl Engine {
             shared: false,
             policy: None,
             policy_updated_utc: 0,
+            strongroom: None,
         };
         let id = rec.folder_id.clone();
         self.keyring.folders.insert(id.clone(), rec);
@@ -757,12 +769,38 @@ impl Engine {
         self.config.save(&self.home)
     }
 
+    /// The record with a usable key: a Strongroom folder must be unlocked.
+    fn with_key(&self, rec: &FolderRecord) -> Result<FolderRecord> {
+        if !rec.is_strongroom() {
+            return Ok(rec.clone());
+        }
+        match self.unlocked.get(&rec.folder_id) {
+            Some((key, until)) if *until > util::now_utc() => {
+                let mut r = rec.clone();
+                r.key_hex = key.to_hex();
+                Ok(r)
+            }
+            _ => bail!(
+                "Strongroom {} is locked: unlock it with your security key first (varsto strongroom unlock {})",
+                rec.name,
+                rec.name
+            ),
+        }
+    }
+
+    pub fn is_unlocked(&self, folder: &FolderId) -> bool {
+        self.unlocked
+            .get(folder)
+            .is_some_and(|(_, until)| *until > util::now_utc())
+    }
+
     fn resolve_folder(&self, name_or_id: &str) -> Result<(FolderRecord, PathBuf)> {
         let rec = self
             .keyring
             .find(name_or_id)
             .cloned()
             .ok_or_else(|| anyhow!("unknown folder {name_or_id}"))?;
+        let rec = self.with_key(&rec)?;
         let mount = self
             .config
             .folders
@@ -2141,6 +2179,147 @@ impl Engine {
         Ok(reports)
     }
 
+    // ----- strongroom --------------------------------------------------------
+
+    /// Create a folder whose key only exists while a security key is touched
+    /// (two touches: credential, then wrap). The mount is selective, so files
+    /// appear as placeholders and are fetched only while unlocked.
+    pub fn create_strongroom(
+        &mut self,
+        name: &str,
+        path: &Path,
+        method: crate::strongroom::Method,
+        key: &dyn crate::strongroom::SecurityKey,
+        unlock_minutes: u64,
+    ) -> Result<FolderId> {
+        if self.vault.member {
+            bail!("a member device cannot create folders in the owner's vault");
+        }
+        if self.keyring.folders.values().any(|f| f.name == name) {
+            bail!("a folder named {name} already exists in the vault");
+        }
+        fs::create_dir_all(path)?;
+        let folder_id = FolderId::random();
+        let folder_key = SecretKey::random();
+        let info = crate::strongroom::enroll(key, method, &folder_id, &folder_key)?;
+        let rec = FolderRecord {
+            folder_id: folder_id.clone(),
+            name: name.to_string(),
+            key_hex: String::new(),
+            created_by: self.vault.device_id.clone(),
+            created_utc: util::now_utc(),
+            shared: false,
+            policy: None,
+            policy_updated_utc: 0,
+            strongroom: Some(info),
+        };
+        self.keyring.folders.insert(folder_id.clone(), rec);
+        self.keyring.save(
+            &self.home,
+            &self.keys,
+            &self.vault.vault_id,
+            &self.vault.device_id,
+        )?;
+        self.config.folders.push(FolderMount {
+            folder_id: folder_id.clone(),
+            path: path.canonicalize()?,
+            selective: true,
+        });
+        self.config.save(&self.home)?;
+        self.unlocked.insert(
+            folder_id.clone(),
+            (folder_key, util::now_utc() + unlock_minutes as i64 * 60),
+        );
+        self.pending.push(Event::FolderAdded {
+            folder: folder_id.clone(),
+        });
+        self.publish_registry()?;
+        self.commit_batch()?;
+        Ok(folder_id)
+    }
+
+    /// Unlock with the security key (one touch) for `minutes`.
+    pub fn unlock_strongroom(
+        &mut self,
+        folder: &str,
+        key: &dyn crate::strongroom::SecurityKey,
+        minutes: u64,
+    ) -> Result<SecretKey> {
+        let rec = self
+            .keyring
+            .find(folder)
+            .cloned()
+            .ok_or_else(|| anyhow!("unknown folder {folder}"))?;
+        let info = rec
+            .strongroom
+            .as_ref()
+            .ok_or_else(|| anyhow!("{folder} is not a Strongroom folder"))?;
+        let fk = crate::strongroom::unlock(key, &rec.folder_id, info)?;
+        self.unlocked.insert(
+            rec.folder_id.clone(),
+            (fk.clone(), util::now_utc() + minutes as i64 * 60),
+        );
+        Ok(fk)
+    }
+
+    /// Unlock with a key obtained elsewhere (the command line touched the
+    /// security key and hands the folder key to the running service).
+    pub fn unlock_strongroom_with_key(
+        &mut self,
+        folder: &str,
+        key_hex: &str,
+        minutes: u64,
+    ) -> Result<()> {
+        let rec = self
+            .keyring
+            .find(folder)
+            .cloned()
+            .ok_or_else(|| anyhow!("unknown folder {folder}"))?;
+        if !rec.is_strongroom() {
+            bail!("{folder} is not a Strongroom folder");
+        }
+        let fk = SecretKey::from_hex(key_hex)?;
+        // Prove the key is right before accepting it: it must open the wrapped key's folder keys.
+        let _ = FolderKeys::from_folder_key(&rec.folder_id, fk.clone());
+        self.unlocked.insert(
+            rec.folder_id.clone(),
+            (fk, util::now_utc() + minutes as i64 * 60),
+        );
+        Ok(())
+    }
+
+    pub fn lock_strongroom(&mut self, folder: &str) -> Result<()> {
+        let rec = self
+            .keyring
+            .find(folder)
+            .cloned()
+            .ok_or_else(|| anyhow!("unknown folder {folder}"))?;
+        self.unlocked.remove(&rec.folder_id);
+        Ok(())
+    }
+
+    /// Forget every key whose window has passed.
+    pub fn expire_strongrooms(&mut self) {
+        let now = util::now_utc();
+        self.unlocked.retain(|_, (_, until)| *until > now);
+    }
+
+    /// (name, method, unlocked_until) for every Strongroom folder.
+    pub fn strongrooms(&self) -> Vec<(String, crate::strongroom::Method, Option<i64>)> {
+        self.folders()
+            .into_iter()
+            .filter_map(|(r, _)| {
+                let info = r.strongroom.as_ref()?;
+                let until = self
+                    .unlocked
+                    .get(&r.folder_id)
+                    .filter(|(_, u)| *u > util::now_utc())
+                    .map(|(_, u)| *u);
+                Some((r.name.clone(), info.method.clone(), until))
+            })
+            .collect()
+    }
+
     // ----- peer-to-peer ------------------------------------------------------
 
     pub fn p2p_config(&self) -> crate::vault::P2pConfig {
@@ -2172,6 +2351,9 @@ impl Engine {
         let mut pieces = BTreeMap::new();
         for (rec, mount) in self.folders() {
             let Some(root) = mount else { continue };
+            let Ok(rec) = self.with_key(&rec) else {
+                continue;
+            };
             let fk = rec.keys()?;
             let state = self.load_state(&rec.folder_id)?;
             for f in state.files.values().filter(|f| !f.deleted) {
@@ -2378,7 +2560,9 @@ impl Engine {
             None => self
                 .folders()
                 .into_iter()
-                .filter(|(_, m)| m.is_some())
+                .filter(|(r, m)| {
+                    m.is_some() && (!r.is_strongroom() || self.is_unlocked(&r.folder_id))
+                })
                 .map(|(r, _)| r.name)
                 .collect(),
         };
@@ -2442,6 +2626,14 @@ impl Engine {
                 published_seq: state.published_seq,
                 shared: rec.shared,
                 policy: rec.policy.as_ref().map(|p| p.describe()),
+                strongroom: rec.strongroom.as_ref().map(|_| {
+                    match self.unlocked.get(&rec.folder_id) {
+                        Some((_, until)) if *until > util::now_utc() => {
+                            format!("unlocked until {until}")
+                        }
+                        _ => "locked".to_string(),
+                    }
+                }),
                 selective: self.mount_is_selective(&rec.folder_id),
                 placeholders: placeholders_here,
                 pinned: state.pinned.len() as u64,

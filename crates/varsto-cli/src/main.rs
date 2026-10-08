@@ -120,6 +120,11 @@ enum Cmd {
         #[arg(long)]
         check: bool,
     },
+    /// Strongroom folders: opened only with a touch of your FIDO2 security key.
+    Strongroom {
+        #[command(subcommand)]
+        cmd: StrongroomCmd,
+    },
     /// Peer-to-peer transfer of encrypted blocks between your devices (LAN and internet).
     P2p {
         #[command(subcommand)]
@@ -135,6 +140,31 @@ enum Cmd {
         #[command(subcommand)]
         cmd: Option<McpCmd>,
     },
+}
+
+#[derive(Subcommand)]
+enum StrongroomCmd {
+    /// Create a Strongroom folder (two touches of the key). Needs the libfido2 tools (fido2-cred, fido2-assert).
+    Create {
+        name: String,
+        path: PathBuf,
+        /// Use a software key file instead of hardware: for trying the flow only, no real protection.
+        #[arg(long)]
+        software: bool,
+        #[arg(long, default_value_t = 15)]
+        minutes: u64,
+    },
+    /// Unlock for a while (one touch); the running background service gets the key too.
+    Unlock {
+        folder: String,
+        #[arg(long, default_value_t = 15)]
+        minutes: u64,
+    },
+    /// Forget the key now (also in the running service).
+    Lock {
+        folder: String,
+    },
+    Status,
 }
 
 #[derive(Subcommand)]
@@ -865,6 +895,94 @@ fn run(cli: &Cli) -> Result<()> {
                 ReplicaCmd::Status => {
                     let r = varsto_core::replica::Replica::open(&home)?;
                     println!("{}", serde_json::to_string_pretty(&r.summary())?);
+                }
+            }
+        }
+        Cmd::Strongroom { cmd } => {
+            let mut engine = Engine::open(&home, &passphrase()?)?;
+            match cmd {
+                StrongroomCmd::Create {
+                    name,
+                    path,
+                    software,
+                    minutes,
+                } => {
+                    let method = if *software {
+                        varsto_core::strongroom::Method::Software
+                    } else {
+                        varsto_core::strongroom::Method::Fido2
+                    };
+                    if *software {
+                        eprintln!("warning: --software keeps the secret in a file next to the vault; it demonstrates the flow and protects nothing beyond your passphrase");
+                    }
+                    let backend = varsto_core::strongroom::backend(&method, &home);
+                    let id =
+                        engine.create_strongroom(name, path, method, backend.as_ref(), *minutes)?;
+                    println!("Strongroom {name} ({}) created at {}; unlocked for {minutes} minutes in this process. Files appear as placeholders; fetch them while unlocked and free them when done.", id.short(), path.display());
+                }
+                StrongroomCmd::Unlock { folder, minutes } => {
+                    let method = engine
+                        .folders()
+                        .into_iter()
+                        .find(|(r, _)| {
+                            &r.name == folder || r.folder_id.as_str().starts_with(folder.as_str())
+                        })
+                        .and_then(|(r, _)| r.strongroom.map(|i| i.method))
+                        .ok_or_else(|| anyhow!("{folder} is not a Strongroom folder"))?;
+                    let backend = varsto_core::strongroom::backend(&method, &home);
+                    let key = engine.unlock_strongroom(folder, backend.as_ref(), *minutes)?;
+                    // Hand the key to the running service so the background sync works too.
+                    if let Some((sf, _)) = service::status(&home) {
+                        let url = format!("http://127.0.0.1:{}/api/strongroom/unlock", sf.port);
+                        let body = serde_json::json!({"folder": folder, "key_hex": key.to_hex(), "minutes": minutes}).to_string();
+                        match service::http_call("POST", &url, &sf.token, Some(&body)) {
+                            Ok(_) => println!("Strongroom {folder} unlocked for {minutes} minutes (background service too)"),
+                            Err(e) => println!("Strongroom {folder} unlocked for this command only; the background service did not accept the key: {e}"),
+                        }
+                    } else {
+                        let reports = engine.sync(Some(folder))?;
+                        for (pl, pu) in reports {
+                            println!(
+                                "{}: pulled {} updated, pushed {} chunks",
+                                pl.folder, pl.files_updated, pu.chunks_uploaded
+                            );
+                        }
+                        println!("Strongroom {folder} synced; no background service is running, so the key is forgotten now");
+                    }
+                }
+                StrongroomCmd::Lock { folder } => {
+                    engine.lock_strongroom(folder)?;
+                    if let Some((sf, _)) = service::status(&home) {
+                        let url = format!("http://127.0.0.1:{}/api/strongroom/lock", sf.port);
+                        let _ = service::http_call(
+                            "POST",
+                            &url,
+                            &sf.token,
+                            Some(&serde_json::json!({"folder": folder}).to_string()),
+                        );
+                    }
+                    println!("Strongroom {folder} locked");
+                }
+                StrongroomCmd::Status => {
+                    let list = engine.strongrooms();
+                    if list.is_empty() {
+                        println!("no Strongroom folders");
+                    }
+                    for (name, method, until) in list {
+                        println!(
+                            "{name}: {:?}, {}",
+                            method,
+                            match until {
+                                Some(u) => format!("unlocked until {u} (this process)"),
+                                None => "locked".into(),
+                            }
+                        );
+                    }
+                    if let Some((_, sv)) = service::status(&home) {
+                        if let Some(arr) = sv.get("strongrooms").and_then(|v| v.as_array()) {
+                            println!("background service: {}", serde_json::to_string(arr)?);
+                        }
+                    }
                 }
             }
         }

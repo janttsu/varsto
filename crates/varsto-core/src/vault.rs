@@ -453,9 +453,17 @@ pub struct FolderRecord {
     pub policy: Option<crate::policy::Policy>,
     #[serde(default)]
     pub policy_updated_utc: i64,
+    /// Strongroom (S-012): the folder key is not stored here (`key_hex` is
+    /// empty); it is wrapped under a security-key secret and held in memory
+    /// only while unlocked.
+    #[serde(default)]
+    pub strongroom: Option<crate::strongroom::StrongroomInfo>,
 }
 
 impl FolderRecord {
+    pub fn is_strongroom(&self) -> bool {
+        self.strongroom.is_some()
+    }
     pub fn storage_key(device: &DeviceId, folder: &FolderId) -> String {
         format!("vault/folders/{}/{}.enc", device, folder)
     }

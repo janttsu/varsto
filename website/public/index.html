@@ -51,13 +51,13 @@
       <section class="card"><h3>An assistant with limited access</h3><p>An MCP server lets the AI assistant of your choice list, read and organise files in exactly the folders you grant, and answer "where is this cheapest to keep?" from Varsto's own last-used record and open price data.</p></section>
       <section class="card"><h3>Policies that warn in time</h3><p>"Two cloud copies and one at home, verified within 30 days." Every device checks it from the ledger and warns, in the app and by notification, before it stops being true.</p></section>
       <section class="card"><h3>Peer-to-peer, compressed</h3><p>Your devices exchange encrypted blocks directly, torrent-style: on the LAN automatically, across the internet with a reachable address. Blocks are compressed before encryption, so every copy and transfer is small.</p></section>
+      <section class="card"><h3>Strongroom folders</h3><p>A folder whose key exists only while you touch your FIDO2 security key. Cryptographic, not a dialog: no passphrase, vault key or stolen laptop opens it.</p></section>
       <section class="card"><h3>Bookkeeping you can check</h3><p><code>varsto fsck --verify</code> compares the ledger with what the storage actually holds and re-hashes every object. A device restored from an old backup is detected and fenced.</p></section>
     </div>
 
     <h2>What is designed but not built yet</h2>
     <div class="grid">
-      <section class="card todo"><h3>Security keys and Strongroom</h3><p>FIDO2 <code>hmac-secret</code> wrapping of the vault and folders that open only with a touch of your security key. Research on platform support is <a href="docs/fido2-platform-support.html">published</a>.</p></section>
-      <section class="card todo"><h3>Strongroom, NAT traversal, iOS</h3><p>Strongroom folders that open only with a security key, relays and hole punching for peers behind NAT, and the iOS build (needs a Mac) are next.</p></section>
+      <section class="card todo"><h3>NAT traversal, iOS, recovery kit</h3><p>Relays and hole punching for peers behind NAT, the iOS build (needs a Mac), the paper recovery kit, and converting existing folders into Strongrooms are next.</p></section>
     </div>
 
     <h2>Honest status</h2>

@@ -747,3 +747,87 @@ fn peers_serve_chunks_when_the_storage_has_none() {
     stop.store(true, std::sync::atomic::Ordering::Relaxed);
     th.join().unwrap();
 }
+
+#[test]
+fn strongroom_folder_needs_the_security_key_on_every_device() {
+    use varsto_core::strongroom::{Method, SecurityKey, SoftwareKey};
+    let lab = lab();
+    let (mut a, key) = Engine::init(&lab.a_home, "laptop", PASS).unwrap();
+    a.chunker = ChunkerParams::SMALL;
+    a.add_storage(lab.storage.clone()).unwrap();
+    let sk = SoftwareKey {
+        path: lab.a_home.join("software-security-key"),
+    };
+    let fid = a
+        .create_strongroom("taxes", &lab.a_dir, Method::Software, &sk, 15)
+        .unwrap();
+    fs::write(lab.a_dir.join("2025.pdf"), b"tax return").unwrap();
+    a.push("taxes").unwrap();
+    assert_eq!(
+        a.status().unwrap().folders[0]
+            .strongroom
+            .as_deref()
+            .map(|s| s.starts_with("unlocked")),
+        Some(true)
+    );
+    assert!(
+        a.share_create("taxes").is_err(),
+        "strongrooms cannot be shared"
+    );
+
+    // Nothing at rest holds the folder key: not the keyring, not the registry.
+    let keyring = fs::read(lab.a_home.join("keyring.enc")).unwrap();
+    assert!(!keyring.is_empty());
+    let rec = a
+        .folders()
+        .into_iter()
+        .find(|(r, _)| r.folder_id == fid)
+        .unwrap()
+        .0;
+    assert!(rec.key_hex.is_empty());
+    assert!(rec.strongroom.is_some());
+
+    // Locked: sync skips it and direct operations refuse.
+    a.lock_strongroom("taxes").unwrap();
+    assert_eq!(
+        a.status().unwrap().folders[0].strongroom.as_deref(),
+        Some("locked")
+    );
+    assert!(a.sync(None).unwrap().is_empty());
+    assert!(a.push("taxes").is_err());
+
+    // Another device adopts the record and needs the same security key.
+    let mut b = Engine::join(&lab.b_home, "desk", PASS, &key, lab.storage.clone()).unwrap();
+    b.chunker = ChunkerParams::SMALL;
+    b.attach_folder("taxes", &lab.b_dir, true).unwrap();
+    assert!(b.pull("taxes").is_err(), "locked on the new device too");
+    let wrong = SoftwareKey {
+        path: lab.b_home.join("wrong-key"),
+    };
+    wrong.make_credential().unwrap();
+    assert!(b.unlock_strongroom("taxes", &wrong, 5).is_err());
+    fs::copy(
+        lab.a_home.join("software-security-key"),
+        lab.b_home.join("software-security-key"),
+    )
+    .unwrap();
+    let right = SoftwareKey {
+        path: lab.b_home.join("software-security-key"),
+    };
+    b.unlock_strongroom("taxes", &right, 5).unwrap();
+    b.pull("taxes").unwrap();
+    assert!(
+        lab.b_dir.join("2025.pdf.varsto-placeholder").exists(),
+        "selective: placeholders until fetched"
+    );
+    b.fetch_file("taxes", "2025.pdf").unwrap();
+    assert_eq!(fs::read(lab.b_dir.join("2025.pdf")).unwrap(), b"tax return");
+
+    // The command-line hand-over path: a key given by hex unlocks too.
+    let fk = a.unlock_strongroom("taxes", &sk, 1).unwrap();
+    a.lock_strongroom("taxes").unwrap();
+    a.unlock_strongroom_with_key("taxes", &fk.to_hex(), 1)
+        .unwrap();
+    assert_eq!(a.strongrooms().len(), 1);
+    assert!(a.strongrooms()[0].2.is_some());
+}
