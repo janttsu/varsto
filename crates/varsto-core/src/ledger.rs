@@ -128,7 +128,7 @@ impl SignedBatch {
         let sig = signer.sign(&Self::signed_message(&batch.device, batch.seq, &hash));
         Ok(SignedBatch {
             format_version: crate::FORMAT_VERSION,
-            sig_alg: crypto::SIG_ALG.to_string(),
+            sig_alg: signer.alg().to_string(),
             key_id: key_id.to_string(),
             device: batch.device.clone(),
             seq: batch.seq,
@@ -140,14 +140,14 @@ impl SignedBatch {
 
     /// Check signature and hash; does not decrypt.
     pub fn verify(&self, pubkey: &VerifyingKey) -> Result<()> {
-        if self.sig_alg != crypto::SIG_ALG {
-            bail!("unsupported signature algorithm {}", self.sig_alg);
-        }
         let ct = hex::decode(&self.body_hex)?;
         if hex::encode(crypto::hash(&ct)) != self.hash {
             bail!("batch hash does not match body");
         }
+        // The algorithm identifier travels with the batch; the key decides
+        // which identifiers it accepts (hybrid keys never accept Ed25519 alone).
         pubkey.verify(
+            &self.sig_alg,
             &Self::signed_message(&self.device, self.seq, &self.hash),
             &hex::decode(&self.sig_hex)?,
         )
@@ -622,5 +622,38 @@ mod tests {
         let mut b1 = a.append_own(&device, vec![], 1, &key, &signer).unwrap();
         b1.seq = 2;
         assert!(b1.verify(&signer.public()).is_err());
+    }
+
+    #[test]
+    fn legacy_batches_verify_and_hybrid_batches_resist_downgrade() {
+        let key = SecretKey::random();
+        let legacy = SigningKey::from_bytes(&[9u8; 32]).unwrap();
+        let dev = device_id_for(&legacy.public());
+        let batch = Batch {
+            device: dev.clone(),
+            seq: 1,
+            prev: None,
+            lamport: 1,
+            created_utc: 0,
+            events: vec![],
+        };
+        let sealed = SignedBatch::seal(&batch, &key, &legacy).unwrap();
+        assert_eq!(sealed.sig_alg, crypto::SIG_ALG_LEGACY);
+        sealed.verify(&legacy.public()).unwrap();
+
+        let hybrid = SigningKey::generate();
+        let dev2 = device_id_for(&hybrid.public());
+        let batch2 = Batch {
+            device: dev2,
+            ..batch
+        };
+        let mut sealed2 = SignedBatch::seal(&batch2, &key, &hybrid).unwrap();
+        assert_eq!(sealed2.sig_alg, crypto::SIG_ALG);
+        sealed2.verify(&hybrid.public()).unwrap();
+        // Strip the post-quantum half and relabel: must be rejected.
+        let sig = hex::decode(&sealed2.sig_hex).unwrap();
+        sealed2.sig_hex = hex::encode(&sig[..64]);
+        sealed2.sig_alg = crypto::SIG_ALG_LEGACY.to_string();
+        assert!(sealed2.verify(&hybrid.public()).is_err());
     }
 }

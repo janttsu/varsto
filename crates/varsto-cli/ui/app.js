@@ -42,7 +42,8 @@
         if (f.path) { var b = document.createElement("button"); b.className = "secondary"; b.textContent = "Sync"; b.onclick = function () { runSync(f.name); }; act.appendChild(b); }
         if (!s.member) { var sh = document.createElement("button"); sh.className = "secondary"; sh.textContent = f.shared ? "Share token" : "Share…"; sh.onclick = function () {
           if (!f.shared && !confirm("Share folder \"" + f.name + "\" with another Varsto user? Anyone holding the token can read and write it.")) { return; }
-          api("POST", "/api/share/create", { folder: f.name }).then(function (r) { $("sharetoken").textContent = "Share token for " + r.folder + " (send over a secure channel): " + r.token; $("sharetoken").classList.remove("hidden"); refreshStatus(); }).catch(function (e) { alert(e.message); });
+          var to = prompt("Paste the recipient's request code (vsr1…) to seal the token to their device. Leave empty for a plain token that carries the key itself.", "") || "";
+          api("POST", "/api/share/create", { folder: f.name, to: to.trim() }).then(function (r) { $("sharetoken").textContent = (r.sealed ? "Sealed share token for " + r.folder + " (only the requesting device can open it): " : "Share token for " + r.folder + " (contains the folder key; send over a secure channel): ") + r.token; $("sharetoken").classList.remove("hidden"); refreshStatus(); }).catch(function (e) { alert(e.message); });
         }; act.appendChild(sh); }
         tr.appendChild(act); tb.appendChild(tr);
         var o = document.createElement("option"); o.value = f.name; o.textContent = f.name; sel.appendChild(o);
@@ -137,6 +138,7 @@
   };
   $("join").onsubmit = function (ev) { ev.preventDefault(); busy(true); api("POST", "/api/join", formData(ev.target)).then(function () { ev.target.reset(); log("joined the vault; attach folders below"); return refreshState(); }).catch(function (e) { alert(e.message); }).then(function () { busy(false); }); };
   $("replicatoken").onclick = function () { api("GET", "/api/replica/token").then(function (r) { $("replicaout").textContent = "Replica token (give to the device that will hold your encrypted copies without being able to open them): " + r.token; $("replicaout").classList.remove("hidden"); }).catch(function (e) { alert(e.message); }); };
+  $("sharerequest").onclick = function () { api("POST", "/api/share/request", {}).then(function (r) { $("sharerequestout").textContent = r.request_code; $("sharerequestout").classList.remove("hidden"); }).catch(function (e) { alert(e.message); }); };
   $("acceptshare").onsubmit = function (ev) { ev.preventDefault(); busy(true); api("POST", "/api/share/accept", formData(ev.target)).then(function (r) { ev.target.reset(); log("accepted shared folder " + r.folder + "; attach it below"); return refreshState(); }).catch(function (e) { alert(e.message); }).then(function () { busy(false); }); };
   $("addfolder").onsubmit = function (ev) { ev.preventDefault(); api("POST", "/api/folder", formData(ev.target)).then(function () { ev.target.reset(); log("folder added"); return refreshStatus(); }).catch(function (e) { alert(e.message); }); };
   $("attachfolder").onsubmit = function (ev) { ev.preventDefault(); api("POST", "/api/folder/attach", formData(ev.target)).then(function () { ev.target.reset(); log("folder attached"); return refreshStatus(); }).catch(function (e) { alert(e.message); }); };

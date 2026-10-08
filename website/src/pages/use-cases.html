@@ -5,10 +5,10 @@ output: use-cases/index.html
 description: Thirteen situations Varsto is designed for, from a plane without internet to a house fire, with an honest note on what the alpha already does.
 ---
     <h1>Use cases</h1>
-    <p class="lead">These are the situations the design is tested against. They come from the project plan and drive the requirements, the automated tests and the <a href="../features/">feature list</a>. Each one says what the alpha does today (<span class="badge">alpha</span>) and what is designed but not yet built (<span class="badge">designed</span>). Nothing here is a promise about the alpha; the <a href="../docs/failure-model.html">failure model</a> lists what can still go wrong.</p>
+    <p class="lead">These are the situations the design is tested against. They come from the project plan and drive the requirements, the automated tests and the <a href="../features/">feature list</a>. Each one says what the alpha does today and what is designed but not yet built. Nothing here is a promise about the alpha; the <a href="../docs/failure-model.html">failure model</a> lists what can still go wrong.</p>
 
     <section class="feature" id="uc-1">
-      <h2>1. "I forgot to copy the file before the trip" <span class="badge">designed</span></h2>
+      <h2>1. "I forgot to copy the file before the trip"</h2>
       <img src="../assets/img/usecases/plane.svg" alt="Two devices on a plane sync over the phone's hotspot; the cloud is crossed out until landing." width="640" height="320" loading="lazy">
       <div>
         <p><strong>Situation.</strong> On a plane you realise the file you need to work on is on your phone, not on the laptop. There is no internet.</p>
@@ -19,7 +19,7 @@ description: Thirteen situations Varsto is designed for, from a plane without in
     </section>
 
     <section class="feature" id="uc-2">
-      <h2>2. The stolen laptop <span class="badge">designed</span></h2>
+      <h2>2. The stolen laptop</h2>
       <img src="../assets/img/usecases/stolen.svg" alt="A stolen laptop: the Strongroom folder stays locked, the device is revoked and wiped from a phone." width="640" height="320" loading="lazy">
       <div>
         <p>The thief gets the machine open. Strongroom folders stay locked because they need your security key, not a password that may be cached. From another device you revoke the laptop and queue a wipe command that runs the moment it comes online. Everything is still restorable from your own storages. The ledger's revocation cut-off means events signed by the stolen device after that point are quarantined rather than trusted.</p>
@@ -28,7 +28,7 @@ description: Thirteen situations Varsto is designed for, from a plane without in
     </section>
 
     <section class="feature" id="uc-3">
-      <h2>3. A provider closes your account or loses your data <span class="badge">partly</span></h2>
+      <h2>3. A provider closes your account or loses your data</h2>
       <img src="../assets/img/usecases/provider.svg" alt="One provider is closed; copies on a second provider and a disk at home remain and the app repairs." width="640" height="320" loading="lazy">
       <div>
         <p>Your storage box is shut down without warning. Your data is also on a second provider and on your own devices, because Varsto never relies on one storage. The app alerts you that a policy is no longer met, repairs the missing copies to another storage, and "drain" moves everything off the dead provider's record. Switching providers is an ordinary operation, not a migration project.</p>
@@ -37,15 +37,16 @@ description: Thirteen situations Varsto is designed for, from a plane without in
     </section>
 
     <section class="feature" id="uc-4">
-      <h2>4. The house fire <span class="badge">designed</span></h2>
+      <h2>4. The house fire</h2>
       <img src="../assets/img/usecases/fire.svg" alt="A house on fire; every file also has a copy at relatives in another city and in a cloud bucket." width="640" height="320" loading="lazy">
       <div>
         <p>Everything at home goes at once: PC, NAS, the disks in the cupboard. Placement rules by location ("one copy outside this place") have made sure every file also exists in another city or country, in a cloud bucket, on a disk kept at relatives, or on an <a href="#uc-11">untrusted replica</a> at a friend's. Devices in the same place are treated as one failure domain, so two copies in the same room never count as two.</p>
+        <p class="note">Status: designed and documented, not built yet.</p>
       </div>
     </section>
 
     <section class="feature" id="uc-5">
-      <h2>5. The camera roll is full <span class="badge">designed</span></h2>
+      <h2>5. The camera roll is full</h2>
       <img src="../assets/img/usecases/camera.svg" alt="A phone's full camera roll is uploaded encrypted; space is freed once a second copy is verified." width="640" height="320" loading="lazy">
       <div>
         <p>Automatic camera upload moves photos and videos to your storages, encrypted on the phone before they leave it. "Free up space" deletes the originals only after your retention policy is satisfied and the copies have been verified by hash, not merely uploaded. Thumbnails stay on the phone so the gallery still looks like a gallery.</p>
@@ -54,7 +55,7 @@ description: Thirteen situations Varsto is designed for, from a plane without in
     </section>
 
     <section class="feature" id="uc-6">
-      <h2>6. A new device, or a small phone <span class="badge">alpha</span></h2>
+      <h2>6. A new device, or a small phone</h2>
       <img src="../assets/img/usecases/newdevice.svg" alt="A new small phone sees the whole folder tree as placeholders and has downloaded only a few items." width="640" height="320" loading="lazy">
       <div>
         <p>Join a new device with your key and the whole folder tree appears at once as placeholders. Only what you open is downloaded, and large folders never fill a small disk. A phone with 128 GB can carry a 2 TB vault. "Free up space" turns a file back into a placeholder when it is safely stored elsewhere.</p>
@@ -63,15 +64,16 @@ description: Thirteen situations Varsto is designed for, from a plane without in
     </section>
 
     <section class="feature" id="uc-7">
-      <h2>7. "What is the cheapest place to keep these?" <span class="badge">designed</span></h2>
+      <h2>7. "What is the cheapest place to keep these?"</h2>
       <img src="../assets/img/usecases/cheapest.svg" alt="A chat with an assistant that compares storage prices from open data and proposes a move, with a Confirm button." width="640" height="320" loading="lazy">
       <div>
         <p>Ask the AI assistant of your choice through Varsto's MCP server. It compares providers from an open, dated and sourced price data set, looks at how often the files are read, and proposes a move, for example old videos to a cold tier with one hot copy at home. Nothing moves until you confirm. The assistant sees names and sizes only where you allow it, never file contents, and never the folders you hide from it.</p>
+        <p class="note">Status: designed and documented, not built yet.</p>
       </div>
     </section>
 
     <section class="feature" id="uc-8">
-      <h2>8. Sensitive documents <span class="badge">designed</span></h2>
+      <h2>8. Sensitive documents</h2>
       <img src="../assets/img/usecases/sensitive.svg" alt="A tax folder in a Strongroom: opens only with a security key, no clear text on the phone, hidden from the AI assistant." width="640" height="320" loading="lazy">
       <div>
         <p>The tax folder lives in a Strongroom: it opens only with a touch of your FIDO2 security key, enforced in the cryptography, not by a dialog. On the phone nothing from it is ever written in clear text, and the assistant cannot see that the folder exists. Once the folder is closed, the key leaves memory.</p>
@@ -80,7 +82,7 @@ description: Thirteen situations Varsto is designed for, from a plane without in
     </section>
 
     <section class="feature" id="uc-9">
-      <h2>9. Tens of terabytes on old disks <span class="badge">designed</span></h2>
+      <h2>9. Tens of terabytes on old disks</h2>
       <img src="../assets/img/features/disks.svg" alt="Hard drives on a shelf next to a PC with a USB dock." width="640" height="320" loading="lazy">
       <div>
         <p><strong>Situation.</strong> You manage a huge archive on old hard disks through a USB dock. The disks sit in a cupboard; some are kept elsewhere. Today you track them with a spreadsheet, or with git-annex.</p>
@@ -93,7 +95,7 @@ description: Thirteen situations Varsto is designed for, from a plane without in
     <p>Four situations that were not in the original plan but came up while building; all four work in the alpha.</p>
 
     <section class="feature" id="uc-10">
-      <h2>10. Gigabytes between home and office, with no upload <span class="badge">alpha</span></h2>
+      <h2>10. Gigabytes between home and office, with no upload</h2>
       <img src="../assets/img/features/transferrer.svg" alt="A USB stick marked as transferrer between a home PC and an office PC." width="640" height="320" loading="lazy">
       <div>
         <p>Mark a USB stick or an external disk as a <em>transferrer</em> and attach it to both machines. It receives only the encrypted blocks the other side still lacks; once both ends hold a block it is deleted from the stick, which also carries the ledger batches, so the two machines agree on what happened even if they never share a network. Edit footage at the office, carry the stick home, plug it in, done.</p>
@@ -102,7 +104,7 @@ description: Thirteen situations Varsto is designed for, from a plane without in
     </section>
 
     <section class="feature" id="uc-11">
-      <h2>11. Two friends host each other's backups <span class="badge">alpha</span></h2>
+      <h2>11. Two friends host each other's backups</h2>
       <img src="../assets/img/features/untrusted.svg" alt="You with the keys, a shared storage, and a friend's NAS that stores verified encrypted copies it cannot open." width="640" height="320" loading="lazy">
       <div>
         <p>You give a friend a <em>replica token</em>. Their device copies your encrypted objects from a storage you both reach onto its own disk, verifies every hash and writes its own signed report into your ledger. It never receives a key that opens anything; it learns object names and sizes, exactly what a cloud provider learns. In your app the copies show up as verified. They do the same with your NAS. Neither of you can read the other's files, and both of you have an off-site copy for free.</p>
@@ -111,7 +113,7 @@ description: Thirteen situations Varsto is designed for, from a plane without in
     </section>
 
     <section class="feature" id="uc-12">
-      <h2>12. Sharing a folder with another Varsto user <span class="badge">alpha</span></h2>
+      <h2>12. Sharing a folder with another Varsto user</h2>
       <img src="../assets/img/features/sharing.svg" alt="Two users; a folder key is handed over so the other user can sync and read the folder." width="640" height="320" loading="lazy">
       <div>
         <p>You hand over a share token for one folder: the folder's key, nothing else of your vault. The other user accepts it on their own device, points it at storage both of you can reach, and from then on syncs and reads that folder like any of their own. Their device writes its own signed ledger under the folder key, so you see their copies too. Give the token over a channel you trust; QR invitations and revocation are the next steps.</p>
@@ -120,7 +122,7 @@ description: Thirteen situations Varsto is designed for, from a plane without in
     </section>
 
     <section class="feature" id="uc-13">
-      <h2>13. Browsing photos on a device that has not downloaded them <span class="badge">alpha</span></h2>
+      <h2>13. Browsing photos on a device that has not downloaded them</h2>
       <img src="../assets/img/usecases/reader.svg" alt="A desktop generates thumbnails, stores them encrypted, and a phone shows the previews for files it has not downloaded." width="640" height="320" loading="lazy">
       <div>
         <p>The device that holds the photos and videos generates thumbnails once, encrypts them under the folder key and stores them next to the data. Every other device with the key, including a phone whose folder is all placeholders, shows the previews without fetching a single picture. Storage providers see ciphertext only, for the thumbnails as for everything else.</p>

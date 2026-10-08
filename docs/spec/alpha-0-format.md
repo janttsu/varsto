@@ -13,7 +13,7 @@
 - Cold storages are written but never read (requirement F-043 default).
 - A local desktop interface (`varsto desktop`): a web page served from the binary on 127.0.0.1 with a per-session token and a Host check, the first shape of the local control API (plan 6.8, 6.32).
 
-Not in alpha-0: sharing with other users, peer-to-peer transfer, hybrid post-quantum signatures and key agreement, FIDO2 security keys, Strongroom, placeholders, policies and alerts, packs, mobile, MCP, daemon. Keys are shared between devices out of band (the "vault key").
+Not in alpha-0 (see section 10 and 11 for what later alphas added): sharing with other users, peer-to-peer transfer, hybrid post-quantum signatures and key agreement, FIDO2 security keys, Strongroom, placeholders, policies and alerts, packs, mobile, MCP, daemon. Keys are shared between devices out of band (the "vault key").
 
 ## 2. Identifiers
 
@@ -36,7 +36,7 @@ Subset of [key-hierarchy.md](key-hierarchy.md). All keys are 256 bits. Derivatio
 | --- | --- | --- |
 | master key (K3) | root of the vault | random; shown once as the hex "vault key" for joining other devices; wrapped locally under the passphrase key |
 | passphrase key (K4) | wrap the master key and device signing key on one device | Argon2id (fixed minimums: 64 MiB, 3 passes, 1 lane; readers refuse weaker parameters) |
-| device signing key (K6/K7) | sign this device's ledger batches | Ed25519, random per device, wrapped with K4 |
+| device signing key (K6/K7) | sign this device's ledger batches | alpha.3: Ed25519 + ML-DSA-65 hybrid (alpha-0: Ed25519 only), random per device, wrapped with K4 |
 | ledger key | encrypt ledger batch bodies | derive(K3, `ledger`) |
 | device-registry key | encrypt device records | derive(K3, `device-registry`) |
 | folder-record key | encrypt folder records | derive(K3, `folder-record`) |
@@ -69,7 +69,7 @@ A storage cannot move, rename or replay an object into another place without the
 
 ```text
 vault/meta.json                          format version, vault id (plaintext)
-vault/devices/<device>.enc               device record: name, Ed25519 public key
+vault/devices/<device>.enc               device record: name, public key (Ed25519 || ML-DSA-65; 32 bytes = legacy Ed25519 only)
 vault/folders/<device>/<folder>.enc      folder record: name, folder key
 ledger/<device>/<seq 16 digits>.json     signed batch envelope (body encrypted)
 manifests/<folder>/<device>/<seq>.enc    full folder view of one device
@@ -132,7 +132,7 @@ trash/          deleted files
 ## 9. Known limitations
 
 - Pairing is "copy the vault key": no hybrid KEM, no QR, no second factor. The vault key is the master key in hex; losing it and every device means losing the data (no escrow).
-- Ed25519 only; ML-DSA hybrid signatures are a format change that the `sig_alg` field prepares for.
+- alpha-0 signed with Ed25519 only; since alpha.3 every batch carries `sig_alg = "ed25519+ml-dsa-65"` (section 11). The `sig_alg` field made the switch possible without rewriting stored data.
 - Whole files are chunked in a stream, but a changed file is re-read twice during a push (once to hash, once to upload) when a chunk is new; packs for small files do not exist yet.
 - Manifests are full views; very large folders will need incremental manifests and checkpoints (plan section 8, blocking question 1).
 - Verification of cold copies, policies, placeholders, sharing and P2P are not implemented.
@@ -171,3 +171,20 @@ For image and video files, the device that holds the plaintext generates a JPEG 
 ### Mobile shells
 
 Android: a foreground service runs the same `varsto service` binary (shipped as `libvarsto.so`), the activity shows the local interface in a WebView. iOS: `varsto-ffi` exposes `varsto_start` and `varsto_url` for an in-process service behind a `WKWebView`; the Xcode project is generated with xcodegen on a Mac.
+
+## 11. Post-quantum hybrid cryptography (0.0.1-alpha.3)
+
+Every place a public key is used now combines a classical and a post-quantum algorithm, so that stored data and signatures stay trustworthy if either is broken.
+
+### Signatures: Ed25519 + ML-DSA-65
+
+- A device signing key is an Ed25519 seed and an ML-DSA-65 (FIPS 204) seed, serialised as 64 bytes inside `keys.enc`. The public key is the Ed25519 key followed by the ML-DSA-65 encapsulation of the verifying key (32 + 1952 bytes) and is what the device record publishes; the device id is the keyed hash of these bytes.
+- A signature is the Ed25519 signature followed by the ML-DSA-65 signature over the same message (64 + 3309 bytes). `sig_alg` is `ed25519+ml-dsa-65`. Verification requires **both** parts; a batch whose post-quantum half is missing or damaged is rejected even if the Ed25519 half is valid.
+- Downgrade protection: a key that carries a post-quantum part never accepts `sig_alg = "ed25519"`. Batches signed by alpha-0 devices (32-byte public keys, `sig_alg = "ed25519"`) remain valid for those devices; such a device keeps signing Ed25519-only until it is re-enrolled, because changing its key would change its device id. No stored object had to be rewritten: the algorithm identifier on every batch selects the verification rule.
+- Cost: about 3.3 KB per batch. Batches already group many events (model B), so the ledger grows by a few kilobytes per sync, not per file.
+
+### Key encapsulation: X25519 + ML-KEM-768
+
+- Used wherever a secret must reach another party's public key. Today that is the share token: the recipient runs `varsto share request`, which stores a private key in its device directory and prints a request code `vsr1.<X25519 key || ML-KEM-768 key>` (1216 bytes, hex). The owner runs `share create <folder> --to <code>`.
+- The owner encapsulates to both halves, derives one key with `derive_key("e2ee-sync-format/0/hybrid-kem/x25519+ml-kem-768", len-prefixed(x25519_ss, mlkem_ss, ciphertext, encapsulation_key))`, and encrypts the folder key with XChaCha20-Poly1305 under associated data (`share-token`, vault id, folder id, name). The sealed token `vst1.<vault>.<folder>.<kem-alg>.<kem-ct>.<sealed-key>.<name>` carries only ciphertext and can travel over any channel; only the requesting device can open it. The plain token format of alpha.2 still exists and is marked as carrying the key.
+- What this does not solve yet: the owner has no way to confirm that a request code really came from the intended person (no identity binding, no QR confirmation), and tokens are not revocable. Both are planned.

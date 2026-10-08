@@ -15,7 +15,7 @@ use crate::crypto::{self, PassphraseParams, SecretKey, SigningKey, VerifyingKey}
 use crate::ids::{ChunkId, DeviceId, FolderId, VaultId};
 use crate::storage::StorageSpec;
 use crate::util;
-use anyhow::{bail, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -75,6 +75,172 @@ impl ShareToken {
             key_hex: parts[2].to_string(),
             name: parts[3].to_string(),
         })
+    }
+}
+
+impl ShareToken {
+    /// Seal the folder key to a recipient's encapsulation key so the token
+    /// can travel over an untrusted channel. Everything but the key stays in
+    /// clear: vault id, folder id and name are not secrets.
+    pub fn seal(&self, to: &crate::kem::EncapsKey) -> Result<SealedShareToken> {
+        let (kem_ct, key) = to.encapsulate()?;
+        let aad = crypto::aad(
+            "share-token",
+            &[
+                self.vault_id.as_str().as_bytes(),
+                self.folder_id.as_str().as_bytes(),
+                self.name.as_bytes(),
+            ],
+        );
+        let folder_key = hex::decode(&self.key_hex)?;
+        let sealed = crypto::encrypt(&key, &aad, &folder_key)?;
+        Ok(SealedShareToken {
+            vault_id: self.vault_id.clone(),
+            folder_id: self.folder_id.clone(),
+            name: self.name.clone(),
+            kem_alg: crate::kem::KEM_ALG.to_string(),
+            kem_ct_hex: hex::encode(kem_ct),
+            sealed_key_hex: hex::encode(sealed),
+        })
+    }
+}
+
+/// A share token whose folder key is encapsulated to one recipient
+/// (hybrid X25519 + ML-KEM-768). Encoded as
+/// `vst1.<vault-id>.<folder-id>.<kem-alg>.<kem-ct-hex>.<sealed-key-hex>.<name>`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SealedShareToken {
+    pub vault_id: VaultId,
+    pub folder_id: FolderId,
+    pub name: String,
+    pub kem_alg: String,
+    pub kem_ct_hex: String,
+    pub sealed_key_hex: String,
+}
+
+pub const SEALED_SHARE_PREFIX: &str = "vst1.";
+pub const SHARE_REQUEST_PREFIX: &str = "vsr1.";
+
+impl SealedShareToken {
+    pub fn encode(&self) -> String {
+        format!(
+            "{SEALED_SHARE_PREFIX}{}.{}.{}.{}.{}.{}",
+            self.vault_id,
+            self.folder_id,
+            self.kem_alg,
+            self.kem_ct_hex,
+            self.sealed_key_hex,
+            self.name
+        )
+    }
+    pub fn is_sealed(s: &str) -> bool {
+        s.trim().starts_with(SEALED_SHARE_PREFIX)
+    }
+    pub fn decode(s: &str) -> Result<Self> {
+        let s = s.trim();
+        let rest = s
+            .strip_prefix(SEALED_SHARE_PREFIX)
+            .ok_or_else(|| anyhow!("not a sealed share token"))?;
+        let parts: Vec<&str> = rest.splitn(6, '.').collect();
+        if parts.len() != 6 {
+            bail!("sealed share token has the wrong shape");
+        }
+        Ok(SealedShareToken {
+            vault_id: VaultId::from_hex(parts[0])?,
+            folder_id: FolderId::from_hex(parts[1])?,
+            kem_alg: parts[2].to_string(),
+            kem_ct_hex: parts[3].to_string(),
+            sealed_key_hex: parts[4].to_string(),
+            name: parts[5].to_string(),
+        })
+    }
+    /// Open with the recipient's private key.
+    pub fn open(&self, dk: &crate::kem::DecapsKey) -> Result<ShareToken> {
+        if self.kem_alg != crate::kem::KEM_ALG {
+            bail!("unsupported key encapsulation algorithm {}", self.kem_alg);
+        }
+        let key = dk.decapsulate(&hex::decode(&self.kem_ct_hex)?)?;
+        let aad = crypto::aad(
+            "share-token",
+            &[
+                self.vault_id.as_str().as_bytes(),
+                self.folder_id.as_str().as_bytes(),
+                self.name.as_bytes(),
+            ],
+        );
+        let folder_key =
+            crypto::decrypt(&key, &aad, &hex::decode(&self.sealed_key_hex)?).map_err(|_| {
+                anyhow!("this share token was not sealed to this device's request code")
+            })?;
+        SecretKey::from_bytes(&folder_key)?;
+        Ok(ShareToken {
+            vault_id: self.vault_id.clone(),
+            folder_id: self.folder_id.clone(),
+            key_hex: hex::encode(folder_key),
+            name: self.name.clone(),
+        })
+    }
+}
+
+/// Recipient-side state for a pending share request: the private half of the
+/// request code, kept in the device directory until the token is accepted.
+#[derive(Serialize, Deserialize)]
+pub struct ShareRequest {
+    pub kem_alg: String,
+    pub secret_hex: String,
+}
+
+impl ShareRequest {
+    pub const FILE: &'static str = "share-request.json";
+
+    /// Load or create the request key for `home` and return the request code.
+    pub fn code_for(home: &Path) -> Result<String> {
+        std::fs::create_dir_all(home)?;
+        let path = home.join(Self::FILE);
+        let dk = if path.exists() {
+            let r: ShareRequest = serde_json::from_slice(&std::fs::read(&path)?)?;
+            crate::kem::DecapsKey::from_bytes(&hex::decode(&r.secret_hex)?)?
+        } else {
+            let dk = crate::kem::DecapsKey::generate();
+            let r = ShareRequest {
+                kem_alg: crate::kem::KEM_ALG.to_string(),
+                secret_hex: hex::encode(dk.to_bytes()),
+            };
+            util::write_atomic(&path, &serde_json::to_vec_pretty(&r)?)?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
+            }
+            dk
+        };
+        Ok(format!(
+            "{SHARE_REQUEST_PREFIX}{}",
+            hex::encode(dk.public().to_bytes())
+        ))
+    }
+    pub fn parse_code(code: &str) -> Result<crate::kem::EncapsKey> {
+        let rest = code
+            .trim()
+            .strip_prefix(SHARE_REQUEST_PREFIX)
+            .ok_or_else(|| anyhow!("not a share request code (expected the vsr1. prefix)"))?;
+        crate::kem::EncapsKey::from_bytes(&hex::decode(rest)?)
+    }
+    /// Open a sealed token with the request key stored in `home`.
+    pub fn open_token(home: &Path, token: &str) -> Result<ShareToken> {
+        let path = home.join(Self::FILE);
+        if !path.exists() {
+            bail!(
+                "no share request in {}: run `varsto share request` there first and give its code to the owner",
+                home.display()
+            );
+        }
+        let r: ShareRequest = serde_json::from_slice(&std::fs::read(&path)?)?;
+        let dk = crate::kem::DecapsKey::from_bytes(&hex::decode(&r.secret_hex)?)?;
+        SealedShareToken::decode(token)?.open(&dk)
+    }
+    pub fn clear(home: &Path) {
+        let _ = std::fs::remove_file(home.join(Self::FILE));
     }
 }
 

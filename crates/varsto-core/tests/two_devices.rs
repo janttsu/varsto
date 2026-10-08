@@ -507,3 +507,48 @@ fn thumbnails_are_generated_once_and_shared_encrypted() {
     let files = b.list_files("photos").unwrap();
     assert!(files.iter().any(|f| f.path == "cat.png" && f.media));
 }
+
+#[test]
+fn sealed_share_token_opens_only_on_the_requesting_device() {
+    use varsto_core::vault::{SealedShareToken, ShareRequest};
+    let lab = lab();
+    let (mut owner, _key) = Engine::init(&lab.a_home, "owner", PASS).unwrap();
+    owner.chunker = ChunkerParams::SMALL;
+    owner.add_storage(lab.storage.clone()).unwrap();
+    owner.add_folder("docs", &lab.a_dir).unwrap();
+    fs::write(lab.a_dir.join("plan.txt"), b"shared through a sealed token").unwrap();
+    owner.push("docs").unwrap();
+
+    // Recipient creates a request code before it has any vault.
+    let code = ShareRequest::code_for(&lab.b_home).unwrap();
+    assert!(code.starts_with("vsr1."));
+    let plain = owner.share_create("docs").unwrap();
+    let sealed = plain
+        .seal(&ShareRequest::parse_code(&code).unwrap())
+        .unwrap();
+    let encoded = sealed.encode();
+    assert!(SealedShareToken::is_sealed(&encoded));
+    assert!(
+        !encoded.contains(&plain.key_hex),
+        "folder key must not appear in the sealed token"
+    );
+
+    // A different device cannot open it.
+    let other = tempfile::tempdir().unwrap();
+    ShareRequest::code_for(other.path()).unwrap();
+    assert!(ShareRequest::open_token(other.path(), &encoded).is_err());
+
+    // The requesting device opens it and syncs the folder.
+    let opened = ShareRequest::open_token(&lab.b_home, &encoded).unwrap();
+    assert_eq!(opened.key_hex, plain.key_hex);
+    let mut member =
+        Engine::accept_share(&lab.b_home, "friend", PASS, &opened, lab.storage.clone()).unwrap();
+    ShareRequest::clear(&lab.b_home);
+    member.chunker = ChunkerParams::SMALL;
+    member.attach_folder("docs", &lab.b_dir, false).unwrap();
+    member.pull("docs").unwrap();
+    assert_eq!(
+        fs::read(lab.b_dir.join("plan.txt")).unwrap(),
+        b"shared through a sealed token"
+    );
+}

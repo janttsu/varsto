@@ -22,6 +22,9 @@ argon2.workspace = true
 hex.workspace = true
 walkdir.workspace = true
 image.workspace = true
+ml-dsa = "0.1.1"
+ml-kem = "0.3.2"
+x25519-dalek = { version = "3.0.0", features = ["static_secrets"] }
 
 [dev-dependencies]
 tempfile.workspace = true

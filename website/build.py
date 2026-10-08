@@ -149,31 +149,81 @@ def rewrite_links(body: str, slug_by_name: dict[str, str], docs_prefix: str = ""
     return re.sub(r'href="([^"#]+)(#[^"]*)?"', repl, body)
 
 
+PLATFORMS = [
+    # (title, icon, matcher for the primary file, matchers for alternatives, status line)
+    ("Linux", "linux", lambda n: n.endswith("-x86_64-unknown-linux-musl.tar.gz"), [],
+     "x86_64, static binary. Tray icon, background service, browser interface and command line in one file. Tested on the development machine."),
+    ("macOS", "macos", lambda n: n.endswith("-macos-apple-silicon-lite.zip"),
+     [("Intel app", lambda n: n.endswith("-macos-intel-lite.zip")),
+      ("Command line, Apple Silicon", lambda n: n.endswith("-aarch64-apple-darwin.tar.gz")),
+      ("Command line, Intel", lambda n: n.endswith("-x86_64-apple-darwin.tar.gz"))],
+     "Apple Silicon and Intel apps, unsigned: right-click, Open the first time. Cross-compiled on Linux, not yet tested on a Mac. The full menu-bar app follows once it is built on real hardware."),
+    ("Windows", "windows", lambda n: n.endswith("-x86_64-pc-windows-gnu.zip"), [],
+     "x86_64 zip. Double-click Varsto.cmd for the tray icon and the interface. Cross-compiled, not yet tested on Windows."),
+    ("Android", "android", lambda n: n.endswith("-android-debug.apk"), [],
+     "Debug-signed APK for sideloading: allow the install when the phone asks. Runs the same core as a foreground service. Tested in the Android 15 emulator only."),
+    ("iOS", "ios", None, [],
+     "Not downloadable yet: the app shell is in the repository (apps/ios) and needs a Mac with Xcode to build."),
+    ("Source", "source", lambda n: n.endswith("-source.tar.gz"), [],
+     "Git archive of the tagged release. Build with a stable Rust toolchain: cargo build --release."),
+]
+
+ICONS = {
+    "linux": '<path d="M12 3c-2.2 0-3.6 1.9-3.6 4.4 0 1.1-.6 2-1.3 3-1 1.4-2.1 3-2.1 5.2 0 .7.1 1.3.4 1.9-.9.3-1.4.8-1.4 1.4 0 .9 1.4 1.4 3.2 1.4 1.1 0 2-.2 2.7-.6.7.2 1.4.3 2.1.3s1.4-.1 2.1-.3c.7.4 1.6.6 2.7.6 1.8 0 3.2-.5 3.2-1.4 0-.6-.5-1.1-1.4-1.4.3-.6.4-1.2.4-1.9 0-2.2-1.1-3.8-2.1-5.2-.7-1-1.3-1.9-1.3-3C15.6 4.9 14.2 3 12 3zm-1.6 4.2c.5 0 .8.5.8 1.1s-.3 1.1-.8 1.1-.8-.5-.8-1.1.3-1.1.8-1.1zm3.2 0c.5 0 .8.5.8 1.1s-.3 1.1-.8 1.1-.8-.5-.8-1.1.3-1.1.8-1.1zM12 10c.9 0 1.8.4 1.8.9S12.9 12 12 12s-1.8-.6-1.8-1.1.9-.9 1.8-.9z"/>',
+    "macos": '<path d="M16.4 12.6c0-2.3 1.9-3.4 2-3.5-1.1-1.6-2.8-1.8-3.4-1.8-1.4-.2-2.8.9-3.5.9s-1.8-.8-3-.8c-1.5 0-3 .9-3.8 2.3-1.6 2.8-.4 7 1.2 9.3.8 1.1 1.7 2.4 2.9 2.3 1.2 0 1.6-.8 3-.8s1.8.8 3 .7c1.3 0 2-1.1 2.8-2.3.9-1.3 1.2-2.6 1.3-2.6-.1-.1-2.5-1-2.5-3.7zM14.1 5.8c.6-.8 1.1-1.9.9-3-.9.1-2 .6-2.7 1.4-.6.7-1.1 1.8-1 2.9 1.1.1 2.1-.5 2.8-1.3z"/>',
+    "windows": '<path d="M3 5.5 11 4.4v7.1H3zm0 13 8 1.1v-7H3zm9 1.2L22 21v-8.4h-10zm0-15.4V11h10V3z"/>',
+    "android": '<path d="M7 9h10v8a2 2 0 0 1-2 2h-1v3h-2v-3h-1v3H9v-3H8a1 1 0 0 1-1-1zm10.6-1H6.4c.3-1.9 1.4-3.5 3-4.4L8.3 2.5l.9-.5 1.2 2.2c.5-.1 1-.2 1.6-.2s1.1.1 1.6.2l1.2-2.2.9.5-1.1 2.1c1.6.9 2.7 2.5 3 4.4zM9.5 6.5a.7.7 0 1 0 0-1.4.7.7 0 0 0 0 1.4zm5 0a.7.7 0 1 0 0-1.4.7.7 0 0 0 0 1.4zM4 10h2v7H4zm14 0h2v7h-2z"/>',
+    "ios": '<path d="M8 2h8a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2zm0 2v15h8V4zm3 16.5h2v1h-2z"/>',
+    "source": '<path d="m8.5 7-5 5 5 5 1.4-1.4L6.3 12l3.6-3.6zm7 0-1.4 1.4 3.6 3.6-3.6 3.6L15.5 17l5-5z"/>',
+}
+
+
 def downloads_table(depth: int) -> str:
     sums = OUT / "downloads" / "SHA256SUMS"
     manifest = OUT / "downloads" / "manifest.json"
     if not sums.exists():
         return '<p class="note">No binaries are published yet. Build from source with <code>cargo build --release</code>.</p>'
     notes = json.loads(manifest.read_text()) if manifest.exists() else {}
-    rows = []
+    files = []
     for line in sums.read_text().splitlines():
         if not line.strip():
             continue
         digest, name = line.split(maxsplit=1)
         name = name.lstrip("*")
-        info = notes.get(name, {})
         size = (OUT / "downloads" / name).stat().st_size if (OUT / "downloads" / name).exists() else 0
-        rows.append(
-            f'<tr><td><a href="{"../" * depth}downloads/{html.escape(name)}">{html.escape(name)}</a></td>'
-            f'<td>{html.escape(info.get("platform", ""))}</td><td>{size // 1024} KiB</td>'
-            f'<td>{html.escape(info.get("note", ""))}</td><td><code class="sum">{digest}</code></td></tr>'
-        )
+        files.append((name, digest, size))
     version = notes.get("_version", "")
+    pre = "../" * depth
+
+    def human(n: int) -> str:
+        return f"{n / 1048576:.1f} MB" if n >= 1048576 else f"{n // 1024} KB"
+
+    cards = []
+    for title, icon, primary, alts, status in PLATFORMS:
+        main = next(((n, d, sz) for n, d, sz in files if primary and primary(n)), None)
+        icon_svg = f'<svg class="dl-icon" viewBox="0 0 24 24" aria-hidden="true">{ICONS[icon]}</svg>'
+        if main:
+            name, digest, size = main
+            button = (f'<a class="dl-primary" href="{pre}downloads/{html.escape(name)}">Download for {html.escape(title)}</a>'
+                      f'<p class="dl-meta">{html.escape(name)}<br>{human(size)} · <span class="sum" title="{digest}">SHA-256 {digest[:12]}…</span></p>')
+        elif title == "Source":
+            button = f'<a class="dl-primary" href="{pre}downloads/">Source</a>'
+        else:
+            button = f'<a class="dl-primary dl-disabled" href="{pre}docs/">Not available yet</a>'
+        alt_links = []
+        for label, matcher in alts:
+            hit = next(((n, d, sz) for n, d, sz in files if matcher(n)), None)
+            if hit:
+                alt_links.append(f'<li><a href="{pre}downloads/{html.escape(hit[0])}">{html.escape(label)}</a> <span class="dl-meta">{human(hit[2])}</span></li>')
+        alt_html = f'<ul class="dl-alt">{"".join(alt_links)}</ul>' if alt_links else ""
+        cards.append(f'<section class="dl-card"><div class="dl-head">{icon_svg}<h3>{html.escape(title)}</h3></div>{button}{alt_html}<p class="dl-status">{html.escape(status)}</p></section>')
+    rows = "\n".join(
+        f'<tr><td><a href="{pre}downloads/{html.escape(n)}">{html.escape(n)}</a></td><td>{html.escape(notes.get(n, {}).get("platform", ""))}</td>'
+        f'<td>{human(sz)}</td><td><code class="sum">{d}</code></td></tr>' for n, d, sz in files)
     return (
-        f'<p>Release <strong>{html.escape(version)}</strong>. Checksums: <a href="{"../" * depth}downloads/SHA256SUMS">SHA256SUMS</a>.</p>'
-        '<table class="downloads"><thead><tr><th>File</th><th>Platform</th><th>Size</th><th>Notes</th><th>SHA-256</th></tr></thead><tbody>'
-        + "\n".join(rows)
-        + "</tbody></table>"
+        f'<p class="dl-release">Release <strong>{html.escape(version)}</strong> · <a href="{pre}downloads/SHA256SUMS">SHA256SUMS</a> · <a href="{pre}downloads/manifest.json">manifest.json</a></p>'
+        f'<div class="dl-grid">{"".join(cards)}</div>'
+        f'<details class="dl-all"><summary>All files and checksums</summary><table class="downloads"><thead><tr><th>File</th><th>Platform</th><th>Size</th><th>SHA-256</th></tr></thead><tbody>{rows}</tbody></table></details>'
     )
 
 

@@ -16,6 +16,7 @@ pub mod chunking;
 pub mod crypto;
 pub mod engine;
 pub mod ids;
+pub mod kem;
 pub mod ledger;
 pub mod manifest;
 pub mod replica;

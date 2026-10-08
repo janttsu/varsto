@@ -275,8 +275,16 @@ fn api(st: &mut State, method: Method, path: &str, query: &str, input: &Value) -
             st.engine = Some(e);
             Ok(json!({"ok": true, "vault_key": key}))
         }
+        (Method::Post, "/api/share/request") => {
+            Ok(json!({"request_code": varsto_core::vault::ShareRequest::code_for(&st.home)?}))
+        }
         (Method::Post, "/api/share/accept") => {
-            let token = varsto_core::vault::ShareToken::decode(&s(input, "token")?)?;
+            let raw = s(input, "token")?;
+            let token = if varsto_core::vault::SealedShareToken::is_sealed(&raw) {
+                varsto_core::vault::ShareRequest::open_token(&st.home, &raw)?
+            } else {
+                varsto_core::vault::ShareToken::decode(&raw)?
+            };
             let spec = StorageSpec::LocalDir {
                 name: opt(input, "storage_name").unwrap_or_else(|| "shared".into()),
                 path: PathBuf::from(s(input, "storage_path")?),
@@ -291,6 +299,7 @@ fn api(st: &mut State, method: Method, path: &str, query: &str, input: &Value) -
                 spec,
             )?;
             st.engine = Some(e);
+            varsto_core::vault::ShareRequest::clear(&st.home);
             Ok(json!({"ok": true, "folder": token.name}))
         }
         (Method::Post, "/api/join") => {
@@ -340,7 +349,13 @@ fn api_unlocked(
         )),
         (Method::Post, "/api/share/create") => {
             let t = engine.share_create(&s(input, "folder")?)?;
-            Ok(json!({"ok": true, "token": t.encode(), "folder": t.name}))
+            match opt(input, "to").filter(|c| !c.trim().is_empty()) {
+                Some(code) => {
+                    let sealed = t.seal(&varsto_core::vault::ShareRequest::parse_code(&code)?)?;
+                    Ok(json!({"ok": true, "token": sealed.encode(), "folder": sealed.name, "sealed": true}))
+                }
+                None => Ok(json!({"ok": true, "token": t.encode(), "folder": t.name, "sealed": false})),
+            }
         }
         (Method::Get, "/api/replica/token") => {
             Ok(json!({"token": engine.replica_token()?.encode()}))

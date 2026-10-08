@@ -2,31 +2,20 @@
 title: Downloads
 nav: Downloads
 output: downloads/index.html
-description: Download Varsto alpha-0 command-line clients and verify their checksums.
+description: Download the Varsto alpha for Linux, macOS, Windows and Android, or the source, and verify the checksums.
 ---
     <h1>Downloads</h1>
     <p class="note">See the <a href="../screenshots/">screenshots</a> for what the alpha looks like.</p>
-    <p class="lead">Alpha-0 is one small binary with a command-line interface and a local desktop interface (<code>varsto desktop</code>, or just double-click the app) that opens in your browser and talks only to this computer. No mobile app yet. Use it with test data only and keep your own backups.</p>
+    <p class="lead">One small program per platform: a tray or menu-bar app that runs the background service, a local interface in your browser, and the same command line everywhere. Alpha: use it with test data only and keep your own backups.</p>
     {{DOWNLOADS}}
     <h2>Install and verify</h2>
     <pre><code>curl -O https://varsto.soderlund.in/downloads/SHA256SUMS
-curl -O https://varsto.soderlund.in/downloads/varsto-0.0.1-alpha.2-x86_64-unknown-linux-musl.tar.gz
+curl -O https://varsto.soderlund.in/downloads/varsto-0.0.1-alpha.3-x86_64-unknown-linux-musl.tar.gz
 sha256sum -c SHA256SUMS --ignore-missing
-tar xzf varsto-0.0.1-alpha.2-x86_64-unknown-linux-musl.tar.gz
-cd varsto-0.0.1-alpha.2-x86_64-unknown-linux-musl
+tar xzf varsto-0.0.1-alpha.3-x86_64-unknown-linux-musl.tar.gz
+cd varsto-0.0.1-alpha.3-x86_64-unknown-linux-musl
 ./varsto desktop        # opens the desktop interface in your browser
 ./varsto --help         # command line</code></pre>
-    <h2>Platforms</h2>
-    <table class="downloads">
-      <thead><tr><th>Platform</th><th>Status</th></tr></thead>
-      <tbody>
-        <tr><td>Linux x86_64</td><td>Static binary (musl). Tested on the development machine. Run <code>./varsto desktop</code> for the graphical interface.</td></tr>
-        <tr><td>macOS (Apple Silicon, Intel)</td><td>Two "lite" app bundles, one per architecture: the background service and the browser interface, no menu-bar icon yet. <strong>Unsigned and not notarised</strong>: right-click, Open, or <code>xattr -dr com.apple.quarantine Varsto.app</code>. Cross-compiled on Linux, <strong>not yet tested on a Mac</strong>. The full menu-bar app (status in the menu bar, keychain, start at login) is built on a Mac with <code>apps/macos/build.sh</code> and will be published as soon as it has been built and tested on real hardware.</td></tr>
-        <tr><td>Windows x86_64</td><td>Zip with <code>varsto.exe</code> and <code>Varsto.cmd</code>: a tray icon, the background service and the interface in your browser. Cross-compiled with MinGW, <strong>not tested on Windows</strong>.</td></tr>
-        <tr><td>Android</td><td>Debug-signed APK for sideloading (<code>adb install</code> or open the file on the phone and allow the install). A foreground service runs the same core; the interface opens in the app. Tested in the Android 15 emulator only.</td></tr>
-        <tr><td>iOS</td><td>Source only (<code>apps/ios</code>); building needs a Mac with Xcode.</td></tr>
-      </tbody>
-    </table>
     <h2>Build from source</h2>
     <p>The source archive matches the tagged release. With a stable Rust toolchain (1.85 or newer): unpack, then <code>cargo build --release</code>; the binary is <code>target/release/varsto</code>. <code>cargo test --workspace</code> runs the test suite, including the two-device scenarios.</p>
     <h2>Desktop interface</h2>

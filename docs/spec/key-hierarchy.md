@@ -6,6 +6,7 @@ Requirement IDs refer to the requirement tables of the project plan; "plan 6.28"
 
 ## 0. Conventions and cited sizes
 
+- **Status 0.0.1-alpha.3:** hybrid signing is implemented as Ed25519 + ML-DSA-65 (`sig_alg = "ed25519+ml-dsa-65"`) for ledger batches, and the hybrid KEM as X25519 + ML-KEM-768 for sealed share tokens; see `alpha-0-format.md` section 11. The rest of this draft is unchanged.
 - "Hybrid signing" means a classical and a post-quantum signature over the same message, both required to verify (plan 6.5). Candidates: Ed25519 (RFC 8032: 32-byte public key, 64-byte signature) and ML-DSA (FIPS 204, Table 2: ML-DSA-65 public key 1952 bytes, signature 3309 bytes). The ML-DSA parameter set is **TBD**; ML-DSA-65 is used in examples only.
 - "Hybrid KEM" means a classical and a post-quantum key encapsulation combined into one shared secret (plan 6.5). Candidates: X25519 and ML-KEM (FIPS 203, Table 3: ML-KEM-768 encapsulation key 1184 bytes, ciphertext 1088 bytes). The parameter set and the combiner construction (it must hash the transcript, not just concatenate secrets) are **TBD** (plan section 8, "PQ library").
 - "AEAD" means XChaCha20-Poly1305 or AES-256-GCM (plan 6.5); the choice is **TBD**. Section 4 explains why the nonce strategy constrains it.

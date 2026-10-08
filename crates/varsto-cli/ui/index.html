@@ -38,10 +38,13 @@
         <h2>Accept a folder shared with you</h2>
         <label>Device name <input name="name" placeholder="my-laptop" required></label>
         <label>Passphrase for this device <input name="passphrase" type="password" minlength="8" required></label>
+        <p class="muted">Step 1: send the owner a request code from this device. Step 2: paste the sealed token they send back.</p>
+        <div class="row"><button type="button" id="sharerequest" class="secondary">Show my request code</button></div>
+        <pre id="sharerequestout" class="hidden"></pre>
         <label>Share token <input name="token" required></label>
         <label>Storage directory both of you can reach <input name="storage_path" required></label>
         <button type="submit">Accept</button>
-        <p class="muted">You get the folder key only: this device can read and write that folder, nothing else of the other vault.</p>
+        <p class="muted">You get the folder key only: this device can read and write that folder, nothing else of the other vault. A sealed token (vst1…) can be opened only here; a plain token carries the key itself.</p>
       </form>
     </div>
   </section>

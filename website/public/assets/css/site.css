@@ -90,3 +90,19 @@ figure.hero figcaption { color: var(--muted); font-size: .95rem; margin-top: .5r
 .shot figcaption { font-size:.9rem; color:var(--muted); margin-top:.5rem; }
 .shots-row { display:grid; grid-template-columns:1fr 1fr; gap:1.5rem; max-width:40rem; }
 @media (max-width: 40rem) { .shots-row { grid-template-columns:1fr; } }
+
+.dl-release { color:var(--muted); }
+.dl-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(13.5rem, 1fr)); gap:1rem; margin:1rem 0 1.5rem; }
+.dl-card { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:1.1rem; display:flex; flex-direction:column; gap:.6rem; }
+.dl-head { display:flex; align-items:center; gap:.6rem; }
+.dl-head h3 { margin:0; font-size:1.1rem; }
+.dl-icon { width:28px; height:28px; fill:var(--accent); flex:none; }
+.dl-primary { display:block; text-align:center; background:var(--accent); color:var(--accent-contrast); font-weight:600; padding:.6rem .8rem; border-radius:10px; text-decoration:none; }
+.dl-primary:hover { filter:brightness(1.08); }
+.dl-primary.dl-disabled { background:var(--surface); color:var(--muted); border:1px solid var(--border); }
+.dl-meta { font-size:.8rem; color:var(--muted); margin:0; overflow-wrap:anywhere; }
+.dl-alt { list-style:none; padding:0; margin:0; font-size:.9rem; }
+.dl-alt li { padding:.15rem 0; }
+.dl-status { font-size:.85rem; color:var(--muted); margin:auto 0 0; }
+.dl-all { margin:1rem 0; }
+.dl-all table { margin-top:.5rem; }

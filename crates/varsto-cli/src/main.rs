@@ -123,8 +123,16 @@ enum Cmd {
 
 #[derive(Subcommand)]
 enum ShareCmd {
-    /// (Owner) Print a share token for a folder: whoever has it can read and write the folder.
-    Create { folder: String },
+    /// (Recipient) Print a request code for this device; the owner seals the share token to it.
+    Request,
+    /// (Owner) Print a share token for a folder. With --to <request-code> the folder key is
+    /// encapsulated to the recipient (hybrid X25519 + ML-KEM-768) and the token is safe to send
+    /// over any channel; without it the key is in the token and the channel must be secure.
+    Create {
+        folder: String,
+        #[arg(long)]
+        to: Option<String>,
+    },
     /// (Recipient) Accept a shared folder into a new device directory (one per shared vault).
     Accept {
         #[arg(long)]
@@ -586,12 +594,34 @@ fn run(cli: &Cli) -> Result<()> {
         },
         Cmd::Tray { interval, open } => tray::run(home, *interval, *open)?,
         Cmd::Share { cmd } => match cmd {
-            ShareCmd::Create { folder } => {
+            ShareCmd::Request => {
+                let code = varsto_core::vault::ShareRequest::code_for(&home)?;
+                if cli.json {
+                    println!("{}", serde_json::json!({"request_code": code}));
+                } else {
+                    println!("share request code for this device (give it to the folder owner; it contains no secret):\n  {code}");
+                }
+            }
+            ShareCmd::Create { folder, to } => {
                 let mut engine = Engine::open(&home, &passphrase()?)?;
                 let t = engine.share_create(folder)?;
-                print(cli, &t, |t| {
-                    format!("share token for folder {} (anyone holding it can read and write the folder; send it over a secure channel):\n  {}", t.name, t.encode())
-                })?;
+                match to {
+                    Some(code) => {
+                        let sealed =
+                            t.seal(&varsto_core::vault::ShareRequest::parse_code(code)?)?;
+                        if cli.json {
+                            println!(
+                                "{}",
+                                serde_json::json!({"folder": sealed.name, "token": sealed.encode(), "sealed": true})
+                            );
+                        } else {
+                            println!("sealed share token for folder {} (only the device that made the request code can open it):\n  {}", sealed.name, sealed.encode());
+                        }
+                    }
+                    None => print(cli, &t, |t| {
+                        format!("share token for folder {} (the folder key is INSIDE this token: anyone holding it can read and write the folder; prefer `share create --to <request-code>`):\n  {}", t.name, t.encode())
+                    })?,
+                }
             }
             ShareCmd::Accept {
                 name,
@@ -599,7 +629,11 @@ fn run(cli: &Cli) -> Result<()> {
                 storage_path,
                 storage_name,
             } => {
-                let token = varsto_core::vault::ShareToken::decode(token)?;
+                let token = if varsto_core::vault::SealedShareToken::is_sealed(token) {
+                    varsto_core::vault::ShareRequest::open_token(&home, token)?
+                } else {
+                    varsto_core::vault::ShareToken::decode(token)?
+                };
                 let spec = StorageSpec::LocalDir {
                     name: storage_name.clone(),
                     path: storage_path.clone(),
@@ -607,6 +641,7 @@ fn run(cli: &Cli) -> Result<()> {
                     carrier: false,
                 };
                 let engine = Engine::accept_share(&home, name, &passphrase()?, &token, spec)?;
+                varsto_core::vault::ShareRequest::clear(&home);
                 println!("joined shared folder {} as device {}; attach it with `varsto folder attach {} <path>` and sync", token.name, engine.device_id().short(), token.name);
             }
         },
