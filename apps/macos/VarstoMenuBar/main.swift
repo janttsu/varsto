@@ -317,16 +317,49 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         updateNote.title = "Checking…"
         DispatchQueue.global().async {
             let c = self.client.call("GET", "/api/update/check")
-            var text = "Update check failed"
-            if let c = c {
+            DispatchQueue.main.async {
+                NSApp.activate(ignoringOtherApps: true)
+                let a = NSAlert()
+                guard let c = c else {
+                    self.updateNote.title = "Update check failed"
+                    a.messageText = "Could not check for updates"
+                    a.informativeText = "The background service did not answer. Is it running? Try again in a moment."
+                    a.runModal()
+                    return
+                }
+                let current = c["current"] as? String ?? "?"
+                let latest = c["latest"] as? String ?? "?"
                 if c["available"] as? Bool == true {
-                    _ = self.client.call("POST", "/api/update", body: [:])
-                    text = "Updating to \(c["latest"] as? String ?? "")… the service restarts itself; quit and reopen Varsto to update this app too."
+                    self.updateNote.title = "Update available: \(latest)"
+                    a.messageText = "Varsto \(latest) is available"
+                    a.informativeText = "You have \(current). The background service downloads the new version, checks its SHA-256 and restarts itself. This window app is replaced the next time you download Varsto.app; the service keeps working with it meanwhile."
+                    a.addButton(withTitle: "Update now")
+                    a.addButton(withTitle: "Later")
+                    if a.runModal() == .alertFirstButtonReturn {
+                        DispatchQueue.global().async {
+                            let r = self.client.call("POST", "/api/update", body: [:])
+                            DispatchQueue.main.async {
+                                let done = NSAlert()
+                                if let r = r, r["ok"] as? Bool == true || r["error"] == nil {
+                                    self.updateNote.title = "Updated to \(latest); service restarting"
+                                    done.messageText = "Update installed"
+                                    done.informativeText = "The service restarts with \(latest) in a few seconds."
+                                } else {
+                                    self.updateNote.title = "Update failed"
+                                    done.messageText = "Update failed"
+                                    done.informativeText = "\(r?["error"] as? String ?? "no details")"
+                                }
+                                done.runModal()
+                            }
+                        }
+                    }
                 } else {
-                    text = "Up to date (\(c["current"] as? String ?? ""))"
+                    self.updateNote.title = "Up to date (\(current))"
+                    a.messageText = "Varsto is up to date"
+                    a.informativeText = "Installed: \(current). Latest: \(latest)."
+                    a.runModal()
                 }
             }
-            DispatchQueue.main.async { self.updateNote.title = text }
         }
     }
     @objc func installCli() {

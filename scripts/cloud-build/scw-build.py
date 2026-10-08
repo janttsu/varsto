@@ -363,6 +363,46 @@ def shots_linux(args):
             delete_instance(srv["id"])
 
 
+def win_password(server_id):
+    """The administrator password Scaleway generated at first boot, decrypted with our RSA key."""
+    key = pathlib.Path.home() / ".ssh" / os.environ.get("SCW_RSA_KEY_FILE", "varsto-scw-rsa")
+    d = scw("instance", "server", "get-rdp-password", server_id, f"zone={ZONE}", f"key={key}")
+    pw = d.get("Password") or d.get("password") or ""
+    if not pw:
+        raise SystemExit("no administrator password yet (cloudbase-init runs about 15 minutes after creation)")
+    return pw
+
+
+def win_bootstrap(args):
+    """Enable OpenSSH on a Windows machine whose first-boot script did not run:
+    a Linux jump machine opens an RDP session and types the PowerShell command."""
+    if not args.server:
+        raise SystemExit("--server <windows instance id> is required")
+    win = scw("instance", "server", "get", args.server, f"zone={ZONE}")
+    wip = next(i["address"] for i in win.get("public_ips", []) if ":" not in i["address"])
+    pw = win_password(args.server)
+    pub = next(iter(sorted(pathlib.Path.home().joinpath(".ssh").glob("id_ed25519.pub"))), None) or next(pathlib.Path.home().joinpath(".ssh").glob("*.pub"))
+    out = ROOT / "dist" / "cloud" / "shots"
+    out.mkdir(parents=True, exist_ok=True)
+    jump = create_instance(f"{TAG}-jump-{int(time.time())}", "POP2-2C-8G", "ubuntu_noble")
+    try:
+        _, jip = wait_running(jump["id"])
+        log(f"jump machine at {jip}; waiting for SSH")
+        wait_ssh("root", jip)
+        run_ssh("root", jip, "mkdir -p /it")
+        scp(str(ROOT / "scripts/cloud-build/win-bootstrap.sh"), f"root@{jip}:/it/win-bootstrap.sh")
+        # The password goes through a file, not the command line.
+        subprocess.run(ssh_base("root", jip) + [f"umask 077 && printf '%s' '{pw}' > /it/winpass"], check=True)
+        run_ssh("root", jip, f"export WIN_IP={wip} WIN_PASS=\"$(cat /it/winpass)\" PUBKEY='{pub.read_text().strip()}' && bash /it/win-bootstrap.sh")
+        scp(f"root@{jip}:/it/shots/*", str(out))
+        log(f"Windows bootstrap done; screenshots in {out}")
+        wait_ssh("Administrator", wip, timeout=300)
+        log("SSH to the Windows machine works")
+    finally:
+        if not args.keep:
+            delete_instance(jump["id"])
+
+
 def cleanup(args):
     """Delete tagged machines. Without --all, machines created in the last 90
     minutes are kept, so a cleanup does not kill a job that is still running."""
@@ -387,12 +427,13 @@ def cleanup(args):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("target", choices=["linux", "windows", "macos", "integration", "shots-linux", "cleanup", "mac-stock"])
+    ap.add_argument("target", choices=["linux", "windows", "macos", "integration", "shots-linux", "win-bootstrap", "cleanup", "mac-stock"])
     ap.add_argument("--keep", action="store_true", help="do not delete the machine afterwards")
     ap.add_argument("--type", help="instance type (POP2-4C-16G, POP2-2C-8G-WIN, M4-S, ...)")
     ap.add_argument("--zone", help="zone for Mac minis (fr-par-1 or fr-par-3)")
     ap.add_argument("--wait-for-stock", action="store_true", help="macos: poll until a Mac mini is in stock")
     ap.add_argument("--any-type", action="store_true", help="macos: accept any Mac mini type in stock")
+    ap.add_argument("--server", help="win-bootstrap: the Windows instance id")
     ap.add_argument("--all", action="store_true", help="cleanup: also delete machines created in the last 90 minutes")
     args = ap.parse_args()
     if shutil.which("scw") is None:
@@ -401,7 +442,7 @@ def main():
         for zone in ("fr-par-1", "fr-par-3"):
             print(zone, mac_stock(zone))
         return
-    {"linux": build_linux, "windows": build_windows, "macos": build_macos, "integration": integration, "shots-linux": shots_linux, "cleanup": cleanup}[args.target](args)
+    {"linux": build_linux, "windows": build_windows, "macos": build_macos, "integration": integration, "shots-linux": shots_linux, "win-bootstrap": win_bootstrap, "cleanup": cleanup}[args.target](args)
 
 
 if __name__ == "__main__":
