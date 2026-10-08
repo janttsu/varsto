@@ -1,0 +1,24 @@
+[package]
+name = "varsto-cli"
+description = "Command-line interface of Varsto"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[[bin]]
+name = "varsto"
+path = "src/main.rs"
+
+[dependencies]
+varsto-core = { path = "../varsto-core" }
+anyhow.workspace = true
+clap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+hex.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+serde_json.workspace = true

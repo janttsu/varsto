@@ -1,0 +1,359 @@
+// SPDX-License-Identifier: PolyForm-Shield-1.0.0
+//! `varsto`: command-line interface (alpha-0). Every command has a `--json`
+//! output for scripts (P-004); exit codes: 0 ok, 1 failure, 2 usage.
+
+use anyhow::{anyhow, Context, Result};
+use clap::{Parser, Subcommand};
+use std::path::PathBuf;
+use varsto_core::storage::StorageSpec;
+use varsto_core::Engine;
+
+#[derive(Parser)]
+#[command(
+    name = "varsto",
+    version,
+    about = "End-to-end encrypted sync with your own storage (alpha)"
+)]
+struct Cli {
+    /// Device directory holding keys, ledger and state.
+    #[arg(long, env = "VARSTO_HOME", global = true)]
+    home: Option<PathBuf>,
+    /// Machine-readable output.
+    #[arg(long, global = true)]
+    json: bool,
+    #[command(subcommand)]
+    cmd: Cmd,
+}
+
+#[derive(Subcommand)]
+enum Cmd {
+    /// Create a new vault on this device and print the vault key once.
+    Init {
+        #[arg(long)]
+        name: String,
+    },
+    /// Join an existing vault through a storage that holds it.
+    Join {
+        #[arg(long)]
+        name: String,
+        #[arg(long)]
+        vault_key: String,
+        /// Name for the storage on this device.
+        #[arg(long, default_value = "primary")]
+        storage_name: String,
+        /// Local directory of the storage.
+        #[arg(long)]
+        storage_path: PathBuf,
+    },
+    /// Manage storages.
+    Storage {
+        #[command(subcommand)]
+        cmd: StorageCmd,
+    },
+    /// Manage folders.
+    Folder {
+        #[command(subcommand)]
+        cmd: FolderCmd,
+    },
+    /// Upload local changes and publish the manifest.
+    Push { folder: String },
+    /// Fetch other devices' changes and apply them.
+    Pull { folder: String },
+    /// Pull then push, for one folder or all attached folders.
+    Sync { folder: Option<String> },
+    /// Show vault, devices, storages and folders.
+    Status,
+    /// Compare the ledger with the storages; --verify downloads and hashes every chunk.
+    Fsck {
+        #[arg(long)]
+        verify: bool,
+    },
+    /// List duplicate files in a folder.
+    Dupes { folder: String },
+    /// List ledger batches.
+    Ledger,
+}
+
+#[derive(Subcommand)]
+enum StorageCmd {
+    /// Add a local directory (local disk, removable disk or network mount).
+    AddLocal {
+        name: String,
+        path: PathBuf,
+        /// Cold storage: written, never read without confirmation.
+        #[arg(long)]
+        cold: bool,
+    },
+    List,
+}
+
+#[derive(Subcommand)]
+enum FolderCmd {
+    /// Create a folder in the vault and sync `path` into it.
+    Add {
+        name: String,
+        path: PathBuf,
+    },
+    /// Sync an existing folder of the vault into `path` on this device.
+    Attach {
+        name_or_id: String,
+        path: PathBuf,
+    },
+    List,
+}
+
+fn passphrase() -> Result<String> {
+    std::env::var("VARSTO_PASSPHRASE")
+        .map_err(|_| anyhow!("set VARSTO_PASSPHRASE (alpha: no interactive prompt yet)"))
+}
+
+fn home(cli: &Cli) -> Result<PathBuf> {
+    if let Some(h) = &cli.home {
+        return Ok(h.clone());
+    }
+    let base = std::env::var_os("XDG_DATA_HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share")))
+        .ok_or_else(|| anyhow!("cannot determine a home directory; pass --home"))?;
+    Ok(base.join("varsto"))
+}
+
+fn print<T: serde::Serialize>(
+    cli: &Cli,
+    value: &T,
+    human: impl FnOnce(&T) -> String,
+) -> Result<()> {
+    if cli.json {
+        println!("{}", serde_json::to_string_pretty(value)?);
+    } else {
+        println!("{}", human(value));
+    }
+    Ok(())
+}
+
+fn run(cli: &Cli) -> Result<()> {
+    let home = home(cli)?;
+    match &cli.cmd {
+        Cmd::Init { name } => {
+            let (engine, vault_key) = Engine::init(&home, name, &passphrase()?)?;
+            if cli.json {
+                println!(
+                    "{}",
+                    serde_json::json!({ "vault_id": engine.vault_id().to_string(), "device_id": engine.device_id().to_string(), "vault_key": vault_key })
+                );
+            } else {
+                println!(
+                    "Vault {} created; this device is {}.",
+                    engine.vault_id(),
+                    engine.device_id()
+                );
+                println!("Vault key (needed to join other devices; shown once, keep it offline):");
+                println!("  {vault_key}");
+            }
+        }
+        Cmd::Join {
+            name,
+            vault_key,
+            storage_name,
+            storage_path,
+        } => {
+            let spec = StorageSpec::LocalDir {
+                name: storage_name.clone(),
+                path: storage_path.clone(),
+                cold: false,
+            };
+            let engine = Engine::join(&home, name, &passphrase()?, vault_key, spec)?;
+            let folders = engine.folders();
+            if cli.json {
+                println!(
+                    "{}",
+                    serde_json::json!({ "vault_id": engine.vault_id().to_string(), "device_id": engine.device_id().to_string(), "folders": folders.iter().map(|(r, _)| r.name.clone()).collect::<Vec<_>>() })
+                );
+            } else {
+                println!(
+                    "Joined vault {} as device {}.",
+                    engine.vault_id(),
+                    engine.device_id()
+                );
+                for (r, _) in folders {
+                    println!(
+                        "  folder {} ({}): attach it with `varsto folder attach {} <path>`",
+                        r.name,
+                        r.folder_id.short(),
+                        r.name
+                    );
+                }
+            }
+        }
+        Cmd::Storage { cmd } => {
+            let mut engine = Engine::open(&home, &passphrase()?)?;
+            match cmd {
+                StorageCmd::AddLocal { name, path, cold } => {
+                    engine.add_storage(StorageSpec::LocalDir {
+                        name: name.clone(),
+                        path: path.clone(),
+                        cold: *cold,
+                    })?;
+                    println!("storage {name} added");
+                }
+                StorageCmd::List => {
+                    print(cli, &engine.storages().to_vec(), |s| {
+                        s.iter()
+                            .map(|x| {
+                                format!("{}{}", x.name(), if x.is_cold() { " (cold)" } else { "" })
+                            })
+                            .collect::<Vec<_>>()
+                            .join("\n")
+                    })?;
+                }
+            }
+        }
+        Cmd::Folder { cmd } => {
+            let mut engine = Engine::open(&home, &passphrase()?)?;
+            match cmd {
+                FolderCmd::Add { name, path } => {
+                    let id = engine.add_folder(name, path)?;
+                    println!("folder {name} ({}) created", id.short());
+                }
+                FolderCmd::Attach { name_or_id, path } => {
+                    let id = engine.attach_folder(name_or_id, path)?;
+                    println!("folder {} attached at {}", id.short(), path.display());
+                }
+                FolderCmd::List => {
+                    let rows: Vec<serde_json::Value> = engine
+                        .folders()
+                        .into_iter()
+                        .map(|(r, m)| serde_json::json!({ "id": r.folder_id.to_string(), "name": r.name, "path": m }))
+                        .collect();
+                    print(cli, &rows, |rows| {
+                        rows.iter()
+                            .map(|r| {
+                                format!(
+                                    "{} {} {}",
+                                    r["id"].as_str().unwrap_or(""),
+                                    r["name"],
+                                    r["path"].as_str().unwrap_or("(not attached)")
+                                )
+                            })
+                            .collect::<Vec<_>>()
+                            .join("\n")
+                    })?;
+                }
+            }
+        }
+        Cmd::Push { folder } => {
+            let mut engine = Engine::open(&home, &passphrase()?)?;
+            let r = engine.push(folder)?;
+            print(cli, &r, |r| {
+                format!(
+                    "{}: scanned {}, changed {}, uploaded {} chunks ({} bytes), manifest {:?}",
+                    r.folder,
+                    r.files_scanned,
+                    r.files_changed,
+                    r.chunks_uploaded,
+                    r.bytes_uploaded,
+                    r.manifest_seq
+                )
+            })?;
+        }
+        Cmd::Pull { folder } => {
+            let mut engine = Engine::open(&home, &passphrase()?)?;
+            let r = engine.pull(folder)?;
+            print(cli, &r, |r| {
+                format!("{}: {} manifests, {} updated, {} deleted, {} conflicts, {} chunks downloaded; unavailable: {:?}; forked: {:?}", r.folder, r.manifests_applied, r.files_updated, r.files_deleted, r.conflicts, r.chunks_downloaded, r.files_unavailable, r.forked_devices)
+            })?;
+        }
+        Cmd::Sync { folder } => {
+            let mut engine = Engine::open(&home, &passphrase()?)?;
+            let r = engine.sync(folder.as_deref())?;
+            print(cli, &r, |r| {
+                r.iter().map(|(pl, ps)| format!("{}: pulled {} updated/{} deleted/{} conflicts, pushed {} changed/{} chunks", pl.folder, pl.files_updated, pl.files_deleted, pl.conflicts, ps.files_changed, ps.chunks_uploaded)).collect::<Vec<_>>().join("\n")
+            })?;
+        }
+        Cmd::Status => {
+            let engine = Engine::open(&home, &passphrase()?)?;
+            let s = engine.status()?;
+            print(cli, &s, |s| {
+                let mut out = format!(
+                    "vault {} device {} ({}) format {} lamport {} batches {}\n",
+                    s.vault_id,
+                    s.device_name,
+                    &s.device_id[..8],
+                    s.format_version,
+                    s.lamport,
+                    s.ledger_batches
+                );
+                out += &format!(
+                    "devices: {}\n",
+                    s.devices.values().cloned().collect::<Vec<_>>().join(", ")
+                );
+                out += &format!(
+                    "storages: {}\n",
+                    s.storages
+                        .iter()
+                        .map(|x| x.name().to_string())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                );
+                for f in &s.folders {
+                    out += &format!("folder {} ({}): {} files, {} bytes, {} chunks, {} without storage copy, {} verified elsewhere, at {}\n", f.name, &f.folder_id[..8], f.files, f.bytes, f.chunks, f.chunks_without_storage_copy, f.chunks_verified_elsewhere, f.path.as_ref().map(|p| p.display().to_string()).unwrap_or_else(|| "(not attached)".into()));
+                }
+                if !s.forked_devices.is_empty() {
+                    out += &format!("WARNING forked devices: {:?}\n", s.forked_devices);
+                }
+                out.trim_end().to_string()
+            })?;
+        }
+        Cmd::Fsck { verify } => {
+            let mut engine = Engine::open(&home, &passphrase()?)?;
+            let r = engine.fsck(*verify)?;
+            print(cli, &r, |r| {
+                format!("referenced {} | with storage copy {} | verified elsewhere {} | claimed only {} | missing {:?} | claims without object {} | unreferenced objects {} | verified now {} | corrupt {:?} | forked {:?} | cold skipped {:?}", r.chunks_referenced, r.chunks_with_storage_copy, r.chunks_verified_elsewhere, r.chunks_claimed_only, r.chunks_missing, r.claims_without_object, r.objects_unreferenced, r.objects_verified_now, r.objects_corrupt, r.forked_devices, r.storages_skipped_cold)
+            })?;
+            if !r.chunks_missing.is_empty()
+                || !r.objects_corrupt.is_empty()
+                || !r.forked_devices.is_empty()
+            {
+                std::process::exit(1);
+            }
+        }
+        Cmd::Dupes { folder } => {
+            let engine = Engine::open(&home, &passphrase()?)?;
+            let r = engine.dupes(folder)?;
+            print(cli, &r, |r| {
+                r.iter()
+                    .map(|g| format!("{} bytes: {}", g.size, g.paths.join(", ")))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            })?;
+        }
+        Cmd::Ledger => {
+            let engine = Engine::open(&home, &passphrase()?)?;
+            let r = engine.ledger_entries()?;
+            print(cli, &r, |r| {
+                r.iter()
+                    .map(|e| {
+                        format!(
+                            "{} #{} lamport {} events {} {}",
+                            &e.device[..8],
+                            e.seq,
+                            e.lamport,
+                            e.events,
+                            &e.hash[..12]
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            })?;
+        }
+    }
+    Ok(())
+}
+
+fn main() {
+    let cli = Cli::parse();
+    if let Err(e) = run(&cli).context("varsto") {
+        eprintln!("error: {e:#}");
+        std::process::exit(1);
+    }
+}
