@@ -104,7 +104,18 @@ impl Backend {
             .and_then(|l| l.split_whitespace().nth(1))
             .and_then(|s| s.parse().ok())
             .unwrap_or(0);
-        Ok((status, raw[sep + 4..].to_vec()))
+        let body = &raw[sep + 4..];
+        let chunked = head.lines().any(|l| {
+            l.to_ascii_lowercase().starts_with("transfer-encoding:") && l.contains("chunked")
+        });
+        Ok((
+            status,
+            if chunked {
+                varsto_core::p2p::decode_chunked(body)?
+            } else {
+                body.to_vec()
+            },
+        ))
     }
 
     fn call_json(&mut self, method: &str, path: &str, body: Option<Value>) -> Result<Value> {

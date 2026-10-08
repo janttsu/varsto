@@ -66,6 +66,9 @@ impl SecretKey {
         Self::from_bytes(&hex::decode(s.trim())?)
     }
 
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.0
+    }
     pub fn to_hex(&self) -> String {
         hex::encode(self.0)
     }

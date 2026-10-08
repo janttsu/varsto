@@ -106,3 +106,13 @@ figure.hero figcaption { color: var(--muted); font-size: .95rem; margin-top: .5r
 .dl-status { font-size:.85rem; color:var(--muted); margin:auto 0 0; }
 .dl-all { margin:1rem 0; }
 .dl-all table { margin-top:.5rem; }
+
+/* Screenshots follow the page theme: one of the pair is shown. */
+.shot-dark { display:none; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .shot-dark { display:block; }
+  :root:not([data-theme="light"]) .shot-light { display:none; }
+}
+:root[data-theme="dark"] .shot-dark { display:block; }
+:root[data-theme="dark"] .shot-light { display:none; }
+.shots-single { grid-template-columns: 1fr; max-width: 20rem; }

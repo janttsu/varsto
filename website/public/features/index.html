@@ -143,10 +143,18 @@
       </div>
     </section>
 
+    <section class="feature">
+      <h2>Devices that send each other the blocks, torrent-style</h2>
+      <img src="../assets/img/usecases/plane.svg" alt="Two devices on a plane sync over the phone's hotspot; the cloud is crossed out until landing." width="640" height="320" loading="lazy">
+      <div>
+        <p>Every device that has a file can serve its encrypted blocks, byte for byte the same objects the storages hold. A device that needs a block asks its peers first and the cloud second, checks every block against its content hash, and spreads the work over the peers that answer. On the LAN devices find each other by themselves; across the internet a device that listens on a reachable address (a forwarded port, a VPN) is a peer too. Only a holder of the vault key can fetch anything, and what travels is ciphertext.</p>
+        <p class="note">Blocks are compressed before encryption (zstd), so every transfer and every copy is small, on the LAN as on the internet. No NAT traversal yet: relays and hole punching are next.</p>
+      </div>
+    </section>
+
     <h2>Also in the design</h2>
     <ul>
       <li><strong>Security keys and Strongroom folders</strong>: folders that open only with a touch of your FIDO2 key, enforced cryptographically, not by a dialog.</li>
-      <li><strong>Peer-to-peer transfer</strong> on the local network, torrent-style, with every block encrypted.</li>
       <li><strong>A recovery kit</strong> you keep on paper or metal, in several places, and test once a year.</li>
     </ul>
     <p class="note">Every design document on the <a href="../docs/">Docs</a> page says which parts exist. Nothing has been audited yet.</p>

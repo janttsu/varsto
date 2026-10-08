@@ -20,17 +20,20 @@ pub mod ids;
 pub mod kem;
 pub mod ledger;
 pub mod manifest;
+pub mod p2p;
+pub mod pack;
 pub mod policy;
 pub mod rclone;
 pub mod replica;
 pub mod s3;
 pub mod storage;
+pub mod strongroom;
 pub mod thumbs;
 pub mod util;
 pub mod vault;
 
 /// Storage format version written into every object header. See
 /// `docs/spec/format-versions.md`.
-pub const FORMAT_VERSION: u16 = 0;
+pub const FORMAT_VERSION: u16 = 1;
 
 pub use engine::{Engine, FsckReport, PullReport, PushReport, StatusReport};

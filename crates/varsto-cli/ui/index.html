@@ -127,6 +127,16 @@
     <p><button id="replicatoken" type="button" class="secondary">Replica token (untrusted backup device)</button></p>
     <div id="replicaout" class="card warn hidden"></div>
     <details><summary>Ledger batches</summary><pre id="ledger"></pre></details>
+    <details id="p2pbox"><summary>Peer-to-peer</summary>
+      <p class="muted">Your devices exchange encrypted blocks directly: on the LAN automatically, across the internet when one of them listens on a reachable address. Blocks are verified by name; a peer needs the vault key to get anything.</p>
+      <div id="p2pstatus" class="muted"></div>
+      <form id="p2pform" class="row">
+        <label class="inline"><input name="enabled" type="checkbox"> enabled</label>
+        <label>Port <input name="port" value="17893" size="6"></label>
+        <label>Public addresses (host:port, comma-separated) <input name="public_addrs" placeholder="203.0.113.5:17893"></label>
+        <button type="submit" class="secondary">Save</button>
+      </form>
+    </details>
     <details><summary>Duplicate files</summary><div class="row"><select id="dupefolder"></select><button id="dupes" type="button" class="secondary">Find duplicates</button></div><pre id="dupeout"></pre></details>
 
     <h2>Activity</h2>

@@ -668,6 +668,21 @@ impl SecretStore {
 pub struct Config {
     pub storages: Vec<StorageSpec>,
     pub folders: Vec<FolderMount>,
+    #[serde(default)]
+    pub p2p: P2pConfig,
+}
+
+/// Peer-to-peer settings (per device, local).
+#[derive(Clone, Debug, Serialize, Deserialize, Default, PartialEq, Eq)]
+pub struct P2pConfig {
+    pub enabled: bool,
+    /// TCP port to listen on (0 = pick one at start).
+    #[serde(default)]
+    pub port: u16,
+    /// Addresses other devices can reach this one at across the internet
+    /// (a forwarded port, a public IP, a VPN address).
+    #[serde(default)]
+    pub public_addrs: Vec<std::net::SocketAddr>,
 }
 
 impl Config {

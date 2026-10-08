@@ -53,6 +53,11 @@ pub struct ServiceState {
     /// Latest durability policy reports (F-032) and the worst state among them.
     pub policies: Vec<varsto_core::policy::PolicyReport>,
     pub policy_worst: Option<varsto_core::policy::PolicyState>,
+    /// Peer-to-peer: listening address and the peers known right now.
+    pub p2p_listen: Option<std::net::SocketAddr>,
+    pub p2p_peers: Vec<varsto_core::p2p::PeerAddr>,
+    pub p2p_lan_peers: usize,
+    pub p2p_chunks: u64,
 }
 
 impl ServiceState {
@@ -69,6 +74,10 @@ impl ServiceState {
             "syncs": self.syncs,
             "policy_worst": self.policy_worst,
             "policies": self.policies,
+            "p2p_listen": self.p2p_listen,
+            "p2p_peers": self.p2p_peers,
+            "p2p_lan_peers": self.p2p_lan_peers,
+            "p2p_chunks": self.p2p_chunks,
         })
     }
     /// Store policy reports; raise a desktop notification when a folder's
@@ -127,6 +136,7 @@ impl ServiceState {
         let mut unavailable = 0;
         let mut forked = false;
         for (pl, ps) in reports {
+            self.p2p_chunks += pl.chunks_from_peers;
             updated += pl.files_updated;
             deleted += pl.files_deleted;
             conflicts += pl.conflicts;
@@ -136,6 +146,122 @@ impl ServiceState {
         }
         self.last_result = format!("{} folders: {updated} updated, {deleted} deleted, {conflicts} conflicts, {uploaded} chunks uploaded{}{}", reports.len(), if unavailable > 0 { format!(", {unavailable} unavailable") } else { String::new() }, if forked { ", FORKED device" } else { "" });
         self.last_error = None;
+    }
+}
+
+/// Peer-to-peer runtime of the service: listener thread, beacon thread,
+/// a shared snapshot of what we serve, and the peer table.
+struct P2p {
+    snapshot: Arc<Mutex<Option<Arc<varsto_core::p2p::Snapshot>>>>,
+    lan_peers: Arc<Mutex<Vec<varsto_core::p2p::PeerAddr>>>,
+    listen: std::net::SocketAddr,
+    stop: Arc<std::sync::atomic::AtomicBool>,
+    last_publish: Mutex<Option<Instant>>,
+}
+
+impl P2p {
+    fn start(state: &Shared) -> Option<P2p> {
+        let (cfg, tag, device) = {
+            let st = state.lock().unwrap();
+            let e = st.engine.as_ref()?;
+            let cfg = e.p2p_config();
+            if !cfg.enabled {
+                return None;
+            }
+            (cfg, e.wire_vault_tag(), e.device_id().clone())
+        };
+        let server = match varsto_core::p2p::Server::bind(([0, 0, 0, 0], cfg.port).into()) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("service: p2p listener failed: {e:#}");
+                return None;
+            }
+        };
+        let listen = server.addr;
+        let snapshot: Arc<Mutex<Option<Arc<varsto_core::p2p::Snapshot>>>> =
+            Arc::new(Mutex::new(None));
+        let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let (snap2, stop2) = (snapshot.clone(), stop.clone());
+        let _ = std::thread::Builder::new()
+            .name("p2p-serve".into())
+            .spawn(move || server.run(snap2, stop2));
+        let lan_peers: Arc<Mutex<Vec<varsto_core::p2p::PeerAddr>>> =
+            Arc::new(Mutex::new(Vec::new()));
+        let (lan2, stop3) = (lan_peers.clone(), stop.clone());
+        match varsto_core::p2p::Beacon::new(tag, device, listen.port()) {
+            Ok(beacon) => {
+                let _ = std::thread::Builder::new()
+                    .name("p2p-beacon".into())
+                    .spawn(move || {
+                        let mut heard: std::collections::BTreeMap<
+                            std::net::SocketAddr,
+                            (varsto_core::p2p::PeerAddr, Instant),
+                        > = Default::default();
+                        while !stop3.load(std::sync::atomic::Ordering::Relaxed) {
+                            beacon.announce();
+                            for p in beacon.listen(Duration::from_secs(5)) {
+                                heard.insert(p.addr, (p, Instant::now()));
+                            }
+                            heard.retain(|_, (_, t)| t.elapsed() < Duration::from_secs(60));
+                            *lan2.lock().unwrap() =
+                                heard.values().map(|(p, _)| p.clone()).collect();
+                        }
+                    });
+            }
+            Err(e) => eprintln!("service: LAN beacon unavailable: {e:#}"),
+        }
+        state.lock().unwrap().service.p2p_listen = Some(listen);
+        println!(
+            "Varsto p2p: listening on {listen} (encrypted blocks only; peers need the vault key)"
+        );
+        Some(P2p {
+            snapshot,
+            lan_peers,
+            listen,
+            stop,
+            last_publish: Mutex::new(None),
+        })
+    }
+
+    /// Merge LAN peers with rendezvous records and hand them to the engine.
+    fn refresh_before_sync(&self, st: &mut State) {
+        let Some(e) = st.engine.as_mut() else { return };
+        let mut peers = self.lan_peers.lock().unwrap().clone();
+        let lan = peers.len();
+        if let Ok(records) = e.peer_records() {
+            for r in records {
+                if !peers.iter().any(|p| p.addr == r.addr) {
+                    peers.push(r);
+                }
+            }
+        }
+        st.service.p2p_lan_peers = lan;
+        st.service.p2p_peers = peers.clone();
+        let p = varsto_core::p2p::Peers::new(e.peer_key(), e.device_id().clone(), peers);
+        e.set_peers(Some(Arc::new(p)));
+    }
+
+    /// Refresh what we serve and re-publish our rendezvous record now and then.
+    fn refresh_after_sync(&self, st: &mut State) {
+        let Some(e) = st.engine.as_ref() else { return };
+        match e.peer_snapshot() {
+            Ok(s) => *self.snapshot.lock().unwrap() = Some(Arc::new(s)),
+            Err(err) => eprintln!("service: p2p snapshot failed: {err:#}"),
+        }
+        let mut last = self.last_publish.lock().unwrap();
+        if last.is_none_or(|t| t.elapsed() > Duration::from_secs(600)) {
+            let cfg = e.p2p_config();
+            if let Err(err) = e.publish_peer_record(self.listen.port(), cfg.public_addrs) {
+                eprintln!("service: p2p record publish failed: {err:#}");
+            }
+            *last = Some(Instant::now());
+        }
+    }
+}
+
+impl Drop for P2p {
+    fn drop(&mut self) {
+        self.stop.store(true, std::sync::atomic::Ordering::Relaxed);
     }
 }
 
@@ -290,6 +416,9 @@ pub fn run(opts: Options) -> Result<()> {
         .name("http".into())
         .spawn(move || desktop::serve_arc(http_server, http_state))?;
 
+    // Peer-to-peer: serve our chunks, announce on the LAN, learn peers.
+    let p2p = P2p::start(&state);
+
     // File watcher: sends a signal on any change under an attached folder.
     let (tx, rx) = mpsc::channel::<()>();
     let mut watcher = make_watcher(tx)?;
@@ -349,7 +478,13 @@ pub fn run(opts: Options) -> Result<()> {
             let mut st = state.lock().unwrap();
             st.service.sync_requested = false;
             let interval = st.service.interval_secs;
+            if let Some(p) = &p2p {
+                p.refresh_before_sync(&mut st);
+            }
             let result = st.engine.as_mut().map(|e| e.sync(None));
+            if let Some(p) = &p2p {
+                p.refresh_after_sync(&mut st);
+            }
             match result {
                 Some(Ok(reports)) => {
                     st.service.record_sync(&reports);

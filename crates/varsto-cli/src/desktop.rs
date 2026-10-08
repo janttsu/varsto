@@ -494,6 +494,21 @@ fn api_unlocked(
         (Method::Post, "/api/fetch") => Ok(serde_json::to_value(
             engine.fetch_file(&s(input, "folder")?, &s(input, "path")?)?,
         )?),
+        (Method::Get, "/api/p2p") => Ok(json!({"config": engine.p2p_config(), "listen": service.p2p_listen, "peers": service.p2p_peers, "lan_peers": service.p2p_lan_peers, "chunks_from_peers": service.p2p_chunks})),
+        (Method::Post, "/api/p2p") => {
+            let mut c = engine.p2p_config();
+            if let Some(en) = input.get("enabled").and_then(|v| v.as_bool()) {
+                c.enabled = en;
+            }
+            if let Some(p) = input.get("port").and_then(|v| v.as_u64()) {
+                c.port = p as u16;
+            }
+            if let Some(pubs) = input.get("public_addrs").and_then(|v| v.as_str()) {
+                c.public_addrs = pubs.split(',').filter_map(|a| a.trim().parse().ok()).collect();
+            }
+            engine.set_p2p_config(c)?;
+            Ok(json!({"ok": true, "note": "restart the background service to apply"}))
+        }
         (Method::Get, "/api/policy") => Ok(json!({
             "policies": engine.folders().into_iter().map(|(r, _)| json!({"folder": r.name, "policy": r.policy, "text": r.policy.as_ref().map(|p| p.describe())})).collect::<Vec<_>>(),
             "reports": engine.policy_check()?,

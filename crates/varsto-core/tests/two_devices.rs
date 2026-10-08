@@ -678,3 +678,72 @@ fn durability_policy_is_shared_and_evaluated_from_the_ledger() {
     a.set_policy("docs", None).unwrap();
     assert!(a.policy_check().unwrap().is_empty());
 }
+
+#[test]
+fn peers_serve_chunks_when_the_storage_has_none() {
+    use std::sync::{atomic::AtomicBool, Arc, Mutex};
+    use varsto_core::p2p;
+    let lab = lab();
+    let (mut a, key) = Engine::init(&lab.a_home, "laptop", PASS).unwrap();
+    a.chunker = ChunkerParams::SMALL;
+    a.add_storage(lab.storage.clone()).unwrap();
+    a.add_folder("docs", &lab.a_dir).unwrap();
+    let big: Vec<u8> = (0..200_000u32).map(|i| (i % 253) as u8).collect();
+    fs::write(lab.a_dir.join("big.bin"), &big).unwrap();
+    fs::write(lab.a_dir.join("note.txt"), b"from a peer").unwrap();
+    a.push("docs").unwrap();
+
+    // The storage keeps the manifests and ledger but loses every chunk object.
+    let chunks_dir = lab.a_home.with_file_name("storage").join("chunks");
+    fs::remove_dir_all(&chunks_dir).unwrap();
+
+    // Laptop serves its files to peers.
+    let server = p2p::Server::bind("127.0.0.1:0".parse().unwrap()).unwrap();
+    let addr = server.addr;
+    let snap = Arc::new(Mutex::new(Some(Arc::new(a.peer_snapshot().unwrap()))));
+    let stop = Arc::new(AtomicBool::new(false));
+    let (snap2, stop2) = (snap.clone(), stop.clone());
+    let th = std::thread::spawn(move || server.run(snap2, stop2));
+
+    let mut b = Engine::join(&lab.b_home, "desk", PASS, &key, lab.storage.clone()).unwrap();
+    b.chunker = ChunkerParams::SMALL;
+    b.attach_folder("docs", &lab.b_dir, false).unwrap();
+    // Without peers the pull cannot complete.
+    let r = b.pull("docs").unwrap();
+    assert_eq!(r.files_unavailable.len(), 2);
+    // With the laptop as a peer, every chunk comes from it and verifies.
+    let peers = p2p::Peers::new(
+        b.peer_key(),
+        b.device_id().clone(),
+        vec![p2p::PeerAddr {
+            device: a.device_id().clone(),
+            addr,
+            name: "laptop".into(),
+        }],
+    );
+    b.set_peers(Some(Arc::new(peers)));
+    let r = b.pull("docs").unwrap();
+    assert!(r.files_unavailable.is_empty(), "{:?}", r.files_unavailable);
+    assert!(r.chunks_from_peers >= 2, "{}", r.chunks_from_peers);
+    assert_eq!(fs::read(lab.b_dir.join("big.bin")).unwrap(), big);
+    assert_eq!(
+        fs::read(lab.b_dir.join("note.txt")).unwrap(),
+        b"from a peer"
+    );
+    // A stranger without the vault key gets nothing.
+    let stranger = p2p::Peers::new(
+        varsto_core::crypto::SecretKey::random(),
+        b.device_id().clone(),
+        vec![p2p::PeerAddr {
+            device: a.device_id().clone(),
+            addr,
+            name: String::new(),
+        }],
+    );
+    assert!(stranger
+        .get(&varsto_core::ids::ObjectName::from_bytes(&[0u8; 32]))
+        .is_none());
+    assert!(stranger.probe().iter().all(|(_, ok)| !ok));
+    stop.store(true, std::sync::atomic::Ordering::Relaxed);
+    th.join().unwrap();
+}

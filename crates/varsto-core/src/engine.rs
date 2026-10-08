@@ -68,6 +68,10 @@ struct FolderState {
     /// Kept per device; it feeds the cold-storage advice (MCP).
     #[serde(default)]
     accessed: BTreeMap<String, i64>,
+    /// Remote versions that could not be downloaded yet (no readable copy);
+    /// retried on every pull, including from peers that appear later.
+    #[serde(default)]
+    pending_remote: BTreeMap<String, FileState>,
 }
 
 fn now_secs() -> i64 {
@@ -107,6 +111,9 @@ pub struct PushReport {
 
 #[derive(Clone, Debug, Serialize, Default)]
 pub struct PullReport {
+    /// Chunks fetched from peers instead of storages.
+    #[serde(default)]
+    pub chunks_from_peers: u64,
     pub folder: String,
     pub manifests_applied: u64,
     pub files_updated: u64,
@@ -212,6 +219,8 @@ pub struct LedgerEntry {
 }
 
 pub struct Engine {
+    /// Peers to try before storages when downloading (set by the service).
+    peers: Option<std::sync::Arc<crate::p2p::Peers>>,
     home: PathBuf,
     vault: LocalVault,
     keys: Keys,
@@ -320,6 +329,7 @@ impl Engine {
         keys.save(home, passphrase, &vault.vault_id, &vault.device_id)?;
         util::write_json(&home.join("vault.json"), &vault)?;
         let mut engine = Engine {
+            peers: None,
             home: home.to_path_buf(),
             vault,
             keys,
@@ -475,7 +485,8 @@ impl Engine {
         }
         let keys = Keys::load(home, passphrase, &vault.vault_id, &vault.device_id)?;
         let keyring = Keyring::load(home, &keys, &vault.vault_id, &vault.device_id)?;
-        Ok(Engine {
+        let mut engine = Engine {
+            peers: None,
             config: Config::load(home)?,
             ledger: LedgerStore::open(&home.join("ledger"))?,
             clock: util::read_json_or_default(&home.join("clock.json"))?,
@@ -487,7 +498,21 @@ impl Engine {
             pending: Vec::new(),
             forked_self: false,
             chunker: ChunkerParams::DEFAULT,
-        })
+        };
+        // Command-line runs use the peers other devices advertised; the service adds LAN peers.
+        if engine.config.p2p.enabled {
+            if let Ok(list) = engine.peer_records() {
+                if !list.is_empty() {
+                    let p = crate::p2p::Peers::new(
+                        engine.peer_key(),
+                        engine.vault.device_id.clone(),
+                        list,
+                    );
+                    engine.set_peers(Some(std::sync::Arc::new(p)));
+                }
+            }
+        }
+        Ok(engine)
     }
 
     pub fn device_id(&self) -> &DeviceId {
@@ -1204,7 +1229,7 @@ impl Engine {
                     &fk.chunk_key(&chunk_id),
                     &fk.chunk_nonce(&chunk_id),
                     &fk.chunk_aad(&self.vault.vault_id, &chunk_id, chunk.len() as u64),
-                    &chunk,
+                    &crate::pack::pack(&chunk),
                 )?;
                 let object = ObjectName::from_bytes(&crypto::hash(&ct));
                 self.pending.push(Event::ChunkOnDevice {
@@ -1382,7 +1407,7 @@ impl Engine {
                     &fk.chunk_key(&chunk_id),
                     &fk.chunk_nonce(&chunk_id),
                     &fk.chunk_aad(&self.vault.vault_id, &chunk_id, chunk.len() as u64),
-                    &chunk,
+                    &crate::pack::pack(&chunk),
                 )?;
                 let object = ObjectName::from_bytes(&crypto::hash(&ct));
                 let key = chunk_storage_key(&object);
@@ -1576,6 +1601,13 @@ impl Engine {
         let fk = rec.keys()?;
         let me = self.vault.device_id.clone();
         let storages = self.open_storages(false)?;
+
+        // Files whose copies were unreachable last time: a storage or a peer
+        // may have them now.
+        let pending: Vec<FileState> = state.pending_remote.values().cloned().collect();
+        for remote in pending {
+            self.apply_remote(&rec, &fk, &root, &mut state, remote, &storages, &mut report)?;
+        }
 
         // Newest manifest per other device, across storages.
         let mut newest: BTreeMap<DeviceId, (u64, usize)> = BTreeMap::new();
@@ -1772,6 +1804,7 @@ impl Engine {
                 report.files_deleted += 1;
             }
             state.local_index.remove(&remote.path);
+            state.pending_remote.remove(&remote.path);
             state.files.insert(remote.path.clone(), remote);
             return Ok(());
         }
@@ -1780,6 +1813,7 @@ impl Engine {
             // Selective sync: show the file as a placeholder; fetch on demand.
             Self::write_placeholder(&disk, &remote)?;
             state.local_index.remove(&remote.path);
+            state.pending_remote.remove(&remote.path);
             state.files.insert(remote.path.clone(), remote);
             report.files_updated += 1;
             return Ok(());
@@ -1801,6 +1835,7 @@ impl Engine {
                         content_hash: remote.content_hash.clone(),
                     },
                 );
+                state.pending_remote.remove(&remote.path);
                 state.files.insert(remote.path.clone(), remote);
                 report.files_updated += 1;
             }
@@ -1808,6 +1843,7 @@ impl Engine {
                 report
                     .files_unavailable
                     .push(format!("{}: {e}", remote.path));
+                state.pending_remote.insert(remote.path.clone(), remote);
             }
         }
         Ok(())
@@ -1833,7 +1869,16 @@ impl Engine {
             for cref in &file.chunks {
                 let key = chunk_storage_key(&cref.object);
                 let mut got = None;
+                if let Some(peers) = &self.peers {
+                    if let Some((dev, ct)) = peers.get(&cref.object) {
+                        report.chunks_from_peers += 1;
+                        got = Some((format!("peer:{}", dev.short()), ct));
+                    }
+                }
                 for (spec, backend) in storages {
+                    if got.is_some() {
+                        break;
+                    }
                     if let Some(ct) = backend.get(&key)? {
                         if ObjectName::from_bytes(&crypto::hash(&ct)) != cref.object {
                             continue; // corrupt copy; try the next storage
@@ -1849,10 +1894,13 @@ impl Engine {
                         cref.chunk.short()
                     );
                 };
-                let plain = crypto::decrypt(
-                    &fk.chunk_key(&cref.chunk),
-                    &fk.chunk_aad(&self.vault.vault_id, &cref.chunk, cref.size),
-                    &ct,
+                let plain = crate::pack::unpack(
+                    &crypto::decrypt(
+                        &fk.chunk_key(&cref.chunk),
+                        &fk.chunk_aad(&self.vault.vault_id, &cref.chunk, cref.size),
+                        &ct,
+                    )?,
+                    cref.size,
                 )?;
                 if ChunkId::from_bytes(&crypto::keyed_hash(&fk.hash, &plain)) != cref.chunk {
                     let _ = fs::remove_file(&tmp);
@@ -2091,6 +2139,144 @@ impl Engine {
             ));
         }
         Ok(reports)
+    }
+
+    // ----- peer-to-peer ------------------------------------------------------
+
+    pub fn p2p_config(&self) -> crate::vault::P2pConfig {
+        self.config.p2p.clone()
+    }
+
+    pub fn set_p2p_config(&mut self, cfg: crate::vault::P2pConfig) -> Result<()> {
+        self.config.p2p = cfg;
+        self.config.save(&self.home)
+    }
+
+    /// Peers to try before storages (None disables).
+    pub fn set_peers(&mut self, peers: Option<std::sync::Arc<crate::p2p::Peers>>) {
+        self.peers = peers;
+    }
+
+    pub fn peer_key(&self) -> SecretKey {
+        crate::p2p::peer_key(&self.keys.master)
+    }
+
+    pub fn wire_vault_tag(&self) -> String {
+        crate::p2p::wire_vault_tag(&self.keys.master, &self.vault.vault_id)
+    }
+
+    /// What this device can serve to peers right now: every chunk of every
+    /// file present on disk, plus objects in local-directory storages.
+    pub fn peer_snapshot(&self) -> Result<crate::p2p::Snapshot> {
+        let mut folder_keys = BTreeMap::new();
+        let mut pieces = BTreeMap::new();
+        for (rec, mount) in self.folders() {
+            let Some(root) = mount else { continue };
+            let fk = rec.keys()?;
+            let state = self.load_state(&rec.folder_id)?;
+            for f in state.files.values().filter(|f| !f.deleted) {
+                let disk = root.join(&f.path);
+                if !disk.is_file() {
+                    continue;
+                }
+                let mut offset = 0u64;
+                for cr in &f.chunks {
+                    pieces.insert(
+                        cr.object.clone(),
+                        crate::p2p::Piece {
+                            folder: rec.folder_id.clone(),
+                            chunk: cr.chunk.clone(),
+                            path: disk.clone(),
+                            offset,
+                            len: cr.size,
+                        },
+                    );
+                    offset += cr.size;
+                }
+            }
+            folder_keys.insert(rec.folder_id.clone(), fk);
+        }
+        let local_roots = self
+            .config
+            .storages
+            .iter()
+            .filter_map(|s| match s {
+                StorageSpec::LocalDir { path, .. } if !s.is_cold() => Some(path.clone()),
+                _ => None,
+            })
+            .collect();
+        Ok(crate::p2p::Snapshot {
+            vault_id: self.vault.vault_id.clone(),
+            device_id: self.vault.device_id.clone(),
+            peer_key: self.peer_key(),
+            folder_keys,
+            pieces,
+            local_roots,
+        })
+    }
+
+    /// Publish where this device can be reached (rendezvous record).
+    pub fn publish_peer_record(
+        &self,
+        port: u16,
+        public_addrs: Vec<std::net::SocketAddr>,
+    ) -> Result<()> {
+        let rec = crate::p2p::PeerRecord {
+            device: self.vault.device_id.clone(),
+            name: self.vault.device_name.clone(),
+            port,
+            lan_addrs: crate::p2p::local_ipv4_addrs(),
+            public_addrs,
+            updated_utc: util::now_utc(),
+        };
+        let key = self.keys.registry_key();
+        let blob = rec.seal(&self.vault.vault_id, &key)?;
+        let k = crate::p2p::PeerRecord::storage_key(&rec.device);
+        for (_, backend) in self.open_storages(false)? {
+            // Records change: delete then write (single writer per path).
+            backend.delete(&k)?;
+            backend.put_if_absent(&k, &blob)?;
+        }
+        Ok(())
+    }
+
+    /// Peers other devices advertised through the storages.
+    pub fn peer_records(&self) -> Result<Vec<crate::p2p::PeerAddr>> {
+        let key = self.keys.registry_key();
+        let mut out: Vec<crate::p2p::PeerAddr> = Vec::new();
+        for (_, backend) in self.open_storages(false)? {
+            for k in backend.list(crate::p2p::PeerRecord::PREFIX)? {
+                let Some(id) = k
+                    .strip_prefix(crate::p2p::PeerRecord::PREFIX)
+                    .and_then(|r| r.strip_suffix(".enc"))
+                else {
+                    continue;
+                };
+                let Ok(dev) = DeviceId::from_hex(id) else {
+                    continue;
+                };
+                if dev == self.vault.device_id {
+                    continue;
+                }
+                let Some(blob) = backend.get(&k)? else {
+                    continue;
+                };
+                let Ok(rec) = crate::p2p::PeerRecord::open(&blob, &self.vault.vault_id, &dev, &key)
+                else {
+                    continue;
+                };
+                for addr in rec.addrs() {
+                    if !out.iter().any(|p| p.addr == addr) {
+                        out.push(crate::p2p::PeerAddr {
+                            device: dev.clone(),
+                            addr,
+                            name: rec.name.clone(),
+                        });
+                    }
+                }
+            }
+        }
+        Ok(out)
     }
 
     /// Record that `path` was used now (open, read, export) on this device.

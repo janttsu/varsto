@@ -120,6 +120,11 @@ enum Cmd {
         #[arg(long)]
         check: bool,
     },
+    /// Peer-to-peer transfer of encrypted blocks between your devices (LAN and internet).
+    P2p {
+        #[command(subcommand)]
+        cmd: P2pCmd,
+    },
     /// Durability policies: "two cloud copies and one at home, verified within 30 days".
     Policy {
         #[command(subcommand)]
@@ -130,6 +135,22 @@ enum Cmd {
         #[command(subcommand)]
         cmd: Option<McpCmd>,
     },
+}
+
+#[derive(Subcommand)]
+enum P2pCmd {
+    /// Enable: the background service serves this device's blocks and pulls from peers.
+    Enable {
+        /// Listening port (default: a fixed port is easier to forward).
+        #[arg(long, default_value_t = 17893)]
+        port: u16,
+        /// Address other devices reach this one at over the internet (host:port), repeatable.
+        #[arg(long = "public")]
+        public_addrs: Vec<std::net::SocketAddr>,
+    },
+    Disable,
+    /// Show settings, known peers and whether they answer right now.
+    Status,
 }
 
 #[derive(Subcommand)]
@@ -844,6 +865,74 @@ fn run(cli: &Cli) -> Result<()> {
                 ReplicaCmd::Status => {
                     let r = varsto_core::replica::Replica::open(&home)?;
                     println!("{}", serde_json::to_string_pretty(&r.summary())?);
+                }
+            }
+        }
+        Cmd::P2p { cmd } => {
+            let mut engine = Engine::open(&home, &passphrase()?)?;
+            match cmd {
+                P2pCmd::Enable { port, public_addrs } => {
+                    engine.set_p2p_config(varsto_core::vault::P2pConfig {
+                        enabled: true,
+                        port: *port,
+                        public_addrs: public_addrs.clone(),
+                    })?;
+                    println!(
+                        "p2p enabled on port {port}{}; restart the background service to apply",
+                        if public_addrs.is_empty() {
+                            String::new()
+                        } else {
+                            format!(
+                                ", public {}",
+                                public_addrs
+                                    .iter()
+                                    .map(|a| a.to_string())
+                                    .collect::<Vec<_>>()
+                                    .join(", ")
+                            )
+                        }
+                    );
+                }
+                P2pCmd::Disable => {
+                    let mut c = engine.p2p_config();
+                    c.enabled = false;
+                    engine.set_p2p_config(c)?;
+                    println!("p2p disabled; restart the background service to apply");
+                }
+                P2pCmd::Status => {
+                    let c = engine.p2p_config();
+                    let peers = engine.peer_records()?;
+                    let probe = varsto_core::p2p::Peers::new(
+                        engine.peer_key(),
+                        engine.device_id().clone(),
+                        peers,
+                    )
+                    .probe();
+                    if cli.json {
+                        println!(
+                            "{}",
+                            serde_json::json!({"config": c, "peers": probe.iter().map(|(p, ok)| serde_json::json!({"device": p.device.to_string(), "name": p.name, "addr": p.addr.to_string(), "reachable": ok})).collect::<Vec<_>>()})
+                        );
+                    } else {
+                        println!(
+                            "p2p: {}, port {}, public {:?}",
+                            if c.enabled { "enabled" } else { "disabled" },
+                            c.port,
+                            c.public_addrs
+                        );
+                        if probe.is_empty() {
+                            println!("no peer records yet (other devices publish one when their service runs with p2p enabled)");
+                        }
+                        for (p, ok) in probe {
+                            println!(
+                                "  {} {} at {}: {}",
+                                p.name,
+                                p.device.short(),
+                                p.addr,
+                                if ok { "reachable" } else { "no answer" }
+                            );
+                        }
+                    }
                 }
             }
         }
