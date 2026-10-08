@@ -162,10 +162,10 @@ PLATFORMS = [
     ("Linux", "linux", lambda n: n.endswith("-x86_64-unknown-linux-musl.tar.gz"), [],
      "x86_64, static binary. Tray icon, background service, browser interface and command line in one file. Tested on the development machine."),
     ("macOS", "macos", lambda n: n.endswith("-macos-apple-silicon-lite.zip"),
-     [("Intel app", lambda n: n.endswith("-macos-intel-lite.zip")),
-      ("Command line, Apple Silicon", lambda n: n.endswith("-aarch64-apple-darwin.tar.gz")),
-      ("Command line, Intel", lambda n: n.endswith("-x86_64-apple-darwin.tar.gz"))],
-     "Apple Silicon and Intel apps, unsigned: right-click, Open the first time. Cross-compiled on Linux, not yet tested on a Mac. The full menu-bar app follows once it is built on real hardware."),
+     [("Varsto.app for Intel Macs", lambda n: n.endswith("-macos-intel-lite.zip")),
+      ("Command line only, Apple Silicon", lambda n: n.endswith("-aarch64-apple-darwin.tar.gz")),
+      ("Command line only, Intel", lambda n: n.endswith("-x86_64-apple-darwin.tar.gz"))],
+     "Varsto.app for Apple Silicon: double-click starts the background service and opens the interface in your browser. Unsigned: right-click, Open the first time. Cross-compiled on Linux, not yet tested on a Mac. The menu-bar icon is in the full app, which is built on a Mac (apps/macos/build.sh) and published once tested."),
     ("Windows", "windows", lambda n: n.endswith("-x86_64-pc-windows-gnu.zip"), [],
      "x86_64 zip. Double-click Varsto.cmd for the tray icon and the interface. Cross-compiled, not yet tested on Windows."),
     ("Android", "android", lambda n: n.endswith("-android-debug.apk"), [],
@@ -212,7 +212,8 @@ def downloads_table(depth: int) -> str:
         icon_svg = f'<svg class="dl-icon" viewBox="0 0 24 24" aria-hidden="true">{ICONS[icon]}</svg>'
         if main:
             name, digest, size = main
-            button = (f'<a class="dl-primary" href="{pre}downloads/{html.escape(name)}">Download for {html.escape(title)}</a>'
+            label = "Download Varsto.app (Apple Silicon)" if title == "macOS" else f"Download for {html.escape(title)}"
+            button = (f'<a class="dl-primary" href="{pre}downloads/{html.escape(name)}">{label}</a>'
                       f'<p class="dl-meta">{html.escape(name)}<br>{human(size)} · <span class="sum" title="{digest}">SHA-256 {digest[:12]}…</span></p>')
         elif title == "Source":
             button = f'<a class="dl-primary" href="{pre}downloads/">Source</a>'
