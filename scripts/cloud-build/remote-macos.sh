@@ -27,7 +27,7 @@ zip="$(ls "$HOME/build/dist"/Varsto-*-macos.zip)"
 rm -rf "$HOME/build/app" && mkdir -p "$HOME/build/app" && ditto -x -k "$zip" "$HOME/build/app"
 echo "== smoke test of the bundled command line"
 export VARSTO_PASSPHRASE=cloud-test-passphrase-123
-bin="$HOME/build/app/Varsto.app/Contents/MacOS/varsto"
+bin="$HOME/build/app/Varsto.app/Contents/Helpers/varsto"
 "$bin" --version
 "$bin" --home "$HOME/build/home" init --name mac-a >/dev/null
 mkdir -p "$HOME/build/storage" "$HOME/build/files"
