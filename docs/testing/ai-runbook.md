@@ -14,8 +14,8 @@ You are an agent asked to run Varsto's tests. Follow this exactly.
 ## Steps
 
 1. **Preflight.** Check required tools (see TESTING.md), free disk space and that virtualisation is available. Record versions and the git commit under test.
-2. **Provision.** `scripts/test/provision-vm.sh <distro>` for each distro in the chosen suite.
-3. **Run.** `scripts/test/run-suite.sh <suite> <vm>`. Capture the exit code, JUnit XML and JSON results.
+2. **Provision.** `scripts/test/provision-vm.sh <distro>` for each distro in the chosen suite. It prints the VM name on stdout; keep it for the next steps. Exit code 3 means an environment problem: report it and stop.
+3. **Run.** `scripts/test/run-suite.sh <suite> <vm>`. Capture the exit code (0 pass, 1 fail, 2 usage or not implemented, 3 environment problem), JUnit XML and JSON results from `test-results/<vm>/`.
 4. **Collect.** `scripts/test/collect-logs.sh <vm>`.
 5. **Reproduce failures.** For tests that print a seed, re-run once with the same seed to confirm the failure is reproducible.
 6. **Report.** Fill in `docs/testing/report-template.md` (Markdown plus JSON). For each failure include: test name, seed, minimal reproduction steps, log excerpt and a suspected cause (label guesses as guesses).
