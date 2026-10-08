@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Alpha.6: the source is public, and every platform builds in the cloud: Varsto</title>
+<meta name="description" content="The repository is now public on GitHub under the PolyForm Shield licence, the native macOS and iOS apps build on GitHub Actions, Linux, Windows and Android build on short-lived cloud machines, and the interface was redone around a file view.">
+<meta name="robots" content="noindex, nofollow">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../blog/feed.xml">
+<link rel="stylesheet" href="../assets/css/site.css?v=34b4c5a07a">
+<script src="../assets/js/theme.js?v=0951491269"></script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="alpha" role="note">
+  <div class="wrap"><strong>Alpha software, not for production data.</strong> Bugs can cause data loss, formats may change without migration, and the cryptography has not been independently audited. Keep your own backups and check that you can restore from them.</div>
+</div>
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="../"><img src="../assets/img/logo.svg" alt="" width="28" height="28"><span>Varsto</span></a>
+    <nav class="main" aria-label="Main">
+      <a href="../">Project</a>
+      <a href="../features/">Features</a>
+      <a href="../use-cases/">Use cases</a>
+      <a href="../encryption/">Encryption</a>
+      <a href="../screenshots/">Screenshots</a>
+      <a href="../docs/">Docs</a>
+      <a href="../downloads/">Downloads</a>
+      <a href="../blog/" aria-current="page">Blog</a>
+      <a href="../forum/">Forum</a>
+      <a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a>
+      <button class="theme" id="theme-toggle" type="button" aria-label="Change colour theme">Theme: auto</button>
+    </nav>
+  </div>
+</header>
+<main id="main">
+  <div class="wrap">
+<article class="prose"><h1>Alpha.6: the source is public, and every platform builds in the cloud</h1><p class="note"><time datetime="2026-10-09">2026-10-09</time></p>
+<p>Since alpha-0 the alphas have added most of what the plan calls the core: S3 and rclone storages, sharing with another user by a sealed key, hybrid post-quantum signatures and key exchange, durability policies that warn in time, peer-to-peer transfer between your own devices, compression before encryption, Strongroom folders behind a FIDO2 security key, a printable recovery kit, and an MCP server so an assistant can read and reorganise exactly the folders you grant. Alpha.6 is about the project around that code.</p>
+<h2 id="the-source-is-public">The source is public</h2>
+<p>The repository lives at <a href="https://github.com/janttsu/varsto">github.com/janttsu/varsto</a> under the <a href="../docs/licence.html">PolyForm Shield License 1.0.0</a>: source-available, not open source. Read it, build it, report what breaks in the issue tracker. The history was rewritten before publication so that it carries no personal paths or addresses; if you cloned an earlier private copy, clone again.</p>
+<h2 id="every-platform-is-built-by-a-machine-that-did-not-exist-an-hour-earlier">Every platform is built by a machine that did not exist an hour earlier</h2>
+<ul>
+<li><strong>macOS and iOS</strong> build on GitHub Actions on Apple Silicon runners: the test suite, the native Varsto.app with its own window, menu-bar item and bundled command line, and the iOS shell for the Simulator, which is launched there and photographed. A tagged release gets the macOS zip attached automatically.</li>
+<li><strong>Linux, Windows and Android</strong> build and test on short-lived cloud machines created by a script, used once and deleted: the full test suite on a real Ubuntu, the Windows zip installed and exercised on a real Windows Server, the Android APK built with the SDK and NDK and then run in an emulator.</li>
+</ul>
+<p>No build depends on a developer's laptop any more, which also means every package on the download page comes from a documented, repeatable path.</p>
+<h2 id="a-file-view-first">A file view first</h2>
+<p>The interface was redone: a sidebar with a folder tree, a Files view with breadcrumbs, state squares and a details pane, and a phone mode in which tables become cards and the navigation moves to the bottom. On a phone a folder is added by name alone; the device chooses where it lives, so you never type a directory. There is also a guarded "start over on this device" in Settings for the alpha, and the overview suggests where idle files would be cheaper to keep, from Varsto's own last-used record and open price data.</p>
+<h2 id="still-alpha">Still alpha</h2>
+<p>Nothing here changes the warning on every page: the cryptography has not been audited, the format may still change, and a bug can destroy data. Use test data, keep your own backups, and read the <a href="../docs/failure-model.html">failure model</a> before trusting it with anything else.</p>
+
+</article>
+  </div>
+</main>
+<footer class="site">
+  <div class="wrap">
+    <span>Varsto is a working name. Source: <a href="https://github.com/janttsu/varsto">github.com/janttsu/varsto</a>, under the PolyForm Shield License 1.0.0 (source-available).</span>
+    <span>No cookies, no tracking. The web server keeps a standard access log for at most seven days.</span>
+    <span><a href="../docs/security-policy.html">Security policy</a> · <a href="../docs/licence.html">Licence</a> · <a href="../docs/trademark.html">Trademark</a></span>
+  </div>
+</footer>
+</body>
+</html>
