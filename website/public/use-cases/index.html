@@ -45,7 +45,7 @@
         <p><strong>Situation.</strong> On a plane you realise the file you need to work on is on your phone, not on the laptop. There is no internet.</p>
         <p><strong>How Varsto helps.</strong> The two devices find each other locally (the phone's hotspot, Wi-Fi Direct or a paired connection) and the file moves directly from one to the other. On the laptop the folder is in selective mode, so the file is already visible as a placeholder; one click fetches it from the phone. Your edits travel back the same way.</p>
         <p><strong>When the network returns</strong> at the airport or hotel, both devices push the changes to your cloud storage and the other devices catch up. The ledger knows at every moment which version is where.</p>
-        <p class="note">Honest notes: aircraft Wi-Fi usually isolates clients, so the phone's own hotspot is the documented first choice. While both devices are in the same bag the changes exist in one place only; the app shows "on these two devices only, not yet in the cloud" and reminds you to sync when a network is available. Signing in, including a security key, works offline because there is no server to ask. Today: selective sync, placeholders and the ledger exist; direct device-to-device transfer does not yet, the devices meet through a shared storage or a <a href="#uc-10">transferrer disk</a>.</p>
+        <p class="note">Honest notes: aircraft Wi-Fi usually isolates clients, so the phone's own hotspot is the documented first choice. While both devices are in the same bag the changes exist in one place only; the app shows "on these two devices only, not yet in the cloud" and reminds you to sync when a network is available. Signing in, including a security key, works offline because there is no server to ask. Today: selective sync, placeholders, the ledger and direct device-to-device transfer on the LAN exist (the phone's hotspot is a LAN); the cloud catches up when it is reachable. Across the internet a device must listen on a reachable address for now.</p>
       </div>
     </section>
 
@@ -54,7 +54,7 @@
       <img src="../assets/img/usecases/stolen.svg" alt="A stolen laptop: the Strongroom folder stays locked, the device is revoked and wiped from a phone." width="640" height="320" loading="lazy">
       <div>
         <p>The thief gets the machine open. Strongroom folders stay locked because they need your security key, not a password that may be cached. From another device you revoke the laptop and queue a wipe command that runs the moment it comes online. Everything is still restorable from your own storages. The ledger's revocation cut-off means events signed by the stolen device after that point are quarantined rather than trusted.</p>
-        <p class="note">Today: a device restored from an old backup is detected and fenced in the ledger; per-folder keys exist. Revocation, wipe and Strongroom are designed, not built.</p>
+        <p class="note">Today: Strongroom folders exist (the key lives only while your security key is touched), and a device restored from an old backup is detected and fenced in the ledger. Revocation and wipe are designed, not built.</p>
       </div>
     </section>
 
@@ -63,7 +63,7 @@
       <img src="../assets/img/usecases/provider.svg" alt="One provider is closed; copies on a second provider and a disk at home remain and the app repairs." width="640" height="320" loading="lazy">
       <div>
         <p>Your storage box is shut down without warning. Your data is also on a second provider and on your own devices, because Varsto never relies on one storage. The app alerts you that a policy is no longer met, repairs the missing copies to another storage, and "drain" moves everything off the dead provider's record. Switching providers is an ordinary operation, not a migration project.</p>
-        <p class="note">Today: any number of storages (local directories in the alpha), <code>fsck</code> reports which claimed copies a storage can no longer back, and new storages receive what they lack. Alerts, policies and drain are designed.</p>
+        <p class="note">Today: any number of storages (directories, S3 buckets, rclone remotes), durability policies that warn in the app and by notification when a rule is at risk or broken, <code>fsck</code> reports which claimed copies a storage can no longer back, and new storages receive what they lack. Automatic repair and drain are designed.</p>
       </div>
     </section>
 
@@ -72,7 +72,7 @@
       <img src="../assets/img/usecases/fire.svg" alt="A house on fire; every file also has a copy at relatives in another city and in a cloud bucket." width="640" height="320" loading="lazy">
       <div>
         <p>Everything at home goes at once: PC, NAS, the disks in the cupboard. Placement rules by location ("one copy outside this place") have made sure every file also exists in another city or country, in a cloud bucket, on a disk kept at relatives, or on an <a href="#uc-11">untrusted replica</a> at a friend's. Devices in the same place are treated as one failure domain, so two copies in the same room never count as two.</p>
-        <p class="note">Status: designed and documented, not built yet.</p>
+        <p class="note">Today: every storage carries a place label (home, cloud, offsite, ...) and a folder policy such as "at least one copy in place cloud" is checked from the ledger on every device, with a warning before it breaks. Grouping whole devices into sites is designed.</p>
       </div>
     </section>
 
@@ -98,8 +98,8 @@
       <h2>7. "What is the cheapest place to keep these?"</h2>
       <img src="../assets/img/usecases/cheapest.svg" alt="A chat with an assistant that compares storage prices from open data and proposes a move, with a Confirm button." width="640" height="320" loading="lazy">
       <div>
-        <p>Ask the AI assistant of your choice through Varsto's MCP server. It compares providers from an open, dated and sourced price data set, looks at how often the files are read, and proposes a move, for example old videos to a cold tier with one hot copy at home. Nothing moves until you confirm. The assistant sees names and sizes only where you allow it, never file contents, and never the folders you hide from it.</p>
-        <p class="note">Status: designed and documented, not built yet.</p>
+        <p>Ask the AI assistant of your choice through Varsto's MCP server. It compares providers from an open, dated and sourced price data set, looks at when the files were last used (Varsto keeps its own record), and proposes a move, for example old videos to a cold tier with one hot copy at home. Nothing moves until you confirm. The assistant sees only the folders you granted, never Strongroom folders.</p>
+        <p class="note">Today: <code>varsto mcp</code> with per-folder grants, the last-used record and the cost advice tool work. Carrying out the move with one click is next.</p>
       </div>
     </section>
 
@@ -108,7 +108,7 @@
       <img src="../assets/img/usecases/sensitive.svg" alt="A tax folder in a Strongroom: opens only with a security key, no clear text on the phone, hidden from the AI assistant." width="640" height="320" loading="lazy">
       <div>
         <p>The tax folder lives in a Strongroom: it opens only with a touch of your FIDO2 security key, enforced in the cryptography, not by a dialog. On the phone nothing from it is ever written in clear text, and the assistant cannot see that the folder exists. Once the folder is closed, the key leaves memory.</p>
-        <p class="note">Today: every folder has its own key and the alpha writes no clear text on storage. The security-key gate and the hidden-from-assistant flag are in the plan.</p>
+        <p class="note">Today: Strongroom folders open only with a FIDO2 security key (libfido2 tools) and are invisible to assistants; nothing is written in clear text on storage. Decrypt-on-open viewers on the phone are in the plan.</p>
       </div>
     </section>
 
@@ -118,7 +118,7 @@
       <div>
         <p><strong>Situation.</strong> You manage a huge archive on old hard disks through a USB dock. The disks sit in a cupboard; some are kept elsewhere. Today you track them with a spreadsheet, or with git-annex.</p>
         <p><strong>How Varsto helps.</strong> Plug in disk "data-01" and tell the app to use it. It fills the disk according to your retention policy, tells you when it can be ejected, and records in the ledger what is on it, where it is kept and when it was last verified. When you need a large file on the laptop and the cloud download would take hours, the app proposes: "Attach disk data-01 (shelf: home); about 12 minutes instead of 9 hours from the cloud". A folder can be kept only on disks, replicated as many times as you choose, with no cloud copy.</p>
-        <p class="note">Today: a disk is just a local-directory storage; the ledger records claims and verifications per storage. Disk groups, places, policies and the "attach this disk" prompt are designed.</p>
+        <p class="note">Today: a disk is a local-directory storage with a place label; the ledger records claims and verifications per storage, and policies warn when a disk has not been verified in time. Disk groups, "disks only" folders and the "attach this disk" prompt are designed.</p>
       </div>
     </section>
 
@@ -147,7 +147,7 @@
       <h2>12. Sharing a folder with another Varsto user</h2>
       <img src="../assets/img/features/sharing.svg" alt="Two users; a folder key is handed over so the other user can sync and read the folder." width="640" height="320" loading="lazy">
       <div>
-        <p>You hand over a share token for one folder: the folder's key, nothing else of your vault. The other user accepts it on their own device, points it at storage both of you can reach, and from then on syncs and reads that folder like any of their own. Their device writes its own signed ledger under the folder key, so you see their copies too. Give the token over a channel you trust; QR invitations and revocation are the next steps.</p>
+        <p>The other user's device prints a request code; you seal the folder key to it (hybrid X25519 + ML-KEM-768) and send the token back over any channel, since only their device can open it. They point the folder at storage both of you can reach and from then on sync and read it like any of their own. Their device writes its own signed ledger under the folder key, so you see their copies too. Confirming who sent a request code, QR invitations and revocation are the next steps.</p>
         <p class="note"><code>varsto share create docs</code> and, for the recipient, <code>varsto share accept</code>, or the same buttons in the desktop interface.</p>
       </div>
     </section>
