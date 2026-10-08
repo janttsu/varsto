@@ -156,8 +156,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         buildMainMenu()
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         if let button = statusItem.button {
-            let image = NSImage(systemSymbolName: "lock.icloud", accessibilityDescription: "Varsto") ?? NSImage(named: NSImage.folderName)
+            // The brand mark as a template image (brand/menubar-template.svg), falling back to a symbol.
+            let image = Bundle.main.url(forResource: "menubar-template", withExtension: "png").flatMap { NSImage(contentsOf: $0) }
+                ?? NSImage(systemSymbolName: "lock.icloud", accessibilityDescription: "Varsto")
             image?.isTemplate = true
+            image?.size = NSSize(width: 18, height: 18)
             button.image = image
         }
         let menu = NSMenu()

@@ -393,11 +393,21 @@ def win_bootstrap(args):
         scp(str(ROOT / "scripts/cloud-build/win-bootstrap.sh"), f"root@{jip}:/it/win-bootstrap.sh")
         # The password goes through a file, not the command line.
         subprocess.run(ssh_base("root", jip) + [f"umask 077 && printf '%s' '{pw}' > /it/winpass"], check=True)
-        run_ssh("root", jip, f"export WIN_IP={wip} WIN_PASS=\"$(cat /it/winpass)\" PUBKEY='{pub.read_text().strip()}' && bash /it/win-bootstrap.sh")
+        tool = "winshot" if args.target == "shots-windows" else "winssh"
+        run_ssh("root", jip, f"export WIN_TOOL={tool} WIN_IP={wip} WIN_PASS=\"$(cat /it/winpass)\" PUBKEY='{pub.read_text().strip()}' && bash /it/win-bootstrap.sh")
         scp(f"root@{jip}:/it/shots/*", str(out))
-        log(f"Windows bootstrap done; screenshots in {out}")
-        wait_ssh("Administrator", wip, timeout=300)
-        log("SSH to the Windows machine works")
+        if tool == "winshot":
+            # The session script wrote its captures on the Windows machine; fetch them over SSH.
+            for _ in range(12):
+                p = subprocess.run(["scp", "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null", "-o", "LogLevel=ERROR", f"Administrator@{wip}:C:/shots/*", str(out)], capture_output=True)
+                if p.returncode == 0:
+                    break
+                time.sleep(10)
+            log(f"Windows tray screenshots in {out}")
+        else:
+            log(f"Windows bootstrap done; screenshots in {out}")
+            wait_ssh("Administrator", wip, timeout=300)
+            log("SSH to the Windows machine works")
     finally:
         if not args.keep:
             delete_instance(jump["id"])
@@ -427,7 +437,7 @@ def cleanup(args):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("target", choices=["linux", "windows", "macos", "integration", "shots-linux", "win-bootstrap", "cleanup", "mac-stock"])
+    ap.add_argument("target", choices=["linux", "windows", "macos", "integration", "shots-linux", "win-bootstrap", "shots-windows", "cleanup", "mac-stock"])
     ap.add_argument("--keep", action="store_true", help="do not delete the machine afterwards")
     ap.add_argument("--type", help="instance type (POP2-4C-16G, POP2-2C-8G-WIN, M4-S, ...)")
     ap.add_argument("--zone", help="zone for Mac minis (fr-par-1 or fr-par-3)")
@@ -442,7 +452,7 @@ def main():
         for zone in ("fr-par-1", "fr-par-3"):
             print(zone, mac_stock(zone))
         return
-    {"linux": build_linux, "windows": build_windows, "macos": build_macos, "integration": integration, "shots-linux": shots_linux, "win-bootstrap": win_bootstrap, "cleanup": cleanup}[args.target](args)
+    {"linux": build_linux, "windows": build_windows, "macos": build_macos, "integration": integration, "shots-linux": shots_linux, "win-bootstrap": win_bootstrap, "shots-windows": win_bootstrap, "cleanup": cleanup}[args.target](args)
 
 
 if __name__ == "__main__":

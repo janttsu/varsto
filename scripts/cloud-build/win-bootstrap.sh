@@ -25,14 +25,18 @@ win="$(xdotool search --class xfreerdp | head -1)"
 xdotool windowactivate --sync "$win" 2>/dev/null || true
 xdotool key --clearmodifiers super+r
 sleep 3
-cmd="powershell -NoProfile -ExecutionPolicy Bypass -Command \"Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0; Set-Service sshd -StartupType Automatic; Start-Service sshd; New-NetFirewallRule -Name sshd -DisplayName OpenSSH -Direction Inbound -Protocol TCP -LocalPort 22 -Action Allow; New-Item -ItemType Directory -Force C:\\ProgramData\\ssh | Out-Null; Set-Content -Path C:\\ProgramData\\ssh\\administrators_authorized_keys -Value '$PUBKEY' -Encoding ascii; icacls C:\\ProgramData\\ssh\\administrators_authorized_keys /inheritance:r /grant Administrators:F /grant SYSTEM:F; New-ItemProperty -Path HKLM:\\SOFTWARE\\OpenSSH -Name DefaultShell -Value C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe -PropertyType String -Force; Restart-Service sshd\""
-xdotool type --delay 12 --clearmodifiers "$cmd"
+cmd="powershell -ep bypass -c \"iwr -useb https://varsto.soderlund.in/tools/${WIN_TOOL:-winssh}.ps1 | iex\""
+xdotool type --delay 20 --clearmodifiers "$cmd"
 sleep 1
 xdotool key Return
 sleep 5
 import -window root /it/shots/windows-desktop-after-command.png
-# Wait for OpenSSH from here (same network as the Windows machine).
-for i in $(seq 1 60); do nc -z -w2 "$WIN_IP" 22 && { echo "SSH_UP"; break; }; sleep 10; done
+# Wait for OpenSSH from here (same network as the Windows machine), or for the screenshot run.
+if [ "${WIN_TOOL:-winssh}" = winssh ]; then
+  for i in $(seq 1 60); do nc -z -w2 "$WIN_IP" 22 && { echo "SSH_UP"; break; }; sleep 10; done
+else
+  sleep 90
+fi
 tail -5 /it/rdp.log
 import -window root /it/shots/windows-desktop.png
 kill $RDP 2>/dev/null || true

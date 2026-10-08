@@ -68,6 +68,7 @@ else
   iconutil -c icns "$iconset" -o "$app/Resources/Varsto.icns"
 fi
 cp "$root/README.md" "$root/LICENSE" "$root/NOTICE" "$root/TRADEMARK.md" "$app/Resources/"
+cp "$root/brand/png/menubar-template.png" "$root/brand/png/menubar-template@2x.png" "$app/Resources/"
 echo "== ad-hoc signature"
 codesign --force --sign - "$app/Helpers/varsto"
 codesign --force --deep --sign - "$stage/Varsto.app"

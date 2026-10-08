@@ -1,0 +1,15 @@
+# Varsto forum (Flarum in Docker on 127.0.0.1:8090). Needs a DNS A record
+# forum.varsto.soderlund.in -> this server before enabling, or Caddy keeps
+# retrying the certificate. Enable: rename to forum.caddy in ~/caddy-sites
+# and run ~/bin/caddy reload --config ~/Caddyfile.
+forum.varsto.soderlund.in {
+	encode zstd gzip
+	reverse_proxy 127.0.0.1:8090
+	log {
+		output file /var/log/caddy/forum-access.log {
+			roll_size 10MiB
+			roll_keep 5
+			roll_keep_for 168h
+		}
+	}
+}

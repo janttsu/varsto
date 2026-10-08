@@ -140,6 +140,22 @@
         </div>
       </div>
 
+      <div class="card" id="datamapcard">
+        <div class="card-head">
+          <h2 class="card-title">Data map</h2>
+          <span id="datamap-total" class="muted small"></span>
+        </div>
+        <div id="datamap" class="blocks" aria-label="One square per block of encrypted data, coloured by where it is"></div>
+        <div class="legend">
+          <span class="legend-item"><i class="blk s-verified"></i>Verified by another device <b id="leg-verified">0</b></span>
+          <span class="legend-item"><i class="blk s-stored"></i>Stored on a storage <b id="leg-stored">0</b></span>
+          <span class="legend-item"><i class="blk s-local"></i>Only on this device <b id="leg-local">0</b></span>
+          <span class="legend-item"><i class="blk s-ph"></i>Not on this device <b id="leg-ph">0</b></span>
+          <span class="legend-item"><i class="blk s-missing"></i>Unavailable <b id="leg-missing">0</b></span>
+          <span id="datamap-note" class="legend-note muted"></span>
+        </div>
+      </div>
+
       <div class="card">
         <div class="card-head">
           <h2 class="card-title">Folders</h2>

@@ -1,0 +1,38 @@
+# Varsto community forum: Flarum (lightweight PHP forum) with MariaDB,
+# behind the host's Caddy at https://forum.varsto.soderlund.in.
+# Start: docker compose up -d      First run creates the admin account from .env.
+services:
+  flarum:
+    image: mondedie/flarum:stable
+    container_name: forum
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      - FORUM_URL=${FORUM_URL}
+      - DB_HOST=forum-db
+      - DB_NAME=flarum
+      - DB_USER=flarum
+      - DB_PASS=${DB_PASS}
+      - FLARUM_ADMIN_USER=${ADMIN_USER}
+      - FLARUM_ADMIN_PASS=${ADMIN_PASS}
+      - FLARUM_ADMIN_MAIL=${ADMIN_MAIL}
+      - FLARUM_TITLE=Varsto forum
+    volumes:
+      - ./data/assets:/flarum/app/public/assets
+      - ./data/extensions:/flarum/app/extensions
+      - ./data/storage/logs:/flarum/app/storage/logs
+    ports:
+      - "127.0.0.1:8090:8888"
+    depends_on:
+      - forum-db
+  forum-db:
+    image: mariadb:11
+    container_name: forum-db
+    restart: unless-stopped
+    environment:
+      - MARIADB_ROOT_PASSWORD=${DB_ROOT_PASS}
+      - MARIADB_DATABASE=flarum
+      - MARIADB_USER=flarum
+      - MARIADB_PASSWORD=${DB_PASS}
+    volumes:
+      - ./data/mariadb:/var/lib/mysql

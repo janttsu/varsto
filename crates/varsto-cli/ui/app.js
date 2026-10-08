@@ -20,6 +20,41 @@
   function pill(cls, text) { return el("span", "pill " + cls, text); }
   function icon(name, cls) { var s = document.createElementNS("http://www.w3.org/2000/svg", "svg"); s.setAttribute("class", "icon" + (cls ? " " + cls : "")); var u = document.createElementNS("http://www.w3.org/2000/svg", "use"); u.setAttribute("href", "#i-" + name); s.appendChild(u); return s; }
 
+
+  // Block maps: one square per block of encrypted data, coloured by where the block is.
+  // Derived only from /api/status: chunks, chunks_without_storage_copy, chunks_verified_elsewhere,
+  // placeholders (files) and whether the folder is attached here. A placeholder file's blocks are
+  // estimated as its share of the folder's chunks.
+  var BLOCK_STATES = ["verified", "stored", "local", "ph", "missing"];
+  function folderBlocks(f) {
+    var c = f.chunks || 0;
+    var verified = Math.min(c, f.chunks_verified_elsewhere || 0);
+    var noCopy = Math.min(c - verified, f.chunks_without_storage_copy || 0);
+    var stored = c - verified - noCopy;
+    var b = { verified: verified, stored: stored, local: 0, ph: 0, missing: 0 };
+    if (!f.path) { b.ph = stored + verified; b.verified = 0; b.stored = 0; b.missing = noCopy; return b; }
+    b.local = noCopy;
+    var ph = f.files > 0 && f.placeholders > 0 ? Math.min(c, Math.round(c * f.placeholders / f.files)) : 0;
+    var take = Math.min(ph, b.stored); b.stored -= take; ph -= take;
+    take = Math.min(ph, b.verified); b.verified -= take; ph -= take;
+    b.ph = (f.files > 0 && f.placeholders > 0 ? Math.min(c, Math.round(c * f.placeholders / f.files)) : 0) - ph;
+    return b;
+  }
+  function addBlocks(a, b) { BLOCK_STATES.forEach(function (k) { a[k] = (a[k] || 0) + (b[k] || 0); }); return a; }
+  function blockTotal(b) { return BLOCK_STATES.reduce(function (n, k) { return n + (b[k] || 0); }, 0); }
+  function drawBlocks(container, counts, perSquare) {
+    container.innerHTML = "";
+    var frag = document.createDocumentFragment();
+    BLOCK_STATES.forEach(function (k) {
+      var n = Math.round((counts[k] || 0) / perSquare);
+      if (counts[k] > 0 && n === 0) { n = 1; }
+      for (var i = 0; i < n; i++) { var sq = document.createElement("i"); sq.className = "blk s-" + k; frag.appendChild(sq); }
+    });
+    container.appendChild(frag);
+    container.classList.remove("fade"); void container.offsetWidth; container.classList.add("fade");
+  }
+  function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); var t = blockTotal(b); if (t === 0) { return m; } var per = Math.max(1, Math.ceil(t / 40)); drawBlocks(m, b, per); m.title = t + " block" + (t === 1 ? "" : "s") + (per > 1 ? ", 1 square \u2248 " + per + " blocks" : ""); return m; }
+  function stateSquare(f) { var k = f.state === "placeholder" ? "ph" : f.state === "missing" ? "missing" : f.pinned ? "verified" : "stored"; var sq = el("i", "blk state-blk s-" + k); sq.title = f.state === "placeholder" ? "Not on this device" : f.state === "missing" ? "Unavailable" : f.pinned ? "Local, kept here" : "Local"; return sq; }
   // Theme: follows the OS unless the user picked one in the sidebar (persisted).
   var mq = window.matchMedia ? window.matchMedia("(prefers-color-scheme: dark)") : null;
   function storedTheme() { try { return localStorage.getItem("varsto-theme") || ""; } catch (e) { return ""; } }
@@ -80,7 +115,7 @@
       var fsel = $("filesfolder"); var prev = fsel.value; fsel.innerHTML = "";
       var fl = $("folderlist"); fl.innerHTML = "";
       var pl = $("policylist"); pl.innerHTML = "";
-      var totalFiles = 0, totalBytes = 0;
+      var totalFiles = 0, totalBytes = 0; var totalBlocks = {};
       s.folders.forEach(function (f) {
         totalFiles += f.files; totalBytes += f.bytes;
         var tr = document.createElement("tr");
@@ -90,7 +125,9 @@
         if (f.selective) { nameCell.appendChild(document.createTextNode(" ")); nameCell.appendChild(pill("grey", "selective")); }
         if (f.shared) { nameCell.appendChild(document.createTextNode(" ")); nameCell.appendChild(pill("accent", "shared")); }
         var sub = el("span", "sub", f.path || "Not attached on this device"); if (f.path) { sub.title = f.path; } nameCell.appendChild(sub);
+        nameCell.appendChild(miniMap(f));
         tr.appendChild(nameCell);
+        totalBlocks = addBlocks(totalBlocks, folderBlocks(f));
         td(f.files, "num"); td(fmtBytes(f.bytes), "num"); td(f.chunks, "num");
         td(f.chunks_without_storage_copy, "num" + (f.chunks_without_storage_copy > 0 ? " bad" : "")); td(f.chunks_verified_elsewhere, "num");
         var pc = document.createElement("td"); pc.dataset.policyFor = f.name; pc.appendChild(pill("grey", f.policy ? "Unchecked" : "No policy")); if (f.policy) { var pt = el("span", "policy-text", f.policy); pt.title = f.policy; pc.appendChild(pt); } tr.appendChild(pc);
@@ -110,6 +147,7 @@
         if (f.selective) { title.appendChild(pill("grey", "selective")); } if (f.shared) { title.appendChild(pill("accent", "shared")); } if (f.strongroom) { title.appendChild(pill(f.strongroom === "locked" ? "grey" : "accent", "strongroom")); }
         body.appendChild(title);
         body.appendChild(el("div", "li-sub", (f.path || "Not attached on this device") + " · " + f.files + " files · " + fmtBytes(f.bytes) + (f.placeholders ? " · " + f.placeholders + " placeholders" : "")));
+        body.appendChild(miniMap(f));
         li.appendChild(body);
         if (f.path) { var la = el("div", "li-actions"); var lb = el("button", "secondary", "Sync"); lb.type = "button"; lb.onclick = function () { runSync(f.name); }; la.appendChild(lb); li.appendChild(la); }
         fl.appendChild(li);
@@ -131,6 +169,13 @@
       $("stat-bytes").textContent = fmtBytes(totalBytes);
       $("stat-devices").textContent = Object.keys(s.devices).length;
       $("stat-storages").textContent = s.storages.length;
+      (function () {
+        var t = blockTotal(totalBlocks); var per = Math.max(1, Math.ceil(t / 600));
+        drawBlocks($("datamap"), totalBlocks, per);
+        BLOCK_STATES.forEach(function (k) { $("leg-" + k).textContent = totalBlocks[k] || 0; });
+        $("datamap-total").textContent = t + " block" + (t === 1 ? "" : "s") + " in " + s.folders.length + " folder" + (s.folders.length === 1 ? "" : "s");
+        $("datamap-note").textContent = per > 1 ? "1 square \u2248 " + per + " blocks" : (t ? "1 square = 1 block" : "");
+      })();
       if (prev) { fsel.value = prev; }
       api("GET", "/api/policy").then(function (p) {
         var worst = null; var lines = [];
@@ -225,6 +270,7 @@
         var tr = document.createElement("tr");
         function td(t, cls) { var d = document.createElement("td"); d.textContent = t; if (cls) { d.className = cls; } tr.appendChild(d); }
         var nameCell = document.createElement("td"); var wrap = el("span", "file-name");
+        wrap.appendChild(stateSquare(f));
         if (f.media) { var im = document.createElement("img"); im.className = "thumb"; im.alt = ""; im.loading = "lazy"; im.src = "/api/thumb?folder=" + encodeURIComponent(folder) + "&path=" + encodeURIComponent(f.path) + "&token=" + encodeURIComponent(token); im.onerror = function () { im.remove(); }; wrap.appendChild(im); }
         wrap.appendChild(document.createTextNode(f.path)); nameCell.appendChild(wrap); tr.appendChild(nameCell);
         td(fmtBytes(f.size), "num");
