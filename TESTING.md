@@ -2,7 +2,7 @@
 
 Varsto is tested in layers. The goal is that cheaper AI systems and scripts can run most tests from written instructions, while a human covers what cannot be automated (Windows, macOS, Android and iOS on real devices).
 
-> The application does not exist yet. This document defines how testing will work so the instructions are in place from day one.
+> Alpha-0: only the Rust core and the CLI exist (`crates/`). The VM levels below are prepared for the application that is still to come.
 
 ## Principles
 
@@ -28,6 +28,18 @@ Varsto is tested in layers. The goal is that cheaper AI systems and scripts can 
 The matrix is defined in [tests/matrix.yaml](tests/matrix.yaml).
 
 ## Running tests (Linux)
+
+### Rust (levels 1 and 2, no VM needed)
+
+```bash
+cargo test --workspace                 # unit tests, two-device sync scenarios, CLI smoke test
+cargo clippy --workspace --all-targets
+cargo fmt --all --check
+```
+
+The integration tests in `crates/varsto-core/tests/` simulate two devices that are never online together, a concurrent edit, and a device restored from an old backup (which must be fenced). The CLI test in `crates/varsto-cli/tests/` runs the built binary end to end with `--json`.
+
+### Virtual machines (levels 3 and up)
 
 ```bash
 scripts/test/provision-vm.sh <distro>      # create a disposable VM, prints its name

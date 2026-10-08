@@ -22,13 +22,33 @@ None of this is finished. See [docs/architecture](docs/architecture/README.md) f
 
 ## Status
 
-Pre-alpha skeleton: repository layout, licence, testing instructions and a website template. There is no working application yet.
+Alpha-0: the first vertical slice works on Linux from the command line. It chunks and encrypts files, stores them in a local-directory storage (a disk, a removable disk or a network mount), keeps a signed per-device ledger in that storage, and syncs a folder between devices that are never online at the same time, with conflict copies and a trash. See [docs/spec/alpha-0-format.md](docs/spec/alpha-0-format.md) for what it does and does not do. There is no sharing, no peer-to-peer transfer, no post-quantum hybrid yet, no mobile app and no audit.
+
+### Quick start (alpha-0, Linux)
+
+```bash
+cargo build --release                      # produces target/release/varsto
+export VARSTO_PASSPHRASE='a long passphrase'
+varsto --home ~/.varsto-laptop init --name laptop            # prints the vault key once
+varsto --home ~/.varsto-laptop storage add-local box /mnt/box
+varsto --home ~/.varsto-laptop folder add docs ~/Documents/synced
+varsto --home ~/.varsto-laptop sync
+
+# on another device that can reach the same storage:
+varsto --home ~/.varsto-desk join --name desk --vault-key <hex> --storage-path /mnt/box
+varsto --home ~/.varsto-desk folder attach docs ~/synced
+varsto --home ~/.varsto-desk sync
+varsto --home ~/.varsto-desk status --json
+varsto --home ~/.varsto-desk fsck --verify
+```
+
+Test data only. Keep your own backups.
 
 ## Repository layout
 
 | Path | Purpose |
 |---|---|
-| `crates/` | Rust core and tools (planned) |
+| `crates/` | Rust workspace: `varsto-core` (library) and `varsto-cli` (the `varsto` binary) |
 | `docs/` | Architecture, specifications, testing guides |
 | `tests/` | Test matrix and shared test assets |
 | `scripts/test/` | Scripts used by the testing instructions |
