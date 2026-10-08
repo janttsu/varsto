@@ -8,7 +8,7 @@
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
+  :root[data-theme="auto"] {
     --bg: #0d0f12; --surface: #14171c; --text: #eceef2; --muted: #9aa3b2;
     --border: #232832; --accent: #8aa9ff; --accent-contrast: #0d0f12;
     --warn-bg: #2a2210; --warn-text: #f6d98a; --warn-border: #5b4a1d;
@@ -110,8 +110,8 @@ figure.hero figcaption { color: var(--muted); font-size: .95rem; margin-top: .5r
 /* Screenshots follow the page theme: one of the pair is shown. */
 .shot-dark { display:none; }
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) .shot-dark { display:block; }
-  :root:not([data-theme="light"]) .shot-light { display:none; }
+  :root[data-theme="auto"] .shot-dark { display:block; }
+  :root[data-theme="auto"] .shot-light { display:none; }
 }
 :root[data-theme="dark"] .shot-dark { display:block; }
 :root[data-theme="dark"] .shot-light { display:none; }
