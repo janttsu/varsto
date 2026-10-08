@@ -12,7 +12,11 @@ targets:
     settings:
       base:
         SWIFT_OBJC_BRIDGING_HEADER: Varsto/Varsto-Bridging-Header.h
-        LIBRARY_SEARCH_PATHS: ["$(SRCROOT)/../../target/aarch64-apple-ios/release", "$(SRCROOT)/../../target/aarch64-apple-ios-sim/release"]
+        # One Rust static library per SDK; arm64 only (Apple Silicon Macs run the arm64 Simulator).
+        "LIBRARY_SEARCH_PATHS[sdk=iphoneos*]": ["$(SRCROOT)/../../target/aarch64-apple-ios/release"]
+        "LIBRARY_SEARCH_PATHS[sdk=iphonesimulator*]": ["$(SRCROOT)/../../target/aarch64-apple-ios-sim/release"]
+        ARCHS: arm64
+        ONLY_ACTIVE_ARCH: "NO"
         OTHER_LDFLAGS: ["-lvarsto_ffi"]
         PRODUCT_BUNDLE_IDENTIFIER: in.soderlund.varsto.ios
         INFOPLIST_KEY_UIBackgroundModes: fetch

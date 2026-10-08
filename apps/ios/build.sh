@@ -14,6 +14,6 @@ cd "$root/apps/ios" && xcodegen generate
 # -quiet prints only warnings, errors and the result; the full log goes to build/xcodebuild.log.
 mkdir -p build
 xcodebuild -project Varsto.xcodeproj -scheme Varsto -sdk iphonesimulator -configuration Release \
-  -derivedDataPath build CODE_SIGNING_ALLOWED=NO -quiet build 2>&1 | tee build/xcodebuild.log
+  -destination 'generic/platform=iOS Simulator' -derivedDataPath build CODE_SIGNING_ALLOWED=NO -quiet build 2>&1 | tee build/xcodebuild.log
 echo "app: apps/ios/build/Build/Products/Release-iphonesimulator/Varsto.app"
 echo "Open apps/ios/Varsto.xcodeproj in Xcode to run on a device (signing needed)."
