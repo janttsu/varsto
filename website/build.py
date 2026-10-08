@@ -73,6 +73,14 @@ def front_matter(text: str) -> tuple[dict, str]:
     return meta, text
 
 
+def asset_version(rel: str) -> str:
+    """Short content hash so browsers fetch a changed stylesheet or script at once
+    (the server caches assets for a day)."""
+    import hashlib
+    f = OUT / rel
+    return hashlib.sha256(f.read_bytes()).hexdigest()[:10] if f.exists() else "0"
+
+
 def page(title: str, description: str, body: str, nav: str, depth: int) -> str:
     p = "../" * depth
     nav_html = "\n".join(
@@ -91,8 +99,8 @@ def page(title: str, description: str, body: str, nav: str, depth: int) -> str:
 <meta name="color-scheme" content="light dark">
 <link rel="icon" href="{p}favicon.svg" type="image/svg+xml">
 <link rel="alternate" type="application/rss+xml" title="{BRAND} blog" href="{p}blog/feed.xml">
-<link rel="stylesheet" href="{p}assets/css/site.css">
-<script src="{p}assets/js/theme.js"></script>
+<link rel="stylesheet" href="{p}assets/css/site.css?v={asset_version("assets/css/site.css")}">
+<script src="{p}assets/js/theme.js?v={asset_version("assets/js/theme.js")}"></script>
 </head>
 <body>
 <a class="skip" href="#main">Skip to content</a>
