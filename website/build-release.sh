@@ -150,5 +150,5 @@ else
   manifest+="}"
 fi
 echo "$manifest" | python3 -c "import json,sys; json.dump(json.load(sys.stdin), sys.stdout, indent=2)" > "$out/manifest.json"
-(cd "$out" && sha256sum varsto-"$version"-* Varsto-"$version"-* 2>/dev/null > SHA256SUMS)
+(cd "$out" && shopt -s nullglob && sha256sum varsto-"$version"-* Varsto-"$version"-* > SHA256SUMS)
 cat "$out/SHA256SUMS"
