@@ -1,0 +1,11 @@
+# The product name lives here so a rename touches as few places as possible.
+[product]
+name = "Varsto"
+provisional = true   # working name; may change before the first public release
+cli_name = "varsto"
+tagline = "Your files. Your storage."
+
+[identifiers]
+# Decide late: app bundle ids cannot change after the first store release.
+android_application_id = ""
+ios_bundle_id = ""

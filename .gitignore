@@ -48,3 +48,14 @@ Thumbs.db
 *.mov
 *.wmv
 
+
+# Varsto
+target/
+node_modules/
+*.log
+*.qcow2
+test-results/
+.env
+.env.*
+*.pem
+*.key

@@ -1,0 +1,33 @@
+# Test matrix (draft). Every entry must be machine-decidable.
+version: 1
+limits:
+  max_runtime_minutes: 120
+  max_vms: 5
+distros:
+  - { name: debian-stable,  arch: x86_64 }
+  - { name: ubuntu-lts,     arch: x86_64 }
+  - { name: fedora,         arch: x86_64 }
+  - { name: arch,           arch: x86_64 }
+  - { name: alpine,         arch: x86_64, note: "musl libc" }
+  - { name: debian-stable,  arch: aarch64, note: "emulated, nightly only" }
+backends:
+  - minio-s3
+  - sftp
+  - local-folder
+  - rclone-local
+  - s3-storage-class-emulation   # cold storage and restore delays
+suites:
+  unit:            { vms: 0, level: 1 }
+  integration:     { vms: 1, level: 2 }
+  simulation:      { vms: 0, level: 3, note: "deterministic, prints seed" }
+  multi-device:    { vms: 3, level: 4, scenarios: [lan-only-sync, offline-then-cloud-catchup, nat-types, packet-loss] }
+  removable-disk:  { vms: 1, level: 5, scenarios: [fill-and-eject, unplug-mid-write, reattach-verify, bit-rot, disk-full, cloned-disk] }
+  upgrade:         { vms: 1, level: 6 }
+  performance:     { vms: 1, level: 6, note: "large files, millions of small files" }
+  cli-contract:    { vms: 1, level: 7 }
+  security:        { vms: 1, level: 8, checks: [fuzz, cargo-audit, cargo-deny, secret-scan, reproducible-build] }
+mobile:
+  android_emulator: { level: 9, requires: kvm }
+  ios_simulator:    { level: 9, requires: macos }
+manual:
+  platforms: [windows, macos, android, ios]
