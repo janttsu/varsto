@@ -2179,6 +2179,15 @@ impl Engine {
         Ok(reports)
     }
 
+    /// The vault key (hex) for the recovery kit. Only an unlocked owner
+    /// device can produce it; members hold no vault key.
+    pub fn export_vault_key(&self) -> Result<String> {
+        if self.vault.member {
+            bail!("a member device holds folder keys only, not the vault key");
+        }
+        Ok(self.keys.master.to_hex())
+    }
+
     // ----- strongroom --------------------------------------------------------
 
     /// Create a folder whose key only exists while a security key is touched

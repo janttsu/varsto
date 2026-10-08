@@ -31,6 +31,8 @@ ureq = "3"
 hmac = "0.12"
 zstd = "0.13"
 base64 = "0.22"
+bip39 = "3"
+sharks = "0.5"
 
 [dev-dependencies]
 tempfile.workspace = true

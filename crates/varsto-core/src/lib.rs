@@ -24,6 +24,7 @@ pub mod p2p;
 pub mod pack;
 pub mod policy;
 pub mod rclone;
+pub mod recovery;
 pub mod replica;
 pub mod s3;
 pub mod storage;

@@ -43,8 +43,12 @@ enum Cmd {
     Join {
         #[arg(long)]
         name: String,
+        /// Vault key in hex (from `init`), or use --words.
+        #[arg(long, conflicts_with = "words")]
+        vault_key: Option<String>,
+        /// The 24 words of the recovery kit instead of the hex key.
         #[arg(long)]
-        vault_key: String,
+        words: Option<String>,
         /// Name for the storage on this device.
         #[arg(long, default_value = "primary")]
         storage_name: String,
@@ -120,6 +124,11 @@ enum Cmd {
         #[arg(long)]
         check: bool,
     },
+    /// Recovery kit: the vault key as 24 words, optionally split into shares.
+    Recovery {
+        #[command(subcommand)]
+        cmd: RecoveryCmd,
+    },
     /// Strongroom folders: opened only with a touch of your FIDO2 security key.
     Strongroom {
         #[command(subcommand)]
@@ -139,6 +148,20 @@ enum Cmd {
     Mcp {
         #[command(subcommand)]
         cmd: Option<McpCmd>,
+    },
+}
+
+#[derive(Subcommand)]
+enum RecoveryCmd {
+    /// Print the printable kit (24 words; with --shares also 3 shares of which 2 rebuild the key).
+    Kit {
+        #[arg(long)]
+        shares: bool,
+    },
+    /// Rebuild the vault key from shares (`"<index>: <24 words>"` each).
+    Combine {
+        #[arg(required = true, num_args = 2..)]
+        shares: Vec<String>,
     },
 }
 
@@ -397,6 +420,10 @@ enum FolderCmd {
     List,
 }
 
+fn bail_usage(msg: &str) -> Result<String> {
+    Err(anyhow!("{msg}"))
+}
+
 fn passphrase() -> Result<String> {
     std::env::var("VARSTO_PASSPHRASE")
         .map_err(|_| anyhow!("set VARSTO_PASSPHRASE (alpha: no interactive prompt yet)"))
@@ -458,6 +485,7 @@ fn run(cli: &Cli) -> Result<()> {
         Cmd::Join {
             name,
             vault_key,
+            words,
             storage_name,
             storage_path,
         } => {
@@ -468,7 +496,12 @@ fn run(cli: &Cli) -> Result<()> {
                 carrier: false,
                 place: String::new(),
             };
-            let engine = Engine::join(&home, name, &passphrase()?, vault_key, spec)?;
+            let key_hex = match (vault_key, words) {
+                (Some(k), _) => k.clone(),
+                (None, Some(w)) => varsto_core::recovery::key_from_words(w)?,
+                (None, None) => bail_usage("give --vault-key <hex> or --words \"<24 words>\"")?,
+            };
+            let engine = Engine::join(&home, name, &passphrase()?, &key_hex, spec)?;
             let folders = engine.folders();
             if cli.json {
                 println!(
@@ -898,6 +931,30 @@ fn run(cli: &Cli) -> Result<()> {
                 }
             }
         }
+        Cmd::Recovery { cmd } => match cmd {
+            RecoveryCmd::Kit { shares } => {
+                let engine = Engine::open(&home, &passphrase()?)?;
+                let key = engine.export_vault_key()?;
+                let sh = if *shares {
+                    Some((2u8, varsto_core::recovery::split(&key, 2, 3)?))
+                } else {
+                    None
+                };
+                print!(
+                    "{}",
+                    varsto_core::recovery::kit_text(&engine.vault_id().to_string(), &key, sh)?
+                );
+            }
+            RecoveryCmd::Combine { shares } => {
+                let parsed: Vec<varsto_core::recovery::Share> = shares
+                    .iter()
+                    .map(|s| varsto_core::recovery::Share::decode(s))
+                    .collect::<Result<_>>()?;
+                let key = varsto_core::recovery::combine(&parsed, 2)?;
+                println!("vault key: {key}");
+                println!("words: {}", varsto_core::recovery::words_from_key(&key)?);
+            }
+        },
         Cmd::Strongroom { cmd } => {
             let mut engine = Engine::open(&home, &passphrase()?)?;
             match cmd {

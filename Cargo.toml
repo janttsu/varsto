@@ -3,7 +3,7 @@ resolver = "2"
 members = ["crates/varsto-core", "crates/varsto-cli", "crates/varsto-ffi"]
 
 [workspace.package]
-version = "0.0.1-alpha.4"
+version = "0.0.1-alpha.5"
 edition = "2021"
 license = "PolyForm-Shield-1.0.0"
 rust-version = "1.85"

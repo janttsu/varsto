@@ -40,7 +40,7 @@
     <p><a class="button" href="downloads/">Download the alpha</a> <a class="button secondary" href="docs/quick-start.html">Quick start</a></p>
     <figure class="hero"><img src="assets/img/hero.svg" alt="Diagram: your keys in the centre, connected by encrypted links to an S3 bucket, a cold archive, hard drives on a shelf, a NAS, a laptop and a phone; every place holds only locked, encrypted blocks." width="1200" height="600"><figcaption>Copies wherever you decide: a bucket, a cold archive, old disks on a shelf, your own machines. Every copy is ciphertext; the keys stay with you.</figcaption></figure>
 
-    <h2>What works today (alpha, 0.0.1-alpha.4)</h2>
+    <h2>What works today (alpha, 0.0.1-alpha.5)</h2>
     <div class="grid">
       <section class="card"><h3>Encrypted before it leaves your device</h3><p>Files are cut into content-defined chunks, each encrypted with XChaCha20-Poly1305 under keys derived from your vault. Storage sees opaque objects and sizes, never names, hashes or content.</p></section>
       <section class="card"><h3>Bring your own storage</h3><p>Any directory this device can reach, any S3-compatible bucket (AWS, Scaleway, Hetzner, B2, R2, MinIO) with your own keys, or any rclone remote. Cold storages and archive classes are written but never read without your confirmation.</p></section>
@@ -57,7 +57,7 @@
 
     <h2>What is designed but not built yet</h2>
     <div class="grid">
-      <section class="card todo"><h3>NAT traversal, iOS, recovery kit</h3><p>Relays and hole punching for peers behind NAT, the iOS build (needs a Mac), the paper recovery kit, and converting existing folders into Strongrooms are next.</p></section>
+      <section class="card todo"><h3>NAT traversal, iOS, disk pools</h3><p>Relays and hole punching for peers behind NAT, the iOS build (needs a Mac), the removable-disk pool with "attach this disk" prompts, and converting existing folders into Strongrooms are next.</p></section>
     </div>
 
     <h2>Honest status</h2>
