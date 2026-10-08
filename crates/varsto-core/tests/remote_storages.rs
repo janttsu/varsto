@@ -24,6 +24,18 @@ fn have_rclone() -> bool {
         .unwrap_or(false)
 }
 
+/// `rclone serve s3` exists since rclone 1.65; older distribution packages lack it.
+fn have_rclone_s3_server() -> bool {
+    have_rclone()
+        && Command::new("rclone")
+            .args(["serve", "s3", "--help"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false)
+}
+
 struct S3Server {
     child: Child,
     endpoint: String,
@@ -131,8 +143,8 @@ fn two_devices_through(spec_a: StorageSpec, secret: Option<String>, spec_b: Stor
 
 #[test]
 fn s3_backend_against_local_s3_server() {
-    if !have_rclone() {
-        eprintln!("rclone not installed; skipping");
+    if !have_rclone_s3_server() {
+        eprintln!("rclone 1.65+ with `serve s3` not installed; skipping");
         return;
     }
     let data = tempfile::tempdir().unwrap();

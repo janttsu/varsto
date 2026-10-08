@@ -85,6 +85,9 @@ def wait_running(server_id, timeout=900):
     while time.time() < deadline:
         s = scw("instance", "server", "get", server_id, f"zone={ZONE}")
         ip = (s.get("public_ip") or {}).get("address")
+        if not ip:
+            ips = [i.get("address") for i in (s.get("public_ips") or []) if i.get("address") and ":" not in i.get("address", "")]
+            ip = ips[0] if ips else None
         if s.get("state") == "running" and ip:
             return s, ip
         time.sleep(10)

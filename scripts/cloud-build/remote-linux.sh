@@ -5,7 +5,10 @@
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
-apt-get install -y -qq build-essential musl-tools pkg-config curl git zip rclone ffmpeg libdbus-1-dev >/dev/null
+apt-get install -y -qq build-essential musl-tools pkg-config curl git zip unzip ffmpeg libdbus-1-dev >/dev/null
+# A current rclone (the distribution package is too old for `rclone serve s3`).
+curl -fsS https://rclone.org/install.sh | bash >/dev/null 2>&1 || true
+rclone version | head -1
 if ! command -v cargo >/dev/null; then
   curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal >/dev/null
 fi
