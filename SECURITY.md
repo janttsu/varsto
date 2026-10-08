@@ -16,4 +16,4 @@ In scope: the core library, the CLI, the desktop and mobile apps, the storage fo
 
 ## Threat model
 
-A written threat model will live in [docs/architecture/threat-model.md](docs/architecture/README.md). Until it exists, treat all guarantees as unproven.
+The design-stage threat model is in [docs/architecture/threat-model.md](docs/architecture/threat-model.md). No implementation exists yet, so treat every guarantee as unproven.

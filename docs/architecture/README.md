@@ -26,6 +26,7 @@ These are the design commitments. Details become specifications under `docs/spec
 ## Related documents
 
 - Security principles: [security-principles.md](security-principles.md)
+- Threat model: [threat-model.md](threat-model.md)
 - Logging: [logging.md](logging.md)
 
 - Specifications: [../spec/README.md](../spec/README.md)
