@@ -1,0 +1,443 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Threat model (design stage): Varsto</title>
+<meta name="description" content="Varsto documentation: Threat model (design stage)">
+<meta name="robots" content="noindex, nofollow">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../blog/feed.xml">
+<link rel="stylesheet" href="../assets/css/site.css">
+<script src="../assets/js/theme.js"></script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="alpha" role="note">
+  <div class="wrap"><strong>Alpha software, not for production data.</strong> Bugs can cause data loss, formats may change without migration, and the cryptography has not been independently audited. Keep your own backups and check that you can restore from them.</div>
+</div>
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="../"><img src="../assets/img/logo.svg" alt="" width="28" height="28"><span>Varsto</span></a>
+    <nav class="main" aria-label="Main">
+      <a href="../">Project</a>
+      <a href="../docs/" aria-current="page">Docs</a>
+      <a href="../downloads/">Downloads</a>
+      <a href="../blog/">Blog</a>
+      <a href="../forum/">Forum</a>
+      <button class="theme" id="theme-toggle" type="button" aria-label="Change colour theme">Theme: auto</button>
+    </nav>
+  </div>
+</header>
+<main id="main">
+  <div class="wrap">
+<article class="prose">
+<h1>Threat model (design stage)</h1>
+<p class="note">From <code>docs/architecture/threat-model.md</code> in the repository, rendered 2026-10-08.</p>
+<blockquote>
+<p><strong>Design-stage model. No implementation exists.</strong> This document describes what the design intends to protect, against whom, and where it deliberately stops. Nothing here has been built, tested or audited, so none of the properties below is achieved yet. Every statement is a design goal that implementation, tests and an independent review must still confirm. Open points are marked <strong>TBD</strong> and point to the open questions in the project plan.</p>
+</blockquote>
+<p>Requirement IDs (<code>F-</code>, <code>S-</code>, <code>P-</code>, <code>N-</code>, <code>M-</code>) refer to the requirement tables of the project plan. "Plan 6.19" and similar refer to sections of that plan; "plan section 8" is its list of open questions.</p>
+<h2 id="1-assets">1. Assets</h2>
+<table>
+<thead>
+<tr>
+<th>Asset</th>
+<th>Why it matters</th>
+<th>Main requirements</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>File content</td>
+<td>The data itself; must stay confidential for decades (harvest now, decrypt later).</td>
+<td>S-001, S-003, S-006</td>
+</tr>
+<tr>
+<td>File names, folder tree and sizes of individual files</td>
+<td>Often as sensitive as content (names reveal people, projects, health).</td>
+<td>S-001, S-006, S-015</td>
+</tr>
+<tr>
+<td>Keys: master key, folder keys, Strongroom keys, device keys, recovery key and its shares</td>
+<td>Whoever holds them holds the data.</td>
+<td>S-002, S-012, S-014, F-042</td>
+</tr>
+<tr>
+<td>Device identities and the device list</td>
+<td>Decide which devices may read, write, add devices and issue wipe commands.</td>
+<td>S-004, F-035</td>
+</tr>
+<tr>
+<td>Storage credentials (S3 keys, rclone secrets, SFTP passwords)</td>
+<td>Allow reading ciphertext, deleting it or running up costs on the user's storage, even without data keys.</td>
+<td>S-002, S-012, F-006, F-007</td>
+</tr>
+<tr>
+<td>The ledger (where every block is)</td>
+<td>Wrong bookkeeping can lead to deleting the last copy of data.</td>
+<td>F-031, N-007</td>
+</tr>
+<tr>
+<td>Usage metadata</td>
+<td>Object sizes and counts, access times, device count and online times, IP addresses.</td>
+<td>S-006, S-015</td>
+</tr>
+<tr>
+<td>Availability of data</td>
+<td>Encryption does not protect against deletion or loss; redundancy does.</td>
+<td>F-018, F-020, F-021, M-005</td>
+</tr>
+</tbody>
+</table>
+<h2 id="2-adversaries">2. Adversaries</h2>
+<p>Each adversary has an ID that other documents use (for example the key hierarchy refers to "A4").</p>
+<table>
+<thead>
+<tr>
+<th>ID</th>
+<th>Adversary</th>
+<th>Assumed capabilities</th>
+<th>Must not learn</th>
+<th>Must not be able to do</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>A1</td>
+<td>Storage provider, or anyone with access to the bucket or remote</td>
+<td>Reads, copies, deletes, modifies, reorders and rolls back any object; sees request logs with times and client IP addresses; may lock the account.</td>
+<td>Content, names, folder structure, keys, or whether the user holds a known file (no plaintext hashes).</td>
+<td>Make a client accept modified, swapped or replayed objects without detection; make the ledger claim data that is not there without the claim being flagged. A1 <strong>can</strong> delete data and deny service; only redundancy limits that.</td>
+</tr>
+<tr>
+<td>A2</td>
+<td>Network attacker, passive or active, on the LAN or the internet</td>
+<td>Records all traffic for later decryption, injects, drops and replays packets, sits in the middle.</td>
+<td>Content, names, keys, which shared folder a connection belongs to.</td>
+<td>Impersonate a device, downgrade a handshake to classical-only cryptography, inject chunks or ledger events.</td>
+</tr>
+<tr>
+<td>A3</td>
+<td>Thief with a stolen <strong>locked</strong> device</td>
+<td>Physical access, unlimited time, can image the storage, can try passwords offline if the data allows it, can restore old app backups.</td>
+<td>Content and names (except folders the user explicitly chose to sync unencrypted, the S-011 exception), keys.</td>
+<td>Try passphrases offline without the device's hardware-bound secret; reset the failed-attempt counter by restoring a backup; add a new device.</td>
+</tr>
+<tr>
+<td>A4</td>
+<td>Thief with a stolen <strong>unlocked</strong> device (open session)</td>
+<td>Everything A3 can do, plus control of the running app, its UI and its local control API.</td>
+<td>Strongroom content and names outside an open unlock window.</td>
+<td>Open Strongroom folders, add devices to Strongroom, enrol new devices without the second factor (TBD, see section 4), block a revocation issued from another device. A4 <strong>can</strong> read normal folders that are already unlocked; wipe and revocation only limit further damage.</td>
+</tr>
+<tr>
+<td>A5</td>
+<td>Malicious peer in the P2P swarm (not, or no longer, a member)</td>
+<td>Connects, advertises chunks, serves wrong data, claims to hold data it does not have, floods requests.</td>
+<td>Content, names, and for non-members which folder a swarm belongs to.</td>
+<td>Make a device accept a corrupted chunk; make the ledger count a fake copy as verified; exhaust a device's resources without limits.</td>
+</tr>
+<tr>
+<td>A6</td>
+<td>Malicious member of a shared folder</td>
+<td>Holds the folder key legitimately; writes, deletes and renames inside the folder; keeps copies; may try to fill the owner's storage.</td>
+<td>Other folders of the owner; content added after its removal.</td>
+<td>Forge another member's ledger events; delete beyond what version history and trash can restore; read new content after removal. A6 <strong>can</strong> keep everything it saw before removal.</td>
+</tr>
+<tr>
+<td>A7</td>
+<td>Compromised release pipeline (build system, signing key, dependency, store account)</td>
+<td>Ships a modified binary to users.</td>
+<td>Not applicable: a malicious client sees everything the user unlocks.</td>
+<td>Ship a release that differs from the published source without that being detectable (reproducible builds, signatures, attestations). The goal is detection, not prevention.</td>
+</tr>
+<tr>
+<td>A8</td>
+<td>Quantum adversary (harvest now, decrypt later)</td>
+<td>Records ciphertext and handshakes today; later runs a large quantum computer.</td>
+<td>Content, names and keys recorded today.</td>
+<td>Recover any key that was protected only by classical public-key cryptography.</td>
+</tr>
+<tr>
+<td>A9</td>
+<td>Coercion (border check, legal pressure, physical threat)</td>
+<td>Forces the user to unlock a device or present a security key.</td>
+<td>Not achievable in general.</td>
+<td>Out of scope beyond the optional duress passphrase (S-009, a "Could" item). See section 4.</td>
+</tr>
+<tr>
+<td>A10</td>
+<td>Malware running as the same OS user on a desktop</td>
+<td>Reads the user's files and process memory where the OS allows, talks to the daemon's control socket, injects input, reads the clipboard.</td>
+<td>Raw key material held in the OS keystore or on a security key (it can use keys while unlocked but should not be able to export them).</td>
+<td>Trigger level-3 (irreversible) actions through the control API or MCP without a confirmation outside that API; open Strongroom without a security-key touch. A10 <strong>can</strong> read anything the user has unlocked while it runs.</td>
+</tr>
+<tr>
+<td>A11</td>
+<td>Operator of a relay or DHT node</td>
+<td>Sees IP addresses, timing, sizes and opaque records; drops, delays or replays records; may run many nodes (Sybil, eclipse).</td>
+<td>Content, names, keys, the identity of the shared folder.</td>
+<td>Redirect a device to an impostor: the DHT record is only a hint and authenticity is checked in the hybrid handshake.</td>
+</tr>
+<tr>
+<td>A12</td>
+<td>Cloud LLM provider reached through MCP</td>
+<td>Receives whatever the MCP tool results contain; the model may follow instructions hidden in file content (prompt injection).</td>
+<td>Secrets (passwords, keys, recovery words, PINs, storage credentials) and Strongroom content.</td>
+<td>Cause irreversible actions without user confirmation outside the LLM channel. It <strong>does</strong> learn whatever content the user lets the tools return; end-to-end encryption does not cover that (plan 6.9).</td>
+</tr>
+<tr>
+<td>A13</td>
+<td>Holder of a removable disk from the offline pool</td>
+<td>Reads and modifies the disk at leisure; clones it or returns an old copy.</td>
+<td>Content and names.</td>
+<td>Make stale or modified data on the disk be accepted as current. Remote wipe does not reach offline disks; only encryption protects them (plan 6.35).</td>
+</tr>
+</tbody>
+</table>
+<h2 id="3-trust-boundaries">3. Trust boundaries</h2>
+<table>
+<thead>
+<tr>
+<th>Boundary</th>
+<th>Trusted inside</th>
+<th>Crosses the boundary</th>
+<th>Design intent</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>User's device (running, unlocked)</td>
+<td>The Varsto process, the OS kernel, the hardware.</td>
+<td>Ciphertext out to storage and peers; plaintext only to the user and to apps the user opens a file with.</td>
+<td>Plaintext and unwrapped keys exist only here and only while unlocked (S-002).</td>
+</tr>
+<tr>
+<td>OS keystore (Android Keystore and StrongBox, Apple Keychain and its hardware key store, Windows and Linux key stores)</td>
+<td>Non-exportable key storage, user-presence and biometric gating, monotonic counters where available.</td>
+<td>Wrap and unwrap requests.</td>
+<td>Holds the hardware-bound secret and the wrapping keys for the locked-state key set. Desktop key stores vary in strength; per-platform assessment is <strong>TBD</strong>.</td>
+</tr>
+<tr>
+<td>FIDO2 security key</td>
+<td>The authenticator's credential-bound <code>hmac-secret</code> (WebAuthn PRF) secret.</td>
+<td>A salt in; a 32-byte secret out, after a touch and an optional PIN.</td>
+<td>The secret is symmetric, so A8 gains nothing from recorded traffic. The key's own signatures (ES256, EdDSA) are classical and are not relied on for confidentiality (plan 6.5). Platform support differs; see the FIDO2 platform research (<code>docs/research/fido2-platform-support.md</code>, separate change).</td>
+</tr>
+<tr>
+<td>Daemon control socket (Unix socket, named pipe)</td>
+<td>Only the OS user boundary.</td>
+<td>CLI, UI and MCP server requests.</td>
+<td>Any process of the same user can reach it (A10). Level-3 actions need confirmation outside the socket (separate UI process, OS prompt or security-key touch). Peer-process checks and token storage are <strong>TBD</strong> (plan section 8, "local control API trust model").</td>
+</tr>
+<tr>
+<td>MCP client and the LLM behind it</td>
+<td>Nothing.</td>
+<td>Tool calls in, tool results out.</td>
+<td>Read-only by default, scoped revocable tokens, summaries instead of names, no secrets, Strongroom invisible, dry-run and external confirmation (F-016, F-038, plan 6.32).</td>
+</tr>
+<tr>
+<td>Storage (cloud, rclone remote, local folder, removable disk)</td>
+<td>Nothing (S-006, S-014).</td>
+<td>Encrypted, authenticated objects.</td>
+<td>Confidentiality and integrity come from client-side authenticated encryption; availability only from redundancy and scrub.</td>
+</tr>
+<tr>
+<td>Peers (other devices)</td>
+<td>Own devices after authentication with device keys, until revoked; shared-folder members only for their folder.</td>
+<td>Encrypted chunks, signed ledger events, transfer requests.</td>
+<td>Every chunk is checked against its hash before acceptance; claims of holding data are challenged (plan 6.19).</td>
+</tr>
+<tr>
+<td>Relay and DHT</td>
+<td>Nothing.</td>
+<td>Opaque, encrypted traffic and records.</td>
+<td>Hints only; authenticity is established end to end in the hybrid handshake (plan 6.33).</td>
+</tr>
+</tbody>
+</table>
+<h2 id="4-non-goals-and-residual-risks">4. Non-goals and residual risks</h2>
+<p>They are listed so that nobody, marketing included (M-005, M-006), claims more than the design intends.</p>
+<ul>
+<li><strong>A compromised, unlocked device.</strong> Malware or an attacker with the open session (A4, A10) can read everything that is unlocked, including a Strongroom folder during its unlock window. A security key has no display, so the user cannot see which operation a touch approves (plan 6.28).</li>
+<li><strong>Coercion (A9).</strong> The design does not protect a user who is forced to unlock. The duress passphrase is an optional "Could" item.</li>
+<li><strong>Deletion and denial of service by the provider (A1).</strong> Encryption prevents reading and undetected modification, not deletion, account closure or rollback to an older state. Redundancy across providers and own devices, scrub and alerts limit the effect (F-018, F-020, F-021, F-032).</li>
+<li><strong>Data copied before a theft or a member removal (A3, A4, A6).</strong> Revocation and key rotation protect future data only.</li>
+<li><strong>Wipe only reaches devices that come online.</strong> A device that stays offline is protected only by its lock (S-008 to S-010) and by revocation (plan 6.29). Wipe does not reach removable disks (A13).</li>
+<li><strong>Content shown to a cloud LLM (A12).</strong> Once the user lets an MCP tool return content, the LLM provider has it.</li>
+<li><strong>Plaintext synced folders.</strong> A folder that the user syncs unencrypted (the S-011 exception on mobile, sync folders on desktop) is protected only by the device's own lock and disk encryption.</li>
+<li><strong>Alpha-stage logs.</strong> In the alpha, logs are redacted but not encrypted at rest; they reveal usage patterns (event types, sizes, times) even without names (plan 6.40).</li>
+<li><strong>Second factor for daily unlock.</strong> Whether the second factor is mandatory for unlock or only for adding a device is <strong>TBD</strong> (plan section 8, "2FA"). Until that is decided, resistance against A3 and A4 is described for the strongest configuration only.</li>
+<li><strong>Locked-state keys.</strong> Background sync, camera upload, ledger acknowledgements and logging need some keys while the app is locked. They are a deliberate, documented reduction of protection against A3. The exact set is drafted in <a href="key-hierarchy.html">../spec/key-hierarchy.md</a> and is <strong>TBD</strong>.</li>
+<li><strong>Side channels.</strong> Compression before encryption can leak information about content through sizes (plan 6.11). Whether compression is on by default, and the padding classes, are <strong>TBD</strong>.</li>
+<li><strong>Implementation flaws.</strong> Bugs, misuse of libraries and timing side channels are outside this model but are the most likely real-world failures. An independent review is planned before beta (S-007).</li>
+</ul>
+<h2 id="5-metadata-that-can-be-learned">5. Metadata that can be learned</h2>
+<p>Encryption hides content and names. It does not hide that data exists, how much there is, or when and from where it is used.</p>
+<table>
+<thead>
+<tr>
+<th>Observer</th>
+<th>What it can learn</th>
+<th>Mitigation in the design</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Storage provider (A1)</td>
+<td>Number and sizes of objects; times of writes and reads; growth rate; deletions; client IP addresses and user agents in access logs.</td>
+<td>Packs group small chunks (plan 6.11); chunk and pack sizes padded to size classes; object names are opaque.</td>
+<td>Padding classes <strong>TBD</strong> (plan section 8, "keyed hash, chunks and padding").</td>
+</tr>
+<tr>
+<td>Storage provider through the rendezvous record (A1)</td>
+<td>How many devices the user has, when each is online and from which IP address (home or travelling), from the reads and writes of the encrypted presence record (plan 6.33).</td>
+<td>Record path derived from a shared secret and a time epoch; heartbeat merged with normal sync requests and randomised; a privacy mode without a rendezvous record.</td>
+<td>Not designed in detail; <strong>TBD</strong> (plan section 8, "rendezvous record metadata").</td>
+</tr>
+<tr>
+<td>DHT participants (A11)</td>
+<td>The device's IP address and that it looks up or publishes a record at certain times; a Sybil attacker may link lookups across epochs.</td>
+<td>DHT off by default or only with explicit consent; record key derived from a shared secret and a daily epoch; records encrypted. The record carries a classical signature only, because a BEP 44 record is too small for an ML-DSA signature, so it is treated as a hint and never as proof of authenticity (plan 6.33).</td>
+<td>Default <strong>TBD</strong> (plan section 8, "P2P library and discovery").</td>
+</tr>
+<tr>
+<td>Relay operator (A11)</td>
+<td>IP addresses of both ends, timing and volume of traffic.</td>
+<td>Self-hostable relays; direct connections preferred; relays see only encrypted traffic.</td>
+<td>Design intent.</td>
+</tr>
+<tr>
+<td>Network observer (A2)</td>
+<td>Which devices talk to each other, when and how much; LAN discovery announcements.</td>
+<td>LAN announcements carry only a derived identifier, no names; the handshake does not reveal the folder identity.</td>
+<td>Design intent.</td>
+</tr>
+<tr>
+<td>Peers in a swarm (A5)</td>
+<td>Which chunk IDs a device has (bitfields) and transfer patterns.</td>
+<td>Only members of the same folder join its swarm; chunk IDs are keyed hashes, so outsiders cannot test for known files.</td>
+<td>Design intent.</td>
+</tr>
+<tr>
+<td>Shared-folder member (A6)</td>
+<td>The folder's full history, member device IDs and times in the ledger; old chunk IDs after removal.</td>
+<td>Names in ledger events are keyed hashes; cryptographic erasure of event payloads (plan section 8, "GDPR and append-only ledger").</td>
+<td><strong>TBD</strong>.</td>
+</tr>
+<tr>
+<td>Holder of a removable disk (A13)</td>
+<td>Pack sizes and counts, last write time, the disk's identity file.</td>
+<td>Same encrypted pack format and padding as other storage.</td>
+<td>Design intent.</td>
+</tr>
+<tr>
+<td>Anyone who can read the ledger objects (A1)</td>
+<td>Activity level and number of devices, from ledger size and event rate.</td>
+<td>Events are batched (<a href="ledger-signing-notes.html">../spec/ledger-signing-notes.md</a>).</td>
+<td><strong>TBD</strong>.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="6-mapping-adversary-to-requirements-and-plan-sections">6. Mapping: adversary to requirements and plan sections</h2>
+<table>
+<thead>
+<tr>
+<th>Adversary</th>
+<th>Requirement IDs</th>
+<th>Plan sections</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>A1 Storage provider</td>
+<td>S-001, S-003, S-006, S-014, F-018, F-020, F-021, F-031</td>
+<td>6.10, 6.11, 6.19, 6.33</td>
+</tr>
+<tr>
+<td>A2 Network attacker</td>
+<td>S-003, F-011, F-013</td>
+<td>6.5, 6.7</td>
+</tr>
+<tr>
+<td>A3 Thief, locked device</td>
+<td>S-008, S-009, S-010, S-011, S-014, F-035, F-037</td>
+<td>6.15, 6.29, 6.31</td>
+</tr>
+<tr>
+<td>A4 Thief, unlocked device</td>
+<td>S-004, S-012, F-035</td>
+<td>6.28, 6.29</td>
+</tr>
+<tr>
+<td>A5 Malicious peer</td>
+<td>F-011, F-012, F-031, N-007</td>
+<td>6.7, 6.19, 6.33</td>
+</tr>
+<tr>
+<td>A6 Malicious shared-folder member</td>
+<td>F-004, S-006, F-025, F-034</td>
+<td>6.11, 6.19; plan section 8 "sharing"</td>
+</tr>
+<tr>
+<td>A7 Compromised release pipeline</td>
+<td>S-007, N-005</td>
+<td>6.14</td>
+</tr>
+<tr>
+<td>A8 Quantum adversary</td>
+<td>S-003, S-014, M-006</td>
+<td>6.5, 6.38</td>
+</tr>
+<tr>
+<td>A9 Coercion</td>
+<td>S-009, S-012</td>
+<td>6.15, 6.28</td>
+</tr>
+<tr>
+<td>A10 Same-user malware</td>
+<td>S-012, F-016, F-038, P-003</td>
+<td>6.28, 6.32; plan section 8 "local control API"</td>
+</tr>
+<tr>
+<td>A11 Relay or DHT operator</td>
+<td>F-012, F-013, S-003</td>
+<td>6.7, 6.33</td>
+</tr>
+<tr>
+<td>A12 Cloud LLM via MCP</td>
+<td>F-014, F-015, F-016, F-038, M-001</td>
+<td>6.9, 6.32</td>
+</tr>
+<tr>
+<td>A13 Holder of a removable disk</td>
+<td>F-040, S-001, S-003, F-035</td>
+<td>6.29, 6.35</td>
+</tr>
+</tbody>
+</table>
+<p>Logging rules (S-015, N-013, plan 6.40) apply to every adversary that can obtain logs or diagnostic bundles: A3, A4, A10 and anyone the user sends a bundle to.</p>
+<h2 id="related-documents">Related documents</h2>
+<ul>
+<li><a href="security-principles.html">security-principles.md</a></li>
+<li><a href="logging.html">logging.md</a></li>
+<li><a href="failure-model.html">../failure-model.md</a></li>
+<li><a href="key-hierarchy.html">../spec/key-hierarchy.md</a> (draft)</li>
+<li><a href="ledger-signing-notes.html">../spec/ledger-signing-notes.md</a> (design notes)</li>
+</ul>
+
+</article>
+  </div>
+</main>
+<footer class="site">
+  <div class="wrap">
+    <span>Varsto is a working name. Source will be published under the PolyForm Shield License 1.0.0 with the first public alpha.</span>
+    <span>No cookies, no tracking. The web server keeps a standard access log for at most seven days.</span>
+    <span><a href="../docs/security-policy.html">Security policy</a> · <a href="../docs/licence.html">Licence</a> · <a href="../docs/trademark.html">Trademark</a></span>
+  </div>
+</footer>
+</body>
+</html>

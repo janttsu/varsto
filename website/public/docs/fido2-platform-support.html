@@ -1,0 +1,387 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FIDO2 hmac-secret and PRF platform support: Varsto</title>
+<meta name="description" content="Varsto documentation: FIDO2 hmac-secret and PRF platform support">
+<meta name="robots" content="noindex, nofollow">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../blog/feed.xml">
+<link rel="stylesheet" href="../assets/css/site.css">
+<script src="../assets/js/theme.js"></script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="alpha" role="note">
+  <div class="wrap"><strong>Alpha software, not for production data.</strong> Bugs can cause data loss, formats may change without migration, and the cryptography has not been independently audited. Keep your own backups and check that you can restore from them.</div>
+</div>
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="../"><img src="../assets/img/logo.svg" alt="" width="28" height="28"><span>Varsto</span></a>
+    <nav class="main" aria-label="Main">
+      <a href="../">Project</a>
+      <a href="../docs/" aria-current="page">Docs</a>
+      <a href="../downloads/">Downloads</a>
+      <a href="../blog/">Blog</a>
+      <a href="../forum/">Forum</a>
+      <button class="theme" id="theme-toggle" type="button" aria-label="Change colour theme">Theme: auto</button>
+    </nav>
+  </div>
+</header>
+<main id="main">
+  <div class="wrap">
+<article class="prose">
+<h1>FIDO2 hmac-secret and PRF platform support</h1>
+<p class="note">From <code>docs/research/fido2-platform-support.md</code> in the repository, rendered 2026-10-08.</p>
+<blockquote>
+<p><strong>Research note, design stage.</strong> This document records what the cited sources say about using a FIDO2 security key to derive secrets (CTAP2 <code>hmac-secret</code>, exposed to web and platform APIs as the WebAuthn <code>prf</code> extension) from a native application. It is not a decision. No hardware was tested for this note. Anything the sources did not state is marked "not verified".</p>
+<p>All sources were read on <strong>2026-10-08</strong> (UTC). Source numbers in tables refer to the list at the end.</p>
+</blockquote>
+<h2 id="terms">Terms</h2>
+<ul>
+<li><strong>hmac-secret</strong> is the CTAP2 extension: the authenticator computes HMAC-SHA-256 over one or two 32-byte salts, keyed with a secret that belongs to one credential, and returns 32 or 64 bytes. The secret must be enabled when the credential is created; it cannot be added to an existing credential [S12].</li>
+<li><strong>PRF</strong> is the WebAuthn name for the same feature. Platform APIs that expose PRF first hash the caller's input into the salt: the Windows header documents <code>SHA-256(UTF8("WebAuthn PRF") || 0x00 || value)</code> [S1]. A raw hmac-secret call (for example through libfido2) sends the salt as given. The same input therefore gives different secrets through the two routes unless the application applies the same transform on every platform.</li>
+<li><strong>hmac-secret-mc</strong> returns the secret already during credential creation; the Yubico SDK documentation says it needs YubiKey firmware 5.8 or later [S12].</li>
+</ul>
+<h2 id="summary-table">Summary table</h2>
+<table>
+<thead>
+<tr>
+<th>Platform</th>
+<th>API</th>
+<th>hmac-secret or PRF available</th>
+<th>Min OS version</th>
+<th>Needs admin/root</th>
+<th>Notes</th>
+<th>Sources</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Windows</td>
+<td>Windows WebAuthn API (<code>webauthn.h</code>, <code>webauthn.dll</code>), or libfido2 which can use it (<code>windows://hello</code>)</td>
+<td>Yes for external security keys through the PRF fields of the WebAuthn API. The old <code>hmac-secret</code> extension identifier is documented as not supported for assertions; use the PRF fields instead. Windows Hello (platform authenticator) is reported to lack hmac-secret.</td>
+<td>WebAuthn API: Windows 10 version 1903 or later. The Windows build that first has the PRF fields: not verified (the header ties them to API versions 4 and 6; no version-to-build table was found).</td>
+<td>Via the WebAuthn API: not stated as required. Direct USB HID access: third parties report administrator rights are required since 1903; not verified from Microsoft sources.</td>
+<td>Check <code>WebAuthNGetApiVersionNumber</code> at run time. Salts are hashed with the "WebAuthn PRF" prefix by default; a flag lets the caller pass raw hmac-secret salts. libfido2 supports hmac-secret through <code>windows://hello</code> since 1.11.0 and 64-byte salts since 1.17.0.</td>
+<td>S1, S2, S3, S4, S5, S6</td>
+</tr>
+<tr>
+<td>macOS</td>
+<td>libfido2 over IOKit HID, or Apple AuthenticationServices</td>
+<td>libfido2: yes (hmac-secret API in <code>fido_assert_set_hmac_salt</code>). AuthenticationServices: PRF API for passkeys since macOS 15; a <code>prf</code> property on security-key requests is documented from macOS 26.4.</td>
+<td>libfido2: no OS minimum stated. AuthenticationServices security-key PRF: 26.4.</td>
+<td>Not stated for libfido2; not verified.</td>
+<td>Yubico reported in mid-2025 that Safari did not pass PRF to external keys on macOS 15 while Chrome did. The behaviour of the native 26.4 API with hardware keys was not tested.</td>
+<td>S5, S7, S8, S9, S10</td>
+</tr>
+<tr>
+<td>Linux</td>
+<td>libfido2 (hidraw, udev)</td>
+<td>Yes (<code>FIDO_EXT_HMAC_SECRET</code>, <code>fido_assert_set_hmac_salt</code>)</td>
+<td>No OS minimum stated; requires libcbor, OpenSSL 3.0+, zlib, libudev</td>
+<td>No root if a udev rule grants the user access to the <code>hidraw</code> device</td>
+<td>libfido2 1.17.0 (2026-04-15) is current in the README. Distribution packages may be older.</td>
+<td>S5, S6, S11</td>
+</tr>
+<tr>
+<td>Android</td>
+<td>Credential Manager (<code>androidx.credentials</code>) for passkeys, or a vendor SDK that talks CTAP2 over USB host or NFC (YubiKit for Android)</td>
+<td>Credential Manager: the release notes mention PRF support (creation fixed for Android 13 and below in 1.3.0-alpha04). Use with external security keys through Credential Manager: not verified. YubiKit for Android: yes, <code>HmacSecretExtension</code> implements prf, hmac-secret and hmac-secret-mc.</td>
+<td>Credential Manager passkeys: Android 9 (API 28). YubiKit FIDO Android UI module: API 23. YubiKit core minimum: not verified.</td>
+<td>No (USB host permission prompt per connection)</td>
+<td>Yubico reported in mid-2025 that Chrome on Android supported PRF with a security key over USB but not NFC. The vendor SDK route supports both USB and NFC.</td>
+<td>S13, S14, S15, S16, S17, S12</td>
+</tr>
+<tr>
+<td>iOS and iPadOS</td>
+<td>Apple AuthenticationServices (<code>ASAuthorizationSecurityKeyPublicKeyCredential*</code>), or YubiKit for iOS</td>
+<td>AuthenticationServices: PRF input and output types exist since iOS 18; the <code>prf</code> property on security-key registration and assertion requests is documented from iOS 26.4. YubiKit for iOS: no hmac-secret or extension API found in the FIDO2 session or response headers.</td>
+<td>AuthenticationServices security-key PRF: iOS and iPadOS 26.4. Security-key requests without PRF: iOS and iPadOS 15.</td>
+<td>No</td>
+<td>YubiKit for iOS: NFC and the Lightning accessory work; the README states that a USB-C connection supports only smart-card applications, not U2F, FIDO2 or OTP. Yubico reported in mid-2025 that iOS 18 did not pass PRF data to external keys. Transport support (NFC, USB-C) of the native security-key API: not verified.</td>
+<td>S7, S8, S9, S10, S12, S18, S19</td>
+</tr>
+</tbody>
+</table>
+<h2 id="per-platform">Per platform</h2>
+<h3 id="windows">Windows</h3>
+<ul>
+<li>The Win32 WebAuthn API is available from Windows 10 version 1903 and exposes external FIDO2 security keys and Windows Hello [S2, S3]. Microsoft's overview page states ECC support from Windows 11 22H2 and plugin passkey managers from Windows 11 24H2; it does not say which Windows build first supports PRF [S3].</li>
+<li><code>webauthn.h</code> documents API versions 1 to 9. In the header comments, <code>WEBAUTHN_AUTHENTICATOR_GET_ASSERTION_OPTIONS</code> version 6 (field <code>pHmacSecretSaltValues</code>) is listed under API version 4, and <code>WEBAUTHN_AUTHENTICATOR_MAKE_CREDENTIAL_OPTIONS</code> version 6 (field <code>bEnablePrf</code>) under API version 6 [S1]. An application must call <code>WebAuthNGetApiVersionNumber</code> and handle older versions.</li>
+<li>The legacy <code>hmac-secret</code> extension identifier is documented in the header as supported for MakeCredential only and "Not Supported" for GetAssertion; assertion-time secrets go through the PRF fields [S1].</li>
+<li>Yubico's PRF guide (mid-2025) lists the Windows Hello platform authenticator as lacking hmac-secret and YubiKeys as working [S4]. The Microsoft docs checked do not say this.</li>
+<li>Administrator rights: Microsoft's pages checked do not mention them. Two third-party pages (a Token2 tool page and an OpenSSH Windows Hello project) state that since Windows 10 1903 direct access to FIDO devices needs administrator rights and that the WebAuthn API is the non-elevated route [S20, S21]. Treat as not verified.</li>
+<li>libfido2 can use the Windows WebAuthn API (<code>windows://hello</code>); since version 1.10.0 it falls back to its own HID code if <code>webauthn.dll</code> is missing [S6].</li>
+</ul>
+<h3 id="macos">macOS</h3>
+<ul>
+<li>libfido2 lists macOS among supported platforms and has native HID support (IOKit) [S5, S6]. Administrator rights and any macOS privacy prompts for HID access: not verified.</li>
+<li>Apple's AuthenticationServices has PRF input and output types from iOS 18 and macOS 15 [S7]. The security-key registration and assertion request classes exist since iOS 15 and macOS 12 [S8, S9]; their <code>prf</code> properties are documented from iOS, iPadOS, macCatalyst and macOS 26.4 [S10]. Which key transports and which keys work through this API was not verified.</li>
+<li>Yubico's guide (mid-2025) reported that on macOS 15 Chrome could use PRF with a YubiKey while Safari could not [S4].</li>
+</ul>
+<h3 id="linux">Linux</h3>
+<ul>
+<li>libfido2 is the usual library: hmac-secret is available when creating (<code>fido_cred_set_extensions</code>, <code>FIDO_EXT_HMAC_SECRET</code>) and asserting (<code>fido_assert_set_hmac_salt</code>, <code>fido_assert_hmac_secret_ptr</code>) [S5, S11].</li>
+<li>The README says a udev rule may be needed so a normal user can reach the device; with a rule, root is not needed [S5].</li>
+</ul>
+<h3 id="android">Android</h3>
+<ul>
+<li>Credential Manager passkeys work on Android 9 (API 28) and later [S13]. The Jetpack release notes list "Support PRF creation for Android versions 13 and below" in <code>androidx.credentials</code> 1.3.0-alpha04 [S14]. Whether Credential Manager can route PRF to an external USB or NFC security key for a third-party app was not found in Android documentation: not verified.</li>
+<li>YubiKit for Android includes a FIDO module with a <code>HmacSecretExtension</code> that implements prf, hmac-secret and hmac-secret-mc [S12, S15]. The library supports USB and NFC YubiKeys [S16]. A separate FIDO Android UI module requires API 23 [S16]. This route works with Yubico's own keys; other vendors' keys speak the same CTAP2 protocol, but this was not verified.</li>
+<li>Yubico's guide (mid-2025) lists Chrome on Android as supporting PRF with a roaming authenticator over USB but not NFC [S4].</li>
+</ul>
+<h3 id="ios-and-ipados">iOS and iPadOS</h3>
+<ul>
+<li>Apple documents PRF types from iOS 18 and, for security-key requests, the <code>prf</code> property from iOS 26.4 [S7, S10]. In mid-2025 Yubico reported that iOS 18 did not pass PRF extension data to external keys, calling this a critical limitation [S4]. Whether 26.4 fixes it for hardware keys: not verified.</li>
+<li>YubiKit for iOS supports FIDO2 over NFC and the Lightning accessory. Its README states that a YubiKey connected over USB-C on iOS 16 or later supports only smart-card applications, not U2F, FIDO2 or OTP [S18]. No hmac-secret or extension handling was found in the FIDO2 session and assertion response headers [S19]. Treat YubiKit for iOS as not offering hmac-secret.</li>
+<li>NFC access in a third-party app needs the NFC tag-reading entitlement and the FIDO AID in the app configuration [S18].</li>
+</ul>
+<h2 id="security-keys-known-to-list-hmac-secret">Security keys known to list hmac-secret</h2>
+<p>Source: the FIDO Alliance Metadata Service (MDS3) blob, number 290, next update 2026-11-01, read on 2026-10-08 [S22]. Of 520 entries, 317 list <code>hmac-secret</code> in <code>authenticatorGetInfo.extensions</code>. The blob's signature was not verified for this note; only its payload was decoded. An MDS entry describes a certified model and firmware profile; it is not proof that a given unit behaves the same. Check each key at run time (CTAP2 <code>authenticatorGetInfo</code>, for example <code>fido2-token -I</code>).</p>
+<table>
+<thead>
+<tr>
+<th>Family</th>
+<th>Form factors listed</th>
+<th>MDS lists hmac-secret</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>YubiKey 5 Series (including NFC, Lightning, FIPS and CCN variants)</td>
+<td>USB-A or USB-C, NFC, Lightning</td>
+<td>Yes, in most entries; some older entries have no extension data</td>
+<td>hmac-secret-mc needs firmware 5.8 or later [S12]</td>
+</tr>
+<tr>
+<td>YubiKey Bio Series</td>
+<td>USB</td>
+<td>Yes</td>
+<td></td>
+</tr>
+<tr>
+<td>Security Key by Yubico, Security Key NFC, Security Key Series</td>
+<td>USB, NFC</td>
+<td>Yes in the entries checked; some older entries list none</td>
+<td></td>
+</tr>
+<tr>
+<td>Nitrokey 3</td>
+<td>USB</td>
+<td>Yes (entry "Nitrokey 3 AM")</td>
+<td></td>
+</tr>
+<tr>
+<td>SoloKeys Solo and Solo Tap</td>
+<td>USB, NFC</td>
+<td>Yes</td>
+<td></td>
+</tr>
+<tr>
+<td>TOKEN2 FIDO2 Security Key, PIN Plus series</td>
+<td>USB, NFC</td>
+<td>Yes</td>
+<td></td>
+</tr>
+<tr>
+<td>Google Titan Security Key v2</td>
+<td>USB, NFC</td>
+<td>Yes</td>
+<td></td>
+</tr>
+<tr>
+<td>Feitian ePass FIDO2, BioPass FIDO2</td>
+<td>USB, NFC</td>
+<td>Yes in the FIDO2 entries; U2F-only entries list none</td>
+<td></td>
+</tr>
+<tr>
+<td>Swissbit iShield Key and Key 2</td>
+<td>USB, NFC</td>
+<td>Yes</td>
+<td></td>
+</tr>
+<tr>
+<td>HID Crescendo, Thales IDPrime FIDO Bio</td>
+<td>NFC, USB</td>
+<td>Yes</td>
+<td></td>
+</tr>
+<tr>
+<td>Kensington VeriMark</td>
+<td>USB, NFC</td>
+<td>Yes</td>
+<td></td>
+</tr>
+<tr>
+<td>OnlyKey</td>
+<td>USB</td>
+<td>Yes</td>
+<td></td>
+</tr>
+<tr>
+<td>Excelsecu eSecu</td>
+<td>USB, NFC, Bluetooth</td>
+<td>Yes in several entries</td>
+<td></td>
+</tr>
+<tr>
+<td>Older or U2F-only keys (for example YubiKey NEO, YK4 Series, Yubikey Edge, Feitian ePass FIDO Security Key, HyperFIDO U2F)</td>
+<td>various</td>
+<td>No</td>
+<td>U2F-only; no CTAP2 extensions</td>
+</tr>
+</tbody>
+</table>
+<h2 id="conclusion-consequences-for-s-005-and-s-012-questions-for-the-maintainer">Conclusion: consequences for S-005 and S-012 (questions for the maintainer)</h2>
+<p>These are questions, not decisions. S-005 requires FIDO2 security key support over USB and NFC on all platforms; S-012 requires Strongroom folder keys to be wrapped with a FIDO2 hmac-secret.</p>
+<ol type="1">
+<li><strong>One derivation on every platform.</strong> Platform PRF APIs hash the input; raw hmac-secret does not. Which transform does the project fix in its specification so that a secret derived on Windows, Linux, Android and iOS from the same key and credential is identical? (Relevant to S-012 and to the key hierarchy.)</li>
+<li><strong>Native versus vendor route per platform.</strong> Windows and Linux have working routes (WebAuthn API, libfido2). On Android the vendor SDK route has hmac-secret and USB and NFC; the Credential Manager route is not verified for external keys. On iOS the vendor SDK route has no hmac-secret and no USB-C FIDO2, and the Apple API documents security-key PRF only from 26.4. Is the project willing to require iOS and iPadOS 26.4 or later for Strongroom, or should Strongroom be limited on iOS until hardware tests exist?</li>
+<li><strong>S-005 transports on iOS.</strong> If YubiKit for iOS does not support FIDO2 over USB-C and native support is not verified, does S-005 ("USB, NFC on all platforms") allow NFC-only on iOS for the first releases?</li>
+<li><strong>Platform authenticators.</strong> Windows Hello is reported to lack hmac-secret, and platform passkeys differ from roaming keys. Does S-012 require an external security key, so that Strongroom cannot be unlocked with a platform authenticator alone?</li>
+<li><strong>Credential lifecycle.</strong> hmac-secret must be enabled when the credential is created and cannot be added later. Each key has its own credential-bound secret, so two keys produce different secrets for the same input. How should a spare key be enrolled (a second wrapped copy of each folder key per key)? Who approves requiring <code>hmac-secret</code> in <code>authenticatorGetInfo</code> as a pairing precondition?</li>
+<li><strong>Key whitelist.</strong> Should the project maintain a tested-keys list, given that the metadata lists many models but behaviour differs by firmware (for example hmac-secret-mc on YubiKey firmware 5.8 and later)?</li>
+<li><strong>Elevation on Windows.</strong> Should the Windows client use only the WebAuthn API (no raw HID) to avoid asking users for administrator rights? The administrator claim is not verified from Microsoft sources.</li>
+<li><strong>Hardware testing.</strong> Who runs the device checks listed in <a href="provider-price-data.html">docs/testing/manual</a> for PRF with real keys on each platform, since none was run for this note?</li>
+</ol>
+<h2 id="sources">Sources</h2>
+<p>All checked on 2026-10-08.</p>
+<table>
+<thead>
+<tr>
+<th>No.</th>
+<th>Source</th>
+<th>URL</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>S1</td>
+<td>Microsoft, <code>webauthn.h</code> (official repository): API versions, PRF fields, hmac-secret notes</td>
+<td><a href="https://raw.githubusercontent.com/microsoft/webauthn/master/webauthn.h">https://raw.githubusercontent.com/microsoft/webauthn/master/webauthn.h</a></td>
+</tr>
+<tr>
+<td>S2</td>
+<td>Microsoft Learn, WebAuthn API portal: runtime requirements (Windows 10 version 1903 and later, Windows 11)</td>
+<td><a href="https://learn.microsoft.com/en-us/windows/win32/webauthn/-webauthn-portal">https://learn.microsoft.com/en-us/windows/win32/webauthn/-webauthn-portal</a></td>
+</tr>
+<tr>
+<td>S3</td>
+<td>Microsoft Learn, WebAuthn APIs for passwordless authentication on Windows</td>
+<td><a href="https://learn.microsoft.com/en-us/windows/security/identity-protection/hello-for-business/webauthn-apis">https://learn.microsoft.com/en-us/windows/security/identity-protection/hello-for-business/webauthn-apis</a></td>
+</tr>
+<tr>
+<td>S4</td>
+<td>Yubico, Developer's Guide to PRF (compatibility table "as of mid-2025")</td>
+<td><a href="https://developers.yubico.com/WebAuthn/Concepts/PRF_Extension/Developers_Guide_to_PRF.html">https://developers.yubico.com/WebAuthn/Concepts/PRF_Extension/Developers_Guide_to_PRF.html</a></td>
+</tr>
+<tr>
+<td>S5</td>
+<td>Yubico, libfido2 README</td>
+<td><a href="https://raw.githubusercontent.com/Yubico/libfido2/main/README.adoc">https://raw.githubusercontent.com/Yubico/libfido2/main/README.adoc</a></td>
+</tr>
+<tr>
+<td>S6</td>
+<td>Yubico, libfido2 release notes (NEWS)</td>
+<td><a href="https://raw.githubusercontent.com/Yubico/libfido2/main/NEWS">https://raw.githubusercontent.com/Yubico/libfido2/main/NEWS</a></td>
+</tr>
+<tr>
+<td>S7</td>
+<td>Apple, <code>ASAuthorizationPublicKeyCredentialPRFRegistrationInput</code> (iOS 18.0, macOS 15.0)</td>
+<td><a href="https://developer.apple.com/documentation/authenticationservices/asauthorizationpublickeycredentialprfregistrationinput-swift.struct">https://developer.apple.com/documentation/authenticationservices/asauthorizationpublickeycredentialprfregistrationinput-swift.struct</a></td>
+</tr>
+<tr>
+<td>S8</td>
+<td>Apple, <code>ASAuthorizationSecurityKeyPublicKeyCredentialRegistrationRequest</code> (iOS 15.0, macOS 12.0)</td>
+<td><a href="https://developer.apple.com/documentation/authenticationservices/asauthorizationsecuritykeypublickeycredentialregistrationrequest">https://developer.apple.com/documentation/authenticationservices/asauthorizationsecuritykeypublickeycredentialregistrationrequest</a></td>
+</tr>
+<tr>
+<td>S9</td>
+<td>Apple, <code>ASAuthorizationSecurityKeyPublicKeyCredentialAssertionRequest</code></td>
+<td><a href="https://developer.apple.com/documentation/authenticationservices/asauthorizationsecuritykeypublickeycredentialassertionrequest">https://developer.apple.com/documentation/authenticationservices/asauthorizationsecuritykeypublickeycredentialassertionrequest</a></td>
+</tr>
+<tr>
+<td>S10</td>
+<td>Apple, <code>prf</code> property on the security-key registration and assertion requests (26.4.0)</td>
+<td><a href="https://developer.apple.com/documentation/authenticationservices/asauthorizationsecuritykeypublickeycredentialregistrationrequest/prf-964zl">https://developer.apple.com/documentation/authenticationservices/asauthorizationsecuritykeypublickeycredentialregistrationrequest/prf-964zl</a> and <a href="https://developer.apple.com/documentation/authenticationservices/asauthorizationsecuritykeypublickeycredentialassertionrequest/prf-7pp6b">https://developer.apple.com/documentation/authenticationservices/asauthorizationsecuritykeypublickeycredentialassertionrequest/prf-7pp6b</a></td>
+</tr>
+<tr>
+<td>S11</td>
+<td>Yubico, libfido2 manual pages <code>fido_assert_set_hmac_salt</code> and <code>fido_cred_set_extensions</code></td>
+<td><a href="https://developers.yubico.com/libfido2/Manuals/fido_assert_set_hmac_salt.html">https://developers.yubico.com/libfido2/Manuals/fido_assert_set_hmac_salt.html</a> and <a href="https://developers.yubico.com/libfido2/Manuals/fido_cred_set_extensions.html">https://developers.yubico.com/libfido2/Manuals/fido_cred_set_extensions.html</a></td>
+</tr>
+<tr>
+<td>S12</td>
+<td>Yubico, YubiKey SDK for .NET: FIDO2 hmac-secret and hmac-secret-mc extensions</td>
+<td><a href="https://docs.yubico.com/yesdk/users-manual/application-fido2/hmac-secret.html">https://docs.yubico.com/yesdk/users-manual/application-fido2/hmac-secret.html</a></td>
+</tr>
+<tr>
+<td>S13</td>
+<td>Android Developers, About passkeys (Android 9 / API 28)</td>
+<td><a href="https://developer.android.com/identity/passkeys">https://developer.android.com/identity/passkeys</a></td>
+</tr>
+<tr>
+<td>S14</td>
+<td>Android Developers, Jetpack Credentials release notes (1.3.0-alpha04, PRF)</td>
+<td><a href="https://developer.android.com/jetpack/androidx/releases/credentials">https://developer.android.com/jetpack/androidx/releases/credentials</a></td>
+</tr>
+<tr>
+<td>S15</td>
+<td>Yubico, yubikit-android <code>HmacSecretExtension.java</code></td>
+<td><a href="https://raw.githubusercontent.com/Yubico/yubikit-android/main/fido/src/main/java/com/yubico/yubikit/fido/client/extensions/HmacSecretExtension.java">https://raw.githubusercontent.com/Yubico/yubikit-android/main/fido/src/main/java/com/yubico/yubikit/fido/client/extensions/HmacSecretExtension.java</a></td>
+</tr>
+<tr>
+<td>S16</td>
+<td>Yubico, yubikit-android README (USB and NFC, FIDO modules, API 23 for the UI module)</td>
+<td><a href="https://raw.githubusercontent.com/Yubico/yubikit-android/main/README.adoc">https://raw.githubusercontent.com/Yubico/yubikit-android/main/README.adoc</a></td>
+</tr>
+<tr>
+<td>S17</td>
+<td>Android Developers, Credential Manager (replaces legacy local FIDO2 credentials)</td>
+<td><a href="https://developer.android.com/identity/sign-in/credential-manager">https://developer.android.com/identity/sign-in/credential-manager</a></td>
+</tr>
+<tr>
+<td>S18</td>
+<td>Yubico, yubikit-ios README (NFC, Lightning, USB-C smart-card only)</td>
+<td><a href="https://raw.githubusercontent.com/Yubico/yubikit-ios/main/README.md">https://raw.githubusercontent.com/Yubico/yubikit-ios/main/README.md</a></td>
+</tr>
+<tr>
+<td>S19</td>
+<td>Yubico, yubikit-ios <code>YKFFIDO2Session.h</code> and <code>YKFFIDO2GetAssertionResponse.h</code> (no hmac-secret handling found)</td>
+<td><a href="https://github.com/Yubico/yubikit-ios">https://github.com/Yubico/yubikit-ios</a></td>
+</tr>
+<tr>
+<td>S20</td>
+<td>Token2, FIDO2.1 Security Key Management Tool (third-party statement on administrator rights)</td>
+<td><a href="https://www.token2.com/site/page/fido2-1-security-key-management-tool-gui-for-fido2-manage-exe">https://www.token2.com/site/page/fido2-1-security-key-management-tool-gui-for-fido2-manage-exe</a></td>
+</tr>
+<tr>
+<td>S21</td>
+<td>tavrez/openssh-sk-winhello (third-party statement on administrator rights)</td>
+<td><a href="https://github.com/tavrez/openssh-sk-winhello">https://github.com/tavrez/openssh-sk-winhello</a></td>
+</tr>
+<tr>
+<td>S22</td>
+<td>FIDO Alliance, Metadata Service (MDS3) blob no. 290</td>
+<td><a href="https://mds3.fidoalliance.org/">https://mds3.fidoalliance.org/</a></td>
+</tr>
+</tbody>
+</table>
+
+</article>
+  </div>
+</main>
+<footer class="site">
+  <div class="wrap">
+    <span>Varsto is a working name. Source will be published under the PolyForm Shield License 1.0.0 with the first public alpha.</span>
+    <span>No cookies, no tracking. The web server keeps a standard access log for at most seven days.</span>
+    <span><a href="../docs/security-policy.html">Security policy</a> · <a href="../docs/licence.html">Licence</a> · <a href="../docs/trademark.html">Trademark</a></span>
+  </div>
+</footer>
+</body>
+</html>

@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Docs: Varsto</title>
-<meta name="description" content="Varsto documentation">
+<title>Security policy: Varsto</title>
+<meta name="description" content="Varsto documentation: Security policy">
 <meta name="robots" content="noindex, nofollow">
 <meta name="color-scheme" content="light dark">
 <link rel="icon" href="../favicon.svg" type="image/svg+xml">
@@ -32,38 +32,20 @@
 </header>
 <main id="main">
   <div class="wrap">
-    <h1>Docs</h1>
-    <p class="lead">The documents below are rendered from the repository. They describe what alpha-0 does today and what the full design intends; every design document says which parts exist.</p>
-    <h2>Start here</h2>
-    <ul class="doclist">
-      <li><a href="quick-start.html">Overview and quick start</a></li>
-    </ul>
-    <h2>Specifications</h2>
-    <ul class="doclist">
-      <li><a href="alpha-0-format.html">Alpha-0 storage format and sync model</a></li>
-      <li><a href="format-versions.html">Storage format versions</a></li>
-      <li><a href="key-hierarchy.html">Key hierarchy (draft)</a></li>
-      <li><a href="ledger-signing-notes.html">Ledger signing: design notes</a></li>
-      <li><a href="specifications.html">Specification status</a></li>
-    </ul>
-    <h2>Security</h2>
-    <ul class="doclist">
-      <li><a href="threat-model.html">Threat model (design stage)</a></li>
-      <li><a href="security-principles.html">Security principles</a></li>
-      <li><a href="logging.html">Logging architecture</a></li>
-      <li><a href="failure-model.html">Failure model</a></li>
-      <li><a href="fido2-platform-support.html">FIDO2 hmac-secret and PRF platform support</a></li>
-    </ul>
-    <h2>Project</h2>
-    <ul class="doclist">
-      <li><a href="security-policy.html">Security policy</a></li>
-      <li><a href="testing.html">Testing</a></li>
-      <li><a href="contributing.html">Contributing</a></li>
-      <li><a href="trademark.html">Trademark policy (draft)</a></li>
-      <li><a href="provider-price-data.html">Provider price data</a></li>
-      <li><a href="mobile-testing.html">Mobile testing guide</a></li>
-      <li><a href="licence.html">Licence (PolyForm Shield 1.0.0)</a></li>
-    </ul>
+<article class="prose">
+<h1>Security policy</h1>
+<p class="note">From <code>SECURITY.md</code> in the repository, rendered 2026-10-08.</p>
+<p>Varsto is alpha software and the cryptography has not been independently audited. See the warning in <a href="provider-price-data.html">README.md</a>.</p>
+<h2 id="reporting-a-vulnerability">Reporting a vulnerability</h2>
+<p>Please do <strong>not</strong> open a public issue for security problems.</p>
+<p>TODO before the first public release: publish a dedicated security contact (and a PGP key or <code>security.txt</code>), define response times, and set up coordinated disclosure.</p>
+<p>Until then, report privately to the repository owner through the hosting platform's private messaging.</p>
+<h2 id="scope">Scope</h2>
+<p>In scope: the core library, the CLI, the desktop and mobile apps, the storage format and protocols, the MCP server, the website and the release process.</p>
+<h2 id="threat-model">Threat model</h2>
+<p>The design-stage threat model is in <a href="threat-model.html">docs/architecture/threat-model.md</a>. No implementation exists yet, so treat every guarantee as unproven.</p>
+
+</article>
   </div>
 </main>
 <footer class="site">

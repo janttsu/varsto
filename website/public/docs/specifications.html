@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Specification status: Varsto</title>
+<meta name="description" content="Varsto documentation: Specification status">
+<meta name="robots" content="noindex, nofollow">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../blog/feed.xml">
+<link rel="stylesheet" href="../assets/css/site.css">
+<script src="../assets/js/theme.js"></script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="alpha" role="note">
+  <div class="wrap"><strong>Alpha software, not for production data.</strong> Bugs can cause data loss, formats may change without migration, and the cryptography has not been independently audited. Keep your own backups and check that you can restore from them.</div>
+</div>
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="../"><img src="../assets/img/logo.svg" alt="" width="28" height="28"><span>Varsto</span></a>
+    <nav class="main" aria-label="Main">
+      <a href="../">Project</a>
+      <a href="../docs/" aria-current="page">Docs</a>
+      <a href="../downloads/">Downloads</a>
+      <a href="../blog/">Blog</a>
+      <a href="../forum/">Forum</a>
+      <button class="theme" id="theme-toggle" type="button" aria-label="Change colour theme">Theme: auto</button>
+    </nav>
+  </div>
+</header>
+<main id="main">
+  <div class="wrap">
+<article class="prose">
+<h1>Specification status</h1>
+<p class="note">From <code>docs/spec/README.md</code> in the repository, rendered 2026-10-08.</p>
+<p>Status of the documents that will define formats and protocols. All are <strong>not started</strong> unless noted. They are intended to be open so that implementations remain interoperable and data stays recoverable.</p>
+<table>
+<thead>
+<tr>
+<th>Document</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Storage layout and pack format</td>
+<td>alpha-0 implemented, no packs: <a href="alpha-0-format.html">alpha-0-format.md</a></td>
+</tr>
+<tr>
+<td>Chunking and hashing</td>
+<td>alpha-0 implemented: <a href="alpha-0-format.html">alpha-0-format.md</a> section 1 to 3</td>
+</tr>
+<tr>
+<td>Key hierarchy and key wrapping (incl. FIDO2 <code>hmac-secret</code>)</td>
+<td>draft, design stage: <a href="key-hierarchy.html">key-hierarchy.md</a></td>
+</tr>
+<tr>
+<td>Post-quantum hybrid handshakes and signatures</td>
+<td>not started</td>
+</tr>
+<tr>
+<td>Event ledger and bookkeeping</td>
+<td>design notes on signing: <a href="ledger-signing-notes.html">ledger-signing-notes.md</a>; alpha-0 mailbox model: <a href="alpha-0-format.html">alpha-0-format.md</a> section 6</td>
+</tr>
+<tr>
+<td>Peer discovery (LAN, storage rendezvous, DHT, relays)</td>
+<td>not started</td>
+</tr>
+<tr>
+<td>Peer-to-peer transfer protocol</td>
+<td>not started</td>
+</tr>
+<tr>
+<td>Version, trash and retention model</td>
+<td>alpha-0 merge rules and trash: <a href="alpha-0-format.html">alpha-0-format.md</a> section 7; retention not started</td>
+</tr>
+<tr>
+<td>Durability policy language</td>
+<td>not started</td>
+</tr>
+<tr>
+<td>Removable-disk layout</td>
+<td>not started</td>
+</tr>
+<tr>
+<td>Local control API and MCP surface</td>
+<td>not started</td>
+</tr>
+<tr>
+<td>Recovery kit</td>
+<td>not started</td>
+</tr>
+</tbody>
+</table>
+<p>Storage format version history (which releases read which formats): see <a href="format-versions.html">format-versions.md</a>.</p>
+<p>Failure model (what fails and what does not): see <a href="failure-model.html">../failure-model.md</a>.</p>
+
+</article>
+  </div>
+</main>
+<footer class="site">
+  <div class="wrap">
+    <span>Varsto is a working name. Source will be published under the PolyForm Shield License 1.0.0 with the first public alpha.</span>
+    <span>No cookies, no tracking. The web server keeps a standard access log for at most seven days.</span>
+    <span><a href="../docs/security-policy.html">Security policy</a> · <a href="../docs/licence.html">Licence</a> · <a href="../docs/trademark.html">Trademark</a></span>
+  </div>
+</footer>
+</body>
+</html>

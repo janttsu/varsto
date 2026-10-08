@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mobile testing guide: Varsto</title>
+<meta name="description" content="Varsto documentation: Mobile testing guide">
+<meta name="robots" content="noindex, nofollow">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../blog/feed.xml">
+<link rel="stylesheet" href="../assets/css/site.css">
+<script src="../assets/js/theme.js"></script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="alpha" role="note">
+  <div class="wrap"><strong>Alpha software, not for production data.</strong> Bugs can cause data loss, formats may change without migration, and the cryptography has not been independently audited. Keep your own backups and check that you can restore from them.</div>
+</div>
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="../"><img src="../assets/img/logo.svg" alt="" width="28" height="28"><span>Varsto</span></a>
+    <nav class="main" aria-label="Main">
+      <a href="../">Project</a>
+      <a href="../docs/" aria-current="page">Docs</a>
+      <a href="../downloads/">Downloads</a>
+      <a href="../blog/">Blog</a>
+      <a href="../forum/">Forum</a>
+      <button class="theme" id="theme-toggle" type="button" aria-label="Change colour theme">Theme: auto</button>
+    </nav>
+  </div>
+</header>
+<main id="main">
+  <div class="wrap">
+<article class="prose">
+<h1>Mobile testing guide</h1>
+<p class="note">From <code>docs/testing/mobile.md</code> in the repository, rendered 2026-10-08.</p>
+<p>A guide for people who have not tested mobile apps before. Facts below come from public documentation and articles gathered in 2026; check the linked vendors' current pages before relying on limits, prices or quotas.</p>
+<h2 id="short-answer">Short answer</h2>
+<ul>
+<li><strong>Android:</strong> yes, most tests can run in an emulator, including headless inside a Linux virtual machine, as long as the machine offers hardware virtualisation (KVM). Real phones are still needed for hardware-specific features.</li>
+<li><strong>iOS:</strong> the iOS Simulator runs only on macOS. Apple's licence allows macOS virtual machines only on Apple hardware, so you cannot run iOS tests inside a Linux VM. Use a Mac (local or hosted).</li>
+<li><strong>Real devices</strong> are required for anything that depends on hardware: biometrics bound to a secure element, NFC / USB security keys, real background execution and battery behaviour, and local-network behaviour between two phones.</li>
+</ul>
+<h2 id="what-an-emulator-can-and-cannot-test">What an emulator can and cannot test</h2>
+<table>
+<thead>
+<tr>
+<th>Area</th>
+<th>Android emulator</th>
+<th>iOS Simulator</th>
+<th>Real device needed?</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>UI flows, navigation, language, dark mode</td>
+<td>yes</td>
+<td>yes</td>
+<td>no</td>
+</tr>
+<tr>
+<td>File access, selective sync UI, offline pinning</td>
+<td>yes</td>
+<td>yes (File Provider works)</td>
+<td>for final check</td>
+</tr>
+<tr>
+<td>Camera upload (add test media to the gallery)</td>
+<td>yes (scripted)</td>
+<td>yes (add photos)</td>
+<td>for background limits</td>
+</tr>
+<tr>
+<td>Passphrase unlock, wipe counter logic</td>
+<td>yes</td>
+<td>yes</td>
+<td>no</td>
+</tr>
+<tr>
+<td>Biometrics bound to hardware keys</td>
+<td>simulated only</td>
+<td>Secure Enclave is not available; biometrics only partly simulated</td>
+<td><strong>yes</strong></td>
+</tr>
+<tr>
+<td>NFC / USB-C security key (FIDO2)</td>
+<td>no NFC hardware</td>
+<td>no</td>
+<td><strong>yes</strong></td>
+</tr>
+<tr>
+<td>Background execution, Doze, BGTasks, battery</td>
+<td>partly</td>
+<td>partly</td>
+<td><strong>yes</strong></td>
+</tr>
+<tr>
+<td>Push notifications</td>
+<td>yes</td>
+<td>limited (sandbox, newer Macs)</td>
+<td>for end-to-end</td>
+</tr>
+<tr>
+<td>LAN discovery and P2P between two devices</td>
+<td>emulator network is isolated</td>
+<td>simulator shares the Mac network</td>
+<td><strong>yes</strong> (two phones)</td>
+</tr>
+<tr>
+<td>Performance and thermal behaviour</td>
+<td>not representative</td>
+<td>not representative</td>
+<td><strong>yes</strong></td>
+</tr>
+</tbody>
+</table>
+<h2 id="android-how-to-test-step-by-step">Android: how to test, step by step</h2>
+<ol type="1">
+<li><strong>Run the core on Linux first.</strong> Most of the logic (crypto, sync, bookkeeping) is a Rust library that is tested on Linux (see TESTING.md). Only the thin Android layer needs an emulator.</li>
+<li><strong>Emulator.</strong> Install the Android command-line tools, create an Android Virtual Device (x86_64 image) and start it with hardware acceleration. Headless example: <code>emulator -avd &lt;name&gt; -no-window -no-audio -gpu swiftshader_indirect</code>, then <code>adb wait-for-device</code>. This is scriptable, so an AI agent or CI job can run it.</li>
+<li><strong>KVM inside a VM.</strong> The emulator needs KVM. On bare metal this works. Inside a virtual machine, nested virtualisation must be enabled on the host (check with <code>kvm-ok</code>). If nested virtualisation is not available, run the emulator on the host, or use Redroid (Android in a container on the host kernel, no <code>/dev/kvm</code>) for logic tests.</li>
+<li><strong>UI tests.</strong> Use the Android test frameworks (Espresso / UI Automator / Compose tests) or a cross-platform tool such as Maestro (YAML flows that run on Android and iOS). Appium is the heavier alternative.</li>
+<li><strong>Real phone.</strong> Enable developer options and USB debugging, then <code>adb install app.apk</code>. No store account is needed for this.</li>
+<li><strong>Pre-release distribution.</strong> Google Play <em>internal testing</em> (up to 100 testers, available within minutes, no full review) or Firebase App Distribution. Note: a new personal Play developer account may need a closed test with 12 testers for 14 days before production release; verify the current rule in Play Console help.</li>
+</ol>
+<h2 id="ios-how-to-test-step-by-step">iOS: how to test, step by step</h2>
+<ol type="1">
+<li>You need a Mac with Xcode. The iOS Simulator is included.</li>
+<li><strong>Run on the Simulator</strong> from Xcode or from the command line with <code>xcodebuild test -destination 'platform=iOS Simulator,name=...'</code>. XCUITest and Maestro both work.</li>
+<li><strong>Run on a real iPhone</strong> from Xcode over a cable. A free Apple ID works for personal testing with short-lived signing; a paid Apple Developer account is required for TestFlight and the store.</li>
+<li><strong>TestFlight.</strong> Internal testers (up to 100) need no review; external testers (up to 10,000) need a first-build review; builds expire after 90 days.</li>
+<li><strong>CI on macOS.</strong> Options: Xcode Cloud (25 free compute hours per month with the Apple Developer Program, as reported), hosted macOS runners from CI providers, or a self-hosted runner on your own Mac. Standard GitHub-hosted macOS runners are reported to be free for public repositories; this repository is hosted elsewhere, so check what your CI offers.</li>
+<li><strong>Cross-compiling the Rust core for iOS</strong> requires the Apple SDK, i.e. macOS and Xcode.</li>
+</ol>
+<h2 id="device-farms-optional">Device farms (optional)</h2>
+<p>Cloud services that rent real devices exist (Firebase Test Lab, AWS Device Farm, BrowserStack and others). Firebase Test Lab's free tier was reported as a small number of test runs per day; paid use is billed per device-hour. They are useful for compatibility checks on many models, not for hardware features such as NFC security keys.</p>
+<h2 id="a-practical-plan">A practical plan</h2>
+<ol type="1">
+<li>Test the Rust core on Linux (cheap, automated, no mobile tooling needed).</li>
+<li>Add Android emulator tests on the same Linux machine or VM (KVM) and let a cheap AI agent run them from this document.</li>
+<li>Add iOS Simulator tests on a Mac; run them yourself or from a self-hosted runner.</li>
+<li>Buy or borrow two cheap real devices: one older Android phone and one older iPhone that supports the lowest iOS version you target. Use them for the hardware-dependent items in the manual checklists.</li>
+<li>Distribute builds to yourself through Play internal testing and TestFlight before any public release.</li>
+</ol>
+<h2 id="results">Results</h2>
+<p>Record every run with <a href="./">report-template.md</a>. Mark which items were verified on a real device and which only in an emulator.</p>
+
+</article>
+  </div>
+</main>
+<footer class="site">
+  <div class="wrap">
+    <span>Varsto is a working name. Source will be published under the PolyForm Shield License 1.0.0 with the first public alpha.</span>
+    <span>No cookies, no tracking. The web server keeps a standard access log for at most seven days.</span>
+    <span><a href="../docs/security-policy.html">Security policy</a> · <a href="../docs/licence.html">Licence</a> · <a href="../docs/trademark.html">Trademark</a></span>
+  </div>
+</footer>
+</body>
+</html>

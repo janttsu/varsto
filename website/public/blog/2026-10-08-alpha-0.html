@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Alpha-0: the first vertical slice: Varsto</title>
+<meta name="description" content="A command-line tool that encrypts, stores and syncs a folder between two devices through storage you own, with a signed ledger you can check.">
+<meta name="robots" content="noindex, nofollow">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../blog/feed.xml">
+<link rel="stylesheet" href="../assets/css/site.css">
+<script src="../assets/js/theme.js"></script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="alpha" role="note">
+  <div class="wrap"><strong>Alpha software, not for production data.</strong> Bugs can cause data loss, formats may change without migration, and the cryptography has not been independently audited. Keep your own backups and check that you can restore from them.</div>
+</div>
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="../"><img src="../assets/img/logo.svg" alt="" width="28" height="28"><span>Varsto</span></a>
+    <nav class="main" aria-label="Main">
+      <a href="../">Project</a>
+      <a href="../docs/">Docs</a>
+      <a href="../downloads/">Downloads</a>
+      <a href="../blog/" aria-current="page">Blog</a>
+      <a href="../forum/">Forum</a>
+      <button class="theme" id="theme-toggle" type="button" aria-label="Change colour theme">Theme: auto</button>
+    </nav>
+  </div>
+</header>
+<main id="main">
+  <div class="wrap">
+<article class="prose"><h1>Alpha-0: the first vertical slice</h1><p class="note"><time datetime="2026-10-08">2026-10-08</time></p>
+<p>Alpha-0 is the first thing you can run. It is deliberately narrow: one storage backend (a directory), a command-line tool, and the smallest set of mechanisms that make the core idea real.</p>
+<h2 id="what-the-core-idea-is">What the core idea is</h2>
+<p>Most encrypted sync products run a server that at least sees who connects when, and usually sells the storage too. Varsto has no server. Your devices write encrypted objects into storage that you own, and they write a signed, encrypted record of what they did next to the data. Another device that reaches the same storage reads that record, verifies the signatures, and knows what exists, where it is and which copies have been checked. Two devices that are never online at the same time still end up with the same files.</p>
+<h2 id="what-alpha-0-does">What alpha-0 does</h2>
+<ul>
+<li>cuts files into content-defined chunks and encrypts each one with a key derived from the chunk's own keyed hash, so the same content becomes the same object on every device and deduplicates without coordination;</li>
+<li>writes chunks, folder manifests and ledger batches into a local-directory storage with put-if-absent semantics, one writer per path, no locks;</li>
+<li>merges manifests with version vectors; concurrent edits keep both versions as a conflict copy, a deletion never beats a concurrent edit, and deleted files go to a local trash;</li>
+<li>detects a device restored from an old backup and refuses to let it sign further;</li>
+<li><code>fsck --verify</code> re-hashes every object a folder references and reports claims the storage cannot back.</li>
+</ul>
+<p>The format is written down in <a href="../docs/alpha-0-format.html">alpha-0-format.md</a>, including every known limitation.</p>
+<h2 id="what-it-does-not-do">What it does not do</h2>
+<p>No sharing with other people, no peer-to-peer transfer, no S3 or rclone yet, no security keys, no mobile apps, and the post-quantum hybrid of the design is not in the code yet (every object carries an algorithm identifier so it can be added without rewriting data). Nothing has been audited. Please use test data only.</p>
+<h2 id="how-to-try-it">How to try it</h2>
+<p>Download the Linux binary from the <a href="../docs/./">downloads page</a>, verify the checksum, and follow the quick start. Two directories on one machine are enough to see the ledger and the sync work; two machines with a shared USB disk or a network mount show the real thing.</p>
+
+</article>
+  </div>
+</main>
+<footer class="site">
+  <div class="wrap">
+    <span>Varsto is a working name. Source will be published under the PolyForm Shield License 1.0.0 with the first public alpha.</span>
+    <span>No cookies, no tracking. The web server keeps a standard access log for at most seven days.</span>
+    <span><a href="../docs/security-policy.html">Security policy</a> · <a href="../docs/licence.html">Licence</a> · <a href="../docs/trademark.html">Trademark</a></span>
+  </div>
+</footer>
+</body>
+</html>

@@ -55,3 +55,26 @@ h2 { font-size: 1.5rem; margin: 2.5rem 0 .75rem; }
 footer.site { border-top: 1px solid var(--border); padding: 2rem 0; color: var(--muted); font-size: .95rem; }
 footer.site .wrap { display: flex; gap: 1rem 2rem; flex-wrap: wrap; justify-content: space-between; }
 @media (prefers-reduced-motion: no-preference) { a, button { transition: background-color .15s, color .15s; } }
+/* Content pages */
+a.button { display: inline-block; background: var(--accent); color: var(--accent-contrast); padding: .6rem 1.1rem; border-radius: 10px; text-decoration: none; font-weight: 600; margin: .5rem .5rem .5rem 0; }
+a.button.secondary { background: var(--surface); color: var(--text); border: 1px solid var(--border); }
+.prose { max-width: 52rem; }
+.prose h1 { font-size: clamp(1.75rem, 4vw, 2.5rem); }
+.prose h2 { margin-top: 2rem; }
+.prose h3 { margin: 1.5rem 0 .5rem; font-size: 1.15rem; }
+.prose blockquote { margin: 1rem 0; padding: .75rem 1rem; border-left: 4px solid var(--warn-border); background: var(--warn-bg); color: var(--warn-text); border-radius: 0 8px 8px 0; }
+.prose blockquote p { margin: 0; }
+pre { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 1rem; overflow-x: auto; font-size: .92rem; line-height: 1.5; }
+code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; font-size: .95em; }
+p code, li code, td code { background: var(--surface); border: 1px solid var(--border); border-radius: 5px; padding: 0 .3em; }
+table { border-collapse: collapse; width: 100%; margin: 1rem 0; font-size: .95rem; display: block; overflow-x: auto; }
+th, td { text-align: left; vertical-align: top; padding: .5rem .6rem; border-bottom: 1px solid var(--border); }
+th { color: var(--muted); font-weight: 600; }
+code.sum { font-size: .8rem; word-break: break-all; }
+.doclist, .posts { list-style: none; padding: 0; }
+.doclist li, .posts li { padding: .45rem 0; border-bottom: 1px solid var(--border); }
+.posts time { color: var(--muted); font-variant-numeric: tabular-nums; margin-right: .5rem; }
+pre.licence { white-space: pre-wrap; }
+figure.hero { margin: 2rem 0 1rem; }
+figure.hero img { width: 100%; height: auto; display: block; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: .5rem; }
+figure.hero figcaption { color: var(--muted); font-size: .95rem; margin-top: .5rem; }

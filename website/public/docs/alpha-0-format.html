@@ -1,0 +1,304 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Alpha-0 storage format and sync model: Varsto</title>
+<meta name="description" content="Varsto documentation: Alpha-0 storage format and sync model">
+<meta name="robots" content="noindex, nofollow">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../blog/feed.xml">
+<link rel="stylesheet" href="../assets/css/site.css">
+<script src="../assets/js/theme.js"></script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="alpha" role="note">
+  <div class="wrap"><strong>Alpha software, not for production data.</strong> Bugs can cause data loss, formats may change without migration, and the cryptography has not been independently audited. Keep your own backups and check that you can restore from them.</div>
+</div>
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="../"><img src="../assets/img/logo.svg" alt="" width="28" height="28"><span>Varsto</span></a>
+    <nav class="main" aria-label="Main">
+      <a href="../">Project</a>
+      <a href="../docs/" aria-current="page">Docs</a>
+      <a href="../downloads/">Downloads</a>
+      <a href="../blog/">Blog</a>
+      <a href="../forum/">Forum</a>
+      <button class="theme" id="theme-toggle" type="button" aria-label="Change colour theme">Theme: auto</button>
+    </nav>
+  </div>
+</header>
+<main id="main">
+  <div class="wrap">
+<article class="prose">
+<h1>Alpha-0 storage format and sync model</h1>
+<p class="note">From <code>docs/spec/alpha-0-format.md</code> in the repository, rendered 2026-10-08.</p>
+<blockquote>
+<p><strong>Format version 0, alpha.</strong> Implemented in <code>crates/varsto-core</code>. It may change without a migration path; every released alpha keeps a reader (see <a href="format-versions.html">format-versions.md</a>). Nothing here has been reviewed or audited. The post-quantum hybrid parts of the plan are not implemented yet; algorithm identifiers in every object make that visible and allow the change.</p>
+</blockquote>
+<h2 id="1-what-alpha-0-does">1. What alpha-0 does</h2>
+<ul>
+<li>Content-defined chunking of files (Gear rolling hash, FastCDC-style normalisation; defaults 64 KiB min, 256 KiB average, 1 MiB max).</li>
+<li>Client-side authenticated encryption of every chunk, manifest, ledger batch and record before it reaches a storage. Storage sees opaque objects and their sizes only.</li>
+<li>One storage backend: a local directory (covers local disks, removable disks and network mounts). S3 and rclone remotes follow.</li>
+<li>A per-device, append-only, signed ledger replicated through every storage. Devices that are never online at the same time converge through the storage ("mailbox").</li>
+<li>Two-way folder sync between devices with version vectors; concurrent edits produce a deterministic winner and a conflict copy; deletions go to a local trash.</li>
+<li><code>fsck</code>: compares the ledger with what the storages actually hold and can verify every object by hash.</li>
+<li>Cold storages are written but never read (requirement F-043 default).</li>
+</ul>
+<p>Not in alpha-0: sharing with other users, peer-to-peer transfer, hybrid post-quantum signatures and key agreement, FIDO2 security keys, Strongroom, placeholders, policies and alerts, packs, mobile, MCP, daemon. Keys are shared between devices out of band (the "vault key").</p>
+<h2 id="2-identifiers">2. Identifiers</h2>
+<table>
+<thead>
+<tr>
+<th>Identifier</th>
+<th>Construction</th>
+<th>Visible to storage</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>vault id</td>
+<td>16 random bytes</td>
+<td>yes (<code>vault/meta.json</code>)</td>
+</tr>
+<tr>
+<td>device id</td>
+<td>first 16 bytes of BLAKE3(device public key)</td>
+<td>yes (object names)</td>
+</tr>
+<tr>
+<td>folder id</td>
+<td>16 random bytes</td>
+<td>yes (object names)</td>
+</tr>
+<tr>
+<td>chunk id</td>
+<td>keyed BLAKE3 of the chunk plaintext, key = folder hash key</td>
+<td>no (inside encrypted manifests and ledger)</td>
+</tr>
+<tr>
+<td>object name</td>
+<td>BLAKE3 of the chunk ciphertext</td>
+<td>yes (object names)</td>
+</tr>
+<tr>
+<td>content hash</td>
+<td>keyed BLAKE3 of the whole file, folder hash key</td>
+<td>no</td>
+</tr>
+</tbody>
+</table>
+<p>Object names are plain hashes of ciphertext, so a peer or a scrub can verify an object without any key. Chunk ids are keyed, so the storage cannot test whether a known file is present (plan 6.11).</p>
+<h2 id="3-keys">3. Keys</h2>
+<p>Subset of <a href="key-hierarchy.html">key-hierarchy.md</a>. All keys are 256 bits. Derivation uses BLAKE3 <code>derive_key</code> with the context <code>e2ee-sync-format/0/&lt;purpose&gt;</code> and length-prefixed scope identifiers (vault, folder, device, chunk) in the key material.</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Purpose</th>
+<th>Derived or wrapped</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>master key (K3)</td>
+<td>root of the vault</td>
+<td>random; shown once as the hex "vault key" for joining other devices; wrapped locally under the passphrase key</td>
+</tr>
+<tr>
+<td>passphrase key (K4)</td>
+<td>wrap the master key and device signing key on one device</td>
+<td>Argon2id (fixed minimums: 64 MiB, 3 passes, 1 lane; readers refuse weaker parameters)</td>
+</tr>
+<tr>
+<td>device signing key (K6/K7)</td>
+<td>sign this device's ledger batches</td>
+<td>Ed25519, random per device, wrapped with K4</td>
+</tr>
+<tr>
+<td>ledger key</td>
+<td>encrypt ledger batch bodies</td>
+<td>derive(K3, <code>ledger</code>)</td>
+</tr>
+<tr>
+<td>device-registry key</td>
+<td>encrypt device records</td>
+<td>derive(K3, <code>device-registry</code>)</td>
+</tr>
+<tr>
+<td>folder-record key</td>
+<td>encrypt folder records</td>
+<td>derive(K3, <code>folder-record</code>)</td>
+</tr>
+<tr>
+<td>local-keyring key</td>
+<td>encrypt the local copy of folder keys</td>
+<td>derive(K3, <code>local-keyring</code>)</td>
+</tr>
+<tr>
+<td>folder key (K9)</td>
+<td>per folder</td>
+<td>random; published in the creating device's folder record</td>
+</tr>
+<tr>
+<td>folder hash key (K11)</td>
+<td>chunk ids and content hashes</td>
+<td>derive(K9, <code>dedup-hash</code>, folder)</td>
+</tr>
+<tr>
+<td>folder metadata key (K10)</td>
+<td>manifests</td>
+<td>derive(K9, <code>folder-metadata</code>, folder)</td>
+</tr>
+<tr>
+<td>chunk key (K14)</td>
+<td>one chunk</td>
+<td>derive(K9, <code>chunk-key</code>, folder, chunk id)</td>
+</tr>
+<tr>
+<td>chunk nonce</td>
+<td>one chunk</td>
+<td>derive(K9, <code>chunk-nonce</code>, folder, chunk id), first 24 bytes</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Alpha-0 decision (convergent chunk keys).</strong> The chunk key and nonce are derived from the chunk's keyed hash, so the same content encrypts to the same object on every device of the vault. Two devices that ingest the same file offline therefore produce one object, deduplication works without coordination, and a future peer-to-peer swarm can advertise object names. The cost: rotating a folder key re-encrypts its data, and anyone holding the folder key can test for known content inside that folder. Shared folders (not yet implemented) will use random chunk keys wrapped under the folder key, as the key hierarchy draft proposes. Rationale and alternatives: plan section 8, "Avainnettu hash, lohkot ja padding".</p>
+<h2 id="4-encryption-and-associated-data">4. Encryption and associated data</h2>
+<p>AEAD is XChaCha20-Poly1305. Every object is <code>nonce (24 bytes) || ciphertext || tag</code>. The associated data is a length-prefixed list that always starts with the format version and the AEAD identifier, then the object type and its scope:</p>
+<table>
+<thead>
+<tr>
+<th>Object</th>
+<th>Associated data fields</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>chunk</td>
+<td>vault id, folder id, chunk id, plaintext length</td>
+</tr>
+<tr>
+<td>manifest</td>
+<td>vault id, folder id, device id, manifest sequence</td>
+</tr>
+<tr>
+<td>ledger batch body</td>
+<td>device id, batch sequence</td>
+</tr>
+<tr>
+<td>device record</td>
+<td>vault id, device id</td>
+</tr>
+<tr>
+<td>folder record</td>
+<td>vault id, creating device id, folder id</td>
+</tr>
+<tr>
+<td>key file</td>
+<td>vault id, device id</td>
+</tr>
+<tr>
+<td>local keyring</td>
+<td>vault id, device id</td>
+</tr>
+</tbody>
+</table>
+<p>A storage cannot move, rename or replay an object into another place without the AEAD check failing.</p>
+<h2 id="5-storage-layout">5. Storage layout</h2>
+<pre class="text"><code>vault/meta.json                          format version, vault id (plaintext)
+vault/devices/&lt;device&gt;.enc               device record: name, Ed25519 public key
+vault/folders/&lt;device&gt;/&lt;folder&gt;.enc      folder record: name, folder key
+ledger/&lt;device&gt;/&lt;seq 16 digits&gt;.json     signed batch envelope (body encrypted)
+manifests/&lt;folder&gt;/&lt;device&gt;/&lt;seq&gt;.enc    full folder view of one device
+chunks/&lt;first two hex&gt;/&lt;object name&gt;     encrypted chunk</code></pre>
+<p>Every path has one writer: a device writes only under its own device id, and chunk objects are content-addressed and written with put-if-absent. No conditional writes, locks or leases are needed on the storage. Objects are never overwritten.</p>
+<h2 id="6-ledger">6. Ledger</h2>
+<p>Model B of <a href="ledger-signing-notes.html">ledger-signing-notes.md</a>: events are grouped into batches; each batch carries the device id, a sequence number, the hash of the previous batch of the same device, a Lamport clock and its events; the body is encrypted, and the signature covers <code>device || seq || BLAKE3(encrypted body)</code>. Event types:</p>
+<table>
+<thead>
+<tr>
+<th>Event</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>device_enrolled</code></td>
+<td>this device joined (name)</td>
+</tr>
+<tr>
+<td><code>folder_added</code></td>
+<td>this device created a folder</td>
+</tr>
+<tr>
+<td><code>chunk_stored</code></td>
+<td>this device wrote an object to a storage (a claim)</td>
+</tr>
+<tr>
+<td><code>chunk_verified</code></td>
+<td>this device fetched the object from a storage and the hash matched</td>
+</tr>
+<tr>
+<td><code>chunk_on_device</code></td>
+<td>this device holds the plaintext as part of a file</td>
+</tr>
+<tr>
+<td><code>manifest_published</code></td>
+<td>this device published manifest <code>seq</code> of a folder</td>
+</tr>
+</tbody>
+</table>
+<p>Replaying every batch yields the location view: for each (folder, chunk) the object name, size, which storages claim it (by whom) and which devices verified it there. A storage copy counts as <strong>verified</strong> only when a device other than the writer has verified it. <code>varsto status</code> reports chunks without any storage copy and chunks verified elsewhere.</p>
+<p>Mailbox rules:</p>
+<ul>
+<li>on every pull a device lists <code>ledger/</code> on every hot storage and ingests batches it does not have, after checking the signature against the device registry and the hash chain;</li>
+<li>on every push it uploads its own batches that a storage lacks;</li>
+<li>two different batches with the same device and sequence number are a <strong>fork</strong>: the device is marked forked in the local heads;</li>
+<li>if the mailbox holds batches of this device's own identity that it never wrote (a copy restored from an old backup, or a clone), the device fences itself: it stops signing and <code>push</code> fails until it is re-enrolled as a new device.</li>
+</ul>
+<p>Lamport clocks: each device keeps one logical clock, incremented on every local change and raised to any larger value seen in batches or manifests.</p>
+<h2 id="7-manifests-and-merging">7. Manifests and merging</h2>
+<p>Each device publishes its full view of a folder as a manifest (<code>seq</code> increases per device). A file state has: path, version vector (device -&gt; clock of that device's last change), deleted flag, size, mtime (change detection only), content hash, chunk list (chunk id, object name, size), and the device and clock of the last change.</p>
+<p>Merge rules for the same path, local versus remote:</p>
+<ul>
+<li>remote dominated by local: keep local; local dominated by remote: take remote;</li>
+<li>concurrent with identical content: keep, version = element-wise maximum;</li>
+<li>concurrent, one side deleted: the modification wins (a deletion never destroys a concurrent edit);</li>
+<li>concurrent, different content: the state with the larger (clock, device id) wins; the loser is kept as <code>name.conflict-&lt;device&gt;-&lt;clock&gt;.ext</code>, a new file with its own version; the merged version vector is the element-wise maximum so both devices converge without a further round.</li>
+</ul>
+<p>Deleted files are moved to <code>&lt;home&gt;/trash/&lt;folder&gt;/&lt;path&gt;.&lt;time&gt;</code> on the device, never removed outright (F-025).</p>
+<h2 id="8-local-device-directory">8. Local device directory</h2>
+<pre class="text"><code>vault.json      vault id, device id, device name, format version
+keys.enc        master key and signing key, wrapped under the passphrase
+keyring.enc     folder records known to this device (encrypted)
+config.json     storages and folder mounts (no secrets)
+devices.json    device registry cache (public keys)
+clock.json      Lamport clock
+ledger/         local copy of every device&#39;s batches and the heads file
+state/&lt;folder&gt;.json  merged file states, local index, last seen manifests
+trash/          deleted files</code></pre>
+<h2 id="9-known-limitations">9. Known limitations</h2>
+<ul>
+<li>Pairing is "copy the vault key": no hybrid KEM, no QR, no second factor. The vault key is the master key in hex; losing it and every device means losing the data (no escrow).</li>
+<li>Ed25519 only; ML-DSA hybrid signatures are a format change that the <code>sig_alg</code> field prepares for.</li>
+<li>Whole files are chunked in a stream, but a changed file is re-read twice during a push (once to hash, once to upload) when a chunk is new; packs for small files do not exist yet.</li>
+<li>Manifests are full views; very large folders will need incremental manifests and checkpoints (plan section 8, blocking question 1).</li>
+<li>Verification of cold copies, policies, placeholders, sharing and P2P are not implemented.</li>
+<li>Logging and the redaction rules of <code>docs/architecture/logging.md</code> are not implemented; the CLI prints only aggregate counts and identifiers.</li>
+</ul>
+
+</article>
+  </div>
+</main>
+<footer class="site">
+  <div class="wrap">
+    <span>Varsto is a working name. Source will be published under the PolyForm Shield License 1.0.0 with the first public alpha.</span>
+    <span>No cookies, no tracking. The web server keeps a standard access log for at most seven days.</span>
+    <span><a href="../docs/security-policy.html">Security policy</a> · <a href="../docs/licence.html">Licence</a> · <a href="../docs/trademark.html">Trademark</a></span>
+  </div>
+</footer>
+</body>
+</html>

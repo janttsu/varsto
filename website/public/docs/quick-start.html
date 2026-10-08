@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Overview and quick start: Varsto</title>
+<meta name="description" content="Varsto documentation: Overview and quick start">
+<meta name="robots" content="noindex, nofollow">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../blog/feed.xml">
+<link rel="stylesheet" href="../assets/css/site.css">
+<script src="../assets/js/theme.js"></script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="alpha" role="note">
+  <div class="wrap"><strong>Alpha software, not for production data.</strong> Bugs can cause data loss, formats may change without migration, and the cryptography has not been independently audited. Keep your own backups and check that you can restore from them.</div>
+</div>
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="../"><img src="../assets/img/logo.svg" alt="" width="28" height="28"><span>Varsto</span></a>
+    <nav class="main" aria-label="Main">
+      <a href="../">Project</a>
+      <a href="../docs/" aria-current="page">Docs</a>
+      <a href="../downloads/">Downloads</a>
+      <a href="../blog/">Blog</a>
+      <a href="../forum/">Forum</a>
+      <button class="theme" id="theme-toggle" type="button" aria-label="Change colour theme">Theme: auto</button>
+    </nav>
+  </div>
+</header>
+<main id="main">
+  <div class="wrap">
+<article class="prose">
+<h1>Overview and quick start</h1>
+<p class="note">From <code>README.md</code> in the repository, rendered 2026-10-08.</p>
+<blockquote>
+<p><strong>Alpha software — do not use for production data.</strong> Varsto is in early development. Bugs can cause data loss or corruption, file formats and protocols may change without a migration path, and the cryptography has not been independently audited yet. Do not use it as the only copy of anything. You are responsible for keeping your own backups and for checking that you can restore from them. Each released storage-format version keeps a reader; see <a href="format-versions.html">docs/spec/format-versions.md</a>.</p>
+</blockquote>
+<p><em>"Varsto" is a working name and may change before the first public release.</em></p>
+<p>Varsto is an end-to-end encrypted file sync, sharing and backup app that <strong>does not sell storage</strong>. You bring the storage; the app does the rest.</p>
+<h2 id="goals">Goals</h2>
+<ul>
+<li><strong>Bring your own storage.</strong> S3-compatible keys, any rclone-compatible remote, a local folder, or removable disks (for example old hard drives in a USB dock). Cold storage such as Glacier is understood and used for rarely accessed data.</li>
+<li><strong>No one to trust, and no shortcuts.</strong> All content, file names and metadata are encrypted on your devices, and keys stay with you. External disks and cloud providers see opaque blocks only. Designed for post-quantum security (hybrid classical + post-quantum). Security is never traded for speed: there is no weaker "fast mode". Hardware security keys (FIDO2 / YubiKey), special-protected folders, and a recovery kit you store physically in several places. See <a href="security-principles.html">docs/architecture/security-principles.md</a>.</li>
+<li><strong>No tracker, no account, no vendor cloud.</strong> Devices find each other on the local network, through a rendezvous record in your own storage, and as a fallback through a DHT. Designed to avoid single points of failure.</li>
+<li><strong>Fast, block-level sync.</strong> Files are split into blocks; only changed blocks move. Peer-to-peer transfer between your own devices, also offline over a LAN, with the cloud brought up to date when you are back online.</li>
+<li><strong>Safety nets.</strong> Version history, trash (optionally on cold storage), durability policies with alerts, geographic location awareness, and provider-independent recovery. What the design tolerates, and what it does not, is listed in <a href="failure-model.html">docs/failure-model.md</a>.</li>
+<li><strong>Clients.</strong> Linux, Windows, macOS, Android, iOS; a CLI for Linux and macOS; an MCP server so you can manage and organise files by talking to a local or cloud AI of your choice.</li>
+</ul>
+<p>None of this is finished. See <a href="provider-price-data.html">docs/architecture</a> for the design principles and <a href="provider-price-data.html">docs/spec</a> for the status of the format and protocol specifications.</p>
+<h2 id="status">Status</h2>
+<p>Alpha-0: the first vertical slice works on Linux from the command line. It chunks and encrypts files, stores them in a local-directory storage (a disk, a removable disk or a network mount), keeps a signed per-device ledger in that storage, and syncs a folder between devices that are never online at the same time, with conflict copies and a trash. See <a href="alpha-0-format.html">docs/spec/alpha-0-format.md</a> for what it does and does not do. There is no sharing, no peer-to-peer transfer, no post-quantum hybrid yet, no mobile app and no audit.</p>
+<h3 id="quick-start-alpha-0-linux">Quick start (alpha-0, Linux)</h3>
+<div class="sourceCode" id="cb1"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="ex">cargo</span> build <span class="at">--release</span>                      <span class="co"># produces target/release/varsto</span></span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a><span class="bu">export</span> <span class="va">VARSTO_PASSPHRASE</span><span class="op">=</span><span class="st">&#39;a long passphrase&#39;</span></span>
+<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a><span class="ex">varsto</span> <span class="at">--home</span> ~/.varsto-laptop init <span class="at">--name</span> laptop            <span class="co"># prints the vault key once</span></span>
+<span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a><span class="ex">varsto</span> <span class="at">--home</span> ~/.varsto-laptop storage add-local box /mnt/box</span>
+<span id="cb1-5"><a href="#cb1-5" aria-hidden="true" tabindex="-1"></a><span class="ex">varsto</span> <span class="at">--home</span> ~/.varsto-laptop folder add docs ~/Documents/synced</span>
+<span id="cb1-6"><a href="#cb1-6" aria-hidden="true" tabindex="-1"></a><span class="ex">varsto</span> <span class="at">--home</span> ~/.varsto-laptop sync</span>
+<span id="cb1-7"><a href="#cb1-7" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-8"><a href="#cb1-8" aria-hidden="true" tabindex="-1"></a><span class="co"># on another device that can reach the same storage:</span></span>
+<span id="cb1-9"><a href="#cb1-9" aria-hidden="true" tabindex="-1"></a><span class="ex">varsto</span> <span class="at">--home</span> ~/.varsto-desk join <span class="at">--name</span> desk <span class="at">--vault-key</span> <span class="op">&lt;</span>hex<span class="op">&gt;</span> --storage-path /mnt/box</span>
+<span id="cb1-10"><a href="#cb1-10" aria-hidden="true" tabindex="-1"></a><span class="ex">varsto</span> <span class="at">--home</span> ~/.varsto-desk folder attach docs ~/synced</span>
+<span id="cb1-11"><a href="#cb1-11" aria-hidden="true" tabindex="-1"></a><span class="ex">varsto</span> <span class="at">--home</span> ~/.varsto-desk sync</span>
+<span id="cb1-12"><a href="#cb1-12" aria-hidden="true" tabindex="-1"></a><span class="ex">varsto</span> <span class="at">--home</span> ~/.varsto-desk status <span class="at">--json</span></span>
+<span id="cb1-13"><a href="#cb1-13" aria-hidden="true" tabindex="-1"></a><span class="ex">varsto</span> <span class="at">--home</span> ~/.varsto-desk fsck <span class="at">--verify</span></span></code></pre></div>
+<p>Test data only. Keep your own backups.</p>
+<h2 id="repository-layout">Repository layout</h2>
+<table>
+<thead>
+<tr>
+<th>Path</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>crates/</code></td>
+<td>Rust workspace: <code>varsto-core</code> (library) and <code>varsto-cli</code> (the <code>varsto</code> binary)</td>
+</tr>
+<tr>
+<td><code>docs/</code></td>
+<td>Architecture, specifications, testing guides</td>
+</tr>
+<tr>
+<td><code>tests/</code></td>
+<td>Test matrix and shared test assets</td>
+</tr>
+<tr>
+<td><code>scripts/test/</code></td>
+<td>Scripts used by the testing instructions</td>
+</tr>
+<tr>
+<td><code>website/</code></td>
+<td>Static project website (template)</td>
+</tr>
+<tr>
+<td><code>brand/</code></td>
+<td>Product name and brand settings in one place</td>
+</tr>
+</tbody>
+</table>
+<h2 id="licence">Licence</h2>
+<p>Varsto is <strong>source-available, not open source</strong>. It is licensed under the <a href="licence.html">PolyForm Shield License 1.0.0</a>: you may use it for any purpose, privately or in a company, except for providing a product that competes with it. It may not be sold, repackaged or rebranded as a competing product; redistribution of unmodified copies under the licence is allowed. The name and logo are covered separately by <a href="trademark.html">TRADEMARK.md</a>. Storage formats and protocols are intended to be openly specified so that your data stays recoverable.</p>
+<h2 id="contributing-security-and-testing">Contributing, security and testing</h2>
+<ul>
+<li><a href="contributing.html">CONTRIBUTING.md</a></li>
+<li><a href="security-policy.html">SECURITY.md</a></li>
+<li><a href="testing.html">TESTING.md</a></li>
+</ul>
+
+</article>
+  </div>
+</main>
+<footer class="site">
+  <div class="wrap">
+    <span>Varsto is a working name. Source will be published under the PolyForm Shield License 1.0.0 with the first public alpha.</span>
+    <span>No cookies, no tracking. The web server keeps a standard access log for at most seven days.</span>
+    <span><a href="../docs/security-policy.html">Security policy</a> · <a href="../docs/licence.html">Licence</a> · <a href="../docs/trademark.html">Trademark</a></span>
+  </div>
+</footer>
+</body>
+</html>

@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Docs: Varsto</title>
-<meta name="description" content="Varsto documentation">
+<title>Storage format versions: Varsto</title>
+<meta name="description" content="Varsto documentation: Storage format versions">
 <meta name="robots" content="noindex, nofollow">
 <meta name="color-scheme" content="light dark">
 <link rel="icon" href="../favicon.svg" type="image/svg+xml">
@@ -32,38 +32,42 @@
 </header>
 <main id="main">
   <div class="wrap">
-    <h1>Docs</h1>
-    <p class="lead">The documents below are rendered from the repository. They describe what alpha-0 does today and what the full design intends; every design document says which parts exist.</p>
-    <h2>Start here</h2>
-    <ul class="doclist">
-      <li><a href="quick-start.html">Overview and quick start</a></li>
-    </ul>
-    <h2>Specifications</h2>
-    <ul class="doclist">
-      <li><a href="alpha-0-format.html">Alpha-0 storage format and sync model</a></li>
-      <li><a href="format-versions.html">Storage format versions</a></li>
-      <li><a href="key-hierarchy.html">Key hierarchy (draft)</a></li>
-      <li><a href="ledger-signing-notes.html">Ledger signing: design notes</a></li>
-      <li><a href="specifications.html">Specification status</a></li>
-    </ul>
-    <h2>Security</h2>
-    <ul class="doclist">
-      <li><a href="threat-model.html">Threat model (design stage)</a></li>
-      <li><a href="security-principles.html">Security principles</a></li>
-      <li><a href="logging.html">Logging architecture</a></li>
-      <li><a href="failure-model.html">Failure model</a></li>
-      <li><a href="fido2-platform-support.html">FIDO2 hmac-secret and PRF platform support</a></li>
-    </ul>
-    <h2>Project</h2>
-    <ul class="doclist">
-      <li><a href="security-policy.html">Security policy</a></li>
-      <li><a href="testing.html">Testing</a></li>
-      <li><a href="contributing.html">Contributing</a></li>
-      <li><a href="trademark.html">Trademark policy (draft)</a></li>
-      <li><a href="provider-price-data.html">Provider price data</a></li>
-      <li><a href="mobile-testing.html">Mobile testing guide</a></li>
-      <li><a href="licence.html">Licence (PolyForm Shield 1.0.0)</a></li>
-    </ul>
+<article class="prose">
+<h1>Storage format versions</h1>
+<p class="note">From <code>docs/spec/format-versions.md</code> in the repository, rendered 2026-10-08.</p>
+<h2 id="purpose">Purpose</h2>
+<p>During alpha development, storage formats may change without migration paths. Once a format version is released, that version stays readable. This table tracks which released versions of Varsto can read each storage format, and whether standalone reader tools are available for data recovery.</p>
+<h2 id="format-versions">Format versions</h2>
+<table>
+<thead>
+<tr>
+<th>Format version</th>
+<th>First release</th>
+<th>Releases that read it</th>
+<th>Standalone reader tool</th>
+<th>Archived tag</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0 (alpha-0)</td>
+<td>0.0.1-alpha.0 (branch <code>alpha-0</code>, not tagged yet)</td>
+<td>0.0.1-alpha.0</td>
+<td>none yet (<code>varsto pull</code> and <code>varsto fsck</code> of the same version)</td>
+<td>-</td>
+</tr>
+</tbody>
+</table>
+<h2 id="release-rules">Release rules</h2>
+<ol type="1">
+<li>Tag every alpha release (for example <code>alpha-2026-10-08</code>) with the source commit and binaries.</li>
+<li>Archive binaries and source on each release.</li>
+<li>Before publishing a new storage format version, ensure the previous version has a reader tool (built-in or standalone).</li>
+<li>Update this table before publishing each storage format version, with the release number and reader status.</li>
+<li>Once the product launches (first public release), every subsequent format change requires forward compatibility for at least one previous version.</li>
+</ol>
+
+</article>
   </div>
 </main>
 <footer class="site">

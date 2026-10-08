@@ -1,0 +1,619 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Key hierarchy (draft): Varsto</title>
+<meta name="description" content="Varsto documentation: Key hierarchy (draft)">
+<meta name="robots" content="noindex, nofollow">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../blog/feed.xml">
+<link rel="stylesheet" href="../assets/css/site.css">
+<script src="../assets/js/theme.js"></script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="alpha" role="note">
+  <div class="wrap"><strong>Alpha software, not for production data.</strong> Bugs can cause data loss, formats may change without migration, and the cryptography has not been independently audited. Keep your own backups and check that you can restore from them.</div>
+</div>
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="../"><img src="../assets/img/logo.svg" alt="" width="28" height="28"><span>Varsto</span></a>
+    <nav class="main" aria-label="Main">
+      <a href="../">Project</a>
+      <a href="../docs/" aria-current="page">Docs</a>
+      <a href="../downloads/">Downloads</a>
+      <a href="../blog/">Blog</a>
+      <a href="../forum/">Forum</a>
+      <button class="theme" id="theme-toggle" type="button" aria-label="Change colour theme">Theme: auto</button>
+    </nav>
+  </div>
+</header>
+<main id="main">
+  <div class="wrap">
+<article class="prose">
+<h1>Key hierarchy (draft)</h1>
+<p class="note">From <code>docs/spec/key-hierarchy.md</code> in the repository, rendered 2026-10-08.</p>
+<blockquote>
+<p><strong>DRAFT, not final, no implementation.</strong> This is a design-stage proposal written to answer the open question about the locked-state key set. It does not fix algorithms or parameters: wherever a value is not backed by a cited standard it is marked <strong>TBD</strong>. Nothing described here exists in code, and none of the properties has been tested or reviewed. Adversary IDs (A1 to A13) refer to <a href="threat-model.html">../architecture/threat-model.md</a>.</p>
+</blockquote>
+<p>Requirement IDs refer to the requirement tables of the project plan; "plan 6.28" and similar refer to plan sections, and "plan section 8" to its open questions.</p>
+<h2 id="0-conventions-and-cited-sizes">0. Conventions and cited sizes</h2>
+<ul>
+<li>"Hybrid signing" means a classical and a post-quantum signature over the same message, both required to verify (plan 6.5). Candidates: Ed25519 (RFC 8032: 32-byte public key, 64-byte signature) and ML-DSA (FIPS 204, Table 2: ML-DSA-65 public key 1952 bytes, signature 3309 bytes). The ML-DSA parameter set is <strong>TBD</strong>; ML-DSA-65 is used in examples only.</li>
+<li>"Hybrid KEM" means a classical and a post-quantum key encapsulation combined into one shared secret (plan 6.5). Candidates: X25519 and ML-KEM (FIPS 203, Table 3: ML-KEM-768 encapsulation key 1184 bytes, ciphertext 1088 bytes). The parameter set and the combiner construction (it must hash the transcript, not just concatenate secrets) are <strong>TBD</strong> (plan section 8, "PQ library").</li>
+<li>"AEAD" means XChaCha20-Poly1305 or AES-256-GCM (plan 6.5); the choice is <strong>TBD</strong>. Section 4 explains why the nonce strategy constrains it.</li>
+<li>"KDF" means a key derivation function with a context string, for example HKDF (RFC 5869) or the BLAKE3 key-derivation mode; the choice is <strong>TBD</strong>. "Keyed hash" means HMAC or keyed BLAKE3 (plan 6.11); the choice is <strong>TBD</strong>.</li>
+<li>"Wrap" means AEAD encryption of a key under another key, with the associated data defined in section 3.</li>
+<li>Passphrase stretching uses Argon2id (RFC 9106; plan 6.5, 6.15). Cost parameters are <strong>TBD</strong> and will be fixed minimums (S-013). The passphrase is normalised with NFKC before stretching (plan 6.15).</li>
+<li>Every random key is 256 bits from the operating system's CSPRNG (S-014).</li>
+</ul>
+<h2 id="1-key-table">1. Key table</h2>
+<p>"Locked" in the last columns means the vault is locked: the user has not unlocked it, or it has locked again. Section 5 lists the locked-state key set separately.</p>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Key</th>
+<th>Purpose (exactly one)</th>
+<th>How derived or wrapped</th>
+<th>Where stored</th>
+<th>When in memory</th>
+<th>Who can use it</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>K1</td>
+<td>Recovery key</td>
+<td>Unwrap the master key and the Strongroom folder keys when no device or security key is left (F-020, F-042).</td>
+<td>256 random bits, encoded as 24 words with a checksum, optionally split into threshold shares. Encoding <strong>TBD</strong> (plan section 8, "recovery kit").</td>
+<td>Only on paper or metal held by the user (S-014, plan 6.38). Never on a device or in storage.</td>
+<td>Only during creation and during recovery; erased right after.</td>
+<td>The user, on a device being recovered.</td>
+</tr>
+<tr>
+<td>K2</td>
+<td>Recovery wrapping key</td>
+<td>Wrap K3 and K13 for recovery.</td>
+<td>KDF(K1, context <code>recovery-wrap</code>).</td>
+<td>Not stored. The wrapped blobs (K3 under K2, K13 under K2) are stored in every storage and on every device.</td>
+<td>Only during recovery.</td>
+<td>The user with K1.</td>
+</tr>
+<tr>
+<td>K3</td>
+<td>Master key</td>
+<td>Root of the vault: wraps K5 and the folder keys of private folders, and derives K11 for private folders.</td>
+<td>256 random bits, never derived from a passphrase (S-014).</td>
+<td>Wrapped only: under K4 on each device, under K2 in storage.</td>
+<td>While the vault is unlocked; erased on lock.</td>
+<td>Unlocked devices of the vault owner.</td>
+</tr>
+<tr>
+<td>K4</td>
+<td>Device unlock key</td>
+<td>Wrap K3 on one device.</td>
+<td>KDF over three labelled inputs: Argon2id(passphrase), a hardware-bound secret from the OS keystore, and, when enabled, a FIDO2 <code>hmac-secret</code> / PRF output. Whether the third input is mandatory is <strong>TBD</strong> (plan section 8, "2FA").</td>
+<td>Not stored. The hardware-bound secret stays in the OS keystore.</td>
+<td>Only during unlock.</td>
+<td>The user at that device (A3 cannot try passphrases without the hardware-bound secret).</td>
+</tr>
+<tr>
+<td>K5</td>
+<td>Vault identity key (hybrid signing)</td>
+<td>Sign membership statements: device enrolment and revocation, folder membership changes and key rotations.</td>
+<td>Random key pair at vault creation; private part wrapped under K3. Whether this key exists, or membership is a chain of device signatures, is <strong>TBD</strong>.</td>
+<td>Wrapped private part in storage and on devices; public part in every device's trust store.</td>
+<td>Only while performing a membership operation, which needs an unlocked vault and the second factor (S-004).</td>
+<td>Unlocked owner devices, with the second factor.</td>
+</tr>
+<tr>
+<td>K6</td>
+<td>Device identity key (hybrid signing)</td>
+<td>Identify one device: sign its own certificate requests, its K7 certificate and commands it issues (wipe, revoke requests).</td>
+<td>Random key pair generated on the device; public part certified by K5 through a ledger event.</td>
+<td>Private part on the device only, wrapped by an OS keystore key that requires the vault to be unlocked.</td>
+<td>While the vault is unlocked.</td>
+<td>That device only.</td>
+</tr>
+<tr>
+<td>K7</td>
+<td>Device ledger key (hybrid signing)</td>
+<td>Sign this device's own ledger batches: receipts and location facts (plan 6.19). Nothing else.</td>
+<td>Random key pair on the device; certified by K6 with the scope "ledger facts of this device" and an expiry. Expiry length <strong>TBD</strong>.</td>
+<td>OS keystore, in a class usable after the first unlock since boot.</td>
+<td>When a batch is sealed, also while locked.</td>
+<td>That device's daemon or background task.</td>
+</tr>
+<tr>
+<td>K8</td>
+<td>Device transport key (hybrid KEM)</td>
+<td>Peer-to-peer key agreement and receiving wrapped keys (new-device enrolment, shared-folder invitations).</td>
+<td>Random key pair on the device; public part in the device certificate.</td>
+<td>Private part in the OS keystore.</td>
+<td>During handshakes and unwraps. Availability while locked is <strong>TBD</strong> (section 5).</td>
+<td>That device only.</td>
+</tr>
+<tr>
+<td>K9</td>
+<td>Folder key (per folder, per epoch)</td>
+<td>Wrap the chunk keys of one folder and derive its metadata key; the unit of sharing and rotation.</td>
+<td>256 random bits per epoch. Wrapped under K3 (owner, private folders), under each member's K8 through the hybrid KEM (shared folders), or under K12 (Strongroom, see K13).</td>
+<td>Wrapped copies in a folder keyring object in storage and on devices.</td>
+<td>While the vault is unlocked.</td>
+<td>Owner devices and members of the folder.</td>
+</tr>
+<tr>
+<td>K10</td>
+<td>Folder metadata key</td>
+<td>Encrypt manifests, the file tree and names of one folder.</td>
+<td>KDF(K9, context <code>folder-metadata</code>).</td>
+<td>Not stored.</td>
+<td>While the vault is unlocked.</td>
+<td>Holders of K9.</td>
+</tr>
+<tr>
+<td>K11</td>
+<td>Keyed-hash key (per dedup domain)</td>
+<td>Compute chunk IDs and whole-file hashes (F-023, F-024) without plaintext hashes in storage (plan 6.11).</td>
+<td>KDF(K3, context <code>dedup-hash</code>) for the private folders of a vault; KDF(K9 of the first epoch, context <code>dedup-hash</code>) for each shared folder. Behaviour across folder-key epochs is <strong>TBD</strong> (section 6).</td>
+<td>Not stored.</td>
+<td>While the vault is unlocked.</td>
+<td>Holders of K3 or of the shared folder key.</td>
+</tr>
+<tr>
+<td>K12</td>
+<td>Strongroom wrapping key (per security key)</td>
+<td>Wrap K13 and the Strongroom storage credentials (S-012, plan 6.28).</td>
+<td>KDF(output of the FIDO2 <code>hmac-secret</code> / PRF of one enrolled credential, context <code>strongroom-wrap</code>), with a salt per folder. Platform PRF APIs hash their input while raw <code>hmac-secret</code> does not, so the project must fix one transform for all platforms; <strong>TBD</strong> (FIDO2 platform research, question 1).</td>
+<td>Not stored.</td>
+<td>Only during a Strongroom unlock.</td>
+<td>The user holding that physical key (touch, and PIN by default).</td>
+</tr>
+<tr>
+<td>K13</td>
+<td>Strongroom folder key</td>
+<td>Same role as K9, for a Strongroom folder.</td>
+<td>256 random bits per epoch. Wrapped once under K12 for each enrolled security key and once under K2. <strong>Never</strong> wrapped under K3, so an unlocked session alone cannot open it (A4).</td>
+<td>Wrapped copies in storage and on devices.</td>
+<td>Only during the unlock window; erased when it closes (plan 6.28).</td>
+<td>The user with a security key, or with K1.</td>
+</tr>
+<tr>
+<td>K14</td>
+<td>Chunk key</td>
+<td>Encrypt exactly one chunk.</td>
+<td>256 random bits per chunk, wrapped under K9 or K13. A random key (not a key derived from the folder key) keeps rotation cost proportional to the number of keys, not to the data (plan section 8, "sharing").</td>
+<td>Wrapped inside the encrypted manifest or pack index.</td>
+<td>While that chunk is being encrypted or decrypted.</td>
+<td>Holders of the folder key.</td>
+</tr>
+<tr>
+<td>K15</td>
+<td>Camera-upload key pair (hybrid KEM, per target folder)</td>
+<td>Let a locked phone add new files to a folder without being able to read the folder (F-036, plan 6.30).</td>
+<td>Random key pair. Private part wrapped under K9 or K13 of the target folder; public part distributed to the phone. Each upload encapsulates to the public key and gets fresh chunk keys. When the vault is next unlocked, the upload is ingested: chunk keys re-wrapped under the folder key and keyed-hash IDs computed.</td>
+<td>Public part on the phone (no secrecy needed, integrity needed). Private part wrapped in storage.</td>
+<td>Public part: whenever uploading. Private part: during ingest only.</td>
+<td>Phone: encrypt only. Holders of the folder key: decrypt.</td>
+</tr>
+<tr>
+<td>K16</td>
+<td>Upload-tracking key (device-local)</td>
+<td>Remember which camera files were already uploaded while the vault is locked, so the same file is not uploaded twice (plan 6.30). Replaces K11 in the locked state; it never leaves the device and never names objects in storage.</td>
+<td>256 random bits generated on the device.</td>
+<td>OS keystore.</td>
+<td>While uploading, also while locked.</td>
+<td>That device only.</td>
+</tr>
+<tr>
+<td>K17</td>
+<td>Automation key</td>
+<td>Let scripts act on chosen folders without a person present (plan 6.8). A documented exception to S-004.</td>
+<td>A scoped token plus copies of the scoped folder keys wrapped under an OS keystore key that does not require user presence. Created only from an unlocked vault with the second factor. Never covers Strongroom.</td>
+<td>OS keystore on the automation device.</td>
+<td>Whenever an automated job runs.</td>
+<td>Scripts on that device, within the token's scope; revocable by a ledger event and rotation of the scoped folder keys.</td>
+</tr>
+<tr>
+<td>K18</td>
+<td>Log name-hash key (device-local)</td>
+<td>Replace file names and paths in logs with keyed hashes (S-015, plan 6.40).</td>
+<td>256 random bits generated on the device.</td>
+<td>OS keystore; never synced.</td>
+<td>Whenever logging, also while locked.</td>
+<td>That device's logger; resolving a hash needs the same device.</td>
+</tr>
+<tr>
+<td>K19</td>
+<td>Log encryption key pair (phase 2)</td>
+<td>Encrypt log records at rest so that writing works while locked but reading needs an unlock (plan 6.40, phase 2).</td>
+<td>Key pair; private part wrapped under K3. Algorithm (hybrid KEM or not, since logs stay on the device) <strong>TBD</strong>.</td>
+<td>Public part on the device; wrapped private part on the device.</td>
+<td>Public part: whenever logging. Private part: when the user reads logs.</td>
+<td>Logger: write. User: read.</td>
+</tr>
+<tr>
+<td>K20</td>
+<td>Storage credential wrapping key</td>
+<td>Protect S3 keys, rclone secrets and SFTP passwords on a device (F-006, F-007).</td>
+<td>Credentials are synced between devices encrypted under KDF(K3, context <code>storage-credentials</code>); on each device they are re-wrapped under an OS keystore key. Strongroom credentials are wrapped under K12 instead.</td>
+<td>Wrapped credentials in storage (vault configuration) and on devices.</td>
+<td>While syncing. Whether ordinary credentials are usable while locked is <strong>TBD</strong> (section 5).</td>
+<td>Owner devices; never shared with folder members.</td>
+</tr>
+<tr>
+<td>K21</td>
+<td>Discovery key</td>
+<td>Derive the rendezvous-record path and the DHT key, and encrypt the presence record (plan 6.33).</td>
+<td>KDF(shared discovery secret, context <code>rendezvous</code> plus epoch). The discovery secret is random, shared among the devices of a folder or vault, and wrapped under K3 or K9.</td>
+<td>Discovery secret wrapped in storage; unwrapped copy in the OS keystore if presence must be published while locked (<strong>TBD</strong>).</td>
+<td>While publishing or looking up presence.</td>
+<td>Devices of the vault or folder.</td>
+</tr>
+<tr>
+<td>K22</td>
+<td>Ledger payload key</td>
+<td>Encrypt the payload of ledger events so that a member can be forgotten without breaking signatures (plan section 8, "GDPR and append-only ledger").</td>
+<td>Per event or per batch, random, wrapped under the folder key; signatures cover the ciphertext hash. Granularity <strong>TBD</strong>.</td>
+<td>Wrapped next to the event.</td>
+<td>While writing or reading events. Writing while locked needs a locked-state option; <strong>TBD</strong> (section 5).</td>
+<td>Holders of the folder key.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="2-derivation-contexts-and-the-one-purpose-rule">2. Derivation contexts and the one-purpose rule</h2>
+<ul>
+<li><strong>Rule:</strong> every key has exactly one purpose. A key that encrypts never signs; a wrapping key never encrypts data; a hash key never encrypts. A new use needs a new context string, never reuse of an existing one.</li>
+<li><strong>Format:</strong> <code>&lt;prefix&gt;/&lt;format-version&gt;/&lt;purpose&gt;</code>, ASCII, fixed in the specification. The prefix is a format constant and must not follow brand renames (the product name is a working name). The prefix is <strong>TBD</strong>.</li>
+<li><strong>Inputs:</strong> a KDF call takes the parent key, the context string, and identifiers that bind the result to its scope (vault ID, folder ID, epoch, device ID). Identifiers are encoded with explicit lengths so that two different tuples can never produce the same input.</li>
+</ul>
+<p>Proposed purposes (strings illustrative, <strong>TBD</strong>):</p>
+<table>
+<thead>
+<tr>
+<th>Context purpose</th>
+<th>Parent</th>
+<th>Produces</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>recovery-wrap</code></td>
+<td>K1</td>
+<td>K2</td>
+</tr>
+<tr>
+<td><code>device-unlock</code></td>
+<td>Argon2id output, hardware-bound secret, optional PRF output</td>
+<td>K4</td>
+</tr>
+<tr>
+<td><code>folder-metadata</code></td>
+<td>K9 or K13</td>
+<td>K10</td>
+</tr>
+<tr>
+<td><code>dedup-hash</code></td>
+<td>K3, or K9 of a shared folder</td>
+<td>K11</td>
+</tr>
+<tr>
+<td><code>strongroom-wrap</code></td>
+<td>PRF output of one credential</td>
+<td>K12</td>
+</tr>
+<tr>
+<td><code>storage-credentials</code></td>
+<td>K3</td>
+<td>key that encrypts synced credentials (K20)</td>
+</tr>
+<tr>
+<td><code>rendezvous</code></td>
+<td>discovery secret</td>
+<td>K21 for one epoch</td>
+</tr>
+<tr>
+<td><code>ledger-payload</code></td>
+<td>K9</td>
+<td>K22, if derived rather than random (<strong>TBD</strong>)</td>
+</tr>
+<tr>
+<td><code>object-name</code></td>
+<td>none (unkeyed hash of ciphertext)</td>
+<td>storage object names, see section 3</td>
+</tr>
+</tbody>
+</table>
+<h2 id="3-associated-data-per-object-type">3. Associated data per object type</h2>
+<p>Every AEAD operation authenticates a header that binds the ciphertext to its place, so that A1 cannot swap, move or replay objects without detection. Common fields in every header:</p>
+<ul>
+<li>format version and object type;</li>
+<li>algorithm identifiers (AEAD, KEM, signature) for crypto-agility (plan 6.5);</li>
+<li>vault ID, folder ID and key epoch of the wrapping key;</li>
+<li>the ID of the key used (so the right wrap is chosen).</li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>Object</th>
+<th>Additional fields in the associated data</th>
+<th>What this prevents</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Chunk</td>
+<td>Keyed-hash chunk ID (K11 over plaintext), chunk-key ID, plaintext length class.</td>
+<td>Replacing a chunk with another chunk of the same folder; moving it to another folder.</td>
+</tr>
+<tr>
+<td>Pack</td>
+<td>Pack ID, the ordered list of chunk IDs and their offsets (or its hash), writing device ID.</td>
+<td>Reordering or dropping chunks inside a pack; passing a pack off as another.</td>
+</tr>
+<tr>
+<td>Manifest (file version)</td>
+<td>File ID, version number or version vector, hash of the parent version, folder epoch.</td>
+<td>Rolling a file back to an older version, or attaching a version to a different file.</td>
+</tr>
+<tr>
+<td>Ledger batch</td>
+<td>Device ID, batch sequence number, first and last event sequence, hash of the previous batch, Merkle root. See <a href="ledger-signing-notes.html">ledger-signing-notes.md</a>.</td>
+<td>Reordering, replaying or truncating a device's ledger without the gap being detectable.</td>
+</tr>
+<tr>
+<td>Rendezvous record</td>
+<td>Discovery epoch, device ID, record sequence number, expiry time.</td>
+<td>Replaying an old presence record as current.</td>
+</tr>
+<tr>
+<td>Placeholder index</td>
+<td>Device ID, folder ID, index generation number.</td>
+<td>Showing a stale or foreign placeholder list.</td>
+</tr>
+<tr>
+<td>Key wrap</td>
+<td>ID and epoch of the wrapped key, ID and epoch of the wrapping key, purpose string.</td>
+<td>Unwrapping a key for the wrong purpose or in the wrong folder.</td>
+</tr>
+</tbody>
+</table>
+<p>Object names in storage: the plan describes chunks as content-addressed both by "hash of the encrypted data" (plan 6.7) and by "keyed hash" (plan 6.11). This draft proposes both, for different jobs: the <strong>storage object name</strong> is an unkeyed hash of the ciphertext, so peers and scrub can verify a chunk without keys; the <strong>keyed-hash ID</strong> is used for deduplication and appears only inside encrypted manifests. Which one the swarm advertises is <strong>TBD</strong>.</p>
+<h2 id="4-nonce-strategy">4. Nonce strategy</h2>
+<p>Several devices write under the same folder key, offline, without coordinating. Counters would need per-key state shared between devices, and a device restored from a backup or a virtual-machine snapshot would reuse counter values. Nonce reuse with either AEAD candidate breaks confidentiality and authenticity of the affected messages.</p>
+<p>Proposal:</p>
+<ol type="1">
+<li><strong>Fresh keys where possible.</strong> Each chunk has its own random key (K14) and is encrypted once, so a nonce never repeats under it.</li>
+<li><strong>Random 192-bit nonces for long-lived keys</strong> (folder metadata key, wrapping keys), as in XChaCha20-Poly1305 (draft-irtf-cfrg-xchacha). With 192 random bits, collisions are not a practical concern even across many devices and years.</li>
+<li><strong>If AES-256-GCM is chosen instead,</strong> random 96-bit nonces allow at most 2^32 encryptions per key (NIST SP 800-38D, section 8.3). That bound is hard to track across offline devices, so AES-GCM would be used only with single-use keys (rule 1) or with a per-message key derived from a random 256-bit value. Which AEAD is chosen remains <strong>TBD</strong>.</li>
+<li><strong>No deterministic nonces derived from content</strong> for metadata, since equal plaintexts would then be visible to A1.</li>
+</ol>
+<h2 id="5-locked-state-key-set">5. Locked-state key set</h2>
+<p>The plan's blocking question asks which keys exist while the vault is locked. The answer proposed here keeps the set as small as possible and lists what each key allows. "After first unlock" means the device has been unlocked once since boot; "before first unlock" means it has not.</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Mobile, before first unlock</th>
+<th>Mobile, locked after first unlock</th>
+<th>Desktop, locked</th>
+<th>What it allows while locked</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>K7 device ledger key</td>
+<td>no</td>
+<td>yes</td>
+<td>yes</td>
+<td>Sign receipts and location facts of this device only.</td>
+</tr>
+<tr>
+<td>K15 camera-upload public key</td>
+<td>yes (public)</td>
+<td>yes</td>
+<td>not used</td>
+<td>Encrypt new photos and videos to a folder.</td>
+</tr>
+<tr>
+<td>K16 upload-tracking key</td>
+<td>no</td>
+<td>yes</td>
+<td>not used</td>
+<td>Avoid uploading the same file twice.</td>
+</tr>
+<tr>
+<td>K18 log name-hash key</td>
+<td>no</td>
+<td>yes</td>
+<td>yes</td>
+<td>Write log lines without clear-text names.</td>
+</tr>
+<tr>
+<td>K19 log public key (phase 2)</td>
+<td>yes (public)</td>
+<td>yes</td>
+<td>yes</td>
+<td>Encrypt log lines.</td>
+</tr>
+<tr>
+<td>Storage credential for uploads (K20)</td>
+<td>no</td>
+<td><strong>TBD</strong></td>
+<td><strong>TBD</strong></td>
+<td>Upload ciphertext. A put-only, scoped credential would be preferable where the provider supports it; <strong>TBD</strong>.</td>
+</tr>
+<tr>
+<td>K21 discovery key</td>
+<td>no</td>
+<td><strong>TBD</strong></td>
+<td><strong>TBD</strong></td>
+<td>Publish and look up presence.</td>
+</tr>
+<tr>
+<td>K22 ledger payload key (write side)</td>
+<td>no</td>
+<td><strong>TBD</strong></td>
+<td><strong>TBD</strong></td>
+<td>Encrypt new ledger payloads. A write-only (public-key) variant like K15 is one option; <strong>TBD</strong>.</td>
+</tr>
+<tr>
+<td>K8 device transport key</td>
+<td>no</td>
+<td><strong>TBD</strong> (proposal: no)</td>
+<td><strong>TBD</strong> (proposal: yes for headless seed devices)</td>
+<td>Hand out ciphertext chunks to peers.</td>
+</tr>
+<tr>
+<td>K9 of user-chosen plaintext-sync folders</td>
+<td>no</td>
+<td>yes, only for those folders (S-011 exception, plan 6.15)</td>
+<td>yes, only for those folders</td>
+<td>Keep folders that the user chose to sync unencrypted up to date.</td>
+</tr>
+<tr>
+<td>K17 automation key</td>
+<td>not applicable</td>
+<td>not applicable</td>
+<td>yes, on automation devices only</td>
+<td>The scoped jobs only.</td>
+</tr>
+</tbody>
+</table>
+<p>While locked, these keys <strong>must not</strong> allow:</p>
+<ul>
+<li>decrypting any content or name, except the plaintext-sync folders the user chose;</li>
+<li>enrolling or revoking devices, changing folder membership, rotating keys or issuing wipe commands (K5 and K6 are absent);</li>
+<li>opening or listing the contents of Strongroom folders (K12 and K13 are absent);</li>
+<li>reading logs (K19 private part absent) or resolving name hashes for anyone but the local logger;</li>
+<li>hydrating placeholders (downloading content on demand); a locked desktop still shows the placeholders that already exist in the OS file system, because their names are plaintext there by design (F-039).</li>
+</ul>
+<p>Consequence for A3 (thief with a locked phone after first unlock): with a keystore exploit the attacker could sign false ledger facts for that one device, upload ciphertext, and learn which camera files were uploaded. The attacker should not be able to read content or names. Revoking the device (section 6) invalidates its K7 certificate.</p>
+<p>Desktop lock behaviour follows the same set; whether desktop apps lock at all on screen lock is <strong>TBD</strong> (plan section 8, "mobile lock and background sync").</p>
+<h2 id="6-rotation-and-revocation">6. Rotation and revocation</h2>
+<ul>
+<li><strong>Device revocation.</strong> An owner device with the second factor signs a revocation with K5. Effects: the device's K6 and K7 certificates are revoked; every folder the device could read gets a new K9 epoch; the chunk keys of existing data are re-wrapped under the new epoch (cost proportional to the number of chunk keys, not the data size); storage credentials the device held are rotated at the provider (plan 6.29). Data the device already decrypted or copied cannot be recalled (threat model, section 4). Re-encrypting existing data with new chunk keys is a separate, explicit, expensive action.</li>
+<li><strong>Shared-folder member removal.</strong> Same steps for one folder: new K9 epoch wrapped to the remaining members' K8, chunk keys re-wrapped. Open point: chunk IDs come from K11, which the removed member knows, so the member can still recognise existing chunk IDs. Rotating K11 too would rename every chunk (cost proportional to the number of chunks) and break deduplication with older epochs; <strong>TBD</strong> (plan section 8, "sharing").</li>
+<li><strong>Strongroom.</strong> Losing one security key: remove its wrap of K13 and rotate K13 from another enrolled key (plan 6.28). Enrolling a spare key needs an unlock with an existing key, because each credential produces a different secret and needs its own wrap.</li>
+<li><strong>Master key rotation.</strong> Generate a new K3, re-wrap K5, private folder keys and synced credentials; issue a new recovery wrap. Whether this also requires a new recovery key K1 is <strong>TBD</strong>.</li>
+<li><strong>Algorithm migration.</strong> Every object header carries algorithm identifiers (section 3). New objects use new algorithms while old ones stay readable. Wraps that depend on a public-key algorithm (K9 wraps to K8, K15 encapsulations) can be redone without touching data. Signatures over past ledger batches can be covered by a new signature over a checkpoint. Exact procedure <strong>TBD</strong>.</li>
+</ul>
+<h2 id="7-relation-to-the-threat-model">7. Relation to the threat model</h2>
+<p>How this draft is meant to address each adversary of <a href="threat-model.html">../architecture/threat-model.md</a>. These are design intentions, not achieved properties.</p>
+<table>
+<thead>
+<tr>
+<th>Adversary</th>
+<th>Keys and mechanisms involved</th>
+<th>Remaining gap</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>A1 Storage provider</td>
+<td>K9, K10, K14 (content and names encrypted); K11 (no plaintext hashes); section 3 associated data (no swaps or replays); K2 recovery wrap stored there is protected by a 256-bit random key.</td>
+<td>Deletion and rollback to an older state are detected only through the ledger and other copies.</td>
+</tr>
+<tr>
+<td>A2 Network attacker</td>
+<td>K6 and K8 (hybrid authentication and key agreement); chunk encryption in addition to transport encryption.</td>
+<td>KEM combiner and handshake are <strong>TBD</strong>.</td>
+</tr>
+<tr>
+<td>A3 Thief, locked device</td>
+<td>K4 needs the hardware-bound secret; only the section 5 locked-state set is present.</td>
+<td>TBD rows of section 5; strength of desktop key stores.</td>
+</tr>
+<tr>
+<td>A4 Thief, unlocked device</td>
+<td>K13 is never wrapped under K3; K5 and second factor for enrolment; revocation (section 6).</td>
+<td>Normal folders that are unlocked are readable.</td>
+</tr>
+<tr>
+<td>A5 Malicious peer</td>
+<td>Storage object names are ciphertext hashes, so chunks can be verified before use; K7-signed ledger facts.</td>
+<td>Resource limits belong to the transfer protocol.</td>
+</tr>
+<tr>
+<td>A6 Malicious member</td>
+<td>Per-folder K9 and K11; epochs and re-wrapping on removal.</td>
+<td>Old chunk IDs stay recognisable (section 6).</td>
+</tr>
+<tr>
+<td>A7 Release pipeline</td>
+<td>Not addressed by key design.</td>
+<td>Covered by S-007 and N-005.</td>
+</tr>
+<tr>
+<td>A8 Quantum adversary</td>
+<td>Symmetric 256-bit keys; every public-key wrap and handshake is hybrid; K12 relies on a symmetric FIDO2 secret, not on the key's classical signatures.</td>
+<td>Parameter sets <strong>TBD</strong>.</td>
+</tr>
+<tr>
+<td>A9 Coercion</td>
+<td>Not addressed.</td>
+<td>Out of scope.</td>
+</tr>
+<tr>
+<td>A10 Same-user malware</td>
+<td>K12 and K13 need a touch; K5 operations need the second factor.</td>
+<td>Anything unlocked while malware runs is exposed.</td>
+</tr>
+<tr>
+<td>A11 Relay or DHT operator</td>
+<td>K21 derives opaque, epoch-based record keys and encrypts presence records.</td>
+<td>IP addresses and timing remain visible.</td>
+</tr>
+<tr>
+<td>A12 Cloud LLM via MCP</td>
+<td>No key is ever passed through MCP; Strongroom keys are absent unless the user unlocks and allows it.</td>
+<td>Content the user lets tools return.</td>
+</tr>
+<tr>
+<td>A13 Holder of a removable disk</td>
+<td>Same encrypted pack format and associated data as other storage.</td>
+<td>Wipe does not reach the disk.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="8-open-questions">8. Open questions</h2>
+<p>Each item is <strong>TBD</strong> and is not decided by this draft.</p>
+<ol type="1">
+<li>Is the second factor mandatory for daily unlock, or only for enrolling devices (affects K4)? Plan section 8, "2FA".</li>
+<li>Which AEAD, KDF, keyed-hash function, KEM combiner and ML-DSA / ML-KEM parameter sets? Plan section 8, "PQ library".</li>
+<li>Argon2id minimum costs, measured on the slowest supported phone; File Provider and DocumentsProvider extensions cannot run them (plan section 8, "extension memory limits").</li>
+<li>Which transform turns a FIDO2 secret into K12 identically on every platform (FIDO2 platform research, question 1), and whether iOS needs version 26.4 or later for Strongroom (question 2).</li>
+<li>Does K5 exist, or is membership a chain of device signatures?</li>
+<li>Which of the TBD rows in section 5 belong to the locked-state set: upload credentials, discovery key, ledger payload key, transport key? Plan section 8, blocking question "key hierarchy and locked-state key set", and "mobile lock and background sync".</li>
+<li>Dedup-domain boundaries and K11 behaviour across epochs and member removal. Plan section 8, "sharing" and "keyed hash, chunks and padding".</li>
+<li>Recovery-key encoding, threshold scheme and whether master-key rotation needs a new recovery kit. Plan section 8, "recovery kit".</li>
+<li>The context-string prefix and encoding of KDF inputs.</li>
+<li>Granularity of K22 (per event or per batch) and how erasure interacts with signatures. Plan section 8, "GDPR and append-only ledger".</li>
+</ol>
+<h2 id="references">References</h2>
+<ul>
+<li>FIPS 203, Module-Lattice-Based Key-Encapsulation Mechanism Standard, Table 3: <a href="https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf">https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf</a> (checked 2026-10-08)</li>
+<li>FIPS 204, Module-Lattice-Based Digital Signature Standard, Table 2: <a href="https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.204.pdf">https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.204.pdf</a> (checked 2026-10-08)</li>
+<li>RFC 8032, Edwards-Curve Digital Signature Algorithm (EdDSA): <a href="https://www.rfc-editor.org/rfc/rfc8032">https://www.rfc-editor.org/rfc/rfc8032</a></li>
+<li>RFC 9106, Argon2 Memory-Hard Function: <a href="https://www.rfc-editor.org/rfc/rfc9106">https://www.rfc-editor.org/rfc/rfc9106</a></li>
+<li>RFC 5869, HMAC-based Extract-and-Expand Key Derivation Function (HKDF): <a href="https://www.rfc-editor.org/rfc/rfc5869">https://www.rfc-editor.org/rfc/rfc5869</a></li>
+<li>draft-irtf-cfrg-xchacha-03, XChaCha: eXtended-nonce ChaCha and AEAD_XChaCha20_Poly1305: <a href="https://datatracker.ietf.org/doc/html/draft-irtf-cfrg-xchacha-03">https://datatracker.ietf.org/doc/html/draft-irtf-cfrg-xchacha-03</a> (checked 2026-10-08)</li>
+<li>NIST SP 800-38D, Galois/Counter Mode, section 8.3: <a href="https://nvlpubs.nist.gov/nistpubs/Legacy/SP/nistspecialpublication800-38d.pdf">https://nvlpubs.nist.gov/nistpubs/Legacy/SP/nistspecialpublication800-38d.pdf</a> (checked 2026-10-08)</li>
+<li>FIDO2 platform research: <code>docs/research/fido2-platform-support.md</code> (separate change)</li>
+</ul>
+
+</article>
+  </div>
+</main>
+<footer class="site">
+  <div class="wrap">
+    <span>Varsto is a working name. Source will be published under the PolyForm Shield License 1.0.0 with the first public alpha.</span>
+    <span>No cookies, no tracking. The web server keeps a standard access log for at most seven days.</span>
+    <span><a href="../docs/security-policy.html">Security policy</a> · <a href="../docs/licence.html">Licence</a> · <a href="../docs/trademark.html">Trademark</a></span>
+  </div>
+</footer>
+</body>
+</html>

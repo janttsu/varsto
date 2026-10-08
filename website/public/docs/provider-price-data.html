@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Provider price data: Varsto</title>
+<meta name="description" content="Varsto documentation: Provider price data">
+<meta name="robots" content="noindex, nofollow">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../blog/feed.xml">
+<link rel="stylesheet" href="../assets/css/site.css">
+<script src="../assets/js/theme.js"></script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="alpha" role="note">
+  <div class="wrap"><strong>Alpha software, not for production data.</strong> Bugs can cause data loss, formats may change without migration, and the cryptography has not been independently audited. Keep your own backups and check that you can restore from them.</div>
+</div>
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="../"><img src="../assets/img/logo.svg" alt="" width="28" height="28"><span>Varsto</span></a>
+    <nav class="main" aria-label="Main">
+      <a href="../">Project</a>
+      <a href="../docs/" aria-current="page">Docs</a>
+      <a href="../downloads/">Downloads</a>
+      <a href="../blog/">Blog</a>
+      <a href="../forum/">Forum</a>
+      <button class="theme" id="theme-toggle" type="button" aria-label="Change colour theme">Theme: auto</button>
+    </nav>
+  </div>
+</header>
+<main id="main">
+  <div class="wrap">
+<article class="prose">
+<h1>Provider price data</h1>
+<p class="note">From <code>data/providers/README.md</code> in the repository, rendered 2026-10-08.</p>
+<p>Machine-readable price and capability profiles for storage providers. They feed the cost estimates and the provider comparison, so they must be accurate and traceable.</p>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>schema.json</code></td>
+<td>JSON Schema (draft 2020-12) every profile must satisfy</td>
+</tr>
+<tr>
+<td><code>aws-s3.json</code></td>
+<td>Amazon S3, region eu-central-1 (Frankfurt)</td>
+</tr>
+<tr>
+<td><code>scaleway-object-storage.json</code></td>
+<td>Scaleway Object Storage, region fr-par (Paris)</td>
+</tr>
+<tr>
+<td><code>hetzner-storage-box.json</code></td>
+<td>Hetzner Storage Box (prices not yet verified, see below)</td>
+</tr>
+</tbody>
+</table>
+<h2 id="rules">Rules</h2>
+<ol type="1">
+<li><strong>No price without a source and a date.</strong> Every numeric value carries <code>source_url</code> (an <code>https://</code> URL of the official page or machine-readable price list) and <code>last_verified</code> (ISO date, <code>YYYY-MM-DD</code>, the day a person or tool actually read the value there). The schema rejects a number without both.</li>
+<li><strong>Unknown means <code>null</code> plus a note.</strong> If a value cannot be verified from an official source, set <code>"value": null</code> and explain in <code>note</code> why. Never fill a gap from memory, from a third-party listing or from an estimate. A <code>null</code> is a statement that the value is unknown, not that it is zero.</li>
+<li><strong>Use official sources first</strong>: the provider's own pricing page, price-list API or documentation. State the exact item (page section, usage type, SKU) in <code>note</code> so the next person can re-check it.</li>
+<li><strong>Warn when older than 90 days.</strong> <code>scripts/data/validate-providers.sh</code> prints a warning for every <code>last_verified</code> older than 90 days. Re-verify before relying on the number, then update the value and the date together.</li>
+<li><strong>Say what a profile covers.</strong> Prices are only valid for the regions listed in <code>applies_to_regions</code>. Do not extend a price to other regions without verifying them.</li>
+<li><strong>One currency per profile</strong>, in <code>currency</code>, as the provider lists it. Do not convert. State whether tax is included in <code>prices_include_tax</code> (<code>null</code> if unknown).</li>
+<li><strong>Absence is not zero.</strong> If a price list simply has no line for a fee, record <code>null</code> with a note (or <code>0</code> only when the source says the item is free or included).</li>
+<li><strong>Do not copy prices elsewhere.</strong> Planning documents link to these files instead of repeating numbers.</li>
+</ol>
+<h2 id="units">Units</h2>
+<ul>
+<li>Storage: price per GB-month, as the provider bills it. <code>storage_price_per_gb_month</code> is a list of volume bands (<code>from_gb</code>, <code>up_to_gb</code>; the last band has <code>up_to_gb: null</code>). Providers with a flat plan use <code>pricing_model: "fixed_plan"</code> and <code>plans</code>.</li>
+<li>Requests: price per 1000 requests. If the provider lists a price per 10,000 requests, divide and say so in <code>note</code>.</li>
+<li>Egress: price per GB after the free allowance (<code>free_allowance_gb_per_month</code>), by volume band.</li>
+<li>Retrieval: price per GB for cold classes, with the typical delay as quoted by the provider (<code>typical_delay</code>).</li>
+<li><code>minimum_storage_duration_days</code>, <code>minimum_billable_object_size_kb</code>, <code>per_object_overhead_kb</code>: as published; early deletion is normally billed pro rata for the remaining days.</li>
+<li>Other fields: <code>protocols</code> (<code>s3</code>, <code>sftp</code>, <code>webdav</code>, <code>rclone</code> and a few more), <code>regions</code> (code, city, ISO country), <code>object_lock</code> (immutability support).</li>
+</ul>
+<h2 id="validating">Validating</h2>
+<div class="sourceCode" id="cb1"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="ex">scripts/data/validate-providers.sh</span>                 <span class="co"># all profiles</span></span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a><span class="ex">scripts/data/validate-providers.sh</span> data/providers/aws-s3.json</span>
+<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a><span class="ex">scripts/data/validate-providers.sh</span> <span class="at">--max-age-days</span> 30 <span class="at">--fail-on-stale</span></span></code></pre></div>
+<p>The script uses the first validator it finds: <code>check-jsonschema</code>, <code>ajv</code> (with <code>ajv-formats</code>) or Python 3 with the <code>jsonschema</code> package, and prints install instructions if none is available. Exit codes: 0 valid, 1 invalid (or stale with <code>--fail-on-stale</code>), 2 usage error or no validator.</p>
+<h2 id="adding-or-updating-a-provider">Adding or updating a provider</h2>
+<ol type="1">
+<li>Copy the closest existing profile and adjust it.</li>
+<li>Read each value from an official source on the day you record it; write the source and date next to it.</li>
+<li>Run the validator. Fix errors; read the age warnings.</li>
+<li>In the pull request, list what you could not verify.</li>
+</ol>
+<h2 id="known-gaps">Known gaps</h2>
+<ul>
+<li><code>hetzner-storage-box.json</code>: the monthly plan prices are <code>null</code>. The official product page renders prices with client-side scripts and no official static source could be read. Fill them in from the product page and verify before using this profile in estimates.</li>
+<li>Request prices for archive classes (LIST in particular), per-request retrieval fees and the cold-class delay for bulk retrievals are modelled only where verified; see the notes in each profile.</li>
+</ul>
+
+</article>
+  </div>
+</main>
+<footer class="site">
+  <div class="wrap">
+    <span>Varsto is a working name. Source will be published under the PolyForm Shield License 1.0.0 with the first public alpha.</span>
+    <span>No cookies, no tracking. The web server keeps a standard access log for at most seven days.</span>
+    <span><a href="../docs/security-policy.html">Security policy</a> · <a href="../docs/licence.html">Licence</a> · <a href="../docs/trademark.html">Trademark</a></span>
+  </div>
+</footer>
+</body>
+</html>

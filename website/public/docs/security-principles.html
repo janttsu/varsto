@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Security principles: Varsto</title>
+<meta name="description" content="Varsto documentation: Security principles">
+<meta name="robots" content="noindex, nofollow">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../blog/feed.xml">
+<link rel="stylesheet" href="../assets/css/site.css">
+<script src="../assets/js/theme.js"></script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="alpha" role="note">
+  <div class="wrap"><strong>Alpha software, not for production data.</strong> Bugs can cause data loss, formats may change without migration, and the cryptography has not been independently audited. Keep your own backups and check that you can restore from them.</div>
+</div>
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="../"><img src="../assets/img/logo.svg" alt="" width="28" height="28"><span>Varsto</span></a>
+    <nav class="main" aria-label="Main">
+      <a href="../">Project</a>
+      <a href="../docs/" aria-current="page">Docs</a>
+      <a href="../downloads/">Downloads</a>
+      <a href="../blog/">Blog</a>
+      <a href="../forum/">Forum</a>
+      <button class="theme" id="theme-toggle" type="button" aria-label="Change colour theme">Theme: auto</button>
+    </nav>
+  </div>
+</header>
+<main id="main">
+  <div class="wrap">
+<article class="prose">
+<h1>Security principles</h1>
+<p class="note">From <code>docs/architecture/security-principles.md</code> in the repository, rendered 2026-10-08.</p>
+<p>These principles are requirements, not preferences. Details become specifications under <code>docs/spec/</code>.</p>
+<h2 id="1-security-is-never-traded-for-speed">1. Security is never traded for speed</h2>
+<ul>
+<li>There is no "fast mode". No setting disables encryption, skips integrity checks, shortens keys or weakens password stretching.</li>
+<li>Speed comes from parallel transfers, block-level delta sync, hardware-accelerated cryptography (AES-NI, ARMv8 crypto extensions, SIMD ChaCha20), efficient compression before encryption, caching and peer-to-peer transfer. None of these weakens security.</li>
+<li>Security parameters (key sizes, Argon2id costs, algorithms, hybrid handshakes) have fixed minimums in the specification. They may only be tightened. A device that cannot meet the minimum waits longer or refuses; it does not use a weaker setting.</li>
+<li>Every object is authenticated (AEAD) before it is used. Content hashes stored in storage are keyed, never plain.</li>
+<li>CI tests fail if a security parameter falls below its minimum.</li>
+</ul>
+<h2 id="2-keys-stay-with-the-user">2. Keys stay with the user</h2>
+<ul>
+<li>External disks, cloud storage and every provider are untrusted. Everything leaving a device is already encrypted.</li>
+<li>The master key is always strong: 256 random bits from the operating system's CSPRNG. It is never derived from a human-chosen password alone. A passphrase (any length) only wraps the master key locally with Argon2id, optionally combined with a hardware-bound secret and a FIDO2 security key. <!-- TBD: whether the second factor is mandatory for unlock is an open decision (plan section 8, "2FA"). --></li>
+<li>The application never writes keys in clear text to storage, disks or providers. The recovery key is kept apart from the data.</li>
+<li>There is no key escrow and no account recovery by the project. Losing every key and the recovery key means the data is gone; users are told this before adding data.</li>
+</ul>
+<h2 id="3-post-quantum-by-design">3. Post-quantum by design</h2>
+<ul>
+<li>256-bit symmetric keys. Grover's algorithm roughly halves their effective strength against a quantum computer, so 256 bits is the floor for recovery keys as well.</li>
+<li>Hybrid (classical + post-quantum) key exchange and signatures wherever public-key cryptography is used. Algorithm identifiers in every object allow algorithms to change without re-encrypting all data.</li>
+<li>Claims are worded as "designed for" until an independent audit has been published.</li>
+</ul>
+<h2 id="4-recovery-key-custody-recommended-practice">4. Recovery key custody (recommended practice)</h2>
+<p>The recovery key is 24 words with a checksum, generated and shown once on the user's device, ideally offline.</p>
+<p>Recommended default for important data:</p>
+<ol type="1">
+<li>Split the recovery key with threshold sharing (for example 2-of-3 or 3-of-5).</li>
+<li>Write each share by hand on archival paper, or engrave or stamp it on stainless steel for long-term storage.</li>
+<li>Keep the shares in two or three different physical places (home, a trusted person, a workplace or bank). Do not rely on a single safe-deposit box.</li>
+<li>Keep daily unlock separate: at least two hardware security keys.</li>
+<li>Test recovery right after creation and then yearly.</li>
+</ol>
+<p>Rules for creating and storing the key:</p>
+<ul>
+<li>Do not photograph, screenshot, copy to the clipboard, or store it in cloud services or a normal password manager.</li>
+<li>Do not print on a networked or cloud printer (printers can cache output). Prefer handwriting.</li>
+<li>Prefer words over QR codes as the primary medium: they tolerate wear, can be read and written by hand, and do not depend on one application surviving for decades. QR codes may be an optional extra copy.</li>
+<li>The recovery format is openly specified with test vectors, and a small offline reader tool restores the key without the main application.</li>
+</ul>
+<p>Optional layers for advanced users: a memorised passphrase on top of the shares (adds protection, adds loss risk), and tools such as Superbacked-style offline encrypted backups, provided the tool is open source, signed and used on an air-gapped machine.</p>
+
+</article>
+  </div>
+</main>
+<footer class="site">
+  <div class="wrap">
+    <span>Varsto is a working name. Source will be published under the PolyForm Shield License 1.0.0 with the first public alpha.</span>
+    <span>No cookies, no tracking. The web server keeps a standard access log for at most seven days.</span>
+    <span><a href="../docs/security-policy.html">Security policy</a> · <a href="../docs/licence.html">Licence</a> · <a href="../docs/trademark.html">Trademark</a></span>
+  </div>
+</footer>
+</body>
+</html>

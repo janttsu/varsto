@@ -1,37 +1,9 @@
-<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Varsto: your files, your storage</title>
-<meta name="description" content="Varsto: end-to-end encrypted file sync and backup on storage you already own. Alpha, working name.">
-<meta name="robots" content="noindex, nofollow">
-<meta name="color-scheme" content="light dark">
-<link rel="icon" href="favicon.svg" type="image/svg+xml">
-<link rel="alternate" type="application/rss+xml" title="Varsto blog" href="blog/feed.xml">
-<link rel="stylesheet" href="assets/css/site.css">
-<script src="assets/js/theme.js"></script>
-</head>
-<body>
-<a class="skip" href="#main">Skip to content</a>
-<div class="alpha" role="note">
-  <div class="wrap"><strong>Alpha software, not for production data.</strong> Bugs can cause data loss, formats may change without migration, and the cryptography has not been independently audited. Keep your own backups and check that you can restore from them.</div>
-</div>
-<header class="site">
-  <div class="wrap">
-    <a class="brand" href="./"><img src="assets/img/logo.svg" alt="" width="28" height="28"><span>Varsto</span></a>
-    <nav class="main" aria-label="Main">
-      <a href="" aria-current="page">Project</a>
-      <a href="docs/">Docs</a>
-      <a href="downloads/">Downloads</a>
-      <a href="blog/">Blog</a>
-      <a href="forum/">Forum</a>
-      <button class="theme" id="theme-toggle" type="button" aria-label="Change colour theme">Theme: auto</button>
-    </nav>
-  </div>
-</header>
-<main id="main">
-  <div class="wrap">
+---
+title: Project
+nav: Project
+output: index.html
+description: Varsto: end-to-end encrypted file sync and backup on storage you already own. Alpha, working name.
+---
     <h1>Your files. Your storage.</h1>
     <p class="lead">Varsto is an end-to-end encrypted sync and backup app that does not sell storage. You bring a disk, a NAS share or (soon) an S3 bucket; the app encrypts everything on your devices, keeps a signed record of where every block is, and lets devices that are never online at the same time stay in sync through that storage.</p>
     <p><a class="button" href="downloads/">Download alpha-0</a> <a class="button secondary" href="docs/quick-start.html">Quick start</a></p>
@@ -62,22 +34,8 @@
     </ul>
 
     <h2>Downloads</h2>
-    <p>Release <strong>0.0.1-alpha.0</strong>. Checksums: <a href="downloads/SHA256SUMS">SHA256SUMS</a>.</p><table class="downloads"><thead><tr><th>File</th><th>Platform</th><th>Size</th><th>Notes</th><th>SHA-256</th></tr></thead><tbody><tr><td><a href="downloads/varsto-0.0.1-alpha.0-source.tar.gz">varsto-0.0.1-alpha.0-source.tar.gz</a></td><td>Source</td><td>115 KiB</td><td>git archive of HEAD</td><td><code class="sum">98553af4283c1b2d74dfcc33a7ed602d873d48a8299d7b668bfc4754f3304c0e</code></td></tr>
-<tr><td><a href="downloads/varsto-0.0.1-alpha.0-x86_64-pc-windows-gnu.zip">varsto-0.0.1-alpha.0-x86_64-pc-windows-gnu.zip</a></td><td>Windows x86_64</td><td>1499 KiB</td><td>cross-compiled, not tested on Windows</td><td><code class="sum">2fdd571fc84e7231e4d9c40379af2b102e91ef6719aff347924c8853feaf4e21</code></td></tr>
-<tr><td><a href="downloads/varsto-0.0.1-alpha.0-x86_64-unknown-linux-musl.tar.gz">varsto-0.0.1-alpha.0-x86_64-unknown-linux-musl.tar.gz</a></td><td>Linux x86_64</td><td>933 KiB</td><td>static binary (musl)</td><td><code class="sum">91af9a73b59c1b7b568bf7d0893e450d8fd274797f6fd6ff21344119b131a1dc</code></td></tr></tbody></table>
+    {{DOWNLOADS}}
     <p class="note">Verify a download: <code>sha256sum -c SHA256SUMS --ignore-missing</code>. A checksum on the same page proves little against an attacker who controls the site; signed releases and a second channel are planned.</p>
 
     <h2>Latest from the blog</h2>
-    <ul class="posts"><li><time datetime="2026-10-08">2026-10-08</time> <a href="blog/2026-10-08-alpha-0.html">Alpha-0: the first vertical slice</a><br><span class="note">A command-line tool that encrypts, stores and syncs a folder between two devices through storage you own, with a signed ledger you can check.</span></li></ul>
-
-  </div>
-</main>
-<footer class="site">
-  <div class="wrap">
-    <span>Varsto is a working name. Source will be published under the PolyForm Shield License 1.0.0 with the first public alpha.</span>
-    <span>No cookies, no tracking. The web server keeps a standard access log for at most seven days.</span>
-    <span><a href="docs/security-policy.html">Security policy</a> · <a href="docs/licence.html">Licence</a> · <a href="docs/trademark.html">Trademark</a></span>
-  </div>
-</footer>
-</body>
-</html>
+    {{POSTS}}

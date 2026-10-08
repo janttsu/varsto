@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0"><channel><title>Varsto blog</title><link>https://varsto.soderlund.in/blog/</link><description>Release notes and technical articles</description>
+  <item><title>Alpha-0: the first vertical slice</title><link>https://varsto.soderlund.in/blog/2026-10-08-alpha-0.html</link><guid>https://varsto.soderlund.in/blog/2026-10-08-alpha-0.html</guid><pubDate>Thu, 08 Oct 2026 00:00:00 +0000</pubDate><description>A command-line tool that encrypts, stores and syncs a folder between two devices through storage you own, with a signed ledger you can check.</description></item>
+</channel></rss>

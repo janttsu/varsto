@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Failure model: Varsto</title>
+<meta name="description" content="Varsto documentation: Failure model">
+<meta name="robots" content="noindex, nofollow">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../blog/feed.xml">
+<link rel="stylesheet" href="../assets/css/site.css">
+<script src="../assets/js/theme.js"></script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="alpha" role="note">
+  <div class="wrap"><strong>Alpha software, not for production data.</strong> Bugs can cause data loss, formats may change without migration, and the cryptography has not been independently audited. Keep your own backups and check that you can restore from them.</div>
+</div>
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="../"><img src="../assets/img/logo.svg" alt="" width="28" height="28"><span>Varsto</span></a>
+    <nav class="main" aria-label="Main">
+      <a href="../">Project</a>
+      <a href="../docs/" aria-current="page">Docs</a>
+      <a href="../downloads/">Downloads</a>
+      <a href="../blog/">Blog</a>
+      <a href="../forum/">Forum</a>
+      <button class="theme" id="theme-toggle" type="button" aria-label="Change colour theme">Theme: auto</button>
+    </nav>
+  </div>
+</header>
+<main id="main">
+  <div class="wrap">
+<article class="prose">
+<h1>Failure model</h1>
+<p class="note">From <code>docs/failure-model.md</code> in the repository, rendered 2026-10-08.</p>
+<blockquote>
+<p><strong>Design stage.</strong> Nothing described here is implemented yet. This document states what the design is meant to tolerate, what it limits, and what it does not cover. Statements such as "designed to" become claims about the product only after the tests named in <a href="testing.html">TESTING.md</a> show them.</p>
+</blockquote>
+<p>Public statements about reliability must match this document. In particular, any marketing message about "no single point of failure" (requirement M-005) has to link here and must not claim more than this document lists.</p>
+<p>Requirement IDs (F-, S-, P-, N-, M-) refer to the project requirements list. The wider design is described in <a href="provider-price-data.html">docs/architecture</a>.</p>
+<h2 id="failure-table">Failure table</h2>
+<table>
+<thead>
+<tr>
+<th>Failure</th>
+<th>Effect on data</th>
+<th>Effect on sync</th>
+<th>What prevents or limits it</th>
+<th>What does not</th>
+<th>Requirement IDs</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Loss of all keys and of the recovery key</td>
+<td>Data in storage stays encrypted and cannot be read by anyone, including the project. There is no key escrow.</td>
+<td>No device can unlock or add new devices.</td>
+<td>A 24-word recovery key with checksum, shown once; optional threshold split kept in two or three physical places; a recovery test right after creation and then yearly; at least two security keys for daily unlock. Users are told about the consequence before adding data.</td>
+<td>If every key and every recovery share are lost, nothing in the design can restore access. The recovery key is a single point of failure that the software cannot remove.</td>
+<td>S-002, S-014, F-042, S-005</td>
+</tr>
+<tr>
+<td>Loss of one security key</td>
+<td>No data loss while another registered key or the recovery key is available.</td>
+<td>Unlocking continues with the remaining key. Strongroom folders stay locked until a registered key is present.</td>
+<td>Registering at least two keys; a recovery kit for emergencies.</td>
+<td>Losing every key that wraps a Strongroom folder, together with the recovery key, leaves that folder unreadable. Whether a passphrase alone may unlock a normal vault is an open decision (TBD).</td>
+<td>S-004, S-005, S-012, S-014, F-042</td>
+</tr>
+<tr>
+<td>A storage provider deletes data, rolls back to an older state, or locks the account</td>
+<td>Data survives if the configured policy keeps copies on another provider or on own devices. With one provider and no other copy, data can be lost.</td>
+<td>Sync continues through other storages and between devices. A rolled-back or missing object is meant to be detected through the ledger and flagged.</td>
+<td>Several providers (mirroring or erasure coding); own devices counted as copies; periodic scrub and repair from other copies; retention policies with alerts; the index and manifest are mirrored to every provider and to devices.</td>
+<td>A single provider with no second copy. A provider can still see object sizes and access times and can refuse service. Rollback detection is a design goal, not a tested property.</td>
+<td>F-017, F-018, F-020, F-021, F-031, F-032, S-006</td>
+</tr>
+<tr>
+<td>Two devices stolen or destroyed together before changes reach cloud storage (use case UC-1)</td>
+<td>Changes that exist only on those two devices are lost. Earlier synced data is unaffected.</td>
+<td>Other devices do not receive the lost changes.</td>
+<td>The ledger knows which blocks exist only on certain devices; the app is meant to show "only on these devices, not yet in cloud" and policies can raise an alert as soon as a network is available. Devices in the same site count as one failure domain.</td>
+<td>Changes that did not leave the two devices cannot be recovered. A stolen, unlocked device can expose what that device could read.</td>
+<td>F-011, F-031, F-032, F-033, S-012</td>
+</tr>
+<tr>
+<td>One device is stolen or lost</td>
+<td>Data on the device is encrypted at rest; other copies are unaffected.</td>
+<td>The device can be revoked from another device.</td>
+<td>Device revocation with rotation of storage credentials and folder keys; a signed remote wipe command that is applied when the device next sees a network; optional automatic wipe after failed unlock attempts; Strongroom folders stay locked without the security key.</td>
+<td>A thief who keeps the device offline does not receive the wipe command. Revocation and encryption are the protection in that case, and wipe is an additional layer only. Wipe does not reach offline removable disks.</td>
+<td>F-035, S-001, S-009, S-011, S-012, F-033</td>
+</tr>
+<tr>
+<td>Relay or DHT bootstrap nodes are down or blocked</td>
+<td>None.</td>
+<td>Peer discovery falls back in layers: known addresses, local network, the rendezvous record in the user's own storage, then manual invitation. Without a relay, some network types cannot connect directly and the app shows "not connected". Sync through shared storage is unaffected.</td>
+<td>No central tracker or account server; layered discovery; relays are optional and self-hostable; DHT is a fallback and is off by default.</td>
+<td>Two devices behind restrictive NATs, with no shared storage and no relay, cannot find or reach each other outside the local network. Relay and DHT operators can observe IP addresses and traffic volume.</td>
+<td>F-012, F-013, F-005, N-001</td>
+</tr>
+<tr>
+<td>Corruption or silent loss in one copy (bit rot, a peer that claims data it does not hold, a lost object)</td>
+<td>One copy is bad; other verified copies can repair it.</td>
+<td>Affected blocks are marked and fetched from other sources.</td>
+<td>Authenticated encryption and keyed hashes on every object; periodic scrub with challenge-response checks; self-describing packs so the index can be rebuilt; peers that fail proofs are marked unreliable.</td>
+<td>Corruption in every copy at the same time. Blocks that exist in only one place and have no verification yet.</td>
+<td>S-001, S-006, F-020, F-031, N-007</td>
+</tr>
+<tr>
+<td>Removable disk not verified for a long time</td>
+<td>The disk may have degraded while offline. Its content is known only as of the last check.</td>
+<td>Sync is unaffected. The disk counts as a copy only while its claim has not expired.</td>
+<td>Claims in the ledger expire and become "assumed", not "present"; retention policies can require a check every few months and alert when it is overdue; on re-attach the disk is verified and damaged blocks are repaired from other copies; disk identity checks detect clones and restored disks.</td>
+<td>A disk that fails while it sits on a shelf. A disk with no second copy anywhere. Offline disks are protected only by encryption, not by wipe.</td>
+<td>F-040, F-031, F-032, F-033, S-001</td>
+</tr>
+<tr>
+<td>Device clock is badly wrong</td>
+<td>No data loss is expected: event ordering uses logical clocks and sequence numbers, not wall-clock time.</td>
+<td>Ordering of changes is unaffected. Time-based items (claim expiry, freshness checks, alerts, request signing towards some providers) may be wrong or rejected on that device.</td>
+<td>Logical clocks and version vectors in the ledger; simulation tests with clock skew are planned.</td>
+<td>A wrong clock can still cause false alerts or failed requests until it is corrected. Behaviour against real providers is not tested yet.</td>
+<td>F-031, F-003, N-007</td>
+</tr>
+<tr>
+<td>Malicious member of a shared folder</td>
+<td>The member can read what the folder shares and can change or delete files within the permissions given. Anything already downloaded stays with them.</td>
+<td>Their changes sync to other members like any other change.</td>
+<td>Version history and trash allow restoring earlier states; the change history view shows who did what; removing a member is meant to re-wrap the folder key so that new data is not readable by them (details TBD).</td>
+<td>Content the member already read or copied. Fine-grained permission rules are not specified yet (TBD).</td>
+<td>F-004, F-003, F-025, F-026, F-034, S-001</td>
+</tr>
+<tr>
+<td>Software bug during the alpha stage</td>
+<td>Bugs can cause data loss or corruption. File formats and protocols may change without a migration path. The cryptography has not been independently audited.</td>
+<td>Devices may diverge or refuse to sync after a bug or an incompatible update.</td>
+<td>Prominent alpha warnings; version history; ledger invariants checked in deterministic simulation with fault injection; fuzzing and property tests; an index that can be rebuilt from the stored objects; the advice to keep independent backups.</td>
+<td>Bugs that tests do not find. Users who treat alpha software as their only copy.</td>
+<td>N-006, N-007, N-010, S-013, F-020</td>
+</tr>
+<tr>
+<td>The maintainer disappears</td>
+<td>Existing data remains readable by anyone holding the keys: the storage format is documented and the recovery kit comes with an offline reader.</td>
+<td>Sync keeps working between installed clients, because there is no project-run server to switch off.</td>
+<td>Open, documented storage format and protocols; source-available code; no account server; restic-compatible backup option; recovery kit independent of the application.</td>
+<td>Bug fixes, security updates, store releases and OS compatibility stop. Continued development by others is limited by the licence terms. Clients may stop working after operating system changes.</td>
+<td>F-005, F-019, F-020, N-004, F-042</td>
+</tr>
+</tbody>
+</table>
+<h2 id="remaining-single-points-of-failure">Remaining single points of failure</h2>
+<p>The design reduces single points of failure but does not remove these:</p>
+<ul>
+<li><strong>The user's keys and recovery kit.</strong> There is no escrow and no account recovery. This is deliberate (S-014).</li>
+<li><strong>The user's own site and provider configuration.</strong> The software cannot verify geography. A provider region name does not prove where a data centre is, and two "different" providers can share infrastructure (F-033).</li>
+<li><strong>The software itself.</strong> One code base implements the ledger, the cryptography and the sync. A bug there can affect every copy. Independent implementations of the readers and an independent audit are goals, not facts (N-004, S-007).</li>
+<li><strong>The release pipeline and the maintainer.</strong> Updates and signed releases depend on a small team (S-007, N-005).</li>
+<li><strong>Platform dependencies.</strong> Operating system keystores, hardware security keys and mobile background limits are outside the project's control (S-005, F-036).</li>
+<li><strong>Optional infrastructure.</strong> Relays and DHT bootstrap nodes are not required for sync through shared storage, but without them some networks cannot connect directly (F-012, F-013).</li>
+</ul>
+<h2 id="maintaining-this-document">Maintaining this document</h2>
+<p>Update this document in the same change as any design change that adds, removes or alters a failure mode, a mitigation or a requirement ID it cites. Each table row must cite at least one existing requirement ID and must avoid absolute promises.</p>
+
+</article>
+  </div>
+</main>
+<footer class="site">
+  <div class="wrap">
+    <span>Varsto is a working name. Source will be published under the PolyForm Shield License 1.0.0 with the first public alpha.</span>
+    <span>No cookies, no tracking. The web server keeps a standard access log for at most seven days.</span>
+    <span><a href="../docs/security-policy.html">Security policy</a> · <a href="../docs/licence.html">Licence</a> · <a href="../docs/trademark.html">Trademark</a></span>
+  </div>
+</footer>
+</body>
+</html>

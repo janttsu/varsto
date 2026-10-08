@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Contributing: Varsto</title>
+<meta name="description" content="Varsto documentation: Contributing">
+<meta name="robots" content="noindex, nofollow">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../blog/feed.xml">
+<link rel="stylesheet" href="../assets/css/site.css">
+<script src="../assets/js/theme.js"></script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="alpha" role="note">
+  <div class="wrap"><strong>Alpha software, not for production data.</strong> Bugs can cause data loss, formats may change without migration, and the cryptography has not been independently audited. Keep your own backups and check that you can restore from them.</div>
+</div>
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="../"><img src="../assets/img/logo.svg" alt="" width="28" height="28"><span>Varsto</span></a>
+    <nav class="main" aria-label="Main">
+      <a href="../">Project</a>
+      <a href="../docs/" aria-current="page">Docs</a>
+      <a href="../downloads/">Downloads</a>
+      <a href="../blog/">Blog</a>
+      <a href="../forum/">Forum</a>
+      <button class="theme" id="theme-toggle" type="button" aria-label="Change colour theme">Theme: auto</button>
+    </nav>
+  </div>
+</header>
+<main id="main">
+  <div class="wrap">
+<article class="prose">
+<h1>Contributing</h1>
+<p class="note">From <code>CONTRIBUTING.md</code> in the repository, rendered 2026-10-08.</p>
+<p>Thanks for your interest. Varsto is pre-alpha and the contribution process is still being defined.</p>
+<h2 id="rules-that-already-apply">Rules that already apply</h2>
+<ul>
+<li><strong>Language:</strong> everything in this repository is written in English: code comments, identifiers, commit messages, issues, pull requests and documentation.</li>
+<li><strong>No personal data.</strong> Never commit real personal data, real file names, real device or server names, credentials, keys or addresses. Test fixtures must be invented and generic (for example <code>IMG_0001.jpg</code>, <code>laptop</code>, <code>usb-a</code>, <code>cloud</code>).</li>
+<li><strong>No secrets.</strong> Do not commit credentials, tokens, private keys or recovery phrases.</li>
+<li><strong>Tests.</strong> New behaviour needs tests. See <a href="testing.html">TESTING.md</a>.</li>
+<li><strong>Security first.</strong> Do not implement your own cryptographic primitives. Use reviewed libraries and document every choice.</li>
+<li><strong>Logging.</strong> Never log secrets, keys, file names or paths in clear text. Use the sanctioned logging macros and the secret wrapper types; see <a href="logging.html">docs/architecture/logging.md</a>.</li>
+<li><strong>One name in one place.</strong> The product name lives in <code>brand/brand.toml</code>; do not hard-code it where it can be avoided, because the working name may change.</li>
+<li><strong>Licence headers.</strong> Every source file (Rust, shell, JavaScript, CSS) starts with <code>SPDX-License-Identifier: PolyForm-Shield-1.0.0</code>. Markdown, JSON, YAML and HTML files carry no header.</li>
+<li><strong>Rust.</strong> Stable toolchain (see <code>rust-version</code> in <code>Cargo.toml</code>). <code>cargo fmt --all --check</code>, <code>cargo clippy --workspace --all-targets</code> and <code>cargo test --workspace</code> must pass before a pull request.</li>
+</ul>
+<h2 id="licence-of-contributions">Licence of contributions</h2>
+<p>The project is licensed under the PolyForm Shield License 1.0.0. By contributing you agree that your contribution may be distributed under that licence and relicensed by the project. The exact mechanism (Developer Certificate of Origin sign-off or a Contributor Licence Agreement) is not decided yet; until it is, please open an issue before sending large changes.</p>
+<h2 id="workflow">Workflow</h2>
+<ol type="1">
+<li>Create a branch from <code>main</code>.</li>
+<li>Keep commits small and described in the imperative mood.</li>
+<li>Open a pull request and describe what changed and why.</li>
+</ol>
+
+</article>
+  </div>
+</main>
+<footer class="site">
+  <div class="wrap">
+    <span>Varsto is a working name. Source will be published under the PolyForm Shield License 1.0.0 with the first public alpha.</span>
+    <span>No cookies, no tracking. The web server keeps a standard access log for at most seven days.</span>
+    <span><a href="../docs/security-policy.html">Security policy</a> · <a href="../docs/licence.html">Licence</a> · <a href="../docs/trademark.html">Trademark</a></span>
+  </div>
+</footer>
+</body>
+</html>
