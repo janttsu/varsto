@@ -465,6 +465,8 @@ body[data-mobile="1"] .tabbar {
   background: var(--surface); border-top: 1px solid var(--border);
   padding: 6px 8px calc(6px + env(safe-area-inset-bottom));
 }
+/* No tab bar before a vault exists or while it is locked. */
+body[data-mobile="1"]:not([data-view="app"]) .tabbar { display: none; }
 body[data-mobile="1"] .tabbar .nav-item { flex: 1 1 0; flex-direction: column; gap: 3px; padding: 6px 4px; font-size: 11px; font-weight: 500; border-radius: var(--radius-sm); }
 body[data-mobile="1"] .tabbar .nav-item .icon { width: 22px; height: 22px; }
 body[data-mobile="1"] .shell { min-height: 100vh; }
