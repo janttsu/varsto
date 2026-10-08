@@ -30,7 +30,11 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --workspace
       - name: Build Varsto.app
-        run: apps/macos/build.sh --out dist
+        run: apps/macos/build.sh --out dist 2>&1 | tee build.log
+      - name: Build output to the job summary
+        if: failure()
+        run: |
+          { echo '## Build output (last 150 lines)'; echo '```'; tail -n 150 build.log; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
       - name: Smoke test the bundled command line
         run: |
           unzip -q dist/Varsto-*-macos.zip -d smoke
@@ -60,7 +64,11 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: brew install xcodegen
       - name: Build for the Simulator
-        run: apps/ios/build.sh
+        run: apps/ios/build.sh 2>&1 | tee build.log
+      - name: Build output to the job summary
+        if: failure()
+        run: |
+          { echo '## Build output (last 150 lines)'; echo '```'; tail -n 150 build.log; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
       - name: Launch on the Simulator and take a screenshot
         run: apps/ios/simshot.sh dist/ios
       - uses: actions/upload-artifact@v4

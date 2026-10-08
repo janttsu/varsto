@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: PolyForm-Shield-1.0.0
 # Runs on a fresh Ubuntu build instance: installs a JDK, the Android SDK
-# (platform 35, build-tools 35, NDK 27) and Rust, then builds the debug APK.
+# (platform 35, build-tools 34 and 35, NDK 27) and Rust, then builds the debug APK.
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
@@ -15,7 +15,7 @@ if [ ! -x "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" ]; then
 fi
 export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$PATH"
 yes | sdkmanager --licenses >/dev/null 2>&1 || true
-sdkmanager --install "platform-tools" "platforms;android-35" "build-tools;35.0.0" "ndk;27.2.12479018" >/dev/null
+sdkmanager --install "platform-tools" "platforms;android-35" "build-tools;34.0.0" "build-tools;35.0.0" "ndk;27.2.12479018" >/dev/null
 if ! command -v cargo >/dev/null; then
   curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal >/dev/null
 fi
@@ -24,7 +24,7 @@ source "$HOME/.cargo/env"
 cd /build/varsto
 version="$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)".*/\1/')"
 echo "== Android build ($version) on $(lsb_release -ds)"
-apps/android/build.sh 2>&1 | tail -3
+apps/android/build.sh 2>&1 | grep -vE "^(\s*Compiling|\s*Downloading|\s*Downloaded|\s*Updating|\s*Locking)" | tail -80
 mkdir -p dist/android
 cp apps/android/app/build/outputs/apk/debug/app-debug.apk "dist/android/varsto-$version-android-debug.apk"
 (cd dist/android && sha256sum ./*.apk > SHA256SUMS)
