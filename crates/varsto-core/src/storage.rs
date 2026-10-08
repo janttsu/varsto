@@ -41,6 +41,9 @@ pub enum StorageSpec {
         /// are removed from it once another device holds them.
         #[serde(default)]
         carrier: bool,
+        /// Where this storage is, for durability policies: "home", "cloud", "offsite", ... (default "home").
+        #[serde(default)]
+        place: String,
     },
     /// An S3-compatible bucket. The secret access key is not stored here
     /// (config.json is plain text) but in the encrypted secret store under
@@ -61,6 +64,8 @@ pub enum StorageSpec {
         storage_class: Option<String>,
         #[serde(default)]
         cold: bool,
+        #[serde(default)]
+        place: String,
     },
     /// Any rclone remote (`remote:bucket/path`); credentials stay in rclone's config.
     Rclone {
@@ -68,6 +73,8 @@ pub enum StorageSpec {
         remote: String,
         #[serde(default)]
         cold: bool,
+        #[serde(default)]
+        place: String,
     },
 }
 
@@ -116,6 +123,22 @@ impl StorageSpec {
                     .unwrap_or_default()
             ),
             StorageSpec::Rclone { remote, .. } => remote.clone(),
+        }
+    }
+    /// Place for durability policies: the configured one, or "home" for a
+    /// directory and "cloud" for a bucket or rclone remote.
+    pub fn place(&self) -> String {
+        let explicit = match self {
+            StorageSpec::LocalDir { place, .. }
+            | StorageSpec::S3 { place, .. }
+            | StorageSpec::Rclone { place, .. } => place.as_str(),
+        };
+        if !explicit.is_empty() {
+            return explicit.to_string();
+        }
+        match self {
+            StorageSpec::LocalDir { .. } => "home".to_string(),
+            _ => "cloud".to_string(),
         }
     }
     pub fn is_cold(&self) -> bool {

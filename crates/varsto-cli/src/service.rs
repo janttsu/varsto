@@ -50,6 +50,9 @@ pub struct ServiceState {
     pub syncs: u64,
     /// Set after a successful self-update: the loop exits so the supervisor restarts us.
     pub restart_requested: bool,
+    /// Latest durability policy reports (F-032) and the worst state among them.
+    pub policies: Vec<varsto_core::policy::PolicyReport>,
+    pub policy_worst: Option<varsto_core::policy::PolicyState>,
 }
 
 impl ServiceState {
@@ -64,7 +67,52 @@ impl ServiceState {
             "last_error": self.last_error,
             "next_sync_utc": self.next_sync_utc,
             "syncs": self.syncs,
+            "policy_worst": self.policy_worst,
+            "policies": self.policies,
         })
+    }
+    /// Store policy reports; raise a desktop notification when a folder's
+    /// state got worse (ok -> at risk -> violated) or a violation persists
+    /// after an hour of silence.
+    pub fn record_policies(&mut self, reports: Vec<varsto_core::policy::PolicyReport>) {
+        use varsto_core::policy::PolicyState;
+        let mut alerts = Vec::new();
+        for r in &reports {
+            let before = self
+                .policies
+                .iter()
+                .find(|p| p.folder == r.folder)
+                .map(|p| p.state);
+            let worse = match (before, r.state) {
+                (None, PolicyState::Ok) | (None, PolicyState::Unknown) => false,
+                (None, _) => true,
+                (Some(b), n) => n > b && n != PolicyState::Unknown,
+            };
+            if worse {
+                let detail = if r.reasons.is_empty() {
+                    r.warnings.join("; ")
+                } else {
+                    r.reasons.join("; ")
+                };
+                alerts.push(format!(
+                    "Folder {}: policy {} ({}). {}",
+                    r.folder,
+                    match r.state {
+                        PolicyState::Violated => "violated",
+                        PolicyState::AtRisk => "at risk",
+                        _ => "unknown",
+                    },
+                    r.policy.describe(),
+                    detail
+                ));
+            }
+        }
+        self.policy_worst = reports.iter().map(|r| r.state).max();
+        self.policies = reports;
+        for a in alerts {
+            eprintln!("service: {a}");
+            notify("Varsto durability policy", &a);
+        }
     }
     pub fn request_sync(&mut self) {
         self.sync_requested = true;
@@ -88,6 +136,35 @@ impl ServiceState {
         }
         self.last_result = format!("{} folders: {updated} updated, {deleted} deleted, {conflicts} conflicts, {uploaded} chunks uploaded{}{}", reports.len(), if unavailable > 0 { format!(", {unavailable} unavailable") } else { String::new() }, if forked { ", FORKED device" } else { "" });
         self.last_error = None;
+    }
+}
+
+/// Best-effort desktop notification; silent where no notifier exists.
+pub fn notify(title: &str, body: &str) {
+    #[cfg(target_os = "linux")]
+    {
+        let _ = std::process::Command::new("notify-send")
+            .args(["--app-name=Varsto", title, body])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let script = format!(
+            "display notification \"{}\" with title \"{}\"",
+            body.replace('"', "'"),
+            title.replace('"', "'")
+        );
+        let _ = std::process::Command::new("osascript")
+            .args(["-e", &script])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let _ = (title, body);
     }
 }
 
@@ -274,7 +351,15 @@ pub fn run(opts: Options) -> Result<()> {
             let interval = st.service.interval_secs;
             let result = st.engine.as_mut().map(|e| e.sync(None));
             match result {
-                Some(Ok(reports)) => st.service.record_sync(&reports),
+                Some(Ok(reports)) => {
+                    st.service.record_sync(&reports);
+                    let checked = st.engine.as_ref().map(|e| e.policy_check());
+                    match checked {
+                        Some(Ok(reps)) => st.service.record_policies(reps),
+                        Some(Err(e)) => eprintln!("service: policy check failed: {e:#}"),
+                        None => {}
+                    }
+                }
                 Some(Err(e)) => {
                     st.service.last_error = Some(format!("{e:#}"));
                     eprintln!("service: sync failed: {e:#}");

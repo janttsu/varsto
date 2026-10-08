@@ -18,13 +18,14 @@ description: Varsto: end-to-end encrypted file sync and backup on storage you al
       <section class="card"><h3>Selective sync, transferrer disks, untrusted replicas, sharing</h3><p>Placeholders until you fetch; a USB stick that carries only what the other device lacks; a friend's NAS that stores your copies without being able to open them; a folder shared with another user by its key. See <a href="features/">Features</a>, <a href="use-cases/">Use cases</a> and <a href="screenshots/">Screenshots</a>.</p></section>
       <section class="card"><h3>Post-quantum hybrid cryptography</h3><p>Every ledger batch is signed with Ed25519 and ML-DSA-65, and both must verify. A share token is sealed to the recipient's X25519 + ML-KEM-768 key, so it can travel over any channel. Old Ed25519-only batches stay valid through the algorithm identifier they carry.</p></section>
       <section class="card"><h3>An assistant with limited access</h3><p>An MCP server lets the AI assistant of your choice list, read and organise files in exactly the folders you grant, and answer "where is this cheapest to keep?" from Varsto's own last-used record and open price data.</p></section>
+      <section class="card"><h3>Policies that warn in time</h3><p>"Two cloud copies and one at home, verified within 30 days." Every device checks it from the ledger and warns, in the app and by notification, before it stops being true.</p></section>
       <section class="card"><h3>Bookkeeping you can check</h3><p><code>varsto fsck --verify</code> compares the ledger with what the storage actually holds and re-hashes every object. A device restored from an old backup is detected and fenced.</p></section>
     </div>
 
     <h2>What is designed but not built yet</h2>
     <div class="grid">
       <section class="card todo"><h3>Security keys and Strongroom</h3><p>FIDO2 <code>hmac-secret</code> wrapping of the vault and folders that open only with a touch of your security key. Research on platform support is <a href="docs/fido2-platform-support.html">published</a>.</p></section>
-      <section class="card todo"><h3>Peer-to-peer, policies, Strongroom</h3><p>Torrent-style transfer between devices on the LAN and over the internet, durability policies with alerts and Strongroom folders are next, in that order. iOS needs a Mac to build.</p></section>
+      <section class="card todo"><h3>Peer-to-peer and Strongroom</h3><p>Torrent-style transfer between devices on the LAN and over the internet, and Strongroom folders that open only with a security key, are next. iOS needs a Mac to build.</p></section>
     </div>
 
     <h2>Honest status</h2>

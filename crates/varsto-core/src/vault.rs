@@ -244,6 +244,51 @@ impl ShareRequest {
     }
 }
 
+/// A policy change for a folder, published append-only at
+/// `vault/policies/<folder>/<device>/<updated_utc>.enc` under the folder
+/// record key; every device adopts the newest one it can read.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PolicyRecord {
+    pub folder_id: FolderId,
+    pub device: DeviceId,
+    pub updated_utc: i64,
+    pub policy: Option<crate::policy::Policy>,
+}
+
+impl PolicyRecord {
+    pub const PREFIX: &'static str = "vault/policies/";
+    pub fn storage_key(&self) -> String {
+        format!(
+            "{}{}/{}/{:020}.enc",
+            Self::PREFIX,
+            self.folder_id,
+            self.device,
+            self.updated_utc
+        )
+    }
+    fn aad(vault: &VaultId, folder: &FolderId) -> Vec<u8> {
+        crypto::aad(
+            "policy-record",
+            &[vault.as_str().as_bytes(), folder.as_str().as_bytes()],
+        )
+    }
+    pub fn seal(&self, vault: &VaultId, key: &SecretKey) -> Result<Vec<u8>> {
+        crypto::encrypt(
+            key,
+            &Self::aad(vault, &self.folder_id),
+            &serde_json::to_vec(self)?,
+        )
+    }
+    pub fn open(blob: &[u8], vault: &VaultId, folder: &FolderId, key: &SecretKey) -> Result<Self> {
+        let plain = crypto::decrypt(key, &Self::aad(vault, folder), blob)?;
+        let rec: PolicyRecord = serde_json::from_slice(&plain)?;
+        if &rec.folder_id != folder {
+            bail!("policy record folder mismatch");
+        }
+        Ok(rec)
+    }
+}
+
 /// Prefix of member device records: `vault/shares/<folder>/<device>.enc`.
 pub const SHARE_PREFIX: &str = "vault/shares/";
 
@@ -402,6 +447,12 @@ pub struct FolderRecord {
     /// folder-derived keys (local flag, never published).
     #[serde(default)]
     pub shared: bool,
+    /// Durability policy (F-032), published with the record; the newest
+    /// `policy_updated_utc` wins across devices.
+    #[serde(default)]
+    pub policy: Option<crate::policy::Policy>,
+    #[serde(default)]
+    pub policy_updated_utc: i64,
 }
 
 impl FolderRecord {

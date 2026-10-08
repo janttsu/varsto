@@ -20,6 +20,7 @@ pub mod ids;
 pub mod kem;
 pub mod ledger;
 pub mod manifest;
+pub mod policy;
 pub mod rclone;
 pub mod replica;
 pub mod s3;

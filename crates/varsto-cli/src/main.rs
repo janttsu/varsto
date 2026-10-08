@@ -120,11 +120,39 @@ enum Cmd {
         #[arg(long)]
         check: bool,
     },
+    /// Durability policies: "two cloud copies and one at home, verified within 30 days".
+    Policy {
+        #[command(subcommand)]
+        cmd: PolicyCmd,
+    },
     /// MCP server for AI assistants (stdio), with per-folder grants.
     Mcp {
         #[command(subcommand)]
         cmd: Option<McpCmd>,
     },
+}
+
+#[derive(Subcommand)]
+enum PolicyCmd {
+    /// Set a folder's policy (replaces the previous one) and publish it to every device.
+    Set {
+        folder: String,
+        /// Minimum copies on any non-carrier storage.
+        #[arg(long, default_value_t = 0)]
+        min_copies: u32,
+        /// Minimum copies per place, e.g. --place cloud=2 --place home=1.
+        #[arg(long = "place")]
+        places: Vec<String>,
+        /// Every chunk must be verified by another device within this many days.
+        #[arg(long)]
+        verified_within_days: Option<u32>,
+    },
+    /// Remove a folder's policy.
+    Clear { folder: String },
+    /// Show policies.
+    Show,
+    /// Evaluate every policy from the ledger. Exit code: 0 ok, 1 at risk, 2 violated, 3 unknown.
+    Check,
 }
 
 #[derive(Subcommand)]
@@ -232,6 +260,9 @@ enum StorageCmd {
         /// Transferrer: removable media carrying only what other devices still lack; emptied when delivered.
         #[arg(long)]
         carrier: bool,
+        /// Place for durability policies (home, cloud, offsite, ...); default home.
+        #[arg(long, default_value = "")]
+        place: String,
     },
     /// Add an S3-compatible bucket (AWS, Scaleway, Hetzner, Backblaze B2, R2, MinIO, ...).
     AddS3 {
@@ -260,6 +291,9 @@ enum StorageCmd {
         /// Cold storage: written, never read without confirmation.
         #[arg(long)]
         cold: bool,
+        /// Place for durability policies; default cloud.
+        #[arg(long, default_value = "")]
+        place: String,
     },
     /// Add any rclone remote (`remote:bucket/path`); credentials stay in rclone's own config.
     AddRclone {
@@ -267,6 +301,9 @@ enum StorageCmd {
         remote: String,
         #[arg(long)]
         cold: bool,
+        /// Place for durability policies; default cloud.
+        #[arg(long, default_value = "")]
+        place: String,
     },
     List,
 }
@@ -378,6 +415,7 @@ fn run(cli: &Cli) -> Result<()> {
                 path: storage_path.clone(),
                 cold: false,
                 carrier: false,
+                place: String::new(),
             };
             let engine = Engine::join(&home, name, &passphrase()?, vault_key, spec)?;
             let folders = engine.folders();
@@ -410,12 +448,14 @@ fn run(cli: &Cli) -> Result<()> {
                     path,
                     cold,
                     carrier,
+                    place,
                 } => {
                     engine.add_storage(StorageSpec::LocalDir {
                         name: name.clone(),
                         path: path.clone(),
                         cold: *cold,
                         carrier: *carrier,
+                        place: place.clone(),
                     })?;
                     println!("storage {name} added");
                 }
@@ -430,6 +470,7 @@ fn run(cli: &Cli) -> Result<()> {
                     virtual_host,
                     storage_class,
                     cold,
+                    place,
                 } => {
                     engine.add_storage_with_secret(
                         StorageSpec::S3 {
@@ -446,16 +487,23 @@ fn run(cli: &Cli) -> Result<()> {
                                 || storage_class.as_deref().is_some_and(|c| {
                                     c.contains("GLACIER") || c.contains("ARCHIVE")
                                 }),
+                            place: place.clone(),
                         },
                         Some(secret_access_key.clone()),
                     )?;
                     println!("storage {name} added (secret kept in secrets.enc)");
                 }
-                StorageCmd::AddRclone { name, remote, cold } => {
+                StorageCmd::AddRclone {
+                    name,
+                    remote,
+                    cold,
+                    place,
+                } => {
                     engine.add_storage(StorageSpec::Rclone {
                         name: name.clone(),
                         remote: remote.clone(),
                         cold: *cold,
+                        place: place.clone(),
                     })?;
                     println!("storage {name} added");
                 }
@@ -736,6 +784,7 @@ fn run(cli: &Cli) -> Result<()> {
                     path: storage_path.clone(),
                     cold: false,
                     carrier: false,
+                    place: String::new(),
                 };
                 let engine = Engine::accept_share(&home, name, &passphrase()?, &token, spec)?;
                 varsto_core::vault::ShareRequest::clear(&home);
@@ -763,12 +812,14 @@ fn run(cli: &Cli) -> Result<()> {
                         path: source.clone(),
                         cold: false,
                         carrier: false,
+                        place: String::new(),
                     };
                     let tgt = StorageSpec::LocalDir {
                         name: "target".into(),
                         path: target.clone(),
                         cold: false,
                         carrier: false,
+                        place: String::new(),
                     };
                     let r = varsto_core::replica::Replica::init(&home, name, &token, src, tgt)?;
                     println!(
@@ -793,6 +844,68 @@ fn run(cli: &Cli) -> Result<()> {
                 ReplicaCmd::Status => {
                     let r = varsto_core::replica::Replica::open(&home)?;
                     println!("{}", serde_json::to_string_pretty(&r.summary())?);
+                }
+            }
+        }
+        Cmd::Policy { cmd } => {
+            let mut engine = Engine::open(&home, &passphrase()?)?;
+            match cmd {
+                PolicyCmd::Set {
+                    folder,
+                    min_copies,
+                    places,
+                    verified_within_days,
+                } => {
+                    let mut policy = varsto_core::policy::Policy {
+                        min_copies: *min_copies,
+                        verified_within_days: *verified_within_days,
+                        ..Default::default()
+                    };
+                    for p in places {
+                        let (place, n) = varsto_core::policy::parse_place_spec(p)
+                            .ok_or_else(|| anyhow!("--place expects name=count, e.g. cloud=2"))?;
+                        policy.min_per_place.insert(place, n);
+                    }
+                    engine.set_policy(folder, Some(policy.clone()))?;
+                    println!("policy for {folder}: {}", policy.describe());
+                }
+                PolicyCmd::Clear { folder } => {
+                    engine.set_policy(folder, None)?;
+                    println!("policy cleared for {folder}");
+                }
+                PolicyCmd::Show => {
+                    for (rec, _) in engine.folders() {
+                        println!(
+                            "{}: {}",
+                            rec.name,
+                            rec.policy
+                                .as_ref()
+                                .map(|p| p.describe())
+                                .unwrap_or_else(|| "no policy".into())
+                        );
+                    }
+                }
+                PolicyCmd::Check => {
+                    let reports = engine.policy_check()?;
+                    let worst = reports.iter().map(|r| r.state).max();
+                    if cli.json {
+                        println!("{}", serde_json::to_string_pretty(&reports)?);
+                    } else if reports.is_empty() {
+                        println!("no policies set (varsto policy set <folder> ...)");
+                    } else {
+                        for r in &reports {
+                            println!("{}: {:?} ({})", r.folder, r.state, r.policy.describe());
+                            for x in &r.reasons {
+                                println!("  - {x}");
+                            }
+                            for x in &r.warnings {
+                                println!("  ! {x}");
+                            }
+                        }
+                    }
+                    if let Some(w) = worst {
+                        std::process::exit(w.exit_code());
+                    }
                 }
             }
         }

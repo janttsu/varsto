@@ -134,10 +134,18 @@
       </div>
     </section>
 
+    <section class="feature">
+      <h2>Durability policies that warn you before they break</h2>
+      <img src="../assets/img/usecases/provider.svg" alt="One provider is closed; copies on a second provider and a disk at home remain and the app repairs." width="640" height="320" loading="lazy">
+      <div>
+        <p>Tell a folder what must always be true: "at least two cloud copies and one at home, verified within 30 days". The policy travels with the folder, and every device evaluates it from the signed ledger alone, without asking the others. The app distinguishes <em>ok</em>, <em>at risk</em> (a verification is ageing out, or the only spare copy sits on cold storage or on a disk that is away), <em>violated</em> and <em>unknown</em>, and tells you while there is still time: a notification from the background app, a banner in the interface, and <code>varsto policy check</code> with an exit code for cron or monitoring.</p>
+        <p class="note">Verification comes from <code>fsck --verify</code> on another device or from a replica; scheduling that automatically is the next step. Storage places are labels you give when adding a storage.</p>
+      </div>
+    </section>
+
     <h2>Also in the design</h2>
     <ul>
       <li><strong>Security keys and Strongroom folders</strong>: folders that open only with a touch of your FIDO2 key, enforced cryptographically, not by a dialog.</li>
-      <li><strong>Durability policies with alerts</strong>: "at least two cloud copies and one at home, verified within 30 days", and the app tells you before it can no longer be true.</li>
       <li><strong>Peer-to-peer transfer</strong> on the local network, torrent-style, with every block encrypted.</li>
       <li><strong>A recovery kit</strong> you keep on paper or metal, in several places, and test once a year.</li>
     </ul>

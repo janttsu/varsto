@@ -38,7 +38,16 @@
         function td(text, cls) { var d = document.createElement("td"); d.textContent = text; if (cls) { d.className = cls; } tr.appendChild(d); }
         td(f.name); td(f.path || "(not attached)"); td(f.files); td(fmtBytes(f.bytes)); td(f.chunks);
         td(f.chunks_without_storage_copy, f.chunks_without_storage_copy > 0 ? "bad" : ""); td(f.chunks_verified_elsewhere);
+        var pc = document.createElement("td"); pc.dataset.policyFor = f.name; pc.textContent = f.policy || "none"; tr.appendChild(pc);
         var act = document.createElement("td");
+        if (!s.member) { var pb = document.createElement("button"); pb.className = "secondary"; pb.textContent = "Policy…"; pb.onclick = function () {
+          var mc = prompt("Minimum copies on any storage (0 = no rule):", "2"); if (mc === null) { return; }
+          var cloud = prompt("Minimum copies in place 'cloud' (0 = no rule):", "1"); if (cloud === null) { return; }
+          var home = prompt("Minimum copies in place 'home' (0 = no rule):", "1"); if (home === null) { return; }
+          var days = prompt("Every chunk verified by another device within N days (0 = no rule):", "30"); if (days === null) { return; }
+          var clear = (+mc || 0) === 0 && (+cloud || 0) === 0 && (+home || 0) === 0 && (+days || 0) === 0;
+          api("POST", "/api/policy", { folder: f.name, clear: clear, min_copies: +mc || 0, verified_within_days: +days || 0, places: { cloud: +cloud || 0, home: +home || 0 } }).then(function () { log(clear ? "policy cleared for " + f.name : "policy set for " + f.name); return refreshStatus(); }).catch(function (e) { alert(e.message); });
+        }; act.appendChild(pb); }
         if (f.path) { var b = document.createElement("button"); b.className = "secondary"; b.textContent = "Sync"; b.onclick = function () { runSync(f.name); }; act.appendChild(b); }
         if (!s.member) { var sh = document.createElement("button"); sh.className = "secondary"; sh.textContent = f.shared ? "Share token" : "Share…"; sh.onclick = function () {
           if (!f.shared && !confirm("Share folder \"" + f.name + "\" with another Varsto user? Anyone holding the token can read and write it.")) { return; }
@@ -50,6 +59,18 @@
         if (f.path) { var o2 = document.createElement("option"); o2.value = f.name; o2.textContent = f.name + (f.selective ? " (selective)" : ""); o2.dataset.selective = f.selective ? "1" : "0"; fsel.appendChild(o2); }
       });
       if (prev) { fsel.value = prev; }
+      api("GET", "/api/policy").then(function (p) {
+        var worst = null; var lines = [];
+        (p.reports || []).forEach(function (r) {
+          var cell = document.querySelector('[data-policy-for="' + r.folder + '"]');
+          var label = r.state === "ok" ? "OK" : r.state === "at_risk" ? "at risk" : r.state === "violated" ? "VIOLATED" : "unknown";
+          if (cell) { cell.textContent = (r.policy ? r.policy.min_copies ? "" : "" : "") + label + " · " + cell.textContent; cell.className = r.state === "ok" ? "" : "bad"; }
+          if (r.state !== "ok") { lines.push(r.folder + ": " + label + ". " + r.reasons.concat(r.warnings).join(" ")); }
+          if (!worst || r.state === "violated" || (r.state === "at_risk" && worst !== "violated")) { worst = r.state; }
+        });
+        $("policybanner").textContent = lines.join(" ");
+        $("policybanner").classList.toggle("hidden", lines.length === 0);
+      }).catch(function () {});
       $("selectivetoggle").checked = fsel.selectedOptions.length && fsel.selectedOptions[0].dataset.selective === "1";
       (function () {
       });

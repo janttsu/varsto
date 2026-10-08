@@ -382,6 +382,11 @@ impl LedgerStore {
 pub struct Location {
     pub claimed_by: BTreeSet<DeviceId>,
     pub verified_by: BTreeSet<DeviceId>,
+    /// Newest claim and verification times (batch creation time, UTC seconds).
+    #[serde(default)]
+    pub claimed_utc: i64,
+    #[serde(default)]
+    pub verified_utc: i64,
 }
 
 #[derive(Clone, Debug, Default, Serialize)]
@@ -390,6 +395,17 @@ pub struct ChunkRecord {
     pub size: u64,
     pub storages: BTreeMap<String, Location>,
     pub devices: BTreeSet<DeviceId>,
+}
+
+impl Location {
+    /// Verified by someone other than the writer (a replica's own check counts).
+    pub fn independently_verified(&self, storage_name: &str) -> bool {
+        storage_name.starts_with("replica:") && !self.verified_by.is_empty()
+            || self
+                .verified_by
+                .iter()
+                .any(|d| !self.claimed_by.contains(d))
+    }
 }
 
 impl ChunkRecord {
@@ -448,11 +464,9 @@ impl LedgerView {
                         .or_default();
                     rec.object = object.clone();
                     rec.size = *size;
-                    rec.storages
-                        .entry(storage.clone())
-                        .or_default()
-                        .claimed_by
-                        .insert(batch.device.clone());
+                    let loc = rec.storages.entry(storage.clone()).or_default();
+                    loc.claimed_by.insert(batch.device.clone());
+                    loc.claimed_utc = loc.claimed_utc.max(batch.created_utc);
                 }
                 Event::ChunkVerified {
                     folder,
@@ -465,11 +479,9 @@ impl LedgerView {
                         .entry((folder.clone(), chunk.clone()))
                         .or_default();
                     rec.object = object.clone();
-                    rec.storages
-                        .entry(storage.clone())
-                        .or_default()
-                        .verified_by
-                        .insert(batch.device.clone());
+                    let loc = rec.storages.entry(storage.clone()).or_default();
+                    loc.verified_by.insert(batch.device.clone());
+                    loc.verified_utc = loc.verified_utc.max(batch.created_utc);
                 }
                 Event::ChunkOnDevice {
                     folder,

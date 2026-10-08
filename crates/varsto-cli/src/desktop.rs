@@ -326,6 +326,7 @@ fn api(st: &mut State, method: Method, path: &str, query: &str, input: &Value) -
                 path: PathBuf::from(s(input, "storage_path")?),
                 cold: false,
                 carrier: false,
+                place: String::new(),
             };
             let e = Engine::accept_share(
                 &st.home,
@@ -344,6 +345,7 @@ fn api(st: &mut State, method: Method, path: &str, query: &str, input: &Value) -
                 path: PathBuf::from(s(input, "storage_path")?),
                 cold: false,
                 carrier: false,
+                place: String::new(),
             };
             let e = Engine::join(
                 &st.home,
@@ -423,6 +425,7 @@ fn api_unlocked(
                             path_style: !input.get("virtual_host").and_then(|c| c.as_bool()).unwrap_or(false),
                             storage_class: class,
                             cold,
+                            place: opt(input, "place").unwrap_or_default(),
                         },
                         Some(s(input, "secret_access_key")?),
                     )?;
@@ -431,12 +434,14 @@ fn api_unlocked(
                     name: s(input, "name")?,
                     remote: s(input, "remote")?,
                     cold,
+                    place: opt(input, "place").unwrap_or_default(),
                 })?,
                 _ => engine.add_storage(StorageSpec::LocalDir {
                     name: s(input, "name")?,
                     path: PathBuf::from(s(input, "path")?),
                     cold,
                     carrier,
+                    place: opt(input, "place").unwrap_or_default(),
                 })?,
             }
             service.request_sync();
@@ -489,6 +494,32 @@ fn api_unlocked(
         (Method::Post, "/api/fetch") => Ok(serde_json::to_value(
             engine.fetch_file(&s(input, "folder")?, &s(input, "path")?)?,
         )?),
+        (Method::Get, "/api/policy") => Ok(json!({
+            "policies": engine.folders().into_iter().map(|(r, _)| json!({"folder": r.name, "policy": r.policy, "text": r.policy.as_ref().map(|p| p.describe())})).collect::<Vec<_>>(),
+            "reports": engine.policy_check()?,
+        })),
+        (Method::Post, "/api/policy") => {
+            let folder = s(input, "folder")?;
+            if input.get("clear").and_then(|c| c.as_bool()).unwrap_or(false) {
+                engine.set_policy(&folder, None)?;
+            } else {
+                let mut policy = varsto_core::policy::Policy {
+                    min_copies: input.get("min_copies").and_then(|v| v.as_u64()).unwrap_or(0) as u32,
+                    verified_within_days: input.get("verified_within_days").and_then(|v| v.as_u64()).filter(|d| *d > 0).map(|d| d as u32),
+                    ..Default::default()
+                };
+                if let Some(obj) = input.get("places").and_then(|p| p.as_object()) {
+                    for (k, v) in obj {
+                        if let Some(n) = v.as_u64().filter(|n| *n > 0) {
+                            policy.min_per_place.insert(k.clone(), n as u32);
+                        }
+                    }
+                }
+                engine.set_policy(&folder, Some(policy))?;
+            }
+            service.request_sync();
+            Ok(json!({"ok": true}))
+        }
         (Method::Post, "/api/move") => Ok(serde_json::to_value(engine.move_file(
             &s(input, "folder")?,
             &s(input, "from")?,

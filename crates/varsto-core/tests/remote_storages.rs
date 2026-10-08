@@ -149,6 +149,7 @@ fn s3_backend_against_local_s3_server() {
         path_style: true,
         storage_class: None,
         cold: false,
+        place: String::new(),
     };
     let secrets = |_: &str| Some("testsecret".to_string());
     let st = spec.open_with(&secrets).unwrap();
@@ -171,6 +172,7 @@ fn rclone_backend_against_local_remote() {
         name: "rc".into(),
         remote: remote.clone(),
         cold: false,
+        place: String::new(),
     };
     let st = spec.open().unwrap();
     storage_contract(st.as_ref());

@@ -64,6 +64,7 @@ fn lab() -> Lab {
             path: root.join("storage"),
             cold: false,
             carrier: false,
+            place: String::new(),
         },
         a_home: root.join("a-home"),
         b_home: root.join("b-home"),
@@ -287,6 +288,7 @@ fn untrusted_replica_holds_copies_without_keys() {
         path: b_disk.clone(),
         cold: false,
         carrier: false,
+        place: String::new(),
     };
     let mut r = Replica::init(&b_home, "userB", &token, lab.storage.clone(), target).unwrap();
     let rep = r.run_once().unwrap();
@@ -373,6 +375,7 @@ fn carrier_disk_only_carries_what_is_missing_and_empties_itself() {
         path: lab.a_home.with_file_name("usb"),
         cold: false,
         carrier: true,
+        place: String::new(),
     };
     let (mut a, key) = Engine::init(&lab.a_home, "home-pc", PASS).unwrap();
     a.chunker = ChunkerParams::SMALL;
@@ -595,4 +598,83 @@ fn last_accessed_is_recorded_and_files_can_be_moved() {
         .map(|f| f.path)
         .collect();
     assert_eq!(paths, vec!["archive/2019/a.txt".to_string()]);
+}
+
+#[test]
+fn durability_policy_is_shared_and_evaluated_from_the_ledger() {
+    use varsto_core::policy::{Policy, PolicyState};
+    let lab = lab();
+    let (mut a, key) = Engine::init(&lab.a_home, "laptop", PASS).unwrap();
+    a.chunker = ChunkerParams::SMALL;
+    a.add_storage(lab.storage.clone()).unwrap();
+    a.add_folder("docs", &lab.a_dir).unwrap();
+    fs::write(lab.a_dir.join("a.txt"), b"policy test content").unwrap();
+    a.push("docs").unwrap();
+    let policy = Policy {
+        min_copies: 1,
+        min_per_place: [("home".to_string(), 1)].into_iter().collect(),
+        verified_within_days: Some(30),
+    };
+    a.set_policy("docs", Some(policy.clone())).unwrap();
+    // Only the writer has seen the copy: not independently verified yet.
+    let r = a.policy_check().unwrap();
+    assert_eq!(r.len(), 1);
+    assert_eq!(r[0].state, PolicyState::Violated, "{:?}", r[0].reasons);
+    assert_eq!(r[0].chunks_unverified_in_window, 1);
+
+    // Another device joins, adopts the policy through the registry and verifies the storage.
+    let mut b = Engine::join(&lab.b_home, "desk", PASS, &key, lab.storage.clone()).unwrap();
+    b.chunker = ChunkerParams::SMALL;
+    b.attach_folder("docs", &lab.b_dir, false).unwrap();
+    b.pull("docs").unwrap();
+    let adopted = b
+        .folders()
+        .into_iter()
+        .find(|(r, _)| r.name == "docs")
+        .unwrap()
+        .0;
+    assert_eq!(
+        adopted.policy,
+        Some(policy.clone()),
+        "policy travels with the folder"
+    );
+    let fsck = b.fsck(true).unwrap();
+    assert!(fsck.chunks_missing.is_empty());
+    b.push("docs").unwrap();
+    a.pull("docs").unwrap();
+    let r = a.policy_check().unwrap();
+    assert_eq!(
+        r[0].state,
+        PolicyState::Ok,
+        "{:?} {:?}",
+        r[0].reasons,
+        r[0].warnings
+    );
+    assert_eq!(
+        a.status().unwrap().folders[0].policy.as_deref(),
+        Some("at least 1 copy, 1 home, verified within 30 days")
+    );
+
+    // 25 days later the verification is ageing: at risk, with advice. 40 days later: violated.
+    let now = varsto_core::util::now_utc();
+    let r = a.policy_check_at(now + 25 * 86_400).unwrap();
+    assert_eq!(r[0].state, PolicyState::AtRisk);
+    let r = a.policy_check_at(now + 40 * 86_400).unwrap();
+    assert_eq!(r[0].state, PolicyState::Violated);
+
+    // A stricter rule (a cloud copy) is not met by a home directory.
+    a.set_policy(
+        "docs",
+        Some(Policy {
+            min_copies: 1,
+            min_per_place: [("cloud".to_string(), 1)].into_iter().collect(),
+            verified_within_days: None,
+        }),
+    )
+    .unwrap();
+    let r = a.policy_check().unwrap();
+    assert_eq!(r[0].state, PolicyState::Violated);
+    assert_eq!(r[0].chunks_short_per_place["cloud"], 1);
+    a.set_policy("docs", None).unwrap();
+    assert!(a.policy_check().unwrap().is_empty());
 }

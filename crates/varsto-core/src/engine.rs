@@ -21,6 +21,7 @@ use crate::ledger::{
     KEY_REPLICA,
 };
 use crate::manifest::{self, ChunkRef, FileState, Manifest, Merge};
+use crate::policy::{Policy, PolicyReport};
 use crate::replica::{self, ReplicaToken, REPLICA_PREFIX};
 use crate::storage::{Storage, StorageSpec};
 use crate::thumbs;
@@ -134,6 +135,9 @@ pub struct FolderStatus {
     pub selective: bool,
     pub placeholders: u64,
     pub pinned: u64,
+    /// Durability policy, if one is set (human-readable).
+    #[serde(default)]
+    pub policy: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -397,6 +401,8 @@ impl Engine {
             created_by: device_id,
             created_utc: util::now_utc(),
             shared: true,
+            policy: None,
+            policy_updated_utc: 0,
         };
         engine.keyring.folders.insert(rec.folder_id.clone(), rec);
         engine.keyring.save(
@@ -635,6 +641,8 @@ impl Engine {
             created_by: self.vault.device_id.clone(),
             created_utc: util::now_utc(),
             shared: false,
+            policy: None,
+            policy_updated_utc: 0,
         };
         let id = rec.folder_id.clone();
         self.keyring.folders.insert(id.clone(), rec);
@@ -860,6 +868,48 @@ impl Engine {
                     {
                         self.keyring.folders.insert(fid, rec);
                         changed_folders = true;
+                    }
+                }
+            }
+        }
+        // Policy records: newest per folder wins (F-032).
+        if !self.vault.member {
+            for (_, backend) in self.open_storages(false)? {
+                for key in backend.list(vault::PolicyRecord::PREFIX)? {
+                    let Some(fid) = key
+                        .strip_prefix(vault::PolicyRecord::PREFIX)
+                        .and_then(|r| r.split('/').next())
+                    else {
+                        continue;
+                    };
+                    let Ok(fid) = FolderId::from_hex(fid) else {
+                        continue;
+                    };
+                    let Some(local) = self.keyring.folders.get(&fid) else {
+                        continue;
+                    };
+                    // The object name ends with the update time: skip anything not newer.
+                    let stamp: i64 = key
+                        .rsplit('/')
+                        .next()
+                        .and_then(|n| n.strip_suffix(".enc"))
+                        .and_then(|n| n.parse().ok())
+                        .unwrap_or(0);
+                    if stamp <= local.policy_updated_utc {
+                        continue;
+                    }
+                    if let Some(blob) = backend.get(&key)? {
+                        if let Ok(rec) =
+                            vault::PolicyRecord::open(&blob, &self.vault.vault_id, &fid, &fr_key)
+                        {
+                            if let Some(f) = self.keyring.folders.get_mut(&fid) {
+                                if rec.updated_utc > f.policy_updated_utc {
+                                    f.policy = rec.policy;
+                                    f.policy_updated_utc = rec.updated_utc;
+                                    changed_folders = true;
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -1928,6 +1978,121 @@ impl Engine {
     }
 
     /// Files of a folder with their local state (for the interface and CLI).
+    /// Set (or clear) the durability policy of a folder and publish it so
+    /// every device evaluates the same rule.
+    pub fn set_policy(&mut self, folder: &str, policy: Option<Policy>) -> Result<()> {
+        if self.vault.member {
+            bail!("a member device cannot set policies on the owner's folders");
+        }
+        let (rec, _) = self.resolve_folder(folder)?;
+        let now = util::now_utc();
+        let f = self
+            .keyring
+            .folders
+            .get_mut(&rec.folder_id)
+            .ok_or_else(|| anyhow!("unknown folder {folder}"))?;
+        f.policy = policy.clone();
+        f.policy_updated_utc = now;
+        self.keyring.save(
+            &self.home,
+            &self.keys,
+            &self.vault.vault_id,
+            &self.vault.device_id,
+        )?;
+        let prec = vault::PolicyRecord {
+            folder_id: rec.folder_id.clone(),
+            device: self.vault.device_id.clone(),
+            updated_utc: now,
+            policy,
+        };
+        let fr_key = self.keys.folder_record_key();
+        let blob = prec.seal(&self.vault.vault_id, &fr_key)?;
+        for (_, backend) in self.open_storages(true)? {
+            backend.put_if_absent(&prec.storage_key(), &blob)?;
+        }
+        Ok(())
+    }
+
+    /// Evaluate every folder that has a policy, from the ledger alone.
+    pub fn policy_check(&self) -> Result<Vec<PolicyReport>> {
+        self.policy_check_at(util::now_utc())
+    }
+
+    pub fn policy_check_at(&self, now_utc: i64) -> Result<Vec<PolicyReport>> {
+        let view = self.view()?;
+        let mut places: BTreeMap<String, (String, bool)> = BTreeMap::new(); // name -> (place, unreadable now)
+        let mut carriers: BTreeSet<String> = BTreeSet::new();
+        let mut unknown: Vec<String> = Vec::new();
+        for spec in &self.config.storages {
+            if spec.is_carrier() {
+                carriers.insert(spec.name().to_string());
+                continue;
+            }
+            let unreadable = spec.is_cold();
+            if self.open_spec(spec).is_err() {
+                unknown.push(spec.name().to_string());
+            }
+            places.insert(spec.name().to_string(), (spec.place(), unreadable));
+        }
+        let mut unreadable_places: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        for (name, (place, unreadable)) in &places {
+            if *unreadable {
+                unreadable_places
+                    .entry(place.clone())
+                    .or_default()
+                    .push(name.clone());
+            }
+        }
+        let mut reports = Vec::new();
+        for (rec, _) in self.folders() {
+            let Some(policy) = rec.policy.clone() else {
+                continue;
+            };
+            let state = self.load_state(&rec.folder_id)?;
+            let mut seen = BTreeSet::new();
+            let mut facts = Vec::new();
+            for file in state.files.values().filter(|f| !f.deleted) {
+                for cr in &file.chunks {
+                    if !seen.insert(cr.chunk.clone()) {
+                        continue;
+                    }
+                    let mut copies = Vec::new();
+                    if let Some(record) = view.locate(&rec.folder_id, &cr.chunk) {
+                        for (name, loc) in &record.storages {
+                            if loc.claimed_by.is_empty() || carriers.contains(name) {
+                                continue;
+                            }
+                            let place = if name.starts_with("replica:") {
+                                "replica".to_string()
+                            } else {
+                                places
+                                    .get(name)
+                                    .map(|(p, _)| p.clone())
+                                    .unwrap_or_else(|| "other".to_string())
+                            };
+                            copies.push((
+                                name.clone(),
+                                place,
+                                loc.independently_verified(name),
+                                loc.verified_utc,
+                            ));
+                        }
+                    }
+                    facts.push(crate::policy::ChunkFacts { copies });
+                }
+            }
+            reports.push(crate::policy::evaluate(
+                &rec.name,
+                &policy,
+                &facts,
+                &unreadable_places,
+                &unknown,
+                now_utc,
+            ));
+        }
+        Ok(reports)
+    }
+
     /// Record that `path` was used now (open, read, export) on this device.
     pub fn touch_access(&mut self, folder: &str, path: &str) -> Result<()> {
         let (rec, _) = self.resolve_folder(folder)?;
@@ -2090,6 +2255,7 @@ impl Engine {
                 chunks_verified_elsewhere: verified,
                 published_seq: state.published_seq,
                 shared: rec.shared,
+                policy: rec.policy.as_ref().map(|p| p.describe()),
                 selective: self.mount_is_selective(&rec.folder_id),
                 placeholders: placeholders_here,
                 pinned: state.pinned.len() as u64,
