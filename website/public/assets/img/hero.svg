@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 560" width="1200" height="560" role="img" aria-labelledby="t d">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 600" width="1200" height="600" role="img" aria-labelledby="t d">
   <title id="t">Your data in many places, encrypted behind your own keys</title>
   <desc id="d">A key held by the user in the centre. Lines lead to an S3 bucket, a cold archive, hard drives on a shelf, a laptop, a phone and a network drive. Every place holds only locked, encrypted blocks.</desc>
   <defs>
