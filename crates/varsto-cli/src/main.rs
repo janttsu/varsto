@@ -901,7 +901,16 @@ fn run(cli: &Cli) -> Result<()> {
                 None => println!("not running"),
             },
         },
-        Cmd::Tray { interval, open } => tray::run(home, *interval, *open)?,
+        Cmd::Tray { interval, open } => {
+            // The tray app has no terminal output: on Windows, let go of the
+            // console window that a double-click or the .cmd starter opened.
+            #[cfg(windows)]
+            // SAFETY: FreeConsole has no preconditions; it only detaches this process.
+            unsafe {
+                windows_sys::Win32::System::Console::FreeConsole();
+            }
+            tray::run(home, *interval, *open)?
+        }
         Cmd::Share { cmd } => match cmd {
             ShareCmd::Request => {
                 let code = varsto_core::vault::ShareRequest::code_for(&home)?;

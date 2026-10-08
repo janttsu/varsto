@@ -34,7 +34,7 @@ ksni = { version = "0.3", features = ["blocking"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 tray-icon = "0.21"
-windows-sys = { version = "0.59", features = ["Win32_UI_WindowsAndMessaging", "Win32_Foundation"] }
+windows-sys = { version = "0.59", features = ["Win32_UI_WindowsAndMessaging", "Win32_Foundation", "Win32_System_Console"] }
 
 [dev-dependencies]
 tempfile.workspace = true

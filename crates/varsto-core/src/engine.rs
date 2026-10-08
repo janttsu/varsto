@@ -255,6 +255,20 @@ fn chunk_storage_key(object: &ObjectName) -> String {
     format!("chunks/{}/{}", &object.as_str()[..2], object)
 }
 
+/// Absolute path without the `\\?\` verbatim prefix Windows adds, so that
+/// paths shown to people and written to the ledger stay readable.
+fn canonical(path: &Path) -> std::io::Result<PathBuf> {
+    let p = path.canonicalize()?;
+    let s = p.to_string_lossy();
+    if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
+        return Ok(PathBuf::from(format!(r"\\{rest}")));
+    }
+    if let Some(rest) = s.strip_prefix(r"\\?\") {
+        return Ok(PathBuf::from(rest));
+    }
+    Ok(p)
+}
+
 impl Engine {
     // ----- lifecycle -------------------------------------------------------
 
@@ -706,7 +720,7 @@ impl Engine {
         )?;
         self.config.folders.push(FolderMount {
             folder_id: id.clone(),
-            path: path.canonicalize()?,
+            path: canonical(path)?,
             selective: false,
         });
         self.config.save(&self.home)?;
@@ -739,7 +753,7 @@ impl Engine {
         fs::create_dir_all(path)?;
         self.config.folders.push(FolderMount {
             folder_id: rec.folder_id.clone(),
-            path: path.canonicalize()?,
+            path: canonical(path)?,
             selective,
         });
         self.config.save(&self.home)?;
@@ -2246,7 +2260,7 @@ impl Engine {
         )?;
         self.config.folders.push(FolderMount {
             folder_id: folder_id.clone(),
-            path: path.canonicalize()?,
+            path: canonical(path)?,
             selective: true,
         });
         self.config.save(&self.home)?;
