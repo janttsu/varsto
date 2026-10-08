@@ -12,13 +12,18 @@ root="$(cd "$(dirname "$0")/.." && pwd)"
 version="$(grep -m1 '^version' "$root/Cargo.toml" | sed 's/.*"\(.*\)".*/\1/')"
 out="$root/website/public/downloads"
 mkdir -p "$out"
-rm -f "$out"/varsto-"$version"-* "$out"/Varsto-"$version"-* "$out/SHA256SUMS" "$out/manifest.json"
+# Keep a Mac-built native app (Varsto-<version>-macos.zip) if one is already here.
+for f in "$out"/varsto-"$version"-* "$out"/Varsto-"$version"-*; do
+  [ -e "$f" ] || continue
+  case "$f" in *"/Varsto-$version-macos.zip") ;; *) rm -f "$f" ;; esac
+done
+rm -f "$out/SHA256SUMS" "$out/manifest.json"
 targets=("$@")
 have_zig=0
 command -v cargo-zigbuild >/dev/null 2>&1 && have_zig=1
 if [ ${#targets[@]} -eq 0 ]; then
   targets=(x86_64-unknown-linux-musl x86_64-pc-windows-gnu)
-  [ "$have_zig" = 1 ] && targets+=(aarch64-apple-darwin x86_64-apple-darwin)
+  [ "$have_zig" = 1 ] && targets+=(aarch64-apple-darwin)
 fi
 manifest="{\"_version\": \"$version\""
 mac_bins=()
@@ -77,6 +82,11 @@ done
 
 # macOS app bundles, one per architecture (cross-compiled: Rust binary only, no
 # menu bar; the native menu-bar app is built on a Mac with apps/macos/build.sh).
+if [ -f "$out/Varsto-$version-macos.zip" ]; then
+  echo "== Varsto.app (built on a Mac, kept)"
+  manifest+=", \"Varsto-$version-macos.zip\": {\"platform\": \"macOS app (Apple Silicon)\", \"note\": \"native app: own window, menu-bar item, background service and the varsto command line inside the bundle; built and ad-hoc signed on a Mac, not notarised\"}"
+  mac_bins=()
+fi
 for bin in "${mac_bins[@]}"; do
   case "$bin" in *aarch64*) label=apple-silicon; arch_text="Apple Silicon" ;; *) label=intel; arch_text="Intel" ;; esac
   echo "== Varsto.app ($label, cross-compiled)"

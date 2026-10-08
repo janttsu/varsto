@@ -1,15 +1,14 @@
-# macOS app
+# Varsto for macOS
 
-`Varsto.app` is a menu-bar app (no Dock icon) that starts and supervises the
-`varsto` background service shipped inside the bundle, shows the sync status,
-opens the local interface, keeps the passphrase in the login keychain if the
-user wants, offers "Start at login" (macOS 13+) and runs self-updates.
+A native app: its own window with the interface (WebKit inside the app, no browser), a menu-bar item with status, sync, pause, updates and "Start at login", and the `varsto` binary inside the bundle, started by the app as the background service and usable as the command line ("Install command-line tool" in the menu, or `Varsto.app/Contents/MacOS/varsto`). Apple Silicon only.
 
-Two flavours are published:
+Build on a Mac (Xcode command line tools and rustup installed):
 
-- **Built on a Mac** with `apps/macos/build.sh`: native menu-bar app in Swift,
-  ad-hoc signed. Separate zips for Apple Silicon and Intel.
-- **Cross-compiled on Linux** (`website/build-release.sh`): the Rust binary
-  only, in an app bundle that opens the browser interface. No menu bar.
+    apps/macos/build.sh            # -> apps/macos/dist/Varsto-<version>-macos.zip
+    open apps/macos/dist/Varsto-<version>-macos.zip   # unzip, then open Varsto.app (right-click, Open the first time)
 
-Neither flavour is notarised; see the download page for how to open them.
+Publish to the download page from the same Mac (needs pandoc, rsync and SSH access to the site host):
+
+    website/publish-macos.sh apps/macos/dist/Varsto-<version>-macos.zip
+
+The app stores its vault under `~/Library/Application Support/Varsto`, the same place the command line uses by default on macOS, so both see the same folders. The passphrase can be kept in the login keychain so the service unlocks itself after login. The app is ad-hoc signed and not notarised; a Developer ID signature and notarisation come with the Apple Developer account.

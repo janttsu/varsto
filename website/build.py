@@ -161,12 +161,9 @@ PLATFORMS = [
     # (title, icon, matcher for the primary file, matchers for alternatives, status line)
     ("Linux", "linux", lambda n: n.endswith("-x86_64-unknown-linux-musl.tar.gz"), [],
      "x86_64, static binary. Tray icon, background service, browser interface and command line in one file. Tested on the development machine."),
-    ("macOS", "macos", lambda n: n.endswith("-macos-apple-silicon-lite.zip"),
-     [("Varsto.app for Intel Macs", lambda n: n.endswith("-macos-intel-lite.zip")),
-      ("Command line only, Apple Silicon", lambda n: n.endswith("-aarch64-apple-darwin.tar.gz")),
-      ("Command line only, Intel", lambda n: n.endswith("-x86_64-apple-darwin.tar.gz"))],
-     "Varsto.app for Apple Silicon: double-click starts the background service and opens the interface in your browser. Unsigned: right-click, Open the first time. Cross-compiled on Linux, not yet tested on a Mac. The menu-bar icon is in the full app, which is built on a Mac (apps/macos/build.sh) and published once tested."),
-    ("Windows", "windows", lambda n: n.endswith("-x86_64-pc-windows-gnu.zip"), [],
+    ("macOS", "macos", lambda n: n.endswith("-macos.zip") or n.endswith("-macos-apple-silicon-lite.zip"),
+     [("Command line only (Apple Silicon)", lambda n: n.endswith("-aarch64-apple-darwin.tar.gz"))],
+     "Apple Silicon. The native app has its own window, a menu-bar item, the background service and the varsto command line inside the bundle (Install command-line tool in the menu). Unsigned: right-click, Open the first time. A file named ...-lite.zip is the interim cross-compiled build that opens the interface in your browser instead."),    ("Windows", "windows", lambda n: n.endswith("-x86_64-pc-windows-gnu.zip"), [],
      "x86_64 zip. Double-click Varsto.cmd for the tray icon and the interface. Cross-compiled, not yet tested on Windows."),
     ("Android", "android", lambda n: n.endswith("-android-debug.apk"), [],
      "Debug-signed APK for sideloading: allow the install when the phone asks. Runs the same core as a foreground service. Tested in the Android 15 emulator only."),
@@ -208,11 +205,13 @@ def downloads_table(depth: int) -> str:
 
     cards = []
     for title, icon, primary, alts, status in PLATFORMS:
-        main = next(((n, d, sz) for n, d, sz in files if primary and primary(n)), None)
+        candidates = [(n, d, sz) for n, d, sz in files if primary and primary(n)]
+        candidates.sort(key=lambda t: t[0].endswith("-lite.zip"))  # the Mac-built app first
+        main = candidates[0] if candidates else None
         icon_svg = f'<svg class="dl-icon" viewBox="0 0 24 24" aria-hidden="true">{ICONS[icon]}</svg>'
         if main:
             name, digest, size = main
-            label = "Download Varsto.app (Apple Silicon)" if title == "macOS" else f"Download for {html.escape(title)}"
+            label = ("Download Varsto.app (Apple Silicon)" if not name.endswith("-lite.zip") else "Download Varsto.app (interim, Apple Silicon)") if title == "macOS" else f"Download for {html.escape(title)}"
             button = (f'<a class="dl-primary" href="{pre}downloads/{html.escape(name)}">{label}</a>'
                       f'<p class="dl-meta">{html.escape(name)}<br>{human(size)} · <span class="sum" title="{digest}">SHA-256 {digest[:12]}…</span></p>')
         elif title == "Source":
