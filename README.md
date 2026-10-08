@@ -11,7 +11,7 @@ Varsto is an end-to-end encrypted file sync, sharing and backup app that **does 
 ## Goals
 
 - **Bring your own storage.** S3-compatible keys, any rclone-compatible remote, a local folder, or removable disks (for example old hard drives in a USB dock). Cold storage such as Glacier is understood and used for rarely accessed data.
-- **No one to trust.** All content, file names and metadata are encrypted on your devices. Providers see opaque blocks. Designed for post-quantum security (hybrid classical + post-quantum), with hardware security key support (FIDO2 / YubiKey) and special-protected folders.
+- **No one to trust, and no shortcuts.** All content, file names and metadata are encrypted on your devices, and keys stay with you. External disks and cloud providers see opaque blocks only. Designed for post-quantum security (hybrid classical + post-quantum). Security is never traded for speed: there is no weaker "fast mode". Hardware security keys (FIDO2 / YubiKey), special-protected folders, and a recovery kit you store physically in several places. See [docs/architecture/security-principles.md](docs/architecture/security-principles.md).
 - **No tracker, no account, no vendor cloud.** Devices find each other on the local network, through a rendezvous record in your own storage, and as a fallback through a DHT. Designed to avoid single points of failure.
 - **Fast, block-level sync.** Files are split into blocks; only changed blocks move. Peer-to-peer transfer between your own devices, also offline over a LAN, with the cloud brought up to date when you are back online.
 - **Safety nets.** Version history, trash (optionally on cold storage), durability policies with alerts, geographic location awareness, and provider-independent recovery.
