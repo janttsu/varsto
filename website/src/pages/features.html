@@ -94,12 +94,20 @@ description: What Varsto does, with the use cases behind each feature: your own 
       </div>
     </section>
 
+    <section class="feature">
+      <h2>An MCP server: your assistant, with exactly the access you grant</h2>
+      <img src="../assets/img/usecases/cheapest.svg" alt="A chat with an assistant that compares storage prices from open data and proposes a move, with a Confirm button." width="640" height="320" loading="lazy">
+      <div>
+        <p><code>varsto mcp</code> speaks the Model Context Protocol, so Claude, an IDE assistant or any MCP client can list, read, move and sync files, but only in folders you granted, read-only unless you said otherwise. Varsto keeps its own record of when each file was last used, and the assistant can turn it into an answer to "where is this cheapest to keep?": idle files, their size, and the monthly cost in every storage class of an open, dated price data set, cheapest first, with sources. It proposes; you confirm.</p>
+        <p class="note">Access records are per device for now; merging them across devices through the ledger is the next step. Strongroom folders will be excluded from assistants by default.</p>
+      </div>
+    </section>
+
     <h2>Also in the design</h2>
     <ul>
       <li><strong>Security keys and Strongroom folders</strong>: folders that open only with a touch of your FIDO2 key, enforced cryptographically, not by a dialog.</li>
       <li><strong>Durability policies with alerts</strong>: "at least two cloud copies and one at home, verified within 30 days", and the app tells you before it can no longer be true.</li>
       <li><strong>Peer-to-peer transfer</strong> on the local network, torrent-style, with every block encrypted.</li>
       <li><strong>A recovery kit</strong> you keep on paper or metal, in several places, and test once a year.</li>
-      <li><strong>An MCP server</strong> so an AI assistant of your choice can organise files and answer "where is this cheapest to keep?" with only the access you grant.</li>
     </ul>
     <p class="note">Every design document on the <a href="../docs/">Docs</a> page says which parts exist. Nothing has been audited yet.</p>

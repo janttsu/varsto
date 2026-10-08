@@ -552,3 +552,47 @@ fn sealed_share_token_opens_only_on_the_requesting_device() {
         b"shared through a sealed token"
     );
 }
+
+#[test]
+fn last_accessed_is_recorded_and_files_can_be_moved() {
+    let lab = lab();
+    let (mut a, key) = Engine::init(&lab.a_home, "laptop", PASS).unwrap();
+    a.chunker = ChunkerParams::SMALL;
+    a.add_storage(lab.storage.clone()).unwrap();
+    a.add_folder("docs", &lab.a_dir).unwrap();
+    fs::write(lab.a_dir.join("a.txt"), b"alpha").unwrap();
+    a.push("docs").unwrap();
+    let before = a.list_files("docs").unwrap()[0].clone();
+    assert!(
+        before.last_accessed_utc.is_some(),
+        "scan records an access time"
+    );
+    assert!(before.modified_utc > 1_600_000_000);
+
+    let mut b = Engine::join(&lab.b_home, "phone", PASS, &key, lab.storage.clone()).unwrap();
+    b.chunker = ChunkerParams::SMALL;
+    b.attach_folder("docs", &lab.b_dir, true).unwrap();
+    b.pull("docs").unwrap();
+    assert!(
+        b.list_files("docs").unwrap()[0].last_accessed_utc.is_none(),
+        "placeholder never accessed"
+    );
+    assert_eq!(b.read_file("docs", "a.txt").unwrap(), b"alpha");
+    let f = b.list_files("docs").unwrap()[0].clone();
+    assert_eq!(f.state, "local");
+    assert!(f.last_accessed_utc.is_some());
+
+    // Move on the laptop, see it on the phone.
+    a.move_file("docs", "a.txt", "archive/2019/a.txt").unwrap();
+    assert!(!lab.a_dir.join("a.txt").exists());
+    assert!(lab.a_dir.join("archive/2019/a.txt").exists());
+    assert!(a.move_file("docs", "../x", "y").is_err());
+    b.pull("docs").unwrap();
+    let paths: Vec<String> = b
+        .list_files("docs")
+        .unwrap()
+        .into_iter()
+        .map(|f| f.path)
+        .collect();
+    assert_eq!(paths, vec!["archive/2019/a.txt".to_string()]);
+}

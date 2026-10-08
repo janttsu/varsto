@@ -12,6 +12,7 @@
 //! (algorithm identifiers are recorded so that they can be added), and the
 //! cryptography has not been reviewed. Do not use it for real data.
 
+pub mod advice;
 pub mod chunking;
 pub mod crypto;
 pub mod engine;

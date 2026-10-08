@@ -134,7 +134,7 @@ fn handle(state: &Shared, mut request: Request) -> Result<()> {
             .any(|h| h.field.equiv("X-Varsto-Token") && h.value.as_str() == st.token);
         // Thumbnails are loaded by <img>, which cannot send a header; the
         // session token may come in the query string for that one endpoint.
-        let in_query = path == "/api/thumb"
+        let in_query = (path == "/api/thumb" || path == "/api/open")
             && query_param(&query, "token").as_deref() == Some(st.token.as_str());
         in_header || in_query
     };
@@ -143,6 +143,42 @@ fn handle(state: &Shared, mut request: Request) -> Result<()> {
             401,
             &json!({"error": "missing or wrong token; reopen the start URL"}),
         ))?);
+    }
+    if path == "/api/open" {
+        // Download a file through the browser; the token may be in the query
+        // because this is a plain link. Counts as an access.
+        let (folder, file) = (query_param(&query, "folder"), query_param(&query, "path"));
+        let result = {
+            let mut st = state.lock().unwrap();
+            match (&mut st.engine, folder, file) {
+                (Some(e), Some(f), Some(p)) => Some(e.read_file(&f, &p).map(|b| (b, p))),
+                _ => None,
+            }
+        };
+        return match result {
+            Some(Ok((bytes, p))) => {
+                let name = p.rsplit('/').next().unwrap_or("file").replace('"', "");
+                request.respond(
+                    Response::from_data(bytes)
+                        .with_header(header("Content-Type", "application/octet-stream"))
+                        .with_header(header(
+                            "Content-Disposition",
+                            &format!("attachment; filename=\"{name}\""),
+                        )),
+                )?;
+                Ok(())
+            }
+            Some(Err(e)) => {
+                request.respond(Response::from_string(e.to_string()).with_status_code(400))?;
+                Ok(())
+            }
+            None => {
+                request.respond(
+                    Response::from_string("locked or missing parameters").with_status_code(400),
+                )?;
+                Ok(())
+            }
+        };
     }
     if path == "/api/thumb" {
         let (folder, file) = (query_param(&query, "folder"), query_param(&query, "path"));
@@ -453,6 +489,36 @@ fn api_unlocked(
         (Method::Post, "/api/fetch") => Ok(serde_json::to_value(
             engine.fetch_file(&s(input, "folder")?, &s(input, "path")?)?,
         )?),
+        (Method::Post, "/api/move") => Ok(serde_json::to_value(engine.move_file(
+            &s(input, "folder")?,
+            &s(input, "from")?,
+            &s(input, "to")?,
+        )?)?),
+        (Method::Get, "/api/advice") => {
+            let idle_days = query_param(query, "idle_days")
+                .and_then(|d| d.parse().ok())
+                .unwrap_or(90);
+            let folders: Vec<String> = match query_param(query, "folder") {
+                Some(f) => vec![f],
+                None => engine
+                    .folders()
+                    .into_iter()
+                    .filter(|(_, m)| m.is_some())
+                    .map(|(r, _)| r.name)
+                    .collect(),
+            };
+            let mut files = Vec::new();
+            for f in &folders {
+                for e in engine.list_files(f)? {
+                    files.push((f.clone(), e.path, e.size, e.last_accessed_utc, e.modified_utc));
+                }
+            }
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs() as i64)
+                .unwrap_or(0);
+            Ok(serde_json::to_value(varsto_core::advice::storage_advice(&files, idle_days, now))?)
+        }
         (Method::Post, "/api/free") => {
             engine.free_file(&s(input, "folder")?, &s(input, "path")?)?;
             Ok(json!({"ok": true}))

@@ -22,7 +22,7 @@ None of this is finished. See [docs/architecture](docs/architecture/README.md) f
 
 ## Status
 
-Alpha (0.0.1-alpha.2): the core works on Linux, macOS and Windows (macOS and Windows builds are cross-compiled and not yet tested there) as a background service with a tray or menu-bar app, a local desktop interface, a command line, and an Android shell (sideloadable APK). Implemented: encrypted chunked sync through any directory, S3-compatible bucket or rclone remote, signed per-device ledger and convergence between devices that are never online together, conflict copies and trash, selective sync with placeholders, transferrer disks, untrusted replica devices, folder sharing with another user by key, encrypted thumbnails, self-update. It chunks and encrypts files, stores them in a local-directory storage (a disk, a removable disk or a network mount), keeps a signed per-device ledger in that storage, and syncs a folder between devices that are never online at the same time, with conflict copies and a trash. See [docs/spec/alpha-0-format.md](docs/spec/alpha-0-format.md) for what it does and does not do. There is no sharing, no peer-to-peer transfer, no post-quantum hybrid yet, no mobile app and no audit.
+Alpha (0.0.1-alpha.2): the core works on Linux, macOS and Windows (macOS and Windows builds are cross-compiled and not yet tested there) as a background service with a tray or menu-bar app, a local desktop interface, a command line, and an Android shell (sideloadable APK). Implemented: encrypted chunked sync through any directory, S3-compatible bucket or rclone remote, signed per-device ledger and convergence between devices that are never online together, conflict copies and trash, selective sync with placeholders, transferrer disks, untrusted replica devices, folder sharing with another user by key (sealed to a post-quantum request code), encrypted thumbnails, self-update, hybrid Ed25519 + ML-DSA-65 signatures, an MCP server with per-folder grants, and Varsto's own last-accessed record with cost advice from open price data. It chunks and encrypts files, stores them in a local-directory storage (a disk, a removable disk or a network mount), keeps a signed per-device ledger in that storage, and syncs a folder between devices that are never online at the same time, with conflict copies and a trash. See [docs/spec/alpha-0-format.md](docs/spec/alpha-0-format.md) for what it does and does not do. There is no sharing, no peer-to-peer transfer, no post-quantum hybrid yet, no mobile app and no audit.
 
 ### Quick start (alpha-0)
 
@@ -45,6 +45,10 @@ varsto --home ~/.varsto-desk folder attach docs ~/synced
 varsto --home ~/.varsto-desk sync
 varsto --home ~/.varsto-desk status --json
 varsto --home ~/.varsto-desk fsck --verify
+
+# let an AI assistant see one folder (read-only) and ask it where the idle files are cheapest to keep
+varsto --home ~/.varsto-laptop mcp grant docs
+varsto --home ~/.varsto-laptop mcp          # MCP over stdio; point Claude Desktop, Claude Code or any MCP client at this command
 
 # selective sync, transferrer disks, replicas and sharing:
 varsto folder attach docs ~/synced --selective && varsto folder files docs && varsto folder fetch docs big.mp4

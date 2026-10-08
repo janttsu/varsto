@@ -61,6 +61,19 @@ struct FolderState {
     /// Content hashes whose thumbnail this device has generated and stored.
     #[serde(default)]
     thumbs_done: BTreeSet<String>,
+    /// Varsto's own "last accessed" record per path (seconds since the Unix
+    /// epoch): updated when a file is fetched, opened or read through Varsto
+    /// (interface, CLI, MCP) and from the filesystem access time seen at scan.
+    /// Kept per device; it feeds the cold-storage advice (MCP).
+    #[serde(default)]
+    accessed: BTreeMap<String, i64>,
+}
+
+fn now_secs() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
@@ -171,6 +184,10 @@ pub struct FileEntry {
     pub selective: bool,
     /// Image or video: a thumbnail may exist.
     pub media: bool,
+    /// Last modification (seconds since the Unix epoch) from the manifest.
+    pub modified_utc: i64,
+    /// Varsto's own last-accessed time on this device, if any.
+    pub last_accessed_utc: Option<i64>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -1106,6 +1123,19 @@ impl Engine {
                 .unwrap_or(0);
             scanned += 1;
             seen.insert(path.clone());
+            // Last-accessed: the newest of what Varsto recorded, the file's
+            // access time (when the filesystem keeps one) and its mtime.
+            let atime = md
+                .accessed()
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_secs() as i64)
+                .unwrap_or(0)
+                .max(mtime / 1_000_000_000);
+            let recorded = state.accessed.entry(path.clone()).or_insert(0);
+            if atime > *recorded {
+                *recorded = atime;
+            }
             let unchanged = matches!(state.local_index.get(&path), Some(e) if e.size == size && e.mtime == mtime)
                 && matches!(state.files.get(&path), Some(f) if !f.deleted);
             if unchanged {
@@ -1828,6 +1858,7 @@ impl Engine {
         };
         let disk = root.join(path);
         self.download_to(&rec, &fk, &disk, &file, &storages, &mut report)?;
+        state.accessed.insert(path.to_string(), now_secs());
         let _ = fs::remove_file(placeholder_path(&disk));
         let md = fs::metadata(&disk)?;
         let mtime = md
@@ -1897,6 +1928,69 @@ impl Engine {
     }
 
     /// Files of a folder with their local state (for the interface and CLI).
+    /// Record that `path` was used now (open, read, export) on this device.
+    pub fn touch_access(&mut self, folder: &str, path: &str) -> Result<()> {
+        let (rec, _) = self.resolve_folder(folder)?;
+        let mut state = self.load_state(&rec.folder_id)?;
+        if !state.files.get(path).is_some_and(|f| !f.deleted) {
+            bail!("unknown file {path}");
+        }
+        state.accessed.insert(path.to_string(), now_secs());
+        self.save_state(&rec.folder_id, &state)
+    }
+
+    /// Contents of a file, fetching it first if it is a placeholder. Counts
+    /// as an access.
+    pub fn read_file(&mut self, folder: &str, path: &str) -> Result<Vec<u8>> {
+        let (_, root) = self.resolve_folder(folder)?;
+        let disk = root.join(path);
+        if !disk.exists() {
+            self.fetch_file(folder, path)?;
+        }
+        let bytes = fs::read(&disk).with_context(|| format!("read {}", disk.display()))?;
+        self.touch_access(folder, path)?;
+        Ok(bytes)
+    }
+
+    /// Rename or move a file inside a folder (both paths relative to the
+    /// folder root), then push so other devices see the move.
+    pub fn move_file(&mut self, folder: &str, from: &str, to: &str) -> Result<PushReport> {
+        let (_, root) = self.resolve_folder(folder)?;
+        for p in [from, to] {
+            if p.is_empty()
+                || Path::new(p).is_absolute()
+                || p.split('/').any(|c| c == ".." || c.is_empty())
+            {
+                bail!("path must be relative to the folder and must not contain '..': {p}");
+            }
+        }
+        let src = root.join(from);
+        let dst = root.join(to);
+        if !src.exists() {
+            // A placeholder can be moved as well.
+            let ph = placeholder_path(&src);
+            if ph.exists() {
+                if dst.exists() || placeholder_path(&dst).exists() {
+                    bail!("{to} already exists");
+                }
+                if let Some(parent) = dst.parent() {
+                    fs::create_dir_all(parent)?;
+                }
+                fs::rename(&ph, placeholder_path(&dst))?;
+                return self.push(folder);
+            }
+            bail!("unknown file {from}");
+        }
+        if dst.exists() || placeholder_path(&dst).exists() {
+            bail!("{to} already exists");
+        }
+        if let Some(parent) = dst.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::rename(&src, &dst).with_context(|| format!("move {from} to {to}"))?;
+        self.push(folder)
+    }
+
     pub fn list_files(&self, folder: &str) -> Result<Vec<FileEntry>> {
         let (rec, root) = self.resolve_folder(folder)?;
         let state = self.load_state(&rec.folder_id)?;
@@ -1919,6 +2013,8 @@ impl Engine {
                 content_hash: f.content_hash.clone(),
                 selective,
                 media: thumbs::is_image(&f.path) || thumbs::is_video(&f.path),
+                modified_utc: f.mtime / 1_000_000_000,
+                last_accessed_utc: state.accessed.get(&f.path).copied(),
             });
         }
         Ok(out)

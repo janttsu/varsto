@@ -110,7 +110,9 @@
         if (f.media) { var im = document.createElement("img"); im.className = "thumb"; im.alt = ""; im.loading = "lazy"; im.src = "/api/thumb?folder=" + encodeURIComponent(folder) + "&path=" + encodeURIComponent(f.path) + "&token=" + encodeURIComponent(token); im.onerror = function () { im.remove(); }; nameCell.appendChild(im); }
         nameCell.appendChild(document.createTextNode(f.path)); tr.appendChild(nameCell);
         td(fmtBytes(f.size)); td(f.state + (f.pinned ? ", kept here" : ""));
+        td(f.last_accessed_utc ? new Date(f.last_accessed_utc * 1000).toLocaleDateString() : "never here");
         var act = document.createElement("td");
+        if (f.state !== "missing") { var open = document.createElement("a"); open.className = "button secondary"; open.textContent = "Open"; open.href = "/api/open?folder=" + encodeURIComponent(folder) + "&path=" + encodeURIComponent(f.path) + "&token=" + encodeURIComponent(token); open.onclick = function () { setTimeout(loadFiles, 1500); }; act.appendChild(open); act.appendChild(document.createTextNode(" ")); }
         var b = document.createElement("button"); b.className = "secondary";
         if (f.state === "placeholder" || f.state === "missing") { b.textContent = "Download"; b.onclick = function () { busy(true); api("POST", "/api/fetch", { folder: folder, path: f.path }).then(function () { log("fetched " + f.path); }).catch(function (e) { log("fetch failed: " + e.message); }).then(function () { busy(false); loadFiles(); }); }; }
         else { b.textContent = "Free up space"; b.onclick = function () { api("POST", "/api/free", { folder: folder, path: f.path }).then(function () { log(f.path + " is now a placeholder"); }).catch(function (e) { log("free failed: " + e.message); }).then(function () { loadFiles(); refreshStatus(); }); }; }

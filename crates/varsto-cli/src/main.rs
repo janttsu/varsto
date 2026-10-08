@@ -10,6 +10,7 @@ use varsto_core::Engine;
 
 mod desktop;
 mod icon;
+mod mcp;
 mod service;
 mod tray;
 mod update;
@@ -119,6 +120,27 @@ enum Cmd {
         #[arg(long)]
         check: bool,
     },
+    /// MCP server for AI assistants (stdio), with per-folder grants.
+    Mcp {
+        #[command(subcommand)]
+        cmd: Option<McpCmd>,
+    },
+}
+
+#[derive(Subcommand)]
+enum McpCmd {
+    /// Serve MCP over stdin/stdout (default). Point your assistant at `varsto --home <dir> mcp`.
+    Serve,
+    /// Let the assistant see a folder (or `all`); --write also allows moving and renaming files.
+    Grant {
+        folder: String,
+        #[arg(long)]
+        write: bool,
+    },
+    /// Remove a grant (or `all`).
+    Revoke { folder: String },
+    /// Show current grants.
+    List,
 }
 
 #[derive(Subcommand)]
@@ -774,6 +796,25 @@ fn run(cli: &Cli) -> Result<()> {
                 }
             }
         }
+        Cmd::Mcp { cmd } => match cmd.as_ref().unwrap_or(&McpCmd::Serve) {
+            McpCmd::Serve => mcp::serve(&home)?,
+            McpCmd::Grant { folder, write } => {
+                mcp::grant(&home, folder, *write)?;
+                println!(
+                    "granted {} access to {folder} (recorded in {})",
+                    if *write { "read-write" } else { "read-only" },
+                    mcp::grants_path(&home).display()
+                );
+            }
+            McpCmd::Revoke { folder } => {
+                mcp::revoke(&home, folder)?;
+                println!("revoked {folder}");
+            }
+            McpCmd::List => {
+                let g = mcp::Grants::load(&home)?;
+                println!("{}", serde_json::to_string_pretty(&g)?);
+            }
+        },
         Cmd::Update { check } => {
             let c = update::check()?;
             if *check {

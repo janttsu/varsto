@@ -36,3 +36,5 @@ ul#storages { padding-left:1.2rem; }
 .service { display:flex; gap:.6rem; align-items:center; flex-wrap:wrap; margin:.5rem 0 1rem; font-size:.92rem; }
 .service span { flex:1 1 20rem; }
 img.thumb { width:48px; height:48px; object-fit:cover; border-radius:6px; vertical-align:middle; margin-right:.5rem; border:1px solid var(--border); }
+
+a.button { display:inline-block; text-decoration:none; background:var(--surface); color:var(--text); border:1px solid var(--border); border-radius:8px; padding:.5rem .9rem; font-weight:600; }
