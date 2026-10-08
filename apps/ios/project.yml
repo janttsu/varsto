@@ -9,6 +9,16 @@ targets:
     type: application
     platform: iOS
     sources: [Varsto]
+    # xcodegen writes this Info.plist when it generates the project.
+    info:
+      path: Varsto/Info.plist
+      properties:
+        CFBundleDisplayName: Varsto
+        UILaunchScreen: {}
+        UIBackgroundModes: [fetch]
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
     settings:
       base:
         SWIFT_OBJC_BRIDGING_HEADER: Varsto/Varsto-Bridging-Header.h
@@ -19,4 +29,3 @@ targets:
         ONLY_ACTIVE_ARCH: "NO"
         OTHER_LDFLAGS: ["-lvarsto_ffi"]
         PRODUCT_BUNDLE_IDENTIFIER: in.soderlund.varsto.ios
-        INFOPLIST_KEY_UIBackgroundModes: fetch

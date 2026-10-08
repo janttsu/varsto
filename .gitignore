@@ -13,6 +13,7 @@ dist/
 apps/macos/dist/
 apps/ios/Varsto.xcodeproj/
 apps/ios/build/
+apps/ios/Varsto/Info.plist
 apps/android/local.properties
 apps/android/app/src/main/jniLibs/
 __pycache__/
