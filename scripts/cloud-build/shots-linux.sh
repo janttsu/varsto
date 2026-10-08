@@ -76,11 +76,14 @@ token="$(python3 -c "import json;print(json.load(open('/it/home/service.json'))[
 # root needs --no-sandbox. App mode shows the page without tabs or address bar.
 chrome="$(ls -d /root/.cache/ms-playwright/chromium-*/chrome-linux*/chrome 2>/dev/null | head -1)"
 echo "chromium: ${chrome:-not found}"
-nohup "$chrome" --no-sandbox --disable-gpu --no-first-run --user-data-dir=/it/chrome-profile \
-  "--app=http://127.0.0.1:$port/?token=$token" --window-size=1280,800 --window-position=0,0 > /it/app-window.log 2>&1 &
+nohup "$chrome" --no-sandbox --disable-gpu --no-first-run --password-store=basic --disable-infobars \
+  --user-data-dir=/it/chrome-profile "--app=http://127.0.0.1:$port/?token=$token" \
+  --window-size=1280,770 --window-position=0,30 > /it/app-window.log 2>&1 &
 sleep 15
 xdotool key Escape 2>/dev/null || true   # close the tray menu left open by the capture above
-sleep 1
+# The test build of Chromium shows a 'Download Chrome' bar; its close button sits at the right end.
+xdotool mousemove 1262 76 click 1 2>/dev/null || true
+sleep 2
 import -window root /it/shots/linux-app.png
 echo "app window captured; browser log:"; cat /it/app-window.log 2>/dev/null | tail -5
 ls -la /it/shots
