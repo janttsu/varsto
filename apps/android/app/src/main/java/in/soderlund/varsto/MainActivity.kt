@@ -15,7 +15,9 @@ import java.net.URL
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import android.content.res.Configuration
 import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 
 /** Shows the local Varsto interface served by the background service. */
@@ -38,6 +40,12 @@ class MainActivity : AppCompatActivity() {
             val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
             v.setPadding(0, bars.top, 0, bars.bottom)
             WindowInsetsCompat.CONSUMED
+        }
+        // Dark status-bar icons on the light theme, light icons on the dark one.
+        val night = (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
+        WindowCompat.getInsetsController(window, root).apply {
+            isAppearanceLightStatusBars = !night
+            isAppearanceLightNavigationBars = !night
         }
         if (Build.VERSION.SDK_INT >= 33) {
             ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
