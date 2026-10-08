@@ -40,7 +40,23 @@ Options after `--`:
 --device AUTO|OPTIX|CUDA|CPU    AUTO picks the GPU when enough VRAM is free
 --work DIR                      scratch directory (default: $TMPDIR/varsto-render)
 --no-compose                    skip the text layer
+--layout-only                   build every scene and run the overlap check, no render (20 s)
 ```
+
+## Overlap check
+
+Every element registers its projected screen box (`scene_kit.register_box`:
+kind `object`, `card`, `ui` for a piece on a card, `badge` for a padlock, check
+or cross attached to a corner of a parent). `compose.py` adds the text boxes
+measured with the real font and reports every pair that intersects, with these
+exceptions only: a badge may touch its own parent on the silhouette edge (its
+centre must be on or outside the parent box, never over the face); a UI piece
+may lie on its card; a text may lie on a card when it is fully inside it; a text
+marked `free` (letters on the shelf disks, seal initials) may lie on its element.
+`render_all.py --layout-only` runs the check for all scenes without rendering;
+the same check runs after every compose, and a non-empty report means the
+composition must be fixed (move the badge to a free corner with `badge_at`,
+`lock_at` or `attached`, nudge labels, widen the spacing).
 
 Outputs go next to the SVGs: `website/public/assets/img/features/*.webp|png`,
 `website/public/assets/img/usecases/*.webp|png` and

@@ -498,7 +498,7 @@ def screen_bbox(root):
                 for dx in (-1, 1):
                     for dy in (-1, 1):
                         for dz in (-1, 1):
-                            r = el.radius * 0.8
+                            r = el.radius * 0.68
                             x, y = project(mw @ (Vector(el.co) + Vector((dx * r, dy * r, dz * r))))
                             xs.append(x); ys.append(y)
             continue
@@ -511,9 +511,19 @@ def screen_bbox(root):
     return (min(xs), min(ys), max(xs), max(ys))
 
 
-def register_box(name, root):
-    S.boxes[name] = screen_bbox(root)
-    return S.boxes[name]
+def register_box(name, root, kind="object", parent=None):
+    """Record an element for the overlap check. kind: object (device, cloud, disk, ...),
+    card (UI card), ui (piece on a card: icon, badge, pill; parent = the card),
+    badge (padlock / check / cross attached to a corner of parent)."""
+    if name in S.boxes:
+        name = f"{name}#{len(S.boxes)}"
+    S.boxes[name] = {"box": screen_bbox(root), "kind": kind, "parent": parent}
+    root["box_name"] = name
+    return S.boxes[name]["box"]
+
+
+def box_of(root):
+    return S.boxes[root["box_name"]]["box"]
 
 
 # ---------------------------------------------------------------- text (composed later with Pillow)

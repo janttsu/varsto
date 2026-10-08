@@ -10,6 +10,8 @@ card (icons, badges, seals) are parented to the card with on_card().
 """
 from __future__ import annotations
 
+import math
+
 from mathutils import Vector
 
 import scene_kit as K
@@ -27,7 +29,7 @@ def scene(name, w=640, h=320):
 def node(root, x, y, hc, title=None, sub=None, lift=0.0, rot=0.0, gap=20, name=None, label_x=None):
     """Place an object so its mid-height point hc shows at (x, y); label it below."""
     K.place(root, x, y, hc, rot, lift)
-    bb = K.register_box(name or root.name, root)
+    bb = K.register_box(name or root.name, root, "object")
     cx = label_x if label_x is not None else (bb[0] + bb[2]) / 2
     yy = bb[3] + gap
     if title:
@@ -39,44 +41,84 @@ def node(root, x, y, hc, title=None, sub=None, lift=0.0, rot=0.0, gap=20, name=N
     return root
 
 
-def bb_node(root, x, y, depth_h=0.35, lift=0.0, name=None, toward=0.12):
-    """Free-floating billboard (camera-facing) UI object at grid point (x, y)."""
+def free_node(root, x, y, hc=0.0, lift=0.0, rot=0.0, kind="object", name=None):
+    K.place(root, x, y, hc, rot, lift)
+    K.register_box(name or root.name, root, kind)
+    return root
+
+
+def bb_node(root, x, y, depth_h=0.35, lift=0.0, name=None, toward=0.12, kind="object"):
+    """Free-floating billboard (camera-facing) element at grid point (x, y)."""
     K.billboard(root, x, y, depth_h, lift, toward)
-    K.register_box(name or "ui:" + root.name, root)
+    K.register_box(name or root.name, root, kind)
     return root
 
 
-def ui(card, root, x, y, toward=0.05):
-    """UI object on a card's face."""
+def ui(card, root, x, y, toward=0.05, kind="ui"):
+    """UI piece on a card's face (may overlap the card, nothing else)."""
     K.on_card(card, root, x, y, toward)
-    K.register_box("ui:" + root.name, root)
+    K.register_box(root.name, root, kind, parent=card["box_name"])
     return root
 
 
-def lock_near(x, y, lift=0.55, scale=1.0):
-    """Floating padlock badge next to an object."""
+def corner_point(parent, corner, dx=0.0, dy=0.0):
+    x0, y0, x1, y1 = K.box_of(parent)
+    x = {"l": x0, "r": x1, "c": (x0 + x1) / 2}[corner[1]]
+    y = {"t": y0, "b": y1, "c": (y0 + y1) / 2}[corner[0]]
+    return x + dx, y + dy
+
+
+def badge_at(parent, kind, corner="tr", dx=0.0, dy=0.0, depth_h=0.6, r=11.5):
+    """Check / cross badge attached to a corner of parent (sits on its silhouette edge)."""
+    x, y = corner_point(parent, corner, dx, dy)
+    b = K.badge(kind, r)
+    K.billboard(b, x, y, depth_h, 0.0, 0.3)
+    K.register_box(b.name, b, "badge", parent=parent["box_name"])
+    return b
+
+
+def lock_at(parent, corner="tr", dx=0.0, dy=0.0, scale=0.9, lift=None):
+    """Padlock attached to a corner of parent. The lock stands in the world (its
+    centre is 0.15*scale above its origin), floating so the centre meets the corner."""
+    x, y = corner_point(parent, corner, dx, dy)
     p = K.padlock(scale=scale)
-    K.place(p, x, y, 0.15 * scale, lift=lift)
-    K.register_box("ui:" + p.name, p)
+    hc = 0.17 * scale
+    lift = 0.6 if lift is None else lift
+    K.place(p, x, y, hc, lift=lift)
+    K.register_box(p.name, p, "badge", parent=parent["box_name"])
     return p
 
 
-def card_at(x0, y0, w, h, tone="white", r=12, depth_h=0.2):
+def attached(parent, root, corner, dx=0.0, dy=0.0, hc=0.0, lift=0.5, billboard=False, depth_h=0.6):
+    """Any element attached to a parent's corner (registered as a badge)."""
+    x, y = corner_point(parent, corner, dx, dy)
+    if billboard:
+        K.billboard(root, x, y, depth_h, 0.0, 0.3)
+    else:
+        K.place(root, x, y, hc, lift=lift)
+    K.register_box(root.name, root, "badge", parent=parent["box_name"])
+    return root
+
+
+def card_at(x0, y0, w, h, tone="white", r=12, depth_h=0.2, kind="card", parent=None):
     """UI card whose top-left corner is at (x0, y0) in grid px. A camera-facing
     plane is tilted, so a tall card is lifted until its lower edge clears the floor."""
     c = K.card(w, h, r, tone)
     depth_h = max(depth_h, h / 2 * K.PX * K.S.U.z + 0.1)
     K.billboard(c, x0 + w / 2, y0 + h / 2, depth_h, toward=0.0)
-    K.register_box("card:" + c.name, c)
+    K.register_box(c.name, c, kind, parent=parent)
     return c
 
 
-def floating_blocks(x, y, cols, rows, lift=0.5, s=0.1, g=0.06):
+def blocks(cols, rows, s=0.1, g=0.06):
+    """A few standing ciphertext blocks (attach them to a cloud or stick)."""
     g_ = K.empty("fblocks")
     K.cipher_blocks(g_, cols, rows, s=s, g=g, h=0.05, plane="xz")
-    K.place(g_, x, y, 0.0, lift=lift)
-    K.register_box("ui:" + g_.name, g_)
     return g_
+
+
+def floating_blocks(x, y, cols, rows, lift=0.5, s=0.1, g=0.06):
+    return free_node(blocks(cols, rows, s, g), x, y, 0.0, lift=lift)
 
 
 def L(*pts, **kw):
@@ -86,12 +128,12 @@ def L(*pts, **kw):
 # ============================================================ features
 @scene("features/ledger")
 def ledger():
-    node(K.laptop("cipher"), 100, 96, 0.35, "Laptop")
-    node(K.cloud(), 320, 88, 0.3, "Your storage", lift=0.22)
-    lock_near(356, 52, lift=0.78)
-    node(K.monitor("cipher"), 540, 96, 0.4, "Desktop")
-    L((162, 88), (206, 72), (236, 72), (268, 84))
-    L((374, 84), (412, 72), (446, 72), (484, 88))
+    lp = node(K.laptop("cipher"), 100, 96, 0.35, "Laptop")
+    cl = node(K.cloud(), 320, 88, 0.3, "Your storage", lift=0.22)
+    lock_at(cl, "tr", dx=0, dy=0, lift=0.8)
+    mo = node(K.monitor("cipher"), 540, 96, 0.4, "Desktop")
+    L((166, 88), (206, 72), (236, 72), (266, 84))
+    L((376, 84), (412, 72), (446, 72), (482, 88))
     for y, txt in ((190, '#41 laptop · stored block 7f3a on "box"'), (228, "#42 desktop · fetched 7f3a, hash verified")):
         card_at(110, y, 420, 30, r=8)
         K.text(124, y + 20, txt, "row", "s")
@@ -105,24 +147,24 @@ def transferrer():
     node(K.monitor("cipher"), 530, 112, 0.4, "Office PC")
     u = K.usb_stick()
     u.scale = (1.3,) * 3
-    node(u, 320, 140, 0.06, "Transferrer", "USB stick or disk marked as carrier", rot=-20)
-    floating_blocks(318, 72, 3, 1, lift=0.6)
-    lock_near(364, 100, lift=0.5, scale=0.9)
-    L((166, 106), (208, 92), (242, 92), (274, 110))
-    L((368, 110), (402, 92), (438, 92), (476, 106))
+    st = node(u, 320, 146, 0.06, "Transferrer", "USB stick or disk marked as carrier", rot=-20)
+    floating_blocks(300, 70, 3, 1, lift=0.6)
+    lock_at(st, "tr", dx=0, dy=0, lift=0.45)
+    L((166, 106), (208, 92), (242, 92), (268, 118))
+    L((372, 118), (402, 92), (438, 92), (476, 106))
     K.caption("Carries only the missing encrypted blocks; no cloud needed.")
 
 
 @scene("features/untrusted")
 def untrusted():
-    node(K.laptop("lines"), 110, 118, 0.35, "You", "holds the keys")
-    bb_node(K.key(scale=0.9, upright=False), 156, 76, 0.6, toward=0.4)
-    node(K.storage_panel(), 320, 112, 0.63, "Shared storage")
-    lock_near(394, 64, lift=1.0, scale=0.9)
-    node(K.nas(), 520, 128, 0.26, "Your friend's NAS", "stores and verifies, cannot open")
-    bb_node(K.badge("ok"), 562, 90, 0.6)
-    L((172, 116), (246, 116), arrows=("start", "end"))
-    L((396, 118), (474, 118))
+    lp = node(K.laptop("lines"), 108, 122, 0.35, "You", "holds the keys")
+    attached(lp, K.key(scale=0.8, upright=False), "tr", dx=0, dy=0, billboard=True, depth_h=0.7)
+    sp = node(K.storage_panel(), 320, 116, 0.63, "Shared storage")
+    lock_at(sp, "tr", dx=0, dy=0, lift=1.0)
+    ns = node(K.nas(), 526, 134, 0.26, "Your friend's NAS", "stores and verifies, cannot open")
+    badge_at(ns, "ok", "tr", dx=0, dy=0)
+    L((176, 118), (246, 118), arrows=("start", "end"))
+    L((398, 122), (470, 122))
     K.caption("A replica token: it stores and verifies, but can never read.")
 
 
@@ -153,21 +195,21 @@ def selective():
 
 @scene("features/sharing")
 def sharing():
-    node(K.laptop("cipher"), 110, 142, 0.35, "You")
-    node(K.laptop("cipher"), 530, 142, 0.35, "Another Varsto user")
-    node(K.folder(), 320, 136, 0.4, "project/")
-    L((170, 142), (240, 142))
-    L((400, 142), (470, 142))
-    L((150, 96), (220, 26), (420, 26), (486, 96))
-    c = card_at(262, 40, 116, 24, r=12, depth_h=0.9)
-    ui(c, K.key(scale=0.55, upright=False), 288, 52)
-    K.text(342, 56.5, "folder key", "accent")
+    lp = node(K.laptop("cipher"), 106, 146, 0.35, "You")
+    node(K.laptop("cipher"), 534, 146, 0.35, "Another Varsto user")
+    node(K.folder(), 320, 140, 0.4, "project/")
+    L((172, 146), (238, 146))
+    L((402, 146), (468, 146))
+    L((150, 100), (220, 30), (420, 30), (486, 100))
+    c = card_at(262, 44, 116, 24, r=12, depth_h=0.9)
+    ui(c, K.key(scale=0.55, upright=False), 288, 56)
+    K.text(342, 60.5, "folder key", "accent")
     K.caption("One folder key is handed over; the rest of the vault stays shut.")
 
 
 @scene("features/background")
 def background():
-    bar = bb_node(K.bar(608, 30), 320, 35, 0.6, toward=0.0)
+    bar = bb_node(K.bar(608, 30), 320, 35, 0.6, toward=0.0, kind="card")
     for x, w in ((30, 40), (78, 30), (116, 36)):
         ui(bar, K.bar(w, 8, "#64748b", r=4, t=0.012), x + w / 2, 35, toward=0.02)
     ui(bar, K.tray_icon(), 510, 35, toward=0.02)
@@ -195,11 +237,11 @@ def background():
 @scene("features/cold")
 def cold():
     node(K.laptop("cipher"), 100, 116, 0.35, "Laptop")
-    node(K.cloud(), 320, 106, 0.3, "Hot storage", "S3, NAS: read and write", lift=0.22)
-    floating_blocks(304, 128, 3, 1, lift=0.58)
+    cl = node(K.cloud(), 320, 106, 0.3, "Hot storage", "S3, NAS: read and write", lift=0.22)
+    attached(cl, blocks(3, 1), "bl", dx=0, dy=-12, lift=0.3)
     node(K.archive(), 530, 112, 0.25, "Cold archive", ["Glacier: written,", "never read by surprise"])
-    L((162, 108), (206, 94), (236, 94), (268, 104))
-    L((374, 104), (412, 94), (446, 94), (484, 108))
+    L((166, 108), (206, 94), (236, 94), (266, 104))
+    L((376, 104), (412, 94), (446, 94), (482, 108))
     K.caption("Prices steer placement; cold reads happen only on your say-so.")
 
 
@@ -210,29 +252,29 @@ def disks():
     for z, letter in ((0.035 + 0.12, "A"), (0.395 + 0.12, "A"), (0.755 + 0.12, "B")):
         x, y = K.project(sh.matrix_world @ Vector((0.0, -0.08, z + 0.012)))
         K.text(x, y + 4, letter, "letter", free=True)
-    lock_near(230, 70, lift=1.25, scale=0.9)
+    lock_at(sh, "tr", dx=0, dy=0, lift=1.2)
     node(K.laptop("cipher"), 420, 130, 0.35, "PC with a USB dock", label_x=470)
-    node(K.dock(), 540, 168, 0.05, rot=-20)
-    L((488, 162), (505, 168), solid=True, arrows=(), tone="mid", h=0.03, r=0.008)
-    L((234, 128), (290, 110), (324, 110), (360, 118))
+    node(K.dock(), 544, 170, 0.05, rot=-20)
+    L((488, 162), (507, 170), solid=True, arrows=(), tone="mid", h=0.03, r=0.008)
+    L((236, 128), (290, 110), (324, 110), (360, 118))
     K.caption("Old drives become counted, verified copies: attach, fill, eject.")
 
 
 @scene("features/mobile")
 def mobile():
-    node(K.cloud(), 320, 72, 0.3, lift=0.2)
-    lock_near(358, 42, lift=0.72, scale=0.9)
-    node(K.phone("cipher"), 200, 156, 0.42, "Phone", "nothing stored in clear text")
-    lock_near(232, 110, lift=0.58, scale=0.8)
-    node(K.tablet(), 440, 156, 0.43, "Tablet")
-    L((286, 94), (258, 104), (234, 112), (216, 120), arrows=("start", "end"))
-    L((356, 94), (384, 104), (406, 112), (420, 120), arrows=("start", "end"))
+    cl = node(K.cloud(), 320, 86, 0.3, lift=0.2)
+    lock_at(cl, "tr", dx=0, dy=0, lift=0.75)
+    ph = node(K.phone("cipher"), 200, 160, 0.42, "Phone", "nothing stored in clear text")
+    lock_at(ph, "tr", dx=0, dy=0, scale=0.8, lift=0.65)
+    node(K.tablet(), 440, 160, 0.43, "Tablet")
+    L((286, 96), (258, 106), (234, 116), (216, 126), arrows=("start", "end"))
+    L((356, 96), (384, 106), (406, 116), (420, 126), arrows=("start", "end"))
     K.caption("Same encrypted core; files decrypt only when you open them.")
 
 
 def _seal(card, x, y, initials, name):
     ui(card, K.seal(), x, y)
-    K.text(x, y + 3.5, initials, "sealtxt")
+    K.text(x, y + 3.5, initials, "sealtxt", free=True)
     K.text(x, y + 34, name, "sealname")
 
 
@@ -250,11 +292,10 @@ def pq():
     c2 = card_at(340, 56, 260, 176)
     K.text(470, 84, "Share token", "title")
     K.rule2d(356, 96, 584, 96)
-    ui(c2, K.card(212, 38, 19, "blue100"), 470, 131, toward=0.02)
+    pill = ui(c2, K.card(212, 38, 19, "blue100"), 470, 131, toward=0.02, kind="card")
     lk = K.padlock(scale=0.7)
-    p = K.card_point(c2, 388, 131, 0.2)
-    lk.location = p - Vector((0, 0, 0.12))
-    K.register_box("ui:lock", lk)
+    lk.location = K.card_point(c2, 388, 131, 0.2) - Vector((0, 0, 0.12))
+    K.register_box(lk.name, lk, "ui", parent=pill["box_name"])
     K.text(482, 135.5, "folder key, sealed", "row")
     _seal(c2, 410, 184, "X", "X25519")
     _seal(c2, 530, 184, "ML", "ML-KEM-768")
@@ -266,46 +307,44 @@ def pq():
 @scene("usecases/plane")
 def plane():
     p = K.plane(0.9)
-    K.place(p, 62, 44, 0.0, lift=0.9, rot_z=-15)
-    K.register_box("plane", p)
+    free_node(p, 62, 44, 0.0, lift=0.9, rot=-15, name="plane")
     L((100, 44), (600, 44), h=0.9, tone="grey", arrows=(), dash=7, gap=6, r=0.009)
-    K.text(108, 68, "in flight, no internet", "sub", "s")
-    node(K.phone("cipher"), 200, 158, 0.42, "Phone")
-    node(K.laptop("cipher"), 440, 156, 0.35, "Laptop")
-    L((230, 134), (268, 100), (350, 100), (386, 130), tone="blue600", arrows=("start", "end"), solid=True, h=0.5)
-    # free: the laptop's bounding rectangle reaches here, the lid itself does not
+    K.text(112, 70, "in flight, no internet", "sub", "s")
+    node(K.phone("cipher"), 196, 160, 0.42, "Phone")
+    node(K.laptop("cipher"), 446, 158, 0.35, "Laptop")
+    L((226, 136), (266, 100), (350, 100), (390, 130), tone="blue600", arrows=("start", "end"), solid=True, h=0.5)
     K.text(300, 92, "hotspot / LAN, direct transfer", "sub", free=True)
-    bb_node(K.file_icon(1.0), 316, 164, 0.45)
-    lock_near(340, 152, lift=0.55, scale=0.7)
-    node(K.cloud(scale=0.7, alpha_tone="#eef1f7"), 320, 236, 0.22, lift=0.1)
-    bb_node(K.badge("x"), 350, 218, 0.5)
+    f = bb_node(K.file_icon(1.0), 310, 166, 0.45)
+    attached(f, K.padlock(scale=0.6), "tr", dx=2, dy=0, hc=0.1, lift=0.6)
+    cl = node(K.cloud(scale=0.7, alpha_tone="#eef1f7"), 320, 238, 0.22, lift=0.1)
+    badge_at(cl, "x", "tl", dx=0, dy=0)
     K.caption("cloud catches up when the network returns")
 
 
 @scene("usecases/stolen")
 def stolen():
-    node(K.laptop("lock"), 150, 146, 0.35, "Stolen laptop", "Strongroom stays locked")
-    bb_node(K.badge("x"), 208, 104, 0.7)
-    node(K.phone("rows_red"), 480, 156, 0.42, "Your phone")
-    L((456, 118), (420, 64), (250, 54), (212, 106))
+    lp = node(K.laptop("lock"), 150, 148, 0.35, "Stolen laptop", "Strongroom stays locked")
+    badge_at(lp, "x", "tr", dx=0, dy=0, depth_h=0.8)
+    node(K.phone("rows_red"), 480, 158, 0.42, "Your phone")
+    L((456, 120), (420, 64), (250, 54), (214, 104))
     K.text(332, 60, "revoke + wipe", "title")
-    node(K.cloud(scale=0.7), 320, 238, 0.22, lift=0.1)
-    bb_node(K.badge("ok"), 350, 220, 0.5)
+    cl = node(K.cloud(scale=0.7), 320, 240, 0.22, lift=0.1)
+    badge_at(cl, "ok", "tr", dx=0, dy=0)
     K.caption("data still restorable from your storages")
 
 
 @scene("usecases/provider")
 def provider():
-    node(K.cloud(alpha_tone="#e3e8f2"), 130, 94, 0.3, "Provider A closed", lift=0.2)
-    bb_node(K.badge("x"), 168, 66, 0.6)
-    node(K.cloud(), 320, 94, 0.3, "Provider B", lift=0.2)
-    floating_blocks(304, 116, 3, 1, lift=0.58)
-    bb_node(K.badge("ok"), 358, 66, 0.6)
-    node(K.disk(), 510, 112, 0.06, "Disk at home", rot=-15)
-    bb_node(K.badge("ok"), 550, 78, 0.6)
+    ca = node(K.cloud(alpha_tone="#e3e8f2"), 124, 94, 0.3, "Provider A closed", lift=0.2)
+    badge_at(ca, "x", "tr", dx=0, dy=0)
+    cb = node(K.cloud(), 320, 94, 0.3, "Provider B", lift=0.2)
+    attached(cb, blocks(3, 1), "bl", dx=0, dy=-12, lift=0.3)
+    badge_at(cb, "ok", "tr", dx=0, dy=0)
+    dk = node(K.disk(), 514, 112, 0.06, "Disk at home", rot=-15)
+    badge_at(dk, "ok", "tr", dx=0, dy=0)
     node(K.laptop("alert", scale=0.65), 320, 230, 0.23)
-    L((320, 198), (320, 162))
-    L((368, 206), (420, 186), (456, 162), (486, 140))
+    L((320, 198), (320, 166))
+    L((368, 206), (420, 188), (456, 166), (486, 146))
     K.caption("alert: 1 of 3 copies lost, repairing to a new storage")
 
 
@@ -316,24 +355,24 @@ def fire():
     K.flame(0.9, at=(0.16, -0.12, 0.66), parent=h)
     K.flame(0.6, at=(-0.2, -0.08, 0.58), parent=h)
     L((206, 152), (262, 88), (398, 88), (452, 154))
-    node(K.house(), 500, 176, 0.4, "Relatives, other city")
-    bb_node(K.badge("ok"), 546, 138, 0.7)
-    node(K.cloud(scale=0.7), 330, 220, 0.22, None, "plus a cloud bucket", lift=0.1, gap=14)
-    bb_node(K.badge("ok"), 360, 202, 0.5)
+    h2 = node(K.house(), 500, 176, 0.4, "Relatives, other city")
+    badge_at(h2, "ok", "tr", dx=0, dy=0, depth_h=0.9)
+    cl = node(K.cloud(scale=0.7), 330, 222, 0.22, None, "plus a cloud bucket", lift=0.1, gap=14)
+    badge_at(cl, "ok", "tr", dx=0, dy=0)
     K.caption("placement rule: one copy in another place")
 
 
 @scene("usecases/camera")
 def camera():
-    node(K.phone("photos"), 140, 150, 0.42, "Camera roll full")
-    bb_node(K.camera_icon(), 174, 104, 0.7)
-    L((180, 132), (224, 110), (280, 104), (316, 114))
-    node(K.cloud(), 372, 120, 0.3, "Encrypted upload", lift=0.2)
-    floating_blocks(356, 142, 3, 1, lift=0.58)
-    lock_near(410, 90, lift=0.62, scale=0.9)
-    L((420, 140), (464, 158), (492, 180), (506, 202))
-    node(K.disk(), 528, 226, 0.06, None, "second copy verified", rot=-15, gap=18)
-    bb_node(K.badge("ok"), 562, 200, 0.45)
+    ph = node(K.phone("photos"), 140, 150, 0.42, "Camera roll full")
+    attached(ph, K.camera_icon(), "tr", dx=0, dy=0, billboard=True, depth_h=0.8)
+    L((182, 132), (224, 110), (280, 104), (312, 112))
+    cl = node(K.cloud(), 372, 120, 0.3, "Encrypted upload", lift=0.2)
+    attached(cl, blocks(3, 1), "bl", dx=0, dy=-12, lift=0.3)
+    lock_at(cl, "tr", dx=0, dy=0, lift=0.7)
+    L((432, 142), (470, 160), (496, 182), (508, 204))
+    dk = node(K.disk(), 530, 230, 0.06, None, "second copy verified", rot=-15, gap=18)
+    badge_at(dk, "ok", "tr", dx=0, dy=0)
     K.caption("Originals are deleted only after the policy is met and verified.")
 
 
@@ -351,8 +390,8 @@ def _tree_row(card, y, indent, name, size, status, done, top=False):
 
 @scene("usecases/newdevice")
 def newdevice():
-    node(K.phone("tree"), 130, 150, 0.42, "New phone", "joined with a key")
-    bb_node(K.key(scale=0.6, upright=False), 166, 108, 0.7, toward=0.4)
+    ph = node(K.phone("tree"), 130, 150, 0.42, "New phone", "joined with a key")
+    attached(ph, K.key(scale=0.6, upright=False), "tr", dx=2, dy=0, billboard=True, depth_h=0.8)
     c = card_at(240, 54, 350, 200)
     K.rule2d(266, 92, 266, 152, color="#e2e8f0", width=2)
     _tree_row(c, 80, 0, "Photos/", "", "", False, top=True)
@@ -367,7 +406,7 @@ def newdevice():
 
 @scene("usecases/cheapest")
 def cheapest():
-    bb_node(K.card(440, 40, 14, "blue600"), 388, 58, 0.6, toward=0.0)
+    bb_node(K.card(440, 40, 14, "blue600"), 388, 58, 0.6, toward=0.0, kind="card")
     K.text(388, 63, 'You: "What is the cheapest place to keep the 2019 videos?"', "white")
     c = card_at(32, 96, 500, 148, r=14)
     ui(c, K.sparkle(), 58, 120)
@@ -375,41 +414,48 @@ def cheapest():
     K.text(48, 150, "310 GB, read twice a year. Cold tier at provider C would cost about a third of", "sub", "s")
     K.text(48, 168, "the current hot bucket; restore takes hours and costs per GB.", "sub", "s")
     K.text(48, 194, "Proposed: move 2019 videos to provider C cold; keep one hot copy at home.", "row", "s")
-    ui(c, K.card(92, 26, 13, "blue600"), 94, 221, toward=0.02)
+    ui(c, K.card(92, 26, 13, "blue600"), 94, 221, toward=0.02, kind="card")
     K.text(94, 225.3, "Confirm", "white")
     K.caption("Open, dated price data; nothing moves without your confirmation.")
 
 
 @scene("usecases/sensitive")
 def sensitive():
-    node(K.phone("cipher"), 110, 150, 0.42, None, "no clear text on the phone")
-    c = K.framed_card(216, 160, 14)
-    K.billboard(c, 320, 138, 160 / 2 * K.PX * K.S.U.z + 0.1, toward=0.0)
-    K.register_box("card:strong", c)
-    K.text(320, 92, "Taxes/ (Strongroom)", "title")
-    lk = K.padlock(scale=1.6)
-    lk.location = K.card_point(c, 320, 134, 0.35) - Vector((0, 0, 0.27))
-    K.register_box("ui:lock", lk)
-    ui(c, K.ring(12, 0.005), 310.5, 192)
-    ui(c, K.ring(18, 0.004, "#f3c98a"), 310.5, 192)
-    ui(c, K.key(scale=0.55, upright=False), 320, 192, toward=0.07)
-    L((436, 154), (466, 154), tone="grey", arrows=(), dash=7, gap=6, r=0.009, h=0.5)
-    bb_node(K.badge("x"), 450, 154, 0.55)
-    card_at(470, 120, 130, 68)
-    K.text(535, 148, "AI assistant", "title")
-    K.text(535, 168, "cannot see it", "sub")
+    node(K.phone("cipher"), 100, 150, 0.42, None, "no clear text on the phone")
+    c = K.framed_card(200, 160, 14)
+    K.billboard(c, 312, 138, 160 / 2 * K.PX * K.S.U.z + 0.1, toward=0.0)
+    K.register_box(c.name, c, "card")
+    K.text(312, 90, "Taxes/ (Strongroom)", "title")
+    lk = K.padlock(scale=1.4)
+    lk.location = K.card_point(c, 312, 128, 0.35) - Vector((0, 0, 0.24))
+    K.register_box(lk.name, lk, "ui", parent=c["box_name"])
+    kg = K.empty("keygroup")
+    K.on_card(c, kg, 312, 196, 0.07)
+    for R, r, tone in ((12, 0.005, "gold"), (18, 0.004, "#f3c98a")):
+        rg = K.ring(R, r, tone)
+        rg.parent = kg
+        rg.location = (-0.095, 0, 0)
+    ky = K.key(scale=0.55, upright=False)
+    ky.parent = kg
+    ky.location = (0, 0, 0.0)
+    K.register_box(kg.name, kg, "ui", parent=c["box_name"])
+    L((420, 154), (462, 154), tone="grey", arrows=(), dash=7, gap=6, r=0.009, h=0.5)
+    bb_node(K.badge("x"), 441, 154, 0.55, kind="object")
+    card_at(474, 120, 126, 68)
+    K.text(537, 148, "AI assistant", "title")
+    K.text(537, 168, "cannot see it", "sub")
     K.caption("opens only with a touch of your security key")
 
 
 @scene("usecases/reader")
 def reader():
     node(K.monitor("photos"), 150, 142, 0.4, "Desktop", "has the photos, makes thumbnails")
-    L((208, 122), (240, 100), (264, 96), (290, 104))
-    node(K.cloud(), 340, 112, 0.3, None, "thumbs/<folder>/<hash>.enc", lift=0.2, gap=16)
-    floating_blocks(324, 134, 3, 1, lift=0.58)
-    lock_near(380, 86, lift=0.62, scale=0.9)
-    L((390, 128), (422, 144), (452, 148), (482, 148))
-    node(K.phone("thumbs"), 510, 154, 0.42, "Phone", "previews, files are placeholders")
+    L((208, 122), (240, 100), (264, 96), (288, 104))
+    cl = node(K.cloud(), 340, 112, 0.3, None, "thumbs/<folder>/<hash>.enc", lift=0.2, gap=16)
+    attached(cl, blocks(3, 1), "bl", dx=0, dy=-12, lift=0.3)
+    lock_at(cl, "tr", dx=0, dy=0, lift=0.7)
+    L((396, 128), (426, 144), (452, 148), (478, 148))
+    node(K.phone("thumbs"), 512, 154, 0.42, "Phone", "previews, files are placeholders")
     K.caption("Thumbnails stay encrypted; the storage sees only ciphertext.")
 
 
@@ -420,29 +466,34 @@ def hero():
     glow = K.empty("glow")
     K.cyl(1.5, 0.004, K.mat("#f1f4fe", rough=1.0, sheen=0.0), parent=glow)
     K.place(glow, kx, ky + 44, 0.0)
-    node(K.pedestal(0.8, 0.14), kx, ky + 44, 0.07)
+    ped = K.pedestal(0.8, 0.14)
     k = K.key(scale=2.6, upright=True)
-    K.place(k, kx, ky - 6, 0.0, lift=0.8, rot_z=K.AZ_DEG)
-    K.register_box("key", k)
+    k.parent = ped
+    k.location = (0, 0, 0.78)
+    k.rotation_euler = (0, 0, math.radians(K.AZ_DEG))
+    node(ped, kx, ky + 44, 0.07)
     K.text(kx, 58, "Your keys", "hero_title")
     K.text(kx, 90, "never leave your devices", "hero_sub")
-    big = 1.35
+    big = 1.25
     nodes = [
-        (130, 392, K.laptop("cipher", scale=1.3), 0.45, "Laptop", None, (190, 318)),
-        (318, 420, K.shelf(), 0.56 * big, "Disks on a shelf", "offline, counted, verified", (394, 312)),
-        (506, 436, K.bucket(), 0.35 * big, "S3 bucket", "hot copy, any provider", (562, 368)),
-        (694, 436, K.archive(), 0.25 * big, "Cold archive", "never read by surprise", (744, 376)),
-        (882, 420, K.nas(), 0.26 * big, "NAS at home", "or a friend's, or a server", (936, 356)),
-        (1070, 392, K.phone("cipher", scale=1.3), 0.55, "Phone", None, (1098, 302)),
+        (112, 396, K.laptop("cipher", scale=1.15), 0.4, "Laptop", None, "tr", (0, 0)),
+        (316, 424, K.shelf(), 0.56 * big, "Disks on a shelf", "offline, counted, verified", "tr", (0, 0)),
+        (506, 438, K.bucket(), 0.35 * big, "S3 bucket", "hot copy, any provider", "tr", (0, 0)),
+        (694, 438, K.archive(), 0.25 * big, "Cold archive", "never read by surprise", "tr", (0, 0)),
+        (884, 424, K.nas(), 0.26 * big, "NAS at home", "or a friend's, or a server", "tr", (0, 0)),
+        (1086, 396, K.phone("cipher", scale=1.15), 0.5, "Phone", None, "tr", (2, 0)),
     ]
-    for x, y, root, hc, title, sub, lock in nodes:
+    placed = []
+    for x, y, root, hc, title, sub, corner, (dx, dy) in nodes:
         if not root.name.startswith(("laptop", "phone")):
             root.scale = (big,) * 3
         node(root, x, y, hc, title, sub, gap=24)
-        lock_near(lock[0], lock[1], lift=0.9, scale=1.2)
-    for x, y, root, hc, title, sub, lock in nodes:
-        dx, dy = x - kx, y - ky
+        lock_at(root, corner, dx=dx, dy=dy, scale=1.1, lift=1.0)
+        placed.append((x, y, root))
+    for x, y, root in placed:
+        bx0, by0, bx1, by1 = K.box_of(root)
+        ex, ey = (bx0 + bx1) / 2, by0 - 14
+        dx, dy = ex - kx, ey - ky
         n = (dx * dx + dy * dy) ** 0.5
         sx, sy = kx + dx / n * 95, ky + dy / n * 95
-        ex, ey = x, y - 74
-        L((sx, sy), (kx + dx / n * 170, ky + dy / n * 170), (ex, ey - 80), (ex, ey), h=0.45, dash=8, gap=6, r=0.014)
+        L((sx, sy), (kx + dx / n * 170, ky + dy / n * 170), (ex, ey - 60), (ex, ey), h=0.45, dash=8, gap=6, r=0.014)

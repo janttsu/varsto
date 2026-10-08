@@ -9,6 +9,7 @@ Options (after the "--"):
     --device AUTO|OPTIX|CUDA|CPU   AUTO picks the GPU when at least 2.5 GB of VRAM is free
     --work DIR           scratch directory for raw renders and layout JSON (default: $TMPDIR/varsto-render)
     --no-compose         skip compose.py (text layer)
+    --layout-only        build the scenes and run the overlap check only (no render)
 
 Outputs go next to the SVGs: website/public/assets/img/{features,usecases}/*.webp|png
 and website/public/assets/img/hero.webp|png.
@@ -32,7 +33,7 @@ import scenes            # noqa: E402
 
 
 def parse_args(argv):
-    opts = {"only": None, "samples": 160, "device": "AUTO", "work": os.path.join(tempfile.gettempdir(), "varsto-render"), "compose": True}
+    opts = {"only": None, "samples": 160, "device": "AUTO", "work": os.path.join(tempfile.gettempdir(), "varsto-render"), "compose": True, "layout_only": False}
     i = 0
     while i < len(argv):
         a = argv[i]
@@ -46,6 +47,8 @@ def parse_args(argv):
             opts["work"] = argv[i + 1]; i += 2
         elif a == "--no-compose":
             opts["compose"] = False; i += 1
+        elif a == "--layout-only":
+            opts["layout_only"] = True; i += 1
         else:
             raise SystemExit(f"unknown option {a}")
     return opts
@@ -69,7 +72,7 @@ def pick_device(wanted: str) -> str:
 def main():
     argv = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
     opts = parse_args(argv)
-    device = pick_device(opts["device"])
+    device = "CPU" if opts["layout_only"] else pick_device(opts["device"])
     os.makedirs(opts["work"], exist_ok=True)
     names = opts["only"] or list(scenes.SCENES)
     t_all = time.time()
@@ -83,17 +86,23 @@ def main():
         raw = os.path.join(opts["work"], name.replace("/", "_") + ".png")
         lay = os.path.join(opts["work"], name.replace("/", "_") + ".json")
         os.makedirs(os.path.dirname(raw), exist_ok=True)
-        K.render(raw)
         json.dump(K.layout(), open(lay, "w"), indent=1)
+        if opts["layout_only"]:
+            r = subprocess.run(["python3", os.path.join(HERE, "compose.py"), "--check", lay], capture_output=True, text=True)
+            line = f"{name:22s} layout check: " + r.stdout.strip().replace("\n", "\n    ")
+            print(line, flush=True)
+            report.append(line)
+            continue
+        K.render(raw)
         dt = time.time() - t0
         line = f"{name:22s} {w}x{h}@2x {samples} spp {K.S.device:5s} {dt:6.1f} s"
         if opts["compose"]:
             out_base = os.path.join(OUT_DIR, name)
             r = subprocess.run([sys.executable if False else "python3", os.path.join(HERE, "compose.py"), raw, lay, out_base],
                                capture_output=True, text=True)
-            if r.returncode:
+            if r.stderr.strip():
                 line += "  compose FAILED: " + r.stderr.strip()[-400:]
-            elif r.stdout.strip():
+            if r.stdout.strip():
                 line += "\n    " + r.stdout.strip().replace("\n", "\n    ")
             for ext in ("webp", "png"):
                 p = f"{out_base}.{ext}"
