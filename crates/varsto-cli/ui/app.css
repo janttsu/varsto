@@ -125,7 +125,7 @@ button .icon, a.button .icon { width: 18px; height: 18px; margin-right: 6px; ver
 }
 .brand { display: flex; align-items: center; gap: 10px; padding: 4px 8px 16px; }
 .brand-mark { width: 28px; height: 28px; color: var(--accent); display: inline-flex; }
-.brand-mark svg { width: 28px; height: 28px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.brand-mark svg { width: 28px; height: 28px; border-radius: 7px; }
 .brand-name { font-size: 17px; font-weight: 700; letter-spacing: -.01em; }
 .tag { font-size: 11px; font-weight: 600; line-height: 1; background: var(--warn-bg); color: var(--warn-text); border: 1px solid var(--warn-border); border-radius: 999px; padding: 3px 7px; text-transform: lowercase; }
 .nav { display: flex; flex-direction: column; gap: 2px; }
