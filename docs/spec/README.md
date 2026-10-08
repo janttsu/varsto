@@ -6,7 +6,7 @@ Status of the documents that will define formats and protocols. All are **not st
 |---|---|
 | Storage layout and pack format | not started |
 | Chunking and hashing | not started |
-| Key hierarchy and key wrapping (incl. FIDO2 `hmac-secret`) | not started |
+| Key hierarchy and key wrapping (incl. FIDO2 `hmac-secret`) | draft, design stage: [key-hierarchy.md](key-hierarchy.md) |
 | Post-quantum hybrid handshakes and signatures | not started |
 | Event ledger and bookkeeping | not started |
 | Peer discovery (LAN, storage rendezvous, DHT, relays) | not started |
