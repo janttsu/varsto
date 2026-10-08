@@ -221,7 +221,8 @@ def build_macos(args):
             time.sleep(600)
     tarball = source_tarball(ROOT / "dist" / "cloud" / "src.tar.gz")
     name = f"{TAG}-macos-{int(time.time())}"
-    srv = scw("apple-silicon", "server", "create", f"zone={zone}", f"name={name}", f"type={wanted}", f"project-id={scw('config', 'get', 'default-project-id', json_out=False).strip()}", f"tags.0={TAG}")
+    # Apple Silicon servers take no tags: the name prefix identifies ours.
+    srv = scw("apple-silicon", "server", "create", f"zone={zone}", f"name={name}", f"type={wanted}", f"project-id={scw('config', 'get', 'default-project-id', json_out=False).strip()}")
     sid = srv["id"]
     log(f"created Mac mini {sid} ({wanted}); billed for 24 h minimum; waiting for delivery (10-20 min)")
     try:
@@ -477,7 +478,7 @@ def cleanup(args):
         delete_instance(s["id"])
     for zone in ("fr-par-1", "fr-par-3"):
         for s in scw("apple-silicon", "server", "list", f"zone={zone}"):
-            if TAG in (s.get("tags") or []):
+            if (s.get("name") or "").startswith(f"{TAG}-"):
                 log(f"deleting Mac mini {s['id']}")
                 subprocess.run(["scw", "apple-silicon", "server", "delete", s["id"], f"zone={zone}"], capture_output=True)
     log("cleanup done")

@@ -63,3 +63,25 @@ if [ -n "$pos" ]; then
 fi
 convert /it/shots/linux-desktop.png -crop 1280x40+0+0 /it/shots/linux-panel.png || true
 ls -la /it/shots; tail -3 /it/tray.log
+
+# ---- The interface in its own window: a real Chromium (Playwright build) in
+# app mode under a window manager, captured from the virtual desktop.
+apt-get install -y -qq openbox python3-venv >/dev/null
+openbox >/dev/null 2>&1 &
+sleep 1
+python3 -m venv /it/venv && /it/venv/bin/pip -q install playwright >/dev/null && /it/venv/bin/playwright install --with-deps chromium >/dev/null 2>&1
+port="$(python3 -c "import json;print(json.load(open('/it/home/service.json'))['port'])")"
+token="$(python3 -c "import json;print(json.load(open('/it/home/service.json'))['token'])")"
+/it/venv/bin/python3 - "$port" "$token" <<'PY' &
+import sys, time
+from playwright.sync_api import sync_playwright
+port, token = sys.argv[1], sys.argv[2]
+with sync_playwright() as p:
+    b = p.chromium.launch(headless=False, args=[f"--app=http://127.0.0.1:{port}/?token={token}", "--window-size=1280,800", "--window-position=0,0"])
+    time.sleep(40)
+    b.close()
+PY
+sleep 15
+import -window root /it/shots/linux-app.png
+echo "app window captured"
+ls -la /it/shots

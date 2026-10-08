@@ -28,6 +28,14 @@ try {
     $bmp.Save($path, [System.Drawing.Imaging.ImageFormat]::Png); $g.Dispose(); $bmp.Dispose()
   }
   Shot "C:\shots\windows-desktop.png"
+  # The interface in its own window (Edge app mode: no tabs, no address bar).
+  $sf = Get-Content C:\demo\home\service.json | ConvertFrom-Json
+  $url = "http://127.0.0.1:$($sf.port)/?token=$($sf.token)"
+  $edge = "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
+  if (-not (Test-Path $edge)) { $edge = "C:\Program Files\Microsoft\Edge\Application\msedge.exe" }
+  Start-Process -FilePath $edge -ArgumentList "--app=$url", "--window-size=1280,820", "--window-position=0,0", "--no-first-run"
+  Start-Sleep -Seconds 12
+  Shot "C:\shots\windows-app.png"
   # Open the hidden-icons flyout (the chevron left of the system icons) and capture it.
   $sig = '[DllImport("user32.dll")] public static extern void mouse_event(int f, int x, int y, int d, int e);'
   $u = Add-Type -MemberDefinition $sig -Name M -Namespace W -PassThru
