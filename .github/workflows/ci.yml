@@ -65,14 +65,21 @@ jobs:
       - run: brew install xcodegen
       - name: Build for the Simulator
         run: apps/ios/build.sh 2>&1 | tee build.log
-      - name: Build output to the job summary
+      - name: Launch on the Simulator and take a screenshot
+        run: apps/ios/simshot.sh dist/ios 2>&1 | tee simshot.log
+      - name: Output to the job summary
         if: failure()
         run: |
-          { echo '## Build output (last 150 lines)'; echo '```'; tail -n 150 build.log; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
-      - name: Launch on the Simulator and take a screenshot
-        run: apps/ios/simshot.sh dist/ios
+          for f in build.log simshot.log; do
+            [ -f "$f" ] || continue
+            { echo "## $f (last 150 lines)"; echo '```'; tail -n 150 "$f"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          done
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: Varsto-ios-simulator
-          path: dist/ios
-          if-no-files-found: error
+          path: |
+            dist/ios
+            build.log
+            simshot.log
+          if-no-files-found: warn

@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: PolyForm-Shield-1.0.0
 # Boot an iPhone Simulator, install the app built by build.sh, launch it and
 # save a screenshot plus the app bundle:  apps/ios/simshot.sh [OUT_DIR]
-set -euo pipefail
+set -euxo pipefail
 root="$(cd "$(dirname "$0")/../.." && pwd)"
 out="${1:-$root/dist/ios}"
 mkdir -p "$out"
@@ -20,5 +20,7 @@ sleep 20
 xcrun simctl io "$udid" screenshot "$out/ios-simulator.png"
 xcrun simctl spawn "$udid" log show --last 2m --predicate 'process == "Varsto"' > "$out/ios-simulator.log" 2>/dev/null || true
 xcrun simctl shutdown "$udid"
+# Crash reports of the app, if it died after launch.
+ls -t ~/Library/Logs/DiagnosticReports/Varsto* 2>/dev/null | head -3 | while read -r f; do cp "$f" "$out/"; done
 ditto -c -k --keepParent "$app" "$out/Varsto-ios-simulator.zip"
 ls -l "$out"
