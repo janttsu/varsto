@@ -16,6 +16,9 @@ while [ $# -gt 0 ]; do
   esac
 done
 [ "$(uname -s)" = Darwin ] || { echo "run this on a Mac" >&2; exit 1; }
+# An absolute output directory: the zip is written from inside the staging directory.
+mkdir -p "${out:?}"
+out="$(cd "$out" && pwd)"
 command -v swiftc >/dev/null || { echo "swiftc missing: run xcode-select --install" >&2; exit 1; }
 command -v cargo >/dev/null || { echo "cargo missing: install rustup from https://rustup.rs" >&2; exit 1; }
 target=aarch64-apple-darwin
@@ -72,7 +75,6 @@ cp "$root/brand/png/menubar-template.png" "$root/brand/png/menubar-template@2x.p
 echo "== ad-hoc signature"
 codesign --force --sign - "$app/Helpers/varsto"
 codesign --force --deep --sign - "$stage/Varsto.app"
-mkdir -p "${out:?}"
 name="Varsto-$version-macos.zip"
 rm -f "${out:?}/${name:?}"
 (cd "$stage" && ditto -c -k --keepParent Varsto.app "$out/$name")
