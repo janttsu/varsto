@@ -40,7 +40,7 @@
 
     <section class="feature">
       <h2>Devices that are never online together still converge</h2>
-      <img src="../assets/img/features/ledger.svg" alt="Two devices and a storage; a signed ledger lists which device stored and which verified a block." width="640" height="320" loading="lazy">
+      <picture><source type="image/webp" srcset="../assets/img/features/ledger.webp"><img src="../assets/img/features/ledger.png" alt="Two devices and a storage; a signed ledger lists which device stored and which verified a block." width="640" height="320" loading="lazy"></picture>
       <div>
         <p>There is no server. Each device writes encrypted blocks into storage you own and, next to them, a signed and encrypted ledger of what it did. Another device reads the ledger when it reaches the same storage, verifies the signatures and knows what exists, where it is and which copies were checked by someone else. <code>varsto fsck --verify</code> re-hashes every object and reports claims the storage cannot back. A device restored from an old backup is detected and fenced.</p>
         <p class="note">Use case: a laptop that is on the road for a week and a desktop at home. Both write to the same bucket or NAS share whenever they can; they never need to be on at the same time.</p>
@@ -49,7 +49,7 @@
 
     <section class="feature">
       <h2>Transferrer: a disk that travels between two devices</h2>
-      <img src="../assets/img/features/transferrer.svg" alt="A USB stick marked as transferrer between a home PC and an office PC." width="640" height="320" loading="lazy">
+      <picture><source type="image/webp" srcset="../assets/img/features/transferrer.webp"><img src="../assets/img/features/transferrer.png" alt="A USB stick marked as transferrer between a home PC and an office PC." width="640" height="320" loading="lazy"></picture>
       <div>
         <p>Mark a USB stick or an external disk as a transferrer. It only receives the encrypted blocks that the other device still lacks, and once both ends hold a block it is removed from the stick. For gigabytes of video between home and office this is faster than any upload, and it works with no internet at all.</p>
         <p class="note">Use case: edit footage at the office, carry the stick home, plug it in; the home machine catches up in minutes and the stick empties itself for the next trip.</p>
@@ -58,7 +58,7 @@
 
     <section class="feature">
       <h2>Untrusted replicas: backup space you do not have to trust</h2>
-      <img src="../assets/img/features/untrusted.svg" alt="You with the keys, a shared storage, and a friend's NAS that stores verified encrypted copies it cannot open." width="640" height="320" loading="lazy">
+      <picture><source type="image/webp" srcset="../assets/img/features/untrusted.webp"><img src="../assets/img/features/untrusted.png" alt="You with the keys, a shared storage, and a friend's NAS that stores verified encrypted copies it cannot open." width="640" height="320" loading="lazy"></picture>
       <div>
         <p>Give a friend, a relative or a rented box a <em>replica token</em>. Their device copies your encrypted objects from a shared location to its own disk, verifies every hash, and reports the copies into your ledger. It never receives a key that could open anything; it learns object names and sizes, exactly what a storage provider learns. Two users can host each other's backups this way.</p>
         <p class="note">Use case: you and a friend each keep a copy of the other's vault on a NAS in your homes. Neither can read the other's files; both see in their own app that the copies exist and are verified.</p>
@@ -67,7 +67,7 @@
 
     <section class="feature">
       <h2>Selective sync with placeholders</h2>
-      <img src="../assets/img/features/selective.svg" alt="A phone showing a file list where large files are placeholders and small ones are downloaded." width="640" height="320" loading="lazy">
+      <picture><source type="image/webp" srcset="../assets/img/features/selective.webp"><img src="../assets/img/features/selective.png" alt="A phone showing a file list where large files are placeholders and small ones are downloaded." width="640" height="320" loading="lazy"></picture>
       <div>
         <p>Every device can keep a folder in selective mode: the full tree is visible as placeholders, a file is downloaded when you ask for it, and <em>Free up space</em> turns it back into a placeholder once it is safely stored elsewhere. Placeholders are never mistaken for deletions. Operating-system integration (Finder, Explorer, Files) comes later; the mechanism is the same as in Resilio Sync's selective sync.</p>
       </div>
@@ -75,7 +75,7 @@
 
     <section class="feature">
       <h2>Share a folder with another Varsto user</h2>
-      <img src="../assets/img/features/sharing.svg" alt="Two users; a folder key is handed over so the other user can sync and read the folder." width="640" height="320" loading="lazy">
+      <picture><source type="image/webp" srcset="../assets/img/features/sharing.webp"><img src="../assets/img/features/sharing.png" alt="Two users; a folder key is handed over so the other user can sync and read the folder." width="640" height="320" loading="lazy"></picture>
       <div>
         <p>Sharing is key sharing: the recipient's device prints a request code, the owner seals the folder key to it (hybrid X25519 + ML-KEM-768) and sends the token back over any channel; only the requesting device can open it. The recipient syncs the folder through storage both can reach, and their device writes its own signed ledger under the folder key, so the owner sees their copies too. The token opens that folder and nothing else of the vault. Confirming who sent a request code, QR invitations and revocation are the next steps.</p>
       </div>
@@ -83,7 +83,7 @@
 
     <section class="feature">
       <h2>A real background app on macOS, Windows and Linux</h2>
-      <img src="../assets/img/features/background.svg" alt="A tray menu: status, open, sync now, pause, check for updates." width="640" height="320" loading="lazy">
+      <picture><source type="image/webp" srcset="../assets/img/features/background.webp"><img src="../assets/img/features/background.png" alt="A tray menu: status, open, sync now, pause, check for updates." width="640" height="320" loading="lazy"></picture>
       <div>
         <p>A menu-bar or tray app runs the background service, watches your folders and syncs changes within seconds, with a periodic catch-up for changes made elsewhere. The same small binary provides the command line and the local interface in your browser, served only to your computer. Updates: one click in the app, or <code>varsto update</code>, with a checksum check.</p>
       </div>
@@ -91,7 +91,7 @@
 
     <section class="feature">
       <h2>Your own buckets, rclone remotes and cold storage</h2>
-      <img src="../assets/img/features/cold.svg" alt="Laptop, hot storage and a cold archive with a note that cold storage is never read by surprise." width="640" height="320" loading="lazy">
+      <picture><source type="image/webp" srcset="../assets/img/features/cold.webp"><img src="../assets/img/features/cold.png" alt="Laptop, hot storage and a cold archive with a note that cold storage is never read by surprise." width="640" height="320" loading="lazy"></picture>
       <div>
         <p>A storage is a directory, an S3-compatible bucket with your own access keys (AWS, Scaleway, Hetzner, Backblaze B2, Cloudflare R2, MinIO) or any rclone remote, so SFTP, WebDAV, Google Drive and the rest come for free. Secrets stay encrypted on your device; rclone keeps its own. Archive classes such as Deep Archive are written but never read without an explicit confirmation, and the app reports an object that must be restored first instead of retrying. Per-storage prices for upload, download and restore, so the app can say where a read is cheap, are the next step.</p>
         <p class="note">Status: directories, S3 and rclone work; the price model is designed.</p>
@@ -100,7 +100,7 @@
 
     <section class="feature">
       <h2>Old disks on a shelf as counted, verified copies</h2>
-      <img src="../assets/img/features/disks.svg" alt="Hard drives on a shelf next to a PC with a USB dock." width="640" height="320" loading="lazy">
+      <picture><source type="image/webp" srcset="../assets/img/features/disks.webp"><img src="../assets/img/features/disks.png" alt="Hard drives on a shelf next to a PC with a USB dock." width="640" height="320" loading="lazy"></picture>
       <div>
         <p>Attach a disk from a USB dock, let the app fill it with the data that has the fewest copies, eject it when told, and store it anywhere. Next time it is attached the app verifies it, repairs what rotted and loads what is new. Disks belong to groups and places, so a policy can require one copy at home and one elsewhere. A folder can be kept only on disks, replicated as many times as you choose, with no cloud copy at all.</p>
         <p class="note">Status: designed and documented, not built yet.</p>
@@ -109,7 +109,7 @@
 
     <section class="feature">
       <h2>Mobile apps that keep nothing in clear text</h2>
-      <img src="../assets/img/features/mobile.svg" alt="A phone and a tablet syncing through storage; the phone stores nothing in clear text." width="640" height="320" loading="lazy">
+      <picture><source type="image/webp" srcset="../assets/img/features/mobile.webp"><img src="../assets/img/features/mobile.png" alt="A phone and a tablet syncing through storage; the phone stores nothing in clear text." width="640" height="320" loading="lazy"></picture>
       <div>
         <p>Android and iOS run the same encrypted core. Files stay encrypted on the device and are decrypted when you open them; thumbnails are generated once, encrypted and shared with your other devices. The Android alpha is a sideloadable APK; iOS needs a Mac to build and will follow.</p>
         <p class="note">Status: in progress.</p>
@@ -118,7 +118,7 @@
 
     <section class="feature">
       <h2>Post-quantum hybrid cryptography everywhere a public key is used</h2>
-      <img src="../assets/img/features/pq.svg" alt="A ledger batch with two seals, Ed25519 and ML-DSA-65, and a share token sealed with X25519 and ML-KEM-768." width="640" height="320" loading="lazy">
+      <picture><source type="image/webp" srcset="../assets/img/features/pq.webp"><img src="../assets/img/features/pq.png" alt="A ledger batch with two seals, Ed25519 and ML-DSA-65, and a share token sealed with X25519 and ML-KEM-768." width="640" height="320" loading="lazy"></picture>
       <div>
         <p>Signatures are hybrid: every ledger batch carries an Ed25519 signature and an ML-DSA-65 (FIPS 204) signature over the same bytes, and a batch is accepted only if both verify. A key that has a post-quantum part never accepts an Ed25519-only signature, so nobody can strip the stronger half. Key exchange is hybrid too: a share token is sealed to the recipient's X25519 + ML-KEM-768 (FIPS 203) key, so the folder key never travels in clear and the token can be sent over any channel.</p>
         <p class="note">Devices created with alpha-0 keep their Ed25519-only keys and stay valid, because every signed object carries an algorithm identifier; nothing stored had to be rewritten. Re-enrol such a device to give it a post-quantum key.</p>
@@ -127,7 +127,7 @@
 
     <section class="feature">
       <h2>An MCP server: your assistant, with exactly the access you grant</h2>
-      <img src="../assets/img/usecases/cheapest.svg" alt="A chat with an assistant that compares storage prices from open data and proposes a move, with a Confirm button." width="640" height="320" loading="lazy">
+      <picture><source type="image/webp" srcset="../assets/img/usecases/cheapest.webp"><img src="../assets/img/usecases/cheapest.png" alt="A chat with an assistant that compares storage prices from open data and proposes a move, with a Confirm button." width="640" height="320" loading="lazy"></picture>
       <div>
         <p><code>varsto mcp</code> speaks the Model Context Protocol, so Claude, an IDE assistant or any MCP client can list, read, move and sync files, but only in folders you granted, read-only unless you said otherwise. Varsto keeps its own record of when each file was last used, and the assistant can turn it into an answer to "where is this cheapest to keep?": idle files, their size, and the monthly cost in every storage class of an open, dated price data set, cheapest first, with sources. It proposes; you confirm.</p>
         <p class="note">Access records are per device for now; merging them across devices through the ledger is the next step. Strongroom folders will be excluded from assistants by default.</p>
@@ -136,7 +136,7 @@
 
     <section class="feature">
       <h2>Durability policies that warn you before they break</h2>
-      <img src="../assets/img/usecases/provider.svg" alt="One provider is closed; copies on a second provider and a disk at home remain and the app repairs." width="640" height="320" loading="lazy">
+      <picture><source type="image/webp" srcset="../assets/img/usecases/provider.webp"><img src="../assets/img/usecases/provider.png" alt="One provider is closed; copies on a second provider and a disk at home remain and the app repairs." width="640" height="320" loading="lazy"></picture>
       <div>
         <p>Tell a folder what must always be true: "at least two cloud copies and one at home, verified within 30 days". The policy travels with the folder, and every device evaluates it from the signed ledger alone, without asking the others. The app distinguishes <em>ok</em>, <em>at risk</em> (a verification is ageing out, or the only spare copy sits on cold storage or on a disk that is away), <em>violated</em> and <em>unknown</em>, and tells you while there is still time: a notification from the background app, a banner in the interface, and <code>varsto policy check</code> with an exit code for cron or monitoring.</p>
         <p class="note">Verification comes from <code>fsck --verify</code> on another device or from a replica; scheduling that automatically is the next step. Storage places are labels you give when adding a storage.</p>
@@ -145,7 +145,7 @@
 
     <section class="feature">
       <h2>Devices that send each other the blocks, torrent-style</h2>
-      <img src="../assets/img/usecases/plane.svg" alt="Two devices on a plane sync over the phone's hotspot; the cloud is crossed out until landing." width="640" height="320" loading="lazy">
+      <picture><source type="image/webp" srcset="../assets/img/usecases/plane.webp"><img src="../assets/img/usecases/plane.png" alt="Two devices on a plane sync over the phone's hotspot; the cloud is crossed out until landing." width="640" height="320" loading="lazy"></picture>
       <div>
         <p>Every device that has a file can serve its encrypted blocks, byte for byte the same objects the storages hold. A device that needs a block asks its peers first and the cloud second, checks every block against its content hash, and spreads the work over the peers that answer. On the LAN devices find each other by themselves; across the internet a device that listens on a reachable address (a forwarded port, a VPN) is a peer too. Only a holder of the vault key can fetch anything, and what travels is ciphertext.</p>
         <p class="note">Blocks are compressed before encryption (zstd), so every transfer and every copy is small, on the LAN as on the internet. No NAT traversal yet: relays and hole punching are next.</p>
@@ -154,7 +154,7 @@
 
     <section class="feature">
       <h2>Strongroom: folders that open only with your security key</h2>
-      <img src="../assets/img/usecases/sensitive.svg" alt="A tax folder in a Strongroom: opens only with a security key, no clear text on the phone, hidden from the AI assistant." width="640" height="320" loading="lazy">
+      <picture><source type="image/webp" srcset="../assets/img/usecases/sensitive.webp"><img src="../assets/img/usecases/sensitive.png" alt="A tax folder in a Strongroom: opens only with a security key, no clear text on the phone, hidden from the AI assistant." width="640" height="320" loading="lazy"></picture>
       <div>
         <p>A Strongroom folder's key is never stored anywhere. It is wrapped under a secret that only your FIDO2 security key can produce (the hmac-secret extension), so a touch of the same key opens the folder on every device of the vault, and nothing else does: not your passphrase, not the vault key, not a stolen laptop. Enforcement is cryptographic, not a dialog. Unlock for a window, work, lock; while locked the folder is skipped by sync, cannot be shared, and is invisible to assistants.</p>
         <p class="note">Needs the libfido2 tools (fido2-cred, fido2-assert); a software key exists for trying the flow. Converting existing folders and enrolling a backup key are next.</p>
@@ -163,7 +163,7 @@
 
     <section class="feature">
       <h2>A recovery kit for paper or metal</h2>
-      <img src="../assets/img/features/untrusted.svg" alt="You with the keys, a shared storage, and a friend's NAS that stores verified encrypted copies it cannot open." width="640" height="320" loading="lazy">
+      <picture><source type="image/webp" srcset="../assets/img/features/untrusted.webp"><img src="../assets/img/features/untrusted.png" alt="You with the keys, a shared storage, and a friend's NAS that stores verified encrypted copies it cannot open." width="640" height="320" loading="lazy"></picture>
       <div>
         <p>There is no account and no escrow: the vault key is yours alone, so the app helps you keep it. <code>varsto recovery kit</code> prints the key as 24 words with a checksum, laid out for paper or metal, and optionally three shares of which any two rebuild the key and one alone reveals nothing, so no single place has to hold everything. A new device joins straight from the words. Test it once a year.</p>
       </div>
