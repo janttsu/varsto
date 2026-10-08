@@ -136,6 +136,31 @@ def build_linux(args):
             delete_instance(sid)
 
 
+def build_android(args):
+    """Debug APK (arm64 + x86_64) built on a Linux machine with the Android SDK and NDK."""
+    out = ROOT / "dist" / "cloud" / "android"
+    out.mkdir(parents=True, exist_ok=True)
+    tarball = source_tarball(ROOT / "dist" / "cloud" / "src.tar.gz")
+    name = f"{TAG}-android-{int(time.time())}"
+    srv = create_instance(name, args.type or "POP2-8C-32G", "ubuntu_noble")
+    sid = srv["id"]
+    try:
+        _, ip = wait_running(sid)
+        log(f"running at {ip}; waiting for SSH")
+        wait_ssh("root", ip)
+        run_ssh("root", ip, "mkdir -p /build")
+        scp(str(tarball), f"root@{ip}:/build/src.tar.gz")
+        scp(str(ROOT / "scripts/cloud-build/remote-android.sh"), f"root@{ip}:/build/remote.sh")
+        run_ssh("root", ip, "cd /build && tar xzf src.tar.gz && bash /build/remote.sh")
+        scp(f"root@{ip}:/build/varsto/dist/android/*", str(out))
+        log(f"artifacts in {out}")
+        for f in sorted(out.iterdir()):
+            print(f"  {f.name}  {f.stat().st_size // 1024} KB")
+    finally:
+        if not args.keep:
+            delete_instance(sid)
+
+
 WINDOWS_USERDATA = r"""#ps1_sysnative
 $ErrorActionPreference = "Continue"
 Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0
@@ -486,7 +511,7 @@ def cleanup(args):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("target", choices=["linux", "windows", "macos", "integration", "shots-linux", "win-bootstrap", "shots-windows", "cleanup", "mac-stock"])
+    ap.add_argument("target", choices=["linux", "android", "windows", "macos", "integration", "shots-linux", "win-bootstrap", "shots-windows", "cleanup", "mac-stock"])
     ap.add_argument("--keep", action="store_true", help="do not delete the machine afterwards")
     ap.add_argument("--type", help="instance type (POP2-4C-16G, POP2-2C-8G-WIN, M4-S, ...)")
     ap.add_argument("--zone", help="zone for Mac minis (fr-par-1 or fr-par-3)")
@@ -501,7 +526,7 @@ def main():
         for zone in ("fr-par-1", "fr-par-3"):
             print(zone, mac_stock(zone))
         return
-    {"linux": build_linux, "windows": build_windows, "macos": build_macos, "integration": integration, "shots-linux": shots_linux, "win-bootstrap": win_bootstrap, "shots-windows": win_bootstrap, "cleanup": cleanup}[args.target](args)
+    {"linux": build_linux, "android": build_android, "windows": build_windows, "macos": build_macos, "integration": integration, "shots-linux": shots_linux, "win-bootstrap": win_bootstrap, "shots-windows": win_bootstrap, "cleanup": cleanup}[args.target](args)
 
 
 if __name__ == "__main__":

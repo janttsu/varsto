@@ -15,3 +15,4 @@ apps/ios/Varsto.xcodeproj/
 apps/ios/build/
 apps/android/local.properties
 apps/android/app/src/main/jniLibs/
+__pycache__/
