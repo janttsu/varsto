@@ -8,141 +8,312 @@
 <link rel="stylesheet" href="/app.css">
 <script src="/app.js" defer></script>
 </head>
-<body>
-<header>
-  <div class="brand">Varsto <span class="tag">alpha</span></div>
-  <div id="who" class="muted"></div>
-  <button id="lock" class="secondary hidden" type="button">Lock</button>
-</header>
-<div class="alpha">Alpha software, not for production data. Keep your own backups.</div>
-<main>
+<body data-view="loading">
+<svg class="sprite" aria-hidden="true" focusable="false">
+  <symbol id="i-overview" viewBox="0 0 20 20"><rect x="3" y="3" width="6" height="6" rx="1.5"/><rect x="11" y="3" width="6" height="6" rx="1.5"/><rect x="3" y="11" width="6" height="6" rx="1.5"/><rect x="11" y="11" width="6" height="6" rx="1.5"/></symbol>
+  <symbol id="i-folders" viewBox="0 0 20 20"><path d="M3 6.5A1.5 1.5 0 0 1 4.5 5h3.4l1.6 1.6h6A1.5 1.5 0 0 1 17 8.1v6.4a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 3 14.5z"/></symbol>
+  <symbol id="i-files" viewBox="0 0 20 20"><path d="M5.5 3h6L16 7.5v8A1.5 1.5 0 0 1 14.5 17h-9A1.5 1.5 0 0 1 4 15.5v-11A1.5 1.5 0 0 1 5.5 3z"/><path d="M11 3v4.5h5"/><path d="M7 11h6M7 14h6"/></symbol>
+  <symbol id="i-storages" viewBox="0 0 20 20"><ellipse cx="10" cy="5" rx="6" ry="2.3"/><path d="M4 5v5c0 1.3 2.7 2.3 6 2.3s6-1 6-2.3V5"/><path d="M4 10v5c0 1.3 2.7 2.3 6 2.3s6-1 6-2.3v-5"/></symbol>
+  <symbol id="i-policies" viewBox="0 0 20 20"><path d="M10 2.5 16 5v4.5c0 3.8-2.6 6.6-6 8-3.4-1.4-6-4.2-6-8V5z"/><path d="m7.5 10 1.8 1.8L12.8 8"/></symbol>
+  <symbol id="i-peers" viewBox="0 0 20 20"><rect x="2.5" y="4" width="10" height="7" rx="1.2"/><path d="M5.5 14h4"/><rect x="13" y="8" width="4.5" height="8" rx="1.2"/><path d="M14.5 14h1.5"/></symbol>
+  <symbol id="i-sharing" viewBox="0 0 20 20"><circle cx="14.5" cy="4.5" r="2"/><circle cx="5.5" cy="10" r="2"/><circle cx="14.5" cy="15.5" r="2"/><path d="m7.3 9 5.4-3.5M7.3 11l5.4 3.5"/></symbol>
+  <symbol id="i-settings" viewBox="0 0 20 20"><circle cx="10" cy="10" r="2.5"/><path d="M10 2.5v2M10 15.5v2M2.5 10h2M15.5 10h2M4.7 4.7l1.4 1.4M13.9 13.9l1.4 1.4M4.7 15.3l1.4-1.4M13.9 6.1l1.4-1.4"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 20 20"><rect x="4" y="9" width="12" height="8.5" rx="1.5"/><path d="M6.5 9V6.5a3.5 3.5 0 0 1 7 0V9"/></symbol>
+  <symbol id="i-sun" viewBox="0 0 20 20"><circle cx="10" cy="10" r="3.2"/><path d="M10 2.5v2M10 15.5v2M2.5 10h2M15.5 10h2M4.7 4.7l1.4 1.4M13.9 13.9l1.4 1.4M4.7 15.3l1.4-1.4M13.9 6.1l1.4-1.4"/></symbol>
+  <symbol id="i-moon" viewBox="0 0 20 20"><path d="M16 12.2A6.5 6.5 0 0 1 7.8 4a6.5 6.5 0 1 0 8.2 8.2z"/></symbol>
+  <symbol id="i-sync" viewBox="0 0 20 20"><path d="M15.5 8.5A6 6 0 0 0 4.8 6.2"/><path d="M4.5 11.5A6 6 0 0 0 15.2 13.8"/><path d="M4.5 3.5v3h3M15.5 16.5v-3h-3"/></symbol>
+  <symbol id="i-check" viewBox="0 0 20 20"><path d="m4.5 10.5 3.5 3.5 7.5-8"/></symbol>
+  <symbol id="i-warn" viewBox="0 0 20 20"><path d="M10 3.5 17 16H3z"/><path d="M10 8v4M10 13.6v.4"/></symbol>
+  <symbol id="i-info" viewBox="0 0 20 20"><circle cx="10" cy="10" r="7"/><path d="M10 9v4.5M10 6.6v.4"/></symbol>
+  <symbol id="i-device" viewBox="0 0 20 20"><rect x="2.5" y="4" width="15" height="10" rx="1.5"/><path d="M7 17h6"/></symbol>
+  <symbol id="i-activity" viewBox="0 0 20 20"><path d="M2.5 10h3l2-5 4 10 2-5h4"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 20 20"><path d="M10 4.5v11M4.5 10h11"/></symbol>
+  <symbol id="i-key" viewBox="0 0 20 20"><circle cx="7" cy="12" r="3.5"/><path d="m9.5 9.5 6.5-6.5M13.5 5.5l2 2M11.5 7.5l2 2"/></symbol>
+  <symbol id="i-power" viewBox="0 0 20 20"><path d="M10 3v6"/><path d="M6 6.2a5.8 5.8 0 1 0 8 0"/></symbol>
+</svg>
+
+<aside class="sidebar">
+  <div class="brand">
+    <span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 2.8 20 6v5.4c0 4.9-3.4 8.6-8 9.8-4.6-1.2-8-4.9-8-9.8V6z" fill="currentColor" opacity=".18"/><path d="M12 2.8 20 6v5.4c0 4.9-3.4 8.6-8 9.8-4.6-1.2-8-4.9-8-9.8V6z"/><path d="m8.5 11.5 2.5 2.5 4.5-5"/></svg></span>
+    <span class="brand-name">Varsto</span>
+    <span class="tag">alpha</span>
+  </div>
+  <nav class="nav" aria-label="Sections">
+    <button type="button" class="nav-item" data-nav="overview" aria-current="page"><svg class="icon"><use href="#i-overview"/></svg><span>Overview</span></button>
+    <button type="button" class="nav-item" data-nav="folders"><svg class="icon"><use href="#i-folders"/></svg><span>Folders</span></button>
+    <button type="button" class="nav-item" data-nav="files"><svg class="icon"><use href="#i-files"/></svg><span>Files</span></button>
+    <button type="button" class="nav-item" data-nav="storages"><svg class="icon"><use href="#i-storages"/></svg><span>Storages</span></button>
+    <button type="button" class="nav-item" data-nav="policies"><svg class="icon"><use href="#i-policies"/></svg><span>Policies</span></button>
+    <button type="button" class="nav-item" data-nav="peers"><svg class="icon"><use href="#i-peers"/></svg><span>Peers</span></button>
+    <button type="button" class="nav-item" data-nav="sharing"><svg class="icon"><use href="#i-sharing"/></svg><span>Sharing</span></button>
+    <button type="button" class="nav-item" data-nav="settings"><svg class="icon"><use href="#i-settings"/></svg><span>Settings</span></button>
+  </nav>
+  <div class="sidebar-foot">
+    <button type="button" id="themetoggle" class="nav-item" aria-pressed="false"><svg class="icon icon-sun"><use href="#i-sun"/></svg><svg class="icon icon-moon"><use href="#i-moon"/></svg><span class="theme-label">Dark mode</span></button>
+    <div class="sidebar-version muted">Local interface · v<span id="version"></span></div>
+  </div>
+</aside>
+
+<div class="shell">
+  <header class="topbar">
+    <h1 id="pagetitle" class="page-title">Overview</h1>
+    <div class="topbar-status">
+      <span id="svc-dot" class="dot" data-state="unknown"></span>
+      <span id="who" class="muted"></span>
+    </div>
+    <button id="lock" class="secondary hidden" type="button"><svg class="icon"><use href="#i-lock"/></svg>Lock</button>
+  </header>
+  <div class="alpha"><svg class="icon"><use href="#i-warn"/></svg><span>Alpha software: not for production data. Keep your own backups.</span></div>
+
+  <main>
   <section id="setup" class="hidden">
-    <h1>Set up this device</h1>
-    <div class="cols">
+    <div class="hero">
+      <h2 class="hero-title">Set up this device</h2>
+      <p class="muted">Create a new vault, join one of your existing vaults, or accept a folder that someone shared with you. Everything is encrypted on this device before it reaches any storage.</p>
+    </div>
+    <div class="cols cols-3">
       <form id="init" class="card">
-        <h2>Create a new vault</h2>
+        <h3 class="card-title"><svg class="icon accent"><use href="#i-key"/></svg>Create a new vault</h3>
         <label>Device name <input name="name" placeholder="laptop" required></label>
         <label>Passphrase <input name="passphrase" type="password" minlength="8" required></label>
-        <button type="submit">Create vault</button>
-        <p class="muted">You will be shown the vault key once. Write it down and keep it offline; it is the only way to add other devices or recover the data.</p>
+        <div class="actions"><button type="submit">Create vault</button></div>
+        <p class="muted small">You will be shown the vault key once. Write it down and keep it offline; it is the only way to add other devices or recover the data.</p>
       </form>
       <form id="join" class="card">
-        <h2>Join an existing vault</h2>
+        <h3 class="card-title"><svg class="icon accent"><use href="#i-device"/></svg>Join an existing vault</h3>
         <label>Device name <input name="name" placeholder="desk" required></label>
         <label>Passphrase for this device <input name="passphrase" type="password" minlength="8" required></label>
         <label>Vault key (hex) <input name="vault_key" required></label>
         <label>Storage directory that holds the vault <input name="storage_path" placeholder="/Volumes/box" required></label>
-        <button type="submit">Join</button>
+        <div class="actions"><button type="submit">Join</button></div>
       </form>
       <form id="acceptshare" class="card">
-        <h2>Accept a folder shared with you</h2>
+        <h3 class="card-title"><svg class="icon accent"><use href="#i-sharing"/></svg>Accept a shared folder</h3>
         <label>Device name <input name="name" placeholder="my-laptop" required></label>
         <label>Passphrase for this device <input name="passphrase" type="password" minlength="8" required></label>
-        <p class="muted">Step 1: send the owner a request code from this device. Step 2: paste the sealed token they send back.</p>
+        <p class="muted small">Step 1: send the owner a request code from this device. Step 2: paste the sealed token they send back.</p>
         <div class="row"><button type="button" id="sharerequest" class="secondary">Show my request code</button></div>
         <pre id="sharerequestout" class="hidden"></pre>
         <label>Share token <input name="token" required></label>
         <label>Storage directory both of you can reach <input name="storage_path" required></label>
-        <button type="submit">Accept</button>
-        <p class="muted">You get the folder key only: this device can read and write that folder, nothing else of the other vault. A sealed token (vst1…) can be opened only here; a plain token carries the key itself.</p>
+        <div class="actions"><button type="submit">Accept</button></div>
+        <p class="muted small">You get the folder key only: this device can read and write that folder, nothing else of the other vault. A sealed token (vst1…) can be opened only here; a plain token carries the key itself.</p>
       </form>
     </div>
   </section>
 
   <section id="unlock" class="hidden">
-    <h1>Unlock</h1>
-    <form id="unlockform" class="card narrow">
-      <label>Passphrase <input name="passphrase" type="password" required autofocus></label>
-      <button type="submit">Unlock</button>
-    </form>
+    <div class="centered">
+      <form id="unlockform" class="card unlock-card">
+        <div class="unlock-icon"><svg class="icon"><use href="#i-lock"/></svg></div>
+        <h2 class="hero-title">Unlock Varsto</h2>
+        <p class="muted">Enter the passphrase of this device to open the vault.</p>
+        <label>Passphrase <input name="passphrase" type="password" required autofocus></label>
+        <div class="actions"><button type="submit">Unlock</button></div>
+      </form>
+    </div>
   </section>
 
   <section id="app" class="hidden">
-    <div id="vaultkey" class="card warn hidden"></div>
-    <div id="policybanner" class="card warn hidden"></div>
-    <div id="service" class="card service"><span id="svc-text">Background service</span> <button id="pause" type="button" class="secondary">Pause</button> <button id="update" type="button" class="secondary">Check for updates</button></div>
-    <div class="toolbar">
-      <button id="sync" type="button">Sync all folders</button>
-      <button id="fsck" type="button" class="secondary">Check storage (fsck)</button>
-      <label class="inline"><input id="verify" type="checkbox"> re-hash every object</label>
-      <button id="refresh" type="button" class="secondary">Refresh</button>
+    <div id="vaultkey" class="notice warn hidden"></div>
+
+    <!-- Overview -->
+    <div class="page" data-page="overview">
+      <div id="policybanner" class="notice warn hidden"></div>
+      <div class="stats">
+        <div class="stat"><span class="stat-label">Folders</span><span class="stat-value" id="stat-folders">–</span></div>
+        <div class="stat"><span class="stat-label">Files</span><span class="stat-value" id="stat-files">–</span></div>
+        <div class="stat"><span class="stat-label">Protected data</span><span class="stat-value" id="stat-bytes">–</span></div>
+        <div class="stat"><span class="stat-label">Devices</span><span class="stat-value" id="stat-devices">–</span></div>
+        <div class="stat"><span class="stat-label">Storages</span><span class="stat-value" id="stat-storages">–</span></div>
+      </div>
+
+      <div id="service" class="card service">
+        <div class="service-icon"><svg class="icon"><use href="#i-sync"/></svg></div>
+        <div class="service-body">
+          <div class="service-head"><span class="card-title">Background service</span><span id="svc-pill" class="pill grey">unknown</span></div>
+          <div id="svc-text" class="muted"></div>
+        </div>
+        <div class="service-actions">
+          <button id="pause" type="button" class="secondary">Pause</button>
+          <button id="update" type="button" class="secondary">Check for updates</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <h2 class="card-title">Folders</h2>
+          <div class="toolbar">
+            <label class="inline muted"><input id="verify" type="checkbox"> re-hash every object</label>
+            <button id="fsck" type="button" class="secondary">Check storage</button>
+            <button id="refresh" type="button" class="secondary">Refresh</button>
+            <button id="sync" type="button"><svg class="icon"><use href="#i-sync"/></svg>Sync all</button>
+          </div>
+        </div>
+        <div class="table-wrap">
+        <table id="folders"><thead><tr><th>Folder</th><th>Path on this device</th><th class="num">Files</th><th class="num">Size</th><th class="num">Chunks</th><th class="num">Without storage copy</th><th class="num">Verified elsewhere</th><th>Policy</th><th></th></tr></thead><tbody></tbody></table>
+        </div>
+        <p id="folders-empty" class="muted empty hidden">No folders yet. Add one on the Folders page.</p>
+      </div>
+
+      <div class="card">
+        <h2 class="card-title"><svg class="icon accent"><use href="#i-activity"/></svg>Activity</h2>
+        <pre id="log" class="log"></pre>
+      </div>
     </div>
 
-    <h2>Folders</h2>
-    <table id="folders"><thead><tr><th>Folder</th><th>Path on this device</th><th>Files</th><th>Size</th><th>Chunks</th><th>Without storage copy</th><th>Verified elsewhere</th><th>Policy</th><th></th></tr></thead><tbody></tbody></table>
-    <div id="sharetoken" class="card warn hidden"></div>
+    <!-- Folders -->
+    <div class="page hidden" data-page="folders">
+      <div class="card">
+        <h2 class="card-title">Your folders</h2>
+        <ul id="folderlist" class="list"></ul>
+        <p id="folderlist-empty" class="muted empty hidden">No folders yet. Add one below.</p>
+      </div>
+      <div class="cols">
+        <form id="addfolder" class="card">
+          <h3 class="card-title"><svg class="icon accent"><use href="#i-plus"/></svg>Add a folder</h3>
+          <label>Name <input name="name" placeholder="docs" required></label>
+          <label>Directory <input name="path" placeholder="/Users/me/Documents/synced" required></label>
+          <div class="actions"><button type="submit">Add folder</button></div>
+        </form>
+        <form id="attachfolder" class="card">
+          <h3 class="card-title"><svg class="icon accent"><use href="#i-device"/></svg>Attach a folder from another device</h3>
+          <label>Folder name or id <input name="name_or_id" required></label>
+          <label>Directory on this device <input name="path" required></label>
+          <label class="inline"><input name="selective" type="checkbox"> Selective sync: files appear as placeholders until you fetch them</label>
+          <div class="actions"><button type="submit">Attach</button></div>
+          <p class="muted small">Folders created on other devices appear in the list after a sync.</p>
+        </form>
+      </div>
+    </div>
 
-    <div class="cols">
-      <form id="addfolder" class="card">
-        <h3>Add a folder</h3>
-        <label>Name <input name="name" placeholder="docs" required></label>
-        <label>Directory <input name="path" placeholder="/Users/me/Documents/synced" required></label>
-        <button type="submit">Add</button>
-      </form>
-      <form id="attachfolder" class="card">
-        <h3>Attach a folder from another device</h3>
-        <label>Folder name or id <input name="name_or_id" required></label>
-        <label>Directory on this device <input name="path" required></label>
-        <label class="inline"><input name="selective" type="checkbox"> selective sync: files appear as placeholders until you fetch them</label>
-        <button type="submit">Attach</button>
-        <p class="muted">Folders created on other devices appear in the table after a sync.</p>
+    <!-- Files -->
+    <div class="page hidden" data-page="files">
+      <div class="card">
+        <div class="card-head">
+          <h2 class="card-title">Files</h2>
+          <div class="toolbar">
+            <label class="inline muted"><input id="selectivetoggle" type="checkbox"> selective sync for this folder</label>
+            <select id="filesfolder"></select>
+            <button id="filesload" type="button">Show files</button>
+          </div>
+        </div>
+        <div class="table-wrap">
+        <table id="files"><thead><tr><th>File</th><th class="num">Size</th><th>State</th><th>Last used</th><th></th></tr></thead><tbody></tbody></table>
+        </div>
+        <p id="files-empty" class="muted empty">Choose a folder and press Show files.</p>
+      </div>
+    </div>
+
+    <!-- Storages -->
+    <div class="page hidden" data-page="storages">
+      <div class="card">
+        <h2 class="card-title">Storages</h2>
+        <p class="muted small">Encrypted objects are written to every storage. Varsto never sends a key anywhere; a storage sees only sealed blocks.</p>
+        <ul id="storages" class="list"></ul>
+        <p id="storages-empty" class="muted empty hidden">No storage yet. Add a directory, an S3 bucket or an rclone remote below.</p>
+      </div>
+      <form id="addstorage" class="card narrow">
+        <h3 class="card-title"><svg class="icon accent"><use href="#i-plus"/></svg>Add a storage</h3>
+        <label>Type <select name="kind" id="storagekind"><option value="local-dir">Directory (disk, removable disk, network mount)</option><option value="s3">S3-compatible bucket</option><option value="rclone">rclone remote</option></select></label>
+        <label>Name <input name="name" placeholder="box" required></label>
+        <div data-kind="local-dir">
+          <label>Directory <input name="path"></label>
+          <label class="inline"><input name="carrier" type="checkbox"> Transferrer: removable media that carries only what other devices still lack, emptied once delivered</label>
+        </div>
+        <div data-kind="s3" class="hidden">
+          <label>Endpoint <input name="endpoint" placeholder="https://s3.eu-central-1.amazonaws.com"></label>
+          <label>Region <input name="region" placeholder="eu-central-1"></label>
+          <label>Bucket <input name="bucket"></label>
+          <label>Prefix (optional) <input name="prefix" placeholder="varsto"></label>
+          <label>Access key id <input name="access_key_id" autocomplete="off"></label>
+          <label>Secret access key <input name="secret_access_key" type="password" autocomplete="off"></label>
+          <label>Storage class (optional) <input name="storage_class" placeholder="DEEP_ARCHIVE, GLACIER_IR, STANDARD_IA"></label>
+          <label class="inline"><input name="virtual_host" type="checkbox"> Virtual-host style URLs (bucket.host)</label>
+          <p class="muted small">The secret is stored encrypted in this device's secrets.enc and never in config.json. Archive classes are treated as cold.</p>
+        </div>
+        <div data-kind="rclone" class="hidden">
+          <label>Remote (name:bucket/path) <input name="remote" placeholder="hetzner:backup/varsto"></label>
+          <p class="muted small">Uses your rclone and its configuration; Varsto never sees the remote's credentials.</p>
+        </div>
+        <label class="inline"><input name="cold" type="checkbox"> Cold storage: written, never read without confirmation</label>
+        <div class="actions"><button type="submit">Add storage</button></div>
       </form>
     </div>
 
-    <h2>Files</h2>
-    <div class="row"><select id="filesfolder"></select><button id="filesload" type="button" class="secondary">Show files</button><label class="inline"><input id="selectivetoggle" type="checkbox"> selective sync for this folder</label></div>
-    <table id="files"><thead><tr><th>File</th><th>Size</th><th>State</th><th>Last used</th><th></th></tr></thead><tbody></tbody></table>
-
-    <h2>Storages</h2>
-    <ul id="storages"></ul>
-    <form id="addstorage" class="card narrow">
-      <h3>Add a storage</h3>
-      <label>Type <select name="kind" id="storagekind"><option value="local-dir">Directory (disk, removable disk, network mount)</option><option value="s3">S3-compatible bucket</option><option value="rclone">rclone remote</option></select></label>
-      <label>Name <input name="name" placeholder="box" required></label>
-      <div data-kind="local-dir">
-        <label>Directory <input name="path"></label>
-        <label class="inline"><input name="carrier" type="checkbox"> transferrer: removable media that carries only what other devices still lack, emptied once delivered</label>
+    <!-- Policies -->
+    <div class="page hidden" data-page="policies">
+      <div class="card">
+        <h2 class="card-title">Durability policies</h2>
+        <p class="muted small">A policy states how many copies a folder must have, where, and how recently another device must have verified them. Varsto checks it against the ledger on every sync and tells you before a rule is broken.</p>
+        <ul id="policylist" class="list"></ul>
+        <p id="policylist-empty" class="muted empty hidden">No folders yet.</p>
       </div>
-      <div data-kind="s3" class="hidden">
-        <label>Endpoint <input name="endpoint" placeholder="https://s3.eu-central-1.amazonaws.com"></label>
-        <label>Region <input name="region" placeholder="eu-central-1"></label>
-        <label>Bucket <input name="bucket"></label>
-        <label>Prefix (optional) <input name="prefix" placeholder="varsto"></label>
-        <label>Access key id <input name="access_key_id" autocomplete="off"></label>
-        <label>Secret access key <input name="secret_access_key" type="password" autocomplete="off"></label>
-        <label>Storage class (optional) <input name="storage_class" placeholder="DEEP_ARCHIVE, GLACIER_IR, STANDARD_IA"></label>
-        <label class="inline"><input name="virtual_host" type="checkbox"> virtual-host style URLs (bucket.host)</label>
-        <p class="muted">The secret is stored encrypted in this device's secrets.enc and never in config.json. Archive classes are treated as cold.</p>
-      </div>
-      <div data-kind="rclone" class="hidden">
-        <label>Remote (name:bucket/path) <input name="remote" placeholder="hetzner:backup/varsto"></label>
-        <p class="muted">Uses your rclone and its configuration; Varsto never sees the remote's credentials.</p>
-      </div>
-      <label class="inline"><input name="cold" type="checkbox"> cold storage: written, never read without confirmation</label>
-      <button type="submit">Add</button>
-    </form>
+    </div>
 
-    <h2>Devices and ledger</h2>
-    <p id="devices" class="muted"></p>
-    <p><button id="replicatoken" type="button" class="secondary">Replica token (untrusted backup device)</button></p>
-    <div id="replicaout" class="card warn hidden"></div>
-    <details><summary>Ledger batches</summary><pre id="ledger"></pre></details>
-    <details id="p2pbox"><summary>Peer-to-peer</summary>
-      <p class="muted">Your devices exchange encrypted blocks directly: on the LAN automatically, across the internet when one of them listens on a reachable address. Blocks are verified by name; a peer needs the vault key to get anything.</p>
-      <div id="p2pstatus" class="muted"></div>
-      <form id="p2pform" class="row">
-        <label class="inline"><input name="enabled" type="checkbox"> enabled</label>
-        <label>Port <input name="port" value="17893" size="6"></label>
-        <label>Public addresses (host:port, comma-separated) <input name="public_addrs" placeholder="203.0.113.5:17893"></label>
-        <button type="submit" class="secondary">Save</button>
-      </form>
-    </details>
-    <details><summary>Duplicate files</summary><div class="row"><select id="dupefolder"></select><button id="dupes" type="button" class="secondary">Find duplicates</button></div><pre id="dupeout"></pre></details>
+    <!-- Peers -->
+    <div class="page hidden" data-page="peers">
+      <div class="card">
+        <h2 class="card-title"><svg class="icon accent"><use href="#i-device"/></svg>Devices</h2>
+        <p id="devices" class="muted"></p>
+      </div>
+      <details id="p2pbox" class="card" open>
+        <summary class="card-title">Peer-to-peer transfer</summary>
+        <p class="muted small">Your devices exchange encrypted blocks directly: on the LAN automatically, across the internet when one of them listens on a reachable address. Blocks are verified by name; a peer needs the vault key to get anything.</p>
+        <div id="p2pstatus" class="status-line"></div>
+        <form id="p2pform" class="form-grid">
+          <label class="inline"><input name="enabled" type="checkbox"> Enabled</label>
+          <label>Port <input name="port" value="17893" size="6"></label>
+          <label>Public addresses (host:port, comma-separated) <input name="public_addrs" placeholder="203.0.113.5:17893"></label>
+          <div class="actions"><button type="submit">Save</button></div>
+        </form>
+      </details>
+    </div>
 
-    <h2>Activity</h2>
-    <pre id="log"></pre>
+    <!-- Sharing -->
+    <div class="page hidden" data-page="sharing">
+      <div id="sharetoken" class="notice warn hidden"></div>
+      <div class="cols">
+        <div class="card">
+          <h2 class="card-title"><svg class="icon accent"><use href="#i-sharing"/></svg>Share a folder</h2>
+          <p class="muted small">Press Share on a folder in the Overview to create a share token. Ask the recipient for their request code first to seal the token to their device; a plain token carries the folder key itself and must travel over a secure channel.</p>
+          <p id="members" class="muted small"></p>
+        </div>
+        <div class="card" id="replicacard">
+          <h2 class="card-title"><svg class="icon accent"><use href="#i-storages"/></svg>Untrusted replica</h2>
+          <p class="muted small">A replica holds and verifies your encrypted copies without any key to open them: a friend's NAS or a server you rent.</p>
+          <div class="actions"><button id="replicatoken" type="button" class="secondary">Create replica token</button></div>
+          <div id="replicaout" class="notice warn hidden"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Settings -->
+    <div class="page hidden" data-page="settings">
+      <div class="cols">
+        <div class="card">
+          <h2 class="card-title">Appearance</h2>
+          <p class="muted small">The interface follows the system theme unless you choose one in the sidebar.</p>
+          <div class="actions"><button id="themeauto" type="button" class="secondary">Follow system theme</button></div>
+        </div>
+        <div class="card">
+          <h2 class="card-title">Service</h2>
+          <p class="muted small">The background service watches your folders and serves this interface on this computer only. Quitting stops syncing until Varsto is started again.</p>
+          <div class="actions"><button id="quit" type="button" class="secondary danger"><svg class="icon"><use href="#i-power"/></svg>Quit Varsto</button></div>
+        </div>
+      </div>
+      <details class="card">
+        <summary class="card-title">Duplicate files</summary>
+        <div class="row"><select id="dupefolder"></select><button id="dupes" type="button" class="secondary">Find duplicates</button></div>
+        <pre id="dupeout" class="log"></pre>
+      </details>
+      <details class="card">
+        <summary class="card-title">Ledger batches</summary>
+        <pre id="ledger" class="log"></pre>
+      </details>
+    </div>
   </section>
-</main>
-<footer class="muted">Local interface on this computer only. Version <span id="version"></span>.</footer>
+  </main>
+</div>
 </body>
 </html>

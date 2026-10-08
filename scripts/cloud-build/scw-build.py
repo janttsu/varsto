@@ -71,8 +71,18 @@ def scp(src, dst, extra=()):
 
 # ----- Linux / Windows instances ------------------------------------------------
 
+def rsa_key_id():
+    """Scaleway encrypts the Windows administrator password with an RSA key from IAM."""
+    for k in scw("iam", "ssh-key", "list"):
+        if k.get("name") == os.environ.get("SCW_RSA_KEY_NAME", "orca-rsa"):
+            return k["id"]
+    raise SystemExit("register an RSA public key in IAM named orca-rsa (scw iam ssh-key create name=orca-rsa public-key=\"$(cat ~/.ssh/id_rsa.pub)\")")
+
+
 def create_instance(name, itype, image, user_data=None):
     args = ["instance", "server", "create", f"zone={ZONE}", f"name={name}", f"type={itype}", f"image={image}", "ip=new", f"tags.0={TAG}"]
+    if itype.endswith("-WIN"):
+        args.append(f"admin-password-encryption-ssh-key-id={rsa_key_id()}")
     if user_data:
         args.append(f"cloud-init=@{user_data}")
     srv = scw(*args)
@@ -189,16 +199,23 @@ def mac_stock(zone):
 def build_macos(args):
     out = ROOT / "dist" / "cloud" / "macos"
     out.mkdir(parents=True, exist_ok=True)
-    zone = args.zone or "fr-par-1"
+    zones = [args.zone] if args.zone else ["fr-par-1", "fr-par-3"]
+    zone = zones[0]
     wanted = args.type or "M4-S"
     if args.wait_for_stock:
         while True:
-            stock = dict(mac_stock(zone))
-            avail = [n for n, s in stock.items() if s != "no_stock" and (n == wanted or args.any_type)]
-            if avail:
-                wanted = avail[0]
+            found = None
+            for z in zones:
+                stock = dict(mac_stock(z))
+                avail = [n for n, s in stock.items() if s != "no_stock" and (n == wanted or args.any_type)]
+                if avail:
+                    found = (z, avail[0])
+                    break
+            if found:
+                zone, wanted = found
+                log(f"Mac mini {wanted} available in {zone}")
                 break
-            log(f"no Mac mini in stock in {zone} ({stock}); checking again in 10 min")
+            log("no Mac mini in stock in any zone; checking again in 10 min")
             time.sleep(600)
     tarball = source_tarball(ROOT / "dist" / "cloud" / "src.tar.gz")
     name = f"{TAG}-macos-{int(time.time())}"
@@ -262,11 +279,15 @@ def integration(args):
     ud = ROOT / "dist" / "cloud" / "windows-userdata.ps1"
     ud.write_text(WINDOWS_USERDATA.replace("__PUBKEYS__", local_pubkeys()).replace("C:\\build", "C:\\it"))
     stamp = int(time.time())
-    lin = create_instance(f"{TAG}-it-linux-{stamp}", "POP2-2C-8G", "ubuntu_noble")
-    win = create_instance(f"{TAG}-it-windows-{stamp}", "POP2-2C-8G-WIN", "windows_server_2025", user_data=ud)
     s3 = {"S3_ENDPOINT": "https://s3.fr-par.scw.cloud", "S3_REGION": "fr-par", "S3_BUCKET": bucket, "S3_KEY": access, "S3_SECRET": secret}
     result = {"bucket": bucket}
+    created = []
     try:
+        # Windows first: it is the slower one to boot, and a refused creation must not leave the other machine behind.
+        win = create_instance(f"{TAG}-it-windows-{stamp}", "POP2-2C-8G-WIN", "windows_server_2025", user_data=ud)
+        created.append(win["id"])
+        lin = create_instance(f"{TAG}-it-linux-{stamp}", "POP2-2C-8G", "ubuntu_noble")
+        created.append(lin["id"])
         _, lip = wait_running(lin["id"])
         log(f"linux at {lip}; waiting for SSH")
         wait_ssh("root", lip)
@@ -313,14 +334,48 @@ def integration(args):
         (out / "result.json").write_text(json.dumps(result, indent=2))
         log(f"result: {json.dumps(result, indent=2)}")
         if not args.keep:
-            delete_instance(lin["id"])
-            delete_instance(win["id"])
+            for sid in created:
+                delete_instance(sid)
             subprocess.run(["rclone", "purge", f"scw:{bucket}"], env=env, check=False)
             log(f"bucket {bucket} removed")
 
 
+def shots_linux(args):
+    """Screenshots of the Linux tray icon and menu on a virtual desktop."""
+    out = ROOT / "dist" / "cloud" / "shots"
+    out.mkdir(parents=True, exist_ok=True)
+    tars = sorted((ROOT / "website/public/downloads").glob("varsto-*-x86_64-unknown-linux-musl.tar.gz"))
+    if not tars:
+        raise SystemExit("no Linux tarball in website/public/downloads")
+    srv = create_instance(f"{TAG}-shots-{int(time.time())}", args.type or "POP2-2C-8G", "ubuntu_noble")
+    try:
+        _, ip = wait_running(srv["id"])
+        log(f"running at {ip}; waiting for SSH")
+        wait_ssh("root", ip)
+        run_ssh("root", ip, "mkdir -p /it")
+        scp(str(tars[-1]), f"root@{ip}:/it/varsto.tar.gz")
+        scp(str(ROOT / "scripts/cloud-build/shots-linux.sh"), f"root@{ip}:/it/shots.sh")
+        run_ssh("root", ip, "bash /it/shots.sh")
+        scp(f"root@{ip}:/it/shots/*", str(out))
+        log(f"screenshots in {out}")
+    finally:
+        if not args.keep:
+            delete_instance(srv["id"])
+
+
 def cleanup(args):
+    """Delete tagged machines. Without --all, machines created in the last 90
+    minutes are kept, so a cleanup does not kill a job that is still running."""
+    import datetime
     for s in scw("instance", "server", "list", f"zone={ZONE}", f"tags.0={TAG}"):
+        created = s.get("creation_date", "")
+        try:
+            age = (datetime.datetime.now(datetime.timezone.utc) - datetime.datetime.fromisoformat(created.replace("Z", "+00:00"))).total_seconds()
+        except ValueError:
+            age = 10 ** 9
+        if age < 5400 and not args.all:
+            log(f"keeping {s['name']} (created {int(age // 60)} min ago; use --all to delete)")
+            continue
         delete_instance(s["id"])
     for zone in ("fr-par-1", "fr-par-3"):
         for s in scw("apple-silicon", "server", "list", f"zone={zone}"):
@@ -332,12 +387,13 @@ def cleanup(args):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("target", choices=["linux", "windows", "macos", "integration", "cleanup", "mac-stock"])
+    ap.add_argument("target", choices=["linux", "windows", "macos", "integration", "shots-linux", "cleanup", "mac-stock"])
     ap.add_argument("--keep", action="store_true", help="do not delete the machine afterwards")
     ap.add_argument("--type", help="instance type (POP2-4C-16G, POP2-2C-8G-WIN, M4-S, ...)")
     ap.add_argument("--zone", help="zone for Mac minis (fr-par-1 or fr-par-3)")
     ap.add_argument("--wait-for-stock", action="store_true", help="macos: poll until a Mac mini is in stock")
     ap.add_argument("--any-type", action="store_true", help="macos: accept any Mac mini type in stock")
+    ap.add_argument("--all", action="store_true", help="cleanup: also delete machines created in the last 90 minutes")
     args = ap.parse_args()
     if shutil.which("scw") is None:
         raise SystemExit("scw command line not found")
@@ -345,7 +401,7 @@ def main():
         for zone in ("fr-par-1", "fr-par-3"):
             print(zone, mac_stock(zone))
         return
-    {"linux": build_linux, "windows": build_windows, "macos": build_macos, "integration": integration, "cleanup": cleanup}[args.target](args)
+    {"linux": build_linux, "windows": build_windows, "macos": build_macos, "integration": integration, "shots-linux": shots_linux, "cleanup": cleanup}[args.target](args)
 
 
 if __name__ == "__main__":
