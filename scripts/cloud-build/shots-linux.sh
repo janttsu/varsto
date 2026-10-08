@@ -77,11 +77,17 @@ import sys, time
 from playwright.sync_api import sync_playwright
 port, token = sys.argv[1], sys.argv[2]
 with sync_playwright() as p:
-    b = p.chromium.launch(headless=False, args=[f"--app=http://127.0.0.1:{port}/?token={token}", "--window-size=1280,800", "--window-position=0,0"])
-    time.sleep(40)
-    b.close()
+    # Root needs --no-sandbox; the browser shows the interface in app mode (no tabs, no address bar).
+    try:
+        b = p.chromium.launch(headless=False, chromium_sandbox=False, args=["--no-sandbox", f"--app=http://127.0.0.1:{port}/?token={token}", "--window-size=1280,800", "--window-position=0,0"])
+        time.sleep(40)
+        b.close()
+    except Exception as e:
+        print("app window failed:", e, flush=True)
 PY
 sleep 15
+xdotool key Escape 2>/dev/null || true   # close the tray menu left open by the capture above
+sleep 1
 import -window root /it/shots/linux-app.png
 echo "app window captured"
 ls -la /it/shots
