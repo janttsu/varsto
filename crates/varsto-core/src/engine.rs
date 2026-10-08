@@ -604,7 +604,9 @@ impl Engine {
     /// storage that was configured without one (for example at `join`).
     pub fn store_secret(&mut self, reference: &str, secret: &str) -> Result<()> {
         let mut store = self.secret_store()?;
-        store.secrets.insert(reference.to_string(), secret.to_string());
+        store
+            .secrets
+            .insert(reference.to_string(), secret.to_string());
         store.save(
             &self.home,
             &self.keys,
@@ -2483,6 +2485,40 @@ impl Engine {
         Ok(out)
     }
 
+    /// Create or overwrite a file inside a folder (relative path), then push.
+    /// Used by the MCP server for notes and reorganisation; refuses to leave the folder.
+    pub fn write_file(&mut self, folder: &str, path: &str, bytes: &[u8]) -> Result<PushReport> {
+        let (_, root) = self.resolve_folder(folder)?;
+        if path.is_empty()
+            || Path::new(path).is_absolute()
+            || path.split('/').any(|c| c == ".." || c.is_empty())
+        {
+            bail!("path must be relative to the folder and must not contain '..': {path}");
+        }
+        let disk = root.join(path);
+        if placeholder_path(&disk).exists() {
+            bail!("{path} is a placeholder here; fetch it before overwriting");
+        }
+        if let Some(parent) = disk.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::write(&disk, bytes).with_context(|| format!("write {}", disk.display()))?;
+        self.push(folder)
+    }
+
+    /// Create a directory inside a folder.
+    pub fn mkdir(&mut self, folder: &str, path: &str) -> Result<()> {
+        let (_, root) = self.resolve_folder(folder)?;
+        if path.is_empty()
+            || Path::new(path).is_absolute()
+            || path.split('/').any(|c| c == ".." || c.is_empty())
+        {
+            bail!("path must be relative to the folder and must not contain '..': {path}");
+        }
+        fs::create_dir_all(root.join(path))?;
+        Ok(())
+    }
+
     /// Record that `path` was used now (open, read, export) on this device.
     pub fn touch_access(&mut self, folder: &str, path: &str) -> Result<()> {
         let (rec, _) = self.resolve_folder(folder)?;
@@ -2845,4 +2881,39 @@ impl Engine {
         }
         Ok(out)
     }
+}
+
+/// Alpha helper: forget everything this device knows about its vault (keys,
+/// ledger, state, configuration, secrets, grants) so it can start over. The
+/// user's files in attached folders are left untouched; the storages are not
+/// changed either, so other devices keep working.
+pub fn reset_device(home: &Path) -> Result<Vec<String>> {
+    let mut removed = Vec::new();
+    for name in [
+        "vault.json",
+        "keys.enc",
+        "keyring.enc",
+        "secrets.enc",
+        "config.json",
+        "devices.json",
+        "clock.json",
+        "mcp-grants.json",
+        "share-request.json",
+        "software-security-key",
+        "service.log",
+    ] {
+        let p = home.join(name);
+        if p.exists() {
+            fs::remove_file(&p).with_context(|| format!("remove {}", p.display()))?;
+            removed.push(name.to_string());
+        }
+    }
+    for dir in ["state", "ledger", "trash"] {
+        let p = home.join(dir);
+        if p.exists() {
+            fs::remove_dir_all(&p).with_context(|| format!("remove {}", p.display()))?;
+            removed.push(format!("{dir}/"));
+        }
+    }
+    Ok(removed)
 }

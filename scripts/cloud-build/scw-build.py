@@ -22,6 +22,9 @@ import sys
 import time
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
+# Where the packages to test come from: the published downloads, or a directory
+# of freshly built packages (ARTIFACTS=dist/cloud/artifacts).
+ARTIFACTS = pathlib.Path(os.environ["ARTIFACTS"]).resolve() if os.environ.get("ARTIFACTS") else None
 TAG = "varsto-build"
 ZONE = os.environ.get("SCW_ZONE", "fr-par-1")
 
@@ -162,9 +165,9 @@ def local_pubkeys():
 def build_windows(args):
     out = ROOT / "dist" / "cloud" / "windows"
     out.mkdir(parents=True, exist_ok=True)
-    zips = sorted((ROOT / "website/public/downloads").glob("varsto-*-x86_64-pc-windows-gnu.zip"))
+    zips = sorted(artifacts_dir().glob("varsto-*-x86_64-pc-windows-gnu.zip"))
     if not zips:
-        raise SystemExit("no Windows zip in website/public/downloads: run website/build-release.sh first")
+        raise SystemExit(f"no Windows zip in {artifacts_dir()}: run website/build-release.sh first")
     zip_path = zips[-1]
     ud = ROOT / "dist" / "cloud" / "windows-userdata.ps1"
     ud.write_text(WINDOWS_USERDATA.replace("__PUBKEYS__", local_pubkeys()))
@@ -262,15 +265,19 @@ def scw_s3_env():
     return env, access, secret
 
 
+def artifacts_dir():
+    return ARTIFACTS or (ROOT / "website/public/downloads")
+
+
 def integration(args):
     """Linux and Windows machines share a temporary bucket: sync both ways through
     S3, then fetch blocks peer-to-peer across the public internet."""
     out = ROOT / "dist" / "cloud" / "integration"
     out.mkdir(parents=True, exist_ok=True)
-    linux_tars = sorted((ROOT / "website/public/downloads").glob("varsto-*-x86_64-unknown-linux-musl.tar.gz"))
-    win_zips = sorted((ROOT / "website/public/downloads").glob("varsto-*-x86_64-pc-windows-gnu.zip"))
+    linux_tars = sorted(artifacts_dir().glob("varsto-*-x86_64-unknown-linux-musl.tar.gz"))
+    win_zips = sorted(artifacts_dir().glob("varsto-*-x86_64-pc-windows-gnu.zip"))
     if not linux_tars or not win_zips:
-        raise SystemExit("need the Linux tarball and the Windows zip in website/public/downloads")
+        raise SystemExit(f"need the Linux tarball and the Windows zip in {artifacts_dir()}")
     env, access, secret = scw_s3_env()
     bucket = f"varsto-it-{int(time.time())}"
     subprocess.run(["rclone", "mkdir", f"scw:{bucket}"], env=env, check=True)
@@ -341,9 +348,9 @@ def shots_linux(args):
     """Screenshots of the Linux tray icon and menu on a virtual desktop."""
     out = ROOT / "dist" / "cloud" / "shots"
     out.mkdir(parents=True, exist_ok=True)
-    tars = sorted((ROOT / "website/public/downloads").glob("varsto-*-x86_64-unknown-linux-musl.tar.gz"))
+    tars = sorted(artifacts_dir().glob("varsto-*-x86_64-unknown-linux-musl.tar.gz"))
     if not tars:
-        raise SystemExit("no Linux tarball in website/public/downloads")
+        raise SystemExit(f"no Linux tarball in {artifacts_dir()}")
     srv = create_instance(f"{TAG}-shots-{int(time.time())}", args.type or "POP2-2C-8G", "ubuntu_noble")
     try:
         _, ip = wait_running(srv["id"])

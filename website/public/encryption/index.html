@@ -85,7 +85,7 @@
         <tr><td>An untrusted replica (a friend's NAS)</td><td>The same as a storage provider, plus that objects verify against their names. It signs its own claims under a replica-only key.</td><td>Any content, name or manifest; it never receives a folder key or the vault key.</td></tr>
         <tr><td>A peer on the LAN or the internet</td><td>That some device requests objects by name, after proving it holds the vault's peer authentication key.</td><td>Anything without that key: a stranger gets no object, and the LAN beacon carries only a keyed tag, not the vault id.</td></tr>
         <tr><td>Someone you share a folder with</td><td>That folder: every file in it, and your devices' signed claims about it.</td><td>Any other folder, the vault key, your device registry.</td></tr>
-        <tr><td>An AI assistant through the MCP server</td><td>The folders you granted, read-only unless you said otherwise; file names, sizes, last-used times and, when it reads a file, its content.</td><td>Folders you did not grant; Strongroom folders, ever.</td></tr>
+        <tr><td>An AI assistant through the MCP server</td><td>The folders you granted, read-only unless you said otherwise; file names, sizes, last-used times and, when it reads a file, its content; with a read-write grant it can move files and write new ones there.</td><td>Folders you did not grant; Strongroom folders, ever.</td></tr>
         <tr><td>A thief with your unlocked laptop</td><td>Everything a normal folder holds while the device is unlocked.</td><td>Strongroom folders without your security key; nothing after you revoke the device (planned) or rotate keys.</td></tr>
       </tbody>
     </table>

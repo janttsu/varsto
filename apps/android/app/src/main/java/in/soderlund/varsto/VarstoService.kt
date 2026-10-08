@@ -31,6 +31,12 @@ class VarstoService : Service() {
         // A state file from a previous run would carry a stale token.
         File(home, "service.json").delete()
         val pb = ProcessBuilder(bin.absolutePath, "--home", home.absolutePath, "service", "run", "--port", "17891", "--interval", "300")
+        // Tell the interface it runs on a phone: folders get a place under the
+        // app's external storage without asking the user for a path.
+        val root = (getExternalFilesDir(null) ?: filesDir).resolve("Varsto")
+        root.mkdirs()
+        pb.environment()["VARSTO_MOBILE"] = "1"
+        pb.environment()["VARSTO_FOLDER_ROOT"] = root.absolutePath
         pb.redirectErrorStream(true)
         pb.redirectOutput(File(home, "service.log"))
         process = pb.start()

@@ -12,7 +12,7 @@ use crate::service::{self, ServiceState};
 use anyhow::{anyhow, Context, Result};
 use serde_json::{json, Value};
 use std::io::Read;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use tiny_http::{Header, Method, Request, Response, Server};
 use varsto_core::storage::StorageSpec;
@@ -250,6 +250,18 @@ fn query_param(query: &str, key: &str) -> Option<String> {
     })
 }
 
+/// Where folders go when the interface does not ask for a path (phones, and
+/// a sensible default on desktops): `VARSTO_FOLDER_ROOT`, else `<home>/../Varsto Folders`.
+pub fn folder_root(home: &std::path::Path) -> PathBuf {
+    if let Some(r) = std::env::var_os("VARSTO_FOLDER_ROOT") {
+        return PathBuf::from(r);
+    }
+    if let Some(h) = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")) {
+        return PathBuf::from(h).join("Varsto");
+    }
+    home.join("folders")
+}
+
 fn percent_decode(v: &str) -> String {
     let bytes = v.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());
@@ -277,8 +289,24 @@ fn api(st: &mut State, method: Method, path: &str, query: &str, input: &Value) -
             "has_vault": has_vault,
             "unlocked": st.engine.is_some(),
             "version": env!("CARGO_PKG_VERSION"),
+            "platform": std::env::consts::OS,
+            // Mobile shells set these so the interface can pick folder locations itself.
+            "mobile": std::env::var_os("VARSTO_MOBILE").is_some(),
+            "folder_root": folder_root(&st.home).display().to_string(),
             "service": st.service.summary(),
         })),
+        (Method::Post, "/api/reset") => {
+            if opt(input, "confirm").as_deref() != Some("reset") {
+                return Err(anyhow!(
+                    "send {{\"confirm\": \"reset\"}} to wipe this device's vault configuration"
+                ));
+            }
+            st.engine = None;
+            let removed = varsto_core::engine::reset_device(&st.home)?;
+            st.service.policies.clear();
+            st.service.policy_worst = None;
+            Ok(json!({"ok": true, "removed": removed}))
+        }
         (Method::Get, "/api/service") => Ok(st.service.summary()),
         (Method::Get, "/api/update/check") => Ok(serde_json::to_value(crate::update::check()?)?),
         (Method::Post, "/api/update") => {
@@ -448,7 +476,14 @@ fn api_unlocked(
             Ok(json!({"ok": true}))
         }
         (Method::Post, "/api/folder") => {
-            let id = engine.add_folder(&s(input, "name")?, Path::new(&s(input, "path")?))?;
+            let name = s(input, "name")?;
+            // No path given (phones, or the user left it empty): a directory named
+            // after the folder under this device's Varsto root.
+            let path = opt(input, "path")
+                .filter(|p| !p.trim().is_empty())
+                .map(PathBuf::from)
+                .unwrap_or_else(|| folder_root(engine.home()).join(&name));
+            let id = engine.add_folder(&name, &path)?;
             service.folders_changed = true;
             service.request_sync();
             Ok(json!({"ok": true, "id": id.to_string()}))
@@ -458,11 +493,20 @@ fn api_unlocked(
                 .get("selective")
                 .and_then(|c| c.as_bool())
                 .unwrap_or(false);
-            let id = engine.attach_folder(
-                &s(input, "name_or_id")?,
-                Path::new(&s(input, "path")?),
-                selective,
-            )?;
+            let name_or_id = s(input, "name_or_id")?;
+            let path = opt(input, "path")
+                .filter(|p| !p.trim().is_empty())
+                .map(PathBuf::from)
+                .unwrap_or_else(|| {
+                    let name = engine
+                        .folders()
+                        .into_iter()
+                        .find(|(r, _)| r.name == name_or_id || r.folder_id.as_str().starts_with(&name_or_id))
+                        .map(|(r, _)| r.name)
+                        .unwrap_or_else(|| name_or_id.clone());
+                    folder_root(engine.home()).join(name)
+                });
+            let id = engine.attach_folder(&name_or_id, &path, selective)?;
             service.folders_changed = true;
             service.request_sync();
             Ok(json!({"ok": true, "id": id.to_string()}))
@@ -546,6 +590,15 @@ fn api_unlocked(
             service.request_sync();
             Ok(json!({"ok": true}))
         }
+        (Method::Post, "/api/mkdir") => {
+            engine.mkdir(&s(input, "folder")?, &s(input, "path")?)?;
+            Ok(json!({"ok": true}))
+        }
+        (Method::Post, "/api/write") => Ok(serde_json::to_value(engine.write_file(
+            &s(input, "folder")?,
+            &s(input, "path")?,
+            s(input, "text")?.as_bytes(),
+        )?)?),
         (Method::Post, "/api/move") => Ok(serde_json::to_value(engine.move_file(
             &s(input, "folder")?,
             &s(input, "from")?,

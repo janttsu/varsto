@@ -61,7 +61,7 @@ varsto --home ~/.varsto-laptop p2p status
 varsto --home ~/.varsto-laptop policy set docs --min-copies 2 --place cloud=2 --place home=1 --verified-within-days 30
 varsto --home ~/.varsto-laptop policy check
 
-# let an AI assistant see one folder (read-only) and ask it where the idle files are cheapest to keep
+# let an AI assistant read, analyse and (with --write) reorganise one folder
 varsto --home ~/.varsto-laptop mcp grant docs
 varsto --home ~/.varsto-laptop mcp          # MCP over stdio; point Claude Desktop, Claude Code or any MCP client at this command
 

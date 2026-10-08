@@ -84,10 +84,22 @@ mod tests {
         for size in [16u32, 22, 32, 64] {
             let px = super::rgba(size);
             assert_eq!(px.len(), (size * size * 4) as usize);
-            let white = px.chunks(4).filter(|p| p[0] > 200 && p[1] > 200 && p[2] > 200 && p[3] > 0).count();
-            let blue = px.chunks(4).filter(|p| p[2] > 150 && p[0] < 100 && p[3] > 0).count();
-            assert!(white > (size * size / 12) as usize, "size {size}: too little white ({white})");
-            assert!(blue > (size * size / 3) as usize, "size {size}: too little blue ({blue})");
+            let white = px
+                .chunks(4)
+                .filter(|p| p[0] > 200 && p[1] > 200 && p[2] > 200 && p[3] > 0)
+                .count();
+            let blue = px
+                .chunks(4)
+                .filter(|p| p[2] > 150 && p[0] < 100 && p[3] > 0)
+                .count();
+            assert!(
+                white > (size * size / 12) as usize,
+                "size {size}: too little white ({white})"
+            );
+            assert!(
+                blue > (size * size / 3) as usize,
+                "size {size}: too little blue ({blue})"
+            );
         }
         // A small ASCII rendering for eyeballing with --nocapture.
         let size = 22;
@@ -96,7 +108,13 @@ mod tests {
             let row: String = (0..size)
                 .map(|x| {
                     let p = &px[((y * size + x) * 4) as usize..][..4];
-                    if p[3] == 0 { ' ' } else if p[0] > 200 { '#' } else { '.' }
+                    if p[3] == 0 {
+                        ' '
+                    } else if p[0] > 200 {
+                        '#'
+                    } else {
+                        '.'
+                    }
                 })
                 .collect();
             println!("{row}");

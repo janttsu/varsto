@@ -200,6 +200,31 @@ impl Backend {
             Backend::Direct(e) => Ok(serde_json::to_value(e.move_file(folder, from, to)?)?),
         }
     }
+    fn mkdir(&mut self, folder: &str, path: &str) -> Result<()> {
+        match self {
+            Backend::Http { .. } => {
+                self.call_json(
+                    "POST",
+                    "/api/mkdir",
+                    Some(json!({"folder": folder, "path": path})),
+                )?;
+                Ok(())
+            }
+            Backend::Direct(e) => e.mkdir(folder, path),
+        }
+    }
+    fn write(&mut self, folder: &str, path: &str, bytes: &[u8]) -> Result<Value> {
+        match self {
+            Backend::Http { .. } => self.call_json(
+                "POST",
+                "/api/write",
+                Some(
+                    json!({"folder": folder, "path": path, "text": String::from_utf8_lossy(bytes)}),
+                ),
+            ),
+            Backend::Direct(e) => Ok(serde_json::to_value(e.write_file(folder, path, bytes)?)?),
+        }
+    }
     fn sync(&mut self, folder: Option<&str>) -> Result<Value> {
         match self {
             Backend::Http { .. } => {
@@ -238,11 +263,15 @@ fn tools() -> Value {
          "inputSchema": {"type": "object", "properties": {"folder": {"type": "string"}}, "required": ["folder"]}},
         {"name": "varsto_read", "description": "Read a file (text, up to 512 KiB; fetched first if it is a placeholder). Counts as an access.",
          "inputSchema": {"type": "object", "properties": {"folder": {"type": "string"}, "path": {"type": "string"}}, "required": ["folder", "path"]}},
-        {"name": "varsto_move", "description": "Move or rename a file inside a folder (needs a read-write grant); the change syncs to the other devices.",
+        {"name": "varsto_move", "description": "Move or rename a file inside a folder (needs a read-write grant); the change syncs to the other devices. Use it to reorganise: group by year, project or topic after reading the files.",
          "inputSchema": {"type": "object", "properties": {"folder": {"type": "string"}, "from": {"type": "string"}, "to": {"type": "string"}}, "required": ["folder", "from", "to"]}},
+        {"name": "varsto_mkdir", "description": "Create a directory inside a folder (read-write grant).",
+         "inputSchema": {"type": "object", "properties": {"folder": {"type": "string"}, "path": {"type": "string"}}, "required": ["folder", "path"]}},
+        {"name": "varsto_write", "description": "Create or overwrite a text file inside a folder (read-write grant), for example a summary, an index or notes about what you organised; the file syncs like any other.",
+         "inputSchema": {"type": "object", "properties": {"folder": {"type": "string"}, "path": {"type": "string"}, "text": {"type": "string"}}, "required": ["folder", "path", "text"]}},
         {"name": "varsto_sync", "description": "Sync one folder or all granted folders now.",
          "inputSchema": {"type": "object", "properties": {"folder": {"type": "string"}}}},
-        {"name": "varsto_storage_advice", "description": "Which files have not been used for idle_days (default 90) and what they would cost per month in every known storage class, cheapest first, from the open price data with sources and dates. Use it to answer 'where is this cheapest to keep?' and to propose moves to cold storage; nothing is moved.",
+        {"name": "varsto_storage_advice", "description": "Varsto's own placement estimate, exposed for context: files idle for idle_days (default 90) and their monthly cost in every known storage class, cheapest first, with sources. Nothing is moved.",
          "inputSchema": {"type": "object", "properties": {"folder": {"type": "string"}, "idle_days": {"type": "integer", "minimum": 1}}}}
     ])
 }
@@ -334,6 +363,29 @@ fn call_tool(backend: &mut Backend, grants: &Grants, name: &str, args: &Value) -
                 &backend.move_file(folder, from, to)?,
             )?))
         }
+        "varsto_mkdir" => {
+            let (folder, path) = (arg(args, "folder")?, arg(args, "path")?);
+            if !grants.can_write(folder) {
+                bail!("folder {folder} is read-only for the assistant: the user must run `varsto mcp grant {folder} --write`");
+            }
+            backend.mkdir(folder, path)?;
+            Ok(text_result(format!("created {folder}/{path}")))
+        }
+        "varsto_write" => {
+            let (folder, path, text) =
+                (arg(args, "folder")?, arg(args, "path")?, arg(args, "text")?);
+            if !grants.can_write(folder) {
+                bail!("folder {folder} is read-only for the assistant: the user must run `varsto mcp grant {folder} --write`");
+            }
+            if text.len() > 2 * 1024 * 1024 {
+                bail!("text larger than 2 MiB");
+            }
+            Ok(text_result(serde_json::to_string_pretty(&backend.write(
+                folder,
+                path,
+                text.as_bytes(),
+            )?)?))
+        }
         "varsto_sync" => {
             let folder = args.get("folder").and_then(|v| v.as_str());
             if let Some(f) = folder {
@@ -412,7 +464,7 @@ pub fn serve(home: &Path) -> Result<()> {
                 "protocolVersion": PROTOCOL_VERSION,
                 "capabilities": {"tools": {"listChanged": false}},
                 "serverInfo": {"name": "varsto", "version": env!("CARGO_PKG_VERSION")},
-                "instructions": "Varsto keeps the user's files encrypted on their own storage. You see only folders the user granted (varsto mcp grant). File paths are relative to the folder. last_accessed_utc is Varsto's own record of use on this device; varsto_storage_advice turns it into cost estimates with sources."
+                "instructions": "Varsto keeps the user's files encrypted on their own storage. You see only the folders the user granted (varsto mcp grant), read-only unless the grant says rw. Typical work: read files, analyse and summarise them, propose and carry out a tidier structure with varsto_mkdir and varsto_move, and leave notes or indexes with varsto_write. Paths are relative to the folder. last_accessed_utc is Varsto's own record of use on this device."
             })),
             "notifications/initialized" | "notifications/cancelled" => continue,
             "ping" => Ok(json!({})),

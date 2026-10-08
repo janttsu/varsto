@@ -38,6 +38,16 @@ pub unsafe extern "C" fn varsto_start(home_dir: *const c_char, port: u16) -> i32
         .to_string_lossy()
         .to_string();
     let home = PathBuf::from(home);
+    // Mobile shell: folders live next to the vault directory, chosen by the interface.
+    std::env::set_var("VARSTO_MOBILE", "1");
+    if std::env::var_os("VARSTO_FOLDER_ROOT").is_none() {
+        let root = home
+            .parent()
+            .map(|p| p.join("Folders"))
+            .unwrap_or_else(|| home.join("Folders"));
+        let _ = std::fs::create_dir_all(&root);
+        std::env::set_var("VARSTO_FOLDER_ROOT", root);
+    }
     *HOME.lock().unwrap() = Some(home.clone());
     std::thread::Builder::new()
         .name("varsto-service".into())

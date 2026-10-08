@@ -138,6 +138,11 @@ enum Cmd {
         #[arg(long)]
         check: bool,
     },
+    /// Alpha: forget this device's vault configuration (keys, ledger, state, grants) and start over. Files in folders stay.
+    Reset {
+        #[arg(long)]
+        yes: bool,
+    },
     /// Recovery kit: the vault key as 24 words, optionally split into shares.
     Recovery {
         #[command(subcommand)]
@@ -438,9 +443,24 @@ fn bail_usage<T>(msg: &str) -> Result<T> {
     Err(anyhow!("{msg}"))
 }
 
+/// The device passphrase: from `VARSTO_PASSPHRASE`, otherwise asked on the
+/// terminal (hidden input). Scripts and services set the variable.
 fn passphrase() -> Result<String> {
-    std::env::var("VARSTO_PASSPHRASE")
-        .map_err(|_| anyhow!("set VARSTO_PASSPHRASE (alpha: no interactive prompt yet)"))
+    if let Ok(p) = std::env::var("VARSTO_PASSPHRASE") {
+        return Ok(p);
+    }
+    use std::io::IsTerminal;
+    if std::io::stdin().is_terminal() {
+        let p = rpassword::prompt_password("Varsto passphrase for this device: ")
+            .context("read the passphrase")?;
+        if p.is_empty() {
+            bail_usage::<()>("empty passphrase")?;
+        }
+        return Ok(p);
+    }
+    Err(anyhow!(
+        "no passphrase: set VARSTO_PASSPHRASE, or run from a terminal to be asked"
+    ))
 }
 
 fn home(cli: &Cli) -> Result<PathBuf> {
@@ -512,23 +532,31 @@ fn run(cli: &Cli) -> Result<()> {
             let mut s3_secret: Option<String> = None;
             let spec = match (s3_bucket, storage_path) {
                 (Some(bucket), _) => {
-                    let secret = s3_secret_access_key
-                        .clone()
-                        .ok_or_else(|| anyhow!("give --s3-secret-access-key or set VARSTO_S3_SECRET"))?;
+                    let secret = s3_secret_access_key.clone().ok_or_else(|| {
+                        anyhow!("give --s3-secret-access-key or set VARSTO_S3_SECRET")
+                    })?;
                     // The storage is opened before the vault exists, so the secret travels via the environment for this process.
                     let env_name = format!(
                         "VARSTO_S3_SECRET_{}",
-                        storage_name.to_uppercase().replace(|c: char| !c.is_ascii_alphanumeric(), "_")
+                        storage_name
+                            .to_uppercase()
+                            .replace(|c: char| !c.is_ascii_alphanumeric(), "_")
                     );
                     std::env::set_var(env_name, &secret);
                     s3_secret = Some(secret);
                     StorageSpec::S3 {
                         name: storage_name.clone(),
-                        endpoint: s3_endpoint.clone().unwrap_or_default().trim_end_matches('/').to_string(),
+                        endpoint: s3_endpoint
+                            .clone()
+                            .unwrap_or_default()
+                            .trim_end_matches('/')
+                            .to_string(),
                         region: s3_region.clone(),
                         bucket: bucket.clone(),
                         prefix: s3_prefix.trim_matches('/').to_string(),
-                        access_key_id: s3_access_key_id.clone().ok_or_else(|| anyhow!("give --s3-access-key-id"))?,
+                        access_key_id: s3_access_key_id
+                            .clone()
+                            .ok_or_else(|| anyhow!("give --s3-access-key-id"))?,
                         secret_ref: String::new(),
                         path_style: true,
                         storage_class: None,
@@ -981,6 +1009,24 @@ fn run(cli: &Cli) -> Result<()> {
                     let r = varsto_core::replica::Replica::open(&home)?;
                     println!("{}", serde_json::to_string_pretty(&r.summary())?);
                 }
+            }
+        }
+        Cmd::Reset { yes } => {
+            if !*yes {
+                bail_usage::<()>("this removes keys, ledger, state and configuration from this device (files in folders stay); run again with --yes")?;
+            }
+            if let Some((sf, _)) = service::status(&home) {
+                let url = format!("http://127.0.0.1:{}/api/reset", sf.port);
+                service::http_call(
+                    "POST",
+                    &url,
+                    &sf.token,
+                    Some(&serde_json::json!({"confirm": "reset"}).to_string()),
+                )?;
+                println!("device reset through the running service");
+            } else {
+                let removed = varsto_core::engine::reset_device(&home)?;
+                println!("device reset; removed: {}", removed.join(", "));
             }
         }
         Cmd::Recovery { cmd } => match cmd {
