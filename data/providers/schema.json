@@ -1,0 +1,246 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/varsto/provider-profile.schema.json",
+  "title": "Varsto storage provider profile",
+  "description": "Price and capability data for one storage provider. Every numeric value must carry a source_url and a last_verified date; a value that could not be verified is null and must carry a note.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "id",
+    "name",
+    "website_url",
+    "currency",
+    "protocols",
+    "regions",
+    "storage_classes",
+    "egress",
+    "object_lock"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": { "type": "string" },
+    "schema_version": { "const": 1 },
+    "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
+    "name": { "type": "string", "minLength": 1 },
+    "website_url": { "$ref": "#/$defs/https_url" },
+    "currency": {
+      "description": "ISO 4217 code of every price in this file.",
+      "type": "string",
+      "pattern": "^[A-Z]{3}$"
+    },
+    "prices_include_tax": {
+      "description": "Whether the listed prices include VAT or sales tax. null if the source does not say.",
+      "type": ["boolean", "null"]
+    },
+    "protocols": {
+      "description": "Access protocols supported by the provider, as relevant to Varsto back ends.",
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "enum": ["s3", "sftp", "webdav", "rclone", "scp", "ftp", "ftps", "smb", "rsync", "borg", "restic"]
+      }
+    },
+    "protocols_source": { "$ref": "#/$defs/source" },
+    "regions": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/region" }
+    },
+    "storage_classes": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/storage_class" }
+    },
+    "egress": { "$ref": "#/$defs/egress" },
+    "object_lock": {
+      "description": "Whether the provider supports immutability (WORM) for objects. null if not documented.",
+      "allOf": [{ "$ref": "#/$defs/verified_boolean" }]
+    },
+    "notes": { "type": "array", "items": { "type": "string" } }
+  },
+  "$defs": {
+    "https_url": { "type": "string", "pattern": "^https://[^\\s]+$" },
+    "iso_date": { "type": "string", "format": "date", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+    "source": {
+      "type": "object",
+      "required": ["source_url", "last_verified"],
+      "additionalProperties": false,
+      "properties": {
+        "source_url": { "$ref": "#/$defs/https_url" },
+        "last_verified": { "$ref": "#/$defs/iso_date" }
+      }
+    },
+    "verified_number": {
+      "description": "A number with provenance. If value is a number, source_url and last_verified are required. If value is null, a note explains why it is unknown.",
+      "type": "object",
+      "required": ["value"],
+      "additionalProperties": false,
+      "properties": {
+        "value": { "type": ["number", "null"], "minimum": 0 },
+        "source_url": { "$ref": "#/$defs/https_url" },
+        "last_verified": { "$ref": "#/$defs/iso_date" },
+        "note": { "type": "string", "minLength": 1 }
+      },
+      "if": { "properties": { "value": { "type": "number" } } },
+      "then": { "required": ["source_url", "last_verified"] },
+      "else": { "required": ["note"] }
+    },
+    "verified_text": {
+      "description": "A short text fact with provenance; same rules as verified_number.",
+      "type": "object",
+      "required": ["value"],
+      "additionalProperties": false,
+      "properties": {
+        "value": { "type": ["string", "null"], "minLength": 1 },
+        "source_url": { "$ref": "#/$defs/https_url" },
+        "last_verified": { "$ref": "#/$defs/iso_date" },
+        "note": { "type": "string", "minLength": 1 }
+      },
+      "if": { "properties": { "value": { "type": "string" } } },
+      "then": { "required": ["source_url", "last_verified"] },
+      "else": { "required": ["note"] }
+    },
+    "verified_boolean": {
+      "type": "object",
+      "required": ["value"],
+      "additionalProperties": false,
+      "properties": {
+        "value": { "type": ["boolean", "null"] },
+        "source_url": { "$ref": "#/$defs/https_url" },
+        "last_verified": { "$ref": "#/$defs/iso_date" },
+        "note": { "type": "string", "minLength": 1 }
+      },
+      "if": { "properties": { "value": { "type": "boolean" } } },
+      "then": { "required": ["source_url", "last_verified"] },
+      "else": { "required": ["note"] }
+    },
+    "region": {
+      "type": "object",
+      "required": ["code", "city", "country"],
+      "additionalProperties": false,
+      "properties": {
+        "code": { "type": "string", "minLength": 1 },
+        "city": { "type": ["string", "null"] },
+        "country": { "type": "string", "pattern": "^[A-Z]{2}$" },
+        "source_url": { "$ref": "#/$defs/https_url" },
+        "last_verified": { "$ref": "#/$defs/iso_date" },
+        "note": { "type": "string" }
+      },
+      "dependentRequired": { "source_url": ["last_verified"], "last_verified": ["source_url"] }
+    },
+    "price_tier": {
+      "description": "One band of a volume-tiered price. up_to_gb is null for the last, open-ended band.",
+      "type": "object",
+      "required": ["from_gb", "up_to_gb", "price"],
+      "additionalProperties": false,
+      "properties": {
+        "from_gb": { "type": "number", "minimum": 0 },
+        "up_to_gb": { "type": ["number", "null"], "exclusiveMinimum": 0 },
+        "price": { "$ref": "#/$defs/verified_number" }
+      }
+    },
+    "tiers": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/price_tier" }
+    },
+    "plan": {
+      "description": "A fixed-size plan with a flat monthly price (for example a storage box).",
+      "type": "object",
+      "required": ["id", "capacity_gb", "monthly_price"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "capacity_gb": { "$ref": "#/$defs/verified_number" },
+        "monthly_price": { "$ref": "#/$defs/verified_number" }
+      }
+    },
+    "requests": {
+      "description": "Request prices per 1000 requests, in the profile currency. Use 0 only if the source states that requests are free or included.",
+      "type": "object",
+      "required": ["put_per_1000", "get_per_1000", "list_per_1000"],
+      "additionalProperties": false,
+      "properties": {
+        "put_per_1000": { "$ref": "#/$defs/verified_number" },
+        "get_per_1000": { "$ref": "#/$defs/verified_number" },
+        "list_per_1000": { "$ref": "#/$defs/verified_number" }
+      }
+    },
+    "retrieval": {
+      "type": "object",
+      "required": ["price_per_gb", "typical_delay"],
+      "additionalProperties": false,
+      "properties": {
+        "price_per_gb": { "$ref": "#/$defs/verified_number" },
+        "typical_delay": { "$ref": "#/$defs/verified_text" }
+      }
+    },
+    "storage_class": {
+      "type": "object",
+      "required": [
+        "id",
+        "name",
+        "kind",
+        "applies_to_regions",
+        "pricing_model",
+        "requests",
+        "retrieval",
+        "minimum_storage_duration_days",
+        "minimum_billable_object_size_kb"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "minLength": 1 },
+        "kind": { "enum": ["hot", "infrequent", "cold", "archive", "other"] },
+        "applies_to_regions": {
+          "description": "Region codes (from regions) for which the prices in this class were verified.",
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "pricing_model": { "enum": ["per_gb_month", "fixed_plan"] },
+        "storage_price_per_gb_month": { "$ref": "#/$defs/tiers" },
+        "plans": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/plan" } },
+        "requests": { "$ref": "#/$defs/requests" },
+        "retrieval": { "$ref": "#/$defs/retrieval" },
+        "minimum_storage_duration_days": { "$ref": "#/$defs/verified_number" },
+        "minimum_billable_object_size_kb": { "$ref": "#/$defs/verified_number" },
+        "per_object_overhead_kb": { "$ref": "#/$defs/verified_number" },
+        "notes": { "type": "array", "items": { "type": "string" } }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "pricing_model": { "const": "per_gb_month" } } },
+          "then": { "required": ["storage_price_per_gb_month"] }
+        },
+        {
+          "if": { "properties": { "pricing_model": { "const": "fixed_plan" } } },
+          "then": { "required": ["plans"] }
+        }
+      ]
+    },
+    "egress": {
+      "type": "object",
+      "required": ["applies_to_regions", "free_allowance_gb_per_month", "price_per_gb"],
+      "additionalProperties": false,
+      "properties": {
+        "applies_to_regions": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "free_allowance_gb_per_month": { "$ref": "#/$defs/verified_number" },
+        "free_allowance_scope": { "type": "string" },
+        "price_per_gb": {
+          "description": "Price per GB transferred out to the internet, by volume band, after the free allowance.",
+          "allOf": [{ "$ref": "#/$defs/tiers" }]
+        },
+        "notes": { "type": "array", "items": { "type": "string" } }
+      }
+    }
+  }
+}
