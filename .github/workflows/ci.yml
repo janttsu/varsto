@@ -44,6 +44,15 @@ jobs:
           file smoke/Varsto.app/Contents/Helpers/varsto
           codesign -dv smoke/Varsto.app
           smoke/Varsto.app/Contents/Helpers/varsto --version
+      - name: Launch the app and capture its window
+        run: |
+          open smoke/Varsto.app
+          sleep 12
+          pgrep -x Varsto >/dev/null && echo "app process running" || { echo "app process NOT running"; exit 1; }
+          screencapture -x dist/macos-app.png
+          osascript -e 'tell application "Varsto" to quit' || pkill -x Varsto || true
+          sleep 2
+          pgrep -x varsto >/dev/null && { echo "service still running after quit"; pkill -x varsto; } || echo "service stopped with the app"
       - name: Output to the job summary
         if: failure()
         run: |
@@ -54,6 +63,7 @@ jobs:
           name: Varsto-macos
           path: |
             dist/Varsto-*-macos.zip
+            dist/macos-app.png
             build.log
           if-no-files-found: warn
       - name: Attach to the release
