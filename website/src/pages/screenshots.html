@@ -33,8 +33,13 @@ description: What the alpha looks like: the desktop interface (shown in light or
       <figure class="shot"><img class="shot-light" src="../assets/img/screenshots/android-files-light.png" alt="Android app, light mode: the Files view of the Notes folder with three files as cards, each with its state, size, last use, Open and Free up space buttons, and the bottom tab bar." width="540" height="1200" loading="lazy"><img class="shot-dark" src="../assets/img/screenshots/android-files-dark.png" alt="Android app, dark mode: the same Files view." width="540" height="1200" loading="lazy"><figcaption>Files on the phone: a folder is added by name alone and lives under the app's own storage.</figcaption></figure>
     </div>
 
+    <h2>iOS</h2>
+    <div class="shots-row shots-single">
+      <figure class="shot"><img src="../assets/img/screenshots/ios-simulator.png" alt="iOS Simulator: the Varsto app's first-run screen with the Create a new vault form, shown in a WKWebView." width="540" height="961" loading="lazy"><figcaption>The iOS shell in the Simulator, built and launched by the build pipeline on an Apple Silicon runner: the Rust core runs inside the app process and the interface is the same page in a WebKit view. Not yet run on a real iPhone or iPad.</figcaption></figure>
+    </div>
+
     <h2>Not captured yet</h2>
     <ul>
-      <li><strong>iOS.</strong> The SwiftUI shell is built for the Simulator on GitHub Actions, which also launches it and saves a screenshot; it appears here once that first run is clean.</li>
+      <li><strong>Real phones and tablets.</strong> Android and iOS have been run in the emulator and the Simulator only; captures from real devices follow once the apps reach the store test tracks.</li>
     </ul>
     <p class="note">The screenshots are from a demo vault with invented files. Paths and names on this page are not real data.</p>
