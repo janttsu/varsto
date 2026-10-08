@@ -10,3 +10,4 @@ test-results/
 *.key
 website/public/downloads/
 apps/macos/dist/
+apps/ios/Varsto.xcodeproj/
