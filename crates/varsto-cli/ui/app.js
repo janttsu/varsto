@@ -25,6 +25,9 @@
   var appState = { mobile: false, folder_root: "", platform: "" };
   var lastStatus = null;
   var selectedFile = null;
+  var filesLoadedFor = null;
+  // Load the file list of the chosen folder unless it is already shown.
+  function ensureFiles() { var f = $("filesfolder").value; if (f && filesLoadedFor !== f) { loadFiles(); } }
   var phoneMq = window.matchMedia ? window.matchMedia("(max-width: 600px)") : null;
   function isMobile() { return appState.mobile || !!(phoneMq && phoneMq.matches); }
   function applyMobile() { document.body.dataset.mobile = isMobile() ? "1" : "0"; }
@@ -97,6 +100,7 @@
     document.querySelectorAll(".tabbar .nav-item[data-nav]").forEach(function (b) { if (b.dataset.nav === tab) { b.setAttribute("aria-current", "page"); } else { b.removeAttribute("aria-current"); } });
     if (document.body.dataset.view === "app") { $("pagetitle").textContent = pageTitle(page); }
     if (page === "peers") { loadP2p(); }
+    if (page === "files") { ensureFiles(); }
     window.scrollTo(0, 0);
   }
   document.querySelectorAll(".nav-item[data-nav], .more-item[data-nav]").forEach(function (b) { b.onclick = function () { nav(b.dataset.nav); }; });
@@ -222,6 +226,7 @@
       if (prev && folderByName(prev) && folderByName(prev).path) { fsel.value = prev; }
       else if (!fsel.value && fsel.options.length) { fsel.selectedIndex = 0; }
       markTree(fsel.value);
+      if (currentPage === "files") { ensureFiles(); }
       updateFilesHead();
       if (fsel.options.length === 0) { showFolderForms(true); } else if (s.folders.length > 0 && $("folderforms").dataset.user !== "1") { showFolderForms(false); }
       api("GET", "/api/policy").then(function (p) {
@@ -383,6 +388,7 @@
   $("files-share").onclick = function () { var f = folderByName($("filesfolder").value); if (f) { shareFolder(f); } };
   function loadFiles() {
     var folder = $("filesfolder").value; if (!folder) { return; }
+    filesLoadedFor = folder;
     var keep = selectedFile ? selectedFile.path : null;
     api("GET", "/api/files?folder=" + encodeURIComponent(folder)).then(function (rows) {
       var tb = $("files").querySelector("tbody"); tb.innerHTML = "";
