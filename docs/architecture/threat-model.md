@@ -63,7 +63,7 @@ They are listed so that nobody, marketing included (M-005, M-006), claims more t
 - **Plaintext synced folders.** A folder that the user syncs unencrypted (the S-011 exception on mobile, sync folders on desktop) is protected only by the device's own lock and disk encryption.
 - **Alpha-stage logs.** In the alpha, logs are redacted but not encrypted at rest; they reveal usage patterns (event types, sizes, times) even without names (plan 6.40).
 - **Second factor for daily unlock.** Whether the second factor is mandatory for unlock or only for adding a device is **TBD** (plan section 8, "2FA"). Until that is decided, resistance against A3 and A4 is described for the strongest configuration only.
-- **Locked-state keys.** Background sync, camera upload, ledger acknowledgements and logging need some keys while the app is locked. They are a deliberate, documented reduction of protection against A3. The exact set is drafted in the key hierarchy (`docs/spec/key-hierarchy.md`, separate change) and is **TBD**.
+- **Locked-state keys.** Background sync, camera upload, ledger acknowledgements and logging need some keys while the app is locked. They are a deliberate, documented reduction of protection against A3. The exact set is drafted in [../spec/key-hierarchy.md](../spec/key-hierarchy.md) and is **TBD**.
 - **Side channels.** Compression before encryption can leak information about content through sizes (plan 6.11). Whether compression is on by default, and the padding classes, are **TBD**.
 - **Implementation flaws.** Bugs, misuse of libraries and timing side channels are outside this model but are the most likely real-world failures. An independent review is planned before beta (S-007).
 
@@ -108,3 +108,4 @@ Logging rules (S-015, N-013, plan 6.40) apply to every adversary that can obtain
 - [security-principles.md](security-principles.md)
 - [logging.md](logging.md)
 - [../failure-model.md](../failure-model.md)
+- [../spec/key-hierarchy.md](../spec/key-hierarchy.md) (draft)
