@@ -24,6 +24,8 @@ source "$HOME/.cargo/env"
 cd /build/varsto
 version="$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)".*/\1/')"
 echo "== Android build ($version) on $(lsb_release -ds)"
+df -h / | tail -1
+free -m | head -2
 apps/android/build.sh 2>&1 | grep -vE "^(\s*Compiling|\s*Downloading|\s*Downloaded|\s*Updating|\s*Locking)" | tail -80
 mkdir -p dist/android
 cp apps/android/app/build/outputs/apk/debug/app-debug.apk "dist/android/varsto-$version-android-debug.apk"

@@ -82,8 +82,10 @@ def rsa_key_id():
     raise SystemExit("register an RSA public key in IAM named orca-rsa (scw iam ssh-key create name=orca-rsa public-key=\"$(cat ~/.ssh/id_rsa.pub)\")")
 
 
-def create_instance(name, itype, image, user_data=None):
+def create_instance(name, itype, image, user_data=None, disk_gb=None):
     args = ["instance", "server", "create", f"zone={ZONE}", f"name={name}", f"type={itype}", f"image={image}", "ip=new", f"tags.0={TAG}"]
+    if disk_gb:
+        args.append(f"root-volume=sbs:{disk_gb}GB")
     if itype.endswith("-WIN"):
         args.append(f"admin-password-encryption-ssh-key-id={rsa_key_id()}")
     if user_data:
@@ -142,7 +144,7 @@ def build_android(args):
     out.mkdir(parents=True, exist_ok=True)
     tarball = source_tarball(ROOT / "dist" / "cloud" / "src.tar.gz")
     name = f"{TAG}-android-{int(time.time())}"
-    srv = create_instance(name, args.type or "POP2-8C-32G", "ubuntu_noble")
+    srv = create_instance(name, args.type or "POP2-8C-32G", "ubuntu_noble", disk_gb=40)  # SDK, NDK and two Rust targets need more than the default disk
     sid = srv["id"]
     try:
         _, ip = wait_running(sid)
