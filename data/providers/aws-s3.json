@@ -1,0 +1,447 @@
+{
+  "$schema": "schema.json",
+  "schema_version": 1,
+  "id": "aws-s3",
+  "name": "Amazon S3",
+  "website_url": "https://aws.amazon.com/s3/",
+  "currency": "USD",
+  "prices_include_tax": null,
+  "protocols": [
+    "s3",
+    "rclone"
+  ],
+  "protocols_source": {
+    "source_url": "https://rclone.org/s3/",
+    "last_verified": "2026-10-08"
+  },
+  "regions": [
+    {
+      "code": "eu-central-1",
+      "city": "Frankfurt",
+      "country": "DE",
+      "source_url": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonS3/current/index.json",
+      "last_verified": "2026-10-08",
+      "note": "Prices in this file were verified for this region only. Other regions exist and are priced differently; add a profile or extend applies_to_regions only after verifying each region."
+    }
+  ],
+  "storage_classes": [
+    {
+      "id": "standard",
+      "name": "S3 Standard",
+      "kind": "hot",
+      "applies_to_regions": [
+        "eu-central-1"
+      ],
+      "pricing_model": "per_gb_month",
+      "storage_price_per_gb_month": [
+        {
+          "from_gb": 0,
+          "up_to_gb": 51200,
+          "price": {
+            "value": 0.0245,
+            "source_url": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonS3/current/index.json",
+            "last_verified": "2026-10-08",
+            "note": "AWS price list file AmazonS3, publicationDate 2026-09-28T23:04:16Z, region eu-central-1, usage type EUC1-TimedStorage-ByteHrs, first 50 TB per month"
+          }
+        },
+        {
+          "from_gb": 51200,
+          "up_to_gb": 512000,
+          "price": {
+            "value": 0.0235,
+            "source_url": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonS3/current/index.json",
+            "last_verified": "2026-10-08",
+            "note": "AWS price list file AmazonS3, publicationDate 2026-09-28T23:04:16Z, region eu-central-1, usage type EUC1-TimedStorage-ByteHrs, next 450 TB per month"
+          }
+        },
+        {
+          "from_gb": 512000,
+          "up_to_gb": null,
+          "price": {
+            "value": 0.0225,
+            "source_url": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonS3/current/index.json",
+            "last_verified": "2026-10-08",
+            "note": "AWS price list file AmazonS3, publicationDate 2026-09-28T23:04:16Z, region eu-central-1, usage type EUC1-TimedStorage-ByteHrs, over 500 TB per month"
+          }
+        }
+      ],
+      "requests": {
+        "put_per_1000": {
+          "value": 0.0054,
+          "source_url": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonS3/current/index.json",
+          "last_verified": "2026-10-08",
+          "note": "AWS price list file AmazonS3, publicationDate 2026-09-28T23:04:16Z, region eu-central-1, usage type EUC1-Requests-Tier1; list price is per 1,000 requests"
+        },
+        "get_per_1000": {
+          "value": 0.00043,
+          "source_url": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonS3/current/index.json",
+          "last_verified": "2026-10-08",
+          "note": "AWS price list file AmazonS3, publicationDate 2026-09-28T23:04:16Z, region eu-central-1, usage type EUC1-Requests-Tier2; list price is 0.0043 per 10,000 requests, converted to per 1,000"
+        },
+        "list_per_1000": {
+          "value": 0.0054,
+          "source_url": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonS3/current/index.json",
+          "last_verified": "2026-10-08",
+          "note": "AWS price list file AmazonS3, publicationDate 2026-09-28T23:04:16Z, region eu-central-1, usage type EUC1-Requests-Tier1; the list price groups PUT, COPY, POST and LIST requests"
+        }
+      },
+      "retrieval": {
+        "price_per_gb": {
+          "value": null,
+          "note": "The price list has no retrieval-fee line for S3 Standard; this is the absence of a line item, not an explicit statement that retrieval is free."
+        },
+        "typical_delay": {
+          "value": null,
+          "note": "Not stated for this class in the sources checked."
+        }
+      },
+      "minimum_storage_duration_days": {
+        "value": null,
+        "note": "No minimum duration is listed for S3 Standard on the pricing page; not an explicit statement that none applies."
+      },
+      "minimum_billable_object_size_kb": {
+        "value": null,
+        "note": "No minimum object size is listed for S3 Standard on the pricing page; not an explicit statement that none applies."
+      }
+    },
+    {
+      "id": "standard-ia",
+      "name": "S3 Standard-Infrequent Access",
+      "kind": "infrequent",
+      "applies_to_regions": [
+        "eu-central-1"
+      ],
+      "pricing_model": "per_gb_month",
+      "storage_price_per_gb_month": [
+        {
+          "from_gb": 0,
+          "up_to_gb": null,
+          "price": {
+            "value": 0.0135,
+            "source_url": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonS3/current/index.json",
+            "last_verified": "2026-10-08",
+            "note": "AWS price list file AmazonS3, publicationDate 2026-09-28T23:04:16Z, region eu-central-1, usage type EUC1-TimedStorage-SIA-ByteHrs"
+          }
+        }
+      ],
+      "requests": {
+        "put_per_1000": {
+          "value": 0.01,
+          "source_url": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonS3/current/index.json",
+          "last_verified": "2026-10-08",
+          "note": "AWS price list file AmazonS3, publicationDate 2026-09-28T23:04:16Z, region eu-central-1, usage type EUC1-Requests-SIA-Tier1; list price is per 1,000 requests"
+        },
+        "get_per_1000": {
+          "value": 0.001,
+          "source_url": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonS3/current/index.json",
+          "last_verified": "2026-10-08",
+          "note": "AWS price list file AmazonS3, publicationDate 2026-09-28T23:04:16Z, region eu-central-1, usage type EUC1-Requests-SIA-Tier2; list price is 0.01 per 10,000 requests, converted to per 1,000"
+        },
+        "list_per_1000": {
+          "value": 0.01,
+          "source_url": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonS3/current/index.json",
+          "last_verified": "2026-10-08",
+          "note": "AWS price list file AmazonS3, publicationDate 2026-09-28T23:04:16Z, region eu-central-1, usage type EUC1-Requests-SIA-Tier1; the list price groups PUT, COPY, POST and LIST requests"
+        }
+      },
+      "retrieval": {
+        "price_per_gb": {
+          "value": 0.01,
+          "source_url": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonS3/current/index.json",
+          "last_verified": "2026-10-08",
+          "note": "AWS price list file AmazonS3, publicationDate 2026-09-28T23:04:16Z, region eu-central-1, usage type EUC1-Retrieval-SIA, flat fee per GB retrieved"
+        },
+        "typical_delay": {
+          "value": "millisecond access",
+          "source_url": "https://aws.amazon.com/s3/pricing/",
+          "last_verified": "2026-10-08",
+          "note": "Wording on the pricing page: 'needs millisecond access'."
+        }
+      },
+      "minimum_storage_duration_days": {
+        "value": 30,
+        "source_url": "https://aws.amazon.com/s3/pricing/",
+        "last_verified": "2026-10-08",
+        "note": "Pricing page: charged for a minimum storage duration of 30 days; early deletion is billed pro rata for the remaining days."
+      },
+      "minimum_billable_object_size_kb": {
+        "value": 128,
+        "source_url": "https://aws.amazon.com/s3/pricing/",
+        "last_verified": "2026-10-08",
+        "note": "Pricing page: smaller objects may be stored but are charged for 128 KB."
+      }
+    },
+    {
+      "id": "glacier-instant-retrieval",
+      "name": "S3 Glacier Instant Retrieval",
+      "kind": "cold",
+      "applies_to_regions": [
+        "eu-central-1"
+      ],
+      "pricing_model": "per_gb_month",
+      "storage_price_per_gb_month": [
+        {
+          "from_gb": 0,
+          "up_to_gb": null,
+          "price": {
+            "value": 0.005,
+            "source_url": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonS3/current/index.json",
+            "last_verified": "2026-10-08",
+            "note": "AWS price list file AmazonS3, publicationDate 2026-09-28T23:04:16Z, region eu-central-1, usage type EUC1-TimedStorage-GIR-ByteHrs"
+          }
+        }
+      ],
+      "requests": {
+        "put_per_1000": {
+          "value": 0.02,
+          "source_url": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonS3/current/index.json",
+          "last_verified": "2026-10-08",
+          "note": "AWS price list file AmazonS3, publicationDate 2026-09-28T23:04:16Z, region eu-central-1, usage type EUC1-Requests-GIR-Tier1; list price is per 1,000 requests"
+        },
+        "get_per_1000": {
+          "value": 0.01,
+          "source_url": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonS3/current/index.json",
+          "last_verified": "2026-10-08",
+          "note": "AWS price list file AmazonS3, publicationDate 2026-09-28T23:04:16Z, region eu-central-1, usage type EUC1-Requests-GIR-Tier2; list price is 0.1 per 10,000 requests, converted to per 1,000"
+        },
+        "list_per_1000": {
+          "value": 0.02,
+          "source_url": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonS3/current/index.json",
+          "last_verified": "2026-10-08",
+          "note": "AWS price list file AmazonS3, publicationDate 2026-09-28T23:04:16Z, region eu-central-1, usage type EUC1-Requests-GIR-Tier1; the list price groups PUT, COPY, POST and LIST requests"
+        }
+      },
+      "retrieval": {
+        "price_per_gb": {
+          "value": 0.03,
+          "source_url": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonS3/current/index.json",
+          "last_verified": "2026-10-08",
+          "note": "AWS price list file AmazonS3, publicationDate 2026-09-28T23:04:16Z, region eu-central-1, usage type EUC1-Retrieval-GIR, flat fee per GB retrieved"
+        },
+        "typical_delay": {
+          "value": "instant retrieval in milliseconds",
+          "source_url": "https://aws.amazon.com/s3/pricing/",
+          "last_verified": "2026-10-08",
+          "note": "Wording on the pricing page."
+        }
+      },
+      "minimum_storage_duration_days": {
+        "value": 90,
+        "source_url": "https://aws.amazon.com/s3/pricing/",
+        "last_verified": "2026-10-08",
+        "note": "Pricing page: Glacier Instant Retrieval and Glacier Flexible Retrieval are charged for a minimum of 90 days; early deletion is billed pro rata."
+      },
+      "minimum_billable_object_size_kb": {
+        "value": 128,
+        "source_url": "https://aws.amazon.com/s3/pricing/",
+        "last_verified": "2026-10-08",
+        "note": "Pricing page: Glacier Instant Retrieval has a minimum billable object size of 128 KB."
+      }
+    },
+    {
+      "id": "glacier-flexible-retrieval",
+      "name": "S3 Glacier Flexible Retrieval",
+      "kind": "archive",
+      "applies_to_regions": [
+        "eu-central-1"
+      ],
+      "pricing_model": "per_gb_month",
+      "storage_price_per_gb_month": [
+        {
+          "from_gb": 0,
+          "up_to_gb": null,
+          "price": {
+            "value": 0.00405,
+            "source_url": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonS3/current/index.json",
+            "last_verified": "2026-10-08",
+            "note": "AWS price list file AmazonS3, publicationDate 2026-09-28T23:04:16Z, region eu-central-1, usage type EUC1-TimedStorage-GlacierByteHrs"
+          }
+        }
+      ],
+      "requests": {
+        "put_per_1000": {
+          "value": 0.036,
+          "source_url": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonS3/current/index.json",
+          "last_verified": "2026-10-08",
+          "note": "AWS price list file AmazonS3, publicationDate 2026-09-28T23:04:16Z, region eu-central-1, usage type EUC1-Requests-GLACIER-Tier1 (PutObject requests to Glacier); list price is per 1,000 requests"
+        },
+        "get_per_1000": {
+          "value": 0.00043,
+          "source_url": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonS3/current/index.json",
+          "last_verified": "2026-10-08",
+          "note": "AWS price list file AmazonS3, publicationDate 2026-09-28T23:04:16Z, region eu-central-1, usage type EUC1-Requests-GLACIER-Tier2; list price is 0.0043 per 10,000 GET and other requests, converted to per 1,000"
+        },
+        "list_per_1000": {
+          "value": null,
+          "note": "How LIST requests are billed for objects in this class was not verified; the price list only groups LIST with PUT, COPY and POST in the Standard tier."
+        }
+      },
+      "retrieval": {
+        "price_per_gb": {
+          "value": 0.012,
+          "source_url": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonS3/current/index.json",
+          "last_verified": "2026-10-08",
+          "note": "AWS price list file AmazonS3, publicationDate 2026-09-28T23:04:16Z, region eu-central-1, usage type EUC1-Standard-Retrieval-Bytes; the Standard retrieval fee. The same price list shows Bulk retrieval at 0.00 per GB and Expedited retrieval at 0.036 per GB; per-request retrieval fees also apply and are not modelled here."
+        },
+        "typical_delay": {
+          "value": "retrieval option from 1 minute to 12 hours",
+          "source_url": "https://aws.amazon.com/s3/pricing/",
+          "last_verified": "2026-10-08",
+          "note": "Wording on the pricing page; the delay depends on the retrieval option chosen."
+        }
+      },
+      "minimum_storage_duration_days": {
+        "value": 90,
+        "source_url": "https://aws.amazon.com/s3/pricing/",
+        "last_verified": "2026-10-08",
+        "note": "Pricing page: charged for a minimum storage duration of 90 days; early deletion is billed pro rata."
+      },
+      "minimum_billable_object_size_kb": {
+        "value": null,
+        "note": "No minimum object size is stated for this class on the pricing page; see per_object_overhead_kb."
+      },
+      "per_object_overhead_kb": {
+        "value": 40,
+        "source_url": "https://aws.amazon.com/s3/pricing/",
+        "last_verified": "2026-10-08",
+        "note": "Pricing page: 40 KB of additional metadata per archived object, of which 8 KB is charged at S3 Standard rates and 32 KB at the Glacier rate."
+      }
+    },
+    {
+      "id": "glacier-deep-archive",
+      "name": "S3 Glacier Deep Archive",
+      "kind": "archive",
+      "applies_to_regions": [
+        "eu-central-1"
+      ],
+      "pricing_model": "per_gb_month",
+      "storage_price_per_gb_month": [
+        {
+          "from_gb": 0,
+          "up_to_gb": null,
+          "price": {
+            "value": 0.0018,
+            "source_url": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonS3GlacierDeepArchive/current/index.json",
+            "last_verified": "2026-10-08",
+            "note": "AWS price list file AmazonS3GlacierDeepArchive, publicationDate 2026-09-11T12:45:07Z, region eu-central-1, usage type EUC1-TimedStorage-GDA-ByteHrs"
+          }
+        }
+      ],
+      "requests": {
+        "put_per_1000": {
+          "value": 0.06,
+          "source_url": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonS3GlacierDeepArchive/current/index.json",
+          "last_verified": "2026-10-08",
+          "note": "AWS price list file AmazonS3GlacierDeepArchive, usage type EUC1-Requests-GDA-Tier1 (PutObject requests); list price is per 1,000 requests"
+        },
+        "get_per_1000": {
+          "value": 0.00043,
+          "source_url": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonS3/current/index.json",
+          "last_verified": "2026-10-08",
+          "note": "AWS price list file AmazonS3, publicationDate 2026-09-28T23:04:16Z, region eu-central-1, usage type EUC1-Requests-GDA-Tier2; list price is 0.0043 per 10,000 GET and other requests, converted to per 1,000"
+        },
+        "list_per_1000": {
+          "value": null,
+          "note": "How LIST requests are billed for objects in this class was not verified."
+        }
+      },
+      "retrieval": {
+        "price_per_gb": {
+          "value": 0.024,
+          "source_url": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonS3GlacierDeepArchive/current/index.json",
+          "last_verified": "2026-10-08",
+          "note": "AWS price list file AmazonS3GlacierDeepArchive, usage type EUC1-Standard-Retrieval-Bytes; the Standard retrieval fee. Bulk retrieval is 0.005 per GB in the same file; per-request retrieval fees also apply and are not modelled here."
+        },
+        "typical_delay": {
+          "value": "can be restored within 12 hours",
+          "source_url": "https://aws.amazon.com/s3/pricing/",
+          "last_verified": "2026-10-08",
+          "note": "Wording on the pricing page. The delay for Bulk retrieval was not verified."
+        }
+      },
+      "minimum_storage_duration_days": {
+        "value": 180,
+        "source_url": "https://aws.amazon.com/s3/pricing/",
+        "last_verified": "2026-10-08",
+        "note": "Pricing page: Glacier Deep Archive has a minimum storage duration of 180 days; early deletion is billed pro rata."
+      },
+      "minimum_billable_object_size_kb": {
+        "value": null,
+        "note": "No minimum object size is stated for this class on the pricing page; see per_object_overhead_kb."
+      },
+      "per_object_overhead_kb": {
+        "value": 40,
+        "source_url": "https://aws.amazon.com/s3/pricing/",
+        "last_verified": "2026-10-08",
+        "note": "Pricing page: 40 KB of additional metadata per archived object, of which 8 KB is charged at S3 Standard rates and 32 KB at the Deep Archive rate."
+      }
+    }
+  ],
+  "egress": {
+    "applies_to_regions": [
+      "eu-central-1"
+    ],
+    "free_allowance_gb_per_month": {
+      "value": 100,
+      "source_url": "https://aws.amazon.com/s3/pricing/",
+      "last_verified": "2026-10-08",
+      "note": "Pricing page: 100 GB of data transfer out to the internet per month, aggregated across all AWS services and regions (not per region)."
+    },
+    "free_allowance_scope": "Aggregated across all AWS services and regions of the account holder, excluding China and GovCloud.",
+    "price_per_gb": [
+      {
+        "from_gb": 0,
+        "up_to_gb": 10240,
+        "price": {
+          "value": 0.09,
+          "source_url": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AWSDataTransfer/current/index.json",
+          "last_verified": "2026-10-08",
+          "note": "AWS price list file AWSDataTransfer, publicationDate 2026-09-16T13:22:08Z, from eu-central-1, usage type EUC1-DataTransfer-Out-Bytes: first 10 TB per month beyond the free tier"
+        }
+      },
+      {
+        "from_gb": 10240,
+        "up_to_gb": 51200,
+        "price": {
+          "value": 0.085,
+          "source_url": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AWSDataTransfer/current/index.json",
+          "last_verified": "2026-10-08",
+          "note": "Same file: next 40 TB per month"
+        }
+      },
+      {
+        "from_gb": 51200,
+        "up_to_gb": 153600,
+        "price": {
+          "value": 0.07,
+          "source_url": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AWSDataTransfer/current/index.json",
+          "last_verified": "2026-10-08",
+          "note": "Same file: next 100 TB per month"
+        }
+      },
+      {
+        "from_gb": 153600,
+        "up_to_gb": null,
+        "price": {
+          "value": 0.05,
+          "source_url": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AWSDataTransfer/current/index.json",
+          "last_verified": "2026-10-08",
+          "note": "Same file: greater than 150 TB per month"
+        }
+      }
+    ],
+    "notes": [
+      "Tier bands are in GB (10240 GB = 10 TB). Transfer to other AWS services or regions is priced differently and is not modelled."
+    ]
+  },
+  "object_lock": {
+    "value": true,
+    "source_url": "https://docs.aws.amazon.com/AmazonS3/latest/userguide/object-lock.html",
+    "last_verified": "2026-10-08",
+    "note": "S3 Object Lock uses a write-once-read-many model; requires versioning."
+  },
+  "notes": [
+    "All prices are list prices in USD before tax, taken from the machine-readable AWS price list files named in each source note.",
+    "Storage prices are per GB-month as billed by AWS; the price list uses binary units internally, so treat GB and GiB as equivalent when estimating."
+  ]
+}

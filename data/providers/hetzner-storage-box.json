@@ -1,0 +1,178 @@
+{
+  "$schema": "schema.json",
+  "schema_version": 1,
+  "id": "hetzner-storage-box",
+  "name": "Hetzner Storage Box",
+  "website_url": "https://www.hetzner.com/storage/storage-box/",
+  "currency": "EUR",
+  "prices_include_tax": null,
+  "protocols": [
+    "sftp",
+    "webdav",
+    "rclone",
+    "scp",
+    "ftp",
+    "ftps",
+    "smb",
+    "rsync",
+    "borg",
+    "restic"
+  ],
+  "protocols_source": {
+    "source_url": "https://www.hetzner.com/storage/storage-box/",
+    "last_verified": "2026-10-08"
+  },
+  "regions": [
+    {
+      "code": "fsn1",
+      "city": "Falkenstein",
+      "country": "DE",
+      "source_url": "https://www.hetzner.com/storage/storage-box/",
+      "last_verified": "2026-10-08",
+      "note": "Product page lists 'Germany, FSN1' and 'Finland, HEL1' as storage locations; the city names are taken from the Hetzner locations page, which lists fsn1 as Falkenstein and hel1 as Helsinki for cloud products."
+    },
+    {
+      "code": "hel1",
+      "city": "Helsinki",
+      "country": "FI",
+      "source_url": "https://www.hetzner.com/storage/storage-box/",
+      "last_verified": "2026-10-08",
+      "note": "See the note on fsn1."
+    }
+  ],
+  "storage_classes": [
+    {
+      "id": "storage-box",
+      "name": "Storage Box",
+      "kind": "other",
+      "applies_to_regions": [
+        "fsn1",
+        "hel1"
+      ],
+      "pricing_model": "fixed_plan",
+      "plans": [
+        {
+          "id": "bx11",
+          "capacity_gb": {
+            "value": 1000,
+            "source_url": "https://www.hetzner.com/storage/storage-box/",
+            "last_verified": "2026-10-08",
+            "note": "Product page: available storage 1 TB (decimal TB assumed; unit not stated)"
+          },
+          "monthly_price": {
+            "value": null,
+            "note": "The product page renders prices with client-side scripts and the price could not be read from an official static source; third-party listings were not used."
+          }
+        },
+        {
+          "id": "bx21",
+          "capacity_gb": {
+            "value": 5000,
+            "source_url": "https://www.hetzner.com/storage/storage-box/",
+            "last_verified": "2026-10-08",
+            "note": "Product page: available storage 5 TB (decimal TB assumed; unit not stated)"
+          },
+          "monthly_price": {
+            "value": null,
+            "note": "The product page renders prices with client-side scripts and the price could not be read from an official static source; third-party listings were not used."
+          }
+        },
+        {
+          "id": "bx31",
+          "capacity_gb": {
+            "value": 10000,
+            "source_url": "https://www.hetzner.com/storage/storage-box/",
+            "last_verified": "2026-10-08",
+            "note": "Product page: available storage 10 TB (decimal TB assumed; unit not stated)"
+          },
+          "monthly_price": {
+            "value": null,
+            "note": "The product page renders prices with client-side scripts and the price could not be read from an official static source; third-party listings were not used."
+          }
+        },
+        {
+          "id": "bx41",
+          "capacity_gb": {
+            "value": 20000,
+            "source_url": "https://www.hetzner.com/storage/storage-box/",
+            "last_verified": "2026-10-08",
+            "note": "Product page: available storage 20 TB (decimal TB assumed; unit not stated)"
+          },
+          "monthly_price": {
+            "value": null,
+            "note": "The product page renders prices with client-side scripts and the price could not be read from an official static source; third-party listings were not used."
+          }
+        }
+      ],
+      "requests": {
+        "put_per_1000": {
+          "value": null,
+          "note": "Not a per-request service; no request prices are listed for Storage Box."
+        },
+        "get_per_1000": {
+          "value": null,
+          "note": "Not a per-request service; no request prices are listed for Storage Box."
+        },
+        "list_per_1000": {
+          "value": null,
+          "note": "Not a per-request service; no request prices are listed for Storage Box."
+        }
+      },
+      "retrieval": {
+        "price_per_gb": {
+          "value": null,
+          "note": "No retrieval fee is listed; the product is not a cold storage class."
+        },
+        "typical_delay": {
+          "value": null,
+          "note": "Not applicable; data is online."
+        }
+      },
+      "minimum_storage_duration_days": {
+        "value": null,
+        "note": "No minimum storage duration is listed. The product page states a minimum contract period of 'none' and immediate cancellation, which is a contract term, not a storage duration."
+      },
+      "minimum_billable_object_size_kb": {
+        "value": null,
+        "note": "Not stated."
+      },
+      "notes": [
+        "Not S3-compatible: access is through SSH-based protocols (SFTP, SCP, rsync, Borg), FTP/FTPS, SMB, WebDAV/HTTPS; rclone and restic are listed on the product page. Port 22 (SFTP/SCP) and port 21 (FTP/FTPS) are always active; other protocols must be enabled.",
+        "Plans include a number of snapshots and sub-accounts (see the product page); snapshots are not object lock.",
+        "Plan capacities and prices change; the monthly price is null until it can be read from an official source."
+      ]
+    }
+  ],
+  "egress": {
+    "applies_to_regions": [
+      "fsn1",
+      "hel1"
+    ],
+    "free_allowance_gb_per_month": {
+      "value": null,
+      "note": "Traffic is described as unlimited, so no allowance figure applies."
+    },
+    "price_per_gb": [
+      {
+        "from_gb": 0,
+        "up_to_gb": null,
+        "price": {
+          "value": 0,
+          "source_url": "https://docs.hetzner.com/storage/storage-box/general/",
+          "last_verified": "2026-10-08",
+          "note": "Docs: 'Each Storage Box comes with unlimited traffic.'"
+        }
+      }
+    ],
+    "notes": [
+      "Unlimited traffic is as stated in the documentation; fair-use terms were not checked."
+    ]
+  },
+  "object_lock": {
+    "value": null,
+    "note": "No object lock or immutability feature is documented on the pages checked; snapshots exist but are a different feature."
+  },
+  "notes": [
+    "Prices are currently unknown (null) because no official static source was readable; do not use this profile for cost estimates until the monthly prices are filled in and verified."
+  ]
+}
