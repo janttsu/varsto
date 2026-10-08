@@ -16,10 +16,16 @@
 use crate::chunking::{Chunker, ChunkerParams};
 use crate::crypto::{self, KeyedHasher, SecretKey};
 use crate::ids::{ChunkId, DeviceId, FolderId, ObjectName, VaultId};
-use crate::ledger::{self, Event, Ingest, KeyDirectory, LedgerStore, LedgerView, SignedBatch};
+use crate::ledger::{
+    self, Event, Ingest, KeyDirectory, LedgerStore, LedgerView, SignedBatch, KEY_LEDGER,
+    KEY_REPLICA,
+};
 use crate::manifest::{self, ChunkRef, FileState, Manifest, Merge};
+use crate::replica::{self, ReplicaToken, REPLICA_PREFIX};
 use crate::storage::{Storage, StorageSpec};
+use crate::thumbs;
 use crate::util;
+use crate::vault::{self, ShareToken, SHARE_PREFIX};
 use crate::vault::{
     Config, DeviceRecord, FolderKeys, FolderMount, FolderRecord, Keyring, Keys, LocalVault,
     VaultMeta,
@@ -49,6 +55,12 @@ struct FolderState {
     last_seen: BTreeMap<DeviceId, u64>,
     published_seq: u64,
     published_hash: String,
+    /// Selective sync: paths the user wants kept on this device.
+    #[serde(default)]
+    pinned: BTreeSet<String>,
+    /// Content hashes whose thumbnail this device has generated and stored.
+    #[serde(default)]
+    thumbs_done: BTreeSet<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
@@ -59,6 +71,11 @@ struct Clock {
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
 struct DeviceCache {
     devices: BTreeMap<DeviceId, DeviceRecord>,
+    #[serde(default)]
+    replicas: BTreeMap<DeviceId, DeviceRecord>,
+    /// Member devices of shared folders (other users), by device id.
+    #[serde(default)]
+    members: BTreeMap<DeviceId, DeviceRecord>,
 }
 
 #[derive(Clone, Debug, Serialize, Default)]
@@ -70,6 +87,8 @@ pub struct PushReport {
     pub bytes_uploaded: u64,
     pub manifest_seq: Option<u64>,
     pub batch_seq: Option<u64>,
+    #[serde(default)]
+    pub thumbnails: u64,
 }
 
 #[derive(Clone, Debug, Serialize, Default)]
@@ -98,6 +117,10 @@ pub struct FolderStatus {
     /// Chunks that at least one device other than the writer has verified on a storage.
     pub chunks_verified_elsewhere: u64,
     pub published_seq: u64,
+    pub shared: bool,
+    pub selective: bool,
+    pub placeholders: u64,
+    pub pinned: u64,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -108,6 +131,12 @@ pub struct StatusReport {
     pub format_version: u16,
     pub storages: Vec<StorageSpec>,
     pub devices: BTreeMap<String, String>,
+    /// Untrusted replicas that hold encrypted copies (name by device id).
+    pub replicas: BTreeMap<String, String>,
+    /// Other users' devices that share folders with this vault (name by device id).
+    pub members: BTreeMap<String, String>,
+    /// This device holds only shared folders of another user's vault.
+    pub member: bool,
     pub folders: Vec<FolderStatus>,
     pub ledger_batches: u64,
     pub lamport: u64,
@@ -129,6 +158,19 @@ pub struct FsckReport {
     pub objects_corrupt: Vec<String>,
     pub forked_devices: Vec<String>,
     pub storages_skipped_cold: Vec<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct FileEntry {
+    pub path: String,
+    pub size: u64,
+    /// "local", "placeholder" or "missing".
+    pub state: String,
+    pub pinned: bool,
+    pub content_hash: String,
+    pub selective: bool,
+    /// Image or video: a thumbnail may exist.
+    pub media: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -165,6 +207,15 @@ pub struct Engine {
 /// Open storages with their specs.
 type OpenStorages = Vec<(StorageSpec, Box<dyn Storage>)>;
 
+/// Suffix of placeholder files in selective folders (plan 6.34, Resilio-style).
+pub const PLACEHOLDER_SUFFIX: &str = ".varsto-placeholder";
+
+fn placeholder_path(disk: &Path) -> PathBuf {
+    let mut s = disk.as_os_str().to_os_string();
+    s.push(PLACEHOLDER_SUFFIX);
+    PathBuf::from(s)
+}
+
 fn chunk_storage_key(object: &ObjectName) -> String {
     format!("chunks/{}/{}", &object.as_str()[..2], object)
 }
@@ -191,6 +242,7 @@ impl Engine {
             device_id,
             device_name: device_name.to_string(),
             created_utc: util::now_utc(),
+            member: false,
         };
         let vault_key_hex = keys.master.to_hex();
         Self::write_new(home, vault, keys, passphrase).map(|e| (e, vault_key_hex))
@@ -235,6 +287,7 @@ impl Engine {
             device_id,
             device_name: device_name.to_string(),
             created_utc: meta.created_utc,
+            member: false,
         };
         let mut engine = Self::write_new(home, vault, keys, passphrase)?;
         engine.add_storage(storage)?;
@@ -265,14 +318,126 @@ impl Engine {
             &engine.vault.vault_id,
             &engine.vault.device_id,
         )?;
-        let rec = engine.own_record();
-        engine.devices.devices.insert(rec.device_id.clone(), rec);
-        engine.save_devices()?;
+        if !engine.vault.member {
+            let rec = engine.own_record();
+            engine.devices.devices.insert(rec.device_id.clone(), rec);
+            engine.save_devices()?;
+            engine.pending.push(Event::DeviceEnrolled {
+                name: engine.vault.device_name.clone(),
+            });
+            engine.commit_batch()?;
+        }
+        Ok(engine)
+    }
+
+    /// Become a member of one shared folder of another user's vault (F-047).
+    /// This device gets the folder key only: it can read and write that folder
+    /// through the shared storage, nothing else of the vault.
+    pub fn accept_share(
+        home: &Path,
+        device_name: &str,
+        passphrase: &str,
+        token: &ShareToken,
+        storage: StorageSpec,
+    ) -> Result<Engine> {
+        if home.join("vault.json").exists() {
+            bail!("{} already holds a vault", home.display());
+        }
+        let backend = storage.open()?;
+        let meta: VaultMeta = serde_json::from_slice(
+            &backend
+                .get(VaultMeta::STORAGE_KEY)?
+                .ok_or_else(|| anyhow!("storage {} holds no vault", storage.name()))?,
+        )?;
+        if meta.vault_id != token.vault_id {
+            bail!(
+                "the storage holds vault {} but the token is for {}",
+                meta.vault_id,
+                token.vault_id
+            );
+        }
+        fs::create_dir_all(home)?;
+        // The "master" of a member is a local random root used only for the
+        // local keyring; it never leaves the device and opens nothing shared.
+        let keys = Keys {
+            master: SecretKey::random(),
+            signer: crypto::SigningKey::generate(),
+        };
+        let device_id = ledger::device_id_for(&keys.signer.public());
+        let vault = LocalVault {
+            format_version: crate::FORMAT_VERSION,
+            vault_id: meta.vault_id.clone(),
+            device_id: device_id.clone(),
+            device_name: device_name.to_string(),
+            created_utc: meta.created_utc,
+            member: true,
+        };
+        let mut engine = Self::write_new(home, vault, keys, passphrase)?;
+        let rec = FolderRecord {
+            folder_id: token.folder_id.clone(),
+            name: token.name.clone(),
+            key_hex: token.key_hex.clone(),
+            created_by: device_id,
+            created_utc: util::now_utc(),
+            shared: true,
+        };
+        engine.keyring.folders.insert(rec.folder_id.clone(), rec);
+        engine.keyring.save(
+            home,
+            &engine.keys,
+            &engine.vault.vault_id,
+            &engine.vault.device_id,
+        )?;
+        engine.add_storage(storage)?;
         engine.pending.push(Event::DeviceEnrolled {
             name: engine.vault.device_name.clone(),
         });
         engine.commit_batch()?;
+        engine.pull_registry()?;
         Ok(engine)
+    }
+
+    /// Owner: share a folder with another user. The token carries the folder key.
+    pub fn share_create(&mut self, folder: &str) -> Result<ShareToken> {
+        if self.vault.member {
+            bail!("a member device cannot share folders further");
+        }
+        let rec = self
+            .keyring
+            .find(folder)
+            .cloned()
+            .ok_or_else(|| anyhow!("unknown folder {folder}"))?;
+        if let Some(r) = self.keyring.folders.get_mut(&rec.folder_id) {
+            r.shared = true;
+        }
+        self.keyring.save(
+            &self.home,
+            &self.keys,
+            &self.vault.vault_id,
+            &self.vault.device_id,
+        )?;
+        self.publish_registry()?;
+        Ok(rec.share_token(&self.vault.vault_id))
+    }
+
+    pub fn is_member(&self) -> bool {
+        self.vault.member
+    }
+
+    /// Which key opens a ledger batch with this key id, on this device.
+    fn key_for_id(&self, id: &str) -> Option<SecretKey> {
+        match id {
+            KEY_LEDGER if !self.vault.member => Some(self.keys.ledger_key()),
+            KEY_REPLICA if !self.vault.member => Some(replica::replica_key(&self.keys.master)),
+            other => {
+                let fid = other.strip_prefix("share:")?;
+                let rec = self.keyring.folders.get(&FolderId::from_hex(fid).ok()?)?;
+                Some(vault::share_ledger_key(
+                    &rec.folder_key().ok()?,
+                    &rec.folder_id,
+                ))
+            }
+        }
     }
 
     /// Unlock an existing device directory.
@@ -327,7 +492,13 @@ impl Engine {
 
     fn key_directory(&self) -> Result<KeyDirectory> {
         let mut dir = KeyDirectory::new();
-        for (id, rec) in &self.devices.devices {
+        for (id, rec) in self
+            .devices
+            .devices
+            .iter()
+            .chain(self.devices.replicas.iter())
+            .chain(self.devices.members.iter())
+        {
             dir.insert(id.clone(), rec.pubkey()?);
         }
         dir.insert(self.vault.device_id.clone(), self.keys.signer.public());
@@ -391,6 +562,9 @@ impl Engine {
 
     /// Create a folder in the vault and mount it at `path` on this device.
     pub fn add_folder(&mut self, name: &str, path: &Path) -> Result<FolderId> {
+        if self.vault.member {
+            bail!("this device is a member of a shared folder only; it cannot create folders in the owner's vault");
+        }
         if self.keyring.folders.values().any(|f| f.name == name) {
             bail!("a folder named {name} already exists in the vault");
         }
@@ -401,6 +575,7 @@ impl Engine {
             key_hex: SecretKey::random().to_hex(),
             created_by: self.vault.device_id.clone(),
             created_utc: util::now_utc(),
+            shared: false,
         };
         let id = rec.folder_id.clone();
         self.keyring.folders.insert(id.clone(), rec);
@@ -413,6 +588,7 @@ impl Engine {
         self.config.folders.push(FolderMount {
             folder_id: id.clone(),
             path: path.canonicalize()?,
+            selective: false,
         });
         self.config.save(&self.home)?;
         self.pending.push(Event::FolderAdded { folder: id.clone() });
@@ -422,7 +598,12 @@ impl Engine {
     }
 
     /// Mount a folder that another device created (known from its record).
-    pub fn attach_folder(&mut self, name_or_id: &str, path: &Path) -> Result<FolderId> {
+    pub fn attach_folder(
+        &mut self,
+        name_or_id: &str,
+        path: &Path,
+        selective: bool,
+    ) -> Result<FolderId> {
         let rec = self
             .keyring
             .find(name_or_id)
@@ -440,6 +621,7 @@ impl Engine {
         self.config.folders.push(FolderMount {
             folder_id: rec.folder_id.clone(),
             path: path.canonicalize()?,
+            selective,
         });
         self.config.save(&self.home)?;
         Ok(rec.folder_id)
@@ -460,6 +642,27 @@ impl Engine {
                 (r.clone(), mount)
             })
             .collect()
+    }
+
+    fn mount_is_selective(&self, folder: &FolderId) -> bool {
+        self.config
+            .folders
+            .iter()
+            .any(|m| &m.folder_id == folder && m.selective)
+    }
+
+    /// Switch selective sync on or off for an attached folder.
+    pub fn set_selective(&mut self, name_or_id: &str, selective: bool) -> Result<()> {
+        let (rec, _) = self.resolve_folder(name_or_id)?;
+        for m in self
+            .config
+            .folders
+            .iter_mut()
+            .filter(|m| m.folder_id == rec.folder_id)
+        {
+            m.selective = selective;
+        }
+        self.config.save(&self.home)
     }
 
     fn resolve_folder(&self, name_or_id: &str) -> Result<(FolderRecord, PathBuf)> {
@@ -496,19 +699,30 @@ impl Engine {
         let reg_key = self.keys.registry_key();
         let fr_key = self.keys.folder_record_key();
         for (_, backend) in self.open_storages(true)? {
-            backend.put_if_absent(
-                &DeviceRecord::storage_key(&rec.device_id),
-                &rec.seal(&self.vault.vault_id, &reg_key)?,
-            )?;
-            for f in self
-                .keyring
-                .folders
-                .values()
-                .filter(|f| f.created_by == self.vault.device_id)
-            {
+            if !self.vault.member {
                 backend.put_if_absent(
-                    &FolderRecord::storage_key(&f.created_by, &f.folder_id),
-                    &f.seal(&self.vault.vault_id, &fr_key)?,
+                    &DeviceRecord::storage_key(&rec.device_id),
+                    &rec.seal(&self.vault.vault_id, &reg_key)?,
+                )?;
+                for f in self
+                    .keyring
+                    .folders
+                    .values()
+                    .filter(|f| f.created_by == self.vault.device_id && !self.vault.member)
+                {
+                    backend.put_if_absent(
+                        &FolderRecord::storage_key(&f.created_by, &f.folder_id),
+                        &f.seal(&self.vault.vault_id, &fr_key)?,
+                    )?;
+                }
+            }
+            // Shared folders: every participant (owner devices and members)
+            // publishes its record under the folder-derived registry key.
+            for f in self.keyring.folders.values().filter(|f| f.shared) {
+                let k = vault::share_registry_key(&f.folder_key()?, &f.folder_id);
+                backend.put_if_absent(
+                    &vault::share_record_key(&f.folder_id, &rec.device_id),
+                    &rec.seal(&self.vault.vault_id, &k)?,
                 )?;
             }
         }
@@ -532,10 +746,36 @@ impl Engine {
                 if self.devices.devices.contains_key(&id) {
                     continue;
                 }
+                if self.vault.member {
+                    continue;
+                }
                 if let Some(blob) = backend.get(&key)? {
-                    let rec = DeviceRecord::open(&blob, &self.vault.vault_id, &id, &reg_key)?;
-                    self.devices.devices.insert(id, rec);
-                    changed_devices = true;
+                    if let Ok(rec) = DeviceRecord::open(&blob, &self.vault.vault_id, &id, &reg_key)
+                    {
+                        self.devices.devices.insert(id, rec);
+                        changed_devices = true;
+                    }
+                }
+            }
+            let replica_key = replica::replica_key(&self.keys.master);
+            for key in backend.list(REPLICA_PREFIX)? {
+                let Some(id) = key
+                    .strip_prefix(REPLICA_PREFIX)
+                    .and_then(|s| s.strip_suffix(".enc"))
+                else {
+                    continue;
+                };
+                let id = DeviceId::from_hex(id)?;
+                if self.devices.replicas.contains_key(&id) {
+                    continue;
+                }
+                if let Some(blob) = backend.get(&key)? {
+                    if let Ok(rec) =
+                        DeviceRecord::open(&blob, &self.vault.vault_id, &id, &replica_key)
+                    {
+                        self.devices.replicas.insert(id, rec);
+                        changed_devices = true;
+                    }
                 }
             }
             for key in backend.list(FolderRecord::PREFIX)? {
@@ -552,10 +792,44 @@ impl Engine {
                 if self.keyring.folders.contains_key(&fid) {
                     continue;
                 }
+                if self.vault.member {
+                    continue;
+                }
                 if let Some(blob) = backend.get(&key)? {
-                    let rec = FolderRecord::open(&blob, &self.vault.vault_id, &dev, &fid, &fr_key)?;
-                    self.keyring.folders.insert(fid, rec);
-                    changed_folders = true;
+                    if let Ok(rec) =
+                        FolderRecord::open(&blob, &self.vault.vault_id, &dev, &fid, &fr_key)
+                    {
+                        self.keyring.folders.insert(fid, rec);
+                        changed_folders = true;
+                    }
+                }
+            }
+        }
+        // Member records of shared folders, readable by every holder of the folder key.
+        for (_, backend) in self.open_storages(false)? {
+            for f in self.keyring.folders.values().filter(|f| f.shared) {
+                let k = vault::share_registry_key(&f.folder_key()?, &f.folder_id);
+                let prefix = format!("{SHARE_PREFIX}{}/", f.folder_id);
+                for key in backend.list(&prefix)? {
+                    let Some(id) = key
+                        .strip_prefix(&prefix)
+                        .and_then(|s| s.strip_suffix(".enc"))
+                    else {
+                        continue;
+                    };
+                    let id = DeviceId::from_hex(id)?;
+                    if id == self.vault.device_id
+                        || self.devices.members.contains_key(&id)
+                        || self.devices.devices.contains_key(&id)
+                    {
+                        continue;
+                    }
+                    if let Some(blob) = backend.get(&key)? {
+                        if let Ok(rec) = DeviceRecord::open(&blob, &self.vault.vault_id, &id, &k) {
+                            self.devices.members.insert(id, rec);
+                            changed_devices = true;
+                        }
+                    }
                 }
             }
         }
@@ -581,16 +855,58 @@ impl Engine {
         }
         let lamport = self.tick()?;
         let events = std::mem::take(&mut self.pending);
-        let ledger_key = self.keys.ledger_key();
-        let signed = self.ledger.append_own(
-            &self.vault.device_id,
-            events,
-            lamport,
-            &ledger_key,
-            &self.keys.signer,
-        )?;
+        if !self.vault.member {
+            let ledger_key = self.keys.ledger_key();
+            let signed = self.ledger.append_own(
+                &self.vault.device_id,
+                events,
+                lamport,
+                &ledger_key,
+                &self.keys.signer,
+            )?;
+            self.push_own_batches()?;
+            return Ok(Some(signed.seq));
+        }
+        // A member has no vault ledger key: seal one batch per shared folder
+        // under that folder's share key, so the owner and other members can read it.
+        let mut by_folder: BTreeMap<FolderId, Vec<Event>> = BTreeMap::new();
+        let all: Vec<FolderId> = self.keyring.folders.keys().cloned().collect();
+        for ev in events {
+            let folder = match &ev {
+                Event::ChunkStored { folder, .. }
+                | Event::ChunkVerified { folder, .. }
+                | Event::ChunkOnDevice { folder, .. }
+                | Event::ManifestPublished { folder, .. }
+                | Event::FolderAdded { folder } => Some(folder.clone()),
+                Event::DeviceEnrolled { .. } => None,
+            };
+            match folder {
+                Some(f) => by_folder.entry(f).or_default().push(ev),
+                None => {
+                    for f in &all {
+                        by_folder.entry(f.clone()).or_default().push(ev.clone());
+                    }
+                }
+            }
+        }
+        let mut last = None;
+        for (fid, evs) in by_folder {
+            let Some(rec) = self.keyring.folders.get(&fid) else {
+                continue;
+            };
+            let key = vault::share_ledger_key(&rec.folder_key()?, &fid);
+            let signed = self.ledger.append_own_with(
+                &self.vault.device_id,
+                evs,
+                lamport,
+                &key,
+                &vault::share_key_id(&fid),
+                &self.keys.signer,
+            )?;
+            last = Some(signed.seq);
+        }
         self.push_own_batches()?;
-        Ok(Some(signed.seq))
+        Ok(last)
     }
 
     /// Push every own batch that a storage does not have yet; detect forks.
@@ -633,7 +949,6 @@ impl Engine {
     fn pull_ledger(&mut self) -> Result<Vec<DeviceId>> {
         self.pull_registry()?;
         let dir = self.key_directory()?;
-        let ledger_key = self.keys.ledger_key();
         let me = self.vault.device_id.clone();
         let mut forks = BTreeSet::new();
         for (_, backend) in self.open_storages(false)? {
@@ -660,14 +975,17 @@ impl Engine {
                 };
                 let signed: SignedBatch = serde_json::from_slice(&blob)?;
                 let Some(pk) = dir.get(&dev) else { continue };
+                let Some(key) = self.key_for_id(&signed.key_id) else {
+                    continue;
+                };
                 if dev == me && seq > self.ledger.head(&me).seq {
                     // Another copy of this device identity published ahead of us.
                     forks.insert(me.clone());
-                    let _ = self.ledger.ingest(signed, pk, &ledger_key);
+                    let _ = self.ledger.ingest(signed, pk, &key);
                     self.mark_forked(&me)?;
                     continue;
                 }
-                match self.ledger.ingest(signed, pk, &ledger_key)? {
+                match self.ledger.ingest(signed, pk, &key)? {
                     Ingest::Fork => {
                         forks.insert(dev.clone());
                     }
@@ -675,7 +993,7 @@ impl Engine {
                 }
             }
         }
-        let view = self.ledger.view(&ledger_key)?;
+        let view = self.view()?;
         self.observe_clock(view.max_lamport)?;
         Ok(forks.into_iter().collect())
     }
@@ -688,7 +1006,16 @@ impl Engine {
     }
 
     pub fn view(&self) -> Result<LedgerView> {
-        self.ledger.view(&self.keys.ledger_key())
+        self.ledger.view_with(|id| self.key_for_id(id))
+    }
+
+    /// Token for an untrusted replica device (F-045): it can store and verify
+    /// this vault's encrypted objects but cannot open anything.
+    pub fn replica_token(&self) -> Result<ReplicaToken> {
+        if self.vault.member {
+            bail!("a member device cannot issue replica tokens");
+        }
+        Ok(replica::token_for(&self.keys.master, &self.vault.vault_id))
     }
 
     // ----- scanning ---------------------------------------------------------
@@ -704,6 +1031,7 @@ impl Engine {
         let fk = rec.keys()?;
         let me = self.vault.device_id.clone();
         let mut seen = BTreeSet::new();
+        let mut placeholders: BTreeSet<String> = BTreeSet::new();
         let mut scanned = 0u64;
         let mut changed = 0u64;
         let mut new_index = BTreeMap::new();
@@ -722,6 +1050,10 @@ impl Engine {
             let Some(path) = util::manifest_path(rel) else {
                 continue;
             };
+            if let Some(real) = path.strip_suffix(PLACEHOLDER_SUFFIX) {
+                placeholders.insert(real.to_string());
+                continue;
+            }
             let md = entry.metadata()?;
             let size = md.len();
             let mtime = md
@@ -812,7 +1144,7 @@ impl Engine {
         let gone: Vec<String> = state
             .files
             .iter()
-            .filter(|(p, f)| !f.deleted && !seen.contains(*p))
+            .filter(|(p, f)| !f.deleted && !seen.contains(*p) && !placeholders.contains(*p))
             .map(|(p, _)| p.clone())
             .collect();
         for path in gone {
@@ -856,7 +1188,9 @@ impl Engine {
         report.files_scanned = scanned;
         report.files_changed = changed;
         self.upload_missing(&rec, &root, &state, &mut report)?;
+        report.thumbnails = self.make_thumbnails(&rec, &root, &mut state)?;
         report.manifest_seq = self.publish_manifest(&rec, &mut state)?;
+        self.ensure_manifest_everywhere(&rec, &state)?;
         report.batch_seq = self.commit_batch()?;
         self.save_state(&rec.folder_id, &state)?;
         Ok(report)
@@ -880,8 +1214,12 @@ impl Engine {
         let view = self.view()?;
         let fk = rec.keys()?;
         let folder_id = rec.folder_id.clone();
+        let me = self.vault.device_id.clone();
         let missing_on = |chunk: &ChunkId| -> Vec<String> {
             let known = view.locate(&folder_id, chunk);
+            let held_elsewhere = known
+                .map(|r| r.devices.iter().any(|d| d != &me))
+                .unwrap_or(false);
             storages
                 .iter()
                 .filter(|(spec, _)| {
@@ -889,6 +1227,8 @@ impl Engine {
                         .map(|r| r.storages.contains_key(spec.name()))
                         .unwrap_or(false)
                 })
+                // A carrier only takes what no other device has yet (F-048).
+                .filter(|(spec, _)| !(spec.is_carrier() && held_elsewhere))
                 .map(|(spec, _)| spec.name().to_string())
                 .collect()
         };
@@ -940,6 +1280,124 @@ impl Engine {
                         size: ct.len() as u64,
                     });
                 }
+            }
+        }
+        Ok(())
+    }
+
+    /// Encrypted thumbnails for image and video files that have none yet (F-046).
+    fn make_thumbnails(
+        &mut self,
+        rec: &FolderRecord,
+        root: &Path,
+        state: &mut FolderState,
+    ) -> Result<u64> {
+        let candidates: Vec<(String, String)> = state
+            .files
+            .values()
+            .filter(|f| {
+                !f.deleted
+                    && (thumbs::is_image(&f.path) || thumbs::is_video(&f.path))
+                    && !state.thumbs_done.contains(&f.content_hash)
+            })
+            .map(|f| (f.path.clone(), f.content_hash.clone()))
+            .collect();
+        if candidates.is_empty() {
+            return Ok(0);
+        }
+        let storages: Vec<(StorageSpec, Box<dyn Storage>)> = self
+            .open_storages(false)?
+            .into_iter()
+            .filter(|(s, _)| !s.is_carrier())
+            .collect();
+        let meta = rec.keys()?.meta;
+        let mut made = 0u64;
+        for (path, hash) in candidates {
+            let key = thumbs::storage_key(&rec.folder_id, &hash);
+            if storages
+                .iter()
+                .any(|(_, b)| b.exists(&key).unwrap_or(false))
+            {
+                state.thumbs_done.insert(hash);
+                continue;
+            }
+            let disk = root.join(&path);
+            if !disk.exists() {
+                continue;
+            }
+            let Some(bytes) = thumbs::make(&disk, &path) else {
+                state.thumbs_done.insert(hash); // cannot make one; do not retry every time
+                continue;
+            };
+            let blob = thumbs::seal(&bytes, &self.vault.vault_id, &rec.folder_id, &hash, &meta)?;
+            for (_, backend) in &storages {
+                backend.put_if_absent(&key, &blob)?;
+            }
+            state.thumbs_done.insert(hash);
+            made += 1;
+        }
+        Ok(made)
+    }
+
+    /// Decrypted thumbnail of a file, fetched from the first storage that has it.
+    pub fn thumbnail(&self, folder: &str, path: &str) -> Result<Option<Vec<u8>>> {
+        let (rec, _) = self.resolve_folder(folder)?;
+        let state = self.load_state(&rec.folder_id)?;
+        let Some(file) = state.files.get(path) else {
+            return Ok(None);
+        };
+        if file.deleted || file.content_hash.is_empty() {
+            return Ok(None);
+        }
+        let key = thumbs::storage_key(&rec.folder_id, &file.content_hash);
+        let meta = rec.keys()?.meta;
+        for (_, backend) in self.open_storages(false)? {
+            if let Some(blob) = backend.get(&key)? {
+                return Ok(Some(thumbs::open(
+                    &blob,
+                    &self.vault.vault_id,
+                    &rec.folder_id,
+                    &file.content_hash,
+                    &meta,
+                )?));
+            }
+        }
+        Ok(None)
+    }
+
+    /// Storages added after a manifest was published get the latest manifest.
+    fn ensure_manifest_everywhere(
+        &mut self,
+        rec: &FolderRecord,
+        state: &FolderState,
+    ) -> Result<()> {
+        if state.published_seq == 0 {
+            return Ok(());
+        }
+        let key = Manifest::storage_key(&rec.folder_id, &self.vault.device_id, state.published_seq);
+        let storages = self.open_storages(true)?;
+        let mut blob: Option<Vec<u8>> = None;
+        for (_, backend) in &storages {
+            if backend.exists(&key)? {
+                if blob.is_none() {
+                    blob = backend.get(&key)?;
+                }
+                continue;
+            }
+            if blob.is_none() {
+                let m = Manifest {
+                    format_version: crate::FORMAT_VERSION,
+                    folder: rec.folder_id.clone(),
+                    device: self.vault.device_id.clone(),
+                    seq: state.published_seq,
+                    lamport: self.clock.lamport,
+                    created_utc: util::now_utc(),
+                    files: state.files.clone(),
+                };
+                blob = Some(m.seal(&self.vault.vault_id, &rec.keys()?.meta)?);
+            }
+            if let Some(b) = &blob {
+                backend.put_if_absent(&key, b)?;
             }
         }
         Ok(())
@@ -1127,7 +1585,38 @@ impl Engine {
         }
         self.commit_batch()?;
         self.save_state(&rec.folder_id, &state)?;
+        self.prune_carriers(&rec)?;
         Ok(report)
+    }
+
+    /// Remove from carrier storages the objects that another device already
+    /// holds as well as this one: the media has done its job for them (F-048).
+    fn prune_carriers(&mut self, rec: &FolderRecord) -> Result<()> {
+        let carriers: Vec<(StorageSpec, Box<dyn Storage>)> = self
+            .open_storages(true)?
+            .into_iter()
+            .filter(|(s, _)| s.is_carrier())
+            .collect();
+        if carriers.is_empty() {
+            return Ok(());
+        }
+        let view = self.view()?;
+        let me = self.vault.device_id.clone();
+        for ((folder, _chunk), r) in view.chunks.iter() {
+            if folder != &rec.folder_id {
+                continue;
+            }
+            let held_by_other = r.devices.iter().any(|d| d != &me);
+            if !(held_by_other && r.devices.contains(&me)) {
+                continue;
+            }
+            for (spec, backend) in &carriers {
+                if r.storages.contains_key(spec.name()) {
+                    backend.delete(&chunk_storage_key(&r.object))?;
+                }
+            }
+        }
+        Ok(())
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1143,6 +1632,7 @@ impl Engine {
     ) -> Result<()> {
         let disk = root.join(&remote.path);
         if remote.deleted {
+            let _ = fs::remove_file(placeholder_path(&disk));
             if disk.exists() {
                 let trash = self
                     .home
@@ -1161,6 +1651,15 @@ impl Engine {
             }
             state.local_index.remove(&remote.path);
             state.files.insert(remote.path.clone(), remote);
+            return Ok(());
+        }
+        let selective = self.mount_is_selective(&rec.folder_id);
+        if selective && !state.pinned.contains(&remote.path) && !disk.exists() {
+            // Selective sync: show the file as a placeholder; fetch on demand.
+            Self::write_placeholder(&disk, &remote)?;
+            state.local_index.remove(&remote.path);
+            state.files.insert(remote.path.clone(), remote);
+            report.files_updated += 1;
             return Ok(());
         }
         match self.download_to(rec, fk, &disk, &remote, storages, report) {
@@ -1259,6 +1758,130 @@ impl Engine {
         Ok(())
     }
 
+    fn write_placeholder(disk: &Path, file: &FileState) -> Result<()> {
+        if let Some(parent) = disk.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        let info = serde_json::json!({ "varsto": "placeholder", "size": file.size, "mtime_ns": file.mtime, "hint": "run `varsto folder fetch` or use the app to download this file" });
+        util::write_atomic(&placeholder_path(disk), &serde_json::to_vec(&info)?)
+    }
+
+    /// Download a placeholder file of a selective folder and keep it here.
+    pub fn fetch_file(&mut self, folder: &str, path: &str) -> Result<PullReport> {
+        let (rec, root) = self.resolve_folder(folder)?;
+        let mut state = self.load_state(&rec.folder_id)?;
+        let file = state
+            .files
+            .get(path)
+            .cloned()
+            .ok_or_else(|| anyhow!("unknown file {path}"))?;
+        if file.deleted {
+            bail!("{path} is deleted");
+        }
+        let fk = rec.keys()?;
+        let storages = self.open_storages(false)?;
+        let mut report = PullReport {
+            folder: rec.name.clone(),
+            ..Default::default()
+        };
+        let disk = root.join(path);
+        self.download_to(&rec, &fk, &disk, &file, &storages, &mut report)?;
+        let _ = fs::remove_file(placeholder_path(&disk));
+        let md = fs::metadata(&disk)?;
+        let mtime = md
+            .modified()
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_nanos() as i64)
+            .unwrap_or(0);
+        state.local_index.insert(
+            path.to_string(),
+            LocalIndexEntry {
+                size: md.len(),
+                mtime,
+                content_hash: file.content_hash.clone(),
+            },
+        );
+        state.pinned.insert(path.to_string());
+        report.files_updated += 1;
+        self.commit_batch()?;
+        self.save_state(&rec.folder_id, &state)?;
+        Ok(report)
+    }
+
+    /// Replace a local file of a selective folder with a placeholder. Refused
+    /// unless every chunk is on at least one storage that is not a carrier.
+    pub fn free_file(&mut self, folder: &str, path: &str) -> Result<()> {
+        let (rec, root) = self.resolve_folder(folder)?;
+        let mut state = self.load_state(&rec.folder_id)?;
+        let file = state
+            .files
+            .get(path)
+            .cloned()
+            .ok_or_else(|| anyhow!("unknown file {path}"))?;
+        let view = self.view()?;
+        let durable: HashSet<String> = self
+            .config
+            .storages
+            .iter()
+            .filter(|s| !s.is_carrier())
+            .map(|s| s.name().to_string())
+            .collect();
+        for c in &file.chunks {
+            let ok = view
+                .locate(&rec.folder_id, &c.chunk)
+                .map(|r| {
+                    r.storages
+                        .keys()
+                        .any(|k| durable.contains(k) || k.starts_with("replica:"))
+                })
+                .unwrap_or(false);
+            if !ok {
+                bail!("{path} is not fully stored elsewhere yet; sync first");
+            }
+        }
+        let disk = root.join(path);
+        if disk.exists() {
+            fs::remove_file(&disk)?;
+        }
+        Self::write_placeholder(&disk, &file)?;
+        state.local_index.remove(path);
+        state.pinned.remove(path);
+        self.save_state(&rec.folder_id, &state)?;
+        if !self.mount_is_selective(&rec.folder_id) {
+            self.set_selective(folder, true)?;
+        }
+        Ok(())
+    }
+
+    /// Files of a folder with their local state (for the interface and CLI).
+    pub fn list_files(&self, folder: &str) -> Result<Vec<FileEntry>> {
+        let (rec, root) = self.resolve_folder(folder)?;
+        let state = self.load_state(&rec.folder_id)?;
+        let selective = self.mount_is_selective(&rec.folder_id);
+        let mut out = Vec::new();
+        for f in state.files.values().filter(|f| !f.deleted) {
+            let disk = root.join(&f.path);
+            let state_str = if disk.exists() {
+                "local"
+            } else if placeholder_path(&disk).exists() {
+                "placeholder"
+            } else {
+                "missing"
+            };
+            out.push(FileEntry {
+                path: f.path.clone(),
+                size: f.size,
+                state: state_str.to_string(),
+                pinned: state.pinned.contains(&f.path),
+                content_hash: f.content_hash.clone(),
+                selective,
+                media: thumbs::is_image(&f.path) || thumbs::is_video(&f.path),
+            });
+        }
+        Ok(out)
+    }
+
     /// pull then push, for every attached folder (or one).
     pub fn sync(&mut self, folder: Option<&str>) -> Result<Vec<(PullReport, PushReport)>> {
         let names: Vec<String> = match folder {
@@ -1308,6 +1931,16 @@ impl Engine {
                     _ => without += 1,
                 }
             }
+            let placeholders_here = mount
+                .as_ref()
+                .map(|m| {
+                    state
+                        .files
+                        .values()
+                        .filter(|f| !f.deleted && placeholder_path(&m.join(&f.path)).exists())
+                        .count() as u64
+                })
+                .unwrap_or(0);
             folders.push(FolderStatus {
                 folder_id: rec.folder_id.to_string(),
                 name: rec.name.clone(),
@@ -1318,6 +1951,10 @@ impl Engine {
                 chunks_without_storage_copy: without,
                 chunks_verified_elsewhere: verified,
                 published_seq: state.published_seq,
+                shared: rec.shared,
+                selective: self.mount_is_selective(&rec.folder_id),
+                placeholders: placeholders_here,
+                pinned: state.pinned.len() as u64,
             });
         }
         Ok(StatusReport {
@@ -1331,6 +1968,19 @@ impl Engine {
                 .iter()
                 .map(|(k, v)| (k.to_string(), v.clone()))
                 .collect(),
+            replicas: self
+                .devices
+                .replicas
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.name.clone()))
+                .collect(),
+            members: self
+                .devices
+                .members
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.name.clone()))
+                .collect(),
+            member: self.vault.member,
             folders,
             ledger_batches: view.batches,
             lamport: self.clock.lamport,
@@ -1402,6 +2052,14 @@ impl Engine {
         for ((_, _), rec) in view.chunks.iter() {
             let key = chunk_storage_key(&rec.object);
             for storage in rec.storages.keys() {
+                if self
+                    .config
+                    .storages
+                    .iter()
+                    .any(|s| s.name() == storage && s.is_carrier())
+                {
+                    continue; // carriers are pruned on purpose
+                }
                 if let Some(l) = listings.get(storage) {
                     if !l.contains(&key) {
                         report.claims_without_object += 1;
@@ -1466,10 +2124,12 @@ impl Engine {
     }
 
     pub fn ledger_entries(&self) -> Result<Vec<LedgerEntry>> {
-        let key = self.keys.ledger_key();
         let mut out = Vec::new();
         for s in self.ledger.all()? {
-            let b = s.open(&key)?;
+            let Some(key) = self.key_for_id(&s.key_id) else {
+                continue;
+            };
+            let Ok(b) = s.open(&key) else { continue };
             out.push(LedgerEntry {
                 device: s.device.to_string(),
                 seq: s.seq,

@@ -63,6 +63,7 @@ fn lab() -> Lab {
             name: "box".into(),
             path: root.join("storage"),
             cold: false,
+            carrier: false,
         },
         a_home: root.join("a-home"),
         b_home: root.join("b-home"),
@@ -105,7 +106,7 @@ fn devices_never_online_together_converge() {
         1,
         "folder record must arrive through the storage"
     );
-    b.attach_folder("docs", &lab.b_dir).unwrap();
+    b.attach_folder("docs", &lab.b_dir, false).unwrap();
     let pull = b.pull("docs").unwrap();
     assert_eq!(pull.files_updated, 3);
     assert_eq!(pull.conflicts, 0);
@@ -178,7 +179,7 @@ fn concurrent_edits_keep_both_versions() {
     a.push("docs").unwrap();
     let mut b = Engine::join(&lab.b_home, "phone", PASS, &vault_key, lab.storage.clone()).unwrap();
     b.chunker = ChunkerParams::SMALL;
-    b.attach_folder("docs", &lab.b_dir).unwrap();
+    b.attach_folder("docs", &lab.b_dir, false).unwrap();
     b.pull("docs").unwrap();
 
     // Both edit offline.
@@ -264,4 +265,245 @@ fn copy_dir(from: &Path, to: &Path) {
             fs::copy(e.path(), &dest).unwrap();
         }
     }
+}
+
+#[test]
+fn untrusted_replica_holds_copies_without_keys() {
+    use varsto_core::replica::Replica;
+    let lab = lab();
+    let (mut a, _key) = Engine::init(&lab.a_home, "laptop", PASS).unwrap();
+    a.chunker = ChunkerParams::SMALL;
+    a.add_storage(lab.storage.clone()).unwrap();
+    a.add_folder("docs", &lab.a_dir).unwrap();
+    fs::write(lab.a_dir.join("secret.txt"), b"top secret content").unwrap();
+    fs::write(lab.a_dir.join("big.bin"), pseudo_random(60_000, 5)).unwrap();
+    a.push("docs").unwrap();
+    // User B gets only the replica token and the shared storage.
+    let token = a.replica_token().unwrap();
+    let b_home = lab.a_home.with_file_name("replica-home");
+    let b_disk = lab.a_home.with_file_name("replica-disk");
+    let target = StorageSpec::LocalDir {
+        name: "b-disk".into(),
+        path: b_disk.clone(),
+        cold: false,
+        carrier: false,
+    };
+    let mut r = Replica::init(&b_home, "userB", &token, lab.storage.clone(), target).unwrap();
+    let rep = r.run_once().unwrap();
+    assert!(rep.objects_copied > 3);
+    assert_eq!(rep.objects_corrupt, 0);
+    assert!(rep.chunks_verified >= 2);
+    // Nothing on B's disk or in B's home is plaintext.
+    for root in [&b_disk, &b_home] {
+        for e in walkdir::WalkDir::new(root)
+            .into_iter()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_type().is_file())
+        {
+            let data = fs::read(e.path()).unwrap();
+            assert!(
+                !data.windows(10).any(|w| w == b"top secret"),
+                "plaintext leaked into {}",
+                e.path().display()
+            );
+        }
+    }
+    // The owner's bookkeeping now counts B's verified copies.
+    a.pull("docs").unwrap();
+    let st = a.status().unwrap();
+    assert_eq!(st.replicas.len(), 1);
+    assert_eq!(
+        st.folders[0].chunks_verified_elsewhere,
+        st.folders[0].chunks
+    );
+    // A second run copies nothing new.
+    let rep2 = r.run_once().unwrap();
+    assert_eq!(rep2.objects_copied, 0);
+}
+
+#[test]
+fn shared_folder_between_two_users() {
+    let lab = lab();
+    let (mut a, _key) = Engine::init(&lab.a_home, "laptop", PASS).unwrap();
+    a.chunker = ChunkerParams::SMALL;
+    a.add_storage(lab.storage.clone()).unwrap();
+    a.add_folder("project", &lab.a_dir).unwrap();
+    a.add_folder("private", &lab.a_home.with_file_name("a-private"))
+        .unwrap();
+    fs::write(
+        lab.a_home.with_file_name("a-private").join("mine.txt"),
+        b"private to A",
+    )
+    .unwrap();
+    fs::write(lab.a_dir.join("plan.txt"), b"shared plan").unwrap();
+    a.sync(None).unwrap();
+    let token = a.share_create("project").unwrap();
+    // User C accepts with only the token and the shared storage.
+    let mut c =
+        Engine::accept_share(&lab.b_home, "c-laptop", PASS, &token, lab.storage.clone()).unwrap();
+    c.chunker = ChunkerParams::SMALL;
+    assert!(c.is_member());
+    assert_eq!(c.folders().len(), 1, "a member sees only the shared folder");
+    c.attach_folder("project", &lab.b_dir, false).unwrap();
+    let pull = c.pull("project").unwrap();
+    assert_eq!(pull.files_updated, 1);
+    assert_eq!(
+        fs::read(lab.b_dir.join("plan.txt")).unwrap(),
+        b"shared plan"
+    );
+    fs::write(lab.b_dir.join("notes.txt"), b"from C").unwrap();
+    c.push("project").unwrap();
+    a.pull("project").unwrap();
+    assert_eq!(fs::read(lab.a_dir.join("notes.txt")).unwrap(), b"from C");
+    assert_eq!(a.status().unwrap().members.len(), 1);
+    // C's bookkeeping converges with A's for the shared folder.
+    let cs = c.status().unwrap();
+    assert_eq!(cs.folders[0].chunks_without_storage_copy, 0);
+    // The member cannot create folders or issue replica tokens.
+    assert!(c.add_folder("x", &lab.b_home.with_file_name("x")).is_err());
+    assert!(c.replica_token().is_err());
+}
+
+#[test]
+fn carrier_disk_only_carries_what_is_missing_and_empties_itself() {
+    let lab = lab();
+    // Two devices with no shared hot storage, only a removable disk marked as carrier.
+    let usb = StorageSpec::LocalDir {
+        name: "usb".into(),
+        path: lab.a_home.with_file_name("usb"),
+        cold: false,
+        carrier: true,
+    };
+    let (mut a, key) = Engine::init(&lab.a_home, "home-pc", PASS).unwrap();
+    a.chunker = ChunkerParams::SMALL;
+    a.add_storage(usb.clone()).unwrap();
+    a.add_folder("docs", &lab.a_dir).unwrap();
+    fs::write(lab.a_dir.join("report.txt"), pseudo_random(50_000, 9)).unwrap();
+    a.push("docs").unwrap();
+    let usb_objects = |p: &Path| {
+        walkdir::WalkDir::new(p.join("chunks"))
+            .into_iter()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_type().is_file())
+            .count()
+    };
+    assert!(
+        usb_objects(&lab.a_home.with_file_name("usb")) > 0,
+        "the carrier holds the chunks in transit"
+    );
+    // The disk travels to the second device.
+    let mut b = Engine::join(&lab.b_home, "office-pc", PASS, &key, usb.clone()).unwrap();
+    b.chunker = ChunkerParams::SMALL;
+    b.attach_folder("docs", &lab.b_dir, false).unwrap();
+    b.sync(None).unwrap();
+    assert_eq!(tree(&lab.a_dir), tree(&lab.b_dir));
+    // Back at the first device: it learns that the office holds the chunks and empties the disk.
+    a.sync(None).unwrap();
+    assert_eq!(
+        usb_objects(&lab.a_home.with_file_name("usb")),
+        0,
+        "delivered chunks are pruned from the carrier"
+    );
+    // A new file at home gets onto the disk again; unchanged ones do not.
+    fs::write(lab.a_dir.join("new.txt"), b"new").unwrap();
+    let push = a.push("docs").unwrap();
+    assert_eq!(push.chunks_uploaded, 1);
+    assert!(
+        a.fsck(false).unwrap().claims_without_object == 0,
+        "pruned carrier objects are not reported as missing"
+    );
+}
+
+#[test]
+fn selective_sync_uses_placeholders() {
+    let lab = lab();
+    let (mut a, key) = Engine::init(&lab.a_home, "laptop", PASS).unwrap();
+    a.chunker = ChunkerParams::SMALL;
+    a.add_storage(lab.storage.clone()).unwrap();
+    a.add_folder("photos", &lab.a_dir).unwrap();
+    fs::write(lab.a_dir.join("one.jpg"), pseudo_random(30_000, 1)).unwrap();
+    fs::write(lab.a_dir.join("two.jpg"), pseudo_random(30_000, 2)).unwrap();
+    a.push("photos").unwrap();
+    let mut b = Engine::join(&lab.b_home, "phone", PASS, &key, lab.storage.clone()).unwrap();
+    b.chunker = ChunkerParams::SMALL;
+    b.attach_folder("photos", &lab.b_dir, true).unwrap();
+    b.pull("photos").unwrap();
+    assert!(lab.b_dir.join("one.jpg.varsto-placeholder").exists());
+    assert!(!lab.b_dir.join("one.jpg").exists());
+    let files = b.list_files("photos").unwrap();
+    assert!(files.iter().all(|f| f.state == "placeholder"));
+    // Fetch one file; the placeholder disappears and the file is kept.
+    b.fetch_file("photos", "one.jpg").unwrap();
+    assert_eq!(
+        fs::read(lab.b_dir.join("one.jpg")).unwrap(),
+        fs::read(lab.a_dir.join("one.jpg")).unwrap()
+    );
+    assert!(!lab.b_dir.join("one.jpg.varsto-placeholder").exists());
+    // A placeholder is not a deletion: syncing B must not delete anything at A.
+    b.sync(None).unwrap();
+    a.sync(None).unwrap();
+    assert!(lab.a_dir.join("two.jpg").exists());
+    // Updates to a fetched (pinned) file are downloaded; updates to placeholders stay placeholders.
+    fs::write(lab.a_dir.join("one.jpg"), pseudo_random(30_000, 11)).unwrap();
+    fs::write(lab.a_dir.join("two.jpg"), pseudo_random(30_000, 12)).unwrap();
+    a.push("photos").unwrap();
+    b.pull("photos").unwrap();
+    assert_eq!(
+        fs::read(lab.b_dir.join("one.jpg")).unwrap(),
+        fs::read(lab.a_dir.join("one.jpg")).unwrap()
+    );
+    assert!(!lab.b_dir.join("two.jpg").exists());
+    // Free up space: the file becomes a placeholder again.
+    b.free_file("photos", "one.jpg").unwrap();
+    assert!(!lab.b_dir.join("one.jpg").exists());
+    assert!(lab.b_dir.join("one.jpg.varsto-placeholder").exists());
+    let st = b.status().unwrap();
+    assert!(st.folders[0].selective);
+    assert_eq!(st.folders[0].placeholders, 2);
+}
+
+#[test]
+fn thumbnails_are_generated_once_and_shared_encrypted() {
+    let lab = lab();
+    let (mut a, key) = Engine::init(&lab.a_home, "laptop", PASS).unwrap();
+    a.chunker = ChunkerParams::SMALL;
+    a.add_storage(lab.storage.clone()).unwrap();
+    a.add_folder("photos", &lab.a_dir).unwrap();
+    let img = image::RgbImage::from_fn(640, 480, |x, y| {
+        image::Rgb([(x / 3) as u8, (y / 2) as u8, 120])
+    });
+    img.save(lab.a_dir.join("cat.png")).unwrap();
+    fs::write(lab.a_dir.join("notes.txt"), b"no thumbnail for text").unwrap();
+    let push = a.push("photos").unwrap();
+    assert_eq!(push.thumbnails, 1);
+    assert_eq!(a.push("photos").unwrap().thumbnails, 0, "generated once");
+    // Storage holds the thumbnail encrypted: not a JPEG in clear text.
+    let thumbs: Vec<_> = walkdir::WalkDir::new(lab.a_home.with_file_name("storage").join("thumbs"))
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().is_file())
+        .collect();
+    assert_eq!(thumbs.len(), 1);
+    let blob = fs::read(thumbs[0].path()).unwrap();
+    assert_ne!(
+        &blob[..2],
+        &[0xff, 0xd8],
+        "stored thumbnail must be ciphertext"
+    );
+    // Another device shows the preview without fetching the picture itself (selective sync).
+    let mut b = Engine::join(&lab.b_home, "phone", PASS, &key, lab.storage.clone()).unwrap();
+    b.chunker = ChunkerParams::SMALL;
+    b.attach_folder("photos", &lab.b_dir, true).unwrap();
+    b.pull("photos").unwrap();
+    assert!(!lab.b_dir.join("cat.png").exists());
+    let t = b
+        .thumbnail("photos", "cat.png")
+        .unwrap()
+        .expect("thumbnail available");
+    assert_eq!(&t[..2], &[0xff, 0xd8], "decrypted thumbnail is a JPEG");
+    let decoded = image::load_from_memory(&t).unwrap();
+    assert!(decoded.width() <= 256);
+    assert!(b.thumbnail("photos", "notes.txt").unwrap().is_none());
+    let files = b.list_files("photos").unwrap();
+    assert!(files.iter().any(|f| f.path == "cat.png" && f.media));
 }

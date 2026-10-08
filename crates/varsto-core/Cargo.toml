@@ -21,6 +21,7 @@ zeroize.workspace = true
 argon2.workspace = true
 hex.workspace = true
 walkdir.workspace = true
+image.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

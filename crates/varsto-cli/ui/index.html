@@ -34,6 +34,15 @@
         <label>Storage directory that holds the vault <input name="storage_path" placeholder="/Volumes/box" required></label>
         <button type="submit">Join</button>
       </form>
+      <form id="acceptshare" class="card">
+        <h2>Accept a folder shared with you</h2>
+        <label>Device name <input name="name" placeholder="my-laptop" required></label>
+        <label>Passphrase for this device <input name="passphrase" type="password" minlength="8" required></label>
+        <label>Share token <input name="token" required></label>
+        <label>Storage directory both of you can reach <input name="storage_path" required></label>
+        <button type="submit">Accept</button>
+        <p class="muted">You get the folder key only: this device can read and write that folder, nothing else of the other vault.</p>
+      </form>
     </div>
   </section>
 
@@ -47,6 +56,7 @@
 
   <section id="app" class="hidden">
     <div id="vaultkey" class="card warn hidden"></div>
+    <div id="service" class="card service"><span id="svc-text">Background service</span> <button id="pause" type="button" class="secondary">Pause</button> <button id="update" type="button" class="secondary">Check for updates</button></div>
     <div class="toolbar">
       <button id="sync" type="button">Sync all folders</button>
       <button id="fsck" type="button" class="secondary">Check storage (fsck)</button>
@@ -56,6 +66,7 @@
 
     <h2>Folders</h2>
     <table id="folders"><thead><tr><th>Folder</th><th>Path on this device</th><th>Files</th><th>Size</th><th>Chunks</th><th>Without storage copy</th><th>Verified elsewhere</th><th></th></tr></thead><tbody></tbody></table>
+    <div id="sharetoken" class="card warn hidden"></div>
 
     <div class="cols">
       <form id="addfolder" class="card">
@@ -68,10 +79,15 @@
         <h3>Attach a folder from another device</h3>
         <label>Folder name or id <input name="name_or_id" required></label>
         <label>Directory on this device <input name="path" required></label>
+        <label class="inline"><input name="selective" type="checkbox"> selective sync: files appear as placeholders until you fetch them</label>
         <button type="submit">Attach</button>
         <p class="muted">Folders created on other devices appear in the table after a sync.</p>
       </form>
     </div>
+
+    <h2>Files</h2>
+    <div class="row"><select id="filesfolder"></select><button id="filesload" type="button" class="secondary">Show files</button><label class="inline"><input id="selectivetoggle" type="checkbox"> selective sync for this folder</label></div>
+    <table id="files"><thead><tr><th>File</th><th>Size</th><th>State</th><th></th></tr></thead><tbody></tbody></table>
 
     <h2>Storages</h2>
     <ul id="storages"></ul>
@@ -80,11 +96,14 @@
       <label>Name <input name="name" placeholder="box" required></label>
       <label>Directory (disk, removable disk, network mount) <input name="path" required></label>
       <label class="inline"><input name="cold" type="checkbox"> cold storage: written, never read without confirmation</label>
+        <label class="inline"><input name="carrier" type="checkbox"> transferrer: removable media that carries only what other devices still lack, emptied once delivered</label>
       <button type="submit">Add</button>
     </form>
 
     <h2>Devices and ledger</h2>
     <p id="devices" class="muted"></p>
+    <p><button id="replicatoken" type="button" class="secondary">Replica token (untrusted backup device)</button></p>
+    <div id="replicaout" class="card warn hidden"></div>
     <details><summary>Ledger batches</summary><pre id="ledger"></pre></details>
     <details><summary>Duplicate files</summary><div class="row"><select id="dupefolder"></select><button id="dupes" type="button" class="secondary">Find duplicates</button></div><pre id="dupeout"></pre></details>
 

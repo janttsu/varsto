@@ -32,6 +32,7 @@
       $("who").textContent = "vault " + s.vault_id.slice(0, 8) + " · device " + s.device_name + " · " + s.ledger_batches + " ledger batches";
       var tb = $("folders").querySelector("tbody"); tb.innerHTML = "";
       var sel = $("dupefolder"); sel.innerHTML = "";
+      var fsel = $("filesfolder"); var prev = fsel.value; fsel.innerHTML = "";
       s.folders.forEach(function (f) {
         var tr = document.createElement("tr");
         function td(text, cls) { var d = document.createElement("td"); d.textContent = text; if (cls) { d.className = cls; } tr.appendChild(d); }
@@ -39,19 +40,47 @@
         td(f.chunks_without_storage_copy, f.chunks_without_storage_copy > 0 ? "bad" : ""); td(f.chunks_verified_elsewhere);
         var act = document.createElement("td");
         if (f.path) { var b = document.createElement("button"); b.className = "secondary"; b.textContent = "Sync"; b.onclick = function () { runSync(f.name); }; act.appendChild(b); }
+        if (!s.member) { var sh = document.createElement("button"); sh.className = "secondary"; sh.textContent = f.shared ? "Share token" : "Share…"; sh.onclick = function () {
+          if (!f.shared && !confirm("Share folder \"" + f.name + "\" with another Varsto user? Anyone holding the token can read and write it.")) { return; }
+          api("POST", "/api/share/create", { folder: f.name }).then(function (r) { $("sharetoken").textContent = "Share token for " + r.folder + " (send over a secure channel): " + r.token; $("sharetoken").classList.remove("hidden"); refreshStatus(); }).catch(function (e) { alert(e.message); });
+        }; act.appendChild(sh); }
         tr.appendChild(act); tb.appendChild(tr);
         var o = document.createElement("option"); o.value = f.name; o.textContent = f.name; sel.appendChild(o);
+        if (f.path) { var o2 = document.createElement("option"); o2.value = f.name; o2.textContent = f.name + (f.selective ? " (selective)" : ""); o2.dataset.selective = f.selective ? "1" : "0"; fsel.appendChild(o2); }
+      });
+      if (prev) { fsel.value = prev; }
+      $("selectivetoggle").checked = fsel.selectedOptions.length && fsel.selectedOptions[0].dataset.selective === "1";
+      (function () {
       });
       var ul = $("storages"); ul.innerHTML = "";
-      s.storages.forEach(function (st) { var li = document.createElement("li"); li.textContent = st.name + " (" + st.kind + ": " + st.path + (st.cold ? ", cold" : "") + ")"; ul.appendChild(li); });
+      s.storages.forEach(function (st) { var li = document.createElement("li"); li.textContent = st.name + " (" + st.kind + ": " + st.path + (st.cold ? ", cold" : "") + (st.carrier ? ", transferrer" : "") + ")"; ul.appendChild(li); });
       var names = Object.keys(s.devices).map(function (k) { return s.devices[k] + " (" + k.slice(0, 8) + ")"; });
-      $("devices").textContent = "Devices: " + (names.join(", ") || "none yet") + (s.forked_devices.length ? " · FORKED: " + s.forked_devices.join(", ") : "");
-      return api("GET", "/api/ledger").then(function (l) {
+      var reps = Object.keys(s.replicas || {}).map(function (k) { return s.replicas[k]; });
+      var mems = Object.keys(s.members || {}).map(function (k) { return s.members[k]; });
+      $("devices").textContent = (s.member ? "This device is a member of a shared folder. " : "") + "Devices: " + (names.join(", ") || "none yet") + (reps.length ? " · replicas: " + reps.join(", ") : "") + (mems.length ? " · members: " + mems.join(", ") : "") + (s.forked_devices.length ? " · FORKED: " + s.forked_devices.join(", ") : "");
+      $("replicatoken").classList.toggle("hidden", !!s.member);
+      return api("GET", "/api/service").then(function (sv) { renderService(sv); return api("GET", "/api/ledger"); }).then(function (l) {
         $("ledger").textContent = l.map(function (e) { return e.device.slice(0, 8) + " #" + e.seq + " lamport " + e.lamport + " events " + e.events; }).join("\n") || "(empty)";
       });
     }).catch(function (e) { log("error: " + e.message); });
   }
 
+  function fmtTime(t) { return t ? new Date(t * 1000).toLocaleTimeString() : "never"; }
+  function renderService(sv) {
+    var txt = sv.running ? (sv.paused ? "Background service paused" : "Background service running") + " · watching " + sv.watching + " folder(s) · last sync " + fmtTime(sv.last_sync_utc) + (sv.last_result ? " (" + sv.last_result + ")" : "") + (sv.last_error ? " · last error: " + sv.last_error : "") + " · next in " + (sv.next_sync_utc ? Math.max(0, Math.round(sv.next_sync_utc - Date.now() / 1000)) + " s" : "-") : "Background service not running";
+    $("svc-text").textContent = txt;
+    $("pause").textContent = sv.paused ? "Resume" : "Pause";
+    $("pause").dataset.paused = sv.paused ? "1" : "0";
+  }
+  $("pause").onclick = function () { api("POST", "/api/service/pause", { paused: $("pause").dataset.paused !== "1" }).then(renderService).catch(function (e) { log("error: " + e.message); }); };
+  $("update").onclick = function () {
+    busy(true); log("checking for updates");
+    api("GET", "/api/update/check").then(function (c) {
+      if (!c.available) { log("up to date: " + c.current + " (latest " + c.latest + ")"); busy(false); return; }
+      if (!confirm("Update " + c.current + " to " + c.latest + " now? The service restarts afterwards.")) { busy(false); return; }
+      return api("POST", "/api/update", {}).then(function (r) { log(r.message); if (r.updated) { log("the service is restarting; reopen Varsto in a few seconds"); } busy(false); });
+    }).catch(function (e) { log("update failed: " + e.message); busy(false); });
+  };
   function busy(on) { document.querySelectorAll("button").forEach(function (b) { b.disabled = on; }); }
   function runSync(folder) {
     busy(true); log("sync " + (folder || "all") + " started");
@@ -69,6 +98,28 @@
       log("fsck: " + r.chunks_referenced + " referenced, " + r.chunks_with_storage_copy + " with storage copy, " + r.chunks_verified_elsewhere + " verified elsewhere, " + r.chunks_claimed_only + " claimed only, missing " + r.chunks_missing.length + ", claims without object " + r.claims_without_object + ", unreferenced objects " + r.objects_unreferenced + ", verified now " + r.objects_verified_now + ", corrupt " + r.objects_corrupt.length + (r.forked_devices.length ? ", FORKED " + r.forked_devices.join(",") : ""));
     }).catch(function (e) { log("fsck failed: " + e.message); }).then(function () { busy(false); return refreshStatus(); });
   };
+  function loadFiles() {
+    var folder = $("filesfolder").value; if (!folder) { return; }
+    api("GET", "/api/files?folder=" + encodeURIComponent(folder)).then(function (rows) {
+      var tb = $("files").querySelector("tbody"); tb.innerHTML = "";
+      rows.forEach(function (f) {
+        var tr = document.createElement("tr");
+        function td(t) { var d = document.createElement("td"); d.textContent = t; tr.appendChild(d); }
+        var nameCell = document.createElement("td");
+        if (f.media) { var im = document.createElement("img"); im.className = "thumb"; im.alt = ""; im.loading = "lazy"; im.src = "/api/thumb?folder=" + encodeURIComponent(folder) + "&path=" + encodeURIComponent(f.path) + "&token=" + encodeURIComponent(token); im.onerror = function () { im.remove(); }; nameCell.appendChild(im); }
+        nameCell.appendChild(document.createTextNode(f.path)); tr.appendChild(nameCell);
+        td(fmtBytes(f.size)); td(f.state + (f.pinned ? ", kept here" : ""));
+        var act = document.createElement("td");
+        var b = document.createElement("button"); b.className = "secondary";
+        if (f.state === "placeholder" || f.state === "missing") { b.textContent = "Download"; b.onclick = function () { busy(true); api("POST", "/api/fetch", { folder: folder, path: f.path }).then(function () { log("fetched " + f.path); }).catch(function (e) { log("fetch failed: " + e.message); }).then(function () { busy(false); loadFiles(); }); }; }
+        else { b.textContent = "Free up space"; b.onclick = function () { api("POST", "/api/free", { folder: folder, path: f.path }).then(function () { log(f.path + " is now a placeholder"); }).catch(function (e) { log("free failed: " + e.message); }).then(function () { loadFiles(); refreshStatus(); }); }; }
+        act.appendChild(b); tr.appendChild(act); tb.appendChild(tr);
+      });
+    }).catch(function (e) { log("error: " + e.message); });
+  }
+  $("filesload").onclick = loadFiles;
+  $("filesfolder").onchange = function () { $("selectivetoggle").checked = $("filesfolder").selectedOptions.length && $("filesfolder").selectedOptions[0].dataset.selective === "1"; loadFiles(); };
+  $("selectivetoggle").onchange = function () { api("POST", "/api/selective", { folder: $("filesfolder").value, on: $("selectivetoggle").checked }).then(function () { log("selective sync " + ($("selectivetoggle").checked ? "on" : "off")); return refreshStatus(); }).catch(function (e) { log("error: " + e.message); }); };
   $("dupes").onclick = function () {
     api("GET", "/api/dupes?folder=" + encodeURIComponent($("dupefolder").value)).then(function (g) {
       $("dupeout").textContent = g.length ? g.map(function (x) { return fmtBytes(x.size) + ": " + x.paths.join(", "); }).join("\n") : "no duplicates";
@@ -85,6 +136,8 @@
     }).catch(function (e) { alert(e.message); });
   };
   $("join").onsubmit = function (ev) { ev.preventDefault(); busy(true); api("POST", "/api/join", formData(ev.target)).then(function () { ev.target.reset(); log("joined the vault; attach folders below"); return refreshState(); }).catch(function (e) { alert(e.message); }).then(function () { busy(false); }); };
+  $("replicatoken").onclick = function () { api("GET", "/api/replica/token").then(function (r) { $("replicaout").textContent = "Replica token (give to the device that will hold your encrypted copies without being able to open them): " + r.token; $("replicaout").classList.remove("hidden"); }).catch(function (e) { alert(e.message); }); };
+  $("acceptshare").onsubmit = function (ev) { ev.preventDefault(); busy(true); api("POST", "/api/share/accept", formData(ev.target)).then(function (r) { ev.target.reset(); log("accepted shared folder " + r.folder + "; attach it below"); return refreshState(); }).catch(function (e) { alert(e.message); }).then(function () { busy(false); }); };
   $("addfolder").onsubmit = function (ev) { ev.preventDefault(); api("POST", "/api/folder", formData(ev.target)).then(function () { ev.target.reset(); log("folder added"); return refreshStatus(); }).catch(function (e) { alert(e.message); }); };
   $("attachfolder").onsubmit = function (ev) { ev.preventDefault(); api("POST", "/api/folder/attach", formData(ev.target)).then(function () { ev.target.reset(); log("folder attached"); return refreshStatus(); }).catch(function (e) { alert(e.message); }); };
   $("addstorage").onsubmit = function (ev) { ev.preventDefault(); api("POST", "/api/storage", formData(ev.target)).then(function () { ev.target.reset(); log("storage added"); return refreshStatus(); }).catch(function (e) { alert(e.message); }); };

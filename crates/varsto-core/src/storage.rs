@@ -36,6 +36,11 @@ pub enum StorageSpec {
         path: PathBuf,
         #[serde(default)]
         cold: bool,
+        /// A "transferrer" (F-048): removable media that travels between devices.
+        /// It only receives objects that other devices still lack, and objects
+        /// are removed from it once another device holds them.
+        #[serde(default)]
+        carrier: bool,
     },
 }
 
@@ -48,6 +53,11 @@ impl StorageSpec {
     pub fn is_cold(&self) -> bool {
         match self {
             StorageSpec::LocalDir { cold, .. } => *cold,
+        }
+    }
+    pub fn is_carrier(&self) -> bool {
+        match self {
+            StorageSpec::LocalDir { carrier, .. } => *carrier,
         }
     }
     pub fn open(&self) -> Result<Box<dyn Storage>> {

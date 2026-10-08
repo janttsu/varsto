@@ -11,6 +11,10 @@ publish = false
 name = "varsto"
 path = "src/main.rs"
 
+[features]
+# Use FSEvents instead of kqueue for folder watching (native macOS builds).
+fsevents = ["notify/macos_fsevent"]
+
 [dependencies]
 varsto-core = { path = "../varsto-core" }
 anyhow.workspace = true
@@ -20,6 +24,16 @@ serde_json.workspace = true
 hex.workspace = true
 rand.workspace = true
 tiny_http.workspace = true
+notify.workspace = true
+sha2.workspace = true
+walkdir.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+ksni = { version = "0.3", features = ["blocking"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+tray-icon = "0.21"
+windows-sys = { version = "0.59", features = ["Win32_UI_WindowsAndMessaging", "Win32_Foundation"] }
 
 [dev-dependencies]
 tempfile.workspace = true

@@ -26,7 +26,13 @@ button:disabled { opacity:.5; cursor:wait; }
 .row { display:flex; gap:.6rem; align-items:center; margin:.5rem 0; }
 table { width:100%; border-collapse:collapse; font-size:.92rem; display:block; overflow-x:auto; }
 th, td { text-align:left; padding:.45rem .5rem; border-bottom:1px solid var(--border); vertical-align:top; }
+td { overflow-wrap:anywhere; }
+th, td:first-child { white-space:nowrap; }
+td:last-child { white-space:nowrap; }
 th { color:var(--muted); font-weight:600; }
 td.bad { color:#b42318; font-weight:600; }
 pre { background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:.75rem; font-size:.85rem; overflow:auto; max-height:22rem; white-space:pre-wrap; }
 ul#storages { padding-left:1.2rem; }
+.service { display:flex; gap:.6rem; align-items:center; flex-wrap:wrap; margin:.5rem 0 1rem; font-size:.92rem; }
+.service span { flex:1 1 20rem; }
+img.thumb { width:48px; height:48px; object-fit:cover; border-radius:6px; vertical-align:middle; margin-right:.5rem; border:1px solid var(--border); }

@@ -1,19 +1,19 @@
 // SPDX-License-Identifier: PolyForm-Shield-1.0.0
-//! `varsto desktop`: a local graphical interface served to the user's browser.
+//! Local control API and desktop interface, served by the background service.
 //!
-//! The server binds to 127.0.0.1 only, on a random port unless one is given,
-//! and every API call must carry a per-session token that is handed to the
-//! page once through the start URL. The `Host` header is checked against the
-//! bound address to defeat DNS rebinding. No request from another origin can
-//! read the responses (no CORS headers are ever sent). This is the first
-//! shape of the local control API of the plan; the real daemon API comes later.
+//! The server binds to 127.0.0.1 only. Every API call must carry a per-session
+//! token that is written to `service.json` in the device directory (mode 0600)
+//! and handed to the browser once through the start URL. The `Host` header is
+//! checked against the bound address to defeat DNS rebinding, and no CORS
+//! headers are ever sent. This is the first shape of the local control API of
+//! the plan (6.8, 6.32); the menu-bar app and the CLI are its clients.
 
+use crate::service::{self, ServiceState};
 use anyhow::{anyhow, Context, Result};
-use rand::RngCore;
 use serde_json::{json, Value};
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use tiny_http::{Header, Method, Request, Response, Server};
 use varsto_core::storage::StorageSpec;
 use varsto_core::Engine;
@@ -22,51 +22,37 @@ const INDEX_HTML: &str = include_str!("../ui/index.html");
 const APP_JS: &str = include_str!("../ui/app.js");
 const APP_CSS: &str = include_str!("../ui/app.css");
 
-struct State {
-    home: PathBuf,
-    engine: Option<Engine>,
-    token: String,
-    bound: String,
+pub struct State {
+    pub home: PathBuf,
+    pub engine: Option<Engine>,
+    pub token: String,
+    pub bound: String,
+    pub service: ServiceState,
 }
 
-pub fn run(home: PathBuf, port: u16, open_browser: bool, passphrase: Option<String>) -> Result<()> {
+pub type Shared = Arc<Mutex<State>>;
+
+/// Bind the server. Returns the server and the bound `host:port`.
+pub fn bind(port: u16) -> Result<(Server, String)> {
     let server = Server::http(("127.0.0.1", port))
         .map_err(|e| anyhow!("cannot listen on 127.0.0.1:{port}: {e}"))?;
     let addr = server
         .server_addr()
         .to_ip()
         .ok_or_else(|| anyhow!("no ip address"))?;
-    let bound = format!("127.0.0.1:{}", addr.port());
-    let mut token_bytes = [0u8; 32];
-    rand::rngs::OsRng.fill_bytes(&mut token_bytes);
-    let token = hex::encode(token_bytes);
-    let url = format!("http://{bound}/?token={token}");
-    let mut engine = None;
-    if let Some(p) = passphrase.as_deref() {
-        if home.join("vault.json").exists() {
-            engine = Some(Engine::open(&home, p)?);
-        }
-    }
-    let state = Mutex::new(State {
-        home,
-        engine,
-        token,
-        bound: bound.clone(),
-    });
-    println!("Varsto desktop: {url}");
-    println!("Only this computer can reach it. Press Ctrl-C to stop.");
-    if open_browser {
-        open_in_browser(&url);
-    }
+    Ok((server, format!("127.0.0.1:{}", addr.port())))
+}
+
+/// Serve requests until the server is unblocked. Blocks.
+pub fn serve_arc(server: Arc<Server>, state: Shared) {
     for request in server.incoming_requests() {
         if let Err(e) = handle(&state, request) {
             eprintln!("request failed: {e:#}");
         }
     }
-    Ok(())
 }
 
-fn open_in_browser(url: &str) {
+pub fn open_in_browser(url: &str) {
     #[cfg(target_os = "macos")]
     let cmd = std::process::Command::new("open").arg(url).spawn();
     #[cfg(target_os = "windows")]
@@ -76,7 +62,7 @@ fn open_in_browser(url: &str) {
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     let cmd = std::process::Command::new("xdg-open").arg(url).spawn();
     if cmd.is_err() {
-        eprintln!("could not open a browser; open the URL above by hand");
+        eprintln!("could not open a browser; open the URL by hand");
     }
 }
 
@@ -106,17 +92,16 @@ fn json_response(status: u16, value: &Value) -> Response<std::io::Cursor<Vec<u8>
         .with_header(header("Cache-Control", "no-store"))
 }
 
-fn handle(state: &Mutex<State>, mut request: Request) -> Result<()> {
+fn handle(state: &Shared, mut request: Request) -> Result<()> {
     let host_ok = {
         let st = state.lock().unwrap();
+        let port = st.bound.rsplit(':').next().unwrap_or("").to_string();
         request
             .headers()
             .iter()
             .find(|h| h.field.equiv("Host"))
             .map(|h| {
-                h.value.as_str() == st.bound
-                    || h.value.as_str()
-                        == format!("localhost:{}", st.bound.rsplit(':').next().unwrap_or(""))
+                h.value.as_str() == st.bound || h.value.as_str() == format!("localhost:{port}")
             })
             .unwrap_or(false)
     };
@@ -141,19 +126,42 @@ fn handle(state: &Mutex<State>, mut request: Request) -> Result<()> {
     if !path.starts_with("/api/") {
         return Ok(request.respond(Response::from_string("not found").with_status_code(404))?);
     }
-    // Token check for every API call.
     let token_ok = {
         let st = state.lock().unwrap();
-        request
+        let in_header = request
             .headers()
             .iter()
-            .any(|h| h.field.equiv("X-Varsto-Token") && h.value.as_str() == st.token)
+            .any(|h| h.field.equiv("X-Varsto-Token") && h.value.as_str() == st.token);
+        // Thumbnails are loaded by <img>, which cannot send a header; the
+        // session token may come in the query string for that one endpoint.
+        let in_query = path == "/api/thumb"
+            && query_param(&query, "token").as_deref() == Some(st.token.as_str());
+        in_header || in_query
     };
     if !token_ok {
         return Ok(request.respond(json_response(
             401,
             &json!({"error": "missing or wrong token; reopen the start URL"}),
         ))?);
+    }
+    if path == "/api/thumb" {
+        let (folder, file) = (query_param(&query, "folder"), query_param(&query, "path"));
+        let bytes = {
+            let st = state.lock().unwrap();
+            match (&st.engine, folder, file) {
+                (Some(e), Some(f), Some(p)) => e.thumbnail(&f, &p).unwrap_or(None),
+                _ => None,
+            }
+        };
+        match bytes {
+            Some(b) => request.respond(
+                Response::from_data(b)
+                    .with_header(header("Content-Type", "image/jpeg"))
+                    .with_header(header("Cache-Control", "private, max-age=3600")),
+            )?,
+            None => request.respond(Response::from_string("no thumbnail").with_status_code(404))?,
+        }
+        return Ok(());
     }
     let mut body = String::new();
     if *request.method() == Method::Post {
@@ -167,9 +175,15 @@ fn handle(state: &Mutex<State>, mut request: Request) -> Result<()> {
     } else {
         serde_json::from_str(&body).unwrap_or(json!({}))
     };
+    let method = request.method().clone();
+    if method == Method::Post && path == "/api/quit" {
+        request.respond(json_response(200, &json!({"ok": true})))?;
+        service::request_quit(state);
+        return Ok(());
+    }
     let result = {
         let mut st = state.lock().unwrap();
-        api(&mut st, request.method().clone(), &path, &query, &input)
+        api(&mut st, method, &path, &query, &input)
     };
     match result {
         Ok(v) => Ok(request.respond(json_response(200, &v))?),
@@ -196,23 +210,60 @@ fn query_param(query: &str, key: &str) -> Option<String> {
     query.split('&').find_map(|kv| {
         kv.split_once('=')
             .filter(|(k, _)| *k == key)
-            .map(|(_, v)| v.replace("%2F", "/").replace('+', " "))
+            .map(|(_, v)| percent_decode(v))
     })
 }
 
+fn percent_decode(v: &str) -> String {
+    let bytes = v.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            if let Ok(h) = u8::from_str_radix(&v[i + 1..i + 3], 16) {
+                out.push(h);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(if bytes[i] == b'+' { b' ' } else { bytes[i] });
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).to_string()
+}
+
 fn api(st: &mut State, method: Method, path: &str, query: &str, input: &Value) -> Result<Value> {
-    let method_for_unlocked = method.clone();
     let has_vault = st.home.join("vault.json").exists();
+    let method2 = method.clone();
     match (method, path) {
         (Method::Get, "/api/state") => Ok(json!({
             "home": st.home.display().to_string(),
             "has_vault": has_vault,
             "unlocked": st.engine.is_some(),
             "version": env!("CARGO_PKG_VERSION"),
+            "service": st.service.summary(),
         })),
+        (Method::Get, "/api/service") => Ok(st.service.summary()),
+        (Method::Get, "/api/update/check") => Ok(serde_json::to_value(crate::update::check()?)?),
+        (Method::Post, "/api/update") => {
+            let c = crate::update::check()?;
+            let message = crate::update::apply(&c)?;
+            if c.available {
+                st.service.restart_requested = true;
+            }
+            Ok(json!({"ok": true, "updated": c.available, "message": message}))
+        }
+        (Method::Post, "/api/service/pause") => {
+            st.service.paused = input
+                .get("paused")
+                .and_then(|b| b.as_bool())
+                .unwrap_or(true);
+            Ok(st.service.summary())
+        }
         (Method::Post, "/api/unlock") => {
             let e = Engine::open(&st.home, &s(input, "passphrase")?)?;
             st.engine = Some(e);
+            st.service.request_sync();
             Ok(json!({"ok": true}))
         }
         (Method::Post, "/api/lock") => {
@@ -224,11 +275,30 @@ fn api(st: &mut State, method: Method, path: &str, query: &str, input: &Value) -
             st.engine = Some(e);
             Ok(json!({"ok": true, "vault_key": key}))
         }
+        (Method::Post, "/api/share/accept") => {
+            let token = varsto_core::vault::ShareToken::decode(&s(input, "token")?)?;
+            let spec = StorageSpec::LocalDir {
+                name: opt(input, "storage_name").unwrap_or_else(|| "shared".into()),
+                path: PathBuf::from(s(input, "storage_path")?),
+                cold: false,
+                carrier: false,
+            };
+            let e = Engine::accept_share(
+                &st.home,
+                &s(input, "name")?,
+                &s(input, "passphrase")?,
+                &token,
+                spec,
+            )?;
+            st.engine = Some(e);
+            Ok(json!({"ok": true, "folder": token.name}))
+        }
         (Method::Post, "/api/join") => {
             let spec = StorageSpec::LocalDir {
                 name: opt(input, "storage_name").unwrap_or_else(|| "primary".into()),
                 path: PathBuf::from(s(input, "storage_path")?),
                 cold: false,
+                carrier: false,
             };
             let e = Engine::join(
                 &st.home,
@@ -241,17 +311,19 @@ fn api(st: &mut State, method: Method, path: &str, query: &str, input: &Value) -
             Ok(json!({"ok": true}))
         }
         _ => {
+            let service = &mut st.service;
             let engine = st
                 .engine
                 .as_mut()
                 .ok_or_else(|| anyhow!("vault is locked"))?;
-            api_unlocked(engine, method_for_unlocked, path, query, input)
+            api_unlocked(engine, service, method2, path, query, input)
         }
     }
 }
 
 fn api_unlocked(
     engine: &mut Engine,
+    service: &mut ServiceState,
     method: Method,
     path: &str,
     query: &str,
@@ -266,27 +338,52 @@ fn api_unlocked(
                 .map(|(r, m)| json!({"id": r.folder_id.to_string(), "name": r.name, "path": m}))
                 .collect(),
         )),
+        (Method::Post, "/api/share/create") => {
+            let t = engine.share_create(&s(input, "folder")?)?;
+            Ok(json!({"ok": true, "token": t.encode(), "folder": t.name}))
+        }
+        (Method::Get, "/api/replica/token") => {
+            Ok(json!({"token": engine.replica_token()?.encode()}))
+        }
         (Method::Post, "/api/storage") => {
             let cold = input.get("cold").and_then(|c| c.as_bool()).unwrap_or(false);
+            let carrier = input
+                .get("carrier")
+                .and_then(|c| c.as_bool())
+                .unwrap_or(false);
             engine.add_storage(StorageSpec::LocalDir {
                 name: s(input, "name")?,
                 path: PathBuf::from(s(input, "path")?),
                 cold,
+                carrier,
             })?;
+            service.request_sync();
             Ok(json!({"ok": true}))
         }
         (Method::Post, "/api/folder") => {
             let id = engine.add_folder(&s(input, "name")?, Path::new(&s(input, "path")?))?;
+            service.folders_changed = true;
+            service.request_sync();
             Ok(json!({"ok": true, "id": id.to_string()}))
         }
         (Method::Post, "/api/folder/attach") => {
-            let id =
-                engine.attach_folder(&s(input, "name_or_id")?, Path::new(&s(input, "path")?))?;
+            let selective = input
+                .get("selective")
+                .and_then(|c| c.as_bool())
+                .unwrap_or(false);
+            let id = engine.attach_folder(
+                &s(input, "name_or_id")?,
+                Path::new(&s(input, "path")?),
+                selective,
+            )?;
+            service.folders_changed = true;
+            service.request_sync();
             Ok(json!({"ok": true, "id": id.to_string()}))
         }
         (Method::Post, "/api/sync") => {
             let folder = opt(input, "folder");
             let reports = engine.sync(folder.as_deref())?;
+            service.record_sync(&reports);
             Ok(serde_json::to_value(
                 reports
                     .into_iter()
@@ -302,6 +399,26 @@ fn api_unlocked(
             Ok(serde_json::to_value(engine.fsck(verify)?)?)
         }
         (Method::Get, "/api/ledger") => Ok(serde_json::to_value(engine.ledger_entries()?)?),
+        (Method::Get, "/api/files") => {
+            let folder = query_param(query, "folder")
+                .ok_or_else(|| anyhow!("folder query parameter required"))?;
+            Ok(serde_json::to_value(engine.list_files(&folder)?)?)
+        }
+        (Method::Post, "/api/fetch") => Ok(serde_json::to_value(
+            engine.fetch_file(&s(input, "folder")?, &s(input, "path")?)?,
+        )?),
+        (Method::Post, "/api/free") => {
+            engine.free_file(&s(input, "folder")?, &s(input, "path")?)?;
+            Ok(json!({"ok": true}))
+        }
+        (Method::Post, "/api/selective") => {
+            engine.set_selective(
+                &s(input, "folder")?,
+                input.get("on").and_then(|b| b.as_bool()).unwrap_or(true),
+            )?;
+            service.folders_changed = true;
+            Ok(json!({"ok": true}))
+        }
         (Method::Get, "/api/dupes") => {
             let folder = query_param(query, "folder")
                 .ok_or_else(|| anyhow!("folder query parameter required"))?;

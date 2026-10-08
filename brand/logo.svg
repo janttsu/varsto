@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-label="Varsto">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2f5fe0"/>
+      <stop offset="1" stop-color="#1b3a9a"/>
+    </linearGradient>
+    <linearGradient id="hi" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.22"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+  <!-- tile -->
+  <rect x="16" y="16" width="224" height="224" rx="56" fill="url(#bg)"/>
+  <rect x="16" y="16" width="224" height="224" rx="56" fill="url(#hi)"/>
+  <!-- vault door: ring -->
+  <circle cx="128" cy="128" r="74" fill="none" stroke="#ffffff" stroke-opacity="0.28" stroke-width="12"/>
+  <!-- cairn of three blocks = your copies, stacked -->
+  <rect x="88" y="150" width="80" height="22" rx="7" fill="#ffffff" fill-opacity="0.95"/>
+  <rect x="98" y="122" width="60" height="22" rx="7" fill="#ffffff" fill-opacity="0.75"/>
+  <rect x="108" y="94" width="40" height="22" rx="7" fill="#ffffff" fill-opacity="0.55"/>
+  <!-- key: locks the stack -->
+  <circle cx="168" cy="80" r="15" fill="none" stroke="#9ec1ff" stroke-width="9"/>
+  <rect x="150" y="76" width="4" height="0" fill="none"/>
+  <path d="M157 91 L128 120" stroke="#9ec1ff" stroke-width="9" stroke-linecap="round"/>
+  <path d="M140 108 l9 9 M133 115 l7 7" stroke="#9ec1ff" stroke-width="7" stroke-linecap="round"/>
+</svg>

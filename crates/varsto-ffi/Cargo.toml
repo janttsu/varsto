@@ -1,0 +1,24 @@
+[package]
+name = "varsto-ffi"
+description = "C ABI for embedding the Varsto service in mobile apps"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lib]
+name = "varsto_ffi"
+crate-type = ["staticlib", "cdylib"]
+
+[dependencies]
+varsto-core = { path = "../varsto-core" }
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+rand.workspace = true
+hex.workspace = true
+tiny_http.workspace = true
+notify.workspace = true
+sha2.workspace = true
+walkdir.workspace = true

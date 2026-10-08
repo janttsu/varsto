@@ -41,6 +41,63 @@ pub struct LocalVault {
     pub device_id: DeviceId,
     pub device_name: String,
     pub created_utc: i64,
+    /// A member device holds no master key: only shared folders (F-047).
+    #[serde(default)]
+    pub member: bool,
+}
+
+/// Token the owner gives to another Varsto user to share one folder (F-047):
+/// `<vault-id>.<folder-id>.<folder-key-hex>.<name>`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ShareToken {
+    pub vault_id: VaultId,
+    pub folder_id: FolderId,
+    pub key_hex: String,
+    pub name: String,
+}
+
+impl ShareToken {
+    pub fn encode(&self) -> String {
+        format!(
+            "{}.{}.{}.{}",
+            self.vault_id, self.folder_id, self.key_hex, self.name
+        )
+    }
+    pub fn decode(s: &str) -> Result<Self> {
+        let parts: Vec<&str> = s.trim().splitn(4, '.').collect();
+        if parts.len() != 4 {
+            bail!("share token must be <vault-id>.<folder-id>.<key-hex>.<name>");
+        }
+        SecretKey::from_hex(parts[2])?;
+        Ok(ShareToken {
+            vault_id: VaultId::from_hex(parts[0])?,
+            folder_id: FolderId::from_hex(parts[1])?,
+            key_hex: parts[2].to_string(),
+            name: parts[3].to_string(),
+        })
+    }
+}
+
+/// Prefix of member device records: `vault/shares/<folder>/<device>.enc`.
+pub const SHARE_PREFIX: &str = "vault/shares/";
+
+pub fn share_record_key(folder: &FolderId, device: &DeviceId) -> String {
+    format!("{SHARE_PREFIX}{folder}/{device}.enc")
+}
+
+/// Key id of a member device's ledger batches for one shared folder.
+pub fn share_key_id(folder: &FolderId) -> String {
+    format!("share:{folder}")
+}
+
+/// Members encrypt their ledger batches for a shared folder under this key,
+/// derived from the folder key, so every holder of the folder key can read them.
+pub fn share_ledger_key(folder_key: &SecretKey, folder: &FolderId) -> SecretKey {
+    folder_key.derive("share-ledger", &[folder.as_str().as_bytes()])
+}
+
+pub fn share_registry_key(folder_key: &SecretKey, folder: &FolderId) -> SecretKey {
+    folder_key.derive("share-registry", &[folder.as_str().as_bytes()])
 }
 
 #[derive(Serialize, Deserialize)]
@@ -175,6 +232,10 @@ pub struct FolderRecord {
     pub key_hex: String,
     pub created_by: DeviceId,
     pub created_utc: i64,
+    /// Shared with other users: member records and batches live under
+    /// folder-derived keys (local flag, never published).
+    #[serde(default)]
+    pub shared: bool,
 }
 
 impl FolderRecord {
@@ -216,6 +277,17 @@ impl FolderRecord {
     }
     pub fn keys(&self) -> Result<FolderKeys> {
         FolderKeys::from_folder_key(&self.folder_id, SecretKey::from_hex(&self.key_hex)?)
+    }
+    pub fn folder_key(&self) -> Result<SecretKey> {
+        SecretKey::from_hex(&self.key_hex)
+    }
+    pub fn share_token(&self, vault: &VaultId) -> ShareToken {
+        ShareToken {
+            vault_id: vault.clone(),
+            folder_id: self.folder_id.clone(),
+            key_hex: self.key_hex.clone(),
+            name: self.name.clone(),
+        }
     }
 }
 
@@ -318,6 +390,9 @@ impl Keyring {
 pub struct FolderMount {
     pub folder_id: FolderId,
     pub path: PathBuf,
+    /// Selective sync (F-039): files are placeholders until fetched.
+    #[serde(default)]
+    pub selective: bool,
 }
 
 /// Local configuration: `home/config.json` (no secrets).

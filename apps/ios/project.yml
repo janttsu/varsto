@@ -1,0 +1,18 @@
+# xcodegen project definition (brew install xcodegen)
+name: Varsto
+options:
+  bundleIdPrefix: in.soderlund
+  deploymentTarget:
+    iOS: "16.0"
+targets:
+  Varsto:
+    type: application
+    platform: iOS
+    sources: [Varsto]
+    settings:
+      base:
+        SWIFT_OBJC_BRIDGING_HEADER: Varsto/Varsto-Bridging-Header.h
+        LIBRARY_SEARCH_PATHS: ["$(SRCROOT)/../../target/aarch64-apple-ios/release", "$(SRCROOT)/../../target/aarch64-apple-ios-sim/release"]
+        OTHER_LDFLAGS: ["-lvarsto_ffi"]
+        PRODUCT_BUNDLE_IDENTIFIER: in.soderlund.varsto.ios
+        INFOPLIST_KEY_UIBackgroundModes: fetch

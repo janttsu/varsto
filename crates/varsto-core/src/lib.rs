@@ -18,7 +18,9 @@ pub mod engine;
 pub mod ids;
 pub mod ledger;
 pub mod manifest;
+pub mod replica;
 pub mod storage;
+pub mod thumbs;
 pub mod util;
 pub mod vault;
 

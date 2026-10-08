@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Varsto</string>
+    <string name="service_running">Varsto is syncing in the background</string>
+</resources>

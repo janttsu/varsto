@@ -17,6 +17,10 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 
+/// Key identifiers in batch envelopes: which vault-derived key encrypts the body.
+pub const KEY_LEDGER: &str = "ledger";
+pub const KEY_REPLICA: &str = "replica";
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Event {
@@ -74,11 +78,18 @@ pub struct Batch {
 pub struct SignedBatch {
     pub format_version: u16,
     pub sig_alg: String,
+    /// Which key encrypts the body: "ledger" (own devices), "replica", or "share:<folder>".
+    #[serde(default = "default_key_id")]
+    pub key_id: String,
     pub device: DeviceId,
     pub seq: u64,
     pub body_hex: String,
     pub hash: String,
     pub sig_hex: String,
+}
+
+fn default_key_id() -> String {
+    KEY_LEDGER.to_string()
 }
 
 impl SignedBatch {
@@ -98,6 +109,15 @@ impl SignedBatch {
     }
 
     pub fn seal(batch: &Batch, ledger_key: &SecretKey, signer: &SigningKey) -> Result<Self> {
+        Self::seal_with(batch, ledger_key, KEY_LEDGER, signer)
+    }
+
+    pub fn seal_with(
+        batch: &Batch,
+        ledger_key: &SecretKey,
+        key_id: &str,
+        signer: &SigningKey,
+    ) -> Result<Self> {
         let plain = serde_json::to_vec(batch)?;
         let aad = crypto::aad(
             "ledger-batch",
@@ -109,6 +129,7 @@ impl SignedBatch {
         Ok(SignedBatch {
             format_version: crate::FORMAT_VERSION,
             sig_alg: crypto::SIG_ALG.to_string(),
+            key_id: key_id.to_string(),
             device: batch.device.clone(),
             seq: batch.seq,
             body_hex: hex::encode(ct),
@@ -224,6 +245,18 @@ impl LedgerStore {
         ledger_key: &SecretKey,
         signer: &SigningKey,
     ) -> Result<SignedBatch> {
+        self.append_own_with(device, events, lamport, ledger_key, KEY_LEDGER, signer)
+    }
+
+    pub fn append_own_with(
+        &mut self,
+        device: &DeviceId,
+        events: Vec<Event>,
+        lamport: u64,
+        ledger_key: &SecretKey,
+        key_id: &str,
+        signer: &SigningKey,
+    ) -> Result<SignedBatch> {
         let head = self.head(device);
         if head.forked {
             bail!(
@@ -238,7 +271,7 @@ impl LedgerStore {
             created_utc: util::now_utc(),
             events,
         };
-        let signed = SignedBatch::seal(&batch, ledger_key, signer)?;
+        let signed = SignedBatch::seal_with(&batch, ledger_key, key_id, signer)?;
         util::write_json(&self.batch_path(device, signed.seq), &signed)?;
         self.heads.heads.insert(
             device.clone(),
@@ -309,13 +342,33 @@ impl LedgerStore {
         Ok(out)
     }
 
-    /// Build the location view by replaying every batch.
+    /// Build the location view by replaying every batch (own devices only).
     pub fn view(&self, ledger_key: &SecretKey) -> Result<LedgerView> {
+        self.view_with(|id| {
+            if id == KEY_LEDGER {
+                Some(ledger_key.clone())
+            } else {
+                None
+            }
+        })
+    }
+
+    /// Build the view with a key chosen per batch key id; batches whose key is
+    /// unknown are skipped (for example replica batches on a device that is
+    /// not the owner).
+    pub fn view_with(&self, key_for: impl Fn(&str) -> Option<SecretKey>) -> Result<LedgerView> {
         let mut view = LedgerView::default();
         for signed in self.all()? {
-            let batch = signed.open(ledger_key)?;
+            let Some(key) = key_for(&signed.key_id) else {
+                continue;
+            };
+            let batch = match signed.open(&key) {
+                Ok(b) => b,
+                Err(_) => continue,
+            };
             view.apply(&batch);
         }
+        view.fold_object_claims();
         for d in self.heads.heads.keys() {
             if self.is_forked(d) {
                 view.forked.insert(d.clone());
@@ -344,8 +397,11 @@ impl ChunkRecord {
     /// has checked it, or when the writer itself re-read it is not enough.
     pub fn verified_storages(&self) -> usize {
         self.storages
-            .values()
-            .filter(|l| l.verified_by.iter().any(|d| !l.claimed_by.contains(d)))
+            .iter()
+            .filter(|(name, l)| {
+                name.starts_with("replica:") && !l.verified_by.is_empty()
+                    || l.verified_by.iter().any(|d| !l.claimed_by.contains(d))
+            })
             .count()
     }
     pub fn claimed_storages(&self) -> usize {
@@ -363,6 +419,8 @@ pub struct LedgerView {
     pub max_lamport: u64,
     pub batches: u64,
     pub forked: BTreeSet<DeviceId>,
+    /// Objects claimed by replicas (folded into chunk records).
+    pub object_claims: u64,
 }
 
 impl LedgerView {
@@ -440,6 +498,36 @@ impl LedgerView {
 
     pub fn locate(&self, folder: &FolderId, chunk: &ChunkId) -> Option<&ChunkRecord> {
         self.chunks.get(&(folder.clone(), chunk.clone()))
+    }
+
+    /// Replica claims carry only the object name (empty folder and chunk ids).
+    /// Merge them into the records of every chunk that uses that object.
+    pub fn fold_object_claims(&mut self) {
+        let keys: Vec<(FolderId, ChunkId)> = self
+            .chunks
+            .keys()
+            .filter(|(f, _)| f.as_str().is_empty())
+            .cloned()
+            .collect();
+        if keys.is_empty() {
+            return;
+        }
+        let mut by_object: HashMap<ObjectName, ChunkRecord> = HashMap::new();
+        for k in keys {
+            if let Some(rec) = self.chunks.remove(&k) {
+                by_object.insert(rec.object.clone(), rec);
+            }
+        }
+        for rec in self.chunks.values_mut() {
+            if let Some(claim) = by_object.get(&rec.object) {
+                for (storage, loc) in &claim.storages {
+                    let e = rec.storages.entry(storage.clone()).or_default();
+                    e.claimed_by.extend(loc.claimed_by.iter().cloned());
+                    e.verified_by.extend(loc.verified_by.iter().cloned());
+                }
+            }
+        }
+        self.object_claims = by_object.len() as u64;
     }
 }
 
