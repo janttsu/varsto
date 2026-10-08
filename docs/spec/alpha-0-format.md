@@ -11,6 +11,7 @@
 - Two-way folder sync between devices with version vectors; concurrent edits produce a deterministic winner and a conflict copy; deletions go to a local trash.
 - `fsck`: compares the ledger with what the storages actually hold and can verify every object by hash.
 - Cold storages are written but never read (requirement F-043 default).
+- A local desktop interface (`varsto desktop`): a web page served from the binary on 127.0.0.1 with a per-session token and a Host check, the first shape of the local control API (plan 6.8, 6.32).
 
 Not in alpha-0: sharing with other users, peer-to-peer transfer, hybrid post-quantum signatures and key agreement, FIDO2 security keys, Strongroom, placeholders, policies and alerts, packs, mobile, MCP, daemon. Keys are shared between devices out of band (the "vault key").
 

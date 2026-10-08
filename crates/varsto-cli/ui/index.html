@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Varsto</title>
+<link rel="stylesheet" href="/app.css">
+<script src="/app.js" defer></script>
+</head>
+<body>
+<header>
+  <div class="brand">Varsto <span class="tag">alpha</span></div>
+  <div id="who" class="muted"></div>
+  <button id="lock" class="secondary hidden" type="button">Lock</button>
+</header>
+<div class="alpha">Alpha software, not for production data. Keep your own backups.</div>
+<main>
+  <section id="setup" class="hidden">
+    <h1>Set up this device</h1>
+    <div class="cols">
+      <form id="init" class="card">
+        <h2>Create a new vault</h2>
+        <label>Device name <input name="name" placeholder="laptop" required></label>
+        <label>Passphrase <input name="passphrase" type="password" minlength="8" required></label>
+        <button type="submit">Create vault</button>
+        <p class="muted">You will be shown the vault key once. Write it down and keep it offline; it is the only way to add other devices or recover the data.</p>
+      </form>
+      <form id="join" class="card">
+        <h2>Join an existing vault</h2>
+        <label>Device name <input name="name" placeholder="desk" required></label>
+        <label>Passphrase for this device <input name="passphrase" type="password" minlength="8" required></label>
+        <label>Vault key (hex) <input name="vault_key" required></label>
+        <label>Storage directory that holds the vault <input name="storage_path" placeholder="/Volumes/box" required></label>
+        <button type="submit">Join</button>
+      </form>
+    </div>
+  </section>
+
+  <section id="unlock" class="hidden">
+    <h1>Unlock</h1>
+    <form id="unlockform" class="card narrow">
+      <label>Passphrase <input name="passphrase" type="password" required autofocus></label>
+      <button type="submit">Unlock</button>
+    </form>
+  </section>
+
+  <section id="app" class="hidden">
+    <div id="vaultkey" class="card warn hidden"></div>
+    <div class="toolbar">
+      <button id="sync" type="button">Sync all folders</button>
+      <button id="fsck" type="button" class="secondary">Check storage (fsck)</button>
+      <label class="inline"><input id="verify" type="checkbox"> re-hash every object</label>
+      <button id="refresh" type="button" class="secondary">Refresh</button>
+    </div>
+
+    <h2>Folders</h2>
+    <table id="folders"><thead><tr><th>Folder</th><th>Path on this device</th><th>Files</th><th>Size</th><th>Chunks</th><th>Without storage copy</th><th>Verified elsewhere</th><th></th></tr></thead><tbody></tbody></table>
+
+    <div class="cols">
+      <form id="addfolder" class="card">
+        <h3>Add a folder</h3>
+        <label>Name <input name="name" placeholder="docs" required></label>
+        <label>Directory <input name="path" placeholder="/Users/me/Documents/synced" required></label>
+        <button type="submit">Add</button>
+      </form>
+      <form id="attachfolder" class="card">
+        <h3>Attach a folder from another device</h3>
+        <label>Folder name or id <input name="name_or_id" required></label>
+        <label>Directory on this device <input name="path" required></label>
+        <button type="submit">Attach</button>
+        <p class="muted">Folders created on other devices appear in the table after a sync.</p>
+      </form>
+    </div>
+
+    <h2>Storages</h2>
+    <ul id="storages"></ul>
+    <form id="addstorage" class="card narrow">
+      <h3>Add a storage directory</h3>
+      <label>Name <input name="name" placeholder="box" required></label>
+      <label>Directory (disk, removable disk, network mount) <input name="path" required></label>
+      <label class="inline"><input name="cold" type="checkbox"> cold storage: written, never read without confirmation</label>
+      <button type="submit">Add</button>
+    </form>
+
+    <h2>Devices and ledger</h2>
+    <p id="devices" class="muted"></p>
+    <details><summary>Ledger batches</summary><pre id="ledger"></pre></details>
+    <details><summary>Duplicate files</summary><div class="row"><select id="dupefolder"></select><button id="dupes" type="button" class="secondary">Find duplicates</button></div><pre id="dupeout"></pre></details>
+
+    <h2>Activity</h2>
+    <pre id="log"></pre>
+  </section>
+</main>
+<footer class="muted">Local interface on this computer only. Version <span id="version"></span>.</footer>
+</body>
+</html>

@@ -18,6 +18,8 @@ clap.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 hex.workspace = true
+rand.workspace = true
+tiny_http.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

@@ -7,7 +7,7 @@
 
 *"Varsto" is a working name and may change before the first public release.*
 
-Varsto is an end-to-end encrypted file sync, sharing and backup app that **does not sell storage**. You bring the storage; the app does the rest.
+Varsto is an end-to-end encrypted file sync, sharing and backup app that **uses your own devices and storage services of your choice**. You bring the storage; the app does the rest.
 
 ## Goals
 
@@ -22,12 +22,13 @@ None of this is finished. See [docs/architecture](docs/architecture/README.md) f
 
 ## Status
 
-Alpha-0: the first vertical slice works on Linux from the command line. It chunks and encrypts files, stores them in a local-directory storage (a disk, a removable disk or a network mount), keeps a signed per-device ledger in that storage, and syncs a folder between devices that are never online at the same time, with conflict copies and a trash. See [docs/spec/alpha-0-format.md](docs/spec/alpha-0-format.md) for what it does and does not do. There is no sharing, no peer-to-peer transfer, no post-quantum hybrid yet, no mobile app and no audit.
+Alpha-0: the first vertical slice works on Linux, macOS and Windows (macOS and Windows builds are cross-compiled and not yet tested there) from the command line and from a local desktop interface (`varsto desktop`). It chunks and encrypts files, stores them in a local-directory storage (a disk, a removable disk or a network mount), keeps a signed per-device ledger in that storage, and syncs a folder between devices that are never online at the same time, with conflict copies and a trash. See [docs/spec/alpha-0-format.md](docs/spec/alpha-0-format.md) for what it does and does not do. There is no sharing, no peer-to-peer transfer, no post-quantum hybrid yet, no mobile app and no audit.
 
-### Quick start (alpha-0, Linux)
+### Quick start (alpha-0)
 
 ```bash
 cargo build --release                      # produces target/release/varsto
+varsto desktop                             # local graphical interface in your browser (127.0.0.1 only)
 export VARSTO_PASSPHRASE='a long passphrase'
 varsto --home ~/.varsto-laptop init --name laptop            # prints the vault key once
 varsto --home ~/.varsto-laptop storage add-local box /mnt/box

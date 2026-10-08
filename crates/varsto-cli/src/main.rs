@@ -8,6 +8,8 @@ use std::path::PathBuf;
 use varsto_core::storage::StorageSpec;
 use varsto_core::Engine;
 
+mod desktop;
+
 #[derive(Parser)]
 #[command(
     name = "varsto",
@@ -72,6 +74,15 @@ enum Cmd {
     Dupes { folder: String },
     /// List ledger batches.
     Ledger,
+    /// Open the local graphical interface in your browser (default when run without arguments).
+    Desktop {
+        /// Port on 127.0.0.1 (0 = pick a free one).
+        #[arg(long, default_value_t = 0)]
+        port: u16,
+        /// Do not open a browser automatically.
+        #[arg(long)]
+        no_open: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -327,6 +338,14 @@ fn run(cli: &Cli) -> Result<()> {
                     .join("\n")
             })?;
         }
+        Cmd::Desktop { port, no_open } => {
+            desktop::run(
+                home,
+                *port,
+                !*no_open,
+                std::env::var("VARSTO_PASSPHRASE").ok(),
+            )?;
+        }
         Cmd::Ledger => {
             let engine = Engine::open(&home, &passphrase()?)?;
             let r = engine.ledger_entries()?;
@@ -351,7 +370,15 @@ fn run(cli: &Cli) -> Result<()> {
 }
 
 fn main() {
-    let cli = Cli::parse();
+    // Launched from an app bundle or by double-click: no arguments (macOS may add
+    // a -psn_ process serial number). Open the desktop interface.
+    let mut args: Vec<String> = std::env::args()
+        .filter(|a| !a.starts_with("-psn_"))
+        .collect();
+    if args.len() == 1 {
+        args.push("desktop".to_string());
+    }
+    let cli = Cli::parse_from(args);
     if let Err(e) = run(&cli).context("varsto") {
         eprintln!("error: {e:#}");
         std::process::exit(1);
