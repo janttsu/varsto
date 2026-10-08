@@ -13,7 +13,7 @@ These principles are requirements, not preferences. Details become specification
 ## 2. Keys stay with the user
 
 - External disks, cloud storage and every provider are untrusted. Everything leaving a device is already encrypted.
-- The master key is always strong: 256 random bits from the operating system's CSPRNG. It is never derived from a human-chosen password alone. A passphrase (any length) only wraps the master key locally with Argon2id, optionally combined with a hardware-bound secret and a FIDO2 security key.
+- The master key is always strong: 256 random bits from the operating system's CSPRNG. It is never derived from a human-chosen password alone. A passphrase (any length) only wraps the master key locally with Argon2id, optionally combined with a hardware-bound secret and a FIDO2 security key. <!-- TBD: whether the second factor is mandatory for unlock is an open decision (plan section 8, "2FA"). -->
 - The application never writes keys in clear text to storage, disks or providers. The recovery key is kept apart from the data.
 - There is no key escrow and no account recovery by the project. Losing every key and the recovery key means the data is gone; users are told this before adding data.
 

@@ -36,7 +36,7 @@ Pre-alpha skeleton: repository layout, licence, testing instructions and a websi
 
 ## Licence
 
-Varsto is **source-available, not open source**. It is licensed under the [PolyForm Shield License 1.0.0](LICENSE): you may use it for any purpose, privately or in a company, except for providing a product that competes with it. Rebranding or reselling it is not allowed. The name and logo are covered separately by [TRADEMARK.md](TRADEMARK.md). Storage formats and protocols are intended to be openly specified so that your data stays recoverable.
+Varsto is **source-available, not open source**. It is licensed under the [PolyForm Shield License 1.0.0](LICENSE): you may use it for any purpose, privately or in a company, except for providing a product that competes with it. It may not be sold, repackaged or rebranded as a competing product; redistribution of unmodified copies under the licence is allowed. The name and logo are covered separately by [TRADEMARK.md](TRADEMARK.md). Storage formats and protocols are intended to be openly specified so that your data stays recoverable.
 
 ## Contributing, security and testing
 
