@@ -31,19 +31,27 @@ jobs:
       - run: cargo test --workspace
       - name: Build Varsto.app
         run: apps/macos/build.sh --out dist 2>&1 | tee build.log
-      - name: Build output to the job summary
-        if: failure()
-        run: |
-          { echo '## Build output (last 150 lines)'; echo '```'; tail -n 150 build.log; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
       - name: Smoke test the bundled command line
         run: |
-          unzip -q dist/Varsto-*-macos.zip -d smoke
+          set -x
+          ditto -x -k dist/Varsto-*-macos.zip smoke
+          ls -la smoke/Varsto.app/Contents/MacOS smoke/Varsto.app/Contents/Helpers
+          file smoke/Varsto.app/Contents/Helpers/varsto
+          codesign -dv smoke/Varsto.app
           smoke/Varsto.app/Contents/Helpers/varsto --version
+        shell: bash
+      - name: Output to the job summary
+        if: failure()
+        run: |
+          { echo '## build.log (last 150 lines)'; echo '```'; tail -n 150 build.log; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: Varsto-macos
-          path: dist/Varsto-*-macos.zip
-          if-no-files-found: error
+          path: |
+            dist/Varsto-*-macos.zip
+            build.log
+          if-no-files-found: warn
       - name: Attach to the release
         if: startsWith(github.ref, 'refs/tags/v')
         env:
