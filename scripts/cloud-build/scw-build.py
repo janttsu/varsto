@@ -363,8 +363,12 @@ def shots_linux(args):
 def win_password(server_id):
     """The administrator password Scaleway generated at first boot, decrypted with our RSA key."""
     key = pathlib.Path.home() / ".ssh" / os.environ.get("SCW_RSA_KEY_FILE", "varsto-scw-rsa")
-    d = scw("instance", "server", "get-rdp-password", server_id, f"zone={ZONE}", f"key={key}")
-    pw = d.get("Password") or d.get("password") or ""
+    p = subprocess.run(["scw", "instance", "server", "get-rdp-password", server_id, f"zone={ZONE}", f"key={key}", "-o", "json"], capture_output=True, text=True)
+    try:
+        d = json.loads(p.stdout) if p.stdout.strip() else {}
+    except json.JSONDecodeError:
+        d = {}
+    pw = (d.get("Password") or d.get("password") or "") if isinstance(d, dict) else ""
     if not pw:
         raise SystemExit("no administrator password yet (cloudbase-init runs about 15 minutes after creation)")
     return pw
