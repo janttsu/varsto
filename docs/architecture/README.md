@@ -27,6 +27,7 @@ These are the design commitments. Details become specifications under `docs/spec
 
 - Security principles: [security-principles.md](security-principles.md)
 - Logging: [logging.md](logging.md)
+- Failure model: [../failure-model.md](../failure-model.md)
 
 - Specifications: [../spec/README.md](../spec/README.md)
 - Testing: [../../TESTING.md](../../TESTING.md)
