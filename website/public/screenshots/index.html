@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Screenshots: Varsto</title>
-<meta name="description" content="What the alpha looks like: the desktop interface (shown in light or dark mode to match the site theme), the file list with placeholders and encrypted thumbnails, and the Android app. With an honest list of what has not been captured yet.">
+<meta name="description" content="What the alpha looks like: the desktop interface (shown in light or dark mode to match the site theme), the file view with placeholders and encrypted thumbnails, the phone interface, and the Android app. With an honest list of what has not been captured yet.">
 <meta name="robots" content="noindex, nofollow">
 <meta name="color-scheme" content="light dark">
 <link rel="icon" href="../favicon.svg" type="image/svg+xml">
 <link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../blog/feed.xml">
-<link rel="stylesheet" href="../assets/css/site.css?v=21415169ac">
+<link rel="stylesheet" href="../assets/css/site.css?v=34b4c5a07a">
 <script src="../assets/js/theme.js?v=0951491269"></script>
 </head>
 <body>
@@ -30,6 +30,7 @@
       <a href="../downloads/">Downloads</a>
       <a href="../blog/">Blog</a>
       <a href="../forum/">Forum</a>
+      <a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a>
       <button class="theme" id="theme-toggle" type="button" aria-label="Change colour theme">Theme: auto</button>
     </nav>
   </div>
@@ -37,11 +38,16 @@
 <main id="main">
   <div class="wrap">
     <h1>Screenshots</h1>
-    <p class="lead">Taken from version 0.0.1-alpha.2 with an invented demo vault: a laptop with two folders and a phone that holds the photo folder in selective mode. The desktop interface is the same page on Linux, macOS and Windows: it is served by the background service and rendered by your browser, so only the window frame differs. The tray and menu-bar icons are the only native parts.</p>
+    <p class="lead">Taken from version 0.0.1-alpha.6 with an invented demo vault: a laptop with two folders and a phone that holds the photo folder in selective mode. The desktop interface is the same page on Linux, macOS and Windows: it is served by the background service and rendered by your browser, so only the window frame differs. The tray and menu-bar icons are the only native parts.</p>
 
     <h2>Desktop interface</h2>
-    <figure class="shot"><img class="shot-light" src="../assets/img/screenshots/desktop-overview-light.png" alt="Desktop interface, light mode: service status with Pause and Check for updates, Sync all folders and fsck buttons, a folder table with files, size, chunks, copies without storage and copies verified elsewhere, and forms to add or attach a folder." width="1280" height="860" loading="lazy"><img class="shot-dark" src="../assets/img/screenshots/desktop-overview-dark.png" alt="The same overview in dark mode." width="1280" height="860" loading="lazy"><figcaption>Overview on the laptop: the background service is running and watching two folders; each folder shows how many chunks lack a storage copy and how many copies another device has verified. The picture follows the site theme: light or dark.</figcaption></figure>
-    <figure class="shot"><img class="shot-light" src="../assets/img/screenshots/desktop-files-light.png" alt="File list of a selective folder on the phone device: three photos with thumbnails, two are placeholders with a Download button, one is local with a Free up space button." width="1150" height="350" loading="lazy"><img class="shot-dark" src="../assets/img/screenshots/desktop-files-dark.png" alt="The same file list in dark mode." width="1150" height="350" loading="lazy"><figcaption>The phone's view of the photo folder in selective mode: two files are placeholders, one has been fetched. The thumbnails were generated on the laptop, stored encrypted and decrypted here with the folder key; the phone never downloaded the pictures themselves.</figcaption></figure>
+    <figure class="shot"><img class="shot-light" src="../assets/img/screenshots/desktop-overview-light.png" alt="Desktop interface, light mode: a sidebar with Overview, Files and its folder tree, Shared, Storages, Policies, Peers and Settings; the overview with counters, the running background service, a suggestions card about idle files and a folder table with block maps." width="1280" height="860" loading="lazy"><img class="shot-dark" src="../assets/img/screenshots/desktop-overview-dark.png" alt="The same overview in dark mode." width="1280" height="860" loading="lazy"><figcaption>Overview on the laptop: the background service is running and watching two folders; each folder shows how many chunks lack a storage copy and how many copies another device has verified. The picture follows the site theme: light or dark.</figcaption></figure>
+    <figure class="shot"><img class="shot-light" src="../assets/img/screenshots/desktop-files-light.png" alt="Files view of the Photos folder: breadcrumb, Sync, Download, Free up space and Share buttons, three photos with state squares and thumbnails, and a details pane for the selected photo with its state, size, dates and copies." width="1024" height="654" loading="lazy"><img class="shot-dark" src="../assets/img/screenshots/desktop-files-dark.png" alt="The same file list in dark mode." width="1024" height="654" loading="lazy"><figcaption>The phone's view of the photo folder in selective mode: two files are placeholders, one has been fetched. The thumbnails were generated on the laptop, stored encrypted and decrypted here with the folder key; the phone never downloaded the pictures themselves.</figcaption></figure>
+
+    <h2>Phone interface</h2>
+    <div class="shots-row shots-single">
+      <figure class="shot"><img class="shot-light" src="../assets/img/screenshots/mobile-light.png" alt="Phone interface, light mode: the Files view of the selective Photos folder with full-width Sync, Download, Free up space and Share buttons, three photos as cards with their state, and a bottom tab bar Overview, Files, Storages, More." width="412" height="915" loading="lazy"><img class="shot-dark" src="../assets/img/screenshots/mobile-dark.png" alt="Phone interface, dark mode: the same Files view." width="412" height="915" loading="lazy"><figcaption>The same interface in its phone mode: tables become cards, the sidebar becomes a bottom tab bar, and a folder is added by name alone; the device chooses where it lives, so no directory is ever typed.</figcaption></figure>
+    </div>
 
     <h2>Linux tray</h2>
     <figure class="shot shots-single"><img src="../assets/img/screenshots/linux-tray.png" alt="Xfce panel with the Varsto tray icon and its open menu: status line, Open Varsto, Sync now, Pause syncing, Check for updates, Quit." width="380" height="300" loading="lazy"><figcaption>The tray icon and its menu on an Xfce panel (Ubuntu 24.04), captured on a throw-away cloud machine by the build pipeline; the service was watching a demo folder.</figcaption></figure>
@@ -50,14 +56,17 @@
     <figure class="shot shots-single"><img src="../assets/img/screenshots/windows-tray.png" alt="Windows Server 2025 taskbar corner with the Varsto tray icon next to the system icons." width="840" height="120" loading="lazy"><figcaption>The tray icon on Windows Server 2025, captured by the build pipeline on a rented machine where the Windows package was installed, a demo vault created and the tray app started. The menu capture follows.</figcaption></figure>
 
     <h2>Android</h2>
-    <div class="shots-row shots-single">
-      <figure class="shot"><img class="shot-light" src="../assets/img/screenshots/android-light.png" alt="Android app, light mode: first-run screen with Create a new vault and Join an existing vault forms." width="540" height="1200" loading="lazy"><img class="shot-dark" src="../assets/img/screenshots/android-dark.png" alt="Android app, dark mode: the same first-run screen." width="540" height="1200" loading="lazy"><figcaption>First start in the Android 15 emulator: the foreground service is running and the app shows the same interface in a WebView.</figcaption></figure>
+    <p>The sideloadable debug APK of 0.0.1-alpha.6, built on a short-lived cloud machine and run in an Android 15 emulator. The foreground service runs the same core as the desktop; the app shows the phone interface in a WebView.</p>
+    <div class="shots-row three">
+      <figure class="shot"><img class="shot-light" src="../assets/img/screenshots/android-light.png" alt="Android app, light mode: first-run screen with Create a new vault and Join an existing vault forms." width="540" height="1200" loading="lazy"><img class="shot-dark" src="../assets/img/screenshots/android-dark.png" alt="Android app, dark mode: the same first-run screen." width="540" height="1200" loading="lazy"><figcaption>First start: create a vault here or join one with the vault key from another device.</figcaption></figure>
+      <figure class="shot"><img class="shot-light" src="../assets/img/screenshots/android-overview-light.png" alt="Android app, light mode: overview with counters for folders, files, protected data, devices and storages, the running background service, and the folder list." width="540" height="1200" loading="lazy"><img class="shot-dark" src="../assets/img/screenshots/android-overview-dark.png" alt="Android app, dark mode: the same overview." width="540" height="1200" loading="lazy"><figcaption>Overview after the first folder: the service runs inside the app and syncs on its own schedule.</figcaption></figure>
+      <figure class="shot"><img class="shot-light" src="../assets/img/screenshots/android-files-light.png" alt="Android app, light mode: the Files view of the Notes folder with three files as cards, each with its state, size, last use, Open and Free up space buttons, and the bottom tab bar." width="540" height="1200" loading="lazy"><img class="shot-dark" src="../assets/img/screenshots/android-files-dark.png" alt="Android app, dark mode: the same Files view." width="540" height="1200" loading="lazy"><figcaption>Files on the phone: a folder is added by name alone and lives under the app's own storage.</figcaption></figure>
     </div>
 
     <h2>Not captured yet</h2>
     <ul>
-      <li><strong>macOS app.</strong> The pipeline runs it on a rented Mac mini as soon as one is in stock; the capture appears here then.</li>
-      <li><strong>iOS.</strong> The SwiftUI shell exists in the repository but must be built on a Mac with Xcode; nothing has been captured.</li>
+      <li><strong>macOS app.</strong> The native Apple Silicon app is now built and tested on GitHub Actions for every commit; a capture of its window follows.</li>
+      <li><strong>iOS.</strong> The SwiftUI shell is built for the Simulator on GitHub Actions, which also launches it and saves a screenshot; it appears here once that first run is clean.</li>
     </ul>
     <p class="note">The screenshots are from a demo vault with invented files. Paths and names on this page are not real data.</p>
 
@@ -65,7 +74,7 @@
 </main>
 <footer class="site">
   <div class="wrap">
-    <span>Varsto is a working name. Source will be published under the PolyForm Shield License 1.0.0 with the first public alpha.</span>
+    <span>Varsto is a working name. Source: <a href="https://github.com/janttsu/varsto">github.com/janttsu/varsto</a>, under the PolyForm Shield License 1.0.0 (source-available).</span>
     <span>No cookies, no tracking. The web server keeps a standard access log for at most seven days.</span>
     <span><a href="../docs/security-policy.html">Security policy</a> · <a href="../docs/licence.html">Licence</a> · <a href="../docs/trademark.html">Trademark</a></span>
   </div>

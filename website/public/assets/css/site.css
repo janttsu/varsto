@@ -89,6 +89,8 @@ figure.hero figcaption { color: var(--muted); font-size: .95rem; margin-top: .5r
 .shot img { width:100%; height:auto; border:1px solid var(--border); border-radius:var(--radius); background:var(--surface); }
 .shot figcaption { font-size:.9rem; color:var(--muted); margin-top:.5rem; }
 .shots-row { display:grid; grid-template-columns:1fr 1fr; gap:1.5rem; max-width:40rem; }
+.shots-row.three { grid-template-columns:repeat(3, 1fr); max-width:60rem; }
+@media (max-width: 60rem) { .shots-row.three { grid-template-columns:1fr 1fr; } }
 @media (max-width: 40rem) { .shots-row { grid-template-columns:1fr; } }
 
 .dl-release { color:var(--muted); }
