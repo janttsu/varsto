@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: PolyForm-Shield-1.0.0
 // Varsto for macOS: a native app with its own window (the interface rendered
 // by WebKit inside the app, no browser involved), a menu-bar item, and the
-// `varsto` binary next to it, which this app starts and supervises as the
+// `varsto` binary in Contents/Helpers, which this app starts and supervises as the
 // background service and which doubles as the command-line tool.
 // Built on a Mac with apps/macos/build.sh (Xcode command line tools, rustup).
 
@@ -150,7 +150,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         home = support.appendingPathComponent("Varsto")
         try? FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
-        binary = Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/varsto")
+        binary = Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/varsto")
         client = ServiceClient(home: home)
 
         buildMainMenu()
@@ -235,9 +235,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         process = p
     }
 
+    var refreshing = false
     func refresh() {
         ensureService()
-        guard let state = client.call("GET", "/api/state") else { statusMenuItem.title = "Service starting…"; return }
+        if refreshing { return }
+        refreshing = true
+        // The service may be busy syncing: never block the main thread on it.
+        DispatchQueue.global().async { [weak self] in
+            let state = self?.client.call("GET", "/api/state")
+            DispatchQueue.main.async { self?.refreshing = false; self?.apply(state: state) }
+        }
+    }
+
+    func apply(state: [String: Any]?) {
+        guard let state = state else { statusMenuItem.title = "Service starting…"; return }
         if main.window?.isVisible == true, main.loadedURL.isEmpty { main.show(url: client.uiURL()) }
         if state["has_vault"] as? Bool != true { statusMenuItem.title = "Not set up yet: open Varsto"; return }
         if state["unlocked"] as? Bool != true {
@@ -346,12 +357,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let e = NSAlert(); e.messageText = "Start at login needs macOS 13 or newer"; e.informativeText = "Add Varsto to Login Items in System Settings instead."; e.runModal()
         }
     }
-    @objc func quit() {
-        _ = client.call("POST", "/api/quit", body: [:])
+    @objc func quit() { NSApp.terminate(nil) }
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        timer?.invalidate()
         process?.terminationHandler = nil
-        usleep(300_000)
-        process?.terminate()
-        NSApp.terminate(nil)
+        _ = client.call("POST", "/api/quit", body: [:])
+        if let p = process, p.isRunning {
+            let deadline = Date().addingTimeInterval(3)
+            while p.isRunning && Date() < deadline { usleep(100_000) }
+            if p.isRunning { p.terminate() }
+        }
+        return .terminateNow
     }
 }
 

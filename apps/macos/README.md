@@ -1,6 +1,6 @@
 # Varsto for macOS
 
-A native app: its own window with the interface (WebKit inside the app, no browser), a menu-bar item with status, sync, pause, updates and "Start at login", and the `varsto` binary inside the bundle, started by the app as the background service and usable as the command line ("Install command-line tool" in the menu, or `Varsto.app/Contents/MacOS/varsto`). Apple Silicon only.
+A native app: its own window with the interface (WebKit inside the app, no browser), a menu-bar item with status, sync, pause, updates and "Start at login", and the `varsto` binary inside the bundle, started by the app as the background service and usable as the command line ("Install command-line tool" in the menu, or `Varsto.app/Contents/Helpers/varsto`). Apple Silicon only.
 
 Build on a Mac (Xcode command line tools and rustup installed):
 

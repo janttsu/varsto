@@ -19,16 +19,20 @@ done
 command -v swiftc >/dev/null || { echo "swiftc missing: run xcode-select --install" >&2; exit 1; }
 command -v cargo >/dev/null || { echo "cargo missing: install rustup from https://rustup.rs" >&2; exit 1; }
 target=aarch64-apple-darwin
-rustup target add "$target" >/dev/null
+# With rustup, make sure the target is installed; a Homebrew toolchain on an
+# Apple Silicon Mac already has it as its host target.
+if command -v rustup >/dev/null; then rustup target add "$target" >/dev/null; fi
 echo "== Rust binary ($target)"
 cargo build --release --target "$target" -p varsto-cli --features fsevents
 stage="$(mktemp -d)"
 app="$stage/Varsto.app/Contents"
-mkdir -p "$app/MacOS" "$app/Resources"
+mkdir -p "$app/MacOS" "$app/Helpers" "$app/Resources"
 echo "== Swift app"
 swiftc -O -target arm64-apple-macos12.0 -framework AppKit -framework WebKit -framework ServiceManagement \
   -o "$app/MacOS/Varsto" "$root/apps/macos/VarstoMenuBar/main.swift"
-cp "$root/target/$target/release/varsto" "$app/MacOS/varsto"
+# The command line goes to Contents/Helpers: the Mac file system is case-
+# insensitive, so "varsto" next to the app executable "Varsto" would replace it.
+cp "$root/target/$target/release/varsto" "$app/Helpers/varsto"
 cat > "$app/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -49,9 +53,23 @@ cat > "$app/Info.plist" <<PLIST
 </dict>
 </plist>
 PLIST
-[ -f "$root/brand/Varsto.icns" ] && cp "$root/brand/Varsto.icns" "$app/Resources/Varsto.icns"
+echo "== app icon"
+if [ -f "$root/brand/Varsto.icns" ]; then
+  cp "$root/brand/Varsto.icns" "$app/Resources/Varsto.icns"
+else
+  # Build the .icns from the brand PNGs (iconutil ships with macOS).
+  iconset="$stage/Varsto.iconset"
+  mkdir -p "$iconset"
+  for size in 16 32 128 256 512; do
+    cp "$root/brand/png/logo-$size.png" "$iconset/icon_${size}x${size}.png"
+    double=$((size * 2))
+    cp "$root/brand/png/logo-$double.png" "$iconset/icon_${size}x${size}@2x.png"
+  done
+  iconutil -c icns "$iconset" -o "$app/Resources/Varsto.icns"
+fi
 cp "$root/README.md" "$root/LICENSE" "$root/NOTICE" "$root/TRADEMARK.md" "$app/Resources/"
 echo "== ad-hoc signature"
+codesign --force --sign - "$app/Helpers/varsto"
 codesign --force --deep --sign - "$stage/Varsto.app"
 mkdir -p "${out:?}"
 name="Varsto-$version-macos.zip"
