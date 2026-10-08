@@ -33,15 +33,15 @@ build_target() {
   case "$t" in
     *apple-darwin*)
       if [ "$have_zig" != 1 ]; then echo "!! cargo-zigbuild missing, cannot build $t" >&2; return 1; fi
-      cargo zigbuild --release --target "$t" -p varsto-cli 2>&1 | grep -vE "^\s+(Compiling|Downloaded)" | tail -2 ;;
+      cargo zigbuild --release --target "$t" -p varsto-cli 2>&1 | grep -vE "^\s+(Compiling|Downloaded|Downloading)" | tail -40 ;;
     *musl*)
       export CC_x86_64_unknown_linux_musl="${CC_x86_64_unknown_linux_musl:-gcc}"
-      cargo build --release --target "$t" -p varsto-cli 2>&1 | tail -1 ;;
+      cargo build --release --target "$t" -p varsto-cli 2>&1 | grep -vE "^\s+(Compiling|Downloaded|Downloading)" | tail -40 ;;
     *windows-gnu*)
       export CC_x86_64_pc_windows_gnu="${CC_x86_64_pc_windows_gnu:-x86_64-w64-mingw32-gcc}" AR_x86_64_pc_windows_gnu="${AR_x86_64_pc_windows_gnu:-x86_64-w64-mingw32-ar}"
-      cargo build --release --target "$t" -p varsto-cli 2>&1 | tail -1 ;;
+      cargo build --release --target "$t" -p varsto-cli 2>&1 | grep -vE "^\s+(Compiling|Downloaded|Downloading)" | tail -40 ;;
     *)
-      cargo build --release --target "$t" -p varsto-cli 2>&1 | tail -1 ;;
+      cargo build --release --target "$t" -p varsto-cli 2>&1 | grep -vE "^\s+(Compiling|Downloaded|Downloading)" | tail -40 ;;
   esac
 }
 

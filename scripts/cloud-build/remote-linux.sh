@@ -19,5 +19,5 @@ cd /build/varsto
 echo "== tests on $(lsb_release -ds) $(uname -m)"
 cargo test --workspace --release 2>&1 | grep -E "test result|FAILED|panicked" 
 echo "== release archives"
-website/build-release.sh x86_64-unknown-linux-musl 2>&1 | tail -3
+website/build-release.sh x86_64-unknown-linux-musl 2>&1 | tail -60
 ls -la website/public/downloads/
