@@ -255,6 +255,8 @@ struct P2p {
     /// Set by the relay thread when a registration succeeded: the record
     /// should go out now, so peers learn `relay_via` without waiting for a sync.
     republish: Arc<std::sync::atomic::AtomicBool>,
+    /// The service's traffic counters (`State::traffic`).
+    traffic: Arc<varsto_core::p2p::Traffic>,
 }
 
 /// STUN again this often, and at the earliest this soon after the last
@@ -271,13 +273,14 @@ const RECORD_MAX_AGE: Duration = Duration::from_secs(3600);
 
 impl P2p {
     fn start(state: &Shared) -> Option<P2p> {
-        let (cfg, tag, device, identity, peer_key) = {
+        let (cfg, tag, device, identity, peer_key, traffic) = {
             let st = state.lock().unwrap();
             let e = st.engine.as_ref()?;
             let cfg = e.p2p_config();
             if !cfg.enabled {
                 return None;
             }
+            st.traffic.set_me(e.device_id(), e.own_device_name());
             let identity = match e.p2p_identity() {
                 Ok(id) => Some(id),
                 Err(err) => {
@@ -291,10 +294,11 @@ impl P2p {
                 e.device_id().clone(),
                 identity,
                 e.peer_key(),
+                st.traffic.clone(),
             )
         };
         let server = match varsto_core::p2p::Server::bind(([0, 0, 0, 0], cfg.port).into()) {
-            Ok(s) => s,
+            Ok(s) => s.with_traffic(traffic.clone()),
             Err(e) => {
                 eprintln!("service: p2p listener failed: {e:#}");
                 return None;
@@ -317,6 +321,7 @@ impl P2p {
                 device.clone(),
                 peer_key,
                 snapshot.clone(),
+                traffic.clone(),
             ) {
                 Ok(n) => {
                     n.start_keeper();
@@ -394,6 +399,7 @@ impl P2p {
             last_record: Mutex::new(None),
             last_publish: Mutex::new(None),
             republish,
+            traffic,
         })
     }
 
@@ -561,13 +567,16 @@ impl P2p {
         st.service.p2p_lan_peers = lan.len();
         st.service.p2p_peers = flat;
         *self.records.lock().unwrap() = records.clone();
-        let p = Arc::new(varsto_core::p2p::Peers::build(
-            e.peer_key(),
-            e.device_id().clone(),
-            &records,
-            &lan,
-            self.quic.clone(),
-        ));
+        let p = Arc::new(
+            varsto_core::p2p::Peers::build(
+                e.peer_key(),
+                e.device_id().clone(),
+                &records,
+                &lan,
+                self.quic.clone(),
+            )
+            .with_traffic(self.traffic.clone()),
+        );
         let mut slot = self.peers.lock().unwrap();
         if let Some(prev) = slot.as_ref() {
             p.inherit(prev);
@@ -778,6 +787,7 @@ pub fn run(opts: Options) -> Result<()> {
         engine,
         token,
         bound: bound.clone(),
+        traffic: Arc::default(),
         service: ServiceState {
             running: true,
             interval_secs: opts.interval_secs.max(15),

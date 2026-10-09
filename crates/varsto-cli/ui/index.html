@@ -413,6 +413,19 @@
           <p class="muted small" id="pairinfo"></p>
         </div>
       </div>
+      <div id="trafficcard" class="card">
+        <div class="card-head traffic-head">
+          <h2 class="card-title"><svg class="icon accent"><use href="#i-activity"/></svg>Traffic</h2>
+          <div class="traffic-now">
+            <span id="tr-now" class="traffic-rates"></span>
+            <svg id="tr-spark" class="spark" viewBox="0 0 120 32" preserveAspectRatio="none" role="img" aria-label="Overall speed over the last minute"></svg>
+          </div>
+        </div>
+        <p id="tr-note" class="muted small"></p>
+        <div id="tr-flow" class="traffic-flow"></div>
+        <div class="table-wrap"><table id="tr-table" class="hidden"><thead><tr><th>Device</th><th>Path</th><th>Address</th><th class="num">Down</th><th class="num">Up</th><th class="num">Received</th><th class="num">Sent</th><th>Last activity</th></tr></thead><tbody></tbody></table></div>
+        <div id="tr-relays" class="hidden"><h3 class="tr-sub">Relayed through this device</h3><ul class="list"></ul></div>
+      </div>
       <details id="p2pbox" class="card" open>
         <summary class="card-title">Peer-to-peer transfer</summary>
         <p class="muted small">Your devices exchange encrypted blocks directly: on the LAN automatically, across the internet through NAT with hole punching, and when that fails through one of your own reachable devices acting as a relay. Blocks are verified by name; a peer needs the vault key and a known certificate to get anything.</p>

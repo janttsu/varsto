@@ -60,6 +60,7 @@ varsto --home ~/.varsto-laptop strongroom unlock taxes --minutes 15
 varsto --home ~/.varsto-laptop p2p enable --port 17893
 varsto --home ~/.varsto-server p2p enable --port 17893 --public 203.0.113.5:17893   # reachable: relays for the others
 varsto --home ~/.varsto-laptop p2p status   # NAT guess, public address, path to every peer
+varsto --home ~/.varsto-laptop p2p traffic --watch   # live speed, totals and path per peer
 
 # a durability policy: two cloud copies, one at home, verified within 30 days; exit code 0/1/2/3
 varsto --home ~/.varsto-laptop policy set docs --min-copies 2 --place cloud=2 --place home=1 --verified-within-days 30
