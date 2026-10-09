@@ -148,6 +148,9 @@ pub struct FolderStatus {
     pub published_seq: u64,
     pub shared: bool,
     pub selective: bool,
+    /// Plain files on this device (false: "encrypted on this device", see `FolderMount::encrypted`).
+    #[serde(default)]
+    pub plain: bool,
     pub placeholders: u64,
     pub pinned: u64,
     /// Durability policy, if one is set (human-readable).
@@ -241,6 +244,8 @@ pub struct FileEntry {
     pub pinned: bool,
     pub content_hash: String,
     pub selective: bool,
+    /// Where the file is (or would be) on this device's disk.
+    pub disk: PathBuf,
     /// Image or video: a thumbnail may exist.
     pub media: bool,
     /// Last modification (seconds since the Unix epoch) from the manifest.
@@ -829,6 +834,7 @@ impl Engine {
             folder_id: id.clone(),
             path: canonical(path)?,
             selective: false,
+            encrypted: false,
         });
         self.config.save(&self.home)?;
         self.pending.push(Event::FolderAdded { folder: id.clone() });
@@ -862,6 +868,7 @@ impl Engine {
             folder_id: rec.folder_id.clone(),
             path: canonical(path)?,
             selective,
+            encrypted: false,
         });
         self.config.save(&self.home)?;
         Ok(rec.folder_id)
@@ -903,6 +910,127 @@ impl Engine {
             m.selective = selective;
         }
         self.config.save(&self.home)
+    }
+
+    /// Whether an attached folder is kept "encrypted on this device".
+    pub fn folder_is_encrypted_here(&self, folder: &FolderId) -> bool {
+        self.mount_is_encrypted(folder)
+    }
+
+    fn mount_is_encrypted(&self, folder: &FolderId) -> bool {
+        self.config
+            .folders
+            .iter()
+            .any(|m| &m.folder_id == folder && m.encrypted)
+    }
+
+    /// Mark an attached folder as "encrypted on this device" (phones): files are
+    /// fetched when opened and their plaintext copies are removed when the vault
+    /// locks. Switching it on also makes the folder selective.
+    pub fn set_encrypted_here(&mut self, name_or_id: &str, encrypted: bool) -> Result<()> {
+        let (rec, _) = self.resolve_folder(name_or_id)?;
+        for m in self
+            .config
+            .folders
+            .iter_mut()
+            .filter(|m| m.folder_id == rec.folder_id)
+        {
+            m.encrypted = encrypted;
+            if encrypted {
+                m.selective = true;
+            }
+        }
+        self.config.save(&self.home)
+    }
+
+    /// Replace every local copy in a folder with a placeholder where the
+    /// storages hold the content. Returns (freed, kept): files not yet stored
+    /// elsewhere are kept.
+    pub fn free_folder(&mut self, folder: &str) -> Result<(u64, u64)> {
+        let (rec, root) = self.resolve_folder(folder)?;
+        let state = self.load_state(&rec.folder_id)?;
+        let paths: Vec<String> = state
+            .files
+            .values()
+            .filter(|f| !f.deleted && root.join(&f.path).exists())
+            .map(|f| f.path.clone())
+            .collect();
+        let (mut freed, mut kept) = (0u64, 0u64);
+        for p in paths {
+            match self.free_file(&rec.name, &p) {
+                Ok(()) => freed += 1,
+                Err(_) => kept += 1,
+            }
+        }
+        Ok((freed, kept))
+    }
+
+    /// Remove the plaintext copies of every "encrypted on this device" folder
+    /// (called when the vault locks). Returns (folder, freed, kept) per folder.
+    pub fn free_encrypted_folders(&mut self) -> Vec<(String, u64, u64)> {
+        let names: Vec<String> = self
+            .folders()
+            .into_iter()
+            .filter(|(r, m)| m.is_some() && self.mount_is_encrypted(&r.folder_id))
+            .map(|(r, _)| r.name)
+            .collect();
+        names
+            .into_iter()
+            .map(|n| match self.free_folder(&n) {
+                Ok((f, k)) => (n, f, k),
+                Err(_) => (n, 0, 0),
+            })
+            .collect()
+    }
+
+    /// Same, without the keys (the vault is locked, e.g. at service start after
+    /// the app was killed). Only files whose on-disk content is exactly what the
+    /// ledger already holds (local index matches the manifest and the file is
+    /// unchanged since) are replaced; anything else is kept. Returns the number
+    /// of files freed.
+    pub fn wipe_encrypted_folders_locked(home: &Path) -> Result<u64> {
+        let config = Config::load(home)?;
+        let mut freed = 0u64;
+        for m in config.folders.iter().filter(|m| m.encrypted) {
+            let state_path = home.join("state").join(format!("{}.json", m.folder_id));
+            let mut state: FolderState = util::read_json_or_default(&state_path)?;
+            let mut changed = false;
+            let files: Vec<_> = state
+                .files
+                .values()
+                .filter(|f| !f.deleted)
+                .cloned()
+                .collect();
+            for f in files {
+                let disk = m.path.join(&f.path);
+                let Ok(md) = fs::metadata(&disk) else {
+                    continue;
+                };
+                let known = state.local_index.get(&f.path).is_some_and(|ix| {
+                    ix.content_hash == f.content_hash
+                        && ix.size == md.len()
+                        && md
+                            .modified()
+                            .ok()
+                            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                            .map(|d| d.as_nanos() as i64)
+                            == Some(ix.mtime)
+                });
+                if !known {
+                    continue;
+                }
+                fs::remove_file(&disk)?;
+                Self::write_placeholder(&disk, &f)?;
+                state.local_index.remove(&f.path);
+                state.pinned.remove(&f.path);
+                freed += 1;
+                changed = true;
+            }
+            if changed {
+                util::write_json(&state_path, &state)?;
+            }
+        }
+        Ok(freed)
     }
 
     /// The record with a usable key: a Strongroom folder must be unlocked.
@@ -2444,6 +2572,7 @@ impl Engine {
             folder_id: folder_id.clone(),
             path: canonical(path)?,
             selective: true,
+            encrypted: false,
         });
         self.config.save(&self.home)?;
         self.unlocked.insert(
@@ -2834,6 +2963,7 @@ impl Engine {
                 pinned: state.pinned.contains(&f.path),
                 content_hash: f.content_hash.clone(),
                 selective,
+                disk: disk.clone(),
                 media: thumbs::is_image(&f.path) || thumbs::is_video(&f.path),
                 modified_utc: f.mtime / 1_000_000_000,
                 last_accessed_utc: state.accessed.get(&f.path).copied(),
@@ -2924,6 +3054,7 @@ impl Engine {
                     }
                 }),
                 selective: self.mount_is_selective(&rec.folder_id),
+                plain: !self.mount_is_encrypted(&rec.folder_id),
                 placeholders: placeholders_here,
                 pinned: state.pinned.len() as u64,
             });

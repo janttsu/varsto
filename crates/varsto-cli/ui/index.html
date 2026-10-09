@@ -39,6 +39,10 @@
   <symbol id="i-reset" viewBox="0 0 20 20"><path d="M4.5 10a5.5 5.5 0 1 0 1.6-3.9"/><path d="M4.5 3.5v3h3"/></symbol>
   <symbol id="i-open" viewBox="0 0 20 20"><path d="M11 4h5v5"/><path d="M16 4 9 11"/><path d="M14 11.5v3A1.5 1.5 0 0 1 12.5 16h-7A1.5 1.5 0 0 1 4 14.5v-7A1.5 1.5 0 0 1 5.5 6h3"/></symbol>
   <symbol id="i-close" viewBox="0 0 20 20"><path d="m5 5 10 10M15 5 5 15"/></symbol>
+  <symbol id="i-upload" viewBox="0 0 20 20"><path d="M10 13V3M6 6.5l4-4 4 4"/><path d="M4 16.5h12"/></symbol>
+  <symbol id="i-newfolder" viewBox="0 0 20 20"><path d="M3 6.5A1.5 1.5 0 0 1 4.5 5h3.4l1.6 1.6h6A1.5 1.5 0 0 1 17 8.1v6.4a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 3 14.5z"/><path d="M10 9v4M8 11h4"/></symbol>
+  <symbol id="i-share" viewBox="0 0 20 20"><path d="M10 12V3.5M6.5 7 10 3.5 13.5 7"/><path d="M5 10v5.5A1.5 1.5 0 0 0 6.5 17h7a1.5 1.5 0 0 0 1.5-1.5V10"/></symbol>
+  <symbol id="i-back" viewBox="0 0 20 20"><path d="m12.5 5-5 5 5 5"/></symbol>
 </svg>
 
 <aside class="sidebar">
@@ -133,10 +137,10 @@
   </section>
 
   <section id="app" class="hidden">
-    <div id="vaultkey" class="notice warn hidden"></div>
 
     <!-- Overview -->
     <div class="page" data-page="overview">
+      <div id="vaultkey" class="notice warn vaultkey hidden"><span id="vaultkey-text"></span><button type="button" id="vaultkey-done" class="secondary">I have written it down</button></div>
       <div id="policybanner" class="notice warn hidden"></div>
       <div class="stats">
         <div class="stat"><span class="stat-label">Folders</span><span class="stat-value" id="stat-folders">–</span></div>
@@ -209,25 +213,36 @@
     <div class="page hidden" data-page="files">
       <div id="needsdisk" class="notice warn hidden"></div>
       <div class="files-layout">
-        <div class="card files-main">
+        <div class="card files-main" id="filesmain" data-screen="list">
+          <!-- Phone: the Files tab opens with the vault's folders as cards; one tap opens a folder. -->
+          <div id="folderlist" class="folder-cards" aria-label="Folders"></div>
+          <div id="folderlist-empty" class="empty-state hidden"><div class="empty-icon"><svg class="icon"><use href="#i-folders"/></svg></div><p class="empty-title">No folders yet</p><p class="muted">Add a folder to start protecting it.</p></div>
+          <div class="actions folderlist-actions"><button id="folderlist-add" type="button" class="secondary"><svg class="icon"><use href="#i-plus"/></svg>Add folder</button></div>
           <div class="files-head">
             <div class="crumbs">
+              <button type="button" id="files-back" class="crumb-back" title="Back to the folder list"><svg class="icon"><use href="#i-back"/></svg><span class="sr-only">Back to the folder list</span></button>
               <span class="crumb muted">Files</span>
               <svg class="icon crumb-sep"><use href="#i-chevron"/></svg>
               <select id="filesfolder" class="crumb-select" title="Choose a folder"></select>
+              <span class="toolbar-spacer"></span>
+              <button id="filesadd" type="button" class="secondary icon-btn" title="Add or attach a folder"><svg class="icon"><use href="#i-plus"/></svg><span class="sr-only">Add folder</span></button>
+              <button id="filesload" type="button" class="secondary icon-btn" title="Refresh the file list"><svg class="icon"><use href="#i-sync"/></svg><span class="sr-only">Refresh</span></button>
             </div>
             <div class="files-sub muted small" id="files-sub"></div>
+            <div class="files-where small hidden" id="files-where"></div>
           </div>
           <div class="toolbar files-toolbar">
             <button id="files-sync" type="button" title="Sync this folder now"><svg class="icon"><use href="#i-sync"/></svg>Sync</button>
+            <button id="files-upload" type="button" class="secondary" title="Add files from this device to the folder"><svg class="icon"><use href="#i-upload"/></svg>Add files</button>
+            <button id="files-mkdir" type="button" class="secondary" title="Create a subfolder"><svg class="icon"><use href="#i-newfolder"/></svg>New folder</button>
             <button id="files-download" type="button" class="secondary" title="Download the selected file to this device" disabled><svg class="icon"><use href="#i-download"/></svg>Download</button>
             <button id="files-free" type="button" class="secondary" title="Keep only a placeholder of the selected file here" disabled><svg class="icon"><use href="#i-free"/></svg>Free up space</button>
             <button id="files-share" type="button" class="secondary" title="Share this folder with another Varsto user"><svg class="icon"><use href="#i-sharing"/></svg>Share</button>
             <span class="toolbar-spacer"></span>
-            <label class="inline muted" title="Files appear as placeholders until you download them"><input id="selectivetoggle" type="checkbox"> selective sync</label>
-            <button id="filesadd" type="button" class="secondary icon-btn" title="Add or attach a folder"><svg class="icon"><use href="#i-plus"/></svg><span class="sr-only">Add folder</span></button>
-            <button id="filesload" type="button" class="secondary icon-btn" title="Refresh the file list"><svg class="icon"><use href="#i-sync"/></svg><span class="sr-only">Refresh</span></button>
+            <label class="inline muted" id="selectivelabel" title="Files appear as placeholders until you download them"><input id="selectivetoggle" type="checkbox"> selective sync</label>
           </div>
+          <input type="file" id="fileinput" multiple class="hidden" aria-hidden="true" tabindex="-1">
+          <div id="files-progress" class="status-line progress hidden" role="status"></div>
           <div class="table-wrap">
           <table id="files"><thead><tr><th>Name</th><th class="num">Size</th><th>State</th><th>Last used</th><th></th></tr></thead><tbody></tbody></table>
           </div>
@@ -253,7 +268,11 @@
           <h3 class="card-title"><svg class="icon accent"><use href="#i-plus"/></svg>Add a folder</h3>
           <label>Name <input name="name" placeholder="Documents" required autocomplete="off"></label>
           <label class="desktop-only">Directory <input name="path" placeholder="/Users/me/Documents" autocomplete="off"><span class="hint muted">where this folder lives on this device</span></label>
-          <p class="muted small mobile-only">The folder is created inside Varsto's own space on this device.</p>
+          <div class="mode-cards mobile-only" role="radiogroup" aria-label="On this phone">
+            <label class="mode-card"><input type="radio" name="mode" value="encrypted" checked><span class="mode-body"><span class="mode-title">Encrypted on this phone</span><span class="mode-sub">Files are fetched when you open them and removed when you lock the vault.</span></span></label>
+            <label class="mode-card"><input type="radio" name="mode" value="plain"><span class="mode-body"><span class="mode-title">Plain files on this phone</span><span class="mode-sub">Ordinary files under Internal storage/Varsto, visible in My Files and the gallery. Needs all files access.</span></span></label>
+            <p class="mode-hint small hidden"></p>
+          </div>
           <div class="actions"><button type="submit">Add folder</button><button type="button" class="secondary" data-close-forms>Cancel</button></div>
         </form>
         <form id="attachfolder" class="card">
@@ -261,6 +280,11 @@
           <label class="desktop-only">Folder name or id <input name="name_or_id" autocomplete="off"></label>
           <label class="desktop-only">Directory on this device <input name="path" autocomplete="off"><span class="hint muted">where this folder lives on this device</span></label>
           <label class="inline"><input name="selective" type="checkbox"> Selective sync: files appear as placeholders until you download them</label>
+          <div class="mode-cards mobile-only" role="radiogroup" aria-label="On this phone">
+            <label class="mode-card"><input type="radio" name="mode" value="encrypted" checked><span class="mode-body"><span class="mode-title">Encrypted on this phone</span><span class="mode-sub">Files are fetched when you open them and removed when you lock the vault.</span></span></label>
+            <label class="mode-card"><input type="radio" name="mode" value="plain"><span class="mode-body"><span class="mode-title">Plain files on this phone</span><span class="mode-sub">Ordinary files under Internal storage/Varsto, visible in My Files and the gallery. Needs all files access.</span></span></label>
+            <p class="mode-hint small hidden"></p>
+          </div>
           <ul id="attachlist" class="list mobile-only"></ul>
           <p id="attachlist-empty" class="muted small mobile-only hidden">Every folder of this vault is already attached here.</p>
           <div class="actions desktop-only"><button type="submit">Attach</button></div>
@@ -376,6 +400,12 @@
           <p class="muted small">The interface follows the system theme unless you choose one.</p>
           <div class="actions"><button id="themeauto" type="button" class="secondary">Follow system theme</button><button id="themetoggle2" type="button" class="secondary mobile-only">Switch light / dark</button></div>
         </div>
+        <div class="card hidden" id="allfilescard">
+          <h2 class="card-title">Plain files on this phone</h2>
+          <p class="muted small">A folder in "plain files" mode is synced as ordinary files under Internal storage/Varsto, where My Files and the gallery can see them. Android asks for all files access for that; folders kept encrypted on the phone need nothing.</p>
+          <div class="actions"><button id="allfilesbtn" type="button" class="secondary">Allow all files access</button></div>
+          <p id="allfiles-state" class="muted small"></p>
+        </div>
         <div class="card">
           <h2 class="card-title">Service</h2>
           <p class="muted small">The background service watches your folders and serves this interface on this computer only. Quitting stops syncing until Varsto is started again.</p>
@@ -411,6 +441,23 @@
     </div>
   </section>
   </main>
+</div>
+
+<!-- One dialog for every question the page asks: WebViews return null for window.prompt. -->
+<div id="modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+  <div class="modal-backdrop" id="modal-backdrop"></div>
+  <form class="modal-card" id="modalform" novalidate>
+    <h2 id="modal-title" class="modal-title"></h2>
+    <p id="modal-text" class="modal-text"></p>
+    <pre id="modal-code" class="modal-code hidden"></pre>
+    <div id="modal-fields" class="modal-fields"></div>
+    <div class="modal-actions">
+      <button type="button" id="modal-extra" class="secondary hidden"></button>
+      <span class="toolbar-spacer"></span>
+      <button type="button" id="modal-cancel" class="secondary">Cancel</button>
+      <button type="submit" id="modal-ok">OK</button>
+    </div>
+  </form>
 </div>
 </body>
 </html>

@@ -21,6 +21,8 @@ use varsto_core::Engine;
 const INDEX_HTML: &str = include_str!("../ui/index.html");
 const APP_JS: &str = include_str!("../ui/app.js");
 const APP_CSS: &str = include_str!("../ui/app.css");
+/// Largest single upload through /api/upload (a phone video, not a disk image).
+const MAX_UPLOAD: u64 = 1 << 30;
 
 pub struct State {
     pub home: PathBuf,
@@ -199,6 +201,37 @@ fn handle(state: &Shared, mut request: Request) -> Result<()> {
         }
         return Ok(());
     }
+    if *request.method() == Method::Post && path == "/api/upload" {
+        // Raw upload: `POST /api/upload?folder=<name>&path=<relative path>` with the
+        // file's bytes as the body (any content type). Writes the file into the
+        // folder and pushes it, like /api/write for text.
+        let (folder, file) = (query_param(&query, "folder"), query_param(&query, "path"));
+        let mut bytes = Vec::new();
+        request
+            .as_reader()
+            .take(MAX_UPLOAD + 1)
+            .read_to_end(&mut bytes)?;
+        if bytes.len() as u64 > MAX_UPLOAD {
+            return Ok(request.respond(json_response(
+                413,
+                &json!({"error": format!("file larger than {} MiB", MAX_UPLOAD >> 20)}),
+            ))?);
+        }
+        let result = {
+            let mut st = state.lock().unwrap();
+            match (&mut st.engine, folder, file) {
+                (None, _, _) => Err(anyhow!("vault is locked")),
+                (Some(e), Some(f), Some(p)) => e.write_file(&f, &p, &bytes).map(|r| {
+                    json!({"ok": true, "folder": f, "path": p, "bytes": bytes.len(), "push": r})
+                }),
+                _ => Err(anyhow!("folder and path query parameters required")),
+            }
+        };
+        return match result {
+            Ok(v) => Ok(request.respond(json_response(200, &v))?),
+            Err(e) => Ok(request.respond(json_response(400, &json!({"error": format!("{e:#}")})))?),
+        };
+    }
     let mut body = String::new();
     if *request.method() == Method::Post {
         request
@@ -262,6 +295,55 @@ pub fn folder_root(home: &std::path::Path) -> PathBuf {
     home.join("folders")
 }
 
+/// Where "plain files on this device" folders go on a phone (`VARSTO_PLAIN_ROOT`,
+/// set by the Android shell to the shared storage); elsewhere the folder root.
+pub fn plain_root(home: &std::path::Path) -> PathBuf {
+    match std::env::var_os("VARSTO_PLAIN_ROOT") {
+        Some(r) => PathBuf::from(r),
+        None => folder_root(home),
+    }
+}
+
+/// Whether the plain root can be written now (on Android only after "all files
+/// access" was granted): the directory is created and a probe file written.
+fn plain_root_writable(root: &std::path::Path) -> bool {
+    if std::fs::create_dir_all(root).is_err() {
+        return false;
+    }
+    let probe = root.join(".varsto-probe");
+    let ok = std::fs::write(&probe, b"").is_ok();
+    let _ = std::fs::remove_file(&probe);
+    ok
+}
+
+fn mobile() -> bool {
+    std::env::var_os("VARSTO_MOBILE").is_some()
+}
+
+/// The `plain` flag of a folder request: plain files unless the request says
+/// otherwise; phones default to "encrypted on this device".
+fn wants_plain(input: &Value) -> bool {
+    input
+        .get("plain")
+        .and_then(|b| b.as_bool())
+        .unwrap_or(!mobile())
+}
+
+/// Directory for a folder the interface did not name a path for.
+fn default_folder_path(home: &std::path::Path, name: &str, plain: bool) -> Result<PathBuf> {
+    if plain && mobile() {
+        let root = plain_root(home);
+        if !plain_root_writable(&root) {
+            return Err(anyhow!(
+                "cannot write to {}; allow all files access first",
+                root.display()
+            ));
+        }
+        return Ok(root.join(name));
+    }
+    Ok(folder_root(home).join(name))
+}
+
 fn percent_decode(v: &str) -> String {
     let bytes = v.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());
@@ -291,8 +373,11 @@ fn api(st: &mut State, method: Method, path: &str, query: &str, input: &Value) -
             "version": env!("CARGO_PKG_VERSION"),
             "platform": std::env::consts::OS,
             // Mobile shells set these so the interface can pick folder locations itself.
-            "mobile": std::env::var_os("VARSTO_MOBILE").is_some(),
+            "mobile": mobile(),
             "folder_root": folder_root(&st.home).display().to_string(),
+            // Phones: where "plain files on this phone" folders go, and whether that is possible now.
+            "plain_root": plain_root(&st.home).display().to_string(),
+            "plain_root_writable": !mobile() || plain_root_writable(&plain_root(&st.home)),
             "service": st.service.summary(),
         })),
         (Method::Post, "/api/reset") => {
@@ -331,8 +416,16 @@ fn api(st: &mut State, method: Method, path: &str, query: &str, input: &Value) -
             Ok(json!({"ok": true}))
         }
         (Method::Post, "/api/lock") => {
+            // Folders kept "encrypted on this device" lose their plaintext copies.
+            let freed = st
+                .engine
+                .as_mut()
+                .map(|e| e.free_encrypted_folders())
+                .unwrap_or_default();
             st.engine = None;
-            Ok(json!({"ok": true}))
+            Ok(
+                json!({"ok": true, "freed": freed.into_iter().map(|(f, n, k)| json!({"folder": f, "freed": n, "kept": k})).collect::<Vec<_>>()}),
+            )
         }
         (Method::Post, "/api/init") => {
             let (e, key) = Engine::init(&st.home, &s(input, "name")?, &s(input, "passphrase")?)?;
@@ -410,7 +503,7 @@ fn api_unlocked(
             engine
                 .folders()
                 .into_iter()
-                .map(|(r, m)| json!({"id": r.folder_id.to_string(), "name": r.name, "path": m, "strongroom": r.is_strongroom()}))
+                .map(|(r, m)| json!({"id": r.folder_id.to_string(), "name": r.name, "path": m, "strongroom": r.is_strongroom(), "plain": !engine.folder_is_encrypted_here(&r.folder_id)}))
                 .collect(),
         )),
         (Method::Post, "/api/share/create") => {
@@ -488,12 +581,17 @@ fn api_unlocked(
         (Method::Post, "/api/folder") => {
             let name = s(input, "name")?;
             // No path given (phones, or the user left it empty): a directory named
-            // after the folder under this device's Varsto root.
-            let path = opt(input, "path")
-                .filter(|p| !p.trim().is_empty())
-                .map(PathBuf::from)
-                .unwrap_or_else(|| folder_root(engine.home()).join(&name));
+            // after the folder under this device's Varsto root, or under the shared
+            // storage for "plain files on this phone".
+            let plain = wants_plain(input);
+            let path = match opt(input, "path").filter(|p| !p.trim().is_empty()) {
+                Some(p) => PathBuf::from(p),
+                None => default_folder_path(engine.home(), &name, plain)?,
+            };
             let id = engine.add_folder(&name, &path)?;
+            if !plain {
+                engine.set_encrypted_here(&name, true)?;
+            }
             service.folders_changed = true;
             service.request_sync();
             Ok(json!({"ok": true, "id": id.to_string()}))
@@ -504,19 +602,23 @@ fn api_unlocked(
                 .and_then(|c| c.as_bool())
                 .unwrap_or(false);
             let name_or_id = s(input, "name_or_id")?;
-            let path = opt(input, "path")
-                .filter(|p| !p.trim().is_empty())
-                .map(PathBuf::from)
-                .unwrap_or_else(|| {
+            let plain = wants_plain(input);
+            let path = match opt(input, "path").filter(|p| !p.trim().is_empty()) {
+                Some(p) => PathBuf::from(p),
+                None => {
                     let name = engine
                         .folders()
                         .into_iter()
                         .find(|(r, _)| r.name == name_or_id || r.folder_id.as_str().starts_with(&name_or_id))
                         .map(|(r, _)| r.name)
                         .unwrap_or_else(|| name_or_id.clone());
-                    folder_root(engine.home()).join(name)
-                });
-            let id = engine.attach_folder(&name_or_id, &path, selective)?;
+                    default_folder_path(engine.home(), &name, plain)?
+                }
+            };
+            let id = engine.attach_folder(&name_or_id, &path, selective || !plain)?;
+            if !plain {
+                engine.set_encrypted_here(&name_or_id, true)?;
+            }
             service.folders_changed = true;
             service.request_sync();
             Ok(json!({"ok": true, "id": id.to_string()}))
@@ -696,8 +798,17 @@ fn api_unlocked(
             Ok(serde_json::to_value(varsto_core::advice::storage_advice(&files, idle_days, now))?)
         }
         (Method::Post, "/api/free") => {
-            engine.free_file(&s(input, "folder")?, &s(input, "path")?)?;
-            Ok(json!({"ok": true}))
+            // Without a path: every fetched file of the folder.
+            match opt(input, "path") {
+                Some(p) => {
+                    engine.free_file(&s(input, "folder")?, &p)?;
+                    Ok(json!({"ok": true}))
+                }
+                None => {
+                    let (freed, kept) = engine.free_folder(&s(input, "folder")?)?;
+                    Ok(json!({"ok": true, "freed": freed, "kept": kept}))
+                }
+            }
         }
         (Method::Post, "/api/selective") => {
             engine.set_selective(

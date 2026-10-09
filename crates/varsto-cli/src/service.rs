@@ -651,6 +651,17 @@ pub fn run(opts: Options) -> Result<()> {
                 Err(e) => eprintln!("service: unlock with the stored passphrase failed: {e:#}"),
             }
         }
+        if engine.is_none() {
+            // Locked at start (a phone killed without locking): drop the plaintext
+            // copies of folders kept "encrypted on this device".
+            match Engine::wipe_encrypted_folders_locked(&opts.home) {
+                Ok(n) if n > 0 => {
+                    eprintln!("service: removed {n} plaintext copies of encrypted-here folders")
+                }
+                Ok(_) => {}
+                Err(e) => eprintln!("service: could not clean encrypted-here folders: {e:#}"),
+            }
+        }
     }
     let state: Shared = Arc::new(Mutex::new(State {
         home: opts.home.clone(),

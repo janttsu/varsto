@@ -2,4 +2,9 @@
 <resources>
     <string name="app_name">Varsto</string>
     <string name="service_running">Varsto is syncing in the background</string>
+    <string name="choose_files">Add files to Varsto</string>
+    <string name="open_with">Open with</string>
+    <string name="share_with">Share</string>
+    <string name="file_missing">%1$s is not on this phone yet</string>
+    <string name="file_not_shareable">This file cannot be handed to other apps: %1$s</string>
 </resources>

@@ -8,6 +8,7 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
 import android.os.Build
+import android.os.Environment
 import android.os.IBinder
 import java.io.File
 
@@ -31,12 +32,15 @@ class VarstoService : Service() {
         // A state file from a previous run would carry a stale token.
         File(home, "service.json").delete()
         val pb = ProcessBuilder(bin.absolutePath, "--home", home.absolutePath, "service", "run", "--port", "17891", "--interval", "300")
-        // Tell the interface it runs on a phone: folders get a place under the
-        // app's external storage without asking the user for a path.
-        val root = (getExternalFilesDir(null) ?: filesDir).resolve("Varsto")
+        // Tell the interface it runs on a phone: folders get their place without
+        // asking the user for a path. "Encrypted on this phone" folders live in the
+        // app's private space; "plain files" folders under Internal storage/Varsto,
+        // which the service can write only once all files access is granted.
+        val root = filesDir.resolve("Varsto")
         root.mkdirs()
         pb.environment()["VARSTO_MOBILE"] = "1"
         pb.environment()["VARSTO_FOLDER_ROOT"] = root.absolutePath
+        pb.environment()["VARSTO_PLAIN_ROOT"] = plainRoot().absolutePath
         pb.redirectErrorStream(true)
         pb.redirectOutput(File(home, "service.log"))
         process = pb.start()
@@ -70,6 +74,10 @@ class VarstoService : Service() {
     }
 
     companion object {
+        /** Where plain-file folders go: Internal storage/Varsto. */
+        @Suppress("DEPRECATION")
+        fun plainRoot(): File = File(Environment.getExternalStorageDirectory(), "Varsto")
+
         fun serviceUrl(filesDir: File): String? {
             val f = File(File(filesDir, "vault"), "service.json")
             if (!f.exists()) return null

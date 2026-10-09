@@ -618,6 +618,12 @@ pub struct FolderMount {
     /// Selective sync (F-039): files are placeholders until fetched.
     #[serde(default)]
     pub selective: bool,
+    /// "Encrypted on this device" (phones): the folder lives in the app's
+    /// private space, files are fetched when opened and their plaintext copies
+    /// are removed when the vault locks. Absent in older configurations, which
+    /// means plain files as on a desktop.
+    #[serde(default)]
+    pub encrypted: bool,
 }
 
 /// Storage credentials: `home/secrets.enc`, encrypted under a key derived

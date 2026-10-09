@@ -60,6 +60,10 @@ struct WebView: UIViewRepresentable {
         let config = WKWebViewConfiguration()
         config.websiteDataStore = .nonPersistent()
         let view = WKWebView(frame: .zero, configuration: config)
+        // Not wired yet: the page's `window.VarstoAndroid` bridge (open a file in another app,
+        // share it, all-files access) has no iOS counterpart. Its place is a WKScriptMessageHandler
+        // here that answers openFile/shareFile with UIDocumentInteractionController and
+        // UIActivityViewController; without it the page falls back to the download link.
         view.load(URLRequest(url: url))
         return view
     }
