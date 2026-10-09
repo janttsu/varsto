@@ -337,6 +337,12 @@ enum P2pCmd {
     Disable,
     /// Show settings, NAT guess, public address and the path to every peer.
     Status,
+    /// Live traffic per peer: speed, totals and path, from the running service.
+    Traffic {
+        /// Refresh every second until interrupted.
+        #[arg(long)]
+        watch: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1891,6 +1897,10 @@ fn run(cli: &Cli) -> Result<()> {
                 }
             }
         }
+        // Counted by the running service; no passphrase needed.
+        Cmd::P2p {
+            cmd: P2pCmd::Traffic { watch },
+        } => p2p_traffic(&home, *watch, cli.json)?,
         Cmd::P2p { cmd } => {
             let mut engine = Engine::open(&home, &passphrase()?)?;
             match cmd {
@@ -1938,6 +1948,7 @@ fn run(cli: &Cli) -> Result<()> {
                     println!("p2p disabled; restart the background service to apply");
                 }
                 P2pCmd::Status => p2p_status(&engine, &home, cli.json)?,
+                P2pCmd::Traffic { .. } => unreachable!("handled above"),
             }
         }
         Cmd::Policy { cmd } => {
@@ -2212,6 +2223,118 @@ fn strongroom_convert(
         println!("Plain copies on this device stay until you free them (run again with --free, or free files in the app).");
     }
     Ok(())
+}
+
+/// `p2p traffic`: the running service's counters as a table, once or every
+/// second. Only the service counts; without it there is nothing to show.
+fn p2p_traffic(home: &std::path::Path, watch: bool, json: bool) -> Result<()> {
+    let sf = service::read_service_file(home).ok_or_else(|| {
+        anyhow!("the background service is not running; traffic is counted by the service")
+    })?;
+    let url = format!("http://127.0.0.1:{}/api/p2p/traffic", sf.port);
+    loop {
+        let body = service::http_get(&url, &sf.token)
+            .context("the background service did not answer; is it running?")?;
+        if json {
+            let v: serde_json::Value = serde_json::from_str(&body)?;
+            println!("{v}");
+        } else {
+            let r: varsto_core::p2p::traffic::TrafficReport = serde_json::from_str(&body)?;
+            if watch {
+                print!("\x1b[H\x1b[2J"); // home and clear, like `watch`
+            }
+            print!("{}", traffic_table(&r));
+        }
+        if !watch {
+            return Ok(());
+        }
+        use std::io::Write;
+        std::io::stdout().flush()?;
+        std::thread::sleep(std::time::Duration::from_secs(1));
+    }
+}
+
+fn traffic_table(r: &varsto_core::p2p::traffic::TrafficReport) -> String {
+    let rate = |b: u64| format!("{}/s", fmt_bytes(b));
+    let ago = |t: Option<i64>| match t {
+        None => "-".to_string(),
+        Some(t) => match r.now_utc - t {
+            s if s < 60 => format!("{}s ago", s.max(0)),
+            s if s < 3600 => format!("{}m ago", s / 60),
+            s => format!("{}h ago", s / 3600),
+        },
+    };
+    let who = |name: &str, dev: &varsto_core::ids::DeviceId| {
+        if name.is_empty() {
+            dev.short().to_string()
+        } else {
+            name.to_string()
+        }
+    };
+    let mut out = String::new();
+    let t = &r.totals;
+    match &r.device {
+        Some(d) => out.push_str(&format!(
+            "{} ({}): down {}, up {}, relayed {}; {} active; since the service started: {} down, {} up, {} relayed\n",
+            who(&r.name, d),
+            d.short(),
+            rate(t.rx_bps),
+            rate(t.tx_bps),
+            rate(t.relay_bps),
+            t.active,
+            fmt_bytes(t.rx_total),
+            fmt_bytes(t.tx_total),
+            fmt_bytes(t.relay_total),
+        )),
+        None => out.push_str("peer-to-peer is not running in the service (enable it and restart the service)\n"),
+    }
+    if r.peers.is_empty() {
+        out.push_str("no peers yet\n");
+    } else {
+        out.push_str(&format!(
+            "{:<16} {:<22} {:<22} {:>11} {:>11} {:>10} {:>10} {:>9} {:>6}  {}\n",
+            "DEVICE",
+            "PATH",
+            "ADDRESS",
+            "DOWN",
+            "UP",
+            "DOWN TOTAL",
+            "UP TOTAL",
+            "OBJ IN/OUT",
+            "ACTIVE",
+            "LAST"
+        ));
+    }
+    for p in &r.peers {
+        out.push_str(&format!(
+            "{:<16} {:<22} {:<22} {:>11} {:>11} {:>10} {:>10} {:>9} {:>6}  {}\n",
+            who(&p.name, &p.device),
+            if p.path.is_empty() { "-" } else { &p.path },
+            p.addr.map(|a| a.to_string()).unwrap_or_else(|| "-".into()),
+            rate(p.rx_bps),
+            rate(p.tx_bps),
+            fmt_bytes(p.rx_total),
+            fmt_bytes(p.tx_total),
+            format!("{}/{}", p.objects_in, p.objects_out),
+            p.active,
+            ago(p.last_seen_utc),
+        ));
+    }
+    if !r.relays.is_empty() {
+        out.push_str("relayed through this device:\n");
+        for f in &r.relays {
+            out.push_str(&format!(
+                "  {} -> {}: {}, {} in {} objects, last {}\n",
+                who(&f.from_name, &f.from),
+                who(&f.to_name, &f.to),
+                rate(f.bps),
+                fmt_bytes(f.total),
+                f.objects,
+                ago(f.last_seen_utc),
+            ));
+        }
+    }
+    out
 }
 
 /// `p2p status`: the running service's view when there is one (its socket

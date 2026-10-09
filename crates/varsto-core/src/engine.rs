@@ -826,6 +826,10 @@ impl Engine {
     pub fn device_id(&self) -> &DeviceId {
         &self.vault.device_id
     }
+    /// This device's own name.
+    pub fn own_device_name(&self) -> &str {
+        &self.vault.device_name
+    }
     pub fn vault_id(&self) -> &VaultId {
         &self.vault.vault_id
     }

@@ -39,7 +39,7 @@
       .then(function (r) { return r.json().then(function (j) { if (!r.ok) { throw new Error(j.error || r.statusText); } return j; }); })
       .then(function (j) { done(); return j; }, function (e) { done(); throw e; });
   }
-  function show(section) { ["setup", "unlock", "app"].forEach(function (id) { $(id).classList.toggle("hidden", id !== section); }); $("lock").classList.toggle("hidden", section !== "app"); document.body.dataset.view = section; if (section !== "app") { $("pagetitle").textContent = section === "setup" ? "Welcome" : "Locked"; } else { $("pagetitle").textContent = pageTitle(currentPage); } }
+  function show(section) { ["setup", "unlock", "app"].forEach(function (id) { $(id).classList.toggle("hidden", id !== section); }); $("lock").classList.toggle("hidden", section !== "app"); document.body.dataset.view = section; if (section !== "app") { $("pagetitle").textContent = section === "setup" ? "Welcome" : "Locked"; } else { $("pagetitle").textContent = pageTitle(currentPage); } trafficWatch(); }
   function fmtBytes(n) { var u = ["B", "KiB", "MiB", "GiB", "TiB"]; var i = 0; while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; } return n.toFixed(i ? 1 : 0) + " " + u[i]; }
   function fmtDate(t) { return t ? new Date(t * 1000).toLocaleDateString() : ""; }
   function formData(form) { var o = {}; new FormData(form).forEach(function (v, k) { o[k] = v; }); form.querySelectorAll("input[type=checkbox]").forEach(function (c) { o[c.name] = c.checked; }); return o; }
@@ -195,6 +195,7 @@
     document.querySelectorAll(".tabbar .nav-item[data-nav]").forEach(function (b) { if (b.dataset.nav === tab) { b.setAttribute("aria-current", "page"); } else { b.removeAttribute("aria-current"); } });
     if (document.body.dataset.view === "app") { $("pagetitle").textContent = pageTitle(page); }
     if (page === "peers") { loadP2p(); }
+    trafficWatch();
     if (page === "files") { ensureFiles(); }
     if (page === "settings" && droid && lastStatus) { refreshAllFiles(); }
     window.scrollTo(0, 0);
@@ -1243,6 +1244,191 @@
     }).catch(function () {});
   }
   $("p2pbox").ontoggle = function () { if ($("p2pbox").open) { loadP2p(); } };
+  // Traffic view (Peers page): /api/p2p/traffic every second while the page is shown.
+  // The service answers it without waiting for a sync, so it stays live during long transfers.
+  var trafficTimer = null, trafficBusy = false, lastTraffic = null;
+  var SVGNS = "http://www.w3.org/2000/svg";
+  function trafficWanted() { return currentPage === "peers" && document.body.dataset.view === "app" && document.visibilityState !== "hidden"; }
+  function trafficWatch() {
+    if (!trafficWanted()) { if (trafficTimer) { clearTimeout(trafficTimer); trafficTimer = null; } return; }
+    if (trafficTimer || trafficBusy) { return; }
+    trafficBusy = true;
+    api("GET", "/api/p2p/traffic").then(renderTraffic).catch(function () {}).then(function () {
+      trafficBusy = false;
+      if (trafficWanted() && !trafficTimer) { trafficTimer = setTimeout(function () { trafficTimer = null; trafficWatch(); }, 1000); }
+    });
+  }
+  function fmtRate(n) { return fmtBytes(n) + "/s"; }
+  function fmtAgo(t, now) {
+    if (!t) { return "never"; }
+    var s = Math.max(0, now - t);
+    if (s < 2) { return "now"; }
+    if (s < 60) { return s + " s ago"; }
+    if (s < 3600) { return Math.floor(s / 60) + " min ago"; }
+    return new Date(t * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  }
+  function peerName(name, dev) { return name || (dev || "").slice(0, 8); }
+  // Short path label and pill class: LAN, direct, via <relay>, or not yet.
+  function pathShort(p) {
+    if (!p) { return ["not yet", "grey"]; }
+    if (p === "direct-lan") { return ["LAN", "ok"]; }
+    if (p === "direct") { return ["direct", "accent"]; }
+    if (p.indexOf("relayed via ") === 0) { return ["via " + p.slice(12), "risk"]; }
+    return [p, "grey"];
+  }
+  function svgEl(tag, attrs, cls, text) {
+    var e = document.createElementNS(SVGNS, tag);
+    Object.keys(attrs || {}).forEach(function (k) { e.setAttribute(k, attrs[k]); });
+    if (cls) { e.setAttribute("class", cls); }
+    if (text !== undefined) { e.textContent = text; }
+    return e;
+  }
+  function clip(s, n) { return s.length > n ? s.slice(0, Math.max(1, n - 1)) + "…" : s; }
+  function renderSpark(h) {
+    var sp = $("tr-spark"); sp.innerHTML = "";
+    var down = h.rx || [], up = h.tx || [], relay = h.relay || [];
+    var n = down.length || 60, max = 1;
+    for (var i = 0; i < n; i++) { max = Math.max(max, (down[i] || 0) + (relay[i] || 0), up[i] || 0); }
+    function pts(get) { var out = []; for (var i = 0; i < n; i++) { out.push((i * 120 / (n - 1)).toFixed(1) + "," + (31 - get(i) / max * 28).toFixed(1)); } return out.join(" "); }
+    var dl = pts(function (i) { return (down[i] || 0) + (relay[i] || 0); });
+    sp.appendChild(svgEl("line", { x1: 0, y1: 31.5, x2: 120, y2: 31.5 }, "sp-base"));
+    sp.appendChild(svgEl("polygon", { points: "0,31 " + dl + " 120,31" }, "sp-area"));
+    sp.appendChild(svgEl("polyline", { points: dl }, "sp-down"));
+    sp.appendChild(svgEl("polyline", { points: pts(function (i) { return up[i] || 0; }) }, "sp-up"));
+  }
+  // Flow diagram: this device on the left, peers on the right; a relayed path bends
+  // through a "via" node, and what this device relays for others is drawn through it.
+  function renderFlow(r, peers) {
+    var box = $("tr-flow"); box.innerHTML = "";
+    if (!r.device || !peers.length) { return; }
+    var W = Math.min(820, Math.max(300, box.clientWidth || 600)), narrow = W < 560;
+    var shown = peers.slice(0, 10), rowH = narrow ? 58 : 62, top = 8;
+    var H = Math.max(shown.length * rowH, 76) + top * 2;
+    var meW = narrow ? 90 : 150, peerW = narrow ? Math.min(118, W * 0.36) : 200, nodeH = 44;
+    var meX = 0, meY = H / 2 - nodeH / 2, peerX = W - peerW, gapL = meX + meW, gapR = peerX;
+    var svg = svgEl("svg", { width: W, height: H, viewBox: "0 0 " + W + " " + H, role: "img", "aria-label": "Traffic between this device and its peers" });
+    var defs = svgEl("defs");
+    ["rx", "tx", "relay"].forEach(function (k) {
+      var m = svgEl("marker", { id: "tr-arrow-" + k, viewBox: "0 0 10 10", refX: 7, refY: 5, markerWidth: 8, markerHeight: 8, markerUnits: "userSpaceOnUse", orient: "auto" }, "tr-marker " + k);
+      m.appendChild(svgEl("path", { d: "M0,0 L10,5 L0,10 z" }));
+      defs.appendChild(m);
+    });
+    svg.appendChild(defs);
+    var edges = svgEl("g"), labels = svgEl("g"), nodes = svgEl("g");
+    svg.appendChild(edges); svg.appendChild(nodes); svg.appendChild(labels);
+    var pos = {};
+    shown.forEach(function (p, i) { pos[p.device] = { y: top + i * rowH + rowH / 2 }; });
+    var meCy = H / 2;
+    function curve(x1, y1, x2, y2) { var mx = (x1 + x2) / 2; return "M" + x1 + "," + y1 + " C" + mx + "," + y1 + " " + mx + "," + y2 + " " + x2 + "," + y2; }
+    function edge(d, cls, bps) {
+      var w = bps > 0 ? Math.min(5, 1.5 + Math.log(1 + bps / 4096) / Math.LN10 * 1.2) : 1.25;
+      var e = svgEl("path", { d: d, "stroke-width": w.toFixed(2) }, "tr-edge " + cls + (bps > 0 ? " flowing" : ""));
+      if (bps > 0) { e.setAttribute("marker-end", "url(#tr-arrow-" + cls.split(" ")[0] + ")"); }
+      edges.appendChild(e);
+    }
+    function label(x, y, arrow, cls, text, anchor) {
+      var t = svgEl("text", { x: x, y: y, "text-anchor": anchor || "middle" }, "tr-label");
+      t.appendChild(svgEl("tspan", {}, "tr-arrow " + cls, arrow + " "));
+      t.appendChild(svgEl("tspan", {}, "", text));
+      labels.appendChild(t);
+    }
+    shown.forEach(function (p) {
+      var y = pos[p.device].y, via = p.path.indexOf("relayed via ") === 0 ? p.path.slice(12) : "";
+      var x1 = gapL + 2, x2 = gapR - 2, live = p.rx_bps > 0 || p.tx_bps > 0;
+      var spread = Math.max(-14, Math.min(14, (y - meCy) / 6)), ys = meCy + spread;
+      var hx = x1 + (x2 - x1) * (narrow ? 0.55 : 0.3), hopW = 0;
+      if (via) {
+        // The hop node sits on the peer's row; both halves of the path pass through it.
+        var txt = "via " + clip(via, narrow ? 6 : 14); hopW = Math.round(txt.length * 6.4 + 14);
+        var g = svgEl("g", {}, "tr-hop");
+        g.appendChild(svgEl("rect", { x: hx - hopW / 2, y: y - 11, width: hopW, height: 22, rx: 11 }));
+        g.appendChild(svgEl("text", { x: hx, y: y + 4, "text-anchor": "middle" }, "", txt));
+        nodes.appendChild(g);
+      }
+      if (!p.path) { return; }
+      var lanes = [];
+      if (p.rx_bps > 0) { lanes.push(["rx", p.rx_bps, 1]); }
+      if (p.tx_bps > 0) { lanes.push(["tx", p.tx_bps, -1]); }
+      if (!lanes.length) { lanes.push(["idle", 0, 0]); }
+      lanes.forEach(function (l, i) {
+        var off = lanes.length > 1 ? (i ? 3 : -3) : 0, cls = l[0];
+        var a = [x1, ys + off], b = [x2, y + off];
+        var segs = via ? [[a, [hx - hopW / 2, y + off]], [[hx + hopW / 2, y + off], b]] : [[a, b]];
+        // Downloads point at this device, uploads at the peer.
+        if (l[2] > 0) { segs = segs.map(function (s) { return [s[1], s[0]]; }).reverse(); }
+        segs.forEach(function (s) { edge(curve(s[0][0], s[0][1], s[1][0], s[1][1]), cls, l[1]); });
+      });
+      // Speeds sit next to the peer, above its edge (and below it for a second direction).
+      var lx = x2 - 6, ly = y - 13;
+      if (!live) { return; }
+      var rows = [];
+      if (p.rx_bps > 0) { rows.push(["↓", "rx", fmtRate(p.rx_bps)]); }
+      if (p.tx_bps > 0) { rows.push(["↑", "tx", fmtRate(p.tx_bps)]); }
+      rows.forEach(function (row, i) { label(lx, i ? y + 23 : ly, row[0], row[1], row[2], "end"); });
+    });
+    // Relay flows: from one peer, through this device, to another.
+    (r.relays || []).forEach(function (f, i) {
+      var a = pos[f.from], b = pos[f.to];
+      if (!a || !b || !(f.bps > 0)) { return; }
+      var px = gapL + 14, py = meCy + 18 + i * 4;
+      edge(curve(gapR - 2, a.y + 6, px, py) + " " + curve(px, py, gapR - 2, b.y + 6).replace(/^M[^ ]+ /, ""), "relay", f.bps);
+      label(gapR - 6, b.y + 23, "\u21c4", "relay", "from " + peerName(f.from_name, f.from) + " " + fmtRate(f.bps), "end");
+    });
+    function node(x, y, w, cls, t1, t2) {
+      var g = svgEl("g", {}, "tr-node " + cls);
+      g.appendChild(svgEl("rect", { x: x, y: y, width: w, height: nodeH, rx: 10 }));
+      var chars = Math.floor((w - 20) / 7.2);
+      g.appendChild(svgEl("text", { x: x + 10, y: y + 18 }, "t1", clip(t1, chars)));
+      g.appendChild(svgEl("text", { x: x + 10, y: y + 34 }, "t2", clip(t2, Math.floor((w - 20) / 6.2))));
+      nodes.appendChild(g);
+    }
+    node(meX, meY, meW, "me", r.name || "This device", "this device");
+    shown.forEach(function (p) {
+      var live = p.rx_bps > 0 || p.tx_bps > 0;
+      var sub = p.path ? pathShort(p.path)[0] + (p.active ? " · " + p.active + " active" : "") : "no traffic yet";
+      node(peerX, pos[p.device].y - nodeH / 2, peerW, (live ? "busy" : "") + (p.path ? "" : " never"), peerName(p.name, p.device), sub);
+    });
+    box.appendChild(svg);
+    if (peers.length > shown.length) { box.appendChild(el("p", "muted small", (peers.length - shown.length) + " more devices in the table below.")); }
+  }
+  function renderTraffic(r) {
+    lastTraffic = r;
+    var t = r.totals || {};
+    var now = $("tr-now"); now.innerHTML = "";
+    [["↓ ", "tr-down", t.rx_bps], ["↑ ", "tr-up", t.tx_bps]].concat(t.relay_bps || t.relay_total ? [["⇄ ", "tr-relay", t.relay_bps]] : []).forEach(function (x) {
+      var s = el("span", "tr-rate"); s.appendChild(el("b", x[1], x[0])); s.appendChild(document.createTextNode(fmtRate(x[2] || 0))); now.appendChild(s);
+    });
+    renderSpark(r.history || {});
+    // Busiest first, then the most recently active, then by name.
+    var peers = (r.peers || []).slice().sort(function (a, b) {
+      return (b.rx_bps + b.tx_bps) - (a.rx_bps + a.tx_bps) || (b.last_seen_utc || 0) - (a.last_seen_utc || 0) || peerName(a.name, a.device).localeCompare(peerName(b.name, b.device));
+    });
+    $("tr-note").textContent = !r.device ? "Peer-to-peer is not running on this device; enable it below and restart the service."
+      : !peers.length ? "No other devices known yet."
+      : "Since the service started: " + fmtBytes(t.rx_total) + " received in " + t.objects_in + " blocks, " + fmtBytes(t.tx_total) + " sent in " + t.objects_out + " blocks" + (t.relay_total ? ", " + fmtBytes(t.relay_total) + " relayed for other devices" : "") + ". Speeds are averages over the last " + r.window_secs + " seconds.";
+    renderFlow(r, peers);
+    var tb = $("tr-table").querySelector("tbody"); tb.innerHTML = "";
+    $("tr-table").classList.toggle("hidden", !peers.length);
+    peers.forEach(function (p) {
+      var tr = document.createElement("tr");
+      var td = el("td"); td.appendChild(document.createTextNode(peerName(p.name, p.device))); var sub = (p.name ? p.device.slice(0, 8) : "") + (p.active ? (p.name ? " \u00b7 " : "") + p.active + " active" : ""); if (sub) { td.appendChild(el("span", "sub", sub)); } tr.appendChild(td);
+      var ps = pathShort(p.path); td = el("td"); td.appendChild(pill(ps[1], ps[0])); tr.appendChild(td);
+      td = el("td", "tr-addr", p.addr || ""); if (p.addr) { td.dataset.label = "at"; } tr.appendChild(td);
+      [["Down", fmtRate(p.rx_bps)], ["Up", fmtRate(p.tx_bps)], ["Received", fmtBytes(p.rx_total)], ["Sent", fmtBytes(p.tx_total)]].forEach(function (c) { var d = el("td", "num", c[1]); d.dataset.label = c[0]; tr.appendChild(d); });
+      td = el("td", "tr-last", fmtAgo(p.last_seen_utc, r.now_utc)); td.dataset.label = "Last"; tr.appendChild(td);
+      tb.appendChild(tr);
+    });
+    var rl = (r.relays || []), ul = $("tr-relays").querySelector("ul"); ul.innerHTML = "";
+    $("tr-relays").classList.toggle("hidden", !rl.length);
+    rl.forEach(function (f) {
+      var li = el("li"), ic = el("span", "li-icon"); ic.appendChild(icon("sharing")); li.appendChild(ic);
+      var body = el("div", "li-body");
+      body.appendChild(el("div", "li-title", peerName(f.from_name, f.from) + " → " + peerName(f.to_name, f.to)));
+      body.appendChild(el("div", "li-sub", fmtRate(f.bps) + " now · " + fmtBytes(f.total) + " in " + f.objects + " blocks · " + fmtAgo(f.last_seen_utc, r.now_utc)));
+      li.appendChild(body); ul.appendChild(li);
+    });
+  }
+  window.addEventListener("resize", function () { if (lastTraffic && currentPage === "peers") { renderTraffic(lastTraffic); } });
   $("p2pform").onsubmit = function (ev) { ev.preventDefault(); var d = formData(ev.target); d.port = +d.port || 17893; api("POST", "/api/p2p", d).then(function (r) { log("p2p settings saved; " + r.note); loadP2p(); }).catch(function (e) { alertBox(e.message); }); };
   $("storagekind").onchange = function () { var k = this.value; document.querySelectorAll("#addstorage [data-kind]").forEach(function (d) { d.classList.toggle("hidden", d.getAttribute("data-kind") !== k); }); };
   $("acceptshare").onsubmit = function (ev) { ev.preventDefault(); busy(true); api("POST", "/api/share/accept", formData(ev.target)).then(function (r) { ev.target.reset(); log("accepted shared folder " + r.folder + "; attach it under Files"); nav("files"); return refreshState(); }).catch(function (e) { alertBox(e.message); }).then(function () { busy(false); }); };
@@ -1385,7 +1571,7 @@
   $("allfilesbtn").onclick = function () { if (droid) { try { droid.requestAllFilesAccess(); } catch (e) { alertBox(e.message); } } else { alertBox("Only the Android app can ask for this permission."); } };
   // The shell calls this when the activity resumes (back from the settings screen); browsers get visibilitychange.
   window.varstoResumed = function () { refreshAllFiles(); if (document.body.dataset.view === "app") { refreshStatus(); } };
-  document.addEventListener("visibilitychange", function () { if (document.visibilityState === "visible") { refreshAllFiles(); } });
+  document.addEventListener("visibilitychange", function () { if (document.visibilityState === "visible") { refreshAllFiles(); } trafficWatch(); });
 
   // Reset: wipes this device's vault configuration after the user typed "reset".
   var resetInput = $("resetform").querySelector("input[name=confirm]");

@@ -20,7 +20,8 @@
 //! registration connection and copying the answer back; it sees ciphertext.
 
 use super::stun;
-use super::{auth_header, handle, log, verify_auth, PeerInfo, Snapshot};
+use super::traffic::{Direction, Traffic};
+use super::{auth_header, handle_from, is_object, log, verify_auth, PeerInfo, Route, Snapshot};
 use crate::crypto::SecretKey;
 use crate::ids::DeviceId;
 use anyhow::{anyhow, bail, Context, Result};
@@ -452,11 +453,32 @@ struct Serving {
     registrants: Mutex<HashMap<DeviceId, quinn::Connection>>,
     /// Connections we already serve streams on (so a registration is served once).
     served: Mutex<BTreeSet<usize>>,
+    traffic: Arc<Traffic>,
 }
 
 impl Serving {
     fn peer_key(&self) -> SecretKey {
         self.peer_key.lock().unwrap().clone()
+    }
+
+    /// How a request on `conn` reached us: through the relay `via` (a
+    /// registration connection) or directly from its remote address.
+    fn path_label(&self, conn: &quinn::Connection, via: Option<&DeviceId>) -> String {
+        let remote = conn.remote_address();
+        match via {
+            Some(relay) => {
+                let name = self
+                    .known
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .find(|p| &p.device == relay)
+                    .map(|p| p.name.clone())
+                    .unwrap_or_default();
+                Route::Relay(relay.clone(), name, remote).label()
+            }
+            None => Route::Quic(remote).label(),
+        }
     }
 }
 
@@ -493,9 +515,10 @@ impl Node {
         me: DeviceId,
         peer_key: SecretKey,
         snapshot: Arc<Mutex<Option<Arc<Snapshot>>>>,
+        traffic: Arc<Traffic>,
     ) -> Result<Arc<Node>> {
         let std_sock = UdpSocket::bind(addr).with_context(|| format!("bind p2p UDP {addr}"))?;
-        Self::start_on(std_sock, identity, me, peer_key, snapshot)
+        Self::start_on(std_sock, identity, me, peer_key, snapshot, traffic)
     }
 
     pub fn start_on(
@@ -504,6 +527,7 @@ impl Node {
         me: DeviceId,
         peer_key: SecretKey,
         snapshot: Arc<Mutex<Option<Arc<Snapshot>>>>,
+        traffic: Arc<Traffic>,
     ) -> Result<Arc<Node>> {
         std_sock.set_nonblocking(true)?;
         let rt = tokio::runtime::Builder::new_multi_thread()
@@ -551,6 +575,7 @@ impl Node {
             allowed,
             registrants: Mutex::new(HashMap::new()),
             served: Mutex::new(BTreeSet::new()),
+            traffic,
         });
         let (ep, sv) = (endpoint.clone(), serving.clone());
         rt.spawn(async move {
@@ -558,7 +583,7 @@ impl Node {
                 let sv = sv.clone();
                 tokio::spawn(async move {
                     if let Ok(conn) = incoming.await {
-                        serve_connection(conn, sv).await;
+                        serve_connection(conn, sv, None).await;
                     }
                 });
             }
@@ -586,6 +611,12 @@ impl Node {
 
     pub fn me(&self) -> &DeviceId {
         &self.serving.me
+    }
+
+    /// The counters this node serves and relays into; the peer table
+    /// built on it counts its downloads there as well.
+    pub fn traffic(&self) -> &Arc<Traffic> {
+        &self.serving.traffic
     }
 
     /// The devices of the vault as their records describe them: refreshes
@@ -891,7 +922,8 @@ impl Node {
                 // The relay opens streams toward us on this connection.
                 let sv = self.serving.clone();
                 if sv.served.lock().unwrap().insert(conn.stable_id()) {
-                    tokio::spawn(async move { serve_connection(conn, sv).await });
+                    let via = relay.clone();
+                    tokio::spawn(async move { serve_connection(conn, sv, Some(via)).await });
                 }
                 return Ok(());
             }
@@ -931,16 +963,18 @@ impl std::fmt::Debug for Node {
 // ----- serving ------------------------------------------------------------------
 
 /// Accept streams on `conn` until it closes; each stream is one request.
-async fn serve_connection(conn: quinn::Connection, sv: Arc<Serving>) {
+/// `via` is the relay when `conn` is our registration with it: requests
+/// arriving there come from other devices through that relay.
+async fn serve_connection(conn: quinn::Connection, sv: Arc<Serving>, via: Option<DeviceId>) {
     let hash = peer_hash(&conn);
     sv.served.lock().unwrap().insert(conn.stable_id());
     loop {
         let Ok((send, recv)) = conn.accept_bi().await else {
             break;
         };
-        let (sv, conn, hash) = (sv.clone(), conn.clone(), hash.clone());
+        let (sv, conn, hash, via) = (sv.clone(), conn.clone(), hash.clone(), via.clone());
         tokio::spawn(async move {
-            let _ = serve_stream(send, recv, conn, hash, sv).await;
+            let _ = serve_stream(send, recv, conn, hash, sv, via).await;
         });
     }
 }
@@ -951,10 +985,15 @@ async fn serve_stream(
     conn: quinn::Connection,
     client_hash: Option<String>,
     sv: Arc<Serving>,
+    via: Option<DeviceId>,
 ) -> Result<()> {
     let head = tokio::time::timeout(REQUEST_TIMEOUT, recv.read_to_end(MAX_HEAD))
         .await
         .map_err(|_| anyhow!("request head timed out"))??;
+    let path_label = sv.path_label(&conn, via.as_ref());
+    // The device the answer goes to, once its token checked out, and the
+    // path asked for: the traffic counters charge the answer to it.
+    let mut served: Option<(DeviceId, String)> = None;
     let (status, body) = match parse_request(&head) {
         Err(_) => (400, b"bad request".to_vec()),
         Ok((verb, target, auth)) => match verb.as_str() {
@@ -962,14 +1001,31 @@ async fn serve_stream(
                 Some(rest) => relay_request(&sv, rest, &auth).await,
                 None => {
                     let snap = sv.snapshot.lock().unwrap().clone();
-                    handle(snap.as_deref(), &target, &auth)
+                    let (status, body, peer) = handle_from(snap.as_deref(), &target, &auth);
+                    served = peer.map(|d| (d, target.clone()));
+                    (status, body)
                 }
             },
-            "REGISTER" => register(&sv, &target, &auth, client_hash.as_deref(), conn),
+            "REGISTER" => register(&sv, &target, &auth, client_hash.as_deref(), conn.clone()),
             _ => (405, b"unknown verb".to_vec()),
         },
     };
-    write_response(&mut send, status, &body).await
+    let Some((peer, target)) = served else {
+        return write_response(&mut send, status, &body).await;
+    };
+    let _active = sv.traffic.begin(&peer);
+    let result = write_response(&mut send, status, &body).await;
+    if result.is_ok() {
+        sv.traffic.record(
+            &peer,
+            Direction::Out,
+            body.len() as u64,
+            is_object(&target, status),
+            &path_label,
+            Some(conn.remote_address()),
+        );
+    }
+    result
 }
 
 /// `REGISTER <device>`: the client must hold the certificate the device's
@@ -1021,9 +1077,9 @@ async fn relay_request(sv: &Serving, rest: &str, auth: &str) -> (u16, Vec<u8>) {
         return (400, b"bad device".to_vec());
     };
     let inner = format!("/{inner}");
-    if verify_auth(&sv.peer_key(), auth, &inner).is_none() {
+    let Some(asker) = verify_auth(&sv.peer_key(), auth, &inner) else {
         return (403, b"forbidden".to_vec());
-    }
+    };
     let target = sv.registrants.lock().unwrap().get(&dev).cloned();
     let Some(target) = target else {
         log(&format!(
@@ -1032,8 +1088,13 @@ async fn relay_request(sv: &Serving, rest: &str, auth: &str) -> (u16, Vec<u8>) {
         ));
         return (502, b"device is not registered with this relay".to_vec());
     };
+    let _active = sv.traffic.begin_relay(&dev, &asker);
     match request_on(&target, "GET", &inner, auth).await {
-        Ok(r) => r,
+        Ok(r) => {
+            sv.traffic
+                .record_relay(&dev, &asker, r.1.len() as u64, is_object(&inner, r.0));
+            r
+        }
         Err(e) => {
             // The registrant is gone; forget it so the next try fails fast.
             if target.close_reason().is_some() {

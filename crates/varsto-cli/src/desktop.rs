@@ -29,6 +29,8 @@ pub struct State {
     pub engine: Option<Engine>,
     pub token: String,
     pub bound: String,
+    /// Peer-to-peer traffic counters, read by `/api/p2p/traffic` without the state lock.
+    pub traffic: Arc<varsto_core::p2p::Traffic>,
     pub service: ServiceState,
     /// An open pairing offer (this device adding another one).
     pub pair: Option<varsto_core::pair::Offer>,
@@ -48,12 +50,95 @@ pub fn bind(port: u16) -> Result<(Server, String)> {
 }
 
 /// Serve requests until the server is unblocked. Blocks.
+///
+/// This thread answers what needs no state itself: the page and its assets
+/// and the traffic counters. Everything else goes, in arrival order, to one
+/// worker thread, as before. A sync or a fetch holds the state for minutes,
+/// and every request behind it waits; the traffic view, most interesting
+/// exactly then, must not wait with them. The host name, token and counters
+/// it needs never change after start, so they are copied here once.
 pub fn serve_arc(server: Arc<Server>, state: Shared) {
+    let fixed = {
+        let st = state.lock().unwrap();
+        Fixed {
+            bound: st.bound.clone(),
+            token: st.token.clone(),
+            traffic: st.traffic.clone(),
+        }
+    };
+    let (tx, rx) = std::sync::mpsc::channel::<Request>();
+    let worker = std::thread::Builder::new()
+        .name("http-api".into())
+        .spawn(move || {
+            for request in rx {
+                if let Err(e) = handle(&state, request) {
+                    eprintln!("request failed: {e:#}");
+                }
+            }
+        });
+    if worker.is_err() {
+        eprintln!("cannot start the API worker thread");
+        return;
+    }
     for request in server.incoming_requests() {
-        if let Err(e) = handle(&state, request) {
-            eprintln!("request failed: {e:#}");
+        match handle_unlocked(&fixed, request) {
+            Ok(None) => {}
+            Ok(Some(request)) => {
+                if tx.send(request).is_err() {
+                    break;
+                }
+            }
+            Err(e) => eprintln!("request failed: {e:#}"),
         }
     }
+}
+
+/// What the dispatching thread needs, copied from the state at start.
+struct Fixed {
+    bound: String,
+    token: String,
+    traffic: Arc<varsto_core::p2p::Traffic>,
+}
+
+/// Answer a request that needs no state, or hand it back for the worker.
+fn handle_unlocked(fixed: &Fixed, request: Request) -> Result<Option<Request>> {
+    let port = fixed.bound.rsplit(':').next().unwrap_or("");
+    let host_ok = request
+        .headers()
+        .iter()
+        .find(|h| h.field.equiv("Host"))
+        .map(|h| h.value.as_str() == fixed.bound || h.value.as_str() == format!("localhost:{port}"))
+        .unwrap_or(false);
+    if !host_ok {
+        request.respond(Response::from_string("bad host").with_status_code(400))?;
+        return Ok(None);
+    }
+    if *request.method() != Method::Get {
+        return Ok(Some(request));
+    }
+    let path = request.url().split('?').next().unwrap_or("").to_string();
+    match path.as_str() {
+        "/" => request.respond(html(INDEX_HTML))?,
+        "/app.js" => request.respond(text(APP_JS, "text/javascript; charset=utf-8"))?,
+        "/app.css" => request.respond(text(APP_CSS, "text/css; charset=utf-8"))?,
+        "/api/p2p/traffic" => {
+            let token_ok = request
+                .headers()
+                .iter()
+                .any(|h| h.field.equiv("X-Varsto-Token") && h.value.as_str() == fixed.token);
+            if !token_ok {
+                request.respond(json_response(
+                    401,
+                    &json!({"error": "missing or wrong token; reopen the start URL"}),
+                ))?;
+            } else {
+                let report = serde_json::to_value(fixed.traffic.report())?;
+                request.respond(json_response(200, &report))?;
+            }
+        }
+        _ => return Ok(Some(request)),
+    }
+    Ok(None)
 }
 
 pub fn open_in_browser(url: &str) {

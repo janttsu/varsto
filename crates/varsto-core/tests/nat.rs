@@ -79,6 +79,7 @@ fn node(e: &Engine, snap: Snap) -> Arc<quic::Node> {
         e.device_id().clone(),
         e.peer_key(),
         snap,
+        Arc::default(),
     )
     .unwrap()
 }
@@ -289,6 +290,7 @@ fn wildcard_server_answers_from_the_address_it_was_reached_at() {
         a.device_id().clone(),
         a.peer_key(),
         snap_a,
+        Arc::default(),
     )
     .unwrap();
     let b = join(&lab, "b", "desk", &key);
