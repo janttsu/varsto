@@ -83,6 +83,8 @@ varsto disk list && varsto disk check data-01 --full && varsto disk eject data-0
 
 # selective sync, transferrer disks, replicas and sharing:
 varsto folder attach docs ~/synced --selective && varsto folder files docs && varsto folder fetch docs big.mp4
+varsto paths free ~/synced/big.mp4 && varsto open-placeholder ~/synced/big.mp4.varsto-placeholder  # what the file-manager actions run
+varsto verify-release varsto-<version>-x86_64-unknown-linux-musl.tar.gz --github  # check a download against the signed SHA256SUMS
 varsto storage add-local stick /media/usb --carrier       # carries only what the other device lacks
 varsto replica token                                      # give to an untrusted backup device
 varsto --home ~/.varsto-replica replica init --name nas --token <t> --source /mnt/shared --target /mnt/nas/varsto

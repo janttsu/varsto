@@ -1,10 +1,14 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: PolyForm-Shield-1.0.0
-# Publish a Mac-built Varsto disk image to the download page from a Mac:
-# fetches the live checksum list and manifest, adds (or replaces) the macOS
-# entry, rebuilds the site and deploys it with rsync.
+# Publish a Mac-built Varsto disk image to the download page (built on a Mac,
+# or the one CI attached to the GitHub release): fetches the live checksum
+# list and manifest, adds (or replaces) the macOS entry, signs the final
+# checksum list with the release key (scripts/sign-release.sh; stops here
+# without the key, so a list the updater would refuse is never deployed),
+# rebuilds the site and deploys it with rsync. Run it where the release key is.
 #   website/publish-macos.sh apps/macos/dist/Varsto-<version>-macos.dmg
-# Needs: pandoc (brew install pandoc), python3, rsync, SSH access to the
+# Needs: pandoc (brew install pandoc), python3, rsync, OpenSSL 3 (macOS: brew
+# install openssl@3), the release key (VARSTO_RELEASE_KEY), SSH access to the
 # site host (DEPLOY_HOST, default "dedibox"; DEPLOY_PATH, default
 # sites/varsto/public, relative to the home directory on that host).
 set -euo pipefail
@@ -38,6 +42,7 @@ m[name] = {"platform": "macOS app (Apple Silicon)", "note": "disk image: drag Va
 (out / "manifest.json").write_text(json.dumps(m, indent=2) + "\n")
 print("download table entry added for", name)
 PY
+"$root/scripts/sign-release.sh" "$out/SHA256SUMS"
 python3 "$root/website/build.py"
 DEPLOY_HOST="${DEPLOY_HOST:-dedibox}" DEPLOY_PATH="${DEPLOY_PATH:-sites/varsto/public}" "$root/website/deploy.sh"
 echo "published: $site/downloads/$name"

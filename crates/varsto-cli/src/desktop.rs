@@ -1353,24 +1353,7 @@ fn api_unlocked(
                 .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
                 .unwrap_or_default();
             // One ledger batch for the whole selection.
-            let results = engine.one_batch(|engine| {
-                let mut results = Vec::new();
-                for p in paths {
-                    let r = engine.locate_path(std::path::Path::new(&p)).and_then(|(folder, file)| {
-                        match action.as_str() {
-                            "fetch" => engine.fetch_file(&folder, &file).map(|_| ()),
-                            "free" => engine.free_file(&folder, &file),
-                            other => Err(anyhow!("unknown action {other}")),
-                        }
-                        .map(|()| file)
-                    });
-                    results.push(match r {
-                        Ok(file) => json!({"path": p, "file": file, "ok": true}),
-                        Err(e) => json!({"path": p, "ok": false, "error": format!("{e:#}")}),
-                    });
-                }
-                Ok(results)
-            })?;
+            let results = crate::filemanager::act(engine, &action, paths)?;
             Ok(json!({"results": results}))
         }
         (Method::Post, "/api/free") => {
