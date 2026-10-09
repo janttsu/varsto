@@ -107,6 +107,9 @@ fn devices_never_online_together_converge() {
         1,
         "folder record must arrive through the storage"
     );
+    // Before attaching anything B already knows the other device.
+    let names: Vec<String> = b.status().unwrap().devices.into_values().collect();
+    assert!(names.contains(&"laptop".to_string()), "{names:?}");
     b.attach_folder("docs", &lab.b_dir, false).unwrap();
     let pull = b.pull("docs").unwrap();
     assert_eq!(pull.files_updated, 3);

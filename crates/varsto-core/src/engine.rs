@@ -404,6 +404,7 @@ impl Engine {
         let mut engine = Self::write_new(home, vault, keys, passphrase)?;
         engine.add_storage_with_secret(storage, secret)?;
         engine.pull_registry()?;
+        engine.pull_ledger()?;
         Ok(engine)
     }
 
@@ -3170,6 +3171,11 @@ impl Engine {
                 .collect(),
         };
         let mut out = Vec::new();
+        if names.is_empty() {
+            // Nothing attached yet (a device that just joined): still learn the
+            // other devices and where the blocks are.
+            self.pull_ledger()?;
+        }
         for name in names {
             let pull = self.pull(&name)?;
             let push = self.push(&name)?;
