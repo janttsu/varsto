@@ -10,7 +10,7 @@
 set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 zip="${1:?usage: publish-macos.sh <Varsto-<version>-macos.dmg>}"
-site="${SITE_URL:-https://varsto.soderlund.in}"
+site="${SITE_URL:-https://varsto.net}"
 out="$root/website/public/downloads"
 mkdir -p "$out"
 name="$(basename "$zip")"

@@ -7,7 +7,7 @@
 
 *"Varsto" is a working name and may change before the first public release.*
 
-Source: <https://github.com/janttsu/varsto> (issues and pull requests welcome). Website: <https://varsto.soderlund.in>.
+Source: <https://github.com/janttsu/varsto> (issues and pull requests welcome). Website: <https://varsto.net>.
 
 Varsto is an end-to-end encrypted file sync, sharing and backup app that **uses your own devices and storage services of your choice**. You bring the storage; the app does the rest.
 
