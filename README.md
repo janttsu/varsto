@@ -38,6 +38,7 @@ varsto --home ~/.varsto-laptop storage add-s3 cloud --endpoint https://s3.fr-par
 varsto --home ~/.varsto-laptop storage add-rclone hetzner storagebox:varsto   # any rclone remote
 varsto --home ~/.varsto-laptop folder add docs ~/Documents/synced
 varsto --home ~/.varsto-laptop sync
+varsto install                             # Linux: varsto on PATH, service (systemd user unit) and tray at login, menu entry; ./varsto with no arguments does this the first time
 varsto tray                                # Linux/Windows: tray icon + background service (macOS: Varsto.app)
 varsto update --check                      # self-update from the download page
 

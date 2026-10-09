@@ -129,6 +129,14 @@ enum Cmd {
         #[arg(long)]
         open: bool,
     },
+    /// Install on this computer: the binary on PATH, the background service
+    /// and tray at login, an application menu entry (Linux: no root needed).
+    Install {
+        #[arg(long, default_value_t = 300)]
+        interval: u64,
+    },
+    /// Undo `install`; the vault and folders stay.
+    Uninstall,
     /// Share a folder with another Varsto user, or accept a folder shared with you.
     Share {
         #[command(subcommand)]
@@ -1392,6 +1400,8 @@ fn run(cli: &Cli) -> Result<()> {
                 None => println!("not running"),
             },
         },
+        Cmd::Install { interval } => println!("{}", service::install(&home, *interval)?),
+        Cmd::Uninstall => println!("{}", service::uninstall()?),
         Cmd::Tray { interval, open } => {
             // The tray app has no terminal output: on Windows, let go of the
             // console window that a double-click or the .cmd starter opened.
@@ -2060,6 +2070,15 @@ fn main() {
         .filter(|a| !a.starts_with("-psn_"))
         .collect();
     if args.len() == 1 {
+        // Linux: the first start of a downloaded binary installs it (binary on
+        // PATH, service and tray at login, menu entry) and hands over to the
+        // installed copy, so nobody has to run ./varsto from a folder again.
+        #[cfg(target_os = "linux")]
+        if !service::linux::running_installed() && std::env::var_os("VARSTO_NO_INSTALL").is_none() {
+            if let Some(code) = first_start_install() {
+                std::process::exit(code);
+            }
+        }
         args.push(if cfg!(any(target_os = "linux", target_os = "windows")) {
             "tray".to_string()
         } else {
@@ -2070,6 +2089,33 @@ fn main() {
     if let Err(e) = run(&cli).context("varsto") {
         eprintln!("error: {e:#}");
         std::process::exit(1);
+    }
+}
+
+/// Install, then start the installed tray with the interface open. `None`
+/// when installing failed (this copy then runs as before).
+#[cfg(target_os = "linux")]
+fn first_start_install() -> Option<i32> {
+    let cli = Cli::parse_from(["varsto", "tray"]);
+    let home = home(&cli).ok()?;
+    match service::install(&home, 300) {
+        Ok(report) => {
+            println!("Varsto is installed:\n{report}\nFrom now on run `varsto` (or Varsto in the application menu).");
+            let target = service::linux::installed_binary().ok()?;
+            let started = std::process::Command::new(&target)
+                .arg("--home")
+                .arg(&home)
+                .args(["tray", "--open"])
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn();
+            Some(if started.is_ok() { 0 } else { 1 })
+        }
+        Err(e) => {
+            eprintln!("could not install Varsto ({e:#}); running this copy instead");
+            None
+        }
     }
 }
 

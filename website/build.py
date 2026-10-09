@@ -161,7 +161,7 @@ def rewrite_links(body: str, slug_by_name: dict[str, str], docs_prefix: str = ""
 PLATFORMS = [
     # (title, icon, matcher for the primary file, matchers for alternatives, status line)
     ("Linux", "linux", lambda n: n.endswith("-x86_64-unknown-linux-musl.tar.gz"), [],
-     "x86_64, static binary. Tray icon, background service, browser interface and command line in one file. Tested on the development machine."),
+     "x86_64, static binary. Unpack and run ./varsto once: it installs itself for your user (varsto on your PATH, the background service as a systemd user unit, the tray at login, Varsto in the application menu; no root). Tray icon, background service, browser interface and command line in one file."),
     ("macOS", "macos", lambda n: n.endswith("-macos.dmg") or n.endswith("-macos.zip") or n.endswith("-macos-apple-silicon-lite.zip"),
      [("Command line only (Apple Silicon)", lambda n: n.endswith("-aarch64-apple-darwin.tar.gz"))],
      "Apple Silicon. Open the disk image and drag Varsto to Applications. The app has its own window, a menu-bar item, Finder actions (right-click a file: Download or Free up space with Varsto; double-click a placeholder to download and open it), the background service and the varsto command line inside the bundle. Unsigned: right-click, Open the first time."),

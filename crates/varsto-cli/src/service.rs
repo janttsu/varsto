@@ -1080,15 +1080,8 @@ pub fn install(home: &Path, interval_secs: u64) -> Result<String> {
     }
     #[cfg(target_os = "linux")]
     {
-        // Desktop session: autostart the tray app, which runs the service.
-        let config = std::env::var_os("XDG_CONFIG_HOME")
-            .map(PathBuf::from)
-            .unwrap_or(PathBuf::from(std::env::var("HOME")?).join(".config"));
-        let dir = config.join("autostart");
-        fs::create_dir_all(&dir)?;
-        let entry = dir.join("varsto.desktop");
-        fs::write(&entry, format!("[Desktop Entry]\nType=Application\nName=Varsto\nComment=Encrypted sync with your own storage\nExec={} --home {} tray --interval {}\nIcon=folder-sync\nTerminal=false\nX-GNOME-Autostart-enabled=true\n", exe.display(), home.display(), interval_secs))?;
-        return Ok(format!("installed: {} (starts the tray app at login; for a headless machine create a systemd user unit running `varsto service run`)", entry.display()));
+        let _ = exe;
+        return linux::install(home, interval_secs).map(|lines| lines.join("\n"));
     }
     #[cfg(target_os = "windows")]
     {
@@ -1130,11 +1123,7 @@ pub fn uninstall() -> Result<String> {
     }
     #[cfg(target_os = "linux")]
     {
-        let config = std::env::var_os("XDG_CONFIG_HOME")
-            .map(PathBuf::from)
-            .unwrap_or(PathBuf::from(std::env::var("HOME")?).join(".config"));
-        let _ = fs::remove_file(config.join("autostart/varsto.desktop"));
-        return Ok("removed the autostart entry".into());
+        return linux::uninstall().map(|lines| lines.join("\n"));
     }
     #[cfg(target_os = "windows")]
     {
@@ -1145,4 +1134,209 @@ pub fn uninstall() -> Result<String> {
     }
     #[allow(unreachable_code)]
     Err(anyhow!("not implemented on this platform"))
+}
+
+/// Linux: install like an ordinary program, without root. The binary goes to
+/// `~/.local/bin` (added to PATH in the shell profiles when missing), a
+/// systemd user unit runs the background service (restarting it after a
+/// self-update, exit code 75), the tray starts at login and attaches to that
+/// service, and the application menu gets an entry with the icon.
+#[cfg(target_os = "linux")]
+pub mod linux {
+    use super::*;
+    use anyhow::bail;
+    use std::io::Write;
+    use std::process::Command;
+
+    const ICON_PNG: &[u8] = include_bytes!("../../../brand/png/logo-256.png");
+    const UNIT: &str = "varsto.service";
+    const MARK: &str = "# Added by varsto install";
+
+    fn user_home() -> Result<PathBuf> {
+        Ok(PathBuf::from(
+            std::env::var_os("HOME").ok_or_else(|| anyhow!("HOME is not set"))?,
+        ))
+    }
+
+    fn xdg(var: &str, fallback: &str) -> Result<PathBuf> {
+        Ok(std::env::var_os(var)
+            .map(PathBuf::from)
+            .unwrap_or(user_home()?.join(fallback)))
+    }
+
+    /// Where `varsto install` puts the binary.
+    pub fn installed_binary() -> Result<PathBuf> {
+        Ok(user_home()?.join(".local/bin/varsto"))
+    }
+
+    /// Whether this process runs the installed copy.
+    pub fn running_installed() -> bool {
+        match (
+            std::env::current_exe().and_then(fs::canonicalize),
+            installed_binary(),
+        ) {
+            (Ok(me), Ok(target)) => fs::canonicalize(target).map(|t| t == me).unwrap_or(false),
+            _ => false,
+        }
+    }
+
+    fn systemd_user() -> bool {
+        Command::new("systemctl")
+            .args(["--user", "show-environment"])
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+    }
+
+    fn systemctl(args: &[&str]) -> Result<()> {
+        let out = Command::new("systemctl")
+            .arg("--user")
+            .args(args)
+            .output()?;
+        if !out.status.success() {
+            bail!(
+                "systemctl --user {} failed: {}",
+                args.join(" "),
+                String::from_utf8_lossy(&out.stderr).trim()
+            );
+        }
+        Ok(())
+    }
+
+    fn quote(p: &Path) -> String {
+        let s = p.display().to_string();
+        if s.contains(' ') {
+            format!("\"{s}\"")
+        } else {
+            s
+        }
+    }
+
+    /// Ask a service already running for this home (started by hand or by an
+    /// older copy) to stop, so the installed one takes over.
+    fn stop_running(home: &Path) {
+        if let Some((file, _)) = status(home) {
+            let url = format!("http://127.0.0.1:{}/api/quit", file.port);
+            let _ = http_post(&url, &file.token, "{}");
+            for _ in 0..50 {
+                if status(home).is_none() {
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(200));
+            }
+        }
+    }
+
+    pub fn install(home: &Path, interval_secs: u64) -> Result<Vec<String>> {
+        let mut done = Vec::new();
+        let target = installed_binary()?;
+        let bin_dir = target.parent().unwrap().to_path_buf();
+        fs::create_dir_all(&bin_dir)?;
+        if !running_installed() {
+            // Copy then rename: replacing a running binary in place would
+            // break the process that runs it.
+            let tmp = bin_dir.join(".varsto.new");
+            fs::copy(std::env::current_exe()?, &tmp)?;
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&tmp, fs::Permissions::from_mode(0o755))?;
+            fs::rename(&tmp, &target)?;
+            done.push(format!("binary: {}", target.display()));
+        }
+        let on_path = std::env::var_os("PATH")
+            .map(|p| std::env::split_paths(&p).any(|d| d == bin_dir))
+            .unwrap_or(false);
+        if !on_path {
+            let line = format!("\n{MARK}\nexport PATH=\"$HOME/.local/bin:$PATH\"\n");
+            for rc in [".profile", ".bashrc", ".zshrc"] {
+                let f = user_home()?.join(rc);
+                if rc != ".profile" && !f.exists() {
+                    continue;
+                }
+                let text = fs::read_to_string(&f).unwrap_or_default();
+                if !text.contains(MARK) {
+                    fs::OpenOptions::new()
+                        .create(true)
+                        .append(true)
+                        .open(&f)?
+                        .write_all(line.as_bytes())?;
+                    done.push(format!(
+                        "PATH: added ~/.local/bin in ~/{rc} (open a new terminal)"
+                    ));
+                }
+            }
+        }
+        fs::create_dir_all(home)?;
+        let exec = format!("{} --home {}", quote(&target), quote(home));
+        if systemd_user() {
+            let dir = xdg("XDG_CONFIG_HOME", ".config")?.join("systemd/user");
+            fs::create_dir_all(&dir)?;
+            fs::write(
+                dir.join(UNIT),
+                format!(
+                    "[Unit]\nDescription=Varsto background sync\nAfter=network-online.target\n\n[Service]\nExecStart={exec} service run --port 0 --interval {interval_secs}\nRestart=always\nRestartSec=3\n\n[Install]\nWantedBy=default.target\n"
+                ),
+            )?;
+            stop_running(home);
+            systemctl(&["daemon-reload"])?;
+            systemctl(&["enable", "--now", UNIT])?;
+            done.push(format!(
+                "background service: systemd user unit {UNIT}, started and enabled at login"
+            ));
+        } else {
+            done.push("background service: no systemd user session; the tray app runs it while you are logged in".into());
+        }
+        let config = xdg("XDG_CONFIG_HOME", ".config")?;
+        fs::create_dir_all(config.join("autostart"))?;
+        fs::write(
+            config.join("autostart/varsto.desktop"),
+            format!("[Desktop Entry]\nType=Application\nName=Varsto\nComment=Encrypted sync with your own storage\nExec={exec} tray --interval {interval_secs}\nIcon=varsto\nTerminal=false\nX-GNOME-Autostart-enabled=true\n"),
+        )?;
+        done.push("tray icon: starts at login".into());
+        let data = xdg("XDG_DATA_HOME", ".local/share")?;
+        let icon_dir = data.join("icons/hicolor/256x256/apps");
+        fs::create_dir_all(&icon_dir)?;
+        fs::write(icon_dir.join("varsto.png"), ICON_PNG)?;
+        fs::create_dir_all(data.join("applications"))?;
+        fs::write(
+            data.join("applications/varsto.desktop"),
+            format!("[Desktop Entry]\nType=Application\nName=Varsto\nComment=Encrypted sync with your own storage\nExec={exec} tray --open\nIcon=varsto\nTerminal=false\nCategories=Utility;FileTools;Network;\n"),
+        )?;
+        done.push("application menu: Varsto".into());
+        Ok(done)
+    }
+
+    pub fn uninstall() -> Result<Vec<String>> {
+        let mut done = Vec::new();
+        if systemd_user() {
+            let _ = systemctl(&["disable", "--now", UNIT]);
+            let unit = xdg("XDG_CONFIG_HOME", ".config")?
+                .join("systemd/user")
+                .join(UNIT);
+            if fs::remove_file(unit).is_ok() {
+                let _ = systemctl(&["daemon-reload"]);
+                done.push("background service: stopped and removed".into());
+            }
+        }
+        let config = xdg("XDG_CONFIG_HOME", ".config")?;
+        let data = xdg("XDG_DATA_HOME", ".local/share")?;
+        for f in [
+            config.join("autostart/varsto.desktop"),
+            data.join("applications/varsto.desktop"),
+            data.join("icons/hicolor/256x256/apps/varsto.png"),
+        ] {
+            let _ = fs::remove_file(f);
+        }
+        done.push("autostart and menu entries removed".into());
+        let target = installed_binary()?;
+        if !running_installed() && fs::remove_file(&target).is_ok() {
+            done.push(format!("binary removed: {}", target.display()));
+        } else if target.exists() {
+            done.push(format!(
+                "binary kept: {} (remove it by hand after this)",
+                target.display()
+            ));
+        }
+        done.push("your vault and folders were not touched".into());
+        Ok(done)
+    }
 }
