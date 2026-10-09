@@ -810,7 +810,37 @@ fn api_unlocked(
             let only_here = engine.disk_retire(&label)?;
             Ok(json!({"ok": true, "label": label, "retired": true, "objects_only_here": only_here}))
         }
-        (Method::Get, "/api/strongroom") => Ok(json!({"strongrooms": engine.strongrooms().into_iter().map(|(n, m, u)| json!({"folder": n, "method": m, "unlocked_until": u})).collect::<Vec<_>>()})),
+        (Method::Get, "/api/strongroom") => Ok(json!({
+            "strongrooms": engine.strongrooms().into_iter().map(|(n, m, u)| json!({"folder": n, "method": m, "unlocked_until": u, "keys": engine.strongroom_keys(&n).unwrap_or_default()})).collect::<Vec<_>>(),
+            "conversions": engine.strongroom_conversions().into_iter().map(|(n, switched)| json!({"folder": n, "cleanup_only": switched})).collect::<Vec<_>>(),
+        })),
+        // The command line touched the security key (it made the new key
+        // and its wrap); the conversion runs here, where the folder state is.
+        (Method::Post, "/api/strongroom/convert") => {
+            let folder = s(input, "folder")?;
+            let id = varsto_core::ids::FolderId::from_hex(&s(input, "folder_id")?)?;
+            let key = varsto_core::crypto::SecretKey::from_hex(&s(input, "key_hex")?)?;
+            let info: varsto_core::strongroom::StrongroomInfo = serde_json::from_value(input.get("info").cloned().unwrap_or_default())?;
+            let minutes = input.get("minutes").and_then(|v| v.as_u64()).unwrap_or(15).clamp(1, 24 * 60);
+            let r = engine.convert_to_strongroom_with(&folder, &id, &key, info, minutes)?;
+            let mut out = serde_json::to_value(r)?;
+            if input.get("free").and_then(|v| v.as_bool()).unwrap_or(false) {
+                let (freed, kept) = engine.free_folder(&folder)?;
+                out["freed"] = json!(freed);
+                out["kept"] = json!(kept);
+            }
+            service.request_sync();
+            Ok(out)
+        }
+        (Method::Post, "/api/strongroom/add-key") => {
+            let key: varsto_core::strongroom::EnrolledKey = serde_json::from_value(input.get("key").cloned().unwrap_or_default())?;
+            let n = engine.add_strongroom_key_enrolled(&s(input, "folder")?, key)?;
+            Ok(json!({"ok": true, "keys": n}))
+        }
+        (Method::Post, "/api/strongroom/remove-key") => {
+            let gone = engine.remove_strongroom_key(&s(input, "folder")?, &s(input, "key")?)?;
+            Ok(json!({"ok": true, "removed": gone.short()}))
+        }
         (Method::Post, "/api/strongroom/unlock") => {
             let minutes = input.get("minutes").and_then(|v| v.as_u64()).unwrap_or(15).clamp(1, 24 * 60);
             engine.unlock_strongroom_with_key(&s(input, "folder")?, &s(input, "key_hex")?, minutes)?;

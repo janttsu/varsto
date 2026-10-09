@@ -349,6 +349,37 @@
       });
     }).catch(function (e) { alertBox(e.message); });
   }
+  // Strongroom: the security key is touched on the command line (libfido2 tools), so the page shows the command.
+  function shArg(n) { return /^[A-Za-z0-9._\/-]+$/.test(n) ? n : "'" + n.replace(/'/g, "'\\''") + "'"; }
+  function convertStrongroom(f) {
+    api("GET", "/api/strongroom").then(function (r) {
+      var resume = (r.conversions || []).some(function (c) { return c.folder === f.name && !c.cleanup_only; });
+      return dialog({
+        title: (resume ? "Resume converting " : "Convert ") + f.name + " to a Strongroom",
+        text: (resume ? "A conversion of this folder was interrupted; nothing old was deleted. Run the same command again and touch the key it was started with. " : "The folder gets a new key that only your FIDO2 security key opens. Everything is re-encrypted and uploaded again, then the old copies are deleted from your storages. Other devices replace their plain copies with placeholders and need the security key to open the folder; a device that already had the old key could have kept it. ") + "Run this in a terminal on this computer with the security key plugged in:",
+        code: "varsto strongroom convert " + shArg(f.name), ok: "Close", cancel: false
+      });
+    }).then(function () { return refreshStatus(); }).catch(function (e) { alertBox(e.message); });
+  }
+  function strongroomKeys(f) {
+    api("GET", "/api/strongroom").then(function (r) {
+      var sr = (r.strongrooms || []).filter(function (x) { return x.folder === f.name; })[0];
+      var keys = sr ? sr.keys : [];
+      var lines = keys.map(function (k) { return k.number + ". " + (k.label || "no label") + " (" + k.method + (k.added_utc ? ", added " + fmtDate(k.added_utc) : "") + "): " + k.name; });
+      return dialog({
+        title: "Security keys of " + f.name,
+        text: (keys.length === 1 ? "One key opens this Strongroom; if it is lost, so is the folder. Enrol a backup key and keep it somewhere safe." : keys.length + " keys open this Strongroom; any one of them is enough.") + " To add a backup key, run the command with an enrolled key plugged in; it asks you to swap to the new key.",
+        code: lines.join("\n") + "\n\nvarsto strongroom add-key " + shArg(f.name) + " --label safe",
+        ok: "Close", cancel: false, extra: keys.length > 1 ? "Remove a key…" : ""
+      }).then(function (d) {
+        if (!d || d.action !== "extra") { return; }
+        return dialog({ title: "Remove a key from " + f.name, text: "The key stops opening the folder and its wrap is deleted from the storages. The folder key itself does not change, so a removed key that was kept could still open an older copy of the records. The last key always stays.", fields: [{ name: "key", label: "Key number or label", required: true }], ok: "Remove", danger: true }).then(function (x) {
+          if (!x) { return; }
+          return api("POST", "/api/strongroom/remove-key", { folder: f.name, key: x.values.key.trim() }).then(function (res) { log("removed key " + res.removed + " from " + f.name); });
+        });
+      });
+    }).catch(function (e) { alertBox(e.message); });
+  }
   function stateLabel(state) { return state === "ok" ? "OK" : state === "at_risk" ? "At risk" : state === "violated" ? "Violated" : "Unknown"; }
   function stateClass(state) { return state === "ok" ? "ok" : state === "at_risk" ? "risk" : state === "violated" ? "bad" : "grey"; }
   function folderByName(name) { if (!lastStatus) { return null; } for (var i = 0; i < lastStatus.folders.length; i++) { if (lastStatus.folders[i].name === name) { return lastStatus.folders[i]; } } return null; }
@@ -387,6 +418,8 @@
         if (!s.member) { var pb = document.createElement("button"); pb.className = "secondary"; pb.textContent = "Policy"; pb.onclick = function () { openPolicy(f); }; act.appendChild(pb); }
         if (!s.member) { var rmb = document.createElement("button"); rmb.className = "secondary"; rmb.textContent = "Remove"; rmb.onclick = function () { removeFolder(f); }; act.appendChild(rmb); }
         if (f.strongroom && f.strongroom !== "locked") { var lk = document.createElement("button"); lk.className = "secondary"; lk.textContent = "Lock"; lk.onclick = function () { api("POST", "/api/strongroom/lock", { folder: f.name }).then(function () { log("locked " + f.name); return refreshStatus(); }).catch(function (e) { alertBox(e.message); }); }; act.appendChild(lk); }
+        if (!s.member && f.path && !f.strongroom && !f.shared) { var cv = document.createElement("button"); cv.className = "secondary"; cv.textContent = "Convert to Strongroom…"; cv.onclick = function () { convertStrongroom(f); }; act.appendChild(cv); }
+        if (f.strongroom) { var ks = document.createElement("button"); ks.className = "secondary"; ks.textContent = "Security keys…"; ks.title = "Enrolled security keys; add a backup key"; ks.onclick = function () { strongroomKeys(f); }; act.appendChild(ks); }
         if (f.strongroom === "locked") { var note = document.createElement("span"); note.className = "muted"; note.textContent = "unlock with: varsto strongroom unlock " + f.name; act.appendChild(note); }
         tr.appendChild(act); tb.appendChild(tr);
         var o = document.createElement("option"); o.value = f.name; o.textContent = f.name; sel.appendChild(o);

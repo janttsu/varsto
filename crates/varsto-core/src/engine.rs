@@ -39,6 +39,9 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
+mod strongroom_ops;
+pub use strongroom_ops::{CleanupReport, ConvertReport, StrongroomKeySummary};
+
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
 struct LocalIndexEntry {
     size: u64,
@@ -1803,6 +1806,8 @@ impl Engine {
                 }
             }
         }
+        // Strongroom conversions and key lists (S-012).
+        self.pull_strongroom_records()?;
         if changed_devices {
             self.save_devices()?;
         }
@@ -2452,6 +2457,10 @@ impl Engine {
         self.scan(&rec, &root, &mut state)?;
         let forks = self.pull_ledger()?;
         report.forked_devices = forks.iter().map(|d| d.to_string()).collect();
+        if !self.keyring.folders.contains_key(&rec.folder_id) {
+            // Converted into a Strongroom by another device just now.
+            return Ok(report);
+        }
         let fk = rec.keys()?;
         let me = self.vault.device_id.clone();
         let storages = self.open_storages(false)?;
@@ -3553,6 +3562,10 @@ impl Engine {
 
     /// pull then push, for every attached folder (or one).
     pub fn sync(&mut self, folder: Option<&str>) -> Result<Vec<(PullReport, PushReport)>> {
+        // A folder another device converted into a Strongroom must be
+        // adopted before it is synced under its old key.
+        self.pull_registry()?;
+        self.finish_strongroom_conversions();
         let names: Vec<String> = match folder {
             Some(f) => vec![f.to_string()],
             None => self
@@ -3561,7 +3574,7 @@ impl Engine {
                 .filter(|(r, m)| {
                     m.is_some() && (!r.is_strongroom() || self.is_unlocked(&r.folder_id))
                 })
-                .map(|(r, _)| r.name)
+                .map(|(r, _)| r.folder_id.to_string())
                 .collect(),
         };
         let mut out = Vec::new();
@@ -3572,6 +3585,9 @@ impl Engine {
         }
         for name in names {
             let pull = self.pull(&name)?;
+            if self.keyring.find(&name).is_none() {
+                continue; // converted while pulling
+            }
             let push = self.push(&name)?;
             out.push((pull, push));
         }
@@ -3739,7 +3755,10 @@ impl Engine {
                 _ => {}
             }
         }
-        for ((_, _), rec) in view.chunks.iter() {
+        for ((folder, _), rec) in view.chunks.iter() {
+            if !self.keyring.folders.contains_key(folder) {
+                continue; // a folder converted into a Strongroom: its old objects are gone
+            }
             let key = chunk_storage_key(&rec.object);
             for storage in rec.storages.keys() {
                 if self

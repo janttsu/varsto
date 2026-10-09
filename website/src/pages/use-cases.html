@@ -23,7 +23,7 @@ description: Thirteen situations Varsto is designed for, from a plane without in
       <picture><source type="image/webp" srcset="../assets/img/usecases/stolen.webp"><img src="../assets/img/usecases/stolen.png" alt="A stolen laptop: the Strongroom folder stays locked, the device is revoked and wiped from a phone." width="640" height="320" loading="lazy"></picture>
       <div>
         <p>The thief gets the machine open. Strongroom folders stay locked because they need your security key, not a password that may be cached. From another device you revoke the laptop and queue a wipe command that runs the moment it comes online. Everything is still restorable from your own storages. The ledger's revocation cut-off means events signed by the stolen device after that point are quarantined rather than trusted.</p>
-        <p class="note">Today: Strongroom folders exist (the key lives only while your security key is touched), and a device restored from an old backup is detected and fenced in the ledger. Revocation and wipe are designed, not built.</p>
+        <p class="note">Today: Strongroom folders exist (the key lives only while your security key is touched, with a backup key if you enrol one), and a device restored from an old backup is detected and fenced in the ledger. Revocation and wipe are designed, not built.</p>
       </div>
     </section>
 
@@ -78,7 +78,7 @@ description: Thirteen situations Varsto is designed for, from a plane without in
       <picture><source type="image/webp" srcset="../assets/img/usecases/sensitive.webp"><img src="../assets/img/usecases/sensitive.png" alt="A tax folder in a Strongroom: opens only with a security key, no clear text on the phone, hidden from the AI assistant." width="640" height="320" loading="lazy"></picture>
       <div>
         <p>The tax folder lives in a Strongroom: it opens only with a touch of your FIDO2 security key, enforced in the cryptography, not by a dialog. On the phone nothing from it is ever written in clear text, and the assistant cannot see that the folder exists. Once the folder is closed, the key leaves memory.</p>
-        <p class="note">Today: Strongroom folders open only with a FIDO2 security key (libfido2 tools) and are invisible to assistants; nothing is written in clear text on storage. Decrypt-on-open viewers on the phone are in the plan.</p>
+        <p class="note">Today: Strongroom folders open only with a FIDO2 security key (libfido2 tools), can have a backup key, and are invisible to assistants; nothing is written in clear text on storage. An existing tax folder can be converted into a Strongroom: re-encrypted under a new key, the old copies deleted from storage, plain copies on other devices replaced with placeholders. Decrypt-on-open viewers on the phone are in the plan.</p>
       </div>
     </section>
 
