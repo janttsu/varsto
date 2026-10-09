@@ -665,7 +665,7 @@
         $("policybanner").textContent = lines.join(" ");
         $("policybanner").classList.toggle("hidden", lines.length === 0);
       }).catch(function () {});
-      loadAdvice(); loadAutoVerify();
+      loadAdvice(); loadAutoVerify(); loadRepair();
       updateFilesHead();
       var ul = $("storages"); ul.innerHTML = "";
       s.storages.forEach(function (st) {
@@ -855,6 +855,43 @@
     }).catch(function (e) { log("error: " + e.message); });
   };
 
+  // Automatic repair (Policies page): "N copies repaired, M could not be repaired: why".
+  function renderRepair(v) {
+    if (!v) { return; }
+    var parts = []; var r = v.last;
+    if (v.last_run_utc && r) {
+      parts.push("last run " + fmtWhen(v.last_run_utc) + ": " + r.repaired.length + " cop" + (r.repaired.length === 1 ? "y" : "ies") + " repaired");
+    } else { parts.push("Nothing has needed repair yet"); }
+    if (v.total_repaired) { parts.push(v.total_repaired + " repaired in all"); }
+    var losses = v.open_losses || [];
+    if (losses.length) { parts.push(losses.length + " could not be repaired"); }
+    var waiting = v.queued - losses.length;
+    if (waiting > 0) { parts.push(waiting + " waiting"); }
+    if (v.last_error) { parts.push("last error: " + v.last_error); }
+    $("ar-text").textContent = parts.join(" · ");
+    var ul = $("ar-losses"); ul.innerHTML = "";
+    losses.forEach(function (l) { ul.appendChild(el("li", "bad", l.folder + ": block " + l.object + " on " + l.storage + " (" + l.kind + "): " + l.reason)); });
+    $("ar-cold").classList.toggle("hidden", !losses.some(function (l) { return l.reason.indexOf("cold storage") >= 0; }));
+  }
+  function loadRepair() { api("GET", "/api/repair").then(renderRepair).catch(function () {}); }
+  function runRepair(body, what) {
+    busy(true); log(what + " started");
+    api("POST", "/api/repair", body).then(function (r) {
+      var x = r.report;
+      log(what + ": " + x.repaired.length + " of " + x.found + " damaged copies " + (x.dry_run ? "would be repaired" : "repaired") + (x.already_intact ? ", " + x.already_intact + " already intact" : "") + (x.unrepairable.length ? ", " + x.unrepairable.length + " could not be repaired" : ""));
+      x.repaired.forEach(function (c) { log("  " + c.object + " on " + c.storage + ": from " + c.source); });
+      x.unrepairable.forEach(function (u) { log("  NOT REPAIRED " + u.object + " on " + u.storage + ": " + u.reason); });
+      renderRepair(r.status); busy(false); refreshStatus();
+    }).catch(function (e) { log(what + " failed: " + e.message); busy(false); });
+  }
+  $("ar-run").onclick = function () { runRepair({}, "repair"); };
+  $("ar-preview").onclick = function () { runRepair({ dry_run: true }, "repair preview"); };
+  $("ar-cold").onclick = function () {
+    dialog({ title: "Repair from cold storage", text: "Reading a cold storage starts a retrieval, which your provider may bill and which can take hours. Read it to repair the copies that exist only there?", ok: "Read cold storage" }).then(function (r) {
+      if (r) { runRepair({ from_cold: true }, "repair from cold storage"); }
+    }).catch(function (e) { log("error: " + e.message); });
+  };
+
   // Disk pools: one card per pool with its disks (attached or away), from /api/disks.
   function diskAction(path, body, verb) {
     busy(true); log(verb + " " + body.label + " started");
@@ -961,8 +998,10 @@
   $("lock").onclick = function () { api("POST", "/api/lock").then(function (r) { if (r.exports_removed) { log("removed " + r.exports_removed + " decrypted cop" + (r.exports_removed === 1 ? "y" : "ies") + " made for other apps"); } return refreshState(); }).catch(function (e) { log("error: " + e.message); }); };
   $("fsck").onclick = function () {
     busy(true); log("fsck started");
-    api("POST", "/api/fsck", { verify: $("verify").checked }).then(function (r) {
+    api("POST", "/api/fsck", { verify: $("verify").checked, repair: true }).then(function (r) {
       log("fsck: " + r.chunks_referenced + " referenced, " + r.chunks_with_storage_copy + " with storage copy, " + r.chunks_verified_elsewhere + " verified elsewhere, " + r.chunks_claimed_only + " claimed only, missing " + r.chunks_missing.length + ", claims without object " + r.claims_without_object + ", unreferenced objects " + r.objects_unreferenced + ", verified now " + r.objects_verified_now + ", corrupt " + r.objects_corrupt.length + (r.forked_devices.length ? ", FORKED " + r.forked_devices.join(",") : ""));
+      if (r.repair) { log("repair: " + r.repair.repaired.length + " of " + r.repair.found + " damaged copies repaired" + (r.repair.unrepairable.length ? ", " + r.repair.unrepairable.length + " could not be repaired: " + r.repair.unrepairable.map(function (u) { return u.reason; }).filter(function (x, i, a) { return a.indexOf(x) === i; }).join("; ") : "")); }
+      loadRepair();
     }).catch(function (e) { log("fsck failed: " + e.message); }).then(function () { busy(false); return refreshStatus(); });
   };
 

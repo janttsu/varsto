@@ -42,17 +42,23 @@ use std::path::{Path, PathBuf};
 mod block_cache;
 mod devinfo;
 mod ledger_upkeep;
+mod manifest_upkeep;
 mod membership;
 mod placement;
+mod repair;
 mod strongroom_ops;
 mod verify;
 mod view;
 mod where_data;
 pub use block_cache::{BlockWriter, StagedFile, BLOCK_CACHE_DIR, EXPORT_DIR};
 pub use devinfo::DeviceDetails;
+pub use manifest_upkeep::ManifestPolicy;
 pub use membership::{
     removal_notice, DeviceInfo, DeviceRemoved, EpochRecord, Grant, KemRecord, Removal, Revocation,
     RevokeReport, Revoked, SignedRevocation,
+};
+pub use repair::{
+    Damage, DamageKind, RepairOptions, RepairReport, RepairStatus, RepairedCopy, Unrepairable,
 };
 pub use strongroom_ops::{CleanupReport, ConvertReport, StrongroomKeySummary};
 pub use where_data::{CopyStats, DataLocations, DeviceShare, FolderShare, StorageShare};
@@ -291,6 +297,9 @@ pub struct FsckReport {
     /// Pool disks that are away, with their last verification: "label (place), last verified <date>".
     #[serde(default)]
     pub disks_offline: Vec<String>,
+    /// Damaged copies on this device's storages put in the repair queue.
+    #[serde(default)]
+    pub repairs_queued: u64,
 }
 
 /// What `disk add` did.
@@ -388,6 +397,8 @@ pub struct Engine {
     cycle: Option<ledger_upkeep::Cycle>,
     /// When to write checkpoints and how many batches to keep before them.
     ledger_policy: ledger_upkeep::LedgerPolicy,
+    /// When manifests are listed in full and whether old ones are pruned.
+    manifest_policy: manifest_upkeep::ManifestPolicy,
 }
 
 /// Open storages with their specs.
@@ -669,6 +680,7 @@ impl Engine {
             view_cache: Default::default(),
             cycle: None,
             ledger_policy: Default::default(),
+            manifest_policy: Default::default(),
         };
         engine.config.save(home)?;
         if !engine.vault.member {
@@ -850,6 +862,7 @@ impl Engine {
             view_cache: Default::default(),
             cycle: None,
             ledger_policy: Default::default(),
+            manifest_policy: Default::default(),
         };
         // Command-line runs use the peers other devices advertised, over TCP
         // only; the service adds LAN peers and the QUIC node.
@@ -2573,12 +2586,17 @@ impl Engine {
         let key = Manifest::storage_key(&rec.folder_id, &self.vault.device_id, state.published_seq);
         let storages = self.metadata_storages(true)?;
         let mut blob: Option<Vec<u8>> = None;
-        for (_, backend) in &storages {
+        let mut holder: Option<usize> = None;
+        for (i, (_, backend)) in storages.iter().enumerate() {
             if backend.exists(&key)? {
-                if blob.is_none() {
-                    blob = backend.get(&key)?;
-                }
+                holder.get_or_insert(i);
                 continue;
+            }
+            // Read the published copy only when a storage lacks it.
+            if blob.is_none() {
+                if let Some(h) = holder {
+                    blob = storages[h].1.get(&key)?;
+                }
             }
             if blob.is_none() {
                 let m = Manifest {
@@ -2663,37 +2681,9 @@ impl Engine {
             self.apply_remote(&rec, &fk, &root, &mut state, remote, &storages, &mut report)?;
         }
 
-        // Newest manifest per other device, across storages.
-        let mut newest: BTreeMap<DeviceId, (u64, usize)> = BTreeMap::new();
-        for (idx, (_, backend)) in storages
-            .iter()
-            .enumerate()
-            .filter(|(_, (s, _))| !s.is_data_only())
-        {
-            let prefix = format!("manifests/{}/", rec.folder_id);
-            for key in backend.list(&prefix)? {
-                let Some(rest) = key.strip_prefix(&prefix) else {
-                    continue;
-                };
-                let Some((dev, file)) = rest.split_once('/') else {
-                    continue;
-                };
-                let Some(seq) = file
-                    .strip_suffix(".enc")
-                    .and_then(|s| s.parse::<u64>().ok())
-                else {
-                    continue;
-                };
-                let dev = DeviceId::from_hex(dev)?;
-                if dev == me {
-                    continue;
-                }
-                let e = newest.entry(dev).or_insert((0, idx));
-                if seq > e.0 {
-                    *e = (seq, idx);
-                }
-            }
-        }
+        // Newest manifest per other device, across storages: only what the
+        // ledger announced since the last applied one (`manifest_upkeep`).
+        let newest = self.newest_manifests(&rec.folder_id, &state.last_seen, &storages)?;
 
         // A revoked device's manifests count only up to the last one its
         // accepted ledger batches announced.
@@ -3995,6 +3985,7 @@ impl Engine {
         // Checkpoints, acknowledgements and pruning; anything left undone
         // (an unreachable storage) is retried after the next sync.
         let _ = self.ledger_upkeep();
+        let _ = self.manifest_upkeep();
         Ok(out)
     }
 
@@ -4215,12 +4206,43 @@ impl Engine {
 
     /// Compare the ledger with what the storages actually hold. With
     /// `verify_content`, every referenced object is downloaded and hashed.
+    /// Compare the ledger with the hot storages (and with `verify_content`
+    /// download and hash every referenced object). What is missing or
+    /// corrupt is queued for automatic repair (`engine::repair`).
     pub fn fsck(&mut self, verify_content: bool) -> Result<FsckReport> {
+        let (mut report, found) = self.fsck_scan(verify_content)?;
+        let mut damage = Vec::new();
+        repair::merge_damage(&mut damage, found);
+        report.repairs_queued = damage.len() as u64;
+        self.queue_damage(damage)?;
+        Ok(report)
+    }
+
+    /// `fsck` without touching the repair queue: the report and every
+    /// damaged copy on a storage of this device that repair could rewrite.
+    fn fsck_scan(&mut self, verify_content: bool) -> Result<(FsckReport, Vec<Damage>)> {
         let _ = self.pull_ledger()?;
         let view = self.view()?;
         let mut report = FsckReport {
             forked_devices: view.forked.iter().map(|d| d.to_string()).collect(),
             ..Default::default()
+        };
+        let now = util::now_utc();
+        let mut damage: Vec<Damage> = Vec::new();
+        let damaged = |folder: &FolderId,
+                       chunk: &ChunkId,
+                       object: &ObjectName,
+                       storage: &str,
+                       kind: DamageKind| Damage {
+            folder: folder.clone(),
+            chunk: chunk.clone(),
+            object: object.clone(),
+            storage: storage.to_string(),
+            kind,
+            found_by: "fsck".to_string(),
+            found_utc: now,
+            retry_utc: 0,
+            reason: None,
         };
         // Objects per hot storage.
         let mut listings: BTreeMap<String, HashSet<String>> = BTreeMap::new();
@@ -4258,6 +4280,19 @@ impl Engine {
                 report
                     .chunks_missing
                     .push(format!("{}/{}", folder.short(), chunk.short()));
+                // On no storage at all: every hot storage that takes every
+                // block should get it back.
+                for (spec, _) in &storages {
+                    if !spec.is_carrier() && !spec.is_data_only() {
+                        damage.push(damaged(
+                            folder,
+                            chunk,
+                            object,
+                            spec.name(),
+                            DamageKind::Missing,
+                        ));
+                    }
+                }
             }
             match view.locate(folder, chunk) {
                 Some(r) if r.verified_storages() > 0 => report.chunks_verified_elsewhere += 1,
@@ -4265,7 +4300,7 @@ impl Engine {
                 _ => {}
             }
         }
-        for ((folder, _), rec) in view.chunks.iter() {
+        for ((folder, chunk), rec) in view.chunks.iter() {
             if !self.keyring.folders.contains_key(folder) {
                 continue; // a folder converted into a Strongroom: its old objects are gone
             }
@@ -4282,6 +4317,22 @@ impl Engine {
                 if let Some(l) = listings.get(storage) {
                     if !l.contains(&key) {
                         report.claims_without_object += 1;
+                        // Storage names are local: another device's "box"
+                        // may be another place. Rewrite our own claims and
+                        // blocks of current files (every storage takes those).
+                        let ours = rec.storages[storage]
+                            .claimed_by
+                            .contains(&self.vault.device_id);
+                        if !ours && !referenced.contains_key(&(folder.clone(), chunk.clone())) {
+                            continue;
+                        }
+                        damage.push(damaged(
+                            folder,
+                            chunk,
+                            &rec.object,
+                            storage,
+                            DamageKind::Missing,
+                        ));
                     }
                 }
             }
@@ -4328,6 +4379,15 @@ impl Engine {
                                 spec.name(),
                                 object.short()
                             ));
+                            if !spec.is_carrier() {
+                                damage.push(damaged(
+                                    folder,
+                                    chunk,
+                                    object,
+                                    spec.name(),
+                                    DamageKind::Corrupt,
+                                ));
+                            }
                         }
                     }
                 }
@@ -4371,7 +4431,7 @@ impl Engine {
                 }
             }
         }
-        Ok(report)
+        Ok((report, damage))
     }
 
     // ----- disk pool ----------------------------------------------------------

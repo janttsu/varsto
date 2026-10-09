@@ -72,6 +72,8 @@ pub struct ServiceState {
     pub p2p_cert_sha256: String,
     /// Automatic verification: schedule, last run and next run.
     pub auto_verify: Option<varsto_core::autoverify::VerifyStatus>,
+    /// Automatic repair: queue, last run and copies that could not be repaired.
+    pub repair: Option<varsto_core::engine::RepairStatus>,
 }
 
 impl ServiceState {
@@ -100,6 +102,8 @@ impl ServiceState {
             "p2p_paths": self.p2p_paths,
             "auto_verify": self.auto_verify,
             "auto_verify_text": self.auto_verify.as_ref().map(|v| v.describe()),
+            "repair": self.repair,
+            "repair_text": self.repair.as_ref().map(|r| r.describe()),
         })
     }
     /// Store the disk listing; log and notify when a disk appeared or went
@@ -185,7 +189,7 @@ impl ServiceState {
                     );
                     if !r.corrupt.is_empty() || !r.missing.is_empty() {
                         let msg = format!(
-                            "{} blocks do not match their hash and {} are missing on a storage; run `varsto fsck --verify`",
+                            "{} blocks do not match their hash and {} are missing on a storage; repairing them from other copies",
                             r.corrupt.len(),
                             r.missing.len()
                         );
@@ -197,6 +201,39 @@ impl ServiceState {
             }
         }
         self.auto_verify = Some(engine.verify_status());
+    }
+    /// Repair damaged copies that verification or fsck found (called after
+    /// a sync and after verification), within the service's budget; notify
+    /// once about every copy that could not be repaired.
+    pub fn repair_if_due(&mut self, engine: &mut Engine) {
+        if engine.repair_due(varsto_core::util::now_utc()) {
+            match engine.repair(&varsto_core::engine::RepairOptions::service()) {
+                Ok(r) => {
+                    eprintln!(
+                        "service: automatic repair: {} copies repaired, {} could not be repaired, {} left for later",
+                        r.repaired.len(),
+                        r.unrepairable.len(),
+                        r.left_for_next_run
+                    );
+                    if r.new_losses > 0 {
+                        let mut why: Vec<&str> =
+                            r.unrepairable.iter().map(|u| u.reason.as_str()).collect();
+                        why.sort();
+                        why.dedup();
+                        let msg = format!(
+                            "{} block cop{} could not be repaired: {}",
+                            r.new_losses,
+                            if r.new_losses == 1 { "y" } else { "ies" },
+                            why.join("; ")
+                        );
+                        eprintln!("service: {msg}");
+                        notify("Varsto repair", &msg);
+                    }
+                }
+                Err(e) => eprintln!("service: automatic repair failed: {e:#}"),
+            }
+        }
+        self.repair = Some(engine.repair_status());
     }
     pub fn request_sync(&mut self) {
         self.sync_requested = true;
@@ -1050,6 +1087,7 @@ pub fn run(opts: Options) -> Result<()> {
                     let st = &mut *st;
                     if let Some(e) = st.engine.as_mut() {
                         st.service.auto_verify_if_due(e);
+                        st.service.repair_if_due(e);
                         if let Err(err) = e.publish_device_details(st.service.last_sync_utc) {
                             eprintln!("service: device details not published: {err:#}");
                         }
