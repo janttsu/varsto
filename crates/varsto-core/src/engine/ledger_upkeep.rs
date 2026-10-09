@@ -185,7 +185,7 @@ impl Engine {
     /// batches it covers may go: full devices of the vault that are trusted
     /// and not revoked. Members of shared folders and replicas do not read
     /// the vault ledger.
-    fn ledger_readers(&self) -> Vec<DeviceId> {
+    pub(super) fn ledger_readers(&self) -> Vec<DeviceId> {
         self.devices
             .devices
             .keys()

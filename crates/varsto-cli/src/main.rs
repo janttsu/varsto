@@ -123,6 +123,27 @@ enum Cmd {
     Fsck {
         #[arg(long)]
         verify: bool,
+        /// Repair what was found right away (see `varsto repair`).
+        #[arg(long)]
+        repair: bool,
+    },
+    /// Rewrite missing or corrupt copies on this device's storages from another copy.
+    Repair {
+        /// Show what would be repaired and from where; write nothing.
+        #[arg(long)]
+        dry_run: bool,
+        /// Also read cold storages as a source (retrieval fees may apply).
+        #[arg(long)]
+        from_cold: bool,
+        /// Work on the queue only, without comparing the ledger with the storages first.
+        #[arg(long)]
+        no_scan: bool,
+        /// Most MiB written in this run.
+        #[arg(long)]
+        max_mib: Option<u64>,
+        /// Most blocks written in this run.
+        #[arg(long)]
+        max_blocks: Option<u64>,
     },
     /// List duplicate files in a folder.
     Dupes { folder: String },
@@ -1571,14 +1592,38 @@ fn run(cli: &Cli) -> Result<()> {
         }
         Cmd::Verify { cmd } => upkeep::verify(cli, &home, cmd)?,
         Cmd::Advice { idle_days, cmd } => upkeep::advice(cli, &home, *idle_days, cmd)?,
-        Cmd::Fsck { verify } => {
+        Cmd::Repair {
+            dry_run,
+            from_cold,
+            no_scan,
+            max_mib,
+            max_blocks,
+        } => upkeep::repair(
+            cli,
+            &home,
+            upkeep::RepairArgs {
+                dry_run: *dry_run,
+                from_cold: *from_cold,
+                scan: !*no_scan,
+                max_mib: *max_mib,
+                max_blocks: *max_blocks,
+            },
+        )?,
+        Cmd::Fsck { verify, repair } => {
             let mut engine = Engine::open(&home, &passphrase()?)?;
             let r = engine.fsck(*verify)?;
             print(cli, &r, |r| {
                 format!("referenced {} | with storage copy {} | verified elsewhere {} | claimed only {} | missing {:?} | claims without object {} | unreferenced objects {} | verified now {} | corrupt {:?} | forked {:?} | cold skipped {:?}{}", r.chunks_referenced, r.chunks_with_storage_copy, r.chunks_verified_elsewhere, r.chunks_claimed_only, r.chunks_missing, r.claims_without_object, r.objects_unreferenced, r.objects_verified_now, r.objects_corrupt, r.forked_devices, r.storages_skipped_cold, if r.disks_offline.is_empty() { String::new() } else { format!(" | offline: {} objects on {}", r.objects_offline, r.disks_offline.join("; ")) })
             })?;
-            if !r.chunks_missing.is_empty()
-                || !r.objects_corrupt.is_empty()
+            let mut repaired_all = false;
+            if *repair && r.repairs_queued > 0 {
+                let mut opts = varsto_core::engine::RepairOptions::manual();
+                opts.scan = false;
+                let rep = engine.repair(&opts)?;
+                print(cli, &rep, upkeep::describe_repair)?;
+                repaired_all = rep.unrepairable.is_empty() && rep.left_for_next_run == 0;
+            }
+            if (!r.chunks_missing.is_empty() || !r.objects_corrupt.is_empty()) && !repaired_all
                 || !r.forked_devices.is_empty()
             {
                 std::process::exit(1);
@@ -1643,6 +1688,10 @@ fn run(cli: &Cli) -> Result<()> {
                                 .as_str()
                                 .map(|t| format!("\n{t}"))
                                 .unwrap_or_default()
+                                + &v["service"]["repair_text"]
+                                    .as_str()
+                                    .map(|t| format!("\n{t}"))
+                                    .unwrap_or_default()
                         )
                     },
                 )?,
@@ -2584,6 +2633,9 @@ fn service_line(
             parts.push(format!("next in {} s", (n - chrono_now()).max(0)));
         }
         if let Some(a) = v.get("auto_verify_text").and_then(|x| x.as_str()) {
+            parts.push(a.to_string());
+        }
+        if let Some(a) = v.get("repair_text").and_then(|x| x.as_str()) {
             parts.push(a.to_string());
         }
     }

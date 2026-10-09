@@ -430,6 +430,13 @@
         <div id="av-text" class="status-line"></div>
         <div class="actions"><button id="av-run" type="button">Run now</button><button id="av-settings" type="button" class="secondary">Schedule</button><button id="av-toggle" type="button" class="secondary">Turn off</button></div>
       </div>
+      <div class="card" id="autorepair">
+        <h2 class="card-title">Automatic repair</h2>
+        <p class="muted small">When verification or a storage check finds a block missing or damaged on one of your storages, the service writes it again from another copy: another storage, this device's files or encrypted blocks, or a peer. Cold storages are read only when you ask; transferrers are never written.</p>
+        <div id="ar-text" class="status-line"></div>
+        <ul id="ar-losses" class="list small"></ul>
+        <div class="actions"><button id="ar-run" type="button">Check and repair now</button><button id="ar-preview" type="button" class="secondary">Preview</button><button id="ar-cold" type="button" class="secondary hidden">Repair from cold storage</button></div>
+      </div>
     </div>
 
     <!-- Peers -->

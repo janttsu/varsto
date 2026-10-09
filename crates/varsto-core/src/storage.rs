@@ -394,6 +394,12 @@ pub struct StorageCalls {
     pub ledger_lists: AtomicU64,
     pub ledger_listed_keys: AtomicU64,
     pub ledger_gets: AtomicU64,
+    /// The part under `manifests/`.
+    pub manifest_lists: AtomicU64,
+    pub manifest_listed_keys: AtomicU64,
+    pub manifest_gets: AtomicU64,
+    /// Reads of chunk objects (`chunks/`).
+    pub chunk_gets: AtomicU64,
 }
 
 /// A plain copy of `StorageCalls` at one moment.
@@ -408,6 +414,10 @@ pub struct CallCounts {
     pub ledger_lists: u64,
     pub ledger_listed_keys: u64,
     pub ledger_gets: u64,
+    pub manifest_lists: u64,
+    pub manifest_listed_keys: u64,
+    pub manifest_gets: u64,
+    pub chunk_gets: u64,
 }
 
 impl StorageCalls {
@@ -422,6 +432,10 @@ impl StorageCalls {
             ledger_lists: self.ledger_lists.load(Ordering::Relaxed),
             ledger_listed_keys: self.ledger_listed_keys.load(Ordering::Relaxed),
             ledger_gets: self.ledger_gets.load(Ordering::Relaxed),
+            manifest_lists: self.manifest_lists.load(Ordering::Relaxed),
+            manifest_listed_keys: self.manifest_listed_keys.load(Ordering::Relaxed),
+            manifest_gets: self.manifest_gets.load(Ordering::Relaxed),
+            chunk_gets: self.chunk_gets.load(Ordering::Relaxed),
         }
     }
 }
@@ -439,6 +453,10 @@ impl std::ops::Sub for CallCounts {
             ledger_lists: self.ledger_lists - o.ledger_lists,
             ledger_listed_keys: self.ledger_listed_keys - o.ledger_listed_keys,
             ledger_gets: self.ledger_gets - o.ledger_gets,
+            manifest_lists: self.manifest_lists - o.manifest_lists,
+            manifest_listed_keys: self.manifest_listed_keys - o.manifest_listed_keys,
+            manifest_gets: self.manifest_gets - o.manifest_gets,
+            chunk_gets: self.chunk_gets - o.chunk_gets,
         }
     }
 }
@@ -465,6 +483,13 @@ impl CountingStorage {
         self.calls
             .ledger_listed_keys
             .fetch_add(in_ledger as u64, Ordering::Relaxed);
+        if prefix.starts_with("manifests/") {
+            self.calls.manifest_lists.fetch_add(1, Ordering::Relaxed);
+        }
+        let in_manifests = keys.iter().filter(|k| k.starts_with("manifests/")).count();
+        self.calls
+            .manifest_listed_keys
+            .fetch_add(in_manifests as u64, Ordering::Relaxed);
     }
 }
 
@@ -480,6 +505,12 @@ impl Storage for CountingStorage {
         self.calls.gets.fetch_add(1, Ordering::Relaxed);
         if key.starts_with("ledger/") {
             self.calls.ledger_gets.fetch_add(1, Ordering::Relaxed);
+        }
+        if key.starts_with("manifests/") {
+            self.calls.manifest_gets.fetch_add(1, Ordering::Relaxed);
+        }
+        if key.starts_with("chunks/") {
+            self.calls.chunk_gets.fetch_add(1, Ordering::Relaxed);
         }
         self.inner.get(key)
     }

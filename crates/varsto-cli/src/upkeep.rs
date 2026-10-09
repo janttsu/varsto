@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: PolyForm-Shield-1.0.0
-//! `varsto verify`, `varsto advice` and `varsto storage price`: automatic
-//! verification, placement suggestions and storage prices on the command line.
+//! `varsto verify`, `varsto repair`, `varsto advice` and `varsto storage
+//! price`: automatic verification and repair, placement suggestions and
+//! storage prices on the command line.
 
 use crate::{fmt_bytes, passphrase, print, Cli};
 use anyhow::{bail, Result};
 use clap::Subcommand;
 use std::path::Path;
 use varsto_core::autoverify::VerifySchedule;
+use varsto_core::engine::{RepairOptions, RepairReport};
 use varsto_core::price::StoragePrice;
 use varsto_core::Engine;
 
@@ -133,6 +135,88 @@ pub fn verify(cli: &Cli, home: &Path, cmd: &Option<VerifyCmd>) -> Result<()> {
             let st = engine.verify_status();
             print(cli, &st, |s| s.describe())?;
         }
+    }
+    Ok(())
+}
+
+/// Options of `varsto repair`.
+pub struct RepairArgs {
+    pub dry_run: bool,
+    pub from_cold: bool,
+    pub scan: bool,
+    pub max_mib: Option<u64>,
+    pub max_blocks: Option<u64>,
+}
+
+/// "2 copies repaired (from storage box), 1 could not be repaired: why".
+pub fn describe_repair(r: &RepairReport) -> String {
+    let mut out = if r.dry_run {
+        format!(
+            "dry run: {} of {} damaged cop{} would be repaired",
+            r.repaired.len(),
+            r.found,
+            if r.found == 1 { "y" } else { "ies" }
+        )
+    } else {
+        format!(
+            "{} of {} damaged cop{} repaired ({} written)",
+            r.repaired.len(),
+            r.found,
+            if r.found == 1 { "y" } else { "ies" },
+            fmt_bytes(r.bytes_written)
+        )
+    };
+    if r.already_intact > 0 {
+        out += &format!(", {} already intact", r.already_intact);
+    }
+    if r.not_needed > 0 {
+        out += &format!(", {} no longer needed", r.not_needed);
+    }
+    if r.left_for_next_run > 0 {
+        out += &format!(", {} left for later", r.left_for_next_run);
+    }
+    for c in &r.repaired {
+        out += &format!(
+            "\n  {} {} on {} ({}): from {}",
+            if r.dry_run {
+                "would rewrite"
+            } else {
+                "rewrote"
+            },
+            c.object,
+            c.storage,
+            c.folder,
+            c.source
+        );
+    }
+    for u in &r.unrepairable {
+        out += &format!(
+            "\n  NOT REPAIRED {} on {} ({}): {}",
+            u.object, u.storage, u.folder, u.reason
+        );
+    }
+    if !r.unreachable.is_empty() {
+        out += &format!("\n  not reachable: {}", r.unreachable.join(", "));
+    }
+    out
+}
+
+pub fn repair(cli: &Cli, home: &Path, args: RepairArgs) -> Result<()> {
+    let mut engine = Engine::open(home, &passphrase()?)?;
+    let mut opts = RepairOptions::manual();
+    opts.dry_run = args.dry_run;
+    opts.from_cold = args.from_cold;
+    opts.scan = args.scan;
+    if let Some(m) = args.max_mib {
+        opts.max_bytes = m.saturating_mul(1024 * 1024).max(1);
+    }
+    if let Some(b) = args.max_blocks {
+        opts.max_blocks = b.max(1);
+    }
+    let r = engine.repair(&opts)?;
+    print(cli, &r, describe_repair)?;
+    if !r.unrepairable.is_empty() {
+        std::process::exit(1);
     }
     Ok(())
 }

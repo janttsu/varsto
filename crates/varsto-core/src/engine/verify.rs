@@ -13,7 +13,7 @@
 //! is read from whichever local storage has the same identity, and the check
 //! is recorded under the writer's name so that it meets the writer's claim.
 
-use super::{chunk_storage_key, Engine};
+use super::{chunk_storage_key, Damage, DamageKind, Engine};
 use crate::autoverify::{
     self, Candidate, VerifyRunReport, VerifySchedule, VerifyState, VerifyStatus,
 };
@@ -324,6 +324,21 @@ impl Engine {
             autoverify::plan(candidates, now_utc, schedule.max_blocks, schedule.max_bytes);
         report.due = due;
         report.left_for_next_run = left;
+        let mut damage: Vec<Damage> = Vec::new();
+        let damaged = |i: usize, kind: DamageKind| {
+            let (folder, chunk, object, _, local) = &items[i];
+            Damage {
+                folder: folder.clone(),
+                chunk: chunk.clone(),
+                object: object.clone(),
+                storage: local.clone(),
+                kind,
+                found_by: "verify".to_string(),
+                found_utc: now_utc,
+                retry_utc: 0,
+                reason: None,
+            }
+        };
         for i in order {
             let (folder, chunk, object, storage, local) = &items[i];
             let key = chunk_storage_key(object);
@@ -342,6 +357,7 @@ impl Engine {
             report.blocks_checked += 1;
             let Some(ct) = ct else {
                 report.missing.push(format!("{storage}:{}", object.short()));
+                damage.push(damaged(i, DamageKind::Missing));
                 continue;
             };
             report.bytes_downloaded += ct.len() as u64;
@@ -355,8 +371,11 @@ impl Engine {
                 });
             } else {
                 report.corrupt.push(format!("{storage}:{}", object.short()));
+                damage.push(damaged(i, DamageKind::Corrupt));
             }
         }
+        report.queued_for_repair = damage.len() as u64;
+        self.queue_damage(damage)?;
         self.commit_batch()?;
         report.finished_utc = util::now_utc();
         Ok(report)

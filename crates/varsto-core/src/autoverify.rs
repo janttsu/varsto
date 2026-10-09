@@ -98,6 +98,9 @@ pub struct VerifyRunReport {
     /// Copies on pool disks that are not attached.
     #[serde(default)]
     pub offline: u64,
+    /// Missing or corrupt copies put in the repair queue.
+    #[serde(default)]
+    pub queued_for_repair: u64,
 }
 
 /// Kept in `state/auto-verify.json`.

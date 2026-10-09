@@ -1001,7 +1001,34 @@ fn api_unlocked(
                 .get("verify")
                 .and_then(|c| c.as_bool())
                 .unwrap_or(false);
-            Ok(serde_json::to_value(engine.fsck(verify)?)?)
+            let report = engine.fsck(verify)?;
+            let mut out = serde_json::to_value(&report)?;
+            if input
+                .get("repair")
+                .and_then(|c| c.as_bool())
+                .unwrap_or(false)
+                && report.repairs_queued > 0
+            {
+                let mut opts = varsto_core::engine::RepairOptions::manual();
+                opts.scan = false;
+                out["repair"] = serde_json::to_value(engine.repair(&opts)?)?;
+            }
+            service.repair = Some(engine.repair_status());
+            Ok(out)
+        }
+        (Method::Get, "/api/repair") => Ok(serde_json::to_value(engine.repair_status())?),
+        (Method::Post, "/api/repair") => {
+            let flag = |k: &str| input.get(k).and_then(|v| v.as_bool());
+            let mut opts = varsto_core::engine::RepairOptions::manual();
+            opts.dry_run = flag("dry_run").unwrap_or(false);
+            opts.from_cold = flag("from_cold").unwrap_or(false);
+            opts.scan = flag("scan").unwrap_or(true);
+            let r = engine.repair(&opts)?;
+            service.repair = Some(engine.repair_status());
+            if let Ok(reps) = engine.policy_check() {
+                service.record_policies(reps);
+            }
+            Ok(json!({"report": r, "status": engine.repair_status()}))
         }
         (Method::Get, "/api/ledger") => Ok(serde_json::to_value(engine.ledger_entries()?)?),
         (Method::Get, "/api/files") => {
@@ -1311,6 +1338,7 @@ fn api_unlocked(
         (Method::Post, "/api/verify/run") => {
             let r = engine.auto_verify()?;
             service.auto_verify = Some(engine.verify_status());
+            service.repair_if_due(engine);
             if let Ok(reps) = engine.policy_check() {
                 service.record_policies(reps);
             }
