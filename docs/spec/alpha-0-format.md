@@ -93,7 +93,7 @@ Model B of [ledger-signing-notes.md](ledger-signing-notes.md): events are groupe
 | `chunk_on_device` | this device holds the plaintext as part of a file |
 | `manifest_published` | this device published manifest `seq` of a folder |
 
-Replaying every batch yields the location view: for each (folder, chunk) the object name, size, which storages claim it (by whom) and which devices verified it there. A storage copy counts as **verified** only when a device other than the writer has verified it. `varsto status` reports chunks without any storage copy and chunks verified elsewhere.
+Replaying every batch yields the location view: for each (folder, chunk) the object name, size, which storages claim it (by whom) and which devices verified it there. Applying a batch is order-independent: sets are unions, times are maxima, and where events disagree (the object name and size of a chunk, a device's name) the event with the largest (Lamport time, device, sequence, position) wins. A device therefore keeps the view in `ledger/view.enc` (zstd-compressed JSON, XChaCha20-Poly1305 under a key derived from the device's root key, associated data vault and device) with the last sequence number applied per device, applies only new batches, and rebuilds it from the batches when the keys it can open or the revocation cut-offs change. Retirements, replica claims and forks are applied on top of the cached view at every read, exactly as after a full replay. A storage copy counts as **verified** only when a device other than the writer has verified it. `varsto status` reports chunks without any storage copy and chunks verified elsewhere.
 
 Mailbox rules:
 
@@ -126,7 +126,7 @@ keyring.enc     folder records known to this device (encrypted)
 config.json     storages and folder mounts (no secrets)
 devices.json    device registry cache (public keys)
 clock.json      Lamport clock
-ledger/         local copy of every device's batches and the heads file
+ledger/         local copy of every device's batches, the heads file, pushed.json (own batches confirmed per storage) and view.enc (the cached location view, encrypted)
 state/<folder>.json  merged file states, local index, last seen manifests
 trash/          deleted files
 ```

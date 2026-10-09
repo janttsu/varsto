@@ -261,6 +261,14 @@ fn revoked_device_is_cut_off_and_new_data_needs_new_keys() {
     // A trusts the device that joined with the current key.
     a.sync(None).unwrap();
     assert!(a.devices_list().iter().any(|x| x.name == "d" && !x.revoked));
+    // The cached views (rebuilt on the new epoch and the cut-off) equal a
+    // replay of every batch, also after a restart.
+    for e in [&a, &d] {
+        assert_eq!(e.view().unwrap(), e.view_replayed().unwrap());
+    }
+    drop(a);
+    let a = Engine::open(&lab.home("a"), PASS).unwrap();
+    assert_eq!(a.view().unwrap(), a.view_replayed().unwrap());
 }
 
 #[test]

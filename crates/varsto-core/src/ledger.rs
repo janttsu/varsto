@@ -420,30 +420,163 @@ impl LedgerStore {
     ) -> Result<LedgerView> {
         let mut view = LedgerView::default();
         for signed in self.all()? {
-            if !keep(&signed.device, signed.seq) {
-                continue;
-            }
-            let Some(key) = key_for(&signed.key_id) else {
-                continue;
-            };
-            let batch = match signed.open(&key) {
-                Ok(b) => b,
-                Err(_) => continue,
-            };
-            view.apply(&batch);
+            apply_signed(&mut view, &signed, &key_for, &keep);
         }
+        Ok(self.finish(&view))
+    }
+
+    /// Bring a cached view up to date with the local batches: apply every
+    /// batch after the last one applied per device, and batches that were
+    /// missing then and have arrived since. Returns whether anything was
+    /// applied. Applying is order-independent, so the result equals a full
+    /// replay of the same batches under the same keys and cut-offs.
+    pub fn update_view(
+        &self,
+        cache: &mut ViewCache,
+        key_for: impl Fn(&str) -> Option<SecretKey>,
+        keep: impl Fn(&DeviceId, u64) -> bool,
+    ) -> Result<u64> {
+        let mut applied = 0;
+        for (device, head) in &self.heads.heads {
+            if let Some(gaps) = cache.gaps.get_mut(device) {
+                let filled: Vec<u64> = gaps
+                    .iter()
+                    .copied()
+                    .filter(|seq| self.batch_path(device, *seq).exists())
+                    .collect();
+                for seq in filled {
+                    if let Some(signed) = self.get(device, seq)? {
+                        apply_signed(&mut cache.raw, &signed, &key_for, &keep);
+                        applied += 1;
+                    }
+                    gaps.remove(&seq);
+                }
+                if gaps.is_empty() {
+                    cache.gaps.remove(device);
+                }
+            }
+            let from = cache.applied.get(device).copied().unwrap_or(0);
+            for seq in from + 1..=head.seq {
+                match self.get(device, seq)? {
+                    Some(signed) => {
+                        apply_signed(&mut cache.raw, &signed, &key_for, &keep);
+                        applied += 1;
+                    }
+                    None => {
+                        cache.gaps.entry(device.clone()).or_default().insert(seq);
+                    }
+                }
+            }
+            if head.seq > from {
+                cache.applied.insert(device.clone(), head.seq);
+            }
+        }
+        Ok(applied)
+    }
+
+    /// Whether a cached view can be brought up to date incrementally: it
+    /// must not claim batches beyond the local heads (a ledger directory
+    /// restored from an older copy).
+    pub fn cache_fits(&self, cache: &ViewCache) -> bool {
+        cache
+            .applied
+            .iter()
+            .all(|(device, seq)| *seq <= self.head(device).seq)
+    }
+
+    /// The view as callers see it: retirements applied, replica claims
+    /// folded in, forked devices marked. `raw` is left as it was.
+    pub fn finish(&self, raw: &LedgerView) -> LedgerView {
+        let mut view = raw.clone();
         view.apply_retirements();
         view.fold_object_claims();
-        for d in self.heads.heads.keys() {
-            if self.is_forked(d) {
+        for (d, head) in &self.heads.heads {
+            if head.forked {
                 view.forked.insert(d.clone());
             }
         }
-        Ok(view)
+        view
     }
 }
 
-#[derive(Clone, Debug, Default, Serialize)]
+/// Apply one stored batch to a view if `keep` accepts it and its key is known.
+fn apply_signed(
+    view: &mut LedgerView,
+    signed: &SignedBatch,
+    key_for: &impl Fn(&str) -> Option<SecretKey>,
+    keep: &impl Fn(&DeviceId, u64) -> bool,
+) {
+    if !keep(&signed.device, signed.seq) {
+        return;
+    }
+    let Some(key) = key_for(&signed.key_id) else {
+        return;
+    };
+    if let Ok(batch) = signed.open(&key) {
+        view.apply(&batch);
+    }
+}
+
+/// A location view kept between runs (`ledger/view.enc`): the batches
+/// applied so far, before retirements and replica claims are folded in,
+/// with what was applied and under which keys and cut-offs (`context`).
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct ViewCache {
+    pub format: u32,
+    /// Fingerprint of the keys and revocation cut-offs the view was built
+    /// with; a different one means rebuilding from the batches.
+    pub context: String,
+    /// Per device, every local batch up to this sequence number was applied
+    /// (or skipped for good: unknown key, after a cut-off) ...
+    pub applied: BTreeMap<DeviceId, u64>,
+    /// ... except these, which were missing locally at the time.
+    #[serde(default)]
+    pub gaps: BTreeMap<DeviceId, BTreeSet<u64>>,
+    pub raw: LedgerView,
+}
+
+impl ViewCache {
+    pub const FORMAT: u32 = 1;
+
+    pub fn new(context: String) -> Self {
+        ViewCache {
+            format: Self::FORMAT,
+            context,
+            ..Default::default()
+        }
+    }
+}
+
+/// Which event set a value last: Lamport time, device, batch sequence and
+/// position in the batch. The largest wins, whatever order batches arrive in.
+pub type Stamp = (u64, DeviceId, u64, u32);
+
+/// Serialize maps with tuple keys as lists of pairs (JSON keys are strings).
+mod pairs {
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    pub fn serialize<'a, S, M, K, V>(map: &'a M, s: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+        &'a M: IntoIterator<Item = (&'a K, &'a V)>,
+        K: Serialize + 'a,
+        V: Serialize + 'a,
+    {
+        s.collect_seq(map)
+    }
+
+    pub fn deserialize<'de, D, M, K, V>(d: D) -> Result<M, D::Error>
+    where
+        D: Deserializer<'de>,
+        M: FromIterator<(K, V)>,
+        K: Deserialize<'de>,
+        V: Deserialize<'de>,
+    {
+        Ok(Vec::<(K, V)>::deserialize(d)?.into_iter().collect())
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Location {
     pub claimed_by: BTreeSet<DeviceId>,
     pub verified_by: BTreeSet<DeviceId>,
@@ -453,16 +586,21 @@ pub struct Location {
     #[serde(default)]
     pub verified_utc: i64,
     /// Newest claim or verification (Lamport time), to apply retirements.
-    #[serde(skip)]
+    #[serde(default)]
     pub lamport: u64,
 }
 
-#[derive(Clone, Debug, Default, Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ChunkRecord {
     pub object: ObjectName,
     pub size: u64,
     pub storages: BTreeMap<String, Location>,
     pub devices: BTreeSet<DeviceId>,
+    /// Which events set `object` and `size`.
+    #[serde(default)]
+    pub object_at: Option<Stamp>,
+    #[serde(default)]
+    pub size_at: Option<Stamp>,
 }
 
 impl Location {
@@ -477,6 +615,20 @@ impl Location {
 }
 
 impl ChunkRecord {
+    fn set_object(&mut self, object: &ObjectName, at: Option<Stamp>) {
+        if at > self.object_at {
+            self.object = object.clone();
+            self.object_at = at;
+        }
+    }
+
+    fn set_size(&mut self, size: u64, at: Option<Stamp>) {
+        if at > self.size_at {
+            self.size = size;
+            self.size_at = at;
+        }
+    }
+
     /// A copy is verified when some device other than the one that wrote it
     /// has checked it, or when the writer itself re-read it is not enough.
     pub fn verified_storages(&self) -> usize {
@@ -493,19 +645,26 @@ impl ChunkRecord {
     }
 }
 
-#[derive(Clone, Debug, Default, Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LedgerView {
+    #[serde(with = "pairs")]
     pub chunks: HashMap<(FolderId, ChunkId), ChunkRecord>,
     /// Highest manifest sequence published per (folder, device).
+    #[serde(with = "pairs")]
     pub manifests: BTreeMap<(FolderId, DeviceId), u64>,
     pub devices: BTreeMap<DeviceId, String>,
+    /// Which enrolment event set each device name.
+    #[serde(default)]
+    pub devices_at: BTreeMap<DeviceId, Stamp>,
     pub folders: BTreeSet<FolderId>,
     pub max_lamport: u64,
     /// Retired storages and when (Lamport time).
     pub retired: BTreeMap<String, u64>,
     pub batches: u64,
+    #[serde(default)]
     pub forked: BTreeSet<DeviceId>,
     /// Objects claimed by replicas (folded into chunk records).
+    #[serde(default)]
     pub object_claims: u64,
 }
 
@@ -513,10 +672,15 @@ impl LedgerView {
     fn apply(&mut self, batch: &Batch) {
         self.batches += 1;
         self.max_lamport = self.max_lamport.max(batch.lamport);
-        for ev in &batch.events {
+        for (i, ev) in batch.events.iter().enumerate() {
+            let stamp = || Some((batch.lamport, batch.device.clone(), batch.seq, i as u32));
             match ev {
                 Event::DeviceEnrolled { name } => {
-                    self.devices.insert(batch.device.clone(), name.clone());
+                    let at = stamp().expect("some");
+                    if self.devices_at.get(&batch.device).is_none_or(|s| *s < at) {
+                        self.devices.insert(batch.device.clone(), name.clone());
+                        self.devices_at.insert(batch.device.clone(), at);
+                    }
                 }
                 Event::FolderAdded { folder } => {
                     self.folders.insert(folder.clone());
@@ -532,8 +696,8 @@ impl LedgerView {
                         .chunks
                         .entry((folder.clone(), chunk.clone()))
                         .or_default();
-                    rec.object = object.clone();
-                    rec.size = *size;
+                    rec.set_object(object, stamp());
+                    rec.set_size(*size, stamp());
                     let loc = rec.storages.entry(storage.clone()).or_default();
                     loc.claimed_by.insert(batch.device.clone());
                     loc.claimed_utc = loc.claimed_utc.max(batch.created_utc);
@@ -549,7 +713,7 @@ impl LedgerView {
                         .chunks
                         .entry((folder.clone(), chunk.clone()))
                         .or_default();
-                    rec.object = object.clone();
+                    rec.set_object(object, stamp());
                     let loc = rec.storages.entry(storage.clone()).or_default();
                     loc.verified_by.insert(batch.device.clone());
                     loc.verified_utc = loc.verified_utc.max(batch.created_utc);
@@ -565,8 +729,8 @@ impl LedgerView {
                         .chunks
                         .entry((folder.clone(), chunk.clone()))
                         .or_default();
-                    rec.object = object.clone();
-                    rec.size = *size;
+                    rec.set_object(object, stamp());
+                    rec.set_size(*size, stamp());
                     rec.devices.insert(batch.device.clone());
                 }
                 Event::ManifestPublished { folder, seq, .. } => {
@@ -785,5 +949,137 @@ mod tests {
         sealed2.sig_hex = hex::encode(&sig[..64]);
         sealed2.sig_alg = crypto::SIG_ALG_LEGACY.to_string();
         assert!(sealed2.verify(&hybrid.public()).is_err());
+    }
+
+    /// Small deterministic generator for the property test.
+    struct Rng(u64);
+    impl Rng {
+        fn next(&mut self) -> u64 {
+            self.0 ^= self.0 << 13;
+            self.0 ^= self.0 >> 7;
+            self.0 ^= self.0 << 17;
+            self.0
+        }
+        fn below(&mut self, n: u64) -> u64 {
+            self.next() % n
+        }
+    }
+
+    fn random_event(rng: &mut Rng) -> Event {
+        let chunk = |rng: &mut Rng| ChunkId::from_bytes(&[rng.below(6) as u8, 7]);
+        let object = |rng: &mut Rng| ObjectName::from_bytes(&[rng.below(3) as u8, 9]);
+        let storage = |rng: &mut Rng| ["s1", "s2", "replica:r"][rng.below(3) as usize].to_string();
+        if rng.below(5) == 0 {
+            // A replica's claim: no folder, the object name as chunk id.
+            let object = object(rng);
+            return Event::ChunkStored {
+                folder: FolderId::default(),
+                chunk: ChunkId::from_hex(object.as_str()).unwrap(),
+                object,
+                storage: "replica:r".into(),
+                size: 5,
+            };
+        }
+        let folder = |rng: &mut Rng| FolderId::from_bytes(&[1 + rng.below(3) as u8]);
+        match rng.below(8) {
+            0 => Event::DeviceEnrolled {
+                name: format!("n{}", rng.below(5)),
+            },
+            1 => Event::FolderAdded {
+                folder: folder(rng),
+            },
+            2 | 3 => Event::ChunkStored {
+                folder: folder(rng),
+                chunk: chunk(rng),
+                object: object(rng),
+                storage: storage(rng),
+                size: rng.below(1000),
+            },
+            4 => Event::ChunkVerified {
+                folder: folder(rng),
+                chunk: chunk(rng),
+                object: object(rng),
+                storage: storage(rng),
+            },
+            5 => Event::ChunkOnDevice {
+                folder: folder(rng),
+                chunk: chunk(rng),
+                object: object(rng),
+                size: rng.below(1000),
+            },
+            6 => Event::ManifestPublished {
+                folder: folder(rng),
+                seq: rng.below(20),
+                manifest_hash: String::new(),
+                files: 0,
+            },
+            _ => Event::StorageRetired {
+                storage: storage(rng),
+            },
+        }
+    }
+
+    /// A cached view brought up to date at random moments, while batches of
+    /// three devices arrive in random order (some under a key the reader
+    /// lacks, some after a revocation cut-off), always equals a full replay,
+    /// also after a round trip through its saved form.
+    #[test]
+    fn cached_view_equals_full_replay() {
+        for round in 0..12u64 {
+            let mut rng = Rng(0x9e37_79b9_7f4a_7c15 ^ ((round + 1) * 0x1234_5678_9abc));
+            let key = SecretKey::random();
+            let other = SecretKey::random();
+            let dir = tempfile::tempdir().unwrap();
+            let signers: Vec<SigningKey> = (0..3)
+                .map(|i| SigningKey::from_bytes(&[i as u8 + 1; 32]).unwrap())
+                .collect();
+            let ids: Vec<DeviceId> = signers.iter().map(|s| device_id_for(&s.public())).collect();
+            // Every device writes its own chain.
+            let mut pending: Vec<(usize, SignedBatch)> = Vec::new();
+            for (i, signer) in signers.iter().enumerate() {
+                let mut own = LedgerStore::open(&dir.path().join(format!("own{i}"))).unwrap();
+                let mut lamport = 0;
+                for _ in 0..(5 + rng.below(25)) {
+                    lamport += 1 + rng.below(3);
+                    let events = (0..rng.below(5)).map(|_| random_event(&mut rng)).collect();
+                    let (k, id) = if rng.below(6) == 0 {
+                        (&other, "other")
+                    } else {
+                        (&key, KEY_LEDGER)
+                    };
+                    let b = own
+                        .append_own_with(&ids[i], events, lamport, k, id, signer)
+                        .unwrap();
+                    pending.push((i, b));
+                }
+            }
+            let cutoff = 3 + rng.below(10);
+            let key_for = |id: &str| (id == KEY_LEDGER).then(|| key.clone());
+            let keep = |d: &DeviceId, seq: u64| d != &ids[2] || seq <= cutoff;
+            let mut reader = LedgerStore::open(&dir.path().join("reader")).unwrap();
+            let mut cache = ViewCache::new("ctx".into());
+            while !pending.is_empty() {
+                let (i, b) = pending.remove(rng.below(pending.len() as u64) as usize);
+                let k = if b.key_id == KEY_LEDGER {
+                    Some(&key)
+                } else {
+                    None
+                };
+                reader.ingest_with(b, &signers[i].public(), k).unwrap();
+                if rng.below(3) == 0 {
+                    reader.update_view(&mut cache, key_for, keep).unwrap();
+                    let full = reader.view_filtered(key_for, keep).unwrap();
+                    assert_eq!(reader.finish(&cache.raw), full, "round {round}");
+                }
+                if rng.below(8) == 0 {
+                    cache = serde_json::from_slice(&serde_json::to_vec(&cache).unwrap()).unwrap();
+                }
+            }
+            reader.update_view(&mut cache, key_for, keep).unwrap();
+            let full = reader.view_filtered(key_for, keep).unwrap();
+            assert_eq!(reader.finish(&cache.raw), full, "round {round}");
+            assert!(full.batches > 0);
+            assert!(reader.cache_fits(&cache));
+        }
     }
 }

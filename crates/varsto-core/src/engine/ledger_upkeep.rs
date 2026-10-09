@@ -4,6 +4,15 @@
 //! already holds, and a push lists its own batches from the newest one a
 //! storage is known to hold (`pushed.json`), so neither lists the whole
 //! `ledger/` prefix on every sync.
+//!
+//! The location view is not replayed from every batch on every call: it is
+//! kept in memory and in `ledger/view.enc` (encrypted under a key derived
+//! from this device's root key) together with the batches it was built
+//! from, and new batches are applied to it as they arrive. Applying is
+//! order-independent, so the result equals a full replay. A change of keys
+//! (a key epoch, a shared folder) or of revocation cut-offs (which can drop
+//! batches already applied) rebuilds it; retirements, replica claims and
+//! forks are applied on top at every call, as a full replay does.
 
 use super::*;
 
@@ -36,7 +45,127 @@ fn remote_seqs(backend: &dyn Storage, device: &DeviceId, seq: u64) -> Result<BTr
         .collect())
 }
 
+/// Save the cached view after this many newly applied batches; a view that
+/// is not saved is brought up to date from the batches on the next run.
+const VIEW_SAVE_EVERY: u64 = 32;
+
+/// The cached location view of one engine.
+#[derive(Default)]
+pub(super) struct ViewSlot {
+    cache: Option<ledger::ViewCache>,
+    loaded: bool,
+    unsaved: u64,
+}
+
 impl Engine {
+    /// The location view: the cached one, updated with the batches that
+    /// arrived since, or rebuilt when keys or cut-offs changed.
+    pub fn view(&self) -> Result<LedgerView> {
+        let context = self.view_context();
+        let mut slot = self.view_cache.lock().unwrap_or_else(|e| e.into_inner());
+        let ViewSlot {
+            cache,
+            loaded,
+            unsaved,
+        } = &mut *slot;
+        if !*loaded {
+            *loaded = true;
+            *cache = self.load_view_cache();
+        }
+        let fits = cache.as_ref().is_some_and(|c| {
+            c.format == ledger::ViewCache::FORMAT
+                && c.context == context
+                && self.ledger.cache_fits(c)
+        });
+        if !fits {
+            *cache = Some(ledger::ViewCache::new(context));
+            *unsaved = VIEW_SAVE_EVERY;
+        }
+        let c = cache.as_mut().expect("set above");
+        *unsaved += self.ledger.update_view(
+            c,
+            |id| self.key_for_id(id),
+            |d, seq| self.batch_accepted(d, seq),
+        )?;
+        if *unsaved >= VIEW_SAVE_EVERY && self.save_view_cache(c).is_ok() {
+            *unsaved = 0;
+        }
+        Ok(self.ledger.finish(&c.raw))
+    }
+
+    /// The view replayed from every local batch, without the cache.
+    pub fn view_replayed(&self) -> Result<LedgerView> {
+        self.ledger.view_filtered(
+            |id| self.key_for_id(id),
+            |d, seq| self.batch_accepted(d, seq),
+        )
+    }
+
+    /// Fingerprint of what decides which batches count: every key id this
+    /// device can open (with a hash of the key) and every revocation cut-off.
+    fn view_context(&self) -> String {
+        let mut ids = vec![KEY_LEDGER.to_string(), KEY_REPLICA.to_string()];
+        ids.extend(
+            self.epochs
+                .keys
+                .keys()
+                .filter(|e| **e > 0)
+                .map(|e| format!("{}{e}", ledger::KEY_LEDGER_EPOCH_PREFIX)),
+        );
+        ids.extend(self.keyring.folders.keys().map(vault::share_key_id));
+        let mut parts: Vec<Vec<u8>> = Vec::new();
+        for id in ids {
+            if let Some(k) = self.key_for_id(&id) {
+                parts.push(id.into_bytes());
+                parts.push(crypto::hash(&k.0).to_vec());
+            }
+        }
+        for (d, r) in &self.devices.revoked {
+            parts.push(d.as_str().as_bytes().to_vec());
+            parts.push(r.cutoff_seq.to_le_bytes().to_vec());
+        }
+        let refs: Vec<&[u8]> = parts.iter().map(|p| p.as_slice()).collect();
+        hex::encode(crypto::hash(&crypto::aad("ledger-view-context", &refs)))
+    }
+
+    fn view_cache_path(&self) -> PathBuf {
+        self.home.join("ledger").join("view.enc")
+    }
+
+    fn view_cache_key(&self) -> (SecretKey, Vec<u8>) {
+        (
+            self.keys.master.derive("ledger-view-cache", &[]),
+            crypto::aad(
+                "ledger-view-cache",
+                &[
+                    self.vault.vault_id.as_str().as_bytes(),
+                    self.vault.device_id.as_str().as_bytes(),
+                ],
+            ),
+        )
+    }
+
+    /// The saved view, if there is one that opens and parses.
+    fn load_view_cache(&self) -> Option<ledger::ViewCache> {
+        let blob = fs::read(self.view_cache_path()).ok()?;
+        let (key, aad) = self.view_cache_key();
+        let packed = crypto::decrypt(&key, &aad, &blob).ok()?;
+        let json = zstd::bulk::decompress(&packed, 1 << 30).ok()?;
+        serde_json::from_slice(&json).ok()
+    }
+
+    fn save_view_cache(&self, cache: &ledger::ViewCache) -> Result<()> {
+        let path = self.view_cache_path();
+        // Never recreate a ledger directory that was removed (reset, wipe).
+        if !path.parent().is_some_and(|p| p.is_dir()) {
+            return Ok(());
+        }
+        let json = serde_json::to_vec(cache)?;
+        let packed = zstd::bulk::compress(&json, 3)?;
+        let (key, aad) = self.view_cache_key();
+        util::write_atomic(&path, &crypto::encrypt(&key, &aad, &packed)?)
+    }
+
     /// Push every own batch that a storage does not have yet; detect forks.
     pub(super) fn push_own_batches(&mut self) -> Result<()> {
         let me = self.vault.device_id.clone();
@@ -332,6 +461,15 @@ mod tests {
             e.commit_batch().unwrap()
         });
         report("commit_batch, again", took, calls);
+        let home = c.home.clone();
+        let cache_bytes = fs::metadata(c.view_cache_path())
+            .map(|m| m.len())
+            .unwrap_or(0);
+        drop(devs);
+        let mut c = Engine::open(&home, PASS).unwrap();
+        let (_, took, calls) = measure(&mut c, |e| e.view().unwrap());
+        report("view() after a restart", took, calls);
+        eprintln!("ledger/view.enc: {:.1} MB", cache_bytes as f64 / 1e6);
         let bytes: u64 = walkdir::WalkDir::new(lab.root.join("storage/ledger"))
             .into_iter()
             .filter_map(|e| e.ok())
@@ -442,6 +580,35 @@ mod tests {
         assert_eq!(forks, vec![restored.vault.device_id.clone()]);
         assert!(restored.forked_self);
         let _ = folder;
+    }
+
+    /// The view is saved, picked up again after a restart and brought up
+    /// to date with batches that arrived meanwhile; a damaged file is
+    /// rebuilt from the batches.
+    #[test]
+    fn cached_view_survives_restarts() {
+        let (_tmp, lab) = lab("cache");
+        let mut devs = devices(&lab, 2);
+        let folder = FolderId::random();
+        append_synthetic(&mut devs[0], 0, 40, &folder);
+        devs[0].push_own_batches().unwrap();
+        let b = &mut devs[1];
+        b.pull_ledger().unwrap();
+        let path = b.view_cache_path();
+        assert!(path.exists());
+        let home = b.home.clone();
+        drop(devs);
+        let mut b = Engine::open(&home, PASS).unwrap();
+        assert!(b.load_view_cache().is_some());
+        assert_eq!(b.view().unwrap(), b.view_replayed().unwrap());
+        append_synthetic(&mut b, 1, 3, &folder);
+        assert_eq!(b.view().unwrap(), b.view_replayed().unwrap());
+        drop(b);
+        fs::write(&path, b"garbage").unwrap();
+        let b = Engine::open(&home, PASS).unwrap();
+        let v = b.view().unwrap();
+        assert_eq!(v, b.view_replayed().unwrap());
+        assert!(v.chunks.len() >= 43);
     }
 
     fn copy_tree(from: &Path, to: &Path) {

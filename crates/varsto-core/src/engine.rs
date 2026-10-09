@@ -347,6 +347,8 @@ pub struct Engine {
     pub chunker: ChunkerParams,
     /// Counts the calls made to every storage this engine opens (measurements).
     storage_calls: Option<std::sync::Arc<crate::storage::StorageCalls>>,
+    /// The location view, kept up to date as batches arrive.
+    view_cache: std::sync::Mutex<ledger_upkeep::ViewSlot>,
 }
 
 /// Open storages with their specs.
@@ -625,6 +627,7 @@ impl Engine {
             removal: None,
             chunker: ChunkerParams::DEFAULT,
             storage_calls: None,
+            view_cache: Default::default(),
         };
         engine.config.save(home)?;
         if !engine.vault.member {
@@ -803,6 +806,7 @@ impl Engine {
             removal,
             chunker: ChunkerParams::DEFAULT,
             storage_calls: None,
+            view_cache: Default::default(),
         };
         // Command-line runs use the peers other devices advertised, over TCP
         // only; the service adds LAN peers and the QUIC node.
@@ -1990,13 +1994,6 @@ impl Engine {
         // wrote (restored from an old backup, or cloned). Refuse to sign more.
         self.forked_self = true;
         Ok(())
-    }
-
-    pub fn view(&self) -> Result<LedgerView> {
-        self.ledger.view_filtered(
-            |id| self.key_for_id(id),
-            |d, seq| self.batch_accepted(d, seq),
-        )
     }
 
     /// Token for an untrusted replica device (F-045): it can store and verify
