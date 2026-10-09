@@ -3,6 +3,7 @@
   --bg: #fbfbfa; --surface: #ffffff; --text: #16181d; --muted: #566070;
   --border: #e3e5ea; --accent: #2b57d6; --accent-contrast: #ffffff;
   --warn-bg: #fff4d6; --warn-text: #5a3d00; --warn-border: #f0d58a;
+  --series-1: #2a78d6; --series-2: #eb6834;
   --radius: 12px; --maxw: 72rem;
   --font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   color-scheme: light;
@@ -12,6 +13,7 @@
     --bg: #0d0f12; --surface: #14171c; --text: #eceef2; --muted: #9aa3b2;
     --border: #232832; --accent: #8aa9ff; --accent-contrast: #0d0f12;
     --warn-bg: #2a2210; --warn-text: #f6d98a; --warn-border: #5b4a1d;
+    --series-1: #3987e5; --series-2: #d95926;
     color-scheme: dark;
   }
 }
@@ -19,6 +21,7 @@
   --bg: #0d0f12; --surface: #14171c; --text: #eceef2; --muted: #9aa3b2;
   --border: #232832; --accent: #8aa9ff; --accent-contrast: #0d0f12;
   --warn-bg: #2a2210; --warn-text: #f6d98a; --warn-border: #5b4a1d;
+  --series-1: #3987e5; --series-2: #d95926;
   color-scheme: dark;
 }
 * { box-sizing: border-box; }
@@ -128,3 +131,18 @@ figure.hero figcaption { color: var(--muted); font-size: .95rem; margin-top: .5r
 h3 { font-size:1.15rem; margin:2rem 0 .5rem; }
 [id] { scroll-margin-top:1rem; }
 .tech > p, .tech > ul, .tech > ol { max-width: 52rem; }
+
+/* Benchmarks: bar charts drawn as inline SVG, styled here (no inline styles). */
+.bench-chart { width:100%; max-width:44rem; height:auto; display:block; margin:.5rem 0 1rem; }
+.bench-chart text { font: 12px var(--font); }
+.bench-label { fill:var(--text); }
+.bench-value { fill:var(--muted); font-variant-numeric: tabular-nums; }
+.bench-axis { stroke:var(--border); stroke-width:1; }
+.bench-p2p { fill:var(--series-1); }
+.bench-s3 { fill:var(--series-2); }
+.bench-legend { font-size:.9rem; margin:1rem 0 0; }
+.bench-key { display:inline-block; width:.8rem; height:.8rem; border-radius:3px; vertical-align:-.05rem; margin:0 .35rem 0 .2rem; }
+.bench-key.bench-p2p-key { background:var(--series-1); }
+.bench-key.bench-s3-key { background:var(--series-2); margin-left:1rem; }
+.bench-table td, .bench-table th { white-space:nowrap; }
+.bench-table td .note { font-size:.8rem; }

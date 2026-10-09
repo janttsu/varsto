@@ -401,6 +401,13 @@ def build_redirects() -> None:
         (OUT / old).write_text(text)
 
 
+def copy_data() -> None:
+    """Data files pages link to (benchmark results) are published as they are."""
+    for src in sorted((SRC / "data").glob("*.json")):
+        (OUT / "data").mkdir(parents=True, exist_ok=True)
+        (OUT / "data" / src.name).write_bytes(src.read_bytes())
+
+
 def main() -> None:
     OUT.mkdir(parents=True, exist_ok=True)
     if RELEASE_KEY.exists():
@@ -408,6 +415,7 @@ def main() -> None:
     slugs = build_docs()
     build_blog(slugs)
     build_pages(slugs)
+    copy_data()
     build_404()
     build_redirects()
     print(f"built into {OUT}")

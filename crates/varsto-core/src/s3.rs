@@ -40,6 +40,10 @@ pub struct S3Storage {
     base_path: String,
 }
 
+/// Largest response body read into memory. Chunks are at most a few MiB;
+/// manifests and ledger batches grow with the number of files.
+const MAX_BODY: u64 = 2 << 30;
+
 const EMPTY_SHA256: &str = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
 
 impl S3Storage {
@@ -60,6 +64,10 @@ impl S3Storage {
         let config = ureq::Agent::config_builder()
             .http_status_as_error(false)
             .timeout_global(Some(Duration::from_secs(600)))
+            // Downloads fetch several objects at once; with ureq's default
+            // of three idle connections per host the others would pay a new
+            // TLS handshake for every object.
+            .max_idle_connections_per_host(16)
             .build();
         Ok(S3Storage {
             cfg,
@@ -183,7 +191,13 @@ impl S3Storage {
         let bytes = if method == "HEAD" {
             Vec::new()
         } else {
-            resp.body_mut().read_to_vec()?
+            // ureq stops at 10 MiB by default, but a ledger batch or a file
+            // list of a folder with tens of thousands of files is larger.
+            resp.body_mut()
+                .with_config()
+                .limit(MAX_BODY)
+                .read_to_vec()
+                .with_context(|| format!("{method} {}: reading the response", self.cfg.name))?
         };
         Ok((status, bytes))
     }
@@ -415,6 +429,33 @@ mod tests {
         assert_eq!(xml_tags(doc, "Key"), vec!["a/b&amp;c", "d"]);
         assert_eq!(xml_unescape("a/b&amp;c"), "a/b&c");
         assert_eq!(xml_tag(doc, "IsTruncated"), Some("false"));
+    }
+
+    #[test]
+    fn reads_objects_larger_than_ten_mib() {
+        // A file list of a large folder exceeds ureq's default body limit.
+        let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
+        let port = server.server_addr().to_ip().unwrap().port();
+        let body: Vec<u8> = (0..12 * 1024 * 1024u32).map(|i| (i % 251) as u8).collect();
+        let served = body.clone();
+        let th = std::thread::spawn(move || {
+            let req = server.recv().unwrap();
+            req.respond(tiny_http::Response::from_data(served)).unwrap();
+        });
+        let s = S3Storage::new(S3Config {
+            name: "test".into(),
+            endpoint: format!("http://127.0.0.1:{port}"),
+            region: "us-east-1".into(),
+            bucket: "b".into(),
+            prefix: String::new(),
+            access_key_id: "k".into(),
+            secret_access_key: "s".into(),
+            path_style: true,
+            storage_class: None,
+        })
+        .unwrap();
+        assert_eq!(s.get("manifests/x").unwrap().unwrap(), body);
+        th.join().unwrap();
     }
 
     #[test]

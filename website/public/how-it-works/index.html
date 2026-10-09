@@ -9,7 +9,7 @@
 <meta name="color-scheme" content="light dark">
 <link rel="icon" href="../favicon.svg" type="image/svg+xml">
 <link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../blog/feed.xml">
-<link rel="stylesheet" href="../assets/css/site.css?v=bef92fd5fd">
+<link rel="stylesheet" href="../assets/css/site.css?v=715efe3bcc">
 <script src="../assets/js/theme.js?v=0951491269"></script>
 </head>
 <body>
@@ -204,6 +204,7 @@
       <li><strong>Who may connect.</strong> Each device has its own certificate, whose hash is pinned in its record; every request also carries a short-lived proof made with the vault's peer authentication key. A stranger gets nothing, and a removed device is dropped from the peer list.</li>
     </ul>
     <p class="note">Tested on localhost, on the maintainer's own networks and on a three-device rig across NATs. Two symmetric NATs cannot be punched and fall back to a relay, which needs one reachable device in the vault (a home server, a VPS, a forwarded port); sockets are IPv4 only.</p>
+    <p><strong>How fast.</strong> <a href="../benchmarks/">Benchmarks</a> measures downloads between Paris, Amsterdam and Warsaw, peer to peer against an S3 bucket, with the method, the numbers and what is still slow.</p>
     <p><strong>Transport and the local interface.</strong> Objects are ciphertext before they leave the device, so transport adds no second layer for its own sake: S3 is spoken over HTTPS with Signature Version 4, rclone remotes use rclone's own configuration, and the S3 secret is kept in an encrypted file. The desktop interface is served only on 127.0.0.1, every request carries a per-session token, the Host header is checked, and the page runs under a strict Content Security Policy.</p>
 
     <h2 id="visibility">What each party can see</h2>
