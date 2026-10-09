@@ -160,6 +160,7 @@
     page = legacyPages[page] || page;
     if (!titles[page]) { page = "overview"; }
     if (page === "more" && !isMobile()) { page = "settings"; }
+    if (page !== "policies") { policyReturn = null; } else if (!policyEdited()) { policyReturn = null; policyButtons(); }
     currentPage = page;
     try { sessionStorage.setItem("varsto-page", page); } catch (e) {}
     document.querySelectorAll(".page").forEach(function (d) { d.classList.toggle("hidden", d.dataset.page !== page); });
@@ -225,15 +226,40 @@
     ((p && p.policies) || []).forEach(function (x) { if (x.policy) { Object.keys(x.policy.min_per_place || {}).forEach(function (k) { set[k] = 1; }); } });
     return Object.keys(set).sort();
   }
+  // Where the Policy button was pressed, so Back and Cancel return there.
+  var policyReturn = null; var lastPolicy = null;
+  function policyEdited() { return !!document.querySelector("#policygrid tbody tr.changed"); }
+  function policyButtons() {
+    var edited = policyEdited();
+    $("policysave").disabled = !edited;
+    $("policycancel").disabled = !edited && !policyReturn;
+    $("policyback").classList.toggle("hidden", !policyReturn);
+    if (policyReturn) { $("policyback").textContent = "\u2190 Back to " + (titles[policyReturn] || policyReturn); }
+  }
+  function leavePolicies() { var to = policyReturn; policyReturn = null; nav(to || "overview"); }
+  function discardPolicyEdits() {
+    document.querySelectorAll("#policygrid tbody tr.changed").forEach(function (tr) { tr.classList.remove("changed"); });
+    if (lastPolicy) { renderPolicyGrid(lastPolicy); }
+    policyButtons();
+  }
+  $("policycancel").onclick = function () { discardPolicyEdits(); if (policyReturn) { leavePolicies(); } };
+  $("policyback").onclick = function () {
+    if (!policyEdited()) { leavePolicies(); return; }
+    dialog({ title: "Discard changes?", text: "The edited policies have not been saved.", ok: "Discard", extra: null }).then(function (r) { if (r) { discardPolicyEdits(); leavePolicies(); } });
+  };
   function openPolicy(f) {
     if (isMobile()) { editPolicy(f); return; }
+    var from = currentPage;
     nav("policies");
+    policyReturn = from === "policies" ? null : from; policyButtons();
     var row = document.querySelector('#policygrid tr[data-folder="' + (window.CSS && CSS.escape ? CSS.escape(f.name) : f.name) + '"]');
-    if (row) { row.scrollIntoView({ block: "center" }); var i = row.querySelector("input"); if (i) { i.focus(); i.select(); } }
+    window.scrollTo(0, 0);
+    if (row) { var i = row.querySelector("input"); if (i) { i.focus({ preventScroll: true }); i.select(); } if (row.getBoundingClientRect().bottom > window.innerHeight) { row.scrollIntoView({ block: "nearest" }); } }
   }
   // Desktop: every folder's rules in one table, saved together.
   function renderPolicyGrid(p) {
-    if (document.querySelector("#policygrid tbody tr.changed")) { return; }
+    lastPolicy = p;
+    if (policyEdited()) { return; }
     var places = policyPlaces(p); var reports = {}; (p.reports || []).forEach(function (r) { reports[r.folder] = r; });
     var head = document.querySelector("#policygrid thead tr"); head.innerHTML = "";
     ["Folder", "Status", "Copies on any storage"].concat(places.map(function (pl) { return "Copies in '" + pl + "'"; })).concat(["Verified by another device within (days)"]).forEach(function (h) { head.appendChild(el("th", null, h)); });
@@ -249,7 +275,7 @@
       tr.appendChild(stc);
       var num = function (key, val, label) {
         var c = el("td", "num"); var i = document.createElement("input"); i.type = "number"; i.min = "0"; i.step = "1"; i.value = val || 0; i.dataset.key = key; i.disabled = member; i.setAttribute("aria-label", x.folder + ": " + label);
-        i.oninput = function () { tr.classList.add("changed"); $("policysave").disabled = false; };
+        i.oninput = function () { tr.classList.add("changed"); policyButtons(); };
         c.appendChild(i); tr.appendChild(c);
       };
       num("min_copies", pol.min_copies, "copies on any storage");
@@ -257,7 +283,7 @@
       num("days", pol.verified_within_days, "verified within days");
       body.appendChild(tr);
     });
-    $("policysave").disabled = true;
+    policyButtons();
   }
   $("policysave").onclick = function () {
     var rows = Array.prototype.slice.call(document.querySelectorAll("#policygrid tbody tr.changed"));

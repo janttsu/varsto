@@ -607,3 +607,4 @@ body[data-mobile="1"] .empty-state { padding: 32px 8px 24px; }
 #policygrid input[type=number] { width: 5.5em; }
 #policygrid tr.changed td.policy-folder { font-weight: 600; }
 #policygrid tr.changed td.policy-folder::after { content: " (edited)"; font-weight: 400; color: var(--muted); }
+.back-link { margin: 0 0 12px; }
