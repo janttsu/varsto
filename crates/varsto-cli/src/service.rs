@@ -4,9 +4,11 @@
 //! so that the menu-bar app and the CLI can find it.
 //!
 //! Unlocking: the service starts locked unless the passphrase comes from the
-//! `VARSTO_PASSPHRASE` environment variable or, on macOS, from the login
-//! keychain (`security find-generic-password -s varsto -a <home>`), where the
-//! menu-bar app can store it. The desktop page can unlock it as well.
+//! `VARSTO_PASSPHRASE` environment variable, the macOS login keychain
+//! (`security find-generic-password -s varsto -a <home>`, where the menu-bar
+//! app can store it) or the Linux desktop keyring (`secret-tool`, stored by
+//! `varsto service remember`). The desktop page and any command line that
+//! asks for the passphrase unlock it as well.
 
 use crate::desktop::{self, Shared, State};
 use anyhow::{anyhow, Context, Result};
@@ -731,8 +733,111 @@ pub fn passphrase_from_system(home: &Path) -> Option<String> {
             }
         }
     }
+    #[cfg(target_os = "linux")]
+    {
+        // The desktop keyring (GNOME Keyring, KWallet) through libsecret's tool.
+        if let Ok(out) = std::process::Command::new("secret-tool")
+            .args([
+                "lookup",
+                "service",
+                "varsto",
+                "home",
+                &home.display().to_string(),
+            ])
+            .output()
+        {
+            let p = String::from_utf8_lossy(&out.stdout)
+                .trim_end_matches('\n')
+                .to_string();
+            if out.status.success() && !p.is_empty() {
+                return Some(p);
+            }
+        }
+    }
     let _ = home;
     None
+}
+
+/// Keep the passphrase in the system keyring so the background service
+/// unlocks itself after a restart (macOS login keychain; on Linux the
+/// desktop keyring through `secret-tool`).
+pub fn remember_passphrase(home: &Path, pass: &str) -> Result<String> {
+    use std::io::Write;
+    let account = home.display().to_string();
+    #[cfg(target_os = "macos")]
+    {
+        let out = std::process::Command::new("security")
+            .args([
+                "add-generic-password",
+                "-U",
+                "-s",
+                "varsto",
+                "-a",
+                &account,
+                "-w",
+                pass,
+            ])
+            .output()?;
+        if !out.status.success() {
+            return Err(anyhow!(
+                "security: {}",
+                String::from_utf8_lossy(&out.stderr).trim()
+            ));
+        }
+        return Ok("kept in the login keychain".into());
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let mut child = std::process::Command::new("secret-tool")
+            .args([
+                "store",
+                "--label=Varsto",
+                "service",
+                "varsto",
+                "home",
+                &account,
+            ])
+            .stdin(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .context("secret-tool (libsecret) is not installed")?;
+        child.stdin.take().unwrap().write_all(pass.as_bytes())?;
+        let out = child.wait_with_output()?;
+        if !out.status.success() {
+            return Err(anyhow!(
+                "secret-tool could not store it (no keyring in this session?): {}",
+                String::from_utf8_lossy(&out.stderr).trim()
+            ));
+        }
+        return Ok("kept in your keyring".into());
+    }
+    #[allow(unreachable_code)]
+    {
+        let _ = (account, pass);
+        Err(anyhow!("no system keyring support on this platform"))
+    }
+}
+
+/// Unlock a running service that is locked, with a passphrase the command
+/// line already verified. Returns whether it did.
+pub fn unlock_running(home: &Path, pass: &str) -> bool {
+    let Some((f, _)) = status(home) else {
+        return false;
+    };
+    let base = format!("http://127.0.0.1:{}", f.port);
+    let locked = http_get(&format!("{base}/api/state"), &f.token)
+        .ok()
+        .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+        .is_some_and(|v| {
+            v.get("has_vault") == Some(&json!(true)) && v.get("unlocked") == Some(&json!(false))
+        });
+    locked
+        && http_post(
+            &format!("{base}/api/unlock"),
+            &f.token,
+            &json!({ "passphrase": pass }).to_string(),
+        )
+        .is_ok()
 }
 
 pub struct Options {
@@ -1182,6 +1287,13 @@ pub mod linux {
         Ok(user_home()?.join(".local/bin/varsto"))
     }
 
+    /// Whether the background service unit (or at least the binary) is installed.
+    pub fn installed() -> bool {
+        let unit = xdg("XDG_CONFIG_HOME", ".config").map(|c| c.join("systemd/user").join(UNIT));
+        unit.map(|u| u.exists()).unwrap_or(false)
+            || installed_binary().map(|b| b.exists()).unwrap_or(false)
+    }
+
     /// Whether this process runs the installed copy.
     pub fn running_installed() -> bool {
         match (
@@ -1295,6 +1407,18 @@ pub mod linux {
             done.push(format!(
                 "background service: systemd user unit {UNIT}, started and enabled at login"
             ));
+            // Keep syncing while nobody is logged in (allowed for oneself on
+            // most systems; harmless when it is not).
+            let lingering = Command::new("loginctl")
+                .arg("enable-linger")
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false);
+            done.push(if lingering {
+                "background service: keeps running when you are logged out (systemd linger)".into()
+            } else {
+                "background service: runs while you are logged in (`loginctl enable-linger` was not allowed)".into()
+            });
         } else {
             done.push("background service: no systemd user session; the tray app runs it while you are logged in".into());
         }

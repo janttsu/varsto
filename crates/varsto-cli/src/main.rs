@@ -455,6 +455,8 @@ enum ServiceCmd {
     },
     /// Stop starting at login.
     Uninstall,
+    /// Keep the passphrase in the system keyring so the service unlocks itself.
+    Remember,
     /// Show whether the service is running and what it did last.
     Status,
     /// Ask the running service to quit.
@@ -669,6 +671,11 @@ fn bail_usage<T>(msg: &str) -> Result<T> {
 
 /// The device passphrase: from `VARSTO_PASSPHRASE`, otherwise asked on the
 /// terminal (hidden input). Scripts and services set the variable.
+/// The passphrase typed in this run, so that after a successful command a
+/// locked background service can be unlocked with it (and, after setup,
+/// kept in the keyring if the user wants).
+static TYPED: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
 fn passphrase() -> Result<String> {
     if let Ok(p) = std::env::var("VARSTO_PASSPHRASE") {
         return Ok(p);
@@ -680,6 +687,7 @@ fn passphrase() -> Result<String> {
         if p.is_empty() {
             bail_usage::<()>("empty passphrase")?;
         }
+        *TYPED.lock().unwrap() = Some(p.clone());
         return Ok(p);
     }
     Err(anyhow!(
@@ -1302,6 +1310,34 @@ fn run(cli: &Cli) -> Result<()> {
             })?;
         }
         Cmd::Status => {
+            // The running service answers without a passphrase while it is
+            // unlocked; the line about the service comes first either way.
+            let svc = service::status(&home);
+            let api = |path: &str| -> Option<serde_json::Value> {
+                let (f, _) = svc.as_ref()?;
+                let t = service::http_get(&format!("http://127.0.0.1:{}{path}", f.port), &f.token)
+                    .ok()?;
+                serde_json::from_str(&t).ok()
+            };
+            let from_service = api("/api/status").filter(|v| v.get("vault_id").is_some());
+            if !cli.json {
+                println!(
+                    "{}",
+                    service_line(
+                        svc.as_ref().map(|(f, _)| f.pid),
+                        api("/api/service"),
+                        api("/api/state")
+                    )
+                );
+            }
+            if let Some(v) = from_service {
+                if cli.json {
+                    println!("{}", serde_json::to_string_pretty(&v)?);
+                } else {
+                    println!("{}", status_from_value(&v));
+                }
+                return Ok(());
+            }
             let engine = Engine::open(&home, &passphrase()?)?;
             let s = engine.status()?;
             print(cli, &s, |s| {
@@ -1389,6 +1425,11 @@ fn run(cli: &Cli) -> Result<()> {
             })?,
             ServiceCmd::Install { interval } => println!("{}", service::install(&home, *interval)?),
             ServiceCmd::Uninstall => println!("{}", service::uninstall()?),
+            ServiceCmd::Remember => {
+                let pass = passphrase()?;
+                Engine::open(&home, &pass)?; // wrong passphrases are not stored
+                println!("{}", service::remember_passphrase(&home, &pass)?);
+            }
             ServiceCmd::Status => match service::status(&home) {
                 Some((f, v)) => print(
                     cli,
@@ -2119,6 +2160,188 @@ fn main() {
         eprintln!("error: {e:#}");
         std::process::exit(1);
     }
+    after_command(&cli);
+}
+
+/// After a successful command: a background service that is still locked is
+/// unlocked with the passphrase just verified, and right after setting up a
+/// vault on Linux the background service is installed, so syncing goes on
+/// even for someone who only ever uses the command line.
+fn after_command(cli: &Cli) {
+    let Ok(home) = home(cli) else { return };
+    let typed = TYPED.lock().unwrap().clone();
+    if let Some(pass) = &typed {
+        if service::unlock_running(&home, pass) {
+            eprintln!("(the background service is unlocked too)");
+        }
+    }
+    let setup = matches!(
+        cli.cmd,
+        Cmd::Init { .. }
+            | Cmd::Join { .. }
+            | Cmd::Pair {
+                cmd: PairCmd::Join { .. }
+            }
+    );
+    #[cfg(target_os = "linux")]
+    {
+        use std::io::IsTerminal;
+        // Only for the user's own vault in a terminal: never for test homes
+        // (--home / VARSTO_HOME) or scripts.
+        let own = cli.home.is_none() && std::env::var_os("VARSTO_NO_INSTALL").is_none();
+        if setup && own && std::io::stdout().is_terminal() && !service::linux::installed() {
+            match service::install(&home, 300) {
+                Ok(report) => println!("Background sync is set up:\n{report}"),
+                Err(e) => eprintln!(
+                    "could not set up background sync ({e:#}); run `varsto install` later"
+                ),
+            }
+        }
+        if setup && own && std::io::stdin().is_terminal() {
+            if let Some(pass) = &typed {
+                print!("Keep the passphrase in your keyring so background sync unlocks itself after a restart? [Y/n] ");
+                let _ = std::io::Write::flush(&mut std::io::stdout());
+                let mut answer = String::new();
+                let _ = std::io::stdin().read_line(&mut answer);
+                if !answer.trim().to_lowercase().starts_with('n') {
+                    match service::remember_passphrase(&home, pass) {
+                        Ok(m) => println!("{m}"),
+                        Err(e) => eprintln!("{e:#}; the background service waits to be unlocked (any varsto command that asks for the passphrase does it)"),
+                    }
+                }
+            }
+        }
+    }
+    let _ = setup;
+}
+
+fn ago(t: i64) -> String {
+    let s = (chrono_now() - t).max(0);
+    match s {
+        0..=89 => "just now".into(),
+        90..=5399 => format!("{} min ago", (s + 30) / 60),
+        5400..=129_599 => format!("{} h ago", (s + 1800) / 3600),
+        _ => format!("{} days ago", s / 86400),
+    }
+}
+
+fn chrono_now() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
+}
+
+/// "background service: running (pid 4711), unlocked · last sync 3 min ago (…) · next in 2 min"
+fn service_line(
+    pid: Option<u32>,
+    summary: Option<serde_json::Value>,
+    state: Option<serde_json::Value>,
+) -> String {
+    let Some(pid) = pid else {
+        return if cfg!(target_os = "linux") {
+            "background service: not running (`varsto install` sets it up to sync in the background)".into()
+        } else {
+            "background service: not running".into()
+        };
+    };
+    let mut parts = vec![format!("background service: running (pid {pid})")];
+    let st = state.unwrap_or_default();
+    if st.get("unlocked").and_then(|v| v.as_bool()) == Some(false) {
+        parts.push(
+            "LOCKED: give the passphrase to any varsto command, or `varsto service remember`"
+                .into(),
+        );
+    }
+    if let Some(v) = summary {
+        if v.get("paused").and_then(|x| x.as_bool()) == Some(true) {
+            parts.push("paused".into());
+        }
+        match v.get("last_sync_utc").and_then(|x| x.as_i64()) {
+            Some(t) => {
+                let result = v.get("last_result").and_then(|x| x.as_str()).unwrap_or("");
+                parts.push(format!(
+                    "last sync {}{}",
+                    ago(t),
+                    if result.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" ({result})")
+                    }
+                ));
+            }
+            None => parts.push("no sync yet".into()),
+        }
+        if let Some(e) = v
+            .get("last_error")
+            .and_then(|x| x.as_str())
+            .filter(|e| !e.is_empty())
+        {
+            parts.push(format!("last error: {e}"));
+        }
+        if let Some(n) = v.get("next_sync_utc").and_then(|x| x.as_i64()) {
+            parts.push(format!("next in {} s", (n - chrono_now()).max(0)));
+        }
+        if let Some(a) = v.get("auto_verify_text").and_then(|x| x.as_str()) {
+            parts.push(a.to_string());
+        }
+    }
+    parts.join("\n  ")
+}
+
+/// The status as the service reports it (same lines as from the engine).
+fn status_from_value(v: &serde_json::Value) -> String {
+    let st = |k: &str| v.get(k).and_then(|x| x.as_str()).unwrap_or("").to_string();
+    let num = |x: &serde_json::Value, k: &str| x.get(k).and_then(|n| n.as_u64()).unwrap_or(0);
+    let mut out = format!(
+        "vault {} device {} ({}) format {} lamport {} batches {}\n",
+        st("vault_id"),
+        st("device_name"),
+        st("device_id").chars().take(8).collect::<String>(),
+        num(v, "format_version"),
+        num(v, "lamport"),
+        num(v, "ledger_batches")
+    );
+    let devices: Vec<String> = v
+        .get("devices")
+        .and_then(|d| d.as_object())
+        .map(|m| {
+            m.values()
+                .filter_map(|x| x.as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default();
+    out += &format!("devices: {}\n", devices.join(", "));
+    let storages: Vec<String> = v
+        .get("storages")
+        .and_then(|d| d.as_array())
+        .map(|a| {
+            a.iter()
+                .filter_map(|x| x.get("name").and_then(|n| n.as_str()).map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default();
+    out += &format!("storages: {}\n", storages.join(", "));
+    for f in v
+        .get("folders")
+        .and_then(|d| d.as_array())
+        .into_iter()
+        .flatten()
+    {
+        let fs = |k: &str| f.get(k).and_then(|x| x.as_str()).unwrap_or("").to_string();
+        out += &format!(
+            "folder {} ({}): {} files, {} bytes, {} chunks, {} without storage copy, {} verified elsewhere, at {}\n",
+            fs("name"),
+            fs("folder_id").chars().take(8).collect::<String>(),
+            num(f, "files"),
+            num(f, "bytes"),
+            num(f, "chunks"),
+            num(f, "chunks_without_storage_copy"),
+            num(f, "chunks_verified_elsewhere"),
+            f.get("path").and_then(|p| p.as_str()).unwrap_or("(not attached)")
+        );
+    }
+    out.trim_end().to_string()
 }
 
 /// Install, then start the installed tray with the interface open. `None`
