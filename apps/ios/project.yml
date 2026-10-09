@@ -18,6 +18,10 @@ targets:
         UIBackgroundModes: [fetch]
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
+        # Pairing and peer-to-peer transfer talk to your other devices on the LAN.
+        # (Finding them by broadcast also needs Apple's multicast entitlement;
+        # until then pairing on iOS uses the address shown under the code.)
+        NSLocalNetworkUsageDescription: Varsto pairs with and exchanges encrypted blocks with your own devices on this network.
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
     settings:
       base:
