@@ -33,6 +33,7 @@ pub mod rclone;
 pub mod recovery;
 pub mod replica;
 pub mod s3;
+pub mod share;
 pub mod storage;
 pub mod strongroom;
 pub mod thumbs;

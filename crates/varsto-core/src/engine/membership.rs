@@ -808,29 +808,39 @@ impl Engine {
     }
 
     /// The keys of a folder for every epoch this device knows. Frozen folders
-    /// still read later epochs (a device that did not know the folder was
-    /// shared may have used one) but write under epoch 0.
+    /// still read later vault epochs (a device that did not know the folder
+    /// was shared may have used one) but write under epoch 0, or under the
+    /// folder's newest share epoch once a member was removed (`share_ops`).
     pub(super) fn folder_keys(&self, rec: &FolderRecord) -> Result<FolderKeys> {
         let fk = rec.keys()?;
-        if self.vault.member {
-            return Ok(fk);
+        let mut later: BTreeMap<u32, SecretKey> = BTreeMap::new();
+        if !self.vault.member {
+            let scope: [&[u8]; 2] = [
+                self.vault.vault_id.as_str().as_bytes(),
+                rec.folder_id.as_str().as_bytes(),
+            ];
+            later.extend(
+                self.epochs
+                    .keys
+                    .iter()
+                    .filter(|(e, _)| **e > 0)
+                    .map(|(e, k)| (*e, k.derive("folder-epoch", &scope))),
+            );
         }
-        let scope: [&[u8]; 2] = [
-            self.vault.vault_id.as_str().as_bytes(),
-            rec.folder_id.as_str().as_bytes(),
-        ];
-        let later = self
-            .epochs
-            .keys
-            .iter()
-            .filter(|(e, _)| **e > 0)
-            .map(|(e, k)| (*e, k.derive("folder-epoch", &scope)))
-            .collect();
+        for (e, k) in &rec.epoch_keys {
+            later.insert(*e, SecretKey::from_hex(k)?);
+        }
+        let share_epoch = rec
+            .epoch_keys
+            .keys()
+            .copied()
+            .filter(|e| *e >= crate::share::SHARE_EPOCH_BASE)
+            .max();
         let fk = fk.with_epochs(later);
-        Ok(if self.is_frozen(rec) {
-            fk.write_at_base()
-        } else {
-            fk
+        Ok(match share_epoch {
+            Some(e) => fk.write_at(e),
+            None if self.vault.member || self.is_frozen(rec) => fk.write_at_base(),
+            None => fk,
         })
     }
 
@@ -866,7 +876,7 @@ impl Engine {
             .is_none_or(|r| seq <= r.cutoff_seq)
     }
 
-    fn device_name(&self, device: &DeviceId) -> String {
+    pub(super) fn device_name(&self, device: &DeviceId) -> String {
         if device == &self.vault.device_id {
             return self.vault.device_name.clone();
         }

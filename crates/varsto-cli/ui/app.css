@@ -381,6 +381,9 @@ ul.list .li-body { flex: 1 1 240px; min-width: 0; }
 ul.list .li-title { font-weight: 600; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 ul.list .li-sub { font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
 ul.list .li-actions { display: flex; gap: 8px; flex: none; margin-left: auto; }
+ul.list li.sub-row { display: block; border-top: 0; padding: 0 0 8px 48px; }
+ul.list li.sub-row.hidden { display: none; }
+ul.list.sub-list li { padding: 8px 0; }
 .status-line { font-size: 13px; color: var(--muted); margin: 0 0 12px; }
 
 /* Traffic view (Peers) */

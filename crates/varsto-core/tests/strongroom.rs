@@ -349,3 +349,85 @@ fn backup_key_opens_the_strongroom_and_the_last_key_stays() {
     assert_eq!(ck.len(), 1);
     assert_eq!(ck[0].label, "safe");
 }
+
+#[test]
+fn rekeying_a_strongroom_re_encrypts_it_under_a_new_key_for_every_enrolled_key() {
+    let lab = lab();
+    let (mut a, key) = Engine::init(&lab.a_home, "laptop", PASS).unwrap();
+    a.chunker = ChunkerParams::SMALL;
+    a.add_storage(lab.storage.clone()).unwrap();
+    let first = SoftwareKey {
+        path: lab.a_home.join("software-security-key"),
+    };
+    a.create_strongroom("vault", &lab.a_dir, Method::Software, &first, 15)
+        .unwrap();
+    fs::write(lab.a_dir.join("deed.pdf"), b"title deed").unwrap();
+    fs::write(lab.a_dir.join("big.bin"), pseudo_random(120_000, 7)).unwrap();
+    a.push("vault").unwrap();
+    let spare = varsto_core::strongroom::new_software_key(&lab.a_home);
+    a.add_strongroom_key("vault", Method::Software, &spare, "safe")
+        .unwrap();
+
+    let mut b = Engine::join(&lab.b_home, "desk", PASS, &key, lab.storage.clone()).unwrap();
+    b.chunker = ChunkerParams::SMALL;
+    b.attach_folder("vault", &lab.b_dir, true).unwrap();
+    let spare_name = spare.path.file_name().unwrap().to_owned();
+    fs::copy(&spare.path, lab.b_home.join(&spare_name)).unwrap();
+    b.unlock_strongroom_enrolled("vault", 5).unwrap();
+    b.pull("vault").unwrap();
+    b.fetch_file("vault", "deed.pdf").unwrap();
+    b.lock_strongroom("vault").unwrap();
+
+    let storage = lab.root.join("storage");
+    let old_id = a.folders()[0].0.folder_id.clone();
+    let old_chunks = objects(&storage, "chunks");
+    let old_wraps = objects(&storage, &format!("vault/strongroom-keys/{old_id}"));
+    assert!(!old_wraps.is_empty());
+
+    // Re-key with the software keys in A's directory (both enrolled keys).
+    let r = a.rekey_strongroom("vault", 15).unwrap();
+    assert_eq!(r.files, 2, "{r:?}");
+    assert!(r.cleanup.failures.is_empty(), "{:?}", r.cleanup);
+    assert_ne!(r.folder_id, old_id.to_string());
+    let (rec, _) = a.folders().into_iter().next().unwrap();
+    assert!(rec.is_strongroom() && rec.key_hex.is_empty());
+    assert_eq!(rec.name, "vault");
+    let keys = a.strongroom_keys("vault").unwrap();
+    assert_eq!(keys.len(), 2, "both keys still open it");
+    assert_eq!(keys[1].label, "safe");
+    // Old ciphertext and old key wraps are gone from the storage.
+    assert!(objects(&storage, "chunks").is_disjoint(&old_chunks));
+    assert!(objects(&storage, &format!("manifests/{old_id}")).is_empty());
+    assert!(objects(&storage, &format!("vault/strongroom-keys/{old_id}")).is_empty());
+    // A keeps working under the new key.
+    assert_eq!(fs::read(lab.a_dir.join("deed.pdf")).unwrap(), b"title deed");
+    fs::write(lab.a_dir.join("after.txt"), b"after the re-key").unwrap();
+    a.push("vault").unwrap();
+    a.lock_strongroom("vault").unwrap();
+    a.unlock_strongroom("vault", &first, 5).unwrap();
+    a.lock_strongroom("vault").unwrap();
+    a.unlock_strongroom("vault", &spare, 5).unwrap();
+
+    // B adopts the new folder on its next sync (locked), and its copy of
+    // the spare key opens it.
+    b.sync(None).unwrap();
+    let folders = b.folders();
+    assert_eq!(folders.len(), 1);
+    assert_eq!(folders[0].0.folder_id.to_string(), r.folder_id);
+    assert!(b.strongroom_conversions().is_empty());
+    assert!(!lab.b_dir.join("deed.pdf").exists(), "plain copy left on B");
+    assert!(b.pull("vault").is_err(), "locked on B");
+    b.unlock_strongroom_enrolled("vault", 5).unwrap();
+    b.pull("vault").unwrap();
+    for (f, want) in [
+        ("deed.pdf", b"title deed".to_vec()),
+        ("big.bin", pseudo_random(120_000, 7)),
+        ("after.txt", b"after the re-key".to_vec()),
+    ] {
+        b.fetch_file("vault", f).unwrap();
+        assert_eq!(fs::read(lab.b_dir.join(f)).unwrap(), want, "{f}");
+    }
+    // Re-keying a folder that is not a Strongroom is refused.
+    a.add_folder("plain", &lab.root.join("plain")).unwrap();
+    assert!(a.rekey_strongroom("plain", 5).is_err());
+}

@@ -409,7 +409,7 @@ impl Engine {
                 .filter(|e| **e > 0)
                 .map(|e| format!("{}{e}", ledger::KEY_LEDGER_EPOCH_PREFIX)),
         );
-        ids.extend(self.keyring.folders.keys().map(vault::share_key_id));
+        ids.extend(self.share_ledger_key_ids());
         let mut parts: Vec<Vec<u8>> = Vec::new();
         for id in ids {
             if let Some(k) = self.key_for_id(&id) {

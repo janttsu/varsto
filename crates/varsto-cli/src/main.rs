@@ -339,6 +339,15 @@ enum StrongroomCmd {
         folder: String,
         key: String,
     },
+    /// Rotate a Strongroom's key: a new random key wrapped for every enrolled security key (one
+    /// touch to unlock, then one per key), content re-encrypted, old copies deleted. Use it after
+    /// removing a key that someone may have kept, or when you suspect the key leaked. Run it
+    /// again to resume an interrupted re-key.
+    Rekey {
+        folder: String,
+        #[arg(long, default_value_t = 15)]
+        minutes: u64,
+    },
 }
 
 #[derive(Subcommand)]
@@ -410,15 +419,39 @@ enum McpCmd {
 
 #[derive(Subcommand)]
 enum ShareCmd {
-    /// (Recipient) Print a request code for this device; the owner seals the share token to it.
-    Request,
+    /// (Recipient) Print a request code for this device and its fingerprint (six words); the
+    /// owner seals the share token to it after comparing the words with you.
+    Request {
+        /// Your name, bound to the code (the owner sees it, and it is part of the fingerprint).
+        #[arg(long)]
+        name: Option<String>,
+    },
     /// (Owner) Print a share token for a folder. With --to <request-code> the folder key is
     /// encapsulated to the recipient (hybrid X25519 + ML-KEM-768) and the token is safe to send
     /// over any channel; without it the key is in the token and the channel must be secure.
+    /// Before sealing, compare the code's six-word fingerprint with the requester (call them,
+    /// or meet): it proves the code is theirs.
     Create {
         folder: String,
         #[arg(long)]
         to: Option<String>,
+        /// The fingerprint the requester read to you; it must match the code's (skips the question).
+        #[arg(long)]
+        fingerprint: Option<String>,
+        /// Seal without asking whether the fingerprint matches (you compared it some other way).
+        #[arg(long)]
+        yes: bool,
+    },
+    /// (Owner) Who has access to a shared folder: your devices, members (current and removed)
+    /// and tokens not accepted yet.
+    Members { folder: String },
+    /// (Owner) Remove a member (name or device id) or revoke a token not accepted yet (its id or
+    /// fingerprint words), or `all`: the folder gets a new key for everything written from now on.
+    Revoke {
+        folder: String,
+        member: String,
+        #[arg(long)]
+        yes: bool,
     },
     /// (Recipient) Accept a shared folder into a new device directory (one per shared vault).
     Accept {
@@ -718,6 +751,72 @@ fn folder_and_path(
 
 fn bail_usage<T>(msg: &str) -> Result<T> {
     Err(anyhow!("{msg}"))
+}
+
+/// Ask a yes/no question on the terminal; without one the answer is no.
+fn confirm(question: &str) -> Result<bool> {
+    use std::io::{BufRead, IsTerminal, Write};
+    if !std::io::stdin().is_terminal() {
+        return Ok(false);
+    }
+    eprint!("{question} [y/N] ");
+    std::io::stderr().flush()?;
+    let mut line = String::new();
+    std::io::stdin().lock().read_line(&mut line)?;
+    Ok(matches!(line.trim(), "y" | "Y" | "yes" | "Yes"))
+}
+
+/// Percent-encode a query value.
+fn url_escape(s: &str) -> String {
+    s.bytes()
+        .map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                (b as char).to_string()
+            }
+            _ => format!("%{b:02X}"),
+        })
+        .collect()
+}
+
+fn share_members_text(l: &varsto_core::engine::ShareMembers) -> String {
+    let mut out = format!("{} ({})", l.folder, &l.folder_id[..8]);
+    if l.share_epoch > 0 {
+        out.push_str(&format!(", share epoch {}", l.share_epoch));
+    }
+    if l.access_lost {
+        out.push_str("\nThis device no longer receives new content of this folder: the owner removed it, or has not sent it the new key yet.");
+    }
+    for m in &l.members {
+        let what = match (m.kind.as_str(), m.status.as_str()) {
+            ("owner-device", _) => "owner's device".to_string(),
+            ("invite", "pending") => "token not accepted yet".to_string(),
+            ("invite", _) => "token revoked".to_string(),
+            (_, "removed") => format!(
+                "removed{}{}",
+                m.removed_by
+                    .as_ref()
+                    .map(|b| format!(" by {b}"))
+                    .unwrap_or_default(),
+                m.removed_utc
+                    .map(|t| format!(" on {}", varsto_core::util::format_date(t)))
+                    .unwrap_or_default()
+            ),
+            _ => "member".to_string(),
+        };
+        out.push_str(&format!(
+            "\n  {:<20} {:<10} {}{}{}",
+            m.name,
+            &m.id[..m.id.len().min(8)],
+            what,
+            if m.this_device { " (this device)" } else { "" },
+            if m.fingerprint.is_empty() {
+                String::new()
+            } else {
+                format!("\n  {:<20} fingerprint: {}", "", m.fingerprint)
+            }
+        ));
+    }
+    out
 }
 
 /// The device passphrase: from `VARSTO_PASSPHRASE`, otherwise asked on the
@@ -1577,33 +1676,62 @@ fn run(cli: &Cli) -> Result<()> {
             tray::run(home, *interval, *open)?
         }
         Cmd::Share { cmd } => match cmd {
-            ShareCmd::Request => {
-                let code = varsto_core::vault::ShareRequest::code_for(&home)?;
+            ShareCmd::Request { name } => {
+                let code =
+                    varsto_core::vault::ShareRequest::code_for_named(&home, name.as_deref())?;
+                let words = varsto_core::vault::ShareRequest::fingerprint_for(&home)?;
                 if cli.json {
-                    println!("{}", serde_json::json!({"request_code": code}));
+                    println!(
+                        "{}",
+                        serde_json::json!({"request_code": code, "fingerprint": words})
+                    );
                 } else {
-                    println!("share request code for this device (give it to the folder owner; it contains no secret):\n  {code}");
+                    println!("share request code for this device (give it to the folder owner; it contains no secret):\n  {code}\n\nfingerprint: {words}\nThe owner sees the same six words for this code. Read them to each other over a call or in person before the owner shares: different words mean the code was changed on its way.");
                 }
             }
-            ShareCmd::Create { folder, to } => {
+            ShareCmd::Create {
+                folder,
+                to,
+                fingerprint,
+                yes,
+            } => {
                 let mut engine = Engine::open(&home, &passphrase()?)?;
-                let t = engine.share_create(folder)?;
                 match to {
                     Some(code) => {
-                        let sealed =
-                            t.seal(&varsto_core::vault::ShareRequest::parse_code(code)?)?;
+                        let req = Engine::share_request_info(code)?;
+                        let confirmed = match fingerprint {
+                            Some(f) => Some(f.clone()),
+                            None if *yes => None,
+                            None => {
+                                eprintln!(
+                                    "Request from {}\nfingerprint: {}\nAsk the requester to read their fingerprint (varsto share request shows it).",
+                                    if req.name.is_empty() { "(no name given)" } else { &req.name },
+                                    req.fingerprint
+                                );
+                                if !confirm("Do the six words match exactly?")? {
+                                    bail!("not shared: the fingerprint was not confirmed");
+                                }
+                                Some(req.fingerprint.clone())
+                            }
+                        };
+                        let (sealed, req) =
+                            engine.share_create_sealed(folder, code, confirmed.as_deref())?;
                         if cli.json {
                             println!(
                                 "{}",
-                                serde_json::json!({"folder": sealed.name, "token": sealed.encode(), "sealed": true})
+                                serde_json::json!({"folder": sealed.name, "token": sealed.encode(), "sealed": true, "fingerprint": req.fingerprint, "name": req.name})
                             );
                         } else {
-                            println!("sealed share token for folder {} (only the device that made the request code can open it):\n  {}", sealed.name, sealed.encode());
+                            println!("sealed share token for folder {} (only the device that made the request code can open it; fingerprint {}):\n  {}", sealed.name, req.fingerprint, sealed.encode());
                         }
                     }
-                    None => print(cli, &t, |t| {
-                        format!("share token for folder {} (the folder key is INSIDE this token: anyone holding it can read and write the folder; prefer `share create --to <request-code>`):\n  {}", t.name, t.encode())
-                    })?,
+                    None => {
+                        let t = engine.share_create_plain(folder)?;
+                        let encoded = t.encode_plain()?;
+                        print(cli, &t, |t| {
+                            format!("share token for folder {} (the folder key is INSIDE this token: anyone holding it can read and write the folder; prefer `share create --to <request-code>`):\n  {encoded}", t.name)
+                        })?
+                    }
                 }
             }
             ShareCmd::Accept {
@@ -1626,7 +1754,78 @@ fn run(cli: &Cli) -> Result<()> {
                 };
                 let engine = Engine::accept_share(&home, name, &passphrase()?, &token, spec)?;
                 varsto_core::vault::ShareRequest::clear(&home);
+                if !token.fingerprint.is_empty() {
+                    println!(
+                        "the owner confirmed this device's fingerprint: {}",
+                        token.fingerprint
+                    );
+                }
                 println!("joined shared folder {} as device {}; attach it with `varsto folder attach {} <path>` and sync", token.name, engine.device_id().short(), token.name);
+            }
+            ShareCmd::Members { folder } => {
+                let list: varsto_core::engine::ShareMembers =
+                    if let Some((sf, _)) = service::status(&home) {
+                        let url = format!(
+                            "http://127.0.0.1:{}/api/share/members?folder={}",
+                            sf.port,
+                            url_escape(folder)
+                        );
+                        serde_json::from_str(&service::http_get(&url, &sf.token)?)?
+                    } else {
+                        let engine = Engine::open(&home, &passphrase()?)?;
+                        engine.share_members(folder)?
+                    };
+                print(cli, &list, share_members_text)?;
+            }
+            ShareCmd::Revoke {
+                folder,
+                member,
+                yes,
+            } => {
+                if !*yes {
+                    bail_usage::<()>(&format!(
+                        "this removes {member} from {folder}: the folder gets a new key, the members who stay receive it, and everything written from now on is unreadable to {member}; its later changes are ignored. Everything it already received stays readable to it: a key cannot be recalled. A token not accepted yet stops bringing anything new. Run again with --yes"
+                    ))?;
+                }
+                let report: varsto_core::engine::ShareRevokeReport = if let Some((sf, _)) =
+                    service::status(&home)
+                {
+                    let url = format!("http://127.0.0.1:{}/api/share/revoke", sf.port);
+                    let body =
+                        serde_json::json!({"folder": folder, "member": member, "confirm": true});
+                    let r = service::http_post(&url, &sf.token, &body.to_string())?;
+                    serde_json::from_str(&r)
+                        .map_err(|_| anyhow!("unexpected answer from the service: {r}"))?
+                } else {
+                    let mut engine = Engine::open(&home, &passphrase()?)?;
+                    engine.share_revoke(folder, member)?
+                };
+                print(cli, &report, |r| {
+                    let mut out = format!(
+                        "{}: new folder key (share epoch {})",
+                        r.folder, r.share_epoch
+                    );
+                    if !r.removed.is_empty() {
+                        out.push_str(&format!("\nremoved: {}", r.removed.join(", ")));
+                    }
+                    if !r.invites_revoked.is_empty() {
+                        out.push_str(&format!(
+                            "\ntokens revoked: {}",
+                            r.invites_revoked.join(", ")
+                        ));
+                    }
+                    out.push_str(&format!(
+                        "\nnew key sealed to {} member(s) and open token(s)",
+                        r.grants_sealed
+                    ));
+                    if !r.grants_pending.is_empty() {
+                        out.push_str(&format!(
+                            "\nwaiting for (they get it once they run this version): {}",
+                            r.grants_pending.join(", ")
+                        ));
+                    }
+                    out
+                })?;
             }
         },
         Cmd::Replica { cmd } => {
@@ -2010,6 +2209,9 @@ fn run(cli: &Cli) -> Result<()> {
                         engine.add_strongroom_key_enrolled(folder, k)?
                     };
                     println!("{name} enrolled for {folder}; {n} keys open it now. Keep the backup key somewhere safe.");
+                }
+                StrongroomCmd::Rekey { folder, minutes } => {
+                    strongroom_rekey(&mut engine, &home, folder, *minutes)?
                 }
                 StrongroomCmd::Keys { folder } => {
                     let keys = engine.strongroom_keys(folder)?;
@@ -2561,6 +2763,66 @@ fn strongroom_convert(
         );
     } else {
         println!("Plain copies on this device stay until you free them (run again with --free, or free files in the app).");
+    }
+    Ok(())
+}
+
+/// `strongroom rekey`: the security keys are touched here (unlock with the
+/// current key, then one touch per enrolled key for the new wraps); the
+/// re-encryption runs in the background service when one is running.
+fn strongroom_rekey(
+    engine: &mut Engine,
+    home: &std::path::Path,
+    folder: &str,
+    minutes: u64,
+) -> Result<()> {
+    use varsto_core::crypto::SecretKey;
+    use varsto_core::ids::FolderId;
+    use varsto_core::strongroom;
+    let (rec, _) = engine
+        .folders()
+        .into_iter()
+        .find(|(r, _)| r.is_strongroom() && (r.name == folder || r.folder_id.as_str() == folder))
+        .ok_or_else(|| anyhow!("{folder} is not a Strongroom folder"))?;
+    let info = rec.strongroom.clone().expect("a Strongroom");
+    eprintln!("Unlock {folder} with an enrolled key:");
+    let (old_key, _) = strongroom::unlock_enrolled(home, &rec.folder_id, &info)?;
+    let (id, fk, new_info) = if let Some((id, new_info)) = engine.strongroom_conversion(folder) {
+        eprintln!("Resuming the interrupted re-key of {folder}: touch an enrolled key again.");
+        let (fk, _) = strongroom::unlock_enrolled(home, &id, &new_info)?;
+        (id, fk, new_info)
+    } else {
+        let id = FolderId::random();
+        let fk = SecretKey::random();
+        eprintln!(
+            "Wrapping the new key for every enrolled key ({}): touch each one when asked.",
+            info.keys().len()
+        );
+        let new_info = strongroom::rewrap_enrolled(home, &id, &fk, &info)?;
+        (id, fk, new_info)
+    };
+    eprintln!("Re-encrypting {folder} under the new key; this reads and uploads the whole folder.");
+    let report = if let Some((sf, _)) = service::status(home) {
+        let url = format!("http://127.0.0.1:{}/api/strongroom/rekey", sf.port);
+        let body = serde_json::json!({"folder": folder, "folder_id": id.to_string(), "key_hex": fk.to_hex(), "old_key_hex": old_key.to_hex(), "info": new_info, "minutes": minutes}).to_string();
+        serde_json::from_str(&service::http_call("POST", &url, &sf.token, Some(&body))?)?
+    } else {
+        engine.unlock_strongroom_with_key(folder, &old_key.to_hex(), minutes)?;
+        serde_json::to_value(engine.rekey_strongroom_with(folder, &id, &fk, new_info, minutes)?)?
+    };
+    let report: serde_json::Value = report;
+    println!(
+        "{folder} has a new key ({} files re-encrypted, {} fetched to do it, {} blocks uploaded; {} old objects and {} old manifests deleted). Every enrolled security key opens it; other devices switch on their next sync.",
+        report["files"], report["files_fetched"], report["chunks_uploaded"], report["cleanup"]["objects_deleted"], report["cleanup"]["manifests_deleted"]
+    );
+    if let Some(f) = report["cleanup"]["failures"]
+        .as_array()
+        .filter(|f| !f.is_empty())
+    {
+        println!(
+            "Old copies still to remove (retried on every sync): {}",
+            serde_json::to_string(f)?
+        );
     }
     Ok(())
 }

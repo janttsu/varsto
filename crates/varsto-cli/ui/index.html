@@ -134,13 +134,13 @@
         <h3 class="card-title"><svg class="icon accent"><use href="#i-sharing"/></svg>Accept a shared folder</h3>
         <label>Device name <input name="name" placeholder="my-laptop" required></label>
         <label>Passphrase for this device <input name="passphrase" type="password" minlength="8" required></label>
-        <p class="muted small">Step 1: send the owner a request code from this device. Step 2: paste the sealed token they send back.</p>
+        <p class="muted small">Step 1: send the owner a request code from this device (it carries the device name above). Step 2: read its six-word fingerprint to the owner over a call or in person; they see the same words. Step 3: paste the sealed token they send back.</p>
         <div class="row"><button type="button" id="sharerequest" class="secondary">Show my request code</button></div>
         <pre id="sharerequestout" class="hidden"></pre>
         <label>Share token <input name="token" required></label>
         <label>Storage both of you can reach <input name="storage_path" required></label>
         <div class="actions"><button type="submit">Accept</button></div>
-        <p class="muted small">You get the folder key only: this device can read and write that folder, nothing else of the other vault. A sealed token (vst1…) can be opened only here; a plain token carries the key itself.</p>
+        <p class="muted small">You get the folder key only: this device can read and write that folder, nothing else of the other vault. A sealed token (vst1… or vst2…) can be opened only here, and this device checks that the owner confirmed its fingerprint; a plain token carries the key itself.</p>
       </form>
     </div>
   </section>
