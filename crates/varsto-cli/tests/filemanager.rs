@@ -188,6 +188,9 @@ fn paths_and_open_placeholder() {
     assert!(fs::read_to_string(&opened).unwrap().contains("a.txt"));
 }
 
+// Linux only: on macOS `install` writes a launch agent and on Windows the
+// registry, which this test does not cover.
+#[cfg(target_os = "linux")]
 #[test]
 fn install_writes_file_manager_entries_into_a_temp_home() {
     let tmp = tempfile::tempdir().unwrap();
