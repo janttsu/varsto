@@ -66,11 +66,9 @@ pub fn current() -> Option<Progress> {
         path: c.path.clone(),
         done: c.done,
         total: c.total,
-        percent: if c.total == 0 {
-            100
-        } else {
-            (c.done * 100 / c.total).min(100) as u32
-        },
+        percent: (c.done * 100)
+            .checked_div(c.total)
+            .map_or(100, |p| p.min(100) as u32),
         bytes_per_sec: (c.done as f64 / secs) as u64,
     })
 }

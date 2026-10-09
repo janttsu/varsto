@@ -40,9 +40,10 @@ class VarstoService : Service() {
         File(home, "service.json").delete()
         val pb = ProcessBuilder(bin.absolutePath, "--home", home.absolutePath, "service", "run", "--port", "17891", "--interval", "300")
         // Tell the interface it runs on a phone: folders get their place without
-        // asking the user for a path. "Encrypted on this phone" folders live in the
-        // app's private space; "plain files" folders under Internal storage/Varsto,
-        // which the service can write only once all files access is granted.
+        // asking the user for a path. "Encrypted on this phone" folders keep only
+        // encrypted blocks in the app's private space; "plain files" folders go
+        // under Internal storage/Varsto, which the service can write only once all
+        // files access is granted.
         val root = filesDir.resolve("Varsto")
         root.mkdirs()
         pb.environment()["VARSTO_MOBILE"] = "1"

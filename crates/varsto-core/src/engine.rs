@@ -39,12 +39,14 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
+mod block_cache;
 mod devinfo;
 mod membership;
 mod placement;
 mod strongroom_ops;
 mod verify;
 mod view;
+pub use block_cache::{BlockWriter, StagedFile, BLOCK_CACHE_DIR, EXPORT_DIR};
 pub use devinfo::DeviceDetails;
 pub use membership::{
     removal_notice, DeviceInfo, DeviceRemoved, EpochRecord, Grant, KemRecord, Removal, Revocation,
@@ -64,7 +66,9 @@ struct LocalIndexEntry {
 struct FolderState {
     /// Merged view as applied to disk (including tombstones).
     files: BTreeMap<String, FileState>,
-    /// What is on disk, keyed by manifest path.
+    /// What is on disk, keyed by manifest path. In a folder kept encrypted
+    /// on this device (`block_cache`): the files whose blocks are all in the
+    /// block cache, with the size, time and hash of the version cached.
     local_index: BTreeMap<String, LocalIndexEntry>,
     /// Highest manifest sequence applied per other device.
     last_seen: BTreeMap<DeviceId, u64>,
@@ -86,6 +90,11 @@ struct FolderState {
     /// retried on every pull, including from peers that appear later.
     #[serde(default)]
     pending_remote: BTreeMap<String, FileState>,
+    /// The local index describes the block cache (see `engine::block_cache`).
+    /// False in states written before folders kept encrypted on a device
+    /// used it: their index described plain files in the folder directory.
+    #[serde(default)]
+    block_cache: bool,
 }
 
 fn now_secs() -> i64 {
@@ -1528,11 +1537,27 @@ impl Engine {
             .any(|m| &m.folder_id == folder && m.encrypted)
     }
 
-    /// Mark an attached folder as "encrypted on this device" (phones): files are
-    /// fetched when opened and their plaintext copies are removed when the vault
-    /// locks. Switching it on also makes the folder selective.
+    /// Mark an attached folder as "encrypted on this device" (phones): its
+    /// files are kept as encrypted blocks and read through the app only (see
+    /// `engine::block_cache`); selective sync chooses which files are kept,
+    /// as in any folder. Plain files already in its directory are converted
+    /// on the next sync. Switching back is refused once the folder has
+    /// files: detach it and attach it again with plain files instead.
     pub fn set_encrypted_here(&mut self, name_or_id: &str, encrypted: bool) -> Result<()> {
         let (rec, _) = self.resolve_folder(name_or_id)?;
+        if !encrypted
+            && self.mount_is_encrypted(&rec.folder_id)
+            && self
+                .load_state(&rec.folder_id)?
+                .files
+                .values()
+                .any(|f| !f.deleted)
+        {
+            bail!(
+                "{} keeps its files encrypted on this device; detach it and attach it again to keep plain files",
+                rec.name
+            );
+        }
         for m in self
             .config
             .folders
@@ -1540,9 +1565,6 @@ impl Engine {
             .filter(|m| m.folder_id == rec.folder_id)
         {
             m.encrypted = encrypted;
-            if encrypted {
-                m.selective = true;
-            }
         }
         self.config.save(&self.home)
     }
@@ -1553,6 +1575,11 @@ impl Engine {
     pub fn free_folder(&mut self, folder: &str) -> Result<(u64, u64)> {
         let (rec, root) = self.resolve_folder(folder)?;
         let state = self.load_state(&rec.folder_id)?;
+        if self.mount_is_encrypted(&rec.folder_id) {
+            let paths: Vec<String> = state.local_index.keys().cloned().collect();
+            let kept = self.free_cached(&rec, &paths)?.len() as u64;
+            return Ok((paths.len() as u64 - kept, kept));
+        }
         let paths: Vec<String> = state
             .files
             .values()
@@ -1569,35 +1596,23 @@ impl Engine {
         Ok((freed, kept))
     }
 
-    /// Remove the plaintext copies of every "encrypted on this device" folder
-    /// (called when the vault locks). Returns (folder, freed, kept) per folder.
-    pub fn free_encrypted_folders(&mut self) -> Vec<(String, u64, u64)> {
-        let names: Vec<String> = self
-            .folders()
-            .into_iter()
-            .filter(|(r, m)| m.is_some() && self.mount_is_encrypted(&r.folder_id))
-            .map(|(r, _)| r.name)
-            .collect();
-        names
-            .into_iter()
-            .map(|n| match self.free_folder(&n) {
-                Ok((f, k)) => (n, f, k),
-                Err(_) => (n, 0, 0),
-            })
-            .collect()
-    }
-
-    /// Same, without the keys (the vault is locked, e.g. at service start after
-    /// the app was killed). Only files whose on-disk content is exactly what the
-    /// ledger already holds (local index matches the manifest and the file is
-    /// unchanged since) are replaced; anything else is kept. Returns the number
-    /// of files freed.
+    /// Folders kept "encrypted on this device" that still hold plain copies
+    /// from before the block cache (when such folders were decrypted while
+    /// unlocked), handled without the keys (the vault is locked at service
+    /// start): only files whose on-disk content is exactly what the ledger
+    /// already holds (local index matches the manifest and the file is
+    /// unchanged since) are replaced by placeholders; anything else is kept
+    /// for the conversion on the next sync while unlocked. Returns the number
+    /// of files removed.
     pub fn wipe_encrypted_folders_locked(home: &Path) -> Result<u64> {
         let config = Config::load(home)?;
         let mut freed = 0u64;
         for m in config.folders.iter().filter(|m| m.encrypted) {
             let state_path = home.join("state").join(format!("{}.json", m.folder_id));
             let mut state: FolderState = util::read_json_or_default(&state_path)?;
+            if state.block_cache {
+                continue; // nothing plain is kept any more
+            }
             let mut changed = false;
             let files: Vec<_> = state
                 .files
@@ -2128,6 +2143,9 @@ impl Engine {
         root: &Path,
         state: &mut FolderState,
     ) -> Result<(u64, u64)> {
+        if self.mount_is_encrypted(&rec.folder_id) {
+            return self.scan_cached(rec, root, state);
+        }
         let fk = self.folder_keys(rec)?;
         let me = self.vault.device_id.clone();
         // Chunks this folder already references keep their object (and key
@@ -2380,8 +2398,34 @@ impl Engine {
                 .map(|(spec, _)| spec.name().to_string())
                 .collect()
         };
+        let encrypted_here = self.mount_is_encrypted(&folder_id);
         for file in state.files.values().filter(|f| !f.deleted) {
             if file.chunks.iter().all(|c| missing_on(c).is_empty()) {
+                continue;
+            }
+            if encrypted_here {
+                // Kept encrypted here: the objects come from the block cache.
+                for expected in &file.chunks {
+                    let targets: Vec<String> = missing_on(expected)
+                        .into_iter()
+                        .filter(|t| !report.storages_unavailable.iter().any(|u| u == t))
+                        .collect();
+                    if targets.is_empty() {
+                        continue;
+                    }
+                    let Some(ct) = self.cached_object(&expected.object) else {
+                        continue;
+                    };
+                    self.put_object(
+                        &storages,
+                        &targets,
+                        &folder_id,
+                        &expected.chunk,
+                        &expected.object,
+                        &ct,
+                        report,
+                    )?;
+                }
                 continue;
             }
             let disk = root.join(&file.path);
@@ -2414,39 +2458,57 @@ impl Engine {
                     &crate::pack::pack(&chunk),
                 )?;
                 let object = ObjectName::from_bytes(&crypto::hash(&ct));
-                let key = chunk_storage_key(&object);
-                for (spec, backend) in storages
-                    .iter()
-                    .filter(|(spec, _)| targets.contains(&spec.name().to_string()))
-                {
-                    match backend.put_if_absent(&key, &ct) {
-                        Ok(true) => {
-                            report.chunks_uploaded += 1;
-                            report.bytes_uploaded += ct.len() as u64;
-                        }
-                        Ok(false) => {}
-                        // A pool with no disk attached (or no room) is left out
-                        // for the rest of this push and tried again next time.
-                        Err(e)
-                            if matches!(
-                                pool::pool_error(&e),
-                                Some(PoolError::NoDiskAttached { .. } | PoolError::NoRoom { .. })
-                            ) =>
-                        {
-                            report.storages_unavailable.push(spec.name().to_string());
-                            continue;
-                        }
-                        Err(e) => return Err(e),
-                    }
-                    self.pending.push(Event::ChunkStored {
-                        folder: folder_id.clone(),
-                        chunk: chunk_id.clone(),
-                        object: object.clone(),
-                        storage: spec.name().to_string(),
-                        size: ct.len() as u64,
-                    });
-                }
+                self.put_object(
+                    &storages, &targets, &folder_id, &chunk_id, &object, &ct, report,
+                )?;
             }
+        }
+        Ok(())
+    }
+
+    /// Write one object to the `targets` among `storages` and record it.
+    #[allow(clippy::too_many_arguments)]
+    fn put_object(
+        &mut self,
+        storages: &OpenStorages,
+        targets: &[String],
+        folder_id: &FolderId,
+        chunk_id: &ChunkId,
+        object: &ObjectName,
+        ct: &[u8],
+        report: &mut PushReport,
+    ) -> Result<()> {
+        let key = chunk_storage_key(object);
+        for (spec, backend) in storages
+            .iter()
+            .filter(|(spec, _)| targets.iter().any(|t| t == spec.name()))
+        {
+            match backend.put_if_absent(&key, ct) {
+                Ok(true) => {
+                    report.chunks_uploaded += 1;
+                    report.bytes_uploaded += ct.len() as u64;
+                }
+                Ok(false) => {}
+                // A pool with no disk attached (or no room) is left out
+                // for the rest of this push and tried again next time.
+                Err(e)
+                    if matches!(
+                        pool::pool_error(&e),
+                        Some(PoolError::NoDiskAttached { .. } | PoolError::NoRoom { .. })
+                    ) =>
+                {
+                    report.storages_unavailable.push(spec.name().to_string());
+                    continue;
+                }
+                Err(e) => return Err(e),
+            }
+            self.pending.push(Event::ChunkStored {
+                folder: folder_id.clone(),
+                chunk: chunk_id.clone(),
+                object: object.clone(),
+                storage: spec.name().to_string(),
+                size: ct.len() as u64,
+            });
         }
         Ok(())
     }
@@ -2476,7 +2538,9 @@ impl Engine {
             .into_iter()
             .filter(|(s, _)| !s.is_carrier())
             .collect();
-        let meta = self.folder_keys(rec)?.meta;
+        let fk = self.folder_keys(rec)?;
+        let meta = fk.meta.clone();
+        let encrypted_here = self.mount_is_encrypted(&rec.folder_id);
         let mut made = 0u64;
         for (path, hash) in candidates {
             let key = thumbs::storage_key(&rec.folder_id, &hash);
@@ -2487,11 +2551,25 @@ impl Engine {
                 state.thumbs_done.insert(hash);
                 continue;
             }
-            let disk = root.join(&path);
-            if !disk.exists() {
-                continue;
-            }
-            let Some(bytes) = thumbs::make(&disk, &path) else {
+            let made_here = if encrypted_here {
+                // Pictures are decoded in memory from their cached blocks;
+                // videos would need a plain file, so none is made here.
+                if thumbs::is_video(&path) {
+                    state.thumbs_done.insert(hash);
+                    continue;
+                }
+                if !state.local_index.contains_key(&path) {
+                    continue;
+                }
+                self.thumbnail_from_cache(&fk, state, &path)
+            } else {
+                let disk = root.join(&path);
+                if !disk.exists() {
+                    continue;
+                }
+                thumbs::make(&disk, &path)
+            };
+            let Some(bytes) = made_here else {
                 state.thumbs_done.insert(hash); // cannot make one; do not retry every time
                 continue;
             };
@@ -2682,6 +2760,7 @@ impl Engine {
             self.view()?.manifests
         };
         let metas = fk.meta_keys();
+        let encrypted_here = self.mount_is_encrypted(&rec.folder_id);
         for (dev, (seq, idx)) in newest {
             let seq = if self.is_revoked(&dev) {
                 seq.min(
@@ -2730,7 +2809,17 @@ impl Engine {
                     }
                     Merge::Conflict { winner, loser } => {
                         report.conflicts += 1;
-                        if let Some(loser) = loser {
+                        if let (true, Some(loser)) = (encrypted_here, &loser) {
+                            self.conflict_copy_cached(
+                                &rec,
+                                &fk,
+                                &mut state,
+                                path,
+                                loser,
+                                &storages,
+                                &mut report,
+                            )?;
+                        } else if let Some(loser) = loser {
                             let cpath = manifest::conflict_path(path, &loser);
                             let local_is_loser = state
                                 .files
@@ -2777,7 +2866,12 @@ impl Engine {
                                 l.content_hash == winner.content_hash && l.deleted == winner.deleted
                             })
                             .unwrap_or(false)
-                            && (winner.deleted || root.join(path).exists());
+                            && (winner.deleted
+                                || if encrypted_here {
+                                    state.local_index.contains_key(path)
+                                } else {
+                                    root.join(path).exists()
+                                });
                         if local_has_winner {
                             state.files.insert(path.clone(), winner);
                         } else {
@@ -2795,6 +2889,9 @@ impl Engine {
                 }
             }
             state.last_seen.insert(dev, seq);
+        }
+        if encrypted_here {
+            self.cache_wanted(&rec, &fk, &mut state, &storages, &mut report)?;
         }
         self.commit_batch()?;
         self.save_state(&rec.folder_id, &state)?;
@@ -2937,6 +3034,9 @@ impl Engine {
         storages: &[(StorageSpec, Box<dyn Storage>)],
         report: &mut PullReport,
     ) -> Result<()> {
+        if self.mount_is_encrypted(&rec.folder_id) {
+            return self.apply_remote_cached(rec, fk, state, remote, storages, report);
+        }
         let disk = root.join(&remote.path);
         if remote.deleted {
             let _ = fs::remove_file(placeholder_path(&disk));
@@ -3115,6 +3215,9 @@ impl Engine {
     /// Download a placeholder file of a selective folder and keep it here.
     pub fn fetch_file(&mut self, folder: &str, path: &str) -> Result<PullReport> {
         let (rec, root) = self.resolve_folder(folder)?;
+        if self.mount_is_encrypted(&rec.folder_id) {
+            return self.fetch_cached(&rec, path);
+        }
         let mut state = self.load_state(&rec.folder_id)?;
         let file = state
             .files
@@ -3191,6 +3294,13 @@ impl Engine {
     /// and unless the file on disk is the version that was synced.
     pub fn free_file(&mut self, folder: &str, path: &str) -> Result<()> {
         let (rec, root) = self.resolve_folder(folder)?;
+        if self.mount_is_encrypted(&rec.folder_id) {
+            // Its cached blocks go, except those other cached files use.
+            return match self.free_cached(&rec, &[path.to_string()])?.pop() {
+                Some((_, why)) => Err(anyhow!(why)),
+                None => Ok(()),
+            };
+        }
         let mut state = self.load_state(&rec.folder_id)?;
         let file = state
             .files
@@ -3241,10 +3351,8 @@ impl Engine {
         state.local_index.remove(path);
         state.pinned.remove(path);
         self.save_state(&rec.folder_id, &state)?;
-        // A freed file turns a folder selective, except one kept encrypted
-        // here: its choice ("fetch when opened" or "keep all ready while
-        // unlocked") stays through every lock.
-        if !self.mount_is_selective(&rec.folder_id) && !self.mount_is_encrypted(&rec.folder_id) {
+        // A freed file turns a folder selective.
+        if !self.mount_is_selective(&rec.folder_id) {
             self.set_selective(folder, true)?;
         }
         Ok(())
@@ -3575,7 +3683,8 @@ impl Engine {
     }
 
     /// What this device can serve to peers right now: every chunk of every
-    /// file present on disk, plus objects in local-directory storages.
+    /// file present on disk, plus objects in local-directory storages and in
+    /// the block cache (folders kept encrypted here), served verbatim.
     pub fn peer_snapshot(&self) -> Result<crate::p2p::Snapshot> {
         let mut folder_keys = BTreeMap::new();
         let mut pieces = BTreeMap::new();
@@ -3586,7 +3695,8 @@ impl Engine {
             };
             let fk = self.folder_keys(&rec)?;
             let state = self.load_state(&rec.folder_id)?;
-            for f in state.files.values().filter(|f| !f.deleted) {
+            let plain_here = !self.mount_is_encrypted(&rec.folder_id);
+            for f in state.files.values().filter(|f| plain_here && !f.deleted) {
                 let disk = root.join(&f.path);
                 if !disk.is_file() {
                     continue;
@@ -3609,7 +3719,7 @@ impl Engine {
             }
             folder_keys.insert(rec.folder_id.clone(), fk);
         }
-        let local_roots = self
+        let mut local_roots: Vec<PathBuf> = self
             .config
             .storages
             .iter()
@@ -3618,6 +3728,9 @@ impl Engine {
                 _ => None,
             })
             .collect();
+        if self.block_cache_root().is_dir() {
+            local_roots.push(self.block_cache_root());
+        }
         Ok(crate::p2p::Snapshot {
             vault_id: self.vault.vault_id.clone(),
             device_id: self.vault.device_id.clone(),
@@ -3734,13 +3847,25 @@ impl Engine {
     /// Create or overwrite a file inside a folder (relative path), then push.
     /// Used by the MCP server for notes and reorganisation; refuses to leave the folder.
     pub fn write_file(&mut self, folder: &str, path: &str, bytes: &[u8]) -> Result<PushReport> {
-        let (_, root) = self.resolve_folder(folder)?;
-        if path.is_empty()
-            || Path::new(path).is_absolute()
-            || path.split('/').any(|c| c == ".." || c.is_empty())
-        {
-            bail!("path must be relative to the folder and must not contain '..': {path}");
+        self.write_from_reader(folder, path, bytes)
+    }
+
+    /// `write_file` with the content streamed from `reader`. In a folder kept
+    /// encrypted here it goes straight into the block cache (no plain file);
+    /// elsewhere into a temporary file next to the target, renamed into place
+    /// once complete. An error while reading leaves the folder unchanged.
+    pub fn write_from_reader(
+        &mut self,
+        folder: &str,
+        path: &str,
+        reader: impl std::io::Read,
+    ) -> Result<PushReport> {
+        block_cache::check_rel_path(path)?;
+        if let Some(writer) = self.block_writer(folder)? {
+            let staged = writer.write(reader)?;
+            return self.commit_staged(folder, path, staged);
         }
+        let (_, root) = self.resolve_folder(folder)?;
         let disk = root.join(path);
         if placeholder_path(&disk).exists() {
             bail!("{path} is a placeholder here; fetch it before overwriting");
@@ -3748,7 +3873,18 @@ impl Engine {
         if let Some(parent) = disk.parent() {
             fs::create_dir_all(parent)?;
         }
-        fs::write(&disk, bytes).with_context(|| format!("write {}", disk.display()))?;
+        let tmp = disk.with_file_name(format!(".varsto-upload-{}", std::process::id()));
+        let written = (|| -> Result<()> {
+            let mut out = fs::File::create(&tmp)?;
+            std::io::copy(&mut { reader }, &mut out)?;
+            out.sync_all()?;
+            Ok(())
+        })();
+        if let Err(e) = written {
+            let _ = fs::remove_file(&tmp);
+            return Err(e.context(format!("write {}", disk.display())));
+        }
+        fs::rename(&tmp, &disk).with_context(|| format!("write {}", disk.display()))?;
         self.push(folder)
     }
 
@@ -3775,14 +3911,13 @@ impl Engine {
         Ok(())
     }
 
-    /// Create a directory inside a folder.
+    /// Create a directory inside a folder. Folder lists name files only; in a
+    /// folder kept encrypted here a directory exists once a file is in it.
     pub fn mkdir(&mut self, folder: &str, path: &str) -> Result<()> {
-        let (_, root) = self.resolve_folder(folder)?;
-        if path.is_empty()
-            || Path::new(path).is_absolute()
-            || path.split('/').any(|c| c == ".." || c.is_empty())
-        {
-            bail!("path must be relative to the folder and must not contain '..': {path}");
+        let (rec, root) = self.resolve_folder(folder)?;
+        block_cache::check_rel_path(path)?;
+        if self.mount_is_encrypted(&rec.folder_id) {
+            return Ok(());
         }
         fs::create_dir_all(root.join(path))?;
         Ok(())
@@ -3802,7 +3937,14 @@ impl Engine {
     /// Contents of a file, fetching it first if it is a placeholder. Counts
     /// as an access.
     pub fn read_file(&mut self, folder: &str, path: &str) -> Result<Vec<u8>> {
-        let (_, root) = self.resolve_folder(folder)?;
+        let (rec, root) = self.resolve_folder(folder)?;
+        if self.mount_is_encrypted(&rec.folder_id) {
+            // Decrypted in memory, from the block cache where it can.
+            let size = self.view_size(folder, path)?;
+            let bytes = self.view_range(folder, path, 0, size)?;
+            self.touch_access(folder, path)?;
+            return Ok(bytes);
+        }
         let disk = root.join(path);
         if !disk.exists() {
             self.fetch_file(folder, path)?;
@@ -3826,6 +3968,10 @@ impl Engine {
         }
         // Moving never replaces a file, also not one only another device has.
         self.ensure_path_free(folder, to)?;
+        let rec = self.resolve_folder(folder)?.0;
+        if self.mount_is_encrypted(&rec.folder_id) {
+            return self.move_cached(&rec, folder, from, to);
+        }
         let src = root.join(from);
         let dst = root.join(to);
         if !src.exists() {
@@ -3857,10 +4003,20 @@ impl Engine {
         let (rec, root) = self.resolve_folder(folder)?;
         let state = self.load_state(&rec.folder_id)?;
         let selective = self.mount_is_selective(&rec.folder_id);
+        let encrypted_here = self.mount_is_encrypted(&rec.folder_id);
         let mut out = Vec::new();
         for f in state.files.values().filter(|f| !f.deleted) {
             let disk = root.join(&f.path);
-            let state_str = if disk.exists() {
+            let state_str = if encrypted_here {
+                // Blocks in the cache, or not (yet) on this device.
+                if state.local_index.contains_key(&f.path) {
+                    "local"
+                } else if state.pending_remote.contains_key(&f.path) {
+                    "missing"
+                } else {
+                    "placeholder"
+                }
+            } else if disk.exists() {
                 "local"
             } else if placeholder_path(&disk).exists() {
                 "placeholder"
@@ -3914,6 +4070,12 @@ impl Engine {
             }
             let push = self.push(&name)?;
             out.push((pull, push));
+        }
+        if self.block_cache_root().is_dir() {
+            // Blocks no cached file needs any more (a newer version arrived,
+            // a file was deleted) leave the block cache once stored elsewhere.
+            let view = self.view()?;
+            self.gc_block_cache(&view)?;
         }
         Ok(out)
     }
@@ -3987,13 +4149,21 @@ impl Engine {
                     (false, false) => blocks.stored_away += 1,
                 }
             }
+            let encrypted_here = self.mount_is_encrypted(&rec.folder_id);
             let placeholders_here = mount
                 .as_ref()
                 .map(|m| {
                     state
                         .files
                         .values()
-                        .filter(|f| !f.deleted && placeholder_path(&m.join(&f.path)).exists())
+                        .filter(|f| {
+                            !f.deleted
+                                && if encrypted_here {
+                                    !state.local_index.contains_key(&f.path)
+                                } else {
+                                    placeholder_path(&m.join(&f.path)).exists()
+                                }
+                        })
                         .count() as u64
                 })
                 .unwrap_or(0);
@@ -4525,6 +4695,9 @@ impl Engine {
                 }
             }
             if ct.is_none() {
+                ct = self.cached_object(&object);
+            }
+            if ct.is_none() {
                 if let Some(fk) = folder_keys.get(&need.folder) {
                     for path in &need.files {
                         if let Ok(c) =
@@ -4603,9 +4776,10 @@ impl Engine {
 }
 
 /// Alpha helper: forget everything this device knows about its vault (keys,
-/// ledger, state, configuration, secrets, grants) so it can start over. The
-/// user's files in attached folders are left untouched; the storages are not
-/// changed either, so other devices keep working.
+/// ledger, state, configuration, secrets, grants, the block cache and
+/// exported copies) so it can start over. The user's files in attached
+/// folders are left untouched; the storages are not changed either, so other
+/// devices keep working.
 pub fn reset_device(home: &Path) -> Result<Vec<String>> {
     let mut removed = Vec::new();
     for name in [
@@ -4630,7 +4804,7 @@ pub fn reset_device(home: &Path) -> Result<Vec<String>> {
             removed.push(name.to_string());
         }
     }
-    for dir in ["state", "ledger", "trash"] {
+    for dir in ["state", "ledger", "trash", BLOCK_CACHE_DIR, EXPORT_DIR] {
         let p = home.join(dir);
         if p.exists() {
             fs::remove_dir_all(&p).with_context(|| format!("remove {}", p.display()))?;
