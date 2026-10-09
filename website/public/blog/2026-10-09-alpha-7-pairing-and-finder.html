@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Alpha.7: pair devices with a code, Finder actions, and a real NAT path: Varsto</title>
+<meta name="description" content="Devices now pair from the interface with a one-time code, Finder can download a placeholder or free up space with a right-click, the macOS app installs from a disk image, devices reach each other through NAT, and removable disks can form a pool.">
+<meta name="robots" content="noindex, nofollow">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../blog/feed.xml">
+<link rel="stylesheet" href="../assets/css/site.css?v=34b4c5a07a">
+<script src="../assets/js/theme.js?v=0951491269"></script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="alpha" role="note">
+  <div class="wrap"><strong>Alpha software, not for production data.</strong> Bugs can cause data loss, formats may change without migration, and the cryptography has not been independently audited. Keep your own backups and check that you can restore from them.</div>
+</div>
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="../"><img src="../assets/img/logo.svg" alt="" width="28" height="28"><span>Varsto</span></a>
+    <nav class="main" aria-label="Main">
+      <a href="../">Project</a>
+      <a href="../features/">Features</a>
+      <a href="../use-cases/">Use cases</a>
+      <a href="../encryption/">Encryption</a>
+      <a href="../screenshots/">Screenshots</a>
+      <a href="../docs/">Docs</a>
+      <a href="../downloads/">Downloads</a>
+      <a href="../blog/" aria-current="page">Blog</a>
+      <a href="../forum/">Forum</a>
+      <a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a>
+      <button class="theme" id="theme-toggle" type="button" aria-label="Change colour theme">Theme: auto</button>
+    </nav>
+  </div>
+</header>
+<main id="main">
+  <div class="wrap">
+<article class="prose"><h1>Alpha.7: pair devices with a code, Finder actions, and a real NAT path</h1><p class="note"><time datetime="2026-10-09">2026-10-09</time></p>
+<p>Alpha.7 is mostly the result of using the alpha on real devices for a day: a Samsung phone, a Mac and a test bucket. Each section below started as something that did not work the way it should.</p>
+<h2 id="pair-a-device-with-a-code">Pair a device with a code</h2>
+<p>Adding a device used to mean copying a 64-character vault key and typing the settings of a storage both devices can reach. Now the device that already has the vault shows <strong>Add a device</strong> under Devices: a code of nine digits that works once, for ten minutes. On the new device you choose <strong>Pair with your other device</strong>, type the code, a name and a passphrase, and that is all.</p>
+<p>The two devices find each other on the local network, run SPAKE2 keyed by the code (a wrong guess cannot be checked offline, and three wrong codes close the offer), confirm the key in both directions, and only then does the vault key travel, with the storage settings and their secrets, sealed under the shared key. The new device joins through the first storage it can reach. If it is not found on the network, the address shown under the code works too. The same flow exists on the command line: <code>varsto pair offer</code> and <code>varsto pair join</code>.</p>
+<h2 id="finder-knows-about-placeholders">Finder knows about placeholders</h2>
+<p>On macOS, right-click files for <strong>Download with Varsto</strong> or <strong>Free up space with Varsto</strong>, and double-click a placeholder to download the file and open it. Freeing space is refused unless every block is on a storage <em>and</em> the file on disk is the version that was synced; before this release a file edited after the last sync could have been replaced by its placeholder. The macOS download is now a disk image: open it and drag Varsto to Applications.</p>
+<h2 id="devices-reach-each-other-through-nat">Devices reach each other through NAT</h2>
+<p>Peer-to-peer transfer used to work on the LAN and through forwarded ports. Now devices learn their public address with STUN, punch through NAT over QUIC with a certificate pinned per device, and fall back to relaying through one of your own reachable devices. It was tested between a home network and a cloud machine behind its own NAT, both ways, and with UDP blocked to force the relay.</p>
+<h2 id="pools-of-removable-disks">Pools of removable disks</h2>
+<p>A storage can be a pool of removable disks: Varsto fills them by free space with a reserve, knows which disk holds which block, asks you to attach a specific disk when it needs one, and counts an offline disk as a copy as of its last check.</p>
+<h2 id="smaller-things">Smaller things</h2>
+<ul>
+<li>Durability policies are edited for every folder in one table on desktop, and the full rule and its reasons are visible.</li>
+<li>On a phone you can add files and subfolders, open a file in another app or share it, and keep a folder as plain files in internal storage instead of encrypted.</li>
+<li>The file details say whether this device has the file and which storages hold it.</li>
+<li>The window follows a pause or a sync started from the menu bar.</li>
+<li>Joining accepts the 24 recovery words as well as the hex key.</li>
+</ul>
+<h2 id="still-alpha">Still alpha</h2>
+<p>The warning on every page stands: the cryptography has not been audited, the format may still change, and a bug can destroy data. Use test data and keep your own backups.</p>
+
+</article>
+  </div>
+</main>
+<footer class="site">
+  <div class="wrap">
+    <span>Varsto is a working name. Source: <a href="https://github.com/janttsu/varsto">github.com/janttsu/varsto</a>, under the PolyForm Shield License 1.0.0 (source-available).</span>
+    <span>No cookies, no tracking. The web server keeps a standard access log for at most seven days.</span>
+    <span><a href="../docs/security-policy.html">Security policy</a> · <a href="../docs/licence.html">Licence</a> · <a href="../docs/trademark.html">Trademark</a></span>
+  </div>
+</footer>
+</body>
+</html>

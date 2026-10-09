@@ -39,7 +39,7 @@
   <div class="wrap">
 <article class="prose">
 <h1>Logging architecture</h1>
-<p class="note">From <code>docs/architecture/logging.md</code> in the repository, rendered 2026-10-08.</p>
+<p class="note">From <code>docs/architecture/logging.md</code> in the repository, rendered 2026-10-09.</p>
 <p>Debug logging is <strong>on by default in every application</strong> (daemon, CLI, desktop and mobile apps, MCP server) so that bugs can be investigated after the fact. Logging must never weaken the security model.</p>
 <h2 id="what-is-logged">What is logged</h2>
 <p>Every operation with start, end and outcome: sync runs, block transfers (short block id, size, source: peer or storage), ledger events, peer discovery and connections, storage requests (type and result only), removable-disk attach and eject, policy evaluation and alerts, deletions and trash, device add / revoke / wipe, user actions, MCP calls (tool and result, never file content), key lifecycle events (never key material), application start, version and non-secret settings.</p>

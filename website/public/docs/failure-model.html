@@ -39,7 +39,7 @@
   <div class="wrap">
 <article class="prose">
 <h1>Failure model</h1>
-<p class="note">From <code>docs/failure-model.md</code> in the repository, rendered 2026-10-08.</p>
+<p class="note">From <code>docs/failure-model.md</code> in the repository, rendered 2026-10-09.</p>
 <blockquote>
 <p><strong>Design stage.</strong> Nothing described here is implemented yet. This document states what the design is meant to tolerate, what it limits, and what it does not cover. Statements such as "designed to" become claims about the product only after the tests named in <a href="testing.html">TESTING.md</a> show them.</p>
 </blockquote>
@@ -113,6 +113,14 @@
 <td>Authenticated encryption and keyed hashes on every object; periodic scrub with challenge-response checks; self-describing packs so the index can be rebuilt; peers that fail proofs are marked unreliable.</td>
 <td>Corruption in every copy at the same time. Blocks that exist in only one place and have no verification yet.</td>
 <td>S-001, S-006, F-020, F-031, N-007</td>
+</tr>
+<tr>
+<td>A disk of a disk pool is lost, stolen or dies</td>
+<td>The objects on it are lost unless another storage or disk holds them; the ledger and the pool index say which objects were only there (<code>varsto disk retire</code> prints the count). Stolen disks expose only ciphertext and a marker that names the pool and disk, not the vault.</td>
+<td>Sync is unaffected. Files whose only copy was on the disk stay pending and name the disk ("attach disk data-01 (shelf)"); policies count the disk's copies as verified at its last check and raise an alert when that ages out.</td>
+<td>Encryption of every object; the pool index and the disk's own index make the loss enumerable; durability policies that require a second copy elsewhere (another storage or, in the future, another disk group); retiring a disk prints what exists only on it.</td>
+<td>A pool keeps one copy per pool today: without another storage, a lost disk is lost data. No SMART or health reading; no repair onto a replacement disk by itself.</td>
+<td>F-040, F-031, F-032, S-001</td>
 </tr>
 <tr>
 <td>Removable disk not verified for a long time</td>

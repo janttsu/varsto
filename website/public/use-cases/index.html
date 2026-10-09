@@ -121,7 +121,7 @@
       <div>
         <p><strong>Situation.</strong> You manage a huge archive on old hard disks through a USB dock. The disks sit in a cupboard; some are kept elsewhere. Today you track them with a spreadsheet, or with git-annex.</p>
         <p><strong>How Varsto helps.</strong> Plug in disk "data-01" and tell the app to use it. It fills the disk according to your retention policy, tells you when it can be ejected, and records in the ledger what is on it, where it is kept and when it was last verified. When you need a large file on the laptop and the cloud download would take hours, the app proposes: "Attach disk data-01 (shelf: home); about 12 minutes instead of 9 hours from the cloud". A folder can be kept only on disks, replicated as many times as you choose, with no cloud copy.</p>
-        <p class="note">Today: a disk is a local-directory storage with a place label; the ledger records claims and verifications per storage, and policies warn when a disk has not been verified in time. Disk groups, "disks only" folders and the "attach this disk" prompt are designed.</p>
+        <p class="note">Today: a disk pool is a storage; <code>varsto disk add</code> registers a disk, fills it within its reserve and remembers what is on it, <code>disk check</code> verifies and tops it up when it comes back, <code>disk eject</code> says when it is safe to remove, and a file whose copy is on a disk that is away says "attach disk data-01 (shelf)" in the app and on the command line. Policies count an offline disk at its last verification. Not yet: time estimates in the prompt, placement across disk groups, "disks only" folders and git-annex import.</p>
       </div>
     </section>
 
