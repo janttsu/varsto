@@ -20,7 +20,7 @@
 //! registration connection and copying the answer back; it sees ciphertext.
 
 use super::stun;
-use super::{auth_header, handle, verify_auth, PeerInfo, Snapshot};
+use super::{auth_header, handle, log, verify_auth, PeerInfo, Snapshot};
 use crate::crypto::SecretKey;
 use crate::ids::DeviceId;
 use anyhow::{anyhow, bail, Context, Result};
@@ -55,6 +55,10 @@ const KEEP_ALIVE: Duration = Duration::from_secs(15);
 const IDLE_TIMEOUT: Duration = Duration::from_secs(60);
 /// Period of the keeper that punches toward every known public address.
 pub const KEEPER_INTERVAL: Duration = Duration::from_secs(20);
+/// How long an idle UDP mapping is assumed to survive in a NAT (Linux
+/// conntrack drops an unanswered one after 30 s). Punching more often than
+/// this keeps our port; a pause longer than this may have lost it.
+const MAPPING_LAPSE: Duration = Duration::from_secs(30);
 
 // ----- identity ------------------------------------------------------------
 
@@ -462,6 +466,14 @@ pub struct Node {
     conns: tokio::sync::Mutex<HashMap<SocketAddr, quinn::Connection>>,
     /// Relays we are registered with (device -> connection).
     relays: Mutex<BTreeMap<DeviceId, quinn::Connection>>,
+    /// The addresses the keeper punched last round, to log changes only.
+    punched: Mutex<Vec<SocketAddr>>,
+    /// When the keeper last ran, to notice a pause (sleep, suspended process).
+    last_round: Mutex<Option<Instant>>,
+    /// Set when our NAT mapping may have changed: a punched connect failed,
+    /// or the keeper paused long enough for the mapping to lapse. The
+    /// service then asks STUN again instead of waiting for the next period.
+    restun: std::sync::atomic::AtomicBool,
     pub local_addr: SocketAddr,
 }
 
@@ -554,6 +566,9 @@ impl Node {
             serving,
             conns: tokio::sync::Mutex::new(HashMap::new()),
             relays: Mutex::new(BTreeMap::new()),
+            punched: Mutex::new(Vec::new()),
+            last_round: Mutex::new(None),
+            restun: std::sync::atomic::AtomicBool::new(false),
             local_addr,
         }))
     }
@@ -593,11 +608,51 @@ impl Node {
     /// Punch toward every known peer's public UDP addresses: keeps our own
     /// NAT mapping alive and opens a path for peers that try to reach us.
     pub fn keeper_round(&self) {
+        // A long pause (laptop asleep, process stopped) lets our mapping
+        // lapse; peers punching the old port in the meantime make a Linux
+        // NAT hand us a new one. Ask STUN again rather than trust the record.
+        let mut last = self.last_round.lock().unwrap();
+        if let Some(t) = *last {
+            let gap = t.elapsed();
+            if gap > KEEPER_INTERVAL + MAPPING_LAPSE {
+                log(&format!(
+                    "keeper paused for {} s; the NAT mapping may have changed",
+                    gap.as_secs()
+                ));
+                self.request_restun();
+            }
+        }
+        *last = Some(Instant::now());
+        drop(last);
         let known = self.serving.known.lock().unwrap().clone();
+        let mut addrs: Vec<SocketAddr> = Vec::new();
         for p in known {
             for a in p.udp.iter().filter(|a| !super::is_lan(a.ip())) {
-                self.punch(*a);
+                if !addrs.contains(a) {
+                    addrs.push(*a);
+                }
             }
+        }
+        let mut punched = self.punched.lock().unwrap();
+        if *punched != addrs {
+            log(&format!(
+                "punching toward {} every {} s",
+                if addrs.is_empty() {
+                    "nobody".to_string()
+                } else {
+                    addrs
+                        .iter()
+                        .map(|a| a.to_string())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                },
+                KEEPER_INTERVAL.as_secs()
+            ));
+            *punched = addrs.clone();
+        }
+        drop(punched);
+        for a in addrs {
+            self.punch(a);
         }
     }
 
@@ -612,6 +667,17 @@ impl Node {
                 node.keeper_round();
             }
         });
+    }
+
+    fn request_restun(&self) {
+        self.restun
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Should STUN be asked again now? Clears the request.
+    pub fn take_restun(&self) -> bool {
+        self.restun
+            .swap(false, std::sync::atomic::Ordering::Relaxed)
     }
 
     /// STUN through the shared socket: what the internet sees of our port.
@@ -687,32 +753,61 @@ impl Node {
         if expected.is_empty() {
             bail!("peer has no certificate hash yet");
         }
+        // A LAN address has no NAT between us: no punching, a short wait.
+        let punch = punch && !super::is_lan(addr.ip());
         let cfg = self.client_config(expected)?;
         let connecting = self
             .endpoint
             .connect_with(cfg, addr, "varsto")
             .with_context(|| format!("connect {addr}"))?;
         let mut connecting = Box::pin(connecting);
-        let deadline = Instant::now()
+        let started = Instant::now();
+        let deadline = started
             + if punch {
                 PUNCH_TIMEOUT
             } else {
                 CONNECT_TIMEOUT
             };
         let mut tick = tokio::time::interval(PUNCH_INTERVAL);
-        let conn = loop {
+        let mut punches = 0u32;
+        let outcome = loop {
             tokio::select! {
-                r = &mut connecting => break r.with_context(|| format!("quic {addr}"))?,
+                r = &mut connecting => break r.with_context(|| format!("quic {addr}")),
                 _ = tick.tick() => {
                     if punch {
                         self.punch(addr);
+                        punches += 1;
                     }
                     if Instant::now() >= deadline {
-                        bail!("quic {addr}: no answer");
+                        break Err(anyhow!(
+                            "quic {addr}: no answer in {} ms{}",
+                            started.elapsed().as_millis(),
+                            if punch { format!(" ({punches} punches sent)") } else { String::new() }
+                        ));
                     }
                 }
             }
         };
+        let conn = match outcome {
+            Ok(c) => c,
+            Err(e) => {
+                log(&format!("quic connect {addr} failed: {e:#}"));
+                if punch {
+                    // Our own mapping may be stale; have the record corrected.
+                    self.request_restun();
+                }
+                return Err(e);
+            }
+        };
+        log(&format!(
+            "quic connect {addr} ok in {} ms{}",
+            started.elapsed().as_millis(),
+            if punch {
+                format!(" ({punches} punches sent)")
+            } else {
+                String::new()
+            }
+        ));
         self.conns.lock().await.insert(addr, conn.clone());
         Ok(conn)
     }
@@ -758,6 +853,10 @@ impl Node {
         self.rt.block_on(async {
             let mut last = anyhow!("relay has no address");
             for addr in addrs {
+                log(&format!(
+                    "registering with relay {} at {addr}",
+                    relay.short()
+                ));
                 let conn = match self.connect(*addr, cert_sha256, true).await {
                     Ok(c) => c,
                     Err(e) => {
@@ -890,6 +989,11 @@ fn register(
             b"certificate does not match the device record".to_vec(),
         );
     }
+    log(&format!(
+        "relay: {} registered from {}",
+        dev.short(),
+        conn.remote_address()
+    ));
     sv.registrants.lock().unwrap().insert(dev, conn);
     (200, Vec::new())
 }
@@ -910,6 +1014,10 @@ async fn relay_request(sv: &Serving, rest: &str, auth: &str) -> (u16, Vec<u8>) {
     }
     let target = sv.registrants.lock().unwrap().get(&dev).cloned();
     let Some(target) = target else {
+        log(&format!(
+            "relay: request for {} but it is not registered here",
+            dev.short()
+        ));
         return (502, b"device is not registered with this relay".to_vec());
     };
     match request_on(&target, "GET", &inner, auth).await {
@@ -919,6 +1027,10 @@ async fn relay_request(sv: &Serving, rest: &str, auth: &str) -> (u16, Vec<u8>) {
             if target.close_reason().is_some() {
                 sv.registrants.lock().unwrap().remove(&dev);
             }
+            log(&format!(
+                "relay: forwarding to {} failed: {e:#}",
+                dev.short()
+            ));
             (502, format!("relay: {e}").into_bytes())
         }
     }

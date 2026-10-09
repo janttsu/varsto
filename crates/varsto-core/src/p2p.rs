@@ -52,6 +52,13 @@ fn now() -> i64 {
     crate::util::now_utc()
 }
 
+/// One line in the service log about a path decision, a punch or a relay:
+/// the events a user needs when a transfer does not cross a NAT. Per-request
+/// chatter stays behind `VARSTO_P2P_DEBUG`.
+pub(crate) fn log(what: &str) {
+    eprintln!("p2p: {what}");
+}
+
 /// `X-Varsto-Peer: <device>:<ts>:<mac>` where mac = keyed_hash(peer_key, device || ts || path).
 pub fn auth_header(key: &SecretKey, device: &DeviceId, path: &str) -> String {
     let ts = now();
@@ -436,6 +443,17 @@ impl Route {
             Route::Tcp(a) | Route::Quic(a) | Route::Relay(_, _, a) => *a,
         }
     }
+    /// For the log: transport and address, and the relay's name.
+    fn describe(&self) -> String {
+        match self {
+            Route::Tcp(a) => format!("tcp {a}"),
+            Route::Quic(a) => format!("quic {a}"),
+            Route::Relay(dev, name, a) => format!(
+                "relay {} at {a}",
+                if name.is_empty() { dev.short() } else { name }
+            ),
+        }
+    }
 }
 
 /// Minimal HTTP GET over a fresh TCP connection (no dependency, short timeouts).
@@ -616,7 +634,7 @@ impl Peers {
         }
     }
 
-    fn try_tcp(&self, addr: SocketAddr, path: &str, auth: &str) -> Option<(u16, Vec<u8>)> {
+    fn try_tcp(&self, addr: SocketAddr, path: &str, auth: &str) -> Result<(u16, Vec<u8>)> {
         let result = http_get(addr, path, auth, self.timeout);
         self.debug(&format!(
             "tcp {addr} {path} -> {}",
@@ -630,7 +648,7 @@ impl Peers {
             .lock()
             .unwrap()
             .insert(addr, (ok, Instant::now()));
-        result.ok()
+        result
     }
 
     fn try_quic(
@@ -639,8 +657,8 @@ impl Peers {
         cert: &str,
         path: &str,
         auth: &str,
-    ) -> Option<(u16, Vec<u8>)> {
-        let node = self.quic.as_ref()?;
+    ) -> Result<(u16, Vec<u8>)> {
+        let node = self.quic.as_ref().ok_or_else(|| anyhow!("no QUIC node"))?;
         let result = node.request(addr, cert, path, auth, true);
         self.debug(&format!(
             "quic {addr} {path} -> {}",
@@ -649,18 +667,18 @@ impl Peers {
                 Err(e) => format!("error: {e:#}"),
             }
         ));
-        result.ok()
+        result
     }
 
-    /// Ask a specific peer once, over a given route; `None` when the route is
-    /// not usable right now.
-    fn over(&self, route: &Route, path: &str, auth: &str, p: &PeerInfo) -> Option<(u16, Vec<u8>)> {
+    /// Ask a specific peer once, over a given route; the error says why the
+    /// route gave nothing (including "resting" for one that just failed).
+    fn over(&self, route: &Route, path: &str, auth: &str, p: &PeerInfo) -> Result<(u16, Vec<u8>)> {
         match route {
             Route::Tcp(a) => {
                 // A TCP address that just failed rests for a minute.
                 if let Some((false, when)) = self.state.lock().unwrap().get(a) {
                     if when.elapsed() < ROUTE_TTL {
-                        return None;
+                        bail!("resting after a failure");
                     }
                 }
                 self.try_tcp(*a, path, auth)
@@ -671,7 +689,8 @@ impl Peers {
                     .peers
                     .iter()
                     .find(|r| &r.device == relay)
-                    .map(|r| r.cert_sha256.clone())?;
+                    .map(|r| r.cert_sha256.clone())
+                    .ok_or_else(|| anyhow!("relay record unknown"))?;
                 let via = format!("/p2p/via/{}{}", p.device, path);
                 self.try_quic(*a, &cert, &via, auth)
             }
@@ -699,24 +718,49 @@ impl Peers {
     }
 
     /// One request to peer `p`: the route that worked last time first, then
-    /// every candidate in order. Records the outcome.
+    /// every candidate in order. Records the outcome and logs every change
+    /// of path, so the service log tells how a NAT was (not) crossed.
     fn fetch(&self, p: &PeerInfo, path: &str, auth: &str) -> Option<(u16, Vec<u8>, Route)> {
+        let who = if p.name.is_empty() {
+            p.device.short().to_string()
+        } else {
+            p.name.clone()
+        };
+        // The route that worked last time goes first, however long ago:
+        // falling back to the candidate list costs a timeout per dead
+        // address before the working one is reached again.
         let last = match self.routes.lock().unwrap().get(&p.device) {
-            Some((Some(r), _, when)) if when.elapsed() < ROUTE_TTL => Some(r.clone()),
+            Some((Some(r), _, _)) => Some(r.clone()),
             _ => None,
         };
         if let Some(r) = last {
-            if let Some((s, b)) = self.over(&r, path, auth, p) {
-                self.remember(&p.device, Some(r.clone()), s);
-                return Some((s, b, r));
+            match self.over(&r, path, auth, p) {
+                Ok((s, b)) => {
+                    self.remember(&p.device, Some(r.clone()), s);
+                    return Some((s, b, r));
+                }
+                Err(e) => log(&format!("{who}: {} lost: {e:#}", r.describe())),
             }
         }
+        let mut tried = Vec::new();
         for r in self.candidate_routes(p) {
-            if let Some((s, b)) = self.over(&r, path, auth, p) {
-                self.remember(&p.device, Some(r.clone()), s);
-                return Some((s, b, r));
+            match self.over(&r, path, auth, p) {
+                Ok((s, b)) => {
+                    log(&format!("{who}: {} answered {s}", r.describe()));
+                    self.remember(&p.device, Some(r.clone()), s);
+                    return Some((s, b, r));
+                }
+                Err(e) => tried.push(format!("{}: {e:#}", r.describe())),
             }
         }
+        log(&format!(
+            "{who}: unreachable ({})",
+            if tried.is_empty() {
+                "no route to try".to_string()
+            } else {
+                tried.join("; ")
+            }
+        ));
         self.remember(&p.device, None, 0);
         None
     }
