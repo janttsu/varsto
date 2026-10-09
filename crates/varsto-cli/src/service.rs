@@ -929,6 +929,9 @@ pub fn run(opts: Options) -> Result<()> {
                     let st = &mut *st;
                     if let Some(e) = st.engine.as_mut() {
                         st.service.auto_verify_if_due(e);
+                        if let Err(err) = e.publish_device_details(st.service.last_sync_utc) {
+                            eprintln!("service: device details not published: {err:#}");
+                        }
                     }
                     let checked = st.engine.as_ref().map(|e| e.policy_check());
                     match checked {

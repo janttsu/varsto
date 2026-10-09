@@ -207,6 +207,7 @@
     if (s.member) { ul.innerHTML = ""; return; }
     api("GET", "/api/devices").then(function (r) {
       ul.innerHTML = "";
+      renderSettingsDevices(r);
       r.devices.forEach(function (d) {
         var li = el("li"); var ic = el("span", "li-icon"); ic.appendChild(icon("device")); li.appendChild(ic);
         var body = el("div", "li-body"); var title = el("div", "li-title", d.name);
@@ -215,7 +216,7 @@
         body.appendChild(title);
         body.appendChild(el("div", "li-sub", d.revoked
           ? "Removed by " + d.revoked_by + " on " + fmtDate(d.revoked_utc) + (d.wipe_ordered ? ", wipe ordered" : "") + " · " + d.device_id.slice(0, 8)
-          : "Added " + fmtDate(d.enrolled_utc) + " · " + d.device_id.slice(0, 8)));
+          : [deviceSystem(d), "added " + fmtDate(d.enrolled_utc), d.device_id.slice(0, 8)].filter(Boolean).join(" · ")));
         li.appendChild(body);
         if (!d.this_device && !d.revoked) {
           var a = el("div", "li-actions"); var b = el("button", "secondary danger", "Remove device…"); b.type = "button";
@@ -224,6 +225,38 @@
         ul.appendChild(li);
       });
     }).catch(function (e) { log("error: " + e.message); });
+  }
+  function ago(t) {
+    if (!t) { return ""; }
+    var s = Math.max(0, Math.round(Date.now() / 1000 - t));
+    return s < 90 ? "just now" : s < 5400 ? Math.round(s / 60) + " min ago" : s < 129600 ? Math.round(s / 3600) + " h ago" : Math.round(s / 86400) + " days ago";
+  }
+  // "Android 15 · Samsung SM-S926B · Varsto 0.0.1-alpha.8", or "" before the device published any.
+  function deviceSystem(d) {
+    var x = d.details; if (!x) { return ""; }
+    var sys = !x.os_version ? x.os : x.os_version.indexOf(x.os) >= 0 ? x.os_version : x.os + " " + x.os_version;
+    return [sys, x.model, "Varsto " + x.app_version].filter(Boolean).join(" · ");
+  }
+  // Settings: every device in one compact list, each removable from here too.
+  function renderSettingsDevices(r) {
+    var ul = $("settingsdevices"); ul.innerHTML = "";
+    var mine = (r.devices.filter(function (d) { return d.this_device; })[0] || {}).details;
+    r.devices.forEach(function (d) {
+      var li = el("li"); var body = el("div", "li-body"); var title = el("div", "li-title", d.name);
+      if (d.this_device) { title.appendChild(pill("grey", "This device")); }
+      if (d.revoked) { title.appendChild(pill("risk", "Removed")); }
+      if (!d.revoked && d.details && mine && d.details.app_version !== mine.app_version) { title.appendChild(pill("grey", "other version")); }
+      body.appendChild(title);
+      var seen = d.details ? (d.details.last_sync_utc ? "synced " + ago(d.details.last_sync_utc) : "seen " + ago(d.details.updated_utc)) : "";
+      body.appendChild(el("div", "li-sub", d.revoked ? "Removed " + fmtDate(d.revoked_utc) : [deviceSystem(d) || "no details yet (they appear after its next sync with this version)", seen].filter(Boolean).join(" · ")));
+      if (d.details) { body.title = d.details.arch + " · " + d.device_id; }
+      li.appendChild(body);
+      if (!d.this_device && !d.revoked) {
+        var a = el("div", "li-actions"); var b = el("button", "secondary danger", "Remove…"); b.type = "button";
+        b.onclick = function () { removeDevice(d); }; a.appendChild(b); li.appendChild(a);
+      }
+      ul.appendChild(li);
+    });
   }
   function removeDevice(d) {
     dialog({
@@ -256,7 +289,7 @@
       var cur = null; (p.policies || []).forEach(function (x) { if (x.folder === f.name) { cur = x.policy; } });
       var places = (cur && cur.min_per_place) || {}; var names = policyPlaces(p);
       var fields = [{ name: "min_copies", label: "Copies on any storage", type: "number", value: cur ? cur.min_copies || 0 : 2 }];
-      names.forEach(function (pl) { fields.push({ name: "place:" + pl, label: "Copies in place '" + pl + "'", type: "number", value: cur ? places[pl] || 0 : (pl === "cloud" || pl === "home" ? 1 : 0) }); });
+      names.forEach(function (pl) { fields.push({ name: "place:" + pl, label: placeLabel(pl), type: "number", value: cur ? places[pl] || 0 : (pl === "cloud" || pl === "home" ? 1 : 0) }); });
       fields.push({ name: "days", label: "Every block verified by another device within (days)", type: "number", value: cur ? cur.verified_within_days || 0 : 30 });
       return dialog({
         title: (cur ? "Policy for " : "Set a policy for ") + f.name,
@@ -274,6 +307,8 @@
         .then(function () { log(clear ? "policy cleared for " + f.name : "policy set for " + f.name); return refreshStatus(); });
     }).catch(function (e) { alertBox(e.message); });
   }
+  // Column and field labels for places: the two defaults by what they are.
+  function placeLabel(pl) { return pl === "home" ? "Copies on own devices and disks" : pl === "cloud" ? "Copies in external storage (S3 etc.)" : "Copies in place '" + pl + "'"; }
   // Places a policy can name: those of the storages, those already in use, and the two defaults.
   function policyPlaces(p) {
     var set = { home: 1, cloud: 1 };
@@ -317,7 +352,7 @@
     if (policyEdited()) { return; }
     var places = policyPlaces(p); var reports = {}; (p.reports || []).forEach(function (r) { reports[r.folder] = r; });
     var head = document.querySelector("#policygrid thead tr"); head.innerHTML = "";
-    ["Folder", "Status", "Copies on any storage"].concat(places.map(function (pl) { return "Copies in '" + pl + "'"; })).concat(["Verified by another device within (days)"]).forEach(function (h) { head.appendChild(el("th", null, h)); });
+    ["Folder", "Status", "Copies on any storage"].concat(places.map(placeLabel)).concat(["Verified by another device within (days)"]).forEach(function (h) { head.appendChild(el("th", null, h)); });
     var body = document.querySelector("#policygrid tbody"); body.innerHTML = "";
     var member = !!(lastStatus && lastStatus.member);
     (p.policies || []).forEach(function (x) {
@@ -334,7 +369,7 @@
         c.appendChild(i); tr.appendChild(c);
       };
       num("min_copies", pol.min_copies, "copies on any storage");
-      places.forEach(function (pl) { num("place:" + pl, per[pl], "copies in " + pl); });
+      places.forEach(function (pl) { num("place:" + pl, per[pl], placeLabel(pl).toLowerCase()); });
       num("days", pol.verified_within_days, "verified within days");
       body.appendChild(tr);
     });

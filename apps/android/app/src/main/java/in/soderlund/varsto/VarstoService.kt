@@ -48,6 +48,10 @@ class VarstoService : Service() {
         pb.environment()["VARSTO_MOBILE"] = "1"
         pb.environment()["VARSTO_FOLDER_ROOT"] = root.absolutePath
         pb.environment()["VARSTO_PLAIN_ROOT"] = plainRoot().absolutePath
+        // Shown to the user's other devices in their device list.
+        pb.environment()["VARSTO_OS"] = "Android"
+        pb.environment()["VARSTO_OS_VERSION"] = android.os.Build.VERSION.RELEASE
+        pb.environment()["VARSTO_DEVICE_MODEL"] = "${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}"
         pb.redirectErrorStream(true)
         pb.redirectOutput(File(home, "service.log"))
         process = pb.start()

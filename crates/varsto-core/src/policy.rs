@@ -26,6 +26,17 @@ pub struct Policy {
     pub verified_within_days: Option<u32>,
 }
 
+/// How a place reads in sentences: the two default places by what they
+/// are (a directory or disk pool is "home", S3 and rclone are "cloud"),
+/// other labels as given.
+pub fn place_phrase(place: &str) -> String {
+    match place {
+        "home" => "on your own devices and disks".to_string(),
+        "cloud" => "in external storage (S3 and the like)".to_string(),
+        other => format!("in place '{other}'"),
+    }
+}
+
 impl Policy {
     pub fn describe(&self) -> String {
         let mut parts = Vec::new();
@@ -37,7 +48,7 @@ impl Policy {
             ));
         }
         for (place, n) in &self.min_per_place {
-            parts.push(format!("{n} {place}"));
+            parts.push(format!("{n} {}", place_phrase(place)));
         }
         if let Some(d) = self.verified_within_days {
             parts.push(format!("verified within {d} days"));
@@ -155,8 +166,9 @@ pub fn evaluate(
     }
     for (place, n) in &short_place {
         reasons.push(format!(
-            "{n} chunks have fewer than {} copies in place '{place}'",
-            policy.min_per_place[place]
+            "{n} chunks have fewer than {} copies {}",
+            policy.min_per_place[place],
+            place_phrase(place)
         ));
     }
     if unverified > 0 {

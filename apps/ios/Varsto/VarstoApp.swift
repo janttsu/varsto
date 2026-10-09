@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: PolyForm-Shield-1.0.0
 // Varsto for iOS: runs the Rust service in-process and shows the local interface.
 import SwiftUI
+import UIKit
 import WebKit
 
 @main
@@ -23,6 +24,10 @@ final class ServiceHost: ObservableObject {
         // Keep the vault out of iCloud backups: keys and ledger belong to this device only.
         var values = URLResourceValues(); values.isExcludedFromBackup = true
         var h = home; try? h.setResourceValues(values)
+        // Shown to the user's other devices in their device list.
+        setenv("VARSTO_OS", "iOS", 1)
+        setenv("VARSTO_OS_VERSION", UIDevice.current.systemVersion, 1)
+        setenv("VARSTO_DEVICE_MODEL", UIDevice.current.model, 1)
         let rc = home.path.withCString { varsto_start($0, 0) }
         if rc != 0 { error = "service failed to start (\(rc))"; return }
         DispatchQueue.global().async {

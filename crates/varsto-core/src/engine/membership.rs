@@ -579,6 +579,9 @@ pub struct DeviceInfo {
     pub revoked_utc: Option<i64>,
     pub revoked_by: Option<String>,
     pub wipe_ordered: bool,
+    /// System, model and Varsto version the device last published.
+    #[serde(default)]
+    pub details: Option<super::devinfo::DeviceDetails>,
 }
 
 /// What `revoke_device` did.
@@ -923,6 +926,7 @@ impl Engine {
             revoked_utc: None,
             revoked_by: None,
             wipe_ordered: false,
+            details: self.devices.details.get(me).cloned(),
         }];
         for (id, rec) in &self.devices.devices {
             if id == me || !(self.trusted(id) || self.is_revoked(id)) {
@@ -938,6 +942,7 @@ impl Engine {
                 revoked_utc: r.map(|r| r.issued_utc),
                 revoked_by: r.map(|r| self.device_name(&r.by)),
                 wipe_ordered: r.is_some_and(|r| r.wipe),
+                details: self.devices.details.get(id).cloned(),
             });
         }
         out

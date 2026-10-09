@@ -674,7 +674,7 @@ fn durability_policy_is_shared_and_evaluated_from_the_ledger() {
     );
     assert_eq!(
         a.status().unwrap().folders[0].policy.as_deref(),
-        Some("at least 1 copy, 1 home, verified within 30 days")
+        Some("at least 1 copy, 1 on your own devices and disks, verified within 30 days")
     );
 
     // 25 days later the verification is ageing: at risk, with advice. 40 days later: violated.

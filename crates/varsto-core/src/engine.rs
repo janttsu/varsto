@@ -39,11 +39,13 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
+mod devinfo;
 mod membership;
 mod placement;
 mod strongroom_ops;
 mod verify;
 mod view;
+pub use devinfo::DeviceDetails;
 pub use membership::{
     removal_notice, DeviceInfo, DeviceRemoved, EpochRecord, Grant, KemRecord, Removal, Revocation,
     RevokeReport, Revoked, SignedRevocation,
@@ -112,6 +114,9 @@ struct DeviceCache {
     /// Key epoch whose registry key opened each device record (absent = 0).
     #[serde(default)]
     record_epochs: BTreeMap<DeviceId, u32>,
+    /// System and version each device last published (`devinfo`).
+    #[serde(default)]
+    details: BTreeMap<DeviceId, devinfo::DeviceDetails>,
 }
 
 #[derive(Clone, Debug, Serialize, Default)]
@@ -1088,8 +1093,9 @@ impl Engine {
                             Some(s) => targets.push(s.name()),
                             None => {
                                 plan.blocked = Some(format!(
-                                    "folder {} needs {min} copies in place '{place}' and no other storage there can take them: add one first",
-                                    rec.name
+                                    "folder {} needs {min} copies {} and no other storage there can take them: add one first",
+                                    rec.name,
+                                    crate::policy::place_phrase(place)
                                 ));
                                 return Ok(plan);
                             }
@@ -1885,6 +1891,7 @@ impl Engine {
         }
         // Strongroom conversions and key lists (S-012).
         self.pull_strongroom_records()?;
+        changed_devices |= self.pull_device_details().unwrap_or(false);
         changed_folders |= self.dedupe_folder_names();
         if changed_devices {
             self.save_devices()?;
