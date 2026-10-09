@@ -219,9 +219,15 @@ enum P2pCmd {
         /// Address other devices reach this one at over the internet (host:port), repeatable.
         #[arg(long = "public")]
         public_addrs: Vec<std::net::SocketAddr>,
+        /// STUN server (host:port) asked for the public UDP address, repeatable (default: three public servers).
+        #[arg(long = "stun")]
+        stun: Vec<String>,
+        /// Ask no STUN server at all (no public address is learned; relays and LAN still work).
+        #[arg(long, conflicts_with = "stun")]
+        no_stun: bool,
     },
     Disable,
-    /// Show settings, known peers and whether they answer right now.
+    /// Show settings, NAT guess, public address and the path to every peer.
     Status,
 }
 
@@ -1153,14 +1159,28 @@ fn run(cli: &Cli) -> Result<()> {
         Cmd::P2p { cmd } => {
             let mut engine = Engine::open(&home, &passphrase()?)?;
             match cmd {
-                P2pCmd::Enable { port, public_addrs } => {
+                P2pCmd::Enable {
+                    port,
+                    public_addrs,
+                    stun,
+                    no_stun,
+                } => {
+                    let stun = if *no_stun {
+                        Vec::new()
+                    } else if stun.is_empty() {
+                        varsto_core::vault::default_stun()
+                    } else {
+                        stun.clone()
+                    };
                     engine.set_p2p_config(varsto_core::vault::P2pConfig {
                         enabled: true,
                         port: *port,
                         public_addrs: public_addrs.clone(),
+                        stun,
                     })?;
+                    let id = engine.p2p_identity()?;
                     println!(
-                        "p2p enabled on port {port}{}; restart the background service to apply",
+                        "p2p enabled on port {port}{}; certificate {}; restart the background service to apply",
                         if public_addrs.is_empty() {
                             String::new()
                         } else {
@@ -1172,7 +1192,8 @@ fn run(cli: &Cli) -> Result<()> {
                                     .collect::<Vec<_>>()
                                     .join(", ")
                             )
-                        }
+                        },
+                        &id.sha256[..16]
                     );
                 }
                 P2pCmd::Disable => {
@@ -1181,41 +1202,7 @@ fn run(cli: &Cli) -> Result<()> {
                     engine.set_p2p_config(c)?;
                     println!("p2p disabled; restart the background service to apply");
                 }
-                P2pCmd::Status => {
-                    let c = engine.p2p_config();
-                    let peers = engine.peer_records()?;
-                    let probe = varsto_core::p2p::Peers::new(
-                        engine.peer_key(),
-                        engine.device_id().clone(),
-                        peers,
-                    )
-                    .probe();
-                    if cli.json {
-                        println!(
-                            "{}",
-                            serde_json::json!({"config": c, "peers": probe.iter().map(|(p, ok)| serde_json::json!({"device": p.device.to_string(), "name": p.name, "addr": p.addr.to_string(), "reachable": ok})).collect::<Vec<_>>()})
-                        );
-                    } else {
-                        println!(
-                            "p2p: {}, port {}, public {:?}",
-                            if c.enabled { "enabled" } else { "disabled" },
-                            c.port,
-                            c.public_addrs
-                        );
-                        if probe.is_empty() {
-                            println!("no peer records yet (other devices publish one when their service runs with p2p enabled)");
-                        }
-                        for (p, ok) in probe {
-                            println!(
-                                "  {} {} at {}: {}",
-                                p.name,
-                                p.device.short(),
-                                p.addr,
-                                if ok { "reachable" } else { "no answer" }
-                            );
-                        }
-                    }
-                }
+                P2pCmd::Status => p2p_status(&engine, &home, cli.json)?,
             }
         }
         Cmd::Policy { cmd } => {
@@ -1359,4 +1346,175 @@ fn main() {
         eprintln!("error: {e:#}");
         std::process::exit(1);
     }
+}
+
+/// `p2p status`: the running service's view when there is one (its socket
+/// is the one the NAT maps), otherwise the records plus a probe over TCP and
+/// a STUN query from a temporary socket.
+fn p2p_status(engine: &Engine, home: &std::path::Path, json: bool) -> Result<()> {
+    let c = engine.p2p_config();
+    let live = service::status(home).and_then(|(sf, _)| {
+        let url = format!("http://127.0.0.1:{}/api/p2p", sf.port);
+        service::http_get(&url, &sf.token)
+            .ok()
+            .and_then(|b| serde_json::from_str::<serde_json::Value>(&b).ok())
+    });
+    if let Some(v) = live {
+        if json {
+            println!("{v}");
+            return Ok(());
+        }
+        println!(
+            "p2p: {}, port {}, public {:?}, stun {}",
+            if c.enabled { "enabled" } else { "disabled" },
+            c.port,
+            c.public_addrs,
+            if c.stun.is_empty() {
+                "off".to_string()
+            } else {
+                c.stun.join(", ")
+            }
+        );
+        println!(
+            "service: listening on {}, NAT {}, observed {}, {}{}",
+            v["listen"].as_str().unwrap_or("-"),
+            v["nat"].as_str().unwrap_or("unknown"),
+            match v["public"].as_array() {
+                Some(a) if !a.is_empty() => a
+                    .iter()
+                    .filter_map(|x| x.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                _ => "no public address".to_string(),
+            },
+            if v["reachable"].as_bool() == Some(true) {
+                "reachable (relays for the vault)"
+            } else {
+                "not reachable from the internet"
+            },
+            match v["relays"].as_array() {
+                Some(a) if !a.is_empty() => format!(
+                    ", registered with {}",
+                    a.iter()
+                        .filter_map(|x| x.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ),
+                _ => String::new(),
+            }
+        );
+        let paths = v["paths"].as_array().cloned().unwrap_or_default();
+        if paths.is_empty() {
+            println!("no peers known yet (other devices publish a record when their service runs with p2p enabled)");
+        }
+        for p in paths {
+            println!(
+                "  {} {}: {}{}",
+                p["name"].as_str().unwrap_or(""),
+                p["device"]
+                    .as_str()
+                    .map(|d| &d[..d.len().min(8)])
+                    .unwrap_or(""),
+                p["path"].as_str().unwrap_or("untried"),
+                p["addr"]
+                    .as_str()
+                    .map(|a| format!(" ({a})"))
+                    .unwrap_or_default()
+            );
+        }
+        return Ok(());
+    }
+
+    let records = engine.peer_record_list()?;
+    let probe = varsto_core::p2p::Peers::build(
+        engine.peer_key(),
+        engine.device_id().clone(),
+        &records,
+        &[],
+        None,
+    )
+    .probe();
+    // A temporary socket: the mapping differs from the service's, but the
+    // public IP and the NAT guess are the same.
+    let stun = if c.stun.is_empty() {
+        None
+    } else {
+        std::net::UdpSocket::bind("0.0.0.0:0").ok().map(|s| {
+            varsto_core::p2p::stun::probe(&s, &c.stun, std::time::Duration::from_millis(1500))
+        })
+    };
+    if json {
+        println!(
+            "{}",
+            serde_json::json!({
+                "config": c,
+                "service": serde_json::Value::Null,
+                "nat": stun.as_ref().map(|p| p.nat),
+                "public": stun.as_ref().map(|p| p.public_addrs()),
+                "records": records,
+                "peers": probe,
+            })
+        );
+        return Ok(());
+    }
+    println!(
+        "p2p: {}, port {}, public {:?}, stun {}",
+        if c.enabled { "enabled" } else { "disabled" },
+        c.port,
+        c.public_addrs,
+        if c.stun.is_empty() {
+            "off".to_string()
+        } else {
+            c.stun.join(", ")
+        }
+    );
+    println!("background service not running; probing over TCP from this command");
+    match &stun {
+        Some(p) => println!(
+            "NAT guess {} ({}, from a temporary socket)",
+            p.nat.as_str(),
+            if p.mapped.is_empty() {
+                "no STUN answer".to_string()
+            } else {
+                format!(
+                    "observed {}",
+                    p.public_addrs()
+                        .iter()
+                        .map(|a| a.to_string())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            }
+        ),
+        None => println!("STUN disabled"),
+    }
+    if probe.is_empty() {
+        println!("no peer records yet (other devices publish one when their service runs with p2p enabled)");
+    }
+    for p in probe {
+        let rec = records.iter().find(|r| r.device == p.device);
+        println!(
+            "  {} {}: {}{}{}",
+            p.name,
+            p.device.short(),
+            p.path,
+            p.addr.map(|a| format!(" ({a})")).unwrap_or_default(),
+            rec.map(|r| format!(
+                "; record: nat {}, {}{}",
+                r.nat.as_str(),
+                if r.reachable {
+                    "reachable"
+                } else {
+                    "behind NAT"
+                },
+                if r.relay_via.is_empty() {
+                    String::new()
+                } else {
+                    format!(", relays via {} device(s)", r.relay_via.len())
+                }
+            ))
+            .unwrap_or_default()
+        );
+    }
+    Ok(())
 }

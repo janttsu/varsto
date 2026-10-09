@@ -441,7 +441,27 @@
   $("join").onsubmit = function (ev) { ev.preventDefault(); busy(true); api("POST", "/api/join", formData(ev.target)).then(function () { ev.target.reset(); log("joined the vault; attach folders under Files"); nav("files"); return refreshState(); }).catch(function (e) { alert(e.message); }).then(function () { busy(false); }); };
   $("replicatoken").onclick = function () { api("GET", "/api/replica/token").then(function (r) { $("replicaout").textContent = "Replica token (give to the device that will hold your encrypted copies without being able to open them): " + r.token; $("replicaout").classList.remove("hidden"); }).catch(function (e) { alert(e.message); }); };
   $("sharerequest").onclick = function () { api("POST", "/api/share/request", {}).then(function (r) { $("sharerequestout").textContent = r.request_code; $("sharerequestout").classList.remove("hidden"); }).catch(function (e) { alert(e.message); }); };
-  function loadP2p() { if (document.body.dataset.view !== "app") { return; } api("GET", "/api/p2p").then(function (p) { var f = $("p2pform"); f.enabled.checked = !!p.config.enabled; f.port.value = p.config.port || 17893; f.public_addrs.value = (p.config.public_addrs || []).join(", "); $("p2pstatus").textContent = (p.listen ? "Listening on " + p.listen + ". " : "Not listening (enable and restart the service). ") + (p.peers || []).length + " peers known (" + p.lan_peers + " on the LAN), " + p.chunks_from_peers + " blocks received from peers since start." + ((p.peers || []).length ? " Peers: " + p.peers.map(function (x) { return (x.name || x.device.slice(0, 8)) + " " + x.addr; }).join(", ") : ""); }).catch(function () {}); }
+  function loadP2p() {
+    if (document.body.dataset.view !== "app") { return; }
+    api("GET", "/api/p2p").then(function (p) {
+      var f = $("p2pform");
+      f.enabled.checked = !!p.config.enabled; f.port.value = p.config.port || 17893;
+      f.public_addrs.value = (p.config.public_addrs || []).join(", ");
+      f.stun.value = (p.config.stun || []).join(", ");
+      var peers = p.peers || [];
+      $("p2pstatus").textContent = (p.listen ? "Listening on " + p.listen + ". " : "Not listening (enable and restart the service). ") + peers.length + " peers known (" + p.lan_peers + " on the LAN), " + p.chunks_from_peers + " blocks received from peers since start.";
+      var nat = p.listen ? ("NAT: " + (p.nat || "unknown") + ". " + ((p.public || []).length ? "Public address " + p.public.join(", ") + ". " : "No public address observed. ") + (p.reachable ? "Reachable from the internet; this device relays for the others." : "Not reachable directly" + ((p.relays || []).length ? "; registered with relay " + p.relays.join(", ") + "." : "; no relay yet.")) + (p.cert_sha256 ? " Certificate " + p.cert_sha256.slice(0, 16) + "." : "")) : "";
+      $("p2pnat").textContent = nat;
+      var paths = p.paths || [];
+      var tb = $("p2ppaths").querySelector("tbody"); tb.innerHTML = "";
+      $("p2ppaths").classList.toggle("hidden", !paths.length);
+      paths.forEach(function (x) {
+        var tr = document.createElement("tr");
+        [x.name || x.device.slice(0, 8), x.path + (x.ok || x.path === "untried" || x.path === "unreachable" ? "" : " (refused)"), x.addr || ""].forEach(function (c) { var td = document.createElement("td"); td.textContent = c; tr.appendChild(td); });
+        tb.appendChild(tr);
+      });
+    }).catch(function () {});
+  }
   $("p2pbox").ontoggle = function () { if ($("p2pbox").open) { loadP2p(); } };
   $("p2pform").onsubmit = function (ev) { ev.preventDefault(); var d = formData(ev.target); d.port = +d.port || 17893; api("POST", "/api/p2p", d).then(function (r) { log("p2p settings saved; " + r.note); loadP2p(); }).catch(function (e) { alert(e.message); }); };
   $("storagekind").onchange = function () { var k = this.value; document.querySelectorAll("#addstorage [data-kind]").forEach(function (d) { d.classList.toggle("hidden", d.getAttribute("data-kind") !== k); }); };

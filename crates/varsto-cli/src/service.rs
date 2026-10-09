@@ -58,6 +58,14 @@ pub struct ServiceState {
     pub p2p_peers: Vec<varsto_core::p2p::PeerAddr>,
     pub p2p_lan_peers: usize,
     pub p2p_chunks: u64,
+    /// NAT traversal: what STUN saw, the NAT guess, whether we are reachable,
+    /// the relays we are registered with, and the path to every peer.
+    pub p2p_nat: varsto_core::p2p::stun::Nat,
+    pub p2p_public: Vec<std::net::SocketAddr>,
+    pub p2p_reachable: bool,
+    pub p2p_relays: Vec<String>,
+    pub p2p_paths: Vec<varsto_core::p2p::PeerStatus>,
+    pub p2p_cert_sha256: String,
 }
 
 impl ServiceState {
@@ -78,6 +86,11 @@ impl ServiceState {
             "p2p_peers": self.p2p_peers,
             "p2p_lan_peers": self.p2p_lan_peers,
             "p2p_chunks": self.p2p_chunks,
+            "p2p_nat": self.p2p_nat,
+            "p2p_public": self.p2p_public,
+            "p2p_reachable": self.p2p_reachable,
+            "p2p_relays": self.p2p_relays,
+            "p2p_paths": self.p2p_paths,
         })
     }
     /// Store policy reports; raise a desktop notification when a folder's
@@ -149,26 +162,62 @@ impl ServiceState {
     }
 }
 
-/// Peer-to-peer runtime of the service: listener thread, beacon thread,
-/// a shared snapshot of what we serve, and the peer table.
+/// What STUN and the self-probe learned about our place on the internet.
+#[derive(Clone, Default)]
+struct NatInfo {
+    probe: varsto_core::p2p::stun::Probe,
+    /// A public address led back to us, or the user configured one.
+    reachable: bool,
+    done: bool,
+}
+
+/// Peer-to-peer runtime of the service: TCP listener thread, QUIC node on
+/// the same port number, beacon thread, NAT probe thread, relay thread, a
+/// shared snapshot of what we serve, and the peer table.
 struct P2p {
     snapshot: Arc<Mutex<Option<Arc<varsto_core::p2p::Snapshot>>>>,
     lan_peers: Arc<Mutex<Vec<varsto_core::p2p::PeerAddr>>>,
     listen: std::net::SocketAddr,
     stop: Arc<std::sync::atomic::AtomicBool>,
+    quic: Option<Arc<varsto_core::p2p::quic::Node>>,
+    /// Latest records of the other devices, for the relay thread.
+    records: Arc<Mutex<Vec<varsto_core::p2p::PeerRecord>>>,
+    nat: Arc<Mutex<NatInfo>>,
+    peers: Mutex<Option<Arc<varsto_core::p2p::Peers>>>,
+    last_record: Mutex<Option<varsto_core::p2p::PeerRecord>>,
     last_publish: Mutex<Option<Instant>>,
 }
 
+/// STUN again this often; also how long a relay registration rests after a failure.
+const NAT_REFRESH: Duration = Duration::from_secs(600);
+const RELAY_RETRY: Duration = Duration::from_secs(300);
+/// An unchanged record is still rewritten this often, so peers can tell a
+/// device that is alive from one that stopped a month ago.
+const RECORD_MAX_AGE: Duration = Duration::from_secs(3600);
+
 impl P2p {
     fn start(state: &Shared) -> Option<P2p> {
-        let (cfg, tag, device) = {
+        let (cfg, tag, device, identity, peer_key) = {
             let st = state.lock().unwrap();
             let e = st.engine.as_ref()?;
             let cfg = e.p2p_config();
             if !cfg.enabled {
                 return None;
             }
-            (cfg, e.wire_vault_tag(), e.device_id().clone())
+            let identity = match e.p2p_identity() {
+                Ok(id) => Some(id),
+                Err(err) => {
+                    eprintln!("service: p2p certificate unavailable, QUIC disabled: {err:#}");
+                    None
+                }
+            };
+            (
+                cfg,
+                e.wire_vault_tag(),
+                e.device_id().clone(),
+                identity,
+                e.peer_key(),
+            )
         };
         let server = match varsto_core::p2p::Server::bind(([0, 0, 0, 0], cfg.port).into()) {
             Ok(s) => s,
@@ -185,6 +234,31 @@ impl P2p {
         let _ = std::thread::Builder::new()
             .name("p2p-serve".into())
             .spawn(move || server.run(snap2, stop2));
+
+        // QUIC on the same port number over UDP; without it only TCP works.
+        let quic = identity.and_then(|id| {
+            match varsto_core::p2p::quic::Node::start(
+                ([0, 0, 0, 0], listen.port()).into(),
+                id,
+                device.clone(),
+                peer_key,
+                snapshot.clone(),
+            ) {
+                Ok(n) => {
+                    n.start_keeper();
+                    Some(n)
+                }
+                Err(e) => {
+                    eprintln!("service: p2p QUIC listener failed, TCP only: {e:#}");
+                    None
+                }
+            }
+        });
+        let cert_sha256 = quic
+            .as_ref()
+            .map(|n| n.identity().sha256.clone())
+            .unwrap_or_default();
+
         let lan_peers: Arc<Mutex<Vec<varsto_core::p2p::PeerAddr>>> =
             Arc::new(Mutex::new(Vec::new()));
         let (lan2, stop3) = (lan_peers.clone(), stop.clone());
@@ -210,51 +284,199 @@ impl P2p {
             }
             Err(e) => eprintln!("service: LAN beacon unavailable: {e:#}"),
         }
-        state.lock().unwrap().service.p2p_listen = Some(listen);
+
+        let nat: Arc<Mutex<NatInfo>> = Arc::new(Mutex::new(NatInfo::default()));
+        let records: Arc<Mutex<Vec<varsto_core::p2p::PeerRecord>>> =
+            Arc::new(Mutex::new(Vec::new()));
+        if let Some(node) = &quic {
+            Self::spawn_nat_thread(node.clone(), cfg.clone(), nat.clone(), stop.clone());
+            Self::spawn_relay_thread(node.clone(), records.clone(), nat.clone(), stop.clone());
+        }
+        {
+            let mut st = state.lock().unwrap();
+            st.service.p2p_listen = Some(listen);
+            st.service.p2p_cert_sha256 = cert_sha256;
+        }
         println!(
-            "Varsto p2p: listening on {listen} (encrypted blocks only; peers need the vault key)"
+            "Varsto p2p: listening on {listen} (TCP{}; encrypted blocks only; peers need the vault key)",
+            if quic.is_some() { " and QUIC" } else { "" }
         );
         Some(P2p {
             snapshot,
             lan_peers,
             listen,
             stop,
+            quic,
+            records,
+            nat,
+            peers: Mutex::new(None),
+            last_record: Mutex::new(None),
             last_publish: Mutex::new(None),
         })
+    }
+
+    /// Sleep in half-second steps so a stop request is honoured promptly.
+    fn pause(stop: &std::sync::atomic::AtomicBool, dur: Duration) {
+        let until = Instant::now() + dur;
+        while Instant::now() < until && !stop.load(std::sync::atomic::Ordering::Relaxed) {
+            std::thread::sleep(Duration::from_millis(500));
+        }
+    }
+
+    /// STUN at start and every ten minutes, then ask our own public address
+    /// whether it leads back to us.
+    fn spawn_nat_thread(
+        node: Arc<varsto_core::p2p::quic::Node>,
+        cfg: varsto_core::vault::P2pConfig,
+        nat: Arc<Mutex<NatInfo>>,
+        stop: Arc<std::sync::atomic::AtomicBool>,
+    ) {
+        let _ = std::thread::Builder::new()
+            .name("p2p-nat".into())
+            .spawn(move || {
+                while !stop.load(std::sync::atomic::Ordering::Relaxed) {
+                    let probe = node.stun(&cfg.stun, Duration::from_millis(1500));
+                    let reachable = !cfg.public_addrs.is_empty()
+                        || probe.public_addrs().iter().any(|a| node.probe_self(*a));
+                    if std::env::var_os("VARSTO_P2P_DEBUG").is_some() {
+                        eprintln!(
+                            "p2p: stun {:?} nat {} reachable {reachable}",
+                            probe.mapped,
+                            probe.nat.as_str()
+                        );
+                    }
+                    *nat.lock().unwrap() = NatInfo {
+                        probe,
+                        reachable,
+                        done: true,
+                    };
+                    Self::pause(&stop, NAT_REFRESH);
+                }
+            });
+    }
+
+    /// Keep a registration with every reachable device of the vault while we
+    /// are not reachable ourselves; retry a lost one after five minutes.
+    fn spawn_relay_thread(
+        node: Arc<varsto_core::p2p::quic::Node>,
+        records: Arc<Mutex<Vec<varsto_core::p2p::PeerRecord>>>,
+        nat: Arc<Mutex<NatInfo>>,
+        stop: Arc<std::sync::atomic::AtomicBool>,
+    ) {
+        let _ = std::thread::Builder::new()
+            .name("p2p-relay".into())
+            .spawn(move || {
+                let mut tried: std::collections::BTreeMap<varsto_core::ids::DeviceId, Instant> =
+                    Default::default();
+                while !stop.load(std::sync::atomic::Ordering::Relaxed) {
+                    let info = nat.lock().unwrap().clone();
+                    let relays: Vec<varsto_core::p2p::PeerRecord> = records
+                        .lock()
+                        .unwrap()
+                        .iter()
+                        .filter(|r| r.reachable && !r.cert_sha256.is_empty())
+                        .cloned()
+                        .collect();
+                    if info.done && !info.reachable {
+                        let live = node.registered_relays();
+                        for r in relays {
+                            if live.contains(&r.device)
+                                || tried
+                                    .get(&r.device)
+                                    .is_some_and(|t| t.elapsed() < RELAY_RETRY)
+                            {
+                                continue;
+                            }
+                            tried.insert(r.device.clone(), Instant::now());
+                            match node.register_with(&r.device, &r.udp_addrs(), &r.cert_sha256) {
+                                Ok(()) => println!("Varsto p2p: registered with relay {}", r.name),
+                                Err(e) => eprintln!(
+                                    "service: relay registration with {} failed: {e:#}",
+                                    r.name
+                                ),
+                            }
+                        }
+                    }
+                    Self::pause(&stop, Duration::from_secs(5));
+                }
+            });
     }
 
     /// Merge LAN peers with rendezvous records and hand them to the engine.
     fn refresh_before_sync(&self, st: &mut State) {
         let Some(e) = st.engine.as_mut() else { return };
-        let mut peers = self.lan_peers.lock().unwrap().clone();
-        let lan = peers.len();
-        if let Ok(records) = e.peer_records() {
-            for r in records {
-                if !peers.iter().any(|p| p.addr == r.addr) {
-                    peers.push(r);
+        let lan = self.lan_peers.lock().unwrap().clone();
+        let records = e.peer_record_list().unwrap_or_default();
+        let mut flat = lan.clone();
+        for r in &records {
+            for addr in r.addrs() {
+                if !flat.iter().any(|p| p.addr == addr) {
+                    flat.push(varsto_core::p2p::PeerAddr {
+                        device: r.device.clone(),
+                        addr,
+                        name: r.name.clone(),
+                    });
                 }
             }
         }
-        st.service.p2p_lan_peers = lan;
-        st.service.p2p_peers = peers.clone();
-        let p = varsto_core::p2p::Peers::new(e.peer_key(), e.device_id().clone(), peers);
-        e.set_peers(Some(Arc::new(p)));
+        st.service.p2p_lan_peers = lan.len();
+        st.service.p2p_peers = flat;
+        *self.records.lock().unwrap() = records.clone();
+        let p = Arc::new(varsto_core::p2p::Peers::build(
+            e.peer_key(),
+            e.device_id().clone(),
+            &records,
+            &lan,
+            self.quic.clone(),
+        ));
+        *self.peers.lock().unwrap() = Some(p.clone());
+        e.set_peers(Some(p));
     }
 
-    /// Refresh what we serve and re-publish our rendezvous record now and then.
+    /// Refresh what we serve, show the paths in use, and re-publish our
+    /// rendezvous record when it changed (or once an hour regardless).
     fn refresh_after_sync(&self, st: &mut State) {
         let Some(e) = st.engine.as_ref() else { return };
         match e.peer_snapshot() {
             Ok(s) => *self.snapshot.lock().unwrap() = Some(Arc::new(s)),
             Err(err) => eprintln!("service: p2p snapshot failed: {err:#}"),
         }
+        let info = self.nat.lock().unwrap().clone();
+        let mut rec = e.peer_record_template(self.listen.port());
+        rec.udp_public = info.probe.public_addrs();
+        rec.nat = info.probe.nat;
+        rec.reachable |= info.reachable;
+        if let Some(node) = &self.quic {
+            rec.relay_via = node.registered_relays();
+        }
+        let records = self.records.lock().unwrap();
+        st.service.p2p_relays = rec
+            .relay_via
+            .iter()
+            .map(|d| {
+                records
+                    .iter()
+                    .find(|r| &r.device == d)
+                    .map(|r| r.name.clone())
+                    .unwrap_or_else(|| d.short().to_string())
+            })
+            .collect();
+        drop(records);
+        st.service.p2p_nat = rec.nat;
+        st.service.p2p_public = rec.udp_public.clone();
+        st.service.p2p_reachable = rec.reachable;
+        if let Some(p) = self.peers.lock().unwrap().as_ref() {
+            st.service.p2p_paths = p.status();
+        }
         let mut last = self.last_publish.lock().unwrap();
-        if last.is_none_or(|t| t.elapsed() > Duration::from_secs(600)) {
-            let cfg = e.p2p_config();
-            if let Err(err) = e.publish_peer_record(self.listen.port(), cfg.public_addrs) {
+        let mut last_rec = self.last_record.lock().unwrap();
+        let changed = last_rec.as_ref().is_none_or(|r| !r.same_as(&rec));
+        if changed || last.is_none_or(|t| t.elapsed() > RECORD_MAX_AGE) {
+            if let Err(err) = e.publish_peer_record(&rec) {
                 eprintln!("service: p2p record publish failed: {err:#}");
             }
             *last = Some(Instant::now());
+            *last_rec = Some(rec);
         }
     }
 }

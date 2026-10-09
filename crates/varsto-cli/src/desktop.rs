@@ -549,7 +549,19 @@ fn api_unlocked(
             engine.lock_strongroom(&s(input, "folder")?)?;
             Ok(json!({"ok": true}))
         }
-        (Method::Get, "/api/p2p") => Ok(json!({"config": engine.p2p_config(), "listen": service.p2p_listen, "peers": service.p2p_peers, "lan_peers": service.p2p_lan_peers, "chunks_from_peers": service.p2p_chunks})),
+        (Method::Get, "/api/p2p") => Ok(json!({
+            "config": engine.p2p_config(),
+            "listen": service.p2p_listen,
+            "peers": service.p2p_peers,
+            "lan_peers": service.p2p_lan_peers,
+            "chunks_from_peers": service.p2p_chunks,
+            "nat": service.p2p_nat,
+            "public": service.p2p_public,
+            "reachable": service.p2p_reachable,
+            "relays": service.p2p_relays,
+            "paths": service.p2p_paths,
+            "cert_sha256": service.p2p_cert_sha256,
+        })),
         (Method::Post, "/api/p2p") => {
             let mut c = engine.p2p_config();
             if let Some(en) = input.get("enabled").and_then(|v| v.as_bool()) {
@@ -561,7 +573,15 @@ fn api_unlocked(
             if let Some(pubs) = input.get("public_addrs").and_then(|v| v.as_str()) {
                 c.public_addrs = pubs.split(',').filter_map(|a| a.trim().parse().ok()).collect();
             }
+            if let Some(stun) = input.get("stun").and_then(|v| v.as_str()) {
+                // An empty field disables STUN on purpose.
+                c.stun = stun.split(',').map(|a| a.trim().to_string()).filter(|a| !a.is_empty()).collect();
+            }
+            let enabled = c.enabled;
             engine.set_p2p_config(c)?;
+            if enabled {
+                engine.p2p_identity()?; // the certificate exists before the service restarts
+            }
             Ok(json!({"ok": true, "note": "restart the background service to apply"}))
         }
         (Method::Get, "/api/policy") => Ok(json!({

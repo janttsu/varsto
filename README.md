@@ -24,7 +24,7 @@ None of this is finished. See [docs/architecture](docs/architecture/README.md) f
 
 ## Status
 
-Alpha (0.0.1-alpha.5): the core works on Linux, macOS and Windows (macOS and Windows builds are cross-compiled and not yet tested there) as a background service with a tray or menu-bar app, a local desktop interface, a command line, and an Android shell (sideloadable APK). Implemented: encrypted chunked sync through any directory, S3-compatible bucket or rclone remote, signed per-device ledger and convergence between devices that are never online together, conflict copies and trash, selective sync with placeholders, transferrer disks, untrusted replica devices, folder sharing with another user by key (sealed to a post-quantum request code), encrypted thumbnails, self-update, hybrid Ed25519 + ML-DSA-65 signatures, an MCP server with per-folder grants, durability policies with alerts, peer-to-peer transfer between your devices on the LAN and over the internet, zstd compression before encryption, Strongroom folders that open only with a FIDO2 security key (libfido2 tools), a printable recovery kit (24 words, 2-of-3 shares), and Varsto's own last-accessed record with cost advice from open price data. It chunks and encrypts files, stores them in a local-directory storage (a disk, a removable disk or a network mount), keeps a signed per-device ledger in that storage, and syncs a folder between devices that are never online at the same time, with conflict copies and a trash. See [docs/spec/alpha-0-format.md](docs/spec/alpha-0-format.md) for what it does and does not do. There is no iOS build, no NAT traversal and no audit yet.
+Alpha (0.0.1-alpha.5): the core works on Linux, macOS and Windows (macOS and Windows builds are cross-compiled and not yet tested there) as a background service with a tray or menu-bar app, a local desktop interface, a command line, and an Android shell (sideloadable APK). Implemented: encrypted chunked sync through any directory, S3-compatible bucket or rclone remote, signed per-device ledger and convergence between devices that are never online together, conflict copies and trash, selective sync with placeholders, transferrer disks, untrusted replica devices, folder sharing with another user by key (sealed to a post-quantum request code), encrypted thumbnails, self-update, hybrid Ed25519 + ML-DSA-65 signatures, an MCP server with per-folder grants, durability policies with alerts, peer-to-peer transfer between your devices on the LAN and over the internet (QUIC with hole punching, and a relay through one of your own reachable devices when punching fails; tested on localhost and on the maintainer's own networks only), zstd compression before encryption, Strongroom folders that open only with a FIDO2 security key (libfido2 tools), a printable recovery kit (24 words, 2-of-3 shares), and Varsto's own last-accessed record with cost advice from open price data. It chunks and encrypts files, stores them in a local-directory storage (a disk, a removable disk or a network mount), keeps a signed per-device ledger in that storage, and syncs a folder between devices that are never online at the same time, with conflict copies and a trash. See [docs/spec/alpha-0-format.md](docs/spec/alpha-0-format.md) for what it does and does not do. There is no iOS build, no vendor relay for vaults without a reachable device, and no audit yet.
 
 ### Quick start (alpha-0)
 
@@ -55,9 +55,11 @@ varsto --home ~/.varsto-laptop recovery kit --shares
 varsto --home ~/.varsto-laptop strongroom create taxes ~/Taxes
 varsto --home ~/.varsto-laptop strongroom unlock taxes --minutes 15
 
-# peer-to-peer: devices exchange encrypted blocks directly (LAN automatically; internet with a reachable address)
-varsto --home ~/.varsto-laptop p2p enable --port 17893 --public 203.0.113.5:17893
-varsto --home ~/.varsto-laptop p2p status
+# peer-to-peer: devices exchange encrypted blocks directly (LAN automatically; internet through NAT,
+# with one of your own reachable devices as the relay when hole punching fails)
+varsto --home ~/.varsto-laptop p2p enable --port 17893
+varsto --home ~/.varsto-server p2p enable --port 17893 --public 203.0.113.5:17893   # reachable: relays for the others
+varsto --home ~/.varsto-laptop p2p status   # NAT guess, public address, path to every peer
 
 # a durability policy: two cloud copies, one at home, verified within 30 days; exit code 0/1/2/3
 varsto --home ~/.varsto-laptop policy set docs --min-copies 2 --place cloud=2 --place home=1 --verified-within-days 30
