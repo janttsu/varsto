@@ -16,6 +16,8 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 
 pub trait Storage: Send + Sync {
     fn name(&self) -> &str;
@@ -25,6 +27,16 @@ pub trait Storage: Send + Sync {
     fn exists(&self, key: &str) -> Result<bool>;
     /// List object keys under a prefix, sorted.
     fn list(&self, prefix: &str) -> Result<Vec<String>>;
+    /// Keys under `prefix` that sort after `start_after`, sorted. Lets the
+    /// ledger mailbox read only what is newer than what a device already
+    /// holds; backends that can start a listing in the middle override it.
+    fn list_after(&self, prefix: &str, start_after: &str) -> Result<Vec<String>> {
+        Ok(self
+            .list(prefix)?
+            .into_iter()
+            .filter(|k| k.as_str() > start_after)
+            .collect())
+    }
     fn delete(&self, key: &str) -> Result<()>;
 }
 
@@ -311,6 +323,10 @@ impl Storage for LocalDirStorage {
     }
 
     fn list(&self, prefix: &str) -> Result<Vec<String>> {
+        self.list_after(prefix, "")
+    }
+
+    fn list_after(&self, prefix: &str, start_after: &str) -> Result<Vec<String>> {
         let base = if prefix.is_empty() {
             self.root.clone()
         } else {
@@ -332,7 +348,10 @@ impl Storage for LocalDirStorage {
             }
             let rel = entry.path().strip_prefix(&self.root)?;
             if let Some(k) = rel.to_str() {
-                out.push(k.replace(std::path::MAIN_SEPARATOR, "/"));
+                let k = k.replace(std::path::MAIN_SEPARATOR, "/");
+                if k.as_str() > start_after {
+                    out.push(k);
+                }
             }
         }
         out.sort();
@@ -346,6 +365,129 @@ impl Storage for LocalDirStorage {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
             Err(e) => Err(e.into()),
         }
+    }
+}
+
+/// Calls made through `CountingStorage`, for tests and measurements.
+#[derive(Debug, Default)]
+pub struct StorageCalls {
+    pub lists: AtomicU64,
+    /// Keys returned by all listings together.
+    pub listed_keys: AtomicU64,
+    pub gets: AtomicU64,
+    pub puts: AtomicU64,
+    pub exists: AtomicU64,
+    pub deletes: AtomicU64,
+    /// The part of the above under `ledger/`.
+    pub ledger_lists: AtomicU64,
+    pub ledger_listed_keys: AtomicU64,
+    pub ledger_gets: AtomicU64,
+}
+
+/// A plain copy of `StorageCalls` at one moment.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct CallCounts {
+    pub lists: u64,
+    pub listed_keys: u64,
+    pub gets: u64,
+    pub puts: u64,
+    pub exists: u64,
+    pub deletes: u64,
+    pub ledger_lists: u64,
+    pub ledger_listed_keys: u64,
+    pub ledger_gets: u64,
+}
+
+impl StorageCalls {
+    pub fn snapshot(&self) -> CallCounts {
+        CallCounts {
+            lists: self.lists.load(Ordering::Relaxed),
+            listed_keys: self.listed_keys.load(Ordering::Relaxed),
+            gets: self.gets.load(Ordering::Relaxed),
+            puts: self.puts.load(Ordering::Relaxed),
+            exists: self.exists.load(Ordering::Relaxed),
+            deletes: self.deletes.load(Ordering::Relaxed),
+            ledger_lists: self.ledger_lists.load(Ordering::Relaxed),
+            ledger_listed_keys: self.ledger_listed_keys.load(Ordering::Relaxed),
+            ledger_gets: self.ledger_gets.load(Ordering::Relaxed),
+        }
+    }
+}
+
+impl std::ops::Sub for CallCounts {
+    type Output = CallCounts;
+    fn sub(self, o: CallCounts) -> CallCounts {
+        CallCounts {
+            lists: self.lists - o.lists,
+            listed_keys: self.listed_keys - o.listed_keys,
+            gets: self.gets - o.gets,
+            puts: self.puts - o.puts,
+            exists: self.exists - o.exists,
+            deletes: self.deletes - o.deletes,
+            ledger_lists: self.ledger_lists - o.ledger_lists,
+            ledger_listed_keys: self.ledger_listed_keys - o.ledger_listed_keys,
+            ledger_gets: self.ledger_gets - o.ledger_gets,
+        }
+    }
+}
+
+/// Wraps a storage and counts the calls made to it.
+pub struct CountingStorage {
+    inner: Box<dyn Storage>,
+    calls: Arc<StorageCalls>,
+}
+
+impl CountingStorage {
+    pub fn new(inner: Box<dyn Storage>, calls: Arc<StorageCalls>) -> Self {
+        CountingStorage { inner, calls }
+    }
+
+    fn listed(&self, prefix: &str, keys: &[String]) {
+        let n = keys.len() as u64;
+        self.calls.lists.fetch_add(1, Ordering::Relaxed);
+        self.calls.listed_keys.fetch_add(n, Ordering::Relaxed);
+        if prefix.starts_with("ledger/") {
+            self.calls.ledger_lists.fetch_add(1, Ordering::Relaxed);
+        }
+        let in_ledger = keys.iter().filter(|k| k.starts_with("ledger/")).count();
+        self.calls
+            .ledger_listed_keys
+            .fetch_add(in_ledger as u64, Ordering::Relaxed);
+    }
+}
+
+impl Storage for CountingStorage {
+    fn name(&self) -> &str {
+        self.inner.name()
+    }
+    fn put_if_absent(&self, key: &str, data: &[u8]) -> Result<bool> {
+        self.calls.puts.fetch_add(1, Ordering::Relaxed);
+        self.inner.put_if_absent(key, data)
+    }
+    fn get(&self, key: &str) -> Result<Option<Vec<u8>>> {
+        self.calls.gets.fetch_add(1, Ordering::Relaxed);
+        if key.starts_with("ledger/") {
+            self.calls.ledger_gets.fetch_add(1, Ordering::Relaxed);
+        }
+        self.inner.get(key)
+    }
+    fn exists(&self, key: &str) -> Result<bool> {
+        self.calls.exists.fetch_add(1, Ordering::Relaxed);
+        self.inner.exists(key)
+    }
+    fn list(&self, prefix: &str) -> Result<Vec<String>> {
+        let out = self.inner.list(prefix)?;
+        self.listed(prefix, &out);
+        Ok(out)
+    }
+    fn list_after(&self, prefix: &str, start_after: &str) -> Result<Vec<String>> {
+        let out = self.inner.list_after(prefix, start_after)?;
+        self.listed(prefix, &out);
+        Ok(out)
+    }
+    fn delete(&self, key: &str) -> Result<()> {
+        self.calls.deletes.fetch_add(1, Ordering::Relaxed);
+        self.inner.delete(key)
     }
 }
 
@@ -372,6 +514,14 @@ mod tests {
         s.put_if_absent("ledger/dev/000", b"x").unwrap();
         assert_eq!(s.list("chunks").unwrap(), vec!["chunks/ab/one".to_string()]);
         assert_eq!(s.list("").unwrap().len(), 2);
+        assert_eq!(
+            s.list_after("ledger/", "ledger/dev/000").unwrap(),
+            Vec::<String>::new()
+        );
+        assert_eq!(
+            s.list_after("", "chunks/ab/one").unwrap(),
+            vec!["ledger/dev/000".to_string()]
+        );
         s.delete("chunks/ab/one").unwrap();
         assert!(!s.exists("chunks/ab/one").unwrap());
         assert!(s.get("../x").is_err());

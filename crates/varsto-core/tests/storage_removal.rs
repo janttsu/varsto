@@ -108,4 +108,5 @@ fn storages_are_removed_only_with_enough_copies_elsewhere() {
     fs::write(files.join("c.txt"), b"gamma").unwrap();
     a.sync(None).unwrap();
     assert_eq!(on_storage(&a, "two"), 0);
+    assert_eq!(a.view().unwrap(), a.view_replayed().unwrap());
 }

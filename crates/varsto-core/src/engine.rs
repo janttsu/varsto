@@ -41,6 +41,7 @@ use std::path::{Path, PathBuf};
 
 mod block_cache;
 mod devinfo;
+mod ledger_upkeep;
 mod membership;
 mod placement;
 mod strongroom_ops;
@@ -379,6 +380,14 @@ pub struct Engine {
     /// Set once this device has seen its own revocation: it no longer syncs.
     removal: Option<Removal>,
     pub chunker: ChunkerParams,
+    /// Counts the calls made to every storage this engine opens (measurements).
+    storage_calls: Option<std::sync::Arc<crate::storage::StorageCalls>>,
+    /// The location view, kept up to date as batches arrive.
+    view_cache: std::sync::Mutex<ledger_upkeep::ViewSlot>,
+    /// Set while one action runs whose ledger events go into one batch.
+    cycle: Option<ledger_upkeep::Cycle>,
+    /// When to write checkpoints and how many batches to keep before them.
+    ledger_policy: ledger_upkeep::LedgerPolicy,
 }
 
 /// Open storages with their specs.
@@ -656,6 +665,10 @@ impl Engine {
             epochs,
             removal: None,
             chunker: ChunkerParams::DEFAULT,
+            storage_calls: None,
+            view_cache: Default::default(),
+            cycle: None,
+            ledger_policy: Default::default(),
         };
         engine.config.save(home)?;
         if !engine.vault.member {
@@ -828,11 +841,15 @@ impl Engine {
             vault,
             keys,
             keyring,
-            pending: Vec::new(),
+            pending: ledger_upkeep::load_deferred(home),
             forked_self: false,
             epochs,
             removal,
             chunker: ChunkerParams::DEFAULT,
+            storage_calls: None,
+            view_cache: Default::default(),
+            cycle: None,
+            ledger_policy: Default::default(),
         };
         // Command-line runs use the peers other devices advertised, over TCP
         // only; the service adds LAN peers and the QUIC node.
@@ -931,11 +948,23 @@ impl Engine {
     }
 
     fn open_spec(&self, spec: &StorageSpec) -> Result<Box<dyn Storage>> {
-        if let StorageSpec::Pool { .. } = spec {
-            return Ok(Box::new(self.open_pool(spec)?));
-        }
-        let store = self.secret_store()?;
-        spec.open_with(&|r| store.secrets.get(r).cloned())
+        let backend: Box<dyn Storage> = if let StorageSpec::Pool { .. } = spec {
+            Box::new(self.open_pool(spec)?)
+        } else {
+            let store = self.secret_store()?;
+            spec.open_with(&|r| store.secrets.get(r).cloned())?
+        };
+        Ok(match &self.storage_calls {
+            Some(calls) => Box::new(crate::storage::CountingStorage::new(backend, calls.clone())),
+            None => backend,
+        })
+    }
+
+    /// Count every call this engine makes to its storages from now on
+    /// (measurements and tests).
+    #[doc(hidden)]
+    pub fn count_storage_calls(&mut self, calls: std::sync::Arc<crate::storage::StorageCalls>) {
+        self.storage_calls = Some(calls);
     }
 
     /// Open a configured storage by name (tests and tools).
@@ -1959,20 +1988,32 @@ impl Engine {
         if self.removal.is_some() {
             // A removed device signs nothing more.
             self.pending.clear();
+            self.clear_deferred();
             return self.ensure_active().map(|_| None);
+        }
+        if self.forked_self {
+            bail!("this device's ledger is forked; it must be re-enrolled as a new device");
+        }
+        if self.cycle.is_some() {
+            // One batch at the end of the action (see `one_batch`).
+            self.defer_events()?;
+            return Ok(None);
         }
         let lamport = self.tick()?;
         let events = std::mem::take(&mut self.pending);
         if !self.vault.member {
             let (key_id, ledger_key) = self.ledger_key_now();
-            let signed = self.ledger.append_own_with(
+            let signed = self.ledger.append_own_seen(
                 &self.vault.device_id,
                 events,
+                self.seen_heads(),
                 lamport,
                 &ledger_key,
                 &key_id,
                 &self.keys.signer,
             )?;
+            // The events are in a local batch now.
+            self.clear_deferred();
             self.push_own_batches()?;
             return Ok(Some(signed.seq));
         }
@@ -2014,102 +2055,9 @@ impl Engine {
             )?;
             last = Some(signed.seq);
         }
+        self.clear_deferred();
         self.push_own_batches()?;
         Ok(last)
-    }
-
-    /// Push every own batch that a storage does not have yet; detect forks.
-    fn push_own_batches(&mut self) -> Result<()> {
-        let me = self.vault.device_id.clone();
-        let head = self.ledger.head(&me);
-        for (_, backend) in self.metadata_storages(true)? {
-            let prefix = format!("ledger/{}/", me);
-            let present: HashSet<String> = backend.list(&prefix)?.into_iter().collect();
-            for seq in 1..=head.seq {
-                let Some(batch) = self.ledger.get(&me, seq)? else {
-                    continue;
-                };
-                let key = SignedBatch::storage_key(&me, seq);
-                if present.contains(&key) {
-                    if seq == head.seq {
-                        if let Some(remote) = backend.get(&key)? {
-                            let remote: SignedBatch = serde_json::from_slice(&remote)?;
-                            if remote.hash != batch.hash {
-                                bail!("ledger fork: storage {} already holds a different batch {} of this device (restored from an old copy?)", backend.name(), seq);
-                            }
-                        }
-                    }
-                    continue;
-                }
-                let written = backend.put_if_absent(&key, &serde_json::to_vec(&batch)?)?;
-                if !written {
-                    bail!(
-                        "ledger fork: batch {} of this device appeared on {} concurrently",
-                        seq,
-                        backend.name()
-                    );
-                }
-            }
-        }
-        Ok(())
-    }
-
-    /// Pull everyone's batches from every hot storage.
-    fn pull_ledger(&mut self) -> Result<Vec<DeviceId>> {
-        self.pull_registry()?;
-        self.sync_membership()?;
-        let dir = self.key_directory()?;
-        let me = self.vault.device_id.clone();
-        let mut forks = BTreeSet::new();
-        for (_, backend) in self.metadata_storages(false)? {
-            for key in backend.list("ledger/")? {
-                let Some(rest) = key.strip_prefix("ledger/") else {
-                    continue;
-                };
-                let Some((dev, file)) = rest.split_once('/') else {
-                    continue;
-                };
-                let Some(seq) = file
-                    .strip_suffix(".json")
-                    .and_then(|s| s.parse::<u64>().ok())
-                else {
-                    continue;
-                };
-                let dev = DeviceId::from_hex(dev)?;
-                if !self.batch_accepted(&dev, seq) {
-                    // Signed by a revoked device after its cut-off.
-                    continue;
-                }
-                if self.ledger.get(&dev, seq)?.is_some() && !self.ledger.is_forked(&dev) {
-                    // Known batch: re-check only our own head against the mailbox.
-                    continue;
-                }
-                let Some(blob) = backend.get(&key)? else {
-                    continue;
-                };
-                let signed: SignedBatch = serde_json::from_slice(&blob)?;
-                let Some(pk) = dir.get(&dev) else { continue };
-                let Some(key) = self.key_for_id(&signed.key_id) else {
-                    continue;
-                };
-                if dev == me && seq > self.ledger.head(&me).seq {
-                    // Another copy of this device identity published ahead of us.
-                    forks.insert(me.clone());
-                    let _ = self.ledger.ingest(signed, pk, &key);
-                    self.mark_forked(&me)?;
-                    continue;
-                }
-                match self.ledger.ingest(signed, pk, &key)? {
-                    Ingest::Fork => {
-                        forks.insert(dev.clone());
-                    }
-                    Ingest::New | Ingest::Known => {}
-                }
-            }
-        }
-        let view = self.view()?;
-        self.observe_clock(view.max_lamport)?;
-        Ok(forks.into_iter().collect())
     }
 
     fn mark_forked(&mut self, _device: &DeviceId) -> Result<()> {
@@ -2117,13 +2065,6 @@ impl Engine {
         // wrote (restored from an old backup, or cloned). Refuse to sign more.
         self.forked_self = true;
         Ok(())
-    }
-
-    pub fn view(&self) -> Result<LedgerView> {
-        self.ledger.view_filtered(
-            |id| self.key_for_id(id),
-            |d, seq| self.batch_accepted(d, seq),
-        )
     }
 
     /// Token for an untrusted replica device (F-045): it can store and verify
@@ -2705,7 +2646,7 @@ impl Engine {
             ..Default::default()
         };
         self.scan(&rec, &root, &mut state)?;
-        let forks = self.pull_ledger()?;
+        let forks = self.pull_ledger_once()?;
         report.forked_devices = forks.iter().map(|d| d.to_string()).collect();
         if !self.keyring.folders.contains_key(&rec.folder_id) {
             // Converted into a Strongroom by another device just now.
@@ -3256,7 +3197,9 @@ impl Engine {
         );
         state.pinned.insert(path.to_string());
         report.files_updated += 1;
-        self.commit_batch()?;
+        // What was fetched and checked is recorded with the next batch:
+        // nobody needs it published at once.
+        self.defer_events()?;
         self.save_state(&rec.folder_id, &state)?;
         Ok(report)
     }
@@ -4043,6 +3986,19 @@ impl Engine {
 
     /// pull then push, for every attached folder (or one).
     pub fn sync(&mut self, folder: Option<&str>) -> Result<Vec<(PullReport, PushReport)>> {
+        // Every folder's pull and push record into one ledger batch, and the
+        // ledger is pulled once.
+        let (mut out, seq) = self.one_batch_seq(|e| e.sync_folders(folder))?;
+        for (_, push) in out.iter_mut() {
+            push.batch_seq = push.batch_seq.or(seq);
+        }
+        // Checkpoints, acknowledgements and pruning; anything left undone
+        // (an unreachable storage) is retried after the next sync.
+        let _ = self.ledger_upkeep();
+        Ok(out)
+    }
+
+    fn sync_folders(&mut self, folder: Option<&str>) -> Result<Vec<(PullReport, PushReport)>> {
         self.ensure_active()?;
         // A folder another device converted into a Strongroom must be
         // adopted before it is synced under its old key.

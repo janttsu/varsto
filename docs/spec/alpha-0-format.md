@@ -74,6 +74,7 @@ vault/folders/<device>/<folder>.enc      folder record: name, folder key
 vault/storage-id.json                    random identity of this storage (plaintext, first writer wins)
 vault/storage-names/<device>/<utc>.enc   a device's storage names and their identities (section 20)
 ledger/<device>/<seq 16 digits>.json     signed batch envelope (body encrypted)
+ledger/<device>/checkpoint-<seq 16 digits>.json  signed checkpoint of that device's batches up to seq (section 22)
 manifests/<folder>/<device>/<seq>.enc    full folder view of one device
 chunks/<first two hex>/<object name>     encrypted chunk
 ```
@@ -93,14 +94,16 @@ Model B of [ledger-signing-notes.md](ledger-signing-notes.md): events are groupe
 | `chunk_on_device` | this device holds the plaintext as part of a file |
 | `manifest_published` | this device published manifest `seq` of a folder |
 
-Replaying every batch yields the location view: for each (folder, chunk) the object name, size, which storages claim it (by whom) and which devices verified it there. A storage copy counts as **verified** only when a device other than the writer has verified it. `varsto status` reports chunks without any storage copy and chunks verified elsewhere.
+Replaying every batch yields the location view: for each (folder, chunk) the object name, size, which storages claim it (by whom) and which devices verified it there. Applying a batch is order-independent: sets are unions, times are maxima, and where events disagree (the object name and size of a chunk, a device's name) the event with the largest (Lamport time, device, sequence, position) wins. A device therefore keeps the view in `ledger/view.enc` (zstd-compressed JSON, XChaCha20-Poly1305 under a key derived from the device's root key, associated data vault and device) with the last sequence number applied per device, applies only new batches, and rebuilds it from the batches when the keys it can open or the revocation cut-offs change. Retirements, replica claims and forks are applied on top of the cached view at every read, exactly as after a full replay. A storage copy counts as **verified** only when a device other than the writer has verified it. `varsto status` reports chunks without any storage copy and chunks verified elsewhere.
 
 Mailbox rules:
 
-- on every pull a device lists `ledger/` on every hot storage and ingests batches it does not have, after checking the signature against the device registry and the hash chain;
-- on every push it uploads its own batches that a storage lacks;
-- two different batches with the same device and sequence number are a **fork**: the device is marked forked in the local heads;
+- on every pull a device lists, on every hot storage and for every device whose key it knows, only the batches after the newest one it holds of that device (`list_after`: S3 `start-after`, a directory listing elsewhere), and ingests them after checking the signature against the device registry and the hash chain; a batch under a key the device does not hold (a shared folder it is not a member of, a key epoch it has not adopted yet) is kept unread and read once the key arrives, instead of being downloaded again on every pull;
+- on every push it uploads its own batches that a storage lacks, listing from the newest batch it last confirmed there (`ledger/pushed.json`); when that batch is gone the storage is filled again from the first batch;
+- two different batches with the same device and sequence number are a **fork**: the device is marked forked in the local heads (so are a checkpoint that contradicts a batch and two different checkpoints at the same sequence number, section 22);
 - if the mailbox holds batches of this device's own identity that it never wrote (a copy restored from an old backup, or a clone), the device fences itself: it stops signing and `push` fails until it is re-enrolled as a new device.
+
+Batching: one user action seals at most one batch. A sync seals one batch for the pull and push of every folder together (and pulls the ledger once); applying a placement suggestion and acting on a selection of files in the interface seal one batch each; a verification run seals one. Fetching a single file does not seal a batch: its `chunk_on_device` and `chunk_verified` events wait in `ledger/pending.json` for the next batch (usually the next sync) and count in the device's own view meanwhile. Enrolment, joining a shared folder, folder creation, storage removal and Strongroom changes are sealed and pushed at once, because other devices act on them.
 
 Lamport clocks: each device keeps one logical clock, incremented on every local change and raised to any larger value seen in batches or manifests.
 
@@ -126,7 +129,7 @@ keyring.enc     folder records known to this device (encrypted)
 config.json     storages and folder mounts (no secrets)
 devices.json    device registry cache (public keys)
 clock.json      Lamport clock
-ledger/         local copy of every device's batches and the heads file
+ledger/         local copy of every device's batches, the heads file, pushed.json (own batches confirmed per storage), pending.json (events waiting for the next batch) and view.enc (the cached location view, encrypted)
 state/<folder>.json  merged file states, local index, last seen manifests
 trash/          deleted files
 ```
@@ -375,3 +378,50 @@ Nothing outside the folder roots and the device directory is touched, and the st
 Differences from the key hierarchy draft: no K5 (membership statements are signed by device keys); the rotated key is the vault key K3 rather than per-folder K9 epochs wrapped to K8 keys; chunk keys are convergent (section 3), so they are not re-wrapped and only new chunks use the new keys; storage credentials are not rotated.
 
 Tests: `crates/varsto-core/tests/revocation.rs` (three devices: A removes C, A and B keep syncing, C's later batches and manifest are ignored, nothing written afterwards opens with C's keys, a new device joins with the current key and is refused with the old one; a wipe order empties C's folder and device directory; forged wipe orders are ignored), unit tests in `engine/membership.rs` (revocation and grant signatures) and `p2p.rs` (a revoked device's token is refused).
+
+## 22. Ledger upkeep: checkpoints and pruning (0.0.1-alpha.8)
+
+Every sync, fetch, verification run or disk check used to add a batch of about 8 KB (mostly the hybrid signature) that every device kept forever, on every metadata storage and locally, and every pull listed the whole `ledger/` prefix while every read of the view replayed every batch. Section 6 now describes the incremental mailbox, the cached view and one batch per action; this section adds checkpoints, acknowledgements and pruning, which bound what is stored.
+
+Measured with 20 000 synthetic batches of three devices on one local directory (`cargo test --release -p varsto-core ledger_scale_benchmark -- --ignored --nocapture`): a pull with nothing new went from 20 004 listed keys and 668 ms to 3 empty listings and 65 ms; the view from 434 ms (replay) to 37 ms; after checkpoints and pruning the storage holds 29 objects and 5.2 MB instead of 20 003 objects and 171 MB, and a device that joins reads three checkpoints and a few batches (0.5 s) instead of ingesting every batch (35 to 57 s).
+
+**Acknowledgements.** A batch body has a new field `seen` (omitted when empty): the newest batch of every other device that the writer held when it sealed the batch. The view keeps, per device, the highest value it acknowledged for each other device (`acks`, merged by maximum). After a sync a device that holds a checkpoint of another device newer than what it last acknowledged seals a batch, empty if nothing else is pending, so others learn it.
+
+**Checkpoints.** `ledger/<device>/checkpoint-<seq 16 digits>.json`, written by the device itself:
+
+| Field | Content |
+| --- | --- |
+| `format_version`, `sig_alg`, `key_id` | as in a batch; `key_id` is `ledger` or `ledger@<epoch>`, the current epoch's ledger key |
+| `device`, `seq` | the checkpoint covers batches 1..=seq of this device |
+| `head_hash` | hash of batch `seq`; batch `seq + 1` names it as `prev` |
+| `body_hex` | XChaCha20-Poly1305 under the ledger key, associated data `device, seq, head_hash`, of zstd-compressed JSON `{device, seq, head_hash, created_utc, view}` |
+| `hash`, `sig_hex` | BLAKE3 of the ciphertext; signature over `device \|\| seq \|\| head_hash \|\| hash` (domain `ledger-checkpoint-signature`, distinct from batches) |
+
+`view` is the location view that the device's own batches 1..=seq produce on their own, before retirements and replica claims are folded in: chunk records with the stamps that decide object names and sizes, manifest sequence numbers, the device name, folders, retirements, acknowledgements, the number of batches and the largest Lamport time. Because applying batches is order-independent (section 6), merging this view gives exactly what replaying those batches gives.
+
+A full device writes a checkpoint after a sync when its own batches since the last checkpoint reach at least 256 and at least the size of the last checkpoint divided by 8 KiB, so checkpoints cost at most about as much as the batches they replace (a device with 6 667 batches of synthetic claims wrote a checkpoint of 0.83 MB). It is pushed with the batches to every metadata storage, cold ones included. Members of shared folders and replicas write none.
+
+**Reading.** A pull also sees the checkpoints of each device (their names sort after every batch name, so a listing after the local head always includes them). The newest one within the device's revocation cut-off is fetched when it is newer than the one held; it is kept when its signature verifies against the device record, it opens, and it agrees with the batch held at `seq` if any (otherwise the device is marked forked). Batches it covers are then neither downloaded nor kept. The view of each device's contribution starts from its newest checkpoint whose key this device holds and that lies within the cut-off, and applies only the batches after it; batch `seq + 1` is chained to `head_hash`. A new checkpoint as starting point rebuilds the cached view (from the checkpoints, which is fast).
+
+**Pruning.** The *readers* are the full devices of the vault that are trusted and not revoked (section 21). Members of shared folders and replicas do not read the vault ledger and are not asked. When every reader other than the device itself has acknowledged at least `seq` of its newest checkpoint:
+
+- the device deletes, on every hot metadata storage that holds that checkpoint, its own batches up to `seq - 8` and its older checkpoints, and drops its local copies of them; the last 8 batches before the checkpoint and everything after it stay;
+- every device drops its local copies of another device's batches up to that device's newest checkpoint once the same condition holds for it.
+
+Cold storages are never pruned (early deletion is billed and saves nothing there). Progress per storage is kept in `ledger/pushed.json`. A storage that lost the batches, or a new storage, receives the checkpoint and the batches after the pruned range.
+
+**Fork detection.** A copy of a device restored from a backup older than the checkpoint still finds batches or a checkpoint of its own identity after its own head, fences itself and refuses to sign or push (test `checkpoints_prune_after_everyone_has_seen_them`). Observers detect a checkpoint that contradicts a batch they hold, two checkpoints at the same sequence number with different `head_hash`, and a batch after the checkpoint that does not chain to it.
+
+**Compatibility.** Versions before this one read only the numeric names under `ledger/<device>/` and skip the checkpoint names, and they ignore the `seen` field (unknown fields are ignored). They never acknowledge, so nothing is pruned while a full device of an older version is in the vault: they keep reading every batch. New fields in local files (`base` and `dropped` in the heads file, `pruned` in `pushed.json`) have defaults.
+
+**Limits.**
+
+- A full device that never syncs again (lost, reset without being removed) blocks pruning of every other device's batches until it is revoked.
+- Members of shared folders and replicas keep all their batches; folder manifests (`manifests/<folder>/<device>/`) are still listed in full on every pull and are not pruned.
+- A checkpoint under a key epoch this device has not adopted yet is downloaded again on every pull until it has.
+- Each pruned batch is one delete request; the first checkpoint of a device with a long history decrypts all its batches once.
+- `varsto ledger` and `/api/ledger` list only the batches still held locally.
+- If a revocation's cut-off lies below the newest checkpoint a device holds of the revoked device, that checkpoint is not used and the batches up to the cut-off are used where they are still held. Local copies are dropped only after every reader acknowledged the checkpoint, so a cut-off set by a reader cannot lie below it; a cut-off taken by a device that had not seen the checkpoint (it was offline) leaves out the revoked device's claims it no longer holds: copies count less, never more.
+- What a checkpoint means for signatures and audits is in [ledger-signing-notes.md](ledger-signing-notes.md), section 9.
+
+Tests: `ledger::tests::checkpoint_stands_in_for_its_batches`, `ledger::tests::cached_view_equals_full_replay` (random arrival orders, unknown keys, cut-offs, checkpoints, save round trips), `engine::ledger_upkeep::tests` (`mailbox_reads_only_what_is_new`, `push_refills_a_storage_that_lost_batches`, `restored_copy_is_fenced_by_incremental_listing`, `cached_view_survives_restarts`, `sync_seals_one_batch`, `fetch_is_sealed_with_the_next_batch`, `one_batch_seals_on_failure`, `checkpoints_prune_after_everyone_has_seen_them`, and the ignored `ledger_scale_benchmark`).
