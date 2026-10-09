@@ -876,8 +876,8 @@ pub fn run(opts: Options) -> Result<()> {
             }
         }
         if engine.is_none() {
-            // Locked at start (a phone killed without locking): drop the plaintext
-            // copies of folders kept "encrypted on this device".
+            // Locked at start (a phone killed without locking): drop plain copies
+            // left in folders kept "encrypted on this device" by older versions.
             match Engine::wipe_encrypted_folders_locked(&opts.home) {
                 Ok(n) if n > 0 => {
                     eprintln!("service: removed {n} plaintext copies of encrypted-here folders")
@@ -886,6 +886,12 @@ pub fn run(opts: Options) -> Result<()> {
                 Err(e) => eprintln!("service: could not clean encrypted-here folders: {e:#}"),
             }
         }
+    }
+    // Decrypted copies handed to other apps last time (the app may have been
+    // killed before it locked) go at every start.
+    let exports = Engine::clear_exports(&opts.home);
+    if exports > 0 {
+        eprintln!("service: removed {exports} decrypted copies made for other apps");
     }
     let state: Shared = Arc::new(Mutex::new(State {
         home: opts.home.clone(),

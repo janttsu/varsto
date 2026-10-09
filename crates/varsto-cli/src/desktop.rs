@@ -22,7 +22,9 @@ const INDEX_HTML: &str = include_str!("../ui/index.html");
 const APP_JS: &str = include_str!("../ui/app.js");
 const APP_CSS: &str = include_str!("../ui/app.css");
 /// Largest single upload through /api/upload (a phone video, not a disk image).
-const MAX_UPLOAD: u64 = 1 << 30;
+/// The body is streamed to disk (or encrypted into the block cache as it
+/// arrives), never held in memory as a whole.
+const MAX_UPLOAD: u64 = 16 << 30;
 
 pub struct State {
     pub home: PathBuf,
@@ -307,29 +309,23 @@ fn handle(state: &Shared, mut request: Request) -> Result<()> {
     if *request.method() == Method::Post && path == "/api/upload" {
         // Raw upload: `POST /api/upload?folder=<name>&path=<relative path>` with the
         // file's bytes as the body (any content type). Writes the file into the
-        // folder and pushes it, like /api/write for text.
+        // folder and pushes it, like /api/write for text. The body is streamed:
+        // into a temporary file next to the target, or, in a folder kept
+        // encrypted on this device, chunked and encrypted into the block cache
+        // without holding the state while it arrives.
         let (folder, file) = (query_param(&query, "folder"), query_param(&query, "path"));
-        let mut bytes = Vec::new();
-        request
-            .as_reader()
-            .take(MAX_UPLOAD + 1)
-            .read_to_end(&mut bytes)?;
-        if bytes.len() as u64 > MAX_UPLOAD {
-            return Ok(request.respond(json_response(
-                413,
-                &json!({"error": format!("file larger than {} MiB", MAX_UPLOAD >> 20)}),
-            ))?);
-        }
-        let result = {
-            let mut st = state.lock().unwrap();
-            match (&mut st.engine, folder, file) {
-                (None, _, _) => Err(anyhow!("vault is locked")),
-                (Some(e), Some(f), Some(p)) => e.write_file(&f, &p, &bytes).map(|r| {
-                    json!({"ok": true, "folder": f, "path": p, "bytes": bytes.len(), "push": r})
-                }),
-                _ => Err(anyhow!("folder and path query parameters required")),
-            }
+        let result = match (folder, file) {
+            (Some(f), Some(p)) => upload(state, &mut request, f, p),
+            _ => Err(anyhow!("folder and path query parameters required")),
         };
+        if let Some(too_big) = result
+            .as_ref()
+            .err()
+            .and_then(|e| e.chain().find_map(|c| c.downcast_ref::<std::io::Error>()))
+            .filter(|io| io.kind() == std::io::ErrorKind::FileTooLarge)
+        {
+            return Ok(request.respond(json_response(413, &json!({"error": too_big.to_string()})))?);
+        }
         return match result {
             Ok(v) => Ok(request.respond(json_response(200, &v))?),
             Err(e) => Ok(request.respond(json_response(400, &json!({"error": format!("{e:#}")})))?),
@@ -370,6 +366,65 @@ fn handle(state: &Shared, mut request: Request) -> Result<()> {
         Ok(v) => Ok(request.respond(json_response(200, &v))?),
         Err(e) => Ok(request.respond(json_response(400, &json!({"error": format!("{e:#}")})))?),
     }
+}
+
+/// Reads at most `left` bytes, then fails: an upload larger than allowed is
+/// refused before anything of it is recorded.
+struct Capped<R> {
+    inner: R,
+    left: u64,
+    read: u64,
+}
+
+impl<R: Read> Read for Capped<R> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let n = self.inner.read(buf)?;
+        if n as u64 > self.left {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::FileTooLarge,
+                format!("file larger than {} MiB", MAX_UPLOAD >> 20),
+            ));
+        }
+        self.left -= n as u64;
+        self.read += n as u64;
+        Ok(n)
+    }
+}
+
+/// `/api/upload`: stream the request body into `folder/path` and push.
+fn upload(state: &Shared, request: &mut Request, folder: String, path: String) -> Result<Value> {
+    let writer = {
+        let st = state.lock().unwrap();
+        match &st.engine {
+            None => bail!("vault is locked"),
+            Some(e) => e.block_writer(&folder)?,
+        }
+    };
+    let mut body = Capped {
+        inner: request.as_reader(),
+        left: MAX_UPLOAD,
+        read: 0,
+    };
+    let push = match writer {
+        Some(w) => {
+            let staged = w.write(&mut body)?;
+            let mut st = state.lock().unwrap();
+            let e = st
+                .engine
+                .as_mut()
+                .ok_or_else(|| anyhow!("vault is locked"))?;
+            e.commit_staged(&folder, &path, staged)?
+        }
+        None => {
+            let mut st = state.lock().unwrap();
+            let e = st
+                .engine
+                .as_mut()
+                .ok_or_else(|| anyhow!("vault is locked"))?;
+            e.write_from_reader(&folder, &path, &mut body)?
+        }
+    };
+    Ok(json!({"ok": true, "folder": folder, "path": path, "bytes": body.read, "push": push}))
 }
 
 fn pair_join(state: &Shared, input: &Value) -> Result<Value> {
@@ -566,17 +621,12 @@ fn api(st: &mut State, method: Method, path: &str, query: &str, input: &Value) -
             Ok(json!({"ok": true}))
         }
         (Method::Post, "/api/lock") => {
-            // Folders kept "encrypted on this device" lose their plaintext copies.
-            let freed = st
-                .engine
-                .as_mut()
-                .map(|e| e.free_encrypted_folders())
-                .unwrap_or_default();
+            // The keys go. Folders kept "encrypted on this device" hold only
+            // encrypted blocks; the decrypted copies handed to other apps go.
             st.engine = None;
             st.pair = None;
-            Ok(
-                json!({"ok": true, "freed": freed.into_iter().map(|(f, n, k)| json!({"folder": f, "freed": n, "kept": k})).collect::<Vec<_>>()}),
-            )
+            let exports = Engine::clear_exports(&st.home);
+            Ok(json!({"ok": true, "exports_removed": exports}))
         }
         (Method::Post, "/api/pair/start") => {
             let e = st
@@ -891,7 +941,7 @@ fn api_unlocked(
                     default_folder_path(engine.home(), &name, plain)?
                 }
             };
-            let id = engine.attach_folder(&name_or_id, &path, selective || !plain)?;
+            let id = engine.attach_folder(&name_or_id, &path, selective)?;
             if !plain {
                 engine.set_encrypted_here(&name_or_id, true)?;
             }
@@ -935,6 +985,12 @@ fn api_unlocked(
                     _ => Err(e),
                 },
             }
+        }
+        // A decrypted copy for another app (phones: open in / share with), on
+        // the user's explicit request; removed when the vault locks.
+        (Method::Post, "/api/export") => {
+            let path = engine.export_file(&s(input, "folder")?, &s(input, "path")?)?;
+            Ok(json!({"ok": true, "path": path}))
         }
         (Method::Get, "/api/disks") => Ok(serde_json::to_value(engine.disks()?)?),
         (Method::Post, "/api/disk/add") => {

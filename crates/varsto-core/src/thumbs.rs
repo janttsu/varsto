@@ -80,6 +80,15 @@ pub fn make(path: &Path, name: &str) -> Option<Vec<u8>> {
     None
 }
 
+/// JPEG thumbnail of a picture held in memory (folders kept encrypted on a
+/// device have no plain file to read). Videos need a file and get none.
+pub fn make_from_bytes(bytes: &[u8], name: &str) -> Option<Vec<u8>> {
+    if !is_image(name) {
+        return None;
+    }
+    encode(image::load_from_memory(bytes).ok()?)
+}
+
 fn encode(img: image::DynamicImage) -> Option<Vec<u8>> {
     let thumb = img.thumbnail(MAX_SIDE, MAX_SIDE).to_rgb8();
     let mut buf = Cursor::new(Vec::new());
@@ -130,5 +139,7 @@ mod tests {
         assert_eq!(open(&sealed, &v, &f, "abc", &key).unwrap(), t);
         assert!(open(&sealed, &v, &f, "other", &key).is_err());
         assert!(make(&p, "notes.txt").is_none());
+        let from_memory = make_from_bytes(&std::fs::read(&p).unwrap(), "big.png").unwrap();
+        assert!(image::load_from_memory(&from_memory).unwrap().width() <= MAX_SIDE);
     }
 }

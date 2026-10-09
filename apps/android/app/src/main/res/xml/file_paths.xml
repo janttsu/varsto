@@ -1,7 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Files the shell may hand to other apps as content URIs: the app's own
-     space (encrypted-on-this-phone folders), its cache, the app-specific
-     external directory, and Internal storage/Varsto (plain-file folders). -->
+     space (decrypted copies the service exports on request for folders kept
+     encrypted on this phone, under vault/exports), its cache, the
+     app-specific external directory, and Internal storage/Varsto (plain-file
+     folders). -->
 <paths>
     <files-path name="files" path="." />
     <cache-path name="cache" path="." />

@@ -958,7 +958,7 @@
 
   $("sync").onclick = function () { runSync(null); };
   $("refresh").onclick = refreshStatus;
-  $("lock").onclick = function () { api("POST", "/api/lock").then(function (r) { (r.freed || []).forEach(function (f) { if (f.freed || f.kept) { log(f.folder + ": removed " + f.freed + " local cop" + (f.freed === 1 ? "y" : "ies") + (f.kept ? ", kept " + f.kept + " not yet stored elsewhere" : "")); } }); return refreshState(); }).catch(function (e) { log("error: " + e.message); }); };
+  $("lock").onclick = function () { api("POST", "/api/lock").then(function (r) { if (r.exports_removed) { log("removed " + r.exports_removed + " decrypted cop" + (r.exports_removed === 1 ? "y" : "ies") + " made for other apps"); } return refreshState(); }).catch(function (e) { log("error: " + e.message); }); };
   $("fsck").onclick = function () {
     busy(true); log("fsck started");
     api("POST", "/api/fsck", { verify: $("verify").checked }).then(function (r) {
@@ -975,7 +975,7 @@
   // Where the folder's files are on a phone, in the user's words.
   function whereLine(f) {
     if (!f || !isMobile()) { return ""; }
-    if (f.plain === false) { return "Encrypted on this phone: files are fetched when you open them and removed when you lock the vault."; }
+    if (f.plain === false) { return "Encrypted on this phone: files are kept as encrypted blocks and open only in Varsto. Selective sync chooses which ones are kept here."; }
     if (appState.platform !== "android") { return ""; }
     var p = f.path || "";
     if (p.indexOf("/storage/emulated/0/") === 0 && p.indexOf("/Android/data/") < 0) { return "On this phone: Internal storage/" + p.slice("/storage/emulated/0/".length) + ", visible in My Files."; }
@@ -1003,12 +1003,19 @@
   document.querySelectorAll("[data-close-forms]").forEach(function (b) { b.onclick = function () { showFolderForms(false, true); }; });
 
   // Open or share a file on the phone: fetch it first if it is only a placeholder, then hand the
-  // real path to the shell, which builds a content URI and starts the system chooser.
+  // real path to the shell, which builds a content URI and starts the system chooser. A folder kept
+  // encrypted here has no plain file: the service writes a decrypted copy for this hand-off only.
   function openOnPhone(folder, f, share) {
-    var ready = f.state === "local" ? Promise.resolve() : (busy(true), api("POST", "/api/fetch", { folder: folder, path: f.path }).then(function () { log("fetched " + f.path); busy(false); }, function (e) { busy(false); throw e; }));
-    ready.then(function () {
+    var ready;
+    if (encryptedHere(folder)) {
+      busy(true);
+      ready = api("POST", "/api/export", { folder: folder, path: f.path }).then(function (r) { busy(false); return r.path; }, function (e) { busy(false); throw e; });
+    } else {
+      ready = (f.state === "local" ? Promise.resolve() : (busy(true), api("POST", "/api/fetch", { folder: folder, path: f.path }).then(function () { log("fetched " + f.path); busy(false); }, function (e) { busy(false); throw e; }))).then(function () { return f.disk; });
+    }
+    ready.then(function (disk) {
       if (!droid) { throw new Error("opening files in other apps is not available in this shell yet"); }
-      if (share) { droid.shareFile(f.disk); } else { droid.openFile(f.disk); }
+      if (share) { droid.shareFile(disk); } else { droid.openFile(disk); }
       setTimeout(loadFiles, 1500);
     }).catch(function (e) { log((share ? "share" : "open") + " failed: " + e.message); alertBox(e.message); });
   }
@@ -1018,7 +1025,7 @@
   var handOffOk = false;
   function handOff(folder, f, share) {
     if (!encryptedHere(folder) || handOffOk) { return openOnPhone(folder, f, share); }
-    confirmBox("Varsto writes a decrypted copy of " + f.path.split("/").pop() + " to this phone and gives it to the app you choose. Varsto removes its copy when it locks; the other app may keep its own.", { title: share ? "Share a decrypted copy?" : "Open in another app?", ok: share ? "Share" : "Open" }).then(function (yes) { if (yes) { handOffOk = true; openOnPhone(folder, f, share); } });
+    confirmBox("Varsto writes a decrypted copy of " + f.path.split("/").pop() + " to this phone and gives it to the app you choose. Varsto removes its copy when it locks or restarts; the other app may keep its own.", { title: share ? "Share a decrypted copy?" : "Open in another app?", ok: share ? "Share" : "Open" }).then(function (yes) { if (yes) { handOffOk = true; openOnPhone(folder, f, share); } });
   }
 
   // In-app viewer: /api/view decrypts in memory (with range requests for seeking), so pictures,
@@ -1120,10 +1127,10 @@
   function updateToolbar() {
     var f = selectedFile; var folder = folderByName($("filesfolder").value);
     $("files-download").disabled = !f || !(f.state === "placeholder" || f.state === "missing");
-    // Without a selection the button frees every fetched file of an "encrypted here" folder.
+    // Without a selection the button frees every downloaded file of an "encrypted here" folder.
     var folderWide = !f && !!folder && folder.plain === false && isMobile();
     $("files-free").disabled = f ? f.state !== "local" : !folderWide;
-    $("files-free").title = folderWide ? "Remove every fetched copy of this folder from this phone" : "Keep only a placeholder of the selected file here";
+    $("files-free").title = folderWide ? "Remove the encrypted blocks of every downloaded file of this folder from this phone" : "Keep only a placeholder of the selected file here";
   }
   function fetchFile(folder, path) {
     busy(true); $("needsdisk").classList.add("hidden");

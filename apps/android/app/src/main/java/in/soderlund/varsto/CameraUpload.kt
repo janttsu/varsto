@@ -143,7 +143,7 @@ class CameraUpload(private val context: Context, private val progress: (String?)
             progress("Uploading ${n + 1} of ${items.size} to ${s.folder}")
             if (item.size > MAX_UPLOAD) {
                 remember(item.key)
-                skipped = "${item.name} is larger than 1 GiB and was skipped"
+                skipped = "${item.name} is larger than ${MAX_UPLOAD shr 30} GiB and was skipped"
                 continue
             }
             var path = item.dir + "/" + item.name
@@ -166,8 +166,9 @@ class CameraUpload(private val context: Context, private val progress: (String?)
             remember(item.key)
             uploaded++
             if (encrypted) {
-                // Folders kept encrypted on the phone hold no plaintext they do not need;
-                // the original is still in the gallery.
+                // Folders kept encrypted on the phone need not keep the uploaded blocks
+                // once a storage has them (the service refuses otherwise); the original
+                // is still in the gallery.
                 try {
                     api.post("/api/free", JSONObject().put("folder", s.folder).put("path", path).toString())
                 } catch (e: Exception) {}
@@ -372,8 +373,8 @@ class CameraUpload(private val context: Context, private val progress: (String?)
     }
 
     companion object {
-        /** Same limit as the service's /api/upload. */
-        const val MAX_UPLOAD = 1L shl 30
+        /** Same limit as the service's /api/upload (which streams, nothing is held in memory). */
+        const val MAX_UPLOAD = 16L shl 30
 
         private fun enc(s: String): String = URLEncoder.encode(s, "UTF-8").replace("+", "%20")
 

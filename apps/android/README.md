@@ -7,17 +7,20 @@ interface in a WebView over loopback with the session token.
 
 Build: `apps/android/build.sh` (Android SDK with platform 35, build-tools 35,
 NDK 27 and a JDK 17 or newer). The result is a debug-signed APK for sideloading
-(`adb install`). Each folder is either "encrypted on this phone" (kept in the
-app's private space, fetched when opened, plaintext removed when the vault
-locks) or "plain files on this phone" under Internal storage/Varsto, which
-needs all files access (asked for when that mode is chosen). The page adds
-files through the system file chooser and hands files to other apps through
-a FileProvider (Open with, Share).
+(`adb install`). Each folder is either "encrypted on this phone" (only its
+encrypted blocks are kept, in the app's private space; selective sync chooses
+which files, as in any folder) or "plain files on this phone" under Internal
+storage/Varsto, which needs all files access (asked for when that mode is
+chosen). The page adds files through the system file chooser and hands files
+to other apps through a FileProvider (Open with, Share); for an encrypted
+folder the service first writes a decrypted copy to `files/vault/exports`
+(`POST /api/export`), removed when the vault locks and when the service
+starts.
 
 Folders kept encrypted on the phone open in an in-app viewer by default:
 pictures, video, audio and text are streamed from `GET /api/view`, which
-decrypts only the requested byte range in memory, so no plaintext copy is
-written to the phone. PDFs and other types still go to another app, which
+decrypts only the requested byte range in memory (from the block cache when
+the file is kept on the phone), so no plaintext copy is written to the phone. PDFs and other types still go to another app, which
 receives a decrypted copy (the page says so before handing one over).
 
 Camera upload (Settings): `CameraUpload.kt` runs inside the foreground
