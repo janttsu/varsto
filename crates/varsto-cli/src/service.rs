@@ -223,11 +223,19 @@ struct P2p {
     peers: Mutex<Option<Arc<varsto_core::p2p::Peers>>>,
     last_record: Mutex<Option<varsto_core::p2p::PeerRecord>>,
     last_publish: Mutex<Option<Instant>>,
+    /// Set by the relay thread when a registration succeeded: the record
+    /// should go out now, so peers learn `relay_via` without waiting for a sync.
+    republish: Arc<std::sync::atomic::AtomicBool>,
 }
 
-/// STUN again this often; also how long a relay registration rests after a failure.
+/// STUN again this often, and at the earliest this soon after the last
+/// probe when the node suspects that the mapping changed.
 const NAT_REFRESH: Duration = Duration::from_secs(600);
-const RELAY_RETRY: Duration = Duration::from_secs(300);
+const NAT_RECHECK_MIN: Duration = Duration::from_secs(30);
+/// A failed relay registration is retried after this long, doubling each
+/// time it fails again, up to `RELAY_RETRY_MAX`; a lost one is retried at once.
+const RELAY_RETRY_MIN: Duration = Duration::from_secs(30);
+const RELAY_RETRY_MAX: Duration = Duration::from_secs(300);
 /// An unchanged record is still rewritten this often, so peers can tell a
 /// device that is alive from one that stopped a month ago.
 const RECORD_MAX_AGE: Duration = Duration::from_secs(3600);
@@ -325,9 +333,16 @@ impl P2p {
         let nat: Arc<Mutex<NatInfo>> = Arc::new(Mutex::new(NatInfo::default()));
         let records: Arc<Mutex<Vec<varsto_core::p2p::PeerRecord>>> =
             Arc::new(Mutex::new(Vec::new()));
+        let republish = Arc::new(std::sync::atomic::AtomicBool::new(false));
         if let Some(node) = &quic {
             Self::spawn_nat_thread(node.clone(), cfg.clone(), nat.clone(), stop.clone());
-            Self::spawn_relay_thread(node.clone(), records.clone(), nat.clone(), stop.clone());
+            Self::spawn_relay_thread(
+                node.clone(),
+                records.clone(),
+                nat.clone(),
+                republish.clone(),
+                stop.clone(),
+            );
         }
         {
             let mut st = state.lock().unwrap();
@@ -349,6 +364,7 @@ impl P2p {
             peers: Mutex::new(None),
             last_record: Mutex::new(None),
             last_publish: Mutex::new(None),
+            republish,
         })
     }
 
@@ -373,6 +389,7 @@ impl P2p {
             .spawn(move || {
                 while !stop.load(std::sync::atomic::Ordering::Relaxed) {
                     let probe = node.stun(&cfg.stun, Duration::from_millis(1500));
+                    let last_probe = Instant::now();
                     let reachable = !cfg.public_addrs.is_empty()
                         || probe.public_addrs().iter().any(|a| node.probe_self(*a));
                     if std::env::var_os("VARSTO_P2P_DEBUG").is_some() {
@@ -387,24 +404,41 @@ impl P2p {
                         reachable,
                         done: true,
                     };
-                    Self::pause(&stop, NAT_REFRESH);
+                    // Every ten minutes, or sooner when the node suspects the
+                    // NAT mapping changed (a failed punched connect, a pause).
+                    let until = Instant::now() + NAT_REFRESH;
+                    while Instant::now() < until && !stop.load(std::sync::atomic::Ordering::Relaxed)
+                    {
+                        if node.take_restun() && last_probe.elapsed() >= NAT_RECHECK_MIN {
+                            eprintln!("p2p: asking STUN again (the NAT mapping may have changed)");
+                            break;
+                        }
+                        std::thread::sleep(Duration::from_millis(500));
+                    }
                 }
             });
     }
 
     /// Keep a registration with every reachable device of the vault while we
-    /// are not reachable ourselves; retry a lost one after five minutes.
+    /// are not reachable ourselves. A failed attempt is retried after 30 s,
+    /// then with doubling waits up to five minutes; a lost registration is
+    /// retried at once. A success asks the main loop to republish our record.
     fn spawn_relay_thread(
         node: Arc<varsto_core::p2p::quic::Node>,
         records: Arc<Mutex<Vec<varsto_core::p2p::PeerRecord>>>,
         nat: Arc<Mutex<NatInfo>>,
+        republish: Arc<std::sync::atomic::AtomicBool>,
         stop: Arc<std::sync::atomic::AtomicBool>,
     ) {
         let _ = std::thread::Builder::new()
             .name("p2p-relay".into())
             .spawn(move || {
-                let mut tried: std::collections::BTreeMap<varsto_core::ids::DeviceId, Instant> =
-                    Default::default();
+                // Per relay: when to try again and the wait to use after the
+                // next failure. Absent means "try at once".
+                let mut backoff: std::collections::BTreeMap<
+                    varsto_core::ids::DeviceId,
+                    (Instant, Duration),
+                > = Default::default();
                 while !stop.load(std::sync::atomic::Ordering::Relaxed) {
                     let info = nat.lock().unwrap().clone();
                     let relays: Vec<varsto_core::p2p::PeerRecord> = records
@@ -418,19 +452,36 @@ impl P2p {
                         let live = node.registered_relays();
                         for r in relays {
                             if live.contains(&r.device)
-                                || tried
+                                || backoff
                                     .get(&r.device)
-                                    .is_some_and(|t| t.elapsed() < RELAY_RETRY)
+                                    .is_some_and(|(next, _)| Instant::now() < *next)
                             {
                                 continue;
                             }
-                            tried.insert(r.device.clone(), Instant::now());
                             match node.register_with(&r.device, &r.udp_addrs(), &r.cert_sha256) {
-                                Ok(()) => println!("Varsto p2p: registered with relay {}", r.name),
-                                Err(e) => eprintln!(
-                                    "service: relay registration with {} failed: {e:#}",
-                                    r.name
-                                ),
+                                Ok(()) => {
+                                    println!("Varsto p2p: registered with relay {}", r.name);
+                                    backoff.remove(&r.device);
+                                    republish.store(true, std::sync::atomic::Ordering::Relaxed);
+                                }
+                                Err(e) => {
+                                    let wait = backoff
+                                        .get(&r.device)
+                                        .map(|(_, w)| *w)
+                                        .unwrap_or(RELAY_RETRY_MIN);
+                                    eprintln!(
+                                        "service: relay registration with {} failed: {e:#}; next try in {} s",
+                                        r.name,
+                                        wait.as_secs()
+                                    );
+                                    backoff.insert(
+                                        r.device.clone(),
+                                        (
+                                            Instant::now() + wait,
+                                            (wait * 2).min(RELAY_RETRY_MAX),
+                                        ),
+                                    );
+                                }
                             }
                         }
                     }
@@ -439,11 +490,31 @@ impl P2p {
             });
     }
 
+    /// Did a relay registration just succeed? Clears the flag.
+    fn take_republish(&self) -> bool {
+        self.republish
+            .swap(false, std::sync::atomic::Ordering::Relaxed)
+    }
+
     /// Merge LAN peers with rendezvous records and hand them to the engine.
     fn refresh_before_sync(&self, st: &mut State) {
         let Some(e) = st.engine.as_mut() else { return };
         let lan = self.lan_peers.lock().unwrap().clone();
-        let records = e.peer_record_list().unwrap_or_default();
+        // A storage hiccup must not empty the peer table: that would stop
+        // the keeper's punches (so NAT mappings lapse and peers' punches
+        // steal our port) and make the QUIC server refuse every peer's
+        // certificate. Keep the last good records until the next listing.
+        let records = match e.peer_record_list() {
+            Ok(r) => r,
+            Err(err) => {
+                let kept = self.records.lock().unwrap().clone();
+                eprintln!(
+                    "p2p: peer record listing failed, keeping {} known record(s): {err:#}",
+                    kept.len()
+                );
+                kept
+            }
+        };
         let mut flat = lan.clone();
         for r in &records {
             for addr in r.addrs() {
@@ -483,6 +554,14 @@ impl P2p {
             Ok(s) => *self.snapshot.lock().unwrap() = Some(Arc::new(s)),
             Err(err) => eprintln!("service: p2p snapshot failed: {err:#}"),
         }
+        self.publish_record(st);
+    }
+
+    /// Show the NAT state and the paths in use, and re-publish our rendezvous
+    /// record when it changed (or once an hour regardless). Also called as
+    /// soon as a relay registration succeeds, so `relay_via` spreads quickly.
+    fn publish_record(&self, st: &mut State) {
+        let Some(e) = st.engine.as_ref() else { return };
         let info = self.nat.lock().unwrap().clone();
         let mut rec = e.peer_record_template(self.listen.port());
         rec.udp_public = info.probe.public_addrs();
@@ -703,6 +782,9 @@ pub fn run(opts: Options) -> Result<()> {
     let debounce = Duration::from_secs(2);
     let disk_check_every = Duration::from_secs(30);
     let mut next_disk_check = Instant::now();
+    // Syncs run through the local API (`POST /api/sync`, the CLI) change what
+    // we can serve; the snapshot follows them as it follows our own syncs.
+    let mut snapshot_syncs = 0u64;
 
     while !QUIT.load(Ordering::SeqCst) {
         // Removable disks: notice what was attached or taken away.
@@ -744,6 +826,17 @@ pub fn run(opts: Options) -> Result<()> {
                 st.service.folders_changed = false;
             }
         }
+        if let Some(p) = &p2p {
+            let mut st = state.lock().unwrap();
+            // A relay registration just succeeded: tell the other devices now.
+            if p.take_republish() {
+                p.publish_record(&mut st);
+            }
+            if st.service.syncs != snapshot_syncs {
+                snapshot_syncs = st.service.syncs;
+                p.refresh_after_sync(&mut st);
+            }
+        }
         if state.lock().unwrap().service.restart_requested {
             eprintln!("service: restarting after update");
             std::thread::sleep(Duration::from_millis(300));
@@ -779,6 +872,7 @@ pub fn run(opts: Options) -> Result<()> {
             match result {
                 Some(Ok(reports)) => {
                     st.service.record_sync(&reports);
+                    snapshot_syncs = st.service.syncs; // the snapshot above is current
                     let checked = st.engine.as_ref().map(|e| e.policy_check());
                     match checked {
                         Some(Ok(reps)) => st.service.record_policies(reps),
