@@ -9,9 +9,35 @@
   var $ = function (id) { return document.getElementById(id); };
   var logEl = $("log");
   function log(msg) { var t = new Date().toLocaleTimeString(); logEl.textContent = "[" + t + "] " + msg + "\n" + logEl.textContent; }
+  // Feedback for every action: the button that started a request shows a
+  // spinner until it settles (and "Still working…" after a while), and a
+  // thin bar at the top shows that something runs. Background polls (GET
+  // without a press) stay silent.
+  var lastPress = null; var working = 0; var barTimer = null;
+  document.addEventListener("click", function (ev) { var b = ev.target.closest && ev.target.closest("button"); if (b) { lastPress = { el: b, t: Date.now() }; } }, true);
+  document.addEventListener("submit", function (ev) { var b = ev.submitter || (ev.target.querySelector && ev.target.querySelector("button[type=submit], button:not([type])")); if (b) { lastPress = { el: b, t: Date.now() }; } }, true);
+  function pressed() { var p = lastPress; if (!p || Date.now() - p.t > 600 || !document.contains(p.el)) { return null; } if (p.el.closest("#modal") || p.el.classList.contains("nav-item") || p.el.classList.contains("tree-item")) { return null; } return p.el; }
+  function markBusy(b, on) {
+    var n = (+b.dataset.busy || 0) + (on ? 1 : -1); b.dataset.busy = Math.max(0, n);
+    if (n > 0 && on && n === 1) {
+      b.classList.add("is-busy"); b.setAttribute("aria-busy", "true");
+      b._busyNote = setTimeout(function () { if (+b.dataset.busy > 0 && !(b.nextElementSibling && b.nextElementSibling.classList.contains("busy-note"))) { var note = el("span", "busy-note muted small", "Still working\u2026"); b.after(note); } }, 2000);
+    }
+    if (n <= 0) { b.classList.remove("is-busy"); b.removeAttribute("aria-busy"); clearTimeout(b._busyNote); var nx = b.nextElementSibling; if (nx && nx.classList.contains("busy-note")) { nx.remove(); } }
+  }
+  function workBar(on) {
+    working = Math.max(0, working + (on ? 1 : -1));
+    if (working > 0 && !barTimer) { barTimer = setTimeout(function () { if (working > 0) { $("workbar").classList.add("on"); } }, 300); }
+    if (working === 0) { clearTimeout(barTimer); barTimer = null; $("workbar").classList.remove("on"); }
+  }
   function api(method, path, body) {
+    var b = pressed(); var loud = !!b || method !== "GET";
+    if (b) { markBusy(b, true); }
+    if (loud) { workBar(true); }
+    var done = function () { if (b) { markBusy(b, false); } if (loud) { workBar(false); } };
     return fetch(path, { method: method, headers: { "X-Varsto-Token": token, "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined })
-      .then(function (r) { return r.json().then(function (j) { if (!r.ok) { throw new Error(j.error || r.statusText); } return j; }); });
+      .then(function (r) { return r.json().then(function (j) { if (!r.ok) { throw new Error(j.error || r.statusText); } return j; }); })
+      .then(function (j) { done(); return j; }, function (e) { done(); throw e; });
   }
   function show(section) { ["setup", "unlock", "app"].forEach(function (id) { $(id).classList.toggle("hidden", id !== section); }); $("lock").classList.toggle("hidden", section !== "app"); document.body.dataset.view = section; if (section !== "app") { $("pagetitle").textContent = section === "setup" ? "Welcome" : "Locked"; } else { $("pagetitle").textContent = pageTitle(currentPage); } }
   function fmtBytes(n) { var u = ["B", "KiB", "MiB", "GiB", "TiB"]; var i = 0; while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; } return n.toFixed(i ? 1 : 0) + " " + u[i]; }
