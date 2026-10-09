@@ -148,6 +148,11 @@ enum Cmd {
         #[arg(long)]
         yes: bool,
     },
+    /// Devices of the vault: list them, or remove a lost or stolen one.
+    Device {
+        #[command(subcommand)]
+        cmd: DeviceCmd,
+    },
     /// Pair devices with a one-time code instead of copying the vault key.
     Pair {
         #[command(subcommand)]
@@ -177,6 +182,25 @@ enum Cmd {
     Mcp {
         #[command(subcommand)]
         cmd: Option<McpCmd>,
+    },
+}
+
+#[derive(Subcommand)]
+enum DeviceCmd {
+    /// List the full devices of the vault (removed ones are marked).
+    List,
+    /// Remove another device: it is cut off from the ledger and from peers, and
+    /// the vault gets new keys that it never sees. What it already held stays
+    /// readable to it.
+    Revoke {
+        /// Device name or id (see `varsto device list`).
+        device: String,
+        /// Also order the device to delete its keys, sync state and folder
+        /// contents when it next reaches a storage.
+        #[arg(long)]
+        wipe: bool,
+        #[arg(long)]
+        yes: bool,
     },
 }
 
@@ -1301,6 +1325,87 @@ fn run(cli: &Cli) -> Result<()> {
                 println!("device reset; removed: {}", removed.join(", "));
             }
         }
+        Cmd::Device { cmd } => match cmd {
+            DeviceCmd::List => {
+                let engine = Engine::open(&home, &passphrase()?)?;
+                let list = engine.devices_list();
+                print(cli, &list, |list| {
+                    let mut out = format!("vault key epoch {}\n", engine.key_epoch());
+                    for d in list {
+                        out += &format!(
+                            "{} ({}){}{}\n",
+                            d.name,
+                            &d.device_id[..8],
+                            if d.this_device { ", this device" } else { "" },
+                            match (&d.revoked_by, d.revoked_utc) {
+                                (Some(by), Some(t)) => format!(
+                                    ", removed by {by} on {}{}",
+                                    varsto_core::util::format_date(t),
+                                    if d.wipe_ordered {
+                                        " with a wipe order"
+                                    } else {
+                                        ""
+                                    }
+                                ),
+                                _ => String::new(),
+                            }
+                        );
+                    }
+                    out.trim_end().to_string()
+                })?;
+            }
+            DeviceCmd::Revoke { device, wipe, yes } => {
+                if !*yes {
+                    bail_usage::<()>(&format!(
+                        "this removes {device} from the vault: its later ledger entries are ignored, peers refuse it, and the vault gets new keys for everything written from now on (folders shared with other people and Strongroom folders keep theirs). Everything it already held stays readable to it. {}Print a new recovery kit afterwards: the old one no longer opens new data. Run again with --yes",
+                        if *wipe { "With --wipe it also deletes its keys, sync state and folder contents when it next reaches a storage, including changes it never synced. " } else { "" }
+                    ))?;
+                }
+                let report: varsto_core::engine::RevokeReport = if let Some((sf, _)) =
+                    service::status(&home)
+                {
+                    // The running service owns the keys file: let it do the change.
+                    let base = format!("http://127.0.0.1:{}", sf.port);
+                    let list: serde_json::Value = serde_json::from_str(&service::http_get(
+                        &format!("{base}/api/devices"),
+                        &sf.token,
+                    )?)?;
+                    let name = list["devices"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .find(|d| d["device_id"] == device.as_str() || d["name"] == device.as_str())
+                        .and_then(|d| d["name"].as_str())
+                        .ok_or_else(|| anyhow!("unknown device {device}"))?
+                        .to_string();
+                    let body = serde_json::json!({"device": device, "wipe": wipe, "confirm": name});
+                    let r = service::http_post(
+                        &format!("{base}/api/device/revoke"),
+                        &sf.token,
+                        &body.to_string(),
+                    )?;
+                    serde_json::from_str(&r)
+                        .map_err(|_| anyhow!("unexpected answer from the service: {r}"))?
+                } else {
+                    let mut engine = Engine::open(&home, &passphrase()?)?;
+                    engine.revoke_device(device, *wipe)?
+                };
+                print(cli, &report, |r| {
+                    format!(
+                        "removed {} ({}); vault key epoch {}; ledger entries after #{} are ignored{}\nnew key sent to: {}{}\nre-keyed folders: {}{}\nprint a new recovery kit: `varsto recovery kit`",
+                        r.name,
+                        &r.device_id[..8],
+                        r.key_epoch,
+                        r.cutoff_seq,
+                        if r.wipe { "; wipe ordered" } else { "" },
+                        if r.keys_sent_to.is_empty() { "(no other device)".to_string() } else { r.keys_sent_to.join(", ") },
+                        if r.keys_pending_for.is_empty() { String::new() } else { format!("\nwaiting for (they get it once they publish a key-exchange key): {}", r.keys_pending_for.join(", ")) },
+                        if r.folders_rekeyed.is_empty() { "none".to_string() } else { r.folders_rekeyed.join(", ") },
+                        if r.folders_not_rekeyed.is_empty() { String::new() } else { format!("\nkept their key (shared or Strongroom): {}", r.folders_not_rekeyed.join(", ")) },
+                    )
+                })?;
+            }
+        },
         Cmd::Pair { cmd } => {
             match cmd {
                 PairCmd::Offer => {

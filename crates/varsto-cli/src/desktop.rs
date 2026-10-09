@@ -410,6 +410,8 @@ fn api(st: &mut State, method: Method, path: &str, query: &str, input: &Value) -
             "plain_root": plain_root(&st.home).display().to_string(),
             "plain_root_writable": !mobile() || plain_root_writable(&plain_root(&st.home)),
             "service": st.service.summary(),
+            // Set when another device removed (and maybe wiped) this one.
+            "removal": varsto_core::engine::removal_notice(&st.home),
         })),
         (Method::Post, "/api/reset") => {
             if opt(input, "confirm").as_deref() != Some("reset") {
@@ -619,6 +621,28 @@ fn api_unlocked(
                 }
                 None => Ok(json!({"ok": true, "token": t.encode(), "folder": t.name, "sealed": false})),
             }
+        }
+        (Method::Get, "/api/devices") => Ok(json!({
+            "devices": engine.devices_list(),
+            "key_epoch": engine.key_epoch(),
+            "removal": engine.removal(),
+        })),
+        (Method::Post, "/api/device/revoke") => {
+            let device = s(input, "device")?;
+            let wipe = input.get("wipe").and_then(|v| v.as_bool()).unwrap_or(false);
+            // The interface makes the user type the device's name; so does the API.
+            let name = engine
+                .devices_list()
+                .into_iter()
+                .find(|d| d.device_id == device || d.name == device)
+                .map(|d| d.name)
+                .ok_or_else(|| anyhow!("unknown device {device}"))?;
+            if opt(input, "confirm").as_deref() != Some(name.as_str()) {
+                bail!("send {{\"confirm\": \"{name}\"}} to remove this device");
+            }
+            let report = engine.revoke_device(&device, wipe)?;
+            service.request_sync();
+            Ok(serde_json::to_value(report)?)
         }
         (Method::Get, "/api/replica/token") => {
             Ok(json!({"token": engine.replica_token()?.encode()}))
