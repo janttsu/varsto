@@ -1268,11 +1268,26 @@ impl Engine {
     /// every device keeps the older one's name and numbers the newer ones,
     /// so all of them end up with the same unique names.
     fn dedupe_folder_names(&mut self) -> bool {
-        let mut live: Vec<(i64, FolderId, String)> = self
+        let live_folders: Vec<&FolderRecord> = self
             .keyring
             .folders
             .values()
             .filter(|f| !f.is_removed())
+            .collect();
+        // A folder being converted into a Strongroom briefly exists twice
+        // under one name: the new Strongroom record arrives before the
+        // conversion record retires the old one. That pair is no conflict.
+        let converting = |f: &FolderRecord| {
+            f.is_strongroom()
+                && live_folders.iter().any(|o| {
+                    !o.is_strongroom()
+                        && o.created_utc <= f.created_utc
+                        && o.name.to_lowercase() == f.name.to_lowercase()
+                })
+        };
+        let mut live: Vec<(i64, FolderId, String)> = live_folders
+            .iter()
+            .filter(|f| !converting(f))
             .map(|f| (f.created_utc, f.folder_id.clone(), f.name.clone()))
             .collect();
         live.sort();
@@ -1777,7 +1792,6 @@ impl Engine {
                 }
             }
         }
-        changed_folders |= self.dedupe_folder_names();
         // Member records of shared folders, readable by every holder of the folder key.
         for (_, backend) in self.metadata_storages(false)? {
             for f in self.keyring.folders.values().filter(|f| f.shared) {
@@ -1808,6 +1822,7 @@ impl Engine {
         }
         // Strongroom conversions and key lists (S-012).
         self.pull_strongroom_records()?;
+        changed_folders |= self.dedupe_folder_names();
         if changed_devices {
             self.save_devices()?;
         }
