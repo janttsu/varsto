@@ -12,6 +12,22 @@ app's private space, fetched when opened, plaintext removed when the vault
 locks) or "plain files on this phone" under Internal storage/Varsto, which
 needs all files access (asked for when that mode is chosen). The page adds
 files through the system file chooser and hands files to other apps through
-a FileProvider (Open with, Share). Play Store packaging, SAF folder access,
-camera upload and the battery-friendly scheduling of plan 6.30/6.36 are
-future work.
+a FileProvider (Open with, Share).
+
+Folders kept encrypted on the phone open in an in-app viewer by default:
+pictures, video, audio and text are streamed from `GET /api/view`, which
+decrypts only the requested byte range in memory, so no plaintext copy is
+written to the phone. PDFs and other types still go to another app, which
+receives a decrypted copy (the page says so before handing one over).
+
+Camera upload (Settings): `CameraUpload.kt` runs inside the foreground
+service. A ContentObserver on MediaStore images and videos, plus power,
+network and a 30-minute timer, triggers a scan; new camera items (and
+screenshots if chosen) are posted to `/api/upload` under `YYYY/MM/` of their
+capture date, and each MediaStore id and date added is remembered in
+`camera-upload-done.txt` so nothing is uploaded twice. Originals are never
+changed or deleted. It asks for READ_MEDIA_IMAGES and READ_MEDIA_VIDEO
+(READ_EXTERNAL_STORAGE before Android 13) when the user turns it on.
+
+Play Store packaging, SAF folder access and the battery-friendly scheduling
+of plan 6.30/6.36 are future work.

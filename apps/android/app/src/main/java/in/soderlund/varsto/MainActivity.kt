@@ -49,6 +49,15 @@ class MainActivity : AppCompatActivity() {
             fileChooser = null
             cb.onReceiveValue(urisOf(result.resultCode, result.data))
         }
+    // Camera upload: the page explained why before asking; it hears back whether access was
+    // granted and whether Android will still ask (false once the user chose "don't ask again").
+    private val askMedia: ActivityResultLauncher<Array<String>> =
+        registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+            val granted = CameraUpload.hasPermission(this)
+            val canAsk = CameraUpload.permissions().any { p -> ActivityCompat.shouldShowRequestPermissionRationale(this, p) }
+            web.evaluateJavascript("window.varstoMediaAccess && window.varstoMediaAccess($granted, ${!granted && !canAsk})", null)
+            if (granted) pokeCameraUpload()
+        }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -139,7 +148,7 @@ class MainActivity : AppCompatActivity() {
         return data.data?.let { arrayOf(it) }
     }
 
-    /** What the page may ask the shell for: all files access, and handing a file to another app. */
+    /** What the page may ask the shell for: all files access, camera upload, and handing a file to another app. */
     inner class Bridge {
         @JavascriptInterface
         fun hasAllFilesAccess(): Boolean =
@@ -158,11 +167,39 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+        /** Camera upload settings and status as JSON (see CameraUpload.Settings.json). */
+        @JavascriptInterface
+        fun cameraUpload(): String = CameraUpload.Settings.json(this@MainActivity)
+
+        @JavascriptInterface
+        fun setCameraUpload(json: String) {
+            CameraUpload.Settings.save(this@MainActivity, org.json.JSONObject(json))
+            pokeCameraUpload()
+        }
+
+        @JavascriptInterface
+        fun hasMediaAccess(): Boolean = CameraUpload.hasPermission(this@MainActivity)
+
+        @JavascriptInterface
+        fun requestMediaAccess() {
+            handler.post { askMedia.launch(CameraUpload.permissions()) }
+        }
+
+        /** This app's page in the system settings, where a refused permission can still be given. */
+        @JavascriptInterface
+        fun openAppSettings() {
+            handler.post { startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName"))) }
+        }
+
         @JavascriptInterface
         fun openFile(path: String) = handOff(path, false)
 
         @JavascriptInterface
         fun shareFile(path: String) = handOff(path, true)
+    }
+
+    private fun pokeCameraUpload() {
+        ContextCompat.startForegroundService(this, Intent(this, VarstoService::class.java).setAction(VarstoService.ACTION_CAMERA_SCAN))
     }
 
     private fun handOff(path: String, share: Boolean) {

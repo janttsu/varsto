@@ -169,6 +169,7 @@
     if (document.body.dataset.view === "app") { $("pagetitle").textContent = pageTitle(page); }
     if (page === "peers") { loadP2p(); }
     if (page === "files") { ensureFiles(); }
+    if (page === "settings" && droid && lastStatus) { refreshAllFiles(); }
     window.scrollTo(0, 0);
   }
   document.querySelectorAll(".nav-item[data-nav], .more-item[data-nav]").forEach(function (b) {
@@ -566,7 +567,7 @@
     });
   };
   var busyCount = 0;
-  function busy(on) { busyCount = Math.max(0, busyCount + (on ? 1 : -1)); document.querySelectorAll("button").forEach(function (b) { if (b.classList.contains("nav-item") || b.classList.contains("more-item") || b.classList.contains("tree-item") || b.classList.contains("folder-card") || b.closest("#modal")) { return; } if (b.dataset.keepDisabled === "1") { return; } b.disabled = busyCount > 0; }); if (busyCount === 0) { updateToolbar(); } }
+  function busy(on) { busyCount = Math.max(0, busyCount + (on ? 1 : -1)); document.querySelectorAll("button").forEach(function (b) { if (b.classList.contains("nav-item") || b.classList.contains("more-item") || b.classList.contains("tree-item") || b.classList.contains("folder-card") || b.closest("#modal") || b.closest("#viewer")) { return; } if (b.dataset.keepDisabled === "1") { return; } b.disabled = busyCount > 0; }); if (busyCount === 0) { updateToolbar(); } }
   function runSync(folder) {
     busy(true); log("sync " + (folder || "all") + " started");
     return api("POST", "/api/sync", folder ? { folder: folder } : {}).then(function (r) {
@@ -628,12 +629,73 @@
       setTimeout(loadFiles, 1500);
     }).catch(function (e) { log((share ? "share" : "open") + " failed: " + e.message); alertBox(e.message); });
   }
+  // Folders kept encrypted on the phone: handing a file to another app writes a decrypted copy,
+  // so say so once per session before the first one.
+  function encryptedHere(folder) { var fs = folderByName(folder); return !!(fs && fs.path && fs.plain === false); }
+  var handOffOk = false;
+  function handOff(folder, f, share) {
+    if (!encryptedHere(folder) || handOffOk) { return openOnPhone(folder, f, share); }
+    confirmBox("Varsto writes a decrypted copy of " + f.path.split("/").pop() + " to this phone and gives it to the app you choose. Varsto removes its copy when it locks; the other app may keep its own.", { title: share ? "Share a decrypted copy?" : "Open in another app?", ok: share ? "Share" : "Open" }).then(function (yes) { if (yes) { handOffOk = true; openOnPhone(folder, f, share); } });
+  }
+
+  // In-app viewer: /api/view decrypts in memory (with range requests for seeking), so pictures,
+  // video, audio and text of an encrypted folder are shown without a plaintext copy on the phone.
+  var VIEW_KINDS = { image: "jpg jpeg png gif webp avif bmp", video: "mp4 m4v webm mov 3gp mkv", audio: "mp3 m4a aac ogg oga opus wav flac", text: "txt md csv log json xml html htm svg js css rs py sh yaml yml toml ini conf", pdf: "pdf" };
+  function viewKind(path) { var ext = (path.split("/").pop().split(".").slice(1).pop() || "").toLowerCase(); for (var k in VIEW_KINDS) { if (ext && (" " + VIEW_KINDS[k] + " ").indexOf(" " + ext + " ") >= 0) { return k; } } return null; }
+  function viewUrl(folder, path) { return "/api/view?folder=" + enc(folder) + "&path=" + enc(path) + "&token=" + enc(token); }
+  var viewer = { folder: "", list: [], i: 0, open: false };
+  function openViewer(folder, list, i) {
+    viewer.folder = folder; viewer.list = list; viewer.i = i;
+    if (!viewer.open) { viewer.open = true; try { history.pushState({ viewer: 1 }, ""); } catch (e) {} }
+    $("viewer").classList.remove("hidden"); document.body.classList.add("modal-open");
+    showViewerItem();
+  }
+  function clearStage() { var st = $("viewer-stage"); st.querySelectorAll("video, audio").forEach(function (m) { m.pause(); m.removeAttribute("src"); m.load(); }); st.innerHTML = ""; }
+  function viewerMsg(text) { var m = el("div", "viewer-msg"); m.appendChild(el("p", null, text)); return m; }
+  function showViewerItem() {
+    var f = viewer.list[viewer.i]; var kind = viewKind(f.path); var url = viewUrl(viewer.folder, f.path);
+    clearStage(); var st = $("viewer-stage");
+    $("viewer-name").textContent = f.path.split("/").pop(); $("viewer-name").title = f.path;
+    $("viewer-prev").disabled = viewer.i <= 0; $("viewer-next").disabled = viewer.i >= viewer.list.length - 1;
+    var fail = function () { clearStage(); st.appendChild(viewerMsg("This file cannot be shown here. Use Open in another app.")); };
+    if (kind === "image") { var im = document.createElement("img"); im.alt = f.path; im.onerror = fail; im.src = url; st.appendChild(im); }
+    else if (kind === "video" || kind === "audio") { var m = document.createElement(kind); m.controls = true; m.preload = "metadata"; m.setAttribute("playsinline", ""); m.onerror = fail; m.src = url; st.appendChild(m); }
+    else if (kind === "text") {
+      // The first 256 KiB is plenty to read; the rest stays where it is.
+      fetch(url, { headers: { Range: "bytes=0-262143" } }).then(function (r) { if (!r.ok) { throw new Error(r.statusText); } return r.text(); }).then(function (t) { if (viewer.list[viewer.i] === f) { st.appendChild(el("pre", null, t + (f.size > 262144 ? "\n…" : ""))); } }).catch(fail);
+    }
+    else { st.appendChild(viewerMsg(kind === "pdf" ? "PDF files cannot be shown inside the app. Open in another app hands a decrypted copy to a PDF viewer." : "This kind of file cannot be shown here. Use Open in another app.")); }
+    $("viewer-open").classList.toggle("hidden", !droid); $("viewer-share").classList.toggle("hidden", !droid);
+  }
+  function closeViewer(fromHistory) {
+    if (!viewer.open) { return; }
+    viewer.open = false; clearStage(); $("viewer").classList.add("hidden"); document.body.classList.remove("modal-open");
+    if (!fromHistory) { try { history.back(); } catch (e) {} }
+  }
+  function stepViewer(d) { var j = viewer.i + d; if (viewer.open && j >= 0 && j < viewer.list.length) { viewer.i = j; showViewerItem(); } }
+  $("viewer-close").onclick = function () { closeViewer(false); };
+  $("viewer-prev").onclick = function () { stepViewer(-1); };
+  $("viewer-next").onclick = function () { stepViewer(1); };
+  $("viewer-open").onclick = function () { handOff(viewer.folder, viewer.list[viewer.i], false); };
+  $("viewer-share").onclick = function () { handOff(viewer.folder, viewer.list[viewer.i], true); };
+  $("viewer-details").onclick = function () { var f = viewer.list[viewer.i]; closeViewer(false); document.querySelectorAll("#files tbody tr").forEach(function (tr) { if (tr.dataset.path === f.path) { selectFile(f, tr); tr.scrollIntoView({ block: "center" }); } }); };
+  // Android's back button goes back in the web view's history: it closes the viewer first.
+  window.addEventListener("popstate", function () { closeViewer(true); });
+  document.addEventListener("keydown", function (ev) { if (!viewer.open) { return; } if (ev.key === "Escape") { closeViewer(false); } else if (ev.key === "ArrowLeft") { stepViewer(-1); } else if (ev.key === "ArrowRight") { stepViewer(1); } });
+  (function () {
+    var x0 = null;
+    $("viewer-stage").addEventListener("touchstart", function (ev) { x0 = ev.touches.length === 1 ? ev.touches[0].clientX : null; }, { passive: true });
+    $("viewer-stage").addEventListener("touchend", function (ev) { if (x0 === null) { return; } var dx = ev.changedTouches[0].clientX - x0; x0 = null; if (Math.abs(dx) > 70) { stepViewer(dx < 0 ? 1 : -1); } });
+  })();
+
   function fileActions(folder, f, full) {
     var out = [];
     if (phoneActions()) {
       if (f.state !== "missing") {
-        var ob = el("button", "secondary"); ob.type = "button"; if (full) { ob.appendChild(icon("open")); } ob.appendChild(document.createTextNode("Open")); ob.onclick = function (ev) { ev.stopPropagation(); openOnPhone(folder, f, false); }; out.push(ob);
-        var sb = el("button", "secondary"); sb.type = "button"; if (full) { sb.appendChild(icon("share")); } sb.appendChild(document.createTextNode("Share")); sb.onclick = function (ev) { ev.stopPropagation(); openOnPhone(folder, f, true); }; out.push(sb);
+        var enc2 = encryptedHere(folder);
+        if (enc2 && viewKind(f.path)) { var vb = el("button", full ? "" : "secondary"); vb.type = "button"; if (full) { vb.appendChild(icon("image")); } vb.appendChild(document.createTextNode("View")); vb.onclick = function (ev) { ev.stopPropagation(); openViewer(folder, [f], 0); }; out.push(vb); }
+        var ob = el("button", "secondary"); ob.type = "button"; if (full) { ob.appendChild(icon("open")); } ob.appendChild(document.createTextNode(enc2 ? "Open in another app" : "Open")); ob.title = enc2 ? "Hands a decrypted copy to the app you choose" : ""; ob.onclick = function (ev) { ev.stopPropagation(); handOff(folder, f, false); }; out.push(ob);
+        var sb = el("button", "secondary"); sb.type = "button"; if (full) { sb.appendChild(icon("share")); } sb.appendChild(document.createTextNode("Share")); sb.title = enc2 ? "Hands a decrypted copy to the app you choose" : ""; sb.onclick = function (ev) { ev.stopPropagation(); handOff(folder, f, true); }; out.push(sb);
       }
     } else if (f.state !== "missing") {
       var open = document.createElement("a"); open.className = "button secondary"; if (full) { open.appendChild(icon("open")); } open.appendChild(document.createTextNode("Open"));
@@ -758,8 +820,9 @@
         tb.appendChild(tr);
       });
       var reselect = null;
+      var viewable = isMobile() && encryptedHere(folder) ? rows.filter(function (r) { return r.state !== "missing" && viewKind(r.path); }) : [];
       rows.forEach(function (f) {
-        var tr = document.createElement("tr");
+        var tr = document.createElement("tr"); tr.dataset.path = f.path;
         function td(t, cls, label) { var d = document.createElement("td"); d.textContent = t; if (cls) { d.className = cls; } if (label) { d.dataset.label = label; } tr.appendChild(d); }
         var nameCell = document.createElement("td"); var wrap = el("span", "file-name");
         wrap.appendChild(stateSquare(f));
@@ -772,7 +835,8 @@
         var act = document.createElement("td");
         fileActions(folder, f, false).forEach(function (b) { act.appendChild(b); });
         tr.appendChild(act); tb.appendChild(tr);
-        tr.onclick = function () { if (selectedFile && selectedFile.path === f.path && tr.classList.contains("selected")) { clearSelection(); } else { selectFile(f, tr); } };
+        var vi = viewable.indexOf(f);
+        tr.onclick = vi >= 0 ? function () { openViewer(folder, viewable, vi); } : function () { if (selectedFile && selectedFile.path === f.path && tr.classList.contains("selected")) { clearSelection(); } else { selectFile(f, tr); } };
         if (keep && f.path === keep) { reselect = { f: f, tr: tr }; }
       });
       if (reselect) { selectFile(reselect.f, reselect.tr); } else { clearSelection(); }
@@ -908,7 +972,66 @@
     $("allfiles-state").textContent = ok ? "Allowed: plain-file folders go to Internal storage/Varsto." : "Not allowed yet: folders can only be kept encrypted on this phone.";
     $("allfilesbtn").textContent = ok ? "Open the permission settings" : "Allow all files access";
     document.querySelectorAll(".mode-hint").forEach(function (h) { if (ok) { h.classList.add("hidden"); } });
+    if (typeof refreshCamera === "function") { refreshCamera(); }
   }
+  // Android: camera upload settings (Settings card). The shell keeps them and does the uploading;
+  // the page chooses the folder, explains the media permission and shows the status.
+  var camNew = "\u0000new";
+  function camSettings() { try { return JSON.parse(droid.cameraUpload()); } catch (e) { return null; } }
+  function refreshCamera() {
+    var cs = droid && droid.cameraUpload ? camSettings() : null;
+    $("cameracard").classList.toggle("hidden", !cs);
+    if (!cs) { return; }
+    var sel = $("cam-folder"); var names = ((lastStatus && lastStatus.folders) || []).filter(function (f) { return f.path; }).map(function (f) { return f.name; });
+    sel.innerHTML = "";
+    names.forEach(function (n) { var o = document.createElement("option"); o.value = n; o.textContent = n; sel.appendChild(o); });
+    if (cs.folder && names.indexOf(cs.folder) < 0) { var o2 = document.createElement("option"); o2.value = cs.folder; o2.textContent = cs.folder + " (not on this phone)"; sel.appendChild(o2); }
+    var nw = document.createElement("option"); nw.value = camNew; nw.textContent = "New folder…"; sel.appendChild(nw);
+    sel.value = cs.folder || (names.indexOf("Camera") >= 0 ? "Camera" : camNew);
+    $("cam-on").checked = cs.enabled; $("cam-wifi").checked = cs.wifi_only; $("cam-charging").checked = cs.charging_only; $("cam-shots").checked = cs.screenshots;
+    var line = !cs.enabled ? "Off." : !cs.permission ? "Access to photos and videos is not allowed; turn camera upload off and on again to allow it." : cs.message ? cs.message + "." : "On: new photos and videos go to " + cs.folder + ".";
+    if (cs.uploaded) { line += " " + cs.uploaded + " uploaded so far" + (cs.last_upload ? ", last on " + new Date(cs.last_upload * 1000).toLocaleString() : "") + "."; }
+    $("cam-state").textContent = line;
+  }
+  function saveCamera(enabled) {
+    droid.setCameraUpload(JSON.stringify({ enabled: enabled, folder: $("cam-folder").value === camNew ? "" : $("cam-folder").value, wifi_only: $("cam-wifi").checked, charging_only: $("cam-charging").checked, screenshots: $("cam-shots").checked }));
+    refreshCamera();
+  }
+  // A new folder for the uploads (kept encrypted on the phone, like any folder added here).
+  function cameraFolder() {
+    if ($("cam-folder").value !== camNew) { return Promise.resolve($("cam-folder").value); }
+    return dialog({ title: "Folder for camera upload", fields: [{ name: "name", label: "Name", value: folderByName("Camera") ? "" : "Camera", required: true }], ok: "Create" }).then(function (r) {
+      if (!r) { return null; }
+      var name = r.values.name.trim();
+      if (folderByName(name)) { return name; }
+      return api("POST", "/api/folder", { name: name }).then(function () { log("folder added: " + name); return refreshStatus(); }).then(function () { return name; });
+    });
+  }
+  var camPending = null;
+  window.varstoMediaAccess = function (granted, blocked) {
+    var then = camPending; camPending = null;
+    if (granted) { if (then) { then(); } return; }
+    $("cam-on").checked = false; saveCamera(false);
+    if (blocked) { confirmBox("Android no longer asks for this permission. Open Varsto's app settings and allow Photos and videos there.", { title: "Access was refused", ok: "Open app settings" }).then(function (yes) { if (yes) { droid.openAppSettings(); } }); }
+  };
+  $("cam-on").onchange = function () {
+    if (!$("cam-on").checked) { saveCamera(false); return; }
+    cameraFolder().then(function (name) {
+      if (!name) { $("cam-on").checked = false; return refreshCamera(); }
+      refreshCamera(); $("cam-folder").value = name; $("cam-on").checked = true;
+      if (droid.hasMediaAccess()) { saveCamera(true); return; }
+      return dialog({ title: "Allow access to photos and videos?", text: "Camera upload reads new photos and videos on this phone and uploads them to " + name + ", encrypted. Varsto only reads them: the originals are never changed or deleted. Android asks you next.", ok: "Continue" }).then(function (r) {
+        if (!r) { $("cam-on").checked = false; return; }
+        camPending = function () { saveCamera(true); };
+        droid.requestMediaAccess();
+      });
+    }).catch(function (e) { $("cam-on").checked = false; alertBox(e.message); });
+  };
+  $("cam-folder").onchange = function () {
+    if ($("cam-folder").value === camNew) { cameraFolder().then(function (name) { refreshCamera(); if (name) { $("cam-folder").value = name; saveCamera($("cam-on").checked); } }).catch(function (e) { alertBox(e.message); }); return; }
+    saveCamera($("cam-on").checked);
+  };
+  ["cam-wifi", "cam-charging", "cam-shots"].forEach(function (id) { $(id).onchange = function () { saveCamera($("cam-on").checked); }; });
   $("allfilesbtn").onclick = function () { if (droid) { try { droid.requestAllFilesAccess(); } catch (e) { alertBox(e.message); } } else { alertBox("Only the Android app can ask for this permission."); } };
   // The shell calls this when the activity resumes (back from the settings screen); browsers get visibilitychange.
   window.varstoResumed = function () { refreshAllFiles(); if (document.body.dataset.view === "app") { refreshStatus(); } };
