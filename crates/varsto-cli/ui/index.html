@@ -385,7 +385,9 @@
       <div class="card">
         <h2 class="card-title">Durability policies</h2>
         <p class="muted small">A policy states how many copies a folder must have, where, and how recently another device must have verified them. Varsto checks it against the ledger on every sync and tells you before a rule is broken.</p>
-        <ul id="policylist" class="list"></ul>
+        <div class="table-scroll desktop-only"><table id="policygrid"><thead><tr></tr></thead><tbody></tbody></table></div>
+        <div class="actions desktop-only"><button id="policysave" type="button" disabled>Save policies</button><span class="muted small">0 means no rule; a row of zeros removes the folder's policy.</span></div>
+        <ul id="policylist" class="list mobile-only"></ul>
         <div id="policylist-empty" class="empty-state hidden"><div class="empty-icon"><svg class="icon"><use href="#i-policies"/></svg></div><p class="empty-title">No folders yet</p><p class="muted">Policies are set per folder.</p></div>
       </div>
     </div>

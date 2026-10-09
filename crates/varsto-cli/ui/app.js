@@ -198,26 +198,80 @@
   function editPolicy(f) {
     api("GET", "/api/policy").then(function (p) {
       var cur = null; (p.policies || []).forEach(function (x) { if (x.folder === f.name) { cur = x.policy; } });
-      var places = (cur && cur.min_per_place) || {};
+      var places = (cur && cur.min_per_place) || {}; var names = policyPlaces(p);
+      var fields = [{ name: "min_copies", label: "Copies on any storage", type: "number", value: cur ? cur.min_copies || 0 : 2 }];
+      names.forEach(function (pl) { fields.push({ name: "place:" + pl, label: "Copies in place '" + pl + "'", type: "number", value: cur ? places[pl] || 0 : (pl === "cloud" || pl === "home" ? 1 : 0) }); });
+      fields.push({ name: "days", label: "Every block verified by another device within (days)", type: "number", value: cur ? cur.verified_within_days || 0 : 30 });
       return dialog({
         title: (cur ? "Policy for " : "Set a policy for ") + f.name,
         text: "Minimums that Varsto checks against the ledger on every sync. 0 means no rule.",
-        fields: [
-          { name: "min_copies", label: "Copies on any storage", type: "number", value: cur ? cur.min_copies || 0 : 2 },
-          { name: "cloud", label: "Copies in place 'cloud'", type: "number", value: cur ? places.cloud || 0 : 1 },
-          { name: "home", label: "Copies in place 'home'", type: "number", value: cur ? places.home || 0 : 1 },
-          { name: "days", label: "Every block verified by another device within (days)", type: "number", value: cur ? cur.verified_within_days || 0 : 30 }
-        ],
+        fields: fields,
         ok: cur ? "Save" : "Set policy", extra: cur ? "Clear policy" : null
-      });
-    }).then(function (r) {
-      if (!r) { return; }
-      var v = r.values; var n = function (k) { return Math.max(0, Math.floor(+v[k]) || 0); };
-      var clear = r.action === "extra" || (n("min_copies") === 0 && n("cloud") === 0 && n("home") === 0 && n("days") === 0);
-      return api("POST", "/api/policy", { folder: f.name, clear: clear, min_copies: n("min_copies"), verified_within_days: n("days"), places: { cloud: n("cloud"), home: n("home") } })
+      }).then(function (r) { return r && { r: r, names: names }; });
+    }).then(function (res) {
+      if (!res) { return; }
+      var r = res.r; var v = r.values; var n = function (k) { return Math.max(0, Math.floor(+v[k]) || 0); };
+      var pl = {}; var total = n("min_copies") + n("days");
+      res.names.forEach(function (k) { pl[k] = n("place:" + k); total += pl[k]; });
+      var clear = r.action === "extra" || total === 0;
+      return api("POST", "/api/policy", { folder: f.name, clear: clear, min_copies: n("min_copies"), verified_within_days: n("days"), places: pl })
         .then(function () { log(clear ? "policy cleared for " + f.name : "policy set for " + f.name); return refreshStatus(); });
     }).catch(function (e) { alertBox(e.message); });
   }
+  // Places a policy can name: those of the storages, those already in use, and the two defaults.
+  function policyPlaces(p) {
+    var set = { home: 1, cloud: 1 };
+    ((lastStatus && lastStatus.storages) || []).forEach(function (st) { if (!st.carrier) { set[st.place || "home"] = 1; } });
+    ((p && p.policies) || []).forEach(function (x) { if (x.policy) { Object.keys(x.policy.min_per_place || {}).forEach(function (k) { set[k] = 1; }); } });
+    return Object.keys(set).sort();
+  }
+  function openPolicy(f) {
+    if (isMobile()) { editPolicy(f); return; }
+    nav("policies");
+    var row = document.querySelector('#policygrid tr[data-folder="' + (window.CSS && CSS.escape ? CSS.escape(f.name) : f.name) + '"]');
+    if (row) { row.scrollIntoView({ block: "center" }); var i = row.querySelector("input"); if (i) { i.focus(); i.select(); } }
+  }
+  // Desktop: every folder's rules in one table, saved together.
+  function renderPolicyGrid(p) {
+    if (document.querySelector("#policygrid tbody tr.changed")) { return; }
+    var places = policyPlaces(p); var reports = {}; (p.reports || []).forEach(function (r) { reports[r.folder] = r; });
+    var head = document.querySelector("#policygrid thead tr"); head.innerHTML = "";
+    ["Folder", "Status", "Copies on any storage"].concat(places.map(function (pl) { return "Copies in '" + pl + "'"; })).concat(["Verified by another device within (days)"]).forEach(function (h) { head.appendChild(el("th", null, h)); });
+    var body = document.querySelector("#policygrid tbody"); body.innerHTML = "";
+    var member = !!(lastStatus && lastStatus.member);
+    (p.policies || []).forEach(function (x) {
+      var pol = x.policy || {}; var per = pol.min_per_place || {}; var r = reports[x.folder];
+      var tr = el("tr"); tr.dataset.folder = x.folder;
+      tr.appendChild(el("td", "policy-folder", x.folder));
+      var stc = el("td", "policy-state"); stc.appendChild(r ? pill(stateClass(r.state), stateLabel(r.state)) : pill("grey", x.policy ? "Unchecked" : "No policy"));
+      stc.appendChild(el("div", "muted small", x.text || "No rule set."));
+      (r ? r.reasons.concat(r.warnings) : []).forEach(function (w) { stc.appendChild(el("div", "small", w)); });
+      tr.appendChild(stc);
+      var num = function (key, val, label) {
+        var c = el("td", "num"); var i = document.createElement("input"); i.type = "number"; i.min = "0"; i.step = "1"; i.value = val || 0; i.dataset.key = key; i.disabled = member; i.setAttribute("aria-label", x.folder + ": " + label);
+        i.oninput = function () { tr.classList.add("changed"); $("policysave").disabled = false; };
+        c.appendChild(i); tr.appendChild(c);
+      };
+      num("min_copies", pol.min_copies, "copies on any storage");
+      places.forEach(function (pl) { num("place:" + pl, per[pl], "copies in " + pl); });
+      num("days", pol.verified_within_days, "verified within days");
+      body.appendChild(tr);
+    });
+    $("policysave").disabled = true;
+  }
+  $("policysave").onclick = function () {
+    var rows = Array.prototype.slice.call(document.querySelectorAll("#policygrid tbody tr.changed"));
+    if (!rows.length) { return; }
+    busy(true);
+    rows.reduce(function (chain, tr) {
+      return chain.then(function () {
+        var body = { folder: tr.dataset.folder, places: {} }; var total = 0;
+        tr.querySelectorAll("input").forEach(function (i) { var n = Math.max(0, Math.floor(+i.value) || 0); total += n; var k = i.dataset.key; if (k === "min_copies") { body.min_copies = n; } else if (k === "days") { body.verified_within_days = n; } else { body.places[k.slice(6)] = n; } });
+        body.clear = total === 0;
+        return api("POST", "/api/policy", body).then(function () { tr.classList.remove("changed"); log((body.clear ? "policy cleared for " : "policy saved for ") + body.folder); });
+      });
+    }, Promise.resolve()).catch(function (e) { alertBox(e.message); }).then(function () { busy(false); return refreshStatus(); });
+  };
   function shareFolder(f) {
     dialog({
       title: (f.shared ? "New token for " : "Share ") + f.name,
@@ -267,7 +321,7 @@
         var act = document.createElement("td");
         if (f.path) { var b = document.createElement("button"); b.className = "secondary"; b.textContent = "Sync"; b.onclick = function () { runSync(f.name); }; act.appendChild(b); }
         if (!s.member) { var sh = document.createElement("button"); sh.className = "secondary"; sh.textContent = f.shared ? "Token" : "Share"; sh.onclick = function () { shareFolder(f); }; act.appendChild(sh); }
-        if (!s.member) { var pb = document.createElement("button"); pb.className = "secondary"; pb.textContent = "Policy"; pb.onclick = function () { editPolicy(f); }; act.appendChild(pb); }
+        if (!s.member) { var pb = document.createElement("button"); pb.className = "secondary"; pb.textContent = "Policy"; pb.onclick = function () { openPolicy(f); }; act.appendChild(pb); }
         if (f.strongroom && f.strongroom !== "locked") { var lk = document.createElement("button"); lk.className = "secondary"; lk.textContent = "Lock"; lk.onclick = function () { api("POST", "/api/strongroom/lock", { folder: f.name }).then(function () { log("locked " + f.name); return refreshStatus(); }).catch(function (e) { alertBox(e.message); }); }; act.appendChild(lk); }
         if (f.strongroom === "locked") { var note = document.createElement("span"); note.className = "muted"; note.textContent = "unlock with: varsto strongroom unlock " + f.name; act.appendChild(note); }
         tr.appendChild(act); tb.appendChild(tr);
@@ -333,14 +387,15 @@
       updateFilesHead();
       if (fsel.options.length === 0) { showFolderForms(true); } else if (s.folders.length > 0 && $("folderforms").dataset.user !== "1") { showFolderForms(false); }
       api("GET", "/api/policy").then(function (p) {
+        renderPolicyGrid(p);
         var lines = [];
         (p.reports || []).forEach(function (r) {
           var label = stateLabel(r.state); var cls = stateClass(r.state);
           var cell = document.querySelector('[data-policy-for="' + r.folder + '"]');
           if (cell) { var old = cell.querySelector(".pill"); if (old) { old.replaceWith(pill(cls, label)); } }
           var row = document.querySelector('[data-policy-row="' + r.folder + '"]');
-          if (row) { var rp = row.querySelector(".pill"); if (rp) { rp.replaceWith(pill(cls, label)); } var sub = row.querySelector(".li-sub"); var extra = r.reasons.concat(r.warnings).join(" "); if (sub && extra) { sub.textContent = sub.textContent + " — " + extra; } }
-          if (r.state !== "ok") { lines.push(r.folder + ": " + label + ". " + r.reasons.concat(r.warnings).join(" ")); }
+          if (row) { var rp = row.querySelector(".pill"); if (rp) { rp.replaceWith(pill(cls, label)); } var sub = row.querySelector(".li-sub"); var extra = r.reasons.concat(r.warnings).join("; "); if (sub && extra) { sub.textContent = sub.textContent + " — " + extra; } }
+          if (r.state !== "ok") { lines.push(r.folder + ": " + label + ". " + r.reasons.concat(r.warnings).join("; ") + "."); }
         });
         $("policybanner").textContent = lines.join(" ");
         $("policybanner").classList.toggle("hidden", lines.length === 0);

@@ -94,7 +94,8 @@
 }
 
 * { box-sizing: border-box; }
-html, body { height: 100%; }
+html { height: 100%; }
+body { min-height: 100%; }
 body {
   margin: 0;
   background: var(--bg);
@@ -353,7 +354,7 @@ td:last-child { white-space: nowrap; text-align: right; }
 td.bad { color: var(--bad-text); font-weight: 600; }
 td .sub { display: block; font-weight: 400; font-size: 12.5px; color: var(--muted); max-width: 250px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 2px; }
 td .pill + .pill { margin-left: 4px; }
-td .policy-text { display: block; font-size: 12px; color: var(--muted); margin-top: 4px; max-width: 128px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+td .policy-text { display: block; font-size: 12px; color: var(--muted); margin-top: 4px; min-width: 160px; white-space: normal; overflow-wrap: anywhere; }
 td .muted { font-size: 12.5px; }
 #files tbody tr { cursor: pointer; }
 #files td:first-child { white-space: normal; }
@@ -598,3 +599,11 @@ body[data-mobile="1"] #files td:nth-child(3), body[data-mobile="1"] #files td:nt
 body[data-mobile="1"] .empty-state { padding: 32px 8px 24px; }
 
 .pair-code { font: 600 2rem/1.2 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing: 0.08em; margin: 0.75rem 0 0.25rem; color: var(--text); }
+.table-scroll { overflow-x: auto; }
+#policygrid td, #policygrid th { vertical-align: top; }
+#policygrid th { white-space: normal; font-size: 12.5px; }
+#policygrid .policy-state { min-width: 220px; white-space: normal; }
+#policygrid .policy-state .small { margin-top: 4px; }
+#policygrid input[type=number] { width: 5.5em; }
+#policygrid tr.changed td.policy-folder { font-weight: 600; }
+#policygrid tr.changed td.policy-folder::after { content: " (edited)"; font-weight: 400; color: var(--muted); }
