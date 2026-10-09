@@ -121,7 +121,7 @@ fn handle_unlocked(fixed: &Fixed, request: Request) -> Result<Option<Request>> {
         "/" => request.respond(html(INDEX_HTML))?,
         "/app.js" => request.respond(text(APP_JS, "text/javascript; charset=utf-8"))?,
         "/app.css" => request.respond(text(APP_CSS, "text/css; charset=utf-8"))?,
-        "/api/p2p/traffic" => {
+        "/api/p2p/traffic" | "/api/progress" => {
             let token_ok = request
                 .headers()
                 .iter()
@@ -131,6 +131,10 @@ fn handle_unlocked(fixed: &Fixed, request: Request) -> Result<Option<Request>> {
                     401,
                     &json!({"error": "missing or wrong token; reopen the start URL"}),
                 ))?;
+            } else if path == "/api/progress" {
+                // The download running now, answered while it holds the engine.
+                let p = serde_json::to_value(varsto_core::progress::current())?;
+                request.respond(json_response(200, &json!({ "download": p })))?;
             } else {
                 let report = serde_json::to_value(fixed.traffic.report())?;
                 request.respond(json_response(200, &report))?;

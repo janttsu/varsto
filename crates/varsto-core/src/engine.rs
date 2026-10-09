@@ -3023,6 +3023,7 @@ impl Engine {
             fs::create_dir_all(parent)?;
         }
         let tmp = disk.with_file_name(format!(".varsto-tmp-{}", std::process::id()));
+        let progress = crate::progress::Download::begin(&rec.name, &file.path, file.size);
         {
             let mut out = fs::File::create(&tmp)?;
             for cref in &file.chunks {
@@ -3081,6 +3082,7 @@ impl Engine {
                     bail!("chunk {} failed its content check", cref.chunk.short());
                 }
                 out.write_all(&plain)?;
+                progress.advance(plain.len() as u64);
                 report.chunks_downloaded += 1;
                 report.bytes_downloaded += plain.len() as u64;
                 self.pending.push(Event::ChunkVerified {

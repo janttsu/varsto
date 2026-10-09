@@ -30,11 +30,29 @@
     if (working > 0 && !barTimer) { barTimer = setTimeout(function () { if (working > 0) { $("workbar").classList.add("on"); } }, 300); }
     if (working === 0) { clearTimeout(barTimer); barTimer = null; $("workbar").classList.remove("on"); }
   }
+  // While a pressed button downloads a file, the note under it shows how far.
+  function followDownload(b) {
+    var stop = false;
+    (function tick() {
+      if (stop) { return; }
+      fetch("/api/progress", { headers: { "X-Varsto-Token": token } }).then(function (r) { return r.json(); }).then(function (j) {
+        if (stop) { return; }
+        var d = j.download;
+        if (d && d.total > 0) {
+          var note = b.nextElementSibling && b.nextElementSibling.classList.contains("busy-note") ? b.nextElementSibling : null;
+          if (!note) { note = el("span", "busy-note muted small"); b.after(note); }
+          note.textContent = "Downloading " + d.path.split("/").pop() + ": " + fmtBytes(d.done) + " of " + fmtBytes(d.total) + " (" + d.percent + " %" + (d.bytes_per_sec > 0 ? ", " + fmtBytes(d.bytes_per_sec) + "/s" : "") + ")";
+        }
+      }).catch(function () {}).then(function () { if (!stop) { setTimeout(tick, 400); } });
+    })();
+    return function () { stop = true; };
+  }
   function api(method, path, body) {
     var b = pressed(); var loud = !!b || method !== "GET";
     if (b) { markBusy(b, true); }
     if (loud) { workBar(true); }
-    var done = function () { if (b) { markBusy(b, false); } if (loud) { workBar(false); } };
+    var unfollow = b && /^\/api\/(fetch|paths|sync|view)/.test(path) ? followDownload(b) : null;
+    var done = function () { if (unfollow) { unfollow(); } if (b) { markBusy(b, false); } if (loud) { workBar(false); } };
     return fetch(path, { method: method, headers: { "X-Varsto-Token": token, "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined })
       .then(function (r) { return r.json().then(function (j) { if (!r.ok) { throw new Error(j.error || r.statusText); } return j; }); })
       .then(function (j) { done(); return j; }, function (e) { done(); throw e; });
