@@ -109,11 +109,23 @@ pub struct FolderCost {
 }
 
 /// A placement change Varsto can carry out: keep a folder's idle files only
-/// on the storages (cheapest first) and free their copies on this device.
+/// on the storages (cheapest first) and free their copies on this device
+/// (`free-idle`), or move their blocks to a cheaper cold storage
+/// (`cold-idle`).
 #[derive(Clone, Debug, Serialize)]
 pub struct Suggestion {
-    /// Stable id for `varsto advice apply` and the API: `free-idle:<folder>`.
+    /// Stable id for `varsto advice apply` and the API: `free-idle:<folder>`
+    /// or `cold-idle:<folder>`.
     pub id: String,
+    /// "free-idle" or "cold-idle".
+    pub kind: String,
+    /// For a move: the storage the blocks leave and the one they go to.
+    pub move_from: Option<String>,
+    pub move_to: Option<String>,
+    /// For a move: what the storage bill goes down by per month.
+    pub monthly_saving: Costs,
+    /// For a move: reading blocks this device lacks from the old storage once.
+    pub one_time_cost: Costs,
     pub folder: String,
     /// Idle files that are on this device and not pinned.
     pub files: u64,
@@ -140,6 +152,8 @@ pub struct Suggestion {
 
 /// Prefix of a "free idle files" suggestion id.
 pub const FREE_IDLE_PREFIX: &str = "free-idle:";
+/// Prefix of a "move idle files to cold storage" suggestion id.
+pub const COLD_IDLE_PREFIX: &str = "cold-idle:";
 
 /// What carrying out a suggestion did.
 #[derive(Clone, Debug, Serialize, Default)]
@@ -152,6 +166,9 @@ pub struct ApplyReport {
     pub blocks_verified: u64,
     /// Files left on this device, with the reason.
     pub skipped: Vec<(String, String)>,
+    /// What a `cold-idle` move did.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub moved: Option<crate::placement::MoveReport>,
 }
 
 fn num(v: &serde_json::Value) -> Option<f64> {

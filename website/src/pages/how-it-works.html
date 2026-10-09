@@ -219,7 +219,7 @@ description: How Varsto works: your devices and your own storages, encrypted blo
       <li><strong>Convergent encryption</strong> inside a folder lets co-holders of the folder key confirm identical files.</li>
       <li><strong>Removing a device</strong> protects what is written afterwards, not what the device already held: existing data is not re-encrypted, shared and Strongroom folders keep their keys, and storage credentials are not rotated. Until a second factor exists, any of your devices can remove any other.</li>
       <li><strong>The ledger</strong> has no proof of storage, rollback detection is untested, and keeping it compact over years is still being built.</li>
-      <li><strong>Placement.</strong> Every block goes to every storage of a device; moving data between storages (keeping only a cold copy of idle files) is not built.</li>
+      <li><strong>Placement.</strong> A folder can be written to chosen storages or places, and blocks can be moved between storages (keeping only a cold copy of idle files). Files whose blocks are only on cold storage are not fetched until you move them back, and devices on 0.0.1-alpha.8 or older stop syncing once a move is recorded.</li>
       <li><strong>Strongroom</strong> protects the folder key, not a file you fetched and left on disk; the recovery kit does not cover Strongroom folders.</li>
       <li><strong>The vault key</strong> is a single secret. Keep the recovery kit in more than one place.</li>
     </ul>

@@ -50,6 +50,7 @@ impl Lab {
             min_reserve_bytes: 2 * GIB,
             disks: vec![],
             scan_roots: vec![self.mounts.clone()],
+            copies: 1,
         }
     }
     fn box_spec(&self) -> StorageSpec {

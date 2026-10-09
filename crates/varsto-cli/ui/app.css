@@ -359,6 +359,9 @@ td:last-child { white-space: nowrap; text-align: right; }
 td.bad { color: var(--bad-text); font-weight: 600; }
 td .sub { display: block; font-weight: 400; font-size: 12.5px; color: var(--muted); max-width: 250px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 2px; }
 td .pill + .pill { margin-left: 4px; }
+td.policy-placement { min-width: 140px; white-space: normal; }
+td.policy-placement button { margin-top: 4px; }
+.pool-group button { margin-top: 4px; }
 td .policy-text { display: block; font-size: 12px; color: var(--muted); margin-top: 4px; min-width: 160px; white-space: normal; overflow-wrap: anywhere; }
 td .muted { font-size: 12.5px; }
 #files tbody tr { cursor: pointer; }

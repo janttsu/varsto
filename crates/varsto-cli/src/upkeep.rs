@@ -137,7 +137,7 @@ pub fn verify(cli: &Cli, home: &Path, cmd: &Option<VerifyCmd>) -> Result<()> {
     Ok(())
 }
 
-fn ask(question: &str) -> Result<bool> {
+pub(crate) fn ask(question: &str) -> Result<bool> {
     use std::io::{BufRead, IsTerminal, Write};
     if !std::io::stdin().is_terminal() {
         bail!("confirmation needed: run from a terminal or pass --yes");
@@ -237,6 +237,13 @@ pub fn advice(cli: &Cli, home: &Path, idle_days: i64, cmd: &Option<AdviceCmd>) -
             }
             let r = engine.apply_suggestion(&s.id, idle_days)?;
             print(cli, &r, |r| {
+                if let Some(m) = &r.moved {
+                    let mut out = m.summary.clone();
+                    for (block, why) in &m.kept {
+                        out += &format!("\n  kept {block}: {why}");
+                    }
+                    return out;
+                }
                 let mut out = format!(
                     "{}: {} files freed ({}) on this device{}",
                     r.folder,
