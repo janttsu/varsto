@@ -576,6 +576,13 @@ impl Peers {
         self.peers.is_empty()
     }
 
+    /// Carry the remembered routes and address states over from the table
+    /// this one replaces, so a rebuild (every sync) forgets nothing.
+    pub fn inherit(&self, previous: &Peers) {
+        *self.routes.lock().unwrap() = previous.routes.lock().unwrap().clone();
+        *self.state.lock().unwrap() = previous.state.lock().unwrap().clone();
+    }
+
     /// Peers worth asking now: unreachable ones rest for a minute, the ones
     /// with a working route go first.
     fn ordered(&self) -> Vec<PeerInfo> {

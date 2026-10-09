@@ -429,7 +429,12 @@ impl P2p {
             &lan,
             self.quic.clone(),
         ));
-        *self.peers.lock().unwrap() = Some(p.clone());
+        let mut slot = self.peers.lock().unwrap();
+        if let Some(prev) = slot.as_ref() {
+            p.inherit(prev);
+        }
+        *slot = Some(p.clone());
+        drop(slot);
         e.set_peers(Some(p));
     }
 
