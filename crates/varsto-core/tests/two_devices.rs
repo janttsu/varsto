@@ -853,3 +853,45 @@ fn strongroom_folder_needs_the_security_key_on_every_device() {
     assert_eq!(a.strongrooms().len(), 1);
     assert!(a.strongrooms()[0].2.is_some());
 }
+
+#[test]
+fn many_chunk_files_arrive_in_order_and_a_missing_chunk_fails_the_file() {
+    // A file of many chunks is fetched with several requests in flight; the
+    // pieces must still land in order, and one missing object in the middle
+    // must leave no partial file behind.
+    let lab = lab();
+    let (mut a, key) = Engine::init(&lab.a_home, "laptop", PASS).unwrap();
+    a.chunker = ChunkerParams::SMALL;
+    a.add_storage(lab.storage.clone()).unwrap();
+    a.add_folder("docs", &lab.a_dir).unwrap();
+    let big = pseudo_random(400_000, 7);
+    fs::write(lab.a_dir.join("big.bin"), &big).unwrap();
+    a.push("docs").unwrap();
+
+    let chunks_dir = lab.a_home.with_file_name("storage").join("chunks");
+    let objects: Vec<PathBuf> = walkdir::WalkDir::new(&chunks_dir)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().is_file())
+        .map(|e| e.path().to_path_buf())
+        .collect();
+    assert!(objects.len() > 20, "{} chunks", objects.len());
+    let hidden = lab.a_home.with_file_name("hidden-object");
+    fs::rename(&objects[objects.len() / 2], &hidden).unwrap();
+
+    let mut b = Engine::join(&lab.b_home, "desk", PASS, &key, lab.storage.clone()).unwrap();
+    b.chunker = ChunkerParams::SMALL;
+    b.attach_folder("docs", &lab.b_dir, false).unwrap();
+    let r = b.pull("docs").unwrap();
+    assert_eq!(r.files_unavailable.len(), 1, "{:?}", r.files_unavailable);
+    assert!(
+        tree(&lab.b_dir).is_empty(),
+        "a partial file was left behind"
+    );
+
+    fs::rename(&hidden, &objects[objects.len() / 2]).unwrap();
+    let r = b.pull("docs").unwrap();
+    assert!(r.files_unavailable.is_empty(), "{:?}", r.files_unavailable);
+    assert_eq!(r.chunks_downloaded as usize, objects.len());
+    assert_eq!(fs::read(lab.b_dir.join("big.bin")).unwrap(), big);
+}
