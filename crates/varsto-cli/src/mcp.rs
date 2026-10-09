@@ -222,7 +222,7 @@ impl Backend {
                     json!({"folder": folder, "path": path, "text": String::from_utf8_lossy(bytes)}),
                 ),
             ),
-            Backend::Direct(e) => Ok(serde_json::to_value(e.write_file(folder, path, bytes)?)?),
+            Backend::Direct(e) => Ok(serde_json::to_value(e.create_file(folder, path, bytes)?)?),
         }
     }
     fn sync(&mut self, folder: Option<&str>) -> Result<Value> {
@@ -263,11 +263,11 @@ fn tools() -> Value {
          "inputSchema": {"type": "object", "properties": {"folder": {"type": "string"}}, "required": ["folder"]}},
         {"name": "varsto_read", "description": "Read a file (text, up to 512 KiB; fetched first if it is a placeholder). Counts as an access.",
          "inputSchema": {"type": "object", "properties": {"folder": {"type": "string"}, "path": {"type": "string"}}, "required": ["folder", "path"]}},
-        {"name": "varsto_move", "description": "Move or rename a file inside a folder (needs a read-write grant); the change syncs to the other devices. Use it to reorganise: group by year, project or topic after reading the files.",
+        {"name": "varsto_move", "description": "Move or rename a file inside a folder (needs a read-write grant); the change syncs to the other devices. Use it to reorganise: group by year, project or topic after reading the files. The target name must be free: a move never replaces another file.",
          "inputSchema": {"type": "object", "properties": {"folder": {"type": "string"}, "from": {"type": "string"}, "to": {"type": "string"}}, "required": ["folder", "from", "to"]}},
         {"name": "varsto_mkdir", "description": "Create a directory inside a folder (read-write grant).",
          "inputSchema": {"type": "object", "properties": {"folder": {"type": "string"}, "path": {"type": "string"}}, "required": ["folder", "path"]}},
-        {"name": "varsto_write", "description": "Create or overwrite a text file inside a folder (read-write grant), for example a summary, an index or notes about what you organised; the file syncs like any other.",
+        {"name": "varsto_write", "description": "Create a new text file inside a folder (read-write grant), for example a summary, an index or notes about what you organised; the file syncs like any other. Existing files are never overwritten: pick a new name.",
          "inputSchema": {"type": "object", "properties": {"folder": {"type": "string"}, "path": {"type": "string"}, "text": {"type": "string"}}, "required": ["folder", "path", "text"]}},
         {"name": "varsto_sync", "description": "Sync one folder or all granted folders now.",
          "inputSchema": {"type": "object", "properties": {"folder": {"type": "string"}}}},
@@ -464,7 +464,7 @@ pub fn serve(home: &Path) -> Result<()> {
                 "protocolVersion": PROTOCOL_VERSION,
                 "capabilities": {"tools": {"listChanged": false}},
                 "serverInfo": {"name": "varsto", "version": env!("CARGO_PKG_VERSION")},
-                "instructions": "Varsto keeps the user's files encrypted on their own storage. You see only the folders the user granted (varsto mcp grant), read-only unless the grant says rw. Typical work: read files, analyse and summarise them, propose and carry out a tidier structure with varsto_mkdir and varsto_move, and leave notes or indexes with varsto_write. Paths are relative to the folder. last_accessed_utc is Varsto's own record of use on this device."
+                "instructions": "Varsto keeps the user's files encrypted on their own storage. You see only the folders the user granted (varsto mcp grant), read-only unless the grant says rw. Typical work: read files, analyse and summarise them, propose and carry out a tidier structure with varsto_mkdir and varsto_move, and leave notes or indexes with varsto_write. Files are never deleted or replaced: there is no delete tool, varsto_write only creates new files and varsto_move only moves or renames to a free name. Paths are relative to the folder. last_accessed_utc is Varsto's own record of use on this device."
             })),
             "notifications/initialized" | "notifications/cancelled" => continue,
             "ping" => Ok(json!({})),

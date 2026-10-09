@@ -2,6 +2,7 @@
 //! The MCP server end to end: a vault with one folder, grants, then a client
 //! speaking JSON-RPC over the binary's stdin/stdout.
 
+use std::fs;
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Command, Stdio};
 
@@ -130,6 +131,33 @@ fn mcp_server_answers_with_granted_access_only() {
     );
     assert_ne!(moved["result"]["isError"], true, "{moved}");
     assert!(docs.join("2026/notes.md").exists());
+
+    // Nothing is ever replaced: writing to an existing name and moving onto
+    // one are refused, a new name works, and there is no delete tool.
+    let original = fs::read(docs.join("2026/notes.md")).unwrap();
+    let overwrite = call(
+        "tools/call",
+        serde_json::json!({"name": "varsto_write", "arguments": {"folder": "docs", "path": "2026/notes.md", "text": "replaced"}}),
+    );
+    assert_eq!(overwrite["result"]["isError"], true, "{overwrite}");
+    assert_eq!(fs::read(docs.join("2026/notes.md")).unwrap(), original);
+    let index = call(
+        "tools/call",
+        serde_json::json!({"name": "varsto_write", "arguments": {"folder": "docs", "path": "INDEX.md", "text": "notes.md -> 2026/"}}),
+    );
+    assert_ne!(index["result"]["isError"], true, "{index}");
+    let onto = call(
+        "tools/call",
+        serde_json::json!({"name": "varsto_move", "arguments": {"folder": "docs", "from": "INDEX.md", "to": "2026/notes.md"}}),
+    );
+    assert_eq!(onto["result"]["isError"], true, "{onto}");
+    assert_eq!(fs::read(docs.join("2026/notes.md")).unwrap(), original);
+    assert!(docs.join("INDEX.md").exists());
+    let tools = call("tools/list", serde_json::json!({}));
+    assert!(
+        !tools.to_string().contains("delete"),
+        "no delete tool: {tools}"
+    );
 
     let advice = call(
         "tools/call",

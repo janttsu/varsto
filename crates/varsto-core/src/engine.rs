@@ -3605,6 +3605,29 @@ impl Engine {
         self.push(folder)
     }
 
+    /// Create a new file inside a folder, never replacing one: refused when
+    /// the path exists here, as a placeholder, or as a file another device
+    /// published. The assistant (MCP) writes only through this.
+    pub fn create_file(&mut self, folder: &str, path: &str, bytes: &[u8]) -> Result<PushReport> {
+        self.ensure_path_free(folder, path)?;
+        self.write_file(folder, path, bytes)
+    }
+
+    /// A path no file of the folder uses, on this device or any other.
+    fn ensure_path_free(&self, folder: &str, path: &str) -> Result<()> {
+        let (rec, root) = self.resolve_folder(folder)?;
+        let disk = root.join(path);
+        let known = self
+            .load_state(&rec.folder_id)?
+            .files
+            .get(path)
+            .is_some_and(|f| !f.deleted);
+        if known || disk.exists() || placeholder_path(&disk).exists() {
+            bail!("{path} already exists; files are never replaced, choose another name");
+        }
+        Ok(())
+    }
+
     /// Create a directory inside a folder.
     pub fn mkdir(&mut self, folder: &str, path: &str) -> Result<()> {
         let (_, root) = self.resolve_folder(folder)?;
@@ -3654,6 +3677,8 @@ impl Engine {
                 bail!("path must be relative to the folder and must not contain '..': {p}");
             }
         }
+        // Moving never replaces a file, also not one only another device has.
+        self.ensure_path_free(folder, to)?;
         let src = root.join(from);
         let dst = root.join(to);
         if !src.exists() {

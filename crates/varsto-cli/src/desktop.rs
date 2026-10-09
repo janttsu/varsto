@@ -952,7 +952,8 @@ fn api_unlocked(
             engine.mkdir(&s(input, "folder")?, &s(input, "path")?)?;
             Ok(json!({"ok": true}))
         }
-        (Method::Post, "/api/write") => Ok(serde_json::to_value(engine.write_file(
+        // New files only (the assistant's channel): nothing is overwritten.
+        (Method::Post, "/api/write") => Ok(serde_json::to_value(engine.create_file(
             &s(input, "folder")?,
             &s(input, "path")?,
             s(input, "text")?.as_bytes(),
