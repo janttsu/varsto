@@ -575,6 +575,9 @@ impl FolderKeys {
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
 pub struct Keyring {
     pub folders: BTreeMap<FolderId, FolderRecord>,
+    /// Folders being converted into Strongrooms, by old folder id (S-012).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub converting: BTreeMap<FolderId, crate::strongroom::Conversion>,
 }
 
 impl Keyring {
