@@ -17,6 +17,9 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 
+pub mod checkpoint;
+pub use checkpoint::{Checkpoint, LedgerObject, SignedCheckpoint};
+
 /// Key identifiers in batch envelopes: which vault-derived key encrypts the body.
 pub const KEY_LEDGER: &str = "ledger";
 pub const KEY_REPLICA: &str = "replica";
@@ -75,6 +78,11 @@ pub struct Batch {
     pub lamport: u64,
     pub created_utc: i64,
     pub events: Vec<Event>,
+    /// The newest batch of every other device this device held when it
+    /// sealed this one: lets a device know when everyone has seen past its
+    /// checkpoint. Older versions neither write nor read it.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub seen: BTreeMap<DeviceId, u64>,
 }
 
 /// What is stored and replicated. The signature covers `device || seq || hash`
@@ -180,6 +188,21 @@ pub struct Head {
     pub hash: Option<String>,
     /// Set when two different batches with the same sequence number were seen.
     pub forked: bool,
+    /// The newest checkpoint of this device held here.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base: Option<Base>,
+    /// Batches up to this sequence number were dropped here (a checkpoint
+    /// covers them).
+    #[serde(default)]
+    pub dropped: u64,
+}
+
+/// A checkpoint held locally, as named in the heads file.
+#[derive(Clone, Debug, Serialize, Deserialize, Default, PartialEq, Eq)]
+pub struct Base {
+    pub seq: u64,
+    pub key_id: String,
+    pub head_hash: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
@@ -200,6 +223,9 @@ pub enum Ingest {
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
 struct PushedFile {
     storages: BTreeMap<String, u64>,
+    /// Own batches up to this sequence number were deleted there.
+    #[serde(default)]
+    pruned: BTreeMap<String, u64>,
 }
 
 /// Local copy of every device's batches, plus heads.
@@ -224,6 +250,16 @@ impl LedgerStore {
     /// Own batches up to this sequence number are on the named storage.
     pub fn pushed(&self, storage: &str) -> u64 {
         self.pushed.storages.get(storage).copied().unwrap_or(0)
+    }
+
+    /// Own batches up to this sequence number were deleted from the storage.
+    pub fn pruned(&self, storage: &str) -> u64 {
+        self.pushed.pruned.get(storage).copied().unwrap_or(0)
+    }
+
+    pub fn set_pruned(&mut self, storage: &str, seq: u64) -> Result<()> {
+        self.pushed.pruned.insert(storage.to_string(), seq);
+        util::write_json(&self.dir.join("pushed.json"), &self.pushed)
     }
 
     pub fn set_pushed(&mut self, storage: &str, seq: u64) -> Result<()> {
@@ -286,6 +322,30 @@ impl LedgerStore {
         key_id: &str,
         signer: &SigningKey,
     ) -> Result<SignedBatch> {
+        self.append_own_seen(
+            device,
+            events,
+            BTreeMap::new(),
+            lamport,
+            ledger_key,
+            key_id,
+            signer,
+        )
+    }
+
+    /// Like `append_own_with`, recording which batches of the other devices
+    /// this device holds.
+    #[allow(clippy::too_many_arguments)]
+    pub fn append_own_seen(
+        &mut self,
+        device: &DeviceId,
+        events: Vec<Event>,
+        seen: BTreeMap<DeviceId, u64>,
+        lamport: u64,
+        ledger_key: &SecretKey,
+        key_id: &str,
+        signer: &SigningKey,
+    ) -> Result<SignedBatch> {
         let head = self.head(device);
         if head.forked {
             bail!(
@@ -299,6 +359,7 @@ impl LedgerStore {
             lamport,
             created_utc: util::now_utc(),
             events,
+            seen,
         };
         let signed = SignedBatch::seal_with(&batch, ledger_key, key_id, signer)?;
         util::write_json(&self.batch_path(device, signed.seq), &signed)?;
@@ -308,6 +369,7 @@ impl LedgerStore {
                 seq: signed.seq,
                 hash: Some(signed.hash.clone()),
                 forked: false,
+                ..head
             },
         );
         self.save_heads()?;
@@ -339,6 +401,16 @@ impl LedgerStore {
             .verify(pubkey)
             .with_context(|| format!("batch {}/{}", signed.device, signed.seq))?;
         let batch = ledger_key.map(|k| signed.open(k)).transpose()?;
+        let base = self.head(&signed.device).base;
+        if let Some(base) = base.as_ref().filter(|b| signed.seq <= b.seq) {
+            if self.get(&signed.device, signed.seq)?.is_none() {
+                // Covered by a checkpoint: not kept, but it must agree with it.
+                if signed.seq == base.seq && signed.hash != base.head_hash {
+                    return self.mark_fork(&signed.device);
+                }
+                return Ok(Ingest::Known);
+            }
+        }
         if let Some(existing) = self.get(&signed.device, signed.seq)? {
             if existing.hash == signed.hash {
                 // Heads are written after the batch: catch up after a crash.
@@ -358,13 +430,15 @@ impl LedgerStore {
             return Ok(Ingest::Fork);
         }
         if let (true, Some(batch)) = (signed.seq > 1, &batch) {
-            if let Some(prev) = self.get(&signed.device, signed.seq - 1)? {
-                if batch.prev.as_deref() != Some(prev.hash.as_str()) {
-                    let mut h = self.head(&signed.device);
-                    h.forked = true;
-                    self.heads.heads.insert(signed.device.clone(), h);
-                    self.save_heads()?;
-                    return Ok(Ingest::Fork);
+            let prev = match self.get(&signed.device, signed.seq - 1)? {
+                Some(prev) => Some(prev.hash),
+                None => base
+                    .filter(|b| b.seq == signed.seq - 1)
+                    .map(|b| b.head_hash),
+            };
+            if let Some(prev) = prev {
+                if batch.prev.as_deref() != Some(prev.as_str()) {
+                    return self.mark_fork(&signed.device);
                 }
             }
         }
@@ -379,11 +453,210 @@ impl LedgerStore {
         Ok(Ingest::New)
     }
 
+    fn mark_fork(&mut self, device: &DeviceId) -> Result<Ingest> {
+        let mut h = self.head(device);
+        h.forked = true;
+        self.heads.heads.insert(device.clone(), h);
+        self.save_heads()?;
+        Ok(Ingest::Fork)
+    }
+
+    fn checkpoint_path(&self, device: &DeviceId, seq: u64) -> PathBuf {
+        self.dir
+            .join(device.as_str())
+            .join(format!("{}{seq:016}.json", checkpoint::CHECKPOINT_PREFIX))
+    }
+
+    /// The newest checkpoint of `device` held here.
+    pub fn checkpoint(&self, device: &DeviceId) -> Result<Option<SignedCheckpoint>> {
+        let Some(base) = self.head(device).base else {
+            return Ok(None);
+        };
+        let p = self.checkpoint_path(device, base.seq);
+        if p.exists() {
+            Ok(Some(util::read_json(&p)?))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Keep a checkpoint as the newest of its device. The caller has
+    /// verified its signature and that it opens. A checkpoint that
+    /// contradicts a batch held here marks the device forked.
+    pub fn ingest_checkpoint(&mut self, cp: SignedCheckpoint) -> Result<Ingest> {
+        let device = cp.device.clone();
+        let mut h = self.head(&device);
+        if let Some(base) = &h.base {
+            if base.seq == cp.seq {
+                if base.head_hash == cp.head_hash {
+                    return Ok(Ingest::Known);
+                }
+                return self.mark_fork(&device);
+            }
+            if base.seq > cp.seq {
+                return Ok(Ingest::Known);
+            }
+        }
+        if let Some(b) = self.get(&device, cp.seq)? {
+            if b.hash != cp.head_hash {
+                return self.mark_fork(&device);
+            }
+        }
+        util::write_json(&self.checkpoint_path(&device, cp.seq), &cp)?;
+        if let Some(old) = &h.base {
+            let _ = std::fs::remove_file(self.checkpoint_path(&device, old.seq));
+        }
+        h.base = Some(Base {
+            seq: cp.seq,
+            key_id: cp.key_id.clone(),
+            head_hash: cp.head_hash.clone(),
+        });
+        if cp.seq > h.seq {
+            h.seq = cp.seq;
+            h.hash = Some(cp.head_hash.clone());
+        }
+        self.heads.heads.insert(device, h);
+        self.save_heads()?;
+        Ok(Ingest::New)
+    }
+
+    /// What `device`'s batches up to `seq` add to the view: its checkpoint
+    /// (when it is not newer than `seq`) and the batches after it. Fails if
+    /// one of those batches is missing or does not open: a checkpoint must
+    /// not leave anything out.
+    pub fn contribution(
+        &self,
+        device: &DeviceId,
+        seq: u64,
+        key_for: impl Fn(&str) -> Option<SecretKey>,
+    ) -> Result<LedgerView> {
+        let mut view = LedgerView::default();
+        let head = self.head(device);
+        let base = head.base.as_ref().map(|b| b.seq).filter(|b| *b <= seq);
+        if let Some(b) = base {
+            let signed = self
+                .checkpoint(device)?
+                .ok_or_else(|| anyhow!("checkpoint {b} of {device} is missing"))?;
+            let key = key_for(&signed.key_id)
+                .ok_or_else(|| anyhow!("no key for checkpoint {b} of {device}"))?;
+            view.merge(&signed.open(&key)?.view);
+        }
+        for s in base.unwrap_or(0) + 1..=seq {
+            let signed = self
+                .get(device, s)?
+                .ok_or_else(|| anyhow!("batch {s} of {device} is missing"))?;
+            let key = key_for(&signed.key_id)
+                .ok_or_else(|| anyhow!("no key for batch {s} of {device}"))?;
+            view.apply(&signed.open(&key)?);
+        }
+        Ok(view)
+    }
+
+    /// Seal a checkpoint of this device's own batches up to `seq` and keep
+    /// it as its newest one.
+    pub fn make_checkpoint(
+        &mut self,
+        device: &DeviceId,
+        seq: u64,
+        key_for: impl Fn(&str) -> Option<SecretKey>,
+        ledger_key: &SecretKey,
+        key_id: &str,
+        signer: &SigningKey,
+    ) -> Result<SignedCheckpoint> {
+        let view = self.contribution(device, seq, key_for)?;
+        self.seal_checkpoint(device, seq, view, ledger_key, key_id, signer)
+    }
+
+    /// Seal `view` (the `contribution` up to `seq`) as this device's newest
+    /// checkpoint.
+    pub fn seal_checkpoint(
+        &mut self,
+        device: &DeviceId,
+        seq: u64,
+        view: LedgerView,
+        ledger_key: &SecretKey,
+        key_id: &str,
+        signer: &SigningKey,
+    ) -> Result<SignedCheckpoint> {
+        let head_hash = self
+            .get(device, seq)?
+            .ok_or_else(|| anyhow!("batch {seq} of {device} is missing"))?
+            .hash;
+        let cp = Checkpoint {
+            device: device.clone(),
+            seq,
+            head_hash,
+            created_utc: util::now_utc(),
+            view,
+        };
+        let signed = SignedCheckpoint::seal(&cp, ledger_key, key_id, signer)?;
+        if self.ingest_checkpoint(signed.clone())? == Ingest::Fork {
+            bail!("checkpoint {seq} of {device} contradicts this device's ledger");
+        }
+        Ok(signed)
+    }
+
+    /// Delete the local batches of `device` up to `seq`; never beyond its
+    /// newest checkpoint, which must cover them.
+    pub fn drop_through(&mut self, device: &DeviceId, seq: u64) -> Result<u64> {
+        let mut h = self.head(device);
+        let upto = seq.min(h.base.as_ref().map(|b| b.seq).unwrap_or(0));
+        if upto <= h.dropped {
+            return Ok(0);
+        }
+        let mut n = 0;
+        for s in h.dropped + 1..=upto {
+            match std::fs::remove_file(self.batch_path(device, s)) {
+                Ok(()) => n += 1,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => return Err(e.into()),
+            }
+        }
+        h.dropped = upto;
+        self.heads.heads.insert(device.clone(), h);
+        self.save_heads()?;
+        Ok(n)
+    }
+
+    /// The checkpoint a view starts from for `device`, if it may be used:
+    /// its key is known and the device's batches up to it are accepted.
+    fn usable_base(
+        head: &Head,
+        device: &DeviceId,
+        key_for: &impl Fn(&str) -> Option<SecretKey>,
+        keep: &impl Fn(&DeviceId, u64) -> bool,
+    ) -> u64 {
+        match &head.base {
+            Some(b) if keep(device, b.seq) && key_for(&b.key_id).is_some() => b.seq,
+            _ => 0,
+        }
+    }
+
+    /// Merge the checkpoint `seq` of `device` into a view (nothing if it
+    /// does not open).
+    fn apply_checkpoint(
+        &self,
+        view: &mut LedgerView,
+        device: &DeviceId,
+        seq: u64,
+        key_for: &impl Fn(&str) -> Option<SecretKey>,
+    ) -> Result<()> {
+        let p = self.checkpoint_path(device, seq);
+        if !p.exists() {
+            return Ok(());
+        }
+        let signed: SignedCheckpoint = util::read_json(&p)?;
+        if let Some(cp) = key_for(&signed.key_id).and_then(|k| signed.open(&k).ok()) {
+            view.merge(&cp.view);
+        }
+        Ok(())
+    }
+
     /// All locally known batches in (device, seq) order.
     pub fn all(&self) -> Result<Vec<SignedBatch>> {
         let mut out = Vec::new();
         for (device, head) in &self.heads.heads {
-            for seq in 1..=head.seq {
+            for seq in head.dropped + 1..=head.seq {
                 if let Some(b) = self.get(device, seq)? {
                     out.push(b);
                 }
@@ -419,8 +692,16 @@ impl LedgerStore {
         keep: impl Fn(&DeviceId, u64) -> bool,
     ) -> Result<LedgerView> {
         let mut view = LedgerView::default();
-        for signed in self.all()? {
-            apply_signed(&mut view, &signed, &key_for, &keep);
+        for (device, head) in &self.heads.heads {
+            let base = Self::usable_base(head, device, &key_for, &keep);
+            if base > 0 {
+                self.apply_checkpoint(&mut view, device, base, &key_for)?;
+            }
+            for seq in (base.max(head.dropped) + 1)..=head.seq {
+                if let Some(signed) = self.get(device, seq)? {
+                    apply_signed(&mut view, &signed, &key_for, &keep);
+                }
+            }
         }
         Ok(self.finish(&view))
     }
@@ -437,6 +718,26 @@ impl LedgerStore {
         keep: impl Fn(&DeviceId, u64) -> bool,
     ) -> Result<u64> {
         let mut applied = 0;
+        let bases: BTreeMap<DeviceId, u64> = self
+            .heads
+            .heads
+            .iter()
+            .map(|(d, h)| (d.clone(), Self::usable_base(h, d, &key_for, &keep)))
+            .filter(|(_, b)| *b > 0)
+            .collect();
+        if bases != cache.bases {
+            // A device's contribution now starts from another checkpoint:
+            // start over from the checkpoints.
+            *cache = ViewCache {
+                bases,
+                ..ViewCache::new(std::mem::take(&mut cache.context))
+            };
+            for (device, seq) in cache.bases.clone() {
+                self.apply_checkpoint(&mut cache.raw, &device, seq, &key_for)?;
+                cache.applied.insert(device, seq);
+                applied += 1;
+            }
+        }
         for (device, head) in &self.heads.heads {
             if let Some(gaps) = cache.gaps.get_mut(device) {
                 let filled: Vec<u64> = gaps
@@ -455,7 +756,12 @@ impl LedgerStore {
                     cache.gaps.remove(device);
                 }
             }
-            let from = cache.applied.get(device).copied().unwrap_or(0);
+            let from = cache
+                .applied
+                .get(device)
+                .copied()
+                .unwrap_or(0)
+                .max(head.dropped);
             for seq in from + 1..=head.seq {
                 match self.get(device, seq)? {
                     Some(signed) => {
@@ -535,11 +841,14 @@ pub struct ViewCache {
     /// ... except these, which were missing locally at the time.
     #[serde(default)]
     pub gaps: BTreeMap<DeviceId, BTreeSet<u64>>,
+    /// The checkpoint each device's contribution starts from.
+    #[serde(default)]
+    pub bases: BTreeMap<DeviceId, u64>,
     pub raw: LedgerView,
 }
 
 impl ViewCache {
-    pub const FORMAT: u32 = 1;
+    pub const FORMAT: u32 = 2;
 
     pub fn new(context: String) -> Self {
         ViewCache {
@@ -664,6 +973,9 @@ pub struct LedgerView {
     /// Retired storages and when (Lamport time).
     pub retired: BTreeMap<String, u64>,
     pub batches: u64,
+    /// Per device, the newest batch of each other device it said it held.
+    #[serde(default)]
+    pub acks: BTreeMap<DeviceId, BTreeMap<DeviceId, u64>>,
     #[serde(default)]
     pub forked: BTreeSet<DeviceId>,
     /// Objects claimed by replicas (folded into chunk records).
@@ -675,6 +987,13 @@ impl LedgerView {
     pub(crate) fn apply(&mut self, batch: &Batch) {
         self.batches += 1;
         self.max_lamport = self.max_lamport.max(batch.lamport);
+        if !batch.seen.is_empty() {
+            let acks = self.acks.entry(batch.device.clone()).or_default();
+            for (d, seq) in &batch.seen {
+                let a = acks.entry(d.clone()).or_insert(0);
+                *a = (*a).max(*seq);
+            }
+        }
         for (i, ev) in batch.events.iter().enumerate() {
             let stamp = || Some((batch.lamport, batch.device.clone(), batch.seq, i as u32));
             match ev {
@@ -747,6 +1066,57 @@ impl LedgerView {
                     let r = self.retired.entry(storage.clone()).or_insert(0);
                     *r = (*r).max(batch.lamport);
                 }
+            }
+        }
+    }
+
+    /// Merge another view, as if its batches had been applied to this one
+    /// (every field is a union, a maximum, a sum or stamped).
+    pub fn merge(&mut self, other: &LedgerView) {
+        for (key, rec) in &other.chunks {
+            let mine = self.chunks.entry(key.clone()).or_default();
+            if rec.object_at > mine.object_at {
+                mine.object = rec.object.clone();
+                mine.object_at = rec.object_at.clone();
+            }
+            if rec.size_at > mine.size_at {
+                mine.size = rec.size;
+                mine.size_at = rec.size_at.clone();
+            }
+            for (name, loc) in &rec.storages {
+                let m = mine.storages.entry(name.clone()).or_default();
+                m.claimed_by.extend(loc.claimed_by.iter().cloned());
+                m.verified_by.extend(loc.verified_by.iter().cloned());
+                m.claimed_utc = m.claimed_utc.max(loc.claimed_utc);
+                m.verified_utc = m.verified_utc.max(loc.verified_utc);
+                m.lamport = m.lamport.max(loc.lamport);
+            }
+            mine.devices.extend(rec.devices.iter().cloned());
+        }
+        for (key, seq) in &other.manifests {
+            let e = self.manifests.entry(key.clone()).or_insert(0);
+            *e = (*e).max(*seq);
+        }
+        for (device, at) in &other.devices_at {
+            if self.devices_at.get(device).is_none_or(|s| s < at) {
+                if let Some(name) = other.devices.get(device) {
+                    self.devices.insert(device.clone(), name.clone());
+                    self.devices_at.insert(device.clone(), at.clone());
+                }
+            }
+        }
+        self.folders.extend(other.folders.iter().cloned());
+        self.max_lamport = self.max_lamport.max(other.max_lamport);
+        for (storage, at) in &other.retired {
+            let r = self.retired.entry(storage.clone()).or_insert(0);
+            *r = (*r).max(*at);
+        }
+        self.batches += other.batches;
+        for (device, seen) in &other.acks {
+            let acks = self.acks.entry(device.clone()).or_default();
+            for (d, seq) in seen {
+                let a = acks.entry(d.clone()).or_insert(0);
+                *a = (*a).max(*seq);
             }
         }
     }
@@ -933,6 +1303,7 @@ mod tests {
             lamport: 1,
             created_utc: 0,
             events: vec![],
+            seen: BTreeMap::new(),
         };
         let sealed = SignedBatch::seal(&batch, &key, &legacy).unwrap();
         assert_eq!(sealed.sig_alg, crypto::SIG_ALG_LEGACY);
@@ -1038,11 +1409,21 @@ mod tests {
                 .collect();
             let ids: Vec<DeviceId> = signers.iter().map(|s| device_id_for(&s.public())).collect();
             // Every device writes its own chain.
-            let mut pending: Vec<(usize, SignedBatch)> = Vec::new();
+            enum Item {
+                Batch(usize, SignedBatch),
+                Checkpoint(usize, SignedCheckpoint),
+            }
+            let mut pending: Vec<Item> = Vec::new();
+            let both = |id: &str| match id {
+                KEY_LEDGER => Some(key.clone()),
+                "other" => Some(other.clone()),
+                _ => None,
+            };
             for (i, signer) in signers.iter().enumerate() {
                 let mut own = LedgerStore::open(&dir.path().join(format!("own{i}"))).unwrap();
                 let mut lamport = 0;
-                for _ in 0..(5 + rng.below(25)) {
+                let n = 5 + rng.below(25);
+                for _ in 0..n {
                     lamport += 1 + rng.below(3);
                     let events = (0..rng.below(5)).map(|_| random_event(&mut rng)).collect();
                     let (k, id) = if rng.below(6) == 0 {
@@ -1053,7 +1434,16 @@ mod tests {
                     let b = own
                         .append_own_with(&ids[i], events, lamport, k, id, signer)
                         .unwrap();
-                    pending.push((i, b));
+                    pending.push(Item::Batch(i, b));
+                }
+                if i != 1 {
+                    // Devices 0 and 2 also publish a checkpoint (2's may lie
+                    // beyond its cut-off and must then be ignored).
+                    let at = 1 + rng.below(n);
+                    let cp = own
+                        .make_checkpoint(&ids[i], at, both, &key, KEY_LEDGER, signer)
+                        .unwrap();
+                    pending.push(Item::Checkpoint(i, cp));
                 }
             }
             let cutoff = 3 + rng.below(10);
@@ -1062,13 +1452,21 @@ mod tests {
             let mut reader = LedgerStore::open(&dir.path().join("reader")).unwrap();
             let mut cache = ViewCache::new("ctx".into());
             while !pending.is_empty() {
-                let (i, b) = pending.remove(rng.below(pending.len() as u64) as usize);
-                let k = if b.key_id == KEY_LEDGER {
-                    Some(&key)
-                } else {
-                    None
-                };
-                reader.ingest_with(b, &signers[i].public(), k).unwrap();
+                match pending.remove(rng.below(pending.len() as u64) as usize) {
+                    Item::Batch(i, b) => {
+                        let k = (b.key_id == KEY_LEDGER).then_some(&key);
+                        reader.ingest_with(b, &signers[i].public(), k).unwrap();
+                    }
+                    Item::Checkpoint(i, cp) => {
+                        cp.verify(&signers[i].public()).unwrap();
+                        cp.open(&key).unwrap();
+                        let at = cp.seq;
+                        assert_ne!(reader.ingest_checkpoint(cp).unwrap(), Ingest::Fork);
+                        if i == 0 && rng.below(2) == 0 {
+                            reader.drop_through(&ids[0], at).unwrap();
+                        }
+                    }
+                }
                 if rng.below(3) == 0 {
                     reader.update_view(&mut cache, key_for, keep).unwrap();
                     let full = reader.view_filtered(key_for, keep).unwrap();
@@ -1084,5 +1482,96 @@ mod tests {
             assert!(full.batches > 0);
             assert!(reader.cache_fits(&cache));
         }
+    }
+
+    /// A reader that starts from a checkpoint and applies only the later
+    /// batches gets the same view as one that replays every batch; batches
+    /// the checkpoint covers are not kept; a checkpoint or batch that
+    /// contradicts it is a fork.
+    #[test]
+    fn checkpoint_stands_in_for_its_batches() {
+        let mut rng = Rng(77);
+        let (dir, mut own, key, signer, device) = setup();
+        let mut batches = Vec::new();
+        for lamport in 1..=30 {
+            let events = (0..3).map(|_| random_event(&mut rng)).collect();
+            batches.push(
+                own.append_own(&device, events, lamport, &key, &signer)
+                    .unwrap(),
+            );
+        }
+        let key_for = |id: &str| (id == KEY_LEDGER).then(|| key.clone());
+        let keep = |_: &DeviceId, _: u64| true;
+        let cp = own
+            .make_checkpoint(&device, 20, key_for, &key, KEY_LEDGER, &signer)
+            .unwrap();
+        // The writer's own view is unchanged by its checkpoint.
+        let pk = signer.public();
+        let mut full = LedgerStore::open(&dir.path().join("full")).unwrap();
+        for b in &batches {
+            full.ingest(b.clone(), &pk, &key).unwrap();
+        }
+        let expected = full.view_filtered(key_for, keep).unwrap();
+        assert_eq!(own.view_filtered(key_for, keep).unwrap(), expected);
+
+        let mut fresh = LedgerStore::open(&dir.path().join("fresh")).unwrap();
+        cp.verify(&pk).unwrap();
+        assert_eq!(fresh.ingest_checkpoint(cp.clone()).unwrap(), Ingest::New);
+        assert_eq!(fresh.head(&device).seq, 20);
+        // Covered batches are acknowledged without being kept.
+        assert_eq!(
+            fresh.ingest(batches[4].clone(), &pk, &key).unwrap(),
+            Ingest::Known
+        );
+        assert!(fresh.get(&device, 5).unwrap().is_none());
+        for b in &batches[20..] {
+            assert_eq!(fresh.ingest(b.clone(), &pk, &key).unwrap(), Ingest::New);
+        }
+        assert_eq!(fresh.view_filtered(key_for, keep).unwrap(), expected);
+        let mut cache = ViewCache::new("ctx".into());
+        fresh.update_view(&mut cache, key_for, keep).unwrap();
+        assert_eq!(fresh.finish(&cache.raw), expected);
+
+        // The full reader adopts the checkpoint and drops what it covers.
+        assert_eq!(full.ingest_checkpoint(cp.clone()).unwrap(), Ingest::New);
+        assert_eq!(full.drop_through(&device, 20).unwrap(), 20);
+        assert_eq!(full.all().unwrap().len(), 10);
+        assert_eq!(full.view_filtered(key_for, keep).unwrap(), expected);
+
+        // A copy of the device restored to seq 20 signs another batch 21.
+        let restored_dir = dir.path().join("restored");
+        let mut restored = LedgerStore::open(&restored_dir).unwrap();
+        for b in &batches[..20] {
+            restored.ingest(b.clone(), &pk, &key).unwrap();
+        }
+        let other21 = restored
+            .append_own(&device, vec![], 99, &key, &signer)
+            .unwrap();
+        let mut observer = LedgerStore::open(&dir.path().join("observer")).unwrap();
+        observer.ingest_checkpoint(cp.clone()).unwrap();
+        assert_eq!(observer.ingest(other21, &pk, &key).unwrap(), Ingest::New);
+        assert_eq!(
+            observer.ingest(batches[21].clone(), &pk, &key).unwrap(),
+            Ingest::Fork
+        );
+        // A different checkpoint at the same place is a fork as well.
+        let other_cp = restored
+            .make_checkpoint(&device, 21, key_for, &key, KEY_LEDGER, &signer)
+            .unwrap();
+        assert_eq!(
+            fresh.ingest_checkpoint(other_cp).unwrap(),
+            Ingest::Fork,
+            "it contradicts batch 21"
+        );
+        let mut third = LedgerStore::open(&dir.path().join("third")).unwrap();
+        third.ingest(batches[20].clone(), &pk, &key).unwrap();
+        let cp21 = own
+            .make_checkpoint(&device, 21, key_for, &key, KEY_LEDGER, &signer)
+            .unwrap();
+        assert_eq!(third.ingest_checkpoint(cp21).unwrap(), Ingest::New);
+        let forged = restored
+            .make_checkpoint(&device, 21, key_for, &key, KEY_LEDGER, &signer)
+            .unwrap();
+        assert_eq!(third.ingest_checkpoint(forged).unwrap(), Ingest::Fork);
     }
 }

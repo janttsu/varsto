@@ -351,6 +351,8 @@ pub struct Engine {
     view_cache: std::sync::Mutex<ledger_upkeep::ViewSlot>,
     /// Set while one action runs whose ledger events go into one batch.
     cycle: Option<ledger_upkeep::Cycle>,
+    /// When to write checkpoints and how many batches to keep before them.
+    ledger_policy: ledger_upkeep::LedgerPolicy,
 }
 
 /// Open storages with their specs.
@@ -631,6 +633,7 @@ impl Engine {
             storage_calls: None,
             view_cache: Default::default(),
             cycle: None,
+            ledger_policy: Default::default(),
         };
         engine.config.save(home)?;
         if !engine.vault.member {
@@ -811,6 +814,7 @@ impl Engine {
             storage_calls: None,
             view_cache: Default::default(),
             cycle: None,
+            ledger_policy: Default::default(),
         };
         // Command-line runs use the peers other devices advertised, over TCP
         // only; the service adds LAN peers and the QUIC node.
@@ -1951,9 +1955,10 @@ impl Engine {
         self.clear_deferred();
         if !self.vault.member {
             let (key_id, ledger_key) = self.ledger_key_now();
-            let signed = self.ledger.append_own_with(
+            let signed = self.ledger.append_own_seen(
                 &self.vault.device_id,
                 events,
+                self.seen_heads(),
                 lamport,
                 &ledger_key,
                 &key_id,
@@ -3656,6 +3661,9 @@ impl Engine {
         for (_, push) in out.iter_mut() {
             push.batch_seq = push.batch_seq.or(seq);
         }
+        // Checkpoints, acknowledgements and pruning; anything left undone
+        // (an unreachable storage) is retried after the next sync.
+        let _ = self.ledger_upkeep();
         Ok(out)
     }
 
