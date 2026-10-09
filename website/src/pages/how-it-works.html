@@ -1,0 +1,227 @@
+---
+title: How it works
+nav: How it works
+output: how-it-works/index.html
+description: How Varsto works: your devices and your own storages, encrypted blocks, keys, the signed ledger that tracks every copy, sync, peer-to-peer transfer, sharing, Strongroom and the recovery kit, with the honest limits.
+---
+    <div class="tech">
+    <h1>How Varsto works</h1>
+    <p class="lead">The technology behind Varsto, one mechanism at a time: how a file becomes encrypted blocks, which keys exist, how the signed ledger keeps track of every copy, how devices sync and find each other, and what is not done yet.</p>
+    <p>Everything here is implemented in the source-available core (<code>crates/varsto-core</code>) and described with exact field layouts in the <a href="../docs/alpha-0-format.html">storage format</a>. It is alpha software: formats may still change, and neither the design nor the code has been audited. The <a href="../docs/threat-model.html">threat model</a> and the <a href="../docs/failure-model.html">failure model</a> say what it does and does not defend against.</p>
+
+    <nav class="toc" aria-label="On this page">
+      <p class="toc-title">On this page</p>
+      <ol>
+        <li><a href="#overview">Overview</a></li>
+        <li><a href="#blocks">From file to encrypted blocks</a></li>
+        <li><a href="#keys">Keys</a></li>
+        <li><a href="#ledger">The ledger</a></li>
+        <li><a href="#sync">File lists and sync</a></li>
+        <li><a href="#p2p">Peer to peer</a></li>
+        <li><a href="#visibility">What each party can see</a></li>
+        <li><a href="#sharing">Sharing a folder</a></li>
+        <li><a href="#strongroom">Strongroom</a></li>
+        <li><a href="#recovery">Passphrases and the recovery kit</a></li>
+        <li><a href="#limits">What is not done</a></li>
+      </ol>
+    </nav>
+
+    <section class="feature" id="overview">
+      <h2>Overview</h2>
+      <picture><source type="image/webp" srcset="../assets/img/encryption/architecture.webp"><img src="../assets/img/encryption/architecture.png" alt="A laptop and a phone, each holding the keys, exchange data with your storages, which hold the signed ledger batches, the file lists and the encrypted blocks; the two devices also exchange blocks directly, peer to peer, on the LAN or over the internet." width="640" height="320" loading="lazy"></picture>
+      <div>
+        <p>Varsto has two kinds of parts, and nothing of ours in between.</p>
+        <ul>
+          <li><strong>Your devices</strong> (laptops, desktops, phones) hold the keys. They cut files into blocks, encrypt and decrypt, and run the sync in a background service.</li>
+          <li><strong>Your storages</strong> hold ciphertext only: an S3-compatible bucket, any rclone remote, a NAS or network share, a local or removable disk, or a pool of disks on a shelf. Varsto needs nothing from them beyond put, get, list and delete.</li>
+        </ul>
+        <p>Every storage holds the same three kinds of object: encrypted <strong>blocks</strong> of file content, each device's encrypted <strong>file lists</strong> (manifests), and each device's signed <strong>ledger</strong>, plus a few small encrypted records for devices, folders and policies. Every path has exactly one writer: a device writes only under its own id, and blocks are named by the hash of their ciphertext and never overwritten. Storages therefore need no locks, and each one doubles as a mailbox: devices that are never online at the same time still converge, as long as they share one storage. Devices can also exchange blocks directly, on the LAN or across the internet.</p>
+        <p>There is no Varsto account, server or relay. If the project stopped tomorrow, your installed devices would keep syncing through your storages.</p>
+      </div>
+    </section>
+
+    <section class="feature" id="blocks">
+      <h2>From file to encrypted blocks</h2>
+      <picture><source type="image/webp" srcset="../assets/img/encryption/pipeline.webp"><img src="../assets/img/encryption/pipeline.png" alt="On the device a file is cut into chunks, compressed and encrypted with a key per chunk; only the encrypted blocks, named by their hash, go to the storage, which sees hashes and sizes but no names or content." width="640" height="320" loading="lazy"></picture>
+      <div>
+        <ol>
+          <li><strong>Chunking.</strong> The file is cut into content-defined chunks of about 256 KiB (a rolling hash picks the cut points), so an edit in the middle changes a few chunks, not the whole file.</li>
+          <li><strong>Identity.</strong> Each chunk gets an id: a BLAKE3 keyed hash of its plaintext under the folder's dedup-hash key. The same content in the same folder has the same id on every device, which makes deduplication work offline; the key stops anyone without it from testing whether you hold a known file.</li>
+          <li><strong>Compression.</strong> The chunk is compressed with zstd when that saves at least 5 %. The level is a format constant, so every device produces the same bytes for the same chunk.</li>
+          <li><strong>Encryption.</strong> XChaCha20-Poly1305 under a chunk key and nonce derived from the folder key and the chunk id, with associated data naming the vault, the folder, the chunk and its length. Deterministic keys are safe here because each key encrypts exactly one message, and they let two devices produce byte-identical objects without talking.</li>
+          <li><strong>Naming.</strong> The stored object is named by the BLAKE3 hash of its ciphertext. Any copy, anywhere, can be checked against its name without any key: that is how replicas, peers, <code>fsck --verify</code> and automatic verification check copies they cannot read.</li>
+        </ol>
+        <p class="note">Known trade-off: deterministic (convergent) encryption inside a folder means that two people who both hold the folder key can tell whether they have an identical file, and compressed chunk sizes are visible to the storage. Random per-chunk keys for shared folders are planned for the cases where that matters.</p>
+      </div>
+    </section>
+
+    <section class="feature" id="keys">
+      <h2>Keys</h2>
+      <picture><source type="image/webp" srcset="../assets/img/encryption/hierarchy.webp"><img src="../assets/img/encryption/hierarchy.png" alt="A random vault key derives the vault-wide purpose keys (ledger, registry, folder record and others); the folder record key seals each folder's random key, from which come the metadata key and one key per chunk." width="640" height="320" loading="lazy"></picture>
+      <div>
+        <p>Everything starts from one random 256-bit <strong>vault key</strong>, created on the first device and never derived from anything you type. It is the one secret to keep; the recovery kit is that key on paper.</p>
+        <ul>
+          <li><strong>On each device</strong> the vault key and the device's signing key are stored in <code>keys.enc</code>, encrypted under a key that Argon2id derives from the device passphrase. Changing the passphrase re-wraps that file and touches nothing in storage.</li>
+          <li><strong>Vault-wide keys</strong> are derived from the vault key by purpose: ledger, device registry, folder record, replica ledger, peer authentication and beacon tag. A compromise of one derived key does not expose the others.</li>
+          <li><strong>Per folder</strong> a random folder key is published to your other devices in an encrypted folder record. From it come the dedup-hash key, the metadata key (file lists and thumbnails) and one key per chunk. One folder key opens that folder and nothing else; this is what sharing hands over.</li>
+          <li><strong>Per device</strong> there is a signing key (Ed25519 + ML-DSA-65) whose public half is the device's identity; the device id is a hash of it.</li>
+        </ul>
+        <p><strong>Removing a device</strong> starts a new key <em>epoch</em>: a new random vault key, sealed to each remaining device with the hybrid key exchange below. New ledger batches, records, file lists and blocks use the new keys, and a chain of encrypted epoch records lets the new key open everything older. The removed device finds a signed revocation the next time it reaches a storage and stops; with a wipe order it also empties its folders and keys.</p>
+      </div>
+    </section>
+
+    <h3>The algorithms</h3>
+    <table class="downloads">
+      <thead><tr><th>Purpose</th><th>Algorithm</th><th>Notes</th></tr></thead>
+      <tbody>
+        <tr><td>Content and metadata encryption</td><td>XChaCha20-Poly1305 (AEAD)</td><td>256-bit keys, 192-bit nonces. Every ciphertext carries associated data that names what it is, so a storage cannot move an object into another role.</td></tr>
+        <tr><td>Hashing and key derivation</td><td>BLAKE3 (keyed hash and derive_key)</td><td>Chunk ids and file hashes are keyed. Every derived key carries the context <code>e2ee-sync-format/0/&lt;purpose&gt;</code>.</td></tr>
+        <tr><td>Passphrase to key</td><td>Argon2id</td><td>At least 64 MiB, 3 passes; a random salt per device. The passphrase never leaves the device.</td></tr>
+        <tr><td>Signatures (ledger, records)</td><td>Ed25519 + ML-DSA-65, hybrid</td><td>Both signatures cover the same bytes and both must verify. A key with a post-quantum part never accepts an Ed25519-only signature.</td></tr>
+        <tr><td>Key exchange (sharing, new epochs)</td><td>X25519 + ML-KEM-768, hybrid</td><td>Both shared secrets and the full transcript go into one key; a sealed secret stays private unless both algorithms are broken.</td></tr>
+        <tr><td>Security-key folders</td><td>FIDO2 hmac-secret</td><td>The security key derives a 32-byte secret from a credential and a per-folder salt after a touch.</td></tr>
+        <tr><td>Recovery kit</td><td>BIP-39 words, Shamir over GF(256)</td><td>24 words with checksum; optional 2-of-3 shares.</td></tr>
+      </tbody>
+    </table>
+
+    <section class="feature" id="ledger">
+      <h2>The ledger</h2>
+      <picture><source type="image/webp" srcset="../assets/img/encryption/ledger-flow.webp"><img src="../assets/img/encryption/ledger-flow.png" alt="The laptop writes ledger batch 42 to your storages; the desktop reads it, checks it and merges it; every device's view then answers where block 7f3a is: on box, stored by the laptop and verified by the desktop, and on cloud, stored by the laptop but not verified yet." width="640" height="320" loading="lazy"></picture>
+      <div>
+        <p>The ledger is Varsto's bookkeeping. Every device keeps its own <strong>append-only log of facts</strong> about what it did, and no device ever writes into another one's log. The facts are small and concrete: "I wrote block 7f3a to the storage I call box", "I downloaded 7f3a from box and its hash matched", "I published version 12 of this folder's file list".</p>
+        <p>Every device reads every other device's log through the storages and replays all of them into the same picture: which blocks exist, where every copy is, who wrote it, who has checked it and when. Nothing in it is trusted for where it came from: each batch is signed by the device that made it, and a copy counts as verified only when a different device has checked it.</p>
+        <p>Without the ledger, a sync tool can only hope its copies exist. With it, Varsto can say how many copies of every block there are, in which places, how recently each was checked, and which ones nobody has checked yet.</p>
+      </div>
+    </section>
+
+    <h3>What it records</h3>
+    <table class="downloads">
+      <thead><tr><th>Event</th><th>Meaning</th></tr></thead>
+      <tbody>
+        <tr><td>Device enrolled</td><td>This device joined the vault, under this name.</td></tr>
+        <tr><td>Folder added</td><td>This device created a folder.</td></tr>
+        <tr><td>Block stored</td><td>This device wrote an encrypted block to a storage: folder, chunk id, object name, size and the storage. A claim, attested only by the writer.</td></tr>
+        <tr><td>Block verified</td><td>This device downloaded the block from a storage and its hash matched its name. Recorded by downloads, <code>fsck --verify</code>, automatic verification and full disk checks.</td></tr>
+        <tr><td>Block on device</td><td>This device holds the block's plaintext, as part of a file.</td></tr>
+        <tr><td>File list published</td><td>This device published version <em>n</em> of a folder's file list, with its hash and file count.</td></tr>
+        <tr><td>Storage retired</td><td>A storage was removed from the vault: claims on it made before this event no longer count as copies.</td></tr>
+      </tbody>
+    </table>
+    <p>No file names and no content: blocks are identified by keyed chunk ids and ciphertext hashes, and the whole batch is encrypted anyway.</p>
+
+    <section class="feature">
+      <h3>Signed, chained and sealed</h3>
+      <picture><source type="image/webp" srcset="../assets/img/encryption/chain.webp"><img src="../assets/img/encryption/chain.png" alt="Ledger batches 40, 41 and 42, each signed with Ed25519 and ML-DSA-65 and chained to the one before; a second batch 41 from a rolled-back device forks the chain and is detected and fenced by the other devices." width="640" height="320" loading="lazy"></picture>
+      <div>
+        <p>Events are collected into <strong>batches</strong>, typically one per sync rather than one per file. A batch carries the device id, a sequence number (1, 2, 3, ...), the hash of the device's previous batch, a logical clock, its creation time and the events.</p>
+        <ol>
+          <li>The body is encrypted with XChaCha20-Poly1305 under the ledger key, with the device id and sequence number as associated data.</li>
+          <li>The device signs its id, the sequence number and the hash of the encrypted body with both Ed25519 and ML-DSA-65. Signing the ciphertext hash means anyone can check the chain without the key.</li>
+          <li>The signed batch is written to every storage that holds records as <code>ledger/&lt;device&gt;/&lt;sequence&gt;</code>, never overwritten.</li>
+        </ol>
+        <p>A reader accepts a batch only when both signatures verify against the device's public key in the device registry and its previous-hash matches. The post-quantum signature costs about 3.3 KB, which is why events travel in batches: the ledger grows by a few kilobytes per sync, not per file.</p>
+      </div>
+    </section>
+
+    <h3>Exchanged through your storages</h3>
+    <p>Every storage is a mailbox. After a device commits a batch it uploads every batch of its own that a storage lacks; on every pull it lists the ledger on each hot storage, takes the batches it has not seen, checks them, decrypts them and keeps a local copy. Because each storage carries the whole ledger, a laptop that syncs at night and a phone that syncs in the morning see the same history without ever meeting. Nobody orders anything centrally: a logical (Lamport) clock orders changes, not the wall clock. Untrusted replicas and the people you share a folder with write ledgers too, sealed under keys that open only their part: a replica's claims name objects, not files, and a member's claims cover only the shared folder.</p>
+
+    <h3>The view: where every block is</h3>
+    <p>Replaying all batches gives each device the same <strong>view</strong>: for every block of every folder, its object name and size, the storages that claim a copy and which device claimed it, which devices verified it there and when, and which devices hold the plaintext. It also knows the newest file list of each device for each folder, the devices and folders that exist, and which storages are retired. Storage names are local to each device ("box" here, "primary" there), so every storage carries a random identity, and devices match each other's claims by it.</p>
+
+    <h3>What it is used for</h3>
+    <ul>
+      <li><strong>Uploading once.</strong> Before pushing, a device skips every storage that already claims a block, so a file added on two devices goes up once.</li>
+      <li><strong>Freeing space safely.</strong> A file becomes a placeholder only when the ledger shows every block on a storage that is not a transferrer, and the folder's copy rules still hold.</li>
+      <li><strong>Durability policies.</strong> "At least three copies, one of them in the cloud, each verified by another device within 30 days" is evaluated from the ledger alone, and the service raises an alert when a folder gets worse.</li>
+      <li><strong>Automatic verification.</strong> The background service picks copies that other devices wrote and nobody has checked recently, downloads them, compares the ciphertext hash with the name and records the result, within a daily budget.</li>
+      <li><strong><code>fsck</code>.</strong> Compares the ledger with what the storages actually list: claims without an object, blocks with no copy anywhere, blocks verified elsewhere.</li>
+      <li><strong>Transferrer disks.</strong> A carrier disk takes only the blocks no other device holds yet, and gives the space back once both ends have them.</li>
+      <li><strong>Removing a storage.</strong> Varsto plans from the ledger which blocks would fall below the folder's minimum, copies them elsewhere, checks again and only then records the retirement.</li>
+      <li><strong>Costs.</strong> A storage's monthly cost is the bytes the ledger records on it times its price.</li>
+      <li><strong>Removing a device.</strong> A revocation names the last batch of the removed device that counts; anything it signs later is left out of every view, and only the file lists those batches announced are merged.</li>
+    </ul>
+
+    <h3>Forks and restored devices</h3>
+    <p>Because each device numbers and chains its own batches, history cannot be rewritten quietly. Two different batches with the same device and sequence number, or a batch whose previous-hash does not match, are a <strong>fork</strong>: every device that sees one marks that device as forked, and <code>fsck</code> reports it. The usual cause is a device restored from an old backup or a cloned disk, which would carry on from a sequence number its newer self has already used. When a device finds batches under its own identity that it never wrote, it <strong>fences itself</strong>: it stops signing and pushing until it is enrolled again as a new device, so two diverging copies of one identity never both write history.</p>
+
+    <h3>Limits</h3>
+    <ul>
+      <li>A signature proves that a device <em>said</em> it stored a block, not that the block is still there. That is why a copy counts as verified only after another device has checked it; there is no challenge-response proof of storage yet.</li>
+      <li>A storage that serves an older but valid part of the ledger is not caught by signatures; it shows only when another storage or device has newer batches. Rollback detection is a design goal, not a tested property.</li>
+      <li>The ledger grows with every sync and every device replays it whole. Keeping it compact over years of use is work in progress.</li>
+      <li>Verification times come from device clocks: a badly wrong clock can cause false alerts, though it does not change the order of changes.</li>
+      <li>Storages see the number of ledger directories (your device count) and the size and timing of batches.</li>
+    </ul>
+
+    <h2 id="sync">File lists and sync</h2>
+    <p>The ledger says where blocks are; <strong>manifests</strong> say what the files are. After a change a device publishes its full view of a folder as a new manifest: every path with its size, modification time, content hash, block list and a version vector (for each device, the clock of its last change). It is encrypted under the folder's metadata key and announced in the ledger. Other devices fetch the manifests they have not seen and merge path by path:</p>
+    <ul>
+      <li>a version that includes the other wins; identical content merges;</li>
+      <li>an edit beats a concurrent deletion, so a deletion never destroys someone's work;</li>
+      <li>two different concurrent edits give a deterministic winner (larger clock, then device id), and the other version is kept as <code>name.conflict-&lt;device&gt;-&lt;clock&gt;.ext</code>, so both devices converge without another round.</li>
+    </ul>
+    <p>Deleted files go to a local trash, never removed outright. The background service watches your folders and syncs within seconds of a change. Selective folders show every file but keep placeholders for those you have not fetched, and fetch a file when you open it. Manifests are full views today; very large folders will need incremental ones.</p>
+
+    <h2 id="p2p">Peer to peer</h2>
+    <p>Devices also exchange blocks directly. Because encryption is deterministic within a folder, a device that holds a file can serve exactly the object the storage holds, and the receiver checks it against its name like any storage copy. A device that needs a block asks its peers first and the storages second, and spreads consecutive blocks over the peers that answer.</p>
+    <ul>
+      <li><strong>Finding each other.</strong> On the LAN, a multicast beacon that carries a keyed tag, not the vault id. Across the internet, an encrypted rendezvous record in your storages with each device's addresses.</li>
+      <li><strong>Crossing NATs.</strong> HTTP on the LAN, QUIC over UDP across the internet: STUN tells a device its public address, both sides punch holes, and when that fails, one of your own reachable devices relays. There is no vendor relay.</li>
+      <li><strong>Who may connect.</strong> Each device has its own certificate, whose hash is pinned in its record; every request also carries a short-lived proof made with the vault's peer authentication key. A stranger gets nothing, and a removed device is dropped from the peer list.</li>
+    </ul>
+    <p class="note">Tested on localhost, on the maintainer's own networks and on a three-device rig across NATs. Two symmetric NATs cannot be punched and fall back to a relay, which needs one reachable device in the vault (a home server, a VPS, a forwarded port); sockets are IPv4 only.</p>
+    <p><strong>Transport and the local interface.</strong> Objects are ciphertext before they leave the device, so transport adds no second layer for its own sake: S3 is spoken over HTTPS with Signature Version 4, rclone remotes use rclone's own configuration, and the S3 secret is kept in an encrypted file. The desktop interface is served only on 127.0.0.1, every request carries a per-session token, the Host header is checked, and the page runs under a strict Content Security Policy.</p>
+
+    <h2 id="visibility">What each party can see</h2>
+    <table class="downloads">
+      <thead><tr><th>Party</th><th>Sees</th><th>Cannot see</th></tr></thead>
+      <tbody>
+        <tr><td>A storage provider (bucket, NAS, disk, rclone remote)</td><td>Object names (hashes of ciphertext), object sizes, how often you write and read, your device count from the number of ledger directories.</td><td>File names, contents, folder names, which blocks belong to which file, the hash of your plaintext.</td></tr>
+        <tr><td>An untrusted replica (a friend's NAS)</td><td>The same as a storage provider, plus that objects verify against their names. It signs its own claims under a replica-only key.</td><td>Any content, name or file list; it never receives a folder key or the vault key.</td></tr>
+        <tr><td>A peer on the LAN or the internet</td><td>That some device requests objects by name, after proving it holds the vault's peer authentication key.</td><td>Anything without that key: a stranger gets no object, and the LAN beacon does not name the vault.</td></tr>
+        <tr><td>Someone you share a folder with</td><td>That folder: every file in it, and your devices' signed claims about it.</td><td>Any other folder, the vault key, your device registry.</td></tr>
+        <tr><td>An AI assistant through the MCP server</td><td>The folders you granted, read-only unless you said otherwise.</td><td>Folders you did not grant; Strongroom folders, ever.</td></tr>
+        <tr><td>A thief with your unlocked laptop</td><td>Everything a normal folder holds while the device is unlocked.</td><td>Strongroom folders without your security key; nothing written after you remove the device from another one, except in folders shared with other people.</td></tr>
+      </tbody>
+    </table>
+
+    <section class="feature" id="sharing">
+      <h2>Sharing a folder</h2>
+      <picture><source type="image/webp" srcset="../assets/img/encryption/sealed.webp"><img src="../assets/img/encryption/sealed.png" alt="The recipient's device sends a request code with its X25519 and ML-KEM-768 public keys; you send back a sealed token holding one folder key, which only the requesting device can open, over any channel." width="640" height="320" loading="lazy"></picture>
+      <div>
+        <p>The recipient's device creates a hybrid key pair (X25519 + ML-KEM-768) and prints a request code with the public half. Your device encapsulates to both halves, derives one key from both shared secrets and the transcript, and encrypts the folder key with it. The resulting token can travel over any channel: only the requesting device can open it, and it opens one folder.</p>
+        <p>The recipient's device then writes its own ledger for that folder, sealed under a key derived from the folder key: both sides see each other's claims for that folder and nothing else. Not done yet: confirming that a request code really came from the intended person, and revoking a token.</p>
+      </div>
+    </section>
+
+    <section class="feature" id="strongroom">
+      <h2>Strongroom: cryptographic, not a dialog</h2>
+      <picture><source type="image/webp" srcset="../assets/img/encryption/strongroom.webp"><img src="../assets/img/encryption/strongroom.png" alt="A touch of the security key unlocks a Strongroom folder: only the credential id, the salt and the wrapped folder key are stored, the key stays in memory for 15 minutes, and the passphrase, the vault key or a stolen backup cannot open it." width="640" height="320" loading="lazy"></picture>
+      <div>
+        <p>A Strongroom folder's key is never at rest. At creation the security key makes a credential, then produces a 32-byte secret from it and a random per-folder salt (FIDO2 hmac-secret). Varsto wraps the folder key under that secret and stores only the credential id, the salt and the wrapped key. Unlocking repeats the touch and keeps the key in memory for a window (15 minutes by default), then forgets it. There is no path to the folder key without the physical key: not through the passphrase, the vault key or a stolen backup. Backup security keys get their own wrap of the same folder key. Converting an existing folder gives it a new id and key, re-encrypts it and deletes the old ciphertext.</p>
+      </div>
+    </section>
+
+    <section class="feature" id="recovery">
+      <h2>Passphrases and the recovery kit</h2>
+      <picture><source type="image/webp" srcset="../assets/img/encryption/recovery.webp"><img src="../assets/img/encryption/recovery.png" alt="A recovery kit of 24 words, or three shares of which any two rebuild the vault key while one alone reveals nothing." width="640" height="320" loading="lazy"></picture>
+      <div>
+        <p>The device passphrase goes through Argon2id to unlock <code>keys.enc</code>; the background app can keep it in the operating system's keychain so the service unlocks itself after login. Losing a passphrase loses that device's copy of the keys, not the vault: another device, or the recovery kit, enrols a new one.</p>
+        <p>The recovery kit prints the vault key as 24 BIP-39 words (a miscopied word is caught by the checksum) and, if you ask, three Shamir shares of which any two rebuild the key while one alone reveals nothing. There is no account, no escrow and no reset: the kit is how you carry the responsibility. Print a new kit after removing a device, because the old one holds the old key.</p>
+      </div>
+    </section>
+
+    <h2 id="limits">What is not done</h2>
+    <ul>
+      <li><strong>Not audited.</strong> The algorithms are standard and the libraries well-known Rust implementations, but the composition has not been reviewed by an outside cryptographer, and the storage format may still change.</li>
+      <li><strong>Metadata.</strong> Storages see object sizes, write and read patterns, the number of devices and roughly the number of blocks. Padding and cover traffic are not implemented.</li>
+      <li><strong>Convergent encryption</strong> inside a folder lets co-holders of the folder key confirm identical files.</li>
+      <li><strong>Removing a device</strong> protects what is written afterwards, not what the device already held: existing data is not re-encrypted, shared and Strongroom folders keep their keys, and storage credentials are not rotated. Until a second factor exists, any of your devices can remove any other.</li>
+      <li><strong>The ledger</strong> has no proof of storage, rollback detection is untested, and keeping it compact over years is still being built.</li>
+      <li><strong>Placement.</strong> Every block goes to every storage of a device; moving data between storages (keeping only a cold copy of idle files) is not built.</li>
+      <li><strong>Strongroom</strong> protects the folder key, not a file you fetched and left on disk; the recovery kit does not cover Strongroom folders.</li>
+      <li><strong>The vault key</strong> is a single secret. Keep the recovery kit in more than one place.</li>
+    </ul>
+    <p class="note">Field-level details, byte layouts and version rules: <a href="../docs/alpha-0-format.html">storage format</a>, <a href="../docs/key-hierarchy.html">key hierarchy</a>, <a href="../docs/ledger-signing-notes.html">ledger signing notes</a>, <a href="../docs/security-principles.html">security principles</a>, <a href="../docs/failure-model.html">failure model</a>.</p>
+    </div>

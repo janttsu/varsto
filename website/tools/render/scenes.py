@@ -670,6 +670,47 @@ def recovery():
     K.caption("No account, no reset: the kit is the vault key on paper.")
 
 
+# ============================================================ how-it-works page
+@scene("encryption/architecture")
+def architecture():
+    lp = node(K.laptop("cipher", scale=0.8), 92, 132, 0.28, "Laptop", "holds the keys")
+    ph = node(K.phone("cipher", scale=0.9), 552, 138, 0.38, "Phone", "holds the keys")
+    st = card_at(204, 96, 232, 152)
+    K.text(320, 122, "Your storages", "title")
+    K.text(320, 141, "S3, rclone, NAS, disks", "sub")
+    K.rule2d(218, 152, 422, 152)
+    for i, (a, b) in enumerate((("ledger/", "signed batches"), ("manifests/", "file lists"), ("chunks/", "encrypted blocks"))):
+        y = 178 + i * 24
+        ui(st, K.dot(3, "blue300"), 226, y - 4)
+        K.text(236, y, a, "row", "s")
+        K.text(414, y, b, "sub", "e")
+    lock_at(st, "tr", dx=8, dy=-8, scale=0.8, lift=1.1)
+    L((152, 150), (198, 166), arrows=("start", "end"))
+    L((442, 166), (506, 150), arrows=("start", "end"))
+    L((140, 76), (210, 24), (430, 24), (512, 80), arrows=("start", "end"), tone="blue600", solid=True, h=0.5)
+    K.text(320, 58, "peer to peer: LAN or internet", "sub", free=True)
+    K.caption("Your devices, your storages: nothing of ours in between.")
+
+
+@scene("encryption/ledger-flow")
+def ledger_flow():
+    node(K.laptop("cipher", scale=0.8), 92, 76, 0.28, "Laptop", "writes batch #42")
+    cl = node(K.cloud(scale=0.85), 320, 70, 0.26, "Your storages", "ledger/laptop/42", lift=0.2)
+    lock_at(cl, "tr", dx=0, dy=0, scale=0.75, lift=0.75)
+    node(K.monitor("cipher"), 548, 76, 0.4, "Desktop", "checks, merges")
+    L((150, 70), (186, 56), (220, 56), (258, 66))
+    L((384, 66), (420, 56), (454, 56), (492, 70))
+    v = card_at(96, 172, 448, 92)
+    K.text(112, 196, "Where is block 7f3a?", "title", "s")
+    K.text(528, 196, "the view on any device", "sub", "e")
+    K.rule2d(110, 206, 530, 206)
+    ui(v, K.badge("ok", 9.8), 120, 226)
+    K.text(136, 230.5, "box: stored by laptop, verified by desktop", "row", "s")
+    ui(v, K.dot(5, "grey"), 120, 250)
+    K.text(136, 254.5, "cloud: stored by laptop, not verified yet", "row", "s")
+    K.caption("Every device replays the signed batches into the same view.")
+
+
 # ============================================================ hero (1200 x 600)
 @scene("hero", 1200, 600)
 def hero():

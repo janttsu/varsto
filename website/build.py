@@ -38,7 +38,7 @@ FOOTER = [
     "No cookies, no tracking. The web server keeps a standard access log for at most seven days.",
     '<a href="{p}docs/security-policy.html">Security policy</a> · <a href="{p}docs/licence.html">Licence</a> · <a href="{p}docs/trademark.html">Trademark</a>',
 ]
-NAV = [("Project", ""), ("Features", "features/"), ("Use cases", "use-cases/"), ("Encryption", "encryption/"), ("Screenshots", "screenshots/"), ("Docs", "docs/"), ("Downloads", "downloads/"), ("Blog", "blog/"), ("Forum", "forum/"), ("GitHub", REPO)]
+NAV = [("Project", ""), ("Features", "features/"), ("Use cases", "use-cases/"), ("How it works", "how-it-works/"), ("Screenshots", "screenshots/"), ("Docs", "docs/"), ("Downloads", "downloads/"), ("Blog", "blog/"), ("Forum", "forum/"), ("GitHub", REPO)]
 
 # Repository documents rendered under docs/: (source path, slug, title, group)
 DOCS = [
@@ -330,9 +330,47 @@ def build_404() -> None:
     text = page("Page not found", "", body, "", 0)
     # The 404 page is served from any path: use absolute asset links.
     text = text.replace('href="favicon.svg"', 'href="/favicon.svg"').replace('href="assets/', 'href="/assets/').replace('src="assets/', 'src="/assets/').replace('href="blog/feed.xml"', 'href="/blog/feed.xml"')
-    text = re.sub(r'<a href="([a-z]+/)"', r'<a href="/\1"', text)
+    text = re.sub(r'<a href="([a-z-]+/)"', r'<a href="/\1"', text)
     text = text.replace('<a href="./"', '<a href="/"').replace('href=""', 'href="/"')
     (OUT / "404.html").write_text(text)
+
+
+# Pages that moved: old output path -> new path relative to the site root. The old
+# URL keeps working as a small page that sends the browser on (meta refresh, no
+# script, so the strict CSP holds) and names the new address as canonical.
+REDIRECTS = {
+    "encryption/index.html": ("how-it-works/", "How it works"),
+}
+
+
+def build_redirects() -> None:
+    for old, (new, title) in REDIRECTS.items():
+        p = "../" * old.count("/")
+        target = f"{p}{new}"
+        text = f"""<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{html.escape(title)}: {BRAND}</title>
+<meta name="robots" content="noindex, nofollow">
+<meta name="color-scheme" content="light dark">
+<meta http-equiv="refresh" content="0; url={target}">
+<link rel="canonical" href="{SITE_URL}/{new}">
+<link rel="icon" href="{p}favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="{p}assets/css/site.css?v={asset_version("assets/css/site.css")}">
+</head>
+<body>
+<main id="main">
+  <div class="wrap">
+    <p class="lead">This page has moved to <a href="{target}">{html.escape(title)}</a>.</p>
+  </div>
+</main>
+</body>
+</html>
+"""
+        (OUT / old).parent.mkdir(parents=True, exist_ok=True)
+        (OUT / old).write_text(text)
 
 
 def main() -> None:
@@ -341,6 +379,7 @@ def main() -> None:
     build_blog(slugs)
     build_pages(slugs)
     build_404()
+    build_redirects()
     print(f"built into {OUT}")
 
 
