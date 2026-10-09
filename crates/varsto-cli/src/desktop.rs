@@ -507,11 +507,18 @@ fn api(st: &mut State, method: Method, path: &str, query: &str, input: &Value) -
                     place: String::new(),
                 }
             };
+            // The key in hex, or the 24 words of the recovery kit.
+            let key = s(input, "vault_key")?;
+            let key = if key.trim().contains(char::is_whitespace) {
+                varsto_core::recovery::key_from_words(&key)?
+            } else {
+                key.trim().to_string()
+            };
             let mut e = Engine::join(
                 &st.home,
                 &s(input, "name")?,
                 &s(input, "passphrase")?,
-                &s(input, "vault_key")?,
+                &key,
                 spec,
             )?;
             if let Some(secret) = s3_secret {
