@@ -1091,19 +1091,32 @@ pub fn run(opts: Options) -> Result<()> {
     Ok(())
 }
 
+/// Does a watcher event mean that something may have changed? Opening or
+/// reading a file is not a change: the watcher reports every open (inotify
+/// `IN_OPEN`), and serving blocks to peers, a backup tool or a viewer would
+/// otherwise start a full sync every few seconds. Closing a file that was
+/// open for writing is. Our own temporary files never are.
+fn is_change(ev: &notify::Event) -> bool {
+    use notify::event::{AccessKind, AccessMode, EventKind};
+    if let EventKind::Access(kind) = ev.kind {
+        if kind != AccessKind::Close(AccessMode::Write) {
+            return false;
+        }
+    }
+    !ev.paths.iter().all(|p| {
+        p.file_name()
+            .map(|n| n.to_string_lossy().starts_with(".varsto"))
+            .unwrap_or(false)
+    })
+}
+
 fn make_watcher(tx: mpsc::Sender<()>) -> Result<notify::RecommendedWatcher> {
     let watcher = notify::RecommendedWatcher::new(
         move |res: notify::Result<notify::Event>| {
             if let Ok(ev) = res {
-                // Ignore our own temporary files.
-                if ev.paths.iter().all(|p| {
-                    p.file_name()
-                        .map(|n| n.to_string_lossy().starts_with(".varsto"))
-                        .unwrap_or(false)
-                }) {
-                    return;
+                if is_change(&ev) {
+                    let _ = tx.send(());
                 }
-                let _ = tx.send(());
             }
         },
         notify::Config::default().with_poll_interval(Duration::from_secs(30)),
@@ -1481,5 +1494,40 @@ pub mod linux {
         }
         done.push("your vault and folders were not touched".into());
         Ok(done)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use notify::event::{AccessKind, AccessMode, CreateKind, DataChange, EventKind, ModifyKind};
+
+    fn ev(kind: EventKind, name: &str) -> notify::Event {
+        notify::Event::new(kind).add_path(PathBuf::from("/folder").join(name))
+    }
+
+    #[test]
+    fn reads_are_not_changes() {
+        assert!(!is_change(&ev(
+            EventKind::Access(AccessKind::Open(AccessMode::Any)),
+            "a.txt"
+        )));
+        assert!(!is_change(&ev(
+            EventKind::Access(AccessKind::Close(AccessMode::Read)),
+            "a.txt"
+        )));
+        assert!(is_change(&ev(
+            EventKind::Access(AccessKind::Close(AccessMode::Write)),
+            "a.txt"
+        )));
+        assert!(is_change(&ev(
+            EventKind::Modify(ModifyKind::Data(DataChange::Any)),
+            "a.txt"
+        )));
+        assert!(is_change(&ev(EventKind::Create(CreateKind::File), "a.txt")));
+        assert!(!is_change(&ev(
+            EventKind::Create(CreateKind::File),
+            ".varsto-tmp-1"
+        )));
     }
 }
