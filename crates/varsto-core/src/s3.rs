@@ -334,6 +334,11 @@ impl Storage for S3Storage {
     }
 
     fn list(&self, prefix: &str) -> Result<Vec<String>> {
+        self.list_after(prefix, "")
+    }
+
+    /// ListObjectsV2 with `start-after`: the server skips the older keys.
+    fn list_after(&self, prefix: &str, start_after: &str) -> Result<Vec<String>> {
         let full = self.full_prefix(prefix);
         let strip = if self.cfg.prefix.is_empty() {
             String::new()
@@ -349,6 +354,9 @@ impl Storage for S3Storage {
             }
             query.push(("max-keys".to_string(), "1000".to_string()));
             query.push(("prefix".to_string(), full.clone()));
+            if token.is_none() && !start_after.is_empty() {
+                query.push(("start-after".to_string(), self.full_prefix(start_after)));
+            }
             query.sort();
             let path = if self.base_path.is_empty() {
                 "/".to_string()
@@ -366,7 +374,9 @@ impl Storage for S3Storage {
             for k in xml_tags(&doc, "Key") {
                 let k = xml_unescape(k);
                 if let Some(rel) = k.strip_prefix(&strip) {
-                    keys.push(rel.to_string());
+                    if rel > start_after {
+                        keys.push(rel.to_string());
+                    }
                 }
             }
             let truncated = xml_tag(&doc, "IsTruncated")

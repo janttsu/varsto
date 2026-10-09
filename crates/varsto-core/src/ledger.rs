@@ -195,20 +195,43 @@ pub enum Ingest {
     Fork,
 }
 
+/// How far this device's own batches are known to be on each storage
+/// (`pushed.json`, by storage name), so a push lists only the newer ones.
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+struct PushedFile {
+    storages: BTreeMap<String, u64>,
+}
+
 /// Local copy of every device's batches, plus heads.
 pub struct LedgerStore {
     dir: PathBuf,
     heads: HeadsFile,
+    pushed: PushedFile,
 }
 
 impl LedgerStore {
     pub fn open(dir: &Path) -> Result<Self> {
         std::fs::create_dir_all(dir)?;
         let heads = util::read_json_or_default(&dir.join("heads.json"))?;
+        let pushed = util::read_json_or_default(&dir.join("pushed.json"))?;
         Ok(LedgerStore {
             dir: dir.to_path_buf(),
             heads,
+            pushed,
         })
+    }
+
+    /// Own batches up to this sequence number are on the named storage.
+    pub fn pushed(&self, storage: &str) -> u64 {
+        self.pushed.storages.get(storage).copied().unwrap_or(0)
+    }
+
+    pub fn set_pushed(&mut self, storage: &str, seq: u64) -> Result<()> {
+        if self.pushed(storage) == seq && self.pushed.storages.contains_key(storage) {
+            return Ok(());
+        }
+        self.pushed.storages.insert(storage.to_string(), seq);
+        util::write_json(&self.dir.join("pushed.json"), &self.pushed)
     }
 
     fn save_heads(&self) -> Result<()> {
@@ -299,12 +322,33 @@ impl LedgerStore {
         pubkey: &VerifyingKey,
         ledger_key: &SecretKey,
     ) -> Result<Ingest> {
+        self.ingest_with(signed, pubkey, Some(ledger_key))
+    }
+
+    /// Like `ingest`; without a key (a batch sealed under a key this device
+    /// does not hold) the signature is checked and the batch is kept unread,
+    /// so it is not downloaded again and is read once the key is known. The
+    /// hash chain is then checked from the next batch this device can open.
+    pub fn ingest_with(
+        &mut self,
+        signed: SignedBatch,
+        pubkey: &VerifyingKey,
+        ledger_key: Option<&SecretKey>,
+    ) -> Result<Ingest> {
         signed
             .verify(pubkey)
             .with_context(|| format!("batch {}/{}", signed.device, signed.seq))?;
-        let batch = signed.open(ledger_key)?;
+        let batch = ledger_key.map(|k| signed.open(k)).transpose()?;
         if let Some(existing) = self.get(&signed.device, signed.seq)? {
             if existing.hash == signed.hash {
+                // Heads are written after the batch: catch up after a crash.
+                let mut h = self.head(&signed.device);
+                if signed.seq > h.seq {
+                    h.seq = signed.seq;
+                    h.hash = Some(signed.hash.clone());
+                    self.heads.heads.insert(signed.device.clone(), h);
+                    self.save_heads()?;
+                }
                 return Ok(Ingest::Known);
             }
             let mut h = self.head(&signed.device);
@@ -313,7 +357,7 @@ impl LedgerStore {
             self.save_heads()?;
             return Ok(Ingest::Fork);
         }
-        if signed.seq > 1 {
+        if let (true, Some(batch)) = (signed.seq > 1, &batch) {
             if let Some(prev) = self.get(&signed.device, signed.seq - 1)? {
                 if batch.prev.as_deref() != Some(prev.hash.as_str()) {
                     let mut h = self.head(&signed.device);
@@ -674,6 +718,32 @@ mod tests {
         assert_eq!(observer.ingest(b1, &pk, &key).unwrap(), Ingest::New);
         assert_eq!(observer.ingest(b1_again, &pk, &key).unwrap(), Ingest::Fork);
         assert!(observer.is_forked(&device));
+    }
+
+    #[test]
+    fn batch_under_an_unknown_key_is_kept_unread() {
+        let (_d, mut a, key, signer, device) = setup();
+        let b1 = a.append_own(&device, vec![], 1, &key, &signer).unwrap();
+        let b2 = a
+            .append_own(
+                &device,
+                vec![Event::DeviceEnrolled { name: "a".into() }],
+                2,
+                &key,
+                &signer,
+            )
+            .unwrap();
+        let dir2 = tempfile::tempdir().unwrap();
+        let mut b = LedgerStore::open(&dir2.path().join("ledger")).unwrap();
+        let pk = signer.public();
+        assert_eq!(b.ingest_with(b1, &pk, None).unwrap(), Ingest::New);
+        assert_eq!(b.ingest(b2.clone(), &pk, &key).unwrap(), Ingest::New);
+        assert_eq!(b.head(&device).seq, 2);
+        assert_eq!(b.view(&key).unwrap().batches, 2);
+        // The signature is still checked.
+        let mut forged = b2;
+        forged.seq = 3;
+        assert!(b.ingest_with(forged, &pk, None).is_err());
     }
 
     #[test]

@@ -99,6 +99,15 @@ fn storage_contract(st: &dyn Storage) {
         vec!["a/b.bin".to_string(), "a/c.bin".to_string()]
     );
     assert_eq!(st.list("").unwrap().len(), 3);
+    assert_eq!(
+        st.list_after("a/", "a/b.bin").unwrap(),
+        vec!["a/c.bin".to_string()]
+    );
+    assert_eq!(
+        st.list_after("", "a/c.bin").unwrap(),
+        vec!["z.bin".to_string()]
+    );
+    assert_eq!(st.list_after("a/", "").unwrap().len(), 2);
     st.delete("a/b.bin").unwrap();
     assert!(!st.exists("a/b.bin").unwrap());
     st.delete("a/b.bin").unwrap(); // idempotent

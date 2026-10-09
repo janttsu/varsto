@@ -97,8 +97,8 @@ Replaying every batch yields the location view: for each (folder, chunk) the obj
 
 Mailbox rules:
 
-- on every pull a device lists `ledger/` on every hot storage and ingests batches it does not have, after checking the signature against the device registry and the hash chain;
-- on every push it uploads its own batches that a storage lacks;
+- on every pull a device lists, on every hot storage and for every device whose key it knows, only the batches after the newest one it holds of that device (`list_after`: S3 `start-after`, a directory listing elsewhere), and ingests them after checking the signature against the device registry and the hash chain; a batch under a key the device does not hold (a shared folder it is not a member of, a key epoch it has not adopted yet) is kept unread and read once the key arrives, instead of being downloaded again on every pull;
+- on every push it uploads its own batches that a storage lacks, listing from the newest batch it last confirmed there (`ledger/pushed.json`); when that batch is gone the storage is filled again from the first batch;
 - two different batches with the same device and sequence number are a **fork**: the device is marked forked in the local heads;
 - if the mailbox holds batches of this device's own identity that it never wrote (a copy restored from an old backup, or a clone), the device fences itself: it stops signing and `push` fails until it is re-enrolled as a new device.
 

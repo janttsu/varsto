@@ -1057,6 +1057,20 @@ impl Storage for PoolStorage {
             .collect())
     }
 
+    fn list_after(&self, prefix: &str, start_after: &str) -> Result<Vec<String>> {
+        use std::ops::Bound;
+        let st = self.state.lock().unwrap();
+        Ok(st
+            .index
+            .objects
+            .range::<str, _>((Bound::Excluded(start_after), Bound::Unbounded))
+            .map(|(k, _)| k)
+            .skip_while(|k| k.as_str() < prefix)
+            .take_while(|k| k.starts_with(prefix))
+            .cloned()
+            .collect())
+    }
+
     fn delete(&self, key: &str) -> Result<()> {
         let mut st = self.state.lock().unwrap();
         let Some(e) = st.index.objects.get(key).cloned() else {
