@@ -91,9 +91,20 @@
     <div class="hero">
       <h2 class="hero-title">Welcome to Varsto</h2>
       <p class="muted desktop-only">Create a new vault, join one of your existing vaults, or accept a folder that someone shared with you. Everything is encrypted on this device before it reaches any storage.</p>
-      <p class="muted mobile-only">Create a new vault here if this is your first device. If you already use Varsto, join your vault with the vault key shown on the other device.</p>
+      <p class="muted mobile-only">Create a new vault here if this is your first device. If you already use Varsto, choose Add a device under Devices on your other device and type the code it shows.</p>
     </div>
     <div class="cols cols-3">
+      <form id="pair" class="card">
+        <h3 class="card-title"><svg class="icon accent"><use href="#i-device"/></svg>Pair with your other device</h3>
+        <p class="muted small">On a device that already uses Varsto, open Devices and choose Add a device. Type the code it shows.</p>
+        <label>Code <input name="code" inputmode="numeric" autocomplete="one-time-code" placeholder="123-456-789" required></label>
+        <label>Name for this device <input name="name" placeholder="phone" required></label>
+        <label>Passphrase for this device <input name="passphrase" type="password" minlength="8" required></label>
+        <details class="small"><summary>The other device is not found</summary>
+          <label>Its address, shown under the code <input name="address" placeholder="192.168.1.20:41234" autocapitalize="none"></label>
+        </details>
+        <div class="actions"><button type="submit">Pair</button></div>
+      </form>
       <form id="init" class="card">
         <h3 class="card-title"><svg class="icon accent"><use href="#i-key"/></svg>Create a new vault</h3>
         <label>Device name <input name="name" placeholder="laptop" required></label>
@@ -102,7 +113,7 @@
         <p class="muted small">You will be shown the vault key once. Write it down and keep it offline; it is the only way to add other devices or recover the data.</p>
       </form>
       <form id="join" class="card">
-        <h3 class="card-title"><svg class="icon accent"><use href="#i-device"/></svg>Join an existing vault</h3>
+        <h3 class="card-title"><svg class="icon accent"><use href="#i-key"/></svg>Join with the vault key</h3>
         <label>Device name <input name="name" placeholder="phone" required></label>
         <label>Passphrase for this device <input name="passphrase" type="password" minlength="8" required></label>
         <label>Vault key: the 24 recovery words or the hex key <textarea name="vault_key" rows="3" autocapitalize="none" autocomplete="off" spellcheck="false" required></textarea></label>
@@ -384,6 +395,11 @@
       <div class="card">
         <h2 class="card-title"><svg class="icon accent"><use href="#i-device"/></svg>Devices</h2>
         <p id="devices" class="muted"></p>
+        <div class="actions"><button id="pairstart" type="button">Add a device</button><button id="pairstop" type="button" class="secondary hidden">Cancel</button></div>
+        <div id="pairbox" class="hidden">
+          <p class="pair-code" id="paircode"></p>
+          <p class="muted small" id="pairinfo"></p>
+        </div>
       </div>
       <details id="p2pbox" class="card" open>
         <summary class="card-title">Peer-to-peer transfer</summary>

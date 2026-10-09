@@ -22,6 +22,7 @@ pub mod ledger;
 pub mod manifest;
 pub mod p2p;
 pub mod pack;
+pub mod pair;
 pub mod policy;
 pub mod pool;
 pub mod rclone;

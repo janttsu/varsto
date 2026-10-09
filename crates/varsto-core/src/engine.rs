@@ -355,10 +355,23 @@ impl Engine {
         vault_key_hex: &str,
         storage: StorageSpec,
     ) -> Result<Engine> {
+        Self::join_with_secret(home, device_name, passphrase, vault_key_hex, storage, None)
+    }
+
+    /// Like `join`, with the storage's secret (S3 secret access key) in hand;
+    /// it goes into this device's encrypted secret store.
+    pub fn join_with_secret(
+        home: &Path,
+        device_name: &str,
+        passphrase: &str,
+        vault_key_hex: &str,
+        storage: StorageSpec,
+        secret: Option<String>,
+    ) -> Result<Engine> {
         if home.join("vault.json").exists() {
             bail!("{} already holds a vault", home.display());
         }
-        let backend = storage.open()?;
+        let backend = storage.open_with(&|_| secret.clone())?;
         let meta_bytes = backend.get(VaultMeta::STORAGE_KEY)?.ok_or_else(|| {
             anyhow!(
                 "storage {} holds no vault (no {})",
@@ -389,9 +402,134 @@ impl Engine {
             member: false,
         };
         let mut engine = Self::write_new(home, vault, keys, passphrase)?;
-        engine.add_storage(storage)?;
+        engine.add_storage_with_secret(storage, secret)?;
         engine.pull_registry()?;
         Ok(engine)
+    }
+
+    /// Join with what a paired device sent (`pair::Bundle`): through the first
+    /// of its storages that this device can reach, then add the other
+    /// reachable ones. Returns the engine and one note per storage.
+    pub fn join_paired(
+        home: &Path,
+        device_name: &str,
+        passphrase: &str,
+        bundle: &crate::pair::Bundle,
+    ) -> Result<(Engine, Vec<String>)> {
+        let mut notes = Vec::new();
+        let mut first = None;
+        for (i, s) in bundle.storages.iter().enumerate() {
+            match Self::reachable(s) {
+                Ok(()) => {
+                    first = Some(i);
+                    break;
+                }
+                Err(e) => notes.push(format!("{}: not reachable here ({e:#})", s.spec.name())),
+            }
+        }
+        let Some(first) = first else {
+            bail!(
+                "none of the vault's storages can be reached from this device: {}. Add a storage both devices can reach (an S3 bucket or an rclone remote) on {} and pair again",
+                if notes.is_empty() { "it has none".to_string() } else { notes.join("; ") },
+                bundle.from
+            );
+        };
+        let chosen = &bundle.storages[first];
+        let mut engine = Self::join_with_secret(
+            home,
+            device_name,
+            passphrase,
+            &bundle.vault_key,
+            chosen.spec.clone(),
+            chosen.secret.clone(),
+        )?;
+        if engine.vault.vault_id.to_string() != bundle.vault_id {
+            bail!(
+                "storage {} holds another vault than the one paired with",
+                chosen.spec.name()
+            );
+        }
+        notes.push(format!("{}: joined through it", chosen.spec.name()));
+        for s in bundle.storages.iter().skip(first + 1) {
+            let r = Self::reachable(s)
+                .and_then(|()| engine.add_storage_with_secret(s.spec.clone(), s.secret.clone()));
+            notes.push(match r {
+                Ok(()) => format!("{}: added", s.spec.name()),
+                Err(e) => format!("{}: not reachable here ({e:#})", s.spec.name()),
+            });
+        }
+        Ok((engine, notes))
+    }
+
+    /// Whether a paired storage holds the vault and can be opened from here.
+    /// A directory must already exist (it is the other device's path), and
+    /// disk pools are attached per device, never taken over.
+    fn reachable(s: &crate::pair::BundleStorage) -> Result<()> {
+        match &s.spec {
+            StorageSpec::LocalDir { path, .. } if !path.is_dir() => {
+                bail!("no directory {} on this device", path.display())
+            }
+            StorageSpec::Pool { .. } => bail!("disk pools are attached on each device"),
+            _ => {}
+        }
+        let secret = s.secret.clone();
+        match s
+            .spec
+            .open_with(&|_| secret.clone())?
+            .get(VaultMeta::STORAGE_KEY)?
+        {
+            Some(_) => Ok(()),
+            None => bail!("holds no vault"),
+        }
+    }
+
+    /// Everything a new device needs to join, for pairing: the vault key and
+    /// the storage settings with their secrets. Only a full device can pair.
+    pub fn pairing_bundle(&self) -> Result<crate::pair::Bundle> {
+        if self.vault.member {
+            bail!("a member device cannot add devices");
+        }
+        let store = self.secret_store()?;
+        let storages = self
+            .config
+            .storages
+            .iter()
+            .filter(|s| !matches!(s, StorageSpec::Pool { .. }))
+            .map(|spec| {
+                let secret = match spec {
+                    StorageSpec::S3 {
+                        name, secret_ref, ..
+                    } => {
+                        let r = if secret_ref.is_empty() {
+                            name
+                        } else {
+                            secret_ref
+                        };
+                        let env = format!(
+                            "VARSTO_S3_SECRET_{}",
+                            name.to_uppercase()
+                                .replace(|c: char| !c.is_ascii_alphanumeric(), "_")
+                        );
+                        store
+                            .secrets
+                            .get(r)
+                            .cloned()
+                            .or_else(|| std::env::var(env).ok())
+                    }
+                    _ => None,
+                };
+                crate::pair::BundleStorage {
+                    spec: spec.clone(),
+                    secret,
+                }
+            })
+            .collect();
+        Ok(crate::pair::Bundle {
+            vault_id: self.vault.vault_id.to_string(),
+            vault_key: self.export_vault_key()?,
+            from: self.vault.device_name.clone(),
+            storages,
+        })
     }
 
     fn write_new(home: &Path, vault: LocalVault, keys: Keys, passphrase: &str) -> Result<Engine> {

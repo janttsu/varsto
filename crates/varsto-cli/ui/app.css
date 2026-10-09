@@ -596,3 +596,5 @@ body[data-mobile="1"] #folders td:last-child button { flex: 1 1 30%; }
 body[data-mobile="1"] #folders td .policy-text { display: inline; margin-left: 6px; }
 body[data-mobile="1"] #files td:nth-child(3), body[data-mobile="1"] #files td:nth-child(4) { font-size: 12.5px; }
 body[data-mobile="1"] .empty-state { padding: 32px 8px 24px; }
+
+.pair-code { font: 600 2rem/1.2 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing: 0.08em; margin: 0.75rem 0 0.25rem; color: var(--text); }

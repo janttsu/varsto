@@ -2,7 +2,7 @@
 //! `varsto`: command-line interface (alpha-0). Every command has a `--json`
 //! output for scripts (P-004); exit codes: 0 ok, 1 failure, 2 usage.
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 use varsto_core::storage::StorageSpec;
@@ -148,6 +148,11 @@ enum Cmd {
         #[arg(long)]
         yes: bool,
     },
+    /// Pair devices with a one-time code instead of copying the vault key.
+    Pair {
+        #[command(subcommand)]
+        cmd: PairCmd,
+    },
     /// Recovery kit: the vault key as 24 words, optionally split into shares.
     Recovery {
         #[command(subcommand)]
@@ -172,6 +177,23 @@ enum Cmd {
     Mcp {
         #[command(subcommand)]
         cmd: Option<McpCmd>,
+    },
+}
+
+#[derive(Subcommand)]
+enum PairCmd {
+    /// On a device that holds the vault: show a code and wait for the new device.
+    Offer,
+    /// On the new device: join the vault of the device showing the code.
+    Join {
+        #[arg(long)]
+        name: String,
+        /// The nine digits shown on the other device.
+        #[arg(long)]
+        code: String,
+        /// The other device's address (host:port) when it is not found on the LAN.
+        #[arg(long)]
+        address: Option<String>,
     },
 }
 
@@ -1261,6 +1283,56 @@ fn run(cli: &Cli) -> Result<()> {
             } else {
                 let removed = varsto_core::engine::reset_device(&home)?;
                 println!("device reset; removed: {}", removed.join(", "));
+            }
+        }
+        Cmd::Pair { cmd } => {
+            match cmd {
+                PairCmd::Offer => {
+                    let engine = Engine::open(&home, &passphrase()?)?;
+                    let offer = varsto_core::pair::Offer::start(engine.pairing_bundle()?)?;
+                    let st = offer.status();
+                    println!("Pairing code: {}", st.code);
+                    println!("On the new device choose \"Pair with a code\" (or run `varsto pair join`).");
+                    if !st.addresses.is_empty() {
+                        println!(
+                            "If it does not find this device, give the address: {}",
+                            st.addresses.join(" or ")
+                        );
+                    }
+                    println!(
+                        "The code works once and for {} minutes.",
+                        st.expires_in_secs.div_ceil(60)
+                    );
+                    loop {
+                        std::thread::sleep(std::time::Duration::from_millis(500));
+                        let st = offer.status();
+                        if !st.open {
+                            match (st.paired_with, st.closed_reason) {
+                                (Some(n), _) => println!("Sent the vault to {n}."),
+                                (None, r) => bail!("pairing closed: {}", r.unwrap_or_default()),
+                            }
+                            break;
+                        }
+                    }
+                }
+                PairCmd::Join {
+                    name,
+                    code,
+                    address,
+                } => {
+                    let pass = passphrase()?;
+                    let bundle = varsto_core::pair::receive(code, name, address.as_deref())?;
+                    let (engine, notes) = Engine::join_paired(&home, name, &pass, &bundle)?;
+                    println!(
+                        "joined vault {} as {} (paired with {})",
+                        engine.vault_id(),
+                        name,
+                        bundle.from
+                    );
+                    for n in notes {
+                        println!("  {n}");
+                    }
+                }
             }
         }
         Cmd::Recovery { cmd } => match cmd {

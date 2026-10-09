@@ -748,6 +748,27 @@
   $("joinkind").onchange = applyJoinKind;
   function joinKindForDevice() { if (isMobile()) { $("joinkind").value = "s3"; $("joinkind").querySelector('option[value="local-dir"]').disabled = true; } applyJoinKind(); }
   joinKindForDevice();
+  $("pair").onsubmit = function (ev) {
+    ev.preventDefault(); var d = formData(ev.target); busy(true); log("looking for the device showing code " + d.code);
+    api("POST", "/api/pair/join", d).then(function (r) { ev.target.reset(); log("paired with " + r.from + ": " + r.storages.join("; ")); nav("files"); return refreshState(); }).catch(function (e) { alertBox(e.message); }).then(function () { busy(false); });
+  };
+  // Adding a device: show the code until the new device has fetched the vault.
+  var pairTimer = null;
+  function pairButtons(open) { $("pairstart").classList.toggle("hidden", open); $("pairstop").classList.toggle("hidden", !open); }
+  function renderPair(s) {
+    $("pairbox").classList.remove("hidden"); pairButtons(s.open); $("paircode").textContent = s.open ? s.code : "";
+    if (s.open) {
+      $("pairinfo").textContent = "On the new device choose Pair with your other device and type this code. It works once, for " + Math.max(1, Math.ceil(s.expires_in_secs / 60)) + " more minute(s)." + (s.addresses.length ? " If the new device does not find this one, give it the address " + s.addresses.join(" or ") + "." : "") + (s.failed_attempts ? " Wrong codes so far: " + s.failed_attempts + " of 3." : "");
+      return;
+    }
+    if (pairTimer) { clearInterval(pairTimer); pairTimer = null; }
+    $("pairinfo").textContent = s.paired_with ? "Sent the vault to " + s.paired_with + ". It appears among the devices after its first sync." : "The code is no longer valid (" + (s.closed_reason || "closed") + "). Choose Add a device for a new one.";
+    if (s.paired_with) { log("added device " + s.paired_with); }
+  }
+  function pollPair() { api("GET", "/api/pair/status").then(function (s) { if (s.code) { renderPair(s); if (s.open && !pairTimer) { pairTimer = setInterval(pollPair, 1500); } } }).catch(function () {}); }
+  if (token) { pollPair(); }
+  $("pairstart").onclick = function () { api("POST", "/api/pair/start", {}).then(function (s) { renderPair(s); if (!pairTimer) { pairTimer = setInterval(pollPair, 1500); } }).catch(function (e) { alertBox(e.message); }); };
+  $("pairstop").onclick = function () { api("POST", "/api/pair/stop", {}).then(function () { if (pairTimer) { clearInterval(pairTimer); pairTimer = null; } $("pairbox").classList.add("hidden"); pairButtons(false); }).catch(function (e) { alertBox(e.message); }); };
   $("join").onsubmit = function (ev) { ev.preventDefault(); busy(true); api("POST", "/api/join", formData(ev.target)).then(function () { ev.target.reset(); log("joined the vault; attach folders under Files"); nav("files"); return refreshState(); }).catch(function (e) { alertBox(e.message); }).then(function () { busy(false); }); };
   $("replicatoken").onclick = function () { api("GET", "/api/replica/token").then(function (r) { $("replicaout").textContent = "Replica token (give to the device that will hold your encrypted copies without being able to open them): " + r.token; $("replicaout").classList.remove("hidden"); }).catch(function (e) { alertBox(e.message); }); };
   $("sharerequest").onclick = function () { api("POST", "/api/share/request", {}).then(function (r) { $("sharerequestout").textContent = r.request_code; $("sharerequestout").classList.remove("hidden"); }).catch(function (e) { alertBox(e.message); }); };

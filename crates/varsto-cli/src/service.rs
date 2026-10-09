@@ -754,6 +754,7 @@ pub fn run(opts: Options) -> Result<()> {
             folders_changed: true,
             ..Default::default()
         },
+        pair: None,
     }));
     println!("Varsto service: {url}");
     println!(

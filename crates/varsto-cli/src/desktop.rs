@@ -9,7 +9,7 @@
 //! the plan (6.8, 6.32); the menu-bar app and the CLI are its clients.
 
 use crate::service::{self, ServiceState};
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use serde_json::{json, Value};
 use std::io::Read;
 use std::path::PathBuf;
@@ -30,6 +30,8 @@ pub struct State {
     pub token: String,
     pub bound: String,
     pub service: ServiceState,
+    /// An open pairing offer (this device adding another one).
+    pub pair: Option<varsto_core::pair::Offer>,
 }
 
 pub type Shared = Arc<Mutex<State>>;
@@ -245,6 +247,15 @@ fn handle(state: &Shared, mut request: Request) -> Result<()> {
         serde_json::from_str(&body).unwrap_or(json!({}))
     };
     let method = request.method().clone();
+    if method == Method::Post && path == "/api/pair/join" {
+        // Pairing talks to the other device for up to ~25 seconds; do that
+        // without holding the state, then join under it.
+        let result = pair_join(state, &input);
+        return match result {
+            Ok(v) => Ok(request.respond(json_response(200, &v))?),
+            Err(e) => Ok(request.respond(json_response(400, &json!({"error": format!("{e:#}")})))?),
+        };
+    }
     if method == Method::Post && path == "/api/quit" {
         request.respond(json_response(200, &json!({"ok": true})))?;
         service::request_quit(state);
@@ -258,6 +269,26 @@ fn handle(state: &Shared, mut request: Request) -> Result<()> {
         Ok(v) => Ok(request.respond(json_response(200, &v))?),
         Err(e) => Ok(request.respond(json_response(400, &json!({"error": format!("{e:#}")})))?),
     }
+}
+
+fn pair_join(state: &Shared, input: &Value) -> Result<Value> {
+    let (name, passphrase, code) = (
+        s(input, "name")?,
+        s(input, "passphrase")?,
+        s(input, "code")?,
+    );
+    if passphrase.chars().count() < 8 {
+        bail!("the passphrase needs at least 8 characters");
+    }
+    if state.lock().unwrap().home.join("vault.json").exists() {
+        bail!("this device already holds a vault");
+    }
+    let bundle = varsto_core::pair::receive(&code, &name, opt(input, "address").as_deref())?;
+    let mut st = state.lock().unwrap();
+    let (e, notes) = Engine::join_paired(&st.home, &name, &passphrase, &bundle)?;
+    st.engine = Some(e);
+    st.service.request_sync();
+    Ok(json!({"ok": true, "from": bundle.from, "storages": notes}))
 }
 
 fn s(v: &Value, key: &str) -> Result<String> {
@@ -423,9 +454,33 @@ fn api(st: &mut State, method: Method, path: &str, query: &str, input: &Value) -
                 .map(|e| e.free_encrypted_folders())
                 .unwrap_or_default();
             st.engine = None;
+            st.pair = None;
             Ok(
                 json!({"ok": true, "freed": freed.into_iter().map(|(f, n, k)| json!({"folder": f, "freed": n, "kept": k})).collect::<Vec<_>>()}),
             )
+        }
+        (Method::Post, "/api/pair/start") => {
+            let e = st
+                .engine
+                .as_ref()
+                .ok_or_else(|| anyhow!("unlock the vault first"))?;
+            if let Some(old) = st.pair.take() {
+                old.stop();
+            }
+            let offer = varsto_core::pair::Offer::start(e.pairing_bundle()?)?;
+            let status = offer.status();
+            st.pair = Some(offer);
+            Ok(serde_json::to_value(status)?)
+        }
+        (Method::Get, "/api/pair/status") => Ok(match &st.pair {
+            Some(o) => serde_json::to_value(o.status())?,
+            None => json!({"open": false}),
+        }),
+        (Method::Post, "/api/pair/stop") => {
+            if let Some(o) = st.pair.take() {
+                o.stop();
+            }
+            Ok(json!({"ok": true}))
         }
         (Method::Post, "/api/init") => {
             let (e, key) = Engine::init(&st.home, &s(input, "name")?, &s(input, "passphrase")?)?;
