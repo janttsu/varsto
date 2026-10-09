@@ -6,7 +6,9 @@
 # Default targets: x86_64-unknown-linux-musl, x86_64-pc-windows-gnu and, when
 # cargo-zigbuild is available, aarch64-apple-darwin + x86_64-apple-darwin
 # (combined into one universal binary with llvm-lipo and packaged as Varsto.app).
-# Output: website/public/downloads/<name>, SHA256SUMS, manifest.json, source archive.
+# Output: website/public/downloads/<name>, SHA256SUMS, manifest.json, source archive,
+# and SHA256SUMS.sig when the release key is available (scripts/sign-release.sh;
+# without it the list stays unsigned and deploy.sh refuses to publish it).
 set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 version="$(grep -m1 '^version' "$root/Cargo.toml" | sed 's/.*"\(.*\)".*/\1/')"
@@ -17,7 +19,7 @@ for f in "$out"/varsto-"$version"-* "$out"/Varsto-"$version"-*; do
   [ -e "$f" ] || continue
   case "$f" in *"/Varsto-$version-macos.dmg") ;; *) rm -f "$f" ;; esac
 done
-rm -f "$out/SHA256SUMS" "$out/manifest.json"
+rm -f "$out/SHA256SUMS" "$out/SHA256SUMS.sig" "$out/manifest.json"
 targets=("$@")
 have_zig=0
 command -v cargo-zigbuild >/dev/null 2>&1 && have_zig=1
@@ -152,3 +154,7 @@ fi
 echo "$manifest" | python3 -c "import json,sys; json.dump(json.load(sys.stdin), sys.stdout, indent=2)" > "$out/manifest.json"
 (cd "$out" && shopt -s nullglob && sha256sum varsto-"$version"-* Varsto-"$version"-* > SHA256SUMS)
 cat "$out/SHA256SUMS"
+echo "== signing SHA256SUMS"
+if ! "$root/scripts/sign-release.sh" "$out/SHA256SUMS"; then
+  echo "!! SHA256SUMS is NOT signed: run scripts/sign-release.sh before deploying (updates refuse unsigned releases)" >&2
+fi

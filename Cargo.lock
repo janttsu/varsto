@@ -3056,7 +3056,10 @@ name = "varsto-cli"
 version = "0.0.1-alpha.8"
 dependencies = [
  "anyhow",
+ "base64 0.22.1",
+ "blake2",
  "clap",
+ "ed25519-dalek",
  "hex",
  "ksni",
  "notify",
@@ -3118,12 +3121,16 @@ name = "varsto-ffi"
 version = "0.0.1-alpha.8"
 dependencies = [
  "anyhow",
+ "base64 0.22.1",
+ "blake2",
+ "ed25519-dalek",
  "hex",
  "notify",
  "rand 0.8.8",
  "serde",
  "serde_json",
  "sha2",
+ "tempfile",
  "tiny_http",
  "varsto-core",
  "walkdir",

@@ -40,7 +40,7 @@ description: Varsto: end-to-end encrypted file sync and backup on storage you al
 
     <h2>Downloads</h2>
     {{DOWNLOADS}}
-    <p class="note">Verify a download: <code>sha256sum -c SHA256SUMS --ignore-missing</code>. A checksum on the same page proves little against an attacker who controls the site; signed releases and a second channel are planned.</p>
+    <p class="note">Verify a download: the checksum list is signed with the Varsto release key (see "Verify your download" above): <code>varsto verify-release &lt;file&gt; --github</code>, or minisign and <code>sha256sum -c SHA256SUMS --ignore-missing</code>. <code>varsto update</code> checks the signature and the GitHub release by itself.</p>
 
     <h2>Latest from the blog</h2>
     {{POSTS}}

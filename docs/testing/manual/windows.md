@@ -17,6 +17,9 @@ Build id: ____   Device / OS version: ____   Date (UTC): ____
 
 ## Platform specific
 - [ ] Cloud Files placeholders and Explorer integration
+- [ ] `varsto install`: Explorer context menu (Windows 11: Show more options) has Download / Free up space with Varsto; both work on a selection
+- [ ] Double-click on a `.varsto-placeholder` downloads the file and opens it; errors appear in a message box
+- [ ] `varsto uninstall` removes the context-menu entries and the association
 - [ ] Security key (FIDO2) unlock and Strongroom folders
 - [ ] Antivirus or indexer does not trigger mass downloads
 - [ ] Long paths, case-insensitive name conflicts

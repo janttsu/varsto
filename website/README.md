@@ -31,4 +31,4 @@ Host and path are never committed. The web server (TLS, headers, access-log rota
 - `.well-known/security.txt`: rename the template and fill in the contact once a security contact exists.
 - Re-check the response headers (CSP, HSTS, X-Frame-Options, X-Robots-Tag) after every deploy.
 - Footer: once the repository is public, change "Source will be published ..." to "Source-available under the PolyForm Shield License 1.0.0" in `website/build.py`.
-- Downloads: checksums on the same page do not protect against a compromised site; signed releases and a second channel are planned.
+- Downloads: `SHA256SUMS` is signed (`SHA256SUMS.sig`, minisign format) with the offline release key; sign with `scripts/sign-release.sh` after the last file is added (see RELEASING.md). `deploy.sh` refuses to publish a checksum list whose signature does not verify.

@@ -18,6 +18,8 @@ use std::sync::Mutex;
 
 #[path = "../../varsto-cli/src/desktop.rs"]
 mod desktop;
+#[path = "../../varsto-cli/src/filemanager.rs"]
+mod filemanager;
 #[path = "../../varsto-cli/src/service.rs"]
 mod service;
 #[path = "../../varsto-cli/src/update.rs"]

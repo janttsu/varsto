@@ -9,6 +9,7 @@ use varsto_core::storage::StorageSpec;
 use varsto_core::Engine;
 
 mod desktop;
+mod filemanager;
 mod icon;
 mod mcp;
 mod service;
@@ -153,6 +154,34 @@ enum Cmd {
         #[arg(long)]
         check: bool,
     },
+    /// Check a downloaded release file: the release signature on SHA256SUMS
+    /// (next to the file, or fetched from the download page), then the file's SHA-256.
+    VerifyRelease {
+        /// The downloaded archive (or SHA256SUMS itself, to check only the signature).
+        file: PathBuf,
+        /// The checksum list (default: SHA256SUMS next to the file).
+        #[arg(long)]
+        sums: Option<PathBuf>,
+        /// Its signature (default: the checksum list's path + .sig).
+        #[arg(long)]
+        sig: Option<PathBuf>,
+        /// Also compare with the checksum list of the GitHub release.
+        #[arg(long)]
+        github: bool,
+    },
+    /// Download (fetch) or free files given by their paths on disk, through the
+    /// running background service when there is one; used by file-manager actions.
+    Paths {
+        /// Report failures as a desktop notification or message box (no terminal).
+        #[arg(long)]
+        notify: bool,
+        #[arg(value_parser = ["fetch", "free"])]
+        action: String,
+        #[arg(required = true)]
+        paths: Vec<PathBuf>,
+    },
+    /// Download a placeholder and open the file (double-click on a .varsto-placeholder).
+    OpenPlaceholder { path: PathBuf },
     /// Alpha: forget this device's vault configuration (keys, ledger, state, grants) and start over. Files in folders stay.
     Reset {
         #[arg(long)]
@@ -2108,6 +2137,98 @@ fn run(cli: &Cli) -> Result<()> {
                 })?;
             } else {
                 println!("{}", update::apply(&c)?);
+            }
+        }
+        Cmd::VerifyRelease {
+            file,
+            sums,
+            sig,
+            github,
+        } => {
+            let r = update::verify_release(file, sums.as_deref(), sig.as_deref(), *github)?;
+            print(cli, &r, |r| {
+                let what = match &r.sha256 {
+                    Some(h) => format!("{} matches the signed checksum list (SHA-256 {h})", r.file),
+                    None => format!("{} carries a valid signature", r.file),
+                };
+                format!(
+                    "OK: {what}\nsigned by the Varsto release key {} ({}){}",
+                    r.key_id,
+                    r.signed.replace('\t', " "),
+                    if r.github == Some(true) {
+                        "\nthe GitHub release lists the same checksum"
+                    } else {
+                        ""
+                    }
+                )
+            })?;
+        }
+        Cmd::Paths {
+            notify,
+            action,
+            paths,
+        } => {
+            if *notify {
+                filemanager::detach_own_console();
+            }
+            let title = if action == "fetch" {
+                "Could not download"
+            } else {
+                "Could not free up space"
+            };
+            let results = match filemanager::run_paths(&home, action, paths, passphrase) {
+                Ok(r) => r,
+                Err(e) if *notify => {
+                    filemanager::report_failure(&home, title, &format!("{e:#}"));
+                    return Err(e);
+                }
+                Err(e) => return Err(e),
+            };
+            let failed = filemanager::failures(&results);
+            print(cli, &results, |r| {
+                r.iter()
+                    .filter(|x| x["ok"] == serde_json::json!(true))
+                    .map(|x| {
+                        format!(
+                            "{} {}",
+                            if action == "fetch" {
+                                "fetched"
+                            } else {
+                                "freed"
+                            },
+                            x["path"].as_str().unwrap_or("")
+                        )
+                    })
+                    .chain(failed.iter().map(|f| format!("failed: {f}")))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            })?;
+            if !failed.is_empty() {
+                if *notify {
+                    filemanager::report_failure(&home, title, &failed.join("\n"));
+                }
+                std::process::exit(1);
+            }
+        }
+        Cmd::OpenPlaceholder { path } => {
+            use std::io::IsTerminal;
+            let gui = filemanager::detach_own_console() || !std::io::stderr().is_terminal();
+            match filemanager::open_placeholder(&home, path, passphrase) {
+                Ok(real) => {
+                    if !gui {
+                        println!("opened {}", real.display());
+                    }
+                }
+                Err(e) => {
+                    if gui {
+                        filemanager::report_failure(
+                            &home,
+                            "Could not open the file",
+                            &format!("{e:#}"),
+                        );
+                    }
+                    return Err(e);
+                }
             }
         }
         Cmd::Ledger => {

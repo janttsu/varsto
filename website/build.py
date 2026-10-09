@@ -17,6 +17,7 @@ import html
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -33,6 +34,7 @@ ALPHA = (
     "audited. Keep your own backups and check that you can restore from them."
 )
 REPO = "https://github.com/janttsu/varsto"
+RELEASE_KEY = ROOT / "release-key.pub"
 FOOTER = [
     f'{BRAND} is a working name. Source: <a href="{REPO}">github.com/janttsu/varsto</a>, under the PolyForm Shield License 1.0.0 (source-available).',
     "No cookies, no tracking. The web server keeps a standard access log for at most seven days.",
@@ -234,6 +236,32 @@ def downloads_table(depth: int) -> str:
         f'<p class="dl-release">Release <strong>{html.escape(version)}</strong> · <a href="{pre}downloads/SHA256SUMS">SHA256SUMS</a> · <a href="{pre}downloads/manifest.json">manifest.json</a></p>'
         f'<div class="dl-grid">{"".join(cards)}</div>'
         f'<details class="dl-all"><summary>All files and checksums</summary><table class="downloads"><thead><tr><th>File</th><th>Platform</th><th>Size</th><th>SHA-256</th></tr></thead><tbody>{rows}</tbody></table></details>'
+        + verify_section(pre, version)
+    )
+
+
+def verify_section(pre: str, version: str) -> str:
+    """How to check a download against the signed checksum list."""
+    key_lines = RELEASE_KEY.read_text().splitlines() if RELEASE_KEY.exists() else []
+    if len(key_lines) < 2:
+        return ""
+    key = html.escape(key_lines[1].strip())
+    key_id = html.escape(key_lines[0].rsplit(" ", 1)[-1])
+    ver = html.escape(version or "<version>")
+    return (
+        '<details class="dl-all dl-verify"><summary>Verify your download</summary>'
+        f'<p><a href="{pre}downloads/SHA256SUMS">SHA256SUMS</a> is signed with the Varsto release key '
+        f'(<a href="{pre}downloads/SHA256SUMS.sig">SHA256SUMS.sig</a>, minisign format). The key is kept offline, '
+        f'built into every <code>varsto</code> binary and published in the <a href="{REPO}/blob/main/release-key.pub">repository</a> '
+        f'and <a href="{pre}release-key.pub">here</a>; key ID <code>{key_id}</code>:</p>'
+        f'<pre><code>{key}</code></pre>'
+        '<p>With Varsto already installed, put SHA256SUMS and SHA256SUMS.sig next to the download (or leave them out to fetch them) and run</p>'
+        f'<pre><code>varsto verify-release varsto-{ver}-x86_64-unknown-linux-musl.tar.gz --github</code></pre>'
+        '<p><code>--github</code> also compares the checksum with the list attached to the GitHub release, a second channel. '
+        'Without Varsto, use <a href="https://jedisct1.github.io/minisign/">minisign</a> and then check the hash:</p>'
+        f'<pre><code>minisign -Vm SHA256SUMS -x SHA256SUMS.sig -P {key}\nsha256sum -c --ignore-missing SHA256SUMS</code></pre>'
+        '<p><code>varsto update</code> does all of this by itself and refuses an update whose signature or checksum does not match.</p>'
+        '</details>'
     )
 
 
@@ -375,6 +403,8 @@ def build_redirects() -> None:
 
 def main() -> None:
     OUT.mkdir(parents=True, exist_ok=True)
+    if RELEASE_KEY.exists():
+        shutil.copyfile(RELEASE_KEY, OUT / "release-key.pub")
     slugs = build_docs()
     build_blog(slugs)
     build_pages(slugs)

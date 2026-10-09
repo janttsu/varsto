@@ -1222,10 +1222,12 @@ pub fn install(home: &Path, interval_secs: u64) -> Result<String> {
                 interval_secs
             ),
         )?;
-        return Ok(format!(
+        let mut done = vec![format!(
             "installed: {} (starts the tray app at login)",
             cmd.display()
-        ));
+        )];
+        done.extend(crate::filemanager::windows::install(&exe, home)?);
+        return Ok(done.join("\n"));
     }
     #[allow(unreachable_code)]
     {
@@ -1254,7 +1256,9 @@ pub fn uninstall() -> Result<String> {
         let dir = PathBuf::from(std::env::var("APPDATA")?)
             .join("Microsoft/Windows/Start Menu/Programs/Startup");
         let _ = fs::remove_file(dir.join("Varsto.cmd"));
-        return Ok("removed the startup entry".into());
+        let mut done = vec!["removed the startup entry".to_string()];
+        done.extend(crate::filemanager::windows::uninstall()?);
+        return Ok(done.join("\n"));
     }
     #[allow(unreachable_code)]
     Err(anyhow!("not implemented on this platform"))
@@ -1445,6 +1449,9 @@ pub mod linux {
             format!("[Desktop Entry]\nType=Application\nName=Varsto\nComment=Encrypted sync with your own storage\nExec={exec} tray --open\nIcon=varsto\nTerminal=false\nCategories=Utility;FileTools;Network;\n"),
         )?;
         done.push("application menu: Varsto".into());
+        done.extend(crate::filemanager::linux::install(
+            &data, &config, &target, home,
+        )?);
         Ok(done)
     }
 
@@ -1470,6 +1477,7 @@ pub mod linux {
             let _ = fs::remove_file(f);
         }
         done.push("autostart and menu entries removed".into());
+        done.extend(crate::filemanager::linux::uninstall(&data, &config)?);
         let target = installed_binary()?;
         if !running_installed() && fs::remove_file(&target).is_ok() {
             done.push(format!("binary removed: {}", target.display()));
