@@ -16,6 +16,7 @@ import argparse
 import json
 import os
 import pathlib
+import shlex
 import shutil
 import subprocess
 import sys
@@ -266,7 +267,7 @@ def build_macos(args):
         wait_ssh(user, ip, timeout=900)
         run_ssh(user, ip, "mkdir -p ~/build && printf '%s' \"$VARSTO_SUDO\" > /tmp/sudo-pass && chmod 600 /tmp/sudo-pass", extra=("-o", f"SendEnv=VARSTO_SUDO")) if False else None
         # The sudo password is only needed for the Command Line Tools install; pass it through a file.
-        subprocess.run(ssh_base(user, ip) + [f"mkdir -p ~/build && umask 077 && printf '%s' '{password}' > /tmp/sudo-pass"], check=True)
+        subprocess.run(ssh_base(user, ip) + [f"mkdir -p ~/build && umask 077 && printf '%s' {shlex.quote(password)} > /tmp/sudo-pass"], check=True)
         scp(str(tarball), f"{user}@{ip}:build/src.tar.gz")
         scp(str(ROOT / "scripts/cloud-build/remote-macos.sh"), f"{user}@{ip}:build/remote.sh")
         run_ssh(user, ip, "cd ~/build && tar xzf src.tar.gz && bash ~/build/remote.sh")
@@ -437,7 +438,7 @@ def ensure_windows_ssh(win_id, out):
         wait_ssh("root", jip)
         run_ssh("root", jip, "mkdir -p /it")
         scp(str(ROOT / "scripts/cloud-build/win-bootstrap.sh"), f"root@{jip}:/it/win-bootstrap.sh")
-        subprocess.run(ssh_base("root", jip) + [f"umask 077 && printf '%s' '{pw}' > /it/winpass"], check=True)
+        subprocess.run(ssh_base("root", jip) + [f"umask 077 && printf '%s' {shlex.quote(pw)} > /it/winpass"], check=True)
         run_ssh("root", jip, f"export WIN_TOOL=winssh WIN_IP={wip} WIN_PASS=\"$(cat /it/winpass)\" PUBKEY='{pub.read_text().strip()}' && bash /it/win-bootstrap.sh")
         try:
             scp(f"root@{jip}:/it/shots/*", str(out))
@@ -468,7 +469,7 @@ def win_bootstrap(args):
         run_ssh("root", jip, "mkdir -p /it")
         scp(str(ROOT / "scripts/cloud-build/win-bootstrap.sh"), f"root@{jip}:/it/win-bootstrap.sh")
         # The password goes through a file, not the command line.
-        subprocess.run(ssh_base("root", jip) + [f"umask 077 && printf '%s' '{pw}' > /it/winpass"], check=True)
+        subprocess.run(ssh_base("root", jip) + [f"umask 077 && printf '%s' {shlex.quote(pw)} > /it/winpass"], check=True)
         tool = "winshot" if args.target == "shots-windows" else "winssh"
         run_ssh("root", jip, f"export WIN_TOOL={tool} WIN_IP={wip} WIN_PASS=\"$(cat /it/winpass)\" PUBKEY='{pub.read_text().strip()}' && bash /it/win-bootstrap.sh")
         scp(f"root@{jip}:/it/shots/*", str(out))
