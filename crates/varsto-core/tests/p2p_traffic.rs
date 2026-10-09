@@ -182,7 +182,11 @@ fn downloads_and_uploads_are_counted_on_both_ends_over_tcp_and_quic() {
     assert!(rep_c.files_unavailable.is_empty());
     assert_eq!(rep_c.chunks_from_peers, rep_b.chunks_from_peers);
 
-    let (rb, rc) = (traffic_b.report(), traffic_c.report());
+    // A request that lost the race to another source may still be closing.
+    let (rb, rc) = (
+        settle(&traffic_b, |r| r.totals.active == 0),
+        settle(&traffic_c, |r| r.totals.active == 0),
+    );
     let want = rb.totals.objects_in + rc.totals.objects_in;
     let ra = settle(&traffic_a, |r| r.totals.objects_out == want);
     assert_eq!(ra.name, "laptop");

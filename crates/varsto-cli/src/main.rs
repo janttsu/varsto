@@ -631,7 +631,7 @@ enum FolderCmd {
     /// Turn selective sync on or off for an attached folder.
     Selective {
         name_or_id: String,
-        #[arg(value_parser = clap::value_parser!(bool))]
+        #[arg(action = clap::ArgAction::Set, value_parser = clap::value_parser!(bool))]
         on: bool,
     },
     /// Download one placeholder file and keep it on this device.
