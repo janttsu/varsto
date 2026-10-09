@@ -183,7 +183,7 @@
   function refreshState() {
     return api("GET", "/api/state").then(function (st) {
       $("version").textContent = st.version; $("version2").textContent = st.version;
-      appState.mobile = !!st.mobile; appState.folder_root = st.folder_root || ""; appState.platform = st.platform || "";
+      appState.mobile = !!st.mobile; appState.folder_root = st.folder_root || ""; appState.platform = st.platform || ""; joinKindForDevice();
       appState.plain_root = st.plain_root || ""; appState.plain_root_writable = st.plain_root_writable !== false;
       applyMobile();
       refreshAllFiles();
@@ -737,6 +737,11 @@
     }).catch(function (e) { alertBox(e.message); });
   };
   $("vaultkey-done").onclick = function () { $("vaultkey").classList.add("hidden"); $("vaultkey-text").textContent = ""; };
+  // Where the joined vault lives: a bucket is the only choice on a phone.
+  function applyJoinKind() { var k = $("joinkind").value; document.querySelectorAll("#join [data-joinkind]").forEach(function (d) { d.classList.toggle("hidden", d.getAttribute("data-joinkind") !== k); }); document.querySelectorAll("#join [data-joinkind] input").forEach(function (i) { i.required = !i.closest("[data-joinkind]").classList.contains("hidden") && i.name !== "region"; }); }
+  $("joinkind").onchange = applyJoinKind;
+  function joinKindForDevice() { if (isMobile()) { $("joinkind").value = "s3"; $("joinkind").querySelector('option[value="local-dir"]').disabled = true; } applyJoinKind(); }
+  joinKindForDevice();
   $("join").onsubmit = function (ev) { ev.preventDefault(); busy(true); api("POST", "/api/join", formData(ev.target)).then(function () { ev.target.reset(); log("joined the vault; attach folders under Files"); nav("files"); return refreshState(); }).catch(function (e) { alertBox(e.message); }).then(function () { busy(false); }); };
   $("replicatoken").onclick = function () { api("GET", "/api/replica/token").then(function (r) { $("replicaout").textContent = "Replica token (give to the device that will hold your encrypted copies without being able to open them): " + r.token; $("replicaout").classList.remove("hidden"); }).catch(function (e) { alertBox(e.message); }); };
   $("sharerequest").onclick = function () { api("POST", "/api/share/request", {}).then(function (r) { $("sharerequestout").textContent = r.request_code; $("sharerequestout").classList.remove("hidden"); }).catch(function (e) { alertBox(e.message); }); };

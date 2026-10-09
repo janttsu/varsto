@@ -461,20 +461,62 @@ fn api(st: &mut State, method: Method, path: &str, query: &str, input: &Value) -
             Ok(json!({"ok": true, "folder": token.name}))
         }
         (Method::Post, "/api/join") => {
-            let spec = StorageSpec::LocalDir {
-                name: opt(input, "storage_name").unwrap_or_else(|| "primary".into()),
-                path: PathBuf::from(s(input, "storage_path")?),
-                cold: false,
-                carrier: false,
-                place: String::new(),
+            // The storage that holds the vault: a directory, or an S3-compatible
+            // bucket (the only choice on a phone). The S3 secret travels through the
+            // environment for this process because the storage is opened before
+            // the vault exists, then goes into the encrypted secret store.
+            let storage_name = opt(input, "storage_name")
+                .filter(|n| !n.trim().is_empty())
+                .unwrap_or_else(|| "primary".into());
+            let kind = opt(input, "kind").unwrap_or_default();
+            let mut s3_secret: Option<String> = None;
+            let spec = if kind == "s3" || (kind.is_empty() && opt(input, "bucket").is_some()) {
+                let secret = s(input, "secret_access_key")?;
+                let env_name = format!(
+                    "VARSTO_S3_SECRET_{}",
+                    storage_name
+                        .to_uppercase()
+                        .replace(|c: char| !c.is_ascii_alphanumeric(), "_")
+                );
+                std::env::set_var(env_name, &secret);
+                s3_secret = Some(secret);
+                StorageSpec::S3 {
+                    name: storage_name.clone(),
+                    endpoint: s(input, "endpoint")?.trim_end_matches('/').to_string(),
+                    region: opt(input, "region")
+                        .filter(|r| !r.trim().is_empty())
+                        .unwrap_or_else(|| "auto".into()),
+                    bucket: s(input, "bucket")?,
+                    prefix: opt(input, "prefix")
+                        .unwrap_or_default()
+                        .trim_matches('/')
+                        .to_string(),
+                    access_key_id: s(input, "access_key_id")?,
+                    secret_ref: String::new(),
+                    path_style: true,
+                    storage_class: None,
+                    cold: false,
+                    place: opt(input, "place").unwrap_or_else(|| "cloud".into()),
+                }
+            } else {
+                StorageSpec::LocalDir {
+                    name: storage_name.clone(),
+                    path: PathBuf::from(s(input, "storage_path")?),
+                    cold: false,
+                    carrier: false,
+                    place: String::new(),
+                }
             };
-            let e = Engine::join(
+            let mut e = Engine::join(
                 &st.home,
                 &s(input, "name")?,
                 &s(input, "passphrase")?,
                 &s(input, "vault_key")?,
                 spec,
             )?;
+            if let Some(secret) = s3_secret {
+                e.store_secret(&storage_name, &secret)?;
+            }
             st.engine = Some(e);
             Ok(json!({"ok": true}))
         }
