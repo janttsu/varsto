@@ -711,6 +711,15 @@ fn api_unlocked(
             service.request_sync();
             Ok(json!({"ok": true, "id": id.to_string()}))
         }
+        (Method::Post, "/api/folder/detach") => {
+            engine.detach_folder(&s(input, "name")?)?;
+            Ok(json!({"ok": true}))
+        }
+        (Method::Post, "/api/folder/remove") => {
+            let purge = input.get("purge").and_then(|v| v.as_bool()).unwrap_or(false);
+            let deleted = engine.remove_folder(&s(input, "name")?, purge)?;
+            Ok(json!({"ok": true, "objects_deleted": deleted}))
+        }
         (Method::Post, "/api/folder/attach") => {
             let selective = input
                 .get("selective")

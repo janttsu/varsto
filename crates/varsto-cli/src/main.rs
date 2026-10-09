@@ -485,6 +485,19 @@ enum DiskCmd {
 
 #[derive(Subcommand)]
 enum FolderCmd {
+    /// Stop syncing a folder on this device; its files stay where they are.
+    Detach {
+        name: String,
+    },
+    /// Remove a folder from the vault on every device (files already on
+    /// devices stay). --purge also deletes its encrypted data from the storages.
+    Remove {
+        name: String,
+        #[arg(long)]
+        purge: bool,
+        #[arg(long)]
+        yes: bool,
+    },
     /// Create a folder in the vault and sync `path` into it.
     Add {
         name: String,
@@ -1024,6 +1037,26 @@ fn run(cli: &Cli) -> Result<()> {
                     let (folder, path) = &folder_and_path(&engine, folder, path)?;
                     engine.free_file(folder, path)?;
                     println!("{path} is now a placeholder");
+                }
+                FolderCmd::Detach { name } => {
+                    engine.detach_folder(name)?;
+                    println!(
+                        "{name} is no longer synced on this device; its files stay where they are"
+                    );
+                }
+                FolderCmd::Remove { name, purge, yes } => {
+                    if !*yes {
+                        bail_usage::<()>("this removes the folder from the vault on every device (files on devices stay); run again with --yes")?;
+                    }
+                    let n = engine.remove_folder(name, *purge)?;
+                    println!(
+                        "{name} removed from the vault{}",
+                        if *purge {
+                            format!("; {n} objects deleted from the storages")
+                        } else {
+                            String::new()
+                        }
+                    );
                 }
                 FolderCmd::Files { folder } => {
                     let rows = engine.list_files(folder)?;

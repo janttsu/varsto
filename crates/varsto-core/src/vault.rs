@@ -289,6 +289,43 @@ impl PolicyRecord {
     }
 }
 
+/// A folder removed from the vault, published so every device stops
+/// syncing it: `vault/removed/<folder>/<device>.enc`. Files on devices stay.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct FolderRemoval {
+    pub folder_id: FolderId,
+    pub device: DeviceId,
+    pub removed_utc: i64,
+}
+
+impl FolderRemoval {
+    pub const PREFIX: &'static str = "vault/removed/";
+    pub fn storage_key(&self) -> String {
+        format!("{}{}/{}.enc", Self::PREFIX, self.folder_id, self.device)
+    }
+    fn aad(vault: &VaultId, folder: &FolderId) -> Vec<u8> {
+        crypto::aad(
+            "folder-removal",
+            &[vault.as_str().as_bytes(), folder.as_str().as_bytes()],
+        )
+    }
+    pub fn seal(&self, vault: &VaultId, key: &SecretKey) -> Result<Vec<u8>> {
+        crypto::encrypt(
+            key,
+            &Self::aad(vault, &self.folder_id),
+            &serde_json::to_vec(self)?,
+        )
+    }
+    pub fn open(blob: &[u8], vault: &VaultId, folder: &FolderId, key: &SecretKey) -> Result<Self> {
+        let plain = crypto::decrypt(key, &Self::aad(vault, folder), blob)?;
+        let rec: FolderRemoval = serde_json::from_slice(&plain)?;
+        if &rec.folder_id != folder {
+            bail!("folder removal record mismatch");
+        }
+        Ok(rec)
+    }
+}
+
 /// Prefix of member device records: `vault/shares/<folder>/<device>.enc`.
 pub const SHARE_PREFIX: &str = "vault/shares/";
 
@@ -458,9 +495,15 @@ pub struct FolderRecord {
     /// only while unlocked.
     #[serde(default)]
     pub strongroom: Option<crate::strongroom::StrongroomInfo>,
+    /// Removed from the vault (local flag, learned from a `FolderRemoval`).
+    #[serde(default)]
+    pub removed_utc: i64,
 }
 
 impl FolderRecord {
+    pub fn is_removed(&self) -> bool {
+        self.removed_utc > 0
+    }
     pub fn is_strongroom(&self) -> bool {
         self.strongroom.is_some()
     }
@@ -602,7 +645,7 @@ impl Keyring {
         util::write_atomic(&home.join("keyring.enc"), &blob)
     }
     pub fn find(&self, name_or_id: &str) -> Option<&FolderRecord> {
-        self.folders.values().find(|r| {
+        self.folders.values().filter(|r| !r.is_removed()).find(|r| {
             r.name == name_or_id
                 || r.folder_id.as_str() == name_or_id
                 || r.folder_id.as_str().starts_with(name_or_id) && name_or_id.len() >= 8

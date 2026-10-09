@@ -658,6 +658,7 @@ impl Engine {
             policy: None,
             policy_updated_utc: 0,
             strongroom: None,
+            removed_utc: 0,
         };
         engine.keyring.folders.insert(rec.folder_id.clone(), rec);
         engine.keyring.save(
@@ -1172,9 +1173,7 @@ impl Engine {
         if self.vault.member {
             bail!("this device is a member of a shared folder only; it cannot create folders in the owner's vault");
         }
-        if self.keyring.folders.values().any(|f| f.name == name) {
-            bail!("a folder named {name} already exists in the vault");
-        }
+        self.ensure_unique_folder_name(name)?;
         fs::create_dir_all(path)?;
         let rec = FolderRecord {
             folder_id: FolderId::random(),
@@ -1186,6 +1185,7 @@ impl Engine {
             policy: None,
             policy_updated_utc: 0,
             strongroom: None,
+            removed_utc: 0,
         };
         let id = rec.folder_id.clone();
         self.keyring.folders.insert(id.clone(), rec);
@@ -1240,10 +1240,148 @@ impl Engine {
     }
 
     /// Known folders: (record, mount path if attached here).
+    /// Top-level names are unique in the vault: learn the other devices'
+    /// folders first (best effort when offline), compare without case.
+    fn ensure_unique_folder_name(&mut self, name: &str) -> Result<()> {
+        if name.trim().is_empty() {
+            bail!("a folder needs a name");
+        }
+        let _ = self.pull_registry();
+        if let Some(f) = self
+            .keyring
+            .folders
+            .values()
+            .find(|f| !f.is_removed() && f.name.to_lowercase() == name.trim().to_lowercase())
+        {
+            bail!(
+                "the vault already has a folder named {}: attach that one, or choose another name",
+                f.name
+            );
+        }
+        Ok(())
+    }
+
+    /// Two devices that created a folder with the same name while offline:
+    /// every device keeps the older one's name and numbers the newer ones,
+    /// so all of them end up with the same unique names.
+    fn dedupe_folder_names(&mut self) -> bool {
+        let mut live: Vec<(i64, FolderId, String)> = self
+            .keyring
+            .folders
+            .values()
+            .filter(|f| !f.is_removed())
+            .map(|f| (f.created_utc, f.folder_id.clone(), f.name.clone()))
+            .collect();
+        live.sort();
+        let mut taken: HashSet<String> = HashSet::new();
+        let mut changed = false;
+        for (_, id, name) in live {
+            let mut candidate = name.clone();
+            let mut n = 2;
+            while taken.contains(&candidate.to_lowercase()) {
+                candidate = format!("{name} ({n})");
+                n += 1;
+            }
+            taken.insert(candidate.to_lowercase());
+            if candidate != name {
+                if let Some(f) = self.keyring.folders.get_mut(&id) {
+                    f.name = candidate;
+                    changed = true;
+                }
+            }
+        }
+        changed
+    }
+
+    /// Stop syncing a folder on this device. Its files stay where they are;
+    /// the sync state goes, so attaching it again later starts clean instead
+    /// of reading missing files as deletions.
+    pub fn detach_folder(&mut self, name: &str) -> Result<()> {
+        let (rec, _) = self.resolve_folder(name)?;
+        self.detach_mount(&rec.folder_id)
+    }
+
+    fn detach_mount(&mut self, folder: &FolderId) -> Result<()> {
+        let before = self.config.folders.len();
+        self.config.folders.retain(|m| &m.folder_id != folder);
+        if self.config.folders.len() != before {
+            self.config.save(&self.home)?;
+        }
+        let _ = fs::remove_file(self.state_path(folder));
+        Ok(())
+    }
+
+    fn forget_folder(&mut self, folder: &FolderId, removed_utc: i64) -> Result<()> {
+        self.detach_mount(folder)?;
+        if let Some(f) = self.keyring.folders.get_mut(folder) {
+            f.removed_utc = removed_utc.max(1);
+        }
+        self.keyring.save(
+            &self.home,
+            &self.keys,
+            &self.vault.vault_id,
+            &self.vault.device_id,
+        )
+    }
+
+    /// Remove a folder from the vault on every device: each one stops syncing
+    /// it when it next reads the storage, and files already on devices stay.
+    /// With `purge` its encrypted data (blocks, manifests, thumbnails) is
+    /// deleted from this device's storages. Returns the objects deleted.
+    pub fn remove_folder(&mut self, name: &str, purge: bool) -> Result<u64> {
+        if self.vault.member {
+            bail!("a member device cannot remove the owner's folders");
+        }
+        let rec = self
+            .keyring
+            .find(name)
+            .cloned()
+            .ok_or_else(|| anyhow!("unknown folder {name}"))?;
+        let removal = vault::FolderRemoval {
+            folder_id: rec.folder_id.clone(),
+            device: self.vault.device_id.clone(),
+            removed_utc: util::now_utc(),
+        };
+        let blob = removal.seal(&self.vault.vault_id, &self.keys.folder_record_key())?;
+        for (_, backend) in self.metadata_storages(true)? {
+            backend.put_if_absent(&removal.storage_key(), &blob)?;
+        }
+        let mut deleted = 0u64;
+        if purge {
+            let view = self.view()?;
+            let objects: Vec<String> = view
+                .chunks
+                .iter()
+                .filter(|((f, _), _)| f == &rec.folder_id)
+                .map(|(_, c)| chunk_storage_key(&c.object))
+                .collect();
+            for (_, backend) in self.open_storages(true)? {
+                for key in &objects {
+                    if backend.exists(key).unwrap_or(false) {
+                        backend.delete(key)?;
+                        deleted += 1;
+                    }
+                }
+                for prefix in [
+                    format!("manifests/{}/", rec.folder_id),
+                    format!("thumbs/{}/", rec.folder_id),
+                ] {
+                    for key in backend.list(&prefix)? {
+                        backend.delete(&key)?;
+                        deleted += 1;
+                    }
+                }
+            }
+        }
+        self.forget_folder(&rec.folder_id, removal.removed_utc)?;
+        Ok(deleted)
+    }
+
     pub fn folders(&self) -> Vec<(FolderRecord, Option<PathBuf>)> {
         self.keyring
             .folders
             .values()
+            .filter(|r| !r.is_removed())
             .map(|r| {
                 let mount = self
                     .config
@@ -1606,6 +1744,37 @@ impl Engine {
                 }
             }
         }
+        // Folders removed from the vault: stop syncing them here (files stay).
+        if !self.vault.member {
+            for (_, backend) in self.metadata_storages(false)? {
+                for key in backend.list(vault::FolderRemoval::PREFIX)? {
+                    let Some(fid) = key
+                        .strip_prefix(vault::FolderRemoval::PREFIX)
+                        .and_then(|r| r.split('/').next())
+                        .and_then(|f| FolderId::from_hex(f).ok())
+                    else {
+                        continue;
+                    };
+                    if !self
+                        .keyring
+                        .folders
+                        .get(&fid)
+                        .is_some_and(|f| !f.is_removed())
+                    {
+                        continue;
+                    }
+                    if let Some(blob) = backend.get(&key)? {
+                        if let Ok(rec) =
+                            vault::FolderRemoval::open(&blob, &self.vault.vault_id, &fid, &fr_key)
+                        {
+                            self.forget_folder(&fid, rec.removed_utc)?;
+                            changed_folders = true;
+                        }
+                    }
+                }
+            }
+        }
+        changed_folders |= self.dedupe_folder_names();
         // Member records of shared folders, readable by every holder of the folder key.
         for (_, backend) in self.metadata_storages(false)? {
             for f in self.keyring.folders.values().filter(|f| f.shared) {
@@ -2954,9 +3123,7 @@ impl Engine {
         if self.vault.member {
             bail!("a member device cannot create folders in the owner's vault");
         }
-        if self.keyring.folders.values().any(|f| f.name == name) {
-            bail!("a folder named {name} already exists in the vault");
-        }
+        self.ensure_unique_folder_name(name)?;
         fs::create_dir_all(path)?;
         let folder_id = FolderId::random();
         let folder_key = SecretKey::random();
@@ -2971,6 +3138,7 @@ impl Engine {
             policy: None,
             policy_updated_utc: 0,
             strongroom: Some(info),
+            removed_utc: 0,
         };
         self.keyring.folders.insert(folder_id.clone(), rec);
         self.keyring.save(

@@ -315,6 +315,26 @@
       });
     }).catch(function (e) { alertBox(e.message); }).then(function () { busy(false); return refreshStatus(); });
   }
+  // Removing a folder: stop syncing it here, or remove it from the vault on
+  // every device (optionally with its data on the storages). Files stay.
+  function removeFolder(f) {
+    var vaultWide = function () {
+      return dialog({ title: "Remove " + f.name + " from the vault?", text: "Every device stops syncing " + f.name + " and it disappears from the folder lists. Files already on your devices stay where they are. You can also delete its encrypted data from your storages; then it cannot be brought back.", ok: "Remove from the vault", extra: "Remove and delete its data" }).then(function (r) {
+        if (!r) { return null; }
+        var purge = r.action === "extra"; busy(true);
+        return api("POST", "/api/folder/remove", { name: f.name, purge: purge }).then(function (x) { log(f.name + " removed from the vault" + (purge ? "; " + x.objects_deleted + " objects deleted from the storages" : "")); });
+      });
+    };
+    var first = f.path
+      ? dialog({ title: "Remove " + f.name + "?", text: "Stop syncing it on this device only (the files stay in " + f.path + "), or remove it from the vault on every device.", ok: "Stop syncing here", extra: "Remove from the vault\u2026" }).then(function (r) {
+          if (!r) { return null; }
+          if (r.action === "extra") { return vaultWide(); }
+          busy(true);
+          return api("POST", "/api/folder/detach", { name: f.name }).then(function () { log(f.name + " is no longer synced on this device"); });
+        })
+      : vaultWide();
+    first.catch(function (e) { alertBox(e.message); }).then(function () { busy(false); return refreshStatus(); });
+  }
   function shareFolder(f) {
     dialog({
       title: (f.shared ? "New token for " : "Share ") + f.name,
@@ -365,6 +385,7 @@
         if (f.path) { var b = document.createElement("button"); b.className = "secondary"; b.textContent = "Sync"; b.onclick = function () { runSync(f.name); }; act.appendChild(b); }
         if (!s.member) { var sh = document.createElement("button"); sh.className = "secondary"; sh.textContent = f.shared ? "Token" : "Share"; sh.onclick = function () { shareFolder(f); }; act.appendChild(sh); }
         if (!s.member) { var pb = document.createElement("button"); pb.className = "secondary"; pb.textContent = "Policy"; pb.onclick = function () { openPolicy(f); }; act.appendChild(pb); }
+        if (!s.member) { var rmb = document.createElement("button"); rmb.className = "secondary"; rmb.textContent = "Remove"; rmb.onclick = function () { removeFolder(f); }; act.appendChild(rmb); }
         if (f.strongroom && f.strongroom !== "locked") { var lk = document.createElement("button"); lk.className = "secondary"; lk.textContent = "Lock"; lk.onclick = function () { api("POST", "/api/strongroom/lock", { folder: f.name }).then(function () { log("locked " + f.name); return refreshStatus(); }).catch(function (e) { alertBox(e.message); }); }; act.appendChild(lk); }
         if (f.strongroom === "locked") { var note = document.createElement("span"); note.className = "muted"; note.textContent = "unlock with: varsto strongroom unlock " + f.name; act.appendChild(note); }
         tr.appendChild(act); tb.appendChild(tr);
