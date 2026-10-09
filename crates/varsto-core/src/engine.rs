@@ -1951,8 +1951,6 @@ impl Engine {
         }
         let lamport = self.tick()?;
         let events = std::mem::take(&mut self.pending);
-        // The events go into a local batch below; from here a crash keeps them there.
-        self.clear_deferred();
         if !self.vault.member {
             let (key_id, ledger_key) = self.ledger_key_now();
             let signed = self.ledger.append_own_seen(
@@ -1964,6 +1962,8 @@ impl Engine {
                 &key_id,
                 &self.keys.signer,
             )?;
+            // The events are in a local batch now.
+            self.clear_deferred();
             self.push_own_batches()?;
             return Ok(Some(signed.seq));
         }
@@ -2005,6 +2005,7 @@ impl Engine {
             )?;
             last = Some(signed.seq);
         }
+        self.clear_deferred();
         self.push_own_batches()?;
         Ok(last)
     }

@@ -13,6 +13,13 @@
 //! (a key epoch, a shared folder) or of revocation cut-offs (which can drop
 //! batches already applied) rebuilds it; retirements, replica claims and
 //! forks are applied on top at every call, as a full replay does.
+//!
+//! One user action seals at most one batch (`one_batch`), and small events
+//! that nobody waits for wait for the next one (`ledger/pending.json`).
+//! After a sync, `ledger_upkeep` writes checkpoints of this device's own
+//! batches, acknowledges other devices' checkpoints, and deletes batches a
+//! checkpoint covers once every reader has acknowledged it
+//! (`docs/spec/alpha-0-format.md` section 22).
 
 use super::*;
 use crate::ledger::{LedgerObject, SignedCheckpoint};
