@@ -16,6 +16,8 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 
 pub trait Storage: Send + Sync {
     fn name(&self) -> &str;
@@ -346,6 +348,98 @@ impl Storage for LocalDirStorage {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
             Err(e) => Err(e.into()),
         }
+    }
+}
+
+/// Calls made through `CountingStorage`, for tests and measurements.
+#[derive(Debug, Default)]
+pub struct StorageCalls {
+    pub lists: AtomicU64,
+    /// Keys returned by all listings together.
+    pub listed_keys: AtomicU64,
+    pub gets: AtomicU64,
+    pub puts: AtomicU64,
+    pub exists: AtomicU64,
+    pub deletes: AtomicU64,
+}
+
+/// A plain copy of `StorageCalls` at one moment.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct CallCounts {
+    pub lists: u64,
+    pub listed_keys: u64,
+    pub gets: u64,
+    pub puts: u64,
+    pub exists: u64,
+    pub deletes: u64,
+}
+
+impl StorageCalls {
+    pub fn snapshot(&self) -> CallCounts {
+        CallCounts {
+            lists: self.lists.load(Ordering::Relaxed),
+            listed_keys: self.listed_keys.load(Ordering::Relaxed),
+            gets: self.gets.load(Ordering::Relaxed),
+            puts: self.puts.load(Ordering::Relaxed),
+            exists: self.exists.load(Ordering::Relaxed),
+            deletes: self.deletes.load(Ordering::Relaxed),
+        }
+    }
+}
+
+impl std::ops::Sub for CallCounts {
+    type Output = CallCounts;
+    fn sub(self, o: CallCounts) -> CallCounts {
+        CallCounts {
+            lists: self.lists - o.lists,
+            listed_keys: self.listed_keys - o.listed_keys,
+            gets: self.gets - o.gets,
+            puts: self.puts - o.puts,
+            exists: self.exists - o.exists,
+            deletes: self.deletes - o.deletes,
+        }
+    }
+}
+
+/// Wraps a storage and counts the calls made to it.
+pub struct CountingStorage {
+    inner: Box<dyn Storage>,
+    calls: Arc<StorageCalls>,
+}
+
+impl CountingStorage {
+    pub fn new(inner: Box<dyn Storage>, calls: Arc<StorageCalls>) -> Self {
+        CountingStorage { inner, calls }
+    }
+}
+
+impl Storage for CountingStorage {
+    fn name(&self) -> &str {
+        self.inner.name()
+    }
+    fn put_if_absent(&self, key: &str, data: &[u8]) -> Result<bool> {
+        self.calls.puts.fetch_add(1, Ordering::Relaxed);
+        self.inner.put_if_absent(key, data)
+    }
+    fn get(&self, key: &str) -> Result<Option<Vec<u8>>> {
+        self.calls.gets.fetch_add(1, Ordering::Relaxed);
+        self.inner.get(key)
+    }
+    fn exists(&self, key: &str) -> Result<bool> {
+        self.calls.exists.fetch_add(1, Ordering::Relaxed);
+        self.inner.exists(key)
+    }
+    fn list(&self, prefix: &str) -> Result<Vec<String>> {
+        self.calls.lists.fetch_add(1, Ordering::Relaxed);
+        let out = self.inner.list(prefix)?;
+        self.calls
+            .listed_keys
+            .fetch_add(out.len() as u64, Ordering::Relaxed);
+        Ok(out)
+    }
+    fn delete(&self, key: &str) -> Result<()> {
+        self.calls.deletes.fetch_add(1, Ordering::Relaxed);
+        self.inner.delete(key)
     }
 }
 

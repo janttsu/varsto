@@ -39,6 +39,7 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
+mod ledger_upkeep;
 mod membership;
 mod placement;
 mod strongroom_ops;
@@ -344,6 +345,8 @@ pub struct Engine {
     /// Set once this device has seen its own revocation: it no longer syncs.
     removal: Option<Removal>,
     pub chunker: ChunkerParams,
+    /// Counts the calls made to every storage this engine opens (measurements).
+    storage_calls: Option<std::sync::Arc<crate::storage::StorageCalls>>,
 }
 
 /// Open storages with their specs.
@@ -621,6 +624,7 @@ impl Engine {
             epochs,
             removal: None,
             chunker: ChunkerParams::DEFAULT,
+            storage_calls: None,
         };
         engine.config.save(home)?;
         if !engine.vault.member {
@@ -798,6 +802,7 @@ impl Engine {
             epochs,
             removal,
             chunker: ChunkerParams::DEFAULT,
+            storage_calls: None,
         };
         // Command-line runs use the peers other devices advertised, over TCP
         // only; the service adds LAN peers and the QUIC node.
@@ -892,11 +897,23 @@ impl Engine {
     }
 
     fn open_spec(&self, spec: &StorageSpec) -> Result<Box<dyn Storage>> {
-        if let StorageSpec::Pool { .. } = spec {
-            return Ok(Box::new(self.open_pool(spec)?));
-        }
-        let store = self.secret_store()?;
-        spec.open_with(&|r| store.secrets.get(r).cloned())
+        let backend: Box<dyn Storage> = if let StorageSpec::Pool { .. } = spec {
+            Box::new(self.open_pool(spec)?)
+        } else {
+            let store = self.secret_store()?;
+            spec.open_with(&|r| store.secrets.get(r).cloned())?
+        };
+        Ok(match &self.storage_calls {
+            Some(calls) => Box::new(crate::storage::CountingStorage::new(backend, calls.clone())),
+            None => backend,
+        })
+    }
+
+    /// Count every call this engine makes to its storages from now on
+    /// (measurements and tests).
+    #[doc(hidden)]
+    pub fn count_storage_calls(&mut self, calls: std::sync::Arc<crate::storage::StorageCalls>) {
+        self.storage_calls = Some(calls);
     }
 
     /// Open a configured storage by name (tests and tools).
