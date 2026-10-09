@@ -6,14 +6,18 @@
 //! verifying every object against its content-addressed name. Peers on the
 //! LAN are found with a multicast beacon; peers across the internet through
 //! a rendezvous record each device publishes in the vault's own storage with
-//! the addresses it can be reached at. Transport is plain HTTP: the objects
-//! are ciphertext already, and every request carries a proof of vault
-//! membership derived from the master key, so a listener learns nothing and
-//! a stranger gets nothing.
+//! the addresses it can be reached at. The objects are ciphertext already,
+//! and every request carries a proof of vault membership derived from the
+//! master key, so a listener learns nothing and a stranger gets nothing.
 //!
-//! What this does not do yet: NAT traversal. Across the internet a peer is
-//! reachable only if it listens on a public address (a forwarded port, a
-//! public IP, a VPN). Relays and hole punching are planned.
+//! Two transports share one request handler: plain HTTP over TCP (LAN and
+//! user-forwarded ports) and QUIC over UDP (`quic`), which crosses NATs with
+//! STUN-learned addresses (`stun`), punch datagrams and, failing that, a
+//! relay through one of the user's own reachable devices. There are no
+//! trackers and no vendor servers: the user's storage is the rendezvous.
+
+pub mod quic;
+pub mod stun;
 
 use crate::crypto::{self, SecretKey};
 use crate::ids::{DeviceId, FolderId, ObjectName, VaultId};
@@ -183,41 +187,62 @@ impl Server {
 
     fn handle(req: tiny_http::Request, snap: Option<Arc<Snapshot>>) -> Result<()> {
         let path = req.url().split('?').next().unwrap_or("").to_string();
-        let Some(snap) = snap else {
-            return Ok(
-                req.respond(tiny_http::Response::from_string("locked").with_status_code(503))?
-            );
-        };
         let auth = req
             .headers()
             .iter()
             .find(|h| h.field.equiv("X-Varsto-Peer"))
             .map(|h| h.value.as_str().to_string())
             .unwrap_or_default();
-        if verify_auth(&snap.peer_key, &auth, &path).is_none() {
-            return Ok(
-                req.respond(tiny_http::Response::from_string("forbidden").with_status_code(403))?
-            );
+        let (status, body) = handle(snap.as_deref(), &path, &auth);
+        req.respond(
+            tiny_http::Response::from_data(body)
+                .with_status_code(status)
+                .with_chunked_threshold(usize::MAX),
+        )?;
+        Ok(())
+    }
+}
+
+/// Answer one peer request, whatever transport carried it: `(status, body)`.
+/// Paths: `/p2p/info` and `/p2p/object/<name>`. No snapshot means the
+/// service is locked.
+pub fn handle(snap: Option<&Snapshot>, path: &str, auth: &str) -> (u16, Vec<u8>) {
+    let Some(snap) = snap else {
+        return (503, b"locked".to_vec());
+    };
+    if verify_auth(&snap.peer_key, auth, path).is_none() {
+        return (403, b"forbidden".to_vec());
+    }
+    if path == "/p2p/info" {
+        let body = serde_json::json!({
+            "device": snap.device_id.to_string(),
+            "pieces": snap.pieces.len(),
+            "local_roots": snap.local_roots.len(),
+        });
+        return (200, body.to_string().into_bytes());
+    }
+    if let Some(name) = path.strip_prefix("/p2p/object/") {
+        let Ok(name) = ObjectName::from_hex(name) else {
+            return (400, b"bad name".to_vec());
+        };
+        return match snap.object(&name) {
+            Ok(Some(bytes)) => (200, bytes),
+            Ok(None) => (404, b"not here".to_vec()),
+            Err(e) => (500, format!("{e}").into_bytes()),
+        };
+    }
+    (404, b"not found".to_vec())
+}
+
+/// Private, loopback and link-local addresses: a path over them is "direct-lan".
+pub fn is_lan(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => v4.is_private() || v4.is_loopback() || v4.is_link_local(),
+        IpAddr::V6(v6) => {
+            v6.is_loopback()
+                || (v6.segments()[0] & 0xffc0) == 0xfe80
+                || (v6.segments()[0] & 0xfe00) == 0xfc00
         }
-        if path == "/p2p/info" {
-            let body = serde_json::json!({"device": snap.device_id.to_string(), "pieces": snap.pieces.len(), "local_roots": snap.local_roots.len()});
-            return Ok(req.respond(tiny_http::Response::from_string(body.to_string()))?);
-        }
-        if let Some(name) = path.strip_prefix("/p2p/object/") {
-            let Ok(name) = ObjectName::from_hex(name) else {
-                return Ok(req.respond(
-                    tiny_http::Response::from_string("bad name").with_status_code(400),
-                )?);
-            };
-            return match snap.object(&name)? {
-                Some(bytes) => Ok(req.respond(
-                    tiny_http::Response::from_data(bytes).with_chunked_threshold(usize::MAX),
-                )?),
-                None => Ok(req
-                    .respond(tiny_http::Response::from_string("not here").with_status_code(404))?),
-            };
-        }
-        Ok(req.respond(tiny_http::Response::from_string("not found").with_status_code(404))?)
     }
 }
 
@@ -232,18 +257,44 @@ pub struct PeerAddr {
 
 /// Rendezvous record a device publishes in the vault's storage:
 /// `vault/peers/<device>.enc`, encrypted under the device registry key.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+/// Version 1 added the UDP/QUIC fields; version 0 records (no `version`
+/// field) are still read, with the new fields empty.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PeerRecord {
+    #[serde(default)]
+    pub version: u32,
     pub device: DeviceId,
     pub name: String,
+    /// TCP and UDP port (the same number for both transports).
     pub port: u16,
     pub lan_addrs: Vec<IpAddr>,
+    /// Addresses the user configured (forwarded port, public IP, VPN).
     pub public_addrs: Vec<SocketAddr>,
     pub updated_utc: i64,
+    /// UDP addresses STUN servers saw for our socket.
+    #[serde(default)]
+    pub udp_public: Vec<SocketAddr>,
+    /// UDP addresses on our own interfaces.
+    #[serde(default)]
+    pub udp_local: Vec<SocketAddr>,
+    /// Hex SHA-256 of the device's QUIC certificate; empty before `p2p enable`.
+    #[serde(default)]
+    pub cert_sha256: String,
+    /// NAT guess from STUN: none, cone, symmetric or unknown.
+    #[serde(default)]
+    pub nat: stun::Nat,
+    /// Reachable devices this device keeps a relay registration with.
+    #[serde(default)]
+    pub relay_via: Vec<DeviceId>,
+    /// A public address answered our own probe, or the user configured one:
+    /// other devices can connect directly, and may relay through us.
+    #[serde(default)]
+    pub reachable: bool,
 }
 
 impl PeerRecord {
     pub const PREFIX: &'static str = "vault/peers/";
+    pub const VERSION: u32 = 1;
     pub fn storage_key(device: &DeviceId) -> String {
         format!("{}{}.enc", Self::PREFIX, device)
     }
@@ -268,6 +319,7 @@ impl PeerRecord {
         }
         Ok(rec)
     }
+    /// TCP addresses, LAN first.
     pub fn addrs(&self) -> Vec<SocketAddr> {
         let mut out: Vec<SocketAddr> = self
             .lan_addrs
@@ -276,6 +328,113 @@ impl PeerRecord {
             .collect();
         out.extend(self.public_addrs.iter().cloned());
         out
+    }
+    /// UDP (QUIC) addresses, public first: a LAN peer was already tried over TCP.
+    pub fn udp_addrs(&self) -> Vec<SocketAddr> {
+        let mut out: Vec<SocketAddr> = Vec::new();
+        for a in self
+            .udp_public
+            .iter()
+            .chain(self.public_addrs.iter())
+            .chain(self.udp_local.iter())
+        {
+            if !out.contains(a) {
+                out.push(*a);
+            }
+        }
+        out
+    }
+    /// Equal apart from the timestamp: nothing worth republishing.
+    pub fn same_as(&self, other: &PeerRecord) -> bool {
+        let mut a = self.clone();
+        let mut b = other.clone();
+        a.updated_utc = 0;
+        b.updated_utc = 0;
+        a == b
+    }
+}
+
+/// Everything the client side knows about one device, merged from its
+/// record and from LAN beacons.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PeerInfo {
+    pub device: DeviceId,
+    pub name: String,
+    /// HTTP over TCP, LAN first.
+    pub tcp: Vec<SocketAddr>,
+    /// QUIC over UDP, public first.
+    pub udp: Vec<SocketAddr>,
+    pub cert_sha256: String,
+    pub relay_via: Vec<DeviceId>,
+    pub nat: stun::Nat,
+    pub reachable: bool,
+}
+
+impl PeerInfo {
+    pub fn from_record(rec: &PeerRecord) -> PeerInfo {
+        PeerInfo {
+            device: rec.device.clone(),
+            name: rec.name.clone(),
+            tcp: rec.addrs(),
+            udp: rec.udp_addrs(),
+            cert_sha256: rec.cert_sha256.clone(),
+            relay_via: rec.relay_via.clone(),
+            nat: rec.nat,
+            reachable: rec.reachable,
+        }
+    }
+    /// A peer heard on the LAN: its TCP address, and the same port over UDP
+    /// when its certificate is known (the two listeners share the number).
+    fn add_lan(&mut self, addr: SocketAddr) {
+        if !self.tcp.contains(&addr) {
+            self.tcp.insert(0, addr);
+        }
+        if !self.cert_sha256.is_empty() && !self.udp.contains(&addr) {
+            self.udp.push(addr);
+        }
+    }
+}
+
+/// The path the last attempt to a peer used, for the status displays.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PeerStatus {
+    pub device: DeviceId,
+    pub name: String,
+    /// `direct-lan`, `direct`, `relayed via <name>`, `unreachable` or `untried`.
+    pub path: String,
+    pub addr: Option<SocketAddr>,
+    /// The peer answered as a device of the vault (200, or 404 for an object).
+    pub ok: bool,
+    pub checked_utc: i64,
+}
+
+/// The outcome of the last request to one peer: route (none when every
+/// route failed), status answered, and when.
+type Attempt = (Option<Route>, u16, Instant);
+
+/// How one request reached (or failed to reach) a peer.
+#[derive(Clone, Debug)]
+enum Route {
+    Tcp(SocketAddr),
+    Quic(SocketAddr),
+    Relay(DeviceId, String, SocketAddr),
+}
+
+impl Route {
+    fn label(&self) -> String {
+        match self {
+            Route::Tcp(a) | Route::Quic(a) if is_lan(a.ip()) => "direct-lan".into(),
+            Route::Tcp(_) | Route::Quic(_) => "direct".into(),
+            Route::Relay(dev, name, _) => format!(
+                "relayed via {}",
+                if name.is_empty() { dev.short() } else { name }
+            ),
+        }
+    }
+    fn addr(&self) -> SocketAddr {
+        match self {
+            Route::Tcp(a) | Route::Quic(a) | Route::Relay(_, _, a) => *a,
+        }
     }
 }
 
@@ -347,98 +506,270 @@ pub fn decode_chunked(body: &[u8]) -> Result<Vec<u8>> {
 
 /// Client side: a set of peers tried in turn for each object, the ones that
 /// answered recently first. Objects are verified by name by the caller.
+/// Per peer the paths are tried in order: TCP to its known addresses, QUIC
+/// to its UDP addresses while punching, then a relay from its record. The
+/// outcome is remembered for a minute so a dead peer costs one timeout per
+/// minute and a live one goes straight to the path that worked.
 pub struct Peers {
     pub key: SecretKey,
     pub me: DeviceId,
-    pub peers: Vec<PeerAddr>,
+    pub peers: Vec<PeerInfo>,
+    quic: Option<Arc<quic::Node>>,
+    /// Per TCP address: did the last attempt answer, and when.
     state: Mutex<BTreeMap<SocketAddr, (bool, Instant)>>,
+    /// Per device: the last route (or failure), the status it answered, and when.
+    routes: Mutex<BTreeMap<DeviceId, Attempt>>,
     pub timeout: Duration,
 }
 
+const ROUTE_TTL: Duration = Duration::from_secs(60);
+
 impl Peers {
+    /// TCP-only peers from plain addresses (LAN beacons, tests).
     pub fn new(key: SecretKey, me: DeviceId, peers: Vec<PeerAddr>) -> Self {
+        Self::build(key, me, &[], &peers, None)
+    }
+
+    /// Peers from rendezvous records plus LAN beacons, with QUIC when a node runs.
+    pub fn build(
+        key: SecretKey,
+        me: DeviceId,
+        records: &[PeerRecord],
+        lan: &[PeerAddr],
+        quic: Option<Arc<quic::Node>>,
+    ) -> Self {
+        let mut infos: Vec<PeerInfo> = records
+            .iter()
+            .filter(|r| r.device != me)
+            .map(PeerInfo::from_record)
+            .collect();
+        for p in lan.iter().filter(|p| p.device != me) {
+            match infos.iter_mut().find(|i| i.device == p.device) {
+                Some(i) => i.add_lan(p.addr),
+                None => infos.push(PeerInfo {
+                    device: p.device.clone(),
+                    name: p.name.clone(),
+                    tcp: vec![p.addr],
+                    udp: Vec::new(),
+                    cert_sha256: String::new(),
+                    relay_via: Vec::new(),
+                    nat: stun::Nat::Unknown,
+                    reachable: false,
+                }),
+            }
+        }
+        if let Some(node) = &quic {
+            node.set_known(infos.clone());
+        }
         Peers {
             key,
             me,
-            peers,
+            peers: infos,
+            quic,
             state: Mutex::new(BTreeMap::new()),
+            routes: Mutex::new(BTreeMap::new()),
             timeout: Duration::from_millis(1500),
         }
     }
+
     pub fn is_empty(&self) -> bool {
         self.peers.is_empty()
     }
-    fn ordered(&self) -> Vec<PeerAddr> {
-        let st = self.state.lock().unwrap();
-        let mut v: Vec<PeerAddr> = self
+
+    /// Peers worth asking now: unreachable ones rest for a minute, the ones
+    /// with a working route go first.
+    fn ordered(&self) -> Vec<PeerInfo> {
+        let routes = self.routes.lock().unwrap();
+        let mut v: Vec<PeerInfo> = self
             .peers
             .iter()
-            .filter(|p| p.device != self.me)
-            .filter(|p| match st.get(&p.addr) {
-                // A peer that failed is retried after a minute.
-                Some((false, when)) => when.elapsed() > Duration::from_secs(60),
+            .filter(|p| match routes.get(&p.device) {
+                Some((None, _, when)) => when.elapsed() > ROUTE_TTL,
                 _ => true,
             })
             .cloned()
             .collect();
-        v.sort_by_key(|p| match st.get(&p.addr) {
-            Some((true, _)) => 0,
+        v.sort_by_key(|p| match routes.get(&p.device) {
+            Some((Some(_), _, _)) => 0,
             _ => 1,
         });
         v
     }
+
+    fn remember(&self, device: &DeviceId, route: Option<Route>, status: u16) {
+        self.routes
+            .lock()
+            .unwrap()
+            .insert(device.clone(), (route, status, Instant::now()));
+    }
+
+    fn debug(&self, what: &str) {
+        if std::env::var_os("VARSTO_P2P_DEBUG").is_some() {
+            eprintln!("p2p: {what}");
+        }
+    }
+
+    fn try_tcp(&self, addr: SocketAddr, path: &str, auth: &str) -> Option<(u16, Vec<u8>)> {
+        let result = http_get(addr, path, auth, self.timeout);
+        self.debug(&format!(
+            "tcp {addr} {path} -> {}",
+            match &result {
+                Ok((s, b)) => format!("HTTP {s}, {} bytes", b.len()),
+                Err(e) => format!("error: {e}"),
+            }
+        ));
+        let ok = result.is_ok();
+        self.state
+            .lock()
+            .unwrap()
+            .insert(addr, (ok, Instant::now()));
+        result.ok()
+    }
+
+    fn try_quic(
+        &self,
+        addr: SocketAddr,
+        cert: &str,
+        path: &str,
+        auth: &str,
+    ) -> Option<(u16, Vec<u8>)> {
+        let node = self.quic.as_ref()?;
+        let result = node.request(addr, cert, path, auth, true);
+        self.debug(&format!(
+            "quic {addr} {path} -> {}",
+            match &result {
+                Ok((s, b)) => format!("{s}, {} bytes", b.len()),
+                Err(e) => format!("error: {e:#}"),
+            }
+        ));
+        result.ok()
+    }
+
+    /// Ask a specific peer once, over a given route; `None` when the route is
+    /// not usable right now.
+    fn over(&self, route: &Route, path: &str, auth: &str, p: &PeerInfo) -> Option<(u16, Vec<u8>)> {
+        match route {
+            Route::Tcp(a) => {
+                // A TCP address that just failed rests for a minute.
+                if let Some((false, when)) = self.state.lock().unwrap().get(a) {
+                    if when.elapsed() < ROUTE_TTL {
+                        return None;
+                    }
+                }
+                self.try_tcp(*a, path, auth)
+            }
+            Route::Quic(a) => self.try_quic(*a, &p.cert_sha256, path, auth),
+            Route::Relay(relay, _, a) => {
+                let cert = self
+                    .peers
+                    .iter()
+                    .find(|r| &r.device == relay)
+                    .map(|r| r.cert_sha256.clone())?;
+                let via = format!("/p2p/via/{}{}", p.device, path);
+                self.try_quic(*a, &cert, &via, auth)
+            }
+        }
+    }
+
+    /// Every route to `p`, in the order they are tried.
+    fn candidate_routes(&self, p: &PeerInfo) -> Vec<Route> {
+        let mut out: Vec<Route> = p.tcp.iter().map(|a| Route::Tcp(*a)).collect();
+        if self.quic.is_some() && !p.cert_sha256.is_empty() {
+            out.extend(p.udp.iter().map(|a| Route::Quic(*a)));
+            for relay in &p.relay_via {
+                let Some(r) = self.peers.iter().find(|r| &r.device == relay) else {
+                    continue;
+                };
+                if r.cert_sha256.is_empty() {
+                    continue;
+                }
+                for a in &r.udp {
+                    out.push(Route::Relay(relay.clone(), r.name.clone(), *a));
+                }
+            }
+        }
+        out
+    }
+
+    /// One request to peer `p`: the route that worked last time first, then
+    /// every candidate in order. Records the outcome.
+    fn fetch(&self, p: &PeerInfo, path: &str, auth: &str) -> Option<(u16, Vec<u8>, Route)> {
+        let last = match self.routes.lock().unwrap().get(&p.device) {
+            Some((Some(r), _, when)) if when.elapsed() < ROUTE_TTL => Some(r.clone()),
+            _ => None,
+        };
+        if let Some(r) = last {
+            if let Some((s, b)) = self.over(&r, path, auth, p) {
+                self.remember(&p.device, Some(r.clone()), s);
+                return Some((s, b, r));
+            }
+        }
+        for r in self.candidate_routes(p) {
+            if let Some((s, b)) = self.over(&r, path, auth, p) {
+                self.remember(&p.device, Some(r.clone()), s);
+                return Some((s, b, r));
+            }
+        }
+        self.remember(&p.device, None, 0);
+        None
+    }
+
     /// Fetch one object from the first peer that has it.
     pub fn get(&self, name: &ObjectName) -> Option<(DeviceId, Vec<u8>)> {
         let path = format!("/p2p/object/{name}");
         for p in self.ordered() {
             let auth = auth_header(&self.key, &self.me, &path);
-            let result = http_get(p.addr, &path, &auth, self.timeout);
-            if std::env::var_os("VARSTO_P2P_DEBUG").is_some() {
-                eprintln!(
-                    "p2p: {} {} -> {}",
-                    p.addr,
-                    name,
-                    match &result {
-                        Ok((s, b)) => format!("HTTP {s}, {} bytes", b.len()),
-                        Err(e) => format!("error: {e}"),
-                    }
-                );
-            }
-            match result {
-                Ok((200, body)) if ObjectName::from_bytes(&crypto::hash(&body)) == *name => {
-                    self.state
-                        .lock()
-                        .unwrap()
-                        .insert(p.addr, (true, Instant::now()));
+            if let Some((200, body, _)) = self.fetch(&p, &path, &auth) {
+                if ObjectName::from_bytes(&crypto::hash(&body)) == *name {
                     return Some((p.device, body));
-                }
-                Ok((404, _)) | Ok((200, _)) => {
-                    self.state
-                        .lock()
-                        .unwrap()
-                        .insert(p.addr, (true, Instant::now()));
-                }
-                _ => {
-                    self.state
-                        .lock()
-                        .unwrap()
-                        .insert(p.addr, (false, Instant::now()));
                 }
             }
         }
         None
     }
-    /// Which peers answer right now.
-    pub fn probe(&self) -> Vec<(PeerAddr, bool)> {
+
+    /// Which peers answer right now, and over which path.
+    pub fn probe(&self) -> Vec<PeerStatus> {
         let path = "/p2p/info";
         self.peers
             .iter()
             .map(|p| {
                 let auth = auth_header(&self.key, &self.me, path);
-                let ok = matches!(http_get(p.addr, path, &auth, self.timeout), Ok((200, _)));
-                (p.clone(), ok)
+                let _ = self.fetch(p, path, &auth);
+                self.status_of(p)
             })
             .collect()
+    }
+
+    fn status_of(&self, p: &PeerInfo) -> PeerStatus {
+        let routes = self.routes.lock().unwrap();
+        // `ok` means the peer answered as a vault device: 200, or 404 for an
+        // object it does not hold. A 403 means the path works but we do not.
+        let (path, addr, ok, when) = match routes.get(&p.device) {
+            Some((Some(r), status, when)) => (
+                r.label(),
+                Some(r.addr()),
+                matches!(status, 200 | 404),
+                Some(when),
+            ),
+            Some((None, _, when)) => ("unreachable".to_string(), None, false, Some(when)),
+            None => ("untried".to_string(), None, false, None),
+        };
+        PeerStatus {
+            device: p.device.clone(),
+            name: p.name.clone(),
+            path,
+            addr,
+            ok,
+            checked_utc: when
+                .map(|w| now() - w.elapsed().as_secs() as i64)
+                .unwrap_or(0),
+        }
+    }
+
+    /// The last known path to every peer, without probing.
+    pub fn status(&self) -> Vec<PeerStatus> {
+        self.peers.iter().map(|p| self.status_of(p)).collect()
     }
 }
 
@@ -536,6 +867,69 @@ mod tests {
         let body = b"4\r\nWiki\r\n5\r\npedia\r\n0\r\n\r\n";
         assert_eq!(decode_chunked(body).unwrap(), b"Wikipedia");
         assert!(decode_chunked(b"zz\r\n").is_err());
+    }
+
+    #[test]
+    fn peer_records_seal_open_and_read_old_versions() {
+        let key = SecretKey::random();
+        let vault = VaultId::from_bytes(&[9u8; 16]);
+        let dev = DeviceId::from_bytes(&[3u8; 16]);
+        let relay = DeviceId::from_bytes(&[4u8; 16]);
+        let rec = PeerRecord {
+            version: PeerRecord::VERSION,
+            device: dev.clone(),
+            name: "laptop".into(),
+            port: 17893,
+            lan_addrs: vec!["192.168.1.5".parse().unwrap()],
+            public_addrs: vec![],
+            updated_utc: 1_700_000_000,
+            udp_public: vec!["203.0.113.7:40000".parse().unwrap()],
+            udp_local: vec!["192.168.1.5:17893".parse().unwrap()],
+            cert_sha256: "ab".repeat(32),
+            nat: stun::Nat::Cone,
+            relay_via: vec![relay.clone()],
+            reachable: false,
+        };
+        let blob = rec.seal(&vault, &key).unwrap();
+        let back = PeerRecord::open(&blob, &vault, &dev, &key).unwrap();
+        assert_eq!(back, rec);
+        assert_eq!(back.udp_addrs().len(), 2);
+        assert_eq!(back.udp_addrs()[0], rec.udp_public[0]);
+        // Another device id or key does not open it.
+        assert!(PeerRecord::open(&blob, &vault, &relay, &key).is_err());
+        assert!(PeerRecord::open(&blob, &vault, &dev, &SecretKey::random()).is_err());
+        // Same content, new timestamp: nothing to republish.
+        let mut later = rec.clone();
+        later.updated_utc += 600;
+        assert!(later.same_as(&rec));
+        later.reachable = true;
+        assert!(!later.same_as(&rec));
+
+        // A version 0 record written by alpha.4 has none of the new fields.
+        let old = serde_json::json!({
+            "device": dev.to_string(), "name": "desk", "port": 17893,
+            "lan_addrs": ["10.0.0.2"], "public_addrs": ["198.51.100.9:17893"], "updated_utc": 1
+        });
+        let old: PeerRecord = serde_json::from_value(old).unwrap();
+        assert_eq!(old.version, 0);
+        assert_eq!(old.nat, stun::Nat::Unknown);
+        assert!(old.cert_sha256.is_empty() && old.udp_public.is_empty() && !old.reachable);
+        assert_eq!(old.addrs().len(), 2);
+        let info = PeerInfo::from_record(&old);
+        assert_eq!(info.udp, old.public_addrs);
+    }
+
+    #[test]
+    fn routes_are_labelled_by_address_kind() {
+        let lan: SocketAddr = "192.168.0.9:1".parse().unwrap();
+        let pubaddr: SocketAddr = "203.0.113.9:1".parse().unwrap();
+        assert_eq!(Route::Tcp(lan).label(), "direct-lan");
+        assert_eq!(Route::Quic(pubaddr).label(), "direct");
+        let r = Route::Relay(DeviceId::from_bytes(&[1u8; 16]), "home".into(), pubaddr);
+        assert_eq!(r.label(), "relayed via home");
+        assert!(is_lan("127.0.0.1".parse().unwrap()));
+        assert!(is_lan("fe80::1".parse().unwrap()));
+        assert!(!is_lan("2001:db8::1".parse().unwrap()));
     }
 
     #[test]

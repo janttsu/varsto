@@ -524,14 +524,17 @@ impl Engine {
             forked_self: false,
             chunker: ChunkerParams::DEFAULT,
         };
-        // Command-line runs use the peers other devices advertised; the service adds LAN peers.
+        // Command-line runs use the peers other devices advertised, over TCP
+        // only; the service adds LAN peers and the QUIC node.
         if engine.config.p2p.enabled {
-            if let Ok(list) = engine.peer_records() {
+            if let Ok(list) = engine.peer_record_list() {
                 if !list.is_empty() {
-                    let p = crate::p2p::Peers::new(
+                    let p = crate::p2p::Peers::build(
                         engine.peer_key(),
                         engine.vault.device_id.clone(),
-                        list,
+                        &list,
+                        &[],
+                        None,
                     );
                     engine.set_peers(Some(std::sync::Arc::new(p)));
                 }
@@ -2435,20 +2438,41 @@ impl Engine {
         })
     }
 
-    /// Publish where this device can be reached (rendezvous record).
-    pub fn publish_peer_record(
-        &self,
-        port: u16,
-        public_addrs: Vec<std::net::SocketAddr>,
-    ) -> Result<()> {
-        let rec = crate::p2p::PeerRecord {
+    /// The device's QUIC certificate, created on first use (`p2p enable`).
+    pub fn p2p_identity(&self) -> Result<crate::p2p::quic::Identity> {
+        crate::p2p::quic::Identity::load_or_create(&self.home)
+    }
+
+    /// The rendezvous record this device would publish for `port` with the
+    /// reachability facts the service learned; `publish_peer_record` writes it.
+    pub fn peer_record_template(&self, port: u16) -> crate::p2p::PeerRecord {
+        let lan = crate::p2p::local_ipv4_addrs();
+        crate::p2p::PeerRecord {
+            version: crate::p2p::PeerRecord::VERSION,
             device: self.vault.device_id.clone(),
             name: self.vault.device_name.clone(),
             port,
-            lan_addrs: crate::p2p::local_ipv4_addrs(),
-            public_addrs,
+            udp_local: lan
+                .iter()
+                .map(|ip| std::net::SocketAddr::new(*ip, port))
+                .collect(),
+            lan_addrs: lan,
+            public_addrs: self.config.p2p.public_addrs.clone(),
             updated_utc: util::now_utc(),
-        };
+            udp_public: Vec::new(),
+            cert_sha256: crate::p2p::quic::Identity::load(&self.home)
+                .ok()
+                .flatten()
+                .map(|id| id.sha256)
+                .unwrap_or_default(),
+            nat: crate::p2p::stun::Nat::Unknown,
+            relay_via: Vec::new(),
+            reachable: !self.config.p2p.public_addrs.is_empty(),
+        }
+    }
+
+    /// Publish where this device can be reached (rendezvous record).
+    pub fn publish_peer_record(&self, rec: &crate::p2p::PeerRecord) -> Result<()> {
         let key = self.keys.registry_key();
         let blob = rec.seal(&self.vault.vault_id, &key)?;
         let k = crate::p2p::PeerRecord::storage_key(&rec.device);
@@ -2460,10 +2484,11 @@ impl Engine {
         Ok(())
     }
 
-    /// Peers other devices advertised through the storages.
-    pub fn peer_records(&self) -> Result<Vec<crate::p2p::PeerAddr>> {
+    /// Rendezvous records of the other devices, one per device (the newest
+    /// copy when several storages hold one).
+    pub fn peer_record_list(&self) -> Result<Vec<crate::p2p::PeerRecord>> {
         let key = self.keys.registry_key();
-        let mut out: Vec<crate::p2p::PeerAddr> = Vec::new();
+        let mut out: Vec<crate::p2p::PeerRecord> = Vec::new();
         for (_, backend) in self.open_storages(false)? {
             for k in backend.list(crate::p2p::PeerRecord::PREFIX)? {
                 let Some(id) = k
@@ -2485,14 +2510,27 @@ impl Engine {
                 else {
                     continue;
                 };
-                for addr in rec.addrs() {
-                    if !out.iter().any(|p| p.addr == addr) {
-                        out.push(crate::p2p::PeerAddr {
-                            device: dev.clone(),
-                            addr,
-                            name: rec.name.clone(),
-                        });
-                    }
+                match out.iter_mut().find(|r| r.device == dev) {
+                    Some(have) if have.updated_utc < rec.updated_utc => *have = rec,
+                    Some(_) => {}
+                    None => out.push(rec),
+                }
+            }
+        }
+        Ok(out)
+    }
+
+    /// Peers other devices advertised through the storages, as TCP addresses.
+    pub fn peer_records(&self) -> Result<Vec<crate::p2p::PeerAddr>> {
+        let mut out: Vec<crate::p2p::PeerAddr> = Vec::new();
+        for rec in self.peer_record_list()? {
+            for addr in rec.addrs() {
+                if !out.iter().any(|p| p.addr == addr) {
+                    out.push(crate::p2p::PeerAddr {
+                        device: rec.device.clone(),
+                        addr,
+                        name: rec.name.clone(),
+                    });
                 }
             }
         }

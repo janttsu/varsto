@@ -681,7 +681,7 @@ pub struct Config {
 }
 
 /// Peer-to-peer settings (per device, local).
-#[derive(Clone, Debug, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct P2pConfig {
     pub enabled: bool,
     /// TCP port to listen on (0 = pick one at start).
@@ -691,6 +691,28 @@ pub struct P2pConfig {
     /// (a forwarded port, a public IP, a VPN address).
     #[serde(default)]
     pub public_addrs: Vec<std::net::SocketAddr>,
+    /// STUN servers (`host:port`) asked for our public UDP address. An empty
+    /// list disables STUN; a missing key means the defaults.
+    #[serde(default = "default_stun")]
+    pub stun: Vec<String>,
+}
+
+pub fn default_stun() -> Vec<String> {
+    crate::p2p::stun::DEFAULT_SERVERS
+        .iter()
+        .map(|s| s.to_string())
+        .collect()
+}
+
+impl Default for P2pConfig {
+    fn default() -> Self {
+        P2pConfig {
+            enabled: false,
+            port: 0,
+            public_addrs: Vec::new(),
+            stun: default_stun(),
+        }
+    }
 }
 
 impl Config {

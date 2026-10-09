@@ -743,7 +743,7 @@ fn peers_serve_chunks_when_the_storage_has_none() {
     assert!(stranger
         .get(&varsto_core::ids::ObjectName::from_bytes(&[0u8; 32]))
         .is_none());
-    assert!(stranger.probe().iter().all(|(_, ok)| !ok));
+    assert!(stranger.probe().iter().all(|s| !s.ok));
     stop.store(true, std::sync::atomic::Ordering::Relaxed);
     th.join().unwrap();
 }
