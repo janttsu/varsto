@@ -171,6 +171,10 @@ static FAKE_SPACE: RwLock<Vec<(PathBuf, DiskSpace)>> = RwLock::new(Vec::new());
 /// asking the operating system. Tests use it to simulate small disks.
 #[doc(hidden)]
 pub fn set_fake_space(mount: &Path, space: Option<DiskSpace>) {
+    // Keyed by the canonical path: mounts are stored canonicalised (macOS turns
+    // /var/... into /private/var/...).
+    let mount = mount.canonicalize().unwrap_or_else(|_| mount.to_path_buf());
+    let mount = mount.as_path();
     let mut v = FAKE_SPACE.write().unwrap();
     v.retain(|(p, _)| p != mount);
     if let Some(s) = space {
@@ -182,7 +186,11 @@ pub fn set_fake_space(mount: &Path, space: Option<DiskSpace>) {
 pub fn disk_space(path: &Path) -> Option<DiskSpace> {
     {
         let v = FAKE_SPACE.read().unwrap();
-        if let Some((_, s)) = v.iter().find(|(p, _)| path.starts_with(p)) {
+        let canon = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+        if let Some((_, s)) = v
+            .iter()
+            .find(|(p, _)| path.starts_with(p) || canon.starts_with(p))
+        {
             return Some(*s);
         }
     }

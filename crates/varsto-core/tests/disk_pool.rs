@@ -405,7 +405,7 @@ fn index_files_are_written_and_eject_says_where() {
     assert_eq!(idx.objects.len(), objects.len());
     assert_eq!(idx.pool_id, marker.pool_id);
     let mount = a.disk_eject("data-01").unwrap();
-    assert_eq!(mount, d1);
+    assert_eq!(mount, d1.canonicalize().unwrap());
     // The configuration mirrors the registry (config.json has no secrets).
     let config: serde_json::Value =
         serde_json::from_slice(&fs::read(home.join("config.json")).unwrap()).unwrap();
