@@ -15,12 +15,19 @@ import java.io.File
 /** Foreground service that runs the Rust `varsto service` binary shipped as a native library. */
 class VarstoService : Service() {
     private var process: Process? = null
+    private var camera: CameraUpload? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        startForeground(1, notification())
+        startForeground(1, notification(null))
         ensureRunning()
+        // Camera upload lives as long as this service; the interface pokes it after a settings change.
+        val cam = camera ?: CameraUpload(this) { text ->
+            getSystemService(NotificationManager::class.java).notify(1, notification(text))
+        }.also { camera = it }
+        cam.start()
+        cam.requestScan(if (intent?.action == ACTION_CAMERA_SCAN) 500 else 10_000)
         return START_STICKY
     }
 
@@ -52,7 +59,7 @@ class VarstoService : Service() {
         }.start()
     }
 
-    private fun notification(): Notification {
+    private fun notification(text: String?): Notification {
         val channelId = "varsto"
         if (Build.VERSION.SDK_INT >= 26) {
             val nm = getSystemService(NotificationManager::class.java)
@@ -61,7 +68,7 @@ class VarstoService : Service() {
         val open = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
         return Notification.Builder(this, channelId)
             .setContentTitle("Varsto")
-            .setContentText(getString(R.string.service_running))
+            .setContentText(text ?: getString(R.string.service_running))
             .setSmallIcon(R.drawable.ic_launcher_foreground)
             .setContentIntent(open)
             .setOngoing(true)
@@ -69,11 +76,15 @@ class VarstoService : Service() {
     }
 
     override fun onDestroy() {
+        camera?.stop()
         process?.destroy()
         super.onDestroy()
     }
 
     companion object {
+        /** Start (or poke) the service to look for new photos and videos now. */
+        const val ACTION_CAMERA_SCAN = "in.soderlund.varsto.CAMERA_SCAN"
+
         /** Where plain-file folders go: Internal storage/Varsto. */
         @Suppress("DEPRECATION")
         fun plainRoot(): File = File(Environment.getExternalStorageDirectory(), "Varsto")

@@ -4,6 +4,12 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Camera upload: read new photos and videos (asked for when the user turns it on),
+         and know whether the phone is on Wi-Fi for the "only on Wi-Fi" option. -->
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <!-- "Plain files on this phone" folders live under Internal storage/Varsto so that
          My Files and the gallery see them; the alpha is sideloaded, so all files access
          is asked for only when a user picks that mode. -->

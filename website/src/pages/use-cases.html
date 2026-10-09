@@ -50,7 +50,7 @@ description: Thirteen situations Varsto is designed for, from a plane without in
       <picture><source type="image/webp" srcset="../assets/img/usecases/camera.webp"><img src="../assets/img/usecases/camera.png" alt="A phone's full camera roll is uploaded encrypted; space is freed once a second copy is verified." width="640" height="320" loading="lazy"></picture>
       <div>
         <p>Automatic camera upload moves photos and videos to your storages, encrypted on the phone before they leave it. "Free up space" deletes the originals only after your retention policy is satisfied and the copies have been verified by hash, not merely uploaded. Thumbnails stay on the phone so the gallery still looks like a gallery.</p>
-        <p class="note">Today: encrypted thumbnails and verified copies exist in the core; the Android shell runs the service but has no camera upload yet.</p>
+        <p class="note">Today: the Android app uploads new photos and videos to a folder of your choice (YYYY/MM by capture date, optionally only on Wi-Fi or while charging), each once, and encrypted thumbnails and verified copies exist in the core. It never deletes the originals: freeing space in the gallery is still to come.</p>
       </div>
     </section>
 
@@ -78,7 +78,7 @@ description: Thirteen situations Varsto is designed for, from a plane without in
       <picture><source type="image/webp" srcset="../assets/img/usecases/sensitive.webp"><img src="../assets/img/usecases/sensitive.png" alt="A tax folder in a Strongroom: opens only with a security key, no clear text on the phone, hidden from the AI assistant." width="640" height="320" loading="lazy"></picture>
       <div>
         <p>The tax folder lives in a Strongroom: it opens only with a touch of your FIDO2 security key, enforced in the cryptography, not by a dialog. On the phone nothing from it is ever written in clear text, and the assistant cannot see that the folder exists. Once the folder is closed, the key leaves memory.</p>
-        <p class="note">Today: Strongroom folders open only with a FIDO2 security key (libfido2 tools), can have a backup key, and are invisible to assistants; nothing is written in clear text on storage. An existing tax folder can be converted into a Strongroom: re-encrypted under a new key, the old copies deleted from storage, plain copies on other devices replaced with placeholders. Decrypt-on-open viewers on the phone are in the plan.</p>
+        <p class="note">Today: Strongroom folders open only with a FIDO2 security key (libfido2 tools), can have a backup key, and are invisible to assistants; nothing is written in clear text on storage. An existing tax folder can be converted into a Strongroom: re-encrypted under a new key, the old copies deleted from storage, plain copies on other devices replaced with placeholders. For folders kept encrypted on the phone, the Android app shows pictures, video, audio and text in its own viewer, decrypted in memory without writing a copy to the phone; PDFs and other files still open in another app, which receives a decrypted copy.</p>
       </div>
     </section>
 

@@ -40,6 +40,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 mod strongroom_ops;
+mod view;
 pub use strongroom_ops::{CleanupReport, ConvertReport, StrongroomKeySummary};
 
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]

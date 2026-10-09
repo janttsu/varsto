@@ -435,6 +435,16 @@
           <div class="actions"><button id="allfilesbtn" type="button" class="secondary">Allow all files access</button></div>
           <p id="allfiles-state" class="muted small"></p>
         </div>
+        <div class="card hidden" id="cameracard">
+          <h2 class="card-title">Camera upload</h2>
+          <p class="muted small">New photos and videos taken on this phone go into a Varsto folder, encrypted like every other file, in YYYY/MM subfolders by capture date. Each one is uploaded once; the originals stay in your gallery untouched.</p>
+          <label class="inline"><input id="cam-on" type="checkbox"> Upload new photos and videos to folder</label>
+          <div class="row cam-row"><select id="cam-folder" aria-label="Folder for camera upload"></select></div>
+          <label class="inline"><input id="cam-wifi" type="checkbox"> Only on Wi-Fi</label>
+          <label class="inline"><input id="cam-charging" type="checkbox"> Only while charging</label>
+          <label class="inline"><input id="cam-shots" type="checkbox"> Also screenshots</label>
+          <p id="cam-state" class="muted small"></p>
+        </div>
         <div class="card">
           <h2 class="card-title">Service</h2>
           <p class="muted small">The background service watches your folders and serves this interface on this computer only. Quitting stops syncing until Varsto is started again.</p>
@@ -470,6 +480,25 @@
     </div>
   </section>
   </main>
+</div>
+
+<!-- In-app viewer: /api/view decrypts in memory, so nothing is written to the device. -->
+<div id="viewer" class="viewer hidden" role="dialog" aria-modal="true" aria-labelledby="viewer-name">
+  <div class="viewer-bar">
+    <button type="button" id="viewer-close" class="secondary icon-btn" title="Close"><svg class="icon"><use href="#i-close"/></svg><span class="sr-only">Close</span></button>
+    <span id="viewer-name" class="viewer-name"></span>
+    <button type="button" id="viewer-prev" class="secondary icon-btn" title="Previous"><svg class="icon"><use href="#i-back"/></svg><span class="sr-only">Previous</span></button>
+    <button type="button" id="viewer-next" class="secondary icon-btn" title="Next"><svg class="icon"><use href="#i-chevron"/></svg><span class="sr-only">Next</span></button>
+  </div>
+  <div id="viewer-stage" class="viewer-stage"></div>
+  <div class="viewer-foot">
+    <p class="viewer-note small">Shown from memory: nothing is saved on this phone. Open in another app and Share hand a decrypted copy to that app.</p>
+    <div class="actions">
+      <button type="button" id="viewer-open" class="secondary"><svg class="icon"><use href="#i-open"/></svg>Open in another app</button>
+      <button type="button" id="viewer-share" class="secondary"><svg class="icon"><use href="#i-share"/></svg>Share</button>
+      <button type="button" id="viewer-details" class="secondary"><svg class="icon"><use href="#i-info"/></svg>Details</button>
+    </div>
+  </div>
 </div>
 
 <!-- One dialog for every question the page asks: WebViews return null for window.prompt. -->

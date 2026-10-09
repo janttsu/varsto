@@ -77,7 +77,7 @@ fn header(name: &str, value: &str) -> Header {
 fn html(body: &str) -> Response<std::io::Cursor<Vec<u8>>> {
     Response::from_string(body)
         .with_header(header("Content-Type", "text/html; charset=utf-8"))
-        .with_header(header("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"))
+        .with_header(header("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; media-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"))
         .with_header(header("X-Content-Type-Options", "nosniff"))
         .with_header(header("Referrer-Policy", "no-referrer"))
         .with_header(header("Cache-Control", "no-store"))
@@ -136,9 +136,9 @@ fn handle(state: &Shared, mut request: Request) -> Result<()> {
             .headers()
             .iter()
             .any(|h| h.field.equiv("X-Varsto-Token") && h.value.as_str() == st.token);
-        // Thumbnails are loaded by <img>, which cannot send a header; the
-        // session token may come in the query string for that one endpoint.
-        let in_query = (path == "/api/thumb" || path == "/api/open")
+        // Thumbnails and the viewer are loaded by <img>/<video>, which cannot
+        // send a header; the session token may come in the query string there.
+        let in_query = (path == "/api/thumb" || path == "/api/open" || path == "/api/view")
             && query_param(&query, "token").as_deref() == Some(st.token.as_str());
         in_header || in_query
     };
@@ -184,6 +184,10 @@ fn handle(state: &Shared, mut request: Request) -> Result<()> {
             }
         };
     }
+    if path == "/api/view" {
+        let (folder, file) = (query_param(&query, "folder"), query_param(&query, "path"));
+        return crate::view::respond(state, request, folder, file);
+    }
     if path == "/api/thumb" {
         let (folder, file) = (query_param(&query, "folder"), query_param(&query, "path"));
         let bytes = {
@@ -197,7 +201,15 @@ fn handle(state: &Shared, mut request: Request) -> Result<()> {
             Some(b) => request.respond(
                 Response::from_data(b)
                     .with_header(header("Content-Type", "image/jpeg"))
-                    .with_header(header("Cache-Control", "private, max-age=3600")),
+                    // Phones keep no decrypted thumbnail in the web view's disk cache.
+                    .with_header(header(
+                        "Cache-Control",
+                        if mobile() {
+                            "no-store"
+                        } else {
+                            "private, max-age=3600"
+                        },
+                    )),
             )?,
             None => request.respond(Response::from_string("no thumbnail").with_status_code(404))?,
         }
