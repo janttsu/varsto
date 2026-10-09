@@ -24,6 +24,7 @@ pub mod manifest;
 pub mod p2p;
 pub mod pack;
 pub mod pair;
+pub mod placement;
 pub mod policy;
 pub mod pool;
 pub mod price;

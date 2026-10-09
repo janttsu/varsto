@@ -311,6 +311,8 @@ impl Engine {
             shared: false,
             policy: rec.policy.clone(),
             policy_updated_utc: rec.policy_updated_utc,
+            placement: rec.placement.clone(),
+            placement_updated_utc: rec.placement_updated_utc,
             strongroom: Some(info),
             removed_utc: 0,
         };

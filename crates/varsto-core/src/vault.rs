@@ -490,6 +490,12 @@ pub struct FolderRecord {
     pub policy: Option<crate::policy::Policy>,
     #[serde(default)]
     pub policy_updated_utc: i64,
+    /// Which storages the folder's blocks are written to (default: every
+    /// storage), published like the policy (`crate::placement`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub placement: Option<crate::placement::Placement>,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub placement_updated_utc: i64,
     /// Strongroom (S-012): the folder key is not stored here (`key_hex` is
     /// empty); it is wrapped under a security-key secret and held in memory
     /// only while unlocked.
@@ -498,6 +504,10 @@ pub struct FolderRecord {
     /// Removed from the vault (local flag, learned from a `FolderRemoval`).
     #[serde(default)]
     pub removed_utc: i64,
+}
+
+fn is_zero(v: &i64) -> bool {
+    *v == 0
 }
 
 impl FolderRecord {

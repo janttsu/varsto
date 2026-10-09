@@ -59,6 +59,10 @@ pub struct PoolDisk {
     /// A retired disk receives nothing new; what it holds stays readable.
     #[serde(default)]
     pub retired: bool,
+    /// Where the disk is kept ("home", "offsite", ...): empty means the
+    /// pool's place. Disk groups keep copies on disks in different places.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub place: String,
 }
 
 /// `<mount>/.varsto-disk.json`.
@@ -96,6 +100,9 @@ pub struct DiskIndex {
     pub written_utc: i64,
     /// Object key -> size in bytes.
     pub objects: BTreeMap<String, u64>,
+    /// The disk's place, when it has one of its own.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub place: String,
 }
 
 impl DiskIndex {
@@ -112,6 +119,41 @@ impl DiskIndex {
 struct ObjectEntry {
     disk: String,
     size: u64,
+    /// Further disks holding a copy (disk groups, `copies` > 1). Versions
+    /// before disk groups ignore them and know the first copy only.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    extra: Vec<String>,
+}
+
+impl ObjectEntry {
+    fn new(disk: &str, size: u64) -> Self {
+        ObjectEntry {
+            disk: disk.to_string(),
+            size,
+            extra: Vec::new(),
+        }
+    }
+
+    /// Every disk holding a copy, the first one first.
+    fn holders(&self) -> impl Iterator<Item = &String> {
+        std::iter::once(&self.disk).chain(self.extra.iter())
+    }
+
+    fn held_by(&self, disk: &str) -> bool {
+        self.holders().any(|d| d == disk)
+    }
+
+    /// Forget the copy on `disk`; false when no copy is left.
+    fn remove_holder(&mut self, disk: &str) -> bool {
+        self.extra.retain(|d| d != disk);
+        if self.disk == disk {
+            if self.extra.is_empty() {
+                return false;
+            }
+            self.disk = self.extra.remove(0);
+        }
+        true
+    }
 }
 
 /// `<home>/pool-<pool id>.json`.
@@ -292,6 +334,7 @@ pub fn scan_mounts(roots: &[(PathBuf, usize)]) -> Vec<(PathBuf, DiskMarker)> {
 #[derive(Clone, Debug, Serialize)]
 pub struct DiskStatus {
     pub pool: String,
+    /// The disk's place (its own, or the pool's).
     pub place: String,
     pub label: String,
     pub disk_id: String,
@@ -312,6 +355,8 @@ pub struct DiskStatus {
 pub struct ObjectLocation {
     pub disk_id: String,
     pub label: String,
+    /// The disk's place (its own, or the pool's).
+    pub place: String,
     pub attached: bool,
     pub last_verified_utc: i64,
     pub size: u64,
@@ -341,6 +386,8 @@ struct State {
 pub struct PoolStorage {
     name: String,
     place: String,
+    /// Copies of every object on disks in different places (disk group rule).
+    copies: u32,
     identity: PoolIdentity,
     reserve_percent: u32,
     min_reserve_bytes: u64,
@@ -360,6 +407,7 @@ impl PoolStorage {
             min_reserve_bytes,
             disks,
             scan_roots,
+            copies,
         } = spec
         else {
             bail!("storage {} is not a disk pool", spec.name());
@@ -374,6 +422,7 @@ impl PoolStorage {
         Ok(PoolStorage {
             name: name.clone(),
             place: spec.place(),
+            copies: (*copies).max(1),
             identity,
             reserve_percent: *reserve_percent,
             min_reserve_bytes: *min_reserve_bytes,
@@ -393,6 +442,33 @@ impl PoolStorage {
 
     pub fn place(&self) -> &str {
         &self.place
+    }
+
+    /// Copies of every object the disk group rule asks for (1: no rule).
+    pub fn copies(&self) -> u32 {
+        self.copies
+    }
+
+    /// A disk's place: its own, or the pool's.
+    pub fn disk_place(&self, disk: &PoolDisk) -> String {
+        if disk.place.is_empty() {
+            self.place.clone()
+        } else {
+            disk.place.clone()
+        }
+    }
+
+    fn place_of(&self, st: &State, disk_id: &str) -> String {
+        st.index
+            .disks
+            .get(disk_id)
+            .map(|d| self.disk_place(d))
+            .unwrap_or_else(|| self.place.clone())
+    }
+
+    /// The distinct places that hold a copy of `entry`.
+    fn places_holding(&self, st: &State, entry: &ObjectEntry) -> BTreeSet<String> {
+        entry.holders().map(|d| self.place_of(st, d)).collect()
     }
 
     /// Bytes that must stay free on a disk of `total` bytes.
@@ -491,13 +567,18 @@ impl PoolStorage {
         let mut used = 0u64;
         for (key, size) in &idx.objects {
             used += size;
-            st.index
-                .objects
-                .entry(key.clone())
-                .or_insert_with(|| ObjectEntry {
-                    disk: marker.disk_id.clone(),
-                    size: *size,
-                });
+            match st.index.objects.get_mut(key) {
+                Some(e) => {
+                    if !e.held_by(&marker.disk_id) {
+                        e.extra.push(marker.disk_id.clone());
+                    }
+                }
+                None => {
+                    st.index
+                        .objects
+                        .insert(key.clone(), ObjectEntry::new(&marker.disk_id, *size));
+                }
+            }
         }
         st.index.disks.insert(
             marker.disk_id.clone(),
@@ -510,6 +591,7 @@ impl PoolStorage {
                 last_seen_utc: util::now_utc(),
                 last_verified_utc: 0,
                 retired: false,
+                place: idx.place.clone(),
             },
         );
     }
@@ -517,6 +599,16 @@ impl PoolStorage {
     /// The attached, non-retired disk with the most free space that keeps its
     /// reserve after writing `size` bytes.
     fn choose_disk(&self, st: &mut State, size: u64) -> Result<(String, PathBuf)> {
+        self.choose_disk_outside(st, size, &BTreeSet::new())
+    }
+
+    /// Like `choose_disk`, among disks whose place is not in `taken`.
+    fn choose_disk_outside(
+        &self,
+        st: &mut State,
+        size: u64,
+        taken: &BTreeSet<String>,
+    ) -> Result<(String, PathBuf)> {
         let attached = self.attached(st);
         let mut best: Option<(u64, String, PathBuf)> = None;
         let mut any = false;
@@ -524,7 +616,7 @@ impl PoolStorage {
             let Some(d) = st.index.disks.get(id) else {
                 continue;
             };
-            if d.retired {
+            if d.retired || taken.contains(&self.disk_place(d)) {
                 continue;
             }
             any = true;
@@ -560,13 +652,19 @@ impl PoolStorage {
     ) -> Result<()> {
         let path = Self::data_path(mount, key)?;
         util::write_atomic(&path, data)?;
-        st.index.objects.insert(
-            key.to_string(),
-            ObjectEntry {
-                disk: disk_id.to_string(),
-                size: data.len() as u64,
-            },
-        );
+        match st.index.objects.get_mut(key) {
+            Some(e) => {
+                if !e.held_by(disk_id) {
+                    e.extra.push(disk_id.to_string());
+                }
+            }
+            None => {
+                st.index.objects.insert(
+                    key.to_string(),
+                    ObjectEntry::new(disk_id, data.len() as u64),
+                );
+            }
+        }
         if let Some(d) = st.index.disks.get_mut(disk_id) {
             d.used_bytes += data.len() as u64;
         }
@@ -613,9 +711,102 @@ impl PoolStorage {
         Ok(true)
     }
 
+    /// Whether the disk group rule wants a copy of `key` on `disk_id`: the
+    /// pool holds fewer copies in different places than `copies`, the disk
+    /// holds none, and no copy is in the disk's place yet. Objects the pool
+    /// does not hold at all are wanted too.
+    pub fn wants_copy(&self, disk_id: &str, key: &str) -> bool {
+        let st = self.state.lock().unwrap();
+        let Some(e) = st.index.objects.get(key) else {
+            return true;
+        };
+        if e.held_by(disk_id) {
+            return false;
+        }
+        let places = self.places_holding(&st, e);
+        (places.len() as u32) < self.copies && !places.contains(&self.place_of(&st, disk_id))
+    }
+
+    /// Write a further copy of `key` to one attached disk (disk groups).
+    /// Returns false when that disk already holds it.
+    pub fn add_copy_on_disk(&self, disk_id: &str, key: &str, data: &[u8]) -> Result<bool> {
+        {
+            let st = self.state.lock().unwrap();
+            match st.index.objects.get(key) {
+                None => {
+                    drop(st);
+                    return self.put_on_disk(disk_id, key, data);
+                }
+                Some(e) if e.held_by(disk_id) => return Ok(false),
+                Some(_) => {}
+            }
+        }
+        let mut st = self.state.lock().unwrap();
+        let attached = self.attached(&mut st);
+        let Some(mount) = attached.get(disk_id).cloned() else {
+            bail!("disk is not attached");
+        };
+        let Some(sp) = disk_space(&mount) else {
+            bail!("cannot read the free space of {}", mount.display());
+        };
+        if sp.free < (data.len() as u64).saturating_add(self.reserve(sp.total)) {
+            return Err(anyhow::Error::new(PoolError::NoRoom {
+                pool: self.name.clone(),
+                size: data.len() as u64,
+            }));
+        }
+        self.write_object(&mut st, disk_id, &mount, key, data)?;
+        Ok(true)
+    }
+
+    /// Set a disk's place ("" returns it to the pool's place).
+    pub fn set_disk_place(&self, disk_id: &str, place: &str) -> Result<()> {
+        let mut st = self.state.lock().unwrap();
+        let d = st
+            .index
+            .disks
+            .get_mut(disk_id)
+            .ok_or_else(|| anyhow!("unknown disk"))?;
+        d.place = place.trim().to_string();
+        st.dirty.insert(disk_id.to_string());
+        self.save_index(&st)
+    }
+
+    /// Objects with fewer copies in different places than the disk group
+    /// rule asks for: (objects, bytes). Nothing when `copies` is 1.
+    pub fn group_shortfall(&self) -> (u64, u64) {
+        if self.copies <= 1 {
+            return (0, 0);
+        }
+        let st = self.state.lock().unwrap();
+        let mut out = (0u64, 0u64);
+        for e in st.index.objects.values() {
+            if (self.places_holding(&st, e).len() as u32) < self.copies {
+                out.0 += 1;
+                out.1 += e.size;
+            }
+        }
+        out
+    }
+
+    /// The distinct places holding `key` on this pool (empty when none).
+    pub fn places_of(&self, key: &str) -> BTreeSet<String> {
+        let st = self.state.lock().unwrap();
+        st.index
+            .objects
+            .get(key)
+            .map(|e| self.places_holding(&st, e))
+            .unwrap_or_default()
+    }
+
     /// Register a new disk at `mount`: writes the marker and the disk index.
     /// Refuses a directory that already belongs to another pool or vault.
     pub fn add_disk(&self, mount: &Path, label: &str) -> Result<PoolDisk> {
+        self.add_disk_at(mount, label, "")
+    }
+
+    /// Like `add_disk`, for a disk kept at `place` ("" for the pool's place).
+    pub fn add_disk_at(&self, mount: &Path, label: &str, place: &str) -> Result<PoolDisk> {
         if label.trim().is_empty() {
             bail!("the disk needs a label");
         }
@@ -678,6 +869,7 @@ impl PoolStorage {
             last_seen_utc: util::now_utc(),
             last_verified_utc: util::now_utc(),
             retired: false,
+            place: place.trim().to_string(),
         };
         st.index.disks.insert(id.clone(), disk.clone());
         if let Some(a) = st.attached.as_mut() {
@@ -702,9 +894,10 @@ impl PoolStorage {
                 .index
                 .objects
                 .iter()
-                .filter(|(_, e)| e.disk == disk_id)
+                .filter(|(_, e)| e.held_by(disk_id))
                 .map(|(k, e)| (k.clone(), e.size))
                 .collect(),
+            place: d.place.clone(),
         };
         util::write_atomic(&DiskIndex::path(mount), &serde_json::to_vec(&idx)?)
     }
@@ -787,14 +980,22 @@ impl PoolStorage {
             .index
             .objects
             .iter()
-            .filter(|(_, e)| e.disk == disk_id)
+            .filter(|(_, e)| e.held_by(disk_id))
             .map(|(k, e)| (k.clone(), e.size))
             .collect();
+        // Forget the copy on this disk (other disks may still hold one).
+        let forget = |st: &mut State, key: &str| {
+            if let Some(e) = st.index.objects.get_mut(key) {
+                if !e.remove_holder(disk_id) {
+                    st.index.objects.remove(key);
+                }
+            }
+        };
         for (key, size) in keys {
             let path = Self::data_path(&mount, &key)?;
             let Ok(md) = fs::metadata(&path) else {
                 out.missing.push(key.clone());
-                st.index.objects.remove(&key);
+                forget(&mut st, &key);
                 continue;
             };
             let ok = md.len() == size
@@ -809,7 +1010,7 @@ impl PoolStorage {
                 out.bytes_checked += size;
             } else {
                 out.bad.push(key.clone());
-                st.index.objects.remove(&key);
+                forget(&mut st, &key);
                 let _ = fs::remove_file(&path);
             }
         }
@@ -829,7 +1030,12 @@ impl PoolStorage {
                 };
                 let Some(key) = rel.to_str() else { continue };
                 let key = key.replace(std::path::MAIN_SEPARATOR, "/");
-                if st.index.objects.contains_key(&key) {
+                if st
+                    .index
+                    .objects
+                    .get(&key)
+                    .is_some_and(|e| e.held_by(disk_id))
+                {
                     continue;
                 }
                 let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
@@ -844,13 +1050,15 @@ impl PoolStorage {
                         continue;
                     }
                 }
-                st.index.objects.insert(
-                    key,
-                    ObjectEntry {
-                        disk: disk_id.to_string(),
-                        size,
-                    },
-                );
+                match st.index.objects.get_mut(&key) {
+                    // A further copy of an object another disk holds.
+                    Some(e) => e.extra.push(disk_id.to_string()),
+                    None => {
+                        st.index
+                            .objects
+                            .insert(key, ObjectEntry::new(disk_id, size));
+                    }
+                }
                 out.adopted += 1;
                 out.objects_checked += 1;
                 out.bytes_checked += size;
@@ -860,7 +1068,7 @@ impl PoolStorage {
             .index
             .objects
             .values()
-            .filter(|e| e.disk == disk_id)
+            .filter(|e| e.held_by(disk_id))
             .map(|e| e.size)
             .sum();
         if let Some(d) = st.index.disks.get_mut(disk_id) {
@@ -924,7 +1132,7 @@ impl PoolStorage {
         st.index
             .objects
             .iter()
-            .filter(|(_, e)| e.disk == disk_id)
+            .filter(|(_, e)| e.held_by(disk_id))
             .map(|(k, e)| (k.clone(), e.size))
             .collect()
     }
@@ -939,18 +1147,33 @@ impl PoolStorage {
             .collect()
     }
 
+    /// Where the object is: an attached copy first.
     pub fn locate(&self, key: &str) -> Option<ObjectLocation> {
+        let mut all = self.locate_all(key);
+        all.sort_by_key(|l| !l.attached);
+        all.into_iter().next()
+    }
+
+    /// Every copy of the object, on every disk that holds one.
+    pub fn locate_all(&self, key: &str) -> Vec<ObjectLocation> {
         let mut st = self.state.lock().unwrap();
         let attached = self.attached(&mut st);
-        let e = st.index.objects.get(key)?;
-        let d = st.index.disks.get(&e.disk)?;
-        Some(ObjectLocation {
-            disk_id: e.disk.clone(),
-            label: d.label.clone(),
-            attached: attached.contains_key(&e.disk),
-            last_verified_utc: d.last_verified_utc,
-            size: e.size,
-        })
+        let Some(e) = st.index.objects.get(key) else {
+            return Vec::new();
+        };
+        e.holders()
+            .filter_map(|id| {
+                let d = st.index.disks.get(id)?;
+                Some(ObjectLocation {
+                    disk_id: id.clone(),
+                    label: d.label.clone(),
+                    place: self.disk_place(d),
+                    attached: attached.contains_key(id),
+                    last_verified_utc: d.last_verified_utc,
+                    size: e.size,
+                })
+            })
+            .collect()
     }
 
     /// Listing rows for every disk.
@@ -959,7 +1182,9 @@ impl PoolStorage {
         let attached = self.attached(&mut st);
         let mut counts: BTreeMap<&str, u64> = BTreeMap::new();
         for e in st.index.objects.values() {
-            *counts.entry(e.disk.as_str()).or_default() += 1;
+            for d in e.holders() {
+                *counts.entry(d.as_str()).or_default() += 1;
+            }
         }
         let mut disks: Vec<&PoolDisk> = st.index.disks.values().collect();
         disks.sort_by(|a, b| a.label.cmp(&b.label));
@@ -969,7 +1194,7 @@ impl PoolStorage {
                 let mount = attached.get(&d.id).cloned();
                 DiskStatus {
                     pool: self.name.clone(),
-                    place: self.place.clone(),
+                    place: self.disk_place(d),
                     label: d.label.clone(),
                     disk_id: d.id.clone(),
                     attached: mount.is_some(),
@@ -1011,6 +1236,15 @@ impl Storage for PoolStorage {
         }
         let (disk_id, mount) = self.choose_disk(&mut st, data.len() as u64)?;
         self.write_object(&mut st, &disk_id, &mount, key, data)?;
+        // Disk groups: further copies on attached disks in other places.
+        let mut taken = BTreeSet::from([self.place_of(&st, &disk_id)]);
+        while (taken.len() as u32) < self.copies {
+            let Ok((d, m)) = self.choose_disk_outside(&mut st, data.len() as u64, &taken) else {
+                break;
+            };
+            taken.insert(self.place_of(&st, &d));
+            self.write_object(&mut st, &d, &m, key, data)?;
+        }
         Ok(true)
     }
 
@@ -1020,7 +1254,7 @@ impl Storage for PoolStorage {
             return Ok(None);
         };
         let attached = self.attached(&mut st);
-        let Some(mount) = attached.get(&e.disk) else {
+        let Some(mount) = e.holders().find_map(|d| attached.get(d)) else {
             let label = st
                 .index
                 .disks
@@ -1077,23 +1311,25 @@ impl Storage for PoolStorage {
             return Ok(());
         };
         let attached = self.attached(&mut st);
-        if let Some(mount) = attached.get(&e.disk) {
-            let path = Self::data_path(mount, key)?;
-            match fs::remove_file(&path) {
-                Ok(()) => {}
-                Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
-                Err(err) => return Err(err.into()),
+        for disk in e.holders() {
+            if let Some(mount) = attached.get(disk) {
+                let path = Self::data_path(mount, key)?;
+                match fs::remove_file(&path) {
+                    Ok(()) => {}
+                    Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(err) => return Err(err.into()),
+                }
+                if let Some(d) = st.index.disks.get_mut(disk) {
+                    d.used_bytes = d.used_bytes.saturating_sub(e.size);
+                }
+                st.dirty.insert(disk.clone());
+            } else {
+                st.index
+                    .pending_deletes
+                    .entry(disk.clone())
+                    .or_default()
+                    .insert(key.to_string(), e.size);
             }
-            if let Some(d) = st.index.disks.get_mut(&e.disk) {
-                d.used_bytes = d.used_bytes.saturating_sub(e.size);
-            }
-            st.dirty.insert(e.disk.clone());
-        } else {
-            st.index
-                .pending_deletes
-                .entry(e.disk.clone())
-                .or_default()
-                .insert(key.to_string(), e.size);
         }
         st.index.objects.remove(key);
         self.save_index(&st)
@@ -1161,6 +1397,7 @@ mod tests {
             min_reserve_bytes: 2 << 30,
             disks: vec![],
             scan_roots: vec![],
+            copies: 1,
         };
         let p = PoolStorage::open(
             &spec,

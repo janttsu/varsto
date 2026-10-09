@@ -374,6 +374,7 @@
         <label>Pool <select name="pool" id="diskpool"></select></label>
         <label>Mount path <input name="mount" placeholder="/media/me/data-01" required autocomplete="off"></label>
         <label>Label <input name="label" placeholder="data-01" required autocomplete="off"></label>
+        <label>Place <input name="place" placeholder="the pool's place (home, offsite, ...)" autocomplete="off"></label>
         <div class="actions"><button type="submit">Add disk</button></div>
         <p class="muted small">The disk gets a small marker file and a <code>varsto</code> directory, then is filled with what the pool does not hold yet. Varsto never formats a disk.</p>
       </form>
@@ -404,6 +405,7 @@
         <div data-kind="pool" class="hidden">
           <label>Place (where the disks are kept) <input name="place" placeholder="shelf"></label>
           <label>Keep free on every disk (%) <input name="reserve_percent" value="5" size="4"></label>
+          <label>Copies on disks in different places <input name="copies" value="1" size="3" inputmode="numeric"></label>
           <p class="muted small">Disks are added one by one below once the pool exists. Each disk takes encrypted blocks until its reserve is reached; a disk that is away is remembered, and files on it say so.</p>
         </div>
         <label class="inline"><input name="cold" type="checkbox"> Cold storage: written, never read without confirmation</label>

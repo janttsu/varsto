@@ -876,6 +876,11 @@ fn api_unlocked(
                     min_reserve_bytes: varsto_core::pool::DEFAULT_MIN_RESERVE_BYTES,
                     disks: vec![],
                     scan_roots: vec![],
+                    copies: input
+                        .get("copies")
+                        .and_then(|c| c.as_u64().or_else(|| c.as_str()?.trim().parse().ok()))
+                        .unwrap_or(1)
+                        .clamp(1, 16) as u32,
                 })?,
                 _ => {
                     let name = s(input, "name")?;
@@ -994,10 +999,11 @@ fn api_unlocked(
         }
         (Method::Get, "/api/disks") => Ok(serde_json::to_value(engine.disks()?)?),
         (Method::Post, "/api/disk/add") => {
-            let r = engine.disk_add(
+            let r = engine.disk_add_at(
                 std::path::Path::new(&s(input, "mount")?),
                 &s(input, "pool")?,
                 &s(input, "label")?,
+                &opt(input, "place").unwrap_or_default(),
             )?;
             service.request_sync();
             Ok(serde_json::to_value(r)?)
@@ -1152,6 +1158,70 @@ fn api_unlocked(
             let r = engine.apply_suggestion(&s(input, "id")?, idle_days)?;
             service.folders_changed = true;
             Ok(serde_json::to_value(r)?)
+        }
+        // Data placement: where each folder is written, moving blocks, disk groups.
+        (Method::Get, "/api/placement") => {
+            let mut out = Vec::new();
+            for (r, _) in engine.folders() {
+                out.push(serde_json::to_value(engine.placement(r.folder_id.as_str())?)?);
+            }
+            Ok(json!({
+                "folders": out,
+                "storages": engine.storages().iter().map(|s| json!({
+                    "name": s.name(), "place": s.place(), "cold": s.is_cold(), "carrier": s.is_carrier(),
+                })).collect::<Vec<_>>(),
+            }))
+        }
+        (Method::Post, "/api/placement") => {
+            let folder = s(input, "folder")?;
+            let storages = string_list(input, "storages");
+            let places = string_list(input, "places");
+            let every = input.get("every").and_then(|v| v.as_bool()).unwrap_or(false);
+            let info = if every || (storages.is_empty() && places.is_empty()) {
+                engine.set_placement(&folder, None)?
+            } else {
+                engine.set_placement(
+                    &folder,
+                    Some(varsto_core::placement::Placement {
+                        storages,
+                        places,
+                        ..Default::default()
+                    }),
+                )?
+            };
+            service.request_sync();
+            Ok(serde_json::to_value(info)?)
+        }
+        (Method::Post, "/api/data/move") => {
+            let req = varsto_core::placement::MoveRequest {
+                folder: s(input, "folder")?,
+                from: s(input, "from")?,
+                to: s(input, "to")?,
+                idle_days: input.get("idle_days").and_then(|v| v.as_i64()),
+                dry_run: input.get("dry_run").and_then(|v| v.as_bool()).unwrap_or(false),
+                confirm_cold_read: input
+                    .get("confirm_cold_read")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false),
+            };
+            let r = engine.move_data(&req)?;
+            if !req.dry_run {
+                service.request_sync();
+            }
+            Ok(serde_json::to_value(r)?)
+        }
+        (Method::Get, "/api/disk/groups") => Ok(serde_json::to_value(engine.disk_groups()?)?),
+        (Method::Post, "/api/disk/group") => {
+            let copies = input
+                .get("copies")
+                .and_then(|c| c.as_u64().or_else(|| c.as_str()?.trim().parse().ok()))
+                .ok_or_else(|| anyhow!("copies is required"))?;
+            engine.set_pool_copies(&s(input, "pool")?, copies.min(16) as u32)?;
+            Ok(serde_json::to_value(engine.disk_groups()?)?)
+        }
+        (Method::Post, "/api/disk/place") => {
+            engine.set_disk_place(&s(input, "label")?, &opt(input, "place").unwrap_or_default())?;
+            Ok(serde_json::to_value(engine.disk_groups()?)?)
         }
         (Method::Get, "/api/data/locations") => Ok(serde_json::to_value(engine.data_locations()?)?),
         (Method::Get, "/api/storage/costs") => Ok(serde_json::to_value(engine.storage_estimates()?)?),

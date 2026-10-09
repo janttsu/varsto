@@ -127,6 +127,10 @@ Format and rules are in `alpha-0-format.md` section 22. This section states what
 
 **Why deletion waits for acknowledgements.** Every reader (trusted, non-revoked full device) must have said, in a signed batch, that it holds the device's batches up to N. A reader that has them needs nothing older than the checkpoint; a device that joins later starts from the checkpoint; a device on an older version never acknowledges, so nothing is deleted while one remains. A reader that disappears blocks pruning until it is revoked; that is the price of never deleting a batch some device still needs.
 
+## 10. Drops (0.0.1-alpha.9)
+
+A `chunk_dropped` event (alpha-0-format.md section 23) is a device's signed statement "I removed this object from this storage". Like a claim it is self-attested, and it is the only event by which one device's batch makes other devices' claims stop counting (as a storage retirement does for a whole storage): a full device of the vault can declare any copy gone. That adds no power such a device lacked, since it holds the storage credentials and could delete the objects; a false drop makes copies count less, never more, so a policy errs on the safe side, and a block left without any other copy is written again by the next push where the placement allows. A drop is ordered against claims by Lamport time; a verification after a drop does not revive the copy. Checkpoints carry drops like claims, so a device that only sees a checkpoint still sees them.
+
 ## Sources
 
 All checked on 2026-10-08.
