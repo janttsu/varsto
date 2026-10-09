@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: PolyForm-Shield-1.0.0
 //! Storage backends. A backend is a dumb object store: it never sees keys or
 //! plaintext. Alpha-0 ships the local-folder backend (which also covers
-//! removable disks and network mounts); S3 and rclone remotes follow.
+//! removable disks and network mounts); S3 and rclone remotes follow, and a
+//! pool of removable disks (`crate::pool`) that holds chunk objects only.
 //!
 //! Object keys use forward slashes. Layout written by the engine:
 //! - `vault/meta.json`                       vault identity (not secret)
@@ -76,10 +77,39 @@ pub enum StorageSpec {
         #[serde(default)]
         place: String,
     },
+    /// A pool of removable disks (plan 6.35, 6.41): local directories with an
+    /// identity marker that are attached and detached over time. Holds chunk
+    /// objects only; records, ledger batches and manifests go to the other
+    /// storages. Opened through the engine, which derives the pool identity.
+    Pool {
+        name: String,
+        #[serde(default)]
+        place: String,
+        /// Share of a disk kept free (default 5 %).
+        #[serde(default = "default_reserve_percent")]
+        reserve_percent: u32,
+        /// At least this much is kept free on every disk (default 2 GiB).
+        #[serde(default = "default_min_reserve_bytes")]
+        min_reserve_bytes: u64,
+        #[serde(default)]
+        disks: Vec<crate::pool::PoolDisk>,
+        /// Extra directories scanned one level deep for attached disks, in
+        /// addition to the platform's mount roots.
+        #[serde(default)]
+        scan_roots: Vec<PathBuf>,
+    },
 }
 
 fn default_true() -> bool {
     true
+}
+
+fn default_reserve_percent() -> u32 {
+    crate::pool::DEFAULT_RESERVE_PERCENT
+}
+
+fn default_min_reserve_bytes() -> u64 {
+    crate::pool::DEFAULT_MIN_RESERVE_BYTES
 }
 
 /// Resolves a secret by reference; `None` means "unknown".
@@ -90,7 +120,8 @@ impl StorageSpec {
         match self {
             StorageSpec::LocalDir { name, .. }
             | StorageSpec::S3 { name, .. }
-            | StorageSpec::Rclone { name, .. } => name,
+            | StorageSpec::Rclone { name, .. }
+            | StorageSpec::Pool { name, .. } => name,
         }
     }
     pub fn kind(&self) -> &'static str {
@@ -98,7 +129,13 @@ impl StorageSpec {
             StorageSpec::LocalDir { .. } => "local-dir",
             StorageSpec::S3 { .. } => "s3",
             StorageSpec::Rclone { .. } => "rclone",
+            StorageSpec::Pool { .. } => "pool",
         }
+    }
+    /// Holds chunk objects only: records, ledger batches, manifests and
+    /// thumbnails are not written to it and not looked for there.
+    pub fn is_data_only(&self) -> bool {
+        matches!(self, StorageSpec::Pool { .. })
     }
     /// One-line description for listings (no secrets).
     pub fn describe(&self) -> String {
@@ -123,6 +160,11 @@ impl StorageSpec {
                     .unwrap_or_default()
             ),
             StorageSpec::Rclone { remote, .. } => remote.clone(),
+            StorageSpec::Pool { disks, .. } => format!(
+                "pool of {} disk{}",
+                disks.len(),
+                if disks.len() == 1 { "" } else { "s" }
+            ),
         }
     }
     /// Place for durability policies: the configured one, or "home" for a
@@ -131,13 +173,14 @@ impl StorageSpec {
         let explicit = match self {
             StorageSpec::LocalDir { place, .. }
             | StorageSpec::S3 { place, .. }
-            | StorageSpec::Rclone { place, .. } => place.as_str(),
+            | StorageSpec::Rclone { place, .. }
+            | StorageSpec::Pool { place, .. } => place.as_str(),
         };
         if !explicit.is_empty() {
             return explicit.to_string();
         }
         match self {
-            StorageSpec::LocalDir { .. } => "home".to_string(),
+            StorageSpec::LocalDir { .. } | StorageSpec::Pool { .. } => "home".to_string(),
             _ => "cloud".to_string(),
         }
     }
@@ -146,6 +189,7 @@ impl StorageSpec {
             StorageSpec::LocalDir { cold, .. }
             | StorageSpec::S3 { cold, .. }
             | StorageSpec::Rclone { cold, .. } => *cold,
+            StorageSpec::Pool { .. } => false,
         }
     }
     pub fn is_carrier(&self) -> bool {
@@ -208,6 +252,9 @@ impl StorageSpec {
             StorageSpec::Rclone { name, remote, .. } => Ok(Box::new(
                 crate::rclone::RcloneStorage::new(name.clone(), remote.clone())?,
             )),
+            StorageSpec::Pool { name, .. } => {
+                anyhow::bail!("disk pool {name} must be opened through the engine, which derives its identity from the vault key")
+            }
         }
     }
 }

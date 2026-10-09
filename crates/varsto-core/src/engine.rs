@@ -22,6 +22,7 @@ use crate::ledger::{
 };
 use crate::manifest::{self, ChunkRef, FileState, Manifest, Merge};
 use crate::policy::{Policy, PolicyReport};
+use crate::pool::{self, DiskStatus, PoolDisk, PoolError, PoolIdentity, PoolStorage};
 use crate::replica::{self, ReplicaToken, REPLICA_PREFIX};
 use crate::storage::{Storage, StorageSpec};
 use crate::thumbs;
@@ -107,6 +108,10 @@ pub struct PushReport {
     pub batch_seq: Option<u64>,
     #[serde(default)]
     pub thumbnails: u64,
+    /// Storages that took nothing this time (a disk pool with no disk
+    /// attached or no room); the next push tries them again.
+    #[serde(default)]
+    pub storages_unavailable: Vec<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Default)]
@@ -123,6 +128,9 @@ pub struct PullReport {
     pub bytes_downloaded: u64,
     pub files_unavailable: Vec<String>,
     pub forked_devices: Vec<String>,
+    /// Pool disks that must be attached for unavailable files: "label (place)".
+    #[serde(default)]
+    pub disks_needed: Vec<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -185,6 +193,43 @@ pub struct FsckReport {
     pub objects_corrupt: Vec<String>,
     pub forked_devices: Vec<String>,
     pub storages_skipped_cold: Vec<String>,
+    /// Referenced objects on pool disks that are not attached (not verified now).
+    #[serde(default)]
+    pub objects_offline: u64,
+    /// Pool disks that are away, with their last verification: "label (place), last verified <date>".
+    #[serde(default)]
+    pub disks_offline: Vec<String>,
+}
+
+/// What `disk add` did.
+#[derive(Clone, Debug, Serialize)]
+pub struct DiskAddReport {
+    pub pool: String,
+    pub disk: PoolDisk,
+    pub objects_added: u64,
+    pub bytes_added: u64,
+}
+
+/// What `disk check` did (the reattach routine).
+#[derive(Clone, Debug, Serialize, Default)]
+pub struct DiskCheckReport {
+    pub pool: String,
+    pub label: String,
+    pub mount: PathBuf,
+    pub objects_checked: u64,
+    pub bytes_checked: u64,
+    /// Objects whose size or hash did not match (dropped from the index).
+    pub bad: Vec<String>,
+    /// Objects the index listed but the disk did not have.
+    pub missing: Vec<String>,
+    /// Objects found on the disk that this device did not know.
+    pub adopted: u64,
+    /// Pending deletions applied.
+    pub objects_removed: u64,
+    pub bytes_removed: u64,
+    /// New objects written.
+    pub objects_added: u64,
+    pub bytes_added: u64,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -610,8 +655,40 @@ impl Engine {
     }
 
     fn open_spec(&self, spec: &StorageSpec) -> Result<Box<dyn Storage>> {
+        if let StorageSpec::Pool { .. } = spec {
+            return Ok(Box::new(self.open_pool(spec)?));
+        }
         let store = self.secret_store()?;
         spec.open_with(&|r| store.secrets.get(r).cloned())
+    }
+
+    /// Open a configured storage by name (tests and tools).
+    pub fn open_storage(&self, name: &str) -> Result<Box<dyn Storage>> {
+        let spec = self
+            .config
+            .storages
+            .iter()
+            .find(|s| s.name() == name)
+            .ok_or_else(|| anyhow!("unknown storage {name}"))?;
+        self.open_spec(spec)
+    }
+
+    /// Identity of a disk pool: both values are keyed hashes under a key
+    /// derived from the vault key, so every device of the vault computes the
+    /// same pool id for the same pool name, and a disk marker reveals neither
+    /// the vault id nor the pool name.
+    fn pool_identity(&self, name: &str) -> PoolIdentity {
+        let k = self.keys.master.derive("disk-pool", &[]);
+        PoolIdentity {
+            pool_id: hex::encode(&crypto::keyed_hash(&k, format!("pool:{name}").as_bytes())[..16]),
+            vault_tag: hex::encode(
+                &crypto::keyed_hash(&k, format!("vault:{}", self.vault.vault_id).as_bytes())[..16],
+            ),
+        }
+    }
+
+    fn open_pool(&self, spec: &StorageSpec) -> Result<PoolStorage> {
+        PoolStorage::open(spec, &self.home, self.pool_identity(spec.name()))
     }
 
     /// Keep a storage secret (S3 secret access key) in `secrets.enc`, for a
@@ -638,6 +715,23 @@ impl Engine {
     ) -> Result<()> {
         if self.config.storages.iter().any(|s| s.name() == spec.name()) {
             bail!("a storage named {} already exists", spec.name());
+        }
+        if let StorageSpec::Pool {
+            reserve_percent, ..
+        } = &spec
+        {
+            if self.vault.member {
+                bail!("a member device cannot add disk pools");
+            }
+            if *reserve_percent > 90 {
+                bail!("reserve percent must be at most 90");
+            }
+            // A pool holds chunks only; the vault identity lives in each
+            // disk's marker (keyed tag), so no meta object is written.
+            self.open_pool(&spec)?;
+            self.config.storages.push(spec);
+            self.config.save(&self.home)?;
+            return Ok(());
         }
         if let Some(secret) = secret {
             let reference = match &spec {
@@ -688,6 +782,16 @@ impl Engine {
             out.push((spec.clone(), self.open_spec(spec)?));
         }
         Ok(out)
+    }
+
+    /// Storages that carry records, ledger batches, manifests and thumbnails:
+    /// everything except data-only disk pools.
+    fn metadata_storages(&self, include_cold: bool) -> Result<OpenStorages> {
+        Ok(self
+            .open_storages(include_cold)?
+            .into_iter()
+            .filter(|(s, _)| !s.is_data_only())
+            .collect())
     }
 
     /// Create a folder in the vault and mount it at `path` on this device.
@@ -857,7 +961,7 @@ impl Engine {
         let rec = self.own_record();
         let reg_key = self.keys.registry_key();
         let fr_key = self.keys.folder_record_key();
-        for (_, backend) in self.open_storages(true)? {
+        for (_, backend) in self.metadata_storages(true)? {
             if !self.vault.member {
                 backend.put_if_absent(
                     &DeviceRecord::storage_key(&rec.device_id),
@@ -893,7 +997,7 @@ impl Engine {
         let fr_key = self.keys.folder_record_key();
         let mut changed_devices = false;
         let mut changed_folders = false;
-        for (_, backend) in self.open_storages(false)? {
+        for (_, backend) in self.metadata_storages(false)? {
             for key in backend.list(DeviceRecord::PREFIX)? {
                 let Some(id) = key
                     .strip_prefix(DeviceRecord::PREFIX)
@@ -966,7 +1070,7 @@ impl Engine {
         }
         // Policy records: newest per folder wins (F-032).
         if !self.vault.member {
-            for (_, backend) in self.open_storages(false)? {
+            for (_, backend) in self.metadata_storages(false)? {
                 for key in backend.list(vault::PolicyRecord::PREFIX)? {
                     let Some(fid) = key
                         .strip_prefix(vault::PolicyRecord::PREFIX)
@@ -1007,7 +1111,7 @@ impl Engine {
             }
         }
         // Member records of shared folders, readable by every holder of the folder key.
-        for (_, backend) in self.open_storages(false)? {
+        for (_, backend) in self.metadata_storages(false)? {
             for f in self.keyring.folders.values().filter(|f| f.shared) {
                 let k = vault::share_registry_key(&f.folder_key()?, &f.folder_id);
                 let prefix = format!("{SHARE_PREFIX}{}/", f.folder_id);
@@ -1114,7 +1218,7 @@ impl Engine {
     fn push_own_batches(&mut self) -> Result<()> {
         let me = self.vault.device_id.clone();
         let head = self.ledger.head(&me);
-        for (_, backend) in self.open_storages(true)? {
+        for (_, backend) in self.metadata_storages(true)? {
             let prefix = format!("ledger/{}/", me);
             let present: HashSet<String> = backend.list(&prefix)?.into_iter().collect();
             for seq in 1..=head.seq {
@@ -1152,7 +1256,7 @@ impl Engine {
         let dir = self.key_directory()?;
         let me = self.vault.device_id.clone();
         let mut forks = BTreeSet::new();
-        for (_, backend) in self.open_storages(false)? {
+        for (_, backend) in self.metadata_storages(false)? {
             for key in backend.list("ledger/")? {
                 let Some(rest) = key.strip_prefix("ledger/") else {
                     continue;
@@ -1466,7 +1570,10 @@ impl Engine {
                     // The file changed under us; the next scan will pick it up.
                     break;
                 }
-                let targets = missing_on(&chunk_id);
+                let targets: Vec<String> = missing_on(&chunk_id)
+                    .into_iter()
+                    .filter(|t| !report.storages_unavailable.iter().any(|u| u == t))
+                    .collect();
                 if targets.is_empty() {
                     continue;
                 }
@@ -1482,9 +1589,24 @@ impl Engine {
                     .iter()
                     .filter(|(spec, _)| targets.contains(&spec.name().to_string()))
                 {
-                    if backend.put_if_absent(&key, &ct)? {
-                        report.chunks_uploaded += 1;
-                        report.bytes_uploaded += ct.len() as u64;
+                    match backend.put_if_absent(&key, &ct) {
+                        Ok(true) => {
+                            report.chunks_uploaded += 1;
+                            report.bytes_uploaded += ct.len() as u64;
+                        }
+                        Ok(false) => {}
+                        // A pool with no disk attached (or no room) is left out
+                        // for the rest of this push and tried again next time.
+                        Err(e)
+                            if matches!(
+                                pool::pool_error(&e),
+                                Some(PoolError::NoDiskAttached { .. } | PoolError::NoRoom { .. })
+                            ) =>
+                        {
+                            report.storages_unavailable.push(spec.name().to_string());
+                            continue;
+                        }
+                        Err(e) => return Err(e),
                     }
                     self.pending.push(Event::ChunkStored {
                         folder: folder_id.clone(),
@@ -1520,7 +1642,7 @@ impl Engine {
             return Ok(0);
         }
         let storages: Vec<(StorageSpec, Box<dyn Storage>)> = self
-            .open_storages(false)?
+            .metadata_storages(false)?
             .into_iter()
             .filter(|(s, _)| !s.is_carrier())
             .collect();
@@ -1565,7 +1687,7 @@ impl Engine {
         }
         let key = thumbs::storage_key(&rec.folder_id, &file.content_hash);
         let meta = rec.keys()?.meta;
-        for (_, backend) in self.open_storages(false)? {
+        for (_, backend) in self.metadata_storages(false)? {
             if let Some(blob) = backend.get(&key)? {
                 return Ok(Some(thumbs::open(
                     &blob,
@@ -1589,7 +1711,7 @@ impl Engine {
             return Ok(());
         }
         let key = Manifest::storage_key(&rec.folder_id, &self.vault.device_id, state.published_seq);
-        let storages = self.open_storages(true)?;
+        let storages = self.metadata_storages(true)?;
         let mut blob: Option<Vec<u8>> = None;
         for (_, backend) in &storages {
             if backend.exists(&key)? {
@@ -1639,7 +1761,7 @@ impl Engine {
         };
         let blob = m.seal(&self.vault.vault_id, &rec.keys()?.meta)?;
         let key = Manifest::storage_key(&rec.folder_id, &self.vault.device_id, seq);
-        for (_, backend) in self.open_storages(true)? {
+        for (_, backend) in self.metadata_storages(true)? {
             backend.put_if_absent(&key, &blob)?;
         }
         self.pending.push(Event::ManifestPublished {
@@ -1678,7 +1800,11 @@ impl Engine {
 
         // Newest manifest per other device, across storages.
         let mut newest: BTreeMap<DeviceId, (u64, usize)> = BTreeMap::new();
-        for (idx, (_, backend)) in storages.iter().enumerate() {
+        for (idx, (_, backend)) in storages
+            .iter()
+            .enumerate()
+            .filter(|(_, (s, _))| !s.is_data_only())
+        {
             let prefix = format!("manifests/{}/", rec.folder_id);
             for key in backend.list(&prefix)? {
                 let Some(rest) = key.strip_prefix(&prefix) else {
@@ -1907,6 +2033,12 @@ impl Engine {
                 report.files_updated += 1;
             }
             Err(e) => {
+                if let Some(PoolError::NeedsDisk { label, place, .. }) = pool::pool_error(&e) {
+                    let d = format!("{label} ({place})");
+                    if !report.disks_needed.contains(&d) {
+                        report.disks_needed.push(d);
+                    }
+                }
                 report
                     .files_unavailable
                     .push(format!("{}: {e}", remote.path));
@@ -1942,20 +2074,35 @@ impl Engine {
                         got = Some((format!("peer:{}", dev.short()), ct));
                     }
                 }
+                let mut needs_disk: Option<PoolError> = None;
                 for (spec, backend) in storages {
                     if got.is_some() {
                         break;
                     }
-                    if let Some(ct) = backend.get(&key)? {
-                        if ObjectName::from_bytes(&crypto::hash(&ct)) != cref.object {
-                            continue; // corrupt copy; try the next storage
+                    match backend.get(&key) {
+                        Ok(Some(ct)) => {
+                            if ObjectName::from_bytes(&crypto::hash(&ct)) != cref.object {
+                                continue; // corrupt copy; try the next storage
+                            }
+                            got = Some((spec.name().to_string(), ct));
+                            break;
                         }
-                        got = Some((spec.name().to_string(), ct));
-                        break;
+                        Ok(None) => {}
+                        // The copy is on a pool disk that is away: remember
+                        // which one, in case no other storage has the chunk.
+                        Err(e) => match pool::pool_error(&e) {
+                            Some(nd @ PoolError::NeedsDisk { .. }) => {
+                                needs_disk.get_or_insert(nd.clone());
+                            }
+                            _ => return Err(e),
+                        },
                     }
                 }
                 let Some((storage_name, ct)) = got else {
                     let _ = fs::remove_file(&tmp);
+                    if let Some(nd) = needs_disk {
+                        return Err(anyhow::Error::new(nd));
+                    }
                     bail!(
                         "chunk {} is not available on any readable storage",
                         cref.chunk.short()
@@ -2122,7 +2269,7 @@ impl Engine {
         };
         let fr_key = self.keys.folder_record_key();
         let blob = prec.seal(&self.vault.vault_id, &fr_key)?;
-        for (_, backend) in self.open_storages(true)? {
+        for (_, backend) in self.metadata_storages(true)? {
             backend.put_if_absent(&prec.storage_key(), &blob)?;
         }
         Ok(())
@@ -2158,6 +2305,16 @@ impl Engine {
                     .push(name.clone());
             }
         }
+        // Disk pools: a copy on a disk that is away counts as a copy verified
+        // when that disk was last checked, on media that cannot be read now.
+        let mut pools: BTreeMap<String, PoolStorage> = BTreeMap::new();
+        for spec in &self.config.storages {
+            if let StorageSpec::Pool { .. } = spec {
+                if let Ok(p) = self.open_pool(spec) {
+                    pools.insert(spec.name().to_string(), p);
+                }
+            }
+        }
         let mut reports = Vec::new();
         for (rec, _) in self.folders() {
             let Some(policy) = rec.policy.clone() else {
@@ -2185,12 +2342,34 @@ impl Engine {
                                     .map(|(p, _)| p.clone())
                                     .unwrap_or_else(|| "other".to_string())
                             };
-                            copies.push((
-                                name.clone(),
-                                place,
-                                loc.independently_verified(name),
-                                loc.verified_utc,
-                            ));
+                            let mut copy_name = name.clone();
+                            let mut verified = loc.independently_verified(name);
+                            let mut verified_utc = loc.verified_utc;
+                            if let Some(pool) = pools.get(name) {
+                                match pool.locate(&chunk_storage_key(&record.object)) {
+                                    Some(l) if l.attached => {
+                                        verified |= l.last_verified_utc > 0;
+                                        verified_utc = verified_utc.max(l.last_verified_utc);
+                                    }
+                                    Some(l) => {
+                                        copy_name = format!("{name}:{}", l.label);
+                                        verified = l.last_verified_utc > 0;
+                                        verified_utc = l.last_verified_utc;
+                                    }
+                                    None => {
+                                        copy_name = format!("{name}:unknown disk");
+                                        verified = false;
+                                        verified_utc = 0;
+                                    }
+                                }
+                                if copy_name != *name {
+                                    let list = unreadable_places.entry(place.clone()).or_default();
+                                    if !list.contains(&copy_name) {
+                                        list.push(copy_name.clone());
+                                    }
+                                }
+                            }
+                            copies.push((copy_name, place, verified, verified_utc));
                         }
                     }
                     facts.push(crate::policy::ChunkFacts { copies });
@@ -2452,7 +2631,7 @@ impl Engine {
         let key = self.keys.registry_key();
         let blob = rec.seal(&self.vault.vault_id, &key)?;
         let k = crate::p2p::PeerRecord::storage_key(&rec.device);
-        for (_, backend) in self.open_storages(false)? {
+        for (_, backend) in self.metadata_storages(false)? {
             // Records change: delete then write (single writer per path).
             backend.delete(&k)?;
             backend.put_if_absent(&k, &blob)?;
@@ -2464,7 +2643,7 @@ impl Engine {
     pub fn peer_records(&self) -> Result<Vec<crate::p2p::PeerAddr>> {
         let key = self.keys.registry_key();
         let mut out: Vec<crate::p2p::PeerAddr> = Vec::new();
-        for (_, backend) in self.open_storages(false)? {
+        for (_, backend) in self.metadata_storages(false)? {
             for k in backend.list(crate::p2p::PeerRecord::PREFIX)? {
                 let Some(id) = k
                     .strip_prefix(crate::p2p::PeerRecord::PREFIX)
@@ -2828,10 +3007,24 @@ impl Engine {
                 .count() as u64;
         }
         if verify_content {
+            let mut corrupt_pools: BTreeSet<String> = BTreeSet::new();
             for ((folder, chunk), object) in &referenced {
                 let key = chunk_storage_key(object);
                 for (spec, backend) in &storages {
-                    if let Some(ct) = backend.get(&key)? {
+                    let ct = match backend.get(&key) {
+                        Ok(ct) => ct,
+                        Err(e)
+                            if matches!(
+                                pool::pool_error(&e),
+                                Some(PoolError::NeedsDisk { .. })
+                            ) =>
+                        {
+                            report.objects_offline += 1;
+                            continue;
+                        }
+                        Err(e) => return Err(e),
+                    };
+                    if let Some(ct) = ct {
                         if ObjectName::from_bytes(&crypto::hash(&ct)) == *object {
                             report.objects_verified_now += 1;
                             self.pending.push(Event::ChunkVerified {
@@ -2841,6 +3034,9 @@ impl Engine {
                                 storage: spec.name().to_string(),
                             });
                         } else {
+                            if spec.is_data_only() {
+                                corrupt_pools.insert(spec.name().to_string());
+                            }
                             report.objects_corrupt.push(format!(
                                 "{}:{}",
                                 spec.name(),
@@ -2851,8 +3047,354 @@ impl Engine {
                 }
             }
             self.commit_batch()?;
+            // The attached disks of every pool were read in full: record the check.
+            drop(storages);
+            for spec in self.config.storages.clone() {
+                if !spec.is_data_only() || corrupt_pools.contains(spec.name()) {
+                    continue;
+                }
+                let pool = self.open_pool(&spec)?;
+                let attached: Vec<String> = pool
+                    .statuses()
+                    .into_iter()
+                    .filter(|d| d.attached)
+                    .map(|d| d.disk_id)
+                    .collect();
+                pool.mark_verified(&attached)?;
+                let disks = pool.disks();
+                drop(pool);
+                self.save_pool_disks(spec.name(), disks)?;
+            }
+        }
+        for spec in &self.config.storages {
+            if !spec.is_data_only() {
+                continue;
+            }
+            for d in self.open_pool(spec)?.statuses() {
+                if !d.attached && d.objects > 0 {
+                    report.disks_offline.push(format!(
+                        "{} ({}), last verified {}",
+                        d.label,
+                        d.place,
+                        if d.last_verified_utc > 0 {
+                            util::format_date(d.last_verified_utc)
+                        } else {
+                            "never".to_string()
+                        }
+                    ));
+                }
+            }
         }
         Ok(report)
+    }
+
+    // ----- disk pool ----------------------------------------------------------
+
+    /// Mirror the disk registry a pool learned (adopted disks, mounts, checks)
+    /// into the configuration, so `config.json` always lists every disk.
+    fn save_pool_disks(&mut self, name: &str, disks: Vec<PoolDisk>) -> Result<()> {
+        let Some(StorageSpec::Pool {
+            disks: configured, ..
+        }) = self.config.storages.iter_mut().find(|s| s.name() == name)
+        else {
+            return Ok(());
+        };
+        if *configured != disks {
+            *configured = disks;
+            self.config.save(&self.home)?;
+        }
+        Ok(())
+    }
+
+    fn pool_specs(&self) -> Vec<StorageSpec> {
+        self.config
+            .storages
+            .iter()
+            .filter(|s| s.is_data_only())
+            .cloned()
+            .collect()
+    }
+
+    /// Every disk of every pool with its attached state (refreshes the
+    /// registry, adopting disks other devices filled).
+    pub fn disks(&mut self) -> Result<Vec<DiskStatus>> {
+        let mut out = Vec::new();
+        for spec in self.pool_specs() {
+            let pool = self.open_pool(&spec)?;
+            out.extend(pool.statuses());
+            let disks = pool.disks();
+            drop(pool);
+            self.save_pool_disks(spec.name(), disks)?;
+        }
+        Ok(out)
+    }
+
+    /// The pool and disk a label names (a disk id or its prefix also works).
+    fn find_disk(&self, label: &str) -> Result<(StorageSpec, PoolStorage, PoolDisk)> {
+        for spec in self.pool_specs() {
+            let pool = self.open_pool(&spec)?;
+            if let Some(d) = pool
+                .disks()
+                .into_iter()
+                .find(|d| d.label == label || (label.len() >= 8 && d.id.starts_with(label)))
+            {
+                return Ok((spec, pool, d));
+            }
+        }
+        bail!("unknown disk {label}")
+    }
+
+    /// Register the mounted directory as a new disk of a pool and fill it
+    /// with what the pool does not hold yet.
+    pub fn disk_add(
+        &mut self,
+        mount: &Path,
+        pool_name: &str,
+        label: &str,
+    ) -> Result<DiskAddReport> {
+        let spec = self
+            .pool_specs()
+            .into_iter()
+            .find(|s| s.name() == pool_name)
+            .ok_or_else(|| anyhow!("no disk pool named {pool_name}; add one with `varsto storage add-pool {pool_name}`"))?;
+        if self.find_disk(label).is_ok() {
+            bail!("a disk labelled {label} already exists");
+        }
+        let pool = self.open_pool(&spec)?;
+        let disk = pool.add_disk(mount, label)?;
+        let (objects_added, bytes_added) = self.fill_disk(&spec, &pool, &disk.id)?;
+        pool.flush()?;
+        let disks = pool.disks();
+        drop(pool);
+        self.save_pool_disks(spec.name(), disks)?;
+        Ok(DiskAddReport {
+            pool: spec.name().to_string(),
+            disk,
+            objects_added,
+            bytes_added,
+        })
+    }
+
+    /// Reattach routine: verify the marker and the objects (sizes; hashes with
+    /// `full`), apply queued deletions, then fill the disk with new objects.
+    pub fn disk_check(&mut self, label: &str, full: bool) -> Result<DiskCheckReport> {
+        let (spec, pool, disk) = self.find_disk(label)?;
+        let mount = pool
+            .mount_of(&disk.id)
+            .ok_or_else(|| anyhow!("disk {} is not attached", disk.label))?;
+        let (objects_removed, bytes_removed) = pool.apply_pending_deletes(&disk.id)?;
+        let verified = pool.verify_disk(&disk.id, full)?;
+        if full {
+            // Every object on the disk was re-hashed: that is a verification
+            // other devices can rely on through the ledger.
+            let view = self.view()?;
+            let mut by_object: BTreeMap<ObjectName, (FolderId, ChunkId)> = BTreeMap::new();
+            for ((folder, chunk), r) in view.chunks.iter() {
+                by_object.insert(r.object.clone(), (folder.clone(), chunk.clone()));
+            }
+            for (key, _) in pool.objects_on(&disk.id) {
+                let Some(name) = key.rsplit('/').next() else {
+                    continue;
+                };
+                let Ok(object) = ObjectName::from_hex(name) else {
+                    continue;
+                };
+                if let Some((folder, chunk)) = by_object.get(&object) {
+                    self.pending.push(Event::ChunkVerified {
+                        folder: folder.clone(),
+                        chunk: chunk.clone(),
+                        object,
+                        storage: spec.name().to_string(),
+                    });
+                }
+            }
+        }
+        let (objects_added, bytes_added) = if disk.retired {
+            (0, 0)
+        } else {
+            self.fill_disk(&spec, &pool, &disk.id)?
+        };
+        self.commit_batch()?;
+        pool.flush()?;
+        let disks = pool.disks();
+        drop(pool);
+        self.save_pool_disks(spec.name(), disks)?;
+        Ok(DiskCheckReport {
+            pool: spec.name().to_string(),
+            label: disk.label,
+            mount,
+            objects_checked: verified.objects_checked,
+            bytes_checked: verified.bytes_checked,
+            bad: verified.bad,
+            missing: verified.missing,
+            adopted: verified.adopted,
+            objects_removed,
+            bytes_removed,
+            objects_added,
+            bytes_added,
+        })
+    }
+
+    /// Write the disk's index and sync it; the disk is then safe to remove
+    /// (the program never unmounts). Returns the mount path.
+    pub fn disk_eject(&mut self, label: &str) -> Result<PathBuf> {
+        let (spec, pool, disk) = self.find_disk(label)?;
+        let mount = pool
+            .eject(&disk.id)
+            .with_context(|| format!("eject disk {}", disk.label))?;
+        let disks = pool.disks();
+        drop(pool);
+        self.save_pool_disks(spec.name(), disks)?;
+        Ok(mount)
+    }
+
+    /// Mark a disk retired: nothing new is written to it. Returns the number
+    /// of objects that exist on this disk and on no other storage.
+    pub fn disk_retire(&mut self, label: &str) -> Result<u64> {
+        let (spec, pool, disk) = self.find_disk(label)?;
+        pool.set_retired(&disk.id, true)?;
+        let view = self.view()?;
+        let mut elsewhere: HashSet<ObjectName> = HashSet::new();
+        for r in view.chunks.values() {
+            if r.storages.keys().any(|s| s != spec.name()) {
+                elsewhere.insert(r.object.clone());
+            }
+        }
+        let only_here = pool
+            .objects_on(&disk.id)
+            .iter()
+            .filter(|(key, _)| {
+                key.rsplit('/')
+                    .next()
+                    .and_then(|n| ObjectName::from_hex(n).ok())
+                    .is_none_or(|o| !elsewhere.contains(&o))
+            })
+            .count() as u64;
+        let disks = pool.disks();
+        drop(pool);
+        self.save_pool_disks(spec.name(), disks)?;
+        Ok(only_here)
+    }
+
+    /// The ciphertext of one chunk, re-encrypted from a local file (chunking
+    /// and encryption are deterministic, so the object is identical).
+    fn chunk_ciphertext_from_file(
+        &self,
+        fk: &FolderKeys,
+        path: &Path,
+        chunk: &ChunkId,
+    ) -> Result<Vec<u8>> {
+        let file = fs::File::open(path)?;
+        for piece in Chunker::new(std::io::BufReader::new(file), self.chunker)? {
+            let piece = piece?;
+            if ChunkId::from_bytes(&crypto::keyed_hash(&fk.hash, &piece)) != *chunk {
+                continue;
+            }
+            return crypto::encrypt_with_nonce(
+                &fk.chunk_key(chunk),
+                &fk.chunk_nonce(chunk),
+                &fk.chunk_aad(&self.vault.vault_id, chunk, piece.len() as u64),
+                &crate::pack::pack(&piece),
+            );
+        }
+        bail!("chunk {} is not in {}", chunk.short(), path.display())
+    }
+
+    /// Fill one attached disk with objects of current files that the pool
+    /// holds on no disk, largest first, within the disk's reserve. Objects
+    /// come from the other hot storages or are re-encrypted from local files;
+    /// no other storage is changed. Returns (objects, bytes) written.
+    fn fill_disk(
+        &mut self,
+        spec: &StorageSpec,
+        pool: &PoolStorage,
+        disk_id: &str,
+    ) -> Result<(u64, u64)> {
+        struct Need {
+            folder: FolderId,
+            chunk: ChunkId,
+            size: u64,
+            files: Vec<PathBuf>,
+        }
+        let have = pool.objects();
+        let mut needed: BTreeMap<ObjectName, Need> = BTreeMap::new();
+        let mut folder_keys: BTreeMap<FolderId, FolderKeys> = BTreeMap::new();
+        for (rec, mount) in self.folders() {
+            let Ok(rec) = self.with_key(&rec) else {
+                continue; // a locked Strongroom is skipped
+            };
+            let state = self.load_state(&rec.folder_id)?;
+            for f in state.files.values().filter(|f| !f.deleted) {
+                for c in &f.chunks {
+                    if have.contains_key(&chunk_storage_key(&c.object)) {
+                        continue;
+                    }
+                    let n = needed.entry(c.object.clone()).or_insert_with(|| Need {
+                        folder: rec.folder_id.clone(),
+                        chunk: c.chunk.clone(),
+                        size: c.size,
+                        files: Vec::new(),
+                    });
+                    if let Some(m) = &mount {
+                        n.files.push(m.join(&f.path));
+                    }
+                }
+            }
+            folder_keys.insert(rec.folder_id.clone(), rec.keys()?);
+        }
+        let mut order: Vec<ObjectName> = needed.keys().cloned().collect();
+        order.sort_by(|a, b| needed[b].size.cmp(&needed[a].size).then(a.cmp(b)));
+        let sources = self.metadata_storages(false)?;
+        let (mut n, mut bytes) = (0u64, 0u64);
+        for object in order {
+            let need = &needed[&object];
+            // Ciphertext is a little larger than the chunk; the exact size is
+            // checked again by the pool when writing.
+            if !pool.has_room(disk_id, need.size + 64) {
+                continue;
+            }
+            let key = chunk_storage_key(&object);
+            let mut ct: Option<Vec<u8>> = None;
+            for (_, backend) in &sources {
+                if let Ok(Some(c)) = backend.get(&key) {
+                    if ObjectName::from_bytes(&crypto::hash(&c)) == object {
+                        ct = Some(c);
+                        break;
+                    }
+                }
+            }
+            if ct.is_none() {
+                if let Some(fk) = folder_keys.get(&need.folder) {
+                    for path in &need.files {
+                        if let Ok(c) = self.chunk_ciphertext_from_file(fk, path, &need.chunk) {
+                            ct = Some(c);
+                            break;
+                        }
+                    }
+                }
+            }
+            let Some(ct) = ct else { continue };
+            match pool.put_on_disk(disk_id, &key, &ct) {
+                Ok(true) => {
+                    n += 1;
+                    bytes += ct.len() as u64;
+                    self.pending.push(Event::ChunkStored {
+                        folder: need.folder.clone(),
+                        chunk: need.chunk.clone(),
+                        object: object.clone(),
+                        storage: spec.name().to_string(),
+                        size: ct.len() as u64,
+                    });
+                }
+                Ok(false) => {}
+                Err(e) if matches!(pool::pool_error(&e), Some(PoolError::NoRoom { .. })) => {
+                    continue;
+                }
+                Err(e) => return Err(e),
+            }
+        }
+        self.commit_batch()?;
+        Ok((n, bytes))
     }
 
     /// Duplicate files inside one folder (same keyed content hash).

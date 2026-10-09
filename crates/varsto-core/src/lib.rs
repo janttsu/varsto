@@ -23,6 +23,7 @@ pub mod manifest;
 pub mod p2p;
 pub mod pack;
 pub mod policy;
+pub mod pool;
 pub mod rclone;
 pub mod recovery;
 pub mod replica;

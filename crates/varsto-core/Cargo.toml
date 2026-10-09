@@ -34,5 +34,11 @@ base64 = "0.22"
 bip39 = "3"
 sharks = "0.5"
 
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = ["Win32_Storage_FileSystem", "Win32_Foundation"] }
+
 [dev-dependencies]
 tempfile.workspace = true
