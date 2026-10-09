@@ -204,6 +204,7 @@
     document.querySelectorAll(".tabbar .nav-item[data-nav]").forEach(function (b) { if (b.dataset.nav === tab) { b.setAttribute("aria-current", "page"); } else { b.removeAttribute("aria-current"); } });
     if (document.body.dataset.view === "app") { $("pagetitle").textContent = pageTitle(page); }
     if (page === "peers") { loadP2p(); }
+    if (page === "overview" && lastWhere) { renderWhere(lastWhere); }
     trafficWatch();
     if (page === "files") { ensureFiles(); }
     if (page === "settings" && droid && lastStatus) { refreshAllFiles(); }
@@ -643,6 +644,7 @@
         $("datamap-total").textContent = t + " block" + (t === 1 ? "" : "s") + " in " + s.folders.length + " folder" + (s.folders.length === 1 ? "" : "s");
         $("datamap-note").textContent = per > 1 ? "1 square ≈ " + per + " blocks" : (t ? "1 square = 1 block" : "");
       })();
+      loadWhere();
       if (prev && folderByName(prev) && folderByName(prev).path) { fsel.value = prev; }
       else if (!fsel.value && fsel.options.length) { fsel.selectedIndex = 0; }
       markTree(fsel.value);
@@ -1484,6 +1486,217 @@
     });
   }
   window.addEventListener("resize", function () { if (lastTraffic && currentPage === "peers") { renderTraffic(lastTraffic); } });
+  // "Where your data is" (Overview): folders on the left, the storages and devices
+  // that hold their bytes on the right, ribbons as wide as the bytes (one scale for
+  // both sides, so every extra copy makes the right side taller). Loaded with the
+  // status; phones and narrow cards get proportional bars instead.
+  var lastWhere = null, whereBusy = false, whereWidth = 0;
+  function loadWhere() {
+    if (whereBusy) { return; }
+    whereBusy = true;
+    api("GET", "/api/data/locations").then(function (d) { lastWhere = d; renderWhere(d); }).catch(function () {}).then(function () { whereBusy = false; });
+  }
+  var WD_ORDER = { own: 0, ext: 1, cold: 2, carrier: 3, other: 4 };
+  var WD_PLACE = { own: "own device or disk", ext: "external storage", cold: "cold storage", carrier: "transferrer", other: "seen only in other devices' records" };
+  function wdStorageClass(s) {
+    if (s.carrier) { return "carrier"; }
+    if (s.cold) { return "cold"; }
+    if (!s.configured) { return s.kind === "replica" ? "ext" : "other"; }
+    return s.place === "home" ? "own" : "ext";
+  }
+  function wdKind(s) { return { directory: "directory", s3: "S3", rclone: "rclone", pool: "disk pool", transferrer: "transferrer", replica: "replica device", unknown: "not configured here" }[s.kind] || s.kind; }
+  function fmtShare(x) { if (!(x > 0)) { return "0 %"; } if (x < 0.01) { return "<1 %"; } return Math.round(x * 100) + " %"; }
+  function wdCost(s) { return s.monthly_cost != null ? "about " + s.monthly_cost.toFixed(2) + " " + (s.currency || "") + " a month" : ""; }
+  // The nodes on the right: storages grouped by kind of place, then devices.
+  function wdTargets(d) {
+    var st = d.storages.filter(function (s) { return s.bytes > 0 || s.configured; }).map(function (s) {
+      var c = wdStorageClass(s);
+      var lines = [s.name + " — " + wdKind(s) + (s.place ? ", place " + s.place : ""), WD_PLACE[c],
+        fmtBytes(s.bytes) + " in " + s.blocks + " block" + (s.blocks === 1 ? "" : "s") + " (" + fmtShare(s.share) + " of the data)"];
+      if (s.bytes > 0) { lines.push("Verified by another device: " + fmtBytes(s.verified_bytes)); }
+      if (wdCost(s)) { lines.push(wdCost(s)); }
+      return { key: "s:" + s.name, name: s.name, cls: c, bytes: s.bytes, share: s.share, group: "Storages", title: lines.join("\n"), sub: s.carrier ? "passes on" : s.cold ? "cold" : "" };
+    });
+    st.sort(function (a, b) { return WD_ORDER[a.cls] - WD_ORDER[b.cls] || b.bytes - a.bytes || a.name.localeCompare(b.name); });
+    var dv = d.devices.filter(function (x) { return x.bytes > 0 || x.this_device; }).map(function (x) {
+      return { key: "d:" + x.device_id, name: x.name, sub: x.this_device ? "this device" : x.revoked ? "removed" : "", cls: "own dev", bytes: x.bytes, share: x.share, group: "Devices",
+        title: x.name + (x.this_device ? " — this device" : "") + (x.revoked ? " (removed from the vault)" : "") + "\nFiles on the device: " + fmtBytes(x.bytes) + " in " + x.blocks + " block" + (x.blocks === 1 ? "" : "s") + " (" + fmtShare(x.share) + " of the data)" };
+    });
+    return st.concat(dv);
+  }
+  // Folders on the left; past ten, the smallest are merged into one node.
+  function wdSources(d) {
+    var fs = d.folders.filter(function (f) { return f.bytes > 0; });
+    if (fs.length > 10) {
+      var rest = fs.slice(9), m = { name: rest.length + " more folders", bytes: 0, blocks: 0, storages: {}, devices: {}, unkept_bytes: 0, merged: rest.map(function (f) { return f.name; }) };
+      rest.forEach(function (f) {
+        m.bytes += f.bytes; m.blocks += f.blocks; m.unkept_bytes += f.unkept_bytes;
+        Object.keys(f.storages).forEach(function (k) { m.storages[k] = (m.storages[k] || 0) + f.storages[k]; });
+        Object.keys(f.devices).forEach(function (k) { m.devices[k] = (m.devices[k] || 0) + f.devices[k]; });
+      });
+      fs = fs.slice(0, 9).concat([m]);
+    }
+    return fs.map(function (f) {
+      var flows = {};
+      Object.keys(f.storages).forEach(function (k) { flows["s:" + k] = f.storages[k]; });
+      Object.keys(f.devices).forEach(function (k) { flows["d:" + k] = f.devices[k]; });
+      var where = Object.keys(f.storages).sort(function (a, b) { return f.storages[b] - f.storages[a]; }).map(function (k) { return k + " " + fmtBytes(f.storages[k]); });
+      var title = f.name + " — " + fmtBytes(f.bytes) + " in " + f.blocks + " block" + (f.blocks === 1 ? "" : "s") + " (" + fmtShare(f.bytes / d.total_bytes) + " of the data)" +
+        "\nOn storages: " + (where.join(", ") || "none") + (f.unkept_bytes ? "\nNot kept on any storage: " + fmtBytes(f.unkept_bytes) : "") + (f.merged ? "\n" + f.merged.join(", ") : "");
+      return { name: f.name, bytes: f.bytes, flows: flows, title: title, warn: f.unkept_bytes > 0 };
+    });
+  }
+  function svgTitle(node, text) { node.appendChild(svgEl("title", {}, "", text)); return node; }
+  function renderCopies(d) {
+    var h = $("wd-hist"); h.innerHTML = "";
+    var c = d.copies, W = 176, H = 64, bw = 32, gap = 12, top = 14, base = 46;
+    var rows = [["0", c.none, c.bytes[0], "none"], ["1", c.one, c.bytes[1], "one"], ["2", c.two, c.bytes[2], "two"], ["3+", c.three_plus, c.bytes[3], "more"]];
+    var max = Math.max(1, c.bytes[0], c.bytes[1], c.bytes[2], c.bytes[3]);
+    h.setAttribute("viewBox", "0 0 " + W + " " + H); h.setAttribute("width", W); h.setAttribute("height", H);
+    h.appendChild(svgEl("line", { x1: 0, y1: base + 0.5, x2: W, y2: base + 0.5 }, "wd-hist-base"));
+    rows.forEach(function (r, i) {
+      var x = i * (bw + gap) + 4, share = d.total_bytes ? r[2] / d.total_bytes : 0;
+      var bh = r[2] > 0 ? Math.max(3, (base - top) * r[2] / max) : 0;
+      var g = svgEl("g", {}, "wd-hist-col " + r[3] + (r[2] > 0 ? "" : " zero"));
+      g.appendChild(svgEl("rect", { x: x, y: top - 12, width: bw, height: base - top + 30 }, "wd-hit"));
+      if (bh) { g.appendChild(svgEl("path", { d: "M" + x + "," + base + " V" + (base - bh + 3) + " q0,-3 3,-3 h" + (bw - 6) + " q3,0 3,3 V" + base + " z" }, "wd-hist-bar")); }
+      g.appendChild(svgEl("text", { x: x + bw / 2, y: base - bh - 4, "text-anchor": "middle" }, "wd-hist-val", r[2] > 0 ? fmtShare(share) : ""));
+      g.appendChild(svgEl("text", { x: x + bw / 2, y: base + 14, "text-anchor": "middle" }, "wd-hist-lab", r[0] + "×"));
+      svgTitle(g, (r[0] === "1" ? "1 copy" : r[0] + " copies") + " on storages: " + r[1] + " block" + (r[1] === 1 ? "" : "s") + ", " + fmtBytes(r[2]) + " (" + fmtShare(share) + ")" + (r[0] === "0" && r[1] ? "\nThese blocks are only on devices." : ""));
+      h.appendChild(g);
+    });
+  }
+  function renderWhere(d) {
+    var card = $("wherecard");
+    var shown = d && d.total_bytes > 0;
+    card.classList.toggle("hidden", !shown);
+    if (!shown) { return; }
+    $("wd-bytes").textContent = fmtBytes(d.total_bytes);
+    var avg = $("wd-avg"); avg.textContent = "kept " + d.copies.average.toFixed(1) + "× on average";
+    avg.title = "Kept copies on storages per byte, transferrers not counted";
+    avg.className = "wd-avg" + (d.copies.none ? " bad" : d.copies.average < 2 ? " risk" : "");
+    var nf = d.folders.filter(function (f) { return f.bytes > 0; }).length;
+    var ns = d.storages.filter(function (s) { return s.bytes > 0; }).length;
+    var nd = d.devices.filter(function (x) { return x.bytes > 0; }).length;
+    $("wd-total").textContent = d.total_blocks + " block" + (d.total_blocks === 1 ? "" : "s") + " · " + nf + " folder" + (nf === 1 ? "" : "s") + " · " + ns + " storage" + (ns === 1 ? "" : "s") + " · " + nd + " device" + (nd === 1 ? "" : "s");
+    renderCopies(d);
+    var targets = wdTargets(d), present = {};
+    targets.forEach(function (t) { present[t.cls.split(" ")[0]] = true; });
+    document.querySelectorAll("#wherecard .wd-legend .wd-sw").forEach(function (sw) { var k = sw.classList[1]; sw.parentNode.classList.toggle("hidden", !present[k]); });
+    var unknown = d.folders.filter(function (f) { return f.bytes === 0 && !f.attached; }).length;
+    $("wd-note").textContent = "Encrypted sizes; every copy counts at its storage." + (unknown ? " " + unknown + " folder" + (unknown === 1 ? " is" : "s are") + " not attached here and not counted." : "");
+    var box = $("wd-chart");
+    var W = box.clientWidth;
+    if (!W) { return; }
+    whereWidth = W; box.innerHTML = "";
+    if (isMobile() || W < 520) { renderWhereBars(box, targets); } else { renderWhereFlow(box, d, wdSources(d), targets, Math.min(W, 1100)); }
+  }
+  function renderWhereBars(box, targets) {
+    var group = "";
+    targets.forEach(function (t) {
+      if (t.group !== group) { group = t.group; box.appendChild(el("div", "wd-bars-head", group)); }
+      var row = el("div", "wd-bar-row"); row.title = t.title;
+      var top = el("div", "wd-bar-top"); top.appendChild(el("span", "wd-bar-name", t.name + (t.sub ? " · " + t.sub : ""))); top.appendChild(el("span", "wd-bar-val", fmtBytes(t.bytes) + " · " + fmtShare(t.share)));
+      row.appendChild(top);
+      var sv = svgEl("svg", { viewBox: "0 0 100 6", preserveAspectRatio: "none", "aria-hidden": "true" }, "wd-bar");
+      sv.appendChild(svgEl("rect", { x: 0, y: 0, width: 100, height: 6, rx: 3 }, "wd-track"));
+      if (t.bytes > 0) { sv.appendChild(svgEl("rect", { x: 0, y: 0, width: Math.max(1.5, Math.min(1, t.share) * 100), height: 6, rx: 3 }, "wd-fill " + t.cls)); }
+      row.appendChild(sv); box.appendChild(row);
+    });
+  }
+  function renderWhereFlow(box, d, sources, targets, W) {
+    var charW = 6.9, charW2 = 6.1, barW = 10, rowMin = 34, gap = 8, head = 22, groupGap = 18;
+    function longest(list, f) { return list.reduce(function (n, x) { return Math.max(n, f(x).length); }, 0); }
+    sources.forEach(function (s) { s.line2 = fmtBytes(s.bytes) + " · " + fmtShare(s.bytes / d.total_bytes); });
+    targets.forEach(function (t) { t.line2 = (t.bytes ? fmtBytes(t.bytes) + " · " + fmtShare(t.share) : "empty") + (t.sub ? " · " + t.sub : ""); });
+    function need(list) { return Math.max(longest(list, function (x) { return x.name; }) * charW, longest(list, function (x) { return x.line2; }) * charW2) + 14; }
+    var labL = Math.round(Math.min(W * 0.22, Math.max(84, need(sources))));
+    var labR = Math.round(Math.min(W * 0.34, Math.max(118, need(targets))));
+    var xL = labL, xR = W - labR - barW;
+    var groups = []; targets.forEach(function (t) { if (!groups.length || groups[groups.length - 1] !== t.group) { groups.push(t.group); } });
+    var rightBytes = targets.reduce(function (n, t) { return n + t.bytes; }, 0) || 1;
+    var Ht = Math.max(240, Math.min(520, targets.length * 52));
+    var fixedR = head + (groups.length - 1) * groupGap + (targets.length - 1) * gap;
+    var k = Math.max(0, Ht - fixedR) / rightBytes;
+    // Small nodes get a minimum slot for their label; scale down until it fits.
+    for (var it = 0; it < 6; it++) {
+      var need = fixedR + targets.reduce(function (n, t) { return n + Math.max(rowMin, t.bytes * k); }, 0);
+      if (need <= Ht + 1) { break; }
+      k *= Math.max(0.5, (Ht - fixedR - rowMin * targets.length * 0.5) / (need - fixedR - rowMin * targets.length * 0.5) || 0.5);
+    }
+    var y = head, lastGroup = targets.length ? targets[0].group : "", heads = [[targets.length ? targets[0].group : "", y]];
+    targets.forEach(function (t, i) {
+      if (t.group !== lastGroup) { y += groupGap; lastGroup = t.group; heads.push([t.group, y]); }
+      t.h = Math.max(t.bytes > 0 ? 2 : 0, t.bytes * k); t.slot = Math.max(rowMin, t.h); t.top = y + (t.slot - t.h) / 2; t.cy = y + t.slot / 2; t.fill = t.top;
+      y += t.slot + (i < targets.length - 1 ? gap : 0);
+    });
+    var Hr = y;
+    sources.forEach(function (s) { s.h = Math.max(2, s.bytes * k); s.slot = Math.max(rowMin, s.h); });
+    var leftH = sources.reduce(function (n, s) { return n + s.slot; }, 0) + Math.max(0, sources.length - 1) * gap * 1.5;
+    var H = Math.max(Hr, leftH + head) + 6;
+    var yl = head + Math.max(0, (H - 6 - head - leftH) / 2);
+    sources.forEach(function (s) { s.top = yl + (s.slot - s.h) / 2; s.cy = yl + s.slot / 2; yl += s.slot + gap * 1.5; });
+    var nBands = sources.reduce(function (n, s) { return n + Object.keys(s.flows).length; }, 0);
+    var svg = svgEl("svg", { width: W, height: H, viewBox: "0 0 " + W + " " + H, role: "img", "aria-label": "Bytes of each folder on each storage and device" }, "wd-svg" + (nBands > 30 ? " dense" : ""));
+    var defs = svgEl("defs");
+    ["own", "ext", "cold", "carrier", "other"].forEach(function (c) {
+      var g = svgEl("linearGradient", { id: "wd-g-" + c, x1: 0, y1: 0, x2: 1, y2: 0 });
+      g.appendChild(svgEl("stop", { offset: "0" }, "wd-stop src"));
+      g.appendChild(svgEl("stop", { offset: "1" }, "wd-stop " + c));
+      defs.appendChild(g);
+    });
+    svg.appendChild(defs);
+    var bands = svgEl("g", {}, "wd-bands"), nodes = svgEl("g"), labels = svgEl("g");
+    svg.appendChild(bands); svg.appendChild(nodes); svg.appendChild(labels);
+    var byKey = {}; targets.forEach(function (t) { byKey[t.key] = t; });
+    var x0 = xL + barW, x1 = xR, mx = (x0 + x1) / 2;
+    sources.forEach(function (s, si) {
+      var outs = targets.filter(function (t) { return s.flows[t.key] > 0; });
+      var sum = outs.reduce(function (n, t) { return n + s.flows[t.key]; }, 0) || 1, ys = s.top;
+      outs.forEach(function (t) {
+        var v = s.flows[t.key], hs = s.h * v / sum, ht = v * k;
+        var a0 = ys, a1 = ys + hs, b0 = t.fill, b1 = t.fill + ht;
+        ys = a1; t.fill = b1;
+        var p = svgEl("path", { d: "M" + x0 + "," + a0 + " C" + mx + "," + a0 + " " + mx + "," + b0 + " " + x1 + "," + b0 + " L" + x1 + "," + b1 + " C" + mx + "," + b1 + " " + mx + "," + a1 + " " + x0 + "," + a1 + " Z", fill: "url(#wd-g-" + t.cls.split(" ")[0] + ")", "data-s": si, "data-t": t.key }, "wd-band");
+        svgTitle(p, s.name + " → " + t.name + ": " + fmtBytes(v) + " (" + fmtShare(v / s.bytes) + " of the folder)");
+        bands.appendChild(p);
+      });
+    });
+    function focus(attr, val) {
+      svg.classList.toggle("focus", val !== null);
+      bands.querySelectorAll(".wd-band").forEach(function (b) { b.classList.toggle("hot", val !== null && b.getAttribute(attr) === String(val)); });
+    }
+    function txt(x, y, anchor, cls, text) { labels.appendChild(svgEl("text", { x: x, y: y, "text-anchor": anchor }, cls, text)); }
+    var charsL = Math.floor((labL - 14) / charW), charsR = Math.floor((labR - 14) / charW);
+    var chars2L = Math.floor((labL - 14) / charW2), chars2R = Math.floor((labR - 14) / charW2);
+    sources.forEach(function (s, si) {
+      var g = svgEl("g", {}, "wd-node src" + (s.warn ? " warn" : ""));
+      g.appendChild(svgEl("rect", { x: 0, y: s.cy - s.slot / 2, width: xL + barW, height: s.slot }, "wd-hit"));
+      g.appendChild(svgEl("rect", { x: xL, y: s.top, width: barW, height: s.h, rx: Math.min(3, s.h / 2) }, "wd-bar-node"));
+      g.appendChild(svgEl("text", { x: xL - 8, y: s.cy - 2, "text-anchor": "end" }, "wd-t1", clip(s.name, charsL)));
+      g.appendChild(svgEl("text", { x: xL - 8, y: s.cy + 13, "text-anchor": "end" }, "wd-t2", clip(s.line2, chars2L)));
+      svgTitle(g, s.title);
+      g.addEventListener("mouseenter", function () { focus("data-s", si); });
+      g.addEventListener("mouseleave", function () { focus("data-s", null); });
+      nodes.appendChild(g);
+    });
+    targets.forEach(function (t) {
+      var g = svgEl("g", {}, "wd-node " + t.cls + (t.bytes ? "" : " empty"));
+      g.appendChild(svgEl("rect", { x: xR, y: t.cy - t.slot / 2, width: W - xR, height: t.slot }, "wd-hit"));
+      if (t.h > 0) { g.appendChild(svgEl("rect", { x: xR, y: t.top, width: barW, height: t.h, rx: Math.min(3, t.h / 2) }, "wd-bar-node")); }
+      else { g.appendChild(svgEl("rect", { x: xR, y: t.cy - 1, width: barW, height: 2, rx: 1 }, "wd-bar-node")); }
+      g.appendChild(svgEl("text", { x: xR + barW + 8, y: t.cy - 2 }, "wd-t1", clip(t.name, charsR)));
+      g.appendChild(svgEl("text", { x: xR + barW + 8, y: t.cy + 13 }, "wd-t2", clip(t.line2, chars2R)));
+      svgTitle(g, t.title);
+      g.addEventListener("mouseenter", function () { focus("data-t", t.key); });
+      g.addEventListener("mouseleave", function () { focus("data-t", null); });
+      nodes.appendChild(g);
+    });
+    txt(xL + barW, 12, "end", "wd-head", "Folders");
+    heads.forEach(function (h) { txt(xR, h[1] - 10, "start", "wd-head", h[0]); });
+    box.appendChild(svg);
+  }
+  window.addEventListener("resize", function () { if (lastWhere && currentPage === "overview" && $("wd-chart").clientWidth !== whereWidth) { renderWhere(lastWhere); } });
   $("p2pform").onsubmit = function (ev) { ev.preventDefault(); var d = formData(ev.target); d.port = +d.port || 17893; api("POST", "/api/p2p", d).then(function (r) { log("p2p settings saved; " + r.note); loadP2p(); }).catch(function (e) { alertBox(e.message); }); };
   $("storagekind").onchange = function () { var k = this.value; document.querySelectorAll("#addstorage [data-kind]").forEach(function (d) { d.classList.toggle("hidden", d.getAttribute("data-kind") !== k); }); };
   $("acceptshare").onsubmit = function (ev) { ev.preventDefault(); busy(true); api("POST", "/api/share/accept", formData(ev.target)).then(function (r) { ev.target.reset(); log("accepted shared folder " + r.folder + "; attach it under Files"); nav("files"); return refreshState(); }).catch(function (e) { alertBox(e.message); }).then(function () { busy(false); }); };
