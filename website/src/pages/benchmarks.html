@@ -1,0 +1,201 @@
+---
+title: Benchmarks
+nav: How it works
+output: benchmarks/index.html
+description: Varsto measured between Paris, Amsterdam and Warsaw on 9 October 2026: downloads peer to peer from another device compared with the same downloads from an S3 bucket, with the method, the raw numbers, the fixes the run led to and what was not measured.
+---
+    <div class="tech">
+    <h1>Benchmarks: peer to peer across Europe</h1>
+    <p class="lead">One device in Paris holds the files. Devices in Amsterdam and Warsaw join the vault with an empty folder and download everything: once directly from the Paris device (peer to peer), once from an S3 bucket in Paris. Measured on 9 October 2026 on rented cloud machines.</p>
+    <p>This page reports what was measured, how, what limited it, and what was not measured. The run was stopped before every planned case was done; the gaps are listed below. The numbers belong to an alpha: they describe the code as it was on that day, including fixes made during the run. The driver is in the repository under <code>scripts/bench/</code>, and the summarised results are published as <a href="../data/benchmarks-2026-10-09.json">JSON</a>, so every number on this page can be checked and the run repeated.</p>
+
+    <nav class="toc" aria-label="On this page">
+      <p class="toc-title">On this page</p>
+      <ol>
+        <li><a href="#summary">Summary</a></li>
+        <li><a href="#done">What was measured, and what was not</a></li>
+        <li><a href="#setup">Setup and baseline</a></li>
+        <li><a href="#p2p-only">What “peer to peer only” means</a></li>
+        <li><a href="#large">Large files</a></li>
+        <li><a href="#files">Many small files</a></li>
+        <li><a href="#text">Compressible text</a></li>
+        <li><a href="#writer">The writer's side</a></li>
+        <li><a href="#fixes">Fixed during the run</a></li>
+        <li><a href="#bottlenecks">Still slow, and why</a></li>
+        <li><a href="#when">When peer to peer wins, and when the bucket does</a></li>
+        <li><a href="#cost">Cost</a></li>
+        <li><a href="#limits">Limits of this benchmark</a></li>
+      </ol>
+    </nav>
+
+    <h2 id="summary">Summary</h2>
+    <ul>
+      <li><strong>Large files, Paris to Amsterdam (9 ms apart):</strong> 4 GiB arrived peer to peer in 159 s (27.0 MB/s), from the bucket in 180 s (23.9 MB/s). Peer to peer was slightly faster and far steadier: its two runs differed by 2 %, the bucket's by 11 %.</li>
+      <li><strong>Large files, Paris to Warsaw (33 ms apart):</strong> the bucket won, 190 s (23.4 MB/s) against 423 s (10.2 MB/s) peer to peer. The peer-to-peer path used here opens a new TCP connection for every block of about 300 KiB, so each block pays a handshake and a fresh TCP slow start; the longer the round trip, the more that costs. This is the main thing left to fix (<a href="#bottlenecks">below</a>).</li>
+      <li><strong>Many small files</strong> (10 000 files, 0.27 GiB) came from the bucket at 26 files/s to Amsterdam and 17 files/s to Warsaw: one request after another, one file at a time. The peer-to-peer runs of this set were not reached before the run was stopped.</li>
+      <li><strong>Every block of the peer-to-peer runs came from the Paris device:</strong> 53 892 of 53 892 blocks in four runs, none from the bucket, whose blocks had been deleted; every file matched its SHA-256 afterwards.</li>
+      <li><strong>The run found and fixed five problems</strong>, among them downloads that fetched one block at a time (now eight in flight: 4.4 times faster from the bucket to Warsaw) and a peer-to-peer server that answered one request at a time (now eight: 2.3 times faster to Amsterdam). <a href="#fixes">Details and numbers</a>.</li>
+    </ul>
+
+    <h2 id="done">What was measured, and what was not</h2>
+    <p>The plan was every data set from each reader alone and from both at once, peer to peer and from the bucket, two runs each. The run was stopped after about four hours of machine time. Completed:</p>
+    <table class="downloads bench-table">
+      <thead><tr><th>Data set</th><th>From the bucket (S3)</th><th>Peer to peer</th></tr></thead>
+      <tbody>
+        <tr><td>Large files (2 × 2 GiB)</td><td>Amsterdam, Warsaw, both at once: 2 runs each</td><td>Amsterdam, Warsaw: 2 runs each. <em>Both at once: not run.</em></td></tr>
+        <tr><td>Many small files (10 000)</td><td>Amsterdam, Warsaw, both at once: 2 runs each</td><td><em>Not run.</em></td></tr>
+        <tr><td>Compressible text (512 MiB)</td><td>Amsterdam, Warsaw: 2 runs each</td><td><em>Not run.</em></td></tr>
+        <tr><td>The writer's push</td><td>One run per set (slow, see below)</td><td>RAM disk: 2 runs per set; local disk: 1 run per set</td></tr>
+      </tbody>
+    </table>
+    <p>Times in the tables are the median of the runs, which for two runs is their mean; both runs are shown next to it. Numbers from a single run say so. A few numbers come from runs before a fix and are labelled as such.</p>
+
+    <h2 id="setup">Setup and baseline</h2>
+    <ul>
+      <li><strong>Machines:</strong> three Scaleway POP2-4C-16G instances (4 vCPU AMD EPYC 7543, 16 GB RAM, 80 GB network block volume, Ubuntu 24.04): the writer in Paris (fr-par-1), readers in Amsterdam (nl-ams-1) and Warsaw (pl-waw-1). Each machine had a public IPv4 address on its own interface, so there was no NAT between them.</li>
+      <li><strong>Bucket:</strong> a temporary Scaleway Object Storage bucket in Paris (fr-par), the writer's region. The readers in Amsterdam and Warsaw read it across borders.</li>
+      <li><strong>Varsto:</strong> 0.0.1-alpha.8 plus the fixes listed below (branch commit <code>37bee19</code>; the bucket runs used <code>0180ca8</code>, which differs only in two changes that do not touch those runs, the peer-to-peer server and the file watcher of a running service). A static Linux build (musl).</li>
+      <li><strong>A run:</strong> a new device joins the vault with the vault key, starts the background service, pauses it, attaches an empty folder and asks the service for one sync of that folder (<code>POST /api/sync</code>). The time is from that request to its answer: the file list is read, every block is fetched, checked against its hash, decrypted, checked against the chunk id, and written. Afterwards the driver compares a SHA-256 list of the folder with the writer's. Then the device is removed again.</li>
+    </ul>
+    <h3>Network baseline</h3>
+    <table class="downloads bench-table">
+      <thead><tr><th>Between</th><th>Round trip (ping)</th><th>TCP, one stream (iperf3, Paris sends)</th><th>TCP, four streams</th></tr></thead>
+      <tbody>
+        <tr><td>Paris – Amsterdam</td><td>9.4 ms</td><td>925 Mbit/s</td><td>875 Mbit/s</td></tr>
+        <tr><td>Paris – Warsaw</td><td>33.4 ms</td><td>738 Mbit/s</td><td>949 Mbit/s</td></tr>
+        <tr><td>Amsterdam – Warsaw</td><td>20.6 ms</td><td>–</td><td>–</td></tr>
+      </tbody>
+    </table>
+    <table class="downloads bench-table">
+      <thead><tr><th>Reader</th><th>S3: one 256 MiB object, one stream (rclone)</th><th>S3: 4 KiB objects one after another</th></tr></thead>
+      <tbody>
+        <tr><td>Paris</td><td>91 MB/s</td><td>7 ms each</td></tr>
+        <tr><td>Amsterdam</td><td>26 MB/s</td><td>16 ms each</td></tr>
+        <tr><td>Warsaw</td><td>52 MB/s</td><td>52 ms each</td></tr>
+      </tbody>
+    </table>
+    <p class="note">The links between the machines carried 700 to 950 Mbit/s (90 to 120 MB/s) in one TCP stream. None of the Varsto transfers came close to that: every one of them was limited by round trips and per-request work, not by the network.</p>
+    <h3>Data sets</h3>
+    <ul>
+      <li><strong>Large files:</strong> two files of 2 GiB of random (incompressible) bytes, 4 GiB in all, 13 473 blocks. A set of 4 × 2 GiB plus one 4 GiB file (12 GiB) was generated and pushed to a local disk, but downloads of it would have taken too long for the time available, so the readers used two of its files.</li>
+      <li><strong>Many small files:</strong> 10 000 files in 500 directories, sizes drawn from a log-normal distribution with a median of 16 KiB, cut to 1 KiB…256 KiB, one file in twenty a copy of another; 281 MiB in all. A 50 000-file set of the same shape was pushed, not downloaded.</li>
+      <li><strong>Compressible text:</strong> 128 files of 4 MiB of generated web-server log lines, 512 MiB in all; zstd stores them in 138 MiB.</li>
+    </ul>
+
+    <h2 id="p2p-only">What “peer to peer only” means</h2>
+    <p>Varsto asks peers first and storages second, so a peer-to-peer measurement must make sure the bucket cannot help. After the writer had pushed and the bucket runs were done, every object under <code>chunks/</code> was deleted from the bucket. The bucket kept what devices need to find each other and to know what exists (signed ledger, file lists, device and peer records), but no file content: a block that no peer could deliver would have left the file unavailable. Then:</p>
+    <ul>
+      <li>each run's pull report counted blocks from peers and blocks in all, and the driver failed any run where the two differed;</li>
+      <li>the readers' traffic counters (<code>/api/p2p/traffic</code>) showed 4 295 519 689 bytes received from <code>writer-paris</code> in every peer-to-peer run, and the writer's counters showed the same number sent: the stored size of the 4 GiB set, so nothing was fetched twice;</li>
+      <li>the path was <strong>direct</strong>, over TCP to the writer's public address, port 17893, in every run (the service log names the route it settled on). No relay was involved; a LAN path was impossible between three countries.</li>
+    </ul>
+<!-- fragment: verify -->
+<table class="downloads bench-table"><tbody><tr><th>Run</th><th>Chunks downloaded</th><th>From peers</th><th>From S3</th><th>Path</th></tr><tr><td>large, Amsterdam, alone (×2)</td><td>26 946</td><td>26 946</td><td>0</td><td>writer-paris: direct</td></tr><tr><td>large, Warsaw, alone (×2)</td><td>26 946</td><td>26 946</td><td>0</td><td>writer-paris: direct</td></tr></tbody></table>
+<!-- /fragment -->
+
+    <h2 id="large">Large files</h2>
+    <p>4 GiB in two files, random content, so zstd stores it as it is. One reader at a time, and for the bucket also both readers at once.</p>
+<!-- fragment: large -->
+<p class="bench-legend"><span class="bench-key bench-p2p-key"></span>Peer to peer (from the writer in Paris) <span class="bench-key bench-s3-key"></span>S3 bucket in Paris <span class="note">(MB/s, more is better)</span></p>
+<svg class="bench-chart" viewBox="0 0 620 188" role="img" aria-label="large: MB/s per reader, peer to peer and S3">
+<text class="bench-label" x="162" y="20" text-anchor="end">Amsterdam, alone</text>
+<rect class="bench-p2p" x="170" y="4" width="215" height="14" rx="3"><title>Amsterdam, alone, peer to peer: 27.0 MB/s</title></rect>
+<text class="bench-value" x="391" y="15">27.0</text>
+<rect class="bench-s3" x="170" y="21" width="190" height="14" rx="3"><title>Amsterdam, alone, S3 bucket: 23.9 MB/s</title></rect>
+<text class="bench-value" x="366" y="32">23.9</text>
+<text class="bench-label" x="162" y="68" text-anchor="end">Warsaw, alone</text>
+<rect class="bench-p2p" x="170" y="52" width="81" height="14" rx="3"><title>Warsaw, alone, peer to peer: 10.2 MB/s</title></rect>
+<text class="bench-value" x="257" y="63">10.2</text>
+<rect class="bench-s3" x="170" y="69" width="186" height="14" rx="3"><title>Warsaw, alone, S3 bucket: 23.4 MB/s</title></rect>
+<text class="bench-value" x="362" y="80">23.4</text>
+<text class="bench-label" x="162" y="116" text-anchor="end">Amsterdam, both at once</text>
+<rect class="bench-p2p" x="170" y="100" width="2" height="14" rx="3"><title>Amsterdam, both at once, peer to peer: – MB/s</title></rect>
+<text class="bench-value" x="178" y="111">not run</text>
+<rect class="bench-s3" x="170" y="117" width="360" height="14" rx="3"><title>Amsterdam, both at once, S3 bucket: 45.2 MB/s</title></rect>
+<text class="bench-value" x="536" y="128">45.2</text>
+<text class="bench-label" x="162" y="164" text-anchor="end">Warsaw, both at once</text>
+<rect class="bench-p2p" x="170" y="148" width="2" height="14" rx="3"><title>Warsaw, both at once, peer to peer: – MB/s</title></rect>
+<text class="bench-value" x="178" y="159">not run</text>
+<rect class="bench-s3" x="170" y="165" width="166" height="14" rx="3"><title>Warsaw, both at once, S3 bucket: 20.9 MB/s</title></rect>
+<text class="bench-value" x="342" y="176">20.9</text>
+<line class="bench-axis" x1="170" y1="0" x2="170" y2="188"/>
+</svg>
+<table class="downloads bench-table"><thead><tr><th>Reader</th><th>Peer to peer: time</th><th>MB/s</th><th>S3: time</th><th>MB/s</th><th>P2P vs S3</th></tr></thead><tbody><tr><td>Amsterdam, alone</td><td>159 s <span class="note">(158 s / 161 s)</span></td><td>27.0</td><td>180 s <span class="note">(171 s / 190 s)</span></td><td>23.9</td><td>1.1× faster</td></tr><tr><td>Warsaw, alone</td><td>423 s <span class="note">(420 s / 426 s)</span></td><td>10.2</td><td>190 s <span class="note">(155 s / 226 s)</span></td><td>23.4</td><td>2.2× slower</td></tr><tr><td>Amsterdam, both at once</td><td>not run</td><td>–</td><td>95 s <span class="note">(90 s / 101 s)</span></td><td>45.2</td><td>–</td></tr><tr><td>Warsaw, both at once</td><td>not run</td><td>–</td><td>208 s <span class="note">(185 s / 232 s)</span></td><td>20.9</td><td>–</td></tr></tbody></table>
+<!-- /fragment -->
+    <p>To Amsterdam, nine milliseconds away, peer to peer beat the bucket by a little and was much steadier: 157.6 s and 160.6 s, against 170.6 s and 189.6 s. To Warsaw the bucket was more than twice as fast. Each block of about 300 KiB is one HTTP request on a new TCP connection: a handshake, then TCP slow start from ten packets, so a block needs several round trips however fast the link is. At 33 ms that caps eight requests in flight at about 10 MB/s, which is what was measured. The bucket's HTTPS connections are kept open between requests, so their windows stay large. The fix (reuse connections, or use the QUIC path, which keeps one connection per peer) is described <a href="#bottlenecks">below</a>; it was not measured here.</p>
+    <p>Both readers at once from the bucket: Amsterdam got 45 MB/s and Warsaw 21 MB/s, so the bucket served 66 MB/s in total without slowing either reader down; the bucket is shared infrastructure built for many readers. Peer to peer with both readers at once was not measured; the Paris device used 40 s of CPU time to serve each 4 GiB run (one core about 25 % busy), so CPU would not have been its limit.</p>
+    <p class="note">The reader's own work was the same for both sources: about 40 s of CPU time for 4 GiB (decrypting, two hashes per block, writing), and at most 490 MB of memory.</p>
+
+    <h2 id="files">Many small files</h2>
+    <p>10 000 files of 1 KiB to 256 KiB. Here the size of the files hardly matters: each file is one block, and each block is fetched, checked and written before the next file starts.</p>
+<!-- fragment: files -->
+<table class="downloads bench-table"><thead><tr><th>Reader</th><th>Peer to peer: time</th><th>MB/s</th><th>files/s</th><th>S3: time</th><th>MB/s</th><th>files/s</th><th>P2P vs S3</th></tr></thead><tbody><tr><td>Amsterdam, alone</td><td>not run</td><td>–</td><td>–</td><td>404 s <span class="note">(313 s / 495 s)</span></td><td>0.8</td><td>26.1</td><td>–</td></tr><tr><td>Warsaw, alone</td><td>not run</td><td>–</td><td>–</td><td>596 s <span class="note">(536 s / 655 s)</span></td><td>0.5</td><td>16.9</td><td>–</td></tr><tr><td>Amsterdam, both at once</td><td>not run</td><td>–</td><td>–</td><td>381 s <span class="note">(381 s / 380 s)</span></td><td>0.8</td><td>26.2</td><td>–</td></tr><tr><td>Warsaw, both at once</td><td>not run</td><td>–</td><td>–</td><td>528 s <span class="note">(494 s / 563 s)</span></td><td>0.6</td><td>19.1</td><td>–</td></tr></tbody></table>
+<!-- /fragment -->
+    <p>From the bucket a file took 40 ms to Amsterdam and 60 ms to Warsaw on average, 2.5 times the plain request time measured with rclone to Amsterdam (16 ms) and a little more than it to Warsaw (52 ms). The rest is per-file work on the reader: a new file, its data synced to disk, a rename, ledger events. Both readers at once were no slower than one alone; the bucket did not notice the second reader. Repetitions differed by up to 58 %, which is the bucket, not the reader: the reader's CPU time was 12 s every time.</p>
+    <p>The peer-to-peer runs of this set were not reached. Because the files are fetched one after another, they would be bound by round trips too: one TCP connection and one request per file.</p>
+
+    <h2 id="text">Compressible text</h2>
+    <p>512 MiB of log lines, stored as 138 MiB. Fewer bytes travel, so a reader gets more file per second than with random data: from the bucket, 18 MB/s to Amsterdam and 16.7 MB/s to Warsaw, counted in uncompressed bytes. Peer-to-peer runs of this set were not reached.</p>
+<!-- fragment: text -->
+<table class="downloads bench-table"><thead><tr><th>Reader</th><th>Peer to peer: time</th><th>MB/s</th><th>S3: time</th><th>MB/s</th><th>P2P vs S3</th></tr></thead><tbody><tr><td>Amsterdam, alone</td><td>not run</td><td>–</td><td>36 s <span class="note">(21 s / 52 s)</span></td><td>18.1</td><td>–</td></tr><tr><td>Warsaw, alone</td><td>not run</td><td>–</td><td>32 s <span class="note">(32 s / 32 s)</span></td><td>16.7</td><td>–</td></tr></tbody></table>
+<!-- /fragment -->
+
+    <h2 id="writer">The writer's side</h2>
+    <p>Before anything can be downloaded, the writer cuts its files into blocks, compresses, encrypts and stores them. Three destinations show where the time goes: a RAM disk (Varsto's own work only), the machine's disk (a network block volume, where every object is written with a sync to disk), and the bucket.</p>
+<!-- fragment: writer -->
+<table class="downloads bench-table"><tbody><tr><th>Data set</th><th>Destination</th><th>Build</th><th>Time</th><th>MB/s</th><th>CPU (user + system)</th><th>Peak memory</th></tr><tr><td>files: 10 000 files, 0.27 GiB</td><td>RAM disk (tmpfs)</td><td>measured build</td><td>50 s <span class="note">(median of 2)</span></td><td>5.9</td><td>12 s (5 + 7)</td><td>68 MiB</td></tr><tr><td>files: 10 000 files, 0.27 GiB</td><td>S3 bucket, same region</td><td>measured build</td><td>622 s</td><td>0.5</td><td>21 s (8 + 13)</td><td>68 MiB</td></tr><tr><td>small: 50 000 files, 1.36 GiB</td><td>RAM disk (tmpfs)</td><td>measured build</td><td>255 s <span class="note">(median of 2)</span></td><td>5.7</td><td>62 s (27 + 35)</td><td>258 MiB</td></tr><tr><td>small: 50 000 files, 1.36 GiB</td><td>Local disk (network block volume)</td><td>measured build</td><td>468 s</td><td>3.1</td><td>67 s (27 + 41)</td><td>258 MiB</td></tr><tr><td>small: 50 000 files, 1.36 GiB</td><td>Local disk (network block volume)</td><td>alpha.8 (before the zstd fix)</td><td>515 s</td><td>2.8</td><td>109 s (31 + 78)</td><td>253 MiB</td></tr><tr><td>large: 2 files, 4.00 GiB</td><td>S3 bucket, same region</td><td>measured build</td><td>578 s</td><td>7.4</td><td>80 s (36 + 43)</td><td>105 MiB</td></tr><tr><td>big: 5 files, 12.00 GiB</td><td>Local disk (network block volume)</td><td>measured build</td><td>418 s</td><td>30.9</td><td>197 s (85 + 112)</td><td>147 MiB</td></tr><tr><td>big: 5 files, 12.00 GiB</td><td>Local disk (network block volume)</td><td>alpha.8 (before the zstd fix)</td><td>694 s</td><td>18.6</td><td>483 s (110 + 373)</td><td>137 MiB</td></tr><tr><td>text: 128 files, 0.50 GiB</td><td>RAM disk (tmpfs)</td><td>measured build</td><td>45 s <span class="note">(median of 2)</span></td><td>12.0</td><td>44 s (41 + 2)</td><td>68 MiB</td></tr><tr><td>text: 128 files, 0.50 GiB</td><td>Local disk (network block volume)</td><td>measured build</td><td>56 s</td><td>9.6</td><td>45 s (42 + 3)</td><td>68 MiB</td></tr><tr><td>text: 128 files, 0.50 GiB</td><td>Local disk (network block volume)</td><td>alpha.8 (before the zstd fix)</td><td>68 s</td><td>7.9</td><td>56 s (43 + 13)</td><td>68 MiB</td></tr><tr><td>text: 128 files, 0.50 GiB</td><td>S3 bucket, same region</td><td>measured build</td><td>160 s</td><td>3.4</td><td>46 s (42 + 4)</td><td>74 MiB</td></tr></tbody></table>
+<!-- /fragment -->
+    <ul>
+      <li><strong>Random data</strong> costs about 16 s of CPU per GiB on these cores after the zstd fix (12 GiB: 197 s), against 40 s per GiB before it.</li>
+      <li><strong>Text</strong> costs about 85 s of CPU per GiB: zstd at level 12, a format constant, is slow on compressible data; it buys the 3.7 : 1 ratio every later transfer profits from.</li>
+      <li><strong>Small files</strong> are not CPU-bound even on a RAM disk: 10 000 files took 50 s, of which 12 s CPU. The device's logical clock is written to disk, with two syncs, for every file pushed; on a network volume each sync waits for the storage. Not fixed yet.</li>
+      <li><strong>The bucket</strong> is slowest by far: every block is a HEAD and a PUT, one after another. 10 000 files took 622 s and 4 GiB took 578 s (7.4 MB/s), single runs. Uploads are not parallel yet.</li>
+    </ul>
+
+    <h2 id="fixes">Fixed during the run</h2>
+    <p>The benchmark was also a hunt for bottlenecks. These changes are in the measured build, each with a test, on the <code>p2p-benchmark</code> branch:</p>
+    <table class="downloads bench-table">
+      <thead><tr><th>Problem</th><th>Fix</th><th>Before</th><th>After</th></tr></thead>
+      <tbody>
+        <tr><td>A download fetched one block at a time: every block waited a full round trip before the next was asked for.</td><td>Up to eight blocks of a file in flight at once, from peers or storages, in a sliding window; they are still checked and written in order. The S3 client keeps enough idle connections for them.</td><td>Text from the bucket to Warsaw: 122 s (4.4 MB/s)</td><td>27.8 s (19.4 MB/s), 4.4 times faster. Intermediate steps: eight at a time in fixed batches 104 s; with idle connections kept 61 s; sliding window 27.8 s. Single runs.</td></tr>
+        <tr><td>The peer-to-peer HTTP server answered one request at a time, so eight requests in flight queued at the server.</td><td>Eight requests answered at once.</td><td>Large files peer to peer to Amsterdam: 363 s (11.8 MB/s), one run</td><td>159 s (27.0 MB/s), two runs</td></tr>
+        <tr><td>A fresh zstd context was created for every block; its tables were allocated and cleared each time, more work than compressing the block.</td><td>One context per thread, reused (the output is byte-identical, which a test checks).</td><td>12 GiB to local disk: 694 s, 483 s CPU (373 s system)</td><td>418 s, 197 s CPU (112 s system). Single runs.</td></tr>
+        <tr><td>The S3 client refused any response over 10 MiB. After a push of a few thousand files the ledger batch was 13 MB, and no other device could join or sync.</td><td>Responses up to 2 GiB are read.</td><td>Joining failed</td><td>Joining worked; test with a 12 MiB object</td></tr>
+        <tr><td>The background service treated every opened file as a change: serving blocks to peers, a backup tool or a file viewer started a full sync every few seconds.</td><td>Opening and reading are not changes; closing a file opened for writing still is.</td><td>90 syncs in 11 minutes while files were read</td><td>Reading all 10 000 files: no extra sync</td></tr>
+      </tbody>
+    </table>
+
+    <h2 id="bottlenecks">Still slow, and why</h2>
+    <ul>
+      <li><strong>One TCP connection per block on the peer-to-peer TCP path.</strong> Each request opens a connection and closes it (<code>Connection: close</code>), so it pays a handshake and a fresh slow start. A device whose address can be reached directly is asked over TCP before QUIC; QUIC keeps one connection per peer with its window open. Either keeping TCP connections open or preferring QUIC for addresses outside the LAN should lift the Warsaw number toward what the link can carry. This is the next fix; it was not measured here.</li>
+      <li><strong>Small files go one at a time.</strong> The eight-block window works within a file; a folder of single-block files still fetches one file after another. Fetching ahead across files is the fix for the 10 000-file case, from peers and from buckets alike.</li>
+      <li><strong>A disk sync per file for the logical clock</strong> when pushing, as above.</li>
+      <li><strong>Uploads to a bucket go one block at a time,</strong> with a HEAD before every PUT.</li>
+      <li><strong>The ledger grows by about 1 KB per block:</strong> pushing the 4 GiB set wrote a 13 MB ledger batch, which every device reads when it joins (a new device took 16 s to join from Warsaw).</li>
+    </ul>
+
+    <h2 id="when">When peer to peer wins, and when the bucket does</h2>
+    <p>Varsto uses both on purpose, and the measurements show why.</p>
+    <ul>
+      <li><strong>Peer to peer needs a peer online.</strong> The readers could fetch only because the Paris device was running. The bucket is always there: a laptop that is closed, a phone in a drawer, a device that is never online at the same time as another all still sync through it. That is why a vault always has at least one storage, and why the file lists and the ledger stay in it.</li>
+      <li><strong>Near devices, peer to peer was as fast or faster, and steady.</strong> To Amsterdam it beat the bucket in both runs, with 2 % spread against the bucket's 11 %. On a LAN the round trip is a fraction of a millisecond, and no cloud is involved at all.</li>
+      <li><strong>Far devices, the bucket won today,</strong> because of the per-block TCP connections described above, not because of the network: the link to Warsaw carried 738 Mbit/s in one stream.</li>
+      <li><strong>Many readers at once favour the bucket</strong> unless they help each other: the bucket served two readers at 66 MB/s together without slowing either. A single home device serving many others is limited by its upload. Varsto does let readers serve each other, but that was not measured.</li>
+      <li><strong>Peer to peer costs nothing per gigabyte and leaves no copy with a provider.</strong> The data goes from your device to your device; the bucket does not even need to hold the blocks for the devices to sync, only for the devices that are offline.</li>
+    </ul>
+
+    <h2 id="cost">Cost</h2>
+    <p>Scaleway's public price list (read on 9 October 2026, Paris region, before tax): Object Storage Standard Multi-AZ €0.000022 per GB-hour (about €0.016 per GB-month), requests included, ingress included, egress the first 75 GB a month free and then €0.01 per GB. Transfers between regions (Paris – Amsterdam, Paris – Warsaw) count as egress; within a region they are free.</p>
+    <p>So one reader in Amsterdam downloading the 4 GiB set from the Paris bucket costs about €0.04 once the free 75 GB are used, and a household that syncs 500 GB a month to devices outside the bucket's region pays about €4 a month in egress. Peer to peer moves the same bytes over the devices' own connections and adds nothing to the storage bill. Other providers charge more for egress or per request; the method above applies to them unchanged. The machines for this benchmark (three instances at €0.147 an hour for about four hours) cost under €2.</p>
+
+    <h2 id="limits">Limits of this benchmark</h2>
+    <ul>
+      <li><strong>Incomplete:</strong> peer-to-peer runs exist for the large-file set from each reader alone; small files, text and two readers at once were measured from the bucket only. Push numbers to the local disk and to the bucket are single runs.</li>
+      <li><strong>Cloud machines, not homes.</strong> Data-centre links, public addresses on the interface, no NAT, no Wi-Fi. At home the peer-to-peer path is usually QUIC through a hole-punched NAT, which these runs did not exercise; home upload speed would often be the limit.</li>
+      <li><strong>Three regions of one provider, in Europe.</strong> The bucket and the machines share a provider and its backbone; other providers and longer distances will differ.</li>
+      <li><strong>Network block volumes</strong> make every disk sync slow (milliseconds), which weighs on small files; a laptop's SSD syncs faster.</li>
+      <li><strong>Two runs per case</strong> are few; the bucket's results varied by up to 58 % between repetitions for small files and by a factor of 2.5 for text.</li>
+      <li><strong>Alpha software.</strong> Formats and defaults may still change, and so will these numbers.</li>
+    </ul>
+    <p class="note">Reproduce: <code>scripts/bench/p2p-bench.py</code> creates the machines and the bucket with the Scaleway command line, runs each step, writes <code>results.jsonl</code>, and deletes everything again; <code>report.py</code> and <code>page.py</code> turn the results into the summary and the tables on this page.</p>
+    </div>
