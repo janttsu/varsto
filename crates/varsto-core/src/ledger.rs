@@ -66,6 +66,20 @@ pub enum Event {
     /// The storage was removed from the vault: every claim on it made before
     /// this event no longer counts as a copy (later claims count again).
     StorageRetired { storage: String },
+    /// This device deliberately removed `object` from `storage` (data moved
+    /// to another storage, `docs/spec/alpha-0-format.md` section 23): claims
+    /// on that storage made before this event no longer count as a copy;
+    /// later claims count again.
+    ChunkDropped {
+        folder: FolderId,
+        chunk: ChunkId,
+        object: ObjectName,
+        storage: String,
+    },
+    /// An event type this version does not know (written by a newer one):
+    /// read and ignored, so the rest of its batch still counts. Never written.
+    #[serde(other)]
+    Unknown,
 }
 
 /// Plaintext batch body (encrypted before signing and storage).
@@ -798,6 +812,7 @@ impl LedgerStore {
 
     pub fn finish_owned(&self, mut view: LedgerView) -> LedgerView {
         view.apply_retirements();
+        view.apply_drops();
         view.fold_object_claims();
         for (d, head) in &self.heads.heads {
             if head.forked {
@@ -848,7 +863,8 @@ pub struct ViewCache {
 }
 
 impl ViewCache {
-    pub const FORMAT: u32 = 2;
+    /// 3: chunk records carry drops and claim times (`ChunkDropped`).
+    pub const FORMAT: u32 = 3;
 
     pub fn new(context: String) -> Self {
         ViewCache {
@@ -900,6 +916,15 @@ pub struct Location {
     /// Newest claim or verification (Lamport time), to apply retirements.
     #[serde(default)]
     pub lamport: u64,
+    /// Newest claim alone (Lamport time), to apply drops: a verification
+    /// made after a drop does not bring the copy back. Zero in views written
+    /// before drops existed; `lamport` stands in for it then.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub claimed_lamport: u64,
+}
+
+fn is_zero(v: &u64) -> bool {
+    *v == 0
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -913,6 +938,11 @@ pub struct ChunkRecord {
     pub object_at: Option<Stamp>,
     #[serde(default)]
     pub size_at: Option<Stamp>,
+    /// Storages the chunk was deliberately removed from, with the newest
+    /// drop (Lamport time). Kept in the finished view too, so writers know
+    /// not to put it back (`ChunkRecord::dropped_from`).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub dropped: BTreeMap<String, u64>,
 }
 
 impl Location {
@@ -954,6 +984,12 @@ impl ChunkRecord {
     }
     pub fn claimed_storages(&self) -> usize {
         self.storages.len()
+    }
+
+    /// The chunk was deliberately removed from `storage` and nobody stored
+    /// it there again since.
+    pub fn dropped_from(&self, storage: &str) -> bool {
+        self.dropped.contains_key(storage) && !self.storages.contains_key(storage)
     }
 }
 
@@ -1024,6 +1060,7 @@ impl LedgerView {
                     loc.claimed_by.insert(batch.device.clone());
                     loc.claimed_utc = loc.claimed_utc.max(batch.created_utc);
                     loc.lamport = loc.lamport.max(batch.lamport);
+                    loc.claimed_lamport = loc.claimed_lamport.max(batch.lamport);
                 }
                 Event::ChunkVerified {
                     folder,
@@ -1066,6 +1103,21 @@ impl LedgerView {
                     let r = self.retired.entry(storage.clone()).or_insert(0);
                     *r = (*r).max(batch.lamport);
                 }
+                Event::ChunkDropped {
+                    folder,
+                    chunk,
+                    object,
+                    storage,
+                } => {
+                    let rec = self
+                        .chunks
+                        .entry((folder.clone(), chunk.clone()))
+                        .or_default();
+                    rec.set_object(object, stamp());
+                    let d = rec.dropped.entry(storage.clone()).or_insert(0);
+                    *d = (*d).max(batch.lamport);
+                }
+                Event::Unknown => {}
             }
         }
     }
@@ -1090,6 +1142,11 @@ impl LedgerView {
                 m.claimed_utc = m.claimed_utc.max(loc.claimed_utc);
                 m.verified_utc = m.verified_utc.max(loc.verified_utc);
                 m.lamport = m.lamport.max(loc.lamport);
+                m.claimed_lamport = m.claimed_lamport.max(loc.claimed_lamport);
+            }
+            for (name, at) in &rec.dropped {
+                let d = mine.dropped.entry(name.clone()).or_insert(0);
+                *d = (*d).max(*at);
             }
             mine.devices.extend(rec.devices.iter().cloned());
         }
@@ -1133,6 +1190,28 @@ impl LedgerView {
                 self.retired
                     .get(name)
                     .is_none_or(|retired| loc.lamport > *retired)
+            });
+        }
+    }
+
+    /// Drop the copies that were deliberately removed: a claim counts only
+    /// if it is newer (Lamport time) than the newest drop on that storage.
+    /// Runs once all batches are applied, like retirements.
+    fn apply_drops(&mut self) {
+        for rec in self.chunks.values_mut() {
+            if rec.dropped.is_empty() {
+                continue;
+            }
+            let ChunkRecord {
+                storages, dropped, ..
+            } = rec;
+            storages.retain(|name, loc| {
+                let claimed = if loc.claimed_lamport == 0 {
+                    loc.lamport
+                } else {
+                    loc.claimed_lamport
+                };
+                dropped.get(name).is_none_or(|at| claimed > *at)
             });
         }
     }
@@ -1355,7 +1434,7 @@ mod tests {
             };
         }
         let folder = |rng: &mut Rng| FolderId::from_bytes(&[1 + rng.below(3) as u8]);
-        match rng.below(8) {
+        match rng.below(10) {
             0 => Event::DeviceEnrolled {
                 name: format!("n{}", rng.below(5)),
             },
@@ -1387,7 +1466,13 @@ mod tests {
                 manifest_hash: String::new(),
                 files: 0,
             },
-            _ => Event::StorageRetired {
+            7 => Event::StorageRetired {
+                storage: storage(rng),
+            },
+            _ => Event::ChunkDropped {
+                folder: folder(rng),
+                chunk: chunk(rng),
+                object: object(rng),
                 storage: storage(rng),
             },
         }

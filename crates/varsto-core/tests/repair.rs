@@ -342,3 +342,39 @@ fn transferrers_are_not_repaired() {
     assert!(r.repaired.is_empty(), "{r:?}");
     assert!(!intact(&stick[0]), "a transferrer is never written");
 }
+
+#[test]
+fn moved_blocks_are_not_repaired_back() {
+    let lab = Lab::new();
+    let (mut a, _) = device(
+        &lab,
+        &[
+            dir("box", &lab.p("box"), false),
+            dir("spare", &lab.p("spare"), false),
+        ],
+    );
+    let all = objects(&lab.p("box"));
+    fs::remove_file(&all[0]).unwrap();
+    // fsck queues the missing copy on "box"...
+    assert_eq!(a.fsck(false).unwrap().repairs_queued, 1);
+    // ...then the folder's data is moved off "box" on purpose.
+    let moved = a
+        .move_data(&varsto_core::placement::MoveRequest {
+            folder: "docs".into(),
+            from: "box".into(),
+            to: "spare".into(),
+            idle_days: None,
+            dry_run: false,
+            confirm_cold_read: false,
+        })
+        .unwrap();
+    assert!(moved.blocks_dropped > 0, "{moved:?}");
+    assert!(objects(&lab.p("box")).is_empty());
+
+    let r = a.repair(&RepairOptions::manual()).unwrap();
+    assert!(r.repaired.is_empty(), "{r:?}");
+    assert!(r.unrepairable.is_empty(), "{r:?}");
+    assert!(r.not_needed >= 1, "{r:?}");
+    assert!(objects(&lab.p("box")).is_empty(), "nothing written back");
+    assert_eq!(a.repair_status().queued, 0);
+}

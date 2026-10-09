@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: PolyForm-Shield-1.0.0
 //! Incremental manifest listing and pruning (`docs/spec/alpha-0-format.md`
-//! section 23): a pull lists only manifests the ledger announced since the
+//! section 24): a pull lists only manifests the ledger announced since the
 //! last one applied, and a device deletes its superseded manifests only once
 //! every other full device has acknowledged a batch announcing a newer one.
 

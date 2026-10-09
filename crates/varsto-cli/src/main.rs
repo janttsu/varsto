@@ -11,6 +11,7 @@ use varsto_core::Engine;
 mod desktop;
 mod icon;
 mod mcp;
+mod placing;
 mod service;
 mod tray;
 mod update;
@@ -93,6 +94,29 @@ enum Cmd {
     Pull { folder: String },
     /// Pull then push, for one folder or all attached folders.
     Sync { folder: Option<String> },
+    /// Move a folder's blocks (or those of its idle files) from one storage
+    /// to another: copy, check, then remove from the old one. Never drops a
+    /// copy the folder's policy needs, nor the last one; run it again to
+    /// carry on after an interruption.
+    Move {
+        folder: String,
+        #[arg(long)]
+        from: String,
+        #[arg(long)]
+        to: String,
+        /// Only files not used for this many days.
+        #[arg(long)]
+        idle_days: Option<i64>,
+        /// Show what would move and what it costs; change nothing.
+        #[arg(long)]
+        dry_run: bool,
+        /// Allow reading from cold storage (the old one, or the new one to check the copies).
+        #[arg(long)]
+        confirm_cold_read: bool,
+        /// Do not ask for confirmation.
+        #[arg(long)]
+        yes: bool,
+    },
     /// Show vault, devices, storages and folders.
     Status,
     /// Compare the ledger with the storages; --verify downloads and hashes every chunk.
@@ -558,6 +582,9 @@ enum StorageCmd {
         /// Extra directory scanned for attached disks, besides the platform's mount roots (repeatable).
         #[arg(long)]
         scan_root: Vec<PathBuf>,
+        /// Disk group rule: keep this many copies of every block on disks in different places.
+        #[arg(long, default_value_t = 1)]
+        copies: u32,
     },
     /// List storages with their prices and monthly cost.
     List,
@@ -605,6 +632,17 @@ enum DiskCmd {
         pool: String,
         #[arg(long)]
         label: String,
+        /// Where the disk is kept (home, offsite, ...); default the pool's place.
+        #[arg(long, default_value = "")]
+        place: String,
+    },
+    /// Set where a disk is kept ("" for the pool's place); disk groups keep copies in different places.
+    Place { label: String, place: String },
+    /// Disk group rules: show them, or keep N copies of every block on disks in different places.
+    Group {
+        pool: Option<String>,
+        #[arg(long)]
+        copies: Option<u32>,
     },
     /// Every disk of every pool: attached or away, free space, last verified, pending deletes.
     List,
@@ -670,6 +708,19 @@ enum FolderCmd {
     /// List files of a folder with their local state.
     Files {
         folder: String,
+    },
+    /// Show or set which storages a folder's blocks are written to (default: every storage).
+    Placement {
+        folder: String,
+        /// A storage that takes the folder's blocks (repeatable).
+        #[arg(long)]
+        storage: Vec<String>,
+        /// Every storage at this place takes them (repeatable): home, cloud, offsite, ...
+        #[arg(long)]
+        place: Vec<String>,
+        /// Back to every storage.
+        #[arg(long, conflicts_with_all = ["storage", "place"])]
+        every: bool,
     },
     List,
 }
@@ -958,6 +1009,7 @@ fn run(cli: &Cli) -> Result<()> {
                     place,
                     reserve_percent,
                     scan_root,
+                    copies,
                 } => {
                     engine.add_storage(StorageSpec::Pool {
                         name: name.clone(),
@@ -966,6 +1018,7 @@ fn run(cli: &Cli) -> Result<()> {
                         min_reserve_bytes: varsto_core::pool::DEFAULT_MIN_RESERVE_BYTES,
                         disks: vec![],
                         scan_roots: scan_root.clone(),
+                        copies: (*copies).max(1),
                     })?;
                     println!("disk pool {name} added; attach a disk with: varsto disk add <mount-path> --pool {name} --label <label>");
                 }
@@ -1073,12 +1126,19 @@ fn run(cli: &Cli) -> Result<()> {
         Cmd::Disk { cmd } => {
             let mut engine = Engine::open(&home, &passphrase()?)?;
             match cmd {
+                DiskCmd::Place { label, place } => {
+                    placing::disk_place(cli, &mut engine, label, place)?;
+                }
+                DiskCmd::Group { pool, copies } => {
+                    placing::disk_group(cli, &mut engine, pool.as_deref(), *copies)?;
+                }
                 DiskCmd::Add {
                     mount_path,
                     pool,
                     label,
+                    place,
                 } => {
-                    let r = engine.disk_add(mount_path, pool, label)?;
+                    let r = engine.disk_add_at(mount_path, pool, label, place)?;
                     print(cli, &r, |r| {
                         format!(
                             "disk {} added to pool {} at {}: {} added ({} objects)",
@@ -1157,7 +1217,14 @@ fn run(cli: &Cli) -> Result<()> {
                             } else {
                                 String::new()
                             }
-                        )
+                        ) + &if r.group_short > 0 {
+                            format!(
+                                "; {} objects still have fewer than {} copies in different places",
+                                r.group_short, r.group_copies
+                            )
+                        } else {
+                            String::new()
+                        }
                     })?;
                     if !r.bad.is_empty() {
                         std::process::exit(1);
@@ -1193,9 +1260,41 @@ fn run(cli: &Cli) -> Result<()> {
                 }
             }
         }
+        Cmd::Move {
+            folder,
+            from,
+            to,
+            idle_days,
+            dry_run,
+            confirm_cold_read,
+            yes,
+        } => {
+            let mut engine = Engine::open(&home, &passphrase()?)?;
+            placing::move_data(
+                cli,
+                &mut engine,
+                placing::MoveArgs {
+                    folder,
+                    from,
+                    to,
+                    idle_days: *idle_days,
+                    dry_run: *dry_run,
+                    confirm_cold_read: *confirm_cold_read,
+                    yes: *yes,
+                },
+            )?;
+        }
         Cmd::Folder { cmd } => {
             let mut engine = Engine::open(&home, &passphrase()?)?;
             match cmd {
+                FolderCmd::Placement {
+                    folder,
+                    storage,
+                    place,
+                    every,
+                } => {
+                    placing::folder_placement(cli, &mut engine, folder, storage, place, *every)?;
+                }
                 FolderCmd::Add { name, path } => {
                     let id = engine.add_folder(name, path)?;
                     println!("folder {name} ({}) created", id.short());

@@ -109,7 +109,19 @@ pub enum StorageSpec {
         /// addition to the platform's mount roots.
         #[serde(default)]
         scan_roots: Vec<PathBuf>,
+        /// Disk group rule: keep this many copies of every object on disks
+        /// in different places (each disk has a place; default 1, one copy).
+        #[serde(default = "default_copies", skip_serializing_if = "is_one")]
+        copies: u32,
     },
+}
+
+fn default_copies() -> u32 {
+    1
+}
+
+fn is_one(v: &u32) -> bool {
+    *v == 1
 }
 
 fn default_true() -> bool {

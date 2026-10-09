@@ -14,7 +14,7 @@ use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-pub const DOWNLOAD_BASE: &str = "https://varsto.soderlund.in/downloads/";
+pub const DOWNLOAD_BASE: &str = "https://varsto.net/downloads/";
 
 pub fn target_triple() -> &'static str {
     if cfg!(all(target_os = "linux", target_arch = "x86_64")) {

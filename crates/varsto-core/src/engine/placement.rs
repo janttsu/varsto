@@ -15,7 +15,7 @@
 use super::{chunk_storage_key, Engine, FileEntry, FolderState};
 use crate::advice::{
     self, add_cost, Advice, ApplyReport, Costs, FolderCost, StorageEstimate, Suggestion,
-    FREE_IDLE_PREFIX,
+    COLD_IDLE_PREFIX, FREE_IDLE_PREFIX,
 };
 use crate::crypto;
 use crate::ids::ObjectName;
@@ -30,7 +30,7 @@ use anyhow::{bail, Result};
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 /// Decimal sizes for messages ("3.2 GB").
-fn fmt_size(n: u64) -> String {
+pub(super) fn fmt_size(n: u64) -> String {
     const UNITS: [&str; 5] = ["B", "kB", "MB", "GB", "TB"];
     let mut v = n as f64;
     let mut i = 0;
@@ -59,7 +59,7 @@ fn fmt_costs(c: &Costs) -> String {
 }
 
 /// Idle by the same rule as the advice: no access or change for `idle_days`.
-fn is_idle(e: &FileEntry, idle_days: i64, now_utc: i64) -> bool {
+pub(super) fn is_idle(e: &FileEntry, idle_days: i64, now_utc: i64) -> bool {
     let last = e
         .last_accessed_utc
         .unwrap_or(e.modified_utc)
@@ -293,10 +293,13 @@ impl Engine {
             {
                 advice.suggestions.push(s);
             }
+            if let Some(s) = self.cold_idle_suggestion(rec, list, idle_days, now_utc) {
+                advice.suggestions.push(s);
+            }
         }
         advice.storages = self.estimates_from(&view, &idle_on_total);
         if !advice.storages.is_empty() {
-            advice.notes.push("Storage prices are the ones you set (varsto storage price) and otherwise come from the built-in price data when the provider, region and class are recognised. Varsto writes every block to every storage, so a folder's monthly cost is the sum over the storages that hold it, and freeing files on this device frees disk space here without lowering the storage bill.".to_string());
+            advice.notes.push("Storage prices are the ones you set (varsto storage price) and otherwise come from the built-in price data when the provider, region and class are recognised. A folder's monthly cost is the sum over the storages that hold it (every storage, unless the folder has a placement). Freeing files on this device frees disk space here without lowering the storage bill; moving idle files to a cheaper cold storage lowers the bill.".to_string());
         }
         Ok(advice)
     }
@@ -497,6 +500,11 @@ impl Engine {
         }
         Some(Suggestion {
             id: format!("{FREE_IDLE_PREFIX}{}", rec.name),
+            kind: "free-idle".to_string(),
+            move_from: None,
+            move_to: None,
+            monthly_saving: Costs::new(),
+            one_time_cost: Costs::new(),
             folder: rec.name.clone(),
             files,
             bytes,
@@ -516,8 +524,60 @@ impl Engine {
     /// frees the folder's idle files on this device after the checks above.
     /// Files that cannot go are listed in the report and left alone.
     pub fn apply_suggestion(&mut self, id: &str, idle_days: i64) -> Result<ApplyReport> {
+        if let Some(folder) = id.strip_prefix(COLD_IDLE_PREFIX) {
+            // A move seals its own batches: drops are published before deletes.
+            let moved = self.apply_cold_idle(folder, idle_days)?;
+            return Ok(ApplyReport {
+                id: id.to_string(),
+                folder: moved.folder.clone(),
+                moved: Some(moved),
+                ..Default::default()
+            });
+        }
         // The push, the checks and the frees record into one batch.
         self.one_batch(|e| e.apply_suggestion_now(id, idle_days))
+    }
+
+    /// "Move the idle files of a folder to cold storage X": only when the
+    /// price model says the bill goes down.
+    fn cold_idle_suggestion(
+        &self,
+        rec: &FolderRecord,
+        list: &[FileEntry],
+        idle_days: i64,
+        now_utc: i64,
+    ) -> Option<Suggestion> {
+        let m = self.cold_idle_move(rec, idle_days)?;
+        let mut idle: Vec<&FileEntry> = list
+            .iter()
+            .filter(|e| is_idle(e, idle_days, now_utc))
+            .collect();
+        idle.sort_by_key(|e| std::cmp::Reverse(e.size));
+        let read_back = self
+            .storage_price(&m.to)
+            .and_then(|p| Some((p.read_cost(m.bytes)?, p.currency)))
+            .map(|(c, cur)| Costs::from([(cur, c)]))
+            .unwrap_or_default();
+        Some(Suggestion {
+            id: format!("{COLD_IDLE_PREFIX}{}", rec.name),
+            kind: "cold-idle".to_string(),
+            move_from: Some(m.from.clone()),
+            move_to: Some(m.to.clone()),
+            monthly_saving: m.monthly_saving.clone(),
+            one_time_cost: m.one_time_cost.clone(),
+            folder: rec.name.clone(),
+            files: m.files,
+            bytes: m.bytes,
+            examples: idle.iter().take(5).map(|e| e.path.clone()).collect(),
+            keep_on: m.remaining_on.clone(),
+            cheapest: Some(m.to.clone()),
+            monthly_cost: m.monthly_cost_to.clone(),
+            read_back_cost: read_back,
+            verify_first_bytes: 0,
+            blocked: m.kept.clone(),
+            summary: m.summary.clone(),
+            warnings: m.cold_notes.clone(),
+        })
     }
 
     fn apply_suggestion_now(&mut self, id: &str, idle_days: i64) -> Result<ApplyReport> {

@@ -1,7 +1,7 @@
 # Varsto build helper for fresh Windows Server machines on Scaleway: install
 # and enable OpenSSH Server, trust the project's SSH keys from the instance
 # metadata, make PowerShell the SSH shell. Run from an interactive session:
-#   powershell -ep bypass -c "iwr -useb https://varsto.soderlund.in/tools/winssh.ps1 | iex"
+#   powershell -ep bypass -c "iwr -useb https://varsto.net/tools/winssh.ps1 | iex"
 $ErrorActionPreference = "Continue"
 $ProgressPreference = "SilentlyContinue"
 Start-Transcript -Path C:\winssh.log -Append | Out-Null

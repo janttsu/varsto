@@ -26,7 +26,7 @@ ROOT = Path(__file__).resolve().parent.parent
 SRC = ROOT / "website" / "src"
 OUT = ROOT / "website" / "public"
 BRAND = "Varsto"
-SITE_URL = "https://varsto.soderlund.in"
+SITE_URL = "https://varsto.net"
 ALPHA = (
     "<strong>Alpha software, not for production data.</strong> Bugs can cause data loss, "
     "formats may change without migration, and the cryptography has not been independently "

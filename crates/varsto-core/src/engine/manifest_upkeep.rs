@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: PolyForm-Shield-1.0.0
 //! Keeping folder manifests cheap as they accumulate
-//! (`docs/spec/alpha-0-format.md` section 23).
+//! (`docs/spec/alpha-0-format.md` section 24).
 //!
 //! **Listing.** A pull used to list `manifests/<folder>/` in full on every
 //! storage, so its cost grew with every manifest any device ever published.

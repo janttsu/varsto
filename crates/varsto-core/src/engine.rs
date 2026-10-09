@@ -40,7 +40,9 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 mod block_cache;
+mod data_moves;
 mod devinfo;
+mod disk_groups;
 mod ledger_upkeep;
 mod manifest_upkeep;
 mod membership;
@@ -52,6 +54,7 @@ mod view;
 mod where_data;
 pub use block_cache::{BlockWriter, StagedFile, BLOCK_CACHE_DIR, EXPORT_DIR};
 pub use devinfo::DeviceDetails;
+pub use disk_groups::DiskGroupStatus;
 pub use manifest_upkeep::ManifestPolicy;
 pub use membership::{
     removal_notice, DeviceInfo, DeviceRemoved, EpochRecord, Grant, KemRecord, Removal, Revocation,
@@ -331,6 +334,10 @@ pub struct DiskCheckReport {
     /// New objects written.
     pub objects_added: u64,
     pub bytes_added: u64,
+    /// Disk group rule of the pool (copies on disks in different places)
+    /// and the objects still short of it after this check.
+    pub group_copies: u32,
+    pub group_short: u64,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -757,6 +764,8 @@ impl Engine {
             shared: true,
             policy: None,
             policy_updated_utc: 0,
+            placement: None,
+            placement_updated_utc: 0,
             strongroom: None,
             removed_utc: 0,
         };
@@ -1323,6 +1332,8 @@ impl Engine {
             shared: false,
             policy: None,
             policy_updated_utc: 0,
+            placement: None,
+            placement_updated_utc: 0,
             strongroom: None,
             removed_utc: 0,
         };
@@ -1974,6 +1985,8 @@ impl Engine {
                 }
             }
         }
+        // Placement records: newest per folder wins, as for policies.
+        changed_folders |= self.pull_placement_records()?;
         // Strongroom conversions and key lists (S-012).
         self.pull_strongroom_records()?;
         changed_devices |= self.pull_device_details().unwrap_or(false);
@@ -2040,8 +2053,11 @@ impl Engine {
                 | Event::ChunkVerified { folder, .. }
                 | Event::ChunkOnDevice { folder, .. }
                 | Event::ManifestPublished { folder, .. }
+                | Event::ChunkDropped { folder, .. }
                 | Event::FolderAdded { folder } => Some(folder.clone()),
-                Event::DeviceEnrolled { .. } | Event::StorageRetired { .. } => None,
+                Event::DeviceEnrolled { .. } | Event::StorageRetired { .. } | Event::Unknown => {
+                    None
+                }
             };
             match folder {
                 Some(f) => by_folder.entry(f).or_default().push(ev),
@@ -2319,6 +2335,7 @@ impl Engine {
         let folder_id = rec.folder_id.clone();
         let me = self.vault.device_id.clone();
         let carrier_need = self.carrier_destinations(&view, &folder_id);
+        let targets = self.write_targets(rec);
         let missing_on = |cref: &ChunkRef| -> Vec<String> {
             // The ledger record must be for this very object: after a key
             // change the same chunk id can stand for two objects.
@@ -2335,6 +2352,8 @@ impl Engine {
                         .map(|r| r.storages.contains_key(spec.name()))
                         .unwrap_or(false)
                 })
+                // The folder's placement, and blocks moved away stay away.
+                .filter(|(spec, _)| targets.wants(spec.name(), known))
                 // A carrier only takes what no other device has yet (F-048),
                 // or, with destinations, what one of them still lacks.
                 .filter(|(spec, _)| {
@@ -3396,47 +3415,44 @@ impl Engine {
                                     .map(|(p, _)| p.clone())
                                     .unwrap_or_else(|| "other".to_string())
                             };
-                            let mut copy_name = name.clone();
-                            let mut verified = loc.independently_verified(name);
-                            let mut verified_utc = loc.verified_utc;
+                            let verified = loc.independently_verified(name);
+                            let verified_utc = loc.verified_utc;
                             if let Some(pool) = pools.get(name) {
-                                match pool.locate(&chunk_storage_key(&record.object)) {
-                                    Some(l) if l.attached => {
-                                        verified |= l.last_verified_utc > 0;
-                                        verified_utc = verified_utc.max(l.last_verified_utc);
+                                // One copy per disk that holds the object (disk
+                                // groups keep several), each at its disk's place.
+                                for (copy, at, v, v_utc, readable) in Self::pool_copies(
+                                    name,
+                                    pool,
+                                    &record.object,
+                                    verified,
+                                    verified_utc,
+                                ) {
+                                    if !readable {
+                                        let list = unreadable_places.entry(at.clone()).or_default();
+                                        if !list.contains(&copy) {
+                                            list.push(copy.clone());
+                                        }
                                     }
-                                    Some(l) => {
-                                        copy_name = format!("{name}:{}", l.label);
-                                        verified = l.last_verified_utc > 0;
-                                        verified_utc = l.last_verified_utc;
-                                    }
-                                    None => {
-                                        copy_name = format!("{name}:unknown disk");
-                                        verified = false;
-                                        verified_utc = 0;
-                                    }
+                                    copies.push((copy, at, v, v_utc));
                                 }
-                                if copy_name != *name {
-                                    let list = unreadable_places.entry(place.clone()).or_default();
-                                    if !list.contains(&copy_name) {
-                                        list.push(copy_name.clone());
-                                    }
-                                }
+                                continue;
                             }
-                            copies.push((copy_name, place, verified, verified_utc));
+                            copies.push((name.clone(), place, verified, verified_utc));
                         }
                     }
                     facts.push(crate::policy::ChunkFacts { copies });
                 }
             }
-            reports.push(crate::policy::evaluate(
+            let mut report = crate::policy::evaluate(
                 &rec.name,
                 &policy,
                 &facts,
                 &unreadable_places,
                 &unknown,
                 now_utc,
-            ));
+            );
+            self.disk_group_findings(&rec, &state, &view, &pools, &mut report);
+            reports.push(report);
         }
         Ok(reports)
     }
@@ -3482,6 +3498,8 @@ impl Engine {
             shared: false,
             policy: None,
             policy_updated_utc: 0,
+            placement: None,
+            placement_updated_utc: 0,
             strongroom: Some(info),
             removed_utc: 0,
         };
@@ -4498,27 +4516,7 @@ impl Engine {
         pool_name: &str,
         label: &str,
     ) -> Result<DiskAddReport> {
-        let spec = self
-            .pool_specs()
-            .into_iter()
-            .find(|s| s.name() == pool_name)
-            .ok_or_else(|| anyhow!("no disk pool named {pool_name}; add one with `varsto storage add-pool {pool_name}`"))?;
-        if self.find_disk(label).is_ok() {
-            bail!("a disk labelled {label} already exists");
-        }
-        let pool = self.open_pool(&spec)?;
-        let disk = pool.add_disk(mount, label)?;
-        let (objects_added, bytes_added) = self.fill_disk(&spec, &pool, &disk.id)?;
-        pool.flush()?;
-        let disks = pool.disks();
-        drop(pool);
-        self.save_pool_disks(spec.name(), disks)?;
-        Ok(DiskAddReport {
-            pool: spec.name().to_string(),
-            disk,
-            objects_added,
-            bytes_added,
-        })
+        self.disk_add_at(mount, pool_name, label, "")
     }
 
     /// Reattach routine: verify the marker and the objects (sizes; hashes with
@@ -4563,9 +4561,12 @@ impl Engine {
         self.commit_batch()?;
         pool.flush()?;
         let disks = pool.disks();
+        let (group_copies, group_short) = (pool.copies(), pool.group_shortfall().0);
         drop(pool);
         self.save_pool_disks(spec.name(), disks)?;
         Ok(DiskCheckReport {
+            group_copies,
+            group_short,
             pool: spec.name().to_string(),
             label: disk.label,
             mount,
@@ -4648,9 +4649,12 @@ impl Engine {
     }
 
     /// Fill one attached disk with objects of current files that the pool
-    /// holds on no disk, largest first, within the disk's reserve. Objects
-    /// come from the other hot storages or are re-encrypted from local files;
-    /// no other storage is changed. Returns (objects, bytes) written.
+    /// holds on no disk (or, under a disk group rule, in too few places),
+    /// largest first, within the disk's reserve. Folders whose placement
+    /// leaves the pool out are skipped. Objects come from the pool's other
+    /// attached disks or the other hot storages, or are re-encrypted from
+    /// local files; no other storage is changed. Returns (objects, bytes)
+    /// written.
     fn fill_disk(
         &mut self,
         spec: &StorageSpec,
@@ -4665,16 +4669,20 @@ impl Engine {
             files: Vec<PathBuf>,
         }
         let have = pool.objects();
+        let view = self.view()?;
         let mut needed: BTreeMap<ObjectName, Need> = BTreeMap::new();
         let mut folder_keys: BTreeMap<FolderId, FolderKeys> = BTreeMap::new();
         for (rec, mount) in self.folders() {
             let Ok(rec) = self.with_key(&rec) else {
                 continue; // a locked Strongroom is skipped
             };
+            let targets = self.write_targets(&rec);
             let state = self.load_state(&rec.folder_id)?;
             for f in state.files.values().filter(|f| !f.deleted) {
                 for c in &f.chunks {
-                    if have.contains_key(&chunk_storage_key(&c.object)) {
+                    if !pool.wants_copy(disk_id, &chunk_storage_key(&c.object))
+                        || !targets.wants(spec.name(), view.locate(&rec.folder_id, &c.chunk))
+                    {
                         continue;
                     }
                     let n = needed.entry(c.object.clone()).or_insert_with(|| Need {
@@ -4703,8 +4711,13 @@ impl Engine {
                 continue;
             }
             let key = chunk_storage_key(&object);
-            let mut ct: Option<Vec<u8>> = None;
-            for (_, backend) in &sources {
+            // A further copy (disk groups) comes from the disk that has one.
+            let mut ct: Option<Vec<u8>> = pool
+                .get(&key)
+                .ok()
+                .flatten()
+                .filter(|c| ObjectName::from_bytes(&crypto::hash(c)) == object);
+            for (_, backend) in sources.iter().filter(|_| ct.is_none()) {
                 if let Ok(Some(c)) = backend.get(&key) {
                     if ObjectName::from_bytes(&crypto::hash(&c)) == object {
                         ct = Some(c);
@@ -4728,7 +4741,12 @@ impl Engine {
                 }
             }
             let Some(ct) = ct else { continue };
-            match pool.put_on_disk(disk_id, &key, &ct) {
+            let first_copy = !have.contains_key(&key);
+            match pool.add_copy_on_disk(disk_id, &key, &ct) {
+                Ok(true) if !first_copy => {
+                    n += 1;
+                    bytes += ct.len() as u64;
+                }
                 Ok(true) => {
                     n += 1;
                     bytes += ct.len() as u64;

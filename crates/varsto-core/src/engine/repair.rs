@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: PolyForm-Shield-1.0.0
-//! Automatic repair (`docs/spec/alpha-0-format.md` section 24).
+//! Automatic repair (`docs/spec/alpha-0-format.md` section 25).
 //!
 //! `fsck` (objects missing from a storage that the ledger says holds them,
 //! blocks of current files on no storage, and with `--verify` corrupt
@@ -7,6 +7,9 @@
 //! device wrote) put what they find in a queue, `state/repair.json`. A
 //! repair run takes the queue, oldest damage on the fewest copies first and
 //! within a budget, and for each damaged copy on a storage of this device:
+//!
+//! Copies dropped on purpose (`chunk_dropped`, data moves) and storages a
+//! folder's placement does not take are never written back.
 //!
 //! 1. reads the copy again: a copy that is intact by now (another device
 //!    repaired it, a pool disk came back) is recorded as verified;
@@ -434,6 +437,20 @@ impl Engine {
             }
             if attached.contains(&d.folder) && !current.contains_key(&d.object) {
                 report.not_needed += 1; // no current file uses it any more
+                continue;
+            }
+            // A copy moved away on purpose (`chunk_dropped`), or a storage
+            // the folder's placement does not take, is not written back.
+            let record = view
+                .locate(&d.folder, &d.chunk)
+                .filter(|r| r.object == d.object);
+            let placed = self
+                .keyring
+                .folders
+                .get(&d.folder)
+                .is_none_or(|rec| self.write_targets(rec).wants(&d.storage, None));
+            if record.is_some_and(|r| r.dropped_from(&d.storage)) || !placed {
+                report.not_needed += 1;
                 continue;
             }
             if blocks > 0 && (blocks >= opts.max_blocks || bytes >= opts.max_bytes) {

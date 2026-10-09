@@ -54,7 +54,7 @@ fn names_aad(vault: &crate::ids::VaultId, device: &DeviceId) -> Vec<u8> {
 }
 
 /// The identity of a storage, created by the first device that asks.
-fn storage_identity(backend: &dyn Storage) -> Result<String> {
+pub(super) fn storage_identity(backend: &dyn Storage) -> Result<String> {
     if let Some(raw) = backend.get(STORAGE_ID_KEY)? {
         return Ok(serde_json::from_slice::<StorageIdentity>(&raw)?.storage_id);
     }

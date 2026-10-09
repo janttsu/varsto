@@ -1,5 +1,5 @@
 # Varsto community forum: Flarum (lightweight PHP forum) with MariaDB,
-# behind the host's Caddy at https://forum.varsto.soderlund.in.
+# behind the host's Caddy at https://forum.varsto.net.
 # Start: docker compose up -d      First run creates the admin account from .env.
 services:
   flarum:
@@ -24,7 +24,8 @@ services:
     ports:
       - "127.0.0.1:8090:8888"
     depends_on:
-      - forum-db
+      forum-db:
+        condition: service_healthy
   forum-db:
     image: mariadb:11
     container_name: forum-db
@@ -36,3 +37,9 @@ services:
       - MARIADB_PASSWORD=${DB_PASS}
     volumes:
       - ./data/mariadb:/var/lib/mysql
+    # The forum installs itself on first start and needs the database up.
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 30

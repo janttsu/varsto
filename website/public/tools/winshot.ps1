@@ -1,15 +1,15 @@
 # Varsto build helper: in an interactive Windows session, download the Windows
 # package, create a demo vault with invented files, start the tray app and
 # capture the screen and the notification area. Results in C:\shots.
-#   powershell -ep bypass -c "iwr -useb https://varsto.soderlund.in/tools/winshot.ps1 | iex"
+#   powershell -ep bypass -c "iwr -useb https://varsto.net/tools/winshot.ps1 | iex"
 $ErrorActionPreference = "Continue"; $ProgressPreference = "SilentlyContinue"
 Start-Transcript -Path C:\winshot.log -Append | Out-Null
 try {
   [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
   New-Item -ItemType Directory -Force C:\shots, C:\demo\files, C:\demo\storage | Out-Null
-  $m = Invoke-RestMethod -UseBasicParsing https://varsto.soderlund.in/downloads/manifest.json
+  $m = Invoke-RestMethod -UseBasicParsing https://varsto.net/downloads/manifest.json
   $zipName = ($m.PSObject.Properties.Name | Where-Object { $_ -like "*windows*.zip" } | Select-Object -First 1)
-  Invoke-WebRequest -UseBasicParsing "https://varsto.soderlund.in/downloads/$zipName" -OutFile C:\demo\varsto.zip
+  Invoke-WebRequest -UseBasicParsing "https://varsto.net/downloads/$zipName" -OutFile C:\demo\varsto.zip
   Expand-Archive -Force C:\demo\varsto.zip -DestinationPath C:\demo\app
   $exe = Get-ChildItem C:\demo\app -Recurse -Filter varsto.exe | Select-Object -First 1 -ExpandProperty FullName
   $env:VARSTO_PASSPHRASE = "demo-passphrase-123"

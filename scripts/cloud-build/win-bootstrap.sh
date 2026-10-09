@@ -25,7 +25,7 @@ win="$(xdotool search --class xfreerdp | head -1)"
 xdotool windowactivate --sync "$win" 2>/dev/null || true
 xdotool key --clearmodifiers super+r
 sleep 3
-cmd="powershell -ep bypass -c \"iwr -useb https://varsto.soderlund.in/tools/${WIN_TOOL:-winssh}.ps1 | iex\""
+cmd="powershell -ep bypass -c \"iwr -useb https://varsto.net/tools/${WIN_TOOL:-winssh}.ps1 | iex\""
 xdotool type --delay 20 --clearmodifiers "$cmd"
 sleep 1
 xdotool key Return

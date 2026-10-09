@@ -389,7 +389,7 @@
     if (policyEdited()) { return; }
     var places = policyPlaces(p); var reports = {}; (p.reports || []).forEach(function (r) { reports[r.folder] = r; });
     var head = document.querySelector("#policygrid thead tr"); head.innerHTML = "";
-    ["Folder", "Status", "Copies on any storage"].concat(places.map(placeLabel)).concat(["Verified by another device within (days)"]).forEach(function (h) { head.appendChild(el("th", null, h)); });
+    ["Folder", "Status", "Written to", "Copies on any storage"].concat(places.map(placeLabel)).concat(["Verified by another device within (days)"]).forEach(function (h) { head.appendChild(el("th", null, h)); });
     var body = document.querySelector("#policygrid tbody"); body.innerHTML = "";
     var member = !!(lastStatus && lastStatus.member);
     (p.policies || []).forEach(function (x) {
@@ -400,6 +400,9 @@
       stc.appendChild(el("div", "muted small", x.text || "No rule set."));
       (r ? r.reasons.concat(r.warnings) : []).forEach(function (w) { stc.appendChild(el("div", "small", w)); });
       tr.appendChild(stc);
+      var wc = el("td", "policy-placement"); wc.dataset.placementFor = x.folder; wc.appendChild(el("div", "small", "every storage"));
+      if (!member) { var wb = el("button", "secondary small", "Change"); wb.type = "button"; wb.onclick = function () { editPlacement(x.folder); }; wc.appendChild(wb); }
+      tr.appendChild(wc);
       var num = function (key, val, label) {
         var c = el("td", "num"); var i = document.createElement("input"); i.type = "number"; i.min = "0"; i.step = "1"; i.value = val || 0; i.dataset.key = key; i.disabled = member; i.setAttribute("aria-label", x.folder + ": " + label);
         i.oninput = function () { tr.classList.add("changed"); policyButtons(); };
@@ -411,6 +414,42 @@
       body.appendChild(tr);
     });
     policyButtons();
+    api("GET", "/api/placement").then(function (pp) {
+      (pp.folders || []).forEach(function (x) {
+        var c = document.querySelector('#policygrid td[data-placement-for="' + (window.CSS && CSS.escape ? CSS.escape(x.folder) : x.folder) + '"] div');
+        if (!c) { return; }
+        c.textContent = x.placement ? x.description + " (here: " + x.targets.join(", ") + ")" : "every storage";
+        c.title = (x.warnings || []).join(" ");
+      });
+    }).catch(function () {});
+  }
+  // Folder placement: which storages a folder's blocks are written to (all
+  // by default). Published like the policy, so every device writes it the same way.
+  function editPlacement(folder) {
+    var names = [];
+    api("GET", "/api/placement").then(function (p) {
+      var cur = null; (p.folders || []).forEach(function (x) { if (x.folder === folder) { cur = x; } });
+      var places = {}; var avail = [];
+      (p.storages || []).filter(function (s) { return !s.carrier; }).forEach(function (s) { places[s.place] = 1; avail.push(s.name + " (" + s.place + (s.cold ? ", cold" : "") + ")"); });
+      names = Object.keys(places);
+      var pl = cur && cur.placement;
+      return dialog({
+        title: "Where " + folder + " is written",
+        text: "By default every block goes to every storage. Name storages or places (comma-separated) to write this folder only there. Blocks already stored stay where they are until you move them; policies still count every copy." + (cur && cur.warnings.length ? " Note: " + cur.warnings.join(" ") : ""),
+        fields: [
+          { name: "storages", label: "Storages", value: pl ? pl.storages.join(", ") : "", placeholder: "box, glacier", hint: "Available: " + avail.join(", ") },
+          { name: "places", label: "Places", value: pl ? pl.places.join(", ") : "", placeholder: "cloud", hint: "Places of your storages: " + names.join(", ") }
+        ],
+        ok: "Save", extra: pl ? "Every storage" : null
+      });
+    }).then(function (r) {
+      if (!r) { return; }
+      var v = r.values; var every = r.action === "extra" || (!v.storages.trim() && !v.places.trim());
+      return api("POST", "/api/placement", { folder: folder, storages: v.storages, places: v.places, every: every }).then(function (info) {
+        log(folder + ": new blocks go to " + info.targets.join(", ") + (info.placement ? " (" + info.description + ")" : ""));
+        return refreshStatus();
+      });
+    }).catch(function (e) { alertBox(e.message); });
   }
   $("policysave").onclick = function () {
     var rows = Array.prototype.slice.call(document.querySelectorAll("#policygrid tbody tr.changed"));
@@ -617,7 +656,7 @@
         var pbody = el("div", "li-body"); var ptitle = el("div", "li-title", f.name); ptitle.appendChild(pill("grey", f.policy ? "Unchecked" : "No policy")); pbody.appendChild(ptitle);
         pbody.appendChild(el("div", "li-sub", f.policy || "No rule set. Files are still written to every storage; a policy adds a minimum that Varsto watches for you."));
         pli.appendChild(pbody);
-        if (!s.member) { var pa = el("div", "li-actions"); var pe = el("button", "secondary", f.policy ? "Edit policy" : "Set policy"); pe.type = "button"; pe.onclick = function () { editPolicy(f); }; pa.appendChild(pe); pli.appendChild(pa); }
+        if (!s.member) { var pa = el("div", "li-actions"); var pe = el("button", "secondary", f.policy ? "Edit policy" : "Set policy"); pe.type = "button"; pe.onclick = function () { editPolicy(f); }; pa.appendChild(pe); var pw = el("button", "secondary", "Placement"); pw.type = "button"; pw.title = "Which storages this folder is written to"; pw.onclick = function () { editPlacement(f.name); }; pa.appendChild(pw); pli.appendChild(pa); }
         pl.appendChild(pli);
       });
       renderFolderList(s);
@@ -760,20 +799,41 @@
       box.appendChild(el("p", "muted small", "Folder " + f.folder + ": its idle files cost " + costText(f.idle_monthly) + " a month on its storages, the whole folder " + costText(f.monthly) + (f.unpriced_storages.length ? " (no price set for " + f.unpriced_storages.join(", ") + ")" : "") + "."));
     });
     (a.suggestions || []).forEach(function (s) {
-      var row = el("div", "suggestion");
-      row.appendChild(el("span", "", s.folder + ": " + s.files + " idle file" + (s.files === 1 ? "" : "s") + " (" + fmtBytes(s.bytes) + ") can be freed on this device; they stay on " + s.keep_on.join(", ") + "."));
-      var b = el("button", "secondary", "Free " + s.files + " file" + (s.files === 1 ? "" : "s")); b.type = "button";
+      var row = el("div", "suggestion"); var b;
+      if (s.kind === "cold-idle") {
+        row.appendChild(el("span", "", s.folder + ": the blocks of " + s.files + " idle file" + (s.files === 1 ? "" : "s") + " (" + fmtBytes(s.bytes) + ") can move from " + s.move_from + " to cold storage " + s.move_to + ", saving " + costText(s.monthly_saving) + " a month."));
+        b = el("button", "secondary", "Move to " + s.move_to);
+      } else {
+        row.appendChild(el("span", "", s.folder + ": " + s.files + " idle file" + (s.files === 1 ? "" : "s") + " (" + fmtBytes(s.bytes) + ") can be freed on this device; they stay on " + s.keep_on.join(", ") + "."));
+        b = el("button", "secondary", "Free " + s.files + " file" + (s.files === 1 ? "" : "s"));
+      }
+      b.type = "button";
       b.onclick = function () { applySuggestion(s); };
       row.appendChild(b); box.appendChild(row);
     });
   }
   function applySuggestion(s) {
+    if (s.kind === "cold-idle") { return applyMove(s); }
     var text = s.summary + (s.warnings.length ? " " + s.warnings.join(" ") : "");
     confirmBox(text, { title: "Free idle files of " + s.folder + "?", ok: "Free " + fmtBytes(s.bytes) }).then(function (yes) {
       if (!yes) { return; }
       busy(true); log("freeing idle files of " + s.folder);
       return api("POST", "/api/advice/apply", { id: s.id, idle_days: ADVICE_IDLE_DAYS }).then(function (r) {
         log(r.folder + ": " + r.files_freed + " file" + (r.files_freed === 1 ? "" : "s") + " freed (" + fmtBytes(r.bytes_freed) + ")" + (r.blocks_verified ? ", " + r.blocks_verified + " blocks verified first" : "") + (r.skipped.length ? "; " + r.skipped.length + " kept: " + r.skipped[0][1] : ""));
+        busy(false); refreshStatus();
+      });
+    }).catch(function (e) { log("error: " + e.message); busy(false); });
+  }
+
+  // Moving idle files to cold storage: the confirmation states the copies
+  // left, the change in the bill and what reading them back needs.
+  function applyMove(s) {
+    confirmBox(s.summary, { title: "Move idle files of " + s.folder + " to " + s.move_to + "?", ok: "Move " + fmtBytes(s.bytes) }).then(function (yes) {
+      if (!yes) { return; }
+      busy(true); log("moving idle files of " + s.folder + " to " + s.move_to);
+      return api("POST", "/api/advice/apply", { id: s.id, idle_days: ADVICE_IDLE_DAYS }).then(function (r) {
+        var m = r.moved || {};
+        log(r.folder + ": " + (m.blocks_dropped || 0) + " block" + (m.blocks_dropped === 1 ? "" : "s") + " (" + fmtBytes(m.bytes_dropped || 0) + ") moved from " + m.from + " to " + m.to + (m.blocks_kept ? "; " + m.blocks_kept + " kept: " + m.kept[0][1] : ""));
         busy(false); refreshStatus();
       });
     }).catch(function (e) { log("error: " + e.message); busy(false); });
@@ -921,7 +981,7 @@
         mine.forEach(function (d) {
           var li = el("li"); var ic = el("span", "li-icon"); ic.appendChild(icon("storages")); li.appendChild(ic);
           var body = el("div", "li-body"); var t = el("div", "li-title", d.label);
-          t.appendChild(pill(d.attached ? "ok" : "grey", d.attached ? "attached" : "offline")); if (d.retired) { t.appendChild(pill("grey", "retired")); }
+          t.appendChild(pill(d.attached ? "ok" : "grey", d.attached ? "attached" : "offline")); t.appendChild(pill("grey", d.place)); if (d.retired) { t.appendChild(pill("grey", "retired")); }
           body.appendChild(t);
           var parts = [];
           if (d.attached) { parts.push(d.mount); if (d.free_bytes !== null && d.free_bytes !== undefined) { parts.push(fmtBytes(d.free_bytes) + " free"); } }
@@ -938,15 +998,40 @@
               var full = el("button", "secondary", "Check fully"); full.type = "button"; full.title = "Re-hash every block on the disk"; full.onclick = function () { diskAction("/api/disk/check", { label: d.label, full: true }, "full check"); }; acts.appendChild(full);
               var ej = el("button", "secondary", "Eject"); ej.type = "button"; ej.title = "Write the disk index and sync; then unmount it yourself"; ej.onclick = function () { diskAction("/api/disk/eject", { label: d.label }, "eject"); }; acts.appendChild(ej);
             }
+            var pb = el("button", "secondary", "Place"); pb.type = "button"; pb.title = "Where this disk is kept; disk groups keep copies in different places"; pb.onclick = function () { editDiskPlace(d); }; acts.appendChild(pb);
             if (!d.retired) { var rt = el("button", "secondary", "Retire"); rt.type = "button"; rt.title = "Nothing new goes to this disk"; rt.onclick = function () { dialog({ title: "Retire disk " + d.label + "?", text: "Nothing new is written to it; what it holds stays readable while attached.", ok: "Retire" }).then(function (yes) { if (yes) { diskAction("/api/disk/retire", { label: d.label }, "retire"); } }); }; acts.appendChild(rt); }
             li.appendChild(acts);
           }
           ul.appendChild(li);
         });
         card.appendChild(ul);
+        var grp = el("div", "pool-group"); grp.dataset.groupFor = p.name; card.appendChild(grp);
         box.appendChild(card);
       });
+      return api("GET", "/api/disk/groups").then(function (groups) {
+        groups.forEach(function (g) {
+          var c = document.querySelector('.pool-group[data-group-for="' + (window.CSS && CSS.escape ? CSS.escape(g.pool) : g.pool) + '"]');
+          if (!c) { return; }
+          var line = g.copies > 1 ? "Disk group: " + g.copies + " copies of every block on disks in different places" : "Disk group: one copy of every block (no rule)";
+          line += "; places: " + Object.keys(g.places).map(function (k) { return k + " (" + g.places[k].join(", ") + ")"; }).join(", ");
+          if (g.objects_short) { line += ". " + g.objects_short + " block" + (g.objects_short === 1 ? " is" : "s are") + " short of the rule (" + fmtBytes(g.bytes_short) + "): attach a disk kept elsewhere and check it."; }
+          c.appendChild(el("p", "muted small", line + (g.warnings.length ? " " + g.warnings.join(" ") : "")));
+          if (!isMobile()) { var gb = el("button", "secondary", "Disk group"); gb.type = "button"; gb.onclick = function () { editDiskGroup(g); }; c.appendChild(gb); }
+        });
+      });
     }).catch(function (e) { log("disks: " + e.message); });
+  }
+  function editDiskGroup(g) {
+    dialog({ title: "Disk group of pool " + g.pool, text: "Keep this many copies of every block on disks kept in different places (1: one copy, no rule). Disks of other places get their copies when attached and checked; policies count each disk copy at its disk's place.", fields: [{ name: "copies", label: "Copies in different places", type: "number", value: g.copies }], ok: "Save" }).then(function (r) {
+      if (!r) { return; }
+      return api("POST", "/api/disk/group", { pool: g.pool, copies: Math.max(1, Math.floor(+r.values.copies) || 1) }).then(function () { log("pool " + g.pool + ": disk group rule saved"); return refreshStatus(); });
+    }).catch(function (e) { alertBox(e.message); });
+  }
+  function editDiskPlace(d) {
+    dialog({ title: "Where is " + d.label + " kept?", text: "A place such as home or offsite. Empty: the pool's place.", fields: [{ name: "place", label: "Place", value: d.place }], ok: "Save" }).then(function (r) {
+      if (!r) { return; }
+      return api("POST", "/api/disk/place", { label: d.label, place: r.values.place.trim() }).then(function () { log(d.label + " is kept at " + (r.values.place.trim() || "the pool's place")); return refreshStatus(); });
+    }).catch(function (e) { alertBox(e.message); });
   }
   $("adddisk").onsubmit = function (ev) {
     ev.preventDefault(); var d = formData(ev.target); busy(true); log("adding disk " + d.label + " to pool " + d.pool);
