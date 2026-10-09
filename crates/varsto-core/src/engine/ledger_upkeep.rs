@@ -45,6 +45,20 @@ fn remote_seqs(backend: &dyn Storage, device: &DeviceId, seq: u64) -> Result<BTr
         .collect())
 }
 
+/// Events recorded but not yet sealed into a batch, kept across restarts.
+const DEFERRED_FILE: &str = "ledger/pending.json";
+
+pub(super) fn load_deferred(home: &Path) -> Vec<Event> {
+    util::read_json_or_default(&home.join(DEFERRED_FILE)).unwrap_or_default()
+}
+
+/// One action whose ledger events go into a single batch.
+#[derive(Default)]
+pub(super) struct Cycle {
+    /// Forks found by the ledger pull of this action, which runs once.
+    forks: Option<Vec<DeviceId>>,
+}
+
 /// Save the cached view after this many newly applied batches; a view that
 /// is not saved is brought up to date from the batches on the next run.
 const VIEW_SAVE_EVERY: u64 = 32;
@@ -58,6 +72,55 @@ pub(super) struct ViewSlot {
 }
 
 impl Engine {
+    /// Run `f` with every ledger event it records sealed into one batch when
+    /// it returns, also when it fails (what was done stays recorded). Nested
+    /// calls join the outer one.
+    pub fn one_batch<T>(&mut self, f: impl FnOnce(&mut Self) -> Result<T>) -> Result<T> {
+        self.one_batch_seq(f).map(|(out, _)| out)
+    }
+
+    /// Like `one_batch`, with the sequence number of the batch (if any).
+    pub(super) fn one_batch_seq<T>(
+        &mut self,
+        f: impl FnOnce(&mut Self) -> Result<T>,
+    ) -> Result<(T, Option<u64>)> {
+        if self.cycle.is_some() {
+            return f(self).map(|out| (out, None));
+        }
+        self.cycle = Some(Cycle::default());
+        let out = f(self);
+        self.cycle = None;
+        let committed = self.commit_batch();
+        let out = out?;
+        Ok((out, committed?))
+    }
+
+    /// Pull the ledger, once per `one_batch` action.
+    pub(super) fn pull_ledger_once(&mut self) -> Result<Vec<DeviceId>> {
+        if let Some(forks) = self.cycle.as_ref().and_then(|c| c.forks.clone()) {
+            return Ok(forks);
+        }
+        let forks = self.pull_ledger()?;
+        if let Some(c) = self.cycle.as_mut() {
+            c.forks = Some(forks.clone());
+        }
+        Ok(forks)
+    }
+
+    /// Keep the recorded events for the next batch, on disk so a restart
+    /// does not lose them. They count in this device's view meanwhile.
+    pub(super) fn defer_events(&mut self) -> Result<()> {
+        if self.pending.is_empty() {
+            self.clear_deferred();
+            return Ok(());
+        }
+        util::write_json(&self.home.join(DEFERRED_FILE), &self.pending)
+    }
+
+    pub(super) fn clear_deferred(&self) {
+        let _ = fs::remove_file(self.home.join(DEFERRED_FILE));
+    }
+
     /// The location view: the cached one, updated with the batches that
     /// arrived since, or rebuilt when keys or cut-offs changed.
     pub fn view(&self) -> Result<LedgerView> {
@@ -90,10 +153,25 @@ impl Engine {
         if *unsaved >= VIEW_SAVE_EVERY && self.save_view_cache(c).is_ok() {
             *unsaved = 0;
         }
-        Ok(self.ledger.finish(&c.raw))
+        if self.pending.is_empty() {
+            return Ok(self.ledger.finish(&c.raw));
+        }
+        // Events recorded and not sealed yet count as this device's next batch.
+        let mut raw = c.raw.clone();
+        raw.apply(&ledger::Batch {
+            device: self.vault.device_id.clone(),
+            seq: self.ledger.head(&self.vault.device_id).seq + 1,
+            prev: None,
+            lamport: self.clock.lamport + 1,
+            created_utc: util::now_utc(),
+            events: self.pending.clone(),
+        });
+        raw.batches -= 1;
+        Ok(self.ledger.finish_owned(raw))
     }
 
-    /// The view replayed from every local batch, without the cache.
+    /// The view replayed from every local batch, without the cache (and
+    /// without events not sealed into a batch yet).
     pub fn view_replayed(&self) -> Result<LedgerView> {
         self.ledger.view_filtered(
             |id| self.key_for_id(id),
@@ -609,6 +687,112 @@ mod tests {
         let v = b.view().unwrap();
         assert_eq!(v, b.view_replayed().unwrap());
         assert!(v.chunks.len() >= 43);
+    }
+
+    fn folder_with_files(e: &mut Engine, root: &Path, name: &str, files: &[(&str, &[u8])]) {
+        let dir = root.join(name);
+        e.add_folder(name, &dir).unwrap();
+        for (f, data) in files {
+            fs::write(dir.join(f), data).unwrap();
+        }
+    }
+
+    fn own_head(e: &Engine) -> u64 {
+        e.ledger.head(&e.vault.device_id).seq
+    }
+
+    /// A sync of several folders seals one batch, not a pull and a push
+    /// batch per folder.
+    #[test]
+    fn sync_seals_one_batch() {
+        let (_tmp, lab) = lab("one-batch");
+        let mut devs = devices(&lab, 1);
+        let a = &mut devs[0];
+        a.chunker = ChunkerParams::SMALL;
+        folder_with_files(a, &lab.root, "docs", &[("a.txt", b"alpha")]);
+        folder_with_files(a, &lab.root, "pics", &[("b.txt", b"beta")]);
+        let before = own_head(a);
+        let reports = a.sync(None).unwrap();
+        assert_eq!(reports.len(), 2);
+        assert_eq!(own_head(a), before + 1);
+        assert!(reports.iter().all(|(_, p)| p.batch_seq == Some(before + 1)));
+        fs::write(lab.root.join("docs/a.txt"), b"alpha 2").unwrap();
+        fs::write(lab.root.join("pics/c.txt"), b"gamma").unwrap();
+        a.sync(None).unwrap();
+        assert_eq!(own_head(a), before + 2);
+        // Nothing changed: no batch at all.
+        a.sync(None).unwrap();
+        assert_eq!(own_head(a), before + 2);
+        assert_eq!(a.view().unwrap(), a.view_replayed().unwrap());
+    }
+
+    /// Fetching a file records its blocks with the next batch: kept on disk
+    /// across a restart, counted in this device's view meanwhile.
+    #[test]
+    fn fetch_is_sealed_with_the_next_batch() {
+        let (_tmp, lab) = lab("deferred");
+        let mut devs = devices(&lab, 2);
+        devs[0].chunker = ChunkerParams::SMALL;
+        folder_with_files(
+            &mut devs[0],
+            &lab.root,
+            "photos",
+            &[("one.jpg", &[7u8; 20_000])],
+        );
+        devs[0].sync(None).unwrap();
+        let b = &mut devs[1];
+        b.pull_ledger().unwrap();
+        b.attach_folder("photos", &lab.root.join("b-photos"), true)
+            .unwrap();
+        b.sync(None).unwrap();
+        let me = b.vault.device_id.clone();
+        let on_b = |e: &Engine| {
+            e.view()
+                .unwrap()
+                .chunks
+                .values()
+                .filter(|c| c.devices.contains(&me))
+                .count()
+        };
+        assert_eq!(on_b(b), 0);
+        let head = own_head(b);
+        b.fetch_file("photos", "one.jpg").unwrap();
+        assert_eq!(own_head(b), head, "no batch for a fetch");
+        assert!(on_b(b) > 0, "the fetch counts in this device's view");
+        assert!(b.home.join(DEFERRED_FILE).exists());
+        let home = b.home.clone();
+        drop(devs);
+        let mut b = Engine::open(&home, PASS).unwrap();
+        assert!(on_b(&b) > 0, "kept across a restart");
+        b.sync(None).unwrap();
+        assert_eq!(own_head(&b), head + 1);
+        assert!(!b.home.join(DEFERRED_FILE).exists());
+        assert!(b.pending.is_empty());
+        assert_eq!(b.view().unwrap(), b.view_replayed().unwrap());
+        assert!(on_b(&b) > 0);
+    }
+
+    /// Events recorded before a failure inside `one_batch` are still sealed.
+    #[test]
+    fn one_batch_seals_on_failure() {
+        let (_tmp, lab) = lab("fail");
+        let mut devs = devices(&lab, 1);
+        let a = &mut devs[0];
+        let head = own_head(a);
+        let folder = FolderId::random();
+        let r: Result<()> = a.one_batch(|e| {
+            e.pending.push(Event::FolderAdded {
+                folder: folder.clone(),
+            });
+            e.commit_batch()?;
+            e.pending.push(Event::FolderAdded {
+                folder: folder.clone(),
+            });
+            bail!("interrupted")
+        });
+        assert!(r.is_err());
+        assert_eq!(own_head(a), head + 1);
+        assert!(a.pending.is_empty());
     }
 
     fn copy_tree(from: &Path, to: &Path) {

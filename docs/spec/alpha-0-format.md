@@ -102,6 +102,8 @@ Mailbox rules:
 - two different batches with the same device and sequence number are a **fork**: the device is marked forked in the local heads;
 - if the mailbox holds batches of this device's own identity that it never wrote (a copy restored from an old backup, or a clone), the device fences itself: it stops signing and `push` fails until it is re-enrolled as a new device.
 
+Batching: one user action seals at most one batch. A sync seals one batch for the pull and push of every folder together (and pulls the ledger once); applying a placement suggestion and acting on a selection of files in the interface seal one batch each; a verification run seals one. Fetching a single file does not seal a batch: its `chunk_on_device` and `chunk_verified` events wait in `ledger/pending.json` for the next batch (usually the next sync) and count in the device's own view meanwhile. Enrolment, joining a shared folder, folder creation, storage removal and Strongroom changes are sealed and pushed at once, because other devices act on them.
+
 Lamport clocks: each device keeps one logical clock, incremented on every local change and raised to any larger value seen in batches or manifests.
 
 ## 7. Manifests and merging
@@ -126,7 +128,7 @@ keyring.enc     folder records known to this device (encrypted)
 config.json     storages and folder mounts (no secrets)
 devices.json    device registry cache (public keys)
 clock.json      Lamport clock
-ledger/         local copy of every device's batches, the heads file, pushed.json (own batches confirmed per storage) and view.enc (the cached location view, encrypted)
+ledger/         local copy of every device's batches, the heads file, pushed.json (own batches confirmed per storage), pending.json (events waiting for the next batch) and view.enc (the cached location view, encrypted)
 state/<folder>.json  merged file states, local index, last seen manifests
 trash/          deleted files
 ```

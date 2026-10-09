@@ -487,7 +487,10 @@ impl LedgerStore {
     /// The view as callers see it: retirements applied, replica claims
     /// folded in, forked devices marked. `raw` is left as it was.
     pub fn finish(&self, raw: &LedgerView) -> LedgerView {
-        let mut view = raw.clone();
+        self.finish_owned(raw.clone())
+    }
+
+    pub fn finish_owned(&self, mut view: LedgerView) -> LedgerView {
         view.apply_retirements();
         view.fold_object_claims();
         for (d, head) in &self.heads.heads {
@@ -669,7 +672,7 @@ pub struct LedgerView {
 }
 
 impl LedgerView {
-    fn apply(&mut self, batch: &Batch) {
+    pub(crate) fn apply(&mut self, batch: &Batch) {
         self.batches += 1;
         self.max_lamport = self.max_lamport.max(batch.lamport);
         for (i, ev) in batch.events.iter().enumerate() {

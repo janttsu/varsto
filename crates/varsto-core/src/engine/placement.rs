@@ -516,6 +516,11 @@ impl Engine {
     /// frees the folder's idle files on this device after the checks above.
     /// Files that cannot go are listed in the report and left alone.
     pub fn apply_suggestion(&mut self, id: &str, idle_days: i64) -> Result<ApplyReport> {
+        // The push, the checks and the frees record into one batch.
+        self.one_batch(|e| e.apply_suggestion_now(id, idle_days))
+    }
+
+    fn apply_suggestion_now(&mut self, id: &str, idle_days: i64) -> Result<ApplyReport> {
         let folder = id.strip_prefix(FREE_IDLE_PREFIX).unwrap_or(id);
         let (rec, _) = self.resolve_folder(folder)?;
         let fid = rec.folder_id.to_string();

@@ -349,6 +349,8 @@ pub struct Engine {
     storage_calls: Option<std::sync::Arc<crate::storage::StorageCalls>>,
     /// The location view, kept up to date as batches arrive.
     view_cache: std::sync::Mutex<ledger_upkeep::ViewSlot>,
+    /// Set while one action runs whose ledger events go into one batch.
+    cycle: Option<ledger_upkeep::Cycle>,
 }
 
 /// Open storages with their specs.
@@ -628,6 +630,7 @@ impl Engine {
             chunker: ChunkerParams::DEFAULT,
             storage_calls: None,
             view_cache: Default::default(),
+            cycle: None,
         };
         engine.config.save(home)?;
         if !engine.vault.member {
@@ -800,13 +803,14 @@ impl Engine {
             vault,
             keys,
             keyring,
-            pending: Vec::new(),
+            pending: ledger_upkeep::load_deferred(home),
             forked_self: false,
             epochs,
             removal,
             chunker: ChunkerParams::DEFAULT,
             storage_calls: None,
             view_cache: Default::default(),
+            cycle: None,
         };
         // Command-line runs use the peers other devices advertised, over TCP
         // only; the service adds LAN peers and the QUIC node.
@@ -1930,10 +1934,21 @@ impl Engine {
         if self.removal.is_some() {
             // A removed device signs nothing more.
             self.pending.clear();
+            self.clear_deferred();
             return self.ensure_active().map(|_| None);
+        }
+        if self.forked_self {
+            bail!("this device's ledger is forked; it must be re-enrolled as a new device");
+        }
+        if self.cycle.is_some() {
+            // One batch at the end of the action (see `one_batch`).
+            self.defer_events()?;
+            return Ok(None);
         }
         let lamport = self.tick()?;
         let events = std::mem::take(&mut self.pending);
+        // The events go into a local batch below; from here a crash keeps them there.
+        self.clear_deferred();
         if !self.vault.member {
             let (key_id, ledger_key) = self.ledger_key_now();
             let signed = self.ledger.append_own_with(
@@ -2497,7 +2512,7 @@ impl Engine {
             ..Default::default()
         };
         self.scan(&rec, &root, &mut state)?;
-        let forks = self.pull_ledger()?;
+        let forks = self.pull_ledger_once()?;
         report.forked_devices = forks.iter().map(|d| d.to_string()).collect();
         if !self.keyring.folders.contains_key(&rec.folder_id) {
             // Converted into a Strongroom by another device just now.
@@ -2927,7 +2942,9 @@ impl Engine {
         );
         state.pinned.insert(path.to_string());
         report.files_updated += 1;
-        self.commit_batch()?;
+        // What was fetched and checked is recorded with the next batch:
+        // nobody needs it published at once.
+        self.defer_events()?;
         self.save_state(&rec.folder_id, &state)?;
         Ok(report)
     }
@@ -3633,6 +3650,16 @@ impl Engine {
 
     /// pull then push, for every attached folder (or one).
     pub fn sync(&mut self, folder: Option<&str>) -> Result<Vec<(PullReport, PushReport)>> {
+        // Every folder's pull and push record into one ledger batch, and the
+        // ledger is pulled once.
+        let (mut out, seq) = self.one_batch_seq(|e| e.sync_folders(folder))?;
+        for (_, push) in out.iter_mut() {
+            push.batch_seq = push.batch_seq.or(seq);
+        }
+        Ok(out)
+    }
+
+    fn sync_folders(&mut self, folder: Option<&str>) -> Result<Vec<(PullReport, PushReport)>> {
         self.ensure_active()?;
         // A folder another device converted into a Strongroom must be
         // adopted before it is synced under its old key.
