@@ -489,6 +489,10 @@
     $("pause").textContent = sv.paused ? "Resume" : "Pause";
     $("pause").dataset.paused = sv.paused ? "1" : "0";
   }
+  // The tray and menu bar pause and sync through the same service; follow them.
+  function pollService() { if (!token || document.visibilityState !== "visible") { return; } api("GET", "/api/service").then(renderService).catch(function () {}); }
+  setInterval(pollService, 5000);
+  window.addEventListener("focus", pollService);
   $("pause").onclick = function () { api("POST", "/api/service/pause", { paused: $("pause").dataset.paused !== "1" }).then(renderService).catch(function (e) { log("error: " + e.message); }); };
   $("update").onclick = function () {
     busy(true); log("checking for updates");
