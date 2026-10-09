@@ -354,12 +354,15 @@
       </div>
       <details id="p2pbox" class="card" open>
         <summary class="card-title">Peer-to-peer transfer</summary>
-        <p class="muted small">Your devices exchange encrypted blocks directly: on the LAN automatically, across the internet when one of them listens on a reachable address. Blocks are verified by name; a peer needs the vault key to get anything.</p>
+        <p class="muted small">Your devices exchange encrypted blocks directly: on the LAN automatically, across the internet through NAT with hole punching, and when that fails through one of your own reachable devices acting as a relay. Blocks are verified by name; a peer needs the vault key and a known certificate to get anything.</p>
         <div id="p2pstatus" class="status-line"></div>
+        <div id="p2pnat" class="muted small"></div>
+        <table id="p2ppaths" class="hidden"><thead><tr><th>Device</th><th>Path</th><th>Address</th></tr></thead><tbody></tbody></table>
         <form id="p2pform" class="form-grid">
           <label class="inline"><input name="enabled" type="checkbox"> Enabled</label>
           <label>Port <input name="port" value="17893" size="6"></label>
           <label>Public addresses (host:port, comma-separated) <input name="public_addrs" placeholder="203.0.113.5:17893"></label>
+          <label>STUN servers (host:port, comma-separated; empty disables) <input name="stun" placeholder="stun.example.net:3478"></label>
           <div class="actions"><button type="submit">Save</button></div>
         </form>
       </details>

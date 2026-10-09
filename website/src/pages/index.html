@@ -19,7 +19,7 @@ description: Varsto: end-to-end encrypted file sync and backup on storage you al
       <section class="card"><h3>Post-quantum hybrid cryptography</h3><p>Every ledger batch is signed with Ed25519 and ML-DSA-65, and both must verify. A share token is sealed to the recipient's X25519 + ML-KEM-768 key, so it can travel over any channel. Old Ed25519-only batches stay valid through the algorithm identifier they carry.</p></section>
       <section class="card"><h3>An assistant with limited access</h3><p>An MCP server lets the AI assistant of your choice read, analyse and reorganise files in exactly the folders you grant, read-only unless you say otherwise. Varsto itself tracks when files were last used and suggests where idle data is cheapest to keep.</p></section>
       <section class="card"><h3>Policies that warn in time</h3><p>"Two cloud copies and one at home, verified within 30 days." Every device checks it from the ledger and warns, in the app and by notification, before it stops being true.</p></section>
-      <section class="card"><h3>Peer-to-peer, compressed</h3><p>Your devices exchange encrypted blocks directly, torrent-style: on the LAN automatically, across the internet with a reachable address. Blocks are compressed before encryption, so every copy and transfer is small.</p></section>
+      <section class="card"><h3>Peer-to-peer, compressed</h3><p>Your devices exchange encrypted blocks directly, torrent-style: on the LAN automatically, across the internet through NAT with hole punching, and through one of your own reachable devices when punching fails. No trackers, no vendor relay. Blocks are compressed before encryption, so every copy and transfer is small.</p></section>
       <section class="card"><h3>Strongroom folders</h3><p>A folder whose key exists only while you touch your FIDO2 security key. Cryptographic, not a dialog: no passphrase, vault key or stolen laptop opens it.</p></section>
       <section class="card"><h3>Old disks as a pool</h3><p>Plug a disk into the dock, add it to the pool, and it fills with what the pool lacks until its reserve. Eject when told, keep it anywhere; when it comes back it is recognised by its marker, checked and topped up. A file whose only copy is on a disk that is away says so: "attach disk data-01 (shelf)".</p></section>
       <section class="card"><h3>Bookkeeping you can check</h3><p><code>varsto fsck --verify</code> compares the ledger with what the storage actually holds and re-hashes every object. A device restored from an old backup is detected and fenced.</p></section>
@@ -27,7 +27,7 @@ description: Varsto: end-to-end encrypted file sync and backup on storage you al
 
     <h2>What is designed but not built yet</h2>
     <div class="grid">
-      <section class="card todo"><h3>NAT traversal, iOS, disk groups</h3><p>Relays and hole punching for peers behind NAT, the iOS build (needs a Mac), placement rules across disk groups (two copies on disks kept in different places), and converting existing folders into Strongrooms are next.</p></section>
+      <section class="card todo"><h3>iOS, disk groups, wider NAT testing</h3><p>The iOS build on real devices, placement rules across disk groups (two copies on disks kept in different places), and converting existing folders into Strongrooms are next. NAT traversal is built but tested on localhost and the maintainer's own networks only; a vault with every device behind NAT still has no path across the internet.</p></section>
     </div>
 
     <h2>Honest status</h2>
