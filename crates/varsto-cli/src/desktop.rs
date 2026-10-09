@@ -623,6 +623,17 @@ fn api_unlocked(
         (Method::Get, "/api/replica/token") => {
             Ok(json!({"token": engine.replica_token()?.encode()}))
         }
+        (Method::Get, "/api/storage/remove-plan") => Ok(serde_json::to_value(
+            engine.plan_storage_removal(&query_param(query, "name").unwrap_or_default())?,
+        )?),
+        (Method::Post, "/api/storage/remove") => {
+            let r = engine.remove_storage(
+                &s(input, "name")?,
+                input.get("delete_data").and_then(|v| v.as_bool()).unwrap_or(false),
+            )?;
+            service.request_sync();
+            Ok(serde_json::to_value(r)?)
+        }
         (Method::Post, "/api/storage") => {
             let cold = input.get("cold").and_then(|c| c.as_bool()).unwrap_or(false);
             let carrier = input

@@ -34,7 +34,7 @@ use crate::vault::{
 };
 use anyhow::{anyhow, bail, Context, Result};
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -159,6 +159,38 @@ pub struct FolderStatus {
     /// Strongroom state: "locked" or "unlocked until <utc>".
     #[serde(default)]
     pub strongroom: Option<String>,
+}
+
+/// See `Engine::plan_storage_removal`.
+#[derive(Clone, Debug, Default, Serialize)]
+pub struct StorageRemovalPlan {
+    pub storage: String,
+    /// Blocks on the storage that files still use.
+    pub blocks: u64,
+    /// Of those, blocks that already have enough copies elsewhere.
+    pub blocks_ok: u64,
+    pub copies: Vec<PlannedCopy>,
+    pub bytes_to_copy: u64,
+    /// Storages that receive copies.
+    pub targets: Vec<String>,
+    /// Why the storage cannot be removed now, if it cannot.
+    pub blocked: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct PlannedCopy {
+    pub folder: FolderId,
+    pub chunk: ChunkId,
+    pub object: ObjectName,
+    pub target: String,
+}
+
+#[derive(Clone, Debug, Default, Serialize)]
+pub struct StorageRemovalReport {
+    pub storage: String,
+    pub blocks_copied: u64,
+    pub bytes_copied: u64,
+    pub objects_deleted: u64,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -405,6 +437,9 @@ impl Engine {
         engine.add_storage_with_secret(storage, secret)?;
         engine.pull_registry()?;
         engine.pull_ledger()?;
+        // Publish the enrolment now: the other devices list this one from
+        // the ledger, and a phone may not sync a folder for a long time.
+        engine.push_own_batches()?;
         Ok(engine)
     }
 
@@ -918,6 +953,197 @@ impl Engine {
 
     pub fn storages(&self) -> &[StorageSpec] {
         &self.config.storages
+    }
+
+    /// What removing a storage takes: every block on it must keep enough
+    /// copies on the other storages (at least one, or the folder policy's
+    /// minimum and per-place rules), so blocks short of that are copied first.
+    pub fn plan_storage_removal(&self, name: &str) -> Result<StorageRemovalPlan> {
+        if !self.config.storages.iter().any(|s| s.name() == name) {
+            bail!("unknown storage {name}");
+        }
+        let mut plan = StorageRemovalPlan {
+            storage: name.to_string(),
+            ..Default::default()
+        };
+        // Copies count on this device's other storages that are not
+        // transferrers, and on replicas; claims on storages this device does
+        // not know are not counted.
+        let others: Vec<&StorageSpec> = self
+            .config
+            .storages
+            .iter()
+            .filter(|s| s.name() != name && !s.is_carrier())
+            .collect();
+        if others.is_empty() {
+            plan.blocked = Some(format!(
+                "{name} is the last storage of this vault: add another storage first"
+            ));
+            return Ok(plan);
+        }
+        let place_of: HashMap<&str, String> =
+            others.iter().map(|s| (s.name(), s.place())).collect();
+        let view = self.view()?;
+        let mut targets_used = BTreeSet::new();
+        for (rec, _) in self.folders() {
+            let policy = rec.policy.clone().unwrap_or_default();
+            let required = policy.min_copies.max(1) as usize;
+            // Blocks no file refers to any more need no copies; a folder never
+            // pulled here has no state, so then every block counts.
+            let referenced: HashSet<ChunkId> = self
+                .load_state(&rec.folder_id)
+                .map(|st| {
+                    st.files
+                        .values()
+                        .filter(|f| !f.deleted)
+                        .flat_map(|f| f.chunks.iter().map(|c| c.chunk.clone()))
+                        .collect()
+                })
+                .unwrap_or_default();
+            for ((folder, chunk), cr) in &view.chunks {
+                if folder != &rec.folder_id || !cr.storages.contains_key(name) {
+                    continue;
+                }
+                if !referenced.is_empty() && !referenced.contains(chunk) {
+                    continue;
+                }
+                plan.blocks += 1;
+                let holders: Vec<&String> = cr
+                    .storages
+                    .keys()
+                    .filter(|n| {
+                        n.as_str() != name
+                            && (n.starts_with("replica:") || place_of.contains_key(n.as_str()))
+                    })
+                    .collect();
+                let mut targets: Vec<&str> = Vec::new();
+                let free = |targets: &Vec<&str>, s: &&StorageSpec| {
+                    !holders.iter().any(|h| h.as_str() == s.name()) && !targets.contains(&s.name())
+                };
+                for (place, min) in &policy.min_per_place {
+                    let have = holders
+                        .iter()
+                        .filter(|h| place_of.get(h.as_str()) == Some(place))
+                        .count();
+                    for _ in have..*min as usize {
+                        match others
+                            .iter()
+                            .find(|s| &s.place() == place && free(&targets, s))
+                        {
+                            Some(s) => targets.push(s.name()),
+                            None => {
+                                plan.blocked = Some(format!(
+                                    "folder {} needs {min} copies in place '{place}' and no other storage there can take them: add one first",
+                                    rec.name
+                                ));
+                                return Ok(plan);
+                            }
+                        }
+                    }
+                }
+                while holders.len() + targets.len() < required {
+                    // Prefer warm storages: a cold one is written, rarely read.
+                    let pick = others
+                        .iter()
+                        .filter(|s| free(&targets, s))
+                        .min_by_key(|s| s.is_cold());
+                    match pick {
+                        Some(s) => targets.push(s.name()),
+                        None => {
+                            plan.blocked = Some(format!(
+                                "folder {} needs {required} copies and only {} other storages exist: add one first",
+                                rec.name,
+                                others.len()
+                            ));
+                            return Ok(plan);
+                        }
+                    }
+                }
+                if targets.is_empty() {
+                    plan.blocks_ok += 1;
+                }
+                for t in targets {
+                    targets_used.insert(t.to_string());
+                    plan.bytes_to_copy += cr.size;
+                    plan.copies.push(PlannedCopy {
+                        folder: folder.clone(),
+                        chunk: chunk.clone(),
+                        object: cr.object.clone(),
+                        target: t.to_string(),
+                    });
+                }
+            }
+        }
+        plan.targets = targets_used.into_iter().collect();
+        Ok(plan)
+    }
+
+    /// Remove a storage: copy what the plan says, check again, record the
+    /// retirement in the ledger so no device counts it as a copy any more,
+    /// and drop it from this device. With `delete_data` everything Varsto
+    /// wrote there is deleted afterwards.
+    pub fn remove_storage(
+        &mut self,
+        name: &str,
+        delete_data: bool,
+    ) -> Result<StorageRemovalReport> {
+        let plan = self.plan_storage_removal(name)?;
+        if let Some(why) = plan.blocked {
+            bail!("{why}");
+        }
+        let mut report = StorageRemovalReport {
+            storage: name.to_string(),
+            ..Default::default()
+        };
+        if !plan.copies.is_empty() || delete_data {
+            let source = self.open_storage(name).with_context(|| {
+                format!("{name} must be reachable to copy its blocks elsewhere first")
+            })?;
+            let mut targets: HashMap<String, Box<dyn Storage>> = HashMap::new();
+            for c in &plan.copies {
+                let key = chunk_storage_key(&c.object);
+                let bytes = source
+                    .get(&key)?
+                    .ok_or_else(|| anyhow!("block {} is missing on {name}; run fsck", c.object))?;
+                if !targets.contains_key(&c.target) {
+                    targets.insert(c.target.clone(), self.open_storage(&c.target)?);
+                }
+                targets[&c.target].put_if_absent(&key, &bytes)?;
+                self.pending.push(Event::ChunkStored {
+                    folder: c.folder.clone(),
+                    chunk: c.chunk.clone(),
+                    object: c.object.clone(),
+                    storage: c.target.clone(),
+                    size: bytes.len() as u64,
+                });
+                report.blocks_copied += 1;
+                report.bytes_copied += bytes.len() as u64;
+            }
+            self.commit_batch()?;
+            let again = self.plan_storage_removal(name)?;
+            if again.blocked.is_some() || !again.copies.is_empty() {
+                bail!("{name} still holds blocks without enough copies elsewhere; nothing was removed");
+            }
+            self.pending.push(Event::StorageRetired {
+                storage: name.to_string(),
+            });
+            self.commit_batch()?;
+            if delete_data {
+                for key in source.list("")? {
+                    source.delete(&key)?;
+                    report.objects_deleted += 1;
+                }
+            }
+        } else {
+            self.pending.push(Event::StorageRetired {
+                storage: name.to_string(),
+            });
+            self.commit_batch()?;
+        }
+        self.config.storages.retain(|s| s.name() != name);
+        self.config.save(&self.home)?;
+        self.publish_registry()?;
+        Ok(report)
     }
 
     fn open_storages(&self, include_cold: bool) -> Result<OpenStorages> {
@@ -1453,7 +1679,7 @@ impl Engine {
                 | Event::ChunkOnDevice { folder, .. }
                 | Event::ManifestPublished { folder, .. }
                 | Event::FolderAdded { folder } => Some(folder.clone()),
-                Event::DeviceEnrolled { .. } => None,
+                Event::DeviceEnrolled { .. } | Event::StorageRetired { .. } => None,
             };
             match folder {
                 Some(f) => by_folder.entry(f).or_default().push(ev),
@@ -3255,10 +3481,14 @@ impl Engine {
             device_name: self.vault.device_name.clone(),
             format_version: crate::FORMAT_VERSION,
             storages: self.config.storages.clone(),
-            devices: view
+            // Devices from the ledger, and from the registry for devices whose
+            // enrolment batch has not reached this one yet.
+            devices: self
+                .devices
                 .devices
                 .iter()
-                .map(|(k, v)| (k.to_string(), v.clone()))
+                .map(|(k, r)| (k.to_string(), r.name.clone()))
+                .chain(view.devices.iter().map(|(k, v)| (k.to_string(), v.clone())))
                 .collect(),
             replicas: self
                 .devices

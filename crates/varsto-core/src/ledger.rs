@@ -57,6 +57,9 @@ pub enum Event {
         manifest_hash: String,
         files: u64,
     },
+    /// The storage was removed from the vault: every claim on it made before
+    /// this event no longer counts as a copy (later claims count again).
+    StorageRetired { storage: String },
 }
 
 /// Plaintext batch body (encrypted before signing and storage).
@@ -368,6 +371,7 @@ impl LedgerStore {
             };
             view.apply(&batch);
         }
+        view.apply_retirements();
         view.fold_object_claims();
         for d in self.heads.heads.keys() {
             if self.is_forked(d) {
@@ -387,6 +391,9 @@ pub struct Location {
     pub claimed_utc: i64,
     #[serde(default)]
     pub verified_utc: i64,
+    /// Newest claim or verification (Lamport time), to apply retirements.
+    #[serde(skip)]
+    pub lamport: u64,
 }
 
 #[derive(Clone, Debug, Default, Serialize)]
@@ -433,6 +440,8 @@ pub struct LedgerView {
     pub devices: BTreeMap<DeviceId, String>,
     pub folders: BTreeSet<FolderId>,
     pub max_lamport: u64,
+    /// Retired storages and when (Lamport time).
+    pub retired: BTreeMap<String, u64>,
     pub batches: u64,
     pub forked: BTreeSet<DeviceId>,
     /// Objects claimed by replicas (folded into chunk records).
@@ -467,6 +476,7 @@ impl LedgerView {
                     let loc = rec.storages.entry(storage.clone()).or_default();
                     loc.claimed_by.insert(batch.device.clone());
                     loc.claimed_utc = loc.claimed_utc.max(batch.created_utc);
+                    loc.lamport = loc.lamport.max(batch.lamport);
                 }
                 Event::ChunkVerified {
                     folder,
@@ -482,6 +492,7 @@ impl LedgerView {
                     let loc = rec.storages.entry(storage.clone()).or_default();
                     loc.verified_by.insert(batch.device.clone());
                     loc.verified_utc = loc.verified_utc.max(batch.created_utc);
+                    loc.lamport = loc.lamport.max(batch.lamport);
                 }
                 Event::ChunkOnDevice {
                     folder,
@@ -504,7 +515,27 @@ impl LedgerView {
                         .or_insert(0);
                     *e = (*e).max(*seq);
                 }
+                Event::StorageRetired { storage } => {
+                    let r = self.retired.entry(storage.clone()).or_insert(0);
+                    *r = (*r).max(batch.lamport);
+                }
             }
+        }
+    }
+
+    /// Drop the copies on retired storages that were recorded before the
+    /// retirement. Batches arrive per device, not in Lamport order, so this
+    /// runs once all of them are applied.
+    fn apply_retirements(&mut self) {
+        if self.retired.is_empty() {
+            return;
+        }
+        for rec in self.chunks.values_mut() {
+            rec.storages.retain(|name, loc| {
+                self.retired
+                    .get(name)
+                    .is_none_or(|retired| loc.lamport > *retired)
+            });
         }
     }
 

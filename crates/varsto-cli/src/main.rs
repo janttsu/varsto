@@ -445,6 +445,17 @@ enum StorageCmd {
         scan_root: Vec<PathBuf>,
     },
     List,
+    /// Remove a storage. Blocks that would be left without enough copies
+    /// (one, or the folder policy's minimum) are copied elsewhere first.
+    Remove {
+        name: String,
+        /// Show what would be copied, change nothing.
+        #[arg(long)]
+        dry_run: bool,
+        /// Also delete everything Varsto wrote on the storage afterwards.
+        #[arg(long)]
+        delete_data: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -787,6 +798,38 @@ fn run(cli: &Cli) -> Result<()> {
                         scan_roots: scan_root.clone(),
                     })?;
                     println!("disk pool {name} added; attach a disk with: varsto disk add <mount-path> --pool {name} --label <label>");
+                }
+                StorageCmd::Remove {
+                    name,
+                    dry_run,
+                    delete_data,
+                } => {
+                    let plan = engine.plan_storage_removal(name)?;
+                    if let Some(why) = &plan.blocked {
+                        bail!("cannot remove {name}: {why}");
+                    }
+                    println!(
+                        "{name} holds {} blocks: {} have enough copies elsewhere, {} copies ({} bytes) go to {} first",
+                        plan.blocks,
+                        plan.blocks_ok,
+                        plan.copies.len(),
+                        plan.bytes_to_copy,
+                        if plan.targets.is_empty() { "-".to_string() } else { plan.targets.join(", ") }
+                    );
+                    if *dry_run {
+                        return Ok(());
+                    }
+                    let r = engine.remove_storage(name, *delete_data)?;
+                    println!(
+                        "storage {name} removed: {} blocks copied ({} bytes){}",
+                        r.blocks_copied,
+                        r.bytes_copied,
+                        if *delete_data {
+                            format!(", {} objects deleted from it", r.objects_deleted)
+                        } else {
+                            ", its data was left in place".to_string()
+                        }
+                    );
                 }
                 StorageCmd::List => {
                     print(cli, &engine.storages().to_vec(), |s| {

@@ -97,7 +97,7 @@
       <form id="pair" class="card">
         <h3 class="card-title"><svg class="icon accent"><use href="#i-device"/></svg>Pair with your other device</h3>
         <p class="muted small">On a device that already uses Varsto, open Devices and choose Add a device. Type the code it shows.</p>
-        <label>Code <input name="code" inputmode="numeric" autocomplete="one-time-code" placeholder="123-456-789" required></label>
+        <label>Code <input name="code" type="tel" inputmode="numeric" pattern="[0-9 -]*" maxlength="11" autocomplete="one-time-code" placeholder="123-456-789" required></label>
         <label>Name for this device <input name="name" placeholder="phone" required></label>
         <label>Passphrase for this device <input name="passphrase" type="password" minlength="8" required></label>
         <details class="small"><summary>The other device is not found</summary>

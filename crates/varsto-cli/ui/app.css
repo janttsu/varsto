@@ -463,7 +463,7 @@ ul.list .minimap { margin-top: 6px; }
 .modal-text { color: var(--text-2); font-size: 13.5px; margin: 0 0 12px; }
 .modal-code { background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px 12px; margin: 0 0 12px; overflow-wrap: anywhere; white-space: pre-wrap; user-select: all; }
 .modal-fields label:last-child { margin-bottom: 4px; }
-.modal-actions { display: flex; gap: 8px; align-items: center; margin-top: 12px; }
+.modal-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 12px; }
 body.modal-open { overflow: hidden; }
 
 /* Reset section */

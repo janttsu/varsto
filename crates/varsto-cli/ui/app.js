@@ -298,6 +298,23 @@
       });
     }, Promise.resolve()).catch(function (e) { alertBox(e.message); }).then(function () { busy(false); return refreshStatus(); });
   };
+  // Removing a storage: first show what has to be copied elsewhere to keep
+  // every block's copies (one, or the folder policy's minimum), then do it.
+  function removeStorage(name) {
+    api("GET", "/api/storage/remove-plan?name=" + enc(name)).then(function (p) {
+      if (p.blocked) { alertBox("Cannot remove " + name + ": " + p.blocked); return null; }
+      var text = name + " holds " + p.blocks + " block" + (p.blocks === 1 ? "" : "s") + " of your files. ";
+      text += p.copies.length ? p.blocks_ok + " already have enough copies elsewhere; " + p.copies.length + " cop" + (p.copies.length === 1 ? "y" : "ies") + " (" + fmtBytes(p.bytes_to_copy) + ") will first be made on " + p.targets.join(", ") + ". " : "Every block already has enough copies on your other storages. ";
+      text += "Then no device counts " + name + " as a copy any more. Remove leaves its data in place; you can also delete it.";
+      return dialog({ title: "Remove storage " + name + "?", text: text, ok: "Remove", extra: "Remove and delete data" }).then(function (r) {
+        if (!r) { return null; }
+        busy(true); log((p.copies.length ? "copying " + p.copies.length + " blocks, then " : "") + "removing storage " + name);
+        return api("POST", "/api/storage/remove", { name: name, delete_data: r.action === "extra" }).then(function (x) {
+          log("storage " + name + " removed" + (x.blocks_copied ? ": " + x.blocks_copied + " blocks copied (" + fmtBytes(x.bytes_copied) + ")" : "") + (x.objects_deleted ? ", " + x.objects_deleted + " objects deleted from it" : ""));
+        });
+      });
+    }).catch(function (e) { alertBox(e.message); }).then(function () { busy(false); return refreshStatus(); });
+  }
   function shareFolder(f) {
     dialog({
       title: (f.shared ? "New token for " : "Share ") + f.name,
@@ -436,7 +453,9 @@
         title.appendChild(pill("grey", st.kind === "s3" ? "S3" : st.kind === "rclone" ? "rclone" : st.kind === "pool" ? "disk pool" : "directory"));
         if (st.cold) { title.appendChild(pill("grey", "cold")); } if (st.carrier) { title.appendChild(pill("grey", "transferrer")); }
         if (st.place) { title.appendChild(pill("grey", st.place)); }
-        body.appendChild(title); body.appendChild(el("div", "li-sub", where || "")); li.appendChild(body); ul.appendChild(li);
+        body.appendChild(title); body.appendChild(el("div", "li-sub", where || "")); li.appendChild(body);
+        if (!s.member) { var ra = el("div", "li-actions"); var rb = el("button", "secondary", "Remove"); rb.type = "button"; rb.onclick = function () { removeStorage(st.name); }; ra.appendChild(rb); li.appendChild(ra); }
+        ul.appendChild(li);
       });
       $("storages-empty").classList.toggle("hidden", s.storages.length > 0);
       renderPools(s.storages);
@@ -829,6 +848,11 @@
   $("joinkind").onchange = applyJoinKind;
   function joinKindForDevice() { if (isMobile()) { $("joinkind").value = "s3"; $("joinkind").querySelector('option[value="local-dir"]').disabled = true; } applyJoinKind(); }
   joinKindForDevice();
+  // The code field opens the number pad (type=tel) and groups the digits as typed.
+  $("pair").querySelector("input[name=code]").addEventListener("input", function (ev) {
+    var d = ev.target.value.replace(/[^0-9]/g, "").slice(0, 9);
+    ev.target.value = d.replace(/^(\d{3})(\d{1,3})?(\d{1,3})?$/, function (m, a, b, c) { return a + (b ? "-" + b : "") + (c ? "-" + c : ""); });
+  });
   $("pair").onsubmit = function (ev) {
     ev.preventDefault(); var d = formData(ev.target); busy(true); log("looking for the device showing code " + d.code);
     api("POST", "/api/pair/join", d).then(function (r) { ev.target.reset(); log("paired with " + r.from + ": " + r.storages.join("; ")); nav("files"); return refreshState(); }).catch(function (e) { alertBox(e.message); }).then(function () { busy(false); });
