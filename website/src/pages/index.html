@@ -21,17 +21,18 @@ description: Varsto: end-to-end encrypted file sync and backup on storage you al
       <section class="card"><h3>Policies that warn in time</h3><p>"Two cloud copies and one at home, verified within 30 days." Every device checks it from the ledger and warns, in the app and by notification, before it stops being true.</p></section>
       <section class="card"><h3>Peer-to-peer, compressed</h3><p>Your devices exchange encrypted blocks directly, torrent-style: on the LAN automatically, across the internet with a reachable address. Blocks are compressed before encryption, so every copy and transfer is small.</p></section>
       <section class="card"><h3>Strongroom folders</h3><p>A folder whose key exists only while you touch your FIDO2 security key. Cryptographic, not a dialog: no passphrase, vault key or stolen laptop opens it.</p></section>
+      <section class="card"><h3>Old disks as a pool</h3><p>Plug a disk into the dock, add it to the pool, and it fills with what the pool lacks until its reserve. Eject when told, keep it anywhere; when it comes back it is recognised by its marker, checked and topped up. A file whose only copy is on a disk that is away says so: "attach disk data-01 (shelf)".</p></section>
       <section class="card"><h3>Bookkeeping you can check</h3><p><code>varsto fsck --verify</code> compares the ledger with what the storage actually holds and re-hashes every object. A device restored from an old backup is detected and fenced.</p></section>
     </div>
 
     <h2>What is designed but not built yet</h2>
     <div class="grid">
-      <section class="card todo"><h3>NAT traversal, iOS, disk pools</h3><p>Relays and hole punching for peers behind NAT, the iOS build (needs a Mac), the removable-disk pool with "attach this disk" prompts, and converting existing folders into Strongrooms are next.</p></section>
+      <section class="card todo"><h3>NAT traversal, iOS, disk groups</h3><p>Relays and hole punching for peers behind NAT, the iOS build (needs a Mac), placement rules across disk groups (two copies on disks kept in different places), and converting existing folders into Strongrooms are next.</p></section>
     </div>
 
     <h2>Honest status</h2>
     <ul>
-      <li>The alpha is a first vertical slice: core library, CLI, background service, tray and menu-bar shells, Android shell, about 15 000 lines, 49 automated tests including two-device offline convergence, conflicts, a restored-device fence, replicas, sharing, policies, peers and Strongrooms. Use it with test data only.</li>
+      <li>The alpha is a first vertical slice: core library, CLI, background service, tray and menu-bar shells, Android shell, about 15 000 lines, 59 automated tests including two-device offline convergence, conflicts, a restored-device fence, replicas, sharing, policies, peers, Strongrooms and disk pools. Use it with test data only.</li>
       <li>The cryptographic design has not been reviewed or audited. The <a href="docs/threat-model.html">threat model</a> and the <a href="docs/failure-model.html">failure model</a> say what the design intends and where it stops.</li>
       <li>The source is public at <a href="https://github.com/janttsu/varsto" rel="noopener">github.com/janttsu/varsto</a> under the <a href="docs/licence.html">PolyForm Shield License 1.0.0</a> (source-available, not open source); bugs and questions go to the issue tracker there. The storage format is <a href="docs/alpha-0-format.html">documented</a> so that your data stays recoverable.</li>
       <li>The name is provisional and the site is kept out of search engines until it is settled.</li>
