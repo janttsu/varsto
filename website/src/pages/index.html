@@ -11,7 +11,7 @@ description: Varsto: end-to-end encrypted file sync and backup on storage you al
 
     <h2>What works today (alpha, 0.0.1-alpha.6)</h2>
     <div class="grid">
-      <section class="card"><h3>Encrypted before it leaves your device</h3><p>Files are cut into content-defined chunks, each encrypted with XChaCha20-Poly1305 under keys derived from your vault. Storage sees opaque objects and sizes, never names, hashes or content. <a href="encryption/">How it all works</a>.</p></section>
+      <section class="card"><h3>Encrypted before it leaves your device</h3><p>Files are cut into content-defined chunks, each encrypted with XChaCha20-Poly1305 under keys derived from your vault. Storage sees opaque objects and sizes, never names, hashes or content. <a href="how-it-works/">How it all works</a>.</p></section>
       <section class="card"><h3>Bring your own storage</h3><p>Any directory this device can reach, any S3-compatible bucket (AWS, Scaleway, Hetzner, B2, R2, MinIO) with your own keys, or any rclone remote. Cold storages and archive classes are written but never read without your confirmation.</p></section>
       <section class="card"><h3>Devices that never meet still converge</h3><p>Each device keeps a signed, encrypted ledger and publishes it through the storage. Edits, deletions and conflicts resolve deterministically; concurrent edits keep both versions, deletions go to a trash.</p></section>
       <section class="card"><h3>Background app on every desktop</h3><p>A tray or menu-bar app runs the service, watches folders and syncs within seconds; the interface opens in your browser, served only to this computer. One-click updates.</p></section>

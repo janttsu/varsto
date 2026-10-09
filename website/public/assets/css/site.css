@@ -118,3 +118,13 @@ figure.hero figcaption { color: var(--muted); font-size: .95rem; margin-top: .5r
 :root[data-theme="dark"] .shot-dark { display:block; }
 :root[data-theme="dark"] .shot-light { display:none; }
 .shots-single { grid-template-columns: 1fr; max-width: 20rem; }
+
+/* On-this-page table of contents (How it works). */
+.toc { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:1rem 1.25rem; margin:1.5rem 0 1rem; max-width:42rem; }
+.toc-title { margin:0 0 .4rem; font-weight:600; }
+.toc ol { margin:0; padding-left:1.4rem; columns:2 14rem; column-gap:2rem; }
+.toc li { padding:.1rem 0; break-inside:avoid; }
+.feature > h3 { grid-column: 1 / -1; margin:0 0 .25rem; font-size:1.15rem; }
+h3 { font-size:1.15rem; margin:2rem 0 .5rem; }
+[id] { scroll-margin-top:1rem; }
+.tech > p, .tech > ul, .tech > ol { max-width: 52rem; }
