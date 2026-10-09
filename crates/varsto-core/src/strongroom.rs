@@ -464,6 +464,63 @@ pub fn unlock_enrolled(
     )
 }
 
+/// Re-key: wrap a new folder key (of a new folder id) for every enrolled
+/// security key, each with a fresh salt, using whatever this device has for
+/// each (one touch per hardware key; software keys are key files in `home`).
+/// Credentials, labels and methods stay; every key must answer.
+pub fn rewrap_enrolled(
+    home: &Path,
+    folder: &FolderId,
+    folder_key: &SecretKey,
+    info: &StrongroomInfo,
+) -> Result<StrongroomInfo> {
+    let keys = info.keys();
+    let mut out = Vec::with_capacity(keys.len());
+    for (i, k) in keys.iter().enumerate() {
+        if keys.len() > 1 {
+            eprintln!(
+                "Wrapping the new key for enrolled key {} of {}: {}",
+                i + 1,
+                keys.len(),
+                k.short()
+            );
+        }
+        out.push(
+            rewrap_one(backend_for(k, home).as_ref(), folder, folder_key, k).with_context(
+                || {
+                    format!(
+                        "{}: every enrolled key must take the new folder key (remove a key that is gone first: varsto strongroom remove-key)",
+                        k.short()
+                    )
+                },
+            )?,
+        );
+    }
+    StrongroomInfo::from_keys(out, crate::util::now_utc().max(info.updated_utc + 1))
+}
+
+/// Wrap `folder_key` for one enrolled credential with a fresh salt (one touch).
+pub fn rewrap_one(
+    key: &dyn SecurityKey,
+    folder: &FolderId,
+    folder_key: &SecretKey,
+    k: &EnrolledKey,
+) -> Result<EnrolledKey> {
+    let mut salt = [0u8; 32];
+    rand::RngCore::fill_bytes(&mut rand::rngs::OsRng, &mut salt);
+    let secret = key.hmac_secret(&k.credential, &salt)?;
+    let wrapped = crypto::encrypt(
+        &wrap_key(&secret, folder),
+        &aad(folder),
+        folder_key.as_bytes(),
+    )?;
+    Ok(EnrolledKey {
+        salt_hex: hex::encode(salt),
+        wrapped_key_hex: hex::encode(wrapped),
+        ..k.clone()
+    })
+}
+
 /// Published once a folder has been converted into a Strongroom
 /// (`vault/converted/<old folder>.enc`, under the folder-record key). It
 /// names the folder that replaces the old one and how far each device's
@@ -477,6 +534,9 @@ pub struct ConversionRecord {
     /// Highest manifest sequence of each device that the converted copy
     /// includes: a device that published more after that keeps its plain files.
     pub covered: BTreeMap<DeviceId, u64>,
+    /// The old folder was a Strongroom already: its key was rotated.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub rekey: bool,
 }
 
 impl ConversionRecord {

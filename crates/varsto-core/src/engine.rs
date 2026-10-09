@@ -39,21 +39,25 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
+mod access_sync;
 mod block_cache;
 mod devinfo;
 mod ledger_upkeep;
 mod membership;
 mod placement;
+mod share_ops;
 mod strongroom_ops;
 mod verify;
 mod view;
 mod where_data;
+pub use access_sync::AccessExchangeReport;
 pub use block_cache::{BlockWriter, StagedFile, BLOCK_CACHE_DIR, EXPORT_DIR};
 pub use devinfo::DeviceDetails;
 pub use membership::{
     removal_notice, DeviceInfo, DeviceRemoved, EpochRecord, Grant, KemRecord, Removal, Revocation,
     RevokeReport, Revoked, SignedRevocation,
 };
+pub use share_ops::{ShareMember, ShareMembers, ShareRevokeReport};
 pub use strongroom_ops::{CleanupReport, ConvertReport, StrongroomKeySummary};
 pub use where_data::{CopyStats, DataLocations, DeviceShare, FolderShare, StorageShare};
 
@@ -747,8 +751,13 @@ impl Engine {
             policy_updated_utc: 0,
             strongroom: None,
             removed_utc: 0,
+            epoch_keys: token.epoch_keys.clone(),
         };
         engine.keyring.folders.insert(rec.folder_id.clone(), rec);
+        // The request key stays as this member's KEM key: grants of later
+        // share epochs are sealed to it.
+        engine.adopt_member_kem()?;
+        engine.remember_share_owners(&token.folder_id, &token.owners)?;
         engine.keyring.save(
             home,
             &engine.keys,
@@ -764,36 +773,11 @@ impl Engine {
         Ok(engine)
     }
 
-    /// Owner: share a folder with another user. The token carries the folder key.
+    /// Owner: share a folder with another user. The token carries the folder
+    /// key (and the keys of later epochs); seal it to the recipient's request
+    /// code with `ShareToken::seal` (see `share_ops::share_create_for`).
     pub fn share_create(&mut self, folder: &str) -> Result<ShareToken> {
-        if self.vault.member {
-            bail!("a member device cannot share folders further");
-        }
-        if self.keyring.find(folder).is_some_and(|r| r.is_strongroom()) {
-            bail!("a Strongroom folder cannot be shared");
-        }
-        let rec = self
-            .keyring
-            .find(folder)
-            .cloned()
-            .ok_or_else(|| anyhow!("unknown folder {folder}"))?;
-        if self.key_epoch() > 0 && !self.is_frozen(&rec) {
-            bail!(
-                "{} was re-keyed when a device was removed; sharing a re-keyed folder is not supported yet",
-                rec.name
-            );
-        }
-        if let Some(r) = self.keyring.folders.get_mut(&rec.folder_id) {
-            r.shared = true;
-        }
-        self.keyring.save(
-            &self.home,
-            &self.keys,
-            &self.vault.vault_id,
-            &self.vault.device_id,
-        )?;
-        self.publish_registry()?;
-        Ok(rec.share_token(&self.vault.vault_id))
+        self.share_prepare(folder)
     }
 
     pub fn is_member(&self) -> bool {
@@ -806,10 +790,10 @@ impl Engine {
             KEY_REPLICA if !self.vault.member => Some(replica::replica_key(self.root_key())),
             id if !self.vault.member && id.starts_with(KEY_LEDGER) => self.ledger_key_for(id),
             other => {
-                let fid = other.strip_prefix("share:")?;
-                let rec = self.keyring.folders.get(&FolderId::from_hex(fid).ok()?)?;
+                let (fid, epoch) = crate::share::parse_ledger_key_id(other)?;
+                let rec = self.keyring.folders.get(&fid)?;
                 Some(vault::share_ledger_key(
-                    &rec.folder_key().ok()?,
+                    &self.share_epoch_key(rec, epoch)?,
                     &rec.folder_id,
                 ))
             }
@@ -1312,6 +1296,7 @@ impl Engine {
             policy_updated_utc: 0,
             strongroom: None,
             removed_utc: 0,
+            epoch_keys: BTreeMap::new(),
         };
         let id = rec.folder_id.clone();
         self.keyring.folders.insert(id.clone(), rec);
@@ -1506,6 +1491,7 @@ impl Engine {
                 for prefix in [
                     format!("manifests/{}/", rec.folder_id),
                     format!("thumbs/{}/", rec.folder_id),
+                    format!("vault/access/{}/", rec.folder_id),
                 ] {
                     for key in backend.list(&prefix)? {
                         backend.delete(&key)?;
@@ -1762,13 +1748,7 @@ impl Engine {
             }
             // Shared folders: every participant (owner devices and members)
             // publishes its record under the folder-derived registry key.
-            for f in self.keyring.folders.values().filter(|f| f.shared) {
-                let k = vault::share_registry_key(&f.folder_key()?, &f.folder_id);
-                backend.put_if_absent(
-                    &vault::share_record_key(&f.folder_id, &rec.device_id),
-                    &rec.seal(&self.vault.vault_id, &k)?,
-                )?;
-            }
+            self.publish_share_records(backend.as_ref(), &rec)?;
         }
         // The key-exchange key a revocation seals the next vault key to.
         self.kem_record_stale();
@@ -1933,34 +1913,10 @@ impl Engine {
                 }
             }
         }
-        // Member records of shared folders, readable by every holder of the folder key.
-        for (_, backend) in self.metadata_storages(false)? {
-            for f in self.keyring.folders.values().filter(|f| f.shared) {
-                let k = vault::share_registry_key(&f.folder_key()?, &f.folder_id);
-                let prefix = format!("{SHARE_PREFIX}{}/", f.folder_id);
-                for key in backend.list(&prefix)? {
-                    let Some(id) = key
-                        .strip_prefix(&prefix)
-                        .and_then(|s| s.strip_suffix(".enc"))
-                    else {
-                        continue;
-                    };
-                    let id = DeviceId::from_hex(id)?;
-                    if id == self.vault.device_id
-                        || self.devices.members.contains_key(&id)
-                        || self.devices.devices.contains_key(&id)
-                    {
-                        continue;
-                    }
-                    if let Some(blob) = backend.get(&key)? {
-                        if let Ok(rec) = DeviceRecord::open(&blob, &self.vault.vault_id, &id, &k) {
-                            self.devices.members.insert(id, rec);
-                            changed_devices = true;
-                        }
-                    }
-                }
-            }
-        }
+        // Member records, epochs and grants of shared folders.
+        let (devs, folders) = self.pull_share_state()?;
+        changed_devices |= devs;
+        changed_folders |= folders;
         // Strongroom conversions and key lists (S-012).
         self.pull_strongroom_records()?;
         changed_devices |= self.pull_device_details().unwrap_or(false);
@@ -2044,13 +2000,13 @@ impl Engine {
             let Some(rec) = self.keyring.folders.get(&fid) else {
                 continue;
             };
-            let key = vault::share_ledger_key(&rec.folder_key()?, &fid);
+            let (key_id, key) = self.share_ledger_key_now(rec)?;
             let signed = self.ledger.append_own_with(
                 &self.vault.device_id,
                 evs,
                 lamport,
                 &key,
-                &vault::share_key_id(&fid),
+                &key_id,
                 &self.keys.signer,
             )?;
             last = Some(signed.seq);
@@ -2705,6 +2661,10 @@ impl Engine {
         let metas = fk.meta_keys();
         let encrypted_here = self.mount_is_encrypted(&rec.folder_id);
         for (dev, (seq, idx)) in newest {
+            if !self.share_manifest_source_ok(&rec, &dev) {
+                // A device that is not a participant of the shared folder.
+                continue;
+            }
             let seq = if self.is_revoked(&dev) {
                 seq.min(
                     capped
@@ -2722,18 +2682,19 @@ impl Engine {
             let Some(blob) = storages[idx].1.get(&key)? else {
                 continue;
             };
-            let m = metas
-                .iter()
-                .find_map(|meta| {
-                    Manifest::open(&blob, &self.vault.vault_id, &rec.folder_id, &dev, seq, meta)
-                        .ok()
-                })
-                .ok_or_else(|| {
-                    anyhow!(
-                        "manifest {seq} of device {} does not open with any key this device holds (a newer vault key has not arrived yet?)",
-                        dev.short()
-                    )
-                })?;
+            let Some(m) = metas.iter().find_map(|meta| {
+                Manifest::open(&blob, &self.vault.vault_id, &rec.folder_id, &dev, seq, meta).ok()
+            }) else {
+                if self.share_access_lost(&rec.folder_id) {
+                    // Removed from the shared folder: newer manifests are
+                    // under a key this device will not get.
+                    continue;
+                }
+                bail!(
+                    "manifest {seq} of device {} does not open with any key this device holds (a newer vault key has not arrived yet?)",
+                    dev.short()
+                );
+            };
             self.observe_clock(m.lamport)?;
             report.manifests_applied += 1;
             for (path, remote) in &m.files {
@@ -3494,6 +3455,7 @@ impl Engine {
             policy_updated_utc: 0,
             strongroom: Some(info),
             removed_utc: 0,
+            epoch_keys: BTreeMap::new(),
         };
         self.keyring.folders.insert(folder_id.clone(), rec);
         self.keyring.save(
@@ -3949,6 +3911,8 @@ impl Engine {
         let state = self.load_state(&rec.folder_id)?;
         let selective = self.mount_is_selective(&rec.folder_id);
         let encrypted_here = self.mount_is_encrypted(&rec.folder_id);
+        // Newest use on any device of the folder (`access_sync`).
+        let accessed = self.merged_access(&rec.folder_id, &state);
         let mut out = Vec::new();
         for f in state.files.values().filter(|f| !f.deleted) {
             let disk = root.join(&f.path);
@@ -3978,7 +3942,7 @@ impl Engine {
                 disk: disk.clone(),
                 media: thumbs::is_image(&f.path) || thumbs::is_video(&f.path),
                 modified_utc: f.mtime / 1_000_000_000,
-                last_accessed_utc: state.accessed.get(&f.path).copied(),
+                last_accessed_utc: accessed.get(&f.path).copied(),
             });
         }
         Ok(out)
@@ -3995,6 +3959,8 @@ impl Engine {
         // Checkpoints, acknowledgements and pruning; anything left undone
         // (an unreachable storage) is retried after the next sync.
         let _ = self.ledger_upkeep();
+        // Last-accessed records of every device, when due (`access_sync`).
+        let _ = self.access_upkeep(false);
         Ok(out)
     }
 
@@ -4173,6 +4139,8 @@ impl Engine {
                 .devices
                 .revoked
                 .keys()
+                // Members removed from a shared folder are listed per folder.
+                .filter(|k| !self.devices.members.contains_key(*k))
                 .map(|k| {
                     let name = view
                         .devices

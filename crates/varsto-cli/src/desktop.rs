@@ -657,7 +657,12 @@ fn api(st: &mut State, method: Method, path: &str, query: &str, input: &Value) -
             Ok(json!({"ok": true, "vault_key": key}))
         }
         (Method::Post, "/api/share/request") => {
-            Ok(json!({"request_code": varsto_core::vault::ShareRequest::code_for(&st.home)?}))
+            let name = opt(input, "name").filter(|n| !n.trim().is_empty());
+            let code = varsto_core::vault::ShareRequest::code_for_named(&st.home, name.as_deref())?;
+            Ok(json!({
+                "request_code": code,
+                "fingerprint": varsto_core::vault::ShareRequest::fingerprint_for(&st.home)?,
+            }))
         }
         (Method::Post, "/api/share/accept") => {
             let raw = s(input, "token")?;
@@ -682,7 +687,7 @@ fn api(st: &mut State, method: Method, path: &str, query: &str, input: &Value) -
             )?;
             st.engine = Some(e);
             varsto_core::vault::ShareRequest::clear(&st.home);
-            Ok(json!({"ok": true, "folder": token.name}))
+            Ok(json!({"ok": true, "folder": token.name, "fingerprint": token.fingerprint}))
         }
         (Method::Post, "/api/join") => {
             // The storage that holds the vault: a directory, or an S3-compatible
@@ -779,15 +784,41 @@ fn api_unlocked(
                 .map(|(r, m)| json!({"id": r.folder_id.to_string(), "name": r.name, "path": m, "strongroom": r.is_strongroom(), "plain": !engine.folder_is_encrypted_here(&r.folder_id)}))
                 .collect(),
         )),
+        // The fingerprint of a request code, shown before the token is sealed.
+        (Method::Post, "/api/share/fingerprint") => {
+            let r = Engine::share_request_info(&s(input, "code")?)?;
+            Ok(json!({"fingerprint": r.fingerprint, "name": r.name}))
+        }
         (Method::Post, "/api/share/create") => {
-            let t = engine.share_create(&s(input, "folder")?)?;
+            let folder = s(input, "folder")?;
             match opt(input, "to").filter(|c| !c.trim().is_empty()) {
                 Some(code) => {
-                    let sealed = t.seal(&varsto_core::vault::ShareRequest::parse_code(&code)?)?;
-                    Ok(json!({"ok": true, "token": sealed.encode(), "folder": sealed.name, "sealed": true}))
+                    // The interface sends the words the user confirmed; they
+                    // must be the code's.
+                    let confirmed = opt(input, "fingerprint").filter(|f| !f.trim().is_empty());
+                    let (sealed, req) =
+                        engine.share_create_sealed(&folder, &code, confirmed.as_deref())?;
+                    Ok(json!({"ok": true, "token": sealed.encode(), "folder": sealed.name, "sealed": true, "fingerprint": req.fingerprint, "name": req.name}))
                 }
-                None => Ok(json!({"ok": true, "token": t.encode(), "folder": t.name, "sealed": false})),
+                None => {
+                    let t = engine.share_create_plain(&folder)?;
+                    Ok(json!({"ok": true, "token": t.encode_plain()?, "folder": t.name, "sealed": false}))
+                }
             }
+        }
+        (Method::Get, "/api/share/members") => {
+            let folder = query_param(query, "folder")
+                .ok_or_else(|| anyhow!("folder query parameter required"))?;
+            Ok(serde_json::to_value(engine.share_members(&folder)?)?)
+        }
+        (Method::Post, "/api/share/revoke") => {
+            // Like removing a device: the caller must confirm explicitly.
+            if !input.get("confirm").and_then(|v| v.as_bool()).unwrap_or(false) {
+                bail!("removing a member needs \"confirm\": true");
+            }
+            let r = engine.share_revoke(&s(input, "folder")?, &s(input, "member")?)?;
+            service.request_sync();
+            Ok(serde_json::to_value(r)?)
         }
         (Method::Get, "/api/devices") => Ok(json!({
             "devices": engine.devices_list(),
@@ -1039,6 +1070,19 @@ fn api_unlocked(
             }
             service.request_sync();
             Ok(out)
+        }
+        // Re-key: the command line unlocked the folder and wrapped the new
+        // key for every enrolled security key; the re-encryption runs here.
+        (Method::Post, "/api/strongroom/rekey") => {
+            let folder = s(input, "folder")?;
+            let id = varsto_core::ids::FolderId::from_hex(&s(input, "folder_id")?)?;
+            let key = varsto_core::crypto::SecretKey::from_hex(&s(input, "key_hex")?)?;
+            let info: varsto_core::strongroom::StrongroomInfo = serde_json::from_value(input.get("info").cloned().unwrap_or_default())?;
+            let minutes = input.get("minutes").and_then(|v| v.as_u64()).unwrap_or(15).clamp(1, 24 * 60);
+            engine.unlock_strongroom_with_key(&folder, &s(input, "old_key_hex")?, minutes)?;
+            let r = engine.rekey_strongroom_with(&folder, &id, &key, info, minutes)?;
+            service.request_sync();
+            Ok(serde_json::to_value(r)?)
         }
         (Method::Post, "/api/strongroom/add-key") => {
             let key: varsto_core::strongroom::EnrolledKey = serde_json::from_value(input.get("key").cloned().unwrap_or_default())?;

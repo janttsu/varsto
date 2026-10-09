@@ -140,6 +140,61 @@ impl Engine {
         info: StrongroomInfo,
         unlock_minutes: u64,
     ) -> Result<ConvertReport> {
+        self.convert_into(folder, new_id, folder_key, info, unlock_minutes, false)
+    }
+
+    /// Rotate a Strongroom's key: the conversion above, from a Strongroom to
+    /// a Strongroom. The folder gets a new id and a new random key wrapped
+    /// for every enrolled security key (`strongroom::rewrap_enrolled`), its
+    /// content is re-encrypted, and the old copies (chunks, manifests, the
+    /// old key wraps) are deleted from the storages. The folder must be
+    /// unlocked here under its current key. Run it again with the same new
+    /// key to resume (`strongroom_conversion` names it).
+    pub fn rekey_strongroom_with(
+        &mut self,
+        folder: &str,
+        new_id: &FolderId,
+        folder_key: &SecretKey,
+        info: StrongroomInfo,
+        unlock_minutes: u64,
+    ) -> Result<ConvertReport> {
+        self.convert_into(folder, new_id, folder_key, info, unlock_minutes, true)
+    }
+
+    /// Rotate a Strongroom's key with the security keys this device can
+    /// use (software key files in the vault directory, or the libfido2
+    /// tools: one touch to unlock, then one per enrolled key).
+    pub fn rekey_strongroom(&mut self, folder: &str, unlock_minutes: u64) -> Result<ConvertReport> {
+        if let Some((id, info)) = self.strongroom_conversion(folder) {
+            let (fk, _) = strongroom::unlock_enrolled(&self.home, &id, &info)?;
+            if !self
+                .keyring
+                .find(folder)
+                .is_some_and(|r| self.is_unlocked(&r.folder_id))
+            {
+                self.unlock_strongroom_enrolled(folder, unlock_minutes)?;
+            }
+            return self.rekey_strongroom_with(folder, &id, &fk, info, unlock_minutes);
+        }
+        let (rec, info) = self.strongroom_record(folder)?;
+        if !self.is_unlocked(&rec.folder_id) {
+            self.unlock_strongroom_enrolled(folder, unlock_minutes)?;
+        }
+        let id = FolderId::random();
+        let fk = SecretKey::random();
+        let new_info = strongroom::rewrap_enrolled(&self.home, &id, &fk, &info)?;
+        self.rekey_strongroom_with(folder, &id, &fk, new_info, unlock_minutes)
+    }
+
+    fn convert_into(
+        &mut self,
+        folder: &str,
+        new_id: &FolderId,
+        folder_key: &SecretKey,
+        info: StrongroomInfo,
+        unlock_minutes: u64,
+        rekey: bool,
+    ) -> Result<ConvertReport> {
         if self.vault.member {
             bail!("a member device cannot convert folders of the owner's vault");
         }
@@ -148,7 +203,15 @@ impl Engine {
             .find(folder)
             .cloned()
             .ok_or_else(|| anyhow!("unknown folder {folder}"))?;
-        if rec.is_strongroom() {
+        if rekey {
+            if !rec.is_strongroom() {
+                bail!(
+                    "{} is not a Strongroom; convert it first (varsto strongroom convert)",
+                    rec.name
+                );
+            }
+            self.with_key(&rec)?;
+        } else if rec.is_strongroom() {
             let cleanup = self.finish_strongroom_conversions();
             return Ok(ConvertReport {
                 folder: rec.name.clone(),
@@ -313,6 +376,7 @@ impl Engine {
             policy_updated_utc: rec.policy_updated_utc,
             strongroom: Some(info),
             removed_utc: 0,
+            epoch_keys: BTreeMap::new(),
         };
         self.publish_manifest(&new_rec, &mut new_state)?;
         self.ensure_manifest_everywhere(&new_rec, &new_state)?;
@@ -329,6 +393,7 @@ impl Engine {
             device: me.clone(),
             converted_utc: util::now_utc(),
             covered,
+            rekey,
         };
         let fr_key = self.folder_record_key_now();
         let blob = record.seal(&self.vault.vault_id, &fr_key)?;
@@ -357,6 +422,7 @@ impl Engine {
         }
         self.config.save(&self.home)?;
         let _ = fs::remove_file(self.state_path(&old_id));
+        self.unlocked.remove(&old_id);
         self.unlocked.insert(
             new_id.clone(),
             (
@@ -595,6 +661,10 @@ impl Engine {
                 let prefixes = [
                     format!("thumbs/{}/", old.folder_id),
                     format!("{}{}/", vault::PolicyRecord::PREFIX, old.folder_id),
+                    // A re-keyed Strongroom's old key wraps.
+                    format!("{}{}/", KeysRecord::PREFIX, old.folder_id),
+                    // Last-accessed records under the old key name files.
+                    format!("vault/access/{}/", old.folder_id),
                 ];
                 for prefix in prefixes {
                     for key in backend.list(&prefix)? {
@@ -678,11 +748,8 @@ impl Engine {
                 else {
                     continue;
                 };
-                let known = self
-                    .keyring
-                    .folders
-                    .get(&old)
-                    .is_some_and(|r| !r.is_strongroom());
+                // A Strongroom is "converted" again when its key is rotated.
+                let known = self.keyring.folders.contains_key(&old);
                 if !known || self.keyring.converting.contains_key(&old) {
                     continue;
                 }
@@ -762,6 +829,7 @@ impl Engine {
             self.config.save(&self.home)?;
             let _ = fs::remove_file(self.state_path(&old.folder_id));
         }
+        self.unlocked.remove(&old.folder_id);
         self.keyring.folders.remove(&old.folder_id);
         self.keyring.converting.insert(
             old.folder_id.clone(),

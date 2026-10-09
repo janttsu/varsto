@@ -503,11 +503,74 @@
       ok: f.shared ? "Create token" : "Share"
     }).then(function (r) {
       if (!r) { return; }
-      return api("POST", "/api/share/create", { folder: f.name, to: (r.values.to || "").trim() }).then(function (t) {
-        $("sharetoken").textContent = (t.sealed ? "Sealed share token for " + t.folder + " (only the requesting device can open it): " : "Share token for " + t.folder + " (contains the folder key; send over a secure channel): ") + t.token;
-        $("sharetoken").classList.remove("hidden"); nav("shared"); refreshStatus();
+      var code = (r.values.to || "").trim();
+      if (!code) { return createToken(f, "", ""); }
+      // Confirm who asked: both sides see the same six words for the code.
+      return api("POST", "/api/share/fingerprint", { code: code }).then(function (fp) {
+        var who = fp.name || "the requester";
+        return dialog({
+          title: "Is this " + who + "'s request?",
+          text: "Ask " + who + " to read the fingerprint their device shows for the request code (under Accept a shared folder, or `varsto share request`), over a call or in person, not in the same message as the code. Share only if all six words match: different words mean the code was changed on its way.",
+          code: fp.fingerprint, ok: "The words match", danger: false
+        }).then(function (c) { if (c) { return createToken(f, code, fp.fingerprint); } });
       });
     }).catch(function (e) { alertBox(e.message); });
+  }
+  function createToken(f, code, fingerprint) {
+    return api("POST", "/api/share/create", { folder: f.name, to: code, fingerprint: fingerprint }).then(function (t) {
+      $("sharetoken").textContent = (t.sealed ? "Sealed share token for " + t.folder + " (only the requesting device can open it; fingerprint " + t.fingerprint + "): " : "Share token for " + t.folder + " (contains the folder key; send over a secure channel): ") + t.token;
+      $("sharetoken").classList.remove("hidden"); nav("shared"); refreshStatus();
+    });
+  }
+  // Who has access to a shared folder, under its row on the Shared page.
+  function showMembers(f, box, owner) {
+    api("GET", "/api/share/members?folder=" + encodeURIComponent(f.name)).then(function (l) {
+      box.innerHTML = "";
+      if (l.access_lost) { box.appendChild(el("li", "notice warn", "This device no longer receives new content of " + f.name + ": the owner removed it, or has not sent it the new key yet.")); }
+      l.members.forEach(function (m) {
+        var li = el("li"); var body = el("div", "li-body"); var title = el("div", "li-title", m.name);
+        var kind = m.kind === "owner-device" ? ["grey", "Owner's device"] : m.kind === "invite" ? (m.status === "pending" ? ["accent", "Token not accepted yet"] : ["grey", "Token revoked"]) : m.status === "removed" ? ["risk", "Removed"] : ["accent", "Member"];
+        title.appendChild(pill(kind[0], kind[1]));
+        if (m.this_device) { title.appendChild(pill("grey", "This device")); }
+        body.appendChild(title);
+        var sub = [];
+        if (m.fingerprint) { sub.push("fingerprint " + m.fingerprint); }
+        if (m.status === "removed") { sub.push("removed" + (m.removed_by ? " by " + m.removed_by : "") + (m.removed_utc ? " " + fmtDate(m.removed_utc) : "")); }
+        else if (m.since_utc) { sub.push((m.kind === "invite" ? "issued " : "since ") + fmtDate(m.since_utc)); }
+        if (sub.length) { body.appendChild(el("div", "li-sub", sub.join(" · "))); }
+        li.appendChild(body);
+        var removable = owner && ((m.kind === "member" && m.status === "active") || (m.kind === "invite" && m.status === "pending"));
+        if (removable) {
+          var a = el("div", "li-actions"); var b = el("button", "secondary danger", m.kind === "invite" ? "Revoke…" : "Remove…"); b.type = "button";
+          b.onclick = function () { removeMember(f, m, box); }; a.appendChild(b); li.appendChild(a);
+        }
+        box.appendChild(li);
+      });
+      if (owner && l.members.some(function (m) { return (m.kind === "member" && m.status === "active") || (m.kind === "invite" && m.status === "pending"); })) {
+        var li = el("li"); var a = el("div", "li-actions"); var b = el("button", "secondary danger", "Remove everyone…"); b.type = "button";
+        b.onclick = function () { removeMember(f, { id: "all", name: "everyone", kind: "all" }, box); }; a.appendChild(b); li.appendChild(a); box.appendChild(li);
+      }
+    }).catch(function (e) { alertBox(e.message); });
+  }
+  function removeMember(f, m, box) {
+    var invite = m.kind === "invite";
+    dialog({
+      title: (invite ? "Revoke the token for " : "Remove ") + m.name + (invite ? "?" : " from " + f.name + "?"),
+      text: (invite ? "The token was not accepted yet. " : "") + f.name + " gets a new key: your devices and the members who stay receive it, and everything written from now on is unreadable to " + (m.kind === "all" ? "the people removed" : m.name) + ". Their changes from now on are ignored. " +
+        "Everything they already received stays readable to them: a key cannot be recalled, and they can still reach the storage you shared until you change its access. " + (invite ? "If the token is accepted later, it brings nothing written from now on. " : "") + "This cannot be undone; share again with a new token.",
+      fields: [{ name: "confirm", label: "Type " + (m.kind === "all" ? "the folder name" : "the name") + " to confirm", placeholder: m.kind === "all" ? f.name : m.name, required: true }],
+      ok: invite ? "Revoke" : "Remove", danger: true
+    }).then(function (r) {
+      if (!r) { return; }
+      if (r.values.confirm.trim() !== (m.kind === "all" ? f.name : m.name)) { return alertBox("The name does not match, so nothing was changed."); }
+      busy(true);
+      return api("POST", "/api/share/revoke", { folder: f.name, member: m.id, confirm: true }).then(function (rep) {
+        log(f.name + ": new key (share epoch " + rep.share_epoch + ")" + (rep.removed.length ? ", removed " + rep.removed.join(", ") : "") + (rep.invites_revoked.length ? ", " + rep.invites_revoked.length + " token(s) revoked" : ""));
+        var text = f.name + " has a new key." + (rep.removed.length ? " Removed: " + rep.removed.join(", ") + "." : "") + (rep.invites_revoked.length ? " Tokens revoked: " + rep.invites_revoked.length + "." : "");
+        if (rep.grants_pending.length) { text += " Waiting for " + rep.grants_pending.join(", ") + ": they receive the new key once they run this version."; }
+        return alertBox(text, "Access changed").then(function () { showMembers(f, box, true); });
+      });
+    }).catch(function (e) { alertBox(e.message, "Nothing was changed"); }).then(function () { busy(false); });
   }
   // Strongroom: the security key is touched on the command line (libfido2 tools), so the page shows the command.
   function shArg(n) { return /^[A-Za-z0-9._\/-]+$/.test(n) ? n : "'" + n.replace(/'/g, "'\\''") + "'"; }
@@ -528,8 +591,9 @@
       var lines = keys.map(function (k) { return k.number + ". " + (k.label || "no label") + " (" + k.method + (k.added_utc ? ", added " + fmtDate(k.added_utc) : "") + "): " + k.name; });
       return dialog({
         title: "Security keys of " + f.name,
-        text: (keys.length === 1 ? "One key opens this Strongroom; if it is lost, so is the folder. Enrol a backup key and keep it somewhere safe." : keys.length + " keys open this Strongroom; any one of them is enough.") + " To add a backup key, run the command with an enrolled key plugged in; it asks you to swap to the new key.",
-        code: lines.join("\n") + "\n\nvarsto strongroom add-key " + shArg(f.name) + " --label safe",
+        text: (keys.length === 1 ? "One key opens this Strongroom; if it is lost, so is the folder. Enrol a backup key and keep it somewhere safe." : keys.length + " keys open this Strongroom; any one of them is enough.") + " To add a backup key, run the command with an enrolled key plugged in; it asks you to swap to the new key. " +
+          "Removing a key does not change the folder key. After removing a key someone may have kept, or if you suspect the key leaked, re-key the folder: it gets a new key wrapped for every enrolled key (touch each one), everything is re-encrypted and the old copies are deleted.",
+        code: lines.join("\n") + "\n\nvarsto strongroom add-key " + shArg(f.name) + " --label safe\nvarsto strongroom rekey " + shArg(f.name),
         ok: "Close", cancel: false, extra: keys.length > 1 ? "Remove a key…" : ""
       }).then(function (d) {
         if (!d || d.action !== "extra") { return; }
@@ -607,8 +671,14 @@
           var sli = el("li"); var sic = el("span", "li-icon"); sic.appendChild(icon("sharing")); sli.appendChild(sic);
           var sbody = el("div", "li-body"); var stitle = el("div", "li-title", f.name); stitle.appendChild(pill("accent", "shared")); sbody.appendChild(stitle);
           sbody.appendChild(el("div", "li-sub", f.files + " files · " + fmtBytes(f.bytes) + (f.path ? " · " + f.path : ""))); sli.appendChild(sbody);
-          if (!s.member) { var sa = el("div", "li-actions"); var sb = el("button", "secondary", "New token"); sb.type = "button"; sb.onclick = function () { shareFolder(f); }; sa.appendChild(sb); sli.appendChild(sa); }
-          shl.appendChild(sli);
+          var sa = el("div", "li-actions");
+          var smw = el("li", "sub-row hidden"); var sm = el("ul", "list sub-list"); smw.appendChild(sm);
+          var smb = el("button", "secondary", "Members"); smb.type = "button";
+          smb.onclick = function () { var hidden = smw.classList.toggle("hidden"); if (!hidden) { showMembers(f, sm, !s.member); } };
+          sa.appendChild(smb);
+          if (!s.member) { var sb = el("button", "secondary", "New token"); sb.type = "button"; sb.onclick = function () { shareFolder(f); }; sa.appendChild(sb); }
+          sli.appendChild(sa);
+          shl.appendChild(sli); shl.appendChild(smw);
         }
 
         // Policies page: one row per folder, filled in once the reports arrive.
@@ -1285,7 +1355,13 @@
   $("pairstop").onclick = function () { api("POST", "/api/pair/stop", {}).then(function () { if (pairTimer) { clearInterval(pairTimer); pairTimer = null; } $("pairbox").classList.add("hidden"); pairButtons(false); }).catch(function (e) { alertBox(e.message); }); };
   $("join").onsubmit = function (ev) { ev.preventDefault(); busy(true); api("POST", "/api/join", formData(ev.target)).then(function () { ev.target.reset(); log("joined the vault; attach folders under Files"); nav("files"); return refreshState(); }).catch(function (e) { alertBox(e.message); }).then(function () { busy(false); }); };
   $("replicatoken").onclick = function () { api("GET", "/api/replica/token").then(function (r) { $("replicaout").textContent = "Replica token (give to the device that will hold your encrypted copies without being able to open them): " + r.token; $("replicaout").classList.remove("hidden"); }).catch(function (e) { alertBox(e.message); }); };
-  $("sharerequest").onclick = function () { api("POST", "/api/share/request", {}).then(function (r) { $("sharerequestout").textContent = r.request_code; $("sharerequestout").classList.remove("hidden"); }).catch(function (e) { alertBox(e.message); }); };
+  $("sharerequest").onclick = function () {
+    var nm = $("acceptshare").querySelector("input[name=name]");
+    api("POST", "/api/share/request", { name: nm ? nm.value.trim() : "" }).then(function (r) {
+      $("sharerequestout").textContent = r.request_code + "\n\nFingerprint: " + r.fingerprint + "\nThe owner sees the same six words for this code. Read them to each other over a call or in person before the owner shares.";
+      $("sharerequestout").classList.remove("hidden");
+    }).catch(function (e) { alertBox(e.message); });
+  };
   function loadP2p() {
     if (document.body.dataset.view !== "app") { return; }
     api("GET", "/api/p2p").then(function (p) {
@@ -1706,7 +1782,7 @@
   window.addEventListener("resize", function () { if (lastWhere && currentPage === "overview" && $("wd-chart").clientWidth !== whereWidth) { renderWhere(lastWhere); } });
   $("p2pform").onsubmit = function (ev) { ev.preventDefault(); var d = formData(ev.target); d.port = +d.port || 17893; api("POST", "/api/p2p", d).then(function (r) { log("p2p settings saved; " + r.note); loadP2p(); }).catch(function (e) { alertBox(e.message); }); };
   $("storagekind").onchange = function () { var k = this.value; document.querySelectorAll("#addstorage [data-kind]").forEach(function (d) { d.classList.toggle("hidden", d.getAttribute("data-kind") !== k); }); };
-  $("acceptshare").onsubmit = function (ev) { ev.preventDefault(); busy(true); api("POST", "/api/share/accept", formData(ev.target)).then(function (r) { ev.target.reset(); log("accepted shared folder " + r.folder + "; attach it under Files"); nav("files"); return refreshState(); }).catch(function (e) { alertBox(e.message); }).then(function () { busy(false); }); };
+  $("acceptshare").onsubmit = function (ev) { ev.preventDefault(); busy(true); api("POST", "/api/share/accept", formData(ev.target)).then(function (r) { ev.target.reset(); log("accepted shared folder " + r.folder + (r.fingerprint ? " (the owner confirmed fingerprint " + r.fingerprint + ")" : "") + "; attach it under Files"); nav("files"); return refreshState(); }).catch(function (e) { alertBox(e.message); }).then(function () { busy(false); }); };
 
   // Folder forms: on desktop the directory is pre-filled from the folder root as you type the name;
   // on phones no directory is asked and the service picks <folder_root>/<name> (or the shared
