@@ -598,10 +598,12 @@
     $("fd-size").textContent = fmtBytes(f.size);
     $("fd-modified").textContent = fmtDate(f.modified_utc) || "unknown";
     $("fd-used").textContent = f.last_accessed_utc ? fmtDate(f.last_accessed_utc) : "never";
-    var copies = [];
+    // Device copy first, then the storages. Storage counts are folder-wide and
+    // leave out transferrers, which carry blocks only until they are delivered.
+    var copies = [f.state === "placeholder" || f.state === "missing" ? "not on this device" : "on this device"];
     if (fs) {
-      var storages = lastStatus ? lastStatus.storages.length : 0;
-      copies.push(fs.chunks_without_storage_copy > 0 ? fs.chunks_without_storage_copy + " of the folder's " + fs.chunks + " blocks still lack a storage copy" : "every block of this folder is on " + (storages === 1 ? "the storage" : storages + " storages"));
+      var names = lastStatus ? lastStatus.storages.filter(function (st) { return !st.carrier; }).map(function (st) { return st.name; }) : [];
+      copies.push(fs.chunks_without_storage_copy > 0 ? fs.chunks_without_storage_copy + " of the folder's " + fs.chunks + " blocks still lack a storage copy" : names.length ? "every block of this folder is on " + (names.length === 1 ? "storage " : names.length + " storages: ") + names.join(", ") : "no storage holds this folder");
       if (fs.chunks_verified_elsewhere > 0) { copies.push(fs.chunks_verified_elsewhere + " verified by another device"); }
     }
     $("fd-copies").textContent = copies.join("; ") || "unknown";
