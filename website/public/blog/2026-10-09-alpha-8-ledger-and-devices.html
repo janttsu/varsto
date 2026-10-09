@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Alpha.8: a ledger that stays small, removable devices, and phones that keep nothing in clear text: Varsto</title>
+<meta name="description" content="The ledger now lists only what is new, keeps a cached view and prunes itself behind signed checkpoints; devices can be removed with new keys for everything written afterwards; phones keep encrypted folders as encrypted blocks; and the interface shows where your data is and how peer-to-peer traffic flows.">
+<meta name="robots" content="noindex, nofollow">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../blog/feed.xml">
+<link rel="stylesheet" href="../assets/css/site.css?v=bef92fd5fd">
+<script src="../assets/js/theme.js?v=0951491269"></script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="alpha" role="note">
+  <div class="wrap"><strong>Alpha software, not for production data.</strong> Bugs can cause data loss, formats may change without migration, and the cryptography has not been independently audited. Keep your own backups and check that you can restore from them.</div>
+</div>
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="../"><img src="../assets/img/logo.svg" alt="" width="28" height="28"><span>Varsto</span></a>
+    <nav class="main" aria-label="Main">
+      <a href="../">Project</a>
+      <a href="../features/">Features</a>
+      <a href="../use-cases/">Use cases</a>
+      <a href="../how-it-works/">How it works</a>
+      <a href="../screenshots/">Screenshots</a>
+      <a href="../docs/">Docs</a>
+      <a href="../downloads/">Downloads</a>
+      <a href="../blog/" aria-current="page">Blog</a>
+      <a href="../forum/">Forum</a>
+      <a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a>
+      <button class="theme" id="theme-toggle" type="button" aria-label="Change colour theme">Theme: auto</button>
+    </nav>
+  </div>
+</header>
+<main id="main">
+  <div class="wrap">
+<article class="prose"><h1>Alpha.8: a ledger that stays small, removable devices, and phones that keep nothing in clear text</h1><p class="note"><time datetime="2026-10-09">2026-10-09</time></p>
+<p>Alpha.8 came out of a long day of using alpha.7 on a Mac, a Linux desktop and a Samsung phone, and of asking what happens to the design after a few years of use.</p>
+<h2 id="a-ledger-that-stays-small">A ledger that stays small</h2>
+<p>Every device keeps a signed, encrypted log of facts: which block it stored where, which copy it verified, which file list it published. Until now every entry stayed forever, as its own object on every storage, and every sync listed all of them. Now a sync lists only what is new, the device keeps a cached, encrypted view instead of replaying everything, one sync writes one batch, and each device periodically writes a signed checkpoint. Once all your devices have acknowledged a checkpoint, the batches behind it are deleted, keeping the last few so that a device restored from an old backup is still caught. In a test vault with 20 000 batches, a sync with nothing new went from 668 ms to 28 ms and the ledger on storage from 171 MB to 5 MB. The <a href="../docs/./">How it works</a> page explains the ledger.</p>
+<h2 id="removing-a-device">Removing a device</h2>
+<p>A lost phone or a laptop you no longer use can be removed from any other device (Settings or Peers, "Remove…", or <code>varsto device revoke</code>). Its later entries are ignored, your devices refuse its connections, and the vault moves to new keys that only your remaining devices receive, so nothing written afterwards opens with what the removed device holds. You can also order it to wipe itself the next time it reaches a storage. The device list shows each device's system, model, Varsto version and last sync.</p>
+<h2 id="phones-keep-encrypted-folders-encrypted">Phones keep encrypted folders encrypted</h2>
+<p>A folder kept "encrypted on this phone" now holds only encrypted blocks, the same bytes your storages hold. Selective sync works as everywhere else; files are shown in the app's own viewer, decrypted in memory, and handed to another app only when you ask, as a temporary copy that is removed when the vault locks. Android can upload new photos and videos to a folder of your choice.</p>
+<h2 id="seeing-what-happens">Seeing what happens</h2>
+<ul>
+<li><strong>Where your data is</strong>: a chart from folders to storages and devices, with how many copies everything has.</li>
+<li><strong>Peer-to-peer traffic</strong>: which device sends what to which, over which path, at what speed.</li>
+<li><strong>Automatic verification</strong>: another device re-reads your blocks on a schedule, so a policy such as "verified within 30 days" holds by itself.</li>
+<li>Buttons show at once that something started, and downloads show their progress.</li>
+</ul>
+<h2 id="and-more">And more</h2>
+<p>Strongroom folders can be converted from existing ones and get a backup security key; storages can be removed after their blocks are copied where needed; folders can be detached or removed from the vault, and top-level names are unique; transferrer disks can be given a destination device; storage prices feed cost estimates and one-click freeing of idle files; the assistant (MCP) can never delete or overwrite files; and on Linux the first start installs Varsto for your user, with a background service that keeps syncing for command-line users too.</p>
+<h2 id="still-alpha">Still alpha</h2>
+<p>The cryptography has not been audited, the format may still change, and a bug can destroy data. Use test data and keep your own backups.</p>
+
+</article>
+  </div>
+</main>
+<footer class="site">
+  <div class="wrap">
+    <span>Varsto is a working name. Source: <a href="https://github.com/janttsu/varsto">github.com/janttsu/varsto</a>, under the PolyForm Shield License 1.0.0 (source-available).</span>
+    <span>No cookies, no tracking. The web server keeps a standard access log for at most seven days.</span>
+    <span><a href="../docs/security-policy.html">Security policy</a> · <a href="../docs/licence.html">Licence</a> · <a href="../docs/trademark.html">Trademark</a></span>
+  </div>
+</footer>
+</body>
+</html>

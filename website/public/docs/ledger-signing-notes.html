@@ -41,7 +41,7 @@
 <h1>Ledger signing: design notes</h1>
 <p class="note">From <code>docs/spec/ledger-signing-notes.md</code> in the repository, rendered 2026-10-09.</p>
 <blockquote>
-<p><strong>Design-stage notes, no implementation.</strong> This document compares ways to sign ledger events and recommends one for further specification. The figures are estimates from cited benchmarks and stated assumptions; nothing has been measured on Varsto code because none exists. The recommendation is not a decision. Open points are marked <strong>TBD</strong>.</p>
+<p><strong>Design-stage notes.</strong> Section 9 describes checkpoints and pruning as built in 0.0.1-alpha.8; the rest predates the implementation. This document compares ways to sign ledger events and recommends one for further specification. The figures are estimates from cited benchmarks and stated assumptions, made before Varsto code existed; nothing in sections 2 and 3 was measured on it. The recommendation is not a decision. Open points are marked <strong>TBD</strong>.</p>
 </blockquote>
 <p>Background: each device keeps an append-only, signed event ledger that records where every block is (F-031, plan 6.19). Events are replicated to all devices and to storage. Signatures must be hybrid, classical plus post-quantum (S-003, plan 6.5). The plan's open questions (section 8, blocking question on the ledger protocol model) note that per-event post-quantum signatures would grow a ledger of millions of events to gigabytes. Keys are named as in <a href="key-hierarchy.html">key-hierarchy.md</a> (K7 is the device ledger key); adversaries as in <a href="threat-model.html">../architecture/threat-model.md</a>.</p>
 <h2 id="1-models-compared">1. Models compared</h2>
@@ -192,7 +192,7 @@
 <li>Verification of A parallelises across cores (about 16 minutes on four big cores under the same assumptions), but it is still repeated on every device that receives the full ledger.</li>
 <li>Ed25519 batch verification could reduce the classical part of A and C; it is not counted because no benchmark was cited for it.</li>
 <li>Payload bytes (1.6 GB per copy, 11.2 GB for 7 copies) are the same in every model and not included in the signature figures.</li>
-<li>Ledger compaction (signed checkpoints that let old batches be dropped) would reduce all figures. It is <strong>TBD</strong> and not assumed here.</li>
+<li>Ledger compaction (signed checkpoints that let old batches be dropped) would reduce all figures. It is not assumed here; 0.0.1-alpha.8 implements per-device checkpoints, see section 9.</li>
 </ul>
 <h2 id="4-behaviour-when-a-batch-is-interrupted-by-a-crash">4. Behaviour when a batch is interrupted by a crash</h2>
 <p>The plan's write order applies in every model: data first, then the ledger entry, with fsync (plan 6.19).</p>
@@ -243,7 +243,7 @@
 <ol type="1">
 <li>Seal a batch when it reaches a maximum size, after a maximum delay, or when a receipt must be delivered, whichever comes first. Values <strong>TBD</strong>; 1024 events is the example used above.</li>
 <li>Collect receipts for many chunks in one batch (for example everything received in the same short window) and have the sender wait for the sealed header, instead of sealing one batch per chunk.</li>
-<li>Seal rare, security-relevant events at once in their own batch: device enrolment and revocation, wipe commands, key rotation, policy changes. Their cost is negligible, and they then carry an immediate hybrid signature (effectively model A for them).</li>
+<li>Seal rare, security-relevant events at once in their own batch: device enrolment and revocation, wipe commands, key rotation, policy changes. Their cost is negligible, and they then carry an immediate hybrid signature (effectively model A for them). (0.0.1-alpha.8 publishes revocations, wipe orders and key epochs as separately signed registry objects instead of ledger events, so a revoked device that cannot read the new ledger key still reads its own revocation; see <code>alpha-0-format.md</code> section 20.)</li>
 <li>Exchange the latest signed batch header on every contact with a peer or storage, to detect rollback and equivocation.</li>
 <li>Sign the hash of the encrypted event payload, so payload keys can be destroyed later (cryptographic erasure) without breaking the chain (plan section 8, "GDPR and append-only ledger"; K22 in the key hierarchy).</li>
 </ol>
@@ -262,10 +262,30 @@
 <li>Batch policy: maximum size, maximum delay, and the receipt window. Plan 6.19.</li>
 <li>Hash function for leaves and the hash chain (SHA-256, BLAKE3 or other), and the Merkle tree layout (domain-separated leaf and node hashes are required either way).</li>
 <li>Hybrid signature format (separate concatenated signatures or a combined construction) and the ML-DSA parameter set. Plan section 8, "PQ library".</li>
-<li>Checkpoints and compaction: when old batches may be dropped and what a new device must download. Plan 6.19.</li>
+<li>Checkpoints and compaction: when old batches may be dropped and what a new device must download. Plan 6.19. A first answer is built (section 9); whether checkpoints should become the unit that is exchanged and verified, with batches only as a short tail, is still open.</li>
 <li>Whether the protocol model is an own operation log with a Merkle DAG or an existing CRDT library; this note assumes an own log. Plan section 8, blocking question on the ledger protocol model.</li>
 <li>Measurements on real test devices, including smaller phone cores. Plan 6.39.</li>
 </ol>
+<h2 id="9-checkpoints-and-pruning-as-built-001-alpha8">9. Checkpoints and pruning as built (0.0.1-alpha.8)</h2>
+<p>Format and rules are in <code>alpha-0-format.md</code> section 22. This section states what they mean for trust.</p>
+<p><strong>What a checkpoint is.</strong> A device's signed statement "my batches 1..=N, with batch N having hash H, add up to this view". It is signed with the same hybrid key and algorithm identifier as the device's batches, over the device id, N, H and the hash of the encrypted body, under its own signature domain, so it can be checked from the checkpoint alone and cannot be passed off as a batch or the other way round. The body is encrypted under the current epoch's ledger key.</p>
+<p><strong>What a verifier can still check.</strong></p>
+<ul>
+<li>That the checkpoint comes from that device and is intact (signature, body hash, associated data binding device, N and H).</li>
+<li>That later batches continue from it: batch N+1 must name H as its predecessor.</li>
+<li>Equivocation where it overlaps what the verifier holds: a checkpoint that disagrees with a batch it holds at N, two checkpoints at the same N with different H, or a later batch that does not chain to H all mark the device forked. A copy restored from an old backup still meets its own newer batches or checkpoint on the storages and fences itself.</li>
+<li>That other devices' statements are not forged: a checkpoint holds only its writer's own events. A copy counts as verified only when another device's batch or checkpoint, signed by that other device, says so; a device cannot put verifications by others into its own checkpoint.</li>
+<li>Revocation: checkpoints of a removed device beyond its cut-off are ignored, like its batches.</li>
+</ul>
+<p><strong>What is lost once old batches are pruned.</strong></p>
+<ul>
+<li>Whether the checkpoint is a faithful summary of the batches it replaced. A device could leave a claim out or add one it never made in a batch. This adds no power the device did not have: claims are self-attested, and it could have written the same claims in a batch. But a device that only ever sees the checkpoint cannot tell.</li>
+<li>History and provenance of single events: which batch made a claim, and when it was first made (claim and verification times are kept only as the newest per copy, as the view already did). An audit of old batches is no longer possible once every device has dropped them.</li>
+<li>Equivocation over the pruned range is detectable only by devices that saw the old batches before they went. A device that joins later trusts the checkpoint as the device's account of its past. The last 8 batches before the checkpoint are kept so that recent equivocation and restored copies are still caught.</li>
+<li>A storage that rolls back (serves an older checkpoint and hides newer batches) is caught only by another copy, as before; pruning does not change that.</li>
+<li>Cryptographic erasure of batch payloads (rule 5 of section 7) does not reach a checkpoint that summarises them: the checkpoint carries the information under the current ledger key.</li>
+</ul>
+<p><strong>Why deletion waits for acknowledgements.</strong> Every reader (trusted, non-revoked full device) must have said, in a signed batch, that it holds the device's batches up to N. A reader that has them needs nothing older than the checkpoint; a device that joins later starts from the checkpoint; a device on an older version never acknowledges, so nothing is deleted while one remains. A reader that disappears blocks pruning until it is revoked; that is the price of never deleting a batch some device still needs.</p>
 <h2 id="sources">Sources</h2>
 <p>All checked on 2026-10-08.</p>
 <table>

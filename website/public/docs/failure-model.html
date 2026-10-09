@@ -94,8 +94,8 @@
 <td>One device is stolen or lost</td>
 <td>Data on the device is encrypted at rest; other copies are unaffected.</td>
 <td>The device can be revoked from another device.</td>
-<td>Device revocation with rotation of storage credentials and folder keys; a signed remote wipe command that is applied when the device next sees a network; optional automatic wipe after failed unlock attempts; Strongroom folders stay locked without the security key.</td>
-<td>A thief who keeps the device offline does not receive the wipe command. Revocation and encryption are the protection in that case, and wipe is an additional layer only. Wipe does not reach offline removable disks.</td>
+<td>Device revocation with rotation of storage credentials and folder keys; a signed remote wipe command that is applied when the device next sees a network; optional automatic wipe after failed unlock attempts; Strongroom folders stay locked without the security key. Since 0.0.1-alpha.8: revocation cuts the device off from the ledger and from peers and gives the vault new keys for everything written afterwards, and the signed wipe order is applied when the device next reaches a storage (<a href="alpha-0-format.html">alpha-0-format.md</a> section 20).</td>
+<td>Storage credentials are not rotated yet, so the revoked device can delete ciphertext until they are changed at the provider; automatic wipe after failed unlocks does not exist. A thief who keeps the device offline does not receive the wipe command. Revocation and encryption are the protection in that case, and wipe is an additional layer only. Wipe does not reach offline removable disks.</td>
 <td>F-035, S-001, S-009, S-011, S-012, F-033</td>
 </tr>
 <tr>

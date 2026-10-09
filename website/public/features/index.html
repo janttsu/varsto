@@ -95,8 +95,8 @@
       <h2>Your own buckets, rclone remotes and cold storage</h2>
       <picture><source type="image/webp" srcset="../assets/img/features/cold.webp"><img src="../assets/img/features/cold.png" alt="Laptop, hot storage and a cold archive with a note that cold storage is never read by surprise." width="640" height="320" loading="lazy"></picture>
       <div>
-        <p>A storage is a directory, an S3-compatible bucket with your own access keys (AWS, Scaleway, Hetzner, Backblaze B2, Cloudflare R2, MinIO) or any rclone remote, so SFTP, WebDAV, Google Drive and the rest come for free. Secrets stay encrypted on your device; rclone keeps its own. Archive classes such as Deep Archive are written but never read without an explicit confirmation, and the app reports an object that must be restored first instead of retrying. Per-storage prices for upload, download and restore, so the app can say where a read is cheap, are the next step.</p>
-        <p class="note">Status: directories, S3 and rclone work; the price model is designed.</p>
+        <p>A storage is a directory, an S3-compatible bucket with your own access keys (AWS, Scaleway, Hetzner, Backblaze B2, Cloudflare R2, MinIO) or any rclone remote, so SFTP, WebDAV, Google Drive and the rest come for free. Secrets stay encrypted on your device; rclone keeps its own. Archive classes such as Deep Archive are written but never read without an explicit confirmation, and the app reports an object that must be restored first instead of retrying. Every storage can carry a price per GB-month, for egress and for restore, set by you or taken from the open price data when the provider, region and class are recognised, so the app shows what each storage and each folder costs a month.</p>
+        <p class="note">Status: directories, S3 and rclone work; per-storage prices with monthly costs on the Storages page, <code>varsto storage price</code> and <code>varsto storage list</code>.</p>
       </div>
     </section>
 
@@ -114,7 +114,7 @@
       <picture><source type="image/webp" srcset="../assets/img/features/mobile.webp"><img src="../assets/img/features/mobile.png" alt="A phone and a tablet syncing through storage; the phone stores nothing in clear text." width="640" height="320" loading="lazy"></picture>
       <div>
         <p>Android and iOS run the same encrypted core. Files stay encrypted on the device and are decrypted when you open them; thumbnails are generated once, encrypted and shared with your other devices. The Android alpha is a sideloadable APK; iOS needs a Mac to build and will follow.</p>
-        <p class="note">Status: in progress.</p>
+        <p class="note">Status: in progress. A folder kept encrypted on the phone holds only encrypted blocks there, the same ones your storages hold; selective sync decides which files are kept on the phone, as in any folder, and files added on the phone are encrypted as they arrive. The Android app shows pictures, video (with seeking), audio and text from such folders in its own viewer, decrypted in memory and never written to the phone; PDFs and other files open in another app, which receives a decrypted copy that Varsto removes when it locks or restarts. Camera upload sends new photos and videos to a folder in YYYY/MM subfolders, optionally only on Wi-Fi or while charging. iOS has neither yet.</p>
       </div>
     </section>
 
@@ -131,7 +131,7 @@
       <h2>An MCP server: let your assistant read, analyse and tidy, with exactly the access you grant</h2>
       <picture><source type="image/webp" srcset="../assets/img/usecases/cheapest.webp"><img src="../assets/img/usecases/cheapest.png" alt="A chat with an assistant that works inside one granted folder and proposes a tidier structure, with a Confirm button." width="640" height="320" loading="lazy"></picture>
       <div>
-        <p><code>varsto mcp</code> speaks the Model Context Protocol, so Claude, an IDE assistant or any MCP client can work with your files: read and summarise them, find what belongs together, propose a tidier structure, move and rename files into it, and leave an index or notes, all inside the folders you granted and read-only unless you said otherwise. Strongroom folders are never visible, and everything the assistant writes syncs like any other change.</p>
+        <p><code>varsto mcp</code> speaks the Model Context Protocol, so a local model (through Ollama, LM Studio or any MCP client on your own machine), Claude or an IDE assistant can work with your files: read and summarise them, find what belongs together, propose a tidier structure, move and rename files into it, and leave an index or notes, all inside the folders you granted and read-only unless you said otherwise. Strongroom folders are never visible, and everything the assistant writes syncs like any other change. It can never delete or overwrite a file: there is no delete tool, it only creates new files, and moves and renames go only to free names.</p>
         <p class="note">Varsto itself keeps the last-used record of every file and suggests where idle data would be cheapest to keep; the assistant can see that estimate for context, but placement advice is Varsto's own job, not the assistant's.</p>
       </div>
     </section>
@@ -140,8 +140,8 @@
       <h2>Durability policies that warn you before they break</h2>
       <picture><source type="image/webp" srcset="../assets/img/usecases/provider.webp"><img src="../assets/img/usecases/provider.png" alt="One provider is closed; copies on a second provider and a disk at home remain and the app repairs." width="640" height="320" loading="lazy"></picture>
       <div>
-        <p>Tell a folder what must always be true: "at least two cloud copies and one at home, verified within 30 days". The policy travels with the folder, and every device evaluates it from the signed ledger alone, without asking the others. The app distinguishes <em>ok</em>, <em>at risk</em> (a verification is ageing out, or the only spare copy sits on cold storage or on a disk that is away), <em>violated</em> and <em>unknown</em>, and tells you while there is still time: a notification from the background app, a banner in the interface, and <code>varsto policy check</code> with an exit code for cron or monitoring.</p>
-        <p class="note">Verification comes from <code>fsck --verify</code> on another device or from a replica; scheduling that automatically is the next step. Storage places are labels you give when adding a storage.</p>
+        <p>Tell a folder what must always be true: "at least two cloud copies and one at home, verified within 30 days". The policy travels with the folder, and every device evaluates it from the signed ledger alone, without asking the others. The app distinguishes <em>ok</em>, <em>at risk</em> (a verification is ageing out, or the only spare copy sits on cold storage or on a disk that is away), <em>violated</em> and <em>unknown</em>, and tells you while there is still time: a notification from the background app, a banner in the interface, and <code>varsto policy check</code> with an exit code for cron or monitoring. On the desktop, a "Where your data is" chart on the Overview draws each folder flowing into the storages and devices that hold it, in proportion to the bytes, with how many copies every block has.</p>
+        <p class="note">Verification is automatic: the background service on each device re-reads, within a daily budget, blocks that other devices wrote, checks their hash and records it in the ledger, oldest first and long before a window runs out (<code>varsto verify</code>, and on the Policies page). Cold storage is never read for it. <code>fsck --verify</code> and replicas still verify as well. Storage places are labels you give when adding a storage.</p>
       </div>
     </section>
 
@@ -149,7 +149,7 @@
       <h2>Devices that send each other the blocks, torrent-style</h2>
       <picture><source type="image/webp" srcset="../assets/img/usecases/plane.webp"><img src="../assets/img/usecases/plane.png" alt="Two devices on a plane sync over the phone's hotspot; the cloud is crossed out until landing." width="640" height="320" loading="lazy"></picture>
       <div>
-        <p>Every device that has a file can serve its encrypted blocks, byte for byte the same objects the storages hold. A device that needs a block asks its peers first and the cloud second, checks every block against its content hash, and spreads the work over the peers that answer. On the LAN devices find each other by themselves; across the internet they learn their public address from STUN, punch through NAT over QUIC with a certificate pinned per device, and when punching fails they go through one of your own reachable devices (a home server, a forwarded port, a VPS), which sees only ciphertext. Only a holder of the vault key can fetch anything, and what travels is ciphertext.</p>
+        <p>Every device that has a file can serve its encrypted blocks, byte for byte the same objects the storages hold. A device that needs a block asks its peers first and the cloud second, checks every block against its content hash, and spreads the work over the peers that answer. On the LAN devices find each other by themselves; across the internet they learn their public address from STUN, punch through NAT over QUIC with a certificate pinned per device, and when punching fails they go through one of your own reachable devices (a home server, a forwarded port, a VPS), which sees only ciphertext. Only a holder of the vault key can fetch anything, and what travels is ciphertext. A live traffic view on the Peers page (and <code>varsto p2p traffic --watch</code>) shows which device is sending to which, over which path and how fast, including what a device relays for two others.</p>
         <p class="note">Blocks are compressed before encryption (zstd), so every transfer and every copy is small, on the LAN as on the internet. NAT traversal is tested on localhost and on the maintainer's own networks only; a vault with every device behind NAT has no path across the internet yet.</p>
       </div>
     </section>
@@ -159,7 +159,8 @@
       <picture><source type="image/webp" srcset="../assets/img/usecases/sensitive.webp"><img src="../assets/img/usecases/sensitive.png" alt="A tax folder in a Strongroom: opens only with a security key, no clear text on the phone, hidden from the AI assistant." width="640" height="320" loading="lazy"></picture>
       <div>
         <p>A Strongroom folder's key is never stored anywhere. It is wrapped under a secret that only your FIDO2 security key can produce (the hmac-secret extension), so a touch of the same key opens the folder on every device of the vault, and nothing else does: not your passphrase, not the vault key, not a stolen laptop. Enforcement is cryptographic, not a dialog. Unlock for a window, work, lock; while locked the folder is skipped by sync, cannot be shared, and is invisible to assistants.</p>
-        <p class="note">Needs the libfido2 tools (fido2-cred, fido2-assert); a software key exists for trying the flow. Converting existing folders and enrolling a backup key are next.</p>
+        <p>Enrol a backup key, say a second YubiKey kept in a safe: each key wraps the same folder key, and either one opens it. An existing folder can become a Strongroom: it gets a new key, everything is re-encrypted and uploaded again, the old copies are deleted from your storages once the new ones are in place, and your other devices swap their plain copies for placeholders on their next sync.</p>
+        <p class="note">Needs the libfido2 tools (fido2-cred, fido2-assert); a software key exists for trying the flow. Touching the key happens on the command line (<code>varsto strongroom convert</code>, <code>add-key</code>); the interface shows the command and lists the enrolled keys. A device that already had the old key could have kept it, and removing a key does not re-key the folder.</p>
       </div>
     </section>
 
@@ -168,6 +169,15 @@
       <picture><source type="image/webp" srcset="../assets/img/features/untrusted.webp"><img src="../assets/img/features/untrusted.png" alt="You with the keys, a shared storage, and a friend's NAS that stores verified encrypted copies it cannot open." width="640" height="320" loading="lazy"></picture>
       <div>
         <p>There is no account and no escrow: the vault key is yours alone, so the app helps you keep it. <code>varsto recovery kit</code> prints the key as 24 words with a checksum, laid out for paper or metal, and optionally three shares of which any two rebuild the key and one alone reveals nothing, so no single place has to hold everything. A new device joins straight from the words. Test it once a year.</p>
+      </div>
+    </section>
+
+    <section class="feature">
+      <h2>Remove a lost or stolen device, and wipe it remotely</h2>
+      <picture><source type="image/webp" srcset="../assets/img/usecases/stolen.webp"><img src="../assets/img/usecases/stolen.png" alt="A stolen laptop: the Strongroom folder stays locked, the device is revoked and wiped from a phone." width="640" height="320" loading="lazy"></picture>
+      <div>
+        <p>From any other device, Remove device signs a revocation into your storage. Every device then ignores the removed one's ledger entries after the cut-off and refuses its peer connections, and the vault moves to a new key that is sealed (X25519 + ML-KEM-768) to each remaining device only: ledger, records, manifests and new files of every folder use keys the removed device never sees. With a wipe order, the device deletes its keys, sync state and folder contents the next time it reaches a storage; the order is signed by one of your devices, so a storage or someone with an old vault key cannot trigger it.</p>
+        <p class="note">What the removed device could read before stays readable to it; folders shared with other people and Strongroom folders keep their keys; storage credentials are not rotated for you. Print a new recovery kit afterwards.</p>
       </div>
     </section>
 

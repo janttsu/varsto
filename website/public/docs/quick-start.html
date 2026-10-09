@@ -68,49 +68,56 @@
 <span id="cb1-7"><a href="#cb1-7" aria-hidden="true" tabindex="-1"></a><span class="ex">varsto</span> <span class="at">--home</span> ~/.varsto-laptop storage add-rclone hetzner storagebox:varsto   <span class="co"># any rclone remote</span></span>
 <span id="cb1-8"><a href="#cb1-8" aria-hidden="true" tabindex="-1"></a><span class="ex">varsto</span> <span class="at">--home</span> ~/.varsto-laptop folder add docs ~/Documents/synced</span>
 <span id="cb1-9"><a href="#cb1-9" aria-hidden="true" tabindex="-1"></a><span class="ex">varsto</span> <span class="at">--home</span> ~/.varsto-laptop sync</span>
-<span id="cb1-10"><a href="#cb1-10" aria-hidden="true" tabindex="-1"></a><span class="ex">varsto</span> tray                                <span class="co"># Linux/Windows: tray icon + background service (macOS: Varsto.app)</span></span>
-<span id="cb1-11"><a href="#cb1-11" aria-hidden="true" tabindex="-1"></a><span class="ex">varsto</span> update <span class="at">--check</span>                      <span class="co"># self-update from the download page</span></span>
-<span id="cb1-12"><a href="#cb1-12" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb1-13"><a href="#cb1-13" aria-hidden="true" tabindex="-1"></a><span class="co"># on another device that can reach the same storage:</span></span>
-<span id="cb1-14"><a href="#cb1-14" aria-hidden="true" tabindex="-1"></a><span class="ex">varsto</span> <span class="at">--home</span> ~/.varsto-desk join <span class="at">--name</span> desk <span class="at">--vault-key</span> <span class="op">&lt;</span>hex<span class="op">&gt;</span> --storage-path /mnt/box</span>
-<span id="cb1-15"><a href="#cb1-15" aria-hidden="true" tabindex="-1"></a><span class="ex">varsto</span> <span class="at">--home</span> ~/.varsto-desk folder attach docs ~/synced</span>
-<span id="cb1-16"><a href="#cb1-16" aria-hidden="true" tabindex="-1"></a><span class="ex">varsto</span> <span class="at">--home</span> ~/.varsto-desk sync</span>
-<span id="cb1-17"><a href="#cb1-17" aria-hidden="true" tabindex="-1"></a><span class="ex">varsto</span> <span class="at">--home</span> ~/.varsto-desk status <span class="at">--json</span></span>
-<span id="cb1-18"><a href="#cb1-18" aria-hidden="true" tabindex="-1"></a><span class="ex">varsto</span> <span class="at">--home</span> ~/.varsto-desk fsck <span class="at">--verify</span></span>
-<span id="cb1-19"><a href="#cb1-19" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb1-20"><a href="#cb1-20" aria-hidden="true" tabindex="-1"></a><span class="co"># recovery kit: the vault key as 24 words (and 2-of-3 shares) for paper or metal</span></span>
-<span id="cb1-21"><a href="#cb1-21" aria-hidden="true" tabindex="-1"></a><span class="ex">varsto</span> <span class="at">--home</span> ~/.varsto-laptop recovery kit <span class="at">--shares</span></span>
-<span id="cb1-22"><a href="#cb1-22" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb1-23"><a href="#cb1-23" aria-hidden="true" tabindex="-1"></a><span class="co"># a Strongroom: the folder key exists only while your security key is touched (needs fido2-cred/fido2-assert)</span></span>
-<span id="cb1-24"><a href="#cb1-24" aria-hidden="true" tabindex="-1"></a><span class="ex">varsto</span> <span class="at">--home</span> ~/.varsto-laptop strongroom create taxes ~/Taxes</span>
-<span id="cb1-25"><a href="#cb1-25" aria-hidden="true" tabindex="-1"></a><span class="ex">varsto</span> <span class="at">--home</span> ~/.varsto-laptop strongroom unlock taxes <span class="at">--minutes</span> 15</span>
-<span id="cb1-26"><a href="#cb1-26" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb1-27"><a href="#cb1-27" aria-hidden="true" tabindex="-1"></a><span class="co"># peer-to-peer: devices exchange encrypted blocks directly (LAN automatically; internet through NAT,</span></span>
-<span id="cb1-28"><a href="#cb1-28" aria-hidden="true" tabindex="-1"></a><span class="co"># with one of your own reachable devices as the relay when hole punching fails)</span></span>
-<span id="cb1-29"><a href="#cb1-29" aria-hidden="true" tabindex="-1"></a><span class="ex">varsto</span> <span class="at">--home</span> ~/.varsto-laptop p2p enable <span class="at">--port</span> 17893</span>
-<span id="cb1-30"><a href="#cb1-30" aria-hidden="true" tabindex="-1"></a><span class="ex">varsto</span> <span class="at">--home</span> ~/.varsto-server p2p enable <span class="at">--port</span> 17893 <span class="at">--public</span> 203.0.113.5:17893   <span class="co"># reachable: relays for the others</span></span>
-<span id="cb1-31"><a href="#cb1-31" aria-hidden="true" tabindex="-1"></a><span class="ex">varsto</span> <span class="at">--home</span> ~/.varsto-laptop p2p status   <span class="co"># NAT guess, public address, path to every peer</span></span>
-<span id="cb1-32"><a href="#cb1-32" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb1-33"><a href="#cb1-33" aria-hidden="true" tabindex="-1"></a><span class="co"># a durability policy: two cloud copies, one at home, verified within 30 days; exit code 0/1/2/3</span></span>
-<span id="cb1-34"><a href="#cb1-34" aria-hidden="true" tabindex="-1"></a><span class="ex">varsto</span> <span class="at">--home</span> ~/.varsto-laptop policy set docs <span class="at">--min-copies</span> 2 <span class="at">--place</span> cloud=2 <span class="at">--place</span> home=1 <span class="at">--verified-within-days</span> 30</span>
-<span id="cb1-35"><a href="#cb1-35" aria-hidden="true" tabindex="-1"></a><span class="ex">varsto</span> <span class="at">--home</span> ~/.varsto-laptop policy check</span>
-<span id="cb1-36"><a href="#cb1-36" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb1-37"><a href="#cb1-37" aria-hidden="true" tabindex="-1"></a><span class="co"># let an AI assistant read, analyse and (with --write) reorganise one folder</span></span>
-<span id="cb1-38"><a href="#cb1-38" aria-hidden="true" tabindex="-1"></a><span class="ex">varsto</span> <span class="at">--home</span> ~/.varsto-laptop mcp grant docs</span>
-<span id="cb1-39"><a href="#cb1-39" aria-hidden="true" tabindex="-1"></a><span class="ex">varsto</span> <span class="at">--home</span> ~/.varsto-laptop mcp          <span class="co"># MCP over stdio; point Claude Desktop, Claude Code or any MCP client at this command</span></span>
-<span id="cb1-40"><a href="#cb1-40" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb1-41"><a href="#cb1-41" aria-hidden="true" tabindex="-1"></a><span class="co"># a pool of removable disks: fill, check, eject, retire; files on a disk that is away say &quot;attach disk data-01 (shelf)&quot;</span></span>
-<span id="cb1-42"><a href="#cb1-42" aria-hidden="true" tabindex="-1"></a><span class="ex">varsto</span> storage add-pool shelf <span class="at">--place</span> shelf</span>
-<span id="cb1-43"><a href="#cb1-43" aria-hidden="true" tabindex="-1"></a><span class="ex">varsto</span> disk add /media/me/data-01 <span class="at">--pool</span> shelf <span class="at">--label</span> data-01</span>
-<span id="cb1-44"><a href="#cb1-44" aria-hidden="true" tabindex="-1"></a><span class="ex">varsto</span> disk list <span class="kw">&amp;&amp;</span> <span class="ex">varsto</span> disk check data-01 <span class="at">--full</span> <span class="kw">&amp;&amp;</span> <span class="ex">varsto</span> disk eject data-01</span>
-<span id="cb1-45"><a href="#cb1-45" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb1-46"><a href="#cb1-46" aria-hidden="true" tabindex="-1"></a><span class="co"># selective sync, transferrer disks, replicas and sharing:</span></span>
-<span id="cb1-47"><a href="#cb1-47" aria-hidden="true" tabindex="-1"></a><span class="ex">varsto</span> folder attach docs ~/synced <span class="at">--selective</span> <span class="kw">&amp;&amp;</span> <span class="ex">varsto</span> folder files docs <span class="kw">&amp;&amp;</span> <span class="ex">varsto</span> folder fetch docs big.mp4</span>
-<span id="cb1-48"><a href="#cb1-48" aria-hidden="true" tabindex="-1"></a><span class="ex">varsto</span> storage add-local stick /media/usb <span class="at">--carrier</span>       <span class="co"># carries only what the other device lacks</span></span>
-<span id="cb1-49"><a href="#cb1-49" aria-hidden="true" tabindex="-1"></a><span class="ex">varsto</span> replica token                                      <span class="co"># give to an untrusted backup device</span></span>
-<span id="cb1-50"><a href="#cb1-50" aria-hidden="true" tabindex="-1"></a><span class="ex">varsto</span> <span class="at">--home</span> ~/.varsto-replica replica init <span class="at">--name</span> nas <span class="at">--token</span> <span class="op">&lt;</span>t<span class="op">&gt;</span> --source /mnt/shared <span class="at">--target</span> /mnt/nas/varsto</span>
-<span id="cb1-51"><a href="#cb1-51" aria-hidden="true" tabindex="-1"></a><span class="ex">varsto</span> share create docs                                  <span class="co"># token for another Varsto user</span></span>
-<span id="cb1-52"><a href="#cb1-52" aria-hidden="true" tabindex="-1"></a><span class="ex">varsto</span> <span class="at">--home</span> ~/.varsto-shared share accept <span class="at">--name</span> laptop <span class="at">--token</span> <span class="op">&lt;</span>t<span class="op">&gt;</span> --storage-path /mnt/shared</span></code></pre></div>
+<span id="cb1-10"><a href="#cb1-10" aria-hidden="true" tabindex="-1"></a><span class="ex">varsto</span> install                             <span class="co"># Linux: varsto on PATH, service (systemd user unit) and tray at login, menu entry; ./varsto with no arguments does this the first time</span></span>
+<span id="cb1-11"><a href="#cb1-11" aria-hidden="true" tabindex="-1"></a><span class="ex">varsto</span> tray                                <span class="co"># Linux/Windows: tray icon + background service (macOS: Varsto.app)</span></span>
+<span id="cb1-12"><a href="#cb1-12" aria-hidden="true" tabindex="-1"></a><span class="ex">varsto</span> update <span class="at">--check</span>                      <span class="co"># self-update from the download page</span></span>
+<span id="cb1-13"><a href="#cb1-13" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-14"><a href="#cb1-14" aria-hidden="true" tabindex="-1"></a><span class="co"># on another device that can reach the same storage:</span></span>
+<span id="cb1-15"><a href="#cb1-15" aria-hidden="true" tabindex="-1"></a><span class="ex">varsto</span> <span class="at">--home</span> ~/.varsto-desk join <span class="at">--name</span> desk <span class="at">--vault-key</span> <span class="op">&lt;</span>hex<span class="op">&gt;</span> --storage-path /mnt/box</span>
+<span id="cb1-16"><a href="#cb1-16" aria-hidden="true" tabindex="-1"></a><span class="ex">varsto</span> <span class="at">--home</span> ~/.varsto-desk folder attach docs ~/synced</span>
+<span id="cb1-17"><a href="#cb1-17" aria-hidden="true" tabindex="-1"></a><span class="ex">varsto</span> <span class="at">--home</span> ~/.varsto-desk sync</span>
+<span id="cb1-18"><a href="#cb1-18" aria-hidden="true" tabindex="-1"></a><span class="ex">varsto</span> <span class="at">--home</span> ~/.varsto-desk status <span class="at">--json</span></span>
+<span id="cb1-19"><a href="#cb1-19" aria-hidden="true" tabindex="-1"></a><span class="ex">varsto</span> <span class="at">--home</span> ~/.varsto-desk fsck <span class="at">--verify</span></span>
+<span id="cb1-20"><a href="#cb1-20" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-21"><a href="#cb1-21" aria-hidden="true" tabindex="-1"></a><span class="co"># recovery kit: the vault key as 24 words (and 2-of-3 shares) for paper or metal</span></span>
+<span id="cb1-22"><a href="#cb1-22" aria-hidden="true" tabindex="-1"></a><span class="ex">varsto</span> <span class="at">--home</span> ~/.varsto-laptop recovery kit <span class="at">--shares</span></span>
+<span id="cb1-23"><a href="#cb1-23" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-24"><a href="#cb1-24" aria-hidden="true" tabindex="-1"></a><span class="co"># a Strongroom: the folder key exists only while your security key is touched (needs fido2-cred/fido2-assert)</span></span>
+<span id="cb1-25"><a href="#cb1-25" aria-hidden="true" tabindex="-1"></a><span class="ex">varsto</span> <span class="at">--home</span> ~/.varsto-laptop strongroom create taxes ~/Taxes</span>
+<span id="cb1-26"><a href="#cb1-26" aria-hidden="true" tabindex="-1"></a><span class="ex">varsto</span> <span class="at">--home</span> ~/.varsto-laptop strongroom unlock taxes <span class="at">--minutes</span> 15</span>
+<span id="cb1-27"><a href="#cb1-27" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-28"><a href="#cb1-28" aria-hidden="true" tabindex="-1"></a><span class="co"># peer-to-peer: devices exchange encrypted blocks directly (LAN automatically; internet through NAT,</span></span>
+<span id="cb1-29"><a href="#cb1-29" aria-hidden="true" tabindex="-1"></a><span class="co"># with one of your own reachable devices as the relay when hole punching fails)</span></span>
+<span id="cb1-30"><a href="#cb1-30" aria-hidden="true" tabindex="-1"></a><span class="ex">varsto</span> <span class="at">--home</span> ~/.varsto-laptop p2p enable <span class="at">--port</span> 17893</span>
+<span id="cb1-31"><a href="#cb1-31" aria-hidden="true" tabindex="-1"></a><span class="ex">varsto</span> <span class="at">--home</span> ~/.varsto-server p2p enable <span class="at">--port</span> 17893 <span class="at">--public</span> 203.0.113.5:17893   <span class="co"># reachable: relays for the others</span></span>
+<span id="cb1-32"><a href="#cb1-32" aria-hidden="true" tabindex="-1"></a><span class="ex">varsto</span> <span class="at">--home</span> ~/.varsto-laptop p2p status   <span class="co"># NAT guess, public address, path to every peer</span></span>
+<span id="cb1-33"><a href="#cb1-33" aria-hidden="true" tabindex="-1"></a><span class="ex">varsto</span> <span class="at">--home</span> ~/.varsto-laptop p2p traffic <span class="at">--watch</span>   <span class="co"># live speed, totals and path per peer</span></span>
+<span id="cb1-34"><a href="#cb1-34" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-35"><a href="#cb1-35" aria-hidden="true" tabindex="-1"></a><span class="co"># a durability policy: two cloud copies, one at home, verified within 30 days; exit code 0/1/2/3</span></span>
+<span id="cb1-36"><a href="#cb1-36" aria-hidden="true" tabindex="-1"></a><span class="ex">varsto</span> <span class="at">--home</span> ~/.varsto-laptop policy set docs <span class="at">--min-copies</span> 2 <span class="at">--place</span> cloud=2 <span class="at">--place</span> home=1 <span class="at">--verified-within-days</span> 30</span>
+<span id="cb1-37"><a href="#cb1-37" aria-hidden="true" tabindex="-1"></a><span class="ex">varsto</span> <span class="at">--home</span> ~/.varsto-laptop policy check</span>
+<span id="cb1-38"><a href="#cb1-38" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-39"><a href="#cb1-39" aria-hidden="true" tabindex="-1"></a><span class="co"># let an AI assistant read, analyse and (with --write) reorganise one folder</span></span>
+<span id="cb1-40"><a href="#cb1-40" aria-hidden="true" tabindex="-1"></a><span class="ex">varsto</span> <span class="at">--home</span> ~/.varsto-laptop mcp grant docs</span>
+<span id="cb1-41"><a href="#cb1-41" aria-hidden="true" tabindex="-1"></a><span class="ex">varsto</span> <span class="at">--home</span> ~/.varsto-laptop mcp          <span class="co"># MCP over stdio; point Claude Desktop, Claude Code or any MCP client at this command</span></span>
+<span id="cb1-42"><a href="#cb1-42" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-43"><a href="#cb1-43" aria-hidden="true" tabindex="-1"></a><span class="co"># a lost or stolen device: remove it from another device (new vault keys for everything written</span></span>
+<span id="cb1-44"><a href="#cb1-44" aria-hidden="true" tabindex="-1"></a><span class="co"># afterwards) and order it to wipe itself when it next reaches a storage; then print a new recovery kit</span></span>
+<span id="cb1-45"><a href="#cb1-45" aria-hidden="true" tabindex="-1"></a><span class="ex">varsto</span> <span class="at">--home</span> ~/.varsto-laptop device list</span>
+<span id="cb1-46"><a href="#cb1-46" aria-hidden="true" tabindex="-1"></a><span class="ex">varsto</span> <span class="at">--home</span> ~/.varsto-laptop device revoke phone <span class="at">--wipe</span> <span class="at">--yes</span></span>
+<span id="cb1-47"><a href="#cb1-47" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-48"><a href="#cb1-48" aria-hidden="true" tabindex="-1"></a><span class="co"># a pool of removable disks: fill, check, eject, retire; files on a disk that is away say &quot;attach disk data-01 (shelf)&quot;</span></span>
+<span id="cb1-49"><a href="#cb1-49" aria-hidden="true" tabindex="-1"></a><span class="ex">varsto</span> storage add-pool shelf <span class="at">--place</span> shelf</span>
+<span id="cb1-50"><a href="#cb1-50" aria-hidden="true" tabindex="-1"></a><span class="ex">varsto</span> disk add /media/me/data-01 <span class="at">--pool</span> shelf <span class="at">--label</span> data-01</span>
+<span id="cb1-51"><a href="#cb1-51" aria-hidden="true" tabindex="-1"></a><span class="ex">varsto</span> disk list <span class="kw">&amp;&amp;</span> <span class="ex">varsto</span> disk check data-01 <span class="at">--full</span> <span class="kw">&amp;&amp;</span> <span class="ex">varsto</span> disk eject data-01</span>
+<span id="cb1-52"><a href="#cb1-52" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-53"><a href="#cb1-53" aria-hidden="true" tabindex="-1"></a><span class="co"># selective sync, transferrer disks, replicas and sharing:</span></span>
+<span id="cb1-54"><a href="#cb1-54" aria-hidden="true" tabindex="-1"></a><span class="ex">varsto</span> folder attach docs ~/synced <span class="at">--selective</span> <span class="kw">&amp;&amp;</span> <span class="ex">varsto</span> folder files docs <span class="kw">&amp;&amp;</span> <span class="ex">varsto</span> folder fetch docs big.mp4</span>
+<span id="cb1-55"><a href="#cb1-55" aria-hidden="true" tabindex="-1"></a><span class="ex">varsto</span> storage add-local stick /media/usb <span class="at">--carrier</span>       <span class="co"># carries only what the other device lacks</span></span>
+<span id="cb1-56"><a href="#cb1-56" aria-hidden="true" tabindex="-1"></a><span class="ex">varsto</span> replica token                                      <span class="co"># give to an untrusted backup device</span></span>
+<span id="cb1-57"><a href="#cb1-57" aria-hidden="true" tabindex="-1"></a><span class="ex">varsto</span> <span class="at">--home</span> ~/.varsto-replica replica init <span class="at">--name</span> nas <span class="at">--token</span> <span class="op">&lt;</span>t<span class="op">&gt;</span> --source /mnt/shared <span class="at">--target</span> /mnt/nas/varsto</span>
+<span id="cb1-58"><a href="#cb1-58" aria-hidden="true" tabindex="-1"></a><span class="ex">varsto</span> share create docs                                  <span class="co"># token for another Varsto user</span></span>
+<span id="cb1-59"><a href="#cb1-59" aria-hidden="true" tabindex="-1"></a><span class="ex">varsto</span> <span class="at">--home</span> ~/.varsto-shared share accept <span class="at">--name</span> laptop <span class="at">--token</span> <span class="op">&lt;</span>t<span class="op">&gt;</span> --storage-path /mnt/shared</span></code></pre></div>
 <p>Test data only. Keep your own backups.</p>
 <h2 id="repository-layout">Repository layout</h2>
 <table>
