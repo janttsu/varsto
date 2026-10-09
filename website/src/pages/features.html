@@ -126,7 +126,8 @@ description: What Varsto does, with the use cases behind each feature: your own 
       <picture><source type="image/webp" srcset="../assets/img/usecases/sensitive.webp"><img src="../assets/img/usecases/sensitive.png" alt="A tax folder in a Strongroom: opens only with a security key, no clear text on the phone, hidden from the AI assistant." width="640" height="320" loading="lazy"></picture>
       <div>
         <p>A Strongroom folder's key is never stored anywhere. It is wrapped under a secret that only your FIDO2 security key can produce (the hmac-secret extension), so a touch of the same key opens the folder on every device of the vault, and nothing else does: not your passphrase, not the vault key, not a stolen laptop. Enforcement is cryptographic, not a dialog. Unlock for a window, work, lock; while locked the folder is skipped by sync, cannot be shared, and is invisible to assistants.</p>
-        <p class="note">Needs the libfido2 tools (fido2-cred, fido2-assert); a software key exists for trying the flow. Converting existing folders and enrolling a backup key are next.</p>
+        <p>Enrol a backup key, say a second YubiKey kept in a safe: each key wraps the same folder key, and either one opens it. An existing folder can become a Strongroom: it gets a new key, everything is re-encrypted and uploaded again, the old copies are deleted from your storages once the new ones are in place, and your other devices swap their plain copies for placeholders on their next sync.</p>
+        <p class="note">Needs the libfido2 tools (fido2-cred, fido2-assert); a software key exists for trying the flow. Touching the key happens on the command line (<code>varsto strongroom convert</code>, <code>add-key</code>); the interface shows the command and lists the enrolled keys. A device that already had the old key could have kept it, and removing a key does not re-key the folder.</p>
       </div>
     </section>
 
