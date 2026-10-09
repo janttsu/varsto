@@ -45,12 +45,14 @@ mod placement;
 mod strongroom_ops;
 mod verify;
 mod view;
+mod where_data;
 pub use devinfo::DeviceDetails;
 pub use membership::{
     removal_notice, DeviceInfo, DeviceRemoved, EpochRecord, Grant, KemRecord, Removal, Revocation,
     RevokeReport, Revoked, SignedRevocation,
 };
 pub use strongroom_ops::{CleanupReport, ConvertReport, StrongroomKeySummary};
+pub use where_data::{CopyStats, DataLocations, DeviceShare, FolderShare, StorageShare};
 
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
 struct LocalIndexEntry {

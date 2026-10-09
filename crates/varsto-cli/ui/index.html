@@ -226,6 +226,32 @@
         </div>
       </div>
 
+      <div class="card hidden" id="wherecard">
+        <div class="card-head">
+          <h2 class="card-title">Where your data is</h2>
+          <span id="wd-total" class="muted small"></span>
+        </div>
+        <div class="wd-summary">
+          <div class="wd-headline">
+            <span id="wd-bytes" class="wd-big"></span>
+            <span id="wd-avg" class="wd-avg"></span>
+          </div>
+          <div class="wd-copies">
+            <span class="wd-copies-cap">Kept copies</span>
+            <svg id="wd-hist" class="wd-hist" role="img" aria-label="Blocks by number of kept copies"></svg>
+          </div>
+        </div>
+        <div id="wd-chart" class="wd-chart"></div>
+        <div class="legend wd-legend">
+          <span class="legend-item"><i class="wd-sw own"></i>Own devices and disks</span>
+          <span class="legend-item"><i class="wd-sw ext"></i>External storage</span>
+          <span class="legend-item"><i class="wd-sw carrier"></i>Transferrer (passes copies on)</span>
+          <span class="legend-item"><i class="wd-sw cold"></i>Cold storage</span>
+          <span class="legend-item"><i class="wd-sw other"></i>Seen only in other devices' records</span>
+          <span id="wd-note" class="legend-note muted"></span>
+        </div>
+      </div>
+
       <div class="card">
         <h2 class="card-title"><svg class="icon accent"><use href="#i-activity"/></svg>Activity</h2>
         <pre id="log" class="log"></pre>

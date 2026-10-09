@@ -1097,6 +1097,7 @@ fn api_unlocked(
             service.folders_changed = true;
             Ok(serde_json::to_value(r)?)
         }
+        (Method::Get, "/api/data/locations") => Ok(serde_json::to_value(engine.data_locations()?)?),
         (Method::Get, "/api/storage/costs") => Ok(serde_json::to_value(engine.storage_estimates()?)?),
         (Method::Post, "/api/storage/price") => {
             let name = s(input, "name")?;
