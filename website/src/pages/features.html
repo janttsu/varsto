@@ -139,6 +139,15 @@ description: What Varsto does, with the use cases behind each feature: your own 
       </div>
     </section>
 
+    <section class="feature">
+      <h2>Remove a lost or stolen device, and wipe it remotely</h2>
+      <picture><source type="image/webp" srcset="../assets/img/usecases/stolen.webp"><img src="../assets/img/usecases/stolen.png" alt="A stolen laptop: the Strongroom folder stays locked, the device is revoked and wiped from a phone." width="640" height="320" loading="lazy"></picture>
+      <div>
+        <p>From any other device, Remove device signs a revocation into your storage. Every device then ignores the removed one's ledger entries after the cut-off and refuses its peer connections, and the vault moves to a new key that is sealed (X25519 + ML-KEM-768) to each remaining device only: ledger, records, manifests and new files of every folder use keys the removed device never sees. With a wipe order, the device deletes its keys, sync state and folder contents the next time it reaches a storage; the order is signed by one of your devices, so a storage or someone with an old vault key cannot trigger it.</p>
+        <p class="note">What the removed device could read before stays readable to it; folders shared with other people and Strongroom folders keep their keys; storage credentials are not rotated for you. Print a new recovery kit afterwards.</p>
+      </div>
+    </section>
+
     <h2>Also in the design</h2>
     <ul>
     </ul>

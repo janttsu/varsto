@@ -220,7 +220,7 @@ impl Engine {
             folder_id: new_id.to_string(),
             ..Default::default()
         };
-        let old_keys = rec.keys()?;
+        let old_keys = self.folder_keys(&rec)?;
         let new_keys = FolderKeys::from_folder_key(new_id, folder_key.clone())?;
         let readable = self.open_storages(false)?;
         let targets: Vec<(StorageSpec, Box<dyn Storage>)> = self
@@ -330,7 +330,7 @@ impl Engine {
             converted_utc: util::now_utc(),
             covered,
         };
-        let fr_key = self.keys.folder_record_key();
+        let fr_key = self.folder_record_key_now();
         let blob = record.seal(&self.vault.vault_id, &fr_key)?;
         let key = ConversionRecord::storage_key(&old_id);
         for (_, backend) in self.metadata_storages(true)? {
@@ -393,8 +393,8 @@ impl Engine {
             new_hash.update(&chunk);
             let chunk_id = ChunkId::from_bytes(&crypto::keyed_hash(&new.hash, &chunk));
             let ct = crypto::encrypt_with_nonce(
-                &new.chunk_key(&chunk_id),
-                &new.chunk_nonce(&chunk_id),
+                &new.chunk_key(new.epoch, &chunk_id)?,
+                &new.chunk_nonce(new.epoch, &chunk_id)?,
                 &new.chunk_aad(&self.vault.vault_id, &chunk_id, chunk.len() as u64),
                 &crate::pack::pack(&chunk),
             )?;
@@ -445,6 +445,7 @@ impl Engine {
                 chunk: chunk_id,
                 object,
                 size: chunk.len() as u64,
+                epoch: new.epoch,
             });
         }
         if hex::encode(old_hash.finalize()) != file.content_hash {
@@ -457,10 +458,14 @@ impl Engine {
     }
 
     fn conversion_record(&self, old: &FolderId) -> Result<Option<ConversionRecord>> {
-        let fr_key = self.keys.folder_record_key();
+        let fr_keys = self.folder_record_keys();
         for (_, backend) in self.metadata_storages(false)? {
             if let Some(blob) = backend.get(&ConversionRecord::storage_key(old))? {
-                if let Ok(r) = ConversionRecord::open(&blob, &self.vault.vault_id, old, &fr_key) {
+                if let Ok(r) = fr_keys
+                    .iter()
+                    .find_map(|k| ConversionRecord::open(&blob, &self.vault.vault_id, old, k).ok())
+                    .ok_or(())
+                {
                     return Ok(Some(r));
                 }
             }
@@ -618,7 +623,7 @@ impl Engine {
         if self.vault.member {
             return Ok(());
         }
-        let fr_key = self.keys.folder_record_key();
+        let fr_keys = self.folder_record_keys();
         let mut changed = false;
         let mut conversions: BTreeMap<FolderId, ConversionRecord> = BTreeMap::new();
         for (_, backend) in self.metadata_storages(false)? {
@@ -648,7 +653,11 @@ impl Engine {
                     continue;
                 }
                 if let Some(blob) = backend.get(&key)? {
-                    if let Ok(r) = KeysRecord::open(&blob, &self.vault.vault_id, &fid, &fr_key) {
+                    if let Ok(r) = fr_keys
+                        .iter()
+                        .find_map(|k| KeysRecord::open(&blob, &self.vault.vault_id, &fid, k).ok())
+                        .ok_or(())
+                    {
                         if let Some(f) = self.keyring.folders.get_mut(&fid) {
                             if f.strongroom
                                 .as_ref()
@@ -678,8 +687,12 @@ impl Engine {
                     continue;
                 }
                 if let Some(blob) = backend.get(&key)? {
-                    if let Ok(r) =
-                        ConversionRecord::open(&blob, &self.vault.vault_id, &old, &fr_key)
+                    if let Ok(r) = fr_keys
+                        .iter()
+                        .find_map(|k| {
+                            ConversionRecord::open(&blob, &self.vault.vault_id, &old, k).ok()
+                        })
+                        .ok_or(())
                     {
                         conversions.insert(old, r);
                     }
@@ -884,7 +897,7 @@ impl Engine {
             device: self.vault.device_id.clone(),
             info: new_info,
         };
-        let fr_key = self.keys.folder_record_key();
+        let fr_key = self.folder_record_key_now();
         let blob = record.seal(&self.vault.vault_id, &fr_key)?;
         let key = record.storage_key();
         let prefix = format!("{}{}/", KeysRecord::PREFIX, rec.folder_id);

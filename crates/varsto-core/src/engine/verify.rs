@@ -147,7 +147,9 @@ impl Engine {
         mine: &BTreeMap<String, String>,
         backends: &BTreeMap<String, Box<dyn Storage>>,
     ) -> BTreeMap<DeviceId, BTreeMap<String, String>> {
-        let key = self.keys.registry_key();
+        let key = self.registry_key_now();
+        let reg_keys: Vec<crate::crypto::SecretKey> =
+            self.registry_keys().into_iter().map(|(_, k)| k).collect();
         let vault = &self.vault.vault_id;
         let me = &self.vault.device_id;
         let mut out: BTreeMap<DeviceId, (i64, BTreeMap<String, String>)> = BTreeMap::new();
@@ -180,7 +182,11 @@ impl Engine {
                     .get(k)
                     .ok()
                     .flatten()
-                    .and_then(|blob| crypto::decrypt(&key, &names_aad(vault, &dev), &blob).ok())
+                    .and_then(|blob| {
+                        reg_keys
+                            .iter()
+                            .find_map(|k| crypto::decrypt(k, &names_aad(vault, &dev), &blob).ok())
+                    })
                     .and_then(|plain| serde_json::from_slice::<StorageNames>(&plain).ok())
                     .filter(|r| r.device == dev);
                 let Some(rec) = rec else { continue };

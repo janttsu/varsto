@@ -39,10 +39,15 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
+mod membership;
 mod placement;
 mod strongroom_ops;
 mod verify;
 mod view;
+pub use membership::{
+    removal_notice, DeviceInfo, DeviceRemoved, EpochRecord, Grant, KemRecord, Removal, Revocation,
+    RevokeReport, Revoked, SignedRevocation,
+};
 pub use strongroom_ops::{CleanupReport, ConvertReport, StrongroomKeySummary};
 
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
@@ -101,6 +106,12 @@ struct DeviceCache {
     /// Member devices of shared folders (other users), by device id.
     #[serde(default)]
     members: BTreeMap<DeviceId, DeviceRecord>,
+    /// Devices removed from the vault (signed revocations this device accepted).
+    #[serde(default)]
+    revoked: BTreeMap<DeviceId, membership::Revoked>,
+    /// Key epoch whose registry key opened each device record (absent = 0).
+    #[serde(default)]
+    record_epochs: BTreeMap<DeviceId, u32>,
 }
 
 #[derive(Clone, Debug, Serialize, Default)]
@@ -207,6 +218,10 @@ pub struct StatusReport {
     pub format_version: u16,
     pub storages: Vec<StorageSpec>,
     pub devices: BTreeMap<String, String>,
+    /// Devices removed from the vault (name by device id).
+    pub revoked: BTreeMap<String, String>,
+    /// Vault key epoch: 0 until a device is removed, then one more per removal.
+    pub key_epoch: u32,
     /// Untrusted replicas that hold encrypted copies (name by device id).
     pub replicas: BTreeMap<String, String>,
     /// Other users' devices that share folders with this vault (name by device id).
@@ -324,6 +339,10 @@ pub struct Engine {
     devices: DeviceCache,
     pending: Vec<Event>,
     forked_self: bool,
+    /// Vault keys per epoch (they change when a device is revoked).
+    epochs: membership::VaultEpochs,
+    /// Set once this device has seen its own revocation: it no longer syncs.
+    removal: Option<Removal>,
     pub chunker: ChunkerParams,
 }
 
@@ -382,7 +401,8 @@ impl Engine {
             member: false,
         };
         let vault_key_hex = keys.master.to_hex();
-        Self::write_new(home, vault, keys, passphrase).map(|e| (e, vault_key_hex))
+        let epochs = membership::VaultEpochs::genesis(&keys.master);
+        Self::write_new(home, vault, keys, passphrase, epochs).map(|e| (e, vault_key_hex))
     }
 
     /// Join an existing vault with its vault key, through a storage that holds it.
@@ -425,9 +445,11 @@ impl Engine {
                 crate::FORMAT_VERSION
             );
         }
+        let master = SecretKey::from_hex(vault_key_hex)?;
+        let epochs = membership::discover_epochs(backend.as_ref(), &meta.vault_id, &master)?;
         fs::create_dir_all(home)?;
         let keys = Keys {
-            master: SecretKey::from_hex(vault_key_hex)?,
+            master,
             signer: crypto::SigningKey::generate(),
         };
         let device_id = ledger::device_id_for(&keys.signer.public());
@@ -439,7 +461,7 @@ impl Engine {
             created_utc: meta.created_utc,
             member: false,
         };
-        let mut engine = Self::write_new(home, vault, keys, passphrase)?;
+        let mut engine = Self::write_new(home, vault, keys, passphrase, epochs)?;
         engine.add_storage_with_secret(storage, secret)?;
         engine.pull_registry()?;
         engine.pull_ledger()?;
@@ -574,7 +596,13 @@ impl Engine {
         })
     }
 
-    fn write_new(home: &Path, vault: LocalVault, keys: Keys, passphrase: &str) -> Result<Engine> {
+    fn write_new(
+        home: &Path,
+        vault: LocalVault,
+        keys: Keys,
+        passphrase: &str,
+        epochs: membership::VaultEpochs,
+    ) -> Result<Engine> {
         keys.save(home, passphrase, &vault.vault_id, &vault.device_id)?;
         util::write_json(&home.join("vault.json"), &vault)?;
         let mut engine = Engine {
@@ -590,9 +618,14 @@ impl Engine {
             devices: DeviceCache::default(),
             pending: Vec::new(),
             forked_self: false,
+            epochs,
+            removal: None,
             chunker: ChunkerParams::DEFAULT,
         };
         engine.config.save(home)?;
+        if !engine.vault.member {
+            engine.save_epochs()?;
+        }
         engine.keyring.save(
             home,
             &engine.keys,
@@ -653,7 +686,8 @@ impl Engine {
             created_utc: meta.created_utc,
             member: true,
         };
-        let mut engine = Self::write_new(home, vault, keys, passphrase)?;
+        let epochs = membership::VaultEpochs::genesis(&keys.master);
+        let mut engine = Self::write_new(home, vault, keys, passphrase, epochs)?;
         let rec = FolderRecord {
             folder_id: token.folder_id.clone(),
             name: token.name.clone(),
@@ -695,6 +729,12 @@ impl Engine {
             .find(folder)
             .cloned()
             .ok_or_else(|| anyhow!("unknown folder {folder}"))?;
+        if self.key_epoch() > 0 && !self.is_frozen(&rec) {
+            bail!(
+                "{} was re-keyed when a device was removed; sharing a re-keyed folder is not supported yet",
+                rec.name
+            );
+        }
         if let Some(r) = self.keyring.folders.get_mut(&rec.folder_id) {
             r.shared = true;
         }
@@ -715,8 +755,8 @@ impl Engine {
     /// Which key opens a ledger batch with this key id, on this device.
     fn key_for_id(&self, id: &str) -> Option<SecretKey> {
         match id {
-            KEY_LEDGER if !self.vault.member => Some(self.keys.ledger_key()),
-            KEY_REPLICA if !self.vault.member => Some(replica::replica_key(&self.keys.master)),
+            KEY_REPLICA if !self.vault.member => Some(replica::replica_key(self.root_key())),
+            id if !self.vault.member && id.starts_with(KEY_LEDGER) => self.ledger_key_for(id),
             other => {
                 let fid = other.strip_prefix("share:")?;
                 let rec = self.keyring.folders.get(&FolderId::from_hex(fid).ok()?)?;
@@ -740,6 +780,8 @@ impl Engine {
         }
         let keys = Keys::load(home, passphrase, &vault.vault_id, &vault.device_id)?;
         let keyring = Keyring::load(home, &keys, &vault.vault_id, &vault.device_id)?;
+        let epochs = membership::VaultEpochs::load(home, &keys, &vault.vault_id, &vault.device_id)?;
+        let removal = util::read_json(&home.join("removed.json")).ok();
         let mut engine = Engine {
             peers: None,
             unlocked: BTreeMap::new(),
@@ -753,6 +795,8 @@ impl Engine {
             keyring,
             pending: Vec::new(),
             forked_self: false,
+            epochs,
+            removal,
             chunker: ChunkerParams::DEFAULT,
         };
         // Command-line runs use the peers other devices advertised, over TCP
@@ -799,10 +843,14 @@ impl Engine {
 
     fn key_directory(&self) -> Result<KeyDirectory> {
         let mut dir = KeyDirectory::new();
+        // Revoked devices stay in the directory: their batches up to the
+        // cut-off remain valid. Devices enrolled with an out-of-date vault
+        // key are left out.
         for (id, rec) in self
             .devices
             .devices
             .iter()
+            .filter(|(id, _)| self.trusted(id) || self.is_revoked(id))
             .chain(self.devices.replicas.iter())
             .chain(self.devices.members.iter())
         {
@@ -867,7 +915,7 @@ impl Engine {
     /// same pool id for the same pool name, and a disk marker reveals neither
     /// the vault id nor the pool name.
     fn pool_identity(&self, name: &str) -> PoolIdentity {
-        let k = self.keys.master.derive("disk-pool", &[]);
+        let k = self.root_key().derive("disk-pool", &[]);
         PoolIdentity {
             pool_id: hex::encode(&crypto::keyed_hash(&k, format!("pool:{name}").as_bytes())[..16]),
             vault_tag: hex::encode(
@@ -1363,7 +1411,7 @@ impl Engine {
             device: self.vault.device_id.clone(),
             removed_utc: util::now_utc(),
         };
-        let blob = removal.seal(&self.vault.vault_id, &self.keys.folder_record_key())?;
+        let blob = removal.seal(&self.vault.vault_id, &self.folder_record_key_now())?;
         for (_, backend) in self.metadata_storages(true)? {
             backend.put_if_absent(&removal.storage_key(), &blob)?;
         }
@@ -1614,8 +1662,8 @@ impl Engine {
 
     fn publish_registry(&mut self) -> Result<()> {
         let rec = self.own_record();
-        let reg_key = self.keys.registry_key();
-        let fr_key = self.keys.folder_record_key();
+        let reg_key = self.registry_key_now();
+        let fr_key = self.folder_record_key_now();
         for (_, backend) in self.metadata_storages(true)? {
             if !self.vault.member {
                 backend.put_if_absent(
@@ -1644,12 +1692,15 @@ impl Engine {
                 )?;
             }
         }
+        // The key-exchange key a revocation seals the next vault key to.
+        self.kem_record_stale();
+        self.ensure_kem_record()?;
         Ok(())
     }
 
     fn pull_registry(&mut self) -> Result<()> {
-        let reg_key = self.keys.registry_key();
-        let fr_key = self.keys.folder_record_key();
+        let reg_keys = self.registry_keys();
+        let fr_keys = self.folder_record_keys();
         let mut changed_devices = false;
         let mut changed_folders = false;
         for (_, backend) in self.metadata_storages(false)? {
@@ -1668,14 +1719,23 @@ impl Engine {
                     continue;
                 }
                 if let Some(blob) = backend.get(&key)? {
-                    if let Ok(rec) = DeviceRecord::open(&blob, &self.vault.vault_id, &id, &reg_key)
-                    {
+                    // Newest epoch first; which key opened it decides whether
+                    // a record written after a key change is trusted.
+                    let opened = reg_keys.iter().find_map(|(epoch, k)| {
+                        DeviceRecord::open(&blob, &self.vault.vault_id, &id, k)
+                            .ok()
+                            .map(|rec| (*epoch, rec))
+                    });
+                    if let Some((epoch, rec)) = opened {
+                        if epoch > 0 {
+                            self.devices.record_epochs.insert(id.clone(), epoch);
+                        }
                         self.devices.devices.insert(id, rec);
                         changed_devices = true;
                     }
                 }
             }
-            let replica_key = replica::replica_key(&self.keys.master);
+            let replica_key = replica::replica_key(self.root_key());
             for key in backend.list(REPLICA_PREFIX)? {
                 let Some(id) = key
                     .strip_prefix(REPLICA_PREFIX)
@@ -1714,9 +1774,9 @@ impl Engine {
                     continue;
                 }
                 if let Some(blob) = backend.get(&key)? {
-                    if let Ok(rec) =
-                        FolderRecord::open(&blob, &self.vault.vault_id, &dev, &fid, &fr_key)
-                    {
+                    if let Some(rec) = fr_keys.iter().find_map(|k| {
+                        FolderRecord::open(&blob, &self.vault.vault_id, &dev, &fid, k).ok()
+                    }) {
                         self.keyring.folders.insert(fid, rec);
                         changed_folders = true;
                     }
@@ -1750,9 +1810,9 @@ impl Engine {
                         continue;
                     }
                     if let Some(blob) = backend.get(&key)? {
-                        if let Ok(rec) =
-                            vault::PolicyRecord::open(&blob, &self.vault.vault_id, &fid, &fr_key)
-                        {
+                        if let Some(rec) = fr_keys.iter().find_map(|k| {
+                            vault::PolicyRecord::open(&blob, &self.vault.vault_id, &fid, k).ok()
+                        }) {
                             if let Some(f) = self.keyring.folders.get_mut(&fid) {
                                 if rec.updated_utc > f.policy_updated_utc {
                                     f.policy = rec.policy;
@@ -1785,9 +1845,9 @@ impl Engine {
                         continue;
                     }
                     if let Some(blob) = backend.get(&key)? {
-                        if let Ok(rec) =
-                            vault::FolderRemoval::open(&blob, &self.vault.vault_id, &fid, &fr_key)
-                        {
+                        if let Some(rec) = fr_keys.iter().find_map(|k| {
+                            vault::FolderRemoval::open(&blob, &self.vault.vault_id, &fid, k).ok()
+                        }) {
                             self.forget_folder(&fid, rec.removed_utc)?;
                             changed_folders = true;
                         }
@@ -1846,15 +1906,21 @@ impl Engine {
         if self.pending.is_empty() {
             return Ok(None);
         }
+        if self.removal.is_some() {
+            // A removed device signs nothing more.
+            self.pending.clear();
+            return self.ensure_active().map(|_| None);
+        }
         let lamport = self.tick()?;
         let events = std::mem::take(&mut self.pending);
         if !self.vault.member {
-            let ledger_key = self.keys.ledger_key();
-            let signed = self.ledger.append_own(
+            let (key_id, ledger_key) = self.ledger_key_now();
+            let signed = self.ledger.append_own_with(
                 &self.vault.device_id,
                 events,
                 lamport,
                 &ledger_key,
+                &key_id,
                 &self.keys.signer,
             )?;
             self.push_own_batches()?;
@@ -1941,6 +2007,7 @@ impl Engine {
     /// Pull everyone's batches from every hot storage.
     fn pull_ledger(&mut self) -> Result<Vec<DeviceId>> {
         self.pull_registry()?;
+        self.sync_membership()?;
         let dir = self.key_directory()?;
         let me = self.vault.device_id.clone();
         let mut forks = BTreeSet::new();
@@ -1959,6 +2026,10 @@ impl Engine {
                     continue;
                 };
                 let dev = DeviceId::from_hex(dev)?;
+                if !self.batch_accepted(&dev, seq) {
+                    // Signed by a revoked device after its cut-off.
+                    continue;
+                }
                 if self.ledger.get(&dev, seq)?.is_some() && !self.ledger.is_forked(&dev) {
                     // Known batch: re-check only our own head against the mailbox.
                     continue;
@@ -1999,7 +2070,10 @@ impl Engine {
     }
 
     pub fn view(&self) -> Result<LedgerView> {
-        self.ledger.view_with(|id| self.key_for_id(id))
+        self.ledger.view_filtered(
+            |id| self.key_for_id(id),
+            |d, seq| self.batch_accepted(d, seq),
+        )
     }
 
     /// Token for an untrusted replica device (F-045): it can store and verify
@@ -2008,7 +2082,7 @@ impl Engine {
         if self.vault.member {
             bail!("a member device cannot issue replica tokens");
         }
-        Ok(replica::token_for(&self.keys.master, &self.vault.vault_id))
+        Ok(replica::token_for(self.root_key(), &self.vault.vault_id))
     }
 
     // ----- scanning ---------------------------------------------------------
@@ -2021,8 +2095,17 @@ impl Engine {
         root: &Path,
         state: &mut FolderState,
     ) -> Result<(u64, u64)> {
-        let fk = rec.keys()?;
+        let fk = self.folder_keys(rec)?;
         let me = self.vault.device_id.clone();
+        // Chunks this folder already references keep their object (and key
+        // epoch): after a key change, unchanged content is not re-uploaded.
+        let known: std::collections::HashMap<ChunkId, ChunkRef> = state
+            .files
+            .values()
+            .chain(state.pending_remote.values())
+            .flat_map(|f| f.chunks.iter())
+            .map(|c| (c.chunk.clone(), c.clone()))
+            .collect();
         let mut seen = BTreeSet::new();
         let mut placeholders: BTreeSet<String> = BTreeSet::new();
         let mut scanned = 0u64;
@@ -2084,13 +2167,18 @@ impl Engine {
                 let chunk = chunk?;
                 hasher.update(&chunk);
                 let chunk_id = ChunkId::from_bytes(&crypto::keyed_hash(&fk.hash, &chunk));
-                let ct = crypto::encrypt_with_nonce(
-                    &fk.chunk_key(&chunk_id),
-                    &fk.chunk_nonce(&chunk_id),
-                    &fk.chunk_aad(&self.vault.vault_id, &chunk_id, chunk.len() as u64),
-                    &crate::pack::pack(&chunk),
-                )?;
-                let object = ObjectName::from_bytes(&crypto::hash(&ct));
+                let (object, epoch) = match known.get(&chunk_id) {
+                    Some(c) if c.size == chunk.len() as u64 => (c.object.clone(), c.epoch),
+                    _ => {
+                        let ct = crypto::encrypt_with_nonce(
+                            &fk.chunk_key(fk.epoch, &chunk_id)?,
+                            &fk.chunk_nonce(fk.epoch, &chunk_id)?,
+                            &fk.chunk_aad(&self.vault.vault_id, &chunk_id, chunk.len() as u64),
+                            &crate::pack::pack(&chunk),
+                        )?;
+                        (ObjectName::from_bytes(&crypto::hash(&ct)), fk.epoch)
+                    }
+                };
                 self.pending.push(Event::ChunkOnDevice {
                     folder: rec.folder_id.clone(),
                     chunk: chunk_id.clone(),
@@ -2101,6 +2189,7 @@ impl Engine {
                     chunk: chunk_id,
                     object,
                     size: chunk.len() as u64,
+                    epoch,
                 });
             }
             let content_hash = hex::encode(hasher.finalize());
@@ -2181,6 +2270,7 @@ impl Engine {
     // ----- push ---------------------------------------------------------------
 
     pub fn push(&mut self, folder: &str) -> Result<PushReport> {
+        self.ensure_active()?;
         if self.forked_self {
             bail!("this device's ledger is forked; it must be re-enrolled as a new device");
         }
@@ -2218,11 +2308,15 @@ impl Engine {
             return Ok(());
         }
         let view = self.view()?;
-        let fk = rec.keys()?;
+        let fk = self.folder_keys(rec)?;
         let folder_id = rec.folder_id.clone();
         let me = self.vault.device_id.clone();
-        let missing_on = |chunk: &ChunkId| -> Vec<String> {
-            let known = view.locate(&folder_id, chunk);
+        let missing_on = |cref: &ChunkRef| -> Vec<String> {
+            // The ledger record must be for this very object: after a key
+            // change the same chunk id can stand for two objects.
+            let known = view
+                .locate(&folder_id, &cref.chunk)
+                .filter(|r| r.object == cref.object);
             let held_elsewhere = known
                 .map(|r| r.devices.iter().any(|d| d != &me))
                 .unwrap_or(false);
@@ -2239,7 +2333,7 @@ impl Engine {
                 .collect()
         };
         for file in state.files.values().filter(|f| !f.deleted) {
-            if file.chunks.iter().all(|c| missing_on(&c.chunk).is_empty()) {
+            if file.chunks.iter().all(|c| missing_on(c).is_empty()) {
                 continue;
             }
             let disk = root.join(&file.path);
@@ -2258,7 +2352,7 @@ impl Engine {
                     // The file changed under us; the next scan will pick it up.
                     break;
                 }
-                let targets: Vec<String> = missing_on(&chunk_id)
+                let targets: Vec<String> = missing_on(expected)
                     .into_iter()
                     .filter(|t| !report.storages_unavailable.iter().any(|u| u == t))
                     .collect();
@@ -2266,8 +2360,8 @@ impl Engine {
                     continue;
                 }
                 let ct = crypto::encrypt_with_nonce(
-                    &fk.chunk_key(&chunk_id),
-                    &fk.chunk_nonce(&chunk_id),
+                    &fk.chunk_key(expected.epoch, &chunk_id)?,
+                    &fk.chunk_nonce(expected.epoch, &chunk_id)?,
                     &fk.chunk_aad(&self.vault.vault_id, &chunk_id, chunk.len() as u64),
                     &crate::pack::pack(&chunk),
                 )?;
@@ -2334,7 +2428,7 @@ impl Engine {
             .into_iter()
             .filter(|(s, _)| !s.is_carrier())
             .collect();
-        let meta = rec.keys()?.meta;
+        let meta = self.folder_keys(rec)?.meta;
         let mut made = 0u64;
         for (path, hash) in candidates {
             let key = thumbs::storage_key(&rec.folder_id, &hash);
@@ -2374,16 +2468,25 @@ impl Engine {
             return Ok(None);
         }
         let key = thumbs::storage_key(&rec.folder_id, &file.content_hash);
-        let meta = rec.keys()?.meta;
+        let metas = self.folder_keys(&rec)?.meta_keys();
         for (_, backend) in self.metadata_storages(false)? {
             if let Some(blob) = backend.get(&key)? {
-                return Ok(Some(thumbs::open(
-                    &blob,
-                    &self.vault.vault_id,
-                    &rec.folder_id,
-                    &file.content_hash,
-                    &meta,
-                )?));
+                let mut last = None;
+                for meta in &metas {
+                    match thumbs::open(
+                        &blob,
+                        &self.vault.vault_id,
+                        &rec.folder_id,
+                        &file.content_hash,
+                        meta,
+                    ) {
+                        Ok(t) => return Ok(Some(t)),
+                        Err(e) => last = Some(e),
+                    }
+                }
+                if let Some(e) = last {
+                    return Err(e);
+                }
             }
         }
         Ok(None)
@@ -2418,7 +2521,7 @@ impl Engine {
                     created_utc: util::now_utc(),
                     files: state.files.clone(),
                 };
-                blob = Some(m.seal(&self.vault.vault_id, &rec.keys()?.meta)?);
+                blob = Some(m.seal(&self.vault.vault_id, &self.folder_keys(rec)?.meta)?);
             }
             if let Some(b) = &blob {
                 backend.put_if_absent(&key, b)?;
@@ -2447,7 +2550,7 @@ impl Engine {
             created_utc: util::now_utc(),
             files: state.files.clone(),
         };
-        let blob = m.seal(&self.vault.vault_id, &rec.keys()?.meta)?;
+        let blob = m.seal(&self.vault.vault_id, &self.folder_keys(rec)?.meta)?;
         let key = Manifest::storage_key(&rec.folder_id, &self.vault.device_id, seq);
         for (_, backend) in self.metadata_storages(true)? {
             backend.put_if_absent(&key, &blob)?;
@@ -2466,6 +2569,7 @@ impl Engine {
     // ----- pull ---------------------------------------------------------------
 
     pub fn pull(&mut self, folder: &str) -> Result<PullReport> {
+        self.ensure_active()?;
         let (rec, root) = self.resolve_folder(folder)?;
         let mut state = self.load_state(&rec.folder_id)?;
         let mut report = PullReport {
@@ -2479,7 +2583,7 @@ impl Engine {
             // Converted into a Strongroom by another device just now.
             return Ok(report);
         }
-        let fk = rec.keys()?;
+        let fk = self.folder_keys(&rec)?;
         let me = self.vault.device_id.clone();
         let storages = self.open_storages(false)?;
 
@@ -2522,7 +2626,25 @@ impl Engine {
             }
         }
 
+        // A revoked device's manifests count only up to the last one its
+        // accepted ledger batches announced.
+        let capped = if self.devices.revoked.is_empty() {
+            BTreeMap::new()
+        } else {
+            self.view()?.manifests
+        };
+        let metas = fk.meta_keys();
         for (dev, (seq, idx)) in newest {
+            let seq = if self.is_revoked(&dev) {
+                seq.min(
+                    capped
+                        .get(&(rec.folder_id.clone(), dev.clone()))
+                        .copied()
+                        .unwrap_or(0),
+                )
+            } else {
+                seq
+            };
             if seq <= state.last_seen.get(&dev).copied().unwrap_or(0) {
                 continue;
             }
@@ -2530,14 +2652,18 @@ impl Engine {
             let Some(blob) = storages[idx].1.get(&key)? else {
                 continue;
             };
-            let m = Manifest::open(
-                &blob,
-                &self.vault.vault_id,
-                &rec.folder_id,
-                &dev,
-                seq,
-                &fk.meta,
-            )?;
+            let m = metas
+                .iter()
+                .find_map(|meta| {
+                    Manifest::open(&blob, &self.vault.vault_id, &rec.folder_id, &dev, seq, meta)
+                        .ok()
+                })
+                .ok_or_else(|| {
+                    anyhow!(
+                        "manifest {seq} of device {} does not open with any key this device holds (a newer vault key has not arrived yet?)",
+                        dev.short()
+                    )
+                })?;
             self.observe_clock(m.lamport)?;
             report.manifests_applied += 1;
             for (path, remote) in &m.files {
@@ -2802,7 +2928,7 @@ impl Engine {
                 };
                 let plain = crate::pack::unpack(
                     &crypto::decrypt(
-                        &fk.chunk_key(&cref.chunk),
+                        &fk.chunk_key(cref.epoch, &cref.chunk)?,
                         &fk.chunk_aad(&self.vault.vault_id, &cref.chunk, cref.size),
                         &ct,
                     )?,
@@ -2854,7 +2980,7 @@ impl Engine {
         if file.deleted {
             bail!("{path} is deleted");
         }
-        let fk = rec.keys()?;
+        let fk = self.folder_keys(&rec)?;
         let storages = self.open_storages(false)?;
         let mut report = PullReport {
             folder: rec.name.clone(),
@@ -3005,7 +3131,7 @@ impl Engine {
             updated_utc: now,
             policy,
         };
-        let fr_key = self.keys.folder_record_key();
+        let fr_key = self.folder_record_key_now();
         let blob = prec.seal(&self.vault.vault_id, &fr_key)?;
         for (_, backend) in self.metadata_storages(true)? {
             backend.put_if_absent(&prec.storage_key(), &blob)?;
@@ -3131,7 +3257,9 @@ impl Engine {
         if self.vault.member {
             bail!("a member device holds folder keys only, not the vault key");
         }
-        Ok(self.keys.master.to_hex())
+        // The current epoch's key: it opens the older epochs through the
+        // epoch records, while a key from before a revocation opens nothing new.
+        Ok(self.current_vault_key().to_hex())
     }
 
     // ----- strongroom --------------------------------------------------------
@@ -3292,11 +3420,11 @@ impl Engine {
     }
 
     pub fn peer_key(&self) -> SecretKey {
-        crate::p2p::peer_key(&self.keys.master)
+        crate::p2p::peer_key(self.current_vault_key())
     }
 
     pub fn wire_vault_tag(&self) -> String {
-        crate::p2p::wire_vault_tag(&self.keys.master, &self.vault.vault_id)
+        crate::p2p::wire_vault_tag(self.root_key(), &self.vault.vault_id)
     }
 
     /// What this device can serve to peers right now: every chunk of every
@@ -3309,7 +3437,7 @@ impl Engine {
             let Ok(rec) = self.with_key(&rec) else {
                 continue;
             };
-            let fk = rec.keys()?;
+            let fk = self.folder_keys(&rec)?;
             let state = self.load_state(&rec.folder_id)?;
             for f in state.files.values().filter(|f| !f.deleted) {
                 let disk = root.join(&f.path);
@@ -3323,6 +3451,7 @@ impl Engine {
                         crate::p2p::Piece {
                             folder: rec.folder_id.clone(),
                             chunk: cr.chunk.clone(),
+                            epoch: cr.epoch,
                             path: disk.clone(),
                             offset,
                             len: cr.size,
@@ -3349,6 +3478,7 @@ impl Engine {
             folder_keys,
             pieces,
             local_roots,
+            revoked: self.devices.revoked.keys().cloned().collect(),
         })
     }
 
@@ -3387,7 +3517,8 @@ impl Engine {
 
     /// Publish where this device can be reached (rendezvous record).
     pub fn publish_peer_record(&self, rec: &crate::p2p::PeerRecord) -> Result<()> {
-        let key = self.keys.registry_key();
+        self.ensure_active()?;
+        let key = self.registry_key_now();
         let blob = rec.seal(&self.vault.vault_id, &key)?;
         let k = crate::p2p::PeerRecord::storage_key(&rec.device);
         for (_, backend) in self.metadata_storages(false)? {
@@ -3401,7 +3532,7 @@ impl Engine {
     /// Rendezvous records of the other devices, one per device (the newest
     /// copy when several storages hold one).
     pub fn peer_record_list(&self) -> Result<Vec<crate::p2p::PeerRecord>> {
-        let key = self.keys.registry_key();
+        let keys = self.registry_keys();
         let mut out: Vec<crate::p2p::PeerRecord> = Vec::new();
         for (_, backend) in self.metadata_storages(false)? {
             for k in backend.list(crate::p2p::PeerRecord::PREFIX)? {
@@ -3414,14 +3545,16 @@ impl Engine {
                 let Ok(dev) = DeviceId::from_hex(id) else {
                     continue;
                 };
-                if dev == self.vault.device_id {
+                // Revoked devices and devices with an out-of-date key are no peers.
+                if dev == self.vault.device_id || !self.trusted(&dev) {
                     continue;
                 }
                 let Some(blob) = backend.get(&k)? else {
                     continue;
                 };
-                let Ok(rec) = crate::p2p::PeerRecord::open(&blob, &self.vault.vault_id, &dev, &key)
-                else {
+                let Some(rec) = keys.iter().find_map(|(_, key)| {
+                    crate::p2p::PeerRecord::open(&blob, &self.vault.vault_id, &dev, key).ok()
+                }) else {
                     continue;
                 };
                 match out.iter_mut().find(|r| r.device == dev) {
@@ -3580,6 +3713,7 @@ impl Engine {
 
     /// pull then push, for every attached folder (or one).
     pub fn sync(&mut self, folder: Option<&str>) -> Result<Vec<(PullReport, PushReport)>> {
+        self.ensure_active()?;
         // A folder another device converted into a Strongroom must be
         // adopted before it is synced under its old key.
         self.pull_registry()?;
@@ -3684,14 +3818,30 @@ impl Engine {
             format_version: crate::FORMAT_VERSION,
             storages: self.config.storages.clone(),
             // Devices from the ledger, and from the registry for devices whose
-            // enrolment batch has not reached this one yet.
+            // enrolment batch has not reached this one yet; removed ones go.
             devices: self
                 .devices
                 .devices
                 .iter()
-                .map(|(k, r)| (k.to_string(), r.name.clone()))
-                .chain(view.devices.iter().map(|(k, v)| (k.to_string(), v.clone())))
+                .map(|(k, r)| (k, r.name.clone()))
+                .chain(view.devices.iter().map(|(k, v)| (k, v.clone())))
+                .filter(|(k, _)| self.trusted(k))
+                .map(|(k, v)| (k.to_string(), v))
                 .collect(),
+            revoked: self
+                .devices
+                .revoked
+                .keys()
+                .map(|k| {
+                    let name = view
+                        .devices
+                        .get(k)
+                        .cloned()
+                        .or_else(|| self.devices.devices.get(k).map(|r| r.name.clone()));
+                    (k.to_string(), name.unwrap_or_default())
+                })
+                .collect(),
+            key_epoch: self.key_epoch(),
             replicas: self
                 .devices
                 .replicas
@@ -4077,6 +4227,7 @@ impl Engine {
         fk: &FolderKeys,
         path: &Path,
         chunk: &ChunkId,
+        epoch: u32,
     ) -> Result<Vec<u8>> {
         let file = fs::File::open(path)?;
         for piece in Chunker::new(std::io::BufReader::new(file), self.chunker)? {
@@ -4085,8 +4236,8 @@ impl Engine {
                 continue;
             }
             return crypto::encrypt_with_nonce(
-                &fk.chunk_key(chunk),
-                &fk.chunk_nonce(chunk),
+                &fk.chunk_key(epoch, chunk)?,
+                &fk.chunk_nonce(epoch, chunk)?,
                 &fk.chunk_aad(&self.vault.vault_id, chunk, piece.len() as u64),
                 &crate::pack::pack(&piece),
             );
@@ -4107,6 +4258,7 @@ impl Engine {
         struct Need {
             folder: FolderId,
             chunk: ChunkId,
+            epoch: u32,
             size: u64,
             files: Vec<PathBuf>,
         }
@@ -4126,6 +4278,7 @@ impl Engine {
                     let n = needed.entry(c.object.clone()).or_insert_with(|| Need {
                         folder: rec.folder_id.clone(),
                         chunk: c.chunk.clone(),
+                        epoch: c.epoch,
                         size: c.size,
                         files: Vec::new(),
                     });
@@ -4134,7 +4287,7 @@ impl Engine {
                     }
                 }
             }
-            folder_keys.insert(rec.folder_id.clone(), rec.keys()?);
+            folder_keys.insert(rec.folder_id.clone(), self.folder_keys(&rec)?);
         }
         let mut order: Vec<ObjectName> = needed.keys().cloned().collect();
         order.sort_by(|a, b| needed[b].size.cmp(&needed[a].size).then(a.cmp(b)));
@@ -4160,7 +4313,9 @@ impl Engine {
             if ct.is_none() {
                 if let Some(fk) = folder_keys.get(&need.folder) {
                     for path in &need.files {
-                        if let Ok(c) = self.chunk_ciphertext_from_file(fk, path, &need.chunk) {
+                        if let Ok(c) =
+                            self.chunk_ciphertext_from_file(fk, path, &need.chunk, need.epoch)
+                        {
                             ct = Some(c);
                             break;
                         }
@@ -4251,6 +4406,9 @@ pub fn reset_device(home: &Path) -> Result<Vec<String>> {
         "share-request.json",
         "software-security-key",
         "service.log",
+        membership::RESET_EXTRA[0],
+        membership::RESET_EXTRA[1],
+        membership::RESET_EXTRA[2],
     ] {
         let p = home.join(name);
         if p.exists() {

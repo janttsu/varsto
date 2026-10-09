@@ -189,11 +189,65 @@
       appState.plain_root = st.plain_root || ""; appState.plain_root_writable = st.plain_root_writable !== false;
       applyMobile();
       refreshAllFiles();
+      if (st.removal && !removalShown) {
+        removalShown = true;
+        alertBox("This device was removed from the vault by " + st.removal.by_name + " on " + fmtDate(st.removal.issued_utc) + (st.removal.wipe ? ". As ordered, its keys, sync state and folder contents were deleted." : ". It no longer syncs; reset it under Settings to start over."), "Device removed");
+      }
       if (!st.has_vault) { show("setup"); return; }
       if (!st.unlocked) { show("unlock"); return; }
       show("app");
       return refreshStatus();
     }).catch(function (e) { log("error: " + e.message); });
+  }
+
+  // Devices on the Peers page, each with "Remove device…" (revocation, optionally with a wipe order).
+  var removalShown = false;
+  function loadDevices(s) {
+    var ul = $("devicelist");
+    if (s.member) { ul.innerHTML = ""; return; }
+    api("GET", "/api/devices").then(function (r) {
+      ul.innerHTML = "";
+      r.devices.forEach(function (d) {
+        var li = el("li"); var ic = el("span", "li-icon"); ic.appendChild(icon("device")); li.appendChild(ic);
+        var body = el("div", "li-body"); var title = el("div", "li-title", d.name);
+        if (d.this_device) { title.appendChild(pill("grey", "This device")); }
+        if (d.revoked) { title.appendChild(pill("risk", "Removed")); }
+        body.appendChild(title);
+        body.appendChild(el("div", "li-sub", d.revoked
+          ? "Removed by " + d.revoked_by + " on " + fmtDate(d.revoked_utc) + (d.wipe_ordered ? ", wipe ordered" : "") + " · " + d.device_id.slice(0, 8)
+          : "Added " + fmtDate(d.enrolled_utc) + " · " + d.device_id.slice(0, 8)));
+        li.appendChild(body);
+        if (!d.this_device && !d.revoked) {
+          var a = el("div", "li-actions"); var b = el("button", "secondary danger", "Remove device…"); b.type = "button";
+          b.onclick = function () { removeDevice(d); }; a.appendChild(b); li.appendChild(a);
+        }
+        ul.appendChild(li);
+      });
+    }).catch(function (e) { log("error: " + e.message); });
+  }
+  function removeDevice(d) {
+    dialog({
+      title: "Remove " + d.name + "?",
+      text: "Use this for a lost or stolen device. " + d.name + " is cut off at once: its ledger entries from now on are ignored, your other devices refuse its peer connections, and the vault gets new keys that only your remaining devices receive. " +
+        "What is written from now on is unreadable to it, except in folders shared with other people and Strongroom folders, which keep their keys. " +
+        "Everything it could read until now it can still read: keys cannot be recalled, and its storage credentials work until you change them at your storage provider. " +
+        "Remove and wipe also orders it to delete its keys, sync state and the contents of its folders, unsynced changes included, the next time it reaches one of your storages. " +
+        "Afterwards print a new recovery kit: the old one does not open new data. This cannot be undone.",
+      fields: [{ name: "confirm", label: "Type the device name to confirm", placeholder: d.name, required: true }],
+      ok: "Remove and wipe", extra: "Remove without wipe", danger: true
+    }).then(function (r) {
+      if (!r) { return; }
+      if (r.values.confirm.trim() !== d.name) { return alertBox("The name does not match, so nothing was changed."); }
+      var wipe = r.action === "ok";
+      return api("POST", "/api/device/revoke", { device: d.device_id, wipe: wipe, confirm: d.name }).then(function (rep) {
+        log("removed " + rep.name + (rep.wipe ? " with a wipe order" : "") + "; vault key epoch " + rep.key_epoch);
+        var text = d.name + " was removed" + (rep.wipe ? " and will wipe itself when it next reaches a storage" : "") + ". New keys went to: " + (rep.keys_sent_to.join(", ") || "no other device") + ".";
+        if (rep.keys_pending_for.length) { text += " Waiting for " + rep.keys_pending_for.join(", ") + ": they receive the new key after their next sync with this version."; }
+        if (rep.folders_not_rekeyed.length) { text += " Kept their key (shared or Strongroom): " + rep.folders_not_rekeyed.join(", ") + "."; }
+        text += " Print a new recovery kit now.";
+        return alertBox(text, "Device removed").then(refreshStatus);
+      });
+    }).catch(function (e) { log("error: " + e.message); alertBox(e.message, "Could not remove the device"); });
   }
 
   // Policy editor: four minimums; zeros everywhere (or the Clear button) remove the policy.
@@ -521,6 +575,7 @@
       var mems = Object.keys(s.members || {}).map(function (k) { return s.members[k]; });
       $("devices").textContent = (s.member ? "This device is a member of a shared folder. " : "") + "Devices: " + (names.join(", ") || "none yet") + (reps.length ? " · replicas: " + reps.join(", ") : "") + (mems.length ? " · members: " + mems.join(", ") : "") + (s.forked_devices.length ? " · FORKED: " + s.forked_devices.join(", ") : "");
       $("members").textContent = mems.length ? "Members with access to shared folders: " + mems.join(", ") : "";
+      loadDevices(s);
       $("replicatoken").classList.toggle("hidden", !!s.member);
       $("replicacard").classList.toggle("hidden", !!s.member);
       return api("GET", "/api/service").then(function (sv) { renderService(sv); return api("GET", "/api/ledger"); }).then(function (l) {

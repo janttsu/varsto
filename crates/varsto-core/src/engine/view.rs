@@ -54,7 +54,7 @@ impl Engine {
         if start >= end {
             return Ok(Vec::new());
         }
-        let fk = rec.keys()?;
+        let fk = self.folder_keys(&rec)?;
         let storages = self.open_storages(false)?;
         let mut out = Vec::with_capacity((end - start) as usize);
         let mut offset = 0u64;
@@ -118,7 +118,7 @@ impl Engine {
         };
         let plain = crate::pack::unpack(
             &crypto::decrypt(
-                &fk.chunk_key(&cref.chunk),
+                &fk.chunk_key(cref.epoch, &cref.chunk)?,
                 &fk.chunk_aad(&self.vault.vault_id, &cref.chunk, cref.size),
                 &ct,
             )?,

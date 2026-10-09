@@ -528,7 +528,9 @@ impl P2p {
     /// Merge LAN peers with rendezvous records and hand them to the engine.
     fn refresh_before_sync(&self, st: &mut State) {
         let Some(e) = st.engine.as_mut() else { return };
-        let lan = self.lan_peers.lock().unwrap().clone();
+        let mut lan = self.lan_peers.lock().unwrap().clone();
+        // A removed device may still send beacons: it is no peer.
+        lan.retain(|p| !e.is_revoked(&p.device));
         // A storage hiccup must not empty the peer table: that would stop
         // the keeper's punches (so NAT mappings lapse and peers' punches
         // steal our port) and make the QUIC server refuse every peer's
@@ -938,6 +940,12 @@ pub fn run(opts: Options) -> Result<()> {
                 Some(Err(e)) => {
                     st.service.last_error = Some(format!("{e:#}"));
                     eprintln!("service: sync failed: {e:#}");
+                    // A wipe order was carried out: nothing of the vault is left.
+                    if e.downcast_ref::<varsto_core::engine::DeviceRemoved>()
+                        .is_some_and(|r| r.wiped)
+                    {
+                        st.engine = None;
+                    }
                 }
                 None => {}
             }

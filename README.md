@@ -69,6 +69,11 @@ varsto --home ~/.varsto-laptop policy check
 varsto --home ~/.varsto-laptop mcp grant docs
 varsto --home ~/.varsto-laptop mcp          # MCP over stdio; point Claude Desktop, Claude Code or any MCP client at this command
 
+# a lost or stolen device: remove it from another device (new vault keys for everything written
+# afterwards) and order it to wipe itself when it next reaches a storage; then print a new recovery kit
+varsto --home ~/.varsto-laptop device list
+varsto --home ~/.varsto-laptop device revoke phone --wipe --yes
+
 # a pool of removable disks: fill, check, eject, retire; files on a disk that is away say "attach disk data-01 (shelf)"
 varsto storage add-pool shelf --place shelf
 varsto disk add /media/me/data-01 --pool shelf --label data-01

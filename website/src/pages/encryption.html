@@ -69,7 +69,7 @@ description: How Varsto encrypts, signs and keys everything: algorithms, key hie
         <tr><td>A peer on the LAN or the internet</td><td>That some device requests objects by name, after proving it holds the vault's peer authentication key.</td><td>Anything without that key: a stranger gets no object, and the LAN beacon carries only a keyed tag, not the vault id.</td></tr>
         <tr><td>Someone you share a folder with</td><td>That folder: every file in it, and your devices' signed claims about it.</td><td>Any other folder, the vault key, your device registry.</td></tr>
         <tr><td>An AI assistant through the MCP server</td><td>The folders you granted, read-only unless you said otherwise; file names, sizes, last-used times and, when it reads a file, its content; with a read-write grant it can move files and write new ones there.</td><td>Folders you did not grant; Strongroom folders, ever.</td></tr>
-        <tr><td>A thief with your unlocked laptop</td><td>Everything a normal folder holds while the device is unlocked.</td><td>Strongroom folders without your security key; nothing after you revoke the device (planned) or rotate keys.</td></tr>
+        <tr><td>A thief with your unlocked laptop</td><td>Everything a normal folder holds while the device is unlocked.</td><td>Strongroom folders without your security key; nothing written after you remove the device from another one, except in folders shared with other people, which keep their key.</td></tr>
       </tbody>
     </table>
 
@@ -105,7 +105,7 @@ description: How Varsto encrypts, signs and keys everything: algorithms, key hie
       <li>Not audited. The algorithms are standard and the libraries are well-known Rust implementations, but the composition has not been reviewed by an outside cryptographer yet.</li>
       <li>Metadata leaks to storage: object sizes, write and read patterns, the number of devices and the rough number of chunks. Padding and cover traffic are not implemented.</li>
       <li>Convergent encryption inside a folder lets co-holders of the folder key confirm identical files (see section 3).</li>
-      <li>Revocation of a device and re-keying a folder are designed, not built: today a lost device is fenced in the ledger but its copy of the keys stays valid until you rotate.</li>
+      <li>Removing a device gives the vault new keys for everything written afterwards, but what the device already held stays readable to it: existing data is not re-encrypted, folders shared with other people and Strongroom folders keep their keys, and storage credentials are not rotated. Until a second factor exists, any of your devices can remove any other.</li>
       <li>Strongroom protects the folder key, not a file you fetched and left on disk; free it when you are done.</li>
       <li>The vault key is a single secret. Keep the recovery kit in more than one place.</li>
     </ul>

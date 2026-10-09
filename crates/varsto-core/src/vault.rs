@@ -560,13 +560,25 @@ impl FolderRecord {
 }
 
 /// Keys derived from one folder key.
+///
+/// A folder has key *epochs* (`docs/spec/alpha-0-format.md` section 20):
+/// epoch 0 is the key in the folder record; each device revocation starts a
+/// new vault key epoch, and the folder key of epoch `e >= 1` is derived from
+/// that epoch's vault key. New chunks and manifests use the newest epoch the
+/// device knows; older chunks stay under the epoch recorded in their
+/// `ChunkRef`. The keyed-hash key stays the one of epoch 0, so chunk ids and
+/// content hashes (and with them deduplication and merging) do not change.
 pub struct FolderKeys {
     pub folder: FolderId,
     base: SecretKey,
     /// Keyed-hash key for chunk ids and file content hashes (dedup domain = folder).
     pub hash: SecretKey,
-    /// Encrypts manifests.
+    /// Encrypts manifests (and thumbnails) written now: the newest epoch.
     pub meta: SecretKey,
+    /// The epoch new chunks and manifests are written under.
+    pub epoch: u32,
+    /// Folder keys of epochs 1 and later.
+    later: BTreeMap<u32, SecretKey>,
 }
 
 impl FolderKeys {
@@ -577,28 +589,73 @@ impl FolderKeys {
             hash: base.derive("dedup-hash", scope),
             meta: base.derive("folder-metadata", scope),
             base,
+            epoch: 0,
+            later: BTreeMap::new(),
         })
     }
 
-    /// Alpha-0 decision: the chunk key is derived from the chunk's keyed hash
-    /// (convergent inside the folder), so the same content encrypts to the same
-    /// object on every device, which makes offline deduplication work. Rotation
-    /// therefore re-encrypts data; shared folders will use random keys instead.
-    pub fn chunk_key(&self, chunk: &ChunkId) -> SecretKey {
-        self.base.derive(
-            "chunk-key",
-            &[self.folder.as_str().as_bytes(), chunk.as_str().as_bytes()],
-        )
+    /// Add the folder keys of later epochs; the newest becomes the write epoch.
+    pub fn with_epochs(mut self, later: BTreeMap<u32, SecretKey>) -> Self {
+        if let Some((e, k)) = later.iter().next_back() {
+            self.epoch = *e;
+            self.meta = k.derive("folder-metadata", &[self.folder.as_str().as_bytes()]);
+        }
+        self.later = later;
+        self
     }
 
-    pub fn chunk_nonce(&self, chunk: &ChunkId) -> [u8; crypto::NONCE_LEN] {
-        let k = self.base.derive(
+    /// Keep writing under epoch 0 while still reading later epochs (folders
+    /// shared with other users, Strongroom).
+    pub fn write_at_base(mut self) -> Self {
+        self.epoch = 0;
+        self.meta = self
+            .base
+            .derive("folder-metadata", &[self.folder.as_str().as_bytes()]);
+        self
+    }
+
+    fn epoch_base(&self, epoch: u32) -> Result<&SecretKey> {
+        if epoch == 0 {
+            return Ok(&self.base);
+        }
+        self.later.get(&epoch).ok_or_else(|| {
+            anyhow!(
+                "folder key epoch {epoch} is not known on this device yet (it arrives with the next sync)"
+            )
+        })
+    }
+
+    /// Metadata keys of every known epoch, newest first: manifests and
+    /// thumbnails are opened with the first that fits.
+    pub fn meta_keys(&self) -> Vec<SecretKey> {
+        let scope: &[&[u8]] = &[self.folder.as_str().as_bytes()];
+        self.later
+            .values()
+            .rev()
+            .chain(std::iter::once(&self.base))
+            .map(|k| k.derive("folder-metadata", scope))
+            .collect()
+    }
+
+    /// Alpha-0 decision: the chunk key is derived from the chunk's keyed hash
+    /// (convergent inside the folder and epoch), so the same content encrypts
+    /// to the same object on every device, which makes offline deduplication
+    /// work. Rotation therefore applies to new chunks only.
+    pub fn chunk_key(&self, epoch: u32, chunk: &ChunkId) -> Result<SecretKey> {
+        Ok(self.epoch_base(epoch)?.derive(
+            "chunk-key",
+            &[self.folder.as_str().as_bytes(), chunk.as_str().as_bytes()],
+        ))
+    }
+
+    pub fn chunk_nonce(&self, epoch: u32, chunk: &ChunkId) -> Result<[u8; crypto::NONCE_LEN]> {
+        let k = self.epoch_base(epoch)?.derive(
             "chunk-nonce",
             &[self.folder.as_str().as_bytes(), chunk.as_str().as_bytes()],
         );
         let mut n = [0u8; crypto::NONCE_LEN];
         n.copy_from_slice(&k.0[..crypto::NONCE_LEN]);
-        n
+        Ok(n)
     }
 
     pub fn chunk_aad(&self, vault: &VaultId, chunk: &ChunkId, len: u64) -> Vec<u8> {
