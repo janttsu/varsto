@@ -375,7 +375,7 @@
         var li = el("li"); var tbtn = el("button", "tree-item" + (f.path ? "" : " detached")); tbtn.type = "button"; tbtn.dataset.folder = f.name; tbtn.title = f.path || "Not attached on this device";
         tbtn.appendChild(icon("folders")); tbtn.appendChild(el("span", "tree-name", f.name));
         if (!f.path) { var dot = el("i", "tree-dot"); dot.title = "Not attached on this device"; tbtn.appendChild(dot); }
-        tbtn.onclick = function () { if (f.path) { openFolder(f.name); } else { nav("files"); showFolderForms(true); } };
+        tbtn.onclick = function () { if (f.path) { openFolder(f.name); } else { offerAttach(f); } };
         li.appendChild(tbtn); tree.appendChild(li);
 
         // Attach list (mobile): folders of the vault not attached here.
@@ -411,6 +411,7 @@
       $("policylist-empty").classList.toggle("hidden", s.folders.length > 0);
       $("sharedlist-empty").classList.toggle("hidden", shared > 0);
       $("attachlist-empty").classList.toggle("hidden", detached > 0);
+      $("addfolder-hint").classList.toggle("hidden", detached === 0);
       $("stat-folders").textContent = s.folders.length;
       $("stat-files").textContent = totalFiles;
       $("stat-bytes").textContent = fmtBytes(totalBytes);
@@ -487,7 +488,7 @@
       body.appendChild(el("span", "fc-sub", f.files + " file" + (f.files === 1 ? "" : "s") + " · " + fmtBytes(f.bytes)));
       body.appendChild(miniMap(f)); b.appendChild(body);
       b.appendChild(icon("chevron", "fc-chev"));
-      b.onclick = function () { if (f.path) { openFolder(f.name); } else { showFolderForms(true, true); $("folderforms").scrollIntoView({ block: "start", behavior: "smooth" }); } };
+      b.onclick = function () { if (f.path) { openFolder(f.name); } else { offerAttach(f); } };
       list.appendChild(b);
     });
     $("folderlist-empty").classList.toggle("hidden", s.folders.length > 0);
@@ -937,11 +938,31 @@
     if (appState.mobile) { d.plain = modeOf(form) === "plain"; }
     return d;
   }
-  function attachFolder(nameOrId, path) {
+  // A folder of the vault that is not on this device: attach that same folder
+  // (never create a new one). Phones ask only how to keep it, desktops where.
+  function offerAttach(f) {
+    if (isMobile()) {
+      dialog({ title: "Add " + f.name + " to this phone?", text: "This folder is on your other devices. It syncs here under the same name.", ok: "Encrypted on this phone", extra: "Plain files" }).then(function (r) {
+        if (!r) { return; }
+        var plain = r.action === "extra";
+        if (plain && !hasAllFiles()) {
+          if (droid) { try { droid.requestAllFilesAccess(); } catch (e) {} }
+          alertBox("Android asks for all files access first. Allow it on the settings screen, come back and tap the folder again.");
+          return;
+        }
+        attachFolder(f.name, "", plain);
+      });
+      return;
+    }
+    dialog({ title: "Attach " + f.name + " on this device?", text: "This folder is on your other devices. It syncs into this directory under the same name.", fields: [{ name: "path", label: "Directory on this device", value: joinRoot(f.name) }], ok: "Attach" }).then(function (r) {
+      if (r) { attachFolder(f.name, (r.values.path || "").trim()); }
+    });
+  }
+  function attachFolder(nameOrId, path, plain) {
     var form = $("attachfolder");
     var d = { name_or_id: nameOrId, selective: form.querySelector("input[name=selective]").checked };
     if (path && !isMobile()) { d.path = path; }
-    if (appState.mobile) { d.plain = modeOf(form) === "plain"; }
+    if (appState.mobile) { d.plain = plain === undefined ? modeOf(form) === "plain" : plain; }
     busy(true);
     api("POST", "/api/folder/attach", d).then(function () { log("folder attached: " + nameOrId); return refreshStatus().then(function () { openFolder(nameOrId); }); }).catch(function (e) { alertBox(e.message); }).then(function () { busy(false); });
   }
