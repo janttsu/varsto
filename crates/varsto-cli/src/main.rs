@@ -234,6 +234,40 @@ enum StrongroomCmd {
         folder: String,
     },
     Status,
+    /// Turn an existing folder into a Strongroom: new key wrapped by the security key (two touches), content re-encrypted, old copies deleted from the storages. Run it again to resume an interrupted conversion (one touch).
+    Convert {
+        folder: String,
+        /// Use a software key file instead of hardware: for trying the flow only, no real protection.
+        #[arg(long)]
+        software: bool,
+        #[arg(long, default_value_t = 15)]
+        minutes: u64,
+        /// Also replace this device's plain copies with placeholders once the conversion is done.
+        #[arg(long)]
+        free: bool,
+    },
+    /// Enrol a backup security key (one touch of an enrolled key, then two of the new one).
+    AddKey {
+        folder: String,
+        /// A name for the key, e.g. "safe".
+        #[arg(long, default_value = "")]
+        label: String,
+        /// The new key is a software key file (testing only).
+        #[arg(long)]
+        software: bool,
+        /// libfido2 device path of the new key (default: ask to swap keys, then the first key found).
+        #[arg(long)]
+        device: Option<String>,
+    },
+    /// List the security keys enrolled for a Strongroom.
+    Keys {
+        folder: String,
+    },
+    /// Remove an enrolled key (by number, label or credential); the last key always stays.
+    RemoveKey {
+        folder: String,
+        key: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1398,16 +1432,7 @@ fn run(cli: &Cli) -> Result<()> {
                     println!("Strongroom {name} ({}) created at {}; unlocked for {minutes} minutes in this process. Files appear as placeholders; fetch them while unlocked and free them when done.", id.short(), path.display());
                 }
                 StrongroomCmd::Unlock { folder, minutes } => {
-                    let method = engine
-                        .folders()
-                        .into_iter()
-                        .find(|(r, _)| {
-                            &r.name == folder || r.folder_id.as_str().starts_with(folder.as_str())
-                        })
-                        .and_then(|(r, _)| r.strongroom.map(|i| i.method))
-                        .ok_or_else(|| anyhow!("{folder} is not a Strongroom folder"))?;
-                    let backend = varsto_core::strongroom::backend(&method, &home);
-                    let key = engine.unlock_strongroom(folder, backend.as_ref(), *minutes)?;
+                    let key = engine.unlock_strongroom_enrolled(folder, *minutes)?;
                     // Hand the key to the running service so the background sync works too.
                     if let Some((sf, _)) = service::status(&home) {
                         let url = format!("http://127.0.0.1:{}/api/strongroom/unlock", sf.port);
@@ -1446,12 +1471,24 @@ fn run(cli: &Cli) -> Result<()> {
                         println!("no Strongroom folders");
                     }
                     for (name, method, until) in list {
+                        let keys = engine.strongroom_keys(&name).map(|k| k.len()).unwrap_or(0);
                         println!(
-                            "{name}: {:?}, {}",
+                            "{name}: {:?}, {keys} enrolled key{}, {}",
                             method,
+                            if keys == 1 { "" } else { "s" },
                             match until {
                                 Some(u) => format!("unlocked until {u} (this process)"),
                                 None => "locked".into(),
+                            }
+                        );
+                    }
+                    for (name, switched) in engine.strongroom_conversions() {
+                        println!(
+                            "{name}: {}",
+                            if switched {
+                                "converted; old copies still being removed (retried on every sync)"
+                            } else {
+                                "conversion interrupted; run `varsto strongroom convert` again to resume"
                             }
                         );
                     }
@@ -1460,6 +1497,112 @@ fn run(cli: &Cli) -> Result<()> {
                             println!("background service: {}", serde_json::to_string(arr)?);
                         }
                     }
+                }
+                StrongroomCmd::Convert {
+                    folder,
+                    software,
+                    minutes,
+                    free,
+                } => strongroom_convert(&mut engine, &home, folder, *software, *minutes, *free)?,
+                StrongroomCmd::AddKey {
+                    folder,
+                    label,
+                    software,
+                    device,
+                } => {
+                    use varsto_core::strongroom::{self, Method, SecurityKey};
+                    let id = engine
+                        .folders()
+                        .into_iter()
+                        .find(|(r, _)| {
+                            r.is_strongroom()
+                                && (&r.name == folder || r.folder_id.as_str() == folder)
+                        })
+                        .map(|(r, _)| r.folder_id)
+                        .ok_or_else(|| anyhow!("{folder} is not a Strongroom folder"))?;
+                    eprintln!("First, open {folder} with a key that is enrolled already.");
+                    let fk = engine.unlock_strongroom_enrolled(folder, 1)?;
+                    let (method, backend): (Method, Box<dyn SecurityKey>) = if *software {
+                        eprintln!(
+                            "warning: a software key protects nothing beyond your passphrase"
+                        );
+                        (
+                            Method::Software,
+                            Box::new(strongroom::new_software_key(&home)),
+                        )
+                    } else {
+                        if device.is_none() {
+                            eprintln!(
+                                "Now unplug that key, plug in the backup key and press Enter."
+                            );
+                            let mut line = String::new();
+                            std::io::stdin().read_line(&mut line)?;
+                        }
+                        (
+                            Method::Fido2,
+                            Box::new(strongroom::Fido2Tools {
+                                device: device.clone(),
+                            }),
+                        )
+                    };
+                    let k = strongroom::enroll_key(backend.as_ref(), method, &id, &fk, label)?;
+                    let name = k.short();
+                    let n = if let Some((sf, _)) = service::status(&home) {
+                        let url = format!("http://127.0.0.1:{}/api/strongroom/add-key", sf.port);
+                        let body = serde_json::json!({"folder": folder, "key": k}).to_string();
+                        let r: serde_json::Value = serde_json::from_str(&service::http_call(
+                            "POST",
+                            &url,
+                            &sf.token,
+                            Some(&body),
+                        )?)?;
+                        r["keys"].as_u64().unwrap_or(0) as usize
+                    } else {
+                        engine.add_strongroom_key_enrolled(folder, k)?
+                    };
+                    println!("{name} enrolled for {folder}; {n} keys open it now. Keep the backup key somewhere safe.");
+                }
+                StrongroomCmd::Keys { folder } => {
+                    let keys = engine.strongroom_keys(folder)?;
+                    print(cli, &keys, |keys| {
+                        keys.iter()
+                            .map(|k| {
+                                format!(
+                                    "{}. {} ({:?}, added {}): {}",
+                                    k.number,
+                                    if k.label.is_empty() {
+                                        "no label"
+                                    } else {
+                                        &k.label
+                                    },
+                                    k.method,
+                                    if k.added_utc > 0 {
+                                        varsto_core::util::format_date(k.added_utc)
+                                    } else {
+                                        "with the folder".to_string()
+                                    },
+                                    k.credential
+                                )
+                            })
+                            .collect::<Vec<_>>()
+                            .join("\n")
+                    })?;
+                }
+                StrongroomCmd::RemoveKey { folder, key } => {
+                    let gone = if let Some((sf, _)) = service::status(&home) {
+                        let url = format!("http://127.0.0.1:{}/api/strongroom/remove-key", sf.port);
+                        let body = serde_json::json!({"folder": folder, "key": key}).to_string();
+                        let r: serde_json::Value = serde_json::from_str(&service::http_call(
+                            "POST",
+                            &url,
+                            &sf.token,
+                            Some(&body),
+                        )?)?;
+                        r["removed"].as_str().unwrap_or(key).to_string()
+                    } else {
+                        engine.remove_strongroom_key(folder, key)?.short()
+                    };
+                    println!("{gone} no longer opens {folder}. The folder key is unchanged: a removed key that was copied or kept could still open older copies of the records.");
                 }
             }
         }
@@ -1653,6 +1796,101 @@ fn main() {
         eprintln!("error: {e:#}");
         std::process::exit(1);
     }
+}
+
+/// `strongroom convert`: the security key is touched here; the conversion
+/// itself runs in the background service when one is running (it owns the
+/// folder state), otherwise in this process.
+fn strongroom_convert(
+    engine: &mut Engine,
+    home: &std::path::Path,
+    folder: &str,
+    software: bool,
+    minutes: u64,
+    free: bool,
+) -> Result<()> {
+    use varsto_core::crypto::SecretKey;
+    use varsto_core::ids::FolderId;
+    use varsto_core::strongroom::{self, Method};
+    let service = service::status(home);
+    let (id, fk, info) = if let Some((id, info)) = engine.strongroom_conversion(folder) {
+        eprintln!(
+            "Resuming the interrupted conversion of {folder}: touch the key it was started with."
+        );
+        let (fk, _) = strongroom::unlock_enrolled(home, &id, &info)?;
+        (id, fk, info)
+    } else if engine
+        .folders()
+        .into_iter()
+        .any(|(r, _)| r.is_strongroom() && (r.name == folder || r.folder_id.as_str() == folder))
+    {
+        if service.is_some() {
+            println!("{folder} is a Strongroom already; the background service removes any old copies left on its next sync");
+        } else {
+            let r = engine.finish_strongroom_conversions();
+            println!(
+                "{folder} is a Strongroom already; removed {} old objects{}",
+                r.objects_deleted,
+                if r.failures.is_empty() {
+                    String::new()
+                } else {
+                    format!(", still pending: {}", r.failures.join("; "))
+                }
+            );
+        }
+        return Ok(());
+    } else {
+        let method = if software {
+            eprintln!("warning: --software keeps the secret in a file next to the vault; it demonstrates the flow and protects nothing beyond your passphrase");
+            Method::Software
+        } else {
+            Method::Fido2
+        };
+        let id = FolderId::random();
+        let fk = SecretKey::random();
+        let backend = strongroom::backend(&method, home);
+        let info = strongroom::enroll(backend.as_ref(), method, &id, &fk)?;
+        (id, fk, info)
+    };
+    eprintln!("Re-encrypting {folder} under the new key; this reads and uploads the whole folder.");
+    let report = if let Some((sf, _)) = service {
+        let url = format!("http://127.0.0.1:{}/api/strongroom/convert", sf.port);
+        let body = serde_json::json!({"folder": folder, "folder_id": id.to_string(), "key_hex": fk.to_hex(), "info": info, "minutes": minutes, "free": free}).to_string();
+        serde_json::from_str(&service::http_call("POST", &url, &sf.token, Some(&body))?)?
+    } else {
+        let mut r = serde_json::to_value(
+            engine.convert_to_strongroom_with(folder, &id, &fk, info, minutes)?,
+        )?;
+        if free {
+            let (freed, kept) = engine.free_folder(folder)?;
+            r["freed"] = serde_json::json!(freed);
+            r["kept"] = serde_json::json!(kept);
+        }
+        r
+    };
+    println!(
+        "{folder} is now a Strongroom ({} files re-encrypted, {} fetched to do it, {} blocks uploaded; {} old objects and {} old manifests deleted).",
+        report["files"], report["files_fetched"], report["chunks_uploaded"], report["cleanup"]["objects_deleted"], report["cleanup"]["manifests_deleted"]
+    );
+    if let Some(f) = report["cleanup"]["failures"]
+        .as_array()
+        .filter(|f| !f.is_empty())
+    {
+        println!(
+            "Old copies still to remove (retried on every sync): {}",
+            serde_json::to_string(f)?
+        );
+    }
+    println!("Other devices replace their plain copies with placeholders on their next sync.");
+    if free {
+        println!(
+            "This device: {} files replaced with placeholders, {} kept.",
+            report["freed"], report["kept"]
+        );
+    } else {
+        println!("Plain copies on this device stay until you free them (run again with --free, or free files in the app).");
+    }
+    Ok(())
 }
 
 /// `p2p status`: the running service's view when there is one (its socket
