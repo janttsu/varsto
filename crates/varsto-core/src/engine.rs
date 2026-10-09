@@ -3241,7 +3241,10 @@ impl Engine {
         state.local_index.remove(path);
         state.pinned.remove(path);
         self.save_state(&rec.folder_id, &state)?;
-        if !self.mount_is_selective(&rec.folder_id) {
+        // A freed file turns a folder selective, except one kept encrypted
+        // here: its choice ("fetch when opened" or "keep all ready while
+        // unlocked") stays through every lock.
+        if !self.mount_is_selective(&rec.folder_id) && !self.mount_is_encrypted(&rec.folder_id) {
             self.set_selective(folder, true)?;
         }
         Ok(())

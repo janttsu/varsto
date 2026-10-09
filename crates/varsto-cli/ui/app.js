@@ -664,7 +664,7 @@
         $("policybanner").classList.toggle("hidden", lines.length === 0);
       }).catch(function () {});
       loadAdvice(); loadAutoVerify();
-      $("selectivetoggle").checked = fsel.selectedOptions.length && fsel.selectedOptions[0].dataset.selective === "1";
+      updateFilesHead();
       var ul = $("storages"); ul.innerHTML = "";
       s.storages.forEach(function (st) {
         var where = st.kind === "s3" ? st.endpoint + " bucket " + st.bucket + (st.prefix ? "/" + st.prefix : "") + (st.storage_class ? ", class " + st.storage_class : "") : (st.kind === "rclone" ? st.remote : st.kind === "pool" ? (st.disks || []).length + " disk" + ((st.disks || []).length === 1 ? "" : "s") + ", " + (st.reserve_percent || 5) + " % kept free" : st.path);
@@ -982,16 +982,18 @@
   function updateFilesHead() {
     var f = folderByName($("filesfolder").value);
     $("files-sub").textContent = f ? [f.path, f.files + " file" + (f.files === 1 ? "" : "s"), fmtBytes(f.bytes), f.selective ? "selective sync" : null, f.shared ? "shared" : null].filter(Boolean).join(" · ") : "";
-    if (f && isMobile()) { $("files-sub").textContent = [f.files + " file" + (f.files === 1 ? "" : "s"), fmtBytes(f.bytes), f.selective && f.plain !== false ? "selective sync" : null].filter(Boolean).join(" · "); }
+    if (f && isMobile()) { $("files-sub").textContent = [f.files + " file" + (f.files === 1 ? "" : "s"), fmtBytes(f.bytes), f.selective ? "selective sync" : null].filter(Boolean).join(" · "); }
     var w = whereLine(f); $("files-where").textContent = w; $("files-where").classList.toggle("hidden", !w);
-    $("selectivelabel").classList.toggle("hidden", !!(f && isMobile() && f.plain === false));
+    // Selective sync is the same choice in every folder; in a folder kept
+    // encrypted on a phone the synced files are kept as encrypted blocks.
+    $("selectivetoggle").checked = !!(f && f.selective);
     $("files-share").disabled = !f || !!(lastStatus && lastStatus.member);
     $("files-sync").disabled = !f;
     $("files-upload").disabled = !f;
     $("files-mkdir").disabled = !f;
     updateToolbar();
   }
-  function openFolder(name) { $("filesfolder").value = name; $("selectivetoggle").checked = $("filesfolder").selectedOptions.length && $("filesfolder").selectedOptions[0].dataset.selective === "1"; markTree(name); updateFilesHead(); showFolderForms(false); setScreen("folder"); nav("files"); loadFiles(); }
+  function openFolder(name) { $("filesfolder").value = name; markTree(name); updateFilesHead(); showFolderForms(false); setScreen("folder"); nav("files"); loadFiles(); }
   function showFolderForms(on, byUser) { $("folderforms").classList.toggle("hidden", !on); if (byUser) { $("folderforms").dataset.user = on ? "1" : "0"; } if (on && byUser) { var inp = $("addfolder").querySelector("input[name=name]"); setTimeout(function () { inp.focus(); }, 50); } }
   $("treeadd").onclick = function () { nav("files"); showFolderForms(true, true); window.scrollTo(0, document.body.scrollHeight); };
   $("filesadd").onclick = function () { var open = $("folderforms").classList.contains("hidden"); showFolderForms(open, true); if (open) { $("folderforms").scrollIntoView({ block: "start", behavior: "smooth" }); } };
@@ -1222,7 +1224,7 @@
     }).catch(function (e) { log("error: " + e.message); });
   }
   $("filesload").onclick = loadFiles;
-  $("filesfolder").onchange = function () { $("selectivetoggle").checked = $("filesfolder").selectedOptions.length && $("filesfolder").selectedOptions[0].dataset.selective === "1"; markTree($("filesfolder").value); updateFilesHead(); clearSelection(); setScreen("folder"); loadFiles(); };
+  $("filesfolder").onchange = function () { markTree($("filesfolder").value); updateFilesHead(); clearSelection(); setScreen("folder"); loadFiles(); };
   $("selectivetoggle").onchange = function () { api("POST", "/api/selective", { folder: $("filesfolder").value, on: $("selectivetoggle").checked }).then(function () { log("selective sync " + ($("selectivetoggle").checked ? "on" : "off")); return refreshStatus(); }).catch(function (e) { log("error: " + e.message); }); };
   $("dupes").onclick = function () {
     api("GET", "/api/dupes?folder=" + enc($("dupefolder").value)).then(function (g) {
