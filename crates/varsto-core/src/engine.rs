@@ -39,6 +39,8 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
+mod view;
+
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
 struct LocalIndexEntry {
     size: u64,

@@ -22,6 +22,8 @@ mod desktop;
 mod service;
 #[path = "../../varsto-cli/src/update.rs"]
 mod update;
+#[path = "../../varsto-cli/src/view.rs"]
+mod view;
 
 static HOME: Mutex<Option<PathBuf>> = Mutex::new(None);
 

@@ -14,6 +14,7 @@ mod mcp;
 mod service;
 mod tray;
 mod update;
+mod view;
 
 #[derive(Parser)]
 #[command(
