@@ -18,6 +18,9 @@
 
 pub mod quic;
 pub mod stun;
+pub mod traffic;
+
+pub use traffic::Traffic;
 
 use crate::crypto::{self, SecretKey};
 use crate::ids::{DeviceId, FolderId, ObjectName, VaultId};
@@ -171,6 +174,7 @@ impl Snapshot {
 pub struct Server {
     server: tiny_http::Server,
     pub addr: SocketAddr,
+    traffic: Arc<Traffic>,
 }
 
 impl Server {
@@ -178,7 +182,18 @@ impl Server {
         let server = tiny_http::Server::http(addr)
             .map_err(|e| anyhow!("bind p2p listener on {addr}: {e}"))?;
         let addr = server.server_addr().to_ip().unwrap_or(addr);
-        Ok(Server { server, addr })
+        Ok(Server {
+            server,
+            addr,
+            traffic: Arc::default(),
+        })
+    }
+
+    /// Count what we serve in `traffic` (shared with the QUIC node and the
+    /// peer table) instead of counters of our own.
+    pub fn with_traffic(mut self, traffic: Arc<Traffic>) -> Server {
+        self.traffic = traffic;
+        self
     }
 
     /// Serve until `stop` is set. The snapshot can be swapped at any time.
@@ -192,11 +207,11 @@ impl Server {
                 continue;
             };
             let snap = snapshot.lock().unwrap().clone();
-            let _ = Self::handle(req, snap);
+            let _ = self.handle(req, snap);
         }
     }
 
-    fn handle(req: tiny_http::Request, snap: Option<Arc<Snapshot>>) -> Result<()> {
+    fn handle(&self, req: tiny_http::Request, snap: Option<Arc<Snapshot>>) -> Result<()> {
         let path = req.url().split('?').next().unwrap_or("").to_string();
         let auth = req
             .headers()
@@ -204,12 +219,25 @@ impl Server {
             .find(|h| h.field.equiv("X-Varsto-Peer"))
             .map(|h| h.value.as_str().to_string())
             .unwrap_or_default();
-        let (status, body) = handle(snap.as_deref(), &path, &auth);
+        let (status, body, peer) = handle_from(snap.as_deref(), &path, &auth);
+        let remote = req.remote_addr().copied();
+        let len = body.len() as u64;
+        let _active = peer.as_ref().map(|d| self.traffic.begin(d));
         req.respond(
             tiny_http::Response::from_data(body)
                 .with_status_code(status)
                 .with_chunked_threshold(usize::MAX),
         )?;
+        if let Some(d) = &peer {
+            self.traffic.record(
+                d,
+                traffic::Direction::Out,
+                len,
+                is_object(&path, status),
+                &remote.map(|a| Route::Tcp(a).label()).unwrap_or_default(),
+                remote,
+            );
+        }
         Ok(())
     }
 }
@@ -218,13 +246,34 @@ impl Server {
 /// Paths: `/p2p/info` and `/p2p/object/<name>`. No snapshot means the
 /// service is locked.
 pub fn handle(snap: Option<&Snapshot>, path: &str, auth: &str) -> (u16, Vec<u8>) {
+    let (status, body, _) = handle_from(snap, path, auth);
+    (status, body)
+}
+
+/// `handle`, plus the device that asked when its token was valid: the
+/// traffic counters charge the answer to it.
+pub fn handle_from(
+    snap: Option<&Snapshot>,
+    path: &str,
+    auth: &str,
+) -> (u16, Vec<u8>, Option<DeviceId>) {
     let Some(snap) = snap else {
-        return (503, b"locked".to_vec());
+        return (503, b"locked".to_vec(), None);
     };
-    match verify_auth(&snap.peer_key, auth, path) {
-        Some(dev) if !snap.revoked.contains(&dev) => {}
-        _ => return (403, b"forbidden".to_vec()),
-    }
+    let dev = match verify_auth(&snap.peer_key, auth, path) {
+        Some(dev) if !snap.revoked.contains(&dev) => dev,
+        _ => return (403, b"forbidden".to_vec(), None),
+    };
+    let (status, body) = answer(snap, path);
+    (status, body, Some(dev))
+}
+
+/// A whole object went over the wire (not an info answer or an error).
+pub(crate) fn is_object(path: &str, status: u16) -> bool {
+    status == 200 && path.starts_with("/p2p/object/")
+}
+
+fn answer(snap: &Snapshot, path: &str) -> (u16, Vec<u8>) {
     if path == "/p2p/info" {
         let body = serde_json::json!({
             "device": snap.device_id.to_string(),
@@ -543,6 +592,8 @@ pub struct Peers {
     /// Per device: the last route (or failure), the status it answered, and when.
     routes: Mutex<BTreeMap<DeviceId, Attempt>>,
     pub timeout: Duration,
+    /// Where downloads are counted: the QUIC node's counters when it runs.
+    traffic: Arc<Traffic>,
 }
 
 const ROUTE_TTL: Duration = Duration::from_secs(60);
@@ -585,6 +636,11 @@ impl Peers {
             node.set_known(infos.clone());
             node.set_peer_key(key.clone());
         }
+        let traffic = quic
+            .as_ref()
+            .map(|n| n.traffic().clone())
+            .unwrap_or_default();
+        traffic.learn_names(infos.iter().map(|i| (&i.device, i.name.as_str())));
         Peers {
             key,
             me,
@@ -593,7 +649,19 @@ impl Peers {
             state: Mutex::new(BTreeMap::new()),
             routes: Mutex::new(BTreeMap::new()),
             timeout: Duration::from_millis(1500),
+            traffic,
         }
+    }
+
+    /// Count downloads in `traffic` (the service's counters).
+    pub fn with_traffic(mut self, traffic: Arc<Traffic>) -> Peers {
+        traffic.learn_names(self.peers.iter().map(|i| (&i.device, i.name.as_str())));
+        self.traffic = traffic;
+        self
+    }
+
+    pub fn traffic(&self) -> &Arc<Traffic> {
+        &self.traffic
     }
 
     pub fn is_empty(&self) -> bool {
@@ -727,6 +795,27 @@ impl Peers {
     /// every candidate in order. Records the outcome and logs every change
     /// of path, so the service log tells how a NAT was (not) crossed.
     fn fetch(&self, p: &PeerInfo, path: &str, auth: &str) -> Option<(u16, Vec<u8>, Route)> {
+        let _active = self.traffic.begin(&p.device);
+        let got = self.fetch_uncounted(p, path, auth);
+        if let Some((status, body, route)) = &got {
+            self.traffic.record(
+                &p.device,
+                traffic::Direction::In,
+                body.len() as u64,
+                is_object(path, *status),
+                &route.label(),
+                Some(route.addr()),
+            );
+        }
+        got
+    }
+
+    fn fetch_uncounted(
+        &self,
+        p: &PeerInfo,
+        path: &str,
+        auth: &str,
+    ) -> Option<(u16, Vec<u8>, Route)> {
         let who = if p.name.is_empty() {
             p.device.short().to_string()
         } else {
