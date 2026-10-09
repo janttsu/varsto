@@ -499,12 +499,12 @@
         $("policybanner").textContent = lines.join(" ");
         $("policybanner").classList.toggle("hidden", lines.length === 0);
       }).catch(function () {});
-      loadAdvice();
+      loadAdvice(); loadAutoVerify();
       $("selectivetoggle").checked = fsel.selectedOptions.length && fsel.selectedOptions[0].dataset.selective === "1";
       var ul = $("storages"); ul.innerHTML = "";
       s.storages.forEach(function (st) {
         var where = st.kind === "s3" ? st.endpoint + " bucket " + st.bucket + (st.prefix ? "/" + st.prefix : "") + (st.storage_class ? ", class " + st.storage_class : "") : (st.kind === "rclone" ? st.remote : st.kind === "pool" ? (st.disks || []).length + " disk" + ((st.disks || []).length === 1 ? "" : "s") + ", " + (st.reserve_percent || 5) + " % kept free" : st.path);
-        var li = el("li"); var ic = el("span", "li-icon"); ic.appendChild(icon("storages")); li.appendChild(ic);
+        var li = el("li"); li.dataset.storage = st.name; var ic = el("span", "li-icon"); ic.appendChild(icon("storages")); li.appendChild(ic);
         var body = el("div", "li-body"); var title = el("div", "li-title", st.name);
         title.appendChild(pill("grey", st.kind === "s3" ? "S3" : st.kind === "rclone" ? "rclone" : st.kind === "pool" ? "disk pool" : "directory"));
         if (st.cold) { title.appendChild(pill("grey", "cold")); } if (st.carrier) { title.appendChild(pill("grey", "transferrer")); }
@@ -514,6 +514,7 @@
         ul.appendChild(li);
       });
       $("storages-empty").classList.toggle("hidden", s.storages.length > 0);
+      loadStorageCosts();
       renderPools(s.storages);
       var names = Object.keys(s.devices).map(function (k) { return s.devices[k] + " (" + k.slice(0, 8) + ")"; });
       var reps = Object.keys(s.replicas || {}).map(function (k) { return s.replicas[k]; });
@@ -555,6 +556,7 @@
   function loadAdvice() {
     api("GET", "/api/advice?idle_days=90").then(function (a) {
       var files = (a.idle_files || []).length;
+      renderSuggestions(a);
       if (!files || !(a.estimates || []).length) { $("advice").classList.add("hidden"); return; }
       var best = a.estimates[0];
       var gb = a.idle_gb >= 0.1 ? a.idle_gb.toFixed(1) + " GB" : fmtBytes(a.idle_bytes);
@@ -567,12 +569,119 @@
       var hot = null;
       for (var i = 0; i < a.estimates.length; i++) { var e = a.estimates[i]; if (e !== best && e.kind === "hot") { hot = e; break; } }
       var alt = $("advice-alt");
-      var tail = " Moving files to another storage class is not automatic yet; the figures are estimates from Varsto's price table.";
+      var tail = " The figures are estimates from Varsto's price table and the prices set on the Storages page.";
       if (hot) { alt.textContent = "Cheapest option that stays instantly readable: " + className(hot) + " at about " + money(hot.monthly_cost, hot.currency) + " a month" + (hot.last_verified ? " (verified " + hot.last_verified + ")" : "") + "." + tail; }
       else { var second = a.estimates[1]; alt.textContent = (second ? "Next: " + className(second) + " at about " + money(second.monthly_cost, second.currency) + " a month" + (second.retrieval_cost_once ? ", " + money(second.retrieval_cost_once, second.currency) + " to retrieve once" : "") + "." : "") + tail; }
       $("advice").classList.remove("hidden");
     }).catch(function () { $("advice").classList.add("hidden"); });
   }
+
+  // Placement: per-folder monthly cost and suggestions that can be carried out
+  // after a confirmation that says what happens and what it saves.
+  var ADVICE_IDLE_DAYS = 90;
+  function approx(n, cur) { return n < 0.01 ? "less than 0.01 " + cur : "about " + money(n, cur); }
+  function costText(c) { return Object.keys(c || {}).map(function (cur) { return approx(c[cur], cur); }).join(" + "); }
+  function renderSuggestions(a) {
+    var box = $("advice-suggestions"); box.innerHTML = "";
+    (a.folders || []).forEach(function (f) {
+      if (!f.idle_bytes || !Object.keys(f.idle_monthly || {}).length) { return; }
+      box.appendChild(el("p", "muted small", "Folder " + f.folder + ": its idle files cost " + costText(f.idle_monthly) + " a month on its storages, the whole folder " + costText(f.monthly) + (f.unpriced_storages.length ? " (no price set for " + f.unpriced_storages.join(", ") + ")" : "") + "."));
+    });
+    (a.suggestions || []).forEach(function (s) {
+      var row = el("div", "suggestion");
+      row.appendChild(el("span", "", s.folder + ": " + s.files + " idle file" + (s.files === 1 ? "" : "s") + " (" + fmtBytes(s.bytes) + ") can be freed on this device; they stay on " + s.keep_on.join(", ") + "."));
+      var b = el("button", "secondary", "Free " + s.files + " file" + (s.files === 1 ? "" : "s")); b.type = "button";
+      b.onclick = function () { applySuggestion(s); };
+      row.appendChild(b); box.appendChild(row);
+    });
+  }
+  function applySuggestion(s) {
+    var text = s.summary + (s.warnings.length ? " " + s.warnings.join(" ") : "");
+    confirmBox(text, { title: "Free idle files of " + s.folder + "?", ok: "Free " + fmtBytes(s.bytes) }).then(function (yes) {
+      if (!yes) { return; }
+      busy(true); log("freeing idle files of " + s.folder);
+      return api("POST", "/api/advice/apply", { id: s.id, idle_days: ADVICE_IDLE_DAYS }).then(function (r) {
+        log(r.folder + ": " + r.files_freed + " file" + (r.files_freed === 1 ? "" : "s") + " freed (" + fmtBytes(r.bytes_freed) + ")" + (r.blocks_verified ? ", " + r.blocks_verified + " blocks verified first" : "") + (r.skipped.length ? "; " + r.skipped.length + " kept: " + r.skipped[0][1] : ""));
+        busy(false); refreshStatus();
+      });
+    }).catch(function (e) { log("error: " + e.message); busy(false); });
+  }
+
+  // Storage prices: one line per storage with its price and monthly cost, and a dialog to set them.
+  function priceText(p) {
+    var cur = p.currency ? " " + p.currency : "";
+    var parts = [p.storage_per_gb_month != null ? p.storage_per_gb_month + cur + "/GB-month" : "storage price unknown"];
+    if (p.egress_per_gb != null) { parts.push("egress " + p.egress_per_gb + cur + "/GB"); }
+    if (p.retrieval_per_gb != null) { parts.push("retrieval " + p.retrieval_per_gb + cur + "/GB"); }
+    if (p.minimum_storage_days != null) { parts.push("minimum " + p.minimum_storage_days + " days"); }
+    return parts.join(", ") + (p.source ? " (" + p.source + ")" : "");
+  }
+  function loadStorageCosts() {
+    api("GET", "/api/storage/costs").then(function (list) {
+      list.forEach(function (e) {
+        var li = null; $("storages").querySelectorAll("li").forEach(function (x) { if (x.dataset.storage === e.name) { li = x; } });
+        if (!li || li.querySelector(".li-price")) { return; }
+        li.querySelector(".li-body").appendChild(el("div", "li-sub li-price", (e.price ? priceText(e.price) : "No price set") + " · " + fmtBytes(e.bytes) + " stored" + (e.monthly_cost != null ? " · " + approx(e.monthly_cost, e.currency) + " a month" : "")));
+        var acts = el("div", "li-actions"); var pb = el("button", "secondary", "Price"); pb.type = "button"; pb.onclick = function () { editPrice(e); }; acts.appendChild(pb); li.appendChild(acts);
+      });
+    }).catch(function () {});
+  }
+  function editPrice(e) {
+    var p = e.price || {};
+    var v = function (x) { return x == null ? "" : String(x); };
+    dialog({ title: "Prices of " + e.name, text: "Used for the monthly cost and the placement suggestions. Empty means unknown, not free." + (p.source ? " Now: " + p.source + "." : ""), fields: [
+      { name: "gb_month", label: "Storage per GB-month", value: v(p.storage_per_gb_month), placeholder: "0.006" },
+      { name: "egress", label: "Egress per GB", value: v(p.egress_per_gb), placeholder: "0.01" },
+      { name: "retrieval", label: "Retrieval per GB (cold classes)", value: v(p.retrieval_per_gb) },
+      { name: "min_days", label: "Minimum storage days (cold classes)", value: v(p.minimum_storage_days) },
+      { name: "currency", label: "Currency", value: p.currency || "", placeholder: "EUR" }
+    ], ok: "Save", extra: "Clear my prices" }).then(function (r) {
+      if (!r) { return; }
+      var body = r.action === "extra" ? { name: e.name, clear: true } : { name: e.name, gb_month: r.values.gb_month, egress: r.values.egress, retrieval: r.values.retrieval, min_days: r.values.min_days, currency: r.values.currency };
+      return api("POST", "/api/storage/price", body).then(function () { log("prices of " + e.name + " saved"); refreshStatus(); });
+    }).catch(function (err) { log("error: " + err.message); });
+  }
+
+  // Automatic verification (Policies page): status line, run now, schedule.
+  var autoVerify = null;
+  function fmtWhen(t) { return t ? new Date(t * 1000).toLocaleString() : "never"; }
+  function renderAutoVerify(v) {
+    if (!v) { return; }
+    autoVerify = v; var s = v.schedule; var parts = [];
+    parts.push(s.enabled ? "On: every " + s.interval_hours + " h, up to " + s.max_blocks + " blocks or " + Math.round(s.max_bytes / 1048576) + " MiB per run" : "Off");
+    if (v.last_run_utc) {
+      var r = v.last;
+      parts.push("last run " + fmtWhen(v.last_run_utc) + (r ? ": " + r.blocks_verified + " block" + (r.blocks_verified === 1 ? "" : "s") + " verified" + (r.left_for_next_run ? ", " + r.left_for_next_run + " left for the next run" : "") + (r.corrupt.length ? ", " + r.corrupt.length + " corrupt" : "") + (r.missing.length ? ", " + r.missing.length + " missing" : "") : ""));
+    } else { parts.push("not run yet"); }
+    if (v.last_error) { parts.push("last error: " + v.last_error); }
+    if (s.enabled) { parts.push("next run " + (v.last_run_utc ? fmtWhen(v.next_run_utc) : "at the next sync")); }
+    $("av-text").textContent = parts.join(" · ");
+    $("av-toggle").textContent = s.enabled ? "Turn off" : "Turn on";
+  }
+  function loadAutoVerify() { api("GET", "/api/verify").then(renderAutoVerify).catch(function () {}); }
+  $("av-run").onclick = function () {
+    busy(true); log("automatic verification started");
+    api("POST", "/api/verify/run", {}).then(function (r) {
+      var x = r.report; log("verification: " + x.blocks_verified + " blocks verified of " + x.due + " due, " + fmtBytes(x.bytes_downloaded) + " downloaded" + (x.corrupt.length ? ", CORRUPT: " + x.corrupt.join(", ") : "") + (x.missing.length ? ", MISSING: " + x.missing.join(", ") : ""));
+      renderAutoVerify(r.status); busy(false); refreshStatus();
+    }).catch(function (e) { log("verification failed: " + e.message); busy(false); });
+  };
+  $("av-toggle").onclick = function () {
+    var on = !(autoVerify && autoVerify.schedule.enabled);
+    api("POST", "/api/verify", { enabled: on }).then(renderAutoVerify).catch(function (e) { log("error: " + e.message); });
+  };
+  $("av-settings").onclick = function () {
+    var s = (autoVerify || {}).schedule || {};
+    dialog({ title: "Automatic verification", text: "A run downloads at most this much from your storages; egress fees may apply.", fields: [
+      { name: "interval_hours", label: "Hours between runs", type: "number", value: s.interval_hours },
+      { name: "max_mib", label: "Most MiB per run", type: "number", value: s.max_bytes ? Math.round(s.max_bytes / 1048576) : "" },
+      { name: "max_blocks", label: "Most blocks per run", type: "number", value: s.max_blocks }
+    ], ok: "Save" }).then(function (r) {
+      if (!r) { return; }
+      var n = function (x) { var v = parseInt(x, 10); return isNaN(v) ? undefined : v; };
+      return api("POST", "/api/verify", { interval_hours: n(r.values.interval_hours), max_mib: n(r.values.max_mib), max_blocks: n(r.values.max_blocks) }).then(renderAutoVerify);
+    }).catch(function (e) { log("error: " + e.message); });
+  };
 
   // Disk pools: one card per pool with its disks (attached or away), from /api/disks.
   function diskAction(path, body, verb) {

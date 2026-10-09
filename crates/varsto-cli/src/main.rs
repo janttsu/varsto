@@ -14,6 +14,7 @@ mod mcp;
 mod service;
 mod tray;
 mod update;
+mod upkeep;
 mod view;
 
 #[derive(Parser)]
@@ -178,6 +179,19 @@ enum Cmd {
     Mcp {
         #[command(subcommand)]
         cmd: Option<McpCmd>,
+    },
+    /// Automatic verification of blocks other devices wrote: show, run now, set the schedule.
+    Verify {
+        #[command(subcommand)]
+        cmd: Option<upkeep::VerifyCmd>,
+    },
+    /// Placement advice: idle files, storage prices, monthly costs, and suggestions to apply.
+    Advice {
+        /// Files not used for this many days count as idle.
+        #[arg(long, default_value_t = 90, global = true)]
+        idle_days: i64,
+        #[command(subcommand)]
+        cmd: Option<upkeep::AdviceCmd>,
     },
 }
 
@@ -479,6 +493,7 @@ enum StorageCmd {
         #[arg(long)]
         scan_root: Vec<PathBuf>,
     },
+    /// List storages with their prices and monthly cost.
     List,
     /// Remove a storage. Blocks that would be left without enough copies
     /// (one, or the folder policy's minimum) are copied elsewhere first.
@@ -490,6 +505,28 @@ enum StorageCmd {
         /// Also delete everything Varsto wrote on the storage afterwards.
         #[arg(long)]
         delete_data: bool,
+    },
+    /// Show or set a storage's prices (defaults come from the built-in price data when recognised).
+    Price {
+        name: String,
+        /// Storage price per GB-month.
+        #[arg(long)]
+        gb_month: Option<f64>,
+        /// Egress (data transfer out) per GB.
+        #[arg(long)]
+        egress: Option<f64>,
+        /// Retrieval (restore) per GB, for cold classes.
+        #[arg(long)]
+        retrieval: Option<f64>,
+        /// Minimum storage duration in days billed by a cold class.
+        #[arg(long)]
+        min_days: Option<u32>,
+        /// Currency of the figures (EUR, USD, ...).
+        #[arg(long)]
+        currency: Option<String>,
+        /// Remove the prices you set (built-in figures still apply).
+        #[arg(long)]
+        clear: bool,
     },
 }
 
@@ -880,11 +917,29 @@ fn run(cli: &Cli) -> Result<()> {
                     );
                 }
                 StorageCmd::List => {
-                    print(cli, &engine.storages().to_vec(), |s| {
-                        s.iter()
-                            .map(|x| {
+                    let estimates = engine.storage_estimates()?;
+                    // The specs, each with its price, stored bytes and monthly cost.
+                    let listed: Vec<serde_json::Value> = engine
+                        .storages()
+                        .iter()
+                        .zip(&estimates)
+                        .map(|(spec, e)| {
+                            let mut v = serde_json::to_value(spec).unwrap_or_default();
+                            v["price"] = serde_json::to_value(&e.price).unwrap_or_default();
+                            v["bytes"] = e.bytes.into();
+                            v["monthly_cost"] =
+                                serde_json::to_value(e.monthly_cost).unwrap_or_default();
+                            v
+                        })
+                        .collect();
+                    print(cli, &listed, |_| {
+                        engine
+                            .storages()
+                            .iter()
+                            .zip(&estimates)
+                            .map(|(x, e)| {
                                 format!(
-                                    "{}{}{}{}",
+                                    "{}{}{}{} | {} stored | {}{}",
                                     x.name(),
                                     if x.is_cold() { " (cold)" } else { "" },
                                     if x.is_carrier() { " (carrier)" } else { "" },
@@ -892,13 +947,42 @@ fn run(cli: &Cli) -> Result<()> {
                                         format!(" ({})", x.describe())
                                     } else {
                                         String::new()
-                                    }
+                                    },
+                                    fmt_bytes(e.bytes),
+                                    e.price
+                                        .as_ref()
+                                        .map(|p| p.describe())
+                                        .unwrap_or_else(|| "no price set".to_string()),
+                                    e.monthly_cost
+                                        .map(|c| format!(" | about {c:.2} {} a month", e.currency))
+                                        .unwrap_or_default()
                                 )
                             })
                             .collect::<Vec<_>>()
                             .join("\n")
                     })?;
                 }
+                StorageCmd::Price {
+                    name,
+                    gb_month,
+                    egress,
+                    retrieval,
+                    min_days,
+                    currency,
+                    clear,
+                } => upkeep::price(
+                    cli,
+                    &mut engine,
+                    upkeep::PriceArgs {
+                        name,
+                        gb_month: *gb_month,
+                        egress: *egress,
+                        retrieval: *retrieval,
+                        min_days: *min_days,
+                        currency: currency.as_deref(),
+                        clear: *clear,
+                    },
+                )?,
             }
         }
         Cmd::Disk { cmd } => {
@@ -1195,6 +1279,8 @@ fn run(cli: &Cli) -> Result<()> {
                 out.trim_end().to_string()
             })?;
         }
+        Cmd::Verify { cmd } => upkeep::verify(cli, &home, cmd)?,
+        Cmd::Advice { idle_days, cmd } => upkeep::advice(cli, &home, *idle_days, cmd)?,
         Cmd::Fsck { verify } => {
             let mut engine = Engine::open(&home, &passphrase()?)?;
             let r = engine.fsck(*verify)?;
@@ -1253,8 +1339,15 @@ fn run(cli: &Cli) -> Result<()> {
                     &serde_json::json!({"pid": f.pid, "port": f.port, "version": f.version, "service": v}),
                     |v| {
                         format!(
-                            "running: pid {} port {} version {}; {}",
-                            v["pid"], v["port"], v["version"], v["service"]
+                            "running: pid {} port {} version {}; {}{}",
+                            v["pid"],
+                            v["port"],
+                            v["version"],
+                            v["service"],
+                            v["service"]["auto_verify_text"]
+                                .as_str()
+                                .map(|t| format!("\n{t}"))
+                                .unwrap_or_default()
                         )
                     },
                 )?,

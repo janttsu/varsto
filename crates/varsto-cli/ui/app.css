@@ -269,6 +269,8 @@ details.card:not([open]) > summary { margin: 0; }
 .service-actions { display: flex; gap: 8px; flex: none; flex-wrap: wrap; justify-content: flex-end; }
 #advice-main { margin-bottom: 4px; }
 #advice-main b { font-weight: 600; }
+.advice-suggestions .suggestion { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 8px; }
+.advice-suggestions .suggestion span { flex: 1 1 240px; }
 
 /* Pills */
 .pill { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; line-height: 1; padding: 5px 9px; border-radius: 999px; white-space: nowrap; }

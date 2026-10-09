@@ -167,7 +167,7 @@ pub fn evaluate(
     }
     if ageing > 0 {
         warnings.push(format!(
-            "{ageing} chunks have a verification older than three quarters of the {}-day window: run `varsto fsck --verify` on another device soon",
+            "{ageing} chunks have a verification older than three quarters of the {}-day window: another device renews them with its automatic verification (`varsto verify`) or with `varsto fsck --verify`",
             policy.verified_within_days.unwrap_or(0)
         ));
     }

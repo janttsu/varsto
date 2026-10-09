@@ -62,8 +62,8 @@ description: What Varsto does, with the use cases behind each feature: your own 
       <h2>Your own buckets, rclone remotes and cold storage</h2>
       <picture><source type="image/webp" srcset="../assets/img/features/cold.webp"><img src="../assets/img/features/cold.png" alt="Laptop, hot storage and a cold archive with a note that cold storage is never read by surprise." width="640" height="320" loading="lazy"></picture>
       <div>
-        <p>A storage is a directory, an S3-compatible bucket with your own access keys (AWS, Scaleway, Hetzner, Backblaze B2, Cloudflare R2, MinIO) or any rclone remote, so SFTP, WebDAV, Google Drive and the rest come for free. Secrets stay encrypted on your device; rclone keeps its own. Archive classes such as Deep Archive are written but never read without an explicit confirmation, and the app reports an object that must be restored first instead of retrying. Per-storage prices for upload, download and restore, so the app can say where a read is cheap, are the next step.</p>
-        <p class="note">Status: directories, S3 and rclone work; the price model is designed.</p>
+        <p>A storage is a directory, an S3-compatible bucket with your own access keys (AWS, Scaleway, Hetzner, Backblaze B2, Cloudflare R2, MinIO) or any rclone remote, so SFTP, WebDAV, Google Drive and the rest come for free. Secrets stay encrypted on your device; rclone keeps its own. Archive classes such as Deep Archive are written but never read without an explicit confirmation, and the app reports an object that must be restored first instead of retrying. Every storage can carry a price per GB-month, for egress and for restore, set by you or taken from the open price data when the provider, region and class are recognised, so the app shows what each storage and each folder costs a month.</p>
+        <p class="note">Status: directories, S3 and rclone work; per-storage prices with monthly costs on the Storages page, <code>varsto storage price</code> and <code>varsto storage list</code>.</p>
       </div>
     </section>
 
@@ -108,7 +108,7 @@ description: What Varsto does, with the use cases behind each feature: your own 
       <picture><source type="image/webp" srcset="../assets/img/usecases/provider.webp"><img src="../assets/img/usecases/provider.png" alt="One provider is closed; copies on a second provider and a disk at home remain and the app repairs." width="640" height="320" loading="lazy"></picture>
       <div>
         <p>Tell a folder what must always be true: "at least two cloud copies and one at home, verified within 30 days". The policy travels with the folder, and every device evaluates it from the signed ledger alone, without asking the others. The app distinguishes <em>ok</em>, <em>at risk</em> (a verification is ageing out, or the only spare copy sits on cold storage or on a disk that is away), <em>violated</em> and <em>unknown</em>, and tells you while there is still time: a notification from the background app, a banner in the interface, and <code>varsto policy check</code> with an exit code for cron or monitoring.</p>
-        <p class="note">Verification comes from <code>fsck --verify</code> on another device or from a replica; scheduling that automatically is the next step. Storage places are labels you give when adding a storage.</p>
+        <p class="note">Verification is automatic: the background service on each device re-reads, within a daily budget, blocks that other devices wrote, checks their hash and records it in the ledger, oldest first and long before a window runs out (<code>varsto verify</code>, and on the Policies page). Cold storage is never read for it. <code>fsck --verify</code> and replicas still verify as well. Storage places are labels you give when adding a storage.</p>
       </div>
     </section>
 

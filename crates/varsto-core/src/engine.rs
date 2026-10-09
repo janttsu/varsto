@@ -39,7 +39,9 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
+mod placement;
 mod strongroom_ops;
+mod verify;
 mod view;
 pub use strongroom_ops::{CleanupReport, ConvertReport, StrongroomKeySummary};
 
