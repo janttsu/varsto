@@ -23,8 +23,11 @@ echo "== tests on macOS"
 cargo test --workspace --release 2>&1 | grep -E "test result|FAILED|panicked"
 echo "== native app"
 apps/macos/build.sh --out "$HOME/build/dist"
-zip="$(ls "$HOME/build/dist"/Varsto-*-macos.zip)"
-rm -rf "$HOME/build/app" && mkdir -p "$HOME/build/app" && ditto -x -k "$zip" "$HOME/build/app"
+dmg="$(ls "$HOME/build/dist"/Varsto-*-macos.dmg)"
+rm -rf "$HOME/build/app" "$HOME/build/mnt" && mkdir -p "$HOME/build/app"
+hdiutil attach -nobrowse -readonly -mountpoint "$HOME/build/mnt" "$dmg" >/dev/null
+ditto "$HOME/build/mnt/Varsto.app" "$HOME/build/app/Varsto.app"
+hdiutil detach "$HOME/build/mnt" >/dev/null
 echo "== smoke test of the bundled command line"
 export VARSTO_PASSPHRASE=cloud-test-passphrase-123
 bin="$HOME/build/app/Varsto.app/Contents/Helpers/varsto"

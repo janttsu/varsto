@@ -162,9 +162,10 @@ PLATFORMS = [
     # (title, icon, matcher for the primary file, matchers for alternatives, status line)
     ("Linux", "linux", lambda n: n.endswith("-x86_64-unknown-linux-musl.tar.gz"), [],
      "x86_64, static binary. Tray icon, background service, browser interface and command line in one file. Tested on the development machine."),
-    ("macOS", "macos", lambda n: n.endswith("-macos.zip") or n.endswith("-macos-apple-silicon-lite.zip"),
+    ("macOS", "macos", lambda n: n.endswith("-macos.dmg") or n.endswith("-macos.zip") or n.endswith("-macos-apple-silicon-lite.zip"),
      [("Command line only (Apple Silicon)", lambda n: n.endswith("-aarch64-apple-darwin.tar.gz"))],
-     "Apple Silicon. The native app has its own window, a menu-bar item, the background service and the varsto command line inside the bundle (Install command-line tool in the menu). Unsigned: right-click, Open the first time. A file named ...-lite.zip is the interim cross-compiled build that opens the interface in your browser instead."),    ("Windows", "windows", lambda n: n.endswith("-x86_64-pc-windows-gnu.zip"), [],
+     "Apple Silicon. Open the disk image and drag Varsto to Applications. The app has its own window, a menu-bar item, Finder actions (right-click a file: Download or Free up space with Varsto; double-click a placeholder to download and open it), the background service and the varsto command line inside the bundle. Unsigned: right-click, Open the first time."),
+    ("Windows", "windows", lambda n: n.endswith("-x86_64-pc-windows-gnu.zip"), [],
      "x86_64 zip. Double-click Varsto.cmd for the tray icon and the interface. Cross-compiled, not yet tested on Windows."),
     ("Android", "android", lambda n: n.endswith("-android-debug.apk"), [],
      "Debug-signed APK for sideloading: allow the install when the phone asks. Runs the same core as a foreground service. Tested in the Android 15 emulator only."),

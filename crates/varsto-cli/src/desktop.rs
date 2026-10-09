@@ -901,6 +901,31 @@ fn api_unlocked(
                 .unwrap_or(0);
             Ok(serde_json::to_value(varsto_core::advice::storage_advice(&files, idle_days, now))?)
         }
+        (Method::Post, "/api/paths") => {
+            // Finder and other file managers: act on absolute paths, one result each.
+            let action = s(input, "action")?;
+            let paths: Vec<String> = input
+                .get("paths")
+                .and_then(|p| p.as_array())
+                .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
+                .unwrap_or_default();
+            let mut results = Vec::new();
+            for p in paths {
+                let r = engine.locate_path(std::path::Path::new(&p)).and_then(|(folder, file)| {
+                    match action.as_str() {
+                        "fetch" => engine.fetch_file(&folder, &file).map(|_| ()),
+                        "free" => engine.free_file(&folder, &file),
+                        other => Err(anyhow!("unknown action {other}")),
+                    }
+                    .map(|()| file)
+                });
+                results.push(match r {
+                    Ok(file) => json!({"path": p, "file": file, "ok": true}),
+                    Err(e) => json!({"path": p, "ok": false, "error": format!("{e:#}")}),
+                });
+            }
+            Ok(json!({"results": results}))
+        }
         (Method::Post, "/api/free") => {
             // Without a path: every fetched file of the folder.
             match opt(input, "path") {

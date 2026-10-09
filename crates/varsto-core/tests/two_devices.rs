@@ -463,6 +463,25 @@ fn selective_sync_uses_placeholders() {
     let st = b.status().unwrap();
     assert!(st.folders[0].selective);
     assert_eq!(st.folders[0].placeholders, 2);
+    // Finder hands over absolute paths, placeholders included.
+    let fid = st.folders[0].folder_id.clone();
+    assert_eq!(
+        b.locate_path(&lab.b_dir.join("one.jpg.varsto-placeholder"))
+            .unwrap(),
+        (fid.clone(), "one.jpg".to_string())
+    );
+    assert!(b.locate_path(&lab.a_dir.join("one.jpg")).is_err());
+    // A file edited here since the last sync is never freed: its changes
+    // exist only on this disk. After a sync it may go.
+    b.fetch_file(&fid, "one.jpg").unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    fs::write(lab.b_dir.join("one.jpg"), pseudo_random(30_000, 13)).unwrap();
+    let e = b.free_file("photos", "one.jpg").unwrap_err();
+    assert!(e.to_string().contains("not synced yet"), "{e}");
+    assert!(lab.b_dir.join("one.jpg").exists());
+    b.sync(None).unwrap();
+    b.free_file("photos", "one.jpg").unwrap();
+    assert!(lab.b_dir.join("one.jpg.varsto-placeholder").exists());
 }
 
 #[test]

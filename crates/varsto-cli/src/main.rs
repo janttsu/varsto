@@ -494,20 +494,34 @@ enum FolderCmd {
         on: bool,
     },
     /// Download one placeholder file and keep it on this device.
+    /// Give FOLDER PATH, or only the file's path on disk (the placeholder works too).
     Fetch {
         folder: String,
-        path: String,
+        path: Option<String>,
     },
-    /// Replace a local file with a placeholder (only when stored elsewhere).
+    /// Replace a local file with a placeholder (only when stored elsewhere
+    /// and synced). Give FOLDER PATH, or only the file's path on disk.
     Free {
         folder: String,
-        path: String,
+        path: Option<String>,
     },
     /// List files of a folder with their local state.
     Files {
         folder: String,
     },
     List,
+}
+
+/// FOLDER PATH as given, or the folder and path of one path on disk.
+fn folder_and_path(
+    engine: &Engine,
+    first: &str,
+    path: &Option<String>,
+) -> Result<(String, String)> {
+    match path {
+        Some(p) => Ok((first.to_string(), p.clone())),
+        None => engine.locate_path(&std::path::absolute(first)?),
+    }
 }
 
 fn bail_usage<T>(msg: &str) -> Result<T> {
@@ -943,6 +957,7 @@ fn run(cli: &Cli) -> Result<()> {
                     );
                 }
                 FolderCmd::Fetch { folder, path } => {
+                    let (folder, path) = &folder_and_path(&engine, folder, path)?;
                     let r = match engine.fetch_file(folder, path) {
                         Ok(r) => r,
                         Err(e) => {
@@ -963,6 +978,7 @@ fn run(cli: &Cli) -> Result<()> {
                     println!("fetched {} ({} chunks)", path, r.chunks_downloaded);
                 }
                 FolderCmd::Free { folder, path } => {
+                    let (folder, path) = &folder_and_path(&engine, folder, path)?;
                     engine.free_file(folder, path)?;
                     println!("{path} is now a placeholder");
                 }

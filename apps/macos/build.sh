@@ -53,6 +53,43 @@ cat > "$app/Info.plist" <<PLIST
   <key>NSHighResolutionCapable</key><true/>
   <key>LSApplicationCategoryType</key><string>public.app-category.utilities</string>
   <key>NSAppTransportSecurity</key><dict><key>NSAllowsLocalNetworking</key><true/></dict>
+  <!-- Finder: right-click files for these (Services / Quick Actions). -->
+  <key>NSServices</key>
+  <array>
+    <dict>
+      <key>NSMenuItem</key><dict><key>default</key><string>Download with Varsto</string></dict>
+      <key>NSMessage</key><string>fetchFiles</string>
+      <key>NSPortName</key><string>Varsto</string>
+      <key>NSRequiredContext</key><dict/>
+      <key>NSSendFileTypes</key><array><string>public.item</string></array>
+    </dict>
+    <dict>
+      <key>NSMenuItem</key><dict><key>default</key><string>Free up space with Varsto</string></dict>
+      <key>NSMessage</key><string>freeFiles</string>
+      <key>NSPortName</key><string>Varsto</string>
+      <key>NSRequiredContext</key><dict/>
+      <key>NSSendFileTypes</key><array><string>public.item</string></array>
+    </dict>
+  </array>
+  <!-- Placeholders open with Varsto: double-click downloads the file and opens it. -->
+  <key>UTExportedTypeDeclarations</key>
+  <array>
+    <dict>
+      <key>UTTypeIdentifier</key><string>in.soderlund.varsto.placeholder</string>
+      <key>UTTypeDescription</key><string>Varsto placeholder</string>
+      <key>UTTypeConformsTo</key><array><string>public.data</string></array>
+      <key>UTTypeTagSpecification</key><dict><key>public.filename-extension</key><array><string>varsto-placeholder</string></array></dict>
+    </dict>
+  </array>
+  <key>CFBundleDocumentTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleTypeName</key><string>Varsto placeholder</string>
+      <key>CFBundleTypeRole</key><string>Viewer</string>
+      <key>LSHandlerRank</key><string>Owner</string>
+      <key>LSItemContentTypes</key><array><string>in.soderlund.varsto.placeholder</string></array>
+    </dict>
+  </array>
 </dict>
 </plist>
 PLIST
@@ -75,11 +112,16 @@ cp "$root/brand/png/menubar-template.png" "$root/brand/png/menubar-template@2x.p
 echo "== ad-hoc signature"
 codesign --force --sign - "$app/Helpers/varsto"
 codesign --force --deep --sign - "$stage/Varsto.app"
-name="Varsto-$version-macos.zip"
+echo "== disk image (drag Varsto to Applications)"
+name="Varsto-$version-macos.dmg"
+dmgroot="$stage/dmg"
+rm -rf "$dmgroot" && mkdir -p "$dmgroot"
+ditto "$stage/Varsto.app" "$dmgroot/Varsto.app"
+ln -s /Applications "$dmgroot/Applications"
 rm -f "${out:?}/${name:?}"
-(cd "$stage" && ditto -c -k --keepParent Varsto.app "$out/$name")
+hdiutil create -volname "Varsto" -srcfolder "$dmgroot" -fs HFS+ -format UDZO -ov "$out/$name" >/dev/null
 shasum -a 256 "$out/$name"
 echo
 echo "built $out/$name"
-echo "Test now:   open \"$stage/Varsto.app\""
+echo "Test now:   open \"$stage/Varsto.app\"   or open the .dmg and drag Varsto to Applications"
 echo "Publish:    website/publish-macos.sh \"$out/$name\"   (uploads it and updates the download page)"

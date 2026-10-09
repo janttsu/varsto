@@ -12,10 +12,10 @@ root="$(cd "$(dirname "$0")/.." && pwd)"
 version="$(grep -m1 '^version' "$root/Cargo.toml" | sed 's/.*"\(.*\)".*/\1/')"
 out="$root/website/public/downloads"
 mkdir -p "$out"
-# Keep a Mac-built native app (Varsto-<version>-macos.zip) if one is already here.
+# Keep a Mac-built native app (Varsto-<version>-macos.dmg) if one is already here.
 for f in "$out"/varsto-"$version"-* "$out"/Varsto-"$version"-*; do
   [ -e "$f" ] || continue
-  case "$f" in *"/Varsto-$version-macos.zip") ;; *) rm -f "$f" ;; esac
+  case "$f" in *"/Varsto-$version-macos.dmg") ;; *) rm -f "$f" ;; esac
 done
 rm -f "$out/SHA256SUMS" "$out/manifest.json"
 targets=("$@")
@@ -85,9 +85,9 @@ done
 
 # macOS app bundles, one per architecture (cross-compiled: Rust binary only, no
 # menu bar; the native menu-bar app is built on a Mac with apps/macos/build.sh).
-if [ -f "$out/Varsto-$version-macos.zip" ]; then
+if [ -f "$out/Varsto-$version-macos.dmg" ]; then
   echo "== Varsto.app (built on a Mac, kept)"
-  manifest+=", \"Varsto-$version-macos.zip\": {\"platform\": \"macOS app (Apple Silicon)\", \"note\": \"native app: own window, menu-bar item, background service and the varsto command line inside the bundle; built and ad-hoc signed on a Mac, not notarised\"}"
+  manifest+=", \"Varsto-$version-macos.dmg\": {\"platform\": \"macOS app (Apple Silicon)\", \"note\": \"disk image, drag Varsto to Applications; native app: own window, menu-bar item, background service and the varsto command line inside the bundle; built and ad-hoc signed on a Mac, not notarised\"}"
   mac_bins=()
 fi
 for bin in "${mac_bins[@]}"; do

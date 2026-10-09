@@ -181,12 +181,72 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         for item in menu.items { item.target = self }
         statusItem.menu = menu
 
+        NSApp.servicesProvider = FinderService(owner: self)
+        NSUpdateDynamicServices()
         ensureService()
         refresh()
         timer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in self?.refresh() }
         if ProcessInfo.processInfo.environment["VARSTO_NO_OPEN"] == nil {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { self.openUI() }
+            // Not when Finder started us to open a placeholder.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { if !self.launchedForFiles { self.openUI() } }
         }
+    }
+
+    // ----- Finder: placeholders and the Services menu ------------------------
+
+    var launchedForFiles = false
+
+    /// Double-clicked placeholders: download each file, then open it.
+    func application(_ application: NSApplication, open urls: [URL]) {
+        launchedForFiles = true
+        actOnPaths("fetch", urls.map { $0.path }, openAfter: true)
+    }
+
+    func actOnPaths(_ action: String, _ paths: [String], openAfter: Bool) {
+        guard !paths.isEmpty else { return }
+        DispatchQueue.global().async {
+            var r: [String: Any]?
+            // Started just now by Finder: the service may still be coming up.
+            for _ in 0..<40 {
+                r = self.client.call("POST", "/api/paths", body: ["action": action, "paths": paths])
+                if r != nil { break }
+                Thread.sleep(forTimeInterval: 0.5)
+            }
+            DispatchQueue.main.async { self.report(action, paths, r, openAfter) }
+        }
+    }
+
+    func report(_ action: String, _ paths: [String], _ r: [String: Any]?, _ openAfter: Bool) {
+        let title = action == "fetch" ? "Could not download" : "Could not free up space"
+        guard let r = r else { alert(title, "The Varsto service did not answer. Open Varsto and try again."); return }
+        if let e = r["error"] as? String {
+            if e.contains("locked") {
+                promptUnlockIfNeeded()
+                if client.call("GET", "/api/state")?["unlocked"] as? Bool == true { actOnPaths(action, paths, openAfter: openAfter) }
+            } else {
+                alert(title, e)
+            }
+            return
+        }
+        var failed: [String] = []
+        for x in r["results"] as? [[String: Any]] ?? [] {
+            let p = x["path"] as? String ?? ""
+            if x["ok"] as? Bool == true {
+                if openAfter {
+                    let suffix = ".varsto-placeholder"
+                    let real = p.hasSuffix(suffix) ? String(p.dropLast(suffix.count)) : p
+                    NSWorkspace.shared.open(URL(fileURLWithPath: real))
+                }
+            } else {
+                failed.append("\((p as NSString).lastPathComponent): \(x["error"] as? String ?? "failed")")
+            }
+        }
+        if !failed.isEmpty { alert(title, failed.joined(separator: "\n")) }
+    }
+
+    func alert(_ title: String, _ text: String) {
+        NSApp.activate(ignoringOtherApps: true)
+        let a = NSAlert(); a.messageText = title; a.informativeText = text; a.runModal()
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
@@ -405,6 +465,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if p.isRunning { p.terminate() }
         }
         return .terminateNow
+    }
+}
+
+/// The Services entries declared in Info.plist (NSServices); Finder passes
+/// the selected files on a pasteboard.
+final class FinderService: NSObject {
+    weak var owner: AppDelegate?
+    init(owner: AppDelegate) { self.owner = owner }
+
+    @objc func fetchFiles(_ pboard: NSPasteboard, userData: String, error: AutoreleasingUnsafeMutablePointer<NSString>) {
+        owner?.actOnPaths("fetch", paths(pboard), openAfter: false)
+    }
+
+    @objc func freeFiles(_ pboard: NSPasteboard, userData: String, error: AutoreleasingUnsafeMutablePointer<NSString>) {
+        owner?.actOnPaths("free", paths(pboard), openAfter: false)
+    }
+
+    func paths(_ pboard: NSPasteboard) -> [String] {
+        let urls = pboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] ?? []
+        return urls.map { $0.path }
     }
 }
 

@@ -39,17 +39,63 @@ jobs:
       - name: Smoke test the bundled command line
         run: |
           set -x
-          ditto -x -k dist/Varsto-*-macos.zip smoke
+          hdiutil attach -nobrowse -readonly -mountpoint "$PWD/dmg" dist/Varsto-*-macos.dmg
+          ls -la dmg
+          test -L dmg/Applications
+          mkdir -p smoke && ditto dmg/Varsto.app smoke/Varsto.app
+          hdiutil detach "$PWD/dmg"
+          plutil -lint smoke/Varsto.app/Contents/Info.plist
           ls -la smoke/Varsto.app/Contents/MacOS smoke/Varsto.app/Contents/Helpers
           file smoke/Varsto.app/Contents/Helpers/varsto
           codesign -dv smoke/Varsto.app
           smoke/Varsto.app/Contents/Helpers/varsto --version
+      - name: Prepare a vault with a placeholder for the Finder test
+        run: |
+          set -x
+          home="$HOME/Library/Application Support/Varsto"
+          bin=smoke/Varsto.app/Contents/Helpers/varsto
+          export VARSTO_PASSPHRASE=ci-finder-passphrase-1
+          "$bin" --home "$home" init --name ci-mac >/dev/null
+          mkdir -p "$RUNNER_TEMP/storage" "$RUNNER_TEMP/files"
+          "$bin" --home "$home" storage add-local box "$RUNNER_TEMP/storage"
+          "$bin" --home "$home" folder add docs "$RUNNER_TEMP/files"
+          echo "hello from finder" > "$RUNNER_TEMP/files/note.txt"
+          echo "second file" > "$RUNNER_TEMP/files/other.txt"
+          "$bin" --home "$home" sync
+          "$bin" --home "$home" folder free "$RUNNER_TEMP/files/note.txt"
+          "$bin" --home "$home" folder free "$RUNNER_TEMP/files/other.txt"
+          ls -la "$RUNNER_TEMP/files"
+          test -f "$RUNNER_TEMP/files/note.txt.varsto-placeholder"
+          # The service unlocks itself from the login keychain, like after "Remember in Keychain".
+          security add-generic-password -U -s varsto -a "$home" -w "$VARSTO_PASSPHRASE"
       - name: Launch the app and capture its window
         run: |
           open smoke/Varsto.app
           sleep 12
           pgrep -x Varsto >/dev/null && echo "app process running" || { echo "app process NOT running"; exit 1; }
           screencapture -x dist/macos-app.png
+      - name: Finder - double-click a placeholder, Services menu entries
+        run: |
+          set -x
+          /System/Library/CoreServices/pbs -update || true
+          /System/Library/CoreServices/pbs -dump_pboard 2>/dev/null | grep -i "with Varsto" || echo "services not listed (registration needs Varsto.app in Applications)"
+          open "$RUNNER_TEMP/files/note.txt.varsto-placeholder"
+          for i in $(seq 1 30); do [ -f "$RUNNER_TEMP/files/note.txt" ] && break; sleep 1; done
+          ls -la "$RUNNER_TEMP/files"
+          grep -q "hello from finder" "$RUNNER_TEMP/files/note.txt"
+          test ! -e "$RUNNER_TEMP/files/note.txt.varsto-placeholder"
+          # Services, the way Finder calls them (best effort on a runner).
+          cat > "$RUNNER_TEMP/svc.swift" <<'SWIFT'
+          import AppKit
+          let pb = NSPasteboard(name: NSPasteboard.Name("varsto-ci"))
+          pb.clearContents()
+          pb.writeObjects([URL(fileURLWithPath: CommandLine.arguments[1]) as NSURL])
+          print("NSPerformService:", NSPerformService(CommandLine.arguments[2], pb))
+          SWIFT
+          swift "$RUNNER_TEMP/svc.swift" "$RUNNER_TEMP/files/other.txt.varsto-placeholder" "Download with Varsto" || true
+          for i in $(seq 1 15); do [ -f "$RUNNER_TEMP/files/other.txt" ] && break; sleep 1; done
+          [ -f "$RUNNER_TEMP/files/other.txt" ] && echo "Services download worked" || echo "Services download not verified on this runner"
+          screencapture -x dist/macos-finder.png
           osascript -e 'tell application "Varsto" to quit' || pkill -x Varsto || true
           sleep 2
           pgrep -x varsto >/dev/null && { echo "service still running after quit"; pkill -x varsto; } || echo "service stopped with the app"
@@ -62,8 +108,9 @@ jobs:
         with:
           name: Varsto-macos
           path: |
-            dist/Varsto-*-macos.zip
+            dist/Varsto-*-macos.dmg
             dist/macos-app.png
+            dist/macos-finder.png
             build.log
           if-no-files-found: warn
       - name: Attach to the release
@@ -73,7 +120,7 @@ jobs:
         run: |
           tag="$GITHUB_REF_NAME"
           gh release view "$tag" >/dev/null 2>&1 || gh release create "$tag" --draft --title "$tag" --generate-notes
-          gh release upload "$tag" dist/Varsto-*-macos.zip --clobber
+          gh release upload "$tag" dist/Varsto-*-macos.dmg --clobber
 
   ios:
     name: iOS app (Simulator)

@@ -2463,8 +2463,39 @@ impl Engine {
         Ok(report)
     }
 
+    /// The folder (by id) and relative path of a file on this device, from its
+    /// absolute path; a placeholder's path names the file it stands for.
+    pub fn locate_path(&self, abs: &Path) -> Result<(String, String)> {
+        let canon = |p: &Path| fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+        let text = abs.to_string_lossy();
+        let real = text
+            .strip_suffix(PLACEHOLDER_SUFFIX)
+            .map(PathBuf::from)
+            .unwrap_or_else(|| abs.to_path_buf());
+        // The file itself may not exist (a placeholder), its directory does.
+        let name = real
+            .file_name()
+            .ok_or_else(|| anyhow!("{} is not a file", abs.display()))?;
+        let full = canon(real.parent().unwrap_or(Path::new("/"))).join(name);
+        for (rec, mount) in self.folders() {
+            let Some(root) = mount else { continue };
+            if let Ok(rel) = full.strip_prefix(canon(&root)) {
+                let rel: Vec<String> = rel
+                    .components()
+                    .map(|c| c.as_os_str().to_string_lossy().to_string())
+                    .collect();
+                if rel.is_empty() {
+                    bail!("{} is the folder itself", abs.display());
+                }
+                return Ok((rec.folder_id.to_string(), rel.join("/")));
+            }
+        }
+        bail!("{} is not in a Varsto folder on this device", abs.display())
+    }
+
     /// Replace a local file of a selective folder with a placeholder. Refused
-    /// unless every chunk is on at least one storage that is not a carrier.
+    /// unless every chunk is on at least one storage that is not a carrier,
+    /// and unless the file on disk is the version that was synced.
     pub fn free_file(&mut self, folder: &str, path: &str) -> Result<()> {
         let (rec, root) = self.resolve_folder(folder)?;
         let mut state = self.load_state(&rec.folder_id)?;
@@ -2496,6 +2527,21 @@ impl Engine {
         }
         let disk = root.join(path);
         if disk.exists() {
+            // Only the synced version may go: a file changed since the last
+            // sync (or never indexed here) holds the only copy of its changes.
+            let md = fs::metadata(&disk)?;
+            let mtime = md
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_nanos() as i64)
+                .unwrap_or(0);
+            let synced = state.local_index.get(path).is_some_and(|e| {
+                e.size == md.len() && e.mtime == mtime && e.content_hash == file.content_hash
+            });
+            if !synced {
+                bail!("{path} has changes on this device that are not synced yet; sync first");
+            }
             fs::remove_file(&disk)?;
         }
         Self::write_placeholder(&disk, &file)?;
