@@ -880,26 +880,67 @@ fn api_unlocked(
             let idle_days = query_param(query, "idle_days")
                 .and_then(|d| d.parse().ok())
                 .unwrap_or(90);
-            let folders: Vec<String> = match query_param(query, "folder") {
-                Some(f) => vec![f],
-                None => engine
-                    .folders()
-                    .into_iter()
-                    .filter(|(_, m)| m.is_some())
-                    .map(|(r, _)| r.name)
-                    .collect(),
-            };
-            let mut files = Vec::new();
-            for f in &folders {
-                for e in engine.list_files(f)? {
-                    files.push((f.clone(), e.path, e.size, e.last_accessed_utc, e.modified_utc));
-                }
+            let mut a = engine.placement_advice(idle_days, varsto_core::util::now_utc())?;
+            if let Some(f) = query_param(query, "folder") {
+                a.idle_files.retain(|x| x.folder == f);
+                a.folders.retain(|x| x.folder == f);
+                a.suggestions.retain(|x| x.folder == f);
             }
-            let now = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_secs() as i64)
-                .unwrap_or(0);
-            Ok(serde_json::to_value(varsto_core::advice::storage_advice(&files, idle_days, now))?)
+            Ok(serde_json::to_value(a)?)
+        }
+        (Method::Post, "/api/advice/apply") => {
+            let idle_days = input.get("idle_days").and_then(|v| v.as_i64()).unwrap_or(90);
+            let r = engine.apply_suggestion(&s(input, "id")?, idle_days)?;
+            service.folders_changed = true;
+            Ok(serde_json::to_value(r)?)
+        }
+        (Method::Get, "/api/storage/costs") => Ok(serde_json::to_value(engine.storage_estimates()?)?),
+        (Method::Post, "/api/storage/price") => {
+            let name = s(input, "name")?;
+            let num = |k: &str| input.get(k).and_then(|v| v.as_f64().or_else(|| v.as_str().and_then(|t| t.trim().parse().ok())));
+            if input.get("clear").and_then(|c| c.as_bool()).unwrap_or(false) {
+                engine.set_storage_price(&name, None)?;
+            } else {
+                engine.set_storage_price(
+                    &name,
+                    Some(varsto_core::price::StoragePrice {
+                        storage_per_gb_month: num("gb_month"),
+                        egress_per_gb: num("egress"),
+                        retrieval_per_gb: num("retrieval"),
+                        minimum_storage_days: num("min_days").map(|d| d as u32),
+                        currency: opt(input, "currency").unwrap_or_default(),
+                        source: String::new(),
+                    }),
+                )?;
+            }
+            Ok(json!({"ok": true, "price": engine.storage_price(&name)}))
+        }
+        (Method::Get, "/api/verify") => Ok(serde_json::to_value(engine.verify_status())?),
+        (Method::Post, "/api/verify") => {
+            let mut sched = engine.verify_schedule().clone();
+            if let Some(v) = input.get("enabled").and_then(|v| v.as_bool()) {
+                sched.enabled = v;
+            }
+            if let Some(v) = input.get("interval_hours").and_then(|v| v.as_u64()) {
+                sched.interval_hours = v as u32;
+            }
+            if let Some(v) = input.get("max_mib").and_then(|v| v.as_u64()) {
+                sched.max_bytes = v.saturating_mul(1024 * 1024);
+            }
+            if let Some(v) = input.get("max_blocks").and_then(|v| v.as_u64()) {
+                sched.max_blocks = v;
+            }
+            engine.set_verify_schedule(sched)?;
+            service.auto_verify = Some(engine.verify_status());
+            Ok(serde_json::to_value(engine.verify_status())?)
+        }
+        (Method::Post, "/api/verify/run") => {
+            let r = engine.auto_verify()?;
+            service.auto_verify = Some(engine.verify_status());
+            if let Ok(reps) = engine.policy_check() {
+                service.record_policies(reps);
+            }
+            Ok(json!({"report": r, "status": engine.verify_status()}))
         }
         (Method::Post, "/api/paths") => {
             // Finder and other file managers: act on absolute paths, one result each.

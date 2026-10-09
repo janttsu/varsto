@@ -68,6 +68,8 @@ pub struct ServiceState {
     pub p2p_relays: Vec<String>,
     pub p2p_paths: Vec<varsto_core::p2p::PeerStatus>,
     pub p2p_cert_sha256: String,
+    /// Automatic verification: schedule, last run and next run.
+    pub auto_verify: Option<varsto_core::autoverify::VerifyStatus>,
 }
 
 impl ServiceState {
@@ -94,6 +96,8 @@ impl ServiceState {
             "p2p_reachable": self.p2p_reachable,
             "p2p_relays": self.p2p_relays,
             "p2p_paths": self.p2p_paths,
+            "auto_verify": self.auto_verify,
+            "auto_verify_text": self.auto_verify.as_ref().map(|v| v.describe()),
         })
     }
     /// Store the disk listing; log and notify when a disk appeared or went
@@ -166,6 +170,31 @@ impl ServiceState {
             eprintln!("service: {a}");
             notify("Varsto durability policy", &a);
         }
+    }
+    /// Run automatic verification when the schedule says it is due (called
+    /// after a sync, so never while paused or locked) and keep its status.
+    pub fn auto_verify_if_due(&mut self, engine: &mut Engine) {
+        if engine.auto_verify_due(varsto_core::util::now_utc()) {
+            match engine.auto_verify() {
+                Ok(r) => {
+                    eprintln!(
+                        "service: automatic verification: {} blocks verified, {} left for the next run",
+                        r.blocks_verified, r.left_for_next_run
+                    );
+                    if !r.corrupt.is_empty() || !r.missing.is_empty() {
+                        let msg = format!(
+                            "{} blocks do not match their hash and {} are missing on a storage; run `varsto fsck --verify`",
+                            r.corrupt.len(),
+                            r.missing.len()
+                        );
+                        eprintln!("service: {msg}");
+                        notify("Varsto verification", &msg);
+                    }
+                }
+                Err(e) => eprintln!("service: automatic verification failed: {e:#}"),
+            }
+        }
+        self.auto_verify = Some(engine.verify_status());
     }
     pub fn request_sync(&mut self) {
         self.sync_requested = true;
@@ -895,6 +924,10 @@ pub fn run(opts: Options) -> Result<()> {
                 Some(Ok(reports)) => {
                     st.service.record_sync(&reports);
                     snapshot_syncs = st.service.syncs; // the snapshot above is current
+                    let st = &mut *st;
+                    if let Some(e) = st.engine.as_mut() {
+                        st.service.auto_verify_if_due(e);
+                    }
                     let checked = st.engine.as_ref().map(|e| e.policy_check());
                     match checked {
                         Some(Ok(reps)) => st.service.record_policies(reps),

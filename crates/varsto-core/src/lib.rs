@@ -13,6 +13,7 @@
 //! cryptography has not been reviewed. Do not use it for real data.
 
 pub mod advice;
+pub mod autoverify;
 pub mod chunking;
 pub mod crypto;
 pub mod engine;
@@ -25,6 +26,7 @@ pub mod pack;
 pub mod pair;
 pub mod policy;
 pub mod pool;
+pub mod price;
 pub mod rclone;
 pub mod recovery;
 pub mod replica;

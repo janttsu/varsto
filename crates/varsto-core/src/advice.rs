@@ -5,13 +5,23 @@
 //! figure carries its source URL and verification date, and nothing here is
 //! a quote.
 
+use crate::price::StoragePrice;
 use serde::Serialize;
+use std::collections::BTreeMap;
 
 const PROVIDERS: &[&str] = &[
     include_str!("../../../data/providers/aws-s3.json"),
     include_str!("../../../data/providers/scaleway-object-storage.json"),
     include_str!("../../../data/providers/hetzner-storage-box.json"),
 ];
+
+/// The embedded provider profiles, parsed (profiles that fail to parse are left out).
+pub fn provider_profiles() -> Vec<serde_json::Value> {
+    PROVIDERS
+        .iter()
+        .filter_map(|raw| serde_json::from_str(raw).ok())
+        .collect()
+}
 
 #[derive(Clone, Debug, Serialize)]
 pub struct IdleFile {
@@ -47,6 +57,101 @@ pub struct Advice {
     /// Cheapest first.
     pub estimates: Vec<ClassEstimate>,
     pub notes: Vec<String>,
+    /// The storages configured on this device with their prices and what the
+    /// idle files cost there (filled by `Engine::placement_advice`).
+    #[serde(default)]
+    pub storages: Vec<StorageEstimate>,
+    /// Monthly cost per folder from the storages' prices.
+    #[serde(default)]
+    pub folders: Vec<FolderCost>,
+    /// Placement changes that can be carried out (`Engine::apply_suggestion`).
+    #[serde(default)]
+    pub suggestions: Vec<Suggestion>,
+}
+
+/// Amounts by currency: storages may be priced in different currencies and
+/// are never converted.
+pub type Costs = BTreeMap<String, f64>;
+
+/// Add `amount` in `currency` to `costs`.
+pub fn add_cost(costs: &mut Costs, currency: &str, amount: f64) {
+    let cur = if currency.is_empty() { "?" } else { currency };
+    *costs.entry(cur.to_string()).or_default() += amount;
+}
+
+/// One configured storage, its price and what it holds.
+#[derive(Clone, Debug, Serialize)]
+pub struct StorageEstimate {
+    pub name: String,
+    pub kind: String,
+    pub cold: bool,
+    pub carrier: bool,
+    pub price: Option<StoragePrice>,
+    /// Bytes the ledger records on this storage (every folder).
+    pub bytes: u64,
+    /// Monthly cost of `bytes`, when the storage price is known.
+    pub monthly_cost: Option<f64>,
+    /// Monthly cost of the idle files' share on this storage.
+    pub idle_monthly_cost: Option<f64>,
+    pub currency: String,
+}
+
+/// What a folder's current files cost per month on the storages that hold them.
+#[derive(Clone, Debug, Serialize)]
+pub struct FolderCost {
+    pub folder: String,
+    pub bytes: u64,
+    pub idle_bytes: u64,
+    pub monthly: Costs,
+    pub idle_monthly: Costs,
+    /// Storages holding the folder that have no storage price yet.
+    pub unpriced_storages: Vec<String>,
+}
+
+/// A placement change Varsto can carry out: keep a folder's idle files only
+/// on the storages (cheapest first) and free their copies on this device.
+#[derive(Clone, Debug, Serialize)]
+pub struct Suggestion {
+    /// Stable id for `varsto advice apply` and the API: `free-idle:<folder>`.
+    pub id: String,
+    pub folder: String,
+    /// Idle files that are on this device and not pinned.
+    pub files: u64,
+    pub bytes: u64,
+    /// A few of the paths, largest first.
+    pub examples: Vec<String>,
+    /// Storages that keep the data, cheapest first.
+    pub keep_on: Vec<String>,
+    /// The cheapest of them by the price model, if any price is known.
+    pub cheapest: Option<String>,
+    /// What keeping the files on those storages costs per month (unchanged by the action).
+    pub monthly_cost: Costs,
+    /// Reading every file back once from the cheapest readable storage.
+    pub read_back_cost: Costs,
+    /// Bytes not yet verified on any readable storage; they are downloaded
+    /// and hash-checked before the local copy goes.
+    pub verify_first_bytes: u64,
+    /// Files that cannot be freed now, with the reason.
+    pub blocked: Vec<(String, String)>,
+    /// What the action does, for the confirmation.
+    pub summary: String,
+    pub warnings: Vec<String>,
+}
+
+/// Prefix of a "free idle files" suggestion id.
+pub const FREE_IDLE_PREFIX: &str = "free-idle:";
+
+/// What carrying out a suggestion did.
+#[derive(Clone, Debug, Serialize, Default)]
+pub struct ApplyReport {
+    pub id: String,
+    pub folder: String,
+    pub files_freed: u64,
+    pub bytes_freed: u64,
+    /// Blocks downloaded and hash-checked first because no readable copy had been verified.
+    pub blocks_verified: u64,
+    /// Files left on this device, with the reason.
+    pub skipped: Vec<(String, String)>,
 }
 
 fn num(v: &serde_json::Value) -> Option<f64> {
@@ -134,6 +239,9 @@ pub fn storage_advice(
         idle_gb: gb,
         estimates,
         notes,
+        storages: Vec::new(),
+        folders: Vec::new(),
+        suggestions: Vec::new(),
     }
 }
 

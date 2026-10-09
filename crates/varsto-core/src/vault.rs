@@ -684,6 +684,12 @@ pub struct Config {
     pub folders: Vec<FolderMount>,
     #[serde(default)]
     pub p2p: P2pConfig,
+    /// Automatic verification schedule and budget (`crate::autoverify`).
+    #[serde(default)]
+    pub verify: crate::autoverify::VerifySchedule,
+    /// Storage prices set by the user, by storage name (`crate::price`).
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub prices: std::collections::BTreeMap<String, crate::price::StoragePrice>,
 }
 
 /// Peer-to-peer settings (per device, local).
