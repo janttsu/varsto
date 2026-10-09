@@ -771,7 +771,11 @@ pub fn run(opts: Options) -> Result<()> {
         .spawn(move || desktop::serve_arc(http_server, http_state))?;
 
     // Peer-to-peer: serve our chunks, announce on the LAN, learn peers.
-    let p2p = P2p::start(&state);
+    // Peer-to-peer starts as soon as the vault is open and the setting is on: a
+    // phone or a tray app starts locked, so the node often comes up only after
+    // the user unlocks; a failed start is retried every 30 seconds.
+    let mut p2p = P2p::start(&state);
+    let mut p2p_retry_at = Instant::now();
 
     // File watcher: sends a signal on any change under an attached folder.
     let (tx, rx) = mpsc::channel::<()>();
@@ -824,6 +828,23 @@ pub fn run(opts: Options) -> Result<()> {
                 }
                 st.service.watching = watched.clone();
                 st.service.folders_changed = false;
+            }
+        }
+        if p2p.is_none() && Instant::now() >= p2p_retry_at {
+            let wanted = {
+                let st = state.lock().unwrap();
+                st.engine
+                    .as_ref()
+                    .map(|e| e.p2p_config().enabled)
+                    .unwrap_or(false)
+            };
+            if wanted {
+                p2p = P2p::start(&state);
+                if p2p.is_some() {
+                    eprintln!("service: p2p started after unlock");
+                } else {
+                    p2p_retry_at = Instant::now() + Duration::from_secs(30);
+                }
             }
         }
         if let Some(p) = &p2p {
