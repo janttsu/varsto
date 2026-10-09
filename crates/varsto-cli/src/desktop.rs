@@ -464,6 +464,16 @@ fn api_unlocked(
                     cold,
                     place: opt(input, "place").unwrap_or_default(),
                 })?,
+                "pool" => engine.add_storage(StorageSpec::Pool {
+                    name: s(input, "name")?,
+                    place: opt(input, "place").unwrap_or_default(),
+                    reserve_percent: opt(input, "reserve_percent")
+                        .and_then(|r| r.parse().ok())
+                        .unwrap_or(varsto_core::pool::DEFAULT_RESERVE_PERCENT),
+                    min_reserve_bytes: varsto_core::pool::DEFAULT_MIN_RESERVE_BYTES,
+                    disks: vec![],
+                    scan_roots: vec![],
+                })?,
                 _ => engine.add_storage(StorageSpec::LocalDir {
                     name: s(input, "name")?,
                     path: PathBuf::from(s(input, "path")?),
@@ -535,9 +545,45 @@ fn api_unlocked(
                 .ok_or_else(|| anyhow!("folder query parameter required"))?;
             Ok(serde_json::to_value(engine.list_files(&folder)?)?)
         }
-        (Method::Post, "/api/fetch") => Ok(serde_json::to_value(
-            engine.fetch_file(&s(input, "folder")?, &s(input, "path")?)?,
-        )?),
+        (Method::Post, "/api/fetch") => {
+            match engine.fetch_file(&s(input, "folder")?, &s(input, "path")?) {
+                Ok(r) => Ok(serde_json::to_value(r)?),
+                // The file is on a pool disk that is away: tell the interface which one.
+                Err(e) => match varsto_core::pool::pool_error(&e) {
+                    Some(varsto_core::pool::PoolError::NeedsDisk { label, disk_id, place }) => Ok(json!({
+                        "needs_disk": {"label": label, "disk_id": disk_id, "place": place},
+                        "error": e.to_string(),
+                    })),
+                    _ => Err(e),
+                },
+            }
+        }
+        (Method::Get, "/api/disks") => Ok(serde_json::to_value(engine.disks()?)?),
+        (Method::Post, "/api/disk/add") => {
+            let r = engine.disk_add(
+                std::path::Path::new(&s(input, "mount")?),
+                &s(input, "pool")?,
+                &s(input, "label")?,
+            )?;
+            service.request_sync();
+            Ok(serde_json::to_value(r)?)
+        }
+        (Method::Post, "/api/disk/check") => {
+            let full = input.get("full").and_then(|c| c.as_bool()).unwrap_or(false);
+            let r = engine.disk_check(&s(input, "label")?, full)?;
+            service.request_sync();
+            Ok(serde_json::to_value(r)?)
+        }
+        (Method::Post, "/api/disk/eject") => {
+            let label = s(input, "label")?;
+            let mount = engine.disk_eject(&label)?;
+            Ok(json!({"ok": true, "label": label, "mount": mount, "safe_to_remove": true, "message": format!("{label}: index written and synced; safe to remove")}))
+        }
+        (Method::Post, "/api/disk/retire") => {
+            let label = s(input, "label")?;
+            let only_here = engine.disk_retire(&label)?;
+            Ok(json!({"ok": true, "label": label, "retired": true, "objects_only_here": only_here}))
+        }
         (Method::Get, "/api/strongroom") => Ok(json!({"strongrooms": engine.strongrooms().into_iter().map(|(n, m, u)| json!({"folder": n, "method": m, "unlocked_until": u})).collect::<Vec<_>>()})),
         (Method::Post, "/api/strongroom/unlock") => {
             let minutes = input.get("minutes").and_then(|v| v.as_u64()).unwrap_or(15).clamp(1, 24 * 60);

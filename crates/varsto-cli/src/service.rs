@@ -58,6 +58,8 @@ pub struct ServiceState {
     pub p2p_peers: Vec<varsto_core::p2p::PeerAddr>,
     pub p2p_lan_peers: usize,
     pub p2p_chunks: u64,
+    /// Removable disks of every pool as of the last check (every 30 seconds).
+    pub disks: Vec<varsto_core::pool::DiskStatus>,
 }
 
 impl ServiceState {
@@ -78,7 +80,36 @@ impl ServiceState {
             "p2p_peers": self.p2p_peers,
             "p2p_lan_peers": self.p2p_lan_peers,
             "p2p_chunks": self.p2p_chunks,
+            "disks": self.disks,
         })
+    }
+    /// Store the disk listing; log and notify when a disk appeared or went
+    /// away, and ask for a sync when one appeared (pending files may be on it).
+    pub fn record_disks(&mut self, disks: Vec<varsto_core::pool::DiskStatus>) {
+        // The first listing after start is the baseline: no notifications.
+        let baseline = self.disks.is_empty();
+        for d in &disks {
+            let before = self
+                .disks
+                .iter()
+                .find(|p| p.disk_id == d.disk_id)
+                .map(|p| p.attached);
+            let event = match (before, d.attached) {
+                (Some(false), true) => Some("attached"),
+                (None, true) if !baseline => Some("attached"),
+                (Some(true), false) => Some("detached"),
+                _ => None,
+            };
+            if let Some(ev) = event {
+                let msg = format!("{} {ev}", d.label);
+                eprintln!("service: disk {msg}");
+                notify("Varsto disk", &msg);
+                if ev == "attached" {
+                    self.sync_requested = true;
+                }
+            }
+        }
+        self.disks = disks;
     }
     /// Store policy reports; raise a desktop notification when a folder's
     /// state got worse (ok -> at risk -> violated) or a violation persists
@@ -135,6 +166,7 @@ impl ServiceState {
         let mut uploaded = 0;
         let mut unavailable = 0;
         let mut forked = false;
+        let mut disks: Vec<String> = Vec::new();
         for (pl, ps) in reports {
             self.p2p_chunks += pl.chunks_from_peers;
             updated += pl.files_updated;
@@ -143,8 +175,13 @@ impl ServiceState {
             uploaded += ps.chunks_uploaded;
             unavailable += pl.files_unavailable.len();
             forked |= !pl.forked_devices.is_empty();
+            for d in &pl.disks_needed {
+                if !disks.contains(d) {
+                    disks.push(d.clone());
+                }
+            }
         }
-        self.last_result = format!("{} folders: {updated} updated, {deleted} deleted, {conflicts} conflicts, {uploaded} chunks uploaded{}{}", reports.len(), if unavailable > 0 { format!(", {unavailable} unavailable") } else { String::new() }, if forked { ", FORKED device" } else { "" });
+        self.last_result = format!("{} folders: {updated} updated, {deleted} deleted, {conflicts} conflicts, {uploaded} chunks uploaded{}{}{}", reports.len(), if unavailable > 0 { format!(", {unavailable} unavailable") } else { String::new() }, if disks.is_empty() { String::new() } else { format!(" (attach disk {})", disks.join(", ")) }, if forked { ", FORKED device" } else { "" });
         self.last_error = None;
     }
 }
@@ -426,8 +463,21 @@ pub fn run(opts: Options) -> Result<()> {
     let mut last_change: Option<Instant> = None;
     let mut next_sync = Instant::now();
     let debounce = Duration::from_secs(2);
+    let disk_check_every = Duration::from_secs(30);
+    let mut next_disk_check = Instant::now();
 
     while !QUIT.load(Ordering::SeqCst) {
+        // Removable disks: notice what was attached or taken away.
+        if Instant::now() >= next_disk_check {
+            next_disk_check = Instant::now() + disk_check_every;
+            let mut st = state.lock().unwrap();
+            let listed = st.engine.as_mut().map(|e| e.disks());
+            match listed {
+                Some(Ok(disks)) => st.service.record_disks(disks),
+                Some(Err(e)) => eprintln!("service: disk check failed: {e:#}"),
+                None => {}
+            }
+        }
         // Drain change notifications.
         while rx.try_recv().is_ok() {
             last_change = Some(Instant::now());

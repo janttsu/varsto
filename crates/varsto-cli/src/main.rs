@@ -75,6 +75,11 @@ enum Cmd {
         #[command(subcommand)]
         cmd: StorageCmd,
     },
+    /// Removable disks of a disk pool: add, list, check, eject, retire.
+    Disk {
+        #[command(subcommand)]
+        cmd: DiskCmd,
+    },
     /// Manage folders.
     Folder {
         #[command(subcommand)]
@@ -398,7 +403,45 @@ enum StorageCmd {
         #[arg(long, default_value = "")]
         place: String,
     },
+    /// Add a pool of removable disks; then `varsto disk add <mount> --pool <name> --label <label>`.
+    AddPool {
+        name: String,
+        /// Where the disks are kept (shelf, home, offsite, ...); default home.
+        #[arg(long, default_value = "")]
+        place: String,
+        /// Share of every disk kept free (at least 2 GiB is always kept).
+        #[arg(long, default_value_t = varsto_core::pool::DEFAULT_RESERVE_PERCENT)]
+        reserve_percent: u32,
+        /// Extra directory scanned for attached disks, besides the platform's mount roots (repeatable).
+        #[arg(long)]
+        scan_root: Vec<PathBuf>,
+    },
     List,
+}
+
+#[derive(Subcommand)]
+enum DiskCmd {
+    /// Register a mounted directory as a new disk of a pool and fill it with what the pool lacks.
+    Add {
+        mount_path: PathBuf,
+        #[arg(long)]
+        pool: String,
+        #[arg(long)]
+        label: String,
+    },
+    /// Every disk of every pool: attached or away, free space, last verified, pending deletes.
+    List,
+    /// Reattach routine: verify the marker and the objects, apply queued deletions, add new objects.
+    Check {
+        label: String,
+        /// Re-hash every object (sizes alone otherwise).
+        #[arg(long)]
+        full: bool,
+    },
+    /// Write the disk's index and sync it; prints when the disk is safe to remove (does not unmount).
+    Eject { label: String },
+    /// Nothing new goes to this disk; what it holds stays readable.
+    Retire { label: String },
 }
 
 #[derive(Subcommand)]
@@ -481,6 +524,22 @@ fn home(cli: &Cli) -> Result<PathBuf> {
         .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share")))
         .ok_or_else(|| anyhow!("cannot determine a home directory; pass --home"))?;
     Ok(base.join("varsto"))
+}
+
+/// Decimal sizes for messages ("3.2 GB", "410 MB").
+fn fmt_bytes(n: u64) -> String {
+    const UNITS: [&str; 5] = ["B", "kB", "MB", "GB", "TB"];
+    let mut v = n as f64;
+    let mut i = 0;
+    while v >= 1000.0 && i < UNITS.len() - 1 {
+        v /= 1000.0;
+        i += 1;
+    }
+    if i == 0 {
+        format!("{n} B")
+    } else {
+        format!("{v:.1} {}", UNITS[i])
+    }
 }
 
 fn print<T: serde::Serialize>(
@@ -671,20 +730,164 @@ fn run(cli: &Cli) -> Result<()> {
                     })?;
                     println!("storage {name} added");
                 }
+                StorageCmd::AddPool {
+                    name,
+                    place,
+                    reserve_percent,
+                    scan_root,
+                } => {
+                    engine.add_storage(StorageSpec::Pool {
+                        name: name.clone(),
+                        place: place.clone(),
+                        reserve_percent: *reserve_percent,
+                        min_reserve_bytes: varsto_core::pool::DEFAULT_MIN_RESERVE_BYTES,
+                        disks: vec![],
+                        scan_roots: scan_root.clone(),
+                    })?;
+                    println!("disk pool {name} added; attach a disk with: varsto disk add <mount-path> --pool {name} --label <label>");
+                }
                 StorageCmd::List => {
                     print(cli, &engine.storages().to_vec(), |s| {
                         s.iter()
                             .map(|x| {
                                 format!(
-                                    "{}{}{}",
+                                    "{}{}{}{}",
                                     x.name(),
                                     if x.is_cold() { " (cold)" } else { "" },
-                                    if x.is_carrier() { " (carrier)" } else { "" }
+                                    if x.is_carrier() { " (carrier)" } else { "" },
+                                    if x.is_data_only() {
+                                        format!(" ({})", x.describe())
+                                    } else {
+                                        String::new()
+                                    }
                                 )
                             })
                             .collect::<Vec<_>>()
                             .join("\n")
                     })?;
+                }
+            }
+        }
+        Cmd::Disk { cmd } => {
+            let mut engine = Engine::open(&home, &passphrase()?)?;
+            match cmd {
+                DiskCmd::Add {
+                    mount_path,
+                    pool,
+                    label,
+                } => {
+                    let r = engine.disk_add(mount_path, pool, label)?;
+                    print(cli, &r, |r| {
+                        format!(
+                            "disk {} added to pool {} at {}: {} added ({} objects)",
+                            r.disk.label,
+                            r.pool,
+                            r.disk
+                                .last_mount
+                                .as_ref()
+                                .map(|p| p.display().to_string())
+                                .unwrap_or_default(),
+                            fmt_bytes(r.bytes_added),
+                            r.objects_added
+                        )
+                    })?;
+                }
+                DiskCmd::List => {
+                    let disks = engine.disks()?;
+                    print(cli, &disks, |disks| {
+                        if disks.is_empty() {
+                            return "no disks; add a pool with `varsto storage add-pool <name>` and a disk with `varsto disk add`".to_string();
+                        }
+                        disks
+                            .iter()
+                            .map(|d| {
+                                let state = if d.attached {
+                                    format!(
+                                        "attached at {}, {} free",
+                                        d.mount.as_ref().map(|p| p.display().to_string()).unwrap_or_default(),
+                                        d.free_bytes.map(fmt_bytes).unwrap_or_else(|| "? ".into())
+                                    )
+                                } else {
+                                    "offline".to_string()
+                                };
+                                format!(
+                                    "{} (pool {}, {}): {}{}; {} objects, {} used; last verified {}{}",
+                                    d.label,
+                                    d.pool,
+                                    d.place,
+                                    state,
+                                    if d.retired { ", retired" } else { "" },
+                                    d.objects,
+                                    fmt_bytes(d.used_bytes),
+                                    if d.last_verified_utc > 0 {
+                                        varsto_core::util::format_date(d.last_verified_utc)
+                                    } else {
+                                        "never".to_string()
+                                    },
+                                    if d.pending_deletes > 0 {
+                                        format!("; {} pending deletes", d.pending_deletes)
+                                    } else {
+                                        String::new()
+                                    }
+                                )
+                            })
+                            .collect::<Vec<_>>()
+                            .join("\n")
+                    })?;
+                }
+                DiskCmd::Check { label, full } => {
+                    let r = engine.disk_check(label, *full)?;
+                    print(cli, &r, |r| {
+                        format!(
+                            "{}: checked {}, {} bad{}, {} removed, {} added{}",
+                            r.label,
+                            fmt_bytes(r.bytes_checked),
+                            r.bad.len(),
+                            if r.missing.is_empty() {
+                                String::new()
+                            } else {
+                                format!(", {} missing", r.missing.len())
+                            },
+                            fmt_bytes(r.bytes_removed),
+                            fmt_bytes(r.bytes_added),
+                            if r.adopted > 0 {
+                                format!(", {} objects adopted", r.adopted)
+                            } else {
+                                String::new()
+                            }
+                        )
+                    })?;
+                    if !r.bad.is_empty() {
+                        std::process::exit(1);
+                    }
+                }
+                DiskCmd::Eject { label } => {
+                    let mount = engine.disk_eject(label)?;
+                    if cli.json {
+                        println!(
+                            "{}",
+                            serde_json::json!({ "label": label, "mount": mount, "safe_to_remove": true })
+                        );
+                    } else {
+                        println!(
+                            "{label} ({}): index written and synced; safe to remove",
+                            mount.display()
+                        );
+                    }
+                }
+                DiskCmd::Retire { label } => {
+                    let only_here = engine.disk_retire(label)?;
+                    if cli.json {
+                        println!(
+                            "{}",
+                            serde_json::json!({ "label": label, "retired": true, "objects_only_here": only_here })
+                        );
+                    } else {
+                        println!(
+                            "{label} retired: nothing new goes there; {only_here} object{} exist only on it",
+                            if only_here == 1 { "" } else { "s" }
+                        );
+                    }
                 }
             }
         }
@@ -712,7 +915,23 @@ fn run(cli: &Cli) -> Result<()> {
                     );
                 }
                 FolderCmd::Fetch { folder, path } => {
-                    let r = engine.fetch_file(folder, path)?;
+                    let r = match engine.fetch_file(folder, path) {
+                        Ok(r) => r,
+                        Err(e) => {
+                            if let Some(varsto_core::pool::PoolError::NeedsDisk {
+                                label,
+                                place,
+                                ..
+                            }) = varsto_core::pool::pool_error(&e)
+                            {
+                                eprintln!(
+                                    "{path} is on disk {label} ({place}). Attach it and try again."
+                                );
+                                std::process::exit(1);
+                            }
+                            return Err(e);
+                        }
+                    };
                     println!("fetched {} ({} chunks)", path, r.chunks_downloaded);
                 }
                 FolderCmd::Free { folder, path } => {
@@ -777,14 +996,14 @@ fn run(cli: &Cli) -> Result<()> {
             let mut engine = Engine::open(&home, &passphrase()?)?;
             let r = engine.pull(folder)?;
             print(cli, &r, |r| {
-                format!("{}: {} manifests, {} updated, {} deleted, {} conflicts, {} chunks downloaded; unavailable: {:?}; forked: {:?}", r.folder, r.manifests_applied, r.files_updated, r.files_deleted, r.conflicts, r.chunks_downloaded, r.files_unavailable, r.forked_devices)
+                format!("{}: {} manifests, {} updated, {} deleted, {} conflicts, {} chunks downloaded; unavailable: {:?}; forked: {:?}{}", r.folder, r.manifests_applied, r.files_updated, r.files_deleted, r.conflicts, r.chunks_downloaded, r.files_unavailable, r.forked_devices, if r.disks_needed.is_empty() { String::new() } else { format!("; attach disk {}", r.disks_needed.join(", ")) })
             })?;
         }
         Cmd::Sync { folder } => {
             let mut engine = Engine::open(&home, &passphrase()?)?;
             let r = engine.sync(folder.as_deref())?;
             print(cli, &r, |r| {
-                r.iter().map(|(pl, ps)| format!("{}: pulled {} updated/{} deleted/{} conflicts, pushed {} changed/{} chunks", pl.folder, pl.files_updated, pl.files_deleted, pl.conflicts, ps.files_changed, ps.chunks_uploaded)).collect::<Vec<_>>().join("\n")
+                r.iter().map(|(pl, ps)| format!("{}: pulled {} updated/{} deleted/{} conflicts, pushed {} changed/{} chunks{}{}", pl.folder, pl.files_updated, pl.files_deleted, pl.conflicts, ps.files_changed, ps.chunks_uploaded, if pl.disks_needed.is_empty() { String::new() } else { format!("; attach disk {}", pl.disks_needed.join(", ")) }, if ps.storages_unavailable.is_empty() { String::new() } else { format!("; not written to {}", ps.storages_unavailable.join(", ")) })).collect::<Vec<_>>().join("\n")
             })?;
         }
         Cmd::Status => {
@@ -825,7 +1044,7 @@ fn run(cli: &Cli) -> Result<()> {
             let mut engine = Engine::open(&home, &passphrase()?)?;
             let r = engine.fsck(*verify)?;
             print(cli, &r, |r| {
-                format!("referenced {} | with storage copy {} | verified elsewhere {} | claimed only {} | missing {:?} | claims without object {} | unreferenced objects {} | verified now {} | corrupt {:?} | forked {:?} | cold skipped {:?}", r.chunks_referenced, r.chunks_with_storage_copy, r.chunks_verified_elsewhere, r.chunks_claimed_only, r.chunks_missing, r.claims_without_object, r.objects_unreferenced, r.objects_verified_now, r.objects_corrupt, r.forked_devices, r.storages_skipped_cold)
+                format!("referenced {} | with storage copy {} | verified elsewhere {} | claimed only {} | missing {:?} | claims without object {} | unreferenced objects {} | verified now {} | corrupt {:?} | forked {:?} | cold skipped {:?}{}", r.chunks_referenced, r.chunks_with_storage_copy, r.chunks_verified_elsewhere, r.chunks_claimed_only, r.chunks_missing, r.claims_without_object, r.objects_unreferenced, r.objects_verified_now, r.objects_corrupt, r.forked_devices, r.storages_skipped_cold, if r.disks_offline.is_empty() { String::new() } else { format!(" | offline: {} objects on {}", r.objects_offline, r.disks_offline.join("; ")) })
             })?;
             if !r.chunks_missing.is_empty()
                 || !r.objects_corrupt.is_empty()

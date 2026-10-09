@@ -246,15 +246,16 @@
       $("selectivetoggle").checked = fsel.selectedOptions.length && fsel.selectedOptions[0].dataset.selective === "1";
       var ul = $("storages"); ul.innerHTML = "";
       s.storages.forEach(function (st) {
-        var where = st.kind === "s3" ? st.endpoint + " bucket " + st.bucket + (st.prefix ? "/" + st.prefix : "") + (st.storage_class ? ", class " + st.storage_class : "") : (st.kind === "rclone" ? st.remote : st.path);
+        var where = st.kind === "s3" ? st.endpoint + " bucket " + st.bucket + (st.prefix ? "/" + st.prefix : "") + (st.storage_class ? ", class " + st.storage_class : "") : (st.kind === "rclone" ? st.remote : st.kind === "pool" ? (st.disks || []).length + " disk" + ((st.disks || []).length === 1 ? "" : "s") + ", " + (st.reserve_percent || 5) + " % kept free" : st.path);
         var li = el("li"); var ic = el("span", "li-icon"); ic.appendChild(icon("storages")); li.appendChild(ic);
         var body = el("div", "li-body"); var title = el("div", "li-title", st.name);
-        title.appendChild(pill("grey", st.kind === "s3" ? "S3" : st.kind === "rclone" ? "rclone" : "directory"));
+        title.appendChild(pill("grey", st.kind === "s3" ? "S3" : st.kind === "rclone" ? "rclone" : st.kind === "pool" ? "disk pool" : "directory"));
         if (st.cold) { title.appendChild(pill("grey", "cold")); } if (st.carrier) { title.appendChild(pill("grey", "transferrer")); }
         if (st.place) { title.appendChild(pill("grey", st.place)); }
         body.appendChild(title); body.appendChild(el("div", "li-sub", where || "")); li.appendChild(body); ul.appendChild(li);
       });
       $("storages-empty").classList.toggle("hidden", s.storages.length > 0);
+      renderPools(s.storages);
       var names = Object.keys(s.devices).map(function (k) { return s.devices[k] + " (" + k.slice(0, 8) + ")"; });
       var reps = Object.keys(s.replicas || {}).map(function (k) { return s.replicas[k]; });
       var mems = Object.keys(s.members || {}).map(function (k) { return s.members[k]; });
@@ -292,6 +293,67 @@
       $("advice").classList.remove("hidden");
     }).catch(function () { $("advice").classList.add("hidden"); });
   }
+
+  // Disk pools: one card per pool with its disks (attached or away), from /api/disks.
+  function diskAction(path, body, verb) {
+    busy(true); log(verb + " " + body.label + " started");
+    return api("POST", path, body).then(function (r) {
+      if (r.message) { log(r.message); }
+      else if (r.bytes_checked !== undefined) { log(body.label + ": checked " + fmtBytes(r.bytes_checked) + ", " + r.bad.length + " bad, " + fmtBytes(r.bytes_removed) + " removed, " + fmtBytes(r.bytes_added) + " added" + (r.adopted ? ", " + r.adopted + " objects adopted" : "")); }
+      else if (r.retired) { log(body.label + " retired; " + r.objects_only_here + " object" + (r.objects_only_here === 1 ? "" : "s") + " exist only on it"); }
+    }).catch(function (e) { log(verb + " failed: " + e.message); alert(e.message); }).then(function () { busy(false); return refreshStatus(); });
+  }
+  function renderPools(storages) {
+    var pools = storages.filter(function (st) { return st.kind === "pool"; });
+    var box = $("pools"); box.innerHTML = "";
+    var sel = $("diskpool"); sel.innerHTML = "";
+    pools.forEach(function (p) { var o = document.createElement("option"); o.value = p.name; o.textContent = p.name; sel.appendChild(o); });
+    $("adddisk").classList.toggle("hidden", pools.length === 0);
+    if (!pools.length) { return; }
+    api("GET", "/api/disks").then(function (disks) {
+      pools.forEach(function (p) {
+        var card = el("div", "card pool-card");
+        var head = el("div", "card-head"); var title = el("h2", "card-title", "Pool " + p.name); title.appendChild(pill("grey", p.place || "home")); head.appendChild(title);
+        var mine = disks.filter(function (d) { return d.pool === p.name; });
+        var attached = mine.filter(function (d) { return d.attached; }).length;
+        head.appendChild(el("span", "muted small", mine.length + " disk" + (mine.length === 1 ? "" : "s") + ", " + attached + " attached"));
+        card.appendChild(head);
+        if (!mine.length) { card.appendChild(el("p", "muted small", "No disks yet. Mount a disk and add it below; on the command line: varsto disk add <mount-path> --pool " + p.name + " --label <label>")); }
+        var ul = el("ul", "list");
+        mine.forEach(function (d) {
+          var li = el("li"); var ic = el("span", "li-icon"); ic.appendChild(icon("storages")); li.appendChild(ic);
+          var body = el("div", "li-body"); var t = el("div", "li-title", d.label);
+          t.appendChild(pill(d.attached ? "ok" : "grey", d.attached ? "attached" : "offline")); if (d.retired) { t.appendChild(pill("grey", "retired")); }
+          body.appendChild(t);
+          var parts = [];
+          if (d.attached) { parts.push(d.mount); if (d.free_bytes !== null && d.free_bytes !== undefined) { parts.push(fmtBytes(d.free_bytes) + " free"); } }
+          else if (d.mount) { parts.push("last seen at " + d.mount); }
+          parts.push(d.objects + " block" + (d.objects === 1 ? "" : "s") + ", " + fmtBytes(d.used_bytes) + " used");
+          parts.push("last verified " + (d.last_verified_utc ? fmtDate(d.last_verified_utc) : "never"));
+          if (d.pending_deletes) { parts.push(d.pending_deletes + " pending delete" + (d.pending_deletes === 1 ? "" : "s")); }
+          body.appendChild(el("div", "li-sub", parts.join(" · ")));
+          li.appendChild(body);
+          if (!isMobile()) {
+            var acts = el("div", "li-actions");
+            if (d.attached) {
+              var chk = el("button", "secondary", "Check"); chk.type = "button"; chk.title = "Verify sizes, apply pending deletes, add new blocks"; chk.onclick = function () { diskAction("/api/disk/check", { label: d.label, full: false }, "check"); }; acts.appendChild(chk);
+              var full = el("button", "secondary", "Check fully"); full.type = "button"; full.title = "Re-hash every block on the disk"; full.onclick = function () { diskAction("/api/disk/check", { label: d.label, full: true }, "full check"); }; acts.appendChild(full);
+              var ej = el("button", "secondary", "Eject"); ej.type = "button"; ej.title = "Write the disk index and sync; then unmount it yourself"; ej.onclick = function () { diskAction("/api/disk/eject", { label: d.label }, "eject"); }; acts.appendChild(ej);
+            }
+            if (!d.retired) { var rt = el("button", "secondary", "Retire"); rt.type = "button"; rt.title = "Nothing new goes to this disk"; rt.onclick = function () { if (confirm("Retire disk " + d.label + "? Nothing new is written to it; what it holds stays readable.")) { diskAction("/api/disk/retire", { label: d.label }, "retire"); } }; acts.appendChild(rt); }
+            li.appendChild(acts);
+          }
+          ul.appendChild(li);
+        });
+        card.appendChild(ul);
+        box.appendChild(card);
+      });
+    }).catch(function (e) { log("disks: " + e.message); });
+  }
+  $("adddisk").onsubmit = function (ev) {
+    ev.preventDefault(); var d = formData(ev.target); busy(true); log("adding disk " + d.label + " to pool " + d.pool);
+    api("POST", "/api/disk/add", d).then(function (r) { ev.target.reset(); log("disk " + r.disk.label + " added to pool " + r.pool + ": " + fmtBytes(r.bytes_added) + " added (" + r.objects_added + " blocks)"); }).catch(function (e) { alert(e.message); }).then(function () { busy(false); return refreshStatus(); });
+  };
 
   function fmtTime(t) { return t ? new Date(t * 1000).toLocaleTimeString() : "never"; }
   function renderService(sv) {
@@ -380,7 +442,17 @@
   function clearSelection() { selectedFile = null; document.querySelectorAll("#files tbody tr").forEach(function (r) { r.classList.remove("selected"); }); $("filedetails").classList.add("hidden"); document.querySelector(".files-layout").classList.remove("with-details"); updateToolbar(); }
   $("fd-close").onclick = clearSelection;
   function updateToolbar() { var f = selectedFile; $("files-download").disabled = !f || !(f.state === "placeholder" || f.state === "missing"); $("files-free").disabled = !f || f.state !== "local"; }
-  function fetchFile(folder, path) { busy(true); api("POST", "/api/fetch", { folder: folder, path: path }).then(function () { log("fetched " + path); }).catch(function (e) { log("fetch failed: " + e.message); }).then(function () { busy(false); loadFiles(); }); }
+  function fetchFile(folder, path) {
+    busy(true); $("needsdisk").classList.add("hidden");
+    api("POST", "/api/fetch", { folder: folder, path: path }).then(function (r) {
+      if (r.needs_disk) {
+        var msg = "This file is on disk " + r.needs_disk.label + " (" + r.needs_disk.place + "). Attach it and try again.";
+        $("needsdisk").textContent = msg; $("needsdisk").classList.remove("hidden"); log(path + ": " + msg);
+        return;
+      }
+      log("fetched " + path);
+    }).catch(function (e) { log("fetch failed: " + e.message); }).then(function () { busy(false); loadFiles(); });
+  }
   function freeFile(folder, path) { api("POST", "/api/free", { folder: folder, path: path }).then(function () { log(path + " is now a placeholder"); }).catch(function (e) { log("free failed: " + e.message); }).then(function () { loadFiles(); refreshStatus(); }); }
   $("files-sync").onclick = function () { var f = $("filesfolder").value; if (f) { runSync(f); } };
   $("files-download").onclick = function () { if (selectedFile) { fetchFile($("filesfolder").value, selectedFile.path); } };

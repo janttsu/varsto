@@ -953,9 +953,10 @@ impl PoolStorage {
         for e in st.index.objects.values() {
             *counts.entry(e.disk.as_str()).or_default() += 1;
         }
-        st.index
-            .disks
-            .values()
+        let mut disks: Vec<&PoolDisk> = st.index.disks.values().collect();
+        disks.sort_by(|a, b| a.label.cmp(&b.label));
+        disks
+            .into_iter()
             .map(|d| {
                 let mount = attached.get(&d.id).cloned();
                 DiskStatus {

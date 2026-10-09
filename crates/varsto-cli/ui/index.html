@@ -207,6 +207,7 @@
 
     <!-- Files -->
     <div class="page hidden" data-page="files">
+      <div id="needsdisk" class="notice warn hidden"></div>
       <div class="files-layout">
         <div class="card files-main">
           <div class="files-head">
@@ -291,11 +292,20 @@
         <h2 class="card-title">Storages</h2>
         <p class="muted small">Encrypted objects are written to every storage. Varsto never sends a key anywhere; a storage sees only sealed blocks.</p>
         <ul id="storages" class="list"></ul>
-        <div id="storages-empty" class="empty-state hidden"><div class="empty-icon"><svg class="icon"><use href="#i-storages"/></svg></div><p class="empty-title">No storage yet</p><p class="muted">Add a directory, an S3 bucket or an rclone remote below.</p></div>
+        <div id="storages-empty" class="empty-state hidden"><div class="empty-icon"><svg class="icon"><use href="#i-storages"/></svg></div><p class="empty-title">No storage yet</p><p class="muted">Add a directory, an S3 bucket, an rclone remote or a pool of removable disks below.</p></div>
       </div>
+      <div id="pools"></div>
+      <form id="adddisk" class="card narrow desktop-only hidden">
+        <h3 class="card-title"><svg class="icon accent"><use href="#i-plus"/></svg>Add a disk to a pool</h3>
+        <label>Pool <select name="pool" id="diskpool"></select></label>
+        <label>Mount path <input name="mount" placeholder="/media/me/data-01" required autocomplete="off"></label>
+        <label>Label <input name="label" placeholder="data-01" required autocomplete="off"></label>
+        <div class="actions"><button type="submit">Add disk</button></div>
+        <p class="muted small">The disk gets a small marker file and a <code>varsto</code> directory, then is filled with what the pool does not hold yet. Varsto never formats a disk.</p>
+      </form>
       <form id="addstorage" class="card narrow">
         <h3 class="card-title"><svg class="icon accent"><use href="#i-plus"/></svg>Add a storage</h3>
-        <label>Type <select name="kind" id="storagekind"><option value="local-dir">Directory (disk, removable disk, network mount)</option><option value="s3">S3-compatible bucket</option><option value="rclone">rclone remote</option></select></label>
+        <label>Type <select name="kind" id="storagekind"><option value="local-dir">Directory (disk, removable disk, network mount)</option><option value="s3">S3-compatible bucket</option><option value="rclone">rclone remote</option><option value="pool">Pool of removable disks</option></select></label>
         <label>Name <input name="name" placeholder="box" required></label>
         <div data-kind="local-dir">
           <label>Directory <input name="path"></label>
@@ -315,6 +325,11 @@
         <div data-kind="rclone" class="hidden">
           <label>Remote (name:bucket/path) <input name="remote" placeholder="hetzner:backup/varsto"></label>
           <p class="muted small">Uses your rclone and its configuration; Varsto never sees the remote's credentials.</p>
+        </div>
+        <div data-kind="pool" class="hidden">
+          <label>Place (where the disks are kept) <input name="place" placeholder="shelf"></label>
+          <label>Keep free on every disk (%) <input name="reserve_percent" value="5" size="4"></label>
+          <p class="muted small">Disks are added one by one below once the pool exists. Each disk takes encrypted blocks until its reserve is reached; a disk that is away is remembered, and files on it say so.</p>
         </div>
         <label class="inline"><input name="cold" type="checkbox"> Cold storage: written, never read without confirmation</label>
         <div class="actions"><button type="submit">Add storage</button></div>
