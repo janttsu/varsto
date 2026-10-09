@@ -271,3 +271,43 @@ fn relayed_fetch_through_a_reachable_device() {
         .unwrap();
     assert_eq!(status, 502);
 }
+
+/// A server bound to the wildcard address on a multi-homed host must answer
+/// from the address the request arrived on, or the client's QUIC stack drops
+/// the answer as coming from a stranger. Loopback stands in for the second
+/// interface: the client talks to 127.0.0.2, so a reply routed by the kernel
+/// would leave as 127.0.0.1.
+#[cfg(target_os = "linux")]
+#[test]
+fn wildcard_server_answers_from_the_address_it_was_reached_at() {
+    let lab = lab();
+    let (a, key, _big) = seed(&lab, "a");
+    let snap_a: Snap = Arc::new(Mutex::new(Some(Arc::new(a.peer_snapshot().unwrap()))));
+    let node_a = quic::Node::start(
+        "0.0.0.0:0".parse().unwrap(),
+        a.p2p_identity().unwrap(),
+        a.device_id().clone(),
+        a.peer_key(),
+        snap_a,
+    )
+    .unwrap();
+    let b = join(&lab, "b", "desk", &key);
+    let node_b = node(&b, empty());
+    let (mut rec_a, rec_b) = (record(&a, &node_a, true), record(&b, &node_b, true));
+    let second: std::net::SocketAddr = format!("127.0.0.2:{}", node_a.local_addr.port())
+        .parse()
+        .unwrap();
+    rec_a.udp_local = vec![second];
+    let _peers_a = Peers::build(
+        a.peer_key(),
+        a.device_id().clone(),
+        std::slice::from_ref(&rec_b),
+        &[],
+        Some(node_a.clone()),
+    );
+    let auth = p2p::auth_header(&b.peer_key(), b.device_id(), "/p2p/info");
+    let (status, _) = node_b
+        .request(second, &rec_a.cert_sha256, "/p2p/info", &auth, false)
+        .unwrap();
+    assert_eq!(status, 200);
+}

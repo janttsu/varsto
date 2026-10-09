@@ -129,13 +129,50 @@ fn is_side_traffic(buf: &[u8]) -> bool {
     stun::is_stun(buf) || buf == PUNCH_MAGIC
 }
 
-/// One tokio socket wearing quinn's `AsyncUdpSocket` hat. No GSO/GRO: a
-/// datagram at a time keeps the filtering trivial and the throughput is far
-/// above what a sync tool needs.
+/// One tokio socket wearing quinn's `AsyncUdpSocket` hat, driven through
+/// quinn-udp's socket state so that every datagram carries its addresses:
+/// `recv` reports the local address a packet arrived on (`IP_PKTINFO`) and
+/// `send` puts that address back as the source of the reply. Without this a
+/// socket bound to `0.0.0.0` on a multi-homed host (LAN plus VPN, Docker
+/// bridges, a cloud machine with a private network) answers from whatever
+/// address the routing table prefers for the client, and the client's QUIC
+/// stack drops the answer as coming from a stranger. No GSO: one transmit is
+/// one datagram, which keeps the filtering trivial.
 #[derive(Debug)]
 struct SharedSocket {
     io: tokio::net::UdpSocket,
+    state: quinn::udp::UdpSocketState,
     side: mpsc::UnboundedSender<(SocketAddr, Vec<u8>)>,
+}
+
+impl SharedSocket {
+    fn new(
+        std_sock: UdpSocket,
+        side: mpsc::UnboundedSender<(SocketAddr, Vec<u8>)>,
+    ) -> io::Result<SharedSocket> {
+        let state = quinn::udp::UdpSocketState::new((&std_sock).into())?;
+        let io = tokio::net::UdpSocket::from_std(std_sock)?;
+        Ok(SharedSocket { io, state, side })
+    }
+
+    /// Route the segments of one received buffer that are not QUIC: STUN
+    /// answers to the side channel, punches to the floor. True when the
+    /// buffer was side traffic and quinn must not see it.
+    fn divert(&self, buf: &[u8], meta: &quinn::udp::RecvMeta) -> bool {
+        let stride = meta.stride.max(1);
+        let first = &buf[..meta.len.min(stride)];
+        if !is_side_traffic(first) {
+            return false;
+        }
+        // GRO coalesces equal-sized datagrams from one sender: every
+        // segment of a side-traffic buffer is side traffic as well.
+        for seg in buf[..meta.len].chunks(stride) {
+            if stun::is_stun(seg) {
+                let _ = self.side.send((meta.addr, seg.to_vec()));
+            }
+        }
+        true
+    }
 }
 
 impl quinn::AsyncUdpSocket for SharedSocket {
@@ -144,10 +181,11 @@ impl quinn::AsyncUdpSocket for SharedSocket {
     }
 
     fn try_send(&self, transmit: &quinn::udp::Transmit) -> io::Result<()> {
-        // max_transmit_segments() is 1, so one transmit is one datagram.
-        self.io
-            .try_send_to(transmit.contents, transmit.destination)
-            .map(|_| ())
+        // max_transmit_segments() is 1, so one transmit is one datagram; the
+        // state sends it with `src_ip` as the source when quinn set one.
+        self.io.try_io(tokio::io::Interest::WRITABLE, || {
+            self.state.send((&self.io).into(), transmit)
+        })
     }
 
     fn poll_recv(
@@ -157,27 +195,42 @@ impl quinn::AsyncUdpSocket for SharedSocket {
         meta: &mut [quinn::udp::RecvMeta],
     ) -> Poll<io::Result<usize>> {
         loop {
-            let mut rb = tokio::io::ReadBuf::new(&mut bufs[0]);
-            let from = ready!(self.io.poll_recv_from(cx, &mut rb))?;
-            let n = rb.filled().len();
-            if is_side_traffic(&bufs[0][..n]) {
-                if stun::is_stun(&bufs[0][..n]) {
-                    let _ = self.side.send((from, bufs[0][..n].to_vec()));
+            ready!(self.io.poll_recv_ready(cx))?;
+            let Ok(n) = self.io.try_io(tokio::io::Interest::READABLE, || {
+                self.state.recv((&self.io).into(), bufs, meta)
+            }) else {
+                continue; // a spurious readiness: wait again
+            };
+            // Keep the QUIC messages, compacted to the front, in order.
+            let mut kept = 0;
+            for i in 0..n {
+                if self.divert(&bufs[i], &meta[i]) {
+                    continue;
                 }
-                continue;
+                if kept != i {
+                    let len = meta[i].len;
+                    let (front, back) = bufs.split_at_mut(i);
+                    front[kept][..len].copy_from_slice(&back[0][..len]);
+                    meta[kept] = meta[i];
+                }
+                kept += 1;
             }
-            let m = &mut meta[0];
-            m.addr = from;
-            m.len = n;
-            m.stride = n;
-            m.ecn = None;
-            m.dst_ip = None;
-            return Poll::Ready(Ok(1));
+            if kept > 0 {
+                return Poll::Ready(Ok(kept));
+            }
         }
     }
 
     fn local_addr(&self) -> io::Result<SocketAddr> {
         self.io.local_addr()
+    }
+
+    fn max_receive_segments(&self) -> usize {
+        self.state.gro_segments()
+    }
+
+    fn may_fragment(&self) -> bool {
+        self.state.may_fragment()
     }
 }
 
@@ -462,9 +515,8 @@ impl Node {
 
         let (side_tx, side_rx) = mpsc::unbounded_channel();
         let _enter = rt.enter(); // tokio::net and the endpoint driver need the context
-        let io = tokio::net::UdpSocket::from_std(std_sock)?;
-        let local_addr = io.local_addr()?;
-        let sock = Arc::new(SharedSocket { io, side: side_tx });
+        let sock = Arc::new(SharedSocket::new(std_sock, side_tx)?);
+        let local_addr = sock.io.local_addr()?;
         let endpoint = quinn::Endpoint::new_with_abstract_socket(
             quinn::EndpointConfig::default(),
             Some(server),
