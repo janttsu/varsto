@@ -403,6 +403,22 @@ fn opt(v: &Value, key: &str) -> Option<String> {
         .filter(|x| !x.is_empty())
 }
 
+/// A list field: a JSON array of strings, or one comma-separated string.
+fn string_list(v: &Value, key: &str) -> Vec<String> {
+    match v.get(key) {
+        Some(Value::Array(a)) => a
+            .iter()
+            .filter_map(|x| x.as_str().map(str::to_string))
+            .collect(),
+        Some(Value::String(t)) => t
+            .split(',')
+            .map(|x| x.trim().to_string())
+            .filter(|x| !x.is_empty())
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
 fn query_param(query: &str, key: &str) -> Option<String> {
     query.split('&').find_map(|kv| {
         kv.split_once('=')
@@ -755,6 +771,10 @@ fn api_unlocked(
             service.request_sync();
             Ok(serde_json::to_value(r)?)
         }
+        (Method::Post, "/api/storage/carrier-for") => {
+            let names = engine.set_carrier_for(&s(input, "name")?, &string_list(input, "devices"))?;
+            Ok(json!({"ok": true, "devices": names}))
+        }
         (Method::Post, "/api/storage") => {
             let cold = input.get("cold").and_then(|c| c.as_bool()).unwrap_or(false);
             let carrier = input
@@ -803,13 +823,20 @@ fn api_unlocked(
                     disks: vec![],
                     scan_roots: vec![],
                 })?,
-                _ => engine.add_storage(StorageSpec::LocalDir {
-                    name: s(input, "name")?,
-                    path: PathBuf::from(s(input, "path")?),
-                    cold,
-                    carrier,
-                    place: opt(input, "place").unwrap_or_default(),
-                })?,
+                _ => {
+                    let name = s(input, "name")?;
+                    engine.add_storage(StorageSpec::LocalDir {
+                        name: name.clone(),
+                        path: PathBuf::from(s(input, "path")?),
+                        cold,
+                        carrier,
+                        place: opt(input, "place").unwrap_or_default(),
+                    })?;
+                    let targets = string_list(input, "carrier_for");
+                    if carrier && !targets.is_empty() {
+                        engine.set_carrier_for(&name, &targets)?;
+                    }
+                }
             }
             service.request_sync();
             Ok(json!({"ok": true}))

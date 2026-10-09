@@ -471,12 +471,17 @@ enum StorageCmd {
         #[arg(long)]
         cold: bool,
         /// Transferrer: removable media carrying only what other devices still lack; emptied when delivered.
-        #[arg(long)]
+        #[arg(long, conflicts_with = "cold")]
         carrier: bool,
+        /// Destination device of the transferrer (repeatable): it carries what these devices lack.
+        #[arg(long = "carrier-for", requires = "carrier")]
+        carrier_for: Vec<String>,
         /// Place for durability policies (home, cloud, offsite, ...); default home.
         #[arg(long, default_value = "")]
         place: String,
     },
+    /// Set the destination devices of a transferrer (none: any device that lacks a block).
+    CarrierFor { name: String, devices: Vec<String> },
     /// Add an S3-compatible bucket (AWS, Scaleway, Hetzner, Backblaze B2, R2, MinIO, ...).
     AddS3 {
         name: String,
@@ -847,6 +852,7 @@ fn run(cli: &Cli) -> Result<()> {
                     path,
                     cold,
                     carrier,
+                    carrier_for,
                     place,
                 } => {
                     engine.add_storage(StorageSpec::LocalDir {
@@ -857,6 +863,18 @@ fn run(cli: &Cli) -> Result<()> {
                         place: place.clone(),
                     })?;
                     println!("storage {name} added");
+                    if !carrier_for.is_empty() {
+                        let names = engine.set_carrier_for(name, carrier_for)?;
+                        println!("transferrer {name} carries what {} lacks", names.join(", "));
+                    }
+                }
+                StorageCmd::CarrierFor { name, devices } => {
+                    let names = engine.set_carrier_for(name, devices)?;
+                    if names.is_empty() {
+                        println!("transferrer {name} carries what any device lacks");
+                    } else {
+                        println!("transferrer {name} carries what {} lacks", names.join(", "));
+                    }
                 }
                 StorageCmd::AddS3 {
                     name,

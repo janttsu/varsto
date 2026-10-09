@@ -237,6 +237,9 @@ pub struct StatusReport {
     pub ledger_batches: u64,
     pub lamport: u64,
     pub forked_devices: Vec<String>,
+    /// Destination devices of transferrers, by storage name.
+    #[serde(default)]
+    pub carrier_for: BTreeMap<String, Vec<String>>,
 }
 
 #[derive(Clone, Debug, Serialize, Default)]
@@ -961,6 +964,9 @@ impl Engine {
     ) -> Result<()> {
         if self.config.storages.iter().any(|s| s.name() == spec.name()) {
             bail!("a storage named {} already exists", spec.name());
+        }
+        if spec.is_cold() && spec.is_carrier() {
+            bail!("a storage is either a transferrer or cold storage, not both");
         }
         if let StorageSpec::Pool {
             reserve_percent, ..
@@ -2322,6 +2328,7 @@ impl Engine {
         let fk = self.folder_keys(rec)?;
         let folder_id = rec.folder_id.clone();
         let me = self.vault.device_id.clone();
+        let carrier_need = self.carrier_destinations(&view, &folder_id);
         let missing_on = |cref: &ChunkRef| -> Vec<String> {
             // The ledger record must be for this very object: after a key
             // change the same chunk id can stand for two objects.
@@ -2338,8 +2345,22 @@ impl Engine {
                         .map(|r| r.storages.contains_key(spec.name()))
                         .unwrap_or(false)
                 })
-                // A carrier only takes what no other device has yet (F-048).
-                .filter(|(spec, _)| !(spec.is_carrier() && held_elsewhere))
+                // A carrier only takes what no other device has yet (F-048),
+                // or, with destinations, what one of them still lacks.
+                .filter(|(spec, _)| {
+                    if !spec.is_carrier() {
+                        return true;
+                    }
+                    match carrier_need.get(spec.name()) {
+                        Some(targets) => {
+                            !targets.is_empty()
+                                && known
+                                    .map(|r| targets.iter().any(|t| !r.devices.contains(t)))
+                                    .unwrap_or(true)
+                        }
+                        None => !held_elsewhere,
+                    }
+                })
                 .map(|(spec, _)| spec.name().to_string())
                 .collect()
         };
@@ -2778,21 +2799,115 @@ impl Engine {
         }
         let view = self.view()?;
         let me = self.vault.device_id.clone();
+        let need = self.carrier_destinations(&view, &rec.folder_id);
         for ((folder, _chunk), r) in view.chunks.iter() {
             if folder != &rec.folder_id {
                 continue;
             }
             let held_by_other = r.devices.iter().any(|d| d != &me);
-            if !(held_by_other && r.devices.contains(&me)) {
-                continue;
-            }
             for (spec, backend) in &carriers {
-                if r.storages.contains_key(spec.name()) {
+                if !r.storages.contains_key(spec.name()) {
+                    continue;
+                }
+                let delivered = match need.get(spec.name()) {
+                    // Emptied as soon as every destination that uses the folder holds it.
+                    Some(targets) => targets.iter().all(|t| r.devices.contains(t)),
+                    None => held_by_other && r.devices.contains(&me),
+                };
+                if delivered {
                     backend.delete(&chunk_storage_key(&r.object))?;
                 }
             }
         }
         Ok(())
+    }
+
+    /// Per transferrer with destinations: those of them that use `folder`
+    /// (they published its file list or hold some of its blocks). Transferrers
+    /// without destinations are absent (any device that lacks a block).
+    fn carrier_destinations(
+        &self,
+        view: &LedgerView,
+        folder: &FolderId,
+    ) -> HashMap<String, Vec<DeviceId>> {
+        let uses = |d: &DeviceId| {
+            view.manifests.contains_key(&(folder.clone(), d.clone()))
+                || view
+                    .chunks
+                    .iter()
+                    .any(|((f, _), r)| f == folder && r.devices.contains(d))
+        };
+        self.config
+            .carrier_for
+            .iter()
+            .filter(|(_, ts)| !ts.is_empty())
+            .map(|(name, ts)| {
+                (
+                    name.clone(),
+                    ts.iter().filter(|t| uses(t)).cloned().collect(),
+                )
+            })
+            .collect()
+    }
+
+    /// Set (or with an empty list clear) the destination devices of a
+    /// transferrer, by device name or id.
+    pub fn set_carrier_for(&mut self, storage: &str, devices: &[String]) -> Result<Vec<String>> {
+        let spec = self
+            .config
+            .storages
+            .iter()
+            .find(|s| s.name() == storage)
+            .ok_or_else(|| anyhow!("unknown storage {storage}"))?;
+        if !spec.is_carrier() {
+            bail!("{storage} is not a transferrer");
+        }
+        let mut ids = Vec::new();
+        let mut names = Vec::new();
+        for want in devices.iter().map(|d| d.trim()).filter(|d| !d.is_empty()) {
+            let found = self
+                .devices
+                .devices
+                .iter()
+                .find(|(id, r)| {
+                    r.name.eq_ignore_ascii_case(want)
+                        || (want.len() >= 8 && id.as_str().starts_with(want))
+                })
+                .map(|(id, r)| (id.clone(), r.name.clone()))
+                .ok_or_else(|| anyhow!("no device named {want} in this vault"))?;
+            if !ids.contains(&found.0) {
+                ids.push(found.0);
+                names.push(found.1);
+            }
+        }
+        if ids.is_empty() {
+            self.config.carrier_for.remove(storage);
+        } else {
+            self.config.carrier_for.insert(storage.to_string(), ids);
+        }
+        self.config.save(&self.home)?;
+        Ok(names)
+    }
+
+    /// Destination device names of each transferrer that has some.
+    pub fn carrier_destination_names(&self) -> BTreeMap<String, Vec<String>> {
+        self.config
+            .carrier_for
+            .iter()
+            .map(|(s, ids)| {
+                let names = ids
+                    .iter()
+                    .map(|id| {
+                        self.devices
+                            .devices
+                            .get(id)
+                            .map(|r| r.name.clone())
+                            .unwrap_or_else(|| id.short().to_string())
+                    })
+                    .collect();
+                (s.clone(), names)
+            })
+            .collect()
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -3878,6 +3993,7 @@ impl Engine {
                 })
                 .collect(),
             key_epoch: self.key_epoch(),
+            carrier_for: self.carrier_destination_names(),
             replicas: self
                 .devices
                 .replicas

@@ -415,6 +415,39 @@
       });
     }, Promise.resolve()).catch(function (e) { alertBox(e.message); }).then(function () { busy(false); return refreshStatus(); });
   };
+  // Transferrers: which devices one travels to. It then carries what those
+  // devices lack and is emptied as they receive it.
+  function otherDeviceNames() {
+    var me = lastStatus ? lastStatus.device_name : "";
+    return Object.keys((lastStatus && lastStatus.devices) || {}).map(function (k) { return lastStatus.devices[k]; }).filter(function (n) { return n !== me; });
+  }
+  function fillCarrierFor() {
+    var sel = $("carrierfor"); var keep = sel.value; sel.innerHTML = "";
+    var any = document.createElement("option"); any.value = ""; any.textContent = "any device that lacks the blocks"; sel.appendChild(any);
+    otherDeviceNames().forEach(function (n) { var o = document.createElement("option"); o.value = n; o.textContent = n; sel.appendChild(o); });
+    sel.value = keep;
+  }
+  function carrierDestination(name, current) {
+    var names = otherDeviceNames();
+    dialog({ title: "Where does " + name + " travel?", text: "Name the device (or devices, comma-separated) this transferrer is taken to. It then carries the blocks they still lack and is emptied as they receive them. Leave empty to carry what any device lacks. Your other devices: " + (names.join(", ") || "none yet") + ".", fields: [{ name: "devices", label: "Destination devices", value: current.join(", "), placeholder: names[0] || "" }], ok: "Save" }).then(function (r) {
+      if (!r) { return; }
+      return api("POST", "/api/storage/carrier-for", { name: name, devices: r.values.devices || "" }).then(function (x) { log(x.devices.length ? name + " now carries what " + x.devices.join(", ") + " lacks" : name + " carries what any device lacks"); return refreshStatus(); });
+    }).catch(function (e) { alertBox(e.message); });
+  }
+  (function () {
+    var form = $("addstorage"); var carrier = form.querySelector("input[name=carrier]"); var cold = form.querySelector("input[name=cold]");
+    // A transferrer is read whenever it is plugged in; cold storage is never read without asking: one or the other.
+    function sync() {
+      cold.disabled = carrier.checked && !carrier.closest("[data-kind]").classList.contains("hidden");
+      if (cold.disabled) { cold.checked = false; }
+      carrier.disabled = cold.checked; if (carrier.disabled) { carrier.checked = false; }
+      $("carrierforrow").classList.toggle("hidden", !carrier.checked);
+      if (carrier.checked) { fillCarrierFor(); }
+    }
+    carrier.addEventListener("change", sync); cold.addEventListener("change", sync);
+    form.addEventListener("reset", function () { setTimeout(sync, 0); });
+    $("storagekind").addEventListener("change", sync);
+  })();
   // Removing a storage: first show what has to be copied elsewhere to keep
   // every block's copies (one, or the folder policy's minimum), then do it.
   function removeStorage(name) {
@@ -623,10 +656,15 @@
         var li = el("li"); li.dataset.storage = st.name; var ic = el("span", "li-icon"); ic.appendChild(icon("storages")); li.appendChild(ic);
         var body = el("div", "li-body"); var title = el("div", "li-title", st.name);
         title.appendChild(pill("grey", st.kind === "s3" ? "S3" : st.kind === "rclone" ? "rclone" : st.kind === "pool" ? "disk pool" : "directory"));
-        if (st.cold) { title.appendChild(pill("grey", "cold")); } if (st.carrier) { title.appendChild(pill("grey", "transferrer")); }
+        var dest = (s.carrier_for || {})[st.name] || [];
+        if (st.cold) { title.appendChild(pill("grey", "cold")); } if (st.carrier) { title.appendChild(pill("grey", dest.length ? "transferrer for " + dest.join(", ") : "transferrer")); }
         if (st.place) { title.appendChild(pill("grey", st.place)); }
         body.appendChild(title); body.appendChild(el("div", "li-sub", where || "")); li.appendChild(body);
-        if (!s.member) { var ra = el("div", "li-actions"); var rb = el("button", "secondary", "Remove"); rb.type = "button"; rb.onclick = function () { removeStorage(st.name); }; ra.appendChild(rb); li.appendChild(ra); }
+        if (!s.member) {
+          var ra = el("div", "li-actions");
+          if (st.carrier) { var cb = el("button", "secondary", "Destination\u2026"); cb.type = "button"; cb.onclick = function () { carrierDestination(st.name, dest); }; ra.appendChild(cb); }
+          var rb = el("button", "secondary", "Remove"); rb.type = "button"; rb.onclick = function () { removeStorage(st.name); }; ra.appendChild(rb); li.appendChild(ra);
+        }
         ul.appendChild(li);
       });
       $("storages-empty").classList.toggle("hidden", s.storages.length > 0);

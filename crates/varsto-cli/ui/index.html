@@ -357,6 +357,7 @@
         <div data-kind="local-dir">
           <label>Directory <input name="path"></label>
           <label class="inline"><input name="carrier" type="checkbox"> Transferrer: removable media that carries only what other devices still lack, emptied once delivered</label>
+          <label id="carrierforrow" class="hidden">Carry it for <select name="carrier_for" id="carrierfor"><option value="">any device that lacks the blocks</option></select><span class="hint muted">pick the device the disk travels to, for example one with a slow or no internet connection</span></label>
         </div>
         <div data-kind="s3" class="hidden">
           <label>Endpoint <input name="endpoint" placeholder="https://s3.eu-central-1.amazonaws.com"></label>

@@ -793,6 +793,11 @@ pub struct Config {
     /// Storage prices set by the user, by storage name (`crate::price`).
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub prices: std::collections::BTreeMap<String, crate::price::StoragePrice>,
+    /// Destination devices of transferrers, by storage name: such a
+    /// transferrer carries what those devices lack and is emptied as they
+    /// receive it. Absent: any device that lacks a block.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub carrier_for: std::collections::BTreeMap<String, Vec<DeviceId>>,
 }
 
 /// Peer-to-peer settings (per device, local).
