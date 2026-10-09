@@ -155,6 +155,20 @@ pub struct PullReport {
     pub disks_needed: Vec<String>,
 }
 
+/// Blocks of a folder by where they are: on a storage (verified by another
+/// device or not) or only on this device, and whether this device holds them.
+#[derive(Clone, Debug, Default, Serialize)]
+pub struct BlockCounts {
+    pub verified_here: u64,
+    pub verified_away: u64,
+    pub stored_here: u64,
+    pub stored_away: u64,
+    /// On this device and on no storage yet.
+    pub local_only: u64,
+    /// Neither on this device nor on a storage.
+    pub missing: u64,
+}
+
 #[derive(Clone, Debug, Serialize)]
 pub struct FolderStatus {
     pub folder_id: String,
@@ -175,6 +189,8 @@ pub struct FolderStatus {
     pub plain: bool,
     pub placeholders: u64,
     pub pinned: u64,
+    /// Exact block counts for the data map.
+    pub blocks: BlockCounts,
     /// Durability policy, if one is set (human-readable).
     #[serde(default)]
     pub policy: Option<String>,
@@ -3914,16 +3930,56 @@ impl Engine {
                     chunks.insert(c.chunk.clone());
                 }
             }
+            // Blocks of files that are on this device (not placeholders).
+            let here: HashSet<&ChunkId> = match &mount {
+                Some(_) => state
+                    .files
+                    .values()
+                    .filter(|f| !f.deleted && state.local_index.contains_key(&f.path))
+                    .flat_map(|f| f.chunks.iter().map(|c| &c.chunk))
+                    .collect(),
+                None => HashSet::new(),
+            };
+            // Transferrers empty themselves: a copy there is not kept.
+            let carriers: HashSet<&str> = self
+                .config
+                .storages
+                .iter()
+                .filter(|s| s.is_carrier())
+                .map(|s| s.name())
+                .collect();
             let mut without = 0u64;
             let mut verified = 0u64;
+            let mut blocks = BlockCounts::default();
             for c in &chunks {
-                match view.locate(&rec.folder_id, c) {
-                    Some(r) if r.claimed_storages() > 0 => {
-                        if r.verified_storages() > 0 {
-                            verified += 1;
-                        }
+                let rec_c = view.locate(&rec.folder_id, c);
+                let kept: Vec<(&String, &ledger::Location)> = rec_c
+                    .map(|r| {
+                        r.storages
+                            .iter()
+                            .filter(|(n, _)| !carriers.contains(n.as_str()))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                let is_here = here.contains(c);
+                if kept.is_empty() {
+                    without += 1;
+                    if is_here {
+                        blocks.local_only += 1;
+                    } else {
+                        blocks.missing += 1;
                     }
-                    _ => without += 1,
+                    continue;
+                }
+                let checked = kept.iter().any(|(n, l)| l.independently_verified(n));
+                if checked {
+                    verified += 1;
+                }
+                match (checked, is_here) {
+                    (true, true) => blocks.verified_here += 1,
+                    (true, false) => blocks.verified_away += 1,
+                    (false, true) => blocks.stored_here += 1,
+                    (false, false) => blocks.stored_away += 1,
                 }
             }
             let placeholders_here = mount
@@ -3960,6 +4016,7 @@ impl Engine {
                 plain: !self.mount_is_encrypted(&rec.folder_id),
                 placeholders: placeholders_here,
                 pinned: state.pinned.len() as u64,
+                blocks,
             });
         }
         Ok(StatusReport {

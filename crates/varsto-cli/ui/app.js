@@ -128,24 +128,15 @@
   function alertBox(msg, title) { return dialog({ title: title || "Varsto", text: msg, cancel: false }); }
   function confirmBox(msg, o) { o = o || {}; return dialog({ title: o.title || "Are you sure?", text: msg, ok: o.ok || "OK", danger: !!o.danger }).then(function (r) { return !!r; }); }
 
-  // Block maps: one square per block of encrypted data, coloured by where the block is.
-  // Derived only from /api/status: chunks, chunks_without_storage_copy, chunks_verified_elsewhere,
-  // placeholders (files) and whether the folder is attached here. A placeholder file's blocks are
-  // estimated as its share of the folder's chunks.
-  var BLOCK_STATES = ["verified", "stored", "local", "ph", "missing"];
+  // Block maps: one square per block of encrypted data. The colour says where
+  // the block is kept (verified by another device, on a storage, only on this
+  // device, nowhere reachable); a filled square is also on this device, an
+  // outlined one is not. Exact counts come from /api/status (blocks).
+  var BLOCK_STATES = ["verified_here", "verified_away", "stored_here", "stored_away", "local_only", "missing"];
+  var BLOCK_CLASS = { verified_here: "s-verified", verified_away: "s-verified away", stored_here: "s-stored", stored_away: "s-stored away", local_only: "s-local", missing: "s-missing" };
   function folderBlocks(f) {
-    var c = f.chunks || 0;
-    var verified = Math.min(c, f.chunks_verified_elsewhere || 0);
-    var noCopy = Math.min(c - verified, f.chunks_without_storage_copy || 0);
-    var stored = c - verified - noCopy;
-    var b = { verified: verified, stored: stored, local: 0, ph: 0, missing: 0 };
-    if (!f.path) { b.ph = stored + verified; b.verified = 0; b.stored = 0; b.missing = noCopy; return b; }
-    b.local = noCopy;
-    var want = f.files > 0 && f.placeholders > 0 ? Math.min(c, Math.round(c * f.placeholders / f.files)) : 0;
-    var ph = want;
-    var take = Math.min(ph, b.stored); b.stored -= take; ph -= take;
-    take = Math.min(ph, b.verified); b.verified -= take; ph -= take;
-    b.ph = want - ph;
+    var b = {}; var src = f.blocks || {};
+    BLOCK_STATES.forEach(function (k) { b[k] = src[k] || 0; });
     return b;
   }
   function addBlocks(a, b) { BLOCK_STATES.forEach(function (k) { a[k] = (a[k] || 0) + (b[k] || 0); }); return a; }
@@ -156,7 +147,7 @@
     BLOCK_STATES.forEach(function (k) {
       var n = Math.round((counts[k] || 0) / perSquare);
       if (counts[k] > 0 && n === 0) { n = 1; }
-      for (var i = 0; i < n; i++) { var sq = document.createElement("i"); sq.className = "blk s-" + k; frag.appendChild(sq); }
+      for (var i = 0; i < n; i++) { var sq = document.createElement("i"); sq.className = "blk " + BLOCK_CLASS[k]; frag.appendChild(sq); }
     });
     container.appendChild(frag);
     container.classList.remove("fade"); void container.offsetWidth; container.classList.add("fade");
@@ -624,7 +615,13 @@
       (function () {
         var t = blockTotal(totalBlocks); var per = Math.max(1, Math.ceil(t / 600));
         drawBlocks($("datamap"), totalBlocks, per);
-        BLOCK_STATES.forEach(function (k) { $("leg-" + k).textContent = totalBlocks[k] || 0; });
+        var tb = totalBlocks; var n = function (k) { return tb[k] || 0; };
+        $("leg-verified").textContent = n("verified_here") + n("verified_away");
+        $("leg-stored").textContent = n("stored_here") + n("stored_away");
+        $("leg-local").textContent = n("local_only");
+        $("leg-missing").textContent = n("missing");
+        $("leg-here").textContent = n("verified_here") + n("stored_here") + n("local_only");
+        $("leg-away").textContent = n("verified_away") + n("stored_away");
         $("datamap-total").textContent = t + " block" + (t === 1 ? "" : "s") + " in " + s.folders.length + " folder" + (s.folders.length === 1 ? "" : "s");
         $("datamap-note").textContent = per > 1 ? "1 square ≈ " + per + " blocks" : (t ? "1 square = 1 block" : "");
       })();

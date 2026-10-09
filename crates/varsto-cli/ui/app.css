@@ -464,6 +464,8 @@ svg.spark { width: 120px; height: 32px; display: block; flex: none; }
 .blk.s-local { background: var(--blk-local); }
 .blk.s-ph { background: var(--blk-ph); }
 .blk.s-missing { background: var(--blk-missing); }
+.blk.away { background: transparent; box-shadow: inset 0 0 0 1.5px var(--blk-stored); }
+.blk.away.s-verified { box-shadow: inset 0 0 0 1.5px var(--blk-verified); }
 .blocks { display: flex; flex-wrap: wrap; gap: 2px; min-height: 7px; }
 .blocks.fade { animation: blkfade .4s ease; }
 @keyframes blkfade { from { opacity: .3; } to { opacity: 1; } }
@@ -685,3 +687,6 @@ button.is-busy::after { content: ""; display: inline-block; width: 11px; height:
 .workbar.on { opacity: 1; }
 .workbar::before { content: ""; position: absolute; top: 0; bottom: 0; width: 40%; background: var(--accent); animation: varsto-bar 1.1s ease-in-out infinite; }
 @media (prefers-reduced-motion: reduce) { button.is-busy::after, .workbar::before { animation-duration: 3s; } }
+/* Folder row actions wrap instead of widening the table. */
+#folders td:last-child { white-space: normal; min-width: 150px; }
+#folders td:last-child button { margin: 2px 0; }

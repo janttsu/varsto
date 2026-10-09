@@ -214,13 +214,14 @@
           <h2 class="card-title">Data map</h2>
           <span id="datamap-total" class="muted small"></span>
         </div>
-        <div id="datamap" class="blocks" aria-label="One square per block of encrypted data, coloured by where it is"></div>
+        <div id="datamap" class="blocks" aria-label="One square per block of encrypted data: the colour says where it is kept, a filled square is also on this device"></div>
         <div class="legend">
-          <span class="legend-item"><i class="blk s-verified"></i>Verified by another device <b id="leg-verified">0</b></span>
-          <span class="legend-item"><i class="blk s-stored"></i>Stored on a storage <b id="leg-stored">0</b></span>
-          <span class="legend-item"><i class="blk s-local"></i>Only on this device <b id="leg-local">0</b></span>
-          <span class="legend-item"><i class="blk s-ph"></i>Not on this device <b id="leg-ph">0</b></span>
+          <span class="legend-item"><i class="blk s-verified"></i>On a storage, verified by another device <b id="leg-verified">0</b></span>
+          <span class="legend-item"><i class="blk s-stored"></i>On a storage, not yet verified elsewhere <b id="leg-stored">0</b></span>
+          <span class="legend-item"><i class="blk s-local"></i>Only on this device, no storage copy yet <b id="leg-local">0</b></span>
           <span class="legend-item"><i class="blk s-missing"></i>Unavailable <b id="leg-missing">0</b></span>
+          <span class="legend-item"><i class="blk s-stored"></i>Filled: also on this device <b id="leg-here">0</b></span>
+          <span class="legend-item"><i class="blk s-stored away"></i>Outlined: not on this device <b id="leg-away">0</b></span>
           <span id="datamap-note" class="legend-note muted"></span>
         </div>
       </div>
