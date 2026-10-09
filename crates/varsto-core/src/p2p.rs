@@ -169,6 +169,9 @@ impl Snapshot {
     }
 }
 
+/// Requests the HTTP server answers at the same time.
+const SERVE_THREADS: usize = 8;
+
 /// The serving side: HTTP on `addr`, answering `/p2p/object/<name>` and
 /// `/p2p/info` for authenticated peers.
 pub struct Server {
@@ -197,18 +200,28 @@ impl Server {
     }
 
     /// Serve until `stop` is set. The snapshot can be swapped at any time.
+    /// Several requests are answered at once: a downloading peer keeps
+    /// several objects in flight, and producing one (read, compress,
+    /// encrypt) and sending it would otherwise hold up all the others.
     pub fn run(
         &self,
         snapshot: Arc<Mutex<Option<Arc<Snapshot>>>>,
         stop: Arc<std::sync::atomic::AtomicBool>,
     ) {
-        while !stop.load(std::sync::atomic::Ordering::Relaxed) {
-            let Ok(Some(req)) = self.server.recv_timeout(Duration::from_millis(500)) else {
-                continue;
-            };
-            let snap = snapshot.lock().unwrap().clone();
-            let _ = self.handle(req, snap);
-        }
+        std::thread::scope(|s| {
+            for _ in 0..SERVE_THREADS {
+                s.spawn(|| {
+                    while !stop.load(std::sync::atomic::Ordering::Relaxed) {
+                        let Ok(Some(req)) = self.server.recv_timeout(Duration::from_millis(500))
+                        else {
+                            continue;
+                        };
+                        let snap = snapshot.lock().unwrap().clone();
+                        let _ = self.handle(req, snap);
+                    }
+                });
+            }
+        });
     }
 
     fn handle(&self, req: tiny_http::Request, snap: Option<Arc<Snapshot>>) -> Result<()> {
