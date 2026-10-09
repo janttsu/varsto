@@ -149,7 +149,7 @@
 <td>Malicious member of a shared folder</td>
 <td>Holds the folder key legitimately; writes, deletes and renames inside the folder; keeps copies; may try to fill the owner's storage.</td>
 <td>Other folders of the owner; content added after its removal.</td>
-<td>Forge another member's ledger events; delete beyond what version history and trash can restore; read new content after removal. A6 <strong>can</strong> keep everything it saw before removal.</td>
+<td>Forge another member's ledger events; delete beyond what version history and trash can restore; read new content after removal; come back after removal as a new device. A6 <strong>can</strong> keep everything it saw before removal.</td>
 </tr>
 <tr>
 <td>A7</td>
@@ -271,7 +271,8 @@
 <li><strong>Deletion and denial of service by the provider (A1).</strong> Encryption prevents reading and undetected modification, not deletion, account closure or rollback to an older state. Redundancy across providers and own devices, scrub and alerts limit the effect (F-018, F-020, F-021, F-032).</li>
 <li><strong>Data copied before a theft or a member removal (A3, A4, A6).</strong> Revocation and key rotation protect future data only.</li>
 <li><strong>Wipe only reaches devices that come online.</strong> A device that stays offline is protected only by its lock (S-008 to S-010) and by revocation (plan 6.29). Wipe does not reach removable disks (A13).</li>
-<li><strong>Status of revocation and wipe (0.0.1-alpha.8).</strong> Implemented as described in <a href="alpha-0-format.html">../spec/alpha-0-format.md</a> section 20, with these gaps against this model: there is no second factor, so an A4 thief who acts first can revoke the owner's other devices instead of being unable to block a revocation; storage credentials are not rotated, so a revoked device can still delete ciphertext (A1-like power) until the user changes them at the provider; folders shared with other users and Strongroom folders keep their keys; the wipe order reaches the device only through a storage, not through peers.</li>
+<li><strong>Status of revocation and wipe (0.0.1-alpha.8).</strong> Implemented as described in <a href="alpha-0-format.html">../spec/alpha-0-format.md</a> section 21, with these gaps against this model: there is no second factor, so an A4 thief who acts first can revoke the owner's other devices instead of being unable to block a revocation; storage credentials are not rotated, so a revoked device can still delete ciphertext (A1-like power) until the user changes them at the provider; folders shared with other users and Strongroom folders keep their keys; the wipe order reaches the device only through a storage, not through peers.</li>
+<li><strong>Status of member removal (0.0.1-alpha.9, A6).</strong> Implemented as share epochs (<a href="alpha-0-format.html">../spec/alpha-0-format.md</a> section 24): new content is unreadable to a removed member, its later ledger batches and manifests are ignored, and it cannot enrol a new device with the keys it kept. Gaps: the storage both users reach stays writable to the removed member until the owner changes its access, so it can still delete ciphertext or occupy object names (denial of service, A1-like); it keeps the epoch-0 keyed-hash key and recognises chunk ids of content it knows in what it can still open; before a member is removed, any member can write content, forge member records and sign grants that a member which joined before this version would accept. The requester of a share is confirmed by a six-word fingerprint (66 bits) that both sides compare out of band; a user who skips the comparison gets no protection from it.</li>
 <li><strong>Content shown to a cloud LLM (A12).</strong> Once the user lets an MCP tool return content, the LLM provider has it.</li>
 <li><strong>Plaintext synced folders.</strong> A folder that the user syncs unencrypted (the S-011 exception on mobile, sync folders on desktop) is protected only by the device's own lock and disk encryption.</li>
 <li><strong>Alpha-stage logs.</strong> In the alpha, logs are redacted but not encrypted at rest; they reveal usage patterns (event types, sizes, times) even without names (plan 6.40).</li>
@@ -330,8 +331,8 @@
 </tr>
 <tr>
 <td>Shared-folder member (A6)</td>
-<td>The folder's full history, member device IDs and times in the ledger; old chunk IDs after removal.</td>
-<td>Names in ledger events are keyed hashes; cryptographic erasure of event payloads (plan section 8, "GDPR and append-only ledger").</td>
+<td>The folder's full history, member device IDs and times in the ledger; old chunk IDs after removal; every participant's last-accessed time per file (access records, alpha-0 format section 13).</td>
+<td>Names in ledger events are keyed hashes; cryptographic erasure of event payloads (plan section 8, "GDPR and append-only ledger"); after removal, access records and everything else are under a key the member lacks.</td>
 <td><strong>TBD</strong>.</td>
 </tr>
 <tr>

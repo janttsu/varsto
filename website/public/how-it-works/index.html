@@ -84,7 +84,7 @@
           <li><strong>Encryption.</strong> XChaCha20-Poly1305 under a chunk key and nonce derived from the folder key and the chunk id, with associated data naming the vault, the folder, the chunk and its length. Deterministic keys are safe here because each key encrypts exactly one message, and they let two devices produce byte-identical objects without talking.</li>
           <li><strong>Naming.</strong> The stored object is named by the BLAKE3 hash of its ciphertext. Any copy, anywhere, can be checked against its name without any key: that is how replicas, peers, <code>fsck --verify</code> and automatic verification check copies they cannot read.</li>
         </ol>
-        <p class="note">Known trade-off: deterministic (convergent) encryption inside a folder means that two people who both hold the folder key can tell whether they have an identical file, and compressed chunk sizes are visible to the storage. Random per-chunk keys for shared folders are planned for the cases where that matters.</p>
+        <p class="note">Known trade-off: deterministic (convergent) encryption inside a folder means that two people who both hold the folder key can tell whether they have an identical file, and compressed chunk sizes are visible to the storage. Within a shared folder that stays true for one key epoch; removing a member gives the folder a new random key, so a removed member cannot recognise anything written afterwards.</p>
       </div>
     </section>
 
@@ -225,7 +225,8 @@
       <picture><source type="image/webp" srcset="../assets/img/encryption/sealed.webp"><img src="../assets/img/encryption/sealed.png" alt="The recipient's device sends a request code with its X25519 and ML-KEM-768 public keys; you send back a sealed token holding one folder key, which only the requesting device can open, over any channel." width="640" height="320" loading="lazy"></picture>
       <div>
         <p>The recipient's device creates a hybrid key pair (X25519 + ML-KEM-768) and prints a request code with the public half. Your device encapsulates to both halves, derives one key from both shared secrets and the transcript, and encrypts the folder key with it. The resulting token can travel over any channel: only the requesting device can open it, and it opens one folder.</p>
-        <p>The recipient's device then writes its own ledger for that folder, sealed under a key derived from the folder key: both sides see each other's claims for that folder and nothing else. Not done yet: confirming that a request code really came from the intended person, and revoking a token.</p>
+        <p>Before sealing, both of you compare a fingerprint: six words derived from the request code and the name in it. You read them to each other over a call or in person; a code swapped on its way shows other words, and the recipient's device refuses a token whose confirmed words are not its own.</p>
+        <p>The recipient's device then writes its own ledger for that folder, sealed under a key derived from the folder key: both sides see each other's claims for that folder and nothing else. Removing a member, or revoking a token nobody accepted yet, gives the folder a new random key: your devices and the members who stay receive it (sealed to each member's own key), everything written from then on is under it, and the removed member's later changes are ignored. What they already received stays readable to them; a key cannot be recalled.</p>
       </div>
     </section>
 
@@ -233,7 +234,7 @@
       <h2>Strongroom: cryptographic, not a dialog</h2>
       <picture><source type="image/webp" srcset="../assets/img/encryption/strongroom.webp"><img src="../assets/img/encryption/strongroom.png" alt="A touch of the security key unlocks a Strongroom folder: only the credential id, the salt and the wrapped folder key are stored, the key stays in memory for 15 minutes, and the passphrase, the vault key or a stolen backup cannot open it." width="640" height="320" loading="lazy"></picture>
       <div>
-        <p>A Strongroom folder's key is never at rest. At creation the security key makes a credential, then produces a 32-byte secret from it and a random per-folder salt (FIDO2 hmac-secret). Varsto wraps the folder key under that secret and stores only the credential id, the salt and the wrapped key. Unlocking repeats the touch and keeps the key in memory for a window (15 minutes by default), then forgets it. There is no path to the folder key without the physical key: not through the passphrase, the vault key or a stolen backup. Backup security keys get their own wrap of the same folder key. Converting an existing folder gives it a new id and key, re-encrypts it and deletes the old ciphertext.</p>
+        <p>A Strongroom folder's key is never at rest. At creation the security key makes a credential, then produces a 32-byte secret from it and a random per-folder salt (FIDO2 hmac-secret). Varsto wraps the folder key under that secret and stores only the credential id, the salt and the wrapped key. Unlocking repeats the touch and keeps the key in memory for a window (15 minutes by default), then forgets it. There is no path to the folder key without the physical key: not through the passphrase, the vault key or a stolen backup. Backup security keys get their own wrap of the same folder key. Converting an existing folder gives it a new id and key, re-encrypts it and deletes the old ciphertext; re-keying a Strongroom does the same with a new key wrapped for every enrolled security key, for when a key may have been kept by someone.</p>
       </div>
     </section>
 
@@ -252,8 +253,9 @@
       <li><strong>Metadata.</strong> Storages see object sizes, write and read patterns, the number of devices and roughly the number of blocks. Padding and cover traffic are not implemented.</li>
       <li><strong>Convergent encryption</strong> inside a folder lets co-holders of the folder key confirm identical files.</li>
       <li><strong>Removing a device</strong> protects what is written afterwards, not what the device already held: existing data is not re-encrypted, shared and Strongroom folders keep their keys, and storage credentials are not rotated. Until a second factor exists, any of your devices can remove any other.</li>
+      <li><strong>Removing a member</strong> of a shared folder protects what is written afterwards; the storage you both reach stays writable to them until you change its access.</li>
       <li><strong>The ledger</strong> has no proof of storage, rollback detection is untested, and keeping it compact over years is still being built.</li>
-      <li><strong>Placement.</strong> Every block goes to every storage of a device; moving data between storages (keeping only a cold copy of idle files) is not built.</li>
+      <li><strong>Placement.</strong> A folder can be written to chosen storages or places, and blocks can be moved between storages (keeping only a cold copy of idle files). Files whose blocks are only on cold storage are not fetched until you move them back, and devices on 0.0.1-alpha.8 or older stop syncing once a move is recorded.</li>
       <li><strong>Strongroom</strong> protects the folder key, not a file you fetched and left on disk; the recovery kit does not cover Strongroom folders.</li>
       <li><strong>The vault key</strong> is a single secret. Keep the recovery kit in more than one place.</li>
     </ul>
