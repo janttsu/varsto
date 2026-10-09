@@ -78,7 +78,7 @@ In every model, a signature proves only that the device said something. It does 
 
 1. Seal a batch when it reaches a maximum size, after a maximum delay, or when a receipt must be delivered, whichever comes first. Values **TBD**; 1024 events is the example used above.
 2. Collect receipts for many chunks in one batch (for example everything received in the same short window) and have the sender wait for the sealed header, instead of sealing one batch per chunk.
-3. Seal rare, security-relevant events at once in their own batch: device enrolment and revocation, wipe commands, key rotation, policy changes. Their cost is negligible, and they then carry an immediate hybrid signature (effectively model A for them).
+3. Seal rare, security-relevant events at once in their own batch: device enrolment and revocation, wipe commands, key rotation, policy changes. Their cost is negligible, and they then carry an immediate hybrid signature (effectively model A for them). (0.0.1-alpha.8 publishes revocations, wipe orders and key epochs as separately signed registry objects instead of ledger events, so a revoked device that cannot read the new ledger key still reads its own revocation; see `alpha-0-format.md` section 20.)
 4. Exchange the latest signed batch header on every contact with a peer or storage, to detect rollback and equivocation.
 5. Sign the hash of the encrypted event payload, so payload keys can be destroyed later (cryptographic erasure) without breaking the chain (plan section 8, "GDPR and append-only ledger"; K22 in the key hierarchy).
 
