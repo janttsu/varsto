@@ -441,7 +441,8 @@ async fn request_on(
 /// What the serving side needs, shared by every connection task.
 struct Serving {
     me: DeviceId,
-    peer_key: SecretKey,
+    /// Changes when the vault key epoch changes (a device was revoked).
+    peer_key: Mutex<SecretKey>,
     snapshot: Arc<Mutex<Option<Arc<Snapshot>>>>,
     /// Known devices of the vault: name, certificate hash and addresses.
     known: Mutex<Vec<PeerInfo>>,
@@ -451,6 +452,12 @@ struct Serving {
     registrants: Mutex<HashMap<DeviceId, quinn::Connection>>,
     /// Connections we already serve streams on (so a registration is served once).
     served: Mutex<BTreeSet<usize>>,
+}
+
+impl Serving {
+    fn peer_key(&self) -> SecretKey {
+        self.peer_key.lock().unwrap().clone()
+    }
 }
 
 /// The QUIC endpoint of a device: a tokio runtime of its own, so the rest
@@ -538,7 +545,7 @@ impl Node {
         .context("quic endpoint")?;
         let serving = Arc::new(Serving {
             me,
-            peer_key,
+            peer_key: Mutex::new(peer_key),
             snapshot,
             known: Mutex::new(Vec::new()),
             allowed,
@@ -594,6 +601,11 @@ impl Node {
                 .map(|p| p.cert_sha256.clone()),
         );
         *self.serving.known.lock().unwrap() = peers;
+    }
+
+    /// The peer authentication key of the current vault key epoch.
+    pub fn set_peer_key(&self, key: SecretKey) {
+        *self.serving.peer_key.lock().unwrap() = key;
     }
 
     /// Send one datagram outside QUIC (STUN request or punch).
@@ -832,7 +844,7 @@ impl Node {
     /// can connect directly, so the record may say `reachable`.
     pub fn probe_self(&self, addr: SocketAddr) -> bool {
         let path = "/p2p/info";
-        let auth = auth_header(&self.serving.peer_key, &self.serving.me, path);
+        let auth = auth_header(&self.serving.peer_key(), &self.serving.me, path);
         matches!(
             self.request(addr, &self.identity.sha256, path, &auth, false),
             Ok((200, _))
@@ -849,7 +861,7 @@ impl Node {
         cert_sha256: &str,
     ) -> Result<()> {
         let path = format!("/p2p/register/{}", self.serving.me);
-        let auth = auth_header(&self.serving.peer_key, &self.serving.me, &path);
+        let auth = auth_header(&self.serving.peer_key(), &self.serving.me, &path);
         self.rt.block_on(async {
             let mut last = anyhow!("relay has no address");
             for addr in addrs {
@@ -973,7 +985,7 @@ fn register(
         return (400, b"bad device".to_vec());
     };
     let path = format!("/p2p/register/{dev}");
-    if verify_auth(&sv.peer_key, auth, &path).as_ref() != Some(&dev) {
+    if verify_auth(&sv.peer_key(), auth, &path).as_ref() != Some(&dev) {
         return (403, b"forbidden".to_vec());
     }
     let expected = sv
@@ -1009,7 +1021,7 @@ async fn relay_request(sv: &Serving, rest: &str, auth: &str) -> (u16, Vec<u8>) {
         return (400, b"bad device".to_vec());
     };
     let inner = format!("/{inner}");
-    if verify_auth(&sv.peer_key, auth, &inner).is_none() {
+    if verify_auth(&sv.peer_key(), auth, &inner).is_none() {
         return (403, b"forbidden".to_vec());
     }
     let target = sv.registrants.lock().unwrap().get(&dev).cloned();

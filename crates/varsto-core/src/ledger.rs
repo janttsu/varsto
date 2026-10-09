@@ -20,6 +20,9 @@ use std::path::{Path, PathBuf};
 /// Key identifiers in batch envelopes: which vault-derived key encrypts the body.
 pub const KEY_LEDGER: &str = "ledger";
 pub const KEY_REPLICA: &str = "replica";
+/// Batches sealed under the ledger key of vault key epoch `e >= 1` carry the
+/// key id `ledger@<e>` (epoch 0 keeps the plain `ledger`).
+pub const KEY_LEDGER_EPOCH_PREFIX: &str = "ledger@";
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -357,8 +360,22 @@ impl LedgerStore {
     /// unknown are skipped (for example replica batches on a device that is
     /// not the owner).
     pub fn view_with(&self, key_for: impl Fn(&str) -> Option<SecretKey>) -> Result<LedgerView> {
+        self.view_filtered(key_for, |_, _| true)
+    }
+
+    /// Like `view_with`, replaying only the batches `keep(device, seq)`
+    /// accepts: batches a revoked device signed after its cut-off are left
+    /// out even if they were stored before the revocation arrived.
+    pub fn view_filtered(
+        &self,
+        key_for: impl Fn(&str) -> Option<SecretKey>,
+        keep: impl Fn(&DeviceId, u64) -> bool,
+    ) -> Result<LedgerView> {
         let mut view = LedgerView::default();
         for signed in self.all()? {
+            if !keep(&signed.device, signed.seq) {
+                continue;
+            }
             let Some(key) = key_for(&signed.key_id) else {
                 continue;
             };

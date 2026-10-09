@@ -98,6 +98,8 @@ pub fn verify_auth(key: &SecretKey, header: &str, path: &str) -> Option<DeviceId
 pub struct Piece {
     pub folder: FolderId,
     pub chunk: crate::ids::ChunkId,
+    /// Folder key epoch of the chunk (see `vault::FolderKeys`).
+    pub epoch: u32,
     pub path: PathBuf,
     pub offset: u64,
     pub len: u64,
@@ -114,6 +116,8 @@ pub struct Snapshot {
     pub pieces: BTreeMap<ObjectName, Piece>,
     /// Roots of local-directory storages whose objects can be served verbatim.
     pub local_roots: Vec<PathBuf>,
+    /// Revoked devices: refused even if they still hold a valid token.
+    pub revoked: std::collections::BTreeSet<DeviceId>,
 }
 
 impl Snapshot {
@@ -150,8 +154,8 @@ impl Snapshot {
             return Ok(None); // file changed since the snapshot
         }
         let ct = crypto::encrypt_with_nonce(
-            &fk.chunk_key(&piece.chunk),
-            &fk.chunk_nonce(&piece.chunk),
+            &fk.chunk_key(piece.epoch, &piece.chunk)?,
+            &fk.chunk_nonce(piece.epoch, &piece.chunk)?,
             &fk.chunk_aad(&self.vault_id, &piece.chunk, piece.len),
             &crate::pack::pack(&plain),
         )?;
@@ -217,8 +221,9 @@ pub fn handle(snap: Option<&Snapshot>, path: &str, auth: &str) -> (u16, Vec<u8>)
     let Some(snap) = snap else {
         return (503, b"locked".to_vec());
     };
-    if verify_auth(&snap.peer_key, auth, path).is_none() {
-        return (403, b"forbidden".to_vec());
+    match verify_auth(&snap.peer_key, auth, path) {
+        Some(dev) if !snap.revoked.contains(&dev) => {}
+        _ => return (403, b"forbidden".to_vec()),
     }
     if path == "/p2p/info" {
         let body = serde_json::json!({
@@ -578,6 +583,7 @@ impl Peers {
         }
         if let Some(node) = &quic {
             node.set_known(infos.clone());
+            node.set_peer_key(key.clone());
         }
         Peers {
             key,
@@ -912,6 +918,33 @@ pub fn local_ipv4_addrs() -> Vec<IpAddr> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn revoked_devices_are_refused_even_with_a_valid_token() {
+        let key = SecretKey::random();
+        let (good, gone) = (DeviceId::random(), DeviceId::random());
+        let snap = Snapshot {
+            vault_id: crate::ids::VaultId::random(),
+            device_id: DeviceId::random(),
+            peer_key: key.clone(),
+            folder_keys: BTreeMap::new(),
+            pieces: BTreeMap::new(),
+            local_roots: Vec::new(),
+            revoked: [gone.clone()].into_iter().collect(),
+        };
+        let ask = |dev: &DeviceId| {
+            handle(
+                Some(&snap),
+                "/p2p/info",
+                &auth_header(&key, dev, "/p2p/info"),
+            )
+            .0
+        };
+        assert_eq!(ask(&good), 200);
+        assert_eq!(ask(&gone), 403);
+        let stale = auth_header(&SecretKey::random(), &good, "/p2p/info");
+        assert_eq!(handle(Some(&snap), "/p2p/info", &stale).0, 403);
+    }
 
     #[test]
     fn chunked_bodies_decode() {

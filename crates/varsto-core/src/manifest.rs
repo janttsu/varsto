@@ -15,6 +15,15 @@ pub struct ChunkRef {
     pub chunk: ChunkId,
     pub object: ObjectName,
     pub size: u64,
+    /// Folder key epoch the chunk is encrypted under (0 = the folder record's
+    /// key; later epochs follow device revocations). Omitted when 0, so
+    /// manifests written before rotation existed are unchanged.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub epoch: u32,
+}
+
+fn is_zero(e: &u32) -> bool {
+    *e == 0
 }
 
 /// Version vector: device -> logical clock of that device's last change.
