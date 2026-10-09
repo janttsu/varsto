@@ -1,6 +1,6 @@
 # Website illustrations: 3D renders
 
-The pictures on the project, features and use-case pages are rendered in Blender
+The pictures on the project, features, use-case and encryption pages are rendered in Blender
 from the scene descriptions in this directory, then the labels are composed on top
 with Pillow. The old hand-drawn SVGs (`website/tools/gen_svgs.py`) stay in
 `website/public/assets/img/` as a fallback generator; no page references them.
@@ -9,7 +9,7 @@ with Pillow. The old hand-drawn SVGs (`website/tools/gen_svgs.py`) stay in
 scene_kit.py   builders (laptop, phone, NAS, disks, cloud, bucket, key, padlock, ...),
                shared palette, orthographic studio camera, light rig, backdrop,
                screen-space placement, dashed links, text queue
-scenes.py      the 20 compositions, one function per output file
+scenes.py      the 26 compositions, one function per output file
 compose.py     Pillow text layer (Inter), writes .webp (quality 88) and .png
 render_all.py  renders every scene and composes the text in one go
 fonts/         Inter Regular / Medium / SemiBold (OFL, see fonts/OFL.txt)
@@ -59,7 +59,8 @@ composition must be fixed (move the badge to a free corner with `badge_at`,
 `lock_at` or `attached`, nudge labels, widen the spacing).
 
 Outputs go next to the SVGs: `website/public/assets/img/features/*.webp|png`,
-`website/public/assets/img/usecases/*.webp|png` and
+`website/public/assets/img/usecases/*.webp|png`,
+`website/public/assets/img/encryption/*.webp|png` and
 `website/public/assets/img/hero.webp|png` (1280 x 640 px for the 640 x 320
 illustrations, 2400 x 1200 px for the hero; both are 2x for Retina displays).
 The scratch directory keeps the raw render (`<scene>.png`), the text layout

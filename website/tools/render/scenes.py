@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: PolyForm-Shield-1.0.0
-"""The 20 illustration compositions, one function per output file.
+"""The illustration compositions, one function per output file.
 
 Coordinates are the design grid of the old SVGs (640 x 320, hero 1200 x 600), so
 each scene keeps the same story, elements and reading order. Text is not
@@ -457,6 +457,217 @@ def reader():
     L((396, 128), (426, 144), (452, 148), (478, 148))
     node(K.phone("thumbs"), 512, 154, 0.42, "Phone", "previews, files are placeholders")
     K.caption("Thumbnails stay encrypted; the storage sees only ciphertext.")
+
+
+# ============================================================ encryption page
+def labels(root, title=None, sub=None, gap=20, label_x=None):
+    """Title and sub-labels in a band under an element already placed and registered."""
+    bb = K.box_of(root)
+    cx = label_x if label_x is not None else (bb[0] + bb[2]) / 2
+    yy = bb[3] + gap
+    if title:
+        K.text(cx, yy, title, "title")
+        yy += 18
+    for s in ([sub] if isinstance(sub, str) else (sub or [])):
+        K.text(cx, yy, s, "sub")
+        yy += 18
+    return root
+
+
+def slabs(widths, tones, h=0.3, t=0.06, g=0.045):
+    """A row of standing slabs of different widths (content-defined chunks), facing -Y."""
+    root = K.empty("slabs")
+    x = -(sum(widths) + g * (len(widths) - 1)) / 2
+    for w, tone in zip(widths, tones):
+        K.box(w, t, h, K.mat(tone), bevel=0.02, at=(x + w / 2, 0, 0), parent=root, name="slab")
+        x += w + g
+    return root
+
+
+def word_bars(card, x0, y0, cols, rows, w=40, pitch_x=50, pitch_y=16, tone="grey"):
+    """Rows of short bars on a card standing for printed words."""
+    for r in range(rows):
+        for c in range(cols):
+            ui(card, K.bar(w - (r * 7 + c * 11) % 14, 7, tone, r=3.5, t=0.012), x0 + c * pitch_x, y0 + r * pitch_y, toward=0.02)
+
+
+def _seal_small(card, x, y, initials):
+    ui(card, K.seal(13), x, y)
+    K.text(x, y + 3.5, initials, "sealtxt", free=True)
+
+
+@scene("encryption/hierarchy")
+def hierarchy():
+    v = card_at(20, 70, 150, 150)
+    ui(v, K.key(scale=0.95, upright=False), 95, 112)
+    K.text(95, 162, "Vault key", "title")
+    K.text(95, 184, "random, 256 bits", "sub")
+    K.text(95, 202, "in keys.enc", "sub")
+    p = card_at(222, 22, 220, 116)
+    K.text(332, 46, "Vault-wide keys", "title")
+    K.rule2d(236, 57, 428, 57)
+    for i, (a, b) in enumerate((("ledger", "replica"), ("registry", "peer auth"), ("folder record", "beacon tag"))):
+        y = 80 + i * 20
+        for x, s in ((238, a), (344, b)):
+            ui(p, K.dot(3, "blue300"), x, y - 4)
+            K.text(x + 8, y, s, "row", "s")
+    f = card_at(222, 168, 220, 96)
+    ui(f, K.key(scale=0.5, upright=False), 260, 210)
+    K.text(290, 207, "Folder key", "title", "s")
+    K.text(290, 227, "random, one per folder", "sub", "s")
+    m = card_at(490, 22, 130, 116)
+    ui(m, K.folder_icon(0.6), 555, 52)
+    K.text(555, 92, "Metadata key", "title")
+    K.text(555, 110, "manifests,", "sub")
+    K.text(555, 126, "thumbnails", "sub")
+    c = card_at(490, 168, 130, 96)
+    g = K.empty("cardblocks")
+    K.cipher_blocks(g, 5, 2, s=0.1, g=0.045, h=0.02)
+    ui(c, g, 555, 194, toward=0.01)
+    K.text(555, 232, "Chunk keys", "title")
+    K.text(555, 250, "one per chunk", "sub")
+    L((174, 120), (194, 104), (198, 82), (216, 80))
+    L((300, 142), (300, 164))
+    K.text(310, 157, "seals", "sub", "s")
+    L((446, 200), (464, 190), (466, 90), (484, 80))
+    L((446, 216), (484, 216))
+    K.caption("Keys derive by purpose; each folder has its own random key.")
+
+
+@scene("encryption/pipeline")
+def pipeline():
+    K.text(236, 34, "on your device", "sub")
+    K.text(548, 34, "leaves the device", "sub")
+    L((444, 26), (444, 250), h=0.0, tone="grey", arrows=(), dash=7, gap=6, r=0.009)
+    f = K.file_icon(1.5)
+    bb_node(f, 66, 112, 0.45)
+    labels(f, "File", "report.pdf")
+    widths = (0.2, 0.11, 0.26, 0.15)
+    ch = free_node(slabs(widths, ("#dfe6f6", "#d3dcef", "#dfe6f6", "#d3dcef")), 196, 120, 0.15, lift=0.1)
+    labels(ch, "Chunks", ["cut by content,", "compressed"], gap=26)
+    en = free_node(slabs(widths, ("blue300", "#6f90f0", "#b8c9ff", "blue600")), 344, 120, 0.15, lift=0.1)
+    labels(en, "Encrypted", ["key per chunk,", "named by hash"], gap=26)
+    lock_at(en, "tr", dx=0, dy=0, scale=0.75, lift=0.75)
+    cl = node(K.cloud(), 548, 114, 0.3, "Your storage", ["sees hashes and sizes,", "never names or content"], lift=0.22)
+    attached(cl, blocks(3, 1), "bl", dx=0, dy=-12, lift=0.3)
+    L((100, 114), (136, 114))
+    L((258, 114), (284, 114))
+    L((404, 112), (440, 100), (462, 98), (490, 106))
+    K.caption("Every file is ciphertext before it leaves your device.")
+
+
+def _batch(x0, y0, n, tone="white"):
+    c = card_at(x0, y0, 140, 100, tone=tone)
+    K.text(x0 + 70, y0 + 24, f"Batch #{n}", "title")
+    K.rule2d(x0 + 14, y0 + 34, x0 + 126, y0 + 34)
+    g = K.empty("cardblocks")
+    K.cipher_blocks(g, 7, 2, s=0.09, g=0.04, h=0.02)
+    ui(c, g, x0 + 70, y0 + 52, toward=0.01)
+    _seal_small(c, x0 + 46, y0 + 80, "Ed")
+    _seal_small(c, x0 + 94, y0 + 80, "ML")
+    return c
+
+
+@scene("encryption/chain")
+def chain():
+    _batch(20, 22, 40)
+    _batch(196, 22, 41)
+    _batch(372, 22, 42)
+    d = _batch(196, 152, "41", tone="#fdeef0")
+    badge_at(d, "x", "tr", dx=0, dy=0)
+    L((164, 72), (192, 72), solid=True, h=0.5)
+    L((340, 72), (368, 72), solid=True, h=0.5)
+    L((116, 128), (122, 176), (156, 200), (190, 200), tone="red", h=0.4)
+    K.text(350, 196, "rolled back: fork,", "sub", "s", color="#c2414a")
+    K.text(350, 214, "detected and fenced", "sub", "s", color="#c2414a")
+    node(K.laptop("cipher", scale=0.62), 570, 184, 0.22, "Other devices", "verify and merge")
+    K.caption("Each batch is signed twice and chained to the one before.")
+
+
+@scene("encryption/sealed")
+def sealed():
+    node(K.laptop("cipher", scale=0.85), 92, 150, 0.3, "Recipient", "keeps the private half")
+    node(K.laptop("cipher", scale=0.85), 548, 150, 0.3, "You", "seal the folder key")
+    t = card_at(210, 36, 220, 60)
+    K.text(320, 60, "1  Request code", "title")
+    K.text(320, 82, "X25519 + ML-KEM-768 public", "sub")
+    L((132, 104), (150, 74), (176, 66), (204, 66))
+    L((436, 66), (464, 66), (490, 74), (508, 104))
+    K.text(320, 138, "travels over any channel", "sub")
+    s = card_at(210, 168, 220, 60)
+    lk = K.padlock(scale=0.6)
+    lk.location = K.card_point(s, 238, 206, 0.2) - Vector((0, 0, 0.1))
+    K.register_box(lk.name, lk, "ui", parent=s["box_name"])
+    ui(s, K.key(scale=0.45, upright=False), 270, 198)
+    K.text(354, 194, "2  Sealed token", "title")
+    K.text(354, 214, "one folder key", "sub")
+    L((508, 196), (490, 214), (464, 222), (436, 222))
+    L((204, 222), (176, 222), (150, 214), (132, 196))
+    K.text(320, 250, "only the requesting device can open it", "sub")
+    K.caption("Hybrid key exchange: the token is safe on any channel.")
+
+
+@scene("encryption/strongroom")
+def strongroom():
+    u = K.usb_stick()
+    u.scale = (1.4,) * 3
+    node(u, 92, 150, 0.06, "Security key", "one touch", rot=-20)
+    st = card_at(196, 30, 224, 112)
+    K.text(308, 54, "Stored", "title")
+    K.rule2d(210, 66, 406, 66)
+    for i, s in enumerate(("credential id", "per-folder salt")):
+        y = 90 + i * 22
+        ui(st, K.dot(3, "blue300"), 218, y - 4)
+        K.text(230, y, s, "row", "s")
+    lk = K.padlock(scale=0.4)
+    lk.location = K.card_point(st, 218, 130, 0.15) - Vector((0, 0, 0.07))
+    K.register_box(lk.name, lk, "ui", parent=st["box_name"])
+    K.text(230, 134, "wrapped folder key", "row", "s")
+    mem = card_at(196, 170, 224, 80)
+    ui(mem, K.key(scale=0.5, upright=False), 228, 210)
+    K.text(258, 205, "Unlocked", "title", "s")
+    K.text(258, 226, "in memory, 15 minutes", "sub", "s")
+    no = card_at(456, 30, 164, 180)
+    K.text(538, 54, "No other path", "title")
+    K.rule2d(470, 66, 606, 66)
+    for i, s in enumerate(("passphrase", "vault key", "stolen backup")):
+        y = 100 + i * 38
+        ui(no, K.badge("x", 10), 482, y)
+        K.text(500, y + 4.5, s, "row", "s")
+    L((132, 124), (152, 100), (170, 86), (190, 86))
+    L((132, 168), (152, 196), (170, 210), (190, 210))
+    K.caption("Without the physical key there is no path to the folder key.")
+
+
+@scene("encryption/recovery")
+def recovery():
+    k = card_at(24, 34, 196, 210)
+    K.text(122, 60, "Recovery kit", "title")
+    K.rule2d(38, 72, 206, 72)
+    word_bars(k, 62, 92, 3, 8, w=44, pitch_x=60, pitch_y=17)
+    K.text(122, 262, "24 words, with checksum", "sub")
+    K.text(246, 143, "or", "sub")
+    shares = []
+    for i in range(3):
+        y0 = 30 + i * 76
+        s = card_at(272, y0, 120, 58)
+        K.text(332, y0 + 22, f"Share {i + 1}", "title")
+        word_bars(s, 304, y0 + 38, 2, 1, w=44, pitch_x=56, tone="grey")
+        shares.append(s)
+    for s in shares[:2]:
+        badge_at(s, "ok", "tr", dx=0, dy=0)
+    ped = K.pedestal(0.42, 0.08)
+    ky = K.key(scale=1.25, upright=True)
+    ky.parent = ped
+    ky.location = (0, 0, 0.4)
+    ky.rotation_euler = (0, 0, math.radians(K.AZ_DEG))
+    node(ped, 534, 96, 0.2, "Vault key", "any two shares rebuild it")
+    L((398, 60), (436, 58), (462, 64), (482, 78))
+    L((398, 136), (430, 136), (456, 110), (478, 98))
+    L((398, 211), (440, 211), tone="grey", arrows=(), dash=7, gap=6, r=0.009, h=0.5)
+    bb_node(K.badge("x"), 419, 211, 0.55, kind="object")
+    K.text(452, 215, "alone reveals nothing", "sub", "s")
+    K.caption("No account, no reset: the kit is the vault key on paper.")
 
 
 # ============================================================ hero (1200 x 600)

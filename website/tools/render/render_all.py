@@ -11,7 +11,7 @@ Options (after the "--"):
     --no-compose         skip compose.py (text layer)
     --layout-only        build the scenes and run the overlap check only (no render)
 
-Outputs go next to the SVGs: website/public/assets/img/{features,usecases}/*.webp|png
+Outputs go next to the SVGs: website/public/assets/img/{features,usecases,encryption}/*.webp|png
 and website/public/assets/img/hero.webp|png.
 """
 from __future__ import annotations
