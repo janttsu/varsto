@@ -620,12 +620,18 @@ pub struct Peers {
     state: Mutex<BTreeMap<SocketAddr, (bool, Instant)>>,
     /// Per device: the last route (or failure), the status it answered, and when.
     routes: Mutex<BTreeMap<DeviceId, Attempt>>,
+    /// Per device on a TCP route beyond the LAN: when QUIC is tried again.
+    upgrades: Mutex<BTreeMap<DeviceId, Instant>>,
     pub timeout: Duration,
     /// Where downloads are counted: the QUIC node's counters when it runs.
     traffic: Arc<Traffic>,
 }
 
 const ROUTE_TTL: Duration = Duration::from_secs(60);
+/// A peer reached over TCP beyond the LAN is asked over QUIC again this long
+/// after the fallback, then every `UPGRADE_EVERY`.
+const UPGRADE_FIRST: Duration = Duration::from_secs(10);
+const UPGRADE_EVERY: Duration = Duration::from_secs(60);
 
 impl Peers {
     /// TCP-only peers from plain addresses (LAN beacons, tests).
@@ -677,6 +683,7 @@ impl Peers {
             quic,
             state: Mutex::new(BTreeMap::new()),
             routes: Mutex::new(BTreeMap::new()),
+            upgrades: Mutex::new(BTreeMap::new()),
             timeout: Duration::from_millis(1500),
             traffic,
         }
@@ -702,6 +709,7 @@ impl Peers {
     pub fn inherit(&self, previous: &Peers) {
         *self.routes.lock().unwrap() = previous.routes.lock().unwrap().clone();
         *self.state.lock().unwrap() = previous.state.lock().unwrap().clone();
+        *self.upgrades.lock().unwrap() = previous.upgrades.lock().unwrap().clone();
     }
 
     /// Peers worth asking now: unreachable ones rest for a minute, the ones
@@ -722,6 +730,19 @@ impl Peers {
             _ => 1,
         });
         v
+    }
+
+    /// Is it time to try QUIC again for `device` (at most once per
+    /// `UPGRADE_EVERY`, the first time half a minute after the fallback)?
+    fn upgrade_due(&self, device: &DeviceId) -> bool {
+        let mut up = self.upgrades.lock().unwrap();
+        let now = Instant::now();
+        let next = up.entry(device.clone()).or_insert(now + UPGRADE_FIRST);
+        if now < *next {
+            return false;
+        }
+        *next = now + UPGRADE_EVERY;
+        true
     }
 
     fn remember(&self, device: &DeviceId, route: Option<Route>, status: u16) {
@@ -857,6 +878,28 @@ impl Peers {
             Some((Some(r), _, _)) => Some(r.clone()),
             _ => None,
         };
+        if let Some(r) = &last {
+            // TCP across the internet is the slow route (a connection per
+            // request). It is used when QUIC failed, which can be passing: a
+            // peer that had not read our record yet refuses our certificate.
+            // Try QUIC again now and then, with one request.
+            if matches!(r, Route::Tcp(a) if !is_lan(a.ip())) && self.upgrade_due(&p.device) {
+                for q in self
+                    .candidate_routes(p)
+                    .into_iter()
+                    .filter(|c| matches!(c, Route::Quic(_)))
+                {
+                    if let Ok((s, b)) = self.over(&q, path, auth, p) {
+                        log(&format!(
+                            "{who}: {} answered {s}, used from now on",
+                            q.describe()
+                        ));
+                        self.remember(&p.device, Some(q.clone()), s);
+                        return Some((s, b, q));
+                    }
+                }
+            }
+        }
         if let Some(r) = last {
             match self.over(&r, path, auth, p) {
                 Ok((s, b)) => {
@@ -1175,5 +1218,24 @@ mod tests {
             order_routes(&[wide, lan], &[], vec![]),
             vec![Route::Tcp(lan), Route::Tcp(wide)]
         );
+    }
+
+    #[test]
+    fn quic_is_retried_now_and_then_not_on_every_request() {
+        let me = DeviceId::from_hex("00112233445566778899aabbccddeeff").unwrap();
+        let other = DeviceId::from_hex("ffeeddccbbaa99887766554433221100").unwrap();
+        let p = Peers::new(SecretKey::random(), me, vec![]);
+        // The first fallback starts the clock; nothing is due yet.
+        assert!(!p.upgrade_due(&other));
+        assert!(!p.upgrade_due(&other));
+        // Once due, one caller gets the retry and the next waits a full period.
+        p.upgrades
+            .lock()
+            .unwrap()
+            .insert(other.clone(), Instant::now());
+        assert!(p.upgrade_due(&other));
+        assert!(!p.upgrade_due(&other));
+        let next = p.upgrades.lock().unwrap()[&other];
+        assert!(next > Instant::now() + UPGRADE_EVERY - Duration::from_secs(1));
     }
 }
