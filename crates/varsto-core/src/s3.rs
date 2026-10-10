@@ -64,10 +64,11 @@ impl S3Storage {
         let config = ureq::Agent::config_builder()
             .http_status_as_error(false)
             .timeout_global(Some(Duration::from_secs(600)))
-            // Downloads fetch several objects at once; with ureq's default
+            // Downloads keep up to 32 objects in flight; with ureq's default
             // of three idle connections per host the others would pay a new
             // TLS handshake for every object.
-            .max_idle_connections_per_host(16)
+            .max_idle_connections_per_host(32)
+            .max_idle_connections(64)
             .build();
         Ok(S3Storage {
             cfg,

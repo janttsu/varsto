@@ -33,6 +33,7 @@ use crate::vault::{
     VaultMeta,
 };
 use anyhow::{anyhow, bail, Context, Result};
+use fetch::{fetch_in_order, FetchStats, Fetched, PREFETCH_FILES, PREFETCH_OBJECTS};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs;
@@ -44,6 +45,7 @@ mod block_cache;
 mod data_moves;
 mod devinfo;
 mod disk_groups;
+mod fetch;
 mod ledger_upkeep;
 mod manifest_upkeep;
 mod membership;
@@ -385,6 +387,8 @@ pub struct Engine {
     peers: Option<std::sync::Arc<crate::p2p::Peers>>,
     /// Objects of small files fetched ahead during a pull (see `prefetch_small`).
     prefetched: HashMap<ObjectName, Fetched>,
+    /// How fast peers and storages answered during recent downloads.
+    fetch_stats: std::sync::Arc<FetchStats>,
     /// Strongroom folder keys held in memory until the expiry time (UTC seconds).
     unlocked: BTreeMap<FolderId, (SecretKey, i64)>,
     home: PathBuf,
@@ -424,145 +428,6 @@ fn placeholder_path(disk: &Path) -> PathBuf {
     let mut s = disk.as_os_str().to_os_string();
     s.push(PLACEHOLDER_SUFFIX);
     PathBuf::from(s)
-}
-
-/// Chunks of one file fetched at once (see `download_to`).
-const FETCH_AHEAD: usize = 8;
-/// Fetching ahead across single-block files during a pull: at most this
-/// many files looked at and objects fetched per batch.
-const PREFETCH_FILES: usize = 64;
-const PREFETCH_OBJECTS: usize = 32;
-
-/// One chunk object as `download_to` looked for it.
-enum Fetched {
-    Got {
-        source: String,
-        bytes: Vec<u8>,
-        from_peer: bool,
-    },
-    /// On no reachable storage; maybe on a pool disk that is away.
-    Missing(Option<PoolError>),
-    Failed(anyhow::Error),
-}
-
-/// Fetch `chunks` with up to `FETCH_AHEAD` requests in flight and hand each
-/// to `each` in file order, on the calling thread. The window slides: a slow
-/// answer holds back only the chunks more than `FETCH_AHEAD` behind it. The
-/// first error from `each` stops the fetching.
-fn fetch_in_order(
-    peers: Option<&crate::p2p::Peers>,
-    chunks: &[ChunkRef],
-    storages: &[(StorageSpec, Box<dyn Storage>)],
-    mut each: impl FnMut(&ChunkRef, Fetched) -> Result<()>,
-) -> Result<()> {
-    if chunks.len() <= 1 {
-        for c in chunks {
-            each(c, fetch_object(peers, &c.object, storages))?;
-        }
-        return Ok(());
-    }
-    struct Window {
-        next: usize,
-        consumed: usize,
-        ready: BTreeMap<usize, Fetched>,
-        stop: bool,
-    }
-    let shared = std::sync::Mutex::new(Window {
-        next: 0,
-        consumed: 0,
-        ready: BTreeMap::new(),
-        stop: false,
-    });
-    let changed = std::sync::Condvar::new();
-    std::thread::scope(|s| {
-        for _ in 0..FETCH_AHEAD.min(chunks.len()) {
-            s.spawn(|| loop {
-                let i = {
-                    let mut w = shared.lock().unwrap();
-                    while !w.stop && w.next < chunks.len() && w.next >= w.consumed + FETCH_AHEAD {
-                        w = changed.wait(w).unwrap();
-                    }
-                    if w.stop || w.next >= chunks.len() {
-                        return;
-                    }
-                    w.next += 1;
-                    w.next - 1
-                };
-                // A panic must still fill the slot, or the reader would wait forever.
-                let got = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    fetch_object(peers, &chunks[i].object, storages)
-                }))
-                .unwrap_or_else(|_| Fetched::Failed(anyhow!("chunk fetch panicked")));
-                shared.lock().unwrap().ready.insert(i, got);
-                changed.notify_all();
-            });
-        }
-        let mut result = Ok(());
-        for (i, c) in chunks.iter().enumerate() {
-            let got = {
-                let mut w = shared.lock().unwrap();
-                loop {
-                    if let Some(f) = w.ready.remove(&i) {
-                        w.consumed = i + 1;
-                        break f;
-                    }
-                    w = changed.wait(w).unwrap();
-                }
-            };
-            changed.notify_all();
-            if let Err(e) = each(c, got) {
-                result = Err(e);
-                break;
-            }
-        }
-        shared.lock().unwrap().stop = true;
-        changed.notify_all();
-        result
-    })
-}
-
-/// Ask the peers first, then every storage in order; a copy that does not
-/// match its name is skipped.
-fn fetch_object(
-    peers: Option<&crate::p2p::Peers>,
-    object: &ObjectName,
-    storages: &[(StorageSpec, Box<dyn Storage>)],
-) -> Fetched {
-    if let Some(peers) = peers {
-        if let Some((dev, ct)) = peers.get(object) {
-            return Fetched::Got {
-                source: format!("peer:{}", dev.short()),
-                bytes: ct,
-                from_peer: true,
-            };
-        }
-    }
-    let key = chunk_storage_key(object);
-    let mut needs_disk: Option<PoolError> = None;
-    for (spec, backend) in storages {
-        match backend.get(&key) {
-            Ok(Some(ct)) => {
-                if ObjectName::from_bytes(&crypto::hash(&ct)) != *object {
-                    continue; // corrupt copy; try the next storage
-                }
-                return Fetched::Got {
-                    source: spec.name().to_string(),
-                    bytes: ct,
-                    from_peer: false,
-                };
-            }
-            Ok(None) => {}
-            // The copy is on a pool disk that is away: remember which one,
-            // in case no other storage has the chunk.
-            Err(e) => match pool::pool_error(&e) {
-                Some(nd @ PoolError::NeedsDisk { .. }) => {
-                    needs_disk.get_or_insert(nd.clone());
-                }
-                _ => return Fetched::Failed(e),
-            },
-        }
-    }
-    Fetched::Missing(needs_disk)
 }
 
 fn chunk_storage_key(object: &ObjectName) -> String {
@@ -815,6 +680,7 @@ impl Engine {
         let mut engine = Engine {
             peers: None,
             prefetched: HashMap::new(),
+            fetch_stats: Default::default(),
             unlocked: BTreeMap::new(),
             home: home.to_path_buf(),
             vault,
@@ -980,6 +846,7 @@ impl Engine {
         let mut engine = Engine {
             peers: None,
             prefetched: HashMap::new(),
+            fetch_stats: Default::default(),
             unlocked: BTreeMap::new(),
             config: Config::load(home)?,
             ledger: LedgerStore::open(&home.join("ledger"))?,
@@ -3191,9 +3058,10 @@ impl Engine {
         {
             let mut out = fs::File::create(&tmp)?;
             let peers = self.peers.clone();
+            let stats = self.fetch_stats.clone();
             // Every object is one round trip to a peer or a storage. Fetched
             // one after another, a link with any latency idles most of the
-            // time, so up to FETCH_AHEAD chunks of the file are in flight at
+            // time, so a window of chunks of the file (`fetch::fetch_in_order`) is in flight at
             // once; they are still checked, decrypted and written in order.
             // Small files may have been fetched ahead together (`prefetch_small`).
             // (A file that repeats a block takes the normal way: each cached
@@ -3280,7 +3148,13 @@ impl Engine {
                         write_chunk(cref, fetched)?;
                     }
                 }
-                None => fetch_in_order(peers.as_deref(), &file.chunks, storages, &mut write_chunk)?,
+                None => fetch_in_order(
+                    peers.as_deref(),
+                    &file.chunks,
+                    storages,
+                    &stats,
+                    &mut write_chunk,
+                )?,
             }
             out.sync_all()?;
         }
@@ -3327,8 +3201,9 @@ impl Engine {
         }
         if wanted.len() > 1 {
             let peers = self.peers.clone();
+            let stats = self.fetch_stats.clone();
             let cache = &mut self.prefetched;
-            let _ = fetch_in_order(peers.as_deref(), &wanted, storages, |c, f| {
+            let _ = fetch_in_order(peers.as_deref(), &wanted, storages, &stats, |c, f| {
                 if matches!(f, Fetched::Got { .. }) {
                     cache.insert(c.object.clone(), f);
                 }
