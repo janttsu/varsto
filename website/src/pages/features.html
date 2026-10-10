@@ -5,7 +5,7 @@ output: features/index.html
 description: What Varsto does, with the use cases behind each feature: your own storage, signed bookkeeping, transferrer disks, untrusted replicas, selective sync, sharing.
 ---
     <h1>Features</h1>
-    <p class="lead">Varsto is built around one idea: your files live on devices and storage you choose, every copy is ciphertext, and the app keeps honest, signed bookkeeping of where every block is. The features below follow from that. Items marked exist today; the rest are designed and documented, not built. The <a href="../use-cases/">Use cases</a> page tells the same story from the user's side, one situation at a time.</p>
+    <p class="lead">Varsto is built around one idea: your files live on devices and storage you choose, every copy is ciphertext, and the app keeps honest, signed bookkeeping of where every block is. The features below follow from that. Everything described below exists today; the list at the end is what is designed and documented but not built. The <a href="../use-cases/">Use cases</a> page tells the same story from the user's side, one situation at a time.</p>
 
     <section class="feature">
       <h2>Devices that are never online together still converge</h2>
@@ -150,5 +150,17 @@ description: What Varsto does, with the use cases behind each feature: your own 
 
     <h2>Also in the design</h2>
     <ul>
+      <li>QR invitations for sharing.</li>
+      <li>Per-device storage credentials, rotated at the provider when a device is removed.</li>
+      <li>Re-encrypting existing data after a device is removed.</li>
+      <li>Packs for small files.</li>
+      <li>Incremental manifests.</li>
+      <li>DHT peer discovery.</li>
+      <li>Proof-of-storage challenges.</li>
+      <li>Erasure coding across storages.</li>
+      <li>Encrypted, redacted logs.</li>
+      <li>A File Provider / Cloud Files integration for placeholders.</li>
+      <li>iOS camera upload and viewer.</li>
+      <li>A second factor for device enrolment.</li>
     </ul>
     <p class="note">Every design document on the <a href="../docs/">Docs</a> page says which parts exist. Nothing has been audited yet.</p>
