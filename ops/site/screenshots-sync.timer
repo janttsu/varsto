@@ -1,0 +1,11 @@
+# SPDX-License-Identifier: PolyForm-Shield-1.0.0
+[Unit]
+Description=Varsto website: check for new CI screenshots every 15 minutes
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=15min
+RandomizedDelaySec=60
+
+[Install]
+WantedBy=timers.target

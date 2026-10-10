@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Alpha.9: data where you want it, repair by itself, signed updates, and every platform built in the open: Varsto</title>
+<meta name="description" content="Folders can be placed on chosen storages and moved between them, lost copies are repaired automatically, updates are signed with an offline key, peer-to-peer downloads fetch many blocks at once, and every package is now built, tested and photographed on GitHub&#x27;s runners.">
+<meta name="robots" content="noindex, nofollow">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../blog/feed.xml">
+<link rel="stylesheet" href="../assets/css/site.css?v=715efe3bcc">
+<script src="../assets/js/theme.js?v=0951491269"></script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="alpha" role="note">
+  <div class="wrap"><strong>Alpha software, not for production data.</strong> Bugs can cause data loss, formats may change without migration, and the cryptography has not been independently audited. Keep your own backups and check that you can restore from them.</div>
+</div>
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="../"><img src="../assets/img/logo.svg" alt="" width="28" height="28"><span>Varsto</span></a>
+    <nav class="main" aria-label="Main">
+      <a href="../">Project</a>
+      <a href="../features/">Features</a>
+      <a href="../use-cases/">Use cases</a>
+      <a href="../how-it-works/">How it works</a>
+      <a href="../screenshots/">Screenshots</a>
+      <a href="../docs/">Docs</a>
+      <a href="../downloads/">Downloads</a>
+      <a href="../blog/" aria-current="page">Blog</a>
+      <a href="../forum/">Forum</a>
+      <a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a>
+      <button class="theme" id="theme-toggle" type="button" aria-label="Change colour theme">Theme: auto</button>
+    </nav>
+  </div>
+</header>
+<main id="main">
+  <div class="wrap">
+<article class="prose"><h1>Alpha.9: data where you want it, repair by itself, signed updates, and every platform built in the open</h1><p class="note"><time datetime="2026-10-10">2026-10-10</time></p>
+<p>Alpha.9 is about the long run: deciding where data lives, getting it back to the copies your policy asks for without being told, and trusting the update that brings the next version.</p>
+<h2 id="data-where-you-want-it">Data where you want it</h2>
+<p>Each folder can now have a placement: the storages its blocks go to. Data can be moved from one storage to another (a whole folder, or only files idle for a number of days), block by block, each block written and read back on the new storage before the old copy is deleted, and an interrupted move simply continues when run again. A pool of removable disks can ask for copies on disks kept in different places, such as one at home and one at work, and Varsto fills each disk with what its place still lacks.</p>
+<h2 id="repair-by-itself">Repair by itself</h2>
+<p>When a copy goes missing, a storage is removed or a verification fails, the device that holds the data puts the block back where the folder's policy and placement want it, from its own files, the encrypted block cache, another storage or a peer. The repair queue is visible in the interface and with <code>varsto repair</code>.</p>
+<h2 id="signed-updates">Signed updates</h2>
+<p>Every release's checksum list is now signed with the project's release key, which never leaves the maintainer's machine, and the updater refuses a release that is not signed with it. It also compares the checksum with the one attached to the GitHub release, a second channel. <code>varsto verify-release</code> checks a download by hand, and so does <code>minisign</code>. <a href="https://github.com/janttsu/varsto/blob/main/RELEASING.md">RELEASING.md</a> explains the scheme.</p>
+<h2 id="faster-peer-to-peer">Faster peer to peer</h2>
+<p>Downloads keep up to eight blocks in flight, fetch small files ahead across a folder and share one connection per peer; a device that serves blocks no longer starts a full sync of its own every few seconds. The <a href="../docs/./">benchmarks</a> compare Paris, Amsterdam and Warsaw, peer to peer against an S3 bucket.</p>
+<h2 id="built-in-the-open">Built in the open</h2>
+<p>Every platform is now built and tested on GitHub's runners on every change: the Linux and Windows packages (the Windows one tested on Windows Server 2025, including the Explorer menu entries), the Android app in the emulator, the macOS disk image and the iOS app on Apple Silicon. The same runs take the <a href="../docs/./">screenshots</a>, so the pictures on this site follow the newest build.</p>
+<h2 id="and-more">And more</h2>
+<p>Sharing records who asked for access by fingerprint, removing a member moves the share to new keys, and a Strongroom can be re-keyed; files can be downloaded or freed from the file manager on Linux (Nautilus, Dolphin, Nemo) and Windows (Explorer); folder rows keep their two main buttons and put the rest in a menu; the macOS app and the phone apps say when a newer version waits on the download page instead of calling themselves up to date; and large ledger batches no longer fail on S3.</p>
+<h2 id="update-every-device-before-moving-data">Update every device before moving data</h2>
+<p>Moving data writes a new kind of ledger entry that alpha.8 and earlier cannot read: their syncs would fail from the first move on. Update all your devices first. From this version on, unknown entries are skipped, so later additions will not break it. Clients up to alpha.8 check only the checksum when they update; this release is the first whose updater insists on the signature.</p>
+<h2 id="still-alpha">Still alpha</h2>
+<p>The cryptography has not been audited, the format may still change, and a bug can destroy data. Use test data and keep your own backups.</p>
+
+</article>
+  </div>
+</main>
+<footer class="site">
+  <div class="wrap">
+    <span>Varsto is a working name. Source: <a href="https://github.com/janttsu/varsto">github.com/janttsu/varsto</a>, under the PolyForm Shield License 1.0.0 (source-available).</span>
+    <span>No cookies, no tracking. The web server keeps a standard access log for at most seven days.</span>
+    <span><a href="../docs/security-policy.html">Security policy</a> · <a href="../docs/licence.html">Licence</a> · <a href="../docs/trademark.html">Trademark</a></span>
+  </div>
+</footer>
+</body>
+</html>

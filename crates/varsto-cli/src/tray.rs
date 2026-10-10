@@ -271,6 +271,11 @@ mod platform {
                                 let _ = t.sup.lock().unwrap().call("POST", "/api/update", "{}");
                                 format!("Updating to {}…", c["latest"].as_str().unwrap_or(""))
                             }
+                            Ok(c) if c["newer"].as_bool().unwrap_or(false) => format!(
+                                "{} is out: download it from {}",
+                                c["latest"].as_str().unwrap_or(""),
+                                c["download_page"].as_str().unwrap_or("")
+                            ),
                             Ok(c) => {
                                 format!("Up to date ({})", c["current"].as_str().unwrap_or(""))
                             }
@@ -404,6 +409,11 @@ mod platform {
                                 let _ = s.call("POST", "/api/update", "{}");
                                 format!("Updating to {}…", c["latest"].as_str().unwrap_or(""))
                             }
+                            Ok(c) if c["newer"].as_bool().unwrap_or(false) => format!(
+                                "{} is out: download it from {}",
+                                c["latest"].as_str().unwrap_or(""),
+                                c["download_page"].as_str().unwrap_or("")
+                            ),
                             Ok(c) => {
                                 format!("Up to date ({})", c["current"].as_str().unwrap_or(""))
                             }

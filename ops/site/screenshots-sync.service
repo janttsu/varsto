@@ -1,0 +1,9 @@
+# SPDX-License-Identifier: PolyForm-Shield-1.0.0
+# systemd user unit on the web server: see screenshots-sync.py.
+[Unit]
+Description=Varsto website: screenshots of the newest CI build
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 %h/bin/varsto-screenshots-sync.py %h/sites/varsto/public

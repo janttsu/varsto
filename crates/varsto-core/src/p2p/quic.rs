@@ -992,6 +992,41 @@ impl Node {
         relays.keys().cloned().collect()
     }
 
+    /// The address a device registered with us as its relay connects from.
+    pub fn registrant_addr(&self, dev: &DeviceId) -> Option<SocketAddr> {
+        let regs = self.serving.registrants.lock().unwrap();
+        regs.get(dev)
+            .filter(|c| c.close_reason().is_none())
+            .map(|c| c.remote_address())
+    }
+
+    /// Ask a device that keeps its relay registration with us, on that
+    /// connection. We are its relay, so there is no third device to go
+    /// through, and a device behind a symmetric NAT cannot be dialled.
+    pub fn request_registrant(&self, dev: &DeviceId, path: &str, auth: &str) -> Result<(u16, Vec<u8>)> {
+        let conn = self
+            .serving
+            .registrants
+            .lock()
+            .unwrap()
+            .get(dev)
+            .cloned()
+            .ok_or_else(|| anyhow!("not registered here"))?;
+        let r = self.rt.block_on(async {
+            tokio::time::timeout(Duration::from_secs(60), request_on(&conn, "GET", path, auth)).await
+        });
+        match r {
+            Ok(Ok(x)) => Ok(x),
+            Ok(Err(e)) => {
+                if conn.close_reason().is_some() {
+                    self.serving.registrants.lock().unwrap().remove(dev);
+                }
+                Err(e)
+            }
+            Err(_) => bail!("no answer on its registration in 60 s"),
+        }
+    }
+
     /// Devices registered with us as their relay.
     pub fn registrants(&self) -> Vec<DeviceId> {
         let mut regs = self.serving.registrants.lock().unwrap();

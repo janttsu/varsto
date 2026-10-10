@@ -73,24 +73,41 @@ keeps serving `/downloads/` for clients built before the move.
 
 ## Steps
 
-1. Bump `version` in `Cargo.toml`, commit, tag `v<version>`, push the tag. CI
-   builds the macOS disk image and attaches it to a draft GitHub release.
-2. Build the archives: `website/build-release.sh` (Linux, Windows, source; the
-   cross-compiled macOS command line when cargo-zigbuild is installed). With
-   the release key available it signs `SHA256SUMS` at the end; otherwise it
-   says so and the list stays unsigned.
-3. Add the Mac disk image (from a Mac build or the CI artifact) with
-   `website/publish-macos.sh Varsto-<version>-macos.dmg`: it adds the image to
-   `SHA256SUMS`, signs the final list, rebuilds the site and deploys. To add
-   files by other means, run `scripts/sign-release.sh` last: it refuses to
-   sign when a listed file is missing or differs, and notes files that are
-   not listed.
-4. Upload the signed list to the GitHub release (the second channel) and
-   publish the release:
-   `gh release upload v<version> website/public/downloads/SHA256SUMS website/public/downloads/SHA256SUMS.sig --clobber`
-   Upload it again whenever the list on the site changes.
-5. `website/deploy.sh` refuses to publish a `SHA256SUMS` whose signature does
+Every package is built and tested on GitHub-hosted runners
+(`.github/workflows/ci.yml`): Linux (musl) and the cross-compiled Windows zip
+on Ubuntu, the Windows zip smoke-tested on Windows Server 2025, the Android
+APK in the emulator, the macOS disk image and the iOS shell on Apple
+Silicon. CI never holds the release key.
+
+1. Bump `version` in `Cargo.toml`, commit, tag `v<version>`, push the tag.
+   CI builds every platform, assembles the download set
+   (`website/assemble-release.sh`: manifest, source archive, an unsigned
+   `SHA256SUMS`) and attaches it to a draft GitHub release.
+2. When the run is green, where the release key is:
+   `VARSTO_RELEASE_KEY=/path/to/release-key.pem website/publish-ci-release.sh v<version> --publish`
+   It downloads the run's download set, checks every file against
+   `SHA256SUMS`, signs it, uploads `SHA256SUMS` and `SHA256SUMS.sig` to the
+   GitHub release (the second channel) and publishes it, puts the run's
+   screenshots on the website and deploys the site.
+3. `website/deploy.sh` refuses to publish a `SHA256SUMS` whose signature does
    not verify against `release-key.pub` (`scripts/sign-release.sh --verify`).
+
+Building by hand still works: `website/build-release.sh` (Linux, Windows,
+source; the cross-compiled macOS command line when cargo-zigbuild is
+installed) and `website/publish-macos.sh` for a Mac-built disk image. To add
+files by other means, run `scripts/sign-release.sh` last: it refuses to sign
+when a listed file is missing or differs, and notes files that are not listed.
+
+## Screenshots
+
+CI photographs every platform on every build (`scripts/screenshots`: an
+invented demo vault, the interface in Chromium, the Linux and Windows desktops,
+the Android emulator, the macOS window, the iOS Simulator) and collects the
+pictures in the website's names and sizes (`finalize.py`, artifact
+`screenshots`). Pushes to `main` and tags publish them on the rolling
+pre-release `screenshots-latest`; the web server pulls them every 15 minutes
+(`ops/site`). `scripts/screenshots/update-site.sh [run id | --dir DIR]` copies
+a run's (or a local test's) pictures into the repository's copy of the site.
 
 ## Rotating or losing the key
 

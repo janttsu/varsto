@@ -1,6 +1,12 @@
-# The native macOS app on Apple Silicon, built and tested on GitHub's M-series
-# runners; the zip becomes a release asset when a v* tag is pushed. Linux and
-# Windows are built and tested on short-lived cloud machines (scripts/cloud-build).
+# Every platform is built and tested on GitHub-hosted runners (free for a
+# public repository): Linux and the cross-compiled Windows package on Ubuntu,
+# the Windows package tested and photographed on Windows Server 2025, the
+# Android app in the emulator, the native macOS app and the iOS shell on
+# Apple Silicon. Two collecting jobs put the packages together as one download
+# set (an unsigned SHA256SUMS; the maintainer signs it offline, RELEASING.md)
+# and the screenshots in the website's names and sizes. A v* tag attaches the
+# packages to a draft GitHub release. Multi-machine and cross-country tests
+# run elsewhere (scripts/cloud-build, scripts/bench).
 name: CI
 
 on:
@@ -26,6 +32,150 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  linux:
+    name: Linux (tests, packages, screenshots)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-musl, x86_64-pc-windows-gnu
+      - uses: Swatinem/rust-cache@v2
+      - name: Packages for the build and the tests
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq musl-tools mingw-w64 ffmpeg libdbus-1-dev zip python3-pil >/dev/null
+          curl -fsS https://rclone.org/install.sh | sudo bash >/dev/null 2>&1 || true
+          rclone version | head -1 || true
+      - name: Tests
+        run: cargo test --workspace 2>&1 | tee test.log
+      - name: Linux and Windows packages
+        run: website/build-release.sh x86_64-unknown-linux-musl x86_64-pc-windows-gnu 2>&1 | tee build.log
+      - name: Smoke test the Linux package
+        run: |
+          set -x
+          mkdir -p smoke && tar -C smoke -xzf website/public/downloads/varsto-*-x86_64-unknown-linux-musl.tar.gz
+          bin="$(ls -d "$PWD"/smoke/varsto-*/)varsto"
+          file "$bin"; "$bin" --version
+          echo "VARSTO_BIN=$bin" >> "$GITHUB_ENV"
+      - name: Demo vault (invented user aino)
+        run: |
+          sudo mkdir -p /home/aino && sudo chown "$USER" /home/aino
+          python3 -m pip install --quiet --break-system-packages playwright pillow
+          python3 -m playwright install --with-deps chromium >/dev/null
+          DEMO_HOME=/home/aino scripts/screenshots/demo-vault.sh "$VARSTO_BIN" "$RUNNER_TEMP/demo"
+      - name: Screenshots of the interface
+        run: python3 scripts/screenshots/ui-shots.py "$RUNNER_TEMP/demo" dist/shots
+      - name: Screenshots of the Linux desktop (tray, own window)
+        run: scripts/screenshots/linux-desktop.sh "$VARSTO_BIN" "$RUNNER_TEMP/demo" dist/shots
+      - name: Stop the demo
+        if: always()
+        run: |
+          [ -f "$RUNNER_TEMP/demo/pids" ] && kill $(cat "$RUNNER_TEMP/demo/pids") 2>/dev/null || true
+          tail -n 20 "$RUNNER_TEMP"/demo/*.log 2>/dev/null || true
+      - name: Output to the job summary
+        if: failure()
+        run: |
+          for f in test.log build.log; do
+            [ -f "$f" ] || continue
+            { echo "## $f (last 150 lines)"; echo '```'; tail -n 150 "$f"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: packages-linux-windows
+          path: |
+            website/public/downloads/varsto-*-x86_64-unknown-linux-musl.tar.gz
+            website/public/downloads/varsto-*-x86_64-pc-windows-gnu.zip
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: shots-linux
+          path: dist/shots
+          if-no-files-found: warn
+
+  windows:
+    name: Windows (smoke test, Explorer, screenshots)
+    needs: linux
+    runs-on: windows-2025
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: packages-linux-windows
+          path: pkg
+      - name: Smoke test on Windows
+        run: |
+          New-Item -ItemType Directory -Force C:\build | Out-Null
+          Copy-Item (Get-ChildItem pkg\varsto-*-x86_64-pc-windows-gnu.zip | Select-Object -First 1).FullName C:\build\varsto-windows.zip
+          & scripts\cloud-build\remote-windows.ps1
+      - name: Screenshots of the Windows desktop (tray, own window)
+        run: |
+          $exe = (Get-ChildItem C:\build\unzipped -Recurse -Filter varsto.exe | Select-Object -First 1).FullName
+          & scripts\screenshots\windows-desktop.ps1 -Exe $exe -Work "C:\Users\aino" -Out "$env:GITHUB_WORKSPACE\dist\shots"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: shots-windows
+          path: dist/shots
+          if-no-files-found: warn
+
+  android:
+    name: Android (APK, emulator, screenshots)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android, x86_64-linux-android
+      - uses: Swatinem/rust-cache@v2
+      - name: Build the APK
+        run: |
+          echo "ANDROID_HOME=$ANDROID_HOME"; ls "$ANDROID_HOME/ndk" "$ANDROID_HOME/platforms" "$ANDROID_HOME/build-tools"
+          version="$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)".*/\1/')"
+          apps/android/build.sh 2>&1 | tee build.log
+          mkdir -p dist/android
+          cp apps/android/app/build/outputs/apk/debug/app-debug.apk "dist/android/varsto-$version-android-debug.apk"
+      - name: Enable KVM for the emulator
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Emulator - install, start, vault, screenshots
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot
+          script: scripts/screenshots/android.sh dist/android/varsto-*-android-debug.apk dist/shots
+      - name: Output to the job summary
+        if: failure()
+        run: |
+          [ -f build.log ] && { echo '## build.log (last 150 lines)'; echo '```'; tail -n 150 build.log; echo '```'; } >> "$GITHUB_STEP_SUMMARY" || true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: packages-android
+          path: dist/android/*.apk
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: shots-android
+          path: dist/shots
+          if-no-files-found: warn
+
   macos:
     name: macOS app (Apple Silicon)
     runs-on: macos-15
@@ -73,7 +223,20 @@ jobs:
           open smoke/Varsto.app
           sleep 12
           pgrep -x Varsto >/dev/null && echo "app process running" || { echo "app process NOT running"; exit 1; }
-          screencapture -x dist/macos-app.png
+          mkdir -p dist/shots/raw
+          screencapture -x dist/shots/raw/macos-desktop.png
+          # The app's own window only: system prompts on the runner (local
+          # network access for the runner agent) stay out of the picture.
+          cat > "$RUNNER_TEMP/winid.swift" <<'SWIFT'
+          import CoreGraphics
+          let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] ?? []
+          for w in list where (w[kCGWindowOwnerName as String] as? String) == "Varsto" && (w[kCGWindowLayer as String] as? Int) == 0 {
+            print(w[kCGWindowNumber as String] as? Int ?? 0); break
+          }
+          SWIFT
+          wid="$(swift "$RUNNER_TEMP/winid.swift" | head -1)"
+          echo "Varsto window: ${wid:-not found}"
+          if [ -n "$wid" ]; then screencapture -x -o -l "$wid" dist/shots/macos-app.png; else cp dist/shots/raw/macos-desktop.png dist/shots/macos-app.png; fi
       - name: Finder - double-click a placeholder, Services menu entries
         run: |
           set -x
@@ -109,18 +272,10 @@ jobs:
           name: Varsto-macos
           path: |
             dist/Varsto-*-macos.dmg
-            dist/macos-app.png
+            dist/shots
             dist/macos-finder.png
             build.log
           if-no-files-found: warn
-      - name: Attach to the release
-        if: startsWith(github.ref, 'refs/tags/v')
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          tag="$GITHUB_REF_NAME"
-          gh release view "$tag" >/dev/null 2>&1 || gh release create "$tag" --draft --title "$tag" --generate-notes
-          gh release upload "$tag" dist/Varsto-*-macos.dmg --clobber
 
   ios:
     name: iOS app (Simulator)
@@ -152,3 +307,67 @@ jobs:
             build.log
             simshot.log
           if-no-files-found: warn
+
+  downloads:
+    name: Download set (and draft release on tags)
+    needs: [linux, android, macos]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          path: art
+      - name: Assemble
+        run: |
+          mkdir -p dist/downloads
+          find art/packages-linux-windows art/packages-android -type f -exec cp {} dist/downloads/ \;
+          cp art/Varsto-macos/dist/Varsto-*-macos.dmg dist/downloads/ 2>/dev/null || find art/Varsto-macos -name 'Varsto-*-macos.dmg' -exec cp {} dist/downloads/ \;
+          website/assemble-release.sh dist/downloads
+          ls -la dist/downloads
+      - uses: actions/upload-artifact@v4
+        with:
+          name: downloads
+          path: dist/downloads
+          if-no-files-found: error
+      - name: Attach to the draft release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="$GITHUB_REF_NAME"
+          gh release view "$tag" >/dev/null 2>&1 || gh release create "$tag" --draft --prerelease --title "$tag" --generate-notes
+          gh release upload "$tag" dist/downloads/* --clobber
+
+  screenshots:
+    name: Screenshots for the website
+    needs: [linux, windows, android, macos, ios]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: art
+      - name: Website names and sizes
+        run: |
+          python3 -m pip install --quiet --break-system-packages pillow
+          version="$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)".*/\1/')"
+          python3 scripts/screenshots/finalize.py art dist/screenshots --version "$version" --commit "${{ github.event.pull_request.head.sha || github.sha }}" \
+            --source "GitHub Actions run ${{ github.run_number }}"
+          cat dist/screenshots/shots.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: screenshots
+          path: dist/screenshots
+          if-no-files-found: error
+      - name: Publish for the website (rolling pre-release screenshots-latest)
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tar -C dist/screenshots -czf screenshots.tar.gz .
+          gh release view screenshots-latest >/dev/null 2>&1 || gh release create screenshots-latest --prerelease --latest=false \
+            --title "Screenshots of the newest build" --notes "Pictures CI takes on every build of main; the website pulls them from here. Not a software release."
+          gh release upload screenshots-latest screenshots.tar.gz --clobber

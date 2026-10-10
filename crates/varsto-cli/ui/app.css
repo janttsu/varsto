@@ -290,7 +290,7 @@ label.inline { display: inline-flex; align-items: flex-start; gap: 8px; font-wei
 label.inline input[type=checkbox] { margin-top: 2px; }
 .toolbar label.inline, .card-head label.inline { margin: 0; }
 label .hint { display: block; font-size: 12px; font-weight: 400; margin-top: 4px; }
-input[type=text], input[type=password], input[type=number], input:not([type]) {
+input[type=text], input[type=password], input[type=number], input[type=tel], input[type=email], input[type=url], input[type=search], input:not([type]) {
   display: block; width: 100%; margin-top: 6px;
   height: 36px; padding: 0 12px;
   border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
@@ -357,7 +357,7 @@ td { overflow-wrap: anywhere; color: var(--text-2); }
 td:first-child { font-weight: 500; color: var(--text); white-space: nowrap; }
 td:last-child { white-space: nowrap; text-align: right; }
 td.bad { color: var(--bad-text); font-weight: 600; }
-td .sub { display: block; font-weight: 400; font-size: 12.5px; color: var(--muted); max-width: 250px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 2px; }
+td .sub { display: block; font-weight: 400; font-size: 12.5px; color: var(--muted); max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 2px; }
 td .pill + .pill { margin-left: 4px; }
 td.policy-placement { min-width: 140px; white-space: normal; }
 td.policy-placement button { margin-top: 4px; }
@@ -483,7 +483,7 @@ svg.spark { width: 120px; height: 32px; display: block; flex: none; }
 .legend-item { display: inline-flex; align-items: center; gap: 6px; }
 .legend-item b { color: var(--text-2); font-weight: 600; font-variant-numeric: tabular-nums; }
 .legend-note { margin-left: auto; }
-.minimap { display: flex; gap: 2px; margin-top: 6px; }
+.minimap { display: flex; flex-wrap: wrap; gap: 2px; margin-top: 6px; max-width: 168px; }
 .minimap .blk { width: 5px; height: 5px; border-radius: 1.5px; }
 .state-blk { width: 10px; height: 10px; border-radius: 3px; margin-right: 10px; }
 ul.list .minimap { margin-top: 6px; }
@@ -699,6 +699,15 @@ button.is-busy::after { content: ""; display: inline-block; width: 11px; height:
 /* Folder row actions wrap instead of widening the table. */
 #folders td:last-child { white-space: normal; min-width: 150px; }
 #folders td:last-child button { margin: 2px 0; }
+#folders td:last-child { white-space: nowrap; }
+details.row-menu { display: inline-block; position: relative; }
+details.row-menu > summary { list-style: none; cursor: pointer; display: inline-flex; align-items: center; height: 36px; padding: 0 12px; margin: 2px 0; background: var(--surface); color: var(--text); border: 1px solid var(--border-strong); border-radius: var(--radius-sm); font-weight: 600; user-select: none; }
+details.row-menu > summary:hover, details.row-menu[open] > summary { background: var(--hover); }
+details.row-menu > summary::-webkit-details-marker { display: none; }
+details.row-menu > summary::after { content: ""; width: 6px; height: 6px; border-right: 1.6px solid currentColor; border-bottom: 1.6px solid currentColor; transform: rotate(45deg) translateY(-2px); margin-left: 8px; }
+.row-menu-list { position: fixed; z-index: 40; display: flex; flex-direction: column; align-items: stretch; gap: 2px; min-width: 200px; padding: 6px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); box-shadow: 0 8px 24px rgba(0,0,0,.14); }
+.row-menu-list button { margin: 0 !important; text-align: left; justify-content: flex-start; border-color: transparent; }
+.row-menu-list .muted { padding: 4px 8px; white-space: normal; }
 
 /* Where your data is (Overview) */
 .wd-summary { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin: -2px 0 10px; }
