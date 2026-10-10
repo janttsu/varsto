@@ -46,7 +46,7 @@ jobs:
       - name: Packages for the build and the tests
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq musl-tools mingw-w64 ffmpeg libdbus-1-dev zip >/dev/null
+          sudo apt-get install -y -qq musl-tools mingw-w64 ffmpeg libdbus-1-dev zip python3-pil >/dev/null
           curl -fsS https://rclone.org/install.sh | sudo bash >/dev/null 2>&1 || true
           rclone version | head -1 || true
       - name: Tests
