@@ -170,7 +170,31 @@
     container.appendChild(frag);
     container.classList.remove("fade"); void container.offsetWidth; container.classList.add("fade");
   }
-  function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); var t = blockTotal(b); if (t === 0) { return m; } var per = Math.max(1, Math.ceil(t / 40)); drawBlocks(m, b, per); m.title = t + " block" + (t === 1 ? "" : "s") + (per > 1 ? ", 1 square ≈ " + per + " blocks" : ""); return m; }
+  // A row's less-used actions: a "More" menu on desktops, plain buttons on phones.
+var openRowMenu = null;
+function rowMenu(cell, key) {
+  if (document.body.dataset.mobile === "1") { return { appendChild: function (b) { cell.appendChild(b); }, done: function () {} }; }
+  var d = document.createElement("details"); d.className = "row-menu";
+  var sm = document.createElement("summary"); sm.textContent = "More"; sm.setAttribute("aria-label", "More actions"); d.appendChild(sm);
+  var list = document.createElement("div"); list.className = "row-menu-list"; d.appendChild(list);
+  list.addEventListener("click", function (e) { if (e.target.closest("button")) { d.open = false; openRowMenu = null; } });
+  // Fixed position under the button, so a scrolling table does not clip the menu.
+  d.addEventListener("toggle", function () {
+    if (!d.open) { if (openRowMenu === key) { openRowMenu = null; } return; }
+    openRowMenu = key;
+    var r = sm.getBoundingClientRect(); var w = Math.max(200, list.offsetWidth);
+    list.style.left = Math.max(8, Math.min(r.right - w, window.innerWidth - w - 8)) + "px";
+    var below = r.bottom + 4, h = list.offsetHeight;
+    list.style.top = (below + h > window.innerHeight - 8 ? Math.max(8, r.top - h - 4) : below) + "px";
+  });
+  return { appendChild: function (b) { list.appendChild(b); }, done: function () { if (list.children.length) { cell.appendChild(d); if (openRowMenu === key) { d.open = true; } } } };
+}
+window.addEventListener("scroll", function () { openRowMenu = null; document.querySelectorAll("details.row-menu[open]").forEach(function (d) { d.open = false; }); }, true);
+document.addEventListener("click", function (e) {
+  document.querySelectorAll("details.row-menu[open]").forEach(function (d) { if (!d.contains(e.target)) { d.open = false; openRowMenu = null; } });
+});
+
+function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); var t = blockTotal(b); if (t === 0) { return m; } var per = Math.max(1, Math.ceil(t / 40)); drawBlocks(m, b, per); m.title = t + " block" + (t === 1 ? "" : "s") + (per > 1 ? ", 1 square ≈ " + per + " blocks" : ""); return m; }
   function fileStateKey(f) { return f.state === "placeholder" ? "ph" : f.state === "missing" ? "missing" : f.pinned ? "verified" : "stored"; }
   function fileStateLabel(f) { return f.state === "placeholder" ? "Not on this device" : f.state === "missing" ? "Unavailable" : f.pinned ? "Local, kept here" : "Local"; }
   function stateSquare(f) { var sq = el("i", "blk state-blk s-" + fileStateKey(f)); sq.title = fileStateLabel(f); return sq; }
@@ -676,14 +700,16 @@
         td(f.chunks_without_storage_copy, "num" + (f.chunks_without_storage_copy > 0 ? " bad" : ""), "Without storage copy"); td(f.chunks_verified_elsewhere, "num", "Verified elsewhere");
         var pc = document.createElement("td"); pc.dataset.policyFor = f.name; pc.appendChild(pill("grey", f.policy ? "Unchecked" : "No policy")); if (f.policy) { var pt = el("span", "policy-text", f.policy); pt.title = f.policy; pc.appendChild(pt); } tr.appendChild(pc);
         var act = document.createElement("td");
+        var menu = rowMenu(act, "folder:" + f.name);
         if (f.path) { var b = document.createElement("button"); b.className = "secondary"; b.textContent = "Sync"; b.onclick = function () { runSync(f.name); }; act.appendChild(b); }
-        if (!s.member) { var sh = document.createElement("button"); sh.className = "secondary"; sh.textContent = f.shared ? "Token" : "Share"; sh.onclick = function () { shareFolder(f); }; act.appendChild(sh); }
+        if (!s.member) { var sh = document.createElement("button"); sh.className = "secondary"; sh.textContent = f.shared ? "Token" : "Share"; sh.onclick = function () { shareFolder(f); }; menu.appendChild(sh); }
         if (!s.member) { var pb = document.createElement("button"); pb.className = "secondary"; pb.textContent = "Policy"; pb.onclick = function () { openPolicy(f); }; act.appendChild(pb); }
-        if (!s.member) { var rmb = document.createElement("button"); rmb.className = "secondary"; rmb.textContent = "Remove"; rmb.onclick = function () { removeFolder(f); }; act.appendChild(rmb); }
-        if (f.strongroom && f.strongroom !== "locked") { var lk = document.createElement("button"); lk.className = "secondary"; lk.textContent = "Lock"; lk.onclick = function () { api("POST", "/api/strongroom/lock", { folder: f.name }).then(function () { log("locked " + f.name); return refreshStatus(); }).catch(function (e) { alertBox(e.message); }); }; act.appendChild(lk); }
-        if (!s.member && f.path && !f.strongroom && !f.shared) { var cv = document.createElement("button"); cv.className = "secondary"; cv.textContent = "Convert to Strongroom…"; cv.onclick = function () { convertStrongroom(f); }; act.appendChild(cv); }
-        if (f.strongroom) { var ks = document.createElement("button"); ks.className = "secondary"; ks.textContent = "Security keys…"; ks.title = "Enrolled security keys; add a backup key"; ks.onclick = function () { strongroomKeys(f); }; act.appendChild(ks); }
+        if (!s.member) { var rmb = document.createElement("button"); rmb.className = "secondary"; rmb.textContent = "Remove"; rmb.onclick = function () { removeFolder(f); }; menu.appendChild(rmb); }
+        if (f.strongroom && f.strongroom !== "locked") { var lk = document.createElement("button"); lk.className = "secondary"; lk.textContent = "Lock"; lk.onclick = function () { api("POST", "/api/strongroom/lock", { folder: f.name }).then(function () { log("locked " + f.name); return refreshStatus(); }).catch(function (e) { alertBox(e.message); }); }; menu.appendChild(lk); }
+        if (!s.member && f.path && !f.strongroom && !f.shared) { var cv = document.createElement("button"); cv.className = "secondary"; cv.textContent = "Convert to Strongroom…"; cv.onclick = function () { convertStrongroom(f); }; menu.appendChild(cv); }
+        if (f.strongroom) { var ks = document.createElement("button"); ks.className = "secondary"; ks.textContent = "Security keys…"; ks.title = "Enrolled security keys; add a backup key"; ks.onclick = function () { strongroomKeys(f); }; menu.appendChild(ks); }
         if (f.strongroom === "locked") { var note = document.createElement("span"); note.className = "muted"; note.textContent = "unlock with: varsto strongroom unlock " + f.name; act.appendChild(note); }
+        menu.done();
         tr.appendChild(act); tb.appendChild(tr);
         var o = document.createElement("option"); o.value = f.name; o.textContent = f.name; sel.appendChild(o);
         if (f.path) { var o2 = document.createElement("option"); o2.value = f.name; o2.textContent = f.name; o2.dataset.selective = f.selective ? "1" : "0"; fsel.appendChild(o2); }

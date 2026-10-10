@@ -40,7 +40,7 @@ v "$phone" folder fetch Photos lake.jpg
 v "$laptop" sync
 v "$phone" pull Photos
 : > "$work/pids"
-v "$laptop" service run --port 0 --interval 300 > "$work/svc-laptop.log" 2>&1 &
+"$bin" --home "$laptop" service run --port 0 --interval 300 > "$work/svc-laptop.log" 2>&1 &
 echo $! >> "$work/pids"
 VARSTO_MOBILE=1 VARSTO_FOLDER_ROOT="$H/phone" VARSTO_PLAIN_ROOT="$H/phone-plain" \
   "$bin" --home "$phone" service run --port 0 --interval 300 > "$work/svc-phone.log" 2>&1 &
