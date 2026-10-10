@@ -266,6 +266,7 @@ class Bench:
                         f"--region fr-par --bucket {self.state['bucket']} --access-key-id {access}")
         for s in self.args.sets.split(","):
             self.ssh("par", f"VARSTO_PASSPHRASE=bench-passphrase {v} folder add {s} /bench/data/{s}")
+        self.ssh("par", f"VARSTO_PASSPHRASE=bench-passphrase {v} verify set --off >/dev/null")
 
     def push_local(self):
         """The same push into a directory on the writer's own disk (network
@@ -342,12 +343,25 @@ class Bench:
         homes = {r: f"/bench/h-{tag}" for r in readers}
         datas = {r: f"/bench/r-{tag}" for r in readers}
 
+        # Records of devices from aborted runs would be tried as peers (and
+        # this machine's address may now belong to a new device): keep the writer's only.
+        env, _, _ = self.s3_env()
+        writer = json.loads(self.ssh("par", "cat /bench/w/vault.json"))["device_id"]
+        for name in subprocess.run(["rclone", "lsf", f"scw:{self.state['bucket']}/vault/peers"], env=env,
+                                   capture_output=True, text=True).stdout.split():
+            if name != f"{writer}.enc":
+                subprocess.run(["rclone", "deletefile", f"scw:{self.state['bucket']}/vault/peers/{name}"], env=env,
+                               capture_output=True)
+
         def prepare(r):
             h = homes[r]
             # Leftovers of an aborted run: stop its service first.
             self.ssh(r, "for h in /bench/h-*; do [ -f $h/service.json ] && bash /bench/bench-node.sh svc-stop $h >/dev/null; done; true")
             self.ssh(r, f"rm -rf /bench/h-* /bench/r-*; {self.secret_env()} VARSTO_PASSPHRASE=bench-passphrase /bench/varsto --home {h} join "
                         f"--name {r}-{tag} --vault-key {self.state['vault_key']} {self.s3_flags()} > /dev/null")
+            # Automatic verification would download (and repair) blocks in the
+            # background while the run is measured: off for the benchmark devices.
+            self.ssh(r, f"VARSTO_PASSPHRASE=bench-passphrase /bench/varsto --home {h} verify set --off >/dev/null")
             if mode == "p2p":
                 self.ssh(r, f"VARSTO_PASSPHRASE=bench-passphrase /bench/varsto --home {h} p2p enable --port {PORT} >/dev/null")
             self.node_sh(r, "svc-start", h, env=self.secret_env())
@@ -356,8 +370,11 @@ class Bench:
         with cf.ThreadPoolExecutor(len(readers)) as ex:
             list(ex.map(prepare, readers))
         if mode == "p2p":
-            # The writer reads the new devices' records (and so accepts their
-            # QUIC certificates) when its service starts; it also zeroes its counters.
+            # The writer accepts a device's QUIC certificate once its peer table
+            # trusts the device, and the table is built before a sync reads the
+            # device registry: the first restart learns the new devices, the
+            # second builds the table with them. It also zeroes the counters.
+            self.writer_service(restart=True)
             self.writer_service(restart=True)
         for r in readers:
             self.node_sh(r, "api", homes[r], "POST", "/api/folder/attach",
