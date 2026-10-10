@@ -416,6 +416,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                             }
                         }
                     }
+                } else if c["newer"] as? Bool == true {
+                    // The app bundle is replaced by downloading the new disk image.
+                    let page = c["download_page"] as? String ?? "https://varsto.net/downloads/"
+                    self.updateNote.title = "Update available: \(latest)"
+                    a.messageText = "Varsto \(latest) is available"
+                    a.informativeText = "You have \(current). Download the new disk image and drag Varsto to Applications again; your vault and settings stay as they are."
+                    a.addButton(withTitle: "Open download page")
+                    a.addButton(withTitle: "Later")
+                    if a.runModal() == .alertFirstButtonReturn, let url = URL(string: page) {
+                        NSWorkspace.shared.open(url)
+                    }
                 } else {
                     self.updateNote.title = "Up to date (\(current))"
                     a.messageText = "Varsto is up to date"

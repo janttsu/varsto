@@ -259,7 +259,13 @@ impl Fetch for Curl {
 pub struct Check {
     pub current: String,
     pub latest: String,
+    /// A newer version exists and this binary can install it itself.
     pub available: bool,
+    /// A newer version exists (also where it has to be installed by hand,
+    /// such as the macOS disk image or the Android APK).
+    pub newer: bool,
+    /// Where to download it by hand.
+    pub download_page: String,
     pub archive: Option<String>,
     pub target: String,
 }
@@ -308,8 +314,11 @@ fn check_with(fetch: &dyn Fetch, base: &str) -> Result<Check> {
             .find(|k| k.contains(&target) && (k.ends_with(".tar.gz") || k.ends_with(".zip")))
             .cloned()
     });
+    let newer = version_key(&latest) > version_key(&current);
     Ok(Check {
-        available: version_key(&latest) > version_key(&current) && archive.is_some(),
+        available: newer && archive.is_some(),
+        newer,
+        download_page: base.to_string(),
         current,
         latest,
         archive,
@@ -696,6 +705,8 @@ mod tests {
             current: "0.0.1".into(),
             latest: "9.9.9".into(),
             available: true,
+            newer: true,
+            download_page: BASE.into(),
             archive: Some(ARCHIVE.into()),
             target: "x86_64-unknown-linux-musl".into(),
         };

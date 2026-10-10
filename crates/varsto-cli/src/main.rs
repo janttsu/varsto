@@ -2481,6 +2481,11 @@ fn run(cli: &Cli) -> Result<()> {
                             c.latest,
                             c.archive.clone().unwrap_or_default()
                         )
+                    } else if c.newer {
+                        format!(
+                            "{} is out ({} installed); this build cannot update itself: download it from {}",
+                            c.latest, c.current, c.download_page
+                        )
                     } else {
                         format!("up to date: {} (latest {})", c.current, c.latest)
                     }

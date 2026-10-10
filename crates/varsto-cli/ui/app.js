@@ -1152,6 +1152,10 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   $("update").onclick = function () {
     busy(true); log("checking for updates");
     api("GET", "/api/update/check").then(function (c) {
+      if (!c.available && c.newer) {
+        busy(false);
+        return confirmBox(c.latest + " is out; you have " + c.current + ". This app is updated by downloading the new package (" + c.download_page + "); the background service cannot replace it by itself.", { title: "Update available", ok: "Open the download page" }).then(function (yes) { if (yes) { window.open(c.download_page, "_blank", "noopener"); } });
+      }
       if (!c.available) { log("up to date: " + c.current + " (latest " + c.latest + ")"); busy(false); return; }
       return confirmBox("Update " + c.current + " to " + c.latest + " now? The service restarts afterwards.", { title: "Update Varsto", ok: "Update" }).then(function (yes) {
         if (!yes) { busy(false); return; }
