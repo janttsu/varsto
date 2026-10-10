@@ -2,7 +2,7 @@
 title: Benchmarks
 nav: How it works
 output: benchmarks/index.html
-description: Varsto measured between Paris, Amsterdam and Warsaw on 9 and 10 October 2026: downloads peer to peer from another device compared with the same downloads from an S3 bucket, with the method, the raw numbers, the fixes the runs led to and their limits.
+description: Varsto measured between Paris, Amsterdam and Warsaw on 9 and 10 October 2026, and from a home connection behind NAT: downloads peer to peer from another device compared with the same downloads from an S3 bucket, with the method, the raw numbers, the fixes the runs led to and their limits.
 ---
     <div class="tech">
     <h1>Benchmarks: peer to peer across Europe</h1>
@@ -13,6 +13,7 @@ description: Varsto measured between Paris, Amsterdam and Warsaw on 9 and 10 Oct
       <p class="toc-title">On this page</p>
       <ol>
         <li><a href="#summary">Summary</a></li>
+        <li><a href="#home">From a home behind NAT</a></li>
         <li><a href="#done">What was measured</a></li>
         <li><a href="#setup">Setup and baseline</a></li>
         <li><a href="#p2p-only">What “peer to peer only” means</a></li>
@@ -31,6 +32,7 @@ description: Varsto measured between Paris, Amsterdam and Warsaw on 9 and 10 Oct
 
     <h2 id="summary">Summary</h2>
     <ul>
+      <li><strong>From a home connection behind NAT (100 Mbit/s):</strong> every one of 14 transfers between a home PC and servers in Amsterdam and Warsaw arrived from peers only, through the home router's NAT, NAT to NAT, and through a symmetric NAT by relay. Large files ran at 8.0 to 9.3 MB/s, 1.3 to 1.8 times as fast as the same download from the bucket on the same line. <a href="#home">Details</a>.</li>
       <li><strong>Many small files, Paris to Amsterdam (9 ms apart):</strong> 10 000 files arrived peer to peer in 111 s (90 files/s), from the bucket in 299 s (34 files/s): peer to peer was 2.7 times faster. To Warsaw (33 ms apart) the two were close: 260 s against 294 s. The bucket's speed changed with the hour, though: three hours later, with two readers at once, it delivered 64 files/s to Amsterdam and 53 to Warsaw, close to peer to peer's 70 and 39 with two readers.</li>
       <li><strong>Large files:</strong> to Amsterdam, 4 GiB peer to peer in 159 s (27.0 MB/s) against 180 s (23.9 MB/s) from the bucket, and much steadier. To Warsaw the bucket was faster: 190 s (23.4 MB/s) against 423 s (10.2 MB/s). The peer-to-peer path opens a TCP connection for every block, which costs round trips; the longer the distance, the more.</li>
       <li><strong>Two readers at once, peer to peer:</strong> the readers help each other. Warsaw took 69 % of its blocks from Amsterdam, which had them already, and only 31 % from Paris, so the Paris device sent 5.6 GB instead of 8.6 GB. Neither reader slowed down.</li>
@@ -38,6 +40,67 @@ description: Varsto measured between Paris, Amsterdam and Warsaw on 9 and 10 Oct
       <li><strong>Every block of the peer-to-peer runs came from a peer:</strong> 202 544 of 202 544 blocks in 24 measured downloads, none from the bucket, whose blocks had been deleted; every file matched its SHA-256 afterwards.</li>
       <li><strong>The runs found and fixed nine problems</strong>, among them downloads that fetched one block at a time (now eight in flight, and small files fetched ahead across files) and a peer-to-peer server that answered one request at a time. Making QUIC the preferred path across the internet was tried, measured slower here, and reverted. <a href="#fixes">Details and numbers</a>.</li>
     </ul>
+
+    <h2 id="home">From a home behind NAT (10 October)</h2>
+    <p>The runs above are between data centres with public addresses. These are from a home: a desktop PC on a 100 Mbit/s consumer connection behind its router's NAT, with Varsto installed the way a user installs it (the Linux package, a background service of the user). Two cloud machines joined it: one in Amsterdam with a public address, and one in Warsaw hosting two devices in network namespaces behind NAT, one behind a cone NAT (Linux MASQUERADE keeps the port) and one behind a symmetric NAT (MASQUERADE with random ports, which defeats hole punching). As above, the bucket in Paris held the ledger and the file lists only: before every pull its blocks were deleted, so every block had to come from a peer, and every file was checked against its SHA-256. The driver is <code>scripts/nat-test/home-nat.py</code>.</p>
+    <h3>The line</h3>
+    <table class="downloads bench-table">
+      <thead><tr><th>Home PC and</th><th>Round trip</th><th>TCP, one stream, to the home</th><th>TCP, one stream, from the home</th></tr></thead>
+      <tbody>
+        <tr><td>Amsterdam</td><td>31 ms</td><td>9.1 MB/s</td><td>12.1 MB/s</td></tr>
+        <tr><td>Warsaw</td><td>21 ms</td><td>10.6 MB/s</td><td>11.9 MB/s</td></tr>
+        <tr><td>The bucket (Paris), rclone, 256 MiB</td><td>–</td><td>7.5 MB/s</td><td>4.3 MB/s</td></tr>
+      </tbody>
+    </table>
+    <p>100 Mbit/s is 12.5 MB/s at most, so that is the ceiling for anything on this line.</p>
+    <h3>Through the NATs</h3>
+    <p>STUN classified the home router as a cone NAT. Each transfer moved one 64 MiB file of random bytes; at this size the fixed cost of a sync (ledger and file list in the bucket) is a large part of the time.</p>
+    <table class="downloads bench-table">
+      <thead><tr><th>From</th><th>To</th><th>Path the receiver used</th><th>Time</th><th>Speed</th></tr></thead>
+      <tbody>
+        <tr><td>Home</td><td>Amsterdam (public)</td><td>direct, into the home NAT</td><td>12.2 s</td><td>5.5 MB/s</td></tr>
+        <tr><td>Amsterdam</td><td>Home</td><td>direct</td><td>14.3 s</td><td>4.7 MB/s</td></tr>
+        <tr><td>Warsaw, cone NAT</td><td>Home</td><td>direct, NAT to NAT (hole punching)</td><td>13.3 s</td><td>5.0 MB/s</td></tr>
+        <tr><td>Home</td><td>Warsaw, cone NAT</td><td>direct, NAT to NAT</td><td>14.5 s</td><td>4.6 MB/s</td></tr>
+        <tr><td>Warsaw, symmetric NAT</td><td>Home</td><td>relayed via Amsterdam</td><td>65.7 s</td><td>1.0 MB/s</td></tr>
+        <tr><td>Home</td><td>Warsaw, symmetric NAT</td><td>relayed via Amsterdam</td><td>65.3 s</td><td>1.0 MB/s</td></tr>
+      </tbody>
+    </table>
+    <p>Every path worked the way the design says: direct where a NAT keeps its mapping, a relay through one of the user's own reachable devices where it does not. No vendor server was involved; the devices found each other through records in the bucket and public STUN servers.</p>
+    <figure class="shot"><img class="shot-light" src="../assets/img/benchmarks/home-traffic-light.png" alt="Varsto's Traffic card on the home PC: lines from this device to waw-cone (direct), ams (direct) and waw-sym (via ams), a table with path, address, speeds and totals per device, and at the top right the curve of a download that just finished." width="976" height="553" loading="lazy"><img class="shot-dark" src="../assets/img/benchmarks/home-traffic-dark.png" alt="The same Traffic card in dark mode." width="976" height="553" loading="lazy"><figcaption>The home PC's Traffic card seconds after a 512 MiB download from the cone-NAT device in Warsaw (the curve at the top right): Warsaw and Amsterdam reached directly, the symmetric-NAT device through Amsterdam.</figcaption></figure>
+    <h3>Large files</h3>
+    <p>One 512 MiB file of random bytes per transfer, peer to peer only. The first column is version 0.0.1-alpha.9 with the relay fix below; the second adds the download changes of the same day (connections kept open per peer, objects sent without compressing them again, a window that adapts between 8 and 32 blocks).</p>
+    <table class="downloads bench-table">
+      <thead><tr><th>Transfer</th><th>Before the changes</th><th>With the changes</th><th>Share of one TCP stream</th><th>Share of 100 Mbit/s</th></tr></thead>
+      <tbody>
+        <tr><td>Amsterdam → home</td><td>4.7 MB/s</td><td>8.0 MB/s</td><td>88 %</td><td>64 %</td></tr>
+        <tr><td>Warsaw (cone NAT) → home</td><td>6.9 MB/s</td><td>9.3 MB/s</td><td>88 %</td><td>74 %</td></tr>
+        <tr><td>Home → Amsterdam</td><td>8.7 MB/s</td><td>9.3 MB/s</td><td>77 %</td><td>74 %</td></tr>
+        <tr><td>Home → Warsaw (cone NAT)</td><td>–</td><td>8.6 MB/s</td><td>72 %</td><td>69 %</td></tr>
+      </tbody>
+    </table>
+    <h3>The same download from the bucket</h3>
+    <p>A second device on the home PC, with peer to peer off, pulled a 512 MiB file that a server had just pushed to the bucket, through the same line.</p>
+    <table class="downloads bench-table">
+      <thead><tr><th>Written by</th><th>From the bucket</th><th>Peer to peer (above)</th><th>Peer to peer was</th></tr></thead>
+      <tbody>
+        <tr><td>Amsterdam</td><td>6.1 MB/s</td><td>8.0 MB/s</td><td>1.3 times as fast</td></tr>
+        <tr><td>Warsaw (cone NAT)</td><td>5.2 MB/s</td><td>9.3 MB/s</td><td>1.8 times as fast</td></tr>
+      </tbody>
+    </table>
+    <p>Between data centres the bucket can keep up, because the bucket and the machines sit on the same fast backbone. From a home, the bucket is one more distant hop with its own per-request cost, while a peer sends straight down the line.</p>
+    <h3>Found and fixed</h3>
+    <ul>
+      <li><strong>The relay could not reach the device it relays for.</strong> A device behind a symmetric NAT keeps a connection open with a reachable device of the vault, and other devices reach it through that relay. The relay itself had no route to it: it would not relay through itself and kept dialling addresses nothing can dial. It now asks such a device over the connection the device keeps with it.</li>
+      <li><strong>Peer-to-peer downloads near the line's speed.</strong> The changes above roughly doubled the download from Amsterdam to the home (4.7 to 8.0 MB/s).</li>
+    </ul>
+    <h3>Still slow</h3>
+    <ul>
+      <li><strong>The relayed path</strong> carried only 1 to 1.6 MB/s: every block travels as its own request over two hops, home to Amsterdam to Warsaw and back. It is the fallback for the hardest NATs, but it should still fill more of the line.</li>
+      <li><strong>Small transfers</strong> pay a fixed cost for the ledger and the file list in the bucket: 64 MiB took 12 to 15 s where the bytes alone need about 7.</li>
+      <li><strong>The service's interface</strong> could wait for minutes for an answer while a sync ran and kept trying a peer it could not reach; the status calls should not wait for the sync.</li>
+    </ul>
+    <p class="note">Limits: one home connection, one afternoon, one run per case (a repeat of Warsaw to home during the screenshot ran at 5.2 MB/s, with Amsterdam briefly unreachable); the NATs in Warsaw are Linux's, not consumer routers'; the servers were small (Scaleway DEV1-M). The download changes are in review and not yet released.</p>
 
     <h2 id="done">What was measured</h2>
     <table class="downloads bench-table">
