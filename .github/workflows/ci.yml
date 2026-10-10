@@ -362,3 +362,12 @@ jobs:
           name: screenshots
           path: dist/screenshots
           if-no-files-found: error
+      - name: Publish for the website (rolling pre-release screenshots-latest)
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tar -C dist/screenshots -czf screenshots.tar.gz .
+          gh release view screenshots-latest >/dev/null 2>&1 || gh release create screenshots-latest --prerelease --latest=false \
+            --title "Screenshots of the newest build" --notes "Pictures CI takes on every build of main; the website pulls them from here. Not a software release."
+          gh release upload screenshots-latest screenshots.tar.gz --clobber
