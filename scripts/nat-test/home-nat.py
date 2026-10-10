@@ -8,6 +8,8 @@ and a symmetric NAT.
     home-nat.py setup --package <linux tar.gz>   binary and NAT namespaces on the machines
     home-nat.py vault                   vault on Amsterdam (public, the relay); the
                                         Warsaw devices and this machine join it
+    home-nat.py baseline                round trips, single-stream TCP both ways between this
+                                        machine and each server, and a bucket download
     home-nat.py run [--mb 64]           transfers in every direction, from peers only
     home-nat.py shots --out <dir>       this machine's interface (Peers, traffic) during a transfer
     home-nat.py down                    delete the machines and the bucket
@@ -326,6 +328,74 @@ class Rig:
         results = [self.transfer(s, d, mb) for s, d in pairs]
         log(f"{sum(r['ok'] for r in results)}/{len(results)} transfers from peers only, every file intact")
 
+    # ----- network baseline ---------------------------------------------------
+
+    PROBE = r"""
+import socket, sys, time
+mode, port, secs = sys.argv[1], int(sys.argv[2]), float(sys.argv[3])
+s = socket.socket(); s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1); s.bind(("0.0.0.0", port)); s.listen(1)
+s.settimeout(120); c, _ = s.accept(); buf = b"\0" * (1 << 20); n = 0; t0 = time.time()
+if mode == "send":
+    while time.time() - t0 < secs: c.sendall(buf); n += len(buf)
+else:
+    while True:
+        b = c.recv(1 << 20)
+        if not b: break
+        n += len(b)
+print(n, time.time() - t0)
+"""
+
+    def tcp(self, m, direction, secs=15):
+        """Single TCP stream: 'down' = the server sends to this machine, 'up' = this machine sends."""
+        import socket
+        port = 5299
+        self.ssh(m, f"cat > /nat/probe.py <<'EOF'\n{self.PROBE}\nEOF\nufw allow {port}/tcp >/dev/null 2>&1 || true")
+        mode = "send" if direction == "down" else "recv"
+        proc = subprocess.Popen(sb.ssh_base("root", self.ip(m)) + [f"timeout 150 python3 /nat/probe.py {mode} {port} {secs}"],
+                                stdout=subprocess.PIPE, text=True)
+        time.sleep(2)
+        c = socket.create_connection((self.ip(m), port), timeout=30)
+        n, t0 = 0, time.time()
+        if direction == "down":
+            while True:
+                b = c.recv(1 << 20)
+                if not b:
+                    break
+                n += len(b)
+        else:
+            buf = b"\0" * (1 << 20)
+            while time.time() - t0 < secs:
+                c.sendall(buf)
+                n += len(buf)
+        c.close()
+        secs_taken = time.time() - t0
+        proc.wait(timeout=60)
+        return round(n / secs_taken / 1e6, 1)
+
+    def baseline(self):
+        out = {"kind": "baseline", "ping": {}, "tcp_mb_s": {}, "s3": {}}
+        for m in self.state["nodes"]:
+            r = subprocess.run(["ping", "-c", "20", "-i", "0.2", "-q", self.ip(m)], capture_output=True, text=True).stdout.strip().splitlines()
+            out["ping"][m] = r[-1] if r else ""
+            for d in ("down", "up"):
+                out["tcp_mb_s"][f"{m} {d}"] = self.tcp(m, d)
+            log(f"{m}: {out['ping'][m]}; TCP one stream down {out['tcp_mb_s'][m + ' down']} MB/s, up {out['tcp_mb_s'][m + ' up']} MB/s")
+        env, _, _ = self.s3()
+        src = self.work / "s3-probe.bin"
+        with open(src, "wb") as f:
+            f.write(os.urandom(256 << 20))
+        t0 = time.time()
+        subprocess.run(["rclone", "copyto", str(src), f"scw:{self.state['bucket']}/probe/s3-probe.bin"], env=env, check=True)
+        out["s3"]["up_mb_s"] = round(256 * 1.048576 / (time.time() - t0), 1)
+        dst = self.work / "s3-probe.down"
+        t0 = time.time()
+        subprocess.run(["rclone", "copyto", f"scw:{self.state['bucket']}/probe/s3-probe.bin", str(dst)], env=env, check=True)
+        out["s3"]["down_mb_s"] = round(256 * 1.048576 / (time.time() - t0), 1)
+        subprocess.run(["rclone", "deletefile", f"scw:{self.state['bucket']}/probe/s3-probe.bin"], env=env)
+        src.unlink(); dst.unlink()
+        log(f"bucket (fr-par) from this machine: up {out['s3']['up_mb_s']} MB/s, down {out['s3']['down_mb_s']} MB/s")
+        self.record(out)
+
     # ----- screenshots of this machine's interface --------------------------
 
     def shots(self):
@@ -367,7 +437,7 @@ class Rig:
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("cmd", choices=["up", "setup", "vault", "run", "shots", "down", "local-reset"])
+    ap.add_argument("cmd", choices=["up", "setup", "baseline", "vault", "run", "shots", "down", "local-reset"])
     ap.add_argument("--work", default=os.environ.get("NAT_WORK", "dist/nat-test"))
     ap.add_argument("--type", default="DEV1-M")
     ap.add_argument("--package")
@@ -378,7 +448,7 @@ def main():
     ap.add_argument("--delay", type=float, default=6.0)
     a = ap.parse_args()
     r = Rig(a)
-    {"up": r.up, "setup": r.setup, "vault": r.vault, "run": r.run, "shots": r.shots, "down": r.down,
+    {"up": r.up, "setup": r.setup, "baseline": r.baseline, "vault": r.vault, "run": r.run, "shots": r.shots, "down": r.down,
      "local-reset": r.local_reset}[a.cmd]()
 
 
