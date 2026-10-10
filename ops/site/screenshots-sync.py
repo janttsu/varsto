@@ -38,7 +38,7 @@ try:
     with urllib.request.urlopen(req, timeout=60) as r:
         data, etag = r.read(64 << 20), r.headers.get("ETag")
 except urllib.error.HTTPError as e:
-    if e.code != 304:
+    if e.code not in (304, 404):  # 404: nothing published yet
         raise
     data, etag = None, known.get("etag")
 
