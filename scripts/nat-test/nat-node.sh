@@ -15,7 +15,7 @@ case "${1:-}" in
   setup)
     export DEBIAN_FRONTEND=noninteractive
     apt-get update -qq >/dev/null && apt-get install -y -qq curl python3 iptables >/dev/null
-    mkdir -p /nat && tar -C /nat -xzf /nat/pkg.tar.gz && cp /nat/varsto-*/varsto $B && chmod 755 $B
+    mkdir -p /nat && rm -rf /nat/varsto-*/ && tar -C /nat -xzf /nat/pkg.tar.gz && cp /nat/varsto-*/varsto $B && chmod 755 $B
     $B --version
     ext=$(ip route show default | awk '{print $5}' | head -1)
     sysctl -q -w net.ipv4.ip_forward=1

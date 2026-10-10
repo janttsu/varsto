@@ -504,13 +504,15 @@ enum Route {
     Tcp(SocketAddr),
     Quic(SocketAddr),
     Relay(DeviceId, String, SocketAddr),
+    /// The connection the peer keeps open with us as its relay.
+    Registered(SocketAddr),
 }
 
 impl Route {
     fn label(&self) -> String {
         match self {
-            Route::Tcp(a) | Route::Quic(a) if is_lan(a.ip()) => "direct-lan".into(),
-            Route::Tcp(_) | Route::Quic(_) => "direct".into(),
+            Route::Tcp(a) | Route::Quic(a) | Route::Registered(a) if is_lan(a.ip()) => "direct-lan".into(),
+            Route::Tcp(_) | Route::Quic(_) | Route::Registered(_) => "direct".into(),
             Route::Relay(dev, name, _) => format!(
                 "relayed via {}",
                 if name.is_empty() { dev.short() } else { name }
@@ -519,7 +521,7 @@ impl Route {
     }
     fn addr(&self) -> SocketAddr {
         match self {
-            Route::Tcp(a) | Route::Quic(a) | Route::Relay(_, _, a) => *a,
+            Route::Tcp(a) | Route::Quic(a) | Route::Relay(_, _, a) | Route::Registered(a) => *a,
         }
     }
     /// For the log: transport and address, and the relay's name.
@@ -527,6 +529,7 @@ impl Route {
         match self {
             Route::Tcp(a) => format!("tcp {a}"),
             Route::Quic(a) => format!("quic {a}"),
+            Route::Registered(a) => format!("quic {a}, its registration with us"),
             Route::Relay(dev, name, a) => format!(
                 "relay {} at {a}",
                 if name.is_empty() { dev.short() } else { name }
@@ -783,6 +786,11 @@ impl Peers {
                 self.try_tcp(*a, path, auth)
             }
             Route::Quic(a) => self.try_quic(*a, &p.cert_sha256, path, auth),
+            Route::Registered(_) => self
+                .quic
+                .as_ref()
+                .ok_or_else(|| anyhow!("no QUIC node"))?
+                .request_registrant(&p.device, path, auth),
             Route::Relay(relay, _, a) => {
                 let cert = self
                     .peers
@@ -813,7 +821,14 @@ impl Peers {
                 }
             }
         }
-        order_routes(&p.tcp, if quic { &p.udp } else { &[] }, relays)
+        let mut routes = order_routes(&p.tcp, if quic { &p.udp } else { &[] }, relays);
+        // A peer that keeps its relay registration with us is reached on
+        // that connection first: it is open already, and behind a symmetric
+        // NAT nothing else reaches it from here.
+        if let Some(a) = self.quic.as_ref().and_then(|n| n.registrant_addr(&p.device)) {
+            routes.insert(0, Route::Registered(a));
+        }
+        routes
     }
 
     /// One request to peer `p`: the route that worked last time first, then

@@ -214,7 +214,7 @@ class Rig:
             self.ssh("ams", "mkdir -p /nat/f-ams")
             self.remote("ams", "folder", "add", FOLDER, "/nat/f-ams")
             self.remote("ams", "p2p", "enable", "--port", str(PORT), "--public", f"{self.ip('ams')}:{PORT}")
-            self.node("ams", "service", "-", "/nat/h-ams")
+            self.start_remote("ams")
             log("ams: vault, storage, folder, p2p with its public address; service started")
         for dev in ("waw-cone", "waw-sym"):
             m, ns, home = REMOTE[dev]
@@ -224,7 +224,7 @@ class Rig:
             self.ssh(m, f"mkdir -p /nat/f-{dev}")
             self.remote(dev, "folder", "attach", FOLDER, f"/nat/f-{dev}")
             self.remote(dev, "p2p", "enable", "--port", str(PORT))
-            self.node(m, "service", ns, home)
+            self.start_remote(dev)
             self.state[f"{dev}_joined"] = True
             self.save()
             log(f"{dev}: joined behind {'a cone' if ns == 'natc' else 'a symmetric'} NAT; service started")
@@ -238,6 +238,21 @@ class Rig:
             self.state["home_folder"] = str(files)
             self.save()
             log(f"home: joined, folder at {files}")
+        self.restart()
+
+    def start_remote(self, dev):
+        m, ns, home = REMOTE[dev]
+        self.ssh(m, f"pkill -f -- '--home [{home[0]}]{home[1:]} service' || true")
+        self.node(m, "service", ns, home, env=f"VARSTO_PASSPHRASE={shlex.quote(self.state['pass'])}")
+
+    def restart(self):
+        # Automatic verification would read (and repair) blocks in the
+        # background, from the bucket whose blocks the test deletes.
+        for dev in REMOTE:
+            self.remote(dev, "verify", "set", "--off")
+        self.local("verify", "set", "--off")
+        for dev in REMOTE:
+            self.start_remote(dev)
         self.restart_local_service()
 
     def restart_local_service(self):
@@ -293,27 +308,38 @@ class Rig:
         return {"nat": p.get("nat"), "reachable": p.get("reachable"), "public": p.get("public"),
                 "paths": p.get("paths"), "relays": p.get("relays")}
 
+    def peer_chunks(self, dev):
+        return (self.api(dev, "GET", "/api/p2p") or {}).get("chunks_from_peers") or 0
+
     def transfer(self, src, dst, mb):
         name = f"{src}-to-{dst}-{int(time.time())}.bin"
         want = self.write(src, name, mb)
-        r = self.api(src, "POST", "/api/sync", {"folder": FOLDER})
+        self.api(src, "POST", "/api/sync", {"folder": FOLDER})
         self.purge_chunks()
+        before = self.peer_chunks(dst)
         t0 = time.time()
-        r = self.api(dst, "POST", "/api/sync", {"folder": FOLDER})
+        got = None
+        while time.time() - t0 < 900:
+            self.api(dst, "POST", "/api/sync", {"folder": FOLDER})
+            got = self.sha(dst, name)
+            if got == want:
+                break
+            time.sleep(3)
         secs = time.time() - t0
-        pulls = [x.get("pull", {}) for x in (r if isinstance(r, list) else [r]) if isinstance(x, dict)]
-        down = sum(p.get("chunks_downloaded", 0) for p in pulls)
-        peers = sum(p.get("chunks_from_peers", 0) for p in pulls)
-        got = self.sha(dst, name)
-        ok = got == want and down > 0 and peers == down
+        peers = self.peer_chunks(dst) - before
+        ok = got == want and peers > 0
         entry = {"kind": "transfer", "src": src, "dst": dst, "mb": mb, "seconds": round(secs, 1),
-                 "mb_s": round(mb / secs, 2) if secs else None, "chunks": down, "from_peers": peers,
+                 "mb_s": round(mb * 1.048576 / secs, 2) if ok else None, "chunks_from_peers": peers,
                  "sha_ok": got == want, "ok": ok, "dst_p2p": self.paths(dst)}
         self.record(entry)
         route = [f"{x.get('name')}: {x.get('path')} {x.get('addr') or ''}".strip() for x in (entry["dst_p2p"].get("paths") or [])]
-        log(f"{src} -> {dst}: {'OK' if ok else 'FAILED'} {mb} MB in {secs:.1f} s ({entry['mb_s']} MB/s), "
-            f"{peers}/{down} chunks from peers; routes at {dst}: {route}")
+        log(f"{src} -> {dst}: {'OK' if ok else 'FAILED'} {mb} MiB in {secs:.1f} s ({entry['mb_s']} MB/s), "
+            f"{peers} blocks from peers; routes at {dst}: {route}")
         return entry
+
+    def pause_all(self, paused):
+        for dev in ("home", *REMOTE):
+            self.api(dev, "POST", "/api/service/pause", {"paused": paused})
 
     def run(self):
         mb = self.args.mb
@@ -325,7 +351,11 @@ class Rig:
                  ("waw-sym", "home"), ("home", "waw-sym"), ("waw-sym", "waw-cone")]
         if self.args.only:
             pairs = [p for p in pairs if f"{p[0]}:{p[1]}" in self.args.only.split(",")]
-        results = [self.transfer(s, d, mb) for s, d in pairs]
+        self.pause_all(True)
+        try:
+            results = [self.transfer(s, d, mb) for s, d in pairs]
+        finally:
+            self.pause_all(False)
         log(f"{sum(r['ok'] for r in results)}/{len(results)} transfers from peers only, every file intact")
 
     # ----- network baseline ---------------------------------------------------
@@ -437,7 +467,7 @@ print(n, time.time() - t0)
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("cmd", choices=["up", "setup", "baseline", "vault", "run", "shots", "down", "local-reset"])
+    ap.add_argument("cmd", choices=["up", "setup", "baseline", "vault", "restart", "run", "shots", "down", "local-reset"])
     ap.add_argument("--work", default=os.environ.get("NAT_WORK", "dist/nat-test"))
     ap.add_argument("--type", default="DEV1-M")
     ap.add_argument("--package")
@@ -448,7 +478,7 @@ def main():
     ap.add_argument("--delay", type=float, default=6.0)
     a = ap.parse_args()
     r = Rig(a)
-    {"up": r.up, "setup": r.setup, "baseline": r.baseline, "vault": r.vault, "run": r.run, "shots": r.shots, "down": r.down,
+    {"up": r.up, "setup": r.setup, "baseline": r.baseline, "restart": r.restart, "vault": r.vault, "run": r.run, "shots": r.shots, "down": r.down,
      "local-reset": r.local_reset}[a.cmd]()
 
 

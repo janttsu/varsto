@@ -190,7 +190,7 @@ fn relayed_fetch_through_a_reachable_device() {
     let (b, key, big) = seed(&lab, "b");
     let snap_b: Snap = Arc::new(Mutex::new(Some(Arc::new(b.peer_snapshot().unwrap()))));
     let node_b = node(&b, snap_b);
-    let r = join(&lab, "r", "home-server", &key);
+    let mut r = join(&lab, "r", "home-server", &key);
     let node_r = node(&r, empty());
     let mut a = join(&lab, "a", "travel", &key);
     let node_a = node(&a, empty());
@@ -202,13 +202,13 @@ fn relayed_fetch_through_a_reachable_device() {
     let rec_a = record(&a, &node_a, false);
 
     // R knows both; B knows R; A knows R and B.
-    let _peers_r = Peers::build(
+    let peers_r = Arc::new(Peers::build(
         r.peer_key(),
         r.device_id().clone(),
         &[rec_a.clone(), rec_b.clone()],
         &[],
         Some(node_r.clone()),
-    );
+    ));
     let _peers_b = Peers::build(
         b.peer_key(),
         b.device_id().clone(),
@@ -242,6 +242,18 @@ fn relayed_fetch_through_a_reachable_device() {
     let b_st = st.iter().find(|s| &s.device == b.device_id()).unwrap();
     assert_eq!(b_st.path, "relayed via home-server", "{b_st:?}");
     assert_eq!(b_st.addr, Some(node_r.local_addr));
+
+    // The relay itself fetches from B: B has no address R could dial (as
+    // behind a symmetric NAT), so the only way is B's registration with R.
+    r.set_peers(Some(peers_r.clone()));
+    let rep = r.pull("docs").unwrap();
+    assert!(rep.files_unavailable.is_empty(), "{:?}", rep.files_unavailable);
+    assert!(rep.chunks_from_peers >= 2);
+    assert_eq!(fs::read(lab.dir("r").join("big.bin")).unwrap(), big);
+    let st = peers_r.status();
+    let b_st = st.iter().find(|s| &s.device == b.device_id()).unwrap();
+    assert!(b_st.ok && b_st.path == "direct-lan", "{b_st:?}");
+    assert_eq!(b_st.addr, Some(node_b.local_addr));
 
     // A device whose certificate differs from what R's record for it says
     // cannot register as that device.
