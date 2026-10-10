@@ -176,13 +176,7 @@ fn mtime_ns(md: &fs::Metadata) -> i64 {
 
 /// A path relative to the folder that stays inside it.
 pub(super) fn check_rel_path(path: &str) -> Result<()> {
-    if path.is_empty()
-        || Path::new(path).is_absolute()
-        || path.split('/').any(|c| c == ".." || c.is_empty())
-    {
-        bail!("path must be relative to the folder and must not contain '..': {path}");
-    }
-    Ok(())
+    util::check_rel_path(path)
 }
 
 impl Engine {

@@ -111,6 +111,16 @@ impl KeyedHasher {
     }
 }
 
+/// Constant-time equality of two byte strings (unequal lengths differ in
+/// constant time too). For MACs, confirmation values and tokens.
+pub fn ct_eq(a: &[u8], b: &[u8]) -> bool {
+    let mut diff = (a.len() ^ b.len()) as u8;
+    for i in 0..a.len().max(b.len()) {
+        diff |= a.get(i).copied().unwrap_or(0) ^ b.get(i).copied().unwrap_or(0);
+    }
+    diff == 0
+}
+
 /// Plain BLAKE3 hash of ciphertext or signed bodies (no secret involved).
 pub fn hash(data: &[u8]) -> [u8; 32] {
     *blake3::hash(data).as_bytes()

@@ -17,6 +17,7 @@ fsevents = ["notify/macos_fsevent"]
 
 [dependencies]
 varsto-core = { path = "../varsto-core" }
+tempfile.workspace = true
 anyhow.workspace = true
 clap.workspace = true
 serde.workspace = true
@@ -40,5 +41,4 @@ tray-icon = "0.21"
 windows-sys = { version = "0.59", features = ["Win32_UI_WindowsAndMessaging", "Win32_Foundation", "Win32_System_Console", "Win32_System_Registry", "Win32_UI_Shell"] }
 
 [dev-dependencies]
-tempfile.workspace = true
 serde_json.workspace = true

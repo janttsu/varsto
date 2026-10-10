@@ -161,8 +161,40 @@ pub fn open_in_browser(url: &str) {
     }
 }
 
+/// A response header. Values are ASCII without control characters;
+/// anything else is dropped from the value rather than tripping the
+/// worker thread (a header value never carries user data verbatim).
 fn header(name: &str, value: &str) -> Header {
-    Header::from_bytes(name.as_bytes(), value.as_bytes()).expect("static header")
+    let clean: String = value
+        .chars()
+        .filter(|c| c.is_ascii() && !c.is_ascii_control())
+        .collect();
+    Header::from_bytes(name.as_bytes(), clean.as_bytes())
+        .unwrap_or_else(|_| Header::from_bytes(name.as_bytes(), b"").expect("empty header"))
+}
+
+/// `Content-Disposition` for a download: an ASCII fallback name plus the
+/// UTF-8 name percent-encoded (RFC 6266 / RFC 8187), so any file name works.
+fn attachment(name: &str) -> String {
+    let ascii: String = name
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_' | ' ') {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    let mut enc = String::new();
+    for b in name.bytes() {
+        if b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b'_') {
+            enc.push(b as char);
+        } else {
+            enc.push_str(&format!("%{b:02X}"));
+        }
+    }
+    format!("attachment; filename=\"{ascii}\"; filename*=UTF-8''{enc}")
 }
 
 fn html(body: &str) -> Response<std::io::Cursor<Vec<u8>>> {
@@ -252,14 +284,11 @@ fn handle(state: &Shared, mut request: Request) -> Result<()> {
         };
         return match result {
             Some(Ok((bytes, p))) => {
-                let name = p.rsplit('/').next().unwrap_or("file").replace('"', "");
+                let name = p.rsplit('/').next().unwrap_or("file");
                 request.respond(
                     Response::from_data(bytes)
                         .with_header(header("Content-Type", "application/octet-stream"))
-                        .with_header(header(
-                            "Content-Disposition",
-                            &format!("attachment; filename=\"{name}\""),
-                        )),
+                        .with_header(header("Content-Disposition", &attachment(name))),
                 )?;
                 Ok(())
             }
@@ -765,13 +794,22 @@ fn api(st: &mut State, method: Method, path: &str, query: &str, input: &Value) -
             } else {
                 key.trim().to_string()
             };
-            let mut e = Engine::join(
+            let joined = Engine::join(
                 &st.home,
                 &s(input, "name")?,
                 &s(input, "passphrase")?,
                 &key,
                 spec,
-            )?;
+            );
+            // The secret was needed only while the storage was opened
+            // before the vault existed; children must not inherit it.
+            std::env::remove_var(format!(
+                "VARSTO_S3_SECRET_{}",
+                storage_name
+                    .to_uppercase()
+                    .replace(|c: char| !c.is_ascii_alphanumeric(), "_")
+            ));
+            let mut e = joined?;
             if let Some(secret) = s3_secret {
                 e.store_secret(&storage_name, &secret)?;
             }

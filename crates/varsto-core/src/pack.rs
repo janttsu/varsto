@@ -72,8 +72,13 @@ pub fn unpack(payload: &[u8], expected_len: u64) -> Result<Vec<u8>> {
         .ok_or_else(|| anyhow!("empty chunk payload"))?;
     let plain = match *method {
         METHOD_RAW => data.to_vec(),
-        METHOD_ZSTD => decompress(data, expected_len as usize)
-            .map_err(|e| anyhow!("chunk decompression failed: {e}"))?,
+        METHOD_ZSTD => {
+            if expected_len > crate::manifest::MAX_CHUNK_SIZE {
+                bail!("chunk of {expected_len} bytes is larger than any chunk can be");
+            }
+            decompress(data, expected_len as usize)
+                .map_err(|e| anyhow!("chunk decompression failed: {e}"))?
+        }
         m => bail!("unknown chunk packing method {m}"),
     };
     if plain.len() as u64 != expected_len {

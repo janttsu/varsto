@@ -48,11 +48,14 @@ impl Supervisor {
         } else if service::status(&self.home).is_some() {
             return Ok(()); // started by something else (launch agent, CLI)
         }
-        let log = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(self.home.join("service.log"))
-            .ok();
+        let mut opts = std::fs::OpenOptions::new();
+        opts.create(true).append(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            opts.mode(0o600);
+        }
+        let log = opts.open(self.home.join("service.log")).ok();
         let exe = std::env::current_exe()?;
         let mut cmd = Command::new(exe);
         cmd.arg("--home")

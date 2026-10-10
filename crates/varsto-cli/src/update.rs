@@ -398,10 +398,13 @@ pub fn apply(check: &Check) -> Result<String> {
     if !check.available {
         return Ok(format!("already up to date ({})", check.current));
     }
-    let tmp = tempdir()?;
-    let result = install_from(check, &tmp);
-    let _ = fs::remove_dir_all(&tmp);
-    result
+    // A fresh directory with a random name and mode 0700 (tempfile creates
+    // it exclusively): nobody can pre-create it or plant a binary inside.
+    let tmp = tempfile::Builder::new()
+        .prefix("varsto-update-")
+        .tempdir()
+        .context("create a temporary directory for the update")?;
+    install_from(check, tmp.path())
 }
 
 fn install_from(check: &Check, tmp: &Path) -> Result<String> {
@@ -428,12 +431,17 @@ fn install_from(check: &Check, tmp: &Path) -> Result<String> {
     } else {
         "varsto"
     };
-    let new_bin = walkdir::WalkDir::new(&extract)
+    let found: Vec<PathBuf> = walkdir::WalkDir::new(&extract)
         .into_iter()
         .filter_map(|e| e.ok())
-        .find(|e| e.file_type().is_file() && e.file_name() == bin_name)
+        .filter(|e| e.file_type().is_file() && e.file_name() == bin_name)
         .map(|e| e.into_path())
-        .ok_or_else(|| anyhow!("archive does not contain {bin_name}"))?;
+        .collect();
+    let new_bin = match found.as_slice() {
+        [one] => one.clone(),
+        [] => bail!("archive does not contain {bin_name}"),
+        _ => bail!("archive contains more than one {bin_name}; not installed"),
+    };
     let exe = std::env::current_exe()?;
     replace_binary(&new_bin, &exe)?;
     Ok(format!(
@@ -466,12 +474,6 @@ fn replace_binary(new_bin: &Path, exe: &Path) -> Result<()> {
         }
     }
     Ok(())
-}
-
-fn tempdir() -> Result<PathBuf> {
-    let base = std::env::temp_dir().join(format!("varsto-update-{}", std::process::id()));
-    fs::create_dir_all(&base)?;
-    Ok(base)
 }
 
 // ----- verify-release ---------------------------------------------------------------

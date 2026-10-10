@@ -946,7 +946,10 @@ pub fn run(opts: Options) -> Result<()> {
         },
         pair: None,
     }));
-    println!("Varsto service: {url}");
+    // The token is not printed: stdout ends up in service.log under the
+    // tray and launchd. `varsto desktop` reads it from the service file.
+    let public = url.split("?token=").next().unwrap_or(&url).to_string();
+    println!("Varsto service: {public} (open it with `varsto desktop`)");
     println!(
         "Only this computer can reach it. Service file: {}",
         service_file(&opts.home).display()

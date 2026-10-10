@@ -1475,7 +1475,14 @@ fn run(cli: &Cli) -> Result<()> {
                 (None, Some(w)) => varsto_core::recovery::key_from_words(w)?,
                 (None, None) => bail_usage("give --vault-key <hex> or --words \"<24 words>\"")?,
             };
-            let mut engine = Engine::join(&home, name, &passphrase()?, &key_hex, spec)?;
+            let joined = Engine::join(&home, name, &passphrase()?, &key_hex, spec);
+            std::env::remove_var(format!(
+                "VARSTO_S3_SECRET_{}",
+                storage_name
+                    .to_uppercase()
+                    .replace(|c: char| !c.is_ascii_alphanumeric(), "_")
+            ));
+            let mut engine = joined?;
             if let Some(secret) = s3_secret {
                 engine.store_secret(storage_name, &secret)?;
             }

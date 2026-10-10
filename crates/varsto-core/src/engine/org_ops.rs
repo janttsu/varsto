@@ -8,11 +8,11 @@
 //! full device is trusted as before, and the interface shows none of it.
 
 use super::*;
-use crate::crypto::SigningKey;
+use crate::crypto::{SigningKey, VerifyingKey};
 use crate::org::{
     self, Approval, LogEntry, Manifest, Member, OrgEvent, OrgPolicy, OrgRequest, OrgState,
     RemovedMember, RequestInfo, Roster, SealedApproval, SignedLogEntry, SignedManifest,
-    SignedRoster, LOG_PREFIX, MANIFEST_PREFIX,
+    SignedRoster, LOG_PREFIX, MANIFEST_PREFIX, ROSTER_PREFIX,
 };
 
 /// One device as the organization page shows it.
@@ -55,6 +55,10 @@ pub struct LogView {
     pub event: OrgEvent,
     /// One line in words.
     pub text: String,
+    /// The issuer is no longer an administrator (a former one can still
+    /// append to its own chain; readers see it here).
+    #[serde(default)]
+    pub former_admin: bool,
 }
 
 /// The organization as this device sees it.
@@ -141,7 +145,8 @@ impl Engine {
     /// Refuse an action the organization's policy leaves to admins.
     pub(super) fn org_allows(&self, what: fn(&OrgPolicy) -> bool, action: &str) -> Result<()> {
         if let Some(o) = &self.org {
-            if !o.is_admin(&self.vault.device_id) && !what(&o.policy()) {
+            // A state pinned on join, before the manifest arrived, binds nothing yet.
+            if o.manifest().is_some() && !o.is_admin(&self.vault.device_id) && !what(&o.policy()) {
                 bail!(
                     "in the organization {}, only an administrator can {action}",
                     o.name
@@ -186,29 +191,181 @@ impl Engine {
 
     // ----- publishing ---------------------------------------------------------
 
-    /// Put an organization object where it is missing. A collision on the
-    /// first storage means another admin wrote the same sequence number.
-    fn org_publish(&self, key: &str, bytes: &[u8]) -> Result<()> {
-        let storages = self.metadata_storages(true)?;
-        if storages.is_empty() {
-            bail!("this device has no storage to publish the organization to");
-        }
-        for (i, (_, b)) in storages.iter().enumerate() {
-            if !b.put_if_absent(key, bytes)? && i == 0 {
-                bail!("another administrator changed the organization at the same time; sync, then try again");
+    /// Metadata storages that can be read.
+    fn org_storages(&self) -> Result<OpenStorages> {
+        self.metadata_storages(false)
+    }
+
+    /// The names under `prefix` on every storage, listed once.
+    fn org_listing(storages: &[&dyn Storage], prefix: &str) -> Result<Vec<Vec<String>>> {
+        storages.iter().map(|b| b.list(prefix)).collect()
+    }
+
+    /// The objects of one sequence number from every storage, in name
+    /// order (ties by content hash), one per distinct content: name, hash
+    /// of the bytes, bytes.
+    fn org_candidates(
+        storages: &[&dyn Storage],
+        listing: &[Vec<String>],
+        prefix: &str,
+        seq: u32,
+    ) -> Result<Vec<(String, String, Vec<u8>)>> {
+        let mut out: Vec<(String, String, Vec<u8>)> = Vec::new();
+        for (b, names) in storages.iter().zip(listing) {
+            for k in names {
+                let Some(name) = k.strip_prefix(prefix) else {
+                    continue;
+                };
+                if org::seq_from_name(name) != Some(seq) {
+                    continue;
+                }
+                if let Some(blob) = b.get(k)? {
+                    let hash = hex::encode(crypto::hash(&blob));
+                    if !out.iter().any(|(_, h, _)| *h == hash) {
+                        out.push((name.to_string(), hash, blob));
+                    }
+                }
             }
         }
-        Ok(())
+        out.sort_by(|a, b| (&a.0, &a.1).cmp(&(&b.0, &b.1)));
+        Ok(out)
+    }
+
+    /// Claim a sequence number: the lowest attempt that is free on the
+    /// first storage takes `bytes` with put-if-absent, so two writers of
+    /// the same sequence number cannot both succeed there. An occupied
+    /// attempt whose object `valid` accepts means another writer won (an
+    /// error); junk is skipped. The name is then written to the other
+    /// storages where it is free.
+    fn org_claim(
+        &self,
+        name_of: impl Fn(u32) -> String,
+        valid: impl Fn(&[u8]) -> bool,
+        bytes: &[u8],
+        conflict: &str,
+    ) -> Result<String> {
+        let storages = self.metadata_storages(true)?;
+        let Some((_, first)) = storages.first() else {
+            bail!("this device has no storage to publish the organization to");
+        };
+        let mut chosen = None;
+        for attempt in 1..=org::ATTEMPTS {
+            let name = name_of(attempt);
+            if first.put_if_absent(&name, bytes)? {
+                chosen = Some(name);
+                break;
+            }
+            if let Some(other) = first.get(&name)? {
+                if other == bytes {
+                    chosen = Some(name);
+                    break;
+                }
+                if valid(&other) {
+                    bail!("{conflict}");
+                }
+            }
+        }
+        let Some(name) = chosen else {
+            bail!("the storage holds too many junk objects under this sequence number; remove them under org/ and try again");
+        };
+        for (_, b) in storages.iter().skip(1) {
+            b.put_if_absent(&name, bytes)?;
+        }
+        Ok(name)
+    }
+
+    // ----- what verifies ------------------------------------------------------
+
+    /// Manifest `want` from `blob`, if it extends `state` (or starts it when
+    /// `state` has none yet): chained, in sequence, signed by the root key.
+    fn try_manifest(&self, state: &OrgState, want: u32, blob: &[u8]) -> Option<Manifest> {
+        let have = !state.org_id.is_empty();
+        let sm = serde_json::from_slice::<SignedManifest>(blob).ok()?;
+        if sm.seq != want || (have && sm.org_id != state.org_id) {
+            return None;
+        }
+        let vk = self.epochs.keys.get(&sm.key_epoch)?;
+        let pinned = if have && !state.root_pubkey_hex.is_empty() {
+            Some(state.root_key().ok()?)
+        } else {
+            None
+        };
+        let m = sm.open(&self.vault.vault_id, vk, pinned.as_ref()).ok()?;
+        if m.previous_hash != state.manifest_hash {
+            return None;
+        }
+        if state.manifests.is_empty() && want != 1 {
+            return None;
+        }
+        Some(m)
+    }
+
+    /// Roster `want` from `blob`, if it extends `state`: chained, in
+    /// sequence, signed by a device that the manifest in force for this
+    /// sequence number names as an administrator, that the previous roster
+    /// lists as a member, and that is not revoked.
+    fn try_roster(&self, state: &OrgState, want: u32, blob: &[u8]) -> Option<Roster> {
+        let sr = serde_json::from_slice::<SignedRoster>(blob).ok()?;
+        if sr.seq != want || sr.org_id != state.org_id {
+            return None;
+        }
+        let pk = self.device_key(&sr.issuer)?;
+        let vk = self.epochs.keys.get(&sr.key_epoch)?;
+        if self.is_revoked(&sr.issuer) && sr.issuer != self.vault.device_id {
+            return None;
+        }
+        let r = sr.open(&self.vault.vault_id, vk, &pk).ok()?;
+        if r.previous_hash != state.roster_hash
+            || r.manifest_seq > state.manifest_seq()
+            || !state.governs_admin(&r.issuer, want)
+        {
+            return None;
+        }
+        if want > 1 && !state.lists(&r.issuer) {
+            return None;
+        }
+        Some(r)
+    }
+
+    /// Log entry `want` of `issuer` from `blob`, if it extends that chain:
+    /// signed by the issuer, which the manifest in force when it was
+    /// written names as an administrator.
+    fn try_log(
+        &self,
+        state: &OrgState,
+        issuer: &DeviceId,
+        pk: &VerifyingKey,
+        want: u64,
+        blob: &[u8],
+    ) -> Option<LogEntry> {
+        let se = serde_json::from_slice::<SignedLogEntry>(blob).ok()?;
+        if se.seq != want || &se.issuer != issuer || se.org_id != state.org_id {
+            return None;
+        }
+        let vk = self.epochs.keys.get(&se.key_epoch)?;
+        let e = se.open(&self.vault.vault_id, vk, pk).ok()?;
+        if e.previous_hash != state.log_hashes.get(issuer).cloned().unwrap_or_default()
+            || e.roster_seq > state.roster_seq()
+            || !state.governs_admin(issuer, e.roster_seq + 1)
+        {
+            return None;
+        }
+        Some(e)
     }
 
     fn publish_org_manifest(&mut self, mut m: Manifest, root: &SigningKey) -> Result<()> {
-        let (seq, previous) = {
+        let (seq, previous, roster_seq) = {
             let state = self.org.as_ref().expect("organization state set");
-            (state.manifest_seq() + 1, state.manifest_hash.clone())
+            (
+                state.manifest_seq() + 1,
+                state.manifest_hash.clone(),
+                state.roster_seq(),
+            )
         };
         m.seq = seq;
         m.previous_hash = previous;
         m.issued_utc = util::now_utc();
+        m.roster_seq = roster_seq;
         let sm = SignedManifest::seal(
             &m,
             &self.vault.vault_id,
@@ -217,22 +374,37 @@ impl Engine {
             root,
         )?;
         let bytes = serde_json::to_vec(&sm)?;
-        self.org_publish(&SignedManifest::storage_key(m.seq), &bytes)?;
+        let state = self.org.as_ref().expect("organization state set");
+        self.org_claim(
+            |attempt| SignedManifest::storage_key(seq, attempt),
+            |other| self.try_manifest(state, seq, other).is_some(),
+            &bytes,
+            "another change of the organization's administrators won this sequence number; sync, then try again",
+        )?;
+        let mine = hex::encode(crypto::hash(&bytes));
         let state = self.org.as_mut().expect("organization state set");
-        state.manifest_hash = hex::encode(crypto::hash(&bytes));
+        state.manifest_hash = mine;
         state.name = m.name.clone();
-        state.manifests.insert(m.seq, m);
+        state.manifests.insert(seq, m);
         self.save_org()
     }
 
     fn publish_roster(&mut self, mut r: Roster) -> Result<()> {
         let me = self.vault.device_id.clone();
-        let state = self.org.as_ref().expect("organization state set");
-        r.org_id = state.org_id.clone();
-        r.seq = state.roster_seq() + 1;
-        r.previous_hash = state.roster_hash.clone();
-        r.manifest_seq = state.manifest_seq();
-        r.issuer = me;
+        let (seq, previous, manifest_seq, org_id) = {
+            let state = self.org.as_ref().expect("organization state set");
+            (
+                state.roster_seq() + 1,
+                state.roster_hash.clone(),
+                state.manifest_seq(),
+                state.org_id.clone(),
+            )
+        };
+        r.org_id = org_id;
+        r.seq = seq;
+        r.previous_hash = previous;
+        r.manifest_seq = manifest_seq;
+        r.issuer = me.clone();
         r.issued_utc = util::now_utc();
         let sr = SignedRoster::seal(
             &r,
@@ -242,11 +414,27 @@ impl Engine {
             &self.keys.signer,
         )?;
         let bytes = serde_json::to_vec(&sr)?;
-        self.org_publish(&SignedRoster::storage_key(r.seq), &bytes)?;
+        let state = self.org.as_ref().expect("organization state set");
+        self.org_claim(
+            |attempt| SignedRoster::storage_key(seq, attempt),
+            |other| self.try_roster(state, seq, other).is_some(),
+            &bytes,
+            "another administrator changed the organization at the same time; sync, then try again",
+        )?;
+        let mine = hex::encode(crypto::hash(&bytes));
         let state = self.org.as_mut().expect("organization state set");
-        state.roster_hash = hex::encode(crypto::hash(&bytes));
-        state.roster = Some(r);
+        state.roster_hash = mine.clone();
+        state.roster = Some(r.clone());
+        state.roster_history.insert(seq, (r, mine));
+        Self::trim_history(state);
         self.save_org()
+    }
+
+    fn trim_history(state: &mut OrgState) {
+        while state.roster_history.len() > 8 {
+            let first = *state.roster_history.keys().next().expect("non-empty");
+            state.roster_history.remove(&first);
+        }
     }
 
     fn org_log(&mut self, event: OrgEvent) -> Result<()> {
@@ -265,6 +453,7 @@ impl Engine {
             previous_hash: state.log_hashes.get(&me).cloned().unwrap_or_default(),
             utc: util::now_utc(),
             event,
+            roster_seq: state.roster_seq(),
         };
         let se = SignedLogEntry::seal(
             &e,
@@ -274,7 +463,12 @@ impl Engine {
             &self.keys.signer,
         )?;
         let bytes = serde_json::to_vec(&se)?;
-        self.org_publish(&SignedLogEntry::storage_key(&me, seq), &bytes)?;
+        self.org_claim(
+            |attempt| SignedLogEntry::storage_key(&me, seq, attempt),
+            |_| false,
+            &bytes,
+            "",
+        )?;
         let state = self.org.as_mut().expect("organization state set");
         state
             .log_hashes
@@ -346,6 +540,7 @@ impl Engine {
                 device: me.clone(),
                 name: self.vault.device_name.clone(),
             }],
+            roster_seq: 0,
         };
         if let Err(e) = self.publish_org_manifest(manifest, &signer) {
             self.org = None;
@@ -426,27 +621,33 @@ impl Engine {
             );
         }
         let mut roster = self.current_roster();
-        if roster.member(&info.device).is_some() {
-            bail!("this device is already in the organization");
-        }
         let me = self.vault.device_id.clone();
-        roster.members.push(Member {
-            device: info.device.clone(),
-            user: user.to_string(),
-            name: info.name.clone(),
-            added_utc: util::now_utc(),
-            added_by: me.clone(),
-        });
-        self.publish_roster(roster)?;
-        self.org_log(OrgEvent::DeviceApproved {
-            device: info.device.clone(),
-            user: user.to_string(),
-            name: info.name.clone(),
-        })?;
+        match roster.member(&info.device) {
+            // Listed but never joined (the token was lost): a new token,
+            // the roster stays as it is.
+            Some(m) if !self.devices.devices.contains_key(&info.device) && m.user == user => {}
+            Some(_) => bail!("this device is already in the organization"),
+            None => {
+                roster.members.push(Member {
+                    device: info.device.clone(),
+                    user: user.to_string(),
+                    name: info.name.clone(),
+                    added_utc: util::now_utc(),
+                    added_by: me.clone(),
+                });
+                self.publish_roster(roster)?;
+                self.org_log(OrgEvent::DeviceApproved {
+                    device: info.device.clone(),
+                    user: user.to_string(),
+                    name: info.name.clone(),
+                })?;
+            }
+        }
         let o = self.org.as_ref().expect("organization");
         let approval = Approval {
             bundle: self.pairing_bundle()?,
             org_id: o.org_id.clone(),
+            root_pubkey_hex: o.root_pubkey_hex.clone(),
             org_name: o.name.clone(),
             user: user.to_string(),
             approver: me,
@@ -472,13 +673,35 @@ impl Engine {
         token: &str,
     ) -> Result<(Engine, Vec<String>, Approval)> {
         let (approval, signer) = org::open_approval(home, token)?;
-        let (engine, notes) = Self::join_paired_with(
+        if home.join("vault.json").exists() {
+            bail!("{} already holds a vault", home.display());
+        }
+        // Pin the organization before anything is read from the storages:
+        // a manifest chain under another root key is then never adopted.
+        std::fs::create_dir_all(home)?;
+        if !approval.org_id.is_empty() {
+            OrgState {
+                org_id: approval.org_id.clone(),
+                name: approval.org_name.clone(),
+                root_pubkey_hex: approval.root_pubkey_hex.clone(),
+                ..OrgState::default()
+            }
+            .save(home)?;
+        }
+        let joined = Self::join_paired_with(
             home,
             device_name,
             passphrase,
             &approval.bundle,
             Some(signer),
-        )?;
+        );
+        let (engine, notes) = match joined {
+            Ok(j) => j,
+            Err(e) => {
+                let _ = std::fs::remove_file(home.join(org::STATE_FILE));
+                return Err(e);
+            }
+        };
         OrgRequest::clear(home);
         Ok((engine, notes, approval))
     }
@@ -539,7 +762,9 @@ impl Engine {
     /// removed list, and the log records it.
     pub fn org_remove_user(&mut self, user: &str, wipe: bool) -> Result<OrgRemoveReport> {
         self.ensure_active()?;
-        self.sync_org()?;
+        // Like `revoke_device`: the newest ledger (for the cut-offs) and
+        // registry (for who stays) first.
+        self.pull_ledger()?;
         self.require_admin()?;
         let user = user.trim();
         let roster = self.current_roster();
@@ -809,6 +1034,7 @@ impl Engine {
                 seq: e.seq,
                 event: e.event.clone(),
                 text: self.log_text(e),
+                former_admin: !o.is_admin(&e.issuer),
             })
             .collect()
     }
@@ -881,48 +1107,33 @@ impl Engine {
 
     /// Read new manifests, rosters and log entries from the storages and
     /// adopt those that verify. Run before revocations are read, so that
-    /// "only an admin revokes" uses the newest admin list.
+    /// "only an admin revokes" uses the newest admin list, and again after
+    /// a new key epoch is adopted.
     pub(super) fn sync_org(&mut self) -> Result<()> {
         if self.vault.member || self.removal.is_some() {
             return Ok(());
         }
-        let open = self.metadata_storages(false)?;
+        let open = self.org_storages()?;
         let storages: Vec<&dyn Storage> = open.iter().map(|(_, b)| b.as_ref()).collect();
         let mut state = self.org.clone().unwrap_or_default();
-        let mut have = self.org.is_some();
         let mut changed = false;
-        let vault = self.vault.vault_id.clone();
 
         // Manifests: contiguous from the one after the newest held; the
         // first one pins the root key.
+        let listing = Self::org_listing(&storages, MANIFEST_PREFIX)?;
         loop {
             let want = state.manifest_seq() + 1;
-            let key = SignedManifest::storage_key(want);
             let mut adopted = false;
-            for b in &storages {
-                let Some(blob) = b.get(&key)? else { continue };
-                let Ok(sm) = serde_json::from_slice::<SignedManifest>(&blob) else {
+            for (_, hash, blob) in Self::org_candidates(&storages, &listing, MANIFEST_PREFIX, want)?
+            {
+                let Some(m) = self.try_manifest(&state, want, &blob) else {
                     continue;
                 };
-                if sm.seq != want || (have && sm.org_id != state.org_id) {
-                    continue;
-                }
-                let Some(vk) = self.epochs.keys.get(&sm.key_epoch) else {
-                    continue;
-                };
-                let pinned = if have { state.root_key().ok() } else { None };
-                let Ok(m) = sm.open(&vault, vk, pinned.as_ref()) else {
-                    continue;
-                };
-                if have && m.previous_hash != state.manifest_hash {
-                    continue;
-                }
-                if !have {
+                if state.org_id.is_empty() {
                     state.org_id = m.org_id.clone();
                     state.root_pubkey_hex = m.root_pubkey_hex.clone();
-                    have = true;
                 }
-                state.manifest_hash = hex::encode(crypto::hash(&blob));
+                state.manifest_hash = hash;
                 state.name = m.name.clone();
                 state.manifests.insert(want, m);
                 changed = true;
@@ -933,43 +1144,53 @@ impl Engine {
                 break;
             }
         }
-        if !have {
+        if state.org_id.is_empty() {
             return Ok(());
         }
 
-        // Rosters: contiguous, signed by an admin of the manifest they name.
+        // Rosters. First: did the newest roster this device holds (maybe
+        // its own) win its sequence number? The storages decide (name
+        // order, see `org::object_name`); if another one sorts first, step
+        // back one and adopt that.
+        let listing = Self::org_listing(&storages, ROSTER_PREFIX)?;
+        let newest = state.roster_seq();
+        if newest > 0 {
+            let before = match state.roster_history.get(&(newest - 1)).cloned() {
+                Some((r, h)) => Some((Some(r), h)),
+                None if newest == 1 => Some((None, String::new())),
+                None => None,
+            };
+            if let Some((roster, hash)) = before {
+                let mut before_state = state.clone();
+                before_state.roster = roster;
+                before_state.roster_hash = hash;
+                let winner = Self::org_candidates(&storages, &listing, ROSTER_PREFIX, newest)?
+                    .into_iter()
+                    .find_map(|(_, hash, blob)| {
+                        self.try_roster(&before_state, newest, &blob)
+                            .map(|r| (r, hash))
+                    });
+                if let Some((r, hash)) = winner {
+                    if hash != state.roster_hash {
+                        state.roster = Some(r.clone());
+                        state.roster_hash = hash.clone();
+                        state.roster_history.insert(newest, (r, hash));
+                        changed = true;
+                    }
+                }
+            }
+        }
         loop {
             let want = state.roster_seq() + 1;
-            let key = SignedRoster::storage_key(want);
             let mut adopted = false;
-            for b in &storages {
-                let Some(blob) = b.get(&key)? else { continue };
-                let Ok(sr) = serde_json::from_slice::<SignedRoster>(&blob) else {
+            for (_, hash, blob) in Self::org_candidates(&storages, &listing, ROSTER_PREFIX, want)? {
+                let Some(r) = self.try_roster(&state, want, &blob) else {
                     continue;
                 };
-                if sr.seq != want || sr.org_id != state.org_id {
-                    continue;
-                }
-                let (Some(pk), Some(vk)) = (
-                    self.device_key(&sr.issuer),
-                    self.epochs.keys.get(&sr.key_epoch),
-                ) else {
-                    continue;
-                };
-                if self.is_revoked(&sr.issuer) && sr.issuer != self.vault.device_id {
-                    continue;
-                }
-                let Ok(r) = sr.open(&vault, vk, &pk) else {
-                    continue;
-                };
-                if r.previous_hash != state.roster_hash
-                    || r.manifest_seq > state.manifest_seq()
-                    || !state.was_admin(&r.issuer, r.manifest_seq)
-                {
-                    continue;
-                }
-                state.roster_hash = hex::encode(crypto::hash(&blob));
-                state.roster = Some(r);
+                state.roster_hash = hash.clone();
+                state.roster = Some(r.clone());
+                state.roster_history.insert(want, (r, hash));
+                Self::trim_history(&mut state);
                 changed = true;
                 adopted = true;
                 break;
@@ -979,10 +1200,11 @@ impl Engine {
             }
         }
 
-        // Log entries: one chain per admin device (current or former).
+        // Log entries: one chain per device that is or was an administrator.
+        let listing = Self::org_listing(&storages, LOG_PREFIX)?;
         let mut issuers: BTreeSet<DeviceId> = BTreeSet::new();
-        for b in &storages {
-            for k in b.list(LOG_PREFIX)? {
+        for names in &listing {
+            for k in names {
                 if let Some(dev) = k
                     .strip_prefix(LOG_PREFIX)
                     .and_then(|r| r.split('/').next())
@@ -999,6 +1221,7 @@ impl Engine {
             let Some(pk) = self.device_key(&issuer) else {
                 continue;
             };
+            let prefix = format!("{LOG_PREFIX}{issuer}/");
             loop {
                 let want = state
                     .log
@@ -1006,29 +1229,15 @@ impl Engine {
                     .and_then(|m| m.keys().next_back().copied())
                     .unwrap_or(0)
                     + 1;
-                let key = SignedLogEntry::storage_key(&issuer, want);
+                let Ok(want32) = u32::try_from(want) else {
+                    break;
+                };
                 let mut adopted = false;
-                for b in &storages {
-                    let Some(blob) = b.get(&key)? else { continue };
-                    let Ok(se) = serde_json::from_slice::<SignedLogEntry>(&blob) else {
+                for (_, hash, blob) in Self::org_candidates(&storages, &listing, &prefix, want32)? {
+                    let Some(e) = self.try_log(&state, &issuer, &pk, want, &blob) else {
                         continue;
                     };
-                    if se.seq != want || se.issuer != issuer || se.org_id != state.org_id {
-                        continue;
-                    }
-                    let Some(vk) = self.epochs.keys.get(&se.key_epoch) else {
-                        continue;
-                    };
-                    let Ok(e) = se.open(&vault, vk, &pk) else {
-                        continue;
-                    };
-                    if e.previous_hash != state.log_hashes.get(&issuer).cloned().unwrap_or_default()
-                    {
-                        continue;
-                    }
-                    state
-                        .log_hashes
-                        .insert(issuer.clone(), hex::encode(crypto::hash(&blob)));
+                    state.log_hashes.insert(issuer.clone(), hash);
                     state.log.entry(issuer.clone()).or_default().insert(want, e);
                     changed = true;
                     adopted = true;

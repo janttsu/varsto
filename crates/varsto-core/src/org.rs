@@ -55,14 +55,29 @@ pub const REQUEST_FILE: &str = "org-request.json";
 /// The local cache of the organization as this device last verified it.
 pub const STATE_FILE: &str = "org-state.json";
 
-fn seq_name(seq: u32) -> String {
-    format!("{seq:08}.json")
+/// Object names are `<seq, 8 digits>-<attempt, 3 digits>.json`. A writer
+/// claims the lowest attempt number that is free on its first storage with
+/// put-if-absent, so that two writers of the same sequence number cannot
+/// both succeed there, and so that a junk object someone wrote under a
+/// name first (anyone with the storage credentials can) does not block the
+/// sequence number: the writer moves on to the next attempt. A reader
+/// takes, among the objects of one sequence number from every storage in
+/// name order (ties by content hash), the first one that verifies.
+pub const ATTEMPTS: u32 = 64;
+
+pub fn object_name(seq: u32, attempt: u32) -> String {
+    format!("{seq:08}-{attempt:03}.json")
 }
 
-/// Parse `<seq>.json` (or `<seq>/...`).
+/// Parse the sequence number from `<seq>-<attempt>.json`, `<seq>.json` or
+/// `<seq>/...`.
 pub fn seq_from_name(name: &str) -> Option<u32> {
     let head = name.split('/').next()?;
-    head.strip_suffix(".json").unwrap_or(head).parse().ok()
+    let digits = head.split(['-', '.']).next()?;
+    if digits.len() != 8 {
+        return None;
+    }
+    digits.parse().ok()
 }
 
 // ----- root key -----------------------------------------------------------------
@@ -116,6 +131,12 @@ pub struct Manifest {
     pub issued_utc: i64,
     pub root_pubkey_hex: String,
     pub admins: Vec<Admin>,
+    /// The newest roster when this manifest was written: rosters and log
+    /// entries after it are governed by this manifest, earlier ones by the
+    /// manifest before. A dismissed administrator can therefore not keep
+    /// writing by naming the manifest that still listed it.
+    #[serde(default)]
+    pub roster_seq: u32,
 }
 
 impl Manifest {
@@ -141,8 +162,8 @@ pub struct SignedManifest {
 }
 
 impl SignedManifest {
-    pub fn storage_key(seq: u32) -> String {
-        format!("{MANIFEST_PREFIX}{}", seq_name(seq))
+    pub fn storage_key(seq: u32, attempt: u32) -> String {
+        format!("{MANIFEST_PREFIX}{}", object_name(seq, attempt))
     }
     fn aad(vault: &VaultId, org_id: &str, seq: u32) -> Vec<u8> {
         crypto::aad(
@@ -336,8 +357,8 @@ pub struct SignedRoster {
 }
 
 impl SignedRoster {
-    pub fn storage_key(seq: u32) -> String {
-        format!("{ROSTER_PREFIX}{}", seq_name(seq))
+    pub fn storage_key(seq: u32, attempt: u32) -> String {
+        format!("{ROSTER_PREFIX}{}", object_name(seq, attempt))
     }
     fn aad(vault: &VaultId, org_id: &str, seq: u32) -> Vec<u8> {
         crypto::aad(
@@ -494,6 +515,9 @@ pub struct LogEntry {
     pub previous_hash: String,
     pub utc: i64,
     pub event: OrgEvent,
+    /// The newest roster when the entry was written (which manifest governs it).
+    #[serde(default)]
+    pub roster_seq: u32,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -509,8 +533,8 @@ pub struct SignedLogEntry {
 }
 
 impl SignedLogEntry {
-    pub fn storage_key(issuer: &DeviceId, seq: u64) -> String {
-        format!("{LOG_PREFIX}{issuer}/{seq:08}.json")
+    pub fn storage_key(issuer: &DeviceId, seq: u64, attempt: u32) -> String {
+        format!("{LOG_PREFIX}{issuer}/{seq:08}-{attempt:03}.json")
     }
     fn aad(vault: &VaultId, org_id: &str, issuer: &DeviceId, seq: u64) -> Vec<u8> {
         crypto::aad(
@@ -619,6 +643,12 @@ pub struct OrgState {
     /// Every manifest accepted so far, by seq (small: one per admin change).
     pub manifests: BTreeMap<u32, Manifest>,
     pub roster: Option<Roster>,
+    /// The last few rosters adopted with the hash of their bytes, by seq:
+    /// a device whose own roster lost its sequence number to another
+    /// administrator's (the storages decide, see `object_name`) steps back
+    /// one and adopts the winner.
+    #[serde(default)]
+    pub roster_history: BTreeMap<u32, (Roster, String)>,
     /// Log entries accepted so far, by issuer then seq.
     #[serde(default)]
     pub log: BTreeMap<DeviceId, BTreeMap<u64, LogEntry>>,
@@ -651,12 +681,21 @@ impl OrgState {
     pub fn is_admin(&self, device: &DeviceId) -> bool {
         self.manifest().is_some_and(|m| m.is_admin(device))
     }
-    /// Admin of the manifest `seq` (a roster names the manifest that made
-    /// its issuer an admin).
-    pub fn was_admin(&self, device: &DeviceId, seq: u32) -> bool {
-        self.manifests.get(&seq).is_some_and(|m| m.is_admin(device))
+    /// The manifest in force for roster `seq`: the newest one written while
+    /// the roster before `seq` was current.
+    pub fn governing(&self, roster_seq: u32) -> Option<&Manifest> {
+        self.manifests
+            .values()
+            .rev()
+            .find(|m| m.roster_seq < roster_seq)
     }
-    /// Admin of any manifest so far: log entries are accepted from them.
+    /// Whether `device` may issue roster `seq` (or a log entry written
+    /// while roster `seq - 1` was current).
+    pub fn governs_admin(&self, device: &DeviceId, roster_seq: u32) -> bool {
+        self.governing(roster_seq)
+            .is_some_and(|m| m.is_admin(device))
+    }
+    /// Admin of any manifest so far.
     pub fn ever_admin(&self, device: &DeviceId) -> bool {
         self.manifests.values().any(|m| m.is_admin(device))
     }
@@ -696,7 +735,8 @@ impl OrgState {
 
 /// The local file of a device waiting for approval: its key-exchange key and
 /// the signing key it will join with (both made here, so the device id in
-/// the request code is the id the device gets).
+/// the request code is the id the device gets). It is secret until the
+/// device joins and is kept owner-readable only.
 #[derive(Serialize, Deserialize)]
 pub struct OrgRequest {
     pub kem_alg: String,
@@ -740,12 +780,23 @@ impl OrgRequest {
             }
             r.name = n.to_string();
         }
-        util::write_atomic(&path, &serde_json::to_vec_pretty(&r)?)?;
-        #[cfg(unix)]
+        // Holds the device's signing key until the approval arrives: owner
+        // readable only, from the first byte.
+        let tmp = path.with_extension("json.tmp");
         {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
+            let mut opts = std::fs::OpenOptions::new();
+            opts.write(true).create(true).truncate(true);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::OpenOptionsExt;
+                opts.mode(0o600);
+            }
+            use std::io::Write as _;
+            let mut f = opts.open(&tmp)?;
+            f.write_all(&serde_json::to_vec_pretty(&r)?)?;
+            f.sync_all()?;
         }
+        std::fs::rename(&tmp, &path)?;
         r.code()
     }
     fn code(&self) -> Result<String> {
@@ -819,6 +870,10 @@ impl OrgRequest {
 pub struct Approval {
     pub bundle: crate::pair::Bundle,
     pub org_id: String,
+    /// The root public key (hex): the joining device pins it before its
+    /// first sync, so a replaced manifest chain on the storage is refused.
+    #[serde(default)]
+    pub root_pubkey_hex: String,
     pub org_name: String,
     pub user: String,
     pub approver: DeviceId,
@@ -974,6 +1029,7 @@ mod tests {
                 device: DeviceId::random(),
                 name: "hq".into(),
             }],
+            roster_seq: 0,
         };
         let s = SignedManifest::seal(&m, &vault, 0, &key, &root).unwrap();
         assert_eq!(s.open(&vault, &key, None).unwrap(), m);
@@ -1018,12 +1074,30 @@ mod tests {
             event: OrgEvent::PolicyChanged {
                 policy: OrgPolicy::default(),
             },
+            roster_seq: 1,
         };
         let s = SignedLogEntry::seal(&e, &vault, 0, &key, &admin).unwrap();
         assert_eq!(s.open(&vault, &key, &admin.public()).unwrap(), e);
         let mut t = s.clone();
         t.key_epoch = 1;
         assert!(t.open(&vault, &key, &admin.public()).is_err());
+    }
+
+    #[test]
+    fn object_names_carry_the_sequence_number() {
+        assert_eq!(seq_from_name("00000007-001.json"), Some(7));
+        assert_eq!(seq_from_name("00000007.json"), Some(7));
+        assert_eq!(seq_from_name("7.json"), None);
+        assert_eq!(seq_from_name("junk"), None);
+        assert_eq!(
+            SignedRoster::storage_key(3, 2),
+            "org/roster/00000003-002.json"
+        );
+        let d = DeviceId::random();
+        assert_eq!(
+            SignedLogEntry::storage_key(&d, 12, 1),
+            format!("org/log/{d}/00000012-001.json")
+        );
     }
 
     #[test]
@@ -1051,6 +1125,7 @@ mod tests {
                 storages: vec![],
             },
             org_id: "b".repeat(32),
+            root_pubkey_hex: String::new(),
             org_name: "Acme".into(),
             user: "dana".into(),
             approver: DeviceId::random(),

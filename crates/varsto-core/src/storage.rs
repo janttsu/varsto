@@ -19,6 +19,15 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
+/// Object keys are relative paths with `/` separators and plain
+/// components: nothing that could leave the storage's root on any
+/// platform. Keys that come from untrusted places (another user's storage
+/// listed by a replica, a disk's own index) go through this before a
+/// backend touches a path or builds a remote target.
+pub fn validate_key(key: &str) -> Result<()> {
+    crate::util::check_rel_path(key).map_err(|_| anyhow::anyhow!("invalid object key {key:?}"))
+}
+
 pub trait Storage: Send + Sync {
     fn name(&self) -> &str;
     /// Write an object unless it already exists. Returns true when written.
@@ -295,14 +304,7 @@ impl LocalDirStorage {
     }
 
     fn path_for(&self, key: &str) -> Result<PathBuf> {
-        if key.is_empty()
-            || key.starts_with('/')
-            || key
-                .split('/')
-                .any(|c| c == ".." || c.is_empty() || c == ".")
-        {
-            anyhow::bail!("invalid object key {key:?}");
-        }
+        validate_key(key)?;
         Ok(self.root.join(key))
     }
 }
