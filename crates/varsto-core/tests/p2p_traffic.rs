@@ -328,3 +328,79 @@ fn relayed_transfer_is_counted_by_both_ends_and_the_relay() {
         .iter()
         .all(|p| p.objects_out == 0 && p.objects_in == 0));
 }
+
+#[test]
+fn many_blocks_and_small_files_share_one_quic_connection() {
+    // A large file (many blocks in flight at once) and many small files
+    // (fetched ahead across files) all travel over one QUIC connection. The
+    // record carries no TCP address: on loopback, a LAN address, TCP would
+    // be tried first.
+    let lab = lab();
+    let (mut a, key) = Engine::init(&lab.home("a"), "laptop", PASS).unwrap();
+    a.chunker = ChunkerParams::SMALL;
+    a.add_storage(lab.storage.clone()).unwrap();
+    a.add_folder("docs", &lab.dir("a")).unwrap();
+    let big: Vec<u8> = (0..400_000u32)
+        .map(|i| (i.wrapping_mul(2_654_435_761) >> 11) as u8)
+        .collect();
+    fs::write(lab.dir("a").join("big.bin"), &big).unwrap();
+    for i in 0..60u32 {
+        let body: Vec<u8> = (0..900 + i * 37)
+            .map(|j| (j.wrapping_mul(40_503).wrapping_add(i * 7919) >> 3) as u8)
+            .collect();
+        fs::write(lab.dir("a").join(format!("small-{i:02}.bin")), body).unwrap();
+    }
+    a.push("docs").unwrap();
+    fs::remove_dir_all(lab.root.join("storage").join("chunks")).unwrap();
+
+    let traffic_a = Arc::new(Traffic::new());
+    let node_a = node(&a, served(&a), &traffic_a);
+    let mut b = join(&lab, "b", "desk", &key);
+    let traffic_b = Arc::new(Traffic::new());
+    let node_b = node(&b, empty(), &traffic_b);
+    let (rec_a, rec_b) = (record(&a, &node_a, true), record(&b, &node_b, true));
+    let _peers_a = Peers::build(
+        a.peer_key(),
+        a.device_id().clone(),
+        std::slice::from_ref(&rec_b),
+        &[],
+        Some(node_a.clone()),
+    );
+    b.set_peers(Some(Arc::new(Peers::build(
+        b.peer_key(),
+        b.device_id().clone(),
+        std::slice::from_ref(&rec_a),
+        &[],
+        Some(node_b.clone()),
+    ))));
+    let rep = b.pull("docs").unwrap();
+    assert!(
+        rep.files_unavailable.is_empty(),
+        "{:?}",
+        rep.files_unavailable
+    );
+    assert_eq!(rep.files_updated, 61);
+    assert!(rep.chunks_downloaded > 100, "{}", rep.chunks_downloaded);
+    assert_eq!(rep.chunks_from_peers, rep.chunks_downloaded);
+    assert_eq!(fs::read(lab.dir("b").join("big.bin")).unwrap(), big);
+    for i in 0..60u32 {
+        let name = format!("small-{i:02}.bin");
+        assert_eq!(
+            fs::read(lab.dir("b").join(&name)).unwrap(),
+            fs::read(lab.dir("a").join(&name)).unwrap()
+        );
+    }
+    // Every request in flight shared the one connection.
+    assert_eq!(node_b.connections_opened(), 1);
+
+    // Both ends counted the same objects and bytes.
+    let rb = settle(&traffic_b, |r| r.totals.active == 0);
+    let ra = settle(&traffic_a, |r| {
+        r.totals.objects_out == rep.chunks_from_peers
+    });
+    let b_from_a = peer(&rb, a.device_id());
+    let a_to_b = peer(&ra, b.device_id());
+    assert_eq!(b_from_a.objects_in, rep.chunks_from_peers);
+    assert_eq!(a_to_b.objects_out, rep.chunks_from_peers);
+    assert_eq!(a_to_b.tx_total, b_from_a.rx_total);
+}

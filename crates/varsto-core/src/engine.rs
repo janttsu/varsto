@@ -383,6 +383,8 @@ pub struct LedgerEntry {
 pub struct Engine {
     /// Peers to try before storages when downloading (set by the service).
     peers: Option<std::sync::Arc<crate::p2p::Peers>>,
+    /// Objects of small files fetched ahead during a pull (see `prefetch_small`).
+    prefetched: HashMap<ObjectName, Fetched>,
     /// Strongroom folder keys held in memory until the expiry time (UTC seconds).
     unlocked: BTreeMap<FolderId, (SecretKey, i64)>,
     home: PathBuf,
@@ -426,6 +428,10 @@ fn placeholder_path(disk: &Path) -> PathBuf {
 
 /// Chunks of one file fetched at once (see `download_to`).
 const FETCH_AHEAD: usize = 8;
+/// Fetching ahead across single-block files during a pull: at most this
+/// many files looked at and objects fetched per batch.
+const PREFETCH_FILES: usize = 64;
+const PREFETCH_OBJECTS: usize = 32;
 
 /// One chunk object as `download_to` looked for it.
 enum Fetched {
@@ -808,6 +814,7 @@ impl Engine {
         util::write_json(&home.join("vault.json"), &vault)?;
         let mut engine = Engine {
             peers: None,
+            prefetched: HashMap::new(),
             unlocked: BTreeMap::new(),
             home: home.to_path_buf(),
             vault,
@@ -972,6 +979,7 @@ impl Engine {
         let removal = util::read_json(&home.join("removed.json")).ok();
         let mut engine = Engine {
             peers: None,
+            prefetched: HashMap::new(),
             unlocked: BTreeMap::new(),
             config: Config::load(home)?,
             ledger: LedgerStore::open(&home.join("ledger"))?,
@@ -2841,7 +2849,12 @@ impl Engine {
             };
             self.observe_clock(m.lamport)?;
             report.manifests_applied += 1;
-            for (path, remote) in &m.files {
+            let fetch_ahead = !encrypted_here && !self.mount_is_selective(&rec.folder_id);
+            let mut ahead_from = 0;
+            for (i, (path, remote)) in m.files.iter().enumerate() {
+                if fetch_ahead && i >= ahead_from {
+                    ahead_from = self.prefetch_small(&m, i, &state, &storages);
+                }
                 match manifest::merge(state.files.get(path), remote) {
                     Merge::KeepLocal => {}
                     Merge::TakeRemote => {
@@ -2937,6 +2950,9 @@ impl Engine {
                 }
             }
             state.last_seen.insert(dev, seq);
+            // Whatever was fetched ahead and not used (a file that failed
+            // earlier in its batch) is not kept past its manifest.
+            self.prefetched.clear();
         }
         if encrypted_here {
             self.cache_wanted(&rec, &fk, &mut state, &storages, &mut report)?;
@@ -3179,7 +3195,32 @@ impl Engine {
             // one after another, a link with any latency idles most of the
             // time, so up to FETCH_AHEAD chunks of the file are in flight at
             // once; they are still checked, decrypted and written in order.
-            fetch_in_order(peers.as_deref(), &file.chunks, storages, |cref, fetched| {
+            // Small files may have been fetched ahead together (`prefetch_small`).
+            // (A file that repeats a block takes the normal way: each cached
+            // object is handed out once.)
+            let distinct = file
+                .chunks
+                .iter()
+                .map(|c| &c.object)
+                .collect::<HashSet<_>>()
+                .len();
+            let ahead: Option<Vec<Fetched>> = if !file.chunks.is_empty()
+                && distinct == file.chunks.len()
+                && file
+                    .chunks
+                    .iter()
+                    .all(|c| self.prefetched.contains_key(&c.object))
+            {
+                Some(
+                    file.chunks
+                        .iter()
+                        .filter_map(|c| self.prefetched.remove(&c.object))
+                        .collect(),
+                )
+            } else {
+                None
+            };
+            let mut write_chunk = |cref: &ChunkRef, fetched: Fetched| -> Result<()> {
                 let (storage_name, ct) = match fetched {
                     Fetched::Got {
                         source,
@@ -3232,11 +3273,69 @@ impl Engine {
                     size: cref.size,
                 });
                 Ok(())
-            })?;
+            };
+            match ahead {
+                Some(got) => {
+                    for (cref, fetched) in file.chunks.iter().zip(got) {
+                        write_chunk(cref, fetched)?;
+                    }
+                }
+                None => fetch_in_order(peers.as_deref(), &file.chunks, storages, &mut write_chunk)?,
+            }
             out.sync_all()?;
         }
         fs::rename(&tmp, disk)?;
         Ok(())
+    }
+
+    /// Fetch the blocks of the single-block files that the pull is about to
+    /// take from `m`, starting at file `from`, together into `prefetched`:
+    /// fetched one file after another, a folder of many small files waits a
+    /// full round trip per file. Returns the index of the first file not
+    /// looked at.
+    fn prefetch_small(
+        &mut self,
+        m: &Manifest,
+        from: usize,
+        state: &FolderState,
+        storages: &[(StorageSpec, Box<dyn Storage>)],
+    ) -> usize {
+        let mut wanted: Vec<ChunkRef> = Vec::new();
+        let mut seen: HashSet<ObjectName> = HashSet::new();
+        let mut next = from;
+        for (path, remote) in m.files.iter().skip(from) {
+            if wanted.len() >= PREFETCH_OBJECTS || next >= from + PREFETCH_FILES {
+                break;
+            }
+            next += 1;
+            // Single-block files only: a file of several blocks has its own
+            // window (`download_to`).
+            if remote.deleted
+                || remote.chunks.len() != 1
+                || !matches!(
+                    manifest::merge(state.files.get(path), remote),
+                    Merge::TakeRemote
+                )
+            {
+                continue;
+            }
+            for c in &remote.chunks {
+                if !self.prefetched.contains_key(&c.object) && seen.insert(c.object.clone()) {
+                    wanted.push(c.clone());
+                }
+            }
+        }
+        if wanted.len() > 1 {
+            let peers = self.peers.clone();
+            let cache = &mut self.prefetched;
+            let _ = fetch_in_order(peers.as_deref(), &wanted, storages, |c, f| {
+                if matches!(f, Fetched::Got { .. }) {
+                    cache.insert(c.object.clone(), f);
+                }
+                Ok(())
+            });
+        }
+        next
     }
 
     fn write_placeholder(disk: &Path, file: &FileState) -> Result<()> {

@@ -493,6 +493,11 @@ pub struct Node {
     serving: Arc<Serving>,
     /// Open connections by address, reused across requests.
     conns: tokio::sync::Mutex<HashMap<SocketAddr, quinn::Connection>>,
+    /// One connection attempt per address at a time: requests in flight
+    /// together wait for it and then share the connection it opened.
+    connecting: tokio::sync::Mutex<HashMap<SocketAddr, Arc<tokio::sync::Mutex<()>>>>,
+    /// Connections this node opened as a client (for tests and diagnostics).
+    opened: std::sync::atomic::AtomicUsize,
     /// Relays we are registered with (device -> connection).
     relays: Mutex<BTreeMap<DeviceId, quinn::Connection>>,
     /// The addresses the keeper punched last round, to log changes only.
@@ -597,6 +602,8 @@ impl Node {
             identity,
             serving,
             conns: tokio::sync::Mutex::new(HashMap::new()),
+            connecting: tokio::sync::Mutex::new(HashMap::new()),
+            opened: std::sync::atomic::AtomicUsize::new(0),
             relays: Mutex::new(BTreeMap::new()),
             punched: Mutex::new(Vec::new()),
             last_round: Mutex::new(None),
@@ -788,10 +795,19 @@ impl Node {
         expected: &str,
         punch: bool,
     ) -> Result<quinn::Connection> {
-        if let Some(c) = self.conns.lock().await.get(&addr) {
-            if c.close_reason().is_none() && peer_hash(c).as_deref() == Some(expected) {
-                return Ok(c.clone());
-            }
+        if let Some(c) = self.reusable(addr, expected).await {
+            return Ok(c);
+        }
+        let gate = self
+            .connecting
+            .lock()
+            .await
+            .entry(addr)
+            .or_default()
+            .clone();
+        let _one_at_a_time = gate.lock().await;
+        if let Some(c) = self.reusable(addr, expected).await {
+            return Ok(c);
         }
         if expected.is_empty() {
             bail!("peer has no certificate hash yet");
@@ -852,7 +868,21 @@ impl Node {
             }
         ));
         self.conns.lock().await.insert(addr, conn.clone());
+        self.opened
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         Ok(conn)
+    }
+
+    /// An open connection to `addr` with the certificate we expect.
+    async fn reusable(&self, addr: SocketAddr, expected: &str) -> Option<quinn::Connection> {
+        let conns = self.conns.lock().await;
+        let c = conns.get(&addr)?;
+        (c.close_reason().is_none() && peer_hash(c).as_deref() == Some(expected)).then(|| c.clone())
+    }
+
+    /// How many connections this node has opened as a client.
+    pub fn connections_opened(&self) -> usize {
+        self.opened.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// One request to the peer at `addr` (direct) or, with a `/p2p/via/`
@@ -866,9 +896,33 @@ impl Node {
         punch: bool,
     ) -> Result<(u16, Vec<u8>)> {
         self.rt.block_on(async {
+            let reused = self.reusable(addr, cert_sha256).await.is_some();
             let conn = self.connect(addr, cert_sha256, punch).await?;
-            request_on(&conn, "GET", path, auth).await
+            match request_on(&conn, "GET", path, auth).await {
+                Ok(r) => Ok(r),
+                // A kept connection can outlive the other end (it restarted,
+                // or its address changed): open a new one and ask again once,
+                // instead of falling back to a slower route for good.
+                Err(e) if reused => {
+                    log(&format!(
+                        "quic {addr}: kept connection failed ({e:#}); reconnecting"
+                    ));
+                    conn.close(0u32.into(), b"stale");
+                    self.forget(addr, &conn).await;
+                    let conn = self.connect(addr, cert_sha256, punch).await?;
+                    request_on(&conn, "GET", path, auth).await
+                }
+                Err(e) => Err(e),
+            }
         })
+    }
+
+    /// Drop `conn` from the cache unless another request already replaced it.
+    async fn forget(&self, addr: SocketAddr, conn: &quinn::Connection) {
+        let mut conns = self.conns.lock().await;
+        if conns.get(&addr).map(|c| c.stable_id()) == Some(conn.stable_id()) {
+            conns.remove(&addr);
+        }
     }
 
     /// Does our own public address lead back to us? True means other devices
@@ -1000,8 +1054,15 @@ async fn serve_stream(
             "GET" => match target.strip_prefix("/p2p/via/") {
                 Some(rest) => relay_request(&sv, rest, &auth).await,
                 None => {
+                    // Reading, compressing and encrypting a block is blocking
+                    // work: off the runtime's two threads, so that many
+                    // requests on one connection are answered side by side.
                     let snap = sv.snapshot.lock().unwrap().clone();
-                    let (status, body, peer) = handle_from(snap.as_deref(), &target, &auth);
+                    let (t, a) = (target.clone(), auth.clone());
+                    let (status, body, peer) =
+                        tokio::task::spawn_blocking(move || handle_from(snap.as_deref(), &t, &a))
+                            .await
+                            .unwrap_or_else(|_| (500, b"internal error".to_vec(), None));
                     served = peer.map(|d| (d, target.clone()));
                     (status, body)
                 }

@@ -320,6 +320,18 @@ pub fn is_lan(ip: IpAddr) -> bool {
     }
 }
 
+/// The order routes to a peer are tried in: TCP (LAN addresses first, as
+/// the record lists them), then QUIC, then relays. QUIC was measured first
+/// for addresses beyond the LAN and was slower there than a new TCP
+/// connection per request (October 2026, cloud machines in three
+/// countries), so TCP stays first and QUIC is the way through NATs.
+fn order_routes(tcp: &[SocketAddr], udp: &[SocketAddr], relays: Vec<Route>) -> Vec<Route> {
+    let mut out: Vec<Route> = tcp.iter().map(|a| Route::Tcp(*a)).collect();
+    out.extend(udp.iter().map(|a| Route::Quic(*a)));
+    out.extend(relays);
+    out
+}
+
 /// A peer we can ask for objects.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PeerAddr {
@@ -487,7 +499,7 @@ pub struct PeerStatus {
 type Attempt = (Option<Route>, u16, Instant);
 
 /// How one request reached (or failed to reach) a peer.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 enum Route {
     Tcp(SocketAddr),
     Quic(SocketAddr),
@@ -786,9 +798,9 @@ impl Peers {
 
     /// Every route to `p`, in the order they are tried.
     fn candidate_routes(&self, p: &PeerInfo) -> Vec<Route> {
-        let mut out: Vec<Route> = p.tcp.iter().map(|a| Route::Tcp(*a)).collect();
-        if self.quic.is_some() && !p.cert_sha256.is_empty() {
-            out.extend(p.udp.iter().map(|a| Route::Quic(*a)));
+        let mut relays = Vec::new();
+        let quic = self.quic.is_some() && !p.cert_sha256.is_empty();
+        if quic {
             for relay in &p.relay_via {
                 let Some(r) = self.peers.iter().find(|r| &r.device == relay) else {
                     continue;
@@ -797,11 +809,11 @@ impl Peers {
                     continue;
                 }
                 for a in &r.udp {
-                    out.push(Route::Relay(relay.clone(), r.name.clone(), *a));
+                    relays.push(Route::Relay(relay.clone(), r.name.clone(), *a));
                 }
             }
         }
-        out
+        order_routes(&p.tcp, if quic { &p.udp } else { &[] }, relays)
     }
 
     /// One request to peer `p`: the route that worked last time first, then
@@ -844,7 +856,15 @@ impl Peers {
         if let Some(r) = last {
             match self.over(&r, path, auth, p) {
                 Ok((s, b)) => {
-                    self.remember(&p.device, Some(r.clone()), s);
+                    // Requests run side by side: one may have switched the
+                    // peer to a better route meanwhile; keep that one.
+                    let mut routes = self.routes.lock().unwrap();
+                    match routes.get(&p.device) {
+                        Some((Some(cur), _, _)) if *cur != r => {}
+                        _ => {
+                            routes.insert(p.device.clone(), (Some(r.clone()), s, Instant::now()));
+                        }
+                    }
                     return Some((s, b, r));
                 }
                 Err(e) => log(&format!("{who}: {} lost: {e:#}", r.describe())),
@@ -1132,5 +1152,28 @@ mod tests {
         let mut bad = h.clone();
         bad.pop();
         assert_eq!(verify_auth(&k, &bad, "/p2p/object/abc"), None);
+    }
+
+    #[test]
+    fn routes_are_tried_tcp_then_quic_then_relays() {
+        let lan: SocketAddr = "192.168.1.5:17893".parse().unwrap();
+        let wide: SocketAddr = "203.0.113.5:17893".parse().unwrap();
+        let relay = Route::Relay(
+            DeviceId::from_hex("00112233445566778899aabbccddeeff").unwrap(),
+            "r".into(),
+            wide,
+        );
+        let got = order_routes(&[lan, wide], &[wide, lan], vec![relay.clone()]);
+        assert_eq!(
+            got,
+            vec![
+                Route::Tcp(lan),
+                Route::Tcp(wide),
+                Route::Quic(wide),
+                Route::Quic(lan),
+                relay
+            ]
+        );
+        assert_eq!(order_routes(&[lan], &[], vec![]), vec![Route::Tcp(lan)]);
     }
 }

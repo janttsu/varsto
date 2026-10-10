@@ -3,12 +3,21 @@
 """Summarise p2p-bench.py results (results.jsonl) into the small JSON the
 website's benchmark page is written from: medians per configuration.
 
-    report.py <work>/results.jsonl > website/src/data/benchmarks-<date>.json
+    report.py <results.jsonl>... > website/src/data/benchmarks-<date>.json
+
+Several result files (sessions) can be combined. Runs carrying a variant
+label stand for an earlier build: the A/B steps of one fix are listed under
+"variants"; whole configurations measured before a fix are kept in "pull"
+with their label, next to the current ones.
 """
 import json
 import re
 import statistics
 import sys
+
+
+# Single runs that measured the steps of one fix, one after another.
+AB_STEPS = {"sequential", "prefetch", "prefetch-pool", "sliding", "serial-tcp-server"}
 
 
 def med(xs):
@@ -17,8 +26,8 @@ def med(xs):
 
 
 def main():
-    rows = [json.loads(l) for l in open(sys.argv[1]) if l.strip()]
-    out = {"machines": None, "baseline": None, "datasets": {}, "push": [], "pull": [], "variants": []}
+    rows = [json.loads(l) for path in sys.argv[1:] for l in open(path) if l.strip()]
+    out = {"machines": None, "baselines": {}, "datasets": {}, "push": [], "pull": [], "variants": []}
     for r in rows:
         if r["kind"] == "machines":
             out["machines"] = {"type": r["type"], "zones": r["zones"], "version": r["version"]}
@@ -32,7 +41,7 @@ def main():
                 for k in list(v):
                     if isinstance(v[k], float):
                         v[k] = round(v[k], 1)
-            out["baseline"] = b
+            out["baselines"][r.get("session") or r["utc"][:10]] = b
         elif r["kind"] == "dataset":
             out["datasets"][r["set"]] = {"files": r["files"], "bytes": r["bytes"]}
     pushes = {}
@@ -54,18 +63,18 @@ def main():
         })
     pulls = {}
     for r in rows:
-        if r["kind"] == "run" and r.get("variant"):
+        if r["kind"] == "run" and r.get("variant") in AB_STEPS:
             x = r["summary"][r["readers"][0]]
             out["variants"].append({"variant": r["variant"], "mode": r["mode"], "set": r["set"], "reader": r["readers"][0],
                                     "wall_s": x["wall_s"], "mb_s": x["mb_s"], "chunks": x["chunks"]})
         elif r["kind"] == "run":
             for reader in r["readers"]:
-                key = (r["mode"], r["set"], "+".join(r["readers"]), reader)
+                key = (r.get("variant") or "", r["mode"], r["set"], "+".join(r["readers"]), reader)
                 pulls.setdefault(key, []).append((r, r["summary"][reader]))
-    for (mode, s, group, reader), rs in sorted(pulls.items()):
+    for (variant, mode, s, group, reader), rs in sorted(pulls.items()):
         sums = [x for _, x in rs]
         e = {
-            "mode": mode, "set": s, "group": group, "reader": reader, "runs": len(rs),
+            "variant": variant, "mode": mode, "set": s, "group": group, "reader": reader, "runs": len(rs),
             "wall_s": med([x["wall_s"] for x in sums]),
             "wall_all_s": [x["wall_s"] for x in sums],
             "mb_s": med([x["mb_s"] for x in sums]),

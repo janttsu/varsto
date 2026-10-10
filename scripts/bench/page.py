@@ -3,7 +3,7 @@
 """Render the tables and bar charts of the website's benchmark page from the
 summary JSON that report.py writes.
 
-    page.py website/src/data/benchmarks-2026-10-09.json website/src/pages/benchmarks.html
+    page.py website/src/data/benchmarks-2026-10.json website/src/pages/benchmarks.html
 
 Replaces what stands between `<!-- fragment: name -->` and `<!-- /fragment -->`
 in the page source with freshly rendered tables and charts. The charts are inline SVG styled by classes only
@@ -31,11 +31,32 @@ def rows_for(d, s):
     out = []
     for group in ("ams", "waw", "ams+waw"):
         for reader in group.split("+"):
-            p = next((e for e in d["pull"] if e["mode"] == "p2p" and e["set"] == s and e["group"] == group and e["reader"] == reader), None)
-            q = next((e for e in d["pull"] if e["mode"] == "s3" and e["set"] == s and e["group"] == group and e["reader"] == reader), None)
+            p = next((e for e in d["pull"] if not e["variant"] and e["mode"] == "p2p" and e["set"] == s and e["group"] == group and e["reader"] == reader), None)
+            q = next((e for e in d["pull"] if not e["variant"] and e["mode"] == "s3" and e["set"] == s and e["group"] == group and e["reader"] == reader), None)
             if p or q:
                 out.append((f"{READER[reader]}, {GROUP[group]}", p, q))
     return out
+
+
+EARLIER = {
+    "quic-first": "Peer to peer with QUIC tried before TCP (one connection per peer), 10 October",
+    "no-prefetch-across-files": "S3 before fetching ahead across files (one file at a time), 9 October",
+}
+
+
+def earlier_table(d, s, files):
+    """The same configurations measured with an earlier build, for comparison."""
+    es = [e for e in d["pull"] if e["variant"] in EARLIER and e["set"] == s]
+    if not es:
+        return ""
+    head = "<tr><th>Build</th><th>Reader</th><th>Time</th><th>MB/s</th>" + ("<th>files/s</th>" if files else "") + "</tr>"
+    body = []
+    for e in es:
+        runs = " / ".join(fmt(x, 0) + " s" for x in e["wall_all_s"])
+        body.append(f'<tr><td>{EARLIER[e["variant"]]}</td><td>{READER[e["reader"]]}, {GROUP[e["group"]]}</td>'
+                    f'<td>{fmt(e["wall_s"], 0)} s <span class="note">({runs})</span></td><td>{fmt(e["mb_s"])}</td>'
+                    + (f'<td>{fmt(e["files_s"])}</td>' if files else "") + "</tr>")
+    return f'<table class="downloads bench-table"><thead>{head}</thead><tbody>{"".join(body)}</tbody></table>'
 
 
 def chart(rows, metric, unit, title):
@@ -87,13 +108,13 @@ def fragments(d):
     out = {}
     for s, metric, unit, files in (("large", "mb_s", "MB/s", False), ("files", "files_s", "files/s", True), ("text", "mb_s", "MB/s", False)):
         rows = rows_for(d, s)
-        parts = [table(rows, files)]
+        parts = [table(rows, files), earlier_table(d, s, files)]
         if any(p for _, p, _ in rows):
             parts = [legend(unit), chart(rows, metric, unit, f"{s}: {unit} per reader, peer to peer and S3")] + parts
         out[s] = "\n".join(parts)
     vr = ["<tr><th>Run</th><th>Chunks downloaded</th><th>From peers</th><th>From S3</th><th>Path</th></tr>"]
     for e in d["pull"]:
-        if e["mode"] != "p2p":
+        if e["mode"] != "p2p" or e["variant"]:
             continue
         n = e["chunks"] * e["runs"]
         peers = sum(x or 0 for x in e["chunks_from_peers"])

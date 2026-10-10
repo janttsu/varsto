@@ -5,6 +5,7 @@
     gen-data.py small <dir> [--files 50000]   many small files, nested directories
     gen-data.py files <dir> [--files 10000]   the same distribution, fewer files
     gen-data.py big <dir>                     4 x 2 GiB + 1 x 4 GiB incompressible files
+    gen-data.py large <dir>                   2 x 2 GiB incompressible files
     gen-data.py text <dir> [--mib 512]        compressible log-like text files
 
 The layout and sizes come from a fixed seed, so every run sees the same
@@ -42,9 +43,8 @@ def small(root: pathlib.Path, files: int):
     print(f"small: {files} files, {total} bytes")
 
 
-def big(root: pathlib.Path):
+def big(root: pathlib.Path, sizes=(("big-1.bin", 2), ("big-2.bin", 2), ("big-3.bin", 2), ("big-4.bin", 2), ("huge.bin", 4))):
     root.mkdir(parents=True, exist_ok=True)
-    sizes = [("big-1.bin", 2), ("big-2.bin", 2), ("big-3.bin", 2), ("big-4.bin", 2), ("huge.bin", 4)]
     for name, gib in sizes:
         # openssl's generator is several times faster than /dev/urandom; it
         # takes at most 2^31 - 1 bytes per call, so the file grows by 1 GiB steps.
@@ -82,13 +82,13 @@ def text(root: pathlib.Path, mib: int):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("set", choices=["small", "files", "big", "text"])
+    ap.add_argument("set", choices=["small", "files", "big", "large", "text"])
     ap.add_argument("dir")
     ap.add_argument("--files", type=int)
     ap.add_argument("--mib", type=int, default=512)
     a = ap.parse_args()
     root = pathlib.Path(a.dir)
-    {"small": lambda: small(root, a.files or 50000), "files": lambda: small(root, a.files or 10000), "big": lambda: big(root), "text": lambda: text(root, a.mib)}[a.set]()
+    {"small": lambda: small(root, a.files or 50000), "files": lambda: small(root, a.files or 10000), "big": lambda: big(root), "large": lambda: big(root, (("big-1.bin", 2), ("big-2.bin", 2))), "text": lambda: text(root, a.mib)}[a.set]()
 
 
 if __name__ == "__main__":
