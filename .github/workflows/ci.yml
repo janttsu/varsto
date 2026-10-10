@@ -223,8 +223,20 @@ jobs:
           open smoke/Varsto.app
           sleep 12
           pgrep -x Varsto >/dev/null && echo "app process running" || { echo "app process NOT running"; exit 1; }
-          mkdir -p dist/shots
-          screencapture -x dist/shots/macos-app.png
+          mkdir -p dist/shots/raw
+          screencapture -x dist/shots/raw/macos-desktop.png
+          # The app's own window only: system prompts on the runner (local
+          # network access for the runner agent) stay out of the picture.
+          cat > "$RUNNER_TEMP/winid.swift" <<'SWIFT'
+          import CoreGraphics
+          let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] ?? []
+          for w in list where (w[kCGWindowOwnerName as String] as? String) == "Varsto" && (w[kCGWindowLayer as String] as? Int) == 0 {
+            print(w[kCGWindowNumber as String] as? Int ?? 0); break
+          }
+          SWIFT
+          wid="$(swift "$RUNNER_TEMP/winid.swift" | head -1)"
+          echo "Varsto window: ${wid:-not found}"
+          if [ -n "$wid" ]; then screencapture -x -o -l "$wid" dist/shots/macos-app.png; else cp dist/shots/raw/macos-desktop.png dist/shots/macos-app.png; fi
       - name: Finder - double-click a placeholder, Services menu entries
         run: |
           set -x
@@ -342,7 +354,7 @@ jobs:
         run: |
           python3 -m pip install --quiet --break-system-packages pillow
           version="$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)".*/\1/')"
-          python3 scripts/screenshots/finalize.py art dist/screenshots --version "$version" --commit "$GITHUB_SHA" \
+          python3 scripts/screenshots/finalize.py art dist/screenshots --version "$version" --commit "${{ github.event.pull_request.head.sha || github.sha }}" \
             --source "GitHub Actions run ${{ github.run_number }}"
           cat dist/screenshots/shots.json
       - uses: actions/upload-artifact@v4
