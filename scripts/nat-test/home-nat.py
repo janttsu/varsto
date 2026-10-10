@@ -474,18 +474,25 @@ print(n, time.time() - t0)
         import threading
         t = threading.Thread(target=self.transfer, args=("waw-cone", "home", self.args.mb))
         t.start()
+        # Wait until blocks are flowing in, so the picture shows a transfer.
+        deadline = time.time() + 900
+        while time.time() < deadline:
+            if ((self.api("home", "GET", "/api/p2p/traffic") or {}).get("totals") or {}).get("rx_bps", 0) > 2e6:
+                break
+            time.sleep(1)
         time.sleep(self.args.delay)
         with sync_playwright() as p:
             exe = os.environ.get("CHROMIUM")
             b = p.chromium.launch(executable_path=exe) if exe else p.chromium.launch()
             for scheme in ("light", "dark"):
-                c = b.new_context(viewport={"width": 1280, "height": 900}, color_scheme=scheme, bypass_csp=True)
+                c = b.new_context(viewport={"width": 1280, "height": 900}, device_scale_factor=2, color_scheme=scheme, bypass_csp=True)
                 pg = c.new_page()
                 pg.goto(url)
                 pg.wait_for_selector("#folders tbody tr", timeout=60000)
                 pg.click(".nav-item[data-nav=peers]")
-                time.sleep(3)
-                pg.screenshot(path=str(out / f"p2p-home-{scheme}.png"))
+                time.sleep(4)
+                # The traffic card only: the device list names this machine's system.
+                pg.locator("#trafficcard").screenshot(path=str(out / f"p2p-home-{scheme}.png"))
                 c.close()
             b.close()
         t.join()
@@ -512,7 +519,7 @@ def main():
     ap.add_argument("--mb", type=int, default=64)
     ap.add_argument("--only", help="src:dst pairs, comma separated")
     ap.add_argument("--out", default="dist/nat-test/shots")
-    ap.add_argument("--delay", type=float, default=6.0)
+    ap.add_argument("--delay", type=float, default=3.0)
     a = ap.parse_args()
     r = Rig(a)
     {"up": r.up, "setup": r.setup, "baseline": r.baseline, "restart": r.restart, "s3": r.s3_compare, "vault": r.vault, "run": r.run, "shots": r.shots, "down": r.down,
