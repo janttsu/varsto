@@ -12,12 +12,15 @@ raw="$out/raw"; mkdir -p "$raw"
 SUDO=""; [ "$(id -u)" = 0 ] || SUDO=sudo
 export DEBIAN_FRONTEND=noninteractive
 $SUDO apt-get update -qq
-$SUDO apt-get install -y -qq xvfb xfce4-panel dbus-x11 imagemagick xdotool openbox fonts-noto-core libdbusmenu-gtk3-4 python3-pil >/dev/null
+$SUDO apt-get install -y -qq xvfb xfce4-panel xfce4-session xfconf dbus-x11 imagemagick xdotool openbox fonts-noto-core libdbusmenu-gtk3-4 python3-pil >/dev/null
 export DISPLAY=:99
 Xvfb :99 -screen 0 1280x800x24 >/dev/null 2>&1 &
 sleep 2
 eval "$(dbus-launch --sh-syntax)"
-mkdir -p ~/.config/xfce4/panel
+# The distribution's default panel (with the status tray), so the panel does
+# not stop at its first-run question.
+mkdir -p ~/.config/xfce4/panel ~/.config/xfce4/xfconf/xfce-perchannel-xml
+[ -f /etc/xdg/xfce4/panel/default.xml ] && cp /etc/xdg/xfce4/panel/default.xml ~/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-panel.xml
 xfce4-panel --disable-wm-check >/dev/null 2>&1 &
 sleep 4
 t="$work/tray"; mkdir -p "$t/files" "$t/storage"

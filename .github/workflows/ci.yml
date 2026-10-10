@@ -117,7 +117,7 @@ jobs:
       - name: Screenshots of the Windows desktop (tray, own window)
         run: |
           $exe = (Get-ChildItem C:\build\unzipped -Recurse -Filter varsto.exe | Select-Object -First 1).FullName
-          & scripts\screenshots\windows-desktop.ps1 -Exe $exe -Work "$env:RUNNER_TEMP\shots-work" -Out "$env:GITHUB_WORKSPACE\dist\shots"
+          & scripts\screenshots\windows-desktop.ps1 -Exe $exe -Work "C:\Users\aino" -Out "$env:GITHUB_WORKSPACE\dist\shots"
       - uses: actions/upload-artifact@v4
         if: always()
         with:

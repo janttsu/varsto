@@ -47,11 +47,29 @@ $bytes = New-Object byte[] 6000000; (New-Object Random 7).NextBytes($bytes); [IO
 Start-Process -FilePath $Exe -ArgumentList "--home", $h, "tray" -RedirectStandardOutput "$Work\tray.log" -RedirectStandardError "$Work\tray.err"
 for ($i = 0; $i -lt 60 -and -not (Test-Path "$h\service.json"); $i++) { Start-Sleep 1 }
 Start-Sleep 8
+# Windows 11 / Server 2025 hide new notification icons in the overflow:
+# promote Varsto's (the per-icon setting the taskbar settings page writes).
+Get-ChildItem "HKCU:\Control Panel\NotifyIconSettings" -ErrorAction SilentlyContinue | ForEach-Object {
+  $path = (Get-ItemProperty $_.PSPath -ErrorAction SilentlyContinue).ExecutablePath
+  if ($path -and $path -like "*varsto*") { Set-ItemProperty $_.PSPath -Name IsPromoted -Value 1 -Type DWord; Write-Host "promoted tray icon of $path" }
+}
+Start-Sleep 4
 Shot "$Out\raw\windows-desktop.png" $screen
 # The taskbar corner with the notification area.
 $tw = [Math]::Min(840, $screen.Width); $th = 120
 Shot "$Out\windows-tray.png" (New-Object System.Drawing.Rectangle ($screen.Width - $tw), ($screen.Height - $th), $tw, $th)
 
+# Also the overflow flyout, in case the icon stayed hidden.
+try {
+  Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes
+  $cond = New-Object System.Windows.Automation.PropertyCondition ([System.Windows.Automation.AutomationElement]::NameProperty), "Show Hidden Icons", ([System.Windows.Automation.PropertyConditionFlags]::IgnoreCase)
+  $btn = [System.Windows.Automation.AutomationElement]::RootElement.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $cond)
+  if ($btn) {
+    $btn.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke(); Start-Sleep 2
+    Shot "$Out\raw\windows-tray-overflow.png" (New-Object System.Drawing.Rectangle ($screen.Width - 840), ($screen.Height - 400), 840, 400)
+    [System.Windows.Forms.SendKeys]::SendWait("{ESC}"); Start-Sleep 1
+  } else { Write-Host "no Show Hidden Icons button" }
+} catch { Write-Host "overflow capture: $($_.Exception.Message)" }
 $sf = Get-Content "$h\service.json" | ConvertFrom-Json
 $url = "http://127.0.0.1:$($sf.port)/?token=$($sf.token)"
 $edge = @("${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe", "$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
