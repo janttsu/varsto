@@ -646,6 +646,89 @@
    "variant": "",
    "mode": "p2p",
    "set": "text",
+   "group": "ams+waw",
+   "reader": "ams",
+   "runs": 2,
+   "wall_s": 31.71,
+   "wall_all_s": [
+    32.03,
+    31.39
+   ],
+   "mb_s": 16.93,
+   "files_s": 4.05,
+   "files": 128,
+   "chunks": 1772,
+   "bytes": 536877491,
+   "chunks_from_peers": [
+    1772,
+    1772
+   ],
+   "cpu_s": 14.65,
+   "peak_rss_mib": 133.05,
+   "writer_cpu_s": 53.2,
+   "verified": true,
+   "p2p_in_bytes": [
+    145037420,
+    145037420
+   ],
+   "writer_tx_bytes": [
+    194908730,
+    290074840
+   ],
+   "paths": [
+    ": direct",
+    "writer-paris: direct"
+   ],
+   "routes": [
+    "8 : tcp <writer's public address>:17893 answered"
+   ]
+  },
+  {
+   "variant": "",
+   "mode": "p2p",
+   "set": "text",
+   "group": "ams+waw",
+   "reader": "waw",
+   "runs": 2,
+   "wall_s": 66.06,
+   "wall_all_s": [
+    62.84,
+    69.27
+   ],
+   "mb_s": 8.14,
+   "files_s": 1.9,
+   "files": 128,
+   "chunks": 1772,
+   "bytes": 536877491,
+   "chunks_from_peers": [
+    1772,
+    1772
+   ],
+   "cpu_s": 4.4,
+   "peak_rss_mib": 126.6,
+   "writer_cpu_s": 53.2,
+   "verified": true,
+   "p2p_in_bytes": [
+    145042372,
+    145037420
+   ],
+   "writer_tx_bytes": [
+    194908730,
+    290074840
+   ],
+   "paths": [
+    "ams-p2p-text-ams+waw-1: direct",
+    "writer-paris: direct"
+   ],
+   "routes": [
+    "8 : tcp <writer's public address>:17893 answered",
+    "8 : tcp <writer's public address>:17893 answered 8 : tcp <writer's public address>:17893 answered"
+   ]
+  },
+  {
+   "variant": "",
+   "mode": "p2p",
+   "set": "text",
    "group": "waw",
    "reader": "waw",
    "runs": 2,
@@ -705,6 +788,58 @@
    ],
    "cpu_s": 14.55,
    "peak_rss_mib": 220.6,
+   "writer_cpu_s": null,
+   "verified": true
+  },
+  {
+   "variant": "",
+   "mode": "s3",
+   "set": "files",
+   "group": "ams+waw",
+   "reader": "ams",
+   "runs": 2,
+   "wall_s": 155.9,
+   "wall_all_s": [
+    142.12,
+    169.68
+   ],
+   "mb_s": 1.9,
+   "files_s": 64.65,
+   "files": 10000,
+   "chunks": 10096,
+   "bytes": 294287496,
+   "chunks_from_peers": [
+    0,
+    0
+   ],
+   "cpu_s": 13.05,
+   "peak_rss_mib": 116.8,
+   "writer_cpu_s": null,
+   "verified": true
+  },
+  {
+   "variant": "",
+   "mode": "s3",
+   "set": "files",
+   "group": "ams+waw",
+   "reader": "waw",
+   "runs": 2,
+   "wall_s": 192.05,
+   "wall_all_s": [
+    161.23,
+    222.87
+   ],
+   "mb_s": 1.58,
+   "files_s": 53.45,
+   "files": 10000,
+   "chunks": 10096,
+   "bytes": 294287496,
+   "chunks_from_peers": [
+    0,
+    0
+   ],
+   "cpu_s": 13.6,
+   "peak_rss_mib": 116.75,
    "writer_cpu_s": null,
    "verified": true
   },
