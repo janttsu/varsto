@@ -10,8 +10,8 @@ android {
         applicationId = "in.soderlund.varsto"
         minSdk = 26
         targetSdk = 35
-        versionCode = 8
-        versionName = "0.0.1-alpha.8"
+        versionCode = 9
+        versionName = "0.0.1-alpha.9"
     }
     buildTypes {
         release { isMinifyEnabled = false }

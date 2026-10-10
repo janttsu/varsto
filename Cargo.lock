@@ -3053,7 +3053,7 @@ dependencies = [
 
 [[package]]
 name = "varsto-cli"
-version = "0.0.1-alpha.8"
+version = "0.0.1-alpha.9"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -3078,7 +3078,7 @@ dependencies = [
 
 [[package]]
 name = "varsto-core"
-version = "0.0.1-alpha.8"
+version = "0.0.1-alpha.9"
 dependencies = [
  "anyhow",
  "argon2",
@@ -3118,7 +3118,7 @@ dependencies = [
 
 [[package]]
 name = "varsto-ffi"
-version = "0.0.1-alpha.8"
+version = "0.0.1-alpha.9"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
