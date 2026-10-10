@@ -1,0 +1,1173 @@
+{
+ "machines": {
+  "type": "POP2-4C-16G",
+  "zones": {
+   "par": "fr-par-1",
+   "ams": "nl-ams-1",
+   "waw": "pl-waw-1"
+  },
+  "version": "varsto 0.0.1-alpha.8"
+ },
+ "baselines": {
+  "2026-10-09": {
+   "ping_ms": {
+    "par-waw": 33.357,
+    "ams-par": 9.367,
+    "ams-waw": 20.625
+   },
+   "iperf3_mbit_s": {
+    "par->ams": 925,
+    "par->ams 4 streams": 875,
+    "par->waw": 738,
+    "par->waw 4 streams": 949
+   },
+   "s3": {
+    "par": {
+     "one_stream_256mib_mb_s": 91.2,
+     "small_4kib_objects": 200,
+     "small_ms_per_object": 7.2
+    },
+    "ams": {
+     "one_stream_256mib_mb_s": 25.6,
+     "small_4kib_objects": 200,
+     "small_ms_per_object": 16.1
+    },
+    "waw": {
+     "one_stream_256mib_mb_s": 52.2,
+     "small_4kib_objects": 200,
+     "small_ms_per_object": 52.2
+    }
+   }
+  },
+  "2026-10-10": {
+   "ping_ms": {
+    "par-waw": 33.388,
+    "ams-par": 9.326,
+    "ams-waw": 20.602
+   },
+   "iperf3_mbit_s": {
+    "par->ams": 958,
+    "par->ams 4 streams": 836,
+    "par->waw": 777,
+    "par->waw 4 streams": 909
+   },
+   "s3": {
+    "par": {
+     "one_stream_256mib_mb_s": 58.8,
+     "small_4kib_objects": 200,
+     "small_ms_per_object": 44.7
+    },
+    "ams": {
+     "one_stream_256mib_mb_s": 21.1,
+     "small_4kib_objects": 200,
+     "small_ms_per_object": 106.5
+    },
+    "waw": {
+     "one_stream_256mib_mb_s": 15.3,
+     "small_4kib_objects": 200,
+     "small_ms_per_object": 121.9
+    }
+   }
+  }
+ },
+ "datasets": {
+  "small": {
+   "files": 50000,
+   "bytes": 1456959306
+  },
+  "big": {
+   "files": 5,
+   "bytes": 12884901888
+  },
+  "text": {
+   "files": 128,
+   "bytes": 536877491
+  },
+  "files": {
+   "files": 10000,
+   "bytes": 294287496
+  },
+  "large": {
+   "files": 2,
+   "bytes": 4294967296
+  }
+ },
+ "push": [
+  {
+   "target": "local-disk",
+   "set": "big",
+   "variant": "",
+   "runs": 1,
+   "wall_s": 417.53,
+   "files": 5,
+   "chunks": 40443,
+   "bytes_stored": 12886560051,
+   "mb_s": 30.9,
+   "cpu_s": 197.34,
+   "user_s": 84.94,
+   "sys_s": 112.4,
+   "max_rss_mib": 147.03
+  },
+  {
+   "target": "local-disk",
+   "set": "big",
+   "variant": "alpha8-zstd",
+   "runs": 1,
+   "wall_s": 694.45,
+   "files": 5,
+   "chunks": 40443,
+   "bytes_stored": 12886560051,
+   "mb_s": 18.6,
+   "cpu_s": 482.72,
+   "user_s": 109.92,
+   "sys_s": 372.8,
+   "max_rss_mib": 136.81
+  },
+  {
+   "target": "local-disk",
+   "set": "small",
+   "variant": "",
+   "runs": 1,
+   "wall_s": 468.02,
+   "files": 50000,
+   "chunks": 47911,
+   "bytes_stored": 1382289781,
+   "mb_s": 3.1,
+   "cpu_s": 67.44,
+   "user_s": 26.9,
+   "sys_s": 40.54,
+   "max_rss_mib": 258.07
+  },
+  {
+   "target": "local-disk",
+   "set": "small",
+   "variant": "alpha8-zstd",
+   "runs": 1,
+   "wall_s": 514.78,
+   "files": 50000,
+   "chunks": 47911,
+   "bytes_stored": 1382289781,
+   "mb_s": 2.8,
+   "cpu_s": 109.44,
+   "user_s": 31.24,
+   "sys_s": 78.2,
+   "max_rss_mib": 253.48
+  },
+  {
+   "target": "local-disk",
+   "set": "text",
+   "variant": "",
+   "runs": 1,
+   "wall_s": 56.18,
+   "files": 128,
+   "chunks": 1772,
+   "bytes_stored": 145037420,
+   "mb_s": 9.6,
+   "cpu_s": 44.51,
+   "user_s": 41.73,
+   "sys_s": 2.78,
+   "max_rss_mib": 68.36
+  },
+  {
+   "target": "local-disk",
+   "set": "text",
+   "variant": "alpha8-zstd",
+   "runs": 1,
+   "wall_s": 67.63,
+   "files": 128,
+   "chunks": 1772,
+   "bytes_stored": 145037420,
+   "mb_s": 7.9,
+   "cpu_s": 56.08,
+   "user_s": 42.95,
+   "sys_s": 13.13,
+   "max_rss_mib": 68.24
+  },
+  {
+   "target": "s3-fr-par",
+   "set": "files",
+   "variant": "",
+   "runs": 2,
+   "wall_s": 651.78,
+   "files": 10000,
+   "chunks": 9585,
+   "bytes_stored": 278350407,
+   "mb_s": 0.5,
+   "cpu_s": 21.2,
+   "user_s": 8.28,
+   "sys_s": 12.93,
+   "max_rss_mib": 68.56
+  },
+  {
+   "target": "s3-fr-par",
+   "set": "large",
+   "variant": "",
+   "runs": 2,
+   "wall_s": 932.3,
+   "files": 2,
+   "chunks": 13379,
+   "bytes_stored": 4295515835,
+   "mb_s": 4.6,
+   "cpu_s": 79.61,
+   "user_s": 37.02,
+   "sys_s": 42.6,
+   "max_rss_mib": 107.85
+  },
+  {
+   "target": "s3-fr-par",
+   "set": "text",
+   "variant": "",
+   "runs": 2,
+   "wall_s": 145.45,
+   "files": 128,
+   "chunks": 1772,
+   "bytes_stored": 145037420,
+   "mb_s": 3.7,
+   "cpu_s": 45.05,
+   "user_s": 41.36,
+   "sys_s": 3.69,
+   "max_rss_mib": 76.65
+  },
+  {
+   "target": "tmpfs",
+   "set": "files",
+   "variant": "",
+   "runs": 2,
+   "wall_s": 50.14,
+   "files": 10000,
+   "chunks": 9584,
+   "bytes_stored": 278350366,
+   "mb_s": 5.9,
+   "cpu_s": 12.38,
+   "user_s": 5.38,
+   "sys_s": 7.0,
+   "max_rss_mib": 68.24
+  },
+  {
+   "target": "tmpfs",
+   "set": "small",
+   "variant": "",
+   "runs": 2,
+   "wall_s": 255.02,
+   "files": 50000,
+   "chunks": 47911,
+   "bytes_stored": 1382289781,
+   "mb_s": 5.7,
+   "cpu_s": 62.04,
+   "user_s": 27.48,
+   "sys_s": 34.57,
+   "max_rss_mib": 258.06
+  },
+  {
+   "target": "tmpfs",
+   "set": "text",
+   "variant": "",
+   "runs": 2,
+   "wall_s": 44.91,
+   "files": 128,
+   "chunks": 1772,
+   "bytes_stored": 145037420,
+   "mb_s": 12.0,
+   "cpu_s": 43.62,
+   "user_s": 41.15,
+   "sys_s": 2.47,
+   "max_rss_mib": 68.24
+  }
+ ],
+ "pull": [
+  {
+   "variant": "",
+   "mode": "p2p",
+   "set": "files",
+   "group": "ams",
+   "reader": "ams",
+   "runs": 2,
+   "wall_s": 110.95,
+   "wall_all_s": [
+    110.63,
+    111.28
+   ],
+   "mb_s": 2.65,
+   "files_s": 90.15,
+   "files": 10000,
+   "chunks": 10120,
+   "bytes": 294287496,
+   "chunks_from_peers": [
+    10120,
+    10120
+   ],
+   "cpu_s": 11.6,
+   "peak_rss_mib": 367.15,
+   "writer_cpu_s": 7.4,
+   "verified": true,
+   "p2p_in_bytes": [
+    294702416,
+    294702416
+   ],
+   "writer_tx_bytes": [
+    294702416,
+    294702416
+   ],
+   "paths": [
+    "writer-paris: direct"
+   ],
+   "routes": [
+    "8 : tcp <writer's public address>:17893 answered"
+   ]
+  },
+  {
+   "variant": "",
+   "mode": "p2p",
+   "set": "files",
+   "group": "ams+waw",
+   "reader": "ams",
+   "runs": 2,
+   "wall_s": 155.66,
+   "wall_all_s": [
+    201.6,
+    109.72
+   ],
+   "mb_s": 2.07,
+   "files_s": 70.35,
+   "files": 10000,
+   "chunks": 10120,
+   "bytes": 294287496,
+   "chunks_from_peers": [
+    10120,
+    10120
+   ],
+   "cpu_s": 12.9,
+   "peak_rss_mib": 390.15,
+   "writer_cpu_s": 16.35,
+   "verified": true,
+   "p2p_in_bytes": [
+    294783376,
+    294702416
+   ],
+   "writer_tx_bytes": [
+    589404832,
+    589404832
+   ],
+   "paths": [
+    "waw-p2p-files-ams+waw-1: direct",
+    "writer-paris: direct"
+   ],
+   "routes": [
+    "8 : tcp <writer's public address>:17893 answered",
+    "8 : tcp <writer's public address>:17893 answered 8 : tcp <writer's public address>:17893 answered"
+   ]
+  },
+  {
+   "variant": "",
+   "mode": "p2p",
+   "set": "files",
+   "group": "ams+waw",
+   "reader": "waw",
+   "runs": 2,
+   "wall_s": 259.24,
+   "wall_all_s": [
+    265.04,
+    253.43
+   ],
+   "mb_s": 1.14,
+   "files_s": 38.6,
+   "files": 10000,
+   "chunks": 10120,
+   "bytes": 294287496,
+   "chunks_from_peers": [
+    10120,
+    10120
+   ],
+   "cpu_s": 12.8,
+   "peak_rss_mib": 390.0,
+   "writer_cpu_s": 16.35,
+   "verified": true,
+   "p2p_in_bytes": [
+    294702416,
+    294702416
+   ],
+   "writer_tx_bytes": [
+    589404832,
+    589404832
+   ],
+   "paths": [
+    ": direct",
+    "ams-p2p-files-ams+waw-2: ",
+    "writer-paris: direct"
+   ],
+   "routes": [
+    "8 : tcp <writer's public address>:17893 answered"
+   ]
+  },
+  {
+   "variant": "",
+   "mode": "p2p",
+   "set": "files",
+   "group": "waw",
+   "reader": "waw",
+   "runs": 2,
+   "wall_s": 260.41,
+   "wall_all_s": [
+    257.9,
+    262.93
+   ],
+   "mb_s": 1.13,
+   "files_s": 38.4,
+   "files": 10000,
+   "chunks": 10120,
+   "bytes": 294287496,
+   "chunks_from_peers": [
+    10120,
+    10120
+   ],
+   "cpu_s": 11.75,
+   "peak_rss_mib": 373.25,
+   "writer_cpu_s": 9.55,
+   "verified": true,
+   "p2p_in_bytes": [
+    294702416,
+    294702416
+   ],
+   "writer_tx_bytes": [
+    294702416,
+    294702416
+   ],
+   "paths": [
+    "writer-paris: direct"
+   ],
+   "routes": [
+    "8 : tcp <writer's public address>:17893 answered"
+   ]
+  },
+  {
+   "variant": "",
+   "mode": "p2p",
+   "set": "large",
+   "group": "ams",
+   "reader": "ams",
+   "runs": 2,
+   "wall_s": 159.12,
+   "wall_all_s": [
+    157.63,
+    160.61
+   ],
+   "mb_s": 26.99,
+   "files_s": 0.0,
+   "files": 2,
+   "chunks": 13473,
+   "bytes": 4294967296,
+   "chunks_from_peers": [
+    13473,
+    13473
+   ],
+   "cpu_s": 37.95,
+   "peak_rss_mib": 467.6,
+   "writer_cpu_s": 40.0,
+   "verified": true,
+   "p2p_in_bytes": [
+    4295519689,
+    4295519689
+   ],
+   "writer_tx_bytes": [
+    4295519689,
+    4295519689
+   ],
+   "paths": [
+    "writer-paris: direct"
+   ],
+   "routes": [
+    "8 : tcp <writer's public address>:17893 answered"
+   ]
+  },
+  {
+   "variant": "",
+   "mode": "p2p",
+   "set": "large",
+   "group": "ams+waw",
+   "reader": "ams",
+   "runs": 2,
+   "wall_s": 161.67,
+   "wall_all_s": [
+    162.49,
+    160.85
+   ],
+   "mb_s": 26.56,
+   "files_s": 0.0,
+   "files": 2,
+   "chunks": 13379,
+   "bytes": 4294967296,
+   "chunks_from_peers": [
+    13379,
+    13379
+   ],
+   "cpu_s": 72.0,
+   "peak_rss_mib": 307.25,
+   "writer_cpu_s": 51.75,
+   "verified": true,
+   "p2p_in_bytes": [
+    4295515835,
+    4295515835
+   ],
+   "writer_tx_bytes": [
+    5624409875,
+    5601775273
+   ],
+   "paths": [
+    ": direct",
+    "writer-paris: direct"
+   ],
+   "routes": [
+    "8 : tcp <writer's public address>:17893 answered"
+   ]
+  },
+  {
+   "variant": "",
+   "mode": "p2p",
+   "set": "large",
+   "group": "ams+waw",
+   "reader": "waw",
+   "runs": 2,
+   "wall_s": 364.75,
+   "wall_all_s": [
+    367.1,
+    362.41
+   ],
+   "mb_s": 11.77,
+   "files_s": 0.0,
+   "files": 2,
+   "chunks": 13379,
+   "bytes": 4294967296,
+   "chunks_from_peers": [
+    13379,
+    13379
+   ],
+   "cpu_s": 41.9,
+   "peak_rss_mib": 315.8,
+   "writer_cpu_s": 51.75,
+   "verified": true,
+   "p2p_in_bytes": [
+    4295548763,
+    4295548251
+   ],
+   "writer_tx_bytes": [
+    5624409875,
+    5601775273
+   ],
+   "paths": [
+    "ams-p2p-large-ams+waw-1: direct",
+    "ams-p2p-large-ams+waw-2: direct",
+    "writer-paris: direct"
+   ],
+   "routes": [
+    "8 : tcp <writer's public address>:17893 answered 8 : tcp <writer's public address>:17893 answered"
+   ]
+  },
+  {
+   "variant": "",
+   "mode": "p2p",
+   "set": "large",
+   "group": "waw",
+   "reader": "waw",
+   "runs": 2,
+   "wall_s": 423.05,
+   "wall_all_s": [
+    419.73,
+    426.37
+   ],
+   "mb_s": 10.15,
+   "files_s": 0.0,
+   "files": 2,
+   "chunks": 13473,
+   "bytes": 4294967296,
+   "chunks_from_peers": [
+    13473,
+    13473
+   ],
+   "cpu_s": 42.75,
+   "peak_rss_mib": 489.6,
+   "writer_cpu_s": 42.3,
+   "verified": true,
+   "p2p_in_bytes": [
+    4295519689,
+    4295519689
+   ],
+   "writer_tx_bytes": [
+    4295519689,
+    4295519689
+   ],
+   "paths": [
+    "writer-paris: direct"
+   ],
+   "routes": [
+    "8 : tcp <writer's public address>:17893 answered"
+   ]
+  },
+  {
+   "variant": "",
+   "mode": "p2p",
+   "set": "text",
+   "group": "ams",
+   "reader": "ams",
+   "runs": 2,
+   "wall_s": 32.25,
+   "wall_all_s": [
+    33.32,
+    31.18
+   ],
+   "mb_s": 16.66,
+   "files_s": 3.95,
+   "files": 128,
+   "chunks": 1772,
+   "bytes": 536877491,
+   "chunks_from_peers": [
+    1772,
+    1772
+   ],
+   "cpu_s": 5.2,
+   "peak_rss_mib": 406.05,
+   "writer_cpu_s": 31.1,
+   "verified": true,
+   "p2p_in_bytes": [
+    145037420,
+    145037420
+   ],
+   "writer_tx_bytes": [
+    145037420,
+    145037420
+   ],
+   "paths": [
+    "writer-paris: direct"
+   ],
+   "routes": [
+    "8 : tcp <writer's public address>:17893 answered"
+   ]
+  },
+  {
+   "variant": "",
+   "mode": "p2p",
+   "set": "text",
+   "group": "waw",
+   "reader": "waw",
+   "runs": 2,
+   "wall_s": 74.4,
+   "wall_all_s": [
+    69.61,
+    79.18
+   ],
+   "mb_s": 7.25,
+   "files_s": 1.7,
+   "files": 128,
+   "chunks": 1772,
+   "bytes": 536877491,
+   "chunks_from_peers": [
+    1772,
+    1772
+   ],
+   "cpu_s": 5.3,
+   "peak_rss_mib": 407.1,
+   "writer_cpu_s": 31.7,
+   "verified": true,
+   "p2p_in_bytes": [
+    145037420,
+    145037420
+   ],
+   "writer_tx_bytes": [
+    145037420,
+    145037420
+   ],
+   "paths": [
+    "writer-paris: direct"
+   ],
+   "routes": [
+    "8 : tcp <writer's public address>:17893 answered"
+   ]
+  },
+  {
+   "variant": "",
+   "mode": "s3",
+   "set": "files",
+   "group": "ams",
+   "reader": "ams",
+   "runs": 2,
+   "wall_s": 298.72,
+   "wall_all_s": [
+    323.34,
+    274.1
+   ],
+   "mb_s": 0.99,
+   "files_s": 33.7,
+   "files": 10000,
+   "chunks": 10120,
+   "bytes": 294287496,
+   "chunks_from_peers": [
+    0,
+    0
+   ],
+   "cpu_s": 14.55,
+   "peak_rss_mib": 220.6,
+   "writer_cpu_s": null,
+   "verified": true
+  },
+  {
+   "variant": "",
+   "mode": "s3",
+   "set": "files",
+   "group": "waw",
+   "reader": "waw",
+   "runs": 2,
+   "wall_s": 294.49,
+   "wall_all_s": [
+    269.36,
+    319.61
+   ],
+   "mb_s": 1.01,
+   "files_s": 34.2,
+   "files": 10000,
+   "chunks": 10120,
+   "bytes": 294287496,
+   "chunks_from_peers": [
+    0,
+    0
+   ],
+   "cpu_s": 13.7,
+   "peak_rss_mib": 228.3,
+   "writer_cpu_s": null,
+   "verified": true
+  },
+  {
+   "variant": "",
+   "mode": "s3",
+   "set": "large",
+   "group": "ams",
+   "reader": "ams",
+   "runs": 2,
+   "wall_s": 180.09,
+   "wall_all_s": [
+    170.64,
+    189.55
+   ],
+   "mb_s": 23.91,
+   "files_s": 0.0,
+   "files": 2,
+   "chunks": 13473,
+   "bytes": 4294967296,
+   "chunks_from_peers": [
+    0,
+    0
+   ],
+   "cpu_s": 40.65,
+   "peak_rss_mib": 403.3,
+   "writer_cpu_s": null,
+   "verified": true
+  },
+  {
+   "variant": "",
+   "mode": "s3",
+   "set": "large",
+   "group": "ams+waw",
+   "reader": "ams",
+   "runs": 2,
+   "wall_s": 95.41,
+   "wall_all_s": [
+    89.55,
+    101.28
+   ],
+   "mb_s": 45.19,
+   "files_s": 0.0,
+   "files": 2,
+   "chunks": 13473,
+   "bytes": 4294967296,
+   "chunks_from_peers": [
+    0,
+    0
+   ],
+   "cpu_s": 37.65,
+   "peak_rss_mib": 421.95,
+   "writer_cpu_s": null,
+   "verified": true
+  },
+  {
+   "variant": "",
+   "mode": "s3",
+   "set": "large",
+   "group": "ams+waw",
+   "reader": "waw",
+   "runs": 2,
+   "wall_s": 208.32,
+   "wall_all_s": [
+    185.09,
+    231.56
+   ],
+   "mb_s": 20.88,
+   "files_s": 0.0,
+   "files": 2,
+   "chunks": 13473,
+   "bytes": 4294967296,
+   "chunks_from_peers": [
+    0,
+    0
+   ],
+   "cpu_s": 39.55,
+   "peak_rss_mib": 421.8,
+   "writer_cpu_s": null,
+   "verified": true
+  },
+  {
+   "variant": "",
+   "mode": "s3",
+   "set": "large",
+   "group": "waw",
+   "reader": "waw",
+   "runs": 2,
+   "wall_s": 190.49,
+   "wall_all_s": [
+    155.14,
+    225.84
+   ],
+   "mb_s": 23.35,
+   "files_s": 0.0,
+   "files": 2,
+   "chunks": 13473,
+   "bytes": 4294967296,
+   "chunks_from_peers": [
+    0,
+    0
+   ],
+   "cpu_s": 41.25,
+   "peak_rss_mib": 411.4,
+   "writer_cpu_s": null,
+   "verified": true
+  },
+  {
+   "variant": "",
+   "mode": "s3",
+   "set": "text",
+   "group": "ams",
+   "reader": "ams",
+   "runs": 2,
+   "wall_s": 36.27,
+   "wall_all_s": [
+    20.89,
+    51.65
+   ],
+   "mb_s": 18.05,
+   "files_s": 4.3,
+   "files": 128,
+   "chunks": 1772,
+   "bytes": 536877491,
+   "chunks_from_peers": [
+    0,
+    0
+   ],
+   "cpu_s": 5.15,
+   "peak_rss_mib": 391.9,
+   "writer_cpu_s": null,
+   "verified": true
+  },
+  {
+   "variant": "",
+   "mode": "s3",
+   "set": "text",
+   "group": "ams+waw",
+   "reader": "ams",
+   "runs": 2,
+   "wall_s": 31.19,
+   "wall_all_s": [
+    23.41,
+    38.97
+   ],
+   "mb_s": 18.36,
+   "files_s": 4.4,
+   "files": 128,
+   "chunks": 1772,
+   "bytes": 536877491,
+   "chunks_from_peers": [
+    0,
+    0
+   ],
+   "cpu_s": 5.15,
+   "peak_rss_mib": 234.4,
+   "writer_cpu_s": null,
+   "verified": true
+  },
+  {
+   "variant": "",
+   "mode": "s3",
+   "set": "text",
+   "group": "ams+waw",
+   "reader": "waw",
+   "runs": 2,
+   "wall_s": 62.98,
+   "wall_all_s": [
+    28.19,
+    97.77
+   ],
+   "mb_s": 12.27,
+   "files_s": 2.9,
+   "files": 128,
+   "chunks": 1772,
+   "bytes": 536877491,
+   "chunks_from_peers": [
+    0,
+    0
+   ],
+   "cpu_s": 4.9,
+   "peak_rss_mib": 234.35,
+   "writer_cpu_s": null,
+   "verified": true
+  },
+  {
+   "variant": "",
+   "mode": "s3",
+   "set": "text",
+   "group": "waw",
+   "reader": "waw",
+   "runs": 2,
+   "wall_s": 32.16,
+   "wall_all_s": [
+    32.35,
+    31.96
+   ],
+   "mb_s": 16.7,
+   "files_s": 4.0,
+   "files": 128,
+   "chunks": 1772,
+   "bytes": 536877491,
+   "chunks_from_peers": [
+    0,
+    0
+   ],
+   "cpu_s": 5.4,
+   "peak_rss_mib": 394.8,
+   "writer_cpu_s": null,
+   "verified": true
+  },
+  {
+   "variant": "no-prefetch-across-files",
+   "mode": "s3",
+   "set": "files",
+   "group": "ams",
+   "reader": "ams",
+   "runs": 2,
+   "wall_s": 403.74,
+   "wall_all_s": [
+    312.91,
+    494.57
+   ],
+   "mb_s": 0.77,
+   "files_s": 26.1,
+   "files": 10000,
+   "chunks": 10119,
+   "bytes": 294287496,
+   "chunks_from_peers": [
+    0,
+    0
+   ],
+   "cpu_s": 11.85,
+   "peak_rss_mib": 365.9,
+   "writer_cpu_s": null,
+   "verified": true
+  },
+  {
+   "variant": "no-prefetch-across-files",
+   "mode": "s3",
+   "set": "files",
+   "group": "ams+waw",
+   "reader": "ams",
+   "runs": 2,
+   "wall_s": 380.76,
+   "wall_all_s": [
+    381.33,
+    380.19
+   ],
+   "mb_s": 0.77,
+   "files_s": 26.25,
+   "files": 10000,
+   "chunks": 10119,
+   "bytes": 294287496,
+   "chunks_from_peers": [
+    0,
+    0
+   ],
+   "cpu_s": 12.1,
+   "peak_rss_mib": 383.75,
+   "writer_cpu_s": null,
+   "verified": true
+  },
+  {
+   "variant": "no-prefetch-across-files",
+   "mode": "s3",
+   "set": "files",
+   "group": "ams+waw",
+   "reader": "waw",
+   "runs": 2,
+   "wall_s": 528.24,
+   "wall_all_s": [
+    493.57,
+    562.9
+   ],
+   "mb_s": 0.56,
+   "files_s": 19.05,
+   "files": 10000,
+   "chunks": 10119,
+   "bytes": 294287496,
+   "chunks_from_peers": [
+    0,
+    0
+   ],
+   "cpu_s": 12.3,
+   "peak_rss_mib": 383.6,
+   "writer_cpu_s": null,
+   "verified": true
+  },
+  {
+   "variant": "no-prefetch-across-files",
+   "mode": "s3",
+   "set": "files",
+   "group": "waw",
+   "reader": "waw",
+   "runs": 2,
+   "wall_s": 595.67,
+   "wall_all_s": [
+    536.44,
+    654.9
+   ],
+   "mb_s": 0.5,
+   "files_s": 16.95,
+   "files": 10000,
+   "chunks": 10119,
+   "bytes": 294287496,
+   "chunks_from_peers": [
+    0,
+    0
+   ],
+   "cpu_s": 12.25,
+   "peak_rss_mib": 373.6,
+   "writer_cpu_s": null,
+   "verified": true
+  },
+  {
+   "variant": "quic-first",
+   "mode": "p2p",
+   "set": "large",
+   "group": "ams",
+   "reader": "ams",
+   "runs": 2,
+   "wall_s": 229.51,
+   "wall_all_s": [
+    228.92,
+    230.11
+   ],
+   "mb_s": 18.71,
+   "files_s": 0.0,
+   "files": 2,
+   "chunks": 13379,
+   "bytes": 4294967296,
+   "chunks_from_peers": [
+    13379,
+    13379
+   ],
+   "cpu_s": 98.2,
+   "peak_rss_mib": 279.1,
+   "writer_cpu_s": 88.45,
+   "verified": true,
+   "p2p_in_bytes": [
+    4295515835,
+    4295515835
+   ],
+   "writer_tx_bytes": [
+    4295515835,
+    4295515835
+   ],
+   "paths": [
+    "writer-paris: direct"
+   ],
+   "routes": [
+    "8 : quic <writer's public address>:17893 answered"
+   ]
+  },
+  {
+   "variant": "quic-first",
+   "mode": "p2p",
+   "set": "large",
+   "group": "waw",
+   "reader": "waw",
+   "runs": 1,
+   "wall_s": 466.46,
+   "wall_all_s": [
+    466.46
+   ],
+   "mb_s": 9.21,
+   "files_s": 0.0,
+   "files": 2,
+   "chunks": 13379,
+   "bytes": 4294967296,
+   "chunks_from_peers": [
+    13379
+   ],
+   "cpu_s": 130.1,
+   "peak_rss_mib": 284.8,
+   "writer_cpu_s": 99.6,
+   "verified": true,
+   "p2p_in_bytes": [
+    4295515835
+   ],
+   "writer_tx_bytes": [
+    4295515835
+   ],
+   "paths": [
+    "writer-paris: direct"
+   ],
+   "routes": [
+    "8 : quic <writer's public address>:17893 answered"
+   ]
+  }
+ ],
+ "variants": [
+  {
+   "variant": "sequential",
+   "mode": "s3",
+   "set": "text",
+   "reader": "waw",
+   "wall_s": 121.83,
+   "mb_s": 4.41,
+   "chunks": 1772
+  },
+  {
+   "variant": "prefetch",
+   "mode": "s3",
+   "set": "text",
+   "reader": "waw",
+   "wall_s": 104.29,
+   "mb_s": 5.15,
+   "chunks": 1772
+  },
+  {
+   "variant": "prefetch-pool",
+   "mode": "s3",
+   "set": "text",
+   "reader": "waw",
+   "wall_s": 61.07,
+   "mb_s": 8.79,
+   "chunks": 1772
+  },
+  {
+   "variant": "sliding",
+   "mode": "s3",
+   "set": "text",
+   "reader": "waw",
+   "wall_s": 27.75,
+   "mb_s": 19.35,
+   "chunks": 1772
+  },
+  {
+   "variant": "serial-tcp-server",
+   "mode": "p2p",
+   "set": "large",
+   "reader": "ams",
+   "wall_s": 363.47,
+   "mb_s": 11.82,
+   "chunks": 13473
+  }
+ ]
+}
