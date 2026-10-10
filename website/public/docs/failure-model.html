@@ -41,7 +41,7 @@
 <h1>Failure model</h1>
 <p class="note">From <code>docs/failure-model.md</code> in the repository, rendered 2026-10-10.</p>
 <blockquote>
-<p><strong>Design stage.</strong> Nothing described here is implemented yet. This document states what the design is meant to tolerate, what it limits, and what it does not cover. Statements such as "designed to" become claims about the product only after the tests named in <a href="testing.html">TESTING.md</a> show them.</p>
+<p><strong>Design-stage model, written before the code.</strong> Much of it is now implemented as 0.0.1-alpha.9; the per-row notes and <a href="alpha-0-format.html">docs/spec/alpha-0-format.md</a> record what is built. This document states what the design is meant to tolerate, what it limits, and what it does not cover. Statements such as "designed to" become claims about the product only after the tests named in <a href="testing.html">TESTING.md</a> show them.</p>
 </blockquote>
 <p>Public statements about reliability must match this document. In particular, any marketing message about "no single point of failure" (requirement M-005) has to link here and must not claim more than this document lists.</p>
 <p>Requirement IDs (F-, S-, P-, N-, M-) refer to the project requirements list. The wider design is described in <a href="provider-price-data.html">docs/architecture</a>.</p>
@@ -142,7 +142,7 @@
 <td>Malicious member of a shared folder</td>
 <td>The member can read what the folder shares and can change or delete files within the permissions given. Anything already downloaded stays with them.</td>
 <td>Their changes sync to other members like any other change.</td>
-<td>Version history and trash allow restoring earlier states; the change history view shows who did what; removing a member is meant to re-wrap the folder key so that new data is not readable by them (details TBD).</td>
+<td>Version history and trash allow restoring earlier states; the change history view shows who did what; removing a member moves the folder to a new key (a share epoch) that only the remaining members receive, so new data is not readable by them (alpha-0-format.md section 24).</td>
 <td>Content the member already read or copied. Fine-grained permission rules are not specified yet (TBD).</td>
 <td>F-004, F-003, F-025, F-026, F-034, S-001</td>
 </tr>

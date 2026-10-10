@@ -249,6 +249,18 @@ impl SecurityKey for Fido2Tools {
     }
 
     fn hmac_secret(&self, credential: &str, salt: &[u8; 32]) -> Result<[u8; 32]> {
+        if credential.is_empty()
+            || !credential.bytes().all(|b| {
+                b.is_ascii_alphanumeric()
+                    || b == b'+'
+                    || b == b'/'
+                    || b == b'='
+                    || b == b'-'
+                    || b == b'_'
+            })
+        {
+            bail!("the stored credential id is not base64");
+        }
         let dev = self.device()?;
         let mut challenge = [0u8; 32];
         rand::RngCore::fill_bytes(&mut rand::rngs::OsRng, &mut challenge);

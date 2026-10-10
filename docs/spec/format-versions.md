@@ -8,7 +8,8 @@ During alpha development, storage formats may change without migration paths. On
 
 | Format version | First release | Releases that read it | Standalone reader tool | Archived tag |
 |---|---|---|---|---|
-| 0 (alpha-0) | 0.0.1-alpha.0 (branch `alpha-0`, not tagged yet) | 0.0.1-alpha.0 | none yet (`varsto pull` and `varsto fsck` of the same version) | - |
+| 0 (alpha-0) | 0.0.1-alpha.0 | 0.0.1-alpha.0 to 0.0.1-alpha.3 | none (`varsto pull` and `varsto fsck` of those versions) | see the format version 1 note below |
+| 1 (compression, alpha-0-format.md section 16) | 0.0.1-alpha.4 | 0.0.1-alpha.4 and later, including 0.0.1-alpha.9 | none yet (`varsto pull` and `varsto fsck` of the same version) | every tag from `v0.0.1-alpha.4` on |
 
 ## Release rules
 

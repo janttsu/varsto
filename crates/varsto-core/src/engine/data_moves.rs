@@ -180,6 +180,10 @@ impl Engine {
         if self.vault.member {
             bail!("a member device cannot change where the owner's folders are stored");
         }
+        self.org_allows(
+            |p| p.members_may_set_policies,
+            "change where folders are stored",
+        )?;
         let rec = self
             .keyring
             .find(folder)
@@ -253,7 +257,11 @@ impl Engine {
             updated_utc: now,
             placement,
         };
-        let blob = prec.seal(&self.vault.vault_id, &self.folder_record_key_now())?;
+        let blob = prec.seal_signed(
+            &self.vault.vault_id,
+            &self.folder_record_key_now(),
+            &self.keys.signer,
+        )?;
         for (_, backend) in self.metadata_storages(true)? {
             backend.put_if_absent(&prec.storage_key(), &blob)?;
         }
@@ -280,6 +288,13 @@ impl Engine {
                 let Some(local) = self.keyring.folders.get(&fid) else {
                     continue;
                 };
+                let Some(named) = key
+                    .strip_prefix(PlacementRecord::PREFIX)
+                    .and_then(|r| r.split('/').nth(1))
+                    .and_then(|d| DeviceId::from_hex(d).ok())
+                else {
+                    continue;
+                };
                 // The object name ends with the update time: skip anything not newer.
                 let stamp: i64 = key
                     .rsplit('/')
@@ -293,12 +308,21 @@ impl Engine {
                 let Some(blob) = backend.get(&key)? else {
                     continue;
                 };
-                let Some(rec) = fr_keys
-                    .iter()
-                    .find_map(|k| PlacementRecord::open(&blob, &self.vault.vault_id, &fid, k).ok())
-                else {
+                let verify = |d: &DeviceId| self.device_key(d);
+                let Ok(rec) = PlacementRecord::open_any(
+                    &blob,
+                    &self.vault.vault_id,
+                    &fid,
+                    &named,
+                    &fr_keys,
+                    &verify,
+                    self.org.is_none(),
+                ) else {
                     continue;
                 };
+                if !self.trusted(&rec.device) || !self.org_accepts_policy_from(&rec.device) {
+                    continue;
+                }
                 if let Some(f) = self.keyring.folders.get_mut(&fid) {
                     if rec.updated_utc > f.placement_updated_utc {
                         f.placement = rec.placement;

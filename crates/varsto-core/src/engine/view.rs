@@ -42,7 +42,7 @@ impl Engine {
                 return Ok(Vec::new());
             }
             f.seek(SeekFrom::Start(start))?;
-            let mut out = Vec::with_capacity((end - start) as usize);
+            let mut out = Vec::with_capacity(((end - start).min(16 << 20)) as usize);
             f.take(end - start).read_to_end(&mut out)?;
             return Ok(out);
         }
@@ -58,7 +58,7 @@ impl Engine {
         let fk = self.folder_keys(&rec)?;
         // Storages are opened only for a chunk the block cache lacks.
         let mut storages = None;
-        let mut out = Vec::with_capacity((end - start) as usize);
+        let mut out = Vec::with_capacity(((end - start).min(16 << 20)) as usize);
         let mut offset = 0u64;
         for cref in &file.chunks {
             let (c_start, c_end) = (offset, offset + cref.size);

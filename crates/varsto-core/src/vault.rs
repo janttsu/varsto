@@ -3,9 +3,11 @@
 //!
 //! Alpha-0 key hierarchy (subset of `docs/spec/key-hierarchy.md`):
 //! - master key K3: random 256 bits, wrapped locally under an Argon2id
-//!   passphrase key; shared between devices out of band as the "vault key"
-//!   (pairing and recovery through a hybrid KEM are not implemented yet);
-//! - device signing key K6/K7 (Ed25519) per device, wrapped with K3 locally;
+//!   passphrase key; shared between devices as the "vault key" through
+//!   pairing (`pair`), the recovery kit (`recovery`) or an organization's
+//!   approval token (`org`), which is sealed through the hybrid KEM;
+//! - device signing key K6/K7 (Ed25519 + ML-DSA-65) per device, wrapped with
+//!   K3 locally;
 //! - derived from K3: ledger key, device-registry key, folder-record key,
 //!   local-keyring key;
 //! - folder key K9 per folder (random), from which the folder hash key,
@@ -472,6 +474,160 @@ impl PolicyRecord {
         }
         Ok(rec)
     }
+    /// Seal and sign (alpha.10): the device that sets a policy signs the
+    /// envelope, so a holder of the vault key cannot pass a policy off as
+    /// another device's (an administrator's, in an organization).
+    pub fn seal_signed(
+        &self,
+        vault: &VaultId,
+        key: &SecretKey,
+        signer: &SigningKey,
+    ) -> Result<Vec<u8>> {
+        let ct = self.seal(vault, key)?;
+        SignedRecord::wrap(
+            "policy-record-signature",
+            vault,
+            &self.folder_id,
+            &self.device,
+            self.updated_utc,
+            ct,
+            signer,
+        )
+    }
+    /// Open a signed envelope or, when `allow_unsigned`, a bare record from
+    /// before alpha.10. `verify` gives the writer's key; a signed envelope
+    /// whose issuer is unknown or whose signature fails is refused. The
+    /// `<device>` in the object name must be the writer.
+    pub fn open_any(
+        blob: &[u8],
+        vault: &VaultId,
+        folder: &FolderId,
+        named_device: &DeviceId,
+        keys: &[SecretKey],
+        verify: &dyn Fn(&DeviceId) -> Option<VerifyingKey>,
+        allow_unsigned: bool,
+    ) -> Result<Self> {
+        match SignedRecord::parse(blob) {
+            Some(env) => {
+                let pk = verify(&env.device).ok_or_else(|| anyhow!("unknown writer"))?;
+                let ct = env.verify("policy-record-signature", vault, folder, &pk)?;
+                let rec = keys
+                    .iter()
+                    .find_map(|k| Self::open(&ct, vault, folder, k).ok())
+                    .ok_or_else(|| anyhow!("policy record does not open"))?;
+                if rec.device != env.device
+                    || &rec.device != named_device
+                    || rec.updated_utc != env.updated_utc
+                {
+                    bail!("policy record does not match its envelope");
+                }
+                Ok(rec)
+            }
+            None if allow_unsigned => {
+                let rec = keys
+                    .iter()
+                    .find_map(|k| Self::open(blob, vault, folder, k).ok())
+                    .ok_or_else(|| anyhow!("policy record does not open"))?;
+                if &rec.device != named_device {
+                    bail!("policy record does not match its name");
+                }
+                Ok(rec)
+            }
+            None => bail!("unsigned policy record"),
+        }
+    }
+}
+
+/// A signed envelope around a sealed per-folder record (policies and
+/// placement): the writer's device signature over vault, folder, device,
+/// time and the ciphertext hash.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SignedRecord {
+    pub format_version: u16,
+    pub folder: FolderId,
+    pub device: DeviceId,
+    pub updated_utc: i64,
+    pub body_hex: String,
+    pub sig_alg: String,
+    pub sig_hex: String,
+}
+
+impl SignedRecord {
+    fn message(
+        kind: &str,
+        vault: &VaultId,
+        folder: &FolderId,
+        device: &DeviceId,
+        updated_utc: i64,
+        body_hash: &[u8],
+    ) -> Vec<u8> {
+        crypto::aad(
+            kind,
+            &[
+                vault.as_str().as_bytes(),
+                folder.as_str().as_bytes(),
+                device.as_str().as_bytes(),
+                &updated_utc.to_le_bytes(),
+                body_hash,
+            ],
+        )
+    }
+    pub fn wrap(
+        kind: &str,
+        vault: &VaultId,
+        folder: &FolderId,
+        device: &DeviceId,
+        updated_utc: i64,
+        ct: Vec<u8>,
+        signer: &SigningKey,
+    ) -> Result<Vec<u8>> {
+        let sig = signer.sign(&Self::message(
+            kind,
+            vault,
+            folder,
+            device,
+            updated_utc,
+            &crypto::hash(&ct),
+        ));
+        Ok(serde_json::to_vec(&SignedRecord {
+            format_version: crate::FORMAT_VERSION,
+            folder: folder.clone(),
+            device: device.clone(),
+            updated_utc,
+            body_hex: hex::encode(ct),
+            sig_alg: signer.alg().to_string(),
+            sig_hex: hex::encode(sig),
+        })?)
+    }
+    pub fn parse(blob: &[u8]) -> Option<SignedRecord> {
+        serde_json::from_slice(blob).ok()
+    }
+    /// Verify and return the ciphertext inside.
+    pub fn verify(
+        &self,
+        kind: &str,
+        vault: &VaultId,
+        folder: &FolderId,
+        pk: &VerifyingKey,
+    ) -> Result<Vec<u8>> {
+        if &self.folder != folder {
+            bail!("signed record names another folder");
+        }
+        let ct = hex::decode(&self.body_hex)?;
+        pk.verify(
+            &self.sig_alg,
+            &Self::message(
+                kind,
+                vault,
+                folder,
+                &self.device,
+                self.updated_utc,
+                &crypto::hash(&ct),
+            ),
+            &hex::decode(&self.sig_hex)?,
+        )?;
+        Ok(ct)
+    }
 }
 
 /// A folder removed from the vault, published so every device stops
@@ -597,15 +753,21 @@ impl Keys {
 
     pub fn load(home: &Path, passphrase: &str, vault: &VaultId, device: &DeviceId) -> Result<Self> {
         let kf: KeyFile = util::read_json(&home.join("keys.enc"))?;
+        let blob = hex::decode(&kf.blob_hex)?;
+        let aad = Self::keyfile_aad(vault, device);
         let wrap = crypto::passphrase_key(passphrase, &kf.params)?;
-        let plain = Zeroizing::new(
-            crypto::decrypt(
-                &wrap,
-                &Self::keyfile_aad(vault, device),
-                &hex::decode(&kf.blob_hex)?,
-            )
-            .context("unlock failed: wrong passphrase or damaged key file")?,
-        );
+        let opened = crypto::decrypt(&wrap, &aad, &blob).or_else(|e| {
+            // A key file from before alpha.10, written with the passphrase as
+            // typed: try it unnormalised when normalisation changed it.
+            if crypto::normalize_passphrase(passphrase) != passphrase {
+                let raw = crypto::passphrase_key_raw(passphrase, &kf.params)?;
+                crypto::decrypt(&raw, &aad, &blob)
+            } else {
+                Err(e)
+            }
+        });
+        let plain =
+            Zeroizing::new(opened.context("unlock failed: wrong passphrase or damaged key file")?);
         let material: KeyMaterial = serde_json::from_slice(&plain)?;
         Ok(Keys {
             master: SecretKey::from_hex(&material.master_hex)?,

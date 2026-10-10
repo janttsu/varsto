@@ -3053,7 +3053,7 @@ dependencies = [
 
 [[package]]
 name = "varsto-cli"
-version = "0.0.1-alpha.9"
+version = "0.0.1-alpha.10"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -3078,7 +3078,7 @@ dependencies = [
 
 [[package]]
 name = "varsto-core"
-version = "0.0.1-alpha.9"
+version = "0.0.1-alpha.10"
 dependencies = [
  "anyhow",
  "argon2",
@@ -3108,6 +3108,7 @@ dependencies = [
  "thiserror 2.0.21",
  "tiny_http",
  "tokio",
+ "unicode-normalization",
  "ureq",
  "walkdir",
  "windows-sys 0.59.0",
@@ -3118,7 +3119,7 @@ dependencies = [
 
 [[package]]
 name = "varsto-ffi"
-version = "0.0.1-alpha.9"
+version = "0.0.1-alpha.10"
 dependencies = [
  "anyhow",
  "base64 0.22.1",

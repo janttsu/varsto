@@ -62,26 +62,71 @@ pub(crate) fn log(what: &str) {
     eprintln!("p2p: {what}");
 }
 
-/// `X-Varsto-Peer: <device>:<ts>:<mac>` where mac = keyed_hash(peer_key, device || ts || path).
+/// `X-Varsto-Peer: <device>:<ts>:<nonce>:<mac>` where
+/// mac = keyed_hash(peer_key, device || ts || nonce || path). The nonce is
+/// random per request; a server remembers the nonces it accepted inside the
+/// time window, so a token seen on the wire cannot be replayed to it.
 pub fn auth_header(key: &SecretKey, device: &DeviceId, path: &str) -> String {
     let ts = now();
+    let mut n = [0u8; 12];
+    rand::RngCore::fill_bytes(&mut rand::rngs::OsRng, &mut n);
+    let nonce = hex::encode(n);
     let mac = hex::encode(crypto::keyed_hash(
         key,
-        format!("{}|{}|{}", device.as_str(), ts, path).as_bytes(),
+        format!("{}|{}|{}|{}", device.as_str(), ts, nonce, path).as_bytes(),
     ));
-    format!("{}:{}:{}", device.as_str(), ts, mac)
+    format!("{}:{}:{}:{}", device.as_str(), ts, nonce, mac)
 }
 
+/// Nonces accepted recently (with their time), so each token is good once.
+type NonceCache = (
+    std::collections::HashSet<String>,
+    std::collections::VecDeque<(i64, String)>,
+);
+static SEEN_NONCES: std::sync::Mutex<Option<NonceCache>> = std::sync::Mutex::new(None);
+const SEEN_NONCES_MAX: usize = 100_000;
+
+/// Record `nonce`; false when it was used already inside the window.
+fn nonce_fresh(nonce: &str, ts: i64) -> bool {
+    let mut guard = SEEN_NONCES.lock().unwrap_or_else(|e| e.into_inner());
+    let (set, order) = guard.get_or_insert_with(Default::default);
+    let now = now();
+    while let Some((t, _)) = order.front() {
+        if now - *t > AUTH_WINDOW_SECS || order.len() > SEEN_NONCES_MAX {
+            let (_, n) = order.pop_front().expect("checked front");
+            set.remove(&n);
+        } else {
+            break;
+        }
+    }
+    if !set.insert(nonce.to_string()) {
+        return false;
+    }
+    order.push_back((ts.max(now), nonce.to_string()));
+    true
+}
+
+/// Check a token and spend its nonce: for the device that answers.
 pub fn verify_auth(key: &SecretKey, header: &str, path: &str) -> Option<DeviceId> {
-    let mut parts = header.splitn(3, ':');
-    let (dev, ts, mac) = (parts.next()?, parts.next()?, parts.next()?);
+    verify_auth_inner(key, header, path, true)
+}
+
+/// Check a token without spending its nonce: for a relay, which passes the
+/// request on to the device that answers (and spends it there).
+pub fn verify_auth_relayed(key: &SecretKey, header: &str, path: &str) -> Option<DeviceId> {
+    verify_auth_inner(key, header, path, false)
+}
+
+fn verify_auth_inner(key: &SecretKey, header: &str, path: &str, spend: bool) -> Option<DeviceId> {
+    let mut parts = header.splitn(4, ':');
+    let (dev, ts, nonce, mac) = (parts.next()?, parts.next()?, parts.next()?, parts.next()?);
     let ts: i64 = ts.parse().ok()?;
-    if (now() - ts).abs() > AUTH_WINDOW_SECS {
+    if now().abs_diff(ts) > AUTH_WINDOW_SECS as u64 || nonce.len() != 24 {
         return None;
     }
     let expected = hex::encode(crypto::keyed_hash(
         key,
-        format!("{dev}|{ts}|{path}").as_bytes(),
+        format!("{dev}|{ts}|{nonce}|{path}").as_bytes(),
     ));
     // Constant-time comparison of equal-length hex strings.
     if expected.len() != mac.len()
@@ -91,6 +136,9 @@ pub fn verify_auth(key: &SecretKey, header: &str, path: &str) -> Option<DeviceId
             .fold(0u8, |acc, (a, b)| acc | (a ^ b))
             != 0
     {
+        return None;
+    }
+    if spend && !nonce_fresh(nonce, ts) {
         return None;
     }
     DeviceId::from_hex(dev).ok()
@@ -127,6 +175,9 @@ impl Snapshot {
     /// Produce the ciphertext object for `name`, from a stored copy or by
     /// re-encrypting the piece (deterministic, so the bytes are identical).
     pub fn object(&self, name: &ObjectName) -> Result<Option<Vec<u8>>> {
+        if name.as_str().len() < 2 || !name.as_str().bytes().all(|b| b.is_ascii_hexdigit()) {
+            bail!("malformed object name");
+        }
         for root in &self.local_roots {
             let p = root
                 .join("chunks")
@@ -381,8 +432,15 @@ impl Server {
             let spawned = std::thread::Builder::new()
                 .name("p2p-conn".into())
                 .spawn(move || {
+                    // Counted down when the thread ends, however it ends.
+                    struct Done(Arc<AtomicUsize>);
+                    impl Drop for Done {
+                        fn drop(&mut self) {
+                            self.0.fetch_sub(1, Ordering::Relaxed);
+                        }
+                    }
+                    let _done = Done(conns);
                     let _ = serve_connection(sock, remote, &snapshot, &stop, &slots, &traffic);
-                    conns.fetch_sub(1, Ordering::Relaxed);
                 });
             if spawned.is_err() {
                 open.fetch_sub(1, Ordering::Relaxed);
@@ -759,7 +817,9 @@ enum Route {
 impl Route {
     fn label(&self) -> String {
         match self {
-            Route::Tcp(a) | Route::Quic(a) | Route::Registered(a) if is_lan(a.ip()) => "direct-lan".into(),
+            Route::Tcp(a) | Route::Quic(a) | Route::Registered(a) if is_lan(a.ip()) => {
+                "direct-lan".into()
+            }
             Route::Tcp(_) | Route::Quic(_) | Route::Registered(_) => "direct".into(),
             Route::Relay(dev, name, _) => format!(
                 "relayed via {}",
@@ -915,9 +975,12 @@ fn exchange(
             body.truncate(len);
             Ok((status, body, (!close).then_some(s)))
         }
-        // No length: the body ends with the connection.
+        // No length: the body ends with the connection (bounded like the
+        // length-prefixed case).
         _ => {
-            s.read_to_end(&mut body)?;
+            std::io::Read::by_ref(&mut s)
+                .take(64 << 20)
+                .read_to_end(&mut body)?;
             let body = if chunked {
                 decode_chunked(&body)?
             } else {
@@ -945,11 +1008,15 @@ pub fn decode_chunked(body: &[u8]) -> Result<Vec<u8>> {
         if size == 0 {
             break;
         }
-        if pos + size > body.len() {
-            bail!("truncated chunked body");
+        let end = pos
+            .checked_add(size)
+            .filter(|e| *e + 2 <= body.len())
+            .ok_or_else(|| anyhow!("truncated chunked body"))?;
+        if &body[end..end + 2] != b"\r\n" {
+            bail!("malformed chunked body");
         }
-        out.extend_from_slice(&body[pos..pos + size]);
-        pos += size + 2;
+        out.extend_from_slice(&body[pos..end]);
+        pos = end + 2;
     }
     Ok(out)
 }
@@ -1180,7 +1247,11 @@ impl Peers {
         // A peer that keeps its relay registration with us is reached on
         // that connection first: it is open already, and behind a symmetric
         // NAT nothing else reaches it from here.
-        if let Some(a) = self.quic.as_ref().and_then(|n| n.registrant_addr(&p.device)) {
+        if let Some(a) = self
+            .quic
+            .as_ref()
+            .and_then(|n| n.registrant_addr(&p.device))
+        {
             routes.insert(0, Route::Registered(a));
         }
         routes
@@ -1410,6 +1481,45 @@ pub fn local_ipv4_addrs() -> Vec<IpAddr> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn chunked_bodies_are_decoded_within_bounds() {
+        assert_eq!(decode_chunked(b"3\r\nabc\r\n0\r\n\r\n").unwrap(), b"abc");
+        for bad in [
+            &b"1\r\nA"[..],
+            b"5\r\nabc\r\n0\r\n\r\n",
+            b"3\r\nabcXX0\r\n\r\n",
+            b"zz\r\n",
+            b"3\r\nab",
+        ] {
+            assert!(decode_chunked(bad).is_err(), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn a_peer_token_is_good_once() {
+        let key = SecretKey::random();
+        let dev = DeviceId::random();
+        let h = auth_header(&key, &dev, "/p2p/info");
+        assert_eq!(verify_auth(&key, &h, "/p2p/info"), Some(dev.clone()));
+        assert_eq!(verify_auth(&key, &h, "/p2p/info"), None, "replayed");
+        assert_eq!(
+            verify_auth(&key, &auth_header(&key, &dev, "/p2p/info"), "/p2p/other"),
+            None
+        );
+        assert_eq!(
+            verify_auth(&SecretKey::random(), &auth_header(&key, &dev, "/x"), "/x"),
+            None
+        );
+        assert_eq!(
+            verify_auth(
+                &key,
+                &format!("{dev}:{}:{}", i64::MIN, "00".repeat(32)),
+                "/x"
+            ),
+            None
+        );
+    }
 
     #[test]
     fn revoked_devices_are_refused_even_with_a_valid_token() {

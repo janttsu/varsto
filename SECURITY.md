@@ -16,4 +16,4 @@ In scope: the core library, the CLI, the desktop and mobile apps, the storage fo
 
 ## Threat model
 
-The design-stage threat model is in [docs/architecture/threat-model.md](docs/architecture/threat-model.md). No implementation exists yet, so treat every guarantee as unproven.
+The threat model in [docs/architecture/threat-model.md](docs/architecture/threat-model.md) is a design-stage model written before the code; much of it is now implemented as 0.0.1-alpha.9, and its per-row status notes and [docs/spec/alpha-0-format.md](docs/spec/alpha-0-format.md) record what is built. Nothing has been audited, so treat every guarantee as unproven.

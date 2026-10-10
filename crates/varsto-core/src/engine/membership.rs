@@ -368,6 +368,10 @@ impl SignedRevocation {
 pub struct EpochRecord {
     pub epoch: u32,
     pub previous_hex: String,
+    /// The epoch the previous key belongs to: `epoch - 1` unless a number
+    /// in between was taken by a junk object (`None` in older records).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub previous_epoch: Option<u32>,
     pub issuer: DeviceId,
     pub issued_utc: i64,
     /// Full devices that stay in the vault (they get the new key).
@@ -381,6 +385,9 @@ pub struct EpochRecord {
 impl EpochRecord {
     pub fn storage_key(epoch: u32) -> String {
         format!("{EPOCH_PREFIX}{epoch:08}.enc")
+    }
+    pub fn previous(&self) -> u32 {
+        self.previous_epoch.unwrap_or(self.epoch.saturating_sub(1))
     }
     fn key(vault_key: &SecretKey) -> SecretKey {
         vault_key.derive("epoch-record", &[])
@@ -409,6 +416,98 @@ impl EpochRecord {
             bail!("epoch record does not match its name");
         }
         Ok(rec)
+    }
+}
+
+/// The epoch record as stored since alpha.10: the sealed record plus the
+/// issuer's signature over vault, epoch, issuer and the ciphertext hash.
+/// Without the signature anyone holding the vault key could write a record
+/// under the next number and block every removal and every join. Devices
+/// read records written before as the bare sealed blob (`open_any`).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SignedEpoch {
+    pub format_version: u16,
+    pub epoch: u32,
+    pub issuer: DeviceId,
+    pub body_hex: String,
+    pub sig_alg: String,
+    pub sig_hex: String,
+}
+
+impl SignedEpoch {
+    fn message(vault: &VaultId, epoch: u32, issuer: &DeviceId, body_hash: &[u8]) -> Vec<u8> {
+        sig_message(
+            "epoch-record-signature",
+            &[
+                vault.as_str().as_bytes(),
+                &epoch.to_le_bytes(),
+                issuer.as_str().as_bytes(),
+                body_hash,
+            ],
+        )
+    }
+    pub fn seal(
+        rec: &EpochRecord,
+        vault: &VaultId,
+        vault_key: &SecretKey,
+        signer: &SigningKey,
+    ) -> Result<Vec<u8>> {
+        let ct = rec.seal(vault, vault_key)?;
+        let sig = signer.sign(&Self::message(
+            vault,
+            rec.epoch,
+            &rec.issuer,
+            &crypto::hash(&ct),
+        ));
+        Ok(serde_json::to_vec(&SignedEpoch {
+            format_version: crate::FORMAT_VERSION,
+            epoch: rec.epoch,
+            issuer: rec.issuer.clone(),
+            body_hex: hex::encode(ct),
+            sig_alg: signer.alg().to_string(),
+            sig_hex: hex::encode(sig),
+        })?)
+    }
+    /// The envelope, if `blob` is one (older records are bare ciphertext).
+    pub fn parse(blob: &[u8]) -> Option<SignedEpoch> {
+        serde_json::from_slice(blob).ok()
+    }
+    /// Check the issuer's signature with its key.
+    pub fn verify(&self, vault: &VaultId, issuer_key: &VerifyingKey) -> Result<()> {
+        let ct = hex::decode(&self.body_hex)?;
+        issuer_key.verify(
+            &self.sig_alg,
+            &Self::message(vault, self.epoch, &self.issuer, &crypto::hash(&ct)),
+            &hex::decode(&self.sig_hex)?,
+        )
+    }
+    /// Open an epoch record, signed or bare, with its key. With a verifier
+    /// that knows the issuer's key the signature must verify; a signed
+    /// record whose issuer is unknown is opened on the strength of its key
+    /// (a device joining has no registry yet).
+    pub fn open_any(
+        blob: &[u8],
+        vault: &VaultId,
+        epoch: u32,
+        vault_key: &SecretKey,
+        verifier: &dyn Fn(&DeviceId) -> Option<VerifyingKey>,
+    ) -> Result<EpochRecord> {
+        match Self::parse(blob) {
+            Some(env) => {
+                if env.epoch != epoch {
+                    bail!("epoch envelope does not match its name");
+                }
+                if let Some(pk) = verifier(&env.issuer) {
+                    env.verify(vault, &pk)?;
+                }
+                let rec = EpochRecord::open(&hex::decode(&env.body_hex)?, vault, epoch, vault_key)?;
+                if rec.issuer != env.issuer {
+                    bail!("epoch record issuer does not match its envelope");
+                }
+                Ok(rec)
+            }
+            None => EpochRecord::open(blob, vault, epoch, vault_key),
+        }
     }
 }
 
@@ -582,6 +681,12 @@ pub struct DeviceInfo {
     /// System, model and Varsto version the device last published.
     #[serde(default)]
     pub details: Option<super::devinfo::DeviceDetails>,
+    /// In an organization: the person the device belongs to, and whether
+    /// it is an administrator. Absent without an organization.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub role: Option<String>,
 }
 
 /// What `revoke_device` did.
@@ -589,6 +694,9 @@ pub struct DeviceInfo {
 pub struct RevokeReport {
     pub device_id: String,
     pub name: String,
+    /// Every device removed in this epoch (one, or a user's devices).
+    #[serde(default)]
+    pub devices: Vec<String>,
     pub key_epoch: u32,
     pub cutoff_seq: u64,
     pub wipe: bool,
@@ -607,16 +715,19 @@ fn epoch_from_name(name: &str) -> Option<u32> {
     name.strip_suffix(".enc").and_then(|n| n.parse().ok())
 }
 
+type Verifier<'a> = &'a dyn Fn(&DeviceId) -> Option<VerifyingKey>;
+
 /// Read the record of `epoch` from the first storage where `key` opens it.
 fn fetch_epoch_record(
     storages: &[&dyn Storage],
     vault: &VaultId,
     epoch: u32,
     key: &SecretKey,
+    verifier: Verifier,
 ) -> Result<EpochRecord> {
     for b in storages {
         if let Some(blob) = b.get(&EpochRecord::storage_key(epoch))? {
-            if let Ok(rec) = EpochRecord::open(&blob, vault, epoch, key) {
+            if let Ok(rec) = SignedEpoch::open_any(&blob, vault, epoch, key, verifier) {
                 return Ok(rec);
             }
         }
@@ -624,25 +735,36 @@ fn fetch_epoch_record(
     bail!("the record of key epoch {epoch} is missing or does not open with its key")
 }
 
-/// From the key of `top`, walk the epoch records down to `stop` (exclusive):
-/// returns the keys of epochs `stop..=top` (the key of `stop` included, from
-/// the record above it), the newest record and every frozen folder.
+/// From the key of `top`, follow the epoch records down to `stop`
+/// (exclusive): returns the keys of the epochs on the way (the key of `stop`
+/// included, from the record above it), the newest record and every frozen
+/// folder. A chain that does not pass through `stop` is refused.
 fn walk_chain(
     storages: &[&dyn Storage],
     vault: &VaultId,
     top: u32,
     top_key: SecretKey,
     stop: u32,
+    verifier: Verifier,
 ) -> Result<(BTreeMap<u32, SecretKey>, EpochRecord, BTreeSet<FolderId>)> {
-    let newest = fetch_epoch_record(storages, vault, top, &top_key)?;
+    let newest = fetch_epoch_record(storages, vault, top, &top_key, verifier)?;
     let mut frozen: BTreeSet<FolderId> = newest.frozen.iter().cloned().collect();
     let mut keys = BTreeMap::from([(top, top_key)]);
     let mut prev = SecretKey::from_hex(&newest.previous_hex)?;
-    for e in (stop + 1..top).rev() {
-        let r = fetch_epoch_record(storages, vault, e, &prev)?;
+    let mut e = newest.previous();
+    while e > stop {
+        let r = fetch_epoch_record(storages, vault, e, &prev, verifier)?;
         frozen.extend(r.frozen.iter().cloned());
         keys.insert(e, prev);
         prev = SecretKey::from_hex(&r.previous_hex)?;
+        let next = r.previous();
+        if next >= e {
+            bail!("epoch records do not form a chain");
+        }
+        e = next;
+    }
+    if e != stop {
+        bail!("the chain of key epochs does not pass through epoch {stop}");
     }
     keys.insert(stop, prev);
     Ok((keys, newest, frozen))
@@ -666,18 +788,24 @@ pub(super) fn discover_epochs(
         return Ok(VaultEpochs::genesis(vault_key));
     };
     let storages = [backend];
-    match walk_chain(&storages, vault, top, vault_key.clone(), 0) {
-        Ok((keys, newest, frozen)) => {
-            let mut e = VaultEpochs::genesis(vault_key);
-            e.keys = keys;
-            e.members = newest.members.into_iter().collect();
-            e.frozen = frozen;
-            Ok(e)
+    // The key opens the record of the current epoch; higher numbers that do
+    // not open with it are junk someone wrote (or a newer epoch this key is
+    // too old for, in which case nothing opens).
+    let no_registry = |_: &DeviceId| None;
+    for &e in epochs.iter().rev() {
+        if let Ok((keys, newest, frozen)) =
+            walk_chain(&storages, vault, e, vault_key.clone(), 0, &no_registry)
+        {
+            let mut out = VaultEpochs::genesis(vault_key);
+            out.keys = keys;
+            out.members = newest.members.into_iter().collect();
+            out.frozen = frozen;
+            return Ok(out);
         }
-        Err(_) => bail!(
-            "this vault key does not open the vault's current keys: it is wrong, or it is from before a device was removed (the keys changed then; epoch {top}). Use the current vault key: pair from one of your devices, or print a new recovery kit there"
-        ),
     }
+    bail!(
+        "this vault key does not open the vault's current keys: it is wrong, or it is from before a device was removed (the keys changed then; epoch {top}). Use the current vault key: pair from one of your devices, or print a new recovery kit there"
+    )
 }
 
 /// Remove what a wipe removes inside one folder root. A root that is the
@@ -850,6 +978,53 @@ impl Engine {
         self.devices.revoked.contains_key(device)
     }
 
+    /// Whether a revocation or a new key epoch from `issuer` counts: anyone
+    /// in a plain vault, administrators only in an organization.
+    fn org_may_revoke(&self, issuer: &DeviceId) -> bool {
+        match &self.org {
+            Some(o) if o.manifest().is_some() => o.is_admin(issuer),
+            _ => true,
+        }
+    }
+
+    /// Whether an epoch record found under number `epoch` was written by a
+    /// device allowed to rotate the vault key: a signed envelope from a
+    /// trusted device (an administrator, in an organization). A bare record
+    /// from before signatures existed counts in a vault without an
+    /// organization, where anyone could rotate anyway.
+    fn epoch_envelope_genuine(&self, blob: &[u8], epoch: u32) -> bool {
+        match SignedEpoch::parse(blob) {
+            Some(env) => {
+                env.epoch == epoch
+                    && self.trusted(&env.issuer)
+                    && self.org_may_revoke(&env.issuer)
+                    && self
+                        .device_key(&env.issuer)
+                        .is_some_and(|pk| env.verify(&self.vault.vault_id, &pk).is_ok())
+            }
+            None => self.org.is_none(),
+        }
+    }
+
+    /// Whether a policy or placement record written by `device` is adopted.
+    pub(super) fn org_accepts_policy_from(&self, device: &DeviceId) -> bool {
+        match &self.org {
+            Some(o) => o.is_admin(device) || o.policy().members_may_set_policies,
+            None => true,
+        }
+    }
+
+    fn org_role(&self, device: &DeviceId) -> Option<String> {
+        let o = self.org.as_ref()?;
+        if o.is_admin(device) {
+            Some("admin".into())
+        } else if o.lists(device) {
+            Some("member".into())
+        } else {
+            None
+        }
+    }
+
     /// Devices whose revocations and grants this device acts on: known full
     /// devices that are not revoked and that the newest key epoch kept (or
     /// whose record was written under the current key). A device enrolled
@@ -860,6 +1035,12 @@ impl Engine {
         }
         if self.is_revoked(device) || !self.devices.devices.contains_key(device) {
             return false;
+        }
+        // In an organization, only devices the roster lists belong.
+        if let Some(o) = &self.org {
+            if o.roster.is_some() && !o.lists(device) {
+                return false;
+            }
         }
         let cur = self.key_epoch();
         cur == 0
@@ -887,7 +1068,7 @@ impl Engine {
             .unwrap_or_else(|| device.short().to_string())
     }
 
-    fn device_key(&self, device: &DeviceId) -> Option<VerifyingKey> {
+    pub(super) fn device_key(&self, device: &DeviceId) -> Option<VerifyingKey> {
         if device == &self.vault.device_id {
             return Some(self.keys.signer.public());
         }
@@ -937,6 +1118,8 @@ impl Engine {
             revoked_by: None,
             wipe_ordered: false,
             details: self.devices.details.get(me).cloned(),
+            user: self.org.as_ref().and_then(|o| o.user_of(me)),
+            role: self.org_role(me),
         }];
         for (id, rec) in &self.devices.devices {
             if id == me || !(self.trusted(id) || self.is_revoked(id)) {
@@ -953,6 +1136,8 @@ impl Engine {
                 revoked_by: r.map(|r| self.device_name(&r.by)),
                 wipe_ordered: r.is_some_and(|r| r.wipe),
                 details: self.devices.details.get(id).cloned(),
+                user: self.org.as_ref().and_then(|o| o.user_of(id)),
+                role: self.org_role(id),
             });
         }
         out
@@ -972,6 +1157,14 @@ impl Engine {
         self.pull_ledger()?;
         let me = self.vault.device_id.clone();
         let wanted = name_or_id.trim();
+        if let Some(o) = &self.org {
+            if !o.is_admin(&me) {
+                bail!(
+                    "in the organization {}, only an administrator can remove devices",
+                    o.name
+                );
+            }
+        }
         let matches: Vec<DeviceId> = self
             .devices
             .devices
@@ -1000,12 +1193,28 @@ impl Engine {
         if !self.trusted(&target) {
             bail!("{wanted} is not a current device of this vault");
         }
+        let report = self.revoke_many(std::slice::from_ref(&target), wipe)?;
+        self.org_after_revoke(&target, wipe, report.key_epoch)?;
+        Ok(report)
+    }
+
+    /// Remove several current devices in one key epoch (a user's devices).
+    /// The caller has checked that they are current and not this device.
+    pub(super) fn revoke_many(&mut self, targets: &[DeviceId], wipe: bool) -> Result<RevokeReport> {
+        let me = self.vault.device_id.clone();
+        if targets.is_empty() {
+            bail!("no current device to remove");
+        }
+        if targets.contains(&me) {
+            bail!("a device cannot remove itself");
+        }
+        let targets: BTreeSet<DeviceId> = targets.iter().cloned().collect();
         let remaining: Vec<DeviceId> = self
             .devices
             .devices
             .keys()
             .chain(std::iter::once(&me))
-            .filter(|d| **d != target && self.trusted(d))
+            .filter(|d| !targets.contains(d) && self.trusted(d))
             .cloned()
             .collect::<BTreeSet<_>>()
             .into_iter()
@@ -1013,20 +1222,32 @@ impl Engine {
         if remaining.is_empty() {
             bail!("cannot remove the last full device of the vault");
         }
-        // Another device may have started a newer epoch that has not reached us.
+        // Another device may have started a newer epoch that has not reached
+        // us: one whose record is signed by a device allowed to rotate. A
+        // number taken by anything else is skipped, not waited for.
         let old = self.key_epoch();
+        let mut highest = old;
         for (_, b) in self.metadata_storages(false)? {
-            let newer = b
+            for e in b
                 .list(EPOCH_PREFIX)?
                 .iter()
                 .filter_map(|k| k.strip_prefix(EPOCH_PREFIX).and_then(epoch_from_name))
-                .any(|e| e > old);
-            if newer {
-                bail!("another device changed the vault keys and this device has not received them yet; sync, then try again");
+                .filter(|e| *e > old)
+            {
+                highest = highest.max(e);
+                let genuine = match b.get(&EpochRecord::storage_key(e))? {
+                    Some(blob) => self.epoch_envelope_genuine(&blob, e),
+                    None => false,
+                };
+                if genuine {
+                    bail!("another device changed the vault keys and this device has not received them yet; sync, then try again");
+                }
             }
         }
-        let target_name = self.device_name(&target);
-        let new = old + 1;
+        let target_names: Vec<String> = targets.iter().map(|t| self.device_name(t)).collect();
+        let target = targets.iter().next().cloned().expect("checked non-empty");
+        let target_name = target_names[0].clone();
+        let new = highest + 1;
         let new_key = SecretKey::random();
         // Folders that keep their key: Strongroom, and anything shared with
         // other users (by the local flag or by member records in storage).
@@ -1055,29 +1276,33 @@ impl Engine {
         let record = EpochRecord {
             epoch: new,
             previous_hex: self.current_vault_key().to_hex(),
+            previous_epoch: Some(old),
             issuer: me.clone(),
             issued_utc: util::now_utc(),
             members: remaining.clone(),
-            revoked: vec![target.clone()],
+            revoked: targets.iter().cloned().collect(),
             frozen: frozen.iter().cloned().collect(),
         };
-        let cutoff_seq = self.ledger.head(&target).seq;
-        let rev = Revocation {
-            device: target.clone(),
-            device_name: target_name.clone(),
-            issuer: me.clone(),
-            issued_utc: record.issued_utc,
-            cutoff_seq,
-            wipe,
-            new_epoch: new,
-        };
+        let revs: Vec<Revocation> = targets
+            .iter()
+            .map(|t| Revocation {
+                device: t.clone(),
+                device_name: self.device_name(t),
+                issuer: me.clone(),
+                issued_utc: record.issued_utc,
+                cutoff_seq: self.ledger.head(t).seq,
+                wipe,
+                new_epoch: new,
+            })
+            .collect();
+        let cutoff_seq = revs[0].cutoff_seq;
         let storages = self.metadata_storages(true)?;
         if storages.is_empty() {
             bail!("this device has no storage to publish the removal to");
         }
         // The epoch record first: put-if-absent makes two concurrent
         // rotations collide here instead of splitting the vault.
-        let blob = record.seal(&self.vault.vault_id, &new_key)?;
+        let blob = SignedEpoch::seal(&record, &self.vault.vault_id, &new_key, &self.keys.signer)?;
         for (i, (_, b)) in storages.iter().enumerate() {
             if !b.put_if_absent(&EpochRecord::storage_key(new), &blob)? && i == 0 {
                 bail!(
@@ -1086,21 +1311,23 @@ impl Engine {
             }
         }
         let epoch0 = self.root_key().derive("device-registry", &[]);
-        let signed =
-            SignedRevocation::seal(&rev, &self.vault.vault_id, 0, &epoch0, &self.keys.signer)?;
-        let bytes = serde_json::to_vec(&signed)?;
-        for (_, b) in &storages {
-            b.put_if_absent(&SignedRevocation::storage_key(&target, &me), &bytes)?;
+        for rev in &revs {
+            let signed =
+                SignedRevocation::seal(rev, &self.vault.vault_id, 0, &epoch0, &self.keys.signer)?;
+            let bytes = serde_json::to_vec(&signed)?;
+            for (_, b) in &storages {
+                b.put_if_absent(&SignedRevocation::storage_key(&rev.device, &me), &bytes)?;
+            }
+            self.devices.revoked.insert(
+                rev.device.clone(),
+                Revoked {
+                    by: me.clone(),
+                    issued_utc: rev.issued_utc,
+                    cutoff_seq: rev.cutoff_seq,
+                    wipe,
+                },
+            );
         }
-        self.devices.revoked.insert(
-            target.clone(),
-            Revoked {
-                by: me.clone(),
-                issued_utc: rev.issued_utc,
-                cutoff_seq,
-                wipe,
-            },
-        );
         self.save_devices()?;
         self.epochs.keys.insert(new, new_key);
         self.epochs.members = remaining.iter().cloned().collect();
@@ -1111,6 +1338,7 @@ impl Engine {
         Ok(RevokeReport {
             device_id: target.to_string(),
             name: target_name,
+            devices: target_names,
             key_epoch: new,
             cutoff_seq,
             wipe,
@@ -1132,10 +1360,21 @@ impl Engine {
         }
         self.ensure_active()?;
         self.ensure_kem_record()?;
+        // Revocations first, so that a roster written by a device removed
+        // in the meantime is judged with that knowledge; the organization,
+        // whose manifest says who may revoke; then revocations once more
+        // for issuers the manifest just made administrators.
+        if let Some(gone) = self.pull_revocations()? {
+            return Err(anyhow::Error::new(gone));
+        }
+        self.sync_org()?;
         if let Some(gone) = self.pull_revocations()? {
             return Err(anyhow::Error::new(gone));
         }
         self.adopt_epochs()?;
+        // Objects an admin wrote right after a rotation are sealed under
+        // the epoch just adopted: read the organization once more.
+        self.sync_org()?;
         self.issue_grants()?;
         Ok(())
     }
@@ -1224,6 +1463,7 @@ impl Engine {
             if rev.issuer == rev.device
                 || !self.trusted(&rev.issuer)
                 || self.is_revoked(&rev.device)
+                || !self.org_may_revoke(&rev.issuer)
             {
                 continue;
             }
@@ -1312,14 +1552,16 @@ impl Engine {
                 let Ok(key) = g.open(&self.vault.vault_id, &pk, dk) else {
                     continue;
                 };
+                let verifier = |d: &DeviceId| self.device_key(d);
                 let Ok((keys, newest, frozen)) =
-                    walk_chain(&storages, &self.vault.vault_id, *epoch, key, cur)
+                    walk_chain(&storages, &self.vault.vault_id, *epoch, key, cur, &verifier)
                 else {
                     continue;
                 };
                 // The chain must end at the key we hold, and the epoch must keep us.
                 if keys.get(&cur).map(|k| k.0) != Some(self.current_vault_key().0)
                     || !newest.members.contains(&me)
+                    || !self.org_may_revoke(&newest.issuer)
                 {
                     continue;
                 }

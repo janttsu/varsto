@@ -10,6 +10,10 @@ use anyhow::{bail, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
+/// Largest chunk any device writes (`ChunkerParams::DEFAULT.max` is 1 MiB);
+/// a manifest that claims more is refused before anything is allocated.
+pub const MAX_CHUNK_SIZE: u64 = 16 * 1024 * 1024;
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ChunkRef {
     pub chunk: ChunkId,
@@ -98,7 +102,40 @@ impl Manifest {
         if &m.folder != folder || &m.device != device || m.seq != seq {
             bail!("manifest body does not match its name");
         }
+        m.validate()?;
         Ok(m)
+    }
+
+    /// Refuse a manifest whose entries could not have come from an honest
+    /// device: a path that leaves the folder (it would be written there),
+    /// a key that is not the entry's path, a chunk larger than any chunker
+    /// makes, or a size that is not the sum of its chunks.
+    pub fn validate(&self) -> Result<()> {
+        for (key, f) in &self.files {
+            if key != &f.path {
+                bail!("manifest entry {key:?} names another path {:?}", f.path);
+            }
+            crate::util::check_rel_path(&f.path)?;
+            if f.deleted {
+                continue;
+            }
+            let mut total: u64 = 0;
+            for c in &f.chunks {
+                if c.size == 0 || c.size > MAX_CHUNK_SIZE {
+                    bail!("manifest entry {key:?} has a chunk of {} bytes", c.size);
+                }
+                total = total
+                    .checked_add(c.size)
+                    .ok_or_else(|| anyhow::anyhow!("manifest entry {key:?} overflows"))?;
+            }
+            if total != f.size {
+                bail!(
+                    "manifest entry {key:?} says {} bytes but its chunks hold {total}",
+                    f.size
+                );
+            }
+        }
+        Ok(())
     }
 
     /// Stable hash of the file map, used to detect whether a new manifest is needed.
@@ -220,6 +257,74 @@ pub fn conflict_path(path: &str, loser: &FileState) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn entry(path: &str, chunks: &[u64]) -> FileState {
+        FileState {
+            path: path.to_string(),
+            version: VersionVector::default(),
+            deleted: false,
+            size: chunks.iter().sum(),
+            mtime: 0,
+            content_hash: String::new(),
+            chunks: chunks
+                .iter()
+                .map(|s| ChunkRef {
+                    chunk: ChunkId::from_bytes(&[1; 16]),
+                    object: ObjectName::from_bytes(&[2; 32]),
+                    size: *s,
+                    epoch: 0,
+                })
+                .collect(),
+            modified_by: DeviceId::from_bytes(&[3; 16]),
+            modified_clock: 1,
+        }
+    }
+
+    fn manifest_with(files: Vec<FileState>) -> Manifest {
+        Manifest {
+            format_version: crate::FORMAT_VERSION,
+            folder: FolderId::from_bytes(&[4; 16]),
+            device: DeviceId::from_bytes(&[3; 16]),
+            seq: 1,
+            lamport: 1,
+            created_utc: 0,
+            files: files.into_iter().map(|f| (f.path.clone(), f)).collect(),
+        }
+    }
+
+    #[test]
+    fn manifests_from_other_devices_are_validated_before_use() {
+        assert!(manifest_with(vec![entry("docs/a.txt", &[10, 20])])
+            .validate()
+            .is_ok());
+        // A path that leaves the folder is refused when the manifest is opened.
+        let vault = VaultId::from_bytes(&[5; 16]);
+        let key = SecretKey::random();
+        let bad = manifest_with(vec![entry("../../.ssh/authorized_keys", &[10])]);
+        let blob = bad.seal(&vault, &key).unwrap();
+        assert!(Manifest::open(&blob, &vault, &bad.folder, &bad.device, 1, &key).is_err());
+        let abs = manifest_with(vec![entry("/etc/passwd", &[10])]);
+        assert!(abs.validate().is_err());
+        // The map key must be the entry's path.
+        let mut mismatch = manifest_with(vec![entry("a.txt", &[10])]);
+        let f = mismatch.files.remove("a.txt").unwrap();
+        mismatch.files.insert("other.txt".into(), f);
+        assert!(mismatch.validate().is_err());
+        // Sizes must add up and chunks must be of a size a chunker makes.
+        let mut wrong = manifest_with(vec![entry("a.txt", &[10])]);
+        wrong.files.get_mut("a.txt").unwrap().size = 11;
+        assert!(wrong.validate().is_err());
+        assert!(manifest_with(vec![entry("a.txt", &[1 << 40])])
+            .validate()
+            .is_err());
+        assert!(manifest_with(vec![entry("a.txt", &[0])])
+            .validate()
+            .is_err());
+        // A deleted entry carries no chunks and passes.
+        let mut gone = entry("a.txt", &[]);
+        gone.deleted = true;
+        assert!(manifest_with(vec![gone]).validate().is_ok());
+    }
 
     fn st(dev: &str, clock: u64, hash: &str, vv: &[(&str, u64)]) -> FileState {
         FileState {

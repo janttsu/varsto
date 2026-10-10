@@ -211,7 +211,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   $("themeauto").onclick = function () { try { localStorage.removeItem("varsto-theme"); } catch (e) {} applyTheme(""); log("theme follows the system"); };
 
   // Navigation between the pages of the app section.
-  var titles = { overview: "Overview", files: "Files", shared: "Shared", storages: "Storages", policies: "Policies", peers: "Peers", settings: "Settings", more: "More" };
+  var titles = { overview: "Overview", files: "Files", shared: "Shared", storages: "Storages", policies: "Policies", peers: "Peers", organization: "Organization", settings: "Settings", more: "More" };
   var legacyPages = { folders: "files", sharing: "shared" };
   function pageTitle(p) { return titles[p] || "Overview"; }
   var currentPage = (function () { try { var p = sessionStorage.getItem("varsto-page"); p = legacyPages[p] || p; return titles[p] ? p : "overview"; } catch (e) { return "overview"; } })();
@@ -223,11 +223,12 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     currentPage = page;
     try { sessionStorage.setItem("varsto-page", page); } catch (e) {}
     document.querySelectorAll(".page").forEach(function (d) { d.classList.toggle("hidden", d.dataset.page !== page); });
-    var tab = page === "shared" || page === "policies" || page === "peers" || page === "settings" ? "more" : page;
+    var tab = page === "shared" || page === "policies" || page === "peers" || page === "organization" || page === "settings" ? "more" : page;
     document.querySelectorAll(".sidebar .nav-item[data-nav]").forEach(function (b) { if (b.dataset.nav === page) { b.setAttribute("aria-current", "page"); } else { b.removeAttribute("aria-current"); } });
     document.querySelectorAll(".tabbar .nav-item[data-nav]").forEach(function (b) { if (b.dataset.nav === tab) { b.setAttribute("aria-current", "page"); } else { b.removeAttribute("aria-current"); } });
     if (document.body.dataset.view === "app") { $("pagetitle").textContent = pageTitle(page); }
     if (page === "peers") { loadP2p(); }
+    if (page === "organization") { loadOrg(); }
     if (page === "overview" && lastWhere) { renderWhere(lastWhere); }
     trafficWatch();
     if (page === "files") { ensureFiles(); }
@@ -274,6 +275,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
         var body = el("div", "li-body"); var title = el("div", "li-title", d.name);
         if (d.this_device) { title.appendChild(pill("grey", "This device")); }
         if (d.revoked) { title.appendChild(pill("risk", "Removed")); }
+        if (d.user) { title.appendChild(pill(d.role === "admin" ? "accent" : "grey", d.user + (d.role === "admin" ? " · admin" : ""))); }
         body.appendChild(title);
         body.appendChild(el("div", "li-sub", d.revoked
           ? "Removed by " + d.revoked_by + " on " + fmtDate(d.revoked_utc) + (d.wipe_ordered ? ", wipe ordered" : "") + " · " + d.device_id.slice(0, 8)
@@ -828,6 +830,10 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
       $("devices").textContent = (s.member ? "This device is a member of a shared folder. " : "") + "Devices: " + (names.join(", ") || "none yet") + (reps.length ? " · replicas: " + reps.join(", ") : "") + (mems.length ? " · members: " + mems.join(", ") : "") + (s.forked_devices.length ? " · FORKED: " + s.forked_devices.join(", ") : "");
       $("members").textContent = mems.length ? "Members with access to shared folders: " + mems.join(", ") : "";
       loadDevices(s);
+      var org = s.org || null;
+      document.querySelectorAll("[data-org-only]").forEach(function (b) { b.classList.toggle("hidden", !org); });
+      $("teamcard").classList.toggle("hidden", !!org || !!s.member);
+      if (!org && currentPage === "organization") { nav("settings"); }
       $("replicatoken").classList.toggle("hidden", !!s.member);
       $("replicacard").classList.toggle("hidden", !!s.member);
       return api("GET", "/api/service").then(function (sv) { renderService(sv); return api("GET", "/api/ledger"); }).then(function (l) {
@@ -1514,6 +1520,159 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     api("POST", "/api/share/request", { name: nm ? nm.value.trim() : "" }).then(function (r) {
       $("sharerequestout").textContent = r.request_code + "\n\nFingerprint: " + r.fingerprint + "\nThe owner sees the same six words for this code. Read them to each other over a call or in person before the owner shares.";
       $("sharerequestout").classList.remove("hidden");
+    }).catch(function (e) { alertBox(e.message); });
+  };
+  // Organization (business use): nothing of it shows for a vault without one.
+  $("orgrequest").onclick = function () {
+    var nm = $("orgjoin").querySelector("input[name=name]");
+    if (!nm.value.trim()) { nm.focus(); return alertBox("Give the device a name first: it is part of the code and the fingerprint."); }
+    api("POST", "/api/org/request", { name: nm.value.trim() }).then(function (r) {
+      $("orgrequestout").textContent = r.request_code + "\n\nFingerprint: " + r.fingerprint + "\nThe administrator sees the same six words for this code. Read them to each other over a call or in person before they approve.";
+      $("orgrequestout").classList.remove("hidden");
+    }).catch(function (e) { alertBox(e.message); });
+  };
+  $("orgjoin").onsubmit = function (ev) { ev.preventDefault(); busy(true); api("POST", "/api/org/join", formData(ev.target)).then(function (r) { ev.target.reset(); $("orgrequestout").classList.add("hidden"); log("joined the vault of " + r.organization + " for " + r.user + "; attach folders under Files"); nav("files"); return refreshState(); }).catch(function (e) { alertBox(e.message); }).then(function () { busy(false); }); };
+  $("orgcreate").onclick = function () {
+    dialog({
+      title: "Set up an organization",
+      text: "This device becomes the first administrator and every device in the vault today belongs to the person you name. You will be shown the organization's root words once: they appoint and dismiss administrators and are not stored on any device.",
+      fields: [{ name: "name", label: "Organization name", placeholder: "Acme", required: true }, { name: "user", label: "Your user name (owner of the current devices)", placeholder: "alice", required: true }],
+      ok: "Create"
+    }).then(function (r) {
+      if (!r) { return; }
+      busy(true);
+      return api("POST", "/api/org/create", { name: r.values.name.trim(), user: r.values.user.trim() }).then(function (c) {
+        log("organization " + c.name + " created");
+        return dialog({ title: "Root words of " + c.name, text: "Write these down and keep them offline, away from the vault's recovery kit. They are not stored on any device and are needed only to appoint or dismiss administrators.", code: c.root_words, ok: "I wrote them down", cancel: false });
+      }).then(function () { return refreshStatus(); }).then(function () { nav("organization"); }).catch(function (e) { alertBox(e.message, "Could not create the organization"); }).then(function () { busy(false); });
+    });
+  };
+  var lastOrg = null;
+  function orgDevice(d, admin, user) {
+    var li = el("li"); var body = el("div", "li-body"); var title = el("div", "li-title", d.name);
+    if (d.admin) { title.appendChild(pill("accent", "admin")); }
+    if (d.this_device) { title.appendChild(pill("grey", "This device")); }
+    if (d.revoked) { title.appendChild(pill("risk", "Removed")); }
+    body.appendChild(title);
+    body.appendChild(el("div", "li-sub", [deviceSystem(d), d.added_utc ? "added " + fmtDate(d.added_utc) : "", d.device_id.slice(0, 8)].filter(Boolean).join(" · ")));
+    li.appendChild(body);
+    if (admin && !d.this_device && !d.revoked && user) {
+      var a = el("div", "li-actions"); var b = el("button", "secondary danger small", "Remove device…"); b.type = "button";
+      b.onclick = function () { removeDevice({ device_id: d.device_id, name: d.name }); }; a.appendChild(b); li.appendChild(a);
+    }
+    return li;
+  }
+  function loadOrg() {
+    if (document.body.dataset.view !== "app") { return; }
+    api("GET", "/api/org").then(function (o) {
+      if (o.exists === false) { lastOrg = null; nav("settings"); return; }
+      lastOrg = o;
+      var admin = !!o.this_device_admin;
+      $("org-name").textContent = o.name;
+      $("org-me").textContent = "Organization " + o.org_id.slice(0, 8) + " · this device is " + (admin ? "an administrator" : o.this_device_listed ? "a member" : "not in the organization") + (o.this_user ? ", owned by " + o.this_user : "") + " · " + o.users.length + (o.users.length === 1 ? " person" : " people") + ", " + o.admins.length + (o.admins.length === 1 ? " administrator" : " administrators");
+      $("org-unlisted-note").classList.toggle("hidden", o.this_device_listed);
+      $("org-unlisted-note").textContent = o.this_device_listed ? "" : "This device is not in the organization yet: the other devices ignore what it writes until an administrator adds it (Organization page on their device, or varsto org add-device).";
+      var ul = $("org-users"); ul.innerHTML = "";
+      o.users.forEach(function (u) {
+        var li = el("li"); var body = el("div", "li-body"); var title = el("div", "li-title", u.user); body.appendChild(title);
+        var sub = el("ul", "list compact-list"); u.devices.forEach(function (d) { sub.appendChild(orgDevice(d, admin, u.user)); }); body.appendChild(sub); li.appendChild(body);
+        if (admin && !u.devices.some(function (d) { return d.this_device; })) {
+          var a = el("div", "li-actions"); var b = el("button", "secondary danger", "Remove " + u.user + "…"); b.type = "button";
+          b.onclick = function () { removeUser(u); }; a.appendChild(b); li.appendChild(a);
+        }
+        ul.appendChild(li);
+      });
+      var un = $("org-unlisted"); un.innerHTML = "";
+      $("org-unlisted-head").classList.toggle("hidden", !o.unlisted.length);
+      o.unlisted.forEach(function (d) {
+        var li = el("li"); var body = el("div", "li-body"); body.appendChild(el("div", "li-title", d.name)); body.appendChild(el("div", "li-sub", "enrolled " + fmtDate(d.enrolled_utc) + " · " + d.device_id.slice(0, 8))); li.appendChild(body);
+        if (admin) {
+          var a = el("div", "li-actions"); var b = el("button", "secondary", "Add to organization…"); b.type = "button";
+          b.onclick = function () {
+            dialog({ title: "Add " + d.name, text: "Whose device is this? It then counts as theirs and the other devices accept what it writes.", fields: [{ name: "user", label: "Person (user name)", required: true }], ok: "Add" }).then(function (r) {
+              if (!r) { return; }
+              return api("POST", "/api/org/add-device", { device: d.device_id, user: r.values.user.trim() }).then(function () { log("added " + d.name + " for " + r.values.user); loadOrg(); });
+            }).catch(function (e) { alertBox(e.message); });
+          };
+          a.appendChild(b); li.appendChild(a);
+        }
+        un.appendChild(li);
+      });
+      var rm = $("org-removed"); rm.innerHTML = "";
+      $("org-removed-box").classList.toggle("hidden", !o.removed.length);
+      o.removed.forEach(function (r) {
+        var li = el("li"); var body = el("div", "li-body"); body.appendChild(el("div", "li-title", r.name + " (" + r.user + ")")); body.appendChild(el("div", "li-sub", "removed " + fmtDate(r.removed_utc) + (r.wipe ? ", wipe ordered" : "") + " · " + r.device.slice(0, 8))); li.appendChild(body); rm.appendChild(li);
+      });
+      var ad = $("org-admins"); ad.innerHTML = "";
+      o.admins.forEach(function (d) { ad.appendChild(orgDevice(d, false, null)); });
+      $("org-admin-card").classList.toggle("hidden", !admin);
+      var pf = $("org-policy");
+      ["members_may_share", "members_may_add_storages", "members_may_set_policies", "members_may_add_devices"].forEach(function (k) { var i = pf.querySelector("input[name=" + k + "]"); i.checked = !!o.policy[k]; i.disabled = !admin; });
+      $("org-policy-save").classList.toggle("hidden", !admin);
+      var lg = $("org-log"); lg.innerHTML = "";
+      o.log.slice().reverse().forEach(function (e) {
+        var li = el("li"); var body = el("div", "li-body"); body.appendChild(el("div", "li-title", e.text)); body.appendChild(el("div", "li-sub", fmtDate(e.utc) + " · " + e.issuer_name + " #" + e.seq)); li.appendChild(body); lg.appendChild(li);
+      });
+      if (!o.log.length) { lg.appendChild(el("li", "muted small", "nothing yet")); }
+    }).catch(function (e) { log("error: " + e.message); });
+  }
+  function removeUser(u) {
+    var names = u.devices.filter(function (d) { return !d.revoked; }).map(function (d) { return d.name; });
+    dialog({
+      title: "Remove " + u.user + "?",
+      text: "Every device of " + u.user + " (" + (names.join(", ") || "none active") + ") is cut off at once: their ledger entries from now on are ignored, the other devices refuse their peer connections, and the vault gets new keys that only the remaining devices receive. What they could read until now they can still read, and their storage credentials work until you change them at the provider. Remove and wipe also orders their devices to delete their keys, sync state and folder contents the next time they reach a storage. The log records who did this. This cannot be undone.",
+      fields: [{ name: "confirm", label: "Type the user name to confirm", placeholder: u.user, required: true }],
+      ok: "Remove and wipe", extra: "Remove without wipe", danger: true
+    }).then(function (r) {
+      if (!r) { return; }
+      if (r.values.confirm.trim() !== u.user) { return alertBox("The name does not match, so nothing was changed."); }
+      var wipe = r.action === "ok";
+      return api("POST", "/api/org/remove-user", { user: u.user, wipe: wipe, confirm: u.user }).then(function (rep) {
+        log("removed " + rep.user + " (" + rep.devices.join(", ") + ")" + (wipe ? " with a wipe order" : "") + "; vault key epoch " + rep.revoke.key_epoch);
+        var text = rep.user + " was removed with " + rep.devices.join(", ") + ". New keys went to: " + (rep.revoke.keys_sent_to.join(", ") || "no other device") + ".";
+        if (rep.revoke.keys_pending_for.length) { text += " Waiting for " + rep.revoke.keys_pending_for.join(", ") + "."; }
+        text += " Print a new recovery kit now.";
+        return alertBox(text, "User removed").then(function () { loadOrg(); return refreshStatus(); });
+      });
+    }).catch(function (e) { log("error: " + e.message); alertBox(e.message, "Could not remove the user"); });
+  }
+  $("org-approve").onsubmit = function (ev) {
+    ev.preventDefault();
+    var v = formData(ev.target);
+    api("POST", "/api/org/fingerprint", { code: v.code.trim() }).then(function (f) {
+      return dialog({
+        title: "Approve " + (f.name || f.device_id.slice(0, 8)) + " for " + v.user.trim() + "?",
+        text: "Ask the person to read the six words their device shows. Approve only if they match exactly: different words mean the code was changed on its way.",
+        code: f.fingerprint,
+        ok: "The words match, approve"
+      }).then(function (r) {
+        if (!r) { return null; }
+        return api("POST", "/api/org/approve", { code: v.code.trim(), user: v.user.trim(), fingerprint: f.fingerprint });
+      });
+    }).then(function (a) {
+      if (!a) { return; }
+      ev.target.reset();
+      $("org-approveout").textContent = "Approved " + a.name + " for " + a.user + ". Send this token back; only that device can open it:\n\n" + a.token;
+      $("org-approveout").classList.remove("hidden");
+      log("approved " + a.name + " for " + a.user);
+      loadOrg();
+    }).catch(function (e) { alertBox(e.message, "Not approved"); });
+  };
+  $("org-policy").onsubmit = function (ev) {
+    ev.preventDefault();
+    var v = formData(ev.target);
+    api("POST", "/api/org/policy", v).then(function () { log("organization policy saved"); loadOrg(); }).catch(function (e) { alertBox(e.message); });
+  };
+  $("org-admin").onsubmit = function (ev) {
+    ev.preventDefault();
+    var action = (ev.submitter && ev.submitter.dataset.action) || "add";
+    var v = formData(ev.target);
+    api("POST", "/api/org/admin", { action: action, device: v.device.trim(), root_words: v.root_words.trim() }).then(function () { ev.target.reset(); log(v.device + (action === "add" ? " is now an administrator" : " is no longer an administrator")); loadOrg(); }).catch(function (e) { alertBox(e.message); });
+  };
+  $("org-export").onclick = function () {
+    api("GET", "/api/org/log").then(function (r) {
+      var blob = new Blob([JSON.stringify(r.log, null, 2)], { type: "application/json" });
+      var a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "varsto-organization-log.json"; document.body.appendChild(a); a.click(); setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
     }).catch(function (e) { alertBox(e.message); });
   };
   function loadP2p() {

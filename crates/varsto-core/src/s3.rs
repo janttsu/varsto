@@ -80,6 +80,7 @@ impl S3Storage {
     }
 
     fn object_path(&self, key: &str) -> String {
+        // Keys are validated by `checked` before any request is built.
         let full = if self.cfg.prefix.is_empty() {
             key.to_string()
         } else {
@@ -204,6 +205,7 @@ impl S3Storage {
     }
 
     fn put(&self, key: &str, data: &[u8], if_none_match: bool) -> Result<u16> {
+        crate::storage::validate_key(key)?;
         let mut headers: Vec<(&str, &str)> = Vec::new();
         if if_none_match {
             headers.push(("if-none-match", "*"));
@@ -310,6 +312,7 @@ impl Storage for S3Storage {
     }
 
     fn put_if_absent(&self, key: &str, data: &[u8]) -> Result<bool> {
+        crate::storage::validate_key(key)?;
         // Some servers silently ignore `If-None-Match`, so check first; the
         // condition then only closes the window between HEAD and PUT on
         // servers that do honour it.
@@ -328,6 +331,7 @@ impl Storage for S3Storage {
     }
 
     fn get(&self, key: &str) -> Result<Option<Vec<u8>>> {
+        crate::storage::validate_key(key)?;
         let (status, body) = self.request("GET", &self.object_path(key), &[], &[], &[])?;
         match status {
             200 => Ok(Some(body)),
@@ -340,6 +344,7 @@ impl Storage for S3Storage {
     }
 
     fn exists(&self, key: &str) -> Result<bool> {
+        crate::storage::validate_key(key)?;
         let (status, _) = self.request("HEAD", &self.object_path(key), &[], &[], &[])?;
         match status {
             200 => Ok(true),
@@ -411,6 +416,7 @@ impl Storage for S3Storage {
     }
 
     fn delete(&self, key: &str) -> Result<()> {
+        crate::storage::validate_key(key)?;
         let (status, body) = self.request("DELETE", &self.object_path(key), &[], &[], &[])?;
         match status {
             200 | 202 | 204 | 404 => Ok(()),

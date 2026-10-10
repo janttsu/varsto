@@ -224,6 +224,9 @@ struct HeadsFile {
     heads: BTreeMap<DeviceId, Head>,
 }
 
+/// How far beyond the newest batch held a batch may be and still be kept.
+pub const MAX_AHEAD: u64 = 1 << 16;
+
 #[derive(Debug, PartialEq, Eq)]
 pub enum Ingest {
     New,
@@ -442,6 +445,15 @@ impl LedgerStore {
             self.heads.heads.insert(signed.device.clone(), h);
             self.save_heads()?;
             return Ok(Ingest::Fork);
+        }
+        // Batches may arrive out of order, but not absurdly far ahead of
+        // what this device holds: the head would jump to any number a
+        // device chooses, and every later walk over the sequence would run
+        // that far. Such a batch is read once the gap is filled.
+        let head_seq = self.head(&signed.device).seq;
+        let floor = head_seq.max(base.as_ref().map(|b| b.seq).unwrap_or(0));
+        if signed.seq > floor.saturating_add(MAX_AHEAD) {
+            return Ok(Ingest::Known);
         }
         if let (true, Some(batch)) = (signed.seq > 1, &batch) {
             let prev = match self.get(&signed.device, signed.seq - 1)? {

@@ -1,6 +1,6 @@
 # Threat model
 
-> **Design-stage model. No implementation exists.** This document describes what the design intends to protect, against whom, and where it deliberately stops. Nothing here has been built, tested or audited, so none of the properties below is achieved yet. Every statement is a design goal that implementation, tests and an independent review must still confirm. Open points are marked **TBD** and point to the open questions in the project plan.
+> **Design-stage model, written before the code.** This document describes what the design intends to protect, against whom, and where it deliberately stops. Much of it is now implemented as 0.0.1-alpha.9; the per-row status notes and [docs/spec/alpha-0-format.md](../spec/alpha-0-format.md) record what is built. Nothing has been audited, so every statement remains a design goal that tests and an independent review must still confirm. Open points are marked **TBD** and point to the open questions in the project plan.
 
 Requirement IDs (`F-`, `S-`, `P-`, `N-`, `M-`) refer to the requirement tables of the project plan. "Plan 6.19" and similar refer to sections of that plan; "plan section 8" is its list of open questions.
 

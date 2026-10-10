@@ -21,7 +21,10 @@
 
 use super::stun;
 use super::traffic::{Direction, Traffic};
-use super::{auth_header, handle_from, is_object, log, verify_auth, PeerInfo, Route, Snapshot};
+use super::{
+    auth_header, handle_from, is_object, log, verify_auth, verify_auth_relayed, PeerInfo, Route,
+    Snapshot,
+};
 use crate::crypto::SecretKey;
 use crate::ids::DeviceId;
 use anyhow::{anyhow, bail, Context, Result};
@@ -1003,7 +1006,12 @@ impl Node {
     /// Ask a device that keeps its relay registration with us, on that
     /// connection. We are its relay, so there is no third device to go
     /// through, and a device behind a symmetric NAT cannot be dialled.
-    pub fn request_registrant(&self, dev: &DeviceId, path: &str, auth: &str) -> Result<(u16, Vec<u8>)> {
+    pub fn request_registrant(
+        &self,
+        dev: &DeviceId,
+        path: &str,
+        auth: &str,
+    ) -> Result<(u16, Vec<u8>)> {
         let conn = self
             .serving
             .registrants
@@ -1013,7 +1021,11 @@ impl Node {
             .cloned()
             .ok_or_else(|| anyhow!("not registered here"))?;
         let r = self.rt.block_on(async {
-            tokio::time::timeout(Duration::from_secs(60), request_on(&conn, "GET", path, auth)).await
+            tokio::time::timeout(
+                Duration::from_secs(60),
+                request_on(&conn, "GET", path, auth),
+            )
+            .await
         });
         match r {
             Ok(Ok(x)) => Ok(x),
@@ -1173,7 +1185,7 @@ async fn relay_request(sv: &Serving, rest: &str, auth: &str) -> (u16, Vec<u8>) {
         return (400, b"bad device".to_vec());
     };
     let inner = format!("/{inner}");
-    let Some(asker) = verify_auth(&sv.peer_key(), auth, &inner) else {
+    let Some(asker) = verify_auth_relayed(&sv.peer_key(), auth, &inner) else {
         return (403, b"forbidden".to_vec());
     };
     let target = sv.registrants.lock().unwrap().get(&dev).cloned();

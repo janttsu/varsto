@@ -49,6 +49,7 @@ mod fetch;
 mod ledger_upkeep;
 mod manifest_upkeep;
 mod membership;
+mod org_ops;
 mod placement;
 mod repair;
 mod share_ops;
@@ -63,7 +64,11 @@ pub use disk_groups::DiskGroupStatus;
 pub use manifest_upkeep::ManifestPolicy;
 pub use membership::{
     removal_notice, DeviceInfo, DeviceRemoved, EpochRecord, Grant, KemRecord, Removal, Revocation,
-    RevokeReport, Revoked, SignedRevocation,
+    RevokeReport, Revoked, SignedEpoch, SignedRevocation,
+};
+pub use org_ops::{
+    LogView, OrgApproved, OrgBrief, OrgCreated, OrgDevice, OrgRemoveReport, OrgSummary, OrgUser,
+    UnlistedDevice,
 };
 pub use repair::{
     Damage, DamageKind, RepairOptions, RepairReport, RepairStatus, RepairedCopy, Unrepairable,
@@ -283,6 +288,9 @@ pub struct StatusReport {
     /// Destination devices of transferrers, by storage name.
     #[serde(default)]
     pub carrier_for: BTreeMap<String, Vec<String>>,
+    /// The organization the vault belongs to, if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub org: Option<OrgBrief>,
 }
 
 #[derive(Clone, Debug, Serialize, Default)]
@@ -405,6 +413,8 @@ pub struct Engine {
     epochs: membership::VaultEpochs,
     /// Set once this device has seen its own revocation: it no longer syncs.
     removal: Option<Removal>,
+    /// The organization this vault belongs to, if any (`org_ops`).
+    org: Option<crate::org::OrgState>,
     pub chunker: ChunkerParams,
     /// Counts the calls made to every storage this engine opens (measurements).
     storage_calls: Option<std::sync::Arc<crate::storage::StorageCalls>>,
@@ -498,6 +508,29 @@ impl Engine {
         storage: StorageSpec,
         secret: Option<String>,
     ) -> Result<Engine> {
+        Self::join_with_signer(
+            home,
+            device_name,
+            passphrase,
+            vault_key_hex,
+            storage,
+            secret,
+            None,
+        )
+    }
+
+    /// Like `join_with_secret`, with the signing key the device already made
+    /// (an organization request): its device id is then the one the admin
+    /// approved. Without one a fresh key is generated.
+    pub(crate) fn join_with_signer(
+        home: &Path,
+        device_name: &str,
+        passphrase: &str,
+        vault_key_hex: &str,
+        storage: StorageSpec,
+        secret: Option<String>,
+        signer: Option<crypto::SigningKey>,
+    ) -> Result<Engine> {
         if home.join("vault.json").exists() {
             bail!("{} already holds a vault", home.display());
         }
@@ -522,7 +555,7 @@ impl Engine {
         fs::create_dir_all(home)?;
         let keys = Keys {
             master,
-            signer: crypto::SigningKey::generate(),
+            signer: signer.unwrap_or_else(crypto::SigningKey::generate),
         };
         let device_id = ledger::device_id_for(&keys.signer.public());
         let vault = LocalVault {
@@ -534,7 +567,7 @@ impl Engine {
             member: false,
         };
         let mut engine = Self::write_new(home, vault, keys, passphrase, epochs)?;
-        engine.add_storage_with_secret(storage, secret)?;
+        engine.add_storage_internal(storage, secret)?;
         engine.pull_registry()?;
         engine.pull_ledger()?;
         // Publish the enrolment now: the other devices list this one from
@@ -551,6 +584,16 @@ impl Engine {
         device_name: &str,
         passphrase: &str,
         bundle: &crate::pair::Bundle,
+    ) -> Result<(Engine, Vec<String>)> {
+        Self::join_paired_with(home, device_name, passphrase, bundle, None)
+    }
+
+    pub(crate) fn join_paired_with(
+        home: &Path,
+        device_name: &str,
+        passphrase: &str,
+        bundle: &crate::pair::Bundle,
+        signer: Option<crypto::SigningKey>,
     ) -> Result<(Engine, Vec<String>)> {
         let mut notes = Vec::new();
         let mut first = None;
@@ -571,13 +614,14 @@ impl Engine {
             );
         };
         let chosen = &bundle.storages[first];
-        let mut engine = Self::join_with_secret(
+        let mut engine = Self::join_with_signer(
             home,
             device_name,
             passphrase,
             &bundle.vault_key,
             chosen.spec.clone(),
             chosen.secret.clone(),
+            signer,
         )?;
         if engine.vault.vault_id.to_string() != bundle.vault_id {
             bail!(
@@ -588,7 +632,7 @@ impl Engine {
         notes.push(format!("{}: joined through it", chosen.spec.name()));
         for s in bundle.storages.iter().skip(first + 1) {
             let r = Self::reachable(s)
-                .and_then(|()| engine.add_storage_with_secret(s.spec.clone(), s.secret.clone()));
+                .and_then(|()| engine.add_storage_internal(s.spec.clone(), s.secret.clone()));
             notes.push(match r {
                 Ok(()) => format!("{}: added", s.spec.name()),
                 Err(e) => format!("{}: not reachable here ({e:#})", s.spec.name()),
@@ -625,6 +669,7 @@ impl Engine {
         if self.vault.member {
             bail!("a member device cannot add devices");
         }
+        self.org_allows(|p| p.members_may_add_devices, "add devices")?;
         let store = self.secret_store()?;
         let storages = self
             .config
@@ -694,6 +739,7 @@ impl Engine {
             forked_self: false,
             epochs,
             removal: None,
+            org: crate::org::OrgState::load(home),
             chunker: ChunkerParams::DEFAULT,
             storage_calls: None,
             view_cache: Default::default(),
@@ -793,7 +839,7 @@ impl Engine {
             &engine.vault.vault_id,
             &engine.vault.device_id,
         )?;
-        engine.add_storage(storage)?;
+        engine.add_storage_internal(storage, None)?;
         engine.pending.push(Event::DeviceEnrolled {
             name: engine.vault.device_name.clone(),
         });
@@ -860,6 +906,7 @@ impl Engine {
             forked_self: false,
             epochs,
             removal,
+            org: crate::org::OrgState::load(home),
             chunker: ChunkerParams::DEFAULT,
             storage_calls: None,
             view_cache: Default::default(),
@@ -933,13 +980,25 @@ impl Engine {
     }
 
     fn tick(&mut self) -> Result<u64> {
-        self.clock.lamport += 1;
+        self.clock.lamport = self
+            .clock
+            .lamport
+            .checked_add(1)
+            .ok_or_else(|| anyhow!("the logical clock of this vault is exhausted"))?;
         util::write_json(&self.home.join("clock.json"), &self.clock)?;
         Ok(self.clock.lamport)
     }
 
+    /// Most a clock seen elsewhere may be ahead of ours: a device cannot
+    /// have made more events than this since we last heard from the vault.
+    /// Larger values are a damaged or hostile batch and are not adopted, so
+    /// one bad value cannot push everyone's clock to the end and win every
+    /// later ordering.
+    const CLOCK_LEAP: u64 = 1 << 40;
+
     fn observe_clock(&mut self, seen: u64) -> Result<()> {
-        if seen > self.clock.lamport {
+        if seen > self.clock.lamport && seen <= self.clock.lamport.saturating_add(Self::CLOCK_LEAP)
+        {
             self.clock.lamport = seen;
             util::write_json(&self.home.join("clock.json"), &self.clock)?;
         }
@@ -1034,6 +1093,14 @@ impl Engine {
         spec: StorageSpec,
         secret: Option<String>,
     ) -> Result<()> {
+        self.org_allows(|p| p.members_may_add_storages, "add storages")?;
+        self.add_storage_internal(spec, secret)
+    }
+
+    /// `add_storage_with_secret` without the organization's policy check:
+    /// for joining, where the storages come from the device that approved
+    /// or paired this one.
+    fn add_storage_internal(&mut self, spec: StorageSpec, secret: Option<String>) -> Result<()> {
         if self.config.storages.iter().any(|s| s.name() == spec.name()) {
             bail!("a storage named {} already exists", spec.name());
         }
@@ -1230,6 +1297,7 @@ impl Engine {
         name: &str,
         delete_data: bool,
     ) -> Result<StorageRemovalReport> {
+        self.org_allows(|p| p.members_may_add_storages, "remove storages")?;
         let plan = self.plan_storage_removal(name)?;
         if let Some(why) = plan.blocked {
             bail!("{why}");
@@ -1803,7 +1871,9 @@ impl Engine {
                 else {
                     continue;
                 };
-                let id = DeviceId::from_hex(id)?;
+                let Ok(id) = DeviceId::from_hex(id) else {
+                    continue;
+                };
                 if self.devices.devices.contains_key(&id) {
                     continue;
                 }
@@ -1835,7 +1905,9 @@ impl Engine {
                 else {
                     continue;
                 };
-                let id = DeviceId::from_hex(id)?;
+                let Ok(id) = DeviceId::from_hex(id) else {
+                    continue;
+                };
                 if self.devices.replicas.contains_key(&id) {
                     continue;
                 }
@@ -1858,7 +1930,9 @@ impl Engine {
                 let Some((dev, fid)) = rest.split_once('/') else {
                     continue;
                 };
-                let (dev, fid) = (DeviceId::from_hex(dev)?, FolderId::from_hex(fid)?);
+                let (Ok(dev), Ok(fid)) = (DeviceId::from_hex(dev), FolderId::from_hex(fid)) else {
+                    continue;
+                };
                 if self.keyring.folders.contains_key(&fid) {
                     continue;
                 }
@@ -1891,6 +1965,15 @@ impl Engine {
                     let Some(local) = self.keyring.folders.get(&fid) else {
                         continue;
                     };
+                    // `vault/policies/<folder>/<device>/<utc>.enc`: the name
+                    // says who wrote it, the envelope proves it.
+                    let Some(named) = key
+                        .strip_prefix(vault::PolicyRecord::PREFIX)
+                        .and_then(|r| r.split('/').nth(1))
+                        .and_then(|d| DeviceId::from_hex(d).ok())
+                    else {
+                        continue;
+                    };
                     // The object name ends with the update time: skip anything not newer.
                     let stamp: i64 = key
                         .rsplit('/')
@@ -1902,9 +1985,21 @@ impl Engine {
                         continue;
                     }
                     if let Some(blob) = backend.get(&key)? {
-                        if let Some(rec) = fr_keys.iter().find_map(|k| {
-                            vault::PolicyRecord::open(&blob, &self.vault.vault_id, &fid, k).ok()
-                        }) {
+                        let verify = |d: &DeviceId| self.device_key(d);
+                        if let Ok(rec) = vault::PolicyRecord::open_any(
+                            &blob,
+                            &self.vault.vault_id,
+                            &fid,
+                            &named,
+                            &fr_keys,
+                            &verify,
+                            self.org.is_none(),
+                        ) {
+                            if !self.trusted(&rec.device)
+                                || !self.org_accepts_policy_from(&rec.device)
+                            {
+                                continue;
+                            }
                             if let Some(f) = self.keyring.folders.get_mut(&fid) {
                                 if rec.updated_utc > f.policy_updated_utc {
                                     f.policy = rec.policy;
@@ -2968,15 +3063,16 @@ impl Engine {
         if self.mount_is_encrypted(&rec.folder_id) {
             return self.apply_remote_cached(rec, fk, state, remote, storages, report);
         }
-        let disk = root.join(&remote.path);
+        // Manifests are validated when opened; this is the last line of
+        // defence before a path from another device touches the disk.
+        let disk = util::safe_join(root, &remote.path)?;
         if remote.deleted {
             let _ = fs::remove_file(placeholder_path(&disk));
             if disk.exists() {
-                let trash = self
-                    .home
-                    .join("trash")
-                    .join(rec.folder_id.as_str())
-                    .join(format!("{}.{}", remote.path, util::now_utc()));
+                let trash = util::safe_join(
+                    &self.home.join("trash").join(rec.folder_id.as_str()),
+                    &format!("{}.{}", remote.path, util::now_utc()),
+                )?;
                 if let Some(p) = trash.parent() {
                     fs::create_dir_all(p)?;
                 }
@@ -3052,6 +3148,12 @@ impl Engine {
     ) -> Result<()> {
         if let Some(parent) = disk.parent() {
             fs::create_dir_all(parent)?;
+            if fs::symlink_metadata(parent).is_ok_and(|m| m.file_type().is_symlink()) {
+                bail!(
+                    "{} is a symbolic link; files are not written through links",
+                    parent.display()
+                );
+            }
         }
         let tmp = disk.with_file_name(format!(".varsto-tmp-{}", std::process::id()));
         let progress = crate::progress::Download::begin(&rec.name, &file.path, file.size);
@@ -3216,6 +3318,12 @@ impl Engine {
     fn write_placeholder(disk: &Path, file: &FileState) -> Result<()> {
         if let Some(parent) = disk.parent() {
             fs::create_dir_all(parent)?;
+            if fs::symlink_metadata(parent).is_ok_and(|m| m.file_type().is_symlink()) {
+                bail!(
+                    "{} is a symbolic link; files are not written through links",
+                    parent.display()
+                );
+            }
         }
         let info = serde_json::json!({ "varsto": "placeholder", "size": file.size, "mtime_ns": file.mtime, "hint": "run `varsto folder fetch` or use the app to download this file" });
         util::write_atomic(&placeholder_path(disk), &serde_json::to_vec(&info)?)
@@ -3376,6 +3484,7 @@ impl Engine {
         if self.vault.member {
             bail!("a member device cannot set policies on the owner's folders");
         }
+        self.org_allows(|p| p.members_may_set_policies, "set policies")?;
         let (rec, _) = self.resolve_folder(folder)?;
         let now = util::now_utc();
         let f = self
@@ -3398,7 +3507,7 @@ impl Engine {
             policy,
         };
         let fr_key = self.folder_record_key_now();
-        let blob = prec.seal(&self.vault.vault_id, &fr_key)?;
+        let blob = prec.seal_signed(&self.vault.vault_id, &fr_key, &self.keys.signer)?;
         for (_, backend) in self.metadata_storages(true)? {
             backend.put_if_absent(&prec.storage_key(), &blob)?;
         }
@@ -3520,6 +3629,10 @@ impl Engine {
         if self.vault.member {
             bail!("a member device holds folder keys only, not the vault key");
         }
+        self.org_allows(
+            |p| p.members_may_add_devices,
+            "print the recovery kit or export the vault key",
+        )?;
         // The current epoch's key: it opens the older epochs through the
         // epoch records, while a key from before a revocation opens nothing new.
         Ok(self.current_vault_key().to_hex())
@@ -3749,7 +3862,15 @@ impl Engine {
             folder_keys,
             pieces,
             local_roots,
-            revoked: self.devices.revoked.keys().cloned().collect(),
+            // Refused at the door: revoked devices, and in an organization
+            // every device the roster does not list.
+            revoked: self
+                .devices
+                .revoked
+                .keys()
+                .chain(self.devices.devices.keys().filter(|d| !self.trusted(d)))
+                .cloned()
+                .collect(),
         })
     }
 
@@ -3955,6 +4076,10 @@ impl Engine {
             let bytes = self.view_range(folder, path, 0, size)?;
             self.touch_access(folder, path)?;
             return Ok(bytes);
+        }
+        block_cache::check_rel_path(path)?;
+        if !self.load_state(&rec.folder_id)?.files.contains_key(path) {
+            bail!("unknown file {path} in {folder}");
         }
         let disk = root.join(path);
         if !disk.exists() {
@@ -4257,6 +4382,7 @@ impl Engine {
                 .collect(),
             key_epoch: self.key_epoch(),
             carrier_for: self.carrier_destination_names(),
+            org: self.org_brief(),
             replicas: self
                 .devices
                 .replicas
@@ -4897,6 +5023,8 @@ pub fn reset_device(home: &Path) -> Result<Vec<String>> {
         membership::RESET_EXTRA[0],
         membership::RESET_EXTRA[1],
         membership::RESET_EXTRA[2],
+        org_ops::RESET_ORG[0],
+        org_ops::RESET_ORG[1],
     ] {
         let p = home.join(name);
         if p.exists() {

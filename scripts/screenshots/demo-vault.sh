@@ -38,6 +38,8 @@ v "$phone" folder attach Photos "$H/phone/Photos" --selective
 v "$phone" pull Photos
 v "$phone" folder fetch Photos lake.jpg
 v "$laptop" sync
+# The organization page: aino's company, with the laptop as administrator.
+v "$laptop" org create --name "Aino Design Oy" --user aino --json > /dev/null
 v "$phone" pull Photos
 : > "$work/pids"
 "$bin" --home "$laptop" service run --port 0 --interval 300 > "$work/svc-laptop.log" 2>&1 &
