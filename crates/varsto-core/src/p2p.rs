@@ -138,6 +138,9 @@ impl Snapshot {
                 }
             }
         }
+        if let Some(bytes) = served::get(name) {
+            return Ok(Some(bytes.to_vec()));
+        }
         let Some(piece) = self.pieces.get(name) else {
             return Ok(None);
         };
@@ -156,37 +159,175 @@ impl Snapshot {
         if crate::ids::ChunkId::from_bytes(&crypto::keyed_hash(&fk.hash, &plain)) != piece.chunk {
             return Ok(None); // file changed since the snapshot
         }
-        let ct = crypto::encrypt_with_nonce(
-            &fk.chunk_key(piece.epoch, &piece.chunk)?,
-            &fk.chunk_nonce(piece.epoch, &piece.chunk)?,
-            &fk.chunk_aad(&self.vault_id, &piece.chunk, piece.len),
-            &crate::pack::pack(&plain),
-        )?;
-        if ObjectName::from_bytes(&crypto::hash(&ct)) != *name {
-            return Ok(None);
-        }
+        let key = fk.chunk_key(piece.epoch, &piece.chunk)?;
+        let nonce = fk.chunk_nonce(piece.epoch, &piece.chunk)?;
+        let aad = fk.chunk_aad(&self.vault_id, &piece.chunk, piece.len);
+        // Incompressible blocks (photos, video, archives) were stored
+        // uncompressed: try that first, which costs one encryption and one
+        // hash, before compressing again, which costs far more and is what
+        // the stored object holds only when it paid off.
+        let mut raw = Vec::with_capacity(plain.len() + 1);
+        raw.push(crate::pack::METHOD_RAW);
+        raw.extend_from_slice(&plain);
+        let ct = crypto::encrypt_with_nonce(&key, &nonce, &aad, &raw)?;
+        let ct = if ObjectName::from_bytes(&crypto::hash(&ct)) == *name {
+            ct
+        } else {
+            let ct = crypto::encrypt_with_nonce(&key, &nonce, &aad, &crate::pack::pack(&plain))?;
+            if ObjectName::from_bytes(&crypto::hash(&ct)) != *name {
+                return Ok(None);
+            }
+            served::put(name, &ct);
+            ct
+        };
         Ok(Some(ct))
     }
 }
 
-/// Requests the HTTP server answers at the same time.
-const SERVE_THREADS: usize = 8;
+/// Objects compressed and encrypted again for peers lately. Several devices
+/// catching up at once ask for the same blocks; the second one gets the
+/// bytes without the compression. Bounded by `VARSTO_P2P_CACHE_MB`
+/// (default 64 MiB, 0 turns it off); oldest out first.
+mod served {
+    use crate::ids::ObjectName;
+    use std::collections::{HashMap, VecDeque};
+    use std::sync::{Arc, Mutex, OnceLock};
 
-/// The serving side: HTTP on `addr`, answering `/p2p/object/<name>` and
-/// `/p2p/info` for authenticated peers.
+    #[derive(Default)]
+    struct Cache {
+        map: HashMap<ObjectName, Arc<Vec<u8>>>,
+        order: VecDeque<ObjectName>,
+        bytes: usize,
+    }
+
+    fn cache() -> &'static Mutex<Cache> {
+        static C: OnceLock<Mutex<Cache>> = OnceLock::new();
+        C.get_or_init(Mutex::default)
+    }
+
+    fn cap() -> usize {
+        static CAP: OnceLock<usize> = OnceLock::new();
+        *CAP.get_or_init(|| {
+            std::env::var("VARSTO_P2P_CACHE_MB")
+                .ok()
+                .and_then(|v| v.parse::<usize>().ok())
+                .unwrap_or(64)
+                << 20
+        })
+    }
+
+    pub(super) fn get(name: &ObjectName) -> Option<Arc<Vec<u8>>> {
+        cache().lock().unwrap().map.get(name).cloned()
+    }
+
+    pub(super) fn put(name: &ObjectName, bytes: &[u8]) {
+        let cap = cap();
+        if bytes.len() > cap / 4 {
+            return;
+        }
+        let mut c = cache().lock().unwrap();
+        if c.map.contains_key(name) {
+            return;
+        }
+        while c.bytes + bytes.len() > cap {
+            let Some(old) = c.order.pop_front() else {
+                break;
+            };
+            if let Some(b) = c.map.remove(&old) {
+                c.bytes -= b.len();
+            }
+        }
+        c.bytes += bytes.len();
+        c.order.push_back(name.clone());
+        c.map.insert(name.clone(), Arc::new(bytes.to_vec()));
+    }
+}
+
+/// Requests the HTTP server answers at the same time: twice the cores
+/// (producing an object is reading, compressing and encrypting), between 8
+/// and 32, so a peer that keeps a deep window of requests is kept busy.
+fn serve_threads() -> usize {
+    let cores = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(4);
+    (cores * 2).clamp(8, 32)
+}
+
+/// A listening socket with TCP keep-alive, which accepted connections
+/// inherit: peers keep their connections open between requests, and one
+/// that vanished (closed laptop, NAT mapping gone) is noticed and its
+/// connection closed within a few minutes instead of never.
+fn listener(addr: SocketAddr) -> Result<std::net::TcpListener> {
+    use socket2::{Domain, Socket, TcpKeepalive, Type};
+    let sock = Socket::new(Domain::for_address(addr), Type::STREAM, None)?;
+    #[cfg(unix)]
+    sock.set_reuse_address(true)?;
+    let ka = TcpKeepalive::new().with_time(Duration::from_secs(60));
+    #[cfg(any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "macos",
+        target_os = "ios",
+        target_os = "windows"
+    ))]
+    let ka = ka.with_interval(Duration::from_secs(15));
+    sock.set_tcp_keepalive(&ka)?;
+    sock.set_tcp_nodelay(true)?;
+    sock.bind(&addr.into())?;
+    sock.listen(128)?;
+    Ok(sock.into())
+}
+
+/// The serving side: HTTP/1.1 on `addr`, answering `/p2p/object/<name>` and
+/// `/p2p/info` for authenticated peers. A thread per connection, which a
+/// peer keeps open between requests (keep-alive); producing objects (read,
+/// compress, encrypt) is limited to `serve_threads()` at a time. A
+/// connection idle for `CONN_IDLE` is closed, and at most `MAX_CONNS` are
+/// open at once. (tiny_http's connection pool queued a new connection behind
+/// long-lived ones, so a kept-alive peer could wait for a connection that
+/// was never served.)
 pub struct Server {
-    server: tiny_http::Server,
+    listener: std::net::TcpListener,
     pub addr: SocketAddr,
     traffic: Arc<Traffic>,
 }
 
+const CONN_IDLE: Duration = Duration::from_secs(30);
+const MAX_CONNS: usize = 256;
+const MAX_HEAD: usize = 16 * 1024;
+
+/// Counting semaphore for the expensive part of an answer.
+struct Slots {
+    free: Mutex<usize>,
+    cv: std::sync::Condvar,
+}
+
+impl Slots {
+    fn take(&self) -> SlotGuard<'_> {
+        let mut f = self.free.lock().unwrap();
+        while *f == 0 {
+            f = self.cv.wait(f).unwrap();
+        }
+        *f -= 1;
+        SlotGuard(self)
+    }
+}
+
+struct SlotGuard<'a>(&'a Slots);
+
+impl Drop for SlotGuard<'_> {
+    fn drop(&mut self) {
+        *self.0.free.lock().unwrap() += 1;
+        self.0.cv.notify_one();
+    }
+}
+
 impl Server {
     pub fn bind(addr: SocketAddr) -> Result<Server> {
-        let server = tiny_http::Server::http(addr)
-            .map_err(|e| anyhow!("bind p2p listener on {addr}: {e}"))?;
-        let addr = server.server_addr().to_ip().unwrap_or(addr);
+        let listener = listener(addr).with_context(|| format!("bind p2p listener on {addr}"))?;
+        let addr = listener.local_addr().unwrap_or(addr);
         Ok(Server {
-            server,
+            listener,
             addr,
             traffic: Arc::default(),
         })
@@ -200,58 +341,165 @@ impl Server {
     }
 
     /// Serve until `stop` is set. The snapshot can be swapped at any time.
-    /// Several requests are answered at once: a downloading peer keeps
-    /// several objects in flight, and producing one (read, compress,
-    /// encrypt) and sending it would otherwise hold up all the others.
     pub fn run(
         &self,
         snapshot: Arc<Mutex<Option<Arc<Snapshot>>>>,
         stop: Arc<std::sync::atomic::AtomicBool>,
     ) {
-        std::thread::scope(|s| {
-            for _ in 0..SERVE_THREADS {
-                s.spawn(|| {
-                    while !stop.load(std::sync::atomic::Ordering::Relaxed) {
-                        let Ok(Some(req)) = self.server.recv_timeout(Duration::from_millis(500))
-                        else {
-                            continue;
-                        };
-                        let snap = snapshot.lock().unwrap().clone();
-                        let _ = self.handle(req, snap);
-                    }
-                });
-            }
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let slots = Arc::new(Slots {
+            free: Mutex::new(serve_threads()),
+            cv: std::sync::Condvar::new(),
         });
+        let open = Arc::new(AtomicUsize::new(0));
+        if self.listener.set_nonblocking(true).is_err() {
+            return;
+        }
+        while !stop.load(Ordering::Relaxed) {
+            let (sock, remote) = match self.listener.accept() {
+                Ok(c) => c,
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    std::thread::sleep(Duration::from_millis(5));
+                    continue;
+                }
+                Err(_) => {
+                    std::thread::sleep(Duration::from_millis(50));
+                    continue;
+                }
+            };
+            if open.load(Ordering::Relaxed) >= MAX_CONNS {
+                continue; // dropped: closed at once
+            }
+            open.fetch_add(1, Ordering::Relaxed);
+            let (snapshot, stop, slots, conns, traffic) = (
+                snapshot.clone(),
+                stop.clone(),
+                slots.clone(),
+                open.clone(),
+                self.traffic.clone(),
+            );
+            let spawned = std::thread::Builder::new()
+                .name("p2p-conn".into())
+                .spawn(move || {
+                    let _ = serve_connection(sock, remote, &snapshot, &stop, &slots, &traffic);
+                    conns.fetch_sub(1, Ordering::Relaxed);
+                });
+            if spawned.is_err() {
+                open.fetch_sub(1, Ordering::Relaxed);
+                log("could not start a thread for a peer connection");
+            }
+        }
     }
+}
 
-    fn handle(&self, req: tiny_http::Request, snap: Option<Arc<Snapshot>>) -> Result<()> {
-        let path = req.url().split('?').next().unwrap_or("").to_string();
-        let auth = req
-            .headers()
-            .iter()
-            .find(|h| h.field.equiv("X-Varsto-Peer"))
-            .map(|h| h.value.as_str().to_string())
-            .unwrap_or_default();
-        let (status, body, peer) = handle_from(snap.as_deref(), &path, &auth);
-        let remote = req.remote_addr().copied();
-        let len = body.len() as u64;
-        let _active = peer.as_ref().map(|d| self.traffic.begin(d));
-        req.respond(
-            tiny_http::Response::from_data(body)
-                .with_status_code(status)
-                .with_chunked_threshold(usize::MAX),
-        )?;
+/// Requests on one connection, one after another, until the peer closes it,
+/// asks to close, stays idle for `CONN_IDLE`, or the server stops.
+fn serve_connection(
+    mut sock: TcpStream,
+    remote: SocketAddr,
+    snapshot: &Mutex<Option<Arc<Snapshot>>>,
+    stop: &std::sync::atomic::AtomicBool,
+    slots: &Slots,
+    traffic: &Traffic,
+) -> Result<()> {
+    sock.set_nonblocking(false)?;
+    sock.set_nodelay(true)?;
+    sock.set_read_timeout(Some(Duration::from_secs(1)))?;
+    sock.set_write_timeout(Some(Duration::from_secs(60)))?;
+    let mut buf: Vec<u8> = Vec::with_capacity(4096);
+    let mut chunk = [0u8; 4096];
+    let mut idle_since = Instant::now();
+    loop {
+        // One request head (GET only, no body).
+        let end = loop {
+            if let Some(i) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
+                break i;
+            }
+            if buf.len() > MAX_HEAD {
+                return Ok(());
+            }
+            if stop.load(std::sync::atomic::Ordering::Relaxed) || idle_since.elapsed() > CONN_IDLE {
+                return Ok(());
+            }
+            match sock.read(&mut chunk) {
+                Ok(0) => return Ok(()),
+                Ok(n) => buf.extend_from_slice(&chunk[..n]),
+                Err(e)
+                    if matches!(
+                        e.kind(),
+                        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                    ) => {}
+                Err(e) => return Err(e.into()),
+            }
+        };
+        let head = String::from_utf8_lossy(&buf[..end]).to_string();
+        buf.drain(..end + 4);
+        let mut lines = head.split("\r\n");
+        let request_line = lines.next().unwrap_or("");
+        let mut parts = request_line.split_whitespace();
+        let (method, target, version) = (
+            parts.next().unwrap_or(""),
+            parts.next().unwrap_or(""),
+            parts.next().unwrap_or(""),
+        );
+        let mut auth = String::new();
+        let mut connection = String::new();
+        for l in lines {
+            if let Some((k, v)) = l.split_once(':') {
+                let k = k.trim();
+                if k.eq_ignore_ascii_case("X-Varsto-Peer") {
+                    auth = v.trim().to_string();
+                } else if k.eq_ignore_ascii_case("Connection") {
+                    connection = v.trim().to_ascii_lowercase();
+                }
+            }
+        }
+        let keep = match version {
+            "HTTP/1.1" => !connection.contains("close"),
+            "HTTP/1.0" => connection.contains("keep-alive"),
+            _ => false,
+        };
+        let path = target.split('?').next().unwrap_or("").to_string();
+        let (status, body, peer) = if method == "GET" {
+            let snap = snapshot.lock().unwrap().clone();
+            let _slot = slots.take();
+            handle_from(snap.as_deref(), &path, &auth)
+        } else {
+            (405, b"method not allowed".to_vec(), None)
+        };
+        let _active = peer.as_ref().map(|d| traffic.begin(d));
+        let reason = match status {
+            200 => "OK",
+            400 => "Bad Request",
+            403 => "Forbidden",
+            404 => "Not Found",
+            405 => "Method Not Allowed",
+            503 => "Service Unavailable",
+            _ => "Error",
+        };
+        let mut out = format!(
+            "HTTP/1.1 {status} {reason}\r\nContent-Length: {}\r\nContent-Type: application/octet-stream\r\n{}\r\n",
+            body.len(),
+            if keep { "" } else { "Connection: close\r\n" }
+        )
+        .into_bytes();
+        out.extend_from_slice(&body);
+        sock.write_all(&out)?;
         if let Some(d) = &peer {
-            self.traffic.record(
+            traffic.record(
                 d,
                 traffic::Direction::Out,
-                len,
+                body.len() as u64,
                 is_object(&path, status),
-                &remote.map(|a| Route::Tcp(a).label()).unwrap_or_default(),
-                remote,
+                &Route::Tcp(remote).label(),
+                Some(remote),
             );
         }
-        Ok(())
+        if !keep {
+            let _ = sock.shutdown(std::net::Shutdown::Write);
+            return Ok(());
+        }
+        idle_since = Instant::now();
     }
 }
 
@@ -538,21 +786,97 @@ impl Route {
     }
 }
 
-/// Minimal HTTP GET over a fresh TCP connection (no dependency, short timeouts).
-fn http_get(addr: SocketAddr, path: &str, auth: &str, timeout: Duration) -> Result<(u16, Vec<u8>)> {
-    let mut s = TcpStream::connect_timeout(&addr, timeout)?;
+/// Kept-alive HTTP connections to peers, per address. A new connection per
+/// object paid a handshake and TCP's slow start for every block, which on a
+/// link with tens of milliseconds of round trip held downloads far below
+/// what the link carries. Idle connections are closed after a while; a kept
+/// one that turns out dead is replaced and the request asked again once.
+#[derive(Default)]
+pub struct TcpPool {
+    idle: Mutex<BTreeMap<SocketAddr, Vec<(TcpStream, Instant)>>>,
+}
+
+/// How long an unused connection is kept, and how many per peer address.
+const POOL_IDLE: Duration = Duration::from_secs(20);
+const POOL_PER_ADDR: usize = 32;
+
+impl TcpPool {
+    fn take(&self, addr: SocketAddr) -> Option<TcpStream> {
+        let mut idle = self.idle.lock().unwrap();
+        let v = idle.get_mut(&addr)?;
+        while let Some((s, at)) = v.pop() {
+            if at.elapsed() < POOL_IDLE {
+                return Some(s);
+            }
+        }
+        None
+    }
+
+    fn give_back(&self, addr: SocketAddr, s: TcpStream) {
+        let mut idle = self.idle.lock().unwrap();
+        let v = idle.entry(addr).or_default();
+        v.retain(|(_, at)| at.elapsed() < POOL_IDLE);
+        if v.len() < POOL_PER_ADDR {
+            v.push((s, Instant::now()));
+        }
+    }
+
+    /// GET `path` from `addr` on a kept connection, or a new one.
+    pub fn get(
+        &self,
+        addr: SocketAddr,
+        path: &str,
+        auth: &str,
+        timeout: Duration,
+    ) -> Result<(u16, Vec<u8>)> {
+        // A kept connection the peer closed meanwhile (restart, idle
+        // timeout) fails: then ask again on a fresh one.
+        if let Some(Ok((status, body, keep))) = self
+            .take(addr)
+            .map(|s| exchange(s, addr, path, auth, timeout))
+        {
+            if let Some(s) = keep {
+                self.give_back(addr, s);
+            }
+            return Ok((status, body));
+        }
+        let s = TcpStream::connect_timeout(&addr, timeout)?;
+        s.set_nodelay(true)?;
+        let (status, body, keep) = exchange(s, addr, path, auth, timeout)?;
+        if let Some(s) = keep {
+            self.give_back(addr, s);
+        }
+        Ok((status, body))
+    }
+}
+
+/// One request and its response on `s`; the stream comes back when it can
+/// carry another request (a `Content-Length` body, no `Connection: close`).
+fn exchange(
+    mut s: TcpStream,
+    addr: SocketAddr,
+    path: &str,
+    auth: &str,
+    timeout: Duration,
+) -> Result<(u16, Vec<u8>, Option<TcpStream>)> {
     s.set_read_timeout(Some(Duration::from_secs(30)))?;
     s.set_write_timeout(Some(timeout))?;
-    write!(
-        s,
-        "GET {path} HTTP/1.1\r\nHost: {addr}\r\nX-Varsto-Peer: {auth}\r\nConnection: close\r\n\r\n"
+    s.write_all(
+        format!("GET {path} HTTP/1.1\r\nHost: {addr}\r\nX-Varsto-Peer: {auth}\r\nConnection: keep-alive\r\n\r\n")
+            .as_bytes(),
     )?;
-    let mut raw = Vec::new();
-    s.read_to_end(&mut raw)?;
-    let sep = raw
-        .windows(4)
-        .position(|w| w == b"\r\n\r\n")
-        .ok_or_else(|| anyhow!("malformed peer response"))?;
+    let mut raw: Vec<u8> = Vec::with_capacity(64 * 1024);
+    let mut buf = vec![0u8; 64 * 1024];
+    let sep = loop {
+        if let Some(i) = raw.windows(4).position(|w| w == b"\r\n\r\n") {
+            break i;
+        }
+        let n = s.read(&mut buf)?;
+        if n == 0 {
+            bail!("peer closed the connection before answering");
+        }
+        raw.extend_from_slice(&buf[..n]);
+    };
     let head = String::from_utf8_lossy(&raw[..sep]).to_string();
     if std::env::var_os("VARSTO_P2P_DEBUG").is_some() {
         eprintln!("p2p: response head: {}", head.replace("\r\n", " | "));
@@ -563,19 +887,45 @@ fn http_get(addr: SocketAddr, path: &str, auth: &str, timeout: Duration) -> Resu
         .and_then(|l| l.split_whitespace().nth(1))
         .and_then(|x| x.parse().ok())
         .unwrap_or(0);
-    let body = &raw[sep + 4..];
-    let chunked = head.lines().any(|l| {
-        l.to_ascii_lowercase().starts_with("transfer-encoding:")
-            && l.to_ascii_lowercase().contains("chunked")
-    });
-    Ok((
-        status,
-        if chunked {
-            decode_chunked(body)?
-        } else {
-            body.to_vec()
-        },
-    ))
+    let header = |name: &str| {
+        head.lines().skip(1).find_map(|l| {
+            let (k, v) = l.split_once(':')?;
+            k.trim()
+                .eq_ignore_ascii_case(name)
+                .then(|| v.trim().to_ascii_lowercase())
+        })
+    };
+    let close = header("connection").is_some_and(|v| v.contains("close"));
+    let chunked = header("transfer-encoding").is_some_and(|v| v.contains("chunked"));
+    let length = header("content-length").and_then(|v| v.parse::<usize>().ok());
+    let mut body = raw.split_off(sep + 4);
+    match (chunked, length) {
+        (false, Some(len)) => {
+            if len > 64 << 20 {
+                bail!("peer answer of {len} bytes is too large");
+            }
+            while body.len() < len {
+                let want = (len - body.len()).min(buf.len());
+                let n = s.read(&mut buf[..want])?;
+                if n == 0 {
+                    bail!("peer closed the connection mid-answer");
+                }
+                body.extend_from_slice(&buf[..n]);
+            }
+            body.truncate(len);
+            Ok((status, body, (!close).then_some(s)))
+        }
+        // No length: the body ends with the connection.
+        _ => {
+            s.read_to_end(&mut body)?;
+            let body = if chunked {
+                decode_chunked(&body)?
+            } else {
+                body
+            };
+            Ok((status, body, None))
+        }
+    }
 }
 
 /// Decode an HTTP/1.1 chunked body (`<hex size>\r\n<data>\r\n ... 0\r\n\r\n`).
@@ -622,6 +972,8 @@ pub struct Peers {
     pub timeout: Duration,
     /// Where downloads are counted: the QUIC node's counters when it runs.
     traffic: Arc<Traffic>,
+    /// Kept-alive TCP connections, carried over when the table is rebuilt.
+    pool: Mutex<Arc<TcpPool>>,
 }
 
 const ROUTE_TTL: Duration = Duration::from_secs(60);
@@ -678,6 +1030,7 @@ impl Peers {
             routes: Mutex::new(BTreeMap::new()),
             timeout: Duration::from_millis(1500),
             traffic,
+            pool: Mutex::default(),
         }
     }
 
@@ -701,6 +1054,7 @@ impl Peers {
     pub fn inherit(&self, previous: &Peers) {
         *self.routes.lock().unwrap() = previous.routes.lock().unwrap().clone();
         *self.state.lock().unwrap() = previous.state.lock().unwrap().clone();
+        *self.pool.lock().unwrap() = previous.pool.lock().unwrap().clone();
     }
 
     /// Peers worth asking now: unreachable ones rest for a minute, the ones
@@ -737,7 +1091,8 @@ impl Peers {
     }
 
     fn try_tcp(&self, addr: SocketAddr, path: &str, auth: &str) -> Result<(u16, Vec<u8>)> {
-        let result = http_get(addr, path, auth, self.timeout);
+        let pool = self.pool.lock().unwrap().clone();
+        let result = pool.get(addr, path, auth, self.timeout);
         self.debug(&format!(
             "tcp {addr} {path} -> {}",
             match &result {
@@ -1081,6 +1436,38 @@ mod tests {
         assert_eq!(ask(&gone), 403);
         let stale = auth_header(&SecretKey::random(), &good, "/p2p/info");
         assert_eq!(handle(Some(&snap), "/p2p/info", &stale).0, 403);
+    }
+
+    #[test]
+    fn the_server_keeps_connections_and_still_answers_old_clients() {
+        let server = Server::bind("127.0.0.1:0".parse().unwrap()).unwrap();
+        let addr = server.addr;
+        let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let snap: Arc<Mutex<Option<Arc<Snapshot>>>> = Arc::default();
+        let (s2, st2) = (snap.clone(), stop.clone());
+        let th = std::thread::spawn(move || server.run(s2, st2));
+        // Kept-alive: three requests, one connection.
+        let pool = TcpPool::default();
+        for _ in 0..3 {
+            let (status, body) = pool
+                .get(addr, "/p2p/info", "x", Duration::from_secs(2))
+                .unwrap();
+            assert_eq!((status, body.as_slice()), (503, b"locked".as_slice()));
+        }
+        assert_eq!(
+            pool.idle.lock().unwrap().get(&addr).map(|v| v.len()),
+            Some(1)
+        );
+        // A client of 0.0.1-alpha.8: `Connection: close`, body read to the end.
+        let mut s = TcpStream::connect(addr).unwrap();
+        write!(s, "GET /p2p/info HTTP/1.1\r\nHost: {addr}\r\nX-Varsto-Peer: x\r\nConnection: close\r\n\r\n").unwrap();
+        let mut raw = Vec::new();
+        s.read_to_end(&mut raw).unwrap();
+        let text = String::from_utf8_lossy(&raw);
+        assert!(text.starts_with("HTTP/1.1 503 "), "{text}");
+        assert!(text.ends_with("\r\n\r\nlocked"), "{text}");
+        stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        th.join().unwrap();
     }
 
     #[test]
