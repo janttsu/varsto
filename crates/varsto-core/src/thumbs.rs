@@ -53,11 +53,14 @@ fn aad(vault: &VaultId, folder: &FolderId, content_hash: &str) -> Vec<u8> {
 /// JPEG thumbnail bytes for an image or video file, if one can be made.
 pub fn make(path: &Path, name: &str) -> Option<Vec<u8>> {
     if is_image(name) {
-        let img = image::open(path).ok()?;
-        return encode(img);
+        let reader = image::ImageReader::open(path)
+            .ok()?
+            .with_guessed_format()
+            .ok()?;
+        return encode(decode_limited(reader)?);
     }
     if is_video(name) {
-        let out = std::process::Command::new("ffmpeg")
+        let mut child = std::process::Command::new("ffmpeg")
             .args(["-v", "error", "-y", "-ss", "1", "-i"])
             .arg(path)
             .args([
@@ -71,13 +74,62 @@ pub fn make(path: &Path, name: &str) -> Option<Vec<u8>> {
                 "mjpeg",
                 "-",
             ])
-            .output()
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null())
+            .spawn()
             .ok()?;
-        if out.status.success() && !out.stdout.is_empty() {
-            return Some(out.stdout);
+        // Read the frame on a thread so a large one cannot fill the pipe
+        // and stall ffmpeg; a hostile or broken video must not keep it busy
+        // forever.
+        let mut stdout = child.stdout.take()?;
+        let reader = std::thread::spawn(move || {
+            let mut buf = Vec::new();
+            let _ = std::io::Read::read_to_end(
+                &mut std::io::Read::take(&mut stdout, MAX_THUMB_BYTES as u64 + 1),
+                &mut buf,
+            );
+            buf
+        });
+        let start = std::time::Instant::now();
+        loop {
+            match child.try_wait() {
+                Ok(Some(_)) => break,
+                Ok(None) if start.elapsed() < FFMPEG_TIMEOUT => {
+                    std::thread::sleep(std::time::Duration::from_millis(50))
+                }
+                _ => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return None;
+                }
+            }
+        }
+        let ok = child.wait().ok()?.success();
+        let frame = reader.join().ok()?;
+        if ok && !frame.is_empty() && frame.len() <= MAX_THUMB_BYTES {
+            return Some(frame);
         }
     }
     None
+}
+
+/// Longest ffmpeg may take for one frame.
+const FFMPEG_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
+/// Largest thumbnail kept.
+const MAX_THUMB_BYTES: usize = 4 << 20;
+
+/// Decode with limits: an image that claims huge dimensions (a decompression
+/// bomb) is refused before its pixels are allocated.
+fn decode_limited<R: std::io::BufRead + std::io::Seek>(
+    mut reader: image::ImageReader<R>,
+) -> Option<image::DynamicImage> {
+    let mut limits = image::Limits::default();
+    limits.max_image_width = Some(20_000);
+    limits.max_image_height = Some(20_000);
+    limits.max_alloc = Some(256 << 20);
+    reader.limits(limits);
+    reader.decode().ok()
 }
 
 /// JPEG thumbnail of a picture held in memory (folders kept encrypted on a
@@ -86,7 +138,10 @@ pub fn make_from_bytes(bytes: &[u8], name: &str) -> Option<Vec<u8>> {
     if !is_image(name) {
         return None;
     }
-    encode(image::load_from_memory(bytes).ok()?)
+    let reader = image::ImageReader::new(Cursor::new(bytes))
+        .with_guessed_format()
+        .ok()?;
+    encode(decode_limited(reader)?)
 }
 
 fn encode(img: image::DynamicImage) -> Option<Vec<u8>> {
