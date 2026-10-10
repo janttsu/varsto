@@ -903,7 +903,15 @@ impl Peers {
         if let Some(r) = last {
             match self.over(&r, path, auth, p) {
                 Ok((s, b)) => {
-                    self.remember(&p.device, Some(r.clone()), s);
+                    // Requests run side by side: one may have switched the
+                    // peer to a better route meanwhile; keep that one.
+                    let mut routes = self.routes.lock().unwrap();
+                    match routes.get(&p.device) {
+                        Some((Some(cur), _, _)) if *cur != r => {}
+                        _ => {
+                            routes.insert(p.device.clone(), (Some(r.clone()), s, Instant::now()));
+                        }
+                    }
                     return Some((s, b, r));
                 }
                 Err(e) => log(&format!("{who}: {} lost: {e:#}", r.describe())),
