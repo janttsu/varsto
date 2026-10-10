@@ -896,9 +896,33 @@ impl Node {
         punch: bool,
     ) -> Result<(u16, Vec<u8>)> {
         self.rt.block_on(async {
+            let reused = self.reusable(addr, cert_sha256).await.is_some();
             let conn = self.connect(addr, cert_sha256, punch).await?;
-            request_on(&conn, "GET", path, auth).await
+            match request_on(&conn, "GET", path, auth).await {
+                Ok(r) => Ok(r),
+                // A kept connection can outlive the other end (it restarted,
+                // or its address changed): open a new one and ask again once,
+                // instead of falling back to a slower route for good.
+                Err(e) if reused => {
+                    log(&format!(
+                        "quic {addr}: kept connection failed ({e:#}); reconnecting"
+                    ));
+                    conn.close(0u32.into(), b"stale");
+                    self.forget(addr, &conn).await;
+                    let conn = self.connect(addr, cert_sha256, punch).await?;
+                    request_on(&conn, "GET", path, auth).await
+                }
+                Err(e) => Err(e),
+            }
         })
+    }
+
+    /// Drop `conn` from the cache unless another request already replaced it.
+    async fn forget(&self, addr: SocketAddr, conn: &quinn::Connection) {
+        let mut conns = self.conns.lock().await;
+        if conns.get(&addr).map(|c| c.stable_id()) == Some(conn.stable_id()) {
+            conns.remove(&addr);
+        }
     }
 
     /// Does our own public address lead back to us? True means other devices
