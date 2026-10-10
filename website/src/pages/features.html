@@ -148,6 +148,14 @@ description: What Varsto does, with the use cases behind each feature: your own 
       </div>
     </section>
 
+    <section class="feature" id="organizations">
+      <h2>Organizations: administrators, approvals and a signed log, for business use</h2>
+      <div>
+        <p>A vault has devices, not people, and every full device is equal. An organization adds the layer a company needs: administrators who approve devices for named people, remove a person with every device of theirs in one step (the vault gets new keys that only the remaining devices receive; with a wipe order the removed devices delete their keys and folder contents), set what members may do on their own (share outside the vault, add storages, set policies, add devices), and keep a log of it that is signed by their devices and chained, so nobody can change it afterwards unnoticed. A device joins with a request code and a six-word fingerprint the administrator compares with the person; the approval token, sealed to that device's key, carries the vault key and the storage settings. A device that joined with the vault key alone is ignored by the others until an administrator adds it. The root key that appoints administrators is 24 words on paper, never on a device.</p>
+        <p class="note">A vault without an organization is unchanged: no new objects, no new checks, nothing in the interface. Storage credentials are still shared and not rotated, existing data is not re-encrypted after a removal, and there is no second factor on administrator actions yet.</p>
+      </div>
+    </section>
+
     <h2>Also in the design</h2>
     <ul>
       <li>QR invitations for sharing.</li>

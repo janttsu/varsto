@@ -7,7 +7,7 @@ desktop overview and files, and the phone layout, each light and dark.
 
 Needs `pip install playwright pillow` and `playwright install chromium`
 (CHROMIUM=/path/to/chromium uses another build). Writes the website names:
-desktop-overview-*, desktop-files-*, mobile-* (light and dark).
+desktop-overview-*, desktop-files-*, desktop-organization-*, mobile-* (light and dark).
 """
 import json
 import os
@@ -47,6 +47,11 @@ with sync_playwright() as p:
         pg.wait_for_selector("#folders tbody tr:nth-child(2)", timeout=60000)
         time.sleep(2)
         pg.screenshot(path=f"{out}/desktop-overview-{scheme}.png")
+        # The organization page of the same vault (the laptop is its administrator).
+        pg.click(".sidebar .nav-item[data-nav=organization]")
+        pg.wait_for_selector("#org-users li", timeout=60000)
+        time.sleep(1)
+        pg.screenshot(path=f"{out}/desktop-organization-{scheme}.png")
         c.close()
         # Files of Photos with a file's details, cropped around the layout.
         c = ctx(scheme)

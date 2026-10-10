@@ -75,6 +75,8 @@ varsto --home ~/.varsto-laptop mcp          # MCP over stdio; point Claude Deskt
 # afterwards) and order it to wipe itself when it next reaches a storage; then print a new recovery kit
 varsto --home ~/.varsto-laptop device list
 varsto --home ~/.varsto-laptop device revoke phone --wipe --yes
+varsto --home ~/.varsto-laptop org create --name "Acme" --user alice   # business use: administrators, approvals, a signed log
+varsto --home ~/.varsto-laptop org remove-user bob --wipe --yes       # every device of a person, in one step
 
 # a pool of removable disks: fill, check, eject, retire; files on a disk that is away say "attach disk data-01 (shelf)"
 varsto storage add-pool shelf --place shelf

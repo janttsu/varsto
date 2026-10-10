@@ -77,6 +77,9 @@ ledger/<device>/<seq 16 digits>.json     signed batch envelope (body encrypted)
 ledger/<device>/checkpoint-<seq 16 digits>.json  signed checkpoint of that device's batches up to seq (section 22)
 vault/share-*/<folder>/...               share epochs, keys, grants, member records and tokens of shared folders (section 24)
 vault/access/<folder>/<device>/<utc>.enc a device's last-accessed times for a folder (section 13)
+org/manifest/<seq>.json                  organization: administrators, signed by the root key (section 27)
+org/roster/<seq>.json                    organization: people, devices, policy, signed by an administrator device (section 27)
+org/log/<device>/<seq>.json              organization: one administrator device's chained log (section 27)
 manifests/<folder>/<device>/<seq>.enc    full folder view of one device
 chunks/<first two hex>/<object name>     encrypted chunk
 ```
@@ -134,6 +137,8 @@ keys.enc        master key and signing key, wrapped under the passphrase
 keyring.enc     folder records known to this device (encrypted)
 config.json     storages and folder mounts (no secrets)
 devices.json    device registry cache (public keys)
+org-state.json  the organization as last verified: manifests, roster, log (section 27; absent without one)
+org-request.json  a device waiting for an organization's approval: its request keys (removed on join)
 clock.json      Lamport clock
 ledger/         local copy of every device's batches, the heads file, pushed.json (own batches confirmed per storage), pending.json (events waiting for the next batch) and view.enc (the cached location view, encrypted)
 state/<folder>.json  merged file states, local index, last seen manifests
@@ -142,12 +147,15 @@ trash/          deleted files
 
 ## 9. Known limitations
 
-- Pairing is "copy the vault key": no hybrid KEM, no QR, no second factor. The vault key is the master key in hex; losing it and every device means losing the data (no escrow).
+These were the limits of alpha-0; the sections below record what later versions changed.
+
+- Pairing was "copy the vault key". Since alpha.7 a nine-digit code pairs devices over the LAN (SPAKE2); since alpha.10 an organization approves a device through a token sealed to its hybrid KEM key (section 27). There is still no QR code and no second factor. The vault key is the master key in hex; losing it and every device means losing the data (no escrow).
 - alpha-0 signed with Ed25519 only; since alpha.3 every batch carries `sig_alg = "ed25519+ml-dsa-65"` (section 11). The `sig_alg` field made the switch possible without rewriting stored data.
 - Whole files are chunked in a stream, but a changed file is re-read twice during a push (once to hash, once to upload) when a chunk is new; packs for small files do not exist yet.
-- Manifests are full views; very large folders will need incremental manifests and checkpoints (plan section 8, blocking question 1).
-- Verification of cold copies, policies, placeholders, sharing and P2P are not implemented.
+- Manifests are full views; very large folders will need incremental manifests (listing and pruning exist, section 25).
+- Verification of cold copies (section 20), policies (section 14), placeholders (section 10), sharing (sections 10 and 24) and P2P (section 15) exist since the versions those sections name.
 - Logging and the redaction rules of `docs/architecture/logging.md` are not implemented; the CLI prints only aggregate counts and identifiers.
+- The passphrase is NFKC-normalised before stretching since alpha.10; key files written earlier by a passphrase that normalisation changes are opened with the raw string as a fallback.
 
 ## 10. Additions in 0.0.1-alpha.2
 
@@ -550,3 +558,38 @@ A copy for which nothing is found stays in the queue with the reason ("a copy is
 **Limits.** Only storages of this device are repaired; a copy on another device's storage that this device cannot reach is repaired by that device. Blocks of folders that are not attached here are repaired only from ciphertext (another storage, the cache or a peer), and without a current-file check, so a block of an old version may be rewritten. A peer is asked only when the service (or a command-line run with peer-to-peer enabled) knows peers. Disk pools are repaired through their attached disks; filling a replacement disk stays `varsto disk add`.
 
 Tests: `crates/varsto-core/tests/repair.rs` (from another storage with a dry run first, a corrupt and a missing copy from the local file through `fsck --verify` and the service's run, damage found by verification on another device, from a peer over TCP, cold storage read only with `from_cold` and counted reads, an unrepairable loss reported once, transferrers never written, a block moved off a storage not written back).
+
+## 27. Organizations: administrators, approvals, removing a person (0.0.1-alpha.10)
+
+Code: `crates/varsto-core/src/org.rs` (objects, request codes, approval tokens) and `engine/org_ops.rs`. Plan 6.44, phase A; it realises the vault identity key K5 of [key-hierarchy.md](key-hierarchy.md) as an organization root key plus administrator device signatures.
+
+**Why.** A vault has no people in it: only devices, and every full device is equal, so any device could remove any other (section 21) and anyone holding the vault key belonged. A company needs someone who decides which devices belong, can remove a person with every device of theirs, and can show afterwards who did what. An **organization** adds that as a layer on top of the vault. A vault without one is unchanged: no new objects, no new checks, nothing in the interface.
+
+**Keys.** The organization has a **root key**: a random 256-bit secret shown once as 24 BIP-39 words (`varsto org create`, Set up an organization… under Settings) and never stored on any device. The root signing key is the hybrid Ed25519 + ML-DSA-65 pair whose seeds are `derive(root, "org-root-ed25519")` and `derive(root, "org-root-ml-dsa")`; the organization id is the first 16 bytes of the hash of its public key. The root key signs the manifest only (who the administrators are); everything else is signed by **administrator device keys**, the ordinary device signing keys of section 3. Bodies are encrypted under `derive(K_epoch, "org-record")` with the vault key of the epoch named in the envelope, so the storage reads nothing and a device that joined later opens older objects through the epoch chain.
+
+**Objects** (under `org/` on every metadata storage, written with put-if-absent):
+
+| Object | Content | Protection |
+| --- | --- | --- |
+| `org/manifest/<seq, 8 digits>.json` | org id, name, seq, hash of the previous manifest as stored, time, root public key, administrators (device id and name) | body encrypted; signed by the root key over vault, org id, seq, key epoch and the ciphertext hash |
+| `org/roster/<seq>.json` | org id, seq, hash of the previous roster, the manifest that made the issuer an administrator, issuer, time, `members` (device, user, name, when and by whom added), `removed` (device, user, name, when, by whom, wipe), `policy` | body encrypted; signed by the issuing administrator device |
+| `org/log/<device>/<seq>.json` | one entry of that administrator device's log: seq, hash of its previous entry, time, event | body encrypted; signed by the issuing administrator device |
+
+A manifest, a roster and each device's log are hash chains with contiguous sequence numbers. The roster is a snapshot, not a delta: the newest valid one is the truth. Rosters carry the **policy**: whether members may share folders with people outside the vault, add or remove storages, set policies and placement, or add devices and print the recovery kit. Every flag is off by default; administrators may do everything.
+
+**What a device accepts** (`sync_org`, run on every pull before revocations are read and again after a new key epoch is adopted): the next manifest in sequence whose previous-hash matches, signed by the root key the device already knows (the first manifest it ever sees pins that key; a vault whose storages hold a manifest the device cannot read refuses to create another); the next roster in sequence whose issuer is an administrator in the manifest it names and is not revoked; the next log entry of each device that is or was an administrator. Anything else is ignored. The result is kept in `org-state.json`.
+
+**Who belongs.** Once a roster exists, a full device is *trusted* (section 21: its records, ledger batches, revocations and grants count) only if the roster lists it. A device that joins with the vault key alone therefore reads everything the key opens, but the others ignore what it writes, and the organization page lists it under "not in the organization" until an administrator adds it (`varsto org add-device <device> --user <person>`). Devices that existed when the organization was created are listed under its founder.
+
+**Approval.** A new device runs `varsto org request --name <device>` (or Join your organization on the setup screen): it creates its key-exchange key *and* its device signing key, keeps both in `org-request.json`, and prints `vor1.<KEM public key, hex>.<device id>[.<name>]` with a six-word fingerprint over the key, the device id and the name (the derivation of section 24). An administrator pastes the code, compares the words with the person, names the person and approves: the device goes into the roster (so its id is known before it writes anything), the log gets `device_approved`, and the device receives `vot1.<vault id>.<KEM ciphertext>.<sealed>`: the pairing bundle of section 9 (vault key of the current epoch, storages with their secrets) plus org id, name, user, approver and the confirmed fingerprint, sealed through the hybrid KEM to its request key. `varsto org join --token` (or the setup card) refuses a token whose confirmed fingerprint is not its own, joins through the first reachable storage like pairing, and signs with the key it made at request time.
+
+**Removing.** Only administrators can revoke devices, and only epochs and revocations issued by administrators are adopted; a member device that tries gets an error, and a forged epoch record from a member is ignored. `varsto org remove-user <person> --yes [--wipe]` (Remove <person>… on the Organization page) revokes every current device of the person in **one key epoch** (`revoke_many`: one epoch record naming them all, one signed revocation each, the new key sealed to the devices that stay), moves them to the roster's removed list and logs `user_removed`. Removing a single device with `varsto device revoke` on an administrator device keeps the roster and the log in step. The founder cannot remove the person who owns the device it runs on; another administrator does that. What a removed device can still read is exactly what section 21 says: nothing new, everything old; storage credentials are not rotated.
+
+**Administrators.** `varsto org admin add <device> --root-words "<24 words>"` and `admin remove` publish the next manifest; the root words are typed, used and dropped. An organization keeps at least one administrator. A revoked administrator's old rosters stay valid (they were valid when written); new ones are refused because the issuer is revoked.
+
+**Log.** Events: `org_created`, `admin_added`, `admin_removed`, `device_approved`, `device_added`, `device_removed`, `user_removed`, `policy_changed`, each with the names at the time. `varsto org log [--json]`, `GET /api/org/log` and Export as JSON on the page give the merged, verified log, oldest first. Nobody can change an entry afterwards without the chain breaking on every other device.
+
+**Interfaces.** CLI: `varsto org create|status|request|approve|join|add-device|remove-user|policy|admin add|admin remove|log`; `varsto device list` shows each device's person and role. API: `POST /api/org/request`, `POST /api/org/join` (without a vault), `GET /api/org`, `GET /api/org/log`, `POST /api/org/create|fingerprint|approve|add-device|remove-user|policy|admin`. Interface: Use with a team under Settings creates one; the Organization page (sidebar, and More on a phone) appears only when the vault has one and shows people and devices, approvals, the policy, administrators and the log; members see the page without the administrator actions. `StatusReport.org` carries org id, name, whether this device is an administrator and listed, and its user.
+
+**Limits.** A member's device holds the vault key, so a modified client can read everything the key opens and can hand the key on; the policy flags are enforced by every honest device and by the roster (an unapproved device is ignored), not by the storage. Storage credentials are shared and not rotated (plan 6.44 phase B). Existing data is not re-encrypted after a removal (phase C). There is no second factor on administrator actions and no dual control. Two administrators writing the same roster or manifest sequence at the same moment collide on the first storage; the second one syncs and tries again. A device listed in the roster but removed from the vault by an administrator of an older manifest stays removed. Tests: `crates/varsto-core/tests/organization.rs` (create, a member's limits, approve and join, an unapproved device ignored until added, removing a person in one epoch with a wipe, a single-device removal, the policy, a forged roster ignored, appointing and dismissing administrators with the root words), `crates/varsto-cli/tests/org_cli.rs` (the commands end to end) and `org::tests`.
+

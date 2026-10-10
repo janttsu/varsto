@@ -3,9 +3,11 @@
 //!
 //! Alpha-0 key hierarchy (subset of `docs/spec/key-hierarchy.md`):
 //! - master key K3: random 256 bits, wrapped locally under an Argon2id
-//!   passphrase key; shared between devices out of band as the "vault key"
-//!   (pairing and recovery through a hybrid KEM are not implemented yet);
-//! - device signing key K6/K7 (Ed25519) per device, wrapped with K3 locally;
+//!   passphrase key; shared between devices as the "vault key" through
+//!   pairing (`pair`), the recovery kit (`recovery`) or an organization's
+//!   approval token (`org`), which is sealed through the hybrid KEM;
+//! - device signing key K6/K7 (Ed25519 + ML-DSA-65) per device, wrapped with
+//!   K3 locally;
 //! - derived from K3: ledger key, device-registry key, folder-record key,
 //!   local-keyring key;
 //! - folder key K9 per folder (random), from which the folder hash key,
@@ -597,15 +599,21 @@ impl Keys {
 
     pub fn load(home: &Path, passphrase: &str, vault: &VaultId, device: &DeviceId) -> Result<Self> {
         let kf: KeyFile = util::read_json(&home.join("keys.enc"))?;
+        let blob = hex::decode(&kf.blob_hex)?;
+        let aad = Self::keyfile_aad(vault, device);
         let wrap = crypto::passphrase_key(passphrase, &kf.params)?;
-        let plain = Zeroizing::new(
-            crypto::decrypt(
-                &wrap,
-                &Self::keyfile_aad(vault, device),
-                &hex::decode(&kf.blob_hex)?,
-            )
-            .context("unlock failed: wrong passphrase or damaged key file")?,
-        );
+        let opened = crypto::decrypt(&wrap, &aad, &blob).or_else(|e| {
+            // A key file from before alpha.10, written with the passphrase as
+            // typed: try it unnormalised when normalisation changed it.
+            if crypto::normalize_passphrase(passphrase) != passphrase {
+                let raw = crypto::passphrase_key_raw(passphrase, &kf.params)?;
+                crypto::decrypt(&raw, &aad, &blob)
+            } else {
+                Err(e)
+            }
+        });
+        let plain =
+            Zeroizing::new(opened.context("unlock failed: wrong passphrase or damaged key file")?);
         let material: KeyMaterial = serde_json::from_slice(&plain)?;
         Ok(Keys {
             master: SecretKey::from_hex(&material.master_hex)?,

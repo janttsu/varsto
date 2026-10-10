@@ -664,6 +664,28 @@ fn api(st: &mut State, method: Method, path: &str, query: &str, input: &Value) -
                 "fingerprint": varsto_core::vault::ShareRequest::fingerprint_for(&st.home)?,
             }))
         }
+        // Organization: a request code for this device, and joining with an approval token.
+        (Method::Post, "/api/org/request") => {
+            let name = s(input, "name")?;
+            let code = varsto_core::org::OrgRequest::code_for(&st.home, Some(&name))?;
+            Ok(json!({
+                "request_code": code,
+                "fingerprint": varsto_core::org::OrgRequest::fingerprint_for(&st.home)?,
+            }))
+        }
+        (Method::Post, "/api/org/join") => {
+            let (e, notes, approval) = Engine::org_join(
+                &st.home,
+                &s(input, "name")?,
+                &s(input, "passphrase")?,
+                &s(input, "token")?,
+            )?;
+            st.engine = Some(e);
+            st.service.request_sync();
+            Ok(
+                json!({"ok": true, "organization": approval.org_name, "user": approval.user, "notes": notes}),
+            )
+        }
         (Method::Post, "/api/share/accept") => {
             let raw = s(input, "token")?;
             let token = if varsto_core::vault::SealedShareToken::is_sealed(&raw) {
@@ -844,6 +866,59 @@ fn api_unlocked(
         }
         (Method::Get, "/api/replica/token") => {
             Ok(json!({"token": engine.replica_token()?.encode()}))
+        }
+        // Organization (section 27). Nothing here exists for a vault without one.
+        (Method::Get, "/api/org") => Ok(match engine.org_summary() {
+            Some(s) => serde_json::to_value(s)?,
+            None => json!({"exists": false}),
+        }),
+        (Method::Get, "/api/org/log") => Ok(json!({"log": engine.org_log_entries()})),
+        (Method::Post, "/api/org/create") => {
+            let r = engine.org_create(&s(input, "name")?, &s(input, "user")?)?;
+            service.request_sync();
+            Ok(serde_json::to_value(r)?)
+        }
+        (Method::Post, "/api/org/fingerprint") => {
+            let r = varsto_core::org::OrgRequest::parse(&s(input, "code")?)?;
+            Ok(json!({"fingerprint": r.fingerprint, "name": r.name, "device_id": r.device.to_string()}))
+        }
+        (Method::Post, "/api/org/approve") => {
+            let fp = opt(input, "fingerprint").filter(|f| !f.trim().is_empty());
+            let r = engine.org_approve(&s(input, "code")?, &s(input, "user")?, fp.as_deref())?;
+            service.request_sync();
+            Ok(serde_json::to_value(r)?)
+        }
+        (Method::Post, "/api/org/add-device") => {
+            engine.org_add_device(&s(input, "device")?, &s(input, "user")?)?;
+            service.request_sync();
+            Ok(json!({"ok": true}))
+        }
+        (Method::Post, "/api/org/remove-user") => {
+            let user = s(input, "user")?;
+            if opt(input, "confirm").as_deref() != Some(user.as_str()) {
+                bail!("send {{\"confirm\": \"{user}\"}} to remove this user and every device of theirs");
+            }
+            let wipe = input.get("wipe").and_then(|v| v.as_bool()).unwrap_or(false);
+            let r = engine.org_remove_user(&user, wipe)?;
+            service.request_sync();
+            Ok(serde_json::to_value(r)?)
+        }
+        (Method::Post, "/api/org/policy") => {
+            let p: varsto_core::org::OrgPolicy = serde_json::from_value(input.clone())?;
+            engine.org_set_policy(p)?;
+            service.request_sync();
+            Ok(json!({"ok": true}))
+        }
+        (Method::Post, "/api/org/admin") => {
+            let device = s(input, "device")?;
+            let words = s(input, "root_words")?;
+            match s(input, "action")?.as_str() {
+                "add" => engine.org_admin_add(&device, &words)?,
+                "remove" => engine.org_admin_remove(&device, &words)?,
+                other => bail!("unknown action {other}: use add or remove"),
+            }
+            service.request_sync();
+            Ok(json!({"ok": true}))
         }
         (Method::Get, "/api/storage/remove-plan") => Ok(serde_json::to_value(
             engine.plan_storage_removal(&query_param(query, "name").unwrap_or_default())?,

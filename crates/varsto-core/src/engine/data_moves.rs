@@ -180,6 +180,10 @@ impl Engine {
         if self.vault.member {
             bail!("a member device cannot change where the owner's folders are stored");
         }
+        self.org_allows(
+            |p| p.members_may_set_policies,
+            "change where folders are stored",
+        )?;
         let rec = self
             .keyring
             .find(folder)
@@ -299,6 +303,9 @@ impl Engine {
                 else {
                     continue;
                 };
+                if !self.org_accepts_policy_from(&rec.device) {
+                    continue;
+                }
                 if let Some(f) = self.keyring.folders.get_mut(&fid) {
                     if rec.updated_utc > f.placement_updated_utc {
                         f.placement = rec.placement;

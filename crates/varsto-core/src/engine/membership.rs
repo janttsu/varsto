@@ -582,6 +582,12 @@ pub struct DeviceInfo {
     /// System, model and Varsto version the device last published.
     #[serde(default)]
     pub details: Option<super::devinfo::DeviceDetails>,
+    /// In an organization: the person the device belongs to, and whether
+    /// it is an administrator. Absent without an organization.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub role: Option<String>,
 }
 
 /// What `revoke_device` did.
@@ -589,6 +595,9 @@ pub struct DeviceInfo {
 pub struct RevokeReport {
     pub device_id: String,
     pub name: String,
+    /// Every device removed in this epoch (one, or a user's devices).
+    #[serde(default)]
+    pub devices: Vec<String>,
     pub key_epoch: u32,
     pub cutoff_seq: u64,
     pub wipe: bool,
@@ -850,6 +859,34 @@ impl Engine {
         self.devices.revoked.contains_key(device)
     }
 
+    /// Whether a revocation or a new key epoch from `issuer` counts: anyone
+    /// in a plain vault, administrators only in an organization.
+    fn org_may_revoke(&self, issuer: &DeviceId) -> bool {
+        match &self.org {
+            Some(o) => o.is_admin(issuer),
+            None => true,
+        }
+    }
+
+    /// Whether a policy or placement record written by `device` is adopted.
+    pub(super) fn org_accepts_policy_from(&self, device: &DeviceId) -> bool {
+        match &self.org {
+            Some(o) => o.is_admin(device) || o.policy().members_may_set_policies,
+            None => true,
+        }
+    }
+
+    fn org_role(&self, device: &DeviceId) -> Option<String> {
+        let o = self.org.as_ref()?;
+        if o.is_admin(device) {
+            Some("admin".into())
+        } else if o.lists(device) {
+            Some("member".into())
+        } else {
+            None
+        }
+    }
+
     /// Devices whose revocations and grants this device acts on: known full
     /// devices that are not revoked and that the newest key epoch kept (or
     /// whose record was written under the current key). A device enrolled
@@ -860,6 +897,12 @@ impl Engine {
         }
         if self.is_revoked(device) || !self.devices.devices.contains_key(device) {
             return false;
+        }
+        // In an organization, only devices the roster lists belong.
+        if let Some(o) = &self.org {
+            if o.roster.is_some() && !o.lists(device) {
+                return false;
+            }
         }
         let cur = self.key_epoch();
         cur == 0
@@ -887,7 +930,7 @@ impl Engine {
             .unwrap_or_else(|| device.short().to_string())
     }
 
-    fn device_key(&self, device: &DeviceId) -> Option<VerifyingKey> {
+    pub(super) fn device_key(&self, device: &DeviceId) -> Option<VerifyingKey> {
         if device == &self.vault.device_id {
             return Some(self.keys.signer.public());
         }
@@ -937,6 +980,8 @@ impl Engine {
             revoked_by: None,
             wipe_ordered: false,
             details: self.devices.details.get(me).cloned(),
+            user: self.org.as_ref().and_then(|o| o.user_of(me)),
+            role: self.org_role(me),
         }];
         for (id, rec) in &self.devices.devices {
             if id == me || !(self.trusted(id) || self.is_revoked(id)) {
@@ -953,6 +998,8 @@ impl Engine {
                 revoked_by: r.map(|r| self.device_name(&r.by)),
                 wipe_ordered: r.is_some_and(|r| r.wipe),
                 details: self.devices.details.get(id).cloned(),
+                user: self.org.as_ref().and_then(|o| o.user_of(id)),
+                role: self.org_role(id),
             });
         }
         out
@@ -972,6 +1019,14 @@ impl Engine {
         self.pull_ledger()?;
         let me = self.vault.device_id.clone();
         let wanted = name_or_id.trim();
+        if let Some(o) = &self.org {
+            if !o.is_admin(&me) {
+                bail!(
+                    "in the organization {}, only an administrator can remove devices",
+                    o.name
+                );
+            }
+        }
         let matches: Vec<DeviceId> = self
             .devices
             .devices
@@ -1000,12 +1055,28 @@ impl Engine {
         if !self.trusted(&target) {
             bail!("{wanted} is not a current device of this vault");
         }
+        let report = self.revoke_many(std::slice::from_ref(&target), wipe)?;
+        self.org_after_revoke(&target, wipe, report.key_epoch)?;
+        Ok(report)
+    }
+
+    /// Remove several current devices in one key epoch (a user's devices).
+    /// The caller has checked that they are current and not this device.
+    pub(super) fn revoke_many(&mut self, targets: &[DeviceId], wipe: bool) -> Result<RevokeReport> {
+        let me = self.vault.device_id.clone();
+        if targets.is_empty() {
+            bail!("no current device to remove");
+        }
+        if targets.contains(&me) {
+            bail!("a device cannot remove itself");
+        }
+        let targets: BTreeSet<DeviceId> = targets.iter().cloned().collect();
         let remaining: Vec<DeviceId> = self
             .devices
             .devices
             .keys()
             .chain(std::iter::once(&me))
-            .filter(|d| **d != target && self.trusted(d))
+            .filter(|d| !targets.contains(d) && self.trusted(d))
             .cloned()
             .collect::<BTreeSet<_>>()
             .into_iter()
@@ -1025,7 +1096,9 @@ impl Engine {
                 bail!("another device changed the vault keys and this device has not received them yet; sync, then try again");
             }
         }
-        let target_name = self.device_name(&target);
+        let target_names: Vec<String> = targets.iter().map(|t| self.device_name(t)).collect();
+        let target = targets.iter().next().cloned().expect("checked non-empty");
+        let target_name = target_names[0].clone();
         let new = old + 1;
         let new_key = SecretKey::random();
         // Folders that keep their key: Strongroom, and anything shared with
@@ -1058,19 +1131,22 @@ impl Engine {
             issuer: me.clone(),
             issued_utc: util::now_utc(),
             members: remaining.clone(),
-            revoked: vec![target.clone()],
+            revoked: targets.iter().cloned().collect(),
             frozen: frozen.iter().cloned().collect(),
         };
-        let cutoff_seq = self.ledger.head(&target).seq;
-        let rev = Revocation {
-            device: target.clone(),
-            device_name: target_name.clone(),
-            issuer: me.clone(),
-            issued_utc: record.issued_utc,
-            cutoff_seq,
-            wipe,
-            new_epoch: new,
-        };
+        let revs: Vec<Revocation> = targets
+            .iter()
+            .map(|t| Revocation {
+                device: t.clone(),
+                device_name: self.device_name(t),
+                issuer: me.clone(),
+                issued_utc: record.issued_utc,
+                cutoff_seq: self.ledger.head(t).seq,
+                wipe,
+                new_epoch: new,
+            })
+            .collect();
+        let cutoff_seq = revs[0].cutoff_seq;
         let storages = self.metadata_storages(true)?;
         if storages.is_empty() {
             bail!("this device has no storage to publish the removal to");
@@ -1086,21 +1162,23 @@ impl Engine {
             }
         }
         let epoch0 = self.root_key().derive("device-registry", &[]);
-        let signed =
-            SignedRevocation::seal(&rev, &self.vault.vault_id, 0, &epoch0, &self.keys.signer)?;
-        let bytes = serde_json::to_vec(&signed)?;
-        for (_, b) in &storages {
-            b.put_if_absent(&SignedRevocation::storage_key(&target, &me), &bytes)?;
+        for rev in &revs {
+            let signed =
+                SignedRevocation::seal(rev, &self.vault.vault_id, 0, &epoch0, &self.keys.signer)?;
+            let bytes = serde_json::to_vec(&signed)?;
+            for (_, b) in &storages {
+                b.put_if_absent(&SignedRevocation::storage_key(&rev.device, &me), &bytes)?;
+            }
+            self.devices.revoked.insert(
+                rev.device.clone(),
+                Revoked {
+                    by: me.clone(),
+                    issued_utc: rev.issued_utc,
+                    cutoff_seq: rev.cutoff_seq,
+                    wipe,
+                },
+            );
         }
-        self.devices.revoked.insert(
-            target.clone(),
-            Revoked {
-                by: me.clone(),
-                issued_utc: rev.issued_utc,
-                cutoff_seq,
-                wipe,
-            },
-        );
         self.save_devices()?;
         self.epochs.keys.insert(new, new_key);
         self.epochs.members = remaining.iter().cloned().collect();
@@ -1111,6 +1189,7 @@ impl Engine {
         Ok(RevokeReport {
             device_id: target.to_string(),
             name: target_name,
+            devices: target_names,
             key_epoch: new,
             cutoff_seq,
             wipe,
@@ -1132,10 +1211,14 @@ impl Engine {
         }
         self.ensure_active()?;
         self.ensure_kem_record()?;
+        self.sync_org()?;
         if let Some(gone) = self.pull_revocations()? {
             return Err(anyhow::Error::new(gone));
         }
         self.adopt_epochs()?;
+        // Objects an admin wrote right after a rotation are sealed under
+        // the epoch just adopted: read the organization once more.
+        self.sync_org()?;
         self.issue_grants()?;
         Ok(())
     }
@@ -1224,6 +1307,7 @@ impl Engine {
             if rev.issuer == rev.device
                 || !self.trusted(&rev.issuer)
                 || self.is_revoked(&rev.device)
+                || !self.org_may_revoke(&rev.issuer)
             {
                 continue;
             }
@@ -1320,6 +1404,7 @@ impl Engine {
                 // The chain must end at the key we hold, and the epoch must keep us.
                 if keys.get(&cur).map(|k| k.0) != Some(self.current_vault_key().0)
                     || !newest.members.contains(&me)
+                    || !self.org_may_revoke(&newest.issuer)
                 {
                     continue;
                 }
