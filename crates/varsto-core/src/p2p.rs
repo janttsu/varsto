@@ -320,6 +320,22 @@ pub fn is_lan(ip: IpAddr) -> bool {
     }
 }
 
+/// The order routes to a peer are tried in: TCP to LAN addresses, then
+/// QUIC, then TCP to addresses beyond the LAN, then relays. The HTTP route
+/// opens a connection per request, which costs nothing on a LAN but a
+/// handshake and a fresh TCP slow start per block across the internet;
+/// QUIC keeps one connection per peer, its congestion window open, and
+/// carries each request on its own stream. TCP stays the fallback for
+/// networks that block UDP and for peers without QUIC.
+fn order_routes(tcp: &[SocketAddr], udp: &[SocketAddr], relays: Vec<Route>) -> Vec<Route> {
+    let (lan, wide): (Vec<SocketAddr>, Vec<SocketAddr>) = tcp.iter().partition(|a| is_lan(a.ip()));
+    let mut out: Vec<Route> = lan.into_iter().map(Route::Tcp).collect();
+    out.extend(udp.iter().map(|a| Route::Quic(*a)));
+    out.extend(wide.into_iter().map(Route::Tcp));
+    out.extend(relays);
+    out
+}
+
 /// A peer we can ask for objects.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PeerAddr {
@@ -487,7 +503,7 @@ pub struct PeerStatus {
 type Attempt = (Option<Route>, u16, Instant);
 
 /// How one request reached (or failed to reach) a peer.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 enum Route {
     Tcp(SocketAddr),
     Quic(SocketAddr),
@@ -786,9 +802,9 @@ impl Peers {
 
     /// Every route to `p`, in the order they are tried.
     fn candidate_routes(&self, p: &PeerInfo) -> Vec<Route> {
-        let mut out: Vec<Route> = p.tcp.iter().map(|a| Route::Tcp(*a)).collect();
-        if self.quic.is_some() && !p.cert_sha256.is_empty() {
-            out.extend(p.udp.iter().map(|a| Route::Quic(*a)));
+        let mut relays = Vec::new();
+        let quic = self.quic.is_some() && !p.cert_sha256.is_empty();
+        if quic {
             for relay in &p.relay_via {
                 let Some(r) = self.peers.iter().find(|r| &r.device == relay) else {
                     continue;
@@ -797,11 +813,11 @@ impl Peers {
                     continue;
                 }
                 for a in &r.udp {
-                    out.push(Route::Relay(relay.clone(), r.name.clone(), *a));
+                    relays.push(Route::Relay(relay.clone(), r.name.clone(), *a));
                 }
             }
         }
-        out
+        order_routes(&p.tcp, if quic { &p.udp } else { &[] }, relays)
     }
 
     /// One request to peer `p`: the route that worked last time first, then
@@ -1132,5 +1148,32 @@ mod tests {
         let mut bad = h.clone();
         bad.pop();
         assert_eq!(verify_auth(&k, &bad, "/p2p/object/abc"), None);
+    }
+
+    #[test]
+    fn quic_comes_before_tcp_beyond_the_lan() {
+        let lan: SocketAddr = "192.168.1.5:17893".parse().unwrap();
+        let wide: SocketAddr = "203.0.113.5:17893".parse().unwrap();
+        let relay = Route::Relay(
+            DeviceId::from_hex("00112233445566778899aabbccddeeff").unwrap(),
+            "r".into(),
+            wide,
+        );
+        let got = order_routes(&[wide, lan], &[wide, lan], vec![relay.clone()]);
+        assert_eq!(
+            got,
+            vec![
+                Route::Tcp(lan),
+                Route::Quic(wide),
+                Route::Quic(lan),
+                Route::Tcp(wide),
+                relay
+            ]
+        );
+        // Without QUIC (a peer with no certificate, or the command line) TCP is all there is.
+        assert_eq!(
+            order_routes(&[wide, lan], &[], vec![]),
+            vec![Route::Tcp(lan), Route::Tcp(wide)]
+        );
     }
 }
