@@ -53,7 +53,7 @@ case "${1:-}" in
     if [ -n "$body" ]; then
       in_ns "$ns" curl -sS --max-time 1800 -X "$method" "http://127.0.0.1:$port$path" -H "X-Varsto-Token: $tok" -H 'Content-Type: application/json' -d "$body"
     else
-      in_ns "$ns" curl -sS --max-time 60 -X "$method" "http://127.0.0.1:$port$path" -H "X-Varsto-Token: $tok"
+      in_ns "$ns" curl -sS --max-time 600 -X "$method" "http://127.0.0.1:$port$path" -H "X-Varsto-Token: $tok"
     fi
     ;;
   log) grep -a "p2p:" "$2.service.log" | tail -n "${3:-40}" ;;

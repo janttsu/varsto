@@ -186,7 +186,10 @@ class Rig:
                 return json.loads(r.read() or b"null")
         m, ns, home = REMOTE[dev]
         out = self.node(m, "api", ns, home, method, path, json.dumps(body) if body is not None else "")
-        return json.loads(out) if out.strip() else None
+        r = json.loads(out) if out.strip() else None
+        if isinstance(r, dict) and r.get("error"):
+            raise SystemExit(f"{dev}: {method} {path}: {r['error']}")
+        return r
 
     def local(self, *a, env=None):
         e = dict(os.environ, VARSTO_PASSPHRASE=self.state["pass"])
@@ -337,6 +340,40 @@ class Rig:
             f"{peers} blocks from peers; routes at {dst}: {route}")
         return entry
 
+    def s3_compare(self):
+        """The same kind of download from the bucket: a second device on this
+        machine, command line only and peer to peer off, pulls a file the
+        source just pushed (its blocks stay in the bucket)."""
+        _, _, secret = self.s3()
+        h = self.work / "home-s3"
+        files = self.work / "files-s3"
+        e = dict(os.environ, VARSTO_PASSPHRASE=self.state["pass"], VARSTO_S3_SECRET=secret)
+        v = lambda *a: subprocess.run([local_bin(), "--home", str(h), *a], env=e, capture_output=True, text=True, check=True).stdout
+        if not (h / "vault.json").exists():
+            files.mkdir(parents=True, exist_ok=True)
+            v("join", "--name", "home-s3", "--vault-key", self.state["vault_key"], *self.s3_flags())
+            v("folder", "attach", FOLDER, str(files))
+            v("p2p", "disable")
+            v("verify", "set", "--off")
+            v("pull", FOLDER)
+        self.pause_all(True)
+        try:
+            for src in self.args.only.split(",") if self.args.only else ["ams"]:
+                name = f"{src}-to-bucket-{int(time.time())}.bin"
+                want = self.write(src, name, self.args.mb)
+                self.api(src, "POST", "/api/sync", {"folder": FOLDER})
+                t0 = time.time()
+                out = v("pull", FOLDER)
+                secs = time.time() - t0
+                p = files / name
+                ok = p.exists() and hashlib.sha256(p.read_bytes()).hexdigest() == want
+                mb_s = round(self.args.mb * 1.048576 / secs, 2)
+                self.record({"kind": "s3", "src": src, "dst": "home (bucket)", "mb": self.args.mb, "seconds": round(secs, 1),
+                             "mb_s": mb_s, "ok": ok, "report": out.strip()[-300:]})
+                log(f"{src} -> bucket -> home: {'OK' if ok else 'FAILED'} {self.args.mb} MiB in {secs:.1f} s ({mb_s} MB/s)")
+        finally:
+            self.pause_all(False)
+
     def pause_all(self, paused):
         for dev in ("home", *REMOTE):
             self.api(dev, "POST", "/api/service/pause", {"paused": paused})
@@ -467,7 +504,7 @@ print(n, time.time() - t0)
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("cmd", choices=["up", "setup", "baseline", "vault", "restart", "run", "shots", "down", "local-reset"])
+    ap.add_argument("cmd", choices=["up", "setup", "baseline", "vault", "restart", "s3", "run", "shots", "down", "local-reset"])
     ap.add_argument("--work", default=os.environ.get("NAT_WORK", "dist/nat-test"))
     ap.add_argument("--type", default="DEV1-M")
     ap.add_argument("--package")
@@ -478,7 +515,7 @@ def main():
     ap.add_argument("--delay", type=float, default=6.0)
     a = ap.parse_args()
     r = Rig(a)
-    {"up": r.up, "setup": r.setup, "baseline": r.baseline, "restart": r.restart, "vault": r.vault, "run": r.run, "shots": r.shots, "down": r.down,
+    {"up": r.up, "setup": r.setup, "baseline": r.baseline, "restart": r.restart, "s3": r.s3_compare, "vault": r.vault, "run": r.run, "shots": r.shots, "down": r.down,
      "local-reset": r.local_reset}[a.cmd]()
 
 
