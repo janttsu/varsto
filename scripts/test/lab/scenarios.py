@@ -662,9 +662,115 @@ def s_mixed():
           "the upgraded laptop does not sync")
 
 
+# ----- when things break: storage outage, black-holed network, crash, clock skew --------------
+
+def fresh_pair():
+    """laptop + desktop on this build, one folder, synced."""
+    s_reset()
+    v("vl-laptop", "init --name laptop")
+    v("vl-laptop", f"storage add-s3 cloud --endpoint {lab.S3['endpoint']} --region us-east-1 --bucket {BUCKET} "
+                    f"--access-key-id {lab.S3['key']} --secret-access-key {lab.S3['secret']} --place cloud", json_out=False)
+    gen_data("vl-laptop", "/home/varsto/data/docs", seed=5, big_mb=4, small=40)
+    v("vl-laptop", "folder add docs /home/varsto/data/docs", json_out=False)
+    v("vl-laptop", "push docs")
+    kit = v("vl-laptop", "recovery kit", json_out=False)
+    words = " ".join(re.findall(r"\d+\. (\w+)", kit.split("SHARES")[0]))
+    v("vl-desktop", f"join --name desktop --words {shlex.quote(words)} --s3-bucket {BUCKET} --s3-endpoint {lab.S3['endpoint']} "
+                    f"--s3-access-key-id {lab.S3['key']} --s3-secret-access-key {lab.S3['secret']} --storage-name cloud")
+    v("vl-desktop", "folder attach docs /home/varsto/data/docs", json_out=False)
+    v("vl-desktop", "sync")
+
+
+@scenario("storage-outage-and-recovery")
+def s_outage():
+    fresh_pair()
+    lab.cmd_services_stop(None)
+    try:
+        run("vl-laptop", "echo during-outage > ~/data/docs/outage.txt")
+        t0 = time.time()
+        r = v("vl-laptop", "sync", check_rc=False)
+        secs = time.time() - t0
+        CTX["outage_fail_secs"] = round(secs, 1)
+        check(isinstance(r, dict) and r.get("_failed"), "sync claimed success with the storage down")
+        check(secs < 60, f"sync took {secs:.0f} s to give up on a storage that refuses connections")
+    finally:
+        lab.cmd_services(None)
+    time.sleep(1)
+    v("vl-laptop", "sync")
+    v("vl-desktop", "sync")
+    check(run("vl-desktop", "cat ~/data/docs/outage.txt", check_rc=False).stdout.strip() == "during-outage",
+          "the change made during the outage never arrived")
+    fsck = v("vl-laptop", "fsck --verify", check_rc=False)
+    fsck = fsck.get("_out", fsck) if isinstance(fsck, dict) and "_out" in fsck else fsck
+    check(not fsck.get("chunks_missing") and not fsck.get("objects_corrupt"), f"fsck after the outage: {fsck}")
+
+
+@scenario("blackholed-network")
+def s_blackhole():
+    # The home router drops everything to the WAN without an answer, like a
+    # dead uplink: connections time out instead of being refused.
+    rule = "sudo nft insert rule ip filter forward iifname eth0 oifname eth1 drop"
+    lab.ssh("vl-rhome", rule)
+    try:
+        run("vl-laptop", "echo during-blackhole > ~/data/docs/bh.txt")
+        t0 = time.time()
+        r = v("vl-laptop", "sync", check_rc=False)
+        secs = time.time() - t0
+        CTX["blackhole_fail_secs"] = round(secs, 1)
+        check(isinstance(r, dict) and r.get("_failed"), "sync claimed success with no network")
+        check(secs < 150, f"sync took {secs:.0f} s to give up on an unreachable storage")
+    finally:
+        lab.ssh("vl-rhome", "sudo nft -f /etc/nftables.conf")
+    v("vl-laptop", "sync")
+    v("vl-desktop", "sync")
+    check(run("vl-desktop", "cat ~/data/docs/bh.txt", check_rc=False).stdout.strip() == "during-blackhole",
+          "the change made without network never arrived")
+
+
+@scenario("crash-during-push")
+def s_crash():
+    run("vl-laptop", "head -c $((96<<20)) /dev/urandom > ~/data/docs/crash.bin")
+    run("vl-laptop", f"{ENV} nohup varsto push docs > ~/crash.log 2>&1 &")
+    time.sleep(1.5)
+    run("vl-laptop", "pkill -9 -x varsto; true", check_rc=False)
+    time.sleep(0.5)
+    # The next run carries on; nothing is half-written or lost.
+    v("vl-laptop", "push docs")
+    v("vl-desktop", "sync")
+    a = run("vl-laptop", "sha256sum ~/data/docs/crash.bin").stdout.split()[0]
+    b = run("vl-desktop", "sha256sum ~/data/docs/crash.bin", check_rc=False).stdout.split()
+    check(b and a == b[0], "the file pushed after a crash differs on the other device")
+    fsck = v("vl-laptop", "fsck --verify", check_rc=False)
+    fsck = fsck.get("_out", fsck) if isinstance(fsck, dict) and "_out" in fsck else fsck
+    check(not fsck.get("chunks_missing") and not fsck.get("objects_corrupt"), f"fsck after the crash: {fsck}")
+    st = v("vl-desktop", "status")
+    check(not st.get("forked_devices"), f"a crash left a fork: {st.get('forked_devices')}")
+
+
+@scenario("clock-two-days-ahead")
+def s_clock():
+    run("vl-desktop", "sudo timedatectl set-ntp false 2>/dev/null; sudo date -s '+2 days' >/dev/null")
+    try:
+        run("vl-desktop", "echo from-the-future > ~/data/docs/future.txt")
+        v("vl-desktop", "sync")
+        v("vl-laptop", "sync")
+        check(run("vl-laptop", "cat ~/data/docs/future.txt", check_rc=False).stdout.strip() == "from-the-future",
+              "a device with a wrong clock could not sync")
+        # An edit on the laptop (right clock) after one from the future still wins:
+        # ordering is by logical clocks, not wall time.
+        run("vl-laptop", "echo now-correct > ~/data/docs/future.txt")
+        v("vl-laptop", "sync")
+        v("vl-desktop", "sync")
+        got = run("vl-desktop", "cat ~/data/docs/future.txt").stdout.strip()
+        check(got == "now-correct", f"the later edit lost to a device with a clock ahead: {got}")
+    finally:
+        run("vl-desktop", "sudo date -s '-2 days' >/dev/null", check_rc=False)
+
+
 SCENARIOS = [s_reset, s_init, s_pair, s_sync, s_words, s_conflict, s_selective, s_repair, s_policy,
              s_strongroom, s_org, s_remove_user, s_revoke,
-             s_p2p_setup, s_p2p_lan, s_p2p_pub, s_p2p_sym, s_p2p_stop, s_share, s_disks, s_mixed]
+             s_p2p_setup, s_p2p_lan, s_p2p_pub, s_p2p_sym, s_p2p_stop, s_share, s_disks, s_mixed,
+             s_outage, s_blackhole, s_crash, s_clock]
 
 
 def main():

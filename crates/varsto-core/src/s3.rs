@@ -38,6 +38,11 @@ pub struct S3Storage {
     scheme: String,
     /// Path prefix of every request (`/bucket` for path style, empty otherwise).
     base_path: String,
+    /// Seconds to add to this device's clock when signing: learned from the
+    /// server's `Date` header after it refused a request signed with a
+    /// clock that is off (S3 refuses signatures more than 15 minutes from
+    /// its own time; phones and virtual machines are often that far off).
+    clock_offset: std::sync::atomic::AtomicI64,
 }
 
 /// Largest response body read into memory. Chunks are at most a few MiB;
@@ -81,6 +86,7 @@ impl S3Storage {
             host,
             scheme: scheme.to_string(),
             base_path,
+            clock_offset: std::sync::atomic::AtomicI64::new(0),
         })
     }
 
@@ -103,7 +109,9 @@ impl S3Storage {
         }
     }
 
-    /// Build and sign a request. `query` must already be sorted by key.
+    /// Build, sign and send a request. A 403 from a server whose clock is
+    /// more than five minutes from ours is retried once with our clock
+    /// corrected to the server's (the offset is kept for later requests).
     fn request(
         &self,
         method: &str,
@@ -112,7 +120,35 @@ impl S3Storage {
         extra_headers: &[(&str, &str)],
         body: &[u8],
     ) -> Result<(u16, Vec<u8>)> {
-        let amz_date = amz_date_now();
+        use std::sync::atomic::Ordering;
+        let (status, bytes, server_date) =
+            self.request_once(method, path, query, extra_headers, body)?;
+        if status == 403 {
+            if let Some(server) = server_date.as_deref().and_then(parse_http_date) {
+                let ours = unix_now() + self.clock_offset.load(Ordering::Relaxed);
+                if (server - ours).abs() > 300 {
+                    self.clock_offset
+                        .store(server - unix_now(), Ordering::Relaxed);
+                    let (status, bytes, _) =
+                        self.request_once(method, path, query, extra_headers, body)?;
+                    return Ok((status, bytes));
+                }
+            }
+        }
+        Ok((status, bytes))
+    }
+
+    /// Build and sign one request. `query` must already be sorted by key.
+    fn request_once(
+        &self,
+        method: &str,
+        path: &str,
+        query: &[(String, String)],
+        extra_headers: &[(&str, &str)],
+        body: &[u8],
+    ) -> Result<(u16, Vec<u8>, Option<String>)> {
+        let amz_date =
+            amz_date_at(unix_now() + self.clock_offset.load(std::sync::atomic::Ordering::Relaxed));
         let date = &amz_date[..8];
         let payload_hash = if body.is_empty() {
             EMPTY_SHA256.to_string()
@@ -195,6 +231,11 @@ impl S3Storage {
         }
         .with_context(|| format!("{method} {}", self.cfg.name))?;
         let status = resp.status().as_u16();
+        let server_date = resp
+            .headers()
+            .get("date")
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.to_string());
         let bytes = if method == "HEAD" {
             Vec::new()
         } else {
@@ -206,7 +247,7 @@ impl S3Storage {
                 .read_to_vec()
                 .with_context(|| format!("{method} {}: reading the response", self.cfg.name))?
         };
-        Ok((status, bytes))
+        Ok((status, bytes, server_date))
     }
 
     fn put(&self, key: &str, data: &[u8], if_none_match: bool) -> Result<u16> {
@@ -229,12 +270,54 @@ impl S3Storage {
     }
 }
 
-/// `YYYYMMDDTHHMMSSZ` for the current UTC time, without a date crate.
-fn amz_date_now() -> String {
-    let secs = std::time::SystemTime::now()
+fn unix_now() -> i64 {
+    std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
-        .unwrap_or(0);
+        .unwrap_or(0)
+}
+
+/// `YYYYMMDDTHHMMSSZ` for the current UTC time, without a date crate.
+#[cfg(test)]
+fn amz_date_now() -> String {
+    amz_date_at(unix_now())
+}
+
+/// Seconds since the epoch of an HTTP date (`Sun, 11 Oct 2026 07:57:54 GMT`).
+fn parse_http_date(s: &str) -> Option<i64> {
+    let mut it = s.split_whitespace().skip(1);
+    let day: i64 = it.next()?.parse().ok()?;
+    let month = match it.next()? {
+        "Jan" => 1,
+        "Feb" => 2,
+        "Mar" => 3,
+        "Apr" => 4,
+        "May" => 5,
+        "Jun" => 6,
+        "Jul" => 7,
+        "Aug" => 8,
+        "Sep" => 9,
+        "Oct" => 10,
+        "Nov" => 11,
+        "Dec" => 12,
+        _ => return None,
+    };
+    let year: i64 = it.next()?.parse().ok()?;
+    let mut hms = it.next()?.split(':').map(|x| x.parse::<i64>().ok());
+    let (h, m, sec) = (hms.next()??, hms.next()??, hms.next()??);
+    // Days from civil (Howard Hinnant's algorithm).
+    let y = if month <= 2 { year - 1 } else { year };
+    let era = y.div_euclid(400);
+    let yoe = y - era * 400;
+    let mp = (month + 9) % 12;
+    let doy = (153 * mp + 2) / 5 + day - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days = era * 146_097 + doe - 719_468;
+    Some(days * 86_400 + h * 3600 + m * 60 + sec)
+}
+
+/// `YYYYMMDDTHHMMSSZ` for `secs` since the epoch.
+fn amz_date_at(secs: i64) -> String {
     let days = secs.div_euclid(86_400);
     let rem = secs.rem_euclid(86_400);
     // Civil-from-days (Howard Hinnant's algorithm).
@@ -468,6 +551,20 @@ mod tests {
         .unwrap();
         assert_eq!(s.get("manifests/x").unwrap().unwrap(), body);
         th.join().unwrap();
+    }
+
+    #[test]
+    fn http_dates_parse_and_round_trip() {
+        let t = parse_http_date("Sun, 11 Oct 2026 07:57:54 GMT").unwrap();
+        assert_eq!(amz_date_at(t), "20261011T075754Z");
+        assert_eq!(parse_http_date("Thu, 01 Jan 1970 00:00:00 GMT"), Some(0));
+        assert_eq!(
+            parse_http_date("Tue, 29 Feb 2028 23:59:59 GMT")
+                .map(amz_date_at)
+                .as_deref(),
+            Some("20280229T235959Z")
+        );
+        assert!(parse_http_date("yesterday").is_none());
     }
 
     #[test]
