@@ -64,6 +64,11 @@ impl S3Storage {
         let config = ureq::Agent::config_builder()
             .http_status_as_error(false)
             .timeout_global(Some(Duration::from_secs(600)))
+            // A storage that accepts the request and then goes silent must
+            // not freeze a sync for the whole global limit: connecting and
+            // the first byte of the answer each get their own, shorter one.
+            .timeout_connect(Some(Duration::from_secs(20)))
+            .timeout_recv_response(Some(Duration::from_secs(120)))
             // Downloads keep up to 32 objects in flight; with ureq's default
             // of three idle connections per host the others would pay a new
             // TLS handshake for every object.
