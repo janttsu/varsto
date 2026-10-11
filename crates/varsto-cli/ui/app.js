@@ -1485,6 +1485,9 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   // Where the joined vault lives: a bucket is the only choice on a phone.
   function applyJoinKind() { var k = $("joinkind").value; document.querySelectorAll("#join [data-joinkind]").forEach(function (d) { d.classList.toggle("hidden", d.getAttribute("data-joinkind") !== k); }); document.querySelectorAll("#join [data-joinkind] input").forEach(function (i) { i.required = !i.closest("[data-joinkind]").classList.contains("hidden") && i.name !== "region"; }); }
   $("joinkind").onchange = applyJoinKind;
+  function applyShareKind() { var k = $("sharekind").value; document.querySelectorAll("#acceptshare [data-sharekind]").forEach(function (d) { d.classList.toggle("hidden", d.getAttribute("data-sharekind") !== k); }); document.querySelectorAll("#acceptshare [data-sharekind] input").forEach(function (i) { i.required = !i.closest("[data-sharekind]").classList.contains("hidden") && i.name !== "region"; }); }
+  $("sharekind").onchange = applyShareKind;
+  applyShareKind();
   function joinKindForDevice() { if (isMobile()) { $("joinkind").value = "s3"; $("joinkind").querySelector('option[value="local-dir"]').disabled = true; } applyJoinKind(); }
   joinKindForDevice();
   // The code field opens the number pad (type=tel) and groups the digits as typed.

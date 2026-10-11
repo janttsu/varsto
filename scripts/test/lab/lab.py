@@ -12,7 +12,7 @@
 Topology (all libvirt networks are isolated: nothing reaches the real LAN
 or the internet):
 
-    vl-wan     10.78.0.0/24  "the internet": the host (.1: S3 on :9900, STUN
+    vl-wan     198.51.100.0/24 "the internet": the host (.1: S3 on :9900, STUN
                              on :3478), the public server "pub" (.20), and the
                              outside addresses of the two routers (.11, .12)
     vl-home    10.78.1.0/24  a home LAN behind "rhome" (.254, a cone NAT:
@@ -47,7 +47,9 @@ BASE_FILE = "debian-13-genericcloud-amd64.qcow2"
 USER = "varsto"
 
 NETS = {
-    "vl-wan": ("10.78.0", "vlwan"),
+    # Public-looking addresses (TEST-NET-2, never routed anywhere real):
+    # Varsto treats private ranges as LAN, which would hide NAT behaviour.
+    "vl-wan": ("198.51.100", "vlwan"),
     "vl-home": ("10.78.1", "vlhome"),
     "vl-office": ("10.78.2", "vloffice"),
 }
@@ -65,7 +67,9 @@ DEVICES = [n for n, v in VMS.items() if v[2] == "device"]
 # NAT network ("default") to fetch Rust and crates, and builds the static
 # musl binary from a copy of the repository.
 BUILD_VM = "vl-build"
-S3 = {"endpoint": "http://10.78.0.1:9900", "key": "vlab-access", "secret": "vlab-secret-key-123"}
+WAN_HOST = "198.51.100.1"
+STUN = [f"{WAN_HOST}:3478", "198.51.100.20:3478"]
+S3 = {"endpoint": f"http://{WAN_HOST}:9900", "key": "vlab-access", "secret": "vlab-secret-key-123"}
 
 
 def log(*a):
@@ -235,9 +239,7 @@ def define_vm(vm):
     <disk type='file' device='cdrom'><driver name='qemu' type='raw'/><source file='{DIR / "pool" / (vm + "-seed.iso")}'/><target dev='sda' bus='sata'/><readonly/></disk>
     {ifaces}
     <controller type='pci' model='pcie-root'/>
-    <controller type='pci' model='pcie-root-port'/><controller type='pci' model='pcie-root-port'/>
-    <controller type='pci' model='pcie-root-port'/><controller type='pci' model='pcie-root-port'/>
-    <controller type='pci' model='pcie-root-port'/><controller type='pci' model='pcie-root-port'/>
+    {"<controller type='pci' model='pcie-root-port'/>" * 14}
     <serial type='pty'><target port='0'/></serial>
     <console type='pty'><target type='serial' port='0'/></console>
     <rng model='virtio'><backend model='random'>/dev/urandom</backend></rng>
@@ -293,6 +295,12 @@ table ip filter {{
 def setup_device(vm):
     # Nothing to install: the musl binary needs no libraries. A few helpers.
     ssh(vm, "sudo mkdir -p /opt/varsto && sudo chown varsto: /opt/varsto && mkdir -p ~/data")
+    if vm == "vl-pub":
+        # A second STUN server, on another public address: telling a cone
+        # NAT from a symmetric one needs two.
+        sh(["scp", "-q", "-i", str(key_path()), "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null",
+            "-o", "LogLevel=ERROR", __file__, f"{USER}@{ip_of(vm)}:/opt/varsto/lab.py"])
+        ssh(vm, "sudo systemd-run --unit vl-stun --collect python3 /opt/varsto/lab.py stun-serve --addr 198.51.100.20 >/dev/null 2>&1 || true")
 
 
 def cmd_up(_a):
@@ -345,7 +353,7 @@ def cmd_services(a):
     s3dir = DIR / "s3"
     s3dir.mkdir(exist_ok=True)
     pids = {}
-    p = subprocess.Popen(["rclone", "serve", "s3", "--addr", "10.78.0.1:9900",
+    p = subprocess.Popen(["rclone", "serve", "s3", "--addr", f"{WAN_HOST}:9900",
                           "--auth-key", f"{S3['key']},{S3['secret']}", "--vfs-cache-mode", "off",
                           "--dir-cache-time", "5s",
                           str(s3dir)], stdout=open(run / "s3.log", "a"), stderr=subprocess.STDOUT,
@@ -356,7 +364,7 @@ def cmd_services(a):
     pids["stun"] = p.pid
     (run / "pids.json").write_text(json.dumps(pids))
     time.sleep(1.5)
-    log(f"S3 at {S3['endpoint']} (bucket dirs under {s3dir}), STUN at 10.78.0.1:3478; pids {pids}")
+    log(f"S3 at {S3['endpoint']} (bucket dirs under {s3dir}), STUN at {WAN_HOST}:3478; pids {pids}")
 
 
 def cmd_services_stop(_a):
@@ -506,12 +514,15 @@ def main():
     sub.add_parser("up").set_defaults(f=cmd_up)
     sub.add_parser("services").set_defaults(f=cmd_services)
     sub.add_parser("services-stop").set_defaults(f=cmd_services_stop)
-    sub.add_parser("stun-serve").set_defaults(f=lambda _a: stun_server(("10.78.0.1", 3478)))
+    p = sub.add_parser("stun-serve")
+    p.add_argument("--addr", default=WAN_HOST)
+    p.set_defaults(f=lambda a: stun_server((a.addr, 3478)))
     p = sub.add_parser("install")
     p.add_argument("package")
     p.set_defaults(f=cmd_install)
     p = sub.add_parser("build")
-    p.add_argument("repo", nargs="?", default=str(pathlib.Path(__file__).resolve().parents[3]))
+    here = pathlib.Path(__file__).resolve()
+    p.add_argument("repo", nargs="?", default=str(here.parents[3]) if len(here.parents) > 3 else ".")
     p.set_defaults(f=cmd_build)
     p = sub.add_parser("install-bin")
     p.add_argument("binary", nargs="?")

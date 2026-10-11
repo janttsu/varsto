@@ -548,6 +548,51 @@ fn plain_root_writable(root: &std::path::Path) -> bool {
     ok
 }
 
+/// The storage a joining device reaches the vault through, from a setup
+/// form: a directory (`storage_path`), or an S3-compatible bucket when
+/// `kind` is "s3" or a bucket is given. Returns the spec and the S3 secret.
+fn storage_from_input(
+    input: &Value,
+    storage_name: &str,
+    default_place: &str,
+) -> Result<(StorageSpec, Option<String>)> {
+    let kind = opt(input, "kind").unwrap_or_default();
+    if kind == "s3" || (kind.is_empty() && opt(input, "bucket").is_some_and(|b| !b.is_empty())) {
+        let secret = s(input, "secret_access_key")?;
+        return Ok((
+            StorageSpec::S3 {
+                name: storage_name.to_string(),
+                endpoint: s(input, "endpoint")?.trim_end_matches('/').to_string(),
+                region: opt(input, "region")
+                    .filter(|r| !r.trim().is_empty())
+                    .unwrap_or_else(|| "auto".into()),
+                bucket: s(input, "bucket")?,
+                prefix: opt(input, "prefix")
+                    .unwrap_or_default()
+                    .trim_matches('/')
+                    .to_string(),
+                access_key_id: s(input, "access_key_id")?,
+                secret_ref: String::new(),
+                path_style: true,
+                storage_class: None,
+                cold: false,
+                place: opt(input, "place").unwrap_or_else(|| default_place.into()),
+            },
+            Some(secret),
+        ));
+    }
+    Ok((
+        StorageSpec::LocalDir {
+            name: storage_name.to_string(),
+            path: PathBuf::from(s(input, "storage_path")?),
+            cold: false,
+            carrier: false,
+            place: String::new(),
+        },
+        None,
+    ))
+}
+
 fn mobile() -> bool {
     std::env::var_os("VARSTO_MOBILE").is_some()
 }
@@ -722,19 +767,17 @@ fn api(st: &mut State, method: Method, path: &str, query: &str, input: &Value) -
             } else {
                 varsto_core::vault::ShareToken::decode(&raw)?
             };
-            let spec = StorageSpec::LocalDir {
-                name: opt(input, "storage_name").unwrap_or_else(|| "shared".into()),
-                path: PathBuf::from(s(input, "storage_path")?),
-                cold: false,
-                carrier: false,
-                place: String::new(),
-            };
-            let e = Engine::accept_share(
+            let storage_name = opt(input, "storage_name")
+                .filter(|n| !n.trim().is_empty())
+                .unwrap_or_else(|| "shared".into());
+            let (spec, secret) = storage_from_input(input, &storage_name, "")?;
+            let e = Engine::accept_share_with_secret(
                 &st.home,
                 &s(input, "name")?,
                 &s(input, "passphrase")?,
                 &token,
                 spec,
+                secret,
             )?;
             st.engine = Some(e);
             varsto_core::vault::ShareRequest::clear(&st.home);

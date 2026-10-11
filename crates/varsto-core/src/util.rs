@@ -152,6 +152,22 @@ pub fn safe_join(root: &Path, rel: &str) -> Result<PathBuf> {
     Ok(p)
 }
 
+/// Decimal sizes for messages ("3.2 GB", "410 MB").
+pub fn human_bytes(n: u64) -> String {
+    const UNITS: [&str; 5] = ["B", "kB", "MB", "GB", "TB"];
+    let mut v = n as f64;
+    let mut i = 0;
+    while v >= 1000.0 && i < UNITS.len() - 1 {
+        v /= 1000.0;
+        i += 1;
+    }
+    if i == 0 {
+        format!("{n} B")
+    } else {
+        format!("{v:.1} {}", UNITS[i])
+    }
+}
+
 pub fn manifest_path(rel: &Path) -> Option<String> {
     let mut parts = Vec::new();
     for c in rel.components() {

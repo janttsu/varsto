@@ -326,6 +326,10 @@ pub struct DiskAddReport {
     pub disk: PoolDisk,
     pub objects_added: u64,
     pub bytes_added: u64,
+    /// Why nothing (or less than expected) went to the disk, when the
+    /// reason is the disk itself: smaller than the space the pool keeps free.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub warning: Option<String>,
 }
 
 /// What `disk check` did (the reattach routine).
@@ -779,10 +783,24 @@ impl Engine {
         token: &ShareToken,
         storage: StorageSpec,
     ) -> Result<Engine> {
+        Self::accept_share_with_secret(home, device_name, passphrase, token, storage, None)
+    }
+
+    /// Like `accept_share`, through a storage that needs a secret (an S3
+    /// bucket both users can reach); the secret goes into this device's
+    /// encrypted secret store.
+    pub fn accept_share_with_secret(
+        home: &Path,
+        device_name: &str,
+        passphrase: &str,
+        token: &ShareToken,
+        storage: StorageSpec,
+        secret: Option<String>,
+    ) -> Result<Engine> {
         if home.join("vault.json").exists() {
             bail!("{} already holds a vault", home.display());
         }
-        let backend = storage.open()?;
+        let backend = storage.open_with(&|_| secret.clone())?;
         let meta: VaultMeta = serde_json::from_slice(
             &backend
                 .get(VaultMeta::STORAGE_KEY)?
@@ -839,7 +857,7 @@ impl Engine {
             &engine.vault.vault_id,
             &engine.vault.device_id,
         )?;
-        engine.add_storage_internal(storage, None)?;
+        engine.add_storage_internal(storage, secret)?;
         engine.pending.push(Event::DeviceEnrolled {
             name: engine.vault.device_name.clone(),
         });

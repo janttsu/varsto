@@ -352,8 +352,232 @@ def s_revoke():
     check(isinstance(old, dict) and old.get("_failed"), "joined with a key from before the revocation")
 
 
+# ----- peer to peer through the NATs (background services) ---------------------------------
+
+P2P_MB = 64
+
+
+def api(vm, method, path, body=None, timeout=900):
+    data = f"-H 'Content-Type: application/json' -d {shlex.quote(json.dumps(body))}" if body is not None else ""
+    cmd = ("f=~/.local/share/varsto/service.json; "
+           "port=$(python3 -c \"import json,os;print(json.load(open(os.path.expanduser('$f')))['port'])\"); "
+           "tok=$(python3 -c \"import json,os;print(json.load(open(os.path.expanduser('$f')))['token'])\"); "
+           f"curl -sS --max-time {timeout} -X {method} \"http://127.0.0.1:$port{path}\" -H \"X-Varsto-Token: $tok\" {data}")
+    out = run(vm, cmd).stdout
+    try:
+        return json.loads(out)
+    except json.JSONDecodeError:
+        return {"_raw": out}
+
+
+def start_service(vm):
+    run(vm, f"{ENV} nohup varsto service run --interval 15 > ~/svc.log 2>&1 < /dev/null &")
+    for _ in range(60):
+        if run(vm, "test -s ~/.local/share/varsto/service.json", check_rc=False).returncode == 0:
+            try:
+                if "unlocked" in json.dumps(api(vm, "GET", "/api/state")):
+                    return
+            except Fail:
+                pass
+        time.sleep(1)
+    raise Fail(f"{vm}: service did not start: " + run(vm, "tail -5 ~/svc.log").stdout)
+
+
+def drop_bucket_chunks():
+    import shutil
+    shutil.rmtree(lab.DIR / "s3" / BUCKET / "chunks", ignore_errors=True)
+    (lab.DIR / "s3" / BUCKET / "chunks").mkdir()
+
+
+@scenario("p2p-setup")
+def s_p2p_setup():
+    s_reset()
+    v("vl-laptop", "init --name laptop", json_out=True)
+    key = v("vl-laptop", "recovery kit", json_out=False)
+    v("vl-laptop", f"storage add-s3 cloud --endpoint {lab.S3['endpoint']} --region us-east-1 --bucket {BUCKET} "
+                    f"--access-key-id {lab.S3['key']} --secret-access-key {lab.S3['secret']} --place cloud", json_out=False)
+    run("vl-laptop", f"mkdir -p ~/data/media && head -c {P2P_MB << 20} /dev/urandom > ~/data/media/big.bin")
+    v("vl-laptop", "folder add media /home/varsto/data/media", json_out=False)
+    v("vl-laptop", "push media")
+    CTX["p2p_sha"] = run("vl-laptop", "sha256sum ~/data/media/big.bin").stdout.split()[0]
+    words = " ".join(re.findall(r"\d+\. (\w+)", key.split("SHARES")[0]))
+    for vm, name in (("vl-desktop", "desktop"), ("vl-pub", "pub"), ("vl-work", "work")):
+        v(vm, f"join --name {name} --words {shlex.quote(words)} --s3-bucket {BUCKET} --s3-endpoint {lab.S3['endpoint']} "
+              f"--s3-access-key-id {lab.S3['key']} --s3-secret-access-key {lab.S3['secret']} --storage-name cloud")
+    stun = " ".join(f"--stun {x}" for x in lab.STUN)
+    for vm in lab.DEVICES:
+        extra = " --public 198.51.100.20:17893" if vm == "vl-pub" else ""
+        v(vm, f"p2p enable {stun}{extra}", json_out=False)
+    for vm in lab.DEVICES:
+        start_service(vm)
+    # Rendezvous records travel through the bucket; give every service two rounds.
+    time.sleep(40)
+    for vm in lab.DEVICES:
+        p = api(vm, "GET", "/api/p2p")
+        CTX[f"nat_{vm}"] = {"nat": p.get("nat"), "public": p.get("public"), "reachable": p.get("reachable")}
+    check(CTX["nat_vl-pub"]["reachable"], f"pub should be reachable: {CTX['nat_vl-pub']}")
+
+
+def p2p_pull(vm, label):
+    # The laptop keeps serving but stops syncing (its repair would put the
+    # blocks back into the bucket); the bucket loses every block; only then
+    # does the target attach the folder, so every block has to come from a peer.
+    api("vl-laptop", "POST", "/api/service/pause", {"paused": True})
+    api(vm, "POST", "/api/service/pause", {"paused": True})
+    drop_bucket_chunks()
+    run(vm, "rm -rf ~/data/media")
+    api(vm, "POST", "/api/folder/attach", {"name_or_id": "media", "path": "/home/varsto/data/media", "plain": True})
+    before = api(vm, "GET", "/api/p2p").get("chunks_from_peers") or 0
+    t0 = time.time()
+    api(vm, "POST", "/api/sync", {"folder": "media"})
+    secs = time.time() - t0
+    got = run(vm, "sha256sum ~/data/media/big.bin 2>/dev/null || true").stdout.split()
+    p = api(vm, "GET", "/api/p2p")
+    peers = (p.get("chunks_from_peers") or 0) - before
+    paths = {x.get("name"): x.get("path") for x in (p.get("paths") or [])}
+    CTX[f"p2p_{label}"] = {"seconds": round(secs, 1), "mb_s": round(P2P_MB / secs, 1), "chunks_from_peers": peers, "paths": paths}
+    check(got and got[0] == CTX["p2p_sha"], f"{vm}: file missing or different after pull ({CTX[f'p2p_{label}']})")
+    check(peers > 0, f"{vm}: nothing came from peers ({CTX[f'p2p_{label}']})")
+    api(vm, "POST", "/api/folder/detach", {"name": "media"})
+    api(vm, "POST", "/api/service/pause", {"paused": False})
+
+
+@scenario("p2p-lan")
+def s_p2p_lan():
+    p2p_pull("vl-desktop", "lan")
+    check(CTX["p2p_lan"]["paths"].get("laptop", "").startswith("direct"), f"laptop not direct from desktop: {CTX['p2p_lan']}")
+
+
+@scenario("p2p-public-server-from-cone-nat")
+def s_p2p_pub():
+    run("vl-desktop", "true")
+    p2p_pull("vl-pub", "pub")
+
+
+@scenario("p2p-symmetric-nat")
+def s_p2p_sym():
+    p2p_pull("vl-work", "symmetric")
+
+
+@scenario("p2p-services-stop")
+def s_p2p_stop():
+    for vm in lab.DEVICES:
+        run(vm, "pkill -x varsto; true", check_rc=False)
+    for k, val in CTX.items():
+        if k.startswith(("p2p_", "nat_")):
+            print(f"      {k}: {val}", flush=True)
+
+
+# ----- two people, one shared folder through S3 ---------------------------------------------
+
+@scenario("share-between-people-via-s3")
+def s_share():
+    # The laptop owns the vault of the p2p scenarios; "ville" on the work
+    # machine has a vault directory of its own for the share.
+    home = "--home /home/varsto/share-home"
+    run("vl-work", "rm -rf ~/share-home ~/shared; pkill -x varsto; true", check_rc=False)
+    for vm in ("vl-laptop",):
+        run(vm, "pkill -x varsto; true", check_rc=False)
+        time.sleep(0.5)
+    # The p2p scenarios emptied the bucket: the owner's repair puts every
+    # block back from its own files (the member reads from the bucket).
+    v("vl-laptop", "repair", check_rc=False)
+    fsck = v("vl-laptop", "fsck", check_rc=False)
+    fsck = fsck.get("_out", fsck) if isinstance(fsck, dict) else {}
+    check(not fsck.get("chunks_missing"), f"repair left blocks missing: {fsck.get('chunks_missing')}")
+    req = v("vl-work", f"{home} share request --name ville")
+    tok = v("vl-laptop", f"share create media --to {shlex.quote(req['request_code'])} --fingerprint {shlex.quote(req['fingerprint'])}", json_out=False)
+    token = re.search(r"(vst[12]\.\S+)", tok)
+    check(token, "no sealed token: " + tok[-300:])
+    out = v("vl-work", f"{home} share accept --name ville-pc --token {shlex.quote(token.group(1))} --storage-name owner "
+                       f"--s3-bucket {BUCKET} --s3-endpoint {lab.S3['endpoint']} --s3-access-key-id {lab.S3['key']} "
+                       f"--s3-secret-access-key {lab.S3['secret']}", json_out=False)
+    check("joined shared folder media" in out, out[-300:])
+    v("vl-laptop", "push media", check_rc=False)
+    v("vl-work", f"{home} folder attach media /home/varsto/shared", json_out=False)
+    v("vl-work", f"{home} sync")
+    want = CTX.get("p2p_sha") or run("vl-laptop", "sha256sum ~/data/media/big.bin").stdout.split()[0]
+    got = run("vl-work", "sha256sum ~/shared/big.bin").stdout.split()[0]
+    check(got == want, "the shared file differs")
+    # The member writes; the owner sees it.
+    run("vl-work", "echo from-ville > ~/shared/ville.txt")
+    v("vl-work", f"{home} sync")
+    v("vl-laptop", "sync")
+    check(run("vl-laptop", "cat ~/data/media/ville.txt").stdout.strip() == "from-ville", "owner did not get the member's file")
+    # Removing the member: what is written afterwards stays away from it.
+    v("vl-laptop", "share revoke media ville-pc --yes", json_out=False)
+    run("vl-laptop", "echo after-revoke > ~/data/media/later.txt")
+    v("vl-laptop", "sync")
+    v("vl-work", f"{home} sync", check_rc=False)
+    check(run("vl-work", "test -e ~/shared/later.txt", check_rc=False).returncode != 0, "a removed member got new data")
+
+
+# ----- removable disks: a pool of hot-plugged virtual disks --------------------------------
+
+def attach_disk(vm, name, size="6G"):
+    img = lab.DIR / "pool" / f"{vm}-{name}.qcow2"
+    if not img.exists():
+        lab.sh(["qemu-img", "create", "-q", "-f", "qcow2", str(img), size])
+    lab.virsh("attach-disk", vm, str(img), name, "--targetbus", "virtio", "--subdriver", "qcow2", "--live")
+    for _ in range(20):
+        if run(vm, f"test -b /dev/{name}", check_rc=False).returncode == 0:
+            return
+        time.sleep(0.5)
+    raise Fail(f"/dev/{name} did not appear in {vm}")
+
+
+def detach_disk(vm, name):
+    lab.virsh("detach-disk", vm, name, "--live")
+    for _ in range(20):
+        if run(vm, f"test -b /dev/{name}", check_rc=False).returncode != 0:
+            return
+        time.sleep(0.5)
+
+
+@scenario("disk-pool-hotplug")
+def s_disks():
+    vm = "vl-laptop"
+    run(vm, "pkill -x varsto; true", check_rc=False)
+    for name in ("vdb", "vdc"):
+        run(vm, f"sudo umount /mnt/{name} 2>/dev/null; true", check_rc=False)
+        lab.virsh("detach-disk", vm, name, "--live", check=False)
+        for f in (lab.DIR / "pool").glob(f"{vm}-{name}.qcow2"):
+            f.unlink()
+    for name in ("vdb", "vdc"):
+        attach_disk(vm, name)
+        run(vm, f"sudo mkfs.ext4 -q -L {name} /dev/{name} && sudo mkdir -p /mnt/{name} && sudo mount /dev/{name} /mnt/{name} && sudo chown varsto: /mnt/{name}")
+    out = run(vm, f"{ENV} varsto storage remove shelf 2>&1; true", check_rc=False).stdout
+    check("shelf" not in json.dumps(v(vm, "status")["storages"]), "the old pool could not be removed: " + out[-300:])
+    v(vm, "storage add-pool shelf --place home", json_out=False)
+    # A pool rule of two copies on disks in different places: every block
+    # lands on both disks.
+    v(vm, "disk group shelf --copies 2", json_out=False)
+    a1 = v(vm, "disk add /mnt/vdb --pool shelf --label d1 --place home")
+    a2 = v(vm, "disk add /mnt/vdc --pool shelf --label d2 --place office")
+    CTX["pool_added"] = (a1.get("objects_added"), a2.get("objects_added"))
+    check(a1.get("objects_added") and a2.get("objects_added"), f"disk add filled nothing: {a1} {a2}")
+    v(vm, "push media", check_rc=False)
+    v(vm, "sync", check_rc=False)
+    disks = v(vm, "disk list")
+    held = {d.get("label"): d.get("objects", d.get("object_count")) for d in (disks if isinstance(disks, list) else disks.get("disks", []))}
+    CTX["pool_objects"] = held
+    check(all(held.get(l) for l in ("d1", "d2")), f"both disks should hold blocks: {disks}")
+    # Eject one disk, unplug it, and the pool knows it is away.
+    v(vm, "disk eject d1", json_out=False)
+    run(vm, "sudo umount /mnt/vdb")
+    detach_disk(vm, "vdb")
+    disks = json.dumps(v(vm, "disk list"))
+    check("away" in disks or "false" in disks.lower(), f"d1 is not shown as away: {disks[:400]}")
+    # Plug it back in: the check recognises it by its marker and verifies it.
+    attach_disk(vm, "vdb")
+    run(vm, "sudo mount /dev/vdb /mnt/vdb")
+    chk = v(vm, "disk check d1 --full")
+    check(not chk.get("corrupt") and not chk.get("missing"), f"disk check: {chk}")
+
+
 SCENARIOS = [s_reset, s_init, s_pair, s_sync, s_words, s_conflict, s_selective, s_repair, s_policy,
-             s_strongroom, s_org, s_remove_user, s_revoke]
+             s_strongroom, s_org, s_remove_user, s_revoke,
+             s_p2p_setup, s_p2p_lan, s_p2p_pub, s_p2p_sym, s_p2p_stop, s_share, s_disks]
 
 
 def main():
@@ -373,6 +597,8 @@ def main():
             status, why = "PASS", ""
         except Fail as e:
             status, why = "FAIL", str(e)
+        except SystemExit as e:
+            status, why = "ERROR", f"helper gave up: {e}"
         except Exception as e:  # noqa: BLE001
             status, why = "ERROR", f"{e.__class__.__name__}: {e}\n{traceback.format_exc()[-800:]}"
         secs = round(time.time() - t0, 1)

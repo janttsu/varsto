@@ -599,17 +599,32 @@ enum ShareCmd {
         #[arg(long)]
         yes: bool,
     },
-    /// (Recipient) Accept a shared folder into a new device directory (one per shared vault).
+    /// (Recipient) Accept a shared folder into a new device directory (one per shared vault),
+    /// through a directory or an S3 bucket that both users can reach.
     Accept {
         #[arg(long)]
         name: String,
         #[arg(long)]
         token: String,
         /// Storage directory that both users can reach and that holds the owner's vault.
-        #[arg(long)]
-        storage_path: PathBuf,
+        #[arg(long, required_unless_present = "s3_bucket")]
+        storage_path: Option<PathBuf>,
         #[arg(long, default_value = "shared")]
         storage_name: String,
+        /// Accept through an S3-compatible bucket instead of a directory.
+        #[arg(long, requires = "s3_endpoint")]
+        s3_bucket: Option<String>,
+        #[arg(long)]
+        s3_endpoint: Option<String>,
+        #[arg(long, default_value = "us-east-1")]
+        s3_region: String,
+        #[arg(long, default_value = "")]
+        s3_prefix: String,
+        #[arg(long)]
+        s3_access_key_id: Option<String>,
+        /// Secret access key; read from VARSTO_S3_SECRET if omitted.
+        #[arg(long, env = "VARSTO_S3_SECRET", hide_env_values = true)]
+        s3_secret_access_key: Option<String>,
     },
 }
 
@@ -1735,7 +1750,11 @@ fn run(cli: &Cli) -> Result<()> {
                                 .unwrap_or_default(),
                             fmt_bytes(r.bytes_added),
                             r.objects_added
-                        )
+                        ) + &r
+                            .warning
+                            .as_ref()
+                            .map(|w| format!("\nwarning: {w}"))
+                            .unwrap_or_default()
                     })?;
                 }
                 DiskCmd::List => {
@@ -2273,20 +2292,63 @@ fn run(cli: &Cli) -> Result<()> {
                 token,
                 storage_path,
                 storage_name,
+                s3_bucket,
+                s3_endpoint,
+                s3_region,
+                s3_prefix,
+                s3_access_key_id,
+                s3_secret_access_key,
             } => {
                 let token = if varsto_core::vault::SealedShareToken::is_sealed(token) {
                     varsto_core::vault::ShareRequest::open_token(&home, token)?
                 } else {
                     varsto_core::vault::ShareToken::decode(token)?
                 };
-                let spec = StorageSpec::LocalDir {
-                    name: storage_name.clone(),
-                    path: storage_path.clone(),
-                    cold: false,
-                    carrier: false,
-                    place: String::new(),
+                let (spec, secret) = match (s3_bucket, storage_path) {
+                    (Some(bucket), _) => (
+                        StorageSpec::S3 {
+                            name: storage_name.clone(),
+                            endpoint: s3_endpoint
+                                .clone()
+                                .unwrap_or_default()
+                                .trim_end_matches('/')
+                                .to_string(),
+                            region: s3_region.clone(),
+                            bucket: bucket.clone(),
+                            prefix: s3_prefix.trim_matches('/').to_string(),
+                            access_key_id: s3_access_key_id
+                                .clone()
+                                .ok_or_else(|| anyhow!("give --s3-access-key-id"))?,
+                            secret_ref: String::new(),
+                            path_style: true,
+                            storage_class: None,
+                            cold: false,
+                            place: String::new(),
+                        },
+                        Some(s3_secret_access_key.clone().ok_or_else(|| {
+                            anyhow!("give --s3-secret-access-key or set VARSTO_S3_SECRET")
+                        })?),
+                    ),
+                    (None, Some(path)) => (
+                        StorageSpec::LocalDir {
+                            name: storage_name.clone(),
+                            path: path.clone(),
+                            cold: false,
+                            carrier: false,
+                            place: String::new(),
+                        },
+                        None,
+                    ),
+                    (None, None) => bail_usage("give --storage-path <dir> or --s3-bucket ...")?,
                 };
-                let engine = Engine::accept_share(&home, name, &passphrase()?, &token, spec)?;
+                let engine = Engine::accept_share_with_secret(
+                    &home,
+                    name,
+                    &passphrase()?,
+                    &token,
+                    spec,
+                    secret,
+                )?;
                 varsto_core::vault::ShareRequest::clear(&home);
                 if !token.fingerprint.is_empty() {
                     println!(

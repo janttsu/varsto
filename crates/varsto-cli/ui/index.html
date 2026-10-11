@@ -151,7 +151,16 @@
         <div class="row"><button type="button" id="sharerequest" class="secondary">Show my request code</button></div>
         <pre id="sharerequestout" class="hidden"></pre>
         <label>Share token <input name="token" required></label>
-        <label>Storage both of you can reach <input name="storage_path" required></label>
+        <label>Where the owner's vault is <select name="kind" id="sharekind"><option value="local-dir">A directory both of you can reach</option><option value="s3">An S3-compatible bucket</option></select></label>
+        <div data-sharekind="local-dir"><label>Storage both of you can reach <input name="storage_path"></label></div>
+        <div data-sharekind="s3" class="hidden">
+          <label>Endpoint <input name="endpoint" placeholder="https://s3.fr-par.scw.cloud"></label>
+          <label>Region <input name="region" placeholder="fr-par"></label>
+          <label>Bucket <input name="bucket"></label>
+          <label>Access key id <input name="access_key_id" autocomplete="off"></label>
+          <label>Secret access key <input name="secret_access_key" type="password" autocomplete="off"></label>
+          <p class="muted small">Credentials the owner gave you for this bucket. The secret is kept in this device's encrypted secret store.</p>
+        </div>
         <div class="actions"><button type="submit">Accept</button></div>
         <p class="muted small">You get the folder key only: this device can read and write that folder, nothing else of the other vault. A sealed token (vst1… or vst2…) can be opened only here, and this device checks that the owner confirmed its fingerprint; a plain token carries the key itself.</p>
       </form>

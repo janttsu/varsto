@@ -1041,6 +1041,33 @@ pub struct Peers {
     traffic: Arc<Traffic>,
     /// Kept-alive TCP connections, carried over when the table is rebuilt.
     pool: Mutex<Arc<TcpPool>>,
+    /// Per device: how its object requests went (`ObjectStats`), so that
+    /// peers that have what is asked, and answer fast, are asked first.
+    objects: Mutex<BTreeMap<DeviceId, ObjectStats>>,
+}
+
+/// How a peer answered object requests lately.
+#[derive(Clone, Debug, Default)]
+struct ObjectStats {
+    /// Requests in a row it did not have the object for (404), since its
+    /// last hit. A peer that lacks one block of a file usually lacks the rest.
+    miss_streak: u32,
+    /// Smoothed seconds per successful object request.
+    secs: f64,
+}
+
+impl ObjectStats {
+    /// Lower is asked first. A miss streak outweighs any speed difference;
+    /// within the same streak, faster peers go first; a peer never measured
+    /// sits in the middle so that it gets tried.
+    fn rank(&self) -> (u32, u64) {
+        let speed = if self.secs > 0.0 {
+            (self.secs * 1e6) as u64
+        } else {
+            50_000
+        };
+        (self.miss_streak.min(8), speed)
+    }
 }
 
 const ROUTE_TTL: Duration = Duration::from_secs(60);
@@ -1098,6 +1125,7 @@ impl Peers {
             timeout: Duration::from_millis(1500),
             traffic,
             pool: Mutex::default(),
+            objects: Mutex::default(),
         }
     }
 
@@ -1122,6 +1150,7 @@ impl Peers {
         *self.routes.lock().unwrap() = previous.routes.lock().unwrap().clone();
         *self.state.lock().unwrap() = previous.state.lock().unwrap().clone();
         *self.pool.lock().unwrap() = previous.pool.lock().unwrap().clone();
+        *self.objects.lock().unwrap() = previous.objects.lock().unwrap().clone();
     }
 
     /// Peers worth asking now: unreachable ones rest for a minute, the ones
@@ -1334,15 +1363,42 @@ impl Peers {
         None
     }
 
-    /// Fetch one object from the first peer that has it.
+    /// Fetch one object from the first peer that has it. Peers with a
+    /// working route come first (`ordered`), and among them the ones that
+    /// had the objects asked lately and answered fastest: asking a peer
+    /// that lacks the object through a relay before one on the LAN that has
+    /// it would cost a round trip for every block.
     pub fn get(&self, name: &ObjectName) -> Option<(DeviceId, Vec<u8>)> {
         let path = format!("/p2p/object/{name}");
-        for p in self.ordered() {
+        let mut order = self.ordered();
+        {
+            let routes = self.routes.lock().unwrap();
+            let stats = self.objects.lock().unwrap();
+            order.sort_by_key(|p| {
+                let routed = matches!(routes.get(&p.device), Some((Some(_), _, _)));
+                let rank = stats.get(&p.device).cloned().unwrap_or_default().rank();
+                (!routed, rank)
+            });
+        }
+        for p in order {
             let auth = auth_header(&self.key, &self.me, &path);
-            if let Some((200, body, _)) = self.fetch(&p, &path, &auth) {
-                if ObjectName::from_bytes(&crypto::hash(&body)) == *name {
+            let t = Instant::now();
+            let got = self.fetch(&p, &path, &auth);
+            let mut stats = self.objects.lock().unwrap();
+            let e = stats.entry(p.device.clone()).or_default();
+            match got {
+                Some((200, body, _)) if ObjectName::from_bytes(&crypto::hash(&body)) == *name => {
+                    let secs = t.elapsed().as_secs_f64();
+                    e.secs = if e.secs > 0.0 {
+                        e.secs * 0.8 + secs * 0.2
+                    } else {
+                        secs
+                    };
+                    e.miss_streak = 0;
                     return Some((p.device, body));
                 }
+                Some((404, _, _)) => e.miss_streak = e.miss_streak.saturating_add(1),
+                _ => {}
             }
         }
         None
@@ -1494,6 +1550,29 @@ mod tests {
         ] {
             assert!(decode_chunked(bad).is_err(), "{bad:?}");
         }
+    }
+
+    #[test]
+    fn peers_that_have_objects_and_answer_fast_rank_first() {
+        let fast = ObjectStats {
+            miss_streak: 0,
+            secs: 0.002,
+        };
+        let slow = ObjectStats {
+            miss_streak: 0,
+            secs: 0.2,
+        };
+        let lacking = ObjectStats {
+            miss_streak: 3,
+            secs: 0.001,
+        };
+        let unknown = ObjectStats::default();
+        let mut v = [lacking.rank(), slow.rank(), unknown.rank(), fast.rank()];
+        v.sort();
+        assert_eq!(
+            v,
+            [fast.rank(), unknown.rank(), slow.rank(), lacking.rank()]
+        );
     }
 
     #[test]
