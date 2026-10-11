@@ -31,6 +31,7 @@ import argparse
 import json
 import os
 import pathlib
+import re
 import shutil
 import socket
 import struct
@@ -471,6 +472,42 @@ ssh_pwauth: false
     log(f"built {DIR / 'varsto-musl'}")
 
 
+def cmd_release(a):
+    """Build the release packages that do not need a Mac in the build VM:
+    the Linux (musl) and Windows (gnu) archives with website/build-release.sh
+    and the Android APK with apps/android/build.sh (JDK, SDK and NDK are
+    installed once). Copies them to <dir>/release/<version>/."""
+    cmd_build(a)  # VM up, Rust present, sources synced
+    q = "sudo DEBIAN_FRONTEND=noninteractive"
+    if ssh(BUILD_VM, "command -v x86_64-w64-mingw32-gcc && command -v zip && command -v javac", check=False).returncode != 0:
+        log("build VM: installing mingw-w64, zip and a JDK (once)")
+        ssh(BUILD_VM, f"{q} apt-get install -y -qq mingw-w64 zip unzip openjdk-21-jdk-headless >/dev/null")
+    ssh(BUILD_VM, "~/.cargo/bin/rustup target add x86_64-pc-windows-gnu aarch64-linux-android x86_64-linux-android >/dev/null 2>&1")
+    sdk = "/home/" + USER + "/android-sdk"
+    if ssh(BUILD_VM, f"test -d {sdk}/ndk", check=False).returncode != 0:
+        log("build VM: installing the Android SDK and NDK (once)")
+        ssh(BUILD_VM, f"set -e; mkdir -p {sdk}/cmdline-tools && cd /tmp && curl -fsSL -o ct.zip https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip "
+                      f"&& unzip -q -o ct.zip -d {sdk}/cmdline-tools && rm -rf {sdk}/cmdline-tools/latest && mv {sdk}/cmdline-tools/cmdline-tools {sdk}/cmdline-tools/latest "
+                      f"&& (yes | {sdk}/cmdline-tools/latest/bin/sdkmanager --licenses >/dev/null 2>&1 || true) "
+                      f"&& {sdk}/cmdline-tools/latest/bin/sdkmanager --install platform-tools 'platforms;android-35' 'build-tools;34.0.0' 'build-tools;35.0.0' 'ndk;27.2.12479018' >/dev/null")
+    env = f"export PATH=$HOME/.cargo/bin:$PATH ANDROID_HOME={sdk};"
+    log("build VM: Linux and Windows packages")
+    r = ssh(BUILD_VM, f"{env} cd src && website/build-release.sh x86_64-unknown-linux-musl x86_64-pc-windows-gnu 2>&1 | tail -15", check=False, capture=True)
+    print(r.stdout, r.stderr)
+    log("build VM: Android APK")
+    r2 = ssh(BUILD_VM, f"{env} cd src && apps/android/build.sh 2>&1 | grep -vE '^\\s*(Compiling|Downloading|Downloaded)' | tail -15", check=False, capture=True)
+    print(r2.stdout, r2.stderr)
+    version = re.search(r'^version\s*=\s*"([^"]+)"', (pathlib.Path(a.repo) / "Cargo.toml").read_text(), re.M).group(1)
+    out = DIR / "release" / version
+    out.mkdir(parents=True, exist_ok=True)
+    scp = ["scp", "-q", "-i", str(key_path()), "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null", "-o", "LogLevel=ERROR"]
+    host = f"{USER}@{ip_of(BUILD_VM)}"
+    sh(scp + [f"{host}:src/website/public/downloads/varsto-{version}-*", str(out)], check=False)
+    sh(scp + [f"{host}:src/apps/android/app/build/outputs/apk/debug/app-debug.apk", str(out / f"varsto-{version}-android-debug.apk")], check=False)
+    for f in sorted(out.iterdir()):
+        log(f"release: {f.name} {f.stat().st_size // 1024} KiB")
+
+
 def cmd_install_bin(a):
     """Copy a binary (default: the last build) into every device VM."""
     binp = pathlib.Path(a.binary or DIR / "varsto-musl")
@@ -524,6 +561,9 @@ def main():
     here = pathlib.Path(__file__).resolve()
     p.add_argument("repo", nargs="?", default=str(here.parents[3]) if len(here.parents) > 3 else ".")
     p.set_defaults(f=cmd_build)
+    p = sub.add_parser("release")
+    p.add_argument("--repo", default=str(pathlib.Path(__file__).resolve().parents[3]))
+    p.set_defaults(f=cmd_release)
     p = sub.add_parser("install-bin")
     p.add_argument("binary", nargs="?")
     p.set_defaults(f=cmd_install_bin)
