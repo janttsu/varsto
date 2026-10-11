@@ -28,8 +28,9 @@ def url(dev):
     return f"http://127.0.0.1:{j['port']}/?token={j['token']}"
 
 
-THUMBS = ("Array.from(document.querySelectorAll('img.thumb')).length >= 3 && "
-          "Array.from(document.querySelectorAll('img.thumb')).every(i => i.complete && i.naturalWidth > 0)")
+# Desktop rows use img.thumb; the compact phone list puts them in .mrow-thumb.
+_IMGS = "Array.from(document.querySelectorAll('#files img.thumb, #files .mrow-thumb img'))"
+THUMBS = (f"{_IMGS}.length >= 3 && {_IMGS}.every(i => i.complete && i.naturalWidth > 0)")
 
 with sync_playwright() as p:
     exe = os.environ.get("CHROMIUM")
