@@ -46,15 +46,6 @@ pub struct FileState {
     pub chunks: Vec<ChunkRef>,
     pub modified_by: DeviceId,
     pub modified_clock: u64,
-    /// How the content was cut into blocks: 0 (absent) = the fixed default
-    /// sizes of earlier versions, 1 = by file size (`ChunkerParams::for_size`).
-    /// Needed only to cut a local file again into the same blocks.
-    #[serde(default, skip_serializing_if = "is_zero_u8")]
-    pub chunking: u8,
-}
-
-fn is_zero_u8(v: &u8) -> bool {
-    *v == 0
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -286,7 +277,6 @@ mod tests {
                 .collect(),
             modified_by: DeviceId::from_bytes(&[3; 16]),
             modified_clock: 1,
-            chunking: 0,
         }
     }
 
@@ -350,7 +340,6 @@ mod tests {
             chunks: vec![],
             modified_by: DeviceId::from_bytes(dev.as_bytes()),
             modified_clock: clock,
-            chunking: 0,
         }
     }
 

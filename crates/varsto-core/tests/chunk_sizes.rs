@@ -41,7 +41,11 @@ fn size_tiers() {
 #[test]
 fn big_files_get_big_blocks_and_are_cut_again_the_same_way() {
     let t = tempfile::tempdir().unwrap();
-    let (s1, s2, files) = (t.path().join("s1"), t.path().join("s2"), t.path().join("files"));
+    let (s1, s2, files) = (
+        t.path().join("s1"),
+        t.path().join("s2"),
+        t.path().join("files"),
+    );
     for d in [&s1, &s2, &files] {
         fs::create_dir_all(d).unwrap();
     }

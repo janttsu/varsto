@@ -2329,7 +2329,7 @@ impl Engine {
             let file = fs::File::open(entry.path())?;
             let mut hasher = KeyedHasher::new(&fk.hash);
             let mut chunks = Vec::new();
-            let (params, chunking) = self.chunker_for(size);
+            let params = self.chunker_for(size);
             for chunk in Chunker::new(std::io::BufReader::new(file), params)? {
                 let chunk = chunk?;
                 hasher.update(&chunk);
@@ -2390,7 +2390,6 @@ impl Engine {
                     chunks,
                     modified_by: me.clone(),
                     modified_clock: clock,
-                    chunking,
                 },
             );
             new_index.insert(
@@ -2427,7 +2426,6 @@ impl Engine {
                     chunks: vec![],
                     modified_by: me.clone(),
                     modified_clock: clock,
-                    chunking: 0,
                 },
             );
             changed += 1;
@@ -2617,7 +2615,7 @@ impl Engine {
                 };
                 let progress = crate::progress::Transfer::upload(&rec.name, &file.path, file.size);
                 for (index, chunk) in
-                    Chunker::new(std::io::BufReader::new(handle), self.chunker_of(file))?
+                    Chunker::new(std::io::BufReader::new(handle), self.chunker_for(file.size))?
                         .enumerate()
                 {
                     let chunk = chunk?;
@@ -3997,34 +3995,14 @@ impl Engine {
         self.config.save(&self.home)
     }
 
-    /// Peers to try before storages (None disables).
-    /// Block sizes for a new file of `size` bytes, with the marker its file
-    /// entry carries. Tests that set their own sizes keep them.
-    pub(crate) fn chunker_for(&self, size: u64) -> (ChunkerParams, u8) {
+    /// Block sizes for a file of `size` bytes: the same everywhere, so the
+    /// same content gives the same blocks. Tests that set their own sizes
+    /// keep them.
+    pub(crate) fn chunker_for(&self, size: u64) -> ChunkerParams {
         if self.chunker == ChunkerParams::DEFAULT {
-            (ChunkerParams::for_size(size), 1)
+            ChunkerParams::for_size(size)
         } else {
-            (self.chunker, 0)
-        }
-    }
-
-    /// The block sizes a file entry was cut with, to cut it again the same way.
-    pub(crate) fn chunker_of(&self, f: &FileState) -> ChunkerParams {
-        if f.chunking == 0 {
             self.chunker
-        } else {
-            self.chunker_for(f.size).0
-        }
-    }
-
-    /// Where the entry is not at hand: the sizes by file size first, then
-    /// the fixed ones of earlier versions.
-    pub(crate) fn chunker_candidates(&self, size: u64) -> Vec<ChunkerParams> {
-        let tiered = self.chunker_for(size).0;
-        if tiered == self.chunker {
-            vec![tiered]
-        } else {
-            vec![tiered, self.chunker]
         }
     }
 
@@ -4036,6 +4014,7 @@ impl Engine {
         }
     }
 
+    /// Peers to try before storages (None disables).
     pub fn set_peers(&mut self, peers: Option<std::sync::Arc<crate::p2p::Peers>>) {
         self.peers = peers;
     }
@@ -4221,7 +4200,7 @@ impl Engine {
     /// Create or overwrite a file inside a folder (relative path), then push.
     /// Used by the MCP server for notes and reorganisation; refuses to leave the folder.
     pub fn write_file(&mut self, folder: &str, path: &str, bytes: &[u8]) -> Result<PushReport> {
-        self.write_from_reader(folder, path, bytes)
+        self.write_from_reader_sized(folder, path, bytes, Some(bytes.len() as u64))
     }
 
     /// `write_file` with the content streamed from `reader`. In a folder kept
@@ -5077,7 +5056,7 @@ impl Engine {
         epoch: u32,
     ) -> Result<Vec<u8>> {
         let size = fs::metadata(path)?.len();
-        for params in self.chunker_candidates(size) {
+        for params in [self.chunker_for(size)] {
             let file = fs::File::open(path)?;
             for piece in Chunker::new(std::io::BufReader::new(file), params)? {
                 let piece = piece?;
