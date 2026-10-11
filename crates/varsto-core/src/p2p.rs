@@ -1160,8 +1160,25 @@ impl Peers {
 
     /// Carry the remembered routes and address states over from the table
     /// this one replaces, so a rebuild (every sync) forgets nothing.
+    /// A peer found unreachable whose record has changed since (new
+    /// addresses, or a relay it registered with) is tried again at once
+    /// instead of resting: the new route may be the one that works.
     pub fn inherit(&self, previous: &Peers) {
-        *self.routes.lock().unwrap() = previous.routes.lock().unwrap().clone();
+        let mut routes = previous.routes.lock().unwrap().clone();
+        routes.retain(|dev, (route, _, _)| {
+            if route.is_some() {
+                return true;
+            }
+            let old = previous.peers.iter().find(|p| &p.device == dev);
+            let new = self.peers.iter().find(|p| &p.device == dev);
+            match (old, new) {
+                (Some(o), Some(n)) => {
+                    o.tcp == n.tcp && o.udp == n.udp && o.relay_via == n.relay_via
+                }
+                _ => true,
+            }
+        });
+        *self.routes.lock().unwrap() = routes;
         *self.state.lock().unwrap() = previous.state.lock().unwrap().clone();
         *self.pool.lock().unwrap() = previous.pool.lock().unwrap().clone();
         *self.objects.lock().unwrap() = previous.objects.lock().unwrap().clone();

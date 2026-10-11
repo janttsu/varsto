@@ -44,7 +44,11 @@ pub fn write_atomic(path: &Path, data: &[u8]) -> Result<()> {
         .file_name()
         .and_then(|n| n.to_str())
         .unwrap_or("object");
-    let tmp = dir.join(format!(".{}.tmp-{}", file_name, std::process::id()));
+    // Unique per write, not only per process: uploader threads may write the
+    // same object (a block two files share) at the same moment.
+    static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let tmp = dir.join(format!(".{}.tmp-{}-{}", file_name, std::process::id(), seq));
     {
         let mut f = fs::File::create(&tmp)
             .with_context(|| format!("create temporary file {}", tmp.display()))?;
