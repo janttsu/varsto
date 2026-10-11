@@ -1460,7 +1460,9 @@ pub fn restart_running(home: &Path) -> bool {
 pub fn install(home: &Path, interval_secs: u64) -> Result<String> {
     let exe = std::env::current_exe()?;
     // Through a link on PATH, run the file it points to (inside Varsto.app,
-    // so an updated app is an updated service).
+    // so an updated app is an updated service). Not on Windows: there the
+    // result is a `\\?\` path, which Explorer cannot start from a verb.
+    #[cfg(unix)]
     let exe = fs::canonicalize(&exe).unwrap_or(exe);
     #[cfg(target_os = "macos")]
     {
