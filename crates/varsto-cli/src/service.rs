@@ -773,16 +773,20 @@ pub fn passphrase_from_system(home: &Path) -> Option<String> {
     #[cfg(target_os = "linux")]
     {
         // The desktop keyring (GNOME Keyring, KWallet) through libsecret's tool.
-        if let Ok(out) = std::process::Command::new("secret-tool")
-            .args([
+        // A locked keyring makes secret-tool wait for an unlock window,
+        // which never appears without a desktop session: give up after a
+        // while instead of hanging the service at start.
+        if let Ok(out) = run_secret_tool(
+            &[
                 "lookup",
                 "service",
                 "varsto",
                 "home",
                 &home.display().to_string(),
-            ])
-            .output()
-        {
+            ],
+            None,
+            SECRET_TOOL_LOOKUP_TIMEOUT,
+        ) {
             let p = String::from_utf8_lossy(&out.stdout)
                 .trim_end_matches('\n')
                 .to_string();
@@ -793,6 +797,66 @@ pub fn passphrase_from_system(home: &Path) -> Option<String> {
     }
     let _ = home;
     None
+}
+
+const TIMED_OUT: &str = "secret-tool timed out";
+/// Long enough to type a password into an unlock window.
+const SECRET_TOOL_STORE_TIMEOUT: Duration = Duration::from_secs(90);
+const SECRET_TOOL_LOOKUP_TIMEOUT: Duration = Duration::from_secs(20);
+
+/// Run `secret-tool` with `args`, feeding `stdin`, and kill it after
+/// `timeout`. Output is read on threads so a full pipe cannot stall it.
+#[cfg(target_os = "linux")]
+fn run_secret_tool(
+    args: &[&str],
+    stdin: Option<&[u8]>,
+    timeout: Duration,
+) -> Result<std::process::Output> {
+    use std::io::{Read, Write};
+    use std::process::{Command, Stdio};
+    let mut child = Command::new("secret-tool")
+        .args(args)
+        .stdin(if stdin.is_some() {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .context("secret-tool (libsecret) is not installed")?;
+    if let (Some(data), Some(mut pipe)) = (stdin, child.stdin.take()) {
+        pipe.write_all(data)?;
+    }
+    let mut out_pipe = child.stdout.take().expect("piped");
+    let mut err_pipe = child.stderr.take().expect("piped");
+    let out_t = std::thread::spawn(move || {
+        let mut b = Vec::new();
+        let _ = out_pipe.read_to_end(&mut b);
+        b
+    });
+    let err_t = std::thread::spawn(move || {
+        let mut b = Vec::new();
+        let _ = err_pipe.read_to_end(&mut b);
+        b
+    });
+    let start = Instant::now();
+    let status = loop {
+        if let Some(st) = child.try_wait()? {
+            break st;
+        }
+        if start.elapsed() >= timeout {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(anyhow!(TIMED_OUT));
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    };
+    Ok(std::process::Output {
+        status,
+        stdout: out_t.join().unwrap_or_default(),
+        stderr: err_t.join().unwrap_or_default(),
+    })
 }
 
 /// Keep the passphrase in the system keyring so the background service
@@ -826,21 +890,29 @@ pub fn remember_passphrase(home: &Path, pass: &str) -> Result<String> {
     }
     #[cfg(target_os = "linux")]
     {
-        let mut child = std::process::Command::new("secret-tool")
-            .args([
+        let _ = std::io::stdout().flush();
+        eprintln!("Storing it in your keyring. If a window asks to unlock the keyring, enter your login password there.");
+        let out = match run_secret_tool(
+            &[
                 "store",
                 "--label=Varsto",
                 "service",
                 "varsto",
                 "home",
                 &account,
-            ])
-            .stdin(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .spawn()
-            .context("secret-tool (libsecret) is not installed")?;
-        child.stdin.take().unwrap().write_all(pass.as_bytes())?;
-        let out = child.wait_with_output()?;
+            ],
+            Some(pass.as_bytes()),
+            SECRET_TOOL_STORE_TIMEOUT,
+        ) {
+            Ok(out) => out,
+            Err(e) if e.to_string() == TIMED_OUT => {
+                return Err(anyhow!(
+                    "the keyring did not answer within {} seconds: it is probably locked and could not show its unlock window (no desktop session here, for example over SSH). Unlock it from your desktop session and run `varsto service remember` there",
+                    SECRET_TOOL_STORE_TIMEOUT.as_secs()
+                ))
+            }
+            Err(e) => return Err(e),
+        };
         if !out.status.success() {
             return Err(anyhow!(
                 "secret-tool could not store it (no keyring in this session?): {}",
