@@ -257,11 +257,16 @@ impl Engine {
             updated_utc: now,
             placement,
         };
-        let blob = prec.seal_signed(
-            &self.vault.vault_id,
-            &self.folder_record_key_now(),
-            &self.keys.signer,
-        )?;
+        // Signed in an organization, the older form otherwise (see set_policy).
+        let blob = if self.org.is_some() {
+            prec.seal_signed(
+                &self.vault.vault_id,
+                &self.folder_record_key_now(),
+                &self.keys.signer,
+            )?
+        } else {
+            prec.seal(&self.vault.vault_id, &self.folder_record_key_now())?
+        };
         for (_, backend) in self.metadata_storages(true)? {
             backend.put_if_absent(&prec.storage_key(), &blob)?;
         }

@@ -575,9 +575,96 @@ def s_disks():
     check(not chk.get("corrupt") and not chk.get("missing"), f"disk check: {chk}")
 
 
+# ----- devices on different versions (alpha.9 and this build) -------------------------------
+
+def v9(vm, args, json_out=True, check_rc=True):
+    """Like v(), with the alpha.9 binary (/opt/varsto/varsto9)."""
+    cmd = f"{ENV} /opt/varsto/varsto9 {'--json ' if json_out else ''}{args}"
+    r = run(vm, cmd, check_rc=check_rc)
+    out = r.stdout.strip()
+    if not check_rc and r.returncode != 0:
+        return {"_failed": True, "_rc": r.returncode, "_err": (r.stderr or "").strip(), "_out": out}
+    if json_out:
+        try:
+            return json.loads(out)
+        except json.JSONDecodeError:
+            return out
+    return out
+
+
+@scenario("mixed-versions")
+def s_mixed():
+    check(run("vl-laptop", "test -x /opt/varsto/varsto9", check_rc=False).returncode == 0, "no alpha.9 binary on the VMs")
+    s_reset()
+    # The laptop stays on alpha.9; desktop and pub run this build.
+    out = v9("vl-laptop", "init --name laptop")
+    key = out["vault_key"]
+    v9("vl-laptop", f"storage add-s3 cloud --endpoint {lab.S3['endpoint']} --region us-east-1 --bucket {BUCKET} "
+                     f"--access-key-id {lab.S3['key']} --secret-access-key {lab.S3['secret']} --place cloud", json_out=False)
+    gen_data("vl-laptop", "/home/varsto/data/docs", seed=9, big_mb=2, small=20)
+    v9("vl-laptop", "folder add docs /home/varsto/data/docs", json_out=False)
+    v9("vl-laptop", "push docs")
+    s3 = (f"--s3-bucket {BUCKET} --s3-endpoint {lab.S3['endpoint']} --s3-access-key-id {lab.S3['key']} "
+          f"--s3-secret-access-key {lab.S3['secret']} --storage-name cloud")
+    v("vl-desktop", f"join --name desktop --vault-key {key} {s3}")
+    v("vl-pub", f"join --name pub --vault-key {key} {s3}")
+    for vm in ("vl-desktop", "vl-pub"):
+        v(vm, "folder attach docs /home/varsto/data/docs", json_out=False)
+        v(vm, "sync")
+    same_tree(tree_hashes("vl-laptop", "/home/varsto/data/docs"), tree_hashes("vl-desktop", "/home/varsto/data/docs"),
+              "alpha.9 laptop vs new desktop")
+    # Both ways.
+    run("vl-desktop", "echo from-new > ~/data/docs/from-new.txt")
+    v("vl-desktop", "sync")
+    v9("vl-laptop", "sync")
+    check(run("vl-laptop", "cat ~/data/docs/from-new.txt", check_rc=False).stdout.strip() == "from-new",
+          "alpha.9 did not get a file written by the new version")
+    # Policies set on either version reach the other.
+    v("vl-desktop", "policy set docs --min-copies 1 --verified-within-days 30", json_out=False)
+    v9("vl-laptop", "sync")
+    st = v9("vl-laptop", "status")
+    pol = [f.get("policy") for f in st["folders"] if f["name"] == "docs"]
+    CTX["mixed_policy_seen_by_a9"] = pol
+    check(pol and pol[0] and "30" in json.dumps(pol[0]), f"alpha.9 does not see the policy set by the new version: {pol}")
+    v9("vl-laptop", "policy set docs --min-copies 1 --verified-within-days 60", json_out=False)
+    v("vl-desktop", "sync")
+    pol = [f.get("policy") for f in v("vl-desktop", "status")["folders"] if f["name"] == "docs"]
+    check(pol and "60" in json.dumps(pol[0]), f"the new version does not see the policy set by alpha.9: {pol}")
+    # The new version removes a device; the alpha.9 device follows the new key.
+    v("vl-desktop", "device revoke pub --yes")
+    v9("vl-laptop", "sync")
+    run("vl-desktop", "echo after-revoke-by-new > ~/data/docs/r1.txt")
+    v("vl-desktop", "sync")
+    v9("vl-laptop", "sync")
+    check(run("vl-laptop", "cat ~/data/docs/r1.txt", check_rc=False).stdout.strip() == "after-revoke-by-new",
+          "alpha.9 lost the vault after the new version removed a device")
+    # And the other way round: alpha.9 removes a device the new version knows.
+    kit = v("vl-desktop", "recovery kit", json_out=False)
+    words = " ".join(re.findall(r"\d+\. (\w+)", kit.split("SHARES")[0]))
+    v("vl-work", f"join --name work --words {shlex.quote(words)} {s3}")
+    v9("vl-laptop", "sync")
+    v9("vl-laptop", "device revoke work --yes", json_out=False)
+    v("vl-desktop", "sync")
+    check(any(d["name"] == "work" and d["revoked"] for d in v("vl-desktop", "device list")),
+          "the new version did not accept a removal made by alpha.9")
+    run("vl-laptop", "echo after-revoke-by-a9 > ~/data/docs/r2.txt")
+    v9("vl-laptop", "sync")
+    v("vl-desktop", "sync")
+    check(run("vl-desktop", "cat ~/data/docs/r2.txt", check_rc=False).stdout.strip() == "after-revoke-by-a9",
+          "the new version lost the vault after alpha.9 removed a device")
+    # Upgrading in place: the laptop's own directory, opened by this build.
+    v("vl-laptop", "sync")
+    v("vl-laptop", "fsck")
+    run("vl-laptop", "echo after-upgrade > ~/data/docs/up.txt")
+    v("vl-laptop", "sync")
+    v("vl-desktop", "sync")
+    check(run("vl-desktop", "cat ~/data/docs/up.txt", check_rc=False).stdout.strip() == "after-upgrade",
+          "the upgraded laptop does not sync")
+
+
 SCENARIOS = [s_reset, s_init, s_pair, s_sync, s_words, s_conflict, s_selective, s_repair, s_policy,
              s_strongroom, s_org, s_remove_user, s_revoke,
-             s_p2p_setup, s_p2p_lan, s_p2p_pub, s_p2p_sym, s_p2p_stop, s_share, s_disks]
+             s_p2p_setup, s_p2p_lan, s_p2p_pub, s_p2p_sym, s_p2p_stop, s_share, s_disks, s_mixed]
 
 
 def main():

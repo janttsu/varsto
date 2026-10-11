@@ -3525,7 +3525,16 @@ impl Engine {
             policy,
         };
         let fr_key = self.folder_record_key_now();
-        let blob = prec.seal_signed(&self.vault.vault_id, &fr_key, &self.keys.signer)?;
+        // Signed in an organization (where only some devices may set
+        // policies, and every device runs a version that reads signatures);
+        // the older, unsigned form otherwise, so devices still on alpha.9
+        // keep reading it. Without an organization any device may set a
+        // policy, so a signature would prove nothing more.
+        let blob = if self.org.is_some() {
+            prec.seal_signed(&self.vault.vault_id, &fr_key, &self.keys.signer)?
+        } else {
+            prec.seal(&self.vault.vault_id, &fr_key)?
+        };
         for (_, backend) in self.metadata_storages(true)? {
             backend.put_if_absent(&prec.storage_key(), &blob)?;
         }

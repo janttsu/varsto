@@ -1302,7 +1302,15 @@ impl Engine {
         }
         // The epoch record first: put-if-absent makes two concurrent
         // rotations collide here instead of splitting the vault.
-        let blob = SignedEpoch::seal(&record, &self.vault.vault_id, &new_key, &self.keys.signer)?;
+        // Signed in an organization, where only administrators may rotate
+        // and junk under an epoch number must be told apart; the bare,
+        // older form otherwise, which devices still on alpha.9 can adopt
+        // (without an organization any device may rotate anyway).
+        let blob = if self.org.is_some() {
+            SignedEpoch::seal(&record, &self.vault.vault_id, &new_key, &self.keys.signer)?
+        } else {
+            record.seal(&self.vault.vault_id, &new_key)?
+        };
         for (i, (_, b)) in storages.iter().enumerate() {
             if !b.put_if_absent(&EpochRecord::storage_key(new), &blob)? && i == 0 {
                 bail!(
