@@ -767,10 +767,65 @@ def s_clock():
         run("vl-desktop", "sudo date -s '-2 days' >/dev/null", check_rc=False)
 
 
+# ----- scale: many small files and one large one -------------------------------------------
+
+def timed_rss(vm, args):
+    """Run varsto, return (seconds, peak RSS in MiB, parsed output)."""
+    cmd = (f"{ENV} python3 -c \"import resource,subprocess,sys,time,json; t=time.time(); "
+           f"r=subprocess.run(sys.argv[1:], capture_output=True, text=True); "
+           f"print(json.dumps({{'secs': time.time()-t, 'rss': resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss/1024, "
+           f"'rc': r.returncode, 'out': r.stdout[-2000:], 'err': r.stderr[-800:]}}))\" varsto --json {args}")
+    r = json.loads(run(vm, cmd).stdout)
+    if r["rc"] != 0:
+        raise Fail(f"{vm}: varsto {args} failed: {r['err']}")
+    return round(r["secs"], 1), round(r["rss"]), r["out"]
+
+
+@scenario("scale-20k-files-and-1gb")
+def s_scale():
+    s_reset()
+    v("vl-laptop", "init --name laptop")
+    v("vl-laptop", f"storage add-s3 cloud --endpoint {lab.S3['endpoint']} --region us-east-1 --bucket {BUCKET} "
+                    f"--access-key-id {lab.S3['key']} --secret-access-key {lab.S3['secret']} --place cloud", json_out=False)
+    run("vl-laptop", """python3 - <<'PY'
+import os, random, pathlib
+r = random.Random(7); root = pathlib.Path('/home/varsto/data/many')
+for i in range(20000):
+    d = root / f"d{i % 50:02d}" / f"e{i % 13:02d}"; d.mkdir(parents=True, exist_ok=True)
+    (d / f"f{i:05d}.txt").write_bytes(r.randbytes(r.randint(100, 6000)))
+PY""")
+    run("vl-laptop", "mkdir -p ~/data/large && head -c $((1<<30)) /dev/urandom > ~/data/large/disk.img")
+    v("vl-laptop", "folder add many /home/varsto/data/many", json_out=False)
+    v("vl-laptop", "folder add large /home/varsto/data/large", json_out=False)
+    res = {}
+    res["push_20k"] = timed_rss("vl-laptop", "push many")[:2]
+    res["push_1g"] = timed_rss("vl-laptop", "push large")[:2]
+    res["rescan_20k_unchanged"] = timed_rss("vl-laptop", "push many")[:2]
+    run("vl-laptop", "echo changed >> ~/data/many/d07/e07/f00007.txt")
+    res["push_20k_one_changed"] = timed_rss("vl-laptop", "push many")[:2]
+    kit = v("vl-laptop", "recovery kit", json_out=False)
+    words = " ".join(re.findall(r"\d+\. (\w+)", kit.split("SHARES")[0]))
+    v("vl-desktop", f"join --name desktop --words {shlex.quote(words)} --s3-bucket {BUCKET} --s3-endpoint {lab.S3['endpoint']} "
+                    f"--s3-access-key-id {lab.S3['key']} --s3-secret-access-key {lab.S3['secret']} --storage-name cloud")
+    v("vl-desktop", "folder attach many /home/varsto/data/many", json_out=False)
+    v("vl-desktop", "folder attach large /home/varsto/data/large", json_out=False)
+    res["pull_20k"] = timed_rss("vl-desktop", "pull many")[:2]
+    res["pull_1g"] = timed_rss("vl-desktop", "pull large")[:2]
+    CTX["scale"] = res
+    print("      scale (seconds, peak MiB):", res, flush=True)
+    n = int(run("vl-desktop", "find ~/data/many -type f | wc -l").stdout)
+    check(n == 20000, f"desktop has {n} of 20000 files")
+    a = run("vl-laptop", "sha256sum ~/data/large/disk.img").stdout.split()[0]
+    b = run("vl-desktop", "sha256sum ~/data/large/disk.img").stdout.split()[0]
+    check(a == b, "the 1 GiB file differs")
+    check(res["rescan_20k_unchanged"][0] < 30, f"an unchanged 20k-file folder took {res['rescan_20k_unchanged'][0]} s to scan")
+    check(max(x[1] for x in res.values()) < 1200, f"peak memory above 1.2 GiB: {res}")
+
+
 SCENARIOS = [s_reset, s_init, s_pair, s_sync, s_words, s_conflict, s_selective, s_repair, s_policy,
              s_strongroom, s_org, s_remove_user, s_revoke,
              s_p2p_setup, s_p2p_lan, s_p2p_pub, s_p2p_sym, s_p2p_stop, s_share, s_disks, s_mixed,
-             s_outage, s_blackhole, s_crash, s_clock]
+             s_outage, s_blackhole, s_crash, s_clock, s_scale]
 
 
 def main():
