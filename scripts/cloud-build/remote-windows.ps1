@@ -51,6 +51,15 @@ function Wait-For($test, $what) {
   Get-Process varsto -ErrorAction SilentlyContinue | Format-Table Id, StartTime | Out-String | Write-Host
   throw "timed out: $what"
 }
+# The Free verb's command run directly first, with a time limit, so that a
+# failure or a hang shows its output here instead of stalling the verb.
+$diag = Start-Process -FilePath $exe -ArgumentList "--home", $home1, "paths", "free", "--", "$fa\note.txt" -PassThru -NoNewWindow -RedirectStandardOutput C:\build\free-direct.out -RedirectStandardError C:\build\free-direct.err
+if (-not $diag.WaitForExit(60000)) { $diag.Kill(); Write-Host "free (direct) did not finish in 60 s" }
+Write-Host "free (direct): exit $($diag.ExitCode)"; Get-Content C:\build\free-direct.out, C:\build\free-direct.err -ErrorAction SilentlyContinue | Write-Host
+if (Test-Path "$fa\note.txt.varsto-placeholder") {
+  # Undo for the verb test below: fetch it back.
+  & $exe --home $home1 paths fetch -- "$fa\note.txt.varsto-placeholder"
+}
 $shell = New-Object -ComObject Shell.Application
 function Invoke-Verb($dir, $name, $verb) { $shell.Namespace($dir).ParseName($name).InvokeVerb($verb) }
 Invoke-Verb $fa "note.txt" "Varsto.Free"
