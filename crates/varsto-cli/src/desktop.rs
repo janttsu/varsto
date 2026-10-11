@@ -433,6 +433,9 @@ fn upload(state: &Shared, request: &mut Request, folder: String, path: String) -
             Some(e) => e.block_writer(&folder)?,
         }
     };
+    // Known for a file picked in the page or sent by the phone app: the
+    // block sizes then follow the file size.
+    let length = request.body_length().map(|n| n as u64);
     let mut body = Capped {
         inner: request.as_reader(),
         left: MAX_UPLOAD,
@@ -440,7 +443,7 @@ fn upload(state: &Shared, request: &mut Request, folder: String, path: String) -
     };
     let push = match writer {
         Some(w) => {
-            let staged = w.write(&mut body)?;
+            let staged = w.write_sized(&mut body, length)?;
             let mut st = state.lock().unwrap();
             let e = st
                 .engine
@@ -1374,7 +1377,7 @@ fn api_unlocked(
             Ok(json!({"ok": true, "applied": same_settings || !was.0 || !enabled, "note": note}))
         }
         (Method::Get, "/api/policy") => Ok(json!({
-            "policies": engine.folders().into_iter().map(|(r, _)| json!({"folder": r.name, "policy": r.policy, "text": r.policy.as_ref().map(|p| p.describe())})).collect::<Vec<_>>(),
+            "policies": engine.folders().into_iter().map(|(r, _)| json!({"folder": r.name, "policy": r.effective_policy(), "default": r.policy.is_none(), "text": r.effective_policy().map(|p| p.describe())})).collect::<Vec<_>>(),
             "reports": engine.policy_check()?,
         })),
         (Method::Post, "/api/policy") => {

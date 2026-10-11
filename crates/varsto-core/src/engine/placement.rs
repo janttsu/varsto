@@ -353,14 +353,19 @@ impl Engine {
             });
         }
         if let Some(p) = rec
-            .policy
+            .effective_policy()
             .as_ref()
             .filter(|p| p.min_copies > 0 || !p.min_per_place.is_empty())
         {
-            let copy_rules = Policy {
+            let mut copy_rules = Policy {
                 verified_within_days: None,
                 ..p.clone()
             };
+            // A place this vault has no storage in (no external storage yet,
+            // say) cannot be met by keeping the copy here either.
+            copy_rules
+                .min_per_place
+                .retain(|place, _| places.place.values().any(|p| p == place));
             let r = policy::evaluate(
                 &rec.name,
                 &copy_rules,

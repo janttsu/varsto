@@ -46,6 +46,7 @@ pub struct BlockWriter {
 /// The content of a file, encrypted into the block cache, not yet recorded.
 pub struct StagedFile {
     folder: FolderId,
+    chunking: u8,
     size: u64,
     content_hash: String,
     chunks: Vec<ChunkRef>,
@@ -61,10 +62,20 @@ impl BlockWriter {
     /// Chunk, hash and encrypt everything `reader` yields; only ciphertext is
     /// written (to the block cache). Memory use is bounded by the chunk size.
     pub fn write(&self, reader: impl Read) -> Result<StagedFile> {
+        self.write_sized(reader, None)
+    }
+
+    /// `write` for content of a known size: the block sizes follow it
+    /// (`ChunkerParams::for_size`). Without a size, the fixed default sizes.
+    pub fn write_sized(&self, reader: impl Read, expected: Option<u64>) -> Result<StagedFile> {
+        let (params, chunking) = match expected {
+            Some(n) if self.chunker == ChunkerParams::DEFAULT => (ChunkerParams::for_size(n), 1),
+            _ => (self.chunker, 0),
+        };
         let mut hasher = KeyedHasher::new(&self.fk.hash);
         let mut chunks = Vec::new();
         let mut size = 0u64;
-        for chunk in Chunker::new(reader, self.chunker)? {
+        for chunk in Chunker::new(reader, params)? {
             let chunk = chunk?;
             let len = chunk.len() as u64;
             hasher.update(&chunk);
@@ -84,8 +95,18 @@ impl BlockWriter {
                 epoch,
             });
         }
+        // Shorter or longer than announced: the blocks were cut for another
+        // size, so the entry must not claim the size rule.
+        let chunking = if expected == Some(size) { chunking } else { 0 };
+        if chunking == 0 && params != self.chunker {
+            bail!(
+                "the content was {size} bytes, not the {} announced",
+                expected.unwrap_or(0)
+            );
+        }
         Ok(StagedFile {
             folder: self.folder.clone(),
+            chunking,
             size,
             content_hash: hex::encode(hasher.finalize()),
             chunks,
@@ -284,6 +305,7 @@ impl Engine {
                     chunks: staged.chunks,
                     modified_by: me,
                     modified_clock: clock,
+                    chunking: staged.chunking,
                 },
             );
         }
@@ -339,7 +361,15 @@ impl Engine {
                 let writer = self.writer_for(rec, state)?;
                 for (path, disk) in found {
                     let md = fs::metadata(&disk)?;
-                    let staged = writer.write(std::io::BufReader::new(fs::File::open(&disk)?))?;
+                    let staged = match writer.write_sized(
+                        std::io::BufReader::new(fs::File::open(&disk)?),
+                        Some(md.len()),
+                    ) {
+                        Ok(s) => s,
+                        // Grew or shrank while it was read: the next scan takes it.
+                        Err(_) if fs::metadata(&disk)?.len() != md.len() => continue,
+                        Err(e) => return Err(e),
+                    };
                     // Changed while it was read: the next scan takes it.
                     let now = fs::metadata(&disk)?;
                     if now.len() != md.len() || mtime_ns(&now) != mtime_ns(&md) {
@@ -657,6 +687,7 @@ impl Engine {
                 chunks: vec![],
                 modified_by: me.clone(),
                 modified_clock: clock,
+                chunking: 0,
             },
         );
         let clock = self.tick()?;

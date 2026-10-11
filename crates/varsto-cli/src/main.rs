@@ -3027,9 +3027,13 @@ fn run(cli: &Cli) -> Result<()> {
                         println!(
                             "{}: {}",
                             rec.name,
-                            rec.policy
-                                .as_ref()
-                                .map(|p| p.describe())
+                            rec.effective_policy()
+                                .map(|p| p.describe()
+                                    + if rec.policy.is_none() {
+                                        " (default)"
+                                    } else {
+                                        ""
+                                    })
                                 .unwrap_or_else(|| "no policy".into())
                         );
                     }

@@ -38,6 +38,27 @@ pub fn place_phrase(place: &str) -> String {
 }
 
 impl Policy {
+    /// The policy of every folder that never had one set: one copy on any
+    /// storage, one in external storage (S3 and the like), one on your own
+    /// devices and disks, and every block checked by another device within
+    /// 30 days. Clearing a folder's policy stores an empty one instead.
+    pub fn folder_default() -> Policy {
+        Policy {
+            min_copies: 1,
+            min_per_place: [("cloud".to_string(), 1), ("home".to_string(), 1)]
+                .into_iter()
+                .collect(),
+            verified_within_days: Some(30),
+        }
+    }
+
+    /// No requirement at all (a policy cleared by hand).
+    pub fn is_empty(&self) -> bool {
+        self.min_copies == 0
+            && self.min_per_place.values().all(|n| *n == 0)
+            && self.verified_within_days.is_none()
+    }
+
     pub fn describe(&self) -> String {
         let mut parts = Vec::new();
         if self.min_copies > 0 {

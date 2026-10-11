@@ -7,7 +7,7 @@
 
 use std::io::{self, Read};
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ChunkerParams {
     pub min: usize,
     pub avg: usize,
@@ -22,6 +22,38 @@ impl ChunkerParams {
         avg: 256 * 1024,
         max: 1024 * 1024,
     };
+
+    /// Files from 32 MiB: 256 KiB minimum, 1 MiB average, 4 MiB maximum.
+    pub const MEDIUM: ChunkerParams = ChunkerParams {
+        min: 256 * 1024,
+        avg: 1024 * 1024,
+        max: 4 * 1024 * 1024,
+    };
+
+    /// Files from 1 GiB: 1 MiB minimum, 4 MiB average, 16 MiB maximum. A
+    /// 50 GB file is about 12 000 blocks instead of 200 000: a shorter file
+    /// list, fewer ledger events and fewer requests, while a change in the
+    /// middle still rewrites only a few megabytes.
+    pub const LARGE: ChunkerParams = ChunkerParams {
+        min: 1024 * 1024,
+        avg: 4 * 1024 * 1024,
+        max: 16 * 1024 * 1024,
+    };
+
+    /// The block sizes for a file of `size` bytes (format: a file chunked
+    /// this way says so in its file entry, `chunking: 1`). Depends on the
+    /// size alone, so the same content gives the same blocks everywhere.
+    /// Small files keep the default: documents edited in place dedupe best
+    /// with small blocks, and a file under the minimum is one block anyway.
+    pub fn for_size(size: u64) -> ChunkerParams {
+        if size >= 1 << 30 {
+            Self::LARGE
+        } else if size >= 32 << 20 {
+            Self::MEDIUM
+        } else {
+            Self::DEFAULT
+        }
+    }
 
     /// Small sizes for tests.
     pub const SMALL: ChunkerParams = ChunkerParams {

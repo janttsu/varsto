@@ -85,6 +85,25 @@
   function fmtBytes(n) { var u = ["B", "KiB", "MiB", "GiB", "TiB"]; var i = 0; while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; } return n.toFixed(i ? 1 : 0) + " " + u[i]; }
   function fmtDate(t) { return t ? new Date(t * 1000).toLocaleDateString() : ""; }
   function formData(form) { var o = {}; new FormData(form).forEach(function (v, k) { o[k] = v; }); form.querySelectorAll("input[type=checkbox]").forEach(function (c) { o[c.name] = c.checked; }); return o; }
+  // Help text on [data-help]: shown on hover, on keyboard focus and on a
+  // tap (web views in the apps show no title tooltips, phones have no hover).
+  var helpTip = null;
+  function showHelp(t) {
+    hideHelp(); if (!t.dataset.help) { return; }
+    helpTip = document.createElement("div"); helpTip.className = "help-tip"; helpTip.setAttribute("role", "tooltip"); helpTip.textContent = t.dataset.help;
+    document.body.appendChild(helpTip);
+    var r = t.getBoundingClientRect(), w = helpTip.offsetWidth, h = helpTip.offsetHeight;
+    var left = Math.max(8, Math.min(window.innerWidth - w - 8, r.left + r.width / 2 - w / 2));
+    var top = r.bottom + 8; if (top + h > window.innerHeight - 8) { top = r.top - h - 8; }
+    helpTip.style.left = left + "px"; helpTip.style.top = Math.max(8, top) + "px";
+  }
+  function hideHelp() { if (helpTip) { helpTip.remove(); helpTip = null; } }
+  document.addEventListener("mouseover", function (e) { var t = e.target.closest && e.target.closest("[data-help]"); if (t) { showHelp(t); } });
+  document.addEventListener("mouseout", function (e) { var t = e.target.closest && e.target.closest("[data-help]"); if (t && !t.contains(e.relatedTarget)) { hideHelp(); } });
+  document.addEventListener("focusin", function (e) { if (e.target.dataset && e.target.dataset.help) { showHelp(e.target); } });
+  document.addEventListener("focusout", hideHelp);
+  document.addEventListener("click", function (e) { var t = e.target.closest && e.target.closest("[data-help]"); if (t) { showHelp(t); } else { hideHelp(); } });
+  window.addEventListener("scroll", hideHelp, true);
   function el(tag, cls, text) { var e = document.createElement(tag); if (cls) { e.className = cls; } if (text !== undefined) { e.textContent = text; } return e; }
   function pill(cls, text) { return el("span", "pill " + cls, text); }
   function icon(name, cls) { var s = document.createElementNS("http://www.w3.org/2000/svg", "svg"); s.setAttribute("class", "icon" + (cls ? " " + cls : "")); var u = document.createElementNS("http://www.w3.org/2000/svg", "use"); u.setAttribute("href", "#i-" + name); s.appendChild(u); return s; }
@@ -2100,7 +2119,8 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     if (!shown) { return; }
     $("wd-bytes").textContent = fmtBytes(d.total_bytes);
     var avg = $("wd-avg"); avg.textContent = "kept " + d.copies.average.toFixed(1) + "× on average";
-    avg.title = "Kept copies on storages per byte, transferrers not counted";
+    avg.removeAttribute("title");
+    avg.dataset.help = "On average every byte of your data is kept " + d.copies.average.toFixed(1) + " times on your storages (buckets, folders, disk pools). Copies on your devices are not counted here, and neither are transferrers, which carry blocks only until they are delivered. " + (d.copies.average < 2 ? "With fewer than 2 copies, losing one storage can lose data: add a storage or a policy that asks for more copies." : "With 2 or more copies, one storage can be lost without losing data.");
     avg.className = "wd-avg" + (d.copies.none ? " bad" : d.copies.average < 2 ? " risk" : "");
     var nf = d.folders.filter(function (f) { return f.bytes > 0; }).length;
     var ns = d.storages.filter(function (s) { return s.bytes > 0; }).length;

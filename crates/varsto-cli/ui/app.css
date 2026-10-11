@@ -820,3 +820,7 @@ body[data-mobile="1"] .selbar { gap: 6px; padding: 8px 10px; }
 body[data-mobile="1"] .selbar button:not(.icon-btn) { padding: 0 10px; font-size: 14px; flex: 0 0 auto; }
 body[data-mobile="1"] .selbar button:not(.icon-btn) .icon { display: none; }
 body[data-mobile="1"] .sel-count { font-size: 14px; }
+
+/* Help text for [data-help] */
+.help-tip { position: fixed; z-index: 100; max-width: min(340px, calc(100vw - 16px)); padding: 10px 12px; border-radius: var(--radius-sm); background: var(--text); color: var(--surface); font-size: 13px; line-height: 1.45; box-shadow: 0 6px 20px rgba(0,0,0,.18); pointer-events: none; }
+[data-help] { cursor: help; }

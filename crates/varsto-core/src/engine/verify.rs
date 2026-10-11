@@ -280,7 +280,7 @@ impl Engine {
             .map(|(id, r)| {
                 (
                     id.clone(),
-                    r.policy.as_ref().and_then(|p| p.verified_within_days),
+                    r.effective_policy().and_then(|p| p.verified_within_days),
                 )
             })
             .collect();

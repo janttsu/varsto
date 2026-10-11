@@ -863,6 +863,16 @@ fn is_zero(v: &i64) -> bool {
 }
 
 impl FolderRecord {
+    /// The policy that applies: the folder's own, or the default for
+    /// folders that never had one; None when it was cleared by hand.
+    pub fn effective_policy(&self) -> Option<crate::policy::Policy> {
+        let p = self
+            .policy
+            .clone()
+            .unwrap_or_else(crate::policy::Policy::folder_default);
+        (!p.is_empty()).then_some(p)
+    }
+
     pub fn is_removed(&self) -> bool {
         self.removed_utc > 0
     }

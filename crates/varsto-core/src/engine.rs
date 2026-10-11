@@ -443,6 +443,10 @@ type OpenStorages = Vec<(StorageSpec, Box<dyn Storage>)>;
 /// blocks may wait for them.
 const UPLOADERS: usize = 8;
 const UPLOAD_QUEUE: usize = 16;
+/// At most this much encrypted data waits for or is with the uploaders:
+/// with the large blocks of big files (up to 16 MiB) the queue alone would
+/// otherwise hold hundreds of megabytes, too much for a phone.
+const UPLOAD_BYTES: u64 = 128 << 20;
 
 /// Count one finished write in the report and the ledger.
 fn apply_upload(
@@ -1273,7 +1277,7 @@ impl Engine {
         let view = self.view()?;
         let mut targets_used = BTreeSet::new();
         for (rec, _) in self.folders() {
-            let policy = rec.policy.clone().unwrap_or_default();
+            let policy = rec.effective_policy().unwrap_or_default();
             let required = policy.min_copies.max(1) as usize;
             // Blocks no file refers to any more need no copies; a folder never
             // pulled here has no state, so then every block counts.
@@ -2325,7 +2329,8 @@ impl Engine {
             let file = fs::File::open(entry.path())?;
             let mut hasher = KeyedHasher::new(&fk.hash);
             let mut chunks = Vec::new();
-            for chunk in Chunker::new(std::io::BufReader::new(file), self.chunker)? {
+            let (params, chunking) = self.chunker_for(size);
+            for chunk in Chunker::new(std::io::BufReader::new(file), params)? {
                 let chunk = chunk?;
                 hasher.update(&chunk);
                 let chunk_id = ChunkId::from_bytes(&crypto::keyed_hash(&fk.hash, &chunk));
@@ -2385,6 +2390,7 @@ impl Engine {
                     chunks,
                     modified_by: me.clone(),
                     modified_clock: clock,
+                    chunking,
                 },
             );
             new_index.insert(
@@ -2421,6 +2427,7 @@ impl Engine {
                     chunks: vec![],
                     modified_by: me.clone(),
                     modified_clock: clock,
+                    chunking: 0,
                 },
             );
             changed += 1;
@@ -2522,6 +2529,8 @@ impl Engine {
         let (done_tx, done_rx) = std::sync::mpsc::channel::<UploadDone>();
         let storages_ref = &storages;
         let mut first_error: Option<anyhow::Error> = None;
+        let budget = (std::sync::Mutex::new(0u64), std::sync::Condvar::new());
+        let budget_ref = &budget;
         std::thread::scope(|s| -> Result<()> {
             // Owned by this closure: however it returns (an error reading a
             // file included), the sender goes and the uploaders stop.
@@ -2534,6 +2543,7 @@ impl Engine {
                         Err(_) => break,
                     };
                     let key = chunk_storage_key(&job.object);
+                    let held = job.ct.len() as u64;
                     for (spec, backend) in storages_ref
                         .iter()
                         .filter(|(spec, _)| job.targets.iter().any(|t| t == spec.name()))
@@ -2547,6 +2557,8 @@ impl Engine {
                             outcome,
                         });
                     }
+                    *budget_ref.0.lock().unwrap() -= held;
+                    budget_ref.1.notify_all();
                 });
             }
             drop(done_tx);
@@ -2554,7 +2566,18 @@ impl Engine {
                 while let Ok(d) = done_rx.try_recv() {
                     apply_upload(me, &folder_id, d, report, &mut first_error);
                 }
-                first_error.is_none() && job_tx.send(job).is_ok()
+                if first_error.is_some() {
+                    return false;
+                }
+                let len = job.ct.len() as u64;
+                {
+                    let mut used = budget_ref.0.lock().unwrap();
+                    while *used > 0 && *used + len > UPLOAD_BYTES {
+                        used = budget_ref.1.wait(used).unwrap();
+                    }
+                    *used += len;
+                }
+                job_tx.send(job).is_ok()
             };
             'files: for file in state.files.values().filter(|f| !f.deleted) {
                 if file.chunks.iter().all(|c| missing_on(c).is_empty()) {
@@ -2594,7 +2617,8 @@ impl Engine {
                 };
                 let progress = crate::progress::Transfer::upload(&rec.name, &file.path, file.size);
                 for (index, chunk) in
-                    Chunker::new(std::io::BufReader::new(handle), self.chunker)?.enumerate()
+                    Chunker::new(std::io::BufReader::new(handle), self.chunker_of(file))?
+                        .enumerate()
                 {
                     let chunk = chunk?;
                     progress.advance(chunk.len() as u64);
@@ -3661,6 +3685,8 @@ impl Engine {
             .folders
             .get_mut(&rec.folder_id)
             .ok_or_else(|| anyhow!("unknown folder {folder}"))?;
+        // Cleared: an empty policy, so the default does not come back.
+        let policy = Some(policy.unwrap_or_default());
         f.policy = policy.clone();
         f.policy_updated_utc = now;
         self.keyring.save(
@@ -3734,7 +3760,7 @@ impl Engine {
         }
         let mut reports = Vec::new();
         for (rec, _) in self.folders() {
-            let Some(policy) = rec.policy.clone() else {
+            let Some(policy) = rec.effective_policy() else {
                 continue;
             };
             let state = self.load_state(&rec.folder_id)?;
@@ -3972,6 +3998,36 @@ impl Engine {
     }
 
     /// Peers to try before storages (None disables).
+    /// Block sizes for a new file of `size` bytes, with the marker its file
+    /// entry carries. Tests that set their own sizes keep them.
+    pub(crate) fn chunker_for(&self, size: u64) -> (ChunkerParams, u8) {
+        if self.chunker == ChunkerParams::DEFAULT {
+            (ChunkerParams::for_size(size), 1)
+        } else {
+            (self.chunker, 0)
+        }
+    }
+
+    /// The block sizes a file entry was cut with, to cut it again the same way.
+    pub(crate) fn chunker_of(&self, f: &FileState) -> ChunkerParams {
+        if f.chunking == 0 {
+            self.chunker
+        } else {
+            self.chunker_for(f.size).0
+        }
+    }
+
+    /// Where the entry is not at hand: the sizes by file size first, then
+    /// the fixed ones of earlier versions.
+    pub(crate) fn chunker_candidates(&self, size: u64) -> Vec<ChunkerParams> {
+        let tiered = self.chunker_for(size).0;
+        if tiered == self.chunker {
+            vec![tiered]
+        } else {
+            vec![tiered, self.chunker]
+        }
+    }
+
     /// Tell the other devices over peer-to-peer that something new was
     /// published; on a thread of its own, so a slow peer holds nothing up.
     pub fn notify_peers_changed(&self) {
@@ -4178,9 +4234,21 @@ impl Engine {
         path: &str,
         reader: impl std::io::Read,
     ) -> Result<PushReport> {
+        self.write_from_reader_sized(folder, path, reader, None)
+    }
+
+    /// `write_from_reader` when the size is known beforehand (an upload with
+    /// a Content-Length): the block sizes then follow the file size.
+    pub fn write_from_reader_sized(
+        &mut self,
+        folder: &str,
+        path: &str,
+        reader: impl std::io::Read,
+        size: Option<u64>,
+    ) -> Result<PushReport> {
         block_cache::check_rel_path(path)?;
         if let Some(writer) = self.block_writer(folder)? {
-            let staged = writer.write(reader)?;
+            let staged = writer.write_sized(reader, size)?;
             return self.commit_staged(folder, path, staged);
         }
         let (_, root) = self.resolve_folder(folder)?;
@@ -4518,7 +4586,7 @@ impl Engine {
                 chunks_verified_elsewhere: verified,
                 published_seq: state.published_seq,
                 shared: rec.shared,
-                policy: rec.policy.as_ref().map(|p| p.describe()),
+                policy: rec.effective_policy().map(|p| p.describe()),
                 strongroom: rec.strongroom.as_ref().map(|_| {
                     match self.unlocked.get(&rec.folder_id) {
                         Some((_, until)) if *until > util::now_utc() => {
@@ -5008,18 +5076,21 @@ impl Engine {
         chunk: &ChunkId,
         epoch: u32,
     ) -> Result<Vec<u8>> {
-        let file = fs::File::open(path)?;
-        for piece in Chunker::new(std::io::BufReader::new(file), self.chunker)? {
-            let piece = piece?;
-            if ChunkId::from_bytes(&crypto::keyed_hash(&fk.hash, &piece)) != *chunk {
-                continue;
+        let size = fs::metadata(path)?.len();
+        for params in self.chunker_candidates(size) {
+            let file = fs::File::open(path)?;
+            for piece in Chunker::new(std::io::BufReader::new(file), params)? {
+                let piece = piece?;
+                if ChunkId::from_bytes(&crypto::keyed_hash(&fk.hash, &piece)) != *chunk {
+                    continue;
+                }
+                return crypto::encrypt_with_nonce(
+                    &fk.chunk_key(epoch, chunk)?,
+                    &fk.chunk_nonce(epoch, chunk)?,
+                    &fk.chunk_aad(&self.vault.vault_id, chunk, piece.len() as u64),
+                    &crate::pack::pack(&piece),
+                );
             }
-            return crypto::encrypt_with_nonce(
-                &fk.chunk_key(epoch, chunk)?,
-                &fk.chunk_nonce(epoch, chunk)?,
-                &fk.chunk_aad(&self.vault.vault_id, chunk, piece.len() as u64),
-                &crate::pack::pack(&piece),
-            );
         }
         bail!("chunk {} is not in {}", chunk.short(), path.display())
     }

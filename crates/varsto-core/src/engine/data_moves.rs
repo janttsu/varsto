@@ -489,7 +489,7 @@ impl Engine {
             .map(|s| s.name().to_string())
             .collect();
         let copy_rules = rec
-            .policy
+            .effective_policy()
             .as_ref()
             .filter(|p| p.min_copies > 0 || !p.min_per_place.is_empty())
             .map(|p| Policy {
@@ -539,6 +539,22 @@ impl Engine {
                 .collect();
             let mut reason = None;
             if let Some(rules) = &copy_rules {
+                // Only what dropping this copy makes worse counts: a
+                // requirement the copies did not meet before (no external
+                // storage yet, say) does not keep a copy elsewhere.
+                let before: Vec<(String, String)> = r
+                    .storages
+                    .iter()
+                    .filter(|(n, l)| !l.claimed_by.is_empty() && !carriers.contains(*n))
+                    .map(|(n, _)| (n.clone(), place_of(n)))
+                    .collect();
+                let mut capped = rules.clone();
+                capped.min_copies = capped.min_copies.min(before.len() as u32);
+                for (place, n) in capped.min_per_place.iter_mut() {
+                    let have = before.iter().filter(|(_, p)| p == place).count() as u32;
+                    *n = (*n).min(have);
+                }
+                let rules = &capped;
                 let verdict = crate::policy::evaluate(
                     &rec.name,
                     rules,
@@ -935,26 +951,35 @@ impl Engine {
             let Ok(file) = fs::File::open(path) else {
                 continue;
             };
-            let Ok(chunker) = Chunker::new(std::io::BufReader::new(&file), self.chunker) else {
-                continue;
-            };
-            for piece in chunker {
-                let Ok(piece) = piece else { break };
-                let id = ChunkId::from_bytes(&crypto::keyed_hash(&fk.hash, &piece));
-                let Some(item) = wanted.get(&id) else {
+            let size = file.metadata().map(|m| m.len()).unwrap_or(0);
+            for params in self.chunker_candidates(size) {
+                if wanted.keys().all(|c| out.contains_key(&wanted[c].object)) {
+                    break;
+                }
+                let Ok(handle) = fs::File::open(path) else {
                     continue;
                 };
-                let ct = (|| {
-                    crypto::encrypt_with_nonce(
-                        &fk.chunk_key(item.epoch, &id)?,
-                        &fk.chunk_nonce(item.epoch, &id)?,
-                        &fk.chunk_aad(&self.vault.vault_id, &id, piece.len() as u64),
-                        &crate::pack::pack(&piece),
-                    )
-                })();
-                if let Ok(ct) = ct {
-                    if ObjectName::from_bytes(&crypto::hash(&ct)) == item.object {
-                        out.insert(item.object.clone(), ct);
+                let Ok(chunker) = Chunker::new(std::io::BufReader::new(&handle), params) else {
+                    continue;
+                };
+                for piece in chunker {
+                    let Ok(piece) = piece else { break };
+                    let id = ChunkId::from_bytes(&crypto::keyed_hash(&fk.hash, &piece));
+                    let Some(item) = wanted.get(&id) else {
+                        continue;
+                    };
+                    let ct = (|| {
+                        crypto::encrypt_with_nonce(
+                            &fk.chunk_key(item.epoch, &id)?,
+                            &fk.chunk_nonce(item.epoch, &id)?,
+                            &fk.chunk_aad(&self.vault.vault_id, &id, piece.len() as u64),
+                            &crate::pack::pack(&piece),
+                        )
+                    })();
+                    if let Ok(ct) = ct {
+                        if ObjectName::from_bytes(&crypto::hash(&ct)) == item.object {
+                            out.insert(item.object.clone(), ct);
+                        }
                     }
                 }
             }
