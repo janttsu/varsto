@@ -435,6 +435,68 @@ pub struct Engine {
 /// Open storages with their specs.
 type OpenStorages = Vec<(StorageSpec, Box<dyn Storage>)>;
 
+/// Threads that write objects during a push, and how many encrypted
+/// blocks may wait for them.
+const UPLOADERS: usize = 8;
+const UPLOAD_QUEUE: usize = 16;
+
+/// Count one finished write in the report and the ledger.
+fn apply_upload(
+    me: &mut Engine,
+    folder_id: &FolderId,
+    d: UploadDone,
+    report: &mut PushReport,
+    first_error: &mut Option<anyhow::Error>,
+) {
+    match d.outcome {
+        Ok(written) => {
+            if written {
+                report.chunks_uploaded += 1;
+                report.bytes_uploaded += d.size;
+            }
+            me.pending.push(Event::ChunkStored {
+                folder: folder_id.clone(),
+                chunk: d.chunk,
+                object: d.object,
+                storage: d.storage,
+                size: d.size,
+            });
+        }
+        // A pool with no disk attached (or no room) is left out for the rest
+        // of this push and tried again next time.
+        Err(e)
+            if matches!(
+                pool::pool_error(&e),
+                Some(PoolError::NoDiskAttached { .. } | PoolError::NoRoom { .. })
+            ) =>
+        {
+            if !report.storages_unavailable.contains(&d.storage) {
+                report.storages_unavailable.push(d.storage);
+            }
+        }
+        Err(e) => {
+            first_error.get_or_insert(e);
+        }
+    }
+}
+
+/// One object to write to some storages during a push.
+struct UploadJob {
+    targets: Vec<String>,
+    chunk: ChunkId,
+    object: ObjectName,
+    ct: Vec<u8>,
+}
+
+/// How one write went.
+struct UploadDone {
+    storage: String,
+    chunk: ChunkId,
+    object: ObjectName,
+    size: u64,
+    outcome: Result<bool>,
+}
+
 /// Suffix of placeholder files in selective folders (plan 6.34, Resilio-style).
 pub const PLACEHOLDER_SUFFIX: &str = ".varsto-placeholder";
 
@@ -2453,13 +2515,94 @@ impl Engine {
                 .collect()
         };
         let encrypted_here = self.mount_is_encrypted(&folder_id);
-        for file in state.files.values().filter(|f| !f.deleted) {
-            if file.chunks.iter().all(|c| missing_on(c).is_empty()) {
-                continue;
+        // Reading, chunking and encrypting stay on this thread; the writes go
+        // to a few uploader threads, so that many small objects do not each
+        // wait for the previous one's round trip to the storage. The queue is
+        // bounded: at most UPLOAD_QUEUE encrypted blocks wait in memory.
+        let (job_tx, job_rx) = std::sync::mpsc::sync_channel::<UploadJob>(UPLOAD_QUEUE);
+        let job_rx = std::sync::Mutex::new(job_rx);
+        let (done_tx, done_rx) = std::sync::mpsc::channel::<UploadDone>();
+        let storages_ref = &storages;
+        let mut first_error: Option<anyhow::Error> = None;
+        std::thread::scope(|s| -> Result<()> {
+            // Owned by this closure: however it returns (an error reading a
+            // file included), the sender goes and the uploaders stop.
+            let job_tx = job_tx;
+            for _ in 0..UPLOADERS {
+                let (job_rx, done_tx) = (&job_rx, done_tx.clone());
+                s.spawn(move || loop {
+                    let job = match job_rx.lock().unwrap().recv() {
+                        Ok(j) => j,
+                        Err(_) => break,
+                    };
+                    let key = chunk_storage_key(&job.object);
+                    for (spec, backend) in storages_ref
+                        .iter()
+                        .filter(|(spec, _)| job.targets.iter().any(|t| t == spec.name()))
+                    {
+                        let outcome = backend.put_if_absent(&key, &job.ct);
+                        let _ = done_tx.send(UploadDone {
+                            storage: spec.name().to_string(),
+                            chunk: job.chunk.clone(),
+                            object: job.object.clone(),
+                            size: job.ct.len() as u64,
+                            outcome,
+                        });
+                    }
+                });
             }
-            if encrypted_here {
-                // Kept encrypted here: the objects come from the block cache.
-                for expected in &file.chunks {
+            drop(done_tx);
+            let mut send = |me: &mut Self, report: &mut PushReport, job: UploadJob| -> bool {
+                while let Ok(d) = done_rx.try_recv() {
+                    apply_upload(me, &folder_id, d, report, &mut first_error);
+                }
+                first_error.is_none() && job_tx.send(job).is_ok()
+            };
+            'files: for file in state.files.values().filter(|f| !f.deleted) {
+                if file.chunks.iter().all(|c| missing_on(c).is_empty()) {
+                    continue;
+                }
+                if encrypted_here {
+                    // Kept encrypted here: the objects come from the block cache.
+                    for expected in &file.chunks {
+                        let targets: Vec<String> = missing_on(expected)
+                            .into_iter()
+                            .filter(|t| !report.storages_unavailable.iter().any(|u| u == t))
+                            .collect();
+                        if targets.is_empty() {
+                            continue;
+                        }
+                        let Some(ct) = self.cached_object(&expected.object) else {
+                            continue;
+                        };
+                        let job = UploadJob {
+                            targets,
+                            chunk: expected.chunk.clone(),
+                            object: expected.object.clone(),
+                            ct,
+                        };
+                        if !send(self, report, job) {
+                            break 'files;
+                        }
+                    }
+                    continue;
+                }
+                let disk = root.join(&file.path);
+                let Ok(handle) = fs::File::open(&disk) else {
+                    continue;
+                };
+                for (index, chunk) in
+                    Chunker::new(std::io::BufReader::new(handle), self.chunker)?.enumerate()
+                {
+                    let chunk = chunk?;
+                    let chunk_id = ChunkId::from_bytes(&crypto::keyed_hash(&fk.hash, &chunk));
+                    let Some(expected) = file.chunks.get(index) else {
+                        break;
+                    };
+                    if expected.chunk != chunk_id {
+                        // The file changed under us; the next scan will pick it up.
+                        break;
+                    }
                     let targets: Vec<String> = missing_on(expected)
                         .into_iter()
                         .filter(|t| !report.storages_unavailable.iter().any(|u| u == t))
@@ -2467,102 +2610,32 @@ impl Engine {
                     if targets.is_empty() {
                         continue;
                     }
-                    let Some(ct) = self.cached_object(&expected.object) else {
-                        continue;
-                    };
-                    self.put_object(
-                        &storages,
-                        &targets,
-                        &folder_id,
-                        &expected.chunk,
-                        &expected.object,
-                        &ct,
-                        report,
+                    let ct = crypto::encrypt_with_nonce(
+                        &fk.chunk_key(expected.epoch, &chunk_id)?,
+                        &fk.chunk_nonce(expected.epoch, &chunk_id)?,
+                        &fk.chunk_aad(&self.vault.vault_id, &chunk_id, chunk.len() as u64),
+                        &crate::pack::pack(&chunk),
                     )?;
+                    let object = ObjectName::from_bytes(&crypto::hash(&ct));
+                    let job = UploadJob {
+                        targets,
+                        chunk: chunk_id,
+                        object,
+                        ct,
+                    };
+                    if !send(self, report, job) {
+                        break 'files;
+                    }
                 }
-                continue;
             }
-            let disk = root.join(&file.path);
-            let Ok(handle) = fs::File::open(&disk) else {
-                continue;
-            };
-            for (index, chunk) in
-                Chunker::new(std::io::BufReader::new(handle), self.chunker)?.enumerate()
-            {
-                let chunk = chunk?;
-                let chunk_id = ChunkId::from_bytes(&crypto::keyed_hash(&fk.hash, &chunk));
-                let Some(expected) = file.chunks.get(index) else {
-                    break;
-                };
-                if expected.chunk != chunk_id {
-                    // The file changed under us; the next scan will pick it up.
-                    break;
-                }
-                let targets: Vec<String> = missing_on(expected)
-                    .into_iter()
-                    .filter(|t| !report.storages_unavailable.iter().any(|u| u == t))
-                    .collect();
-                if targets.is_empty() {
-                    continue;
-                }
-                let ct = crypto::encrypt_with_nonce(
-                    &fk.chunk_key(expected.epoch, &chunk_id)?,
-                    &fk.chunk_nonce(expected.epoch, &chunk_id)?,
-                    &fk.chunk_aad(&self.vault.vault_id, &chunk_id, chunk.len() as u64),
-                    &crate::pack::pack(&chunk),
-                )?;
-                let object = ObjectName::from_bytes(&crypto::hash(&ct));
-                self.put_object(
-                    &storages, &targets, &folder_id, &chunk_id, &object, &ct, report,
-                )?;
+            drop(job_tx);
+            for d in done_rx.iter() {
+                apply_upload(self, &folder_id, d, report, &mut first_error);
             }
-        }
-        Ok(())
-    }
-
-    /// Write one object to the `targets` among `storages` and record it.
-    #[allow(clippy::too_many_arguments)]
-    fn put_object(
-        &mut self,
-        storages: &OpenStorages,
-        targets: &[String],
-        folder_id: &FolderId,
-        chunk_id: &ChunkId,
-        object: &ObjectName,
-        ct: &[u8],
-        report: &mut PushReport,
-    ) -> Result<()> {
-        let key = chunk_storage_key(object);
-        for (spec, backend) in storages
-            .iter()
-            .filter(|(spec, _)| targets.iter().any(|t| t == spec.name()))
-        {
-            match backend.put_if_absent(&key, ct) {
-                Ok(true) => {
-                    report.chunks_uploaded += 1;
-                    report.bytes_uploaded += ct.len() as u64;
-                }
-                Ok(false) => {}
-                // A pool with no disk attached (or no room) is left out
-                // for the rest of this push and tried again next time.
-                Err(e)
-                    if matches!(
-                        pool::pool_error(&e),
-                        Some(PoolError::NoDiskAttached { .. } | PoolError::NoRoom { .. })
-                    ) =>
-                {
-                    report.storages_unavailable.push(spec.name().to_string());
-                    continue;
-                }
-                Err(e) => return Err(e),
-            }
-            self.pending.push(Event::ChunkStored {
-                folder: folder_id.clone(),
-                chunk: chunk_id.clone(),
-                object: object.clone(),
-                storage: spec.name().to_string(),
-                size: ct.len() as u64,
-            });
+            Ok(())
+        })?;
+        if let Some(e) = first_error {
+            return Err(e);
         }
         Ok(())
     }
