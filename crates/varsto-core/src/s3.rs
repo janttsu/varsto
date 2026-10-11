@@ -52,6 +52,60 @@ const MAX_BODY: u64 = 2 << 30;
 const EMPTY_SHA256: &str = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
 
 impl S3Storage {
+    /// A refusal in words a person can act on, then the technical details
+    /// (operation, key, HTTP status, the S3 error code and message).
+    fn explain(&self, op: &str, key: &str, status: u16, body: &[u8]) -> anyhow::Error {
+        let doc = String::from_utf8_lossy(body);
+        let code = xml_tag(&doc, "Code")
+            .map(|c| c.trim().to_string())
+            .unwrap_or_default();
+        let message = xml_tag(&doc, "Message")
+            .map(|m| xml_unescape(m.trim()))
+            .unwrap_or_default();
+        let bucket = &self.cfg.bucket;
+        let endpoint = &self.cfg.endpoint;
+        let words = match (code.as_str(), status) {
+            ("InvalidAccessKeyId", _) => format!(
+                "The storage does not know this access key. Check that the access key ID was copied in full and belongs to {endpoint}."
+            ),
+            ("SignatureDoesNotMatch", _) => {
+                "The secret key does not belong to this access key. Copy the secret key again.".to_string()
+            }
+            ("RequestTimeTooSkewed", _) => {
+                "This device's clock is too far from the storage's clock. Set the date and time automatically and try again.".to_string()
+            }
+            ("NoSuchBucket", _) => format!(
+                "Bucket \"{bucket}\" does not exist at {endpoint}. Check the bucket name and the region of the endpoint."
+            ),
+            ("PermanentRedirect" | "AuthorizationHeaderMalformed" | "IllegalLocationConstraintException", _) | (_, 301) => {
+                let hint = xml_tag(&doc, "Region")
+                    .or_else(|| xml_tag(&doc, "Endpoint"))
+                    .map(|r| format!(" It answered: {}.", r.trim()))
+                    .unwrap_or_default();
+                format!("Bucket \"{bucket}\" is in another region than the endpoint {endpoint}. Use the endpoint and region of the bucket.{hint}")
+            }
+            ("AccessDenied" | "AllAccessDisabled" | "AccountProblem", _) | (_, 401 | 403) => format!(
+                "The storage refused access to bucket \"{bucket}\". The access key needs permission to list, read, write and delete objects in it; check the key's policy (IAM) and the bucket policy. A new key without a policy is refused like this."
+            ),
+            ("QuotaExceeded" | "StorageQuotaExceeded", _) | (_, 507) => {
+                "The storage is full or over its quota. Free space there or raise the quota.".to_string()
+            }
+            ("SlowDown", _) | (_, 429 | 503) => {
+                "The storage asked to slow down or is unavailable for a moment. Varsto tries again by itself.".to_string()
+            }
+            (_, 500..=599) => "The storage had an internal error. Varsto tries again by itself; if it keeps happening, check the provider's status page.".to_string(),
+            _ => format!("The storage answered with HTTP {status}."),
+        };
+        let mut detail = format!("{op} {key}: HTTP {status}");
+        if !code.is_empty() {
+            detail.push_str(&format!(" {code}"));
+        }
+        if !message.is_empty() {
+            detail.push_str(&format!(": {message}"));
+        }
+        anyhow!("{words} (storage {}: {detail})", self.cfg.name)
+    }
+
     pub fn new(cfg: S3Config) -> Result<Self> {
         let endpoint = cfg.endpoint.clone();
         let (scheme, rest) = endpoint
@@ -261,10 +315,7 @@ impl S3Storage {
         }
         let (status, body) = self.request("PUT", &self.object_path(key), &[], &headers, data)?;
         if status >= 500 {
-            bail!(
-                "PUT {key}: HTTP {status}: {}",
-                String::from_utf8_lossy(&body)
-            );
+            return Err(self.explain("PUT", key, status, &body));
         }
         Ok(status)
     }
@@ -412,9 +463,9 @@ impl Storage for S3Storage {
             412 => Ok(false),
             400 | 501 => match self.put(key, data, false)? {
                 200 | 201 => Ok(true),
-                s => bail!("PUT {key}: HTTP {s}"),
+                s => Err(self.explain("PUT", key, s, &[])),
             },
-            s => bail!("PUT {key}: HTTP {s}"),
+            s => Err(self.explain("PUT", key, s, &[])),
         }
     }
 
@@ -427,7 +478,7 @@ impl Storage for S3Storage {
             403 if String::from_utf8_lossy(&body).contains("InvalidObjectState") => {
                 bail!("GET {key}: object is in a cold storage class and must be restored first")
             }
-            s => bail!("GET {key}: HTTP {s}: {}", String::from_utf8_lossy(&body)),
+            s => Err(self.explain("GET", key, s, &body)),
         }
     }
 
@@ -437,7 +488,7 @@ impl Storage for S3Storage {
         match status {
             200 => Ok(true),
             404 => Ok(false),
-            s => bail!("HEAD {key}: HTTP {s}"),
+            s => Err(self.explain("HEAD", key, s, &[])),
         }
     }
 
@@ -473,10 +524,7 @@ impl Storage for S3Storage {
             };
             let (status, body) = self.request("GET", &path, &query, &[], &[])?;
             if status != 200 {
-                bail!(
-                    "LIST {prefix}: HTTP {status}: {}",
-                    String::from_utf8_lossy(&body)
-                );
+                return Err(self.explain("LIST", prefix, status, &body));
             }
             let doc = String::from_utf8_lossy(&body).to_string();
             for k in xml_tags(&doc, "Key") {
@@ -508,7 +556,7 @@ impl Storage for S3Storage {
         let (status, body) = self.request("DELETE", &self.object_path(key), &[], &[], &[])?;
         match status {
             200 | 202 | 204 | 404 => Ok(()),
-            s => bail!("DELETE {key}: HTTP {s}: {}", String::from_utf8_lossy(&body)),
+            s => Err(self.explain("DELETE", key, s, &body)),
         }
     }
 }
@@ -524,6 +572,39 @@ mod tests {
         assert_eq!(xml_tags(doc, "Key"), vec!["a/b&amp;c", "d"]);
         assert_eq!(xml_unescape("a/b&amp;c"), "a/b&c");
         assert_eq!(xml_tag(doc, "IsTruncated"), Some("false"));
+    }
+
+    #[test]
+    fn refusals_are_explained() {
+        let s = S3Storage::new(S3Config {
+            name: "test".into(),
+            endpoint: "https://s3.example.net".into(),
+            region: "us-east-1".into(),
+            bucket: "photos".into(),
+            prefix: String::new(),
+            access_key_id: "k".into(),
+            secret_access_key: "s".into(),
+            path_style: true,
+            storage_class: None,
+        })
+        .unwrap();
+        let body = b"<?xml version=\"1.0\"?><Error><Code>AccessDenied</Code><Message>Access Denied</Message></Error>";
+        let e = s.explain("GET", "vault/meta.json", 403, body).to_string();
+        assert!(
+            e.starts_with("The storage refused access to bucket \"photos\""),
+            "{e}"
+        );
+        assert!(
+            e.contains("GET vault/meta.json: HTTP 403 AccessDenied: Access Denied"),
+            "{e}"
+        );
+        let e = s.explain("HEAD", "x", 404, b"").to_string();
+        assert!(e.contains("HTTP 404"), "{e}");
+        let body = b"<Error><Code>NoSuchBucket</Code></Error>";
+        assert!(s
+            .explain("LIST", "", 404, body)
+            .to_string()
+            .contains("does not exist"));
     }
 
     #[test]

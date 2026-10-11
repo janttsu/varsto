@@ -673,9 +673,7 @@ impl Engine {
         token: &str,
     ) -> Result<(Engine, Vec<String>, Approval)> {
         let (approval, signer) = org::open_approval(home, token)?;
-        if home.join("vault.json").exists() {
-            bail!("{} already holds a vault", home.display());
-        }
+        super::ensure_no_vault(home)?;
         // Pin the organization before anything is read from the storages:
         // a manifest chain under another root key is then never adopted.
         std::fs::create_dir_all(home)?;

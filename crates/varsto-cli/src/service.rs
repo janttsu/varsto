@@ -336,7 +336,20 @@ impl P2p {
                 st.traffic.clone(),
             )
         };
-        let server = match varsto_core::p2p::Server::bind(([0, 0, 0, 0], cfg.port).into()) {
+        // The configured port, or any free one when it is taken (another
+        // vault directory on this computer, another program): peer-to-peer
+        // with a changing port beats none.
+        let bound = varsto_core::p2p::Server::bind(([0, 0, 0, 0], cfg.port).into()).or_else(|e| {
+            if cfg.port == 0 {
+                return Err(e);
+            }
+            eprintln!(
+                "service: p2p port {} is taken ({e:#}); using a free one",
+                cfg.port
+            );
+            varsto_core::p2p::Server::bind(([0, 0, 0, 0], 0).into())
+        });
+        let server = match bound {
             Ok(s) => s.with_traffic(traffic.clone()),
             Err(e) => {
                 eprintln!("service: p2p listener failed: {e:#}");
@@ -799,9 +812,48 @@ pub fn passphrase_from_system(home: &Path) -> Option<String> {
     None
 }
 
+/// Whether the desktop keyring's default collection is locked (Linux,
+/// Secret Service over D-Bus): `Some(true)` locked, `Some(false)` open,
+/// `None` when it cannot be told (no session bus, no keyring, no busctl).
+/// Storing into a locked keyring opens an unlock window, which cannot
+/// appear without a graphical session.
+#[cfg(target_os = "linux")]
+pub fn keyring_locked() -> Option<bool> {
+    let out = std::process::Command::new("busctl")
+        .args([
+            "--user",
+            "--timeout=3",
+            "get-property",
+            "org.freedesktop.secrets",
+            "/org/freedesktop/secrets/aliases/default",
+            "org.freedesktop.Secret.Collection",
+            "Locked",
+        ])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    match String::from_utf8_lossy(&out.stdout).trim() {
+        "b true" => Some(true),
+        "b false" => Some(false),
+        _ => None,
+    }
+}
+
+/// A graphical session where an unlock window can appear.
+#[cfg(target_os = "linux")]
+pub fn has_display() -> bool {
+    std::env::var_os("DISPLAY").is_some_and(|v| !v.is_empty())
+        || std::env::var_os("WAYLAND_DISPLAY").is_some_and(|v| !v.is_empty())
+}
+
+#[cfg(target_os = "linux")]
 const TIMED_OUT: &str = "secret-tool timed out";
 /// Long enough to type a password into an unlock window.
+#[cfg(target_os = "linux")]
 const SECRET_TOOL_STORE_TIMEOUT: Duration = Duration::from_secs(90);
+#[cfg(target_os = "linux")]
 const SECRET_TOOL_LOOKUP_TIMEOUT: Duration = Duration::from_secs(20);
 
 /// Run `secret-tool` with `args`, feeding `stdin`, and kill it after
@@ -959,6 +1011,18 @@ pub struct Options {
 
 /// Run the service until quit. Blocks the calling thread.
 pub fn run(opts: Options) -> Result<()> {
+    // One service per home: a second one (the app and the launch agent both
+    // starting one) would fight over the service file and the folders.
+    if let Some((f, _)) = status(&opts.home) {
+        if f.pid != std::process::id() {
+            println!(
+                "a Varsto service (pid {}) already runs for {}; not starting another",
+                f.pid,
+                opts.home.display()
+            );
+            return Ok(());
+        }
+    }
     let (server, bound) = desktop::bind(opts.port)?;
     let mut token_bytes = [0u8; 32];
     rand::rngs::OsRng.fill_bytes(&mut token_bytes);
@@ -1049,6 +1113,8 @@ pub fn run(opts: Options) -> Result<()> {
     let mut watched: Vec<PathBuf> = Vec::new();
     let mut last_change: Option<Instant> = None;
     let mut next_sync = Instant::now();
+    // Folders known at the last sync; a new one is announced to the peers.
+    let mut known_folders = usize::MAX;
     let debounce = Duration::from_secs(2);
     let disk_check_every = Duration::from_secs(30);
     let mut next_disk_check = Instant::now();
@@ -1096,6 +1162,27 @@ pub fn run(opts: Options) -> Result<()> {
                 st.service.folders_changed = false;
             }
         }
+        // Turned off while running: stop serving and fetching from peers.
+        if p2p.is_some() {
+            let wanted = {
+                let st = state.lock().unwrap();
+                st.engine
+                    .as_ref()
+                    .map(|e| e.p2p_config().enabled)
+                    .unwrap_or(true)
+            };
+            if !wanted {
+                if let Some(p) = p2p.take() {
+                    p.stop.store(true, std::sync::atomic::Ordering::SeqCst);
+                }
+                let mut st = state.lock().unwrap();
+                if let Some(e) = st.engine.as_mut() {
+                    e.set_peers(None);
+                }
+                st.service.p2p_listen = None;
+                eprintln!("service: p2p stopped (turned off)");
+            }
+        }
         if p2p.is_none() && Instant::now() >= p2p_retry_at {
             let wanted = {
                 let st = state.lock().unwrap();
@@ -1129,6 +1216,10 @@ pub fn run(opts: Options) -> Result<()> {
             std::thread::sleep(Duration::from_millis(300));
             break;
         }
+        // Another device published something (a folder, files): sync now.
+        if varsto_core::p2p::take_change_heard() {
+            state.lock().unwrap().service.sync_requested = true;
+        }
         let due_change = last_change
             .map(|t| t.elapsed() >= debounce)
             .unwrap_or(false);
@@ -1159,6 +1250,16 @@ pub fn run(opts: Options) -> Result<()> {
             match result {
                 Some(Ok(reports)) => {
                     st.service.record_sync(&reports);
+                    // Something new went out (files, or a folder the other
+                    // devices have not seen): tell them to fetch it now.
+                    let folders = st.engine.as_ref().map(|e| e.folders().len()).unwrap_or(0);
+                    let pushed = reports.iter().any(|(_, p)| p.files_changed > 0);
+                    if pushed || folders != known_folders {
+                        known_folders = folders;
+                        if let Some(e) = st.engine.as_ref() {
+                            e.notify_peers_changed();
+                        }
+                    }
                     snapshot_syncs = st.service.syncs; // the snapshot above is current
                     let st = &mut *st;
                     if let Some(e) = st.engine.as_mut() {
@@ -1257,6 +1358,21 @@ pub fn http_post(url: &str, token: &str, body: &str) -> Result<String> {
 }
 
 pub fn http_call(method: &str, url: &str, token: &str, body: Option<&str>) -> Result<String> {
+    http_call_within(method, url, token, body, Duration::from_secs(600))
+}
+
+/// GET that gives up after `secs` (for answers that wait while a sync holds the engine).
+pub fn http_get_within(url: &str, token: &str, secs: u64) -> Result<String> {
+    http_call_within("GET", url, token, None, Duration::from_secs(secs))
+}
+
+fn http_call_within(
+    method: &str,
+    url: &str,
+    token: &str,
+    body: Option<&str>,
+    wait: Duration,
+) -> Result<String> {
     use std::io::{Read, Write};
     let rest = url
         .strip_prefix("http://")
@@ -1266,7 +1382,7 @@ pub fn http_call(method: &str, url: &str, token: &str, body: Option<&str>) -> Re
         .map(|(h, p)| (h, format!("/{p}")))
         .unwrap_or((rest, "/".into()));
     let mut stream = std::net::TcpStream::connect(hostport)?;
-    stream.set_read_timeout(Some(Duration::from_secs(600)))?;
+    stream.set_read_timeout(Some(wait))?;
     let body = body.unwrap_or("");
     write!(stream, "{method} {path} HTTP/1.1\r\nHost: {hostport}\r\nX-Varsto-Token: {token}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len())?;
     let mut raw = Vec::new();
@@ -1288,8 +1404,64 @@ pub fn http_call(method: &str, url: &str, token: &str, body: Option<&str>) -> Re
 
 // ----- install as a login item ------------------------------------------------
 
+/// The marker `varsto service uninstall` leaves so that commands stop
+/// setting the service up again on their own.
+#[cfg_attr(not(any(target_os = "linux", target_os = "macos")), allow(dead_code))]
+pub fn opted_out(home: &Path) -> bool {
+    home.join("service-off").exists()
+}
+
+pub fn set_opted_out(home: &Path, off: bool) {
+    let m = home.join("service-off");
+    if off {
+        let _ = fs::create_dir_all(home);
+        let _ = fs::write(
+            &m,
+            "background sync was turned off with `varsto uninstall`\n",
+        );
+    } else {
+        let _ = fs::remove_file(&m);
+    }
+}
+
+/// Whether background sync starts at login on this computer.
+#[cfg_attr(not(any(target_os = "linux", target_os = "macos")), allow(dead_code))]
+pub fn login_service_installed() -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        return std::env::var_os("HOME").is_some_and(|h| {
+            PathBuf::from(h)
+                .join("Library/LaunchAgents/in.soderlund.varsto.plist")
+                .exists()
+        });
+    }
+    #[cfg(target_os = "linux")]
+    {
+        return linux::installed();
+    }
+    #[allow(unreachable_code)]
+    true
+}
+
+/// Ask the running service to restart (exit code 75), so its supervisor
+/// starts the binary that is on disk now (after `varsto update`).
+pub fn restart_running(home: &Path) -> bool {
+    match status(home) {
+        Some((f, _)) => http_post(
+            &format!("http://127.0.0.1:{}/api/service/restart", f.port),
+            &f.token,
+            "{}",
+        )
+        .is_ok(),
+        None => false,
+    }
+}
+
 pub fn install(home: &Path, interval_secs: u64) -> Result<String> {
     let exe = std::env::current_exe()?;
+    // Through a link on PATH, run the file it points to (inside Varsto.app,
+    // so an updated app is an updated service).
+    let exe = fs::canonicalize(&exe).unwrap_or(exe);
     #[cfg(target_os = "macos")]
     {
         let dir = PathBuf::from(std::env::var("HOME")?).join("Library/LaunchAgents");
@@ -1302,7 +1474,7 @@ pub fn install(home: &Path, interval_secs: u64) -> Result<String> {
   <key>Label</key><string>in.soderlund.varsto</string>
   <key>ProgramArguments</key><array><string>{}</string><string>--home</string><string>{}</string><string>service</string><string>run</string><string>--interval</string><string>{}</string></array>
   <key>RunAtLoad</key><true/>
-  <key>KeepAlive</key><true/>
+  <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
   <key>ProcessType</key><string>Background</string>
   <key>StandardOutPath</key><string>{}</string>
   <key>StandardErrorPath</key><string>{}</string>

@@ -60,8 +60,91 @@ pub fn make(path: &Path, name: &str) -> Option<Vec<u8>> {
         return encode(decode_limited(reader)?);
     }
     if is_video(name) {
-        let mut child = std::process::Command::new("ffmpeg")
-            .args(["-v", "error", "-y", "-ss", "1", "-i"])
+        // A frame one second in; short clips have none there, so then the first.
+        for at in ["1", "0"] {
+            if let Some(f) = ffmpeg_frame(path, at) {
+                return Some(f);
+            }
+        }
+        #[cfg(target_os = "macos")]
+        if let Some(f) = quicklook_frame(path) {
+            return Some(f);
+        }
+    }
+    None
+}
+
+/// Where ffmpeg is: on PATH, or where package managers put it (a launch
+/// agent or a login service gets a short PATH without Homebrew's folder).
+pub fn ffmpeg() -> Option<std::path::PathBuf> {
+    let exe = if cfg!(windows) {
+        "ffmpeg.exe"
+    } else {
+        "ffmpeg"
+    };
+    let mut dirs: Vec<std::path::PathBuf> = std::env::var_os("PATH")
+        .map(|p| std::env::split_paths(&p).collect())
+        .unwrap_or_default();
+    for d in [
+        "/opt/homebrew/bin",
+        "/usr/local/bin",
+        "/opt/local/bin",
+        "/usr/bin",
+        "/snap/bin",
+    ] {
+        dirs.push(d.into());
+    }
+    dirs.into_iter().map(|d| d.join(exe)).find(|p| p.is_file())
+}
+
+/// Whether this device can make video thumbnails itself.
+pub fn video_tool_available() -> bool {
+    ffmpeg().is_some() || (cfg!(target_os = "macos") && Path::new("/usr/bin/qlmanage").exists())
+}
+
+/// Run a command for at most FFMPEG_TIMEOUT and return its standard output
+/// (at most MAX_THUMB_BYTES), or None when it fails or takes too long.
+fn run_limited(cmd: &mut std::process::Command) -> Option<Vec<u8>> {
+    let mut child = cmd
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .ok()?;
+    // Read on a thread so a large frame cannot fill the pipe and stall the
+    // tool; a hostile or broken video must not keep it busy forever.
+    let mut stdout = child.stdout.take()?;
+    let reader = std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        let _ = std::io::Read::read_to_end(
+            &mut std::io::Read::take(&mut stdout, MAX_THUMB_BYTES as u64 + 1),
+            &mut buf,
+        );
+        buf
+    });
+    let start = std::time::Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) if start.elapsed() < FFMPEG_TIMEOUT => {
+                std::thread::sleep(std::time::Duration::from_millis(50))
+            }
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
+            }
+        }
+    }
+    let ok = child.wait().ok()?.success();
+    let out = reader.join().ok()?;
+    (ok && out.len() <= MAX_THUMB_BYTES).then_some(out)
+}
+
+fn ffmpeg_frame(path: &Path, at: &str) -> Option<Vec<u8>> {
+    let frame = run_limited(
+        std::process::Command::new(ffmpeg()?)
+            .args(["-v", "error", "-y", "-ss", at, "-i"])
             .arg(path)
             .args([
                 "-frames:v",
@@ -73,45 +156,40 @@ pub fn make(path: &Path, name: &str) -> Option<Vec<u8>> {
                 "-vcodec",
                 "mjpeg",
                 "-",
-            ])
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::null())
-            .spawn()
-            .ok()?;
-        // Read the frame on a thread so a large one cannot fill the pipe
-        // and stall ffmpeg; a hostile or broken video must not keep it busy
-        // forever.
-        let mut stdout = child.stdout.take()?;
-        let reader = std::thread::spawn(move || {
-            let mut buf = Vec::new();
-            let _ = std::io::Read::read_to_end(
-                &mut std::io::Read::take(&mut stdout, MAX_THUMB_BYTES as u64 + 1),
-                &mut buf,
-            );
-            buf
-        });
-        let start = std::time::Instant::now();
-        loop {
-            match child.try_wait() {
-                Ok(Some(_)) => break,
-                Ok(None) if start.elapsed() < FFMPEG_TIMEOUT => {
-                    std::thread::sleep(std::time::Duration::from_millis(50))
-                }
-                _ => {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    return None;
-                }
-            }
-        }
-        let ok = child.wait().ok()?.success();
-        let frame = reader.join().ok()?;
-        if ok && !frame.is_empty() && frame.len() <= MAX_THUMB_BYTES {
-            return Some(frame);
-        }
+            ]),
+    )?;
+    (!frame.is_empty()).then_some(frame)
+}
+
+/// macOS without ffmpeg: Quick Look makes a picture of any video the system
+/// can play, into a private temporary folder.
+#[cfg(target_os = "macos")]
+fn quicklook_frame(path: &Path) -> Option<Vec<u8>> {
+    let dir = tempfile::tempdir().ok()?;
+    run_limited(
+        std::process::Command::new("/usr/bin/qlmanage")
+            .args(["-t", "-s", &MAX_SIDE.to_string(), "-o"])
+            .arg(dir.path())
+            .arg(path),
+    )?;
+    let png = std::fs::read_dir(dir.path())
+        .ok()?
+        .filter_map(|e| e.ok())
+        .find(|e| e.path().extension().is_some_and(|x| x == "png"))?;
+    normalize(&std::fs::read(png.path()).ok()?)
+}
+
+/// A thumbnail handed in by the app around the service (a phone makes video
+/// frames with its own media framework): decoded with limits and encoded
+/// again, so only a small JPEG is ever stored.
+pub fn normalize(bytes: &[u8]) -> Option<Vec<u8>> {
+    if bytes.len() > MAX_THUMB_BYTES * 4 {
+        return None;
     }
-    None
+    let reader = image::ImageReader::new(Cursor::new(bytes))
+        .with_guessed_format()
+        .ok()?;
+    encode(decode_limited(reader)?)
 }
 
 /// Longest ffmpeg may take for one frame.

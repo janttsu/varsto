@@ -1197,7 +1197,16 @@ pub struct P2pConfig {
     /// list disables STUN; a missing key means the defaults.
     #[serde(default = "default_stun")]
     pub stun: Vec<String>,
+    /// The user turned peer-to-peer off (`varsto p2p disable`, the
+    /// interface). Peer-to-peer is on by default; settings written before
+    /// it was are switched on unless this is set.
+    #[serde(default)]
+    pub user_disabled: bool,
 }
+
+/// The port peer-to-peer listens on unless told otherwise: a fixed one is
+/// easier to forward, and the same on every start keeps NAT mappings.
+pub const DEFAULT_P2P_PORT: u16 = 17893;
 
 pub fn default_stun() -> Vec<String> {
     crate::p2p::stun::DEFAULT_SERVERS
@@ -1209,17 +1218,26 @@ pub fn default_stun() -> Vec<String> {
 impl Default for P2pConfig {
     fn default() -> Self {
         P2pConfig {
-            enabled: false,
-            port: 0,
+            enabled: true,
+            port: DEFAULT_P2P_PORT,
             public_addrs: Vec::new(),
             stun: default_stun(),
+            user_disabled: false,
         }
     }
 }
 
 impl Config {
     pub fn load(home: &Path) -> Result<Self> {
-        util::read_json_or_default(&home.join("config.json"))
+        let mut c: Config = util::read_json_or_default(&home.join("config.json"))?;
+        // Peer-to-peer is on unless the user turned it off.
+        if !c.p2p.user_disabled && !c.p2p.enabled {
+            c.p2p.enabled = true;
+            if c.p2p.port == 0 {
+                c.p2p.port = DEFAULT_P2P_PORT;
+            }
+        }
+        Ok(c)
     }
     pub fn save(&self, home: &Path) -> Result<()> {
         util::write_json(&home.join("config.json"), self)

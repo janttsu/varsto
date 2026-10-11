@@ -309,7 +309,13 @@ fn check_with(fetch: &dyn Fetch, base: &str) -> Result<Check> {
         .to_string();
     let current = env!("CARGO_PKG_VERSION").to_string();
     let target = target_triple().to_string();
+    // Inside Varsto.app the whole bundle is replaced from the disk image;
+    // elsewhere the archive for this platform carries the binary.
+    let dmg = format!("Varsto-{latest}-macos.dmg");
     let archive = manifest.as_object().and_then(|m| {
+        if app_bundle().is_some() {
+            return m.contains_key(&dmg).then(|| dmg.clone());
+        }
         m.keys()
             .find(|k| k.contains(&target) && (k.ends_with(".tar.gz") || k.ends_with(".zip")))
             .cloned()
@@ -348,7 +354,9 @@ pub fn download_verified(
         .archive
         .clone()
         .ok_or_else(|| anyhow!("no archive for {}", check.target))?;
-    if !archive.starts_with(&format!("varsto-{}-", check.latest)) || archive.contains(['/', '\\']) {
+    let expected_name = archive.starts_with(&format!("varsto-{}-", check.latest))
+        || archive == format!("Varsto-{}-macos.dmg", check.latest);
+    if !expected_name || archive.contains(['/', '\\']) {
         bail!("the manifest names an unexpected archive {archive}; refusing to update");
     }
     let sums = fetch.get(&format!("{base}SHA256SUMS"))?;
@@ -407,8 +415,98 @@ pub fn apply(check: &Check) -> Result<String> {
     install_from(check, tmp.path())
 }
 
+/// The Varsto.app bundle this binary runs from (macOS), if any.
+pub fn app_bundle() -> Option<PathBuf> {
+    if !cfg!(target_os = "macos") {
+        return None;
+    }
+    let exe = std::env::current_exe().ok()?;
+    let exe = fs::canonicalize(&exe).unwrap_or(exe);
+    exe.ancestors()
+        .find(|p| p.extension().is_some_and(|e| e == "app"))
+        .map(Path::to_path_buf)
+}
+
+/// Replace the whole app bundle with the one on the verified disk image:
+/// copy it next to the old one, then swap by renaming, so a failure leaves
+/// the old app in place. Running processes keep their open files.
+fn install_app_from_dmg(dmg: &Path, bundle: &Path, tmp: &Path) -> Result<()> {
+    let run = |cmd: &str, args: &[&str]| -> Result<()> {
+        let out = std::process::Command::new(cmd)
+            .args(args)
+            .output()
+            .with_context(|| format!("run {cmd}"))?;
+        if !out.status.success() {
+            bail!(
+                "{cmd} failed: {}",
+                String::from_utf8_lossy(&out.stderr).trim()
+            );
+        }
+        Ok(())
+    };
+    let mnt = tmp.join("mnt");
+    fs::create_dir_all(&mnt)?;
+    let mnt_s = mnt.display().to_string();
+    run(
+        "/usr/bin/hdiutil",
+        &[
+            "attach",
+            "-nobrowse",
+            "-readonly",
+            "-noautoopen",
+            "-mountpoint",
+            &mnt_s,
+            &dmg.display().to_string(),
+        ],
+    )?;
+    let result = (|| -> Result<()> {
+        let src = fs::read_dir(&mnt)?
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .find(|p| p.extension().is_some_and(|e| e == "app") && !p.is_symlink())
+            .ok_or_else(|| anyhow!("the disk image holds no app"))?;
+        let parent = bundle
+            .parent()
+            .ok_or_else(|| anyhow!("app has no folder"))?;
+        let name = bundle
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
+        let staged = parent.join(format!(".{name}.new"));
+        let old = parent.join(format!(".{name}.old"));
+        let _ = fs::remove_dir_all(&staged);
+        let _ = fs::remove_dir_all(&old);
+        run(
+            "/usr/bin/ditto",
+            &[&src.display().to_string(), &staged.display().to_string()],
+        )
+        .context("copy the new app (is the Applications folder writable?)")?;
+        fs::rename(bundle, &old)?;
+        if let Err(e) = fs::rename(&staged, bundle) {
+            let _ = fs::rename(&old, bundle);
+            return Err(e.into());
+        }
+        let _ = fs::remove_dir_all(&old);
+        Ok(())
+    })();
+    let _ = run("/usr/bin/hdiutil", &["detach", "-force", &mnt_s]);
+    result
+}
+
 fn install_from(check: &Check, tmp: &Path) -> Result<String> {
     let v = download_verified(&Curl, &downloads_base(), &release_key(), check, tmp)?;
+    if v.path.extension().is_some_and(|e| e == "dmg") {
+        let bundle = app_bundle().ok_or_else(|| anyhow!("not running from Varsto.app"))?;
+        install_app_from_dmg(&v.path, &bundle, tmp)?;
+        return Ok(format!(
+            "updated {} -> {} ({}; {}); the app and service restart with it",
+            check.current,
+            check.latest,
+            bundle.display(),
+            v.notes.join("; ")
+        ));
+    }
     let extract = tmp.join("x");
     fs::create_dir_all(&extract)?;
     let tar = std::process::Command::new("tar")

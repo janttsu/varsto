@@ -40,12 +40,14 @@ struct Cli {
 enum Cmd {
     /// Create a new vault on this device and print the vault key once.
     Init {
-        #[arg(long)]
+        /// Name of this device (default: the computer's name).
+        #[arg(long, default_value_t = default_device_name())]
         name: String,
     },
     /// Join an existing vault through a storage that holds it.
     Join {
-        #[arg(long)]
+        /// Name of this device (default: the computer's name).
+        #[arg(long, default_value_t = default_device_name())]
         name: String,
         /// Vault key in hex (from `init`), or use --words.
         #[arg(long, conflicts_with = "words")]
@@ -183,6 +185,13 @@ enum Cmd {
     },
     /// Undo `install`; the vault and folders stay.
     Uninstall,
+    /// Uploads and downloads running now in the background service: each
+    /// file with its progress and speed, and the traffic with every peer.
+    Transfers {
+        /// Refresh every second until interrupted.
+        #[arg(long)]
+        watch: bool,
+    },
     /// Share a folder with another Varsto user, or accept a folder shared with you.
     Share {
         #[command(subcommand)]
@@ -312,7 +321,8 @@ enum PairCmd {
     Offer,
     /// On the new device: join the vault of the device showing the code.
     Join {
-        #[arg(long)]
+        /// Name of this device (default: the computer's name).
+        #[arg(long, default_value_t = default_device_name())]
         name: String,
         /// The nine digits shown on the other device.
         #[arg(long)]
@@ -354,7 +364,8 @@ enum OrgCmd {
     /// (New device) Print a request code and its six-word fingerprint for an administrator.
     Request {
         /// Name of this device, bound to the code.
-        #[arg(long)]
+        /// Name of this device (default: the computer's name).
+        #[arg(long, default_value_t = default_device_name())]
         name: String,
     },
     /// (Administrator) Approve a request code: the device joins under --user and gets a token
@@ -372,7 +383,8 @@ enum OrgCmd {
     },
     /// (New device) Join the vault with the approval token.
     Join {
-        #[arg(long)]
+        /// Name of this device (default: the computer's name).
+        #[arg(long, default_value_t = default_device_name())]
         name: String,
         #[arg(long)]
         token: String,
@@ -602,7 +614,8 @@ enum ShareCmd {
     /// (Recipient) Accept a shared folder into a new device directory (one per shared vault),
     /// through a directory or an S3 bucket that both users can reach.
     Accept {
-        #[arg(long)]
+        /// Name of this device (default: the computer's name).
+        #[arg(long, default_value_t = default_device_name())]
         name: String,
         #[arg(long)]
         token: String,
@@ -634,7 +647,8 @@ enum ReplicaCmd {
     Token,
     /// (Replica) Set up this directory as a replica of a vault.
     Init {
-        #[arg(long)]
+        /// Name of this device (default: the computer's name).
+        #[arg(long, default_value_t = default_device_name())]
         name: String,
         #[arg(long)]
         token: String,
@@ -908,6 +922,35 @@ fn folder_and_path(
         Some(p) => Ok((first.to_string(), p.clone())),
         None => engine.locate_path(&std::path::absolute(first)?),
     }
+}
+
+/// This computer's name, for devices joined without `--name`.
+fn default_device_name() -> String {
+    let name = if cfg!(target_os = "macos") {
+        std::process::Command::new("scutil")
+            .args(["--get", "ComputerName"])
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+    } else if cfg!(windows) {
+        std::env::var("COMPUTERNAME").ok()
+    } else {
+        std::fs::read_to_string("/proc/sys/kernel/hostname")
+            .or_else(|_| std::fs::read_to_string("/etc/hostname"))
+            .ok()
+            .map(|h| h.trim().to_string())
+    };
+    name.filter(|n| !n.is_empty() && !n.contains('.'))
+        .or_else(name_before_dot)
+        .unwrap_or_else(|| "this-device".into())
+}
+
+fn name_before_dot() -> Option<String> {
+    std::fs::read_to_string("/proc/sys/kernel/hostname")
+        .ok()
+        .and_then(|h| h.trim().split('.').next().map(|s| s.to_string()))
+        .filter(|s| !s.is_empty())
 }
 
 fn bail_usage<T>(msg: &str) -> Result<T> {
@@ -2170,8 +2213,14 @@ fn run(cli: &Cli) -> Result<()> {
                 interval_secs: *interval,
                 open_browser: false,
             })?,
-            ServiceCmd::Install { interval } => println!("{}", service::install(&home, *interval)?),
-            ServiceCmd::Uninstall => println!("{}", service::uninstall()?),
+            ServiceCmd::Install { interval } => {
+                service::set_opted_out(&home, false);
+                println!("{}", service::install(&home, *interval)?)
+            }
+            ServiceCmd::Uninstall => {
+                service::set_opted_out(&home, true);
+                println!("{}", service::uninstall()?)
+            }
             ServiceCmd::Remember => {
                 let pass = passphrase()?;
                 Engine::open(&home, &pass)?; // wrong passphrases are not stored
@@ -2216,8 +2265,14 @@ fn run(cli: &Cli) -> Result<()> {
                 None => println!("not running"),
             },
         },
-        Cmd::Install { interval } => println!("{}", service::install(&home, *interval)?),
-        Cmd::Uninstall => println!("{}", service::uninstall()?),
+        Cmd::Install { interval } => {
+            service::set_opted_out(&home, false);
+            println!("{}", service::install(&home, *interval)?)
+        }
+        Cmd::Uninstall => {
+            service::set_opted_out(&home, true);
+            println!("{}", service::uninstall()?)
+        }
         Cmd::Tray { interval, open } => {
             // The tray app has no terminal output: on Windows, let go of the
             // console window that a double-click or the .cmd starter opened.
@@ -2859,11 +2914,47 @@ fn run(cli: &Cli) -> Result<()> {
                 }
             }
         }
+        Cmd::Transfers { watch } => transfers(&home, *watch, cli.json)?,
         // Counted by the running service; no passphrase needed.
         Cmd::P2p {
             cmd: P2pCmd::Traffic { watch },
         } => p2p_traffic(&home, *watch, cli.json)?,
         Cmd::P2p { cmd } => {
+            // With the background service running, settings go through it:
+            // it applies them (on and off at once), and its own copy of the
+            // configuration does not overwrite them later.
+            if let (Some((sf, _)), P2pCmd::Enable { .. } | P2pCmd::Disable) =
+                (service::status(&home), cmd)
+            {
+                let body = match cmd {
+                    P2pCmd::Enable {
+                        port,
+                        public_addrs,
+                        stun,
+                        no_stun,
+                    } => {
+                        let stun = if *no_stun {
+                            String::new()
+                        } else if stun.is_empty() {
+                            varsto_core::vault::default_stun().join(",")
+                        } else {
+                            stun.join(",")
+                        };
+                        serde_json::json!({
+                            "enabled": true,
+                            "port": port,
+                            "public_addrs": public_addrs.iter().map(|a| a.to_string()).collect::<Vec<_>>().join(","),
+                            "stun": stun,
+                        })
+                    }
+                    _ => serde_json::json!({"enabled": false}),
+                };
+                let url = format!("http://127.0.0.1:{}/api/p2p", sf.port);
+                let r: serde_json::Value =
+                    serde_json::from_str(&service::http_post(&url, &sf.token, &body.to_string())?)?;
+                println!("{}", r["note"].as_str().unwrap_or("saved"));
+                return Ok(());
+            }
             let mut engine = Engine::open(&home, &passphrase()?)?;
             match cmd {
                 P2pCmd::Enable {
@@ -2884,30 +2975,22 @@ fn run(cli: &Cli) -> Result<()> {
                         port: *port,
                         public_addrs: public_addrs.clone(),
                         stun,
+                        user_disabled: false,
                     })?;
                     let id = engine.p2p_identity()?;
                     println!(
-                        "p2p enabled on port {port}{}; certificate {}; restart the background service to apply",
-                        if public_addrs.is_empty() {
-                            String::new()
-                        } else {
-                            format!(
-                                ", public {}",
-                                public_addrs
-                                    .iter()
-                                    .map(|a| a.to_string())
-                                    .collect::<Vec<_>>()
-                                    .join(", ")
-                            )
-                        },
+                        "peer-to-peer is on (port {port}, certificate {}); the background service uses it when it starts",
                         &id.sha256[..16]
                     );
                 }
                 P2pCmd::Disable => {
                     let mut c = engine.p2p_config();
                     c.enabled = false;
+                    c.user_disabled = true;
                     engine.set_p2p_config(c)?;
-                    println!("p2p disabled; restart the background service to apply");
+                    println!(
+                        "peer-to-peer is off; the background service stays off it when it starts"
+                    );
                 }
                 P2pCmd::Status => p2p_status(&engine, &home, cli.json)?,
                 P2pCmd::Traffic { .. } => unreachable!("handled above"),
@@ -3016,6 +3099,9 @@ fn run(cli: &Cli) -> Result<()> {
                 })?;
             } else {
                 println!("{}", update::apply(&c)?);
+                if c.available && service::restart_running(&home) {
+                    println!("the background service restarts with {}", c.latest);
+                }
             }
         }
         Cmd::VerifyRelease {
@@ -3183,13 +3269,30 @@ fn after_command(cli: &Cli) {
                 cmd: PairCmd::Join { .. }
             }
     );
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     {
         use std::io::IsTerminal;
-        // Only for the user's own vault in a terminal: never for test homes
+        // Background sync always runs once this computer holds a vault, also
+        // for people who only use the command line: any command sets it up
+        // when it is missing, until `varsto uninstall` turns it off. Only for
+        // the user's own vault in a terminal: never for test homes
         // (--home / VARSTO_HOME) or scripts.
         let own = cli.home.is_none() && std::env::var_os("VARSTO_NO_INSTALL").is_none();
-        if setup && own && std::io::stdout().is_terminal() && !service::linux::installed() {
+        let uninstalling = matches!(
+            cli.cmd,
+            Cmd::Uninstall
+                | Cmd::Reset { .. }
+                | Cmd::Service {
+                    cmd: ServiceCmd::Uninstall | ServiceCmd::Run { .. }
+                }
+        );
+        if own
+            && !uninstalling
+            && std::io::stdout().is_terminal()
+            && home.join("vault.json").exists()
+            && !service::opted_out(&home)
+            && !service::login_service_installed()
+        {
             match service::install(&home, 300) {
                 Ok(report) => println!("Background sync is set up:\n{report}"),
                 Err(e) => eprintln!(
@@ -3197,7 +3300,18 @@ fn after_command(cli: &Cli) {
                 ),
             }
         }
-        if setup && own && std::io::stdin().is_terminal() {
+    }
+    #[cfg(target_os = "linux")]
+    {
+        use std::io::IsTerminal;
+        let own = cli.home.is_none() && std::env::var_os("VARSTO_NO_INSTALL").is_none();
+        let locked_here = service::keyring_locked() == Some(true) && !service::has_display();
+        if setup && own && std::io::stdin().is_terminal() && locked_here && typed.is_some() {
+            // Asking would only lead to a store that waits for an unlock
+            // window that cannot appear in this session.
+            eprintln!("Your keyring is locked and this session has no desktop to unlock it, so the passphrase is not stored: after a restart the background service waits until any varsto command that asks for the passphrase unlocks it. To store it, run `varsto service remember` from your desktop session.");
+        }
+        if setup && own && std::io::stdin().is_terminal() && !locked_here {
             if let Some(pass) = &typed {
                 print!("Keep the passphrase in your keyring so background sync unlocks itself after a restart? [Y/n] ");
                 let _ = std::io::Write::flush(&mut std::io::stdout());
@@ -3531,6 +3645,114 @@ fn strongroom_rekey(
 
 /// `p2p traffic`: the running service's counters as a table, once or every
 /// second. Only the service counts; without it there is nothing to show.
+fn transfers(home: &std::path::Path, watch: bool, json: bool) -> Result<()> {
+    let sf = service::read_service_file(home).ok_or_else(|| {
+        anyhow!("the background service is not running, so nothing is being transferred (start it with `varsto service run` or `varsto install`)")
+    })?;
+    let base = format!("http://127.0.0.1:{}", sf.port);
+    loop {
+        let get = |path: &str| -> Result<serde_json::Value> {
+            let body = service::http_get(&format!("{base}{path}"), &sf.token)
+                .context("the background service did not answer; is it running?")?;
+            Ok(serde_json::from_str(&body)?)
+        };
+        let progress = get("/api/progress")?;
+        let traffic = get("/api/p2p/traffic")?;
+        // The summary waits while a sync holds the engine: then say so.
+        let summary = service::http_get_within(&format!("{base}/api/service"), &sf.token, 2)
+            .ok()
+            .and_then(|b| serde_json::from_str::<serde_json::Value>(&b).ok());
+        if json {
+            println!(
+                "{}",
+                serde_json::json!({"transfers": progress["transfers"], "service": summary, "p2p": traffic})
+            );
+        } else {
+            if watch {
+                print!("\x1b[H\x1b[2J");
+            }
+            let mut out = String::new();
+            let list = progress["transfers"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default();
+            if list.is_empty() {
+                out.push_str("No file is being uploaded or downloaded right now.\n");
+            } else {
+                out.push_str(&format!(
+                    "{:<9} {:>4}  {:>21}  {:>11}  file\n",
+                    "", "%", "done / size", "speed"
+                ));
+                for t in &list {
+                    let n = |k: &str| t[k].as_u64().unwrap_or(0);
+                    out.push_str(&format!(
+                        "{:<9} {:>3}%  {:>21}  {:>11}  {}/{}\n",
+                        t["kind"].as_str().unwrap_or(""),
+                        n("percent"),
+                        format!("{} / {}", fmt_bytes(n("done")), fmt_bytes(n("total"))),
+                        format!("{}/s", fmt_bytes(n("bytes_per_sec"))),
+                        t["folder"].as_str().unwrap_or(""),
+                        t["path"].as_str().unwrap_or(""),
+                    ));
+                }
+            }
+            match &summary {
+                Some(s) => {
+                    let paused = s["paused"].as_bool() == Some(true);
+                    let last = s["last_sync_utc"]
+                        .as_i64()
+                        .map(ago)
+                        .unwrap_or_else(|| "never".into());
+                    out.push_str(&format!(
+                        "Background sync: {}; last sync {last}{}\n",
+                        if paused { "paused" } else { "on" },
+                        s["last_result"]
+                            .as_str()
+                            .filter(|r| !r.is_empty())
+                            .map(|r| format!(" ({r})"))
+                            .unwrap_or_default(),
+                    ));
+                }
+                None => out.push_str("Background sync: syncing now\n"),
+            }
+            if let Ok(r) =
+                serde_json::from_value::<varsto_core::p2p::traffic::TrafficReport>(traffic)
+            {
+                let busy: Vec<_> = r
+                    .peers
+                    .iter()
+                    .filter(|p| p.active > 0 || p.rx_bps > 0 || p.tx_bps > 0)
+                    .collect();
+                if busy.is_empty() {
+                    out.push_str("Peers: no transfer with another device right now\n");
+                } else {
+                    for p in busy {
+                        out.push_str(&format!(
+                            "Peer {}: down {}/s, up {}/s, {} requests in flight ({})\n",
+                            if p.name.is_empty() {
+                                p.device.short().to_string()
+                            } else {
+                                p.name.clone()
+                            },
+                            fmt_bytes(p.rx_bps),
+                            fmt_bytes(p.tx_bps),
+                            p.active,
+                            if p.path.is_empty() { "-" } else { &p.path },
+                        ));
+                    }
+                }
+            }
+            print!("{out}");
+        }
+        if !watch {
+            return Ok(());
+        }
+        use std::io::Write;
+        std::io::stdout().flush()?;
+        std::thread::sleep(std::time::Duration::from_secs(1));
+    }
+}
+
 fn p2p_traffic(home: &std::path::Path, watch: bool, json: bool) -> Result<()> {
     let sf = service::read_service_file(home).ok_or_else(|| {
         anyhow!("the background service is not running; traffic is counted by the service")

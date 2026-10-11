@@ -592,7 +592,21 @@ pub(crate) fn is_object(path: &str, status: u16) -> bool {
     status == 200 && path.starts_with("/p2p/object/")
 }
 
+/// Set when another device of the vault said it has published something
+/// new (`/p2p/changed`): the service then syncs at once instead of at its
+/// next interval.
+static CHANGE_HEARD: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Whether a peer announced a change since the last call.
+pub fn take_change_heard() -> bool {
+    CHANGE_HEARD.swap(false, std::sync::atomic::Ordering::SeqCst)
+}
+
 fn answer(snap: &Snapshot, path: &str) -> (u16, Vec<u8>) {
+    if path == "/p2p/changed" {
+        CHANGE_HEARD.store(true, std::sync::atomic::Ordering::SeqCst);
+        return (200, b"ok".to_vec());
+    }
     if path == "/p2p/info" {
         let body = serde_json::json!({
             "device": snap.device_id.to_string(),
@@ -1402,6 +1416,17 @@ impl Peers {
             }
         }
         None
+    }
+
+    /// Tell every peer that this device published something new (a folder,
+    /// changed files), so that it syncs now. Best effort: a peer that does
+    /// not answer finds the change at its next interval anyway.
+    pub fn notify_changed(&self) {
+        let path = "/p2p/changed";
+        for p in self.ordered() {
+            let auth = auth_header(&self.key, &self.me, path);
+            let _ = self.fetch(&p, path, &auth);
+        }
     }
 
     /// Which peers answer right now, and over which path.

@@ -247,7 +247,11 @@ fn relayed_fetch_through_a_reachable_device() {
     // behind a symmetric NAT), so the only way is B's registration with R.
     r.set_peers(Some(peers_r.clone()));
     let rep = r.pull("docs").unwrap();
-    assert!(rep.files_unavailable.is_empty(), "{:?}", rep.files_unavailable);
+    assert!(
+        rep.files_unavailable.is_empty(),
+        "{:?}",
+        rep.files_unavailable
+    );
     assert!(rep.chunks_from_peers >= 2);
     assert_eq!(fs::read(lab.dir("r").join("big.bin")).unwrap(), big);
     let st = peers_r.status();

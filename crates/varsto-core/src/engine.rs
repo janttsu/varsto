@@ -103,6 +103,10 @@ struct FolderState {
     /// Content hashes whose thumbnail this device has generated and stored.
     #[serde(default)]
     thumbs_done: BTreeSet<String>,
+    /// 2 once videos marked done by older versions (which gave up when
+    /// ffmpeg was not found) were let go, so that they are tried again.
+    #[serde(default)]
+    thumbs_rev: u32,
     /// Varsto's own "last accessed" record per path (seconds since the Unix
     /// epoch): updated when a file is fetched, opened or read through Varsto
     /// (interface, CLI, MCP) and from the filesystem access time seen at scan.
@@ -531,9 +535,7 @@ impl Engine {
     /// vault key (hex) that other devices need to join. The vault key is shown
     /// once and never stored in clear text.
     pub fn init(home: &Path, device_name: &str, passphrase: &str) -> Result<(Engine, String)> {
-        if home.join("vault.json").exists() {
-            bail!("{} already holds a vault", home.display());
-        }
+        ensure_no_vault(home)?;
         fs::create_dir_all(home)?;
         let keys = Keys {
             master: SecretKey::random(),
@@ -597,9 +599,7 @@ impl Engine {
         secret: Option<String>,
         signer: Option<crypto::SigningKey>,
     ) -> Result<Engine> {
-        if home.join("vault.json").exists() {
-            bail!("{} already holds a vault", home.display());
-        }
+        ensure_no_vault(home)?;
         let backend = storage.open_with(&|_| secret.clone())?;
         let meta_bytes = backend.get(VaultMeta::STORAGE_KEY)?.ok_or_else(|| {
             anyhow!(
@@ -859,9 +859,7 @@ impl Engine {
         storage: StorageSpec,
         secret: Option<String>,
     ) -> Result<Engine> {
-        if home.join("vault.json").exists() {
-            bail!("{} already holds a vault", home.display());
-        }
+        ensure_no_vault(home)?;
         let backend = storage.open_with(&|_| secret.clone())?;
         let meta: VaultMeta = serde_json::from_slice(
             &backend
@@ -2564,7 +2562,10 @@ impl Engine {
                 }
                 if encrypted_here {
                     // Kept encrypted here: the objects come from the block cache.
+                    let progress =
+                        crate::progress::Transfer::upload(&rec.name, &file.path, file.size);
                     for expected in &file.chunks {
+                        progress.advance(expected.size);
                         let targets: Vec<String> = missing_on(expected)
                             .into_iter()
                             .filter(|t| !report.storages_unavailable.iter().any(|u| u == t))
@@ -2591,10 +2592,12 @@ impl Engine {
                 let Ok(handle) = fs::File::open(&disk) else {
                     continue;
                 };
+                let progress = crate::progress::Transfer::upload(&rec.name, &file.path, file.size);
                 for (index, chunk) in
                     Chunker::new(std::io::BufReader::new(handle), self.chunker)?.enumerate()
                 {
                     let chunk = chunk?;
+                    progress.advance(chunk.len() as u64);
                     let chunk_id = ChunkId::from_bytes(&crypto::keyed_hash(&fk.hash, &chunk));
                     let Some(expected) = file.chunks.get(index) else {
                         break;
@@ -2647,6 +2650,19 @@ impl Engine {
         root: &Path,
         state: &mut FolderState,
     ) -> Result<u64> {
+        if state.thumbs_rev < 2 {
+            let videos: Vec<String> = state
+                .files
+                .values()
+                .filter(|f| thumbs::is_video(&f.path))
+                .map(|f| f.content_hash.clone())
+                .collect();
+            for h in videos {
+                state.thumbs_done.remove(&h);
+            }
+            state.thumbs_rev = 2;
+        }
+        let videos_here = thumbs::video_tool_available();
         let candidates: Vec<(String, String)> = state
             .files
             .values()
@@ -2670,6 +2686,12 @@ impl Engine {
         let encrypted_here = self.mount_is_encrypted(&rec.folder_id);
         let mut made = 0u64;
         for (path, hash) in candidates {
+            // Without a tool for videos (a phone, a computer without ffmpeg)
+            // they wait: the app around the service may hand in a frame
+            // (`store_thumbnail`), or ffmpeg is installed later.
+            if thumbs::is_video(&path) && !encrypted_here && !videos_here {
+                continue;
+            }
             let key = thumbs::storage_key(&rec.folder_id, &hash);
             if storages
                 .iter()
@@ -2708,6 +2730,62 @@ impl Engine {
             made += 1;
         }
         Ok(made)
+    }
+
+    /// Videos in plain folders on this device that have no thumbnail yet,
+    /// for an app that makes frames itself (a phone): (folder, path, file).
+    pub fn videos_without_thumbnails(
+        &self,
+        limit: usize,
+    ) -> Result<Vec<(String, String, PathBuf)>> {
+        let mut out = Vec::new();
+        for (rec, root) in self.folders() {
+            let Some(root) = root else { continue };
+            if self.mount_is_encrypted(&rec.folder_id) {
+                continue;
+            }
+            let state = self.load_state(&rec.folder_id)?;
+            for f in state.files.values().filter(|f| {
+                !f.deleted
+                    && thumbs::is_video(&f.path)
+                    && !f.content_hash.is_empty()
+                    && !state.thumbs_done.contains(&f.content_hash)
+            }) {
+                let disk = root.join(&f.path);
+                if disk.is_file() {
+                    out.push((rec.name.clone(), f.path.clone(), disk));
+                    if out.len() >= limit {
+                        return Ok(out);
+                    }
+                }
+            }
+        }
+        Ok(out)
+    }
+
+    /// Store a thumbnail made outside the engine (a video frame from the
+    /// phone's media framework) for the current version of a file: it is
+    /// decoded and encoded again, encrypted and written like any other.
+    pub fn store_thumbnail(&mut self, folder: &str, path: &str, picture: &[u8]) -> Result<()> {
+        let (rec, _) = self.resolve_folder(folder)?;
+        let mut state = self.load_state(&rec.folder_id)?;
+        let file = state
+            .files
+            .get(path)
+            .filter(|f| !f.deleted && !f.content_hash.is_empty())
+            .ok_or_else(|| anyhow!("{path} is not a file of {folder}"))?;
+        let hash = file.content_hash.clone();
+        let jpeg = thumbs::normalize(picture).ok_or_else(|| anyhow!("not a picture"))?;
+        let fk = self.folder_keys(&rec)?;
+        let blob = thumbs::seal(&jpeg, &self.vault.vault_id, &rec.folder_id, &hash, &fk.meta)?;
+        let key = thumbs::storage_key(&rec.folder_id, &hash);
+        for (spec, backend) in self.metadata_storages(false)? {
+            if !spec.is_carrier() {
+                backend.put_if_absent(&key, &blob)?;
+            }
+        }
+        state.thumbs_done.insert(hash);
+        self.save_state(&rec.folder_id, &state)
     }
 
     /// Decrypted thumbnail of a file, fetched from the first storage that has it.
@@ -3894,6 +3972,14 @@ impl Engine {
     }
 
     /// Peers to try before storages (None disables).
+    /// Tell the other devices over peer-to-peer that something new was
+    /// published; on a thread of its own, so a slow peer holds nothing up.
+    pub fn notify_peers_changed(&self) {
+        if let Some(peers) = self.peers.clone() {
+            std::thread::spawn(move || peers.notify_changed());
+        }
+    }
+
     pub fn set_peers(&mut self, peers: Option<std::sync::Arc<crate::p2p::Peers>>) {
         self.peers = peers;
     }
@@ -5106,6 +5192,28 @@ impl Engine {
 /// exported copies) so it can start over. The user's files in attached
 /// folders are left untouched; the storages are not changed either, so other
 /// devices keep working.
+/// Refuse to set up a vault where one already is, saying which one and
+/// how to start over.
+pub fn ensure_no_vault(home: &Path) -> Result<()> {
+    let p = home.join("vault.json");
+    if !p.exists() {
+        return Ok(());
+    }
+    let what = util::read_json::<LocalVault>(&p)
+        .map(|v| {
+            format!(
+                "vault {} as device \"{}\"",
+                v.vault_id.short(),
+                v.device_name
+            )
+        })
+        .unwrap_or_else(|_| "a vault".to_string());
+    bail!(
+        "this device already holds {what} ({}). To start over here, run `varsto reset --yes` first: it removes this device's keys and settings; files in folders stay, and the vault's other devices and storages are not touched",
+        home.display()
+    )
+}
+
 pub fn reset_device(home: &Path) -> Result<Vec<String>> {
     let mut removed = Vec::new();
     for name in [

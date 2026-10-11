@@ -198,10 +198,11 @@
         <div class="service-body">
           <div class="service-head"><span class="card-title">Background service</span><span id="svc-pill" class="pill grey">unknown</span></div>
           <div id="svc-text" class="muted"></div>
+          <div id="update-note" class="small hidden"></div>
         </div>
         <div class="service-actions">
           <button id="pause" type="button" class="secondary">Pause</button>
-          <button id="update" type="button" class="secondary">Check for updates</button>
+          <button id="update" type="button" class="hidden">Install update</button>
         </div>
       </div>
 
@@ -218,12 +219,6 @@
       <div class="card">
         <div class="card-head">
           <h2 class="card-title">Folders</h2>
-          <div class="toolbar">
-            <label class="inline muted"><input id="verify" type="checkbox"> re-hash every object</label>
-            <button id="fsck" type="button" class="secondary" title="Compare the ledger with the storages">Check storage</button>
-            <button id="refresh" type="button" class="secondary icon-btn" title="Refresh"><svg class="icon"><use href="#i-sync"/></svg><span class="sr-only">Refresh</span></button>
-            <button id="sync" type="button" title="Sync every attached folder now"><svg class="icon"><use href="#i-sync"/></svg>Sync all</button>
-          </div>
         </div>
         <div class="table-wrap">
         <table id="folders"><thead><tr><th>Folder</th><th class="num">Files</th><th class="num">Size</th><th class="num">Chunks</th><th class="num">Without storage copy</th><th class="num">Verified elsewhere</th><th>Policy</th><th></th></tr></thead><tbody></tbody></table>
@@ -276,7 +271,7 @@
 
       <div class="card">
         <h2 class="card-title"><svg class="icon accent"><use href="#i-activity"/></svg>Activity</h2>
-        <pre id="log" class="log"></pre>
+        <ul id="log" class="activity-list" aria-live="polite"></ul>
       </div>
     </div>
 
@@ -297,13 +292,12 @@
               <select id="filesfolder" class="crumb-select" title="Choose a folder"></select>
               <span class="toolbar-spacer"></span>
               <button id="filesadd" type="button" class="secondary icon-btn" title="Add or attach a folder"><svg class="icon"><use href="#i-plus"/></svg><span class="sr-only">Add folder</span></button>
-              <button id="filesload" type="button" class="secondary icon-btn" title="Refresh the file list"><svg class="icon"><use href="#i-sync"/></svg><span class="sr-only">Refresh</span></button>
+
             </div>
             <div class="files-sub muted small" id="files-sub"></div>
             <div class="files-where small hidden" id="files-where"></div>
           </div>
           <div class="toolbar files-toolbar">
-            <button id="files-sync" type="button" title="Sync this folder now"><svg class="icon"><use href="#i-sync"/></svg>Sync</button>
             <button id="files-upload" type="button" class="secondary" title="Add files from this device to the folder"><svg class="icon"><use href="#i-upload"/></svg>Add files</button>
             <button id="files-mkdir" type="button" class="secondary" title="Create a subfolder"><svg class="icon"><use href="#i-newfolder"/></svg>New folder</button>
             <button id="files-download" type="button" class="secondary" title="Download the selected file to this device" disabled><svg class="icon"><use href="#i-download"/></svg>Download</button>
@@ -316,6 +310,14 @@
           <div id="files-progress" class="status-line progress hidden" role="status"></div>
           <div class="table-wrap">
           <table id="files"><thead><tr><th>Name</th><th class="num">Size</th><th>State</th><th>Last used</th><th></th></tr></thead><tbody></tbody></table>
+          </div>
+          <div id="selbar" class="selbar hidden" role="toolbar" aria-label="Selected files">
+            <button id="sel-cancel" type="button" class="secondary icon-btn" title="Cancel selection"><svg class="icon"><use href="#i-close"/></svg><span class="sr-only">Cancel</span></button>
+            <span id="sel-count" class="sel-count"></span>
+            <span class="toolbar-spacer"></span>
+            <button id="sel-all" type="button" class="secondary">All</button>
+            <button id="sel-download" type="button" class="secondary"><svg class="icon"><use href="#i-download"/></svg>Download</button>
+            <button id="sel-free" type="button" class="secondary"><svg class="icon"><use href="#i-free"/></svg>Free</button>
           </div>
           <div id="files-empty" class="empty-state"><div class="empty-icon"><svg class="icon"><use href="#i-folders"/></svg></div><p class="empty-title">Choose a folder</p><p class="muted">Pick a folder above, or add a new one.</p></div>
         </div>

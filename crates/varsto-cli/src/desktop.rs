@@ -136,7 +136,11 @@ fn handle_unlocked(fixed: &Fixed, request: Request) -> Result<Option<Request>> {
             } else if path == "/api/progress" {
                 // The download running now, answered while it holds the engine.
                 let p = serde_json::to_value(varsto_core::progress::current())?;
-                request.respond(json_response(200, &json!({ "download": p })))?;
+                let all = serde_json::to_value(varsto_core::progress::all())?;
+                request.respond(json_response(
+                    200,
+                    &json!({ "download": p, "transfers": all }),
+                ))?;
             } else {
                 let report = serde_json::to_value(fixed.traffic.report())?;
                 request.respond(json_response(200, &report))?;
@@ -681,6 +685,36 @@ fn api(st: &mut State, method: Method, path: &str, query: &str, input: &Value) -
             }
             Ok(json!({"ok": true, "updated": c.available, "message": message}))
         }
+        // Phones make video frames with their own media framework.
+        (Method::Get, "/api/thumbnails/wanted") => {
+            let e = st
+                .engine
+                .as_ref()
+                .ok_or_else(|| anyhow!("vault is locked"))?;
+            let list: Vec<Value> = e
+                .videos_without_thumbnails(20)?
+                .into_iter()
+                .map(|(folder, path, disk)| json!({"folder": folder, "path": path, "file": disk}))
+                .collect();
+            Ok(json!({ "videos": list }))
+        }
+        (Method::Post, "/api/thumbnail") => {
+            use base64::Engine as _;
+            let picture = base64::engine::general_purpose::STANDARD
+                .decode(s(input, "jpeg")?)
+                .map_err(|_| anyhow!("jpeg is not base64"))?;
+            let folder = s(input, "folder")?;
+            let path = s(input, "path")?;
+            st.engine
+                .as_mut()
+                .ok_or_else(|| anyhow!("vault is locked"))?
+                .store_thumbnail(&folder, &path, &picture)?;
+            Ok(json!({"ok": true}))
+        }
+        (Method::Post, "/api/service/restart") => {
+            st.service.restart_requested = true;
+            Ok(json!({"ok": true}))
+        }
         (Method::Post, "/api/service/pause") => {
             st.service.paused = input
                 .get("paused")
@@ -1085,7 +1119,9 @@ fn api_unlocked(
                 }
             }
             service.request_sync();
-            Ok(json!({"ok": true}))
+            // The sync this starts copies everything to the new storage and
+            // holds the service meanwhile: the page shows this answer at once.
+            Ok(json!({"ok": true, "status": engine.status()?}))
         }
         (Method::Post, "/api/folder") => {
             let name = s(input, "name")?;
@@ -1307,8 +1343,10 @@ fn api_unlocked(
         })),
         (Method::Post, "/api/p2p") => {
             let mut c = engine.p2p_config();
+            let was = (c.enabled, c.port, c.public_addrs.clone(), c.stun.clone());
             if let Some(en) = input.get("enabled").and_then(|v| v.as_bool()) {
                 c.enabled = en;
+                c.user_disabled = !en;
             }
             if let Some(p) = input.get("port").and_then(|v| v.as_u64()) {
                 c.port = p as u16;
@@ -1321,11 +1359,19 @@ fn api_unlocked(
                 c.stun = stun.split(',').map(|a| a.trim().to_string()).filter(|a| !a.is_empty()).collect();
             }
             let enabled = c.enabled;
+            let same_settings = was.1 == c.port && was.2 == c.public_addrs && was.3 == c.stun;
             engine.set_p2p_config(c)?;
             if enabled {
-                engine.p2p_identity()?; // the certificate exists before the service restarts
+                engine.p2p_identity()?;
             }
-            Ok(json!({"ok": true, "note": "restart the background service to apply"}))
+            // Turning it on or off takes effect within a second; a new
+            // port, address or STUN list when the service starts again.
+            let note = if same_settings || !was.0 || !enabled {
+                if enabled { "peer-to-peer is on" } else { "peer-to-peer is off" }
+            } else {
+                "saved; the new port, addresses or STUN servers apply when the background service starts again"
+            };
+            Ok(json!({"ok": true, "applied": same_settings || !was.0 || !enabled, "note": note}))
         }
         (Method::Get, "/api/policy") => Ok(json!({
             "policies": engine.folders().into_iter().map(|(r, _)| json!({"folder": r.name, "policy": r.policy, "text": r.policy.as_ref().map(|p| p.describe())})).collect::<Vec<_>>(),

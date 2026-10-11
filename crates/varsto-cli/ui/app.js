@@ -8,7 +8,22 @@
   })();
   var $ = function (id) { return document.getElementById(id); };
   var logEl = $("log");
-  function log(msg) { var t = new Date().toLocaleTimeString(); logEl.textContent = "[" + t + "] " + msg + "\n" + logEl.textContent; }
+  // Activity: newest first, one row per event with its time and a mark for
+  // how it went (failed, finished or under way); at most 200 rows are kept.
+  function log(msg) {
+    msg = String(msg);
+    var kind = /\b(error|failed|refused|could not|cannot|FORKED|corrupt)\b/i.test(msg) ? "bad" : /\b(started|checking|installing|restarting|waiting|shutting down)\b/i.test(msg) ? "run" : "ok";
+    var li = document.createElement("li"); li.className = "activity-item " + kind;
+    var dot = document.createElement("span"); dot.className = "activity-dot"; dot.setAttribute("aria-hidden", "true");
+    var body = document.createElement("div"); body.className = "activity-body";
+    var m = /^([^:]{1,40}): (.+)$/.exec(msg);
+    var head = document.createElement("div"); head.className = "activity-text";
+    if (m) { var b = document.createElement("strong"); b.textContent = m[1]; head.appendChild(b); head.appendChild(document.createTextNode(" " + m[2])); } else { head.textContent = msg; }
+    var time = document.createElement("time"); time.className = "activity-time"; var now = new Date(); time.dateTime = now.toISOString(); time.textContent = now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+    body.appendChild(head); li.appendChild(dot); li.appendChild(body); li.appendChild(time);
+    logEl.insertBefore(li, logEl.firstChild);
+    while (logEl.children.length > 200) { logEl.removeChild(logEl.lastChild); }
+  }
   // Feedback for every action: the button that started a request shows a
   // spinner until it settles (and "Still working…" after a while), and a
   // thin bar at the top shows that something runs. Background polls (GET
@@ -57,7 +72,16 @@
       .then(function (r) { return r.json().then(function (j) { if (!r.ok) { throw new Error(j.error || r.statusText); } return j; }); })
       .then(function (j) { done(); return j; }, function (e) { done(); throw e; });
   }
-  function show(section) { ["setup", "unlock", "app"].forEach(function (id) { $(id).classList.toggle("hidden", id !== section); }); $("lock").classList.toggle("hidden", section !== "app"); document.body.dataset.view = section; if (section !== "app") { $("pagetitle").textContent = section === "setup" ? "Welcome" : "Locked"; } else { $("pagetitle").textContent = pageTitle(currentPage); } trafficWatch(); }
+  // Without a vault (first start, after a reset or a wipe) nothing of the
+  // old one may stay on screen: the folder tree in the sidebar, the lists.
+  function clearVaultViews() {
+    ["foldertree", "devicelist", "settingsdevices", "sharedlist", "policylist", "attachlist", "storagelist", "org-users", "org-log"].forEach(function (id) { var e = $(id); if (e) { e.innerHTML = ""; } });
+    var t = $("folders"); if (t && t.querySelector("tbody")) { t.querySelector("tbody").innerHTML = ""; }
+    $("who").textContent = "";
+    document.querySelectorAll("[data-org-only]").forEach(function (b) { b.classList.add("hidden"); });
+    lastStatus = null;
+  }
+  function show(section) { if (section === "setup") { clearVaultViews(); } ["setup", "unlock", "app"].forEach(function (id) { $(id).classList.toggle("hidden", id !== section); }); $("lock").classList.toggle("hidden", section !== "app"); document.body.dataset.view = section; if (section !== "app") { $("pagetitle").textContent = section === "setup" ? "Welcome" : "Locked"; } else { $("pagetitle").textContent = pageTitle(currentPage); } trafficWatch(); }
   function fmtBytes(n) { var u = ["B", "KiB", "MiB", "GiB", "TiB"]; var i = 0; while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; } return n.toFixed(i ? 1 : 0) + " " + u[i]; }
   function fmtDate(t) { return t ? new Date(t * 1000).toLocaleDateString() : ""; }
   function formData(form) { var o = {}; new FormData(form).forEach(function (v, k) { o[k] = v; }); form.querySelectorAll("input[type=checkbox]").forEach(function (c) { o[c.name] = c.checked; }); return o; }
@@ -673,8 +697,10 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   function stateClass(state) { return state === "ok" ? "ok" : state === "at_risk" ? "risk" : state === "violated" ? "bad" : "grey"; }
   function folderByName(name) { if (!lastStatus) { return null; } for (var i = 0; i < lastStatus.folders.length; i++) { if (lastStatus.folders[i].name === name) { return lastStatus.folders[i]; } } return null; }
 
-  function refreshStatus() {
-    return api("GET", "/api/status").then(function (s) {
+  // `known`: a status the last request already returned (no second round trip,
+  // which would wait while the service syncs).
+  function refreshStatus(known) {
+    return (known && known.folders ? Promise.resolve(known) : api("GET", "/api/status")).then(function (s) {
       lastStatus = s;
       $("who").textContent = s.device_name + " · vault " + s.vault_id.slice(0, 8) + " · " + s.ledger_batches + " ledger batches";
       var tb = $("folders").querySelector("tbody"); tb.innerHTML = "";
@@ -703,7 +729,6 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
         var pc = document.createElement("td"); pc.dataset.policyFor = f.name; pc.appendChild(pill("grey", f.policy ? "Unchecked" : "No policy")); if (f.policy) { var pt = el("span", "policy-text", f.policy); pt.title = f.policy; pc.appendChild(pt); } tr.appendChild(pc);
         var act = document.createElement("td");
         var menu = rowMenu(act, "folder:" + f.name);
-        if (f.path) { var b = document.createElement("button"); b.className = "secondary"; b.textContent = "Sync"; b.onclick = function () { runSync(f.name); }; act.appendChild(b); }
         if (!s.member) { var sh = document.createElement("button"); sh.className = "secondary"; sh.textContent = f.shared ? "Token" : "Share"; sh.onclick = function () { shareFolder(f); }; menu.appendChild(sh); }
         if (!s.member) { var pb = document.createElement("button"); pb.className = "secondary"; pb.textContent = "Policy"; pb.onclick = function () { openPolicy(f); }; act.appendChild(pb); }
         if (!s.member) { var rmb = document.createElement("button"); rmb.className = "secondary"; rmb.textContent = "Remove"; rmb.onclick = function () { removeFolder(f); }; menu.appendChild(rmb); }
@@ -1141,7 +1166,14 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   };
 
   function fmtTime(t) { return t ? new Date(t * 1000).toLocaleTimeString() : "never"; }
+  // What the service did shows by itself: after each sync the overview and
+  // the open file list are read again (no refresh button).
+  var lastSyncs = null;
   function renderService(sv) {
+    if (lastSyncs !== null && sv.syncs !== lastSyncs && busyCount === 0 && lastStatus) {
+      refreshStatus().then(function () { if (currentPage === "files") { loadFiles(); } }).catch(function () {});
+    }
+    lastSyncs = sv.syncs;
     var state = sv.running ? (sv.paused ? "paused" : "running") : "stopped";
     var txt = sv.running ? "Watching " + sv.watching + " folder(s) · last sync " + fmtTime(sv.last_sync_utc) + (sv.last_result ? " (" + sv.last_result + ")" : "") + (sv.last_error ? " · last error: " + sv.last_error : "") + " · next in " + (sv.next_sync_utc ? Math.max(0, Math.round(sv.next_sync_utc - Date.now() / 1000)) + " s" : "-") : "The background service is not running; nothing syncs until it is started.";
     $("svc-text").textContent = txt;
@@ -1155,18 +1187,30 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   setInterval(pollService, 5000);
   window.addEventListener("focus", pollService);
   $("pause").onclick = function () { api("POST", "/api/service/pause", { paused: $("pause").dataset.paused !== "1" }).then(renderService).catch(function (e) { log("error: " + e.message); }); };
-  $("update").onclick = function () {
-    busy(true); log("checking for updates");
+  // Updates: checked by themselves (at start and every six hours); the
+  // button and note appear only when a newer version exists.
+  var updateInfo = null;
+  function checkUpdate() {
+    if (!token) { return; }
     api("GET", "/api/update/check").then(function (c) {
-      if (!c.available && c.newer) {
-        busy(false);
-        return confirmBox(c.latest + " is out; you have " + c.current + ". This app is updated by downloading the new package (" + c.download_page + "); the background service cannot replace it by itself.", { title: "Update available", ok: "Open the download page" }).then(function (yes) { if (yes) { window.open(c.download_page, "_blank", "noopener"); } });
-      }
-      if (!c.available) { log("up to date: " + c.current + " (latest " + c.latest + ")"); busy(false); return; }
-      return confirmBox("Update " + c.current + " to " + c.latest + " now? The service restarts afterwards.", { title: "Update Varsto", ok: "Update" }).then(function (yes) {
-        if (!yes) { busy(false); return; }
-        return api("POST", "/api/update", {}).then(function (r) { log(r.message); if (r.updated) { log("the service is restarting; reopen Varsto in a few seconds"); } busy(false); });
-      });
+      updateInfo = c;
+      var note = $("update-note"), btn = $("update");
+      if (!c.newer) { note.classList.add("hidden"); btn.classList.add("hidden"); return; }
+      note.textContent = "Varsto " + c.latest + " is available (you have " + c.current + ").";
+      note.classList.remove("hidden");
+      btn.textContent = c.available ? "Install " + c.latest : "Download " + c.latest;
+      btn.classList.remove("hidden");
+    }).catch(function () {});
+  }
+  setTimeout(checkUpdate, 3000);
+  setInterval(checkUpdate, 6 * 3600 * 1000);
+  $("update").onclick = function () {
+    var c = updateInfo; if (!c) { return; }
+    if (!c.available) { window.open(c.download_page, "_blank", "noopener"); return; }
+    confirmBox("Install Varsto " + c.latest + " now? Varsto restarts afterwards.", { title: "Update Varsto", ok: "Install" }).then(function (yes) {
+      if (!yes) { return; }
+      busy(true); log("installing " + c.latest);
+      return api("POST", "/api/update", {}).then(function (r) { log(r.message); if (r.updated) { log("the service is restarting; this page reconnects in a few seconds"); $("update").classList.add("hidden"); } busy(false); });
     }).catch(function (e) { log("update failed: " + e.message); busy(false); });
   };
   $("quit").onclick = function () {
@@ -1184,18 +1228,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     }).catch(function (e) { log("sync failed: " + e.message); }).then(function () { busy(false); return refreshStatus().then(function () { if (currentPage === "files") { loadFiles(); } }); });
   }
 
-  $("sync").onclick = function () { runSync(null); };
-  $("refresh").onclick = refreshStatus;
   $("lock").onclick = function () { api("POST", "/api/lock").then(function (r) { if (r.exports_removed) { log("removed " + r.exports_removed + " decrypted cop" + (r.exports_removed === 1 ? "y" : "ies") + " made for other apps"); } return refreshState(); }).catch(function (e) { log("error: " + e.message); }); };
-  $("fsck").onclick = function () {
-    busy(true); log("fsck started");
-    api("POST", "/api/fsck", { verify: $("verify").checked, repair: true }).then(function (r) {
-      log("fsck: " + r.chunks_referenced + " referenced, " + r.chunks_with_storage_copy + " with storage copy, " + r.chunks_verified_elsewhere + " verified elsewhere, " + r.chunks_claimed_only + " claimed only, missing " + r.chunks_missing.length + ", claims without object " + r.claims_without_object + ", unreferenced objects " + r.objects_unreferenced + ", verified now " + r.objects_verified_now + ", corrupt " + r.objects_corrupt.length + (r.forked_devices.length ? ", FORKED " + r.forked_devices.join(",") : ""));
-      if (r.repair) { log("repair: " + r.repair.repaired.length + " of " + r.repair.found + " damaged copies repaired" + (r.repair.unrepairable.length ? ", " + r.repair.unrepairable.length + " could not be repaired: " + r.repair.unrepairable.map(function (u) { return u.reason; }).filter(function (x, i, a) { return a.indexOf(x) === i; }).join("; ") : "")); }
-      loadRepair();
-    }).catch(function (e) { log("fsck failed: " + e.message); }).then(function () { busy(false); return refreshStatus(); });
-  };
-
   // Files view: folder header, tree selection, rows, details pane and toolbar. On a phone the
   // card has two screens: the folder list and one folder (#filesmain[data-screen]).
   function setScreen(sc) { $("filesmain").dataset.screen = sc; }
@@ -1220,7 +1253,6 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     // encrypted on a phone the synced files are kept as encrypted blocks.
     $("selectivetoggle").checked = !!(f && f.selective);
     $("files-share").disabled = !f || !!(lastStatus && lastStatus.member);
-    $("files-sync").disabled = !f;
     $("files-upload").disabled = !f;
     $("files-mkdir").disabled = !f;
     updateToolbar();
@@ -1375,7 +1407,44 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   }
   function freeFile(folder, path) { api("POST", "/api/free", { folder: folder, path: path }).then(function () { log(path + " is now a placeholder"); }).catch(function (e) { log("free failed: " + e.message); }).then(function () { loadFiles(); refreshStatus(); }); }
   function freeFolder(folder) { busy(true); api("POST", "/api/free", { folder: folder }).then(function (r) { log(folder + ": removed " + r.freed + " local cop" + (r.freed === 1 ? "y" : "ies") + (r.kept ? ", kept " + r.kept + " not yet stored elsewhere" : "")); }).catch(function (e) { log("free failed: " + e.message); }).then(function () { busy(false); loadFiles(); refreshStatus(); }); }
-  $("files-sync").onclick = function () { var f = $("filesfolder").value; if (f) { runSync(f); } };
+  // Phones: a compact list like Resilio Sync. A tap opens a file; a long
+  // press starts selecting, then taps add or remove files, and the bar at
+  // the bottom downloads or frees all of them.
+  var multi = { on: false, sel: {}, rows: [] };
+  function selPaths() { return Object.keys(multi.sel); }
+  function renderSel() {
+    var n = selPaths().length;
+    if (multi.on && n === 0) { multi.on = false; }
+    $("selbar").classList.toggle("hidden", !multi.on);
+    $("files").classList.toggle("selecting", multi.on);
+    $("sel-count").textContent = n + " selected";
+    document.querySelectorAll("#files tbody tr[data-path]").forEach(function (tr) { var on = !!multi.sel[tr.dataset.path]; tr.classList.toggle("picked", on); tr.setAttribute("aria-selected", on ? "true" : "false"); });
+    var files = selPaths().map(function (p) { return multi.sel[p]; });
+    $("sel-download").disabled = !files.some(function (f) { return f.state === "placeholder" || f.state === "missing"; });
+    $("sel-free").disabled = !files.some(function (f) { return f.state === "local"; });
+  }
+  function togglePick(f) { if (multi.sel[f.path]) { delete multi.sel[f.path]; } else { multi.sel[f.path] = f; } renderSel(); }
+  function endSelect() { multi.on = false; multi.sel = {}; renderSel(); }
+  $("sel-cancel").onclick = endSelect;
+  $("sel-all").onclick = function () { multi.rows.forEach(function (f) { multi.sel[f.path] = f; }); renderSel(); };
+  function eachSelected(want, fn, done) {
+    var folder = $("filesfolder").value; var list = selPaths().map(function (p) { return multi.sel[p]; }).filter(want);
+    endSelect(); busy(true);
+    var chain = Promise.resolve();
+    list.forEach(function (f) { chain = chain.then(function () { return fn(folder, f).catch(function (e) { log(f.path + ": " + e.message); }); }); });
+    return chain.then(function () { busy(false); log(done(list.length)); loadFiles(); refreshStatus(); });
+  }
+  $("sel-download").onclick = function () { eachSelected(function (f) { return f.state === "placeholder" || f.state === "missing"; }, function (folder, f) { return api("POST", "/api/fetch", { folder: folder, path: f.path }); }, function (n) { return "downloaded " + n + " file" + (n === 1 ? "" : "s"); }); };
+  $("sel-free").onclick = function () { eachSelected(function (f) { return f.state === "local"; }, function (folder, f) { return api("POST", "/api/free", { folder: folder, path: f.path }); }, function (n) { return "freed " + n + " file" + (n === 1 ? "" : "s") + " on this device"; }); };
+  // Long press: about half a second without moving the finger.
+  function onLongPress(node, fn) {
+    var timer = null, fired = false, x = 0, y = 0;
+    node.addEventListener("touchstart", function (e) { fired = false; var t = e.touches[0]; x = t.clientX; y = t.clientY; timer = setTimeout(function () { fired = true; timer = null; if (navigator.vibrate) { navigator.vibrate(15); } fn(); }, 480); }, { passive: true });
+    node.addEventListener("touchmove", function (e) { var t = e.touches[0]; if (timer && (Math.abs(t.clientX - x) > 10 || Math.abs(t.clientY - y) > 10)) { clearTimeout(timer); timer = null; } }, { passive: true });
+    node.addEventListener("touchend", function (e) { if (timer) { clearTimeout(timer); timer = null; } if (fired) { e.preventDefault(); } });
+    node.addEventListener("contextmenu", function (e) { e.preventDefault(); if (!fired) { fn(); } });
+    return function () { return fired; };
+  }
   $("files-download").onclick = function () { if (selectedFile) { fetchFile($("filesfolder").value, selectedFile.path); } };
   $("files-free").onclick = function () { var folder = $("filesfolder").value; if (selectedFile) { freeFile(folder, selectedFile.path); } else if (folder) { freeFolder(folder); } };
   $("files-share").onclick = function () { var f = folderByName($("filesfolder").value); if (f) { shareFolder(f); } };
@@ -1386,10 +1455,40 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   var newDirs = {};
   $("files-upload").onclick = function () { uploadPrefix = ""; $("fileinput").click(); };
   $("fileinput").onchange = function () { var files = Array.prototype.slice.call($("fileinput").files || []); $("fileinput").value = ""; uploadFiles($("filesfolder").value, files, uploadPrefix); };
+  // Adding files: a line per file ("Adding 2 of 6: name") and a bar for that
+  // file. The bar first follows the file going to the service on this device,
+  // then its blocks going to the storages (`/api/progress`, answered while
+  // the upload holds the vault).
   function uploadFiles(folder, files, prefix) {
     if (!folder || !files.length) { return; }
-    var prog = $("files-progress"); prog.classList.remove("hidden");
+    var prog = $("files-progress"); prog.classList.remove("hidden"); prog.textContent = "";
+    var line = el("div", "upload-line", ""); var bar = el("div", "upload-bar", ""); var fill = el("span", "", ""); bar.appendChild(fill);
+    var sub = el("div", "upload-sub muted small", "");
+    prog.appendChild(line); prog.appendChild(bar); prog.appendChild(sub);
+    function show(pct, text) { fill.style.width = Math.max(0, Math.min(100, pct)) + "%"; sub.textContent = text || ""; }
     var done = 0, failed = 0; busy(true);
+    function sendOne(f, rel) {
+      return new Promise(function (resolve, reject) {
+        var x = new XMLHttpRequest();
+        x.open("POST", "/api/upload?folder=" + enc(folder) + "&path=" + enc(rel));
+        x.setRequestHeader("X-Varsto-Token", token); x.setRequestHeader("Content-Type", "application/octet-stream");
+        var poll = null;
+        x.upload.onprogress = function (e) { if (e.lengthComputable) { show(e.loaded / e.total * 50, "Reading " + fmtBytes(e.loaded) + " of " + fmtBytes(e.total)); } };
+        x.upload.onload = function () {
+          show(50, "Encrypting and sending to the storages");
+          poll = setInterval(function () {
+            api("GET", "/api/progress").then(function (p) {
+              var t = (p.transfers || []).filter(function (t) { return t.kind === "upload" && t.folder === folder && t.path === rel; })[0];
+              if (t) { show(50 + t.percent / 2, "Sending to the storages: " + fmtBytes(t.done) + " of " + fmtBytes(t.total) + (t.bytes_per_sec ? ", " + fmtBytes(t.bytes_per_sec) + "/s" : "")); }
+            }).catch(function () {});
+          }, 700);
+        };
+        function end() { if (poll) { clearInterval(poll); } }
+        x.onload = function () { end(); var j = {}; try { j = JSON.parse(x.responseText); } catch (e) { /* not JSON */ } if (x.status >= 200 && x.status < 300) { resolve(j); } else { reject(new Error(j.error || x.statusText || ("HTTP " + x.status))); } };
+        x.onerror = function () { end(); reject(new Error("the connection to Varsto was lost")); };
+        x.send(f);
+      });
+    }
     function step(i) {
       if (i >= files.length) {
         prog.textContent = failed ? done + " of " + files.length + " files added to " + folder + "; " + failed + " failed" : files.length + " file" + (files.length === 1 ? "" : "s") + " added to " + folder + (prefix ? "/" + prefix : "");
@@ -1398,9 +1497,10 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
         return runSync(folder);
       }
       var f = files[i]; var rel = (prefix ? prefix + "/" : "") + f.name;
-      prog.textContent = "Adding " + (i + 1) + " of " + files.length + ": " + f.name + " (" + fmtBytes(f.size) + ")";
-      return fetch("/api/upload?folder=" + enc(folder) + "&path=" + enc(rel), { method: "POST", headers: { "X-Varsto-Token": token, "Content-Type": "application/octet-stream" }, body: f })
-        .then(function (r) { return r.json().then(function (j) { if (!r.ok) { throw new Error(j.error || r.statusText); } done++; log("added " + rel + " (" + fmtBytes(f.size) + ") to " + folder + "; " + j.push.chunks_uploaded + " chunks pushed"); }); })
+      line.textContent = "Adding " + (i + 1) + " of " + files.length + ": " + f.name + " (" + fmtBytes(f.size) + ")";
+      show(0, "");
+      return sendOne(f, rel)
+        .then(function (j) { done++; show(100, ""); log("added " + rel + " (" + fmtBytes(f.size) + ") to " + folder + (j.push ? "; " + j.push.chunks_uploaded + " chunks pushed" : "")); })
         .catch(function (e) { failed++; log("adding " + rel + " failed: " + e.message); })
         .then(function () { return step(i + 1); });
     }
@@ -1441,8 +1541,36 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
       });
       var reselect = null;
       var viewable = isMobile() && encryptedHere(folder) ? rows.filter(function (r) { return r.state !== "missing" && viewKind(r.path); }) : [];
+      var compact = isMobile();
+      multi.rows = rows;
+      Object.keys(multi.sel).forEach(function (p) { var still = rows.filter(function (r) { return r.path === p; })[0]; if (still) { multi.sel[p] = still; } else { delete multi.sel[p]; } });
+      $("files").classList.toggle("compact", compact);
       rows.forEach(function (f) {
         var tr = document.createElement("tr"); tr.dataset.path = f.path;
+        if (compact) {
+          tr.className = "mrow";
+          var cell = document.createElement("td"); var row = el("div", "mrow-in");
+          var pick = el("span", "mrow-pick"); pick.setAttribute("aria-hidden", "true"); row.appendChild(pick);
+          var media = el("span", "mrow-thumb");
+          if (f.media) { var mi = document.createElement("img"); mi.alt = ""; mi.loading = "lazy"; mi.src = "/api/thumb?folder=" + enc(folder) + "&path=" + enc(f.path) + "&token=" + enc(token); mi.onerror = function () { mi.replaceWith(icon("image")); }; media.appendChild(mi); } else { media.appendChild(icon("files")); }
+          row.appendChild(media);
+          var slash = f.path.lastIndexOf("/");
+          var body = el("div", "mrow-body");
+          body.appendChild(el("div", "mrow-name", slash >= 0 ? f.path.slice(slash + 1) : f.path));
+          body.appendChild(el("div", "mrow-sub", [slash >= 0 ? f.path.slice(0, slash) : null, fmtBytes(f.size), fileStateLabel(f)].filter(Boolean).join(" · ")));
+          row.appendChild(body);
+          row.appendChild(stateSquare(f));
+          cell.appendChild(row); tr.appendChild(cell); tb.appendChild(tr);
+          var mvi = viewable.indexOf(f);
+          var wasLong = onLongPress(tr, function () { multi.on = true; togglePick(f); });
+          tr.onclick = function () {
+            if (wasLong()) { return; }
+            if (multi.on) { togglePick(f); return; }
+            if (mvi >= 0) { openViewer(folder, viewable, mvi); } else if (selectedFile && selectedFile.path === f.path) { clearSelection(); } else { selectFile(f, tr); }
+          };
+          if (keep && f.path === keep) { reselect = { f: f, tr: tr }; }
+          return;
+        }
         function td(t, cls, label) { var d = document.createElement("td"); d.textContent = t; if (cls) { d.className = cls; } if (label) { d.dataset.label = label; } tr.appendChild(d); }
         var nameCell = document.createElement("td"); var wrap = el("span", "file-name");
         wrap.appendChild(stateSquare(f));
@@ -1460,10 +1588,10 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
         if (keep && f.path === keep) { reselect = { f: f, tr: tr }; }
       });
       if (reselect) { selectFile(reselect.f, reselect.tr); } else { clearSelection(); }
+      renderSel();
     }).catch(function (e) { log("error: " + e.message); });
   }
-  $("filesload").onclick = loadFiles;
-  $("filesfolder").onchange = function () { markTree($("filesfolder").value); updateFilesHead(); clearSelection(); setScreen("folder"); loadFiles(); };
+  $("filesfolder").onchange = function () { multi.sel = {}; multi.on = false; markTree($("filesfolder").value); updateFilesHead(); clearSelection(); setScreen("folder"); loadFiles(); };
   $("selectivetoggle").onchange = function () { api("POST", "/api/selective", { folder: $("filesfolder").value, on: $("selectivetoggle").checked }).then(function () { log("selective sync " + ($("selectivetoggle").checked ? "on" : "off")); return refreshStatus(); }).catch(function (e) { log("error: " + e.message); }); };
   $("dupes").onclick = function () {
     api("GET", "/api/dupes?folder=" + enc($("dupefolder").value)).then(function (g) {
@@ -2164,7 +2292,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   }
   $("addfolder").onsubmit = function (ev) { ev.preventDefault(); var d = cleanPath(formData(ev.target), ev.target); var name = d.name; api("POST", "/api/folder", d).then(function () { ev.target.reset(); log("folder added: " + name + (d.plain === false ? " (encrypted on this phone)" : d.plain ? " (plain files on this phone)" : "")); showFolderForms(false, true); return refreshStatus().then(function () { openFolder(name); }); }).catch(function (e) { alertBox(e.message); }); };
   $("attachfolder").onsubmit = function (ev) { ev.preventDefault(); var d = formData(ev.target); if (!d.name_or_id) { return; } attachFolder(d.name_or_id, d.path); ev.target.reset(); };
-  $("addstorage").onsubmit = function (ev) { ev.preventDefault(); api("POST", "/api/storage", formData(ev.target)).then(function () { ev.target.reset(); log("storage added"); return refreshStatus(); }).catch(function (e) { alertBox(e.message); }); };
+  $("addstorage").onsubmit = function (ev) { ev.preventDefault(); api("POST", "/api/storage", formData(ev.target)).then(function (r) { ev.target.reset(); $("storagekind").onchange.call($("storagekind")); log("storage added; copying the vault to it now in the background"); return refreshStatus(r.status); }).catch(function (e) { alertBox(e.message); }); };
 
   // Android: all files access for "plain files on this phone" folders (Settings card).
   function refreshAllFiles() {
@@ -2237,7 +2365,17 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   ["cam-wifi", "cam-charging", "cam-shots"].forEach(function (id) { $(id).onchange = function () { saveCamera($("cam-on").checked); }; });
   $("allfilesbtn").onclick = function () { if (droid) { try { droid.requestAllFilesAccess(); } catch (e) { alertBox(e.message); } } else { alertBox("Only the Android app can ask for this permission."); } };
   // The shell calls this when the activity resumes (back from the settings screen); browsers get visibilitychange.
-  window.varstoResumed = function () { refreshAllFiles(); if (document.body.dataset.view === "app") { refreshStatus(); } };
+  // Android: back in the app with the keyboard open on a number field (the
+  // pairing code), the WebView reconnects the keyboard as a text keyboard.
+  // Focusing the field again makes it ask for the number pad.
+  function refocusNumberField() {
+    var a = document.activeElement;
+    if (!a || a.tagName !== "INPUT" || !(a.type === "tel" || a.inputMode === "numeric")) { return; }
+    var pos = a.selectionStart; a.blur();
+    setTimeout(function () { a.focus(); try { a.setSelectionRange(pos, pos); } catch (e) { /* not every type has a selection */ } }, 60);
+  }
+  document.addEventListener("visibilitychange", function () { if (document.visibilityState === "visible") { refocusNumberField(); } });
+  window.varstoResumed = function () { refocusNumberField(); refreshAllFiles(); if (document.body.dataset.view === "app") { refreshStatus(); } };
   document.addEventListener("visibilitychange", function () { if (document.visibilityState === "visible") { refreshAllFiles(); } trafficWatch(); });
 
   // Reset: wipes this device's vault configuration after the user typed "reset".
