@@ -1,0 +1,37 @@
+---
+title: Osallistu
+nav: Contribute
+output: contribute/index.html
+description: Osallistu Varston kehitykseen. Varsto on Rustilla kirjoitettu päästä päähän salattu synkronointi- ja varmuuskopiotyökalu. Sivulla arkkitehtuuri, kohteet joissa apua tarvitaan, kääntö- ja testiohjeet sekä lisenssiehdot.
+---
+    <h1>Rakenna Varstoa kanssamme</h1>
+    <p class="lead">Varsto on päästä päähän salattu tiedostojen synkronointi- ja varmuuskopiotyökalu tallennustilaan, joka sinulla jo on: S3-bucketeihin, NAS-jakoihin, rclone-etäkohteisiin, vanhoille levyille ja omille laitteillesi. Ydin on kirjoitettu Rustilla, lähdekoodi on julkisesti <a href="https://github.com/janttsu/varsto" rel="noopener">GitHubissa</a>, ja tallennusmuoto on kuvattu kirjallisesti. Projekti on varhaisessa alfavaiheessa, joten nyt on paras hetki vaikuttaa sen suuntaan.</p>
+    <p><a class="button" href="https://github.com/janttsu/varsto" rel="noopener">Lähdekoodi GitHubissa</a> <a class="button secondary" href="https://github.com/janttsu/varsto/issues" rel="noopener">Issuet</a> <a class="button secondary" href="{{P}}docs/contributing.html">Osallistumisen säännöt (en)</a></p>
+
+    <h2>Mitä pääset tekemään</h2>
+    <div class="grid">
+      <section class="card"><h3>Rust-ydin ja kirjoitettu määrittely</h3><p><code>varsto-core</code> sisältää moottorin. Siihen kuuluvat sisällön mukaan määräytyvä pilkkominen, XChaCha20-Poly1305-salaus ja allekirjoitettu kirjanpito, jossa on hybridiallekirjoitukset Ed25519 + ML-DSA-65. Lisäksi siinä ovat sijoittelu ja säilytyssäännöt, vertaisverkon lohkonvaihto NAT-läpäisyineen sekä tallennustaustat hakemistoille, S3:lle ja rclonelle. Jokainen tallennustilaan kirjoitettava objekti on kuvattu <a href="{{P}}docs/alpha-0-format.html">tallennusmuodon määrittelyssä</a> (en).</p></section>
+      <section class="card"><h3>Yksi ohjelma, monta kuorta</h3><p><code>varsto-cli</code> sisältää komentorivin, taustapalvelun, ilmoitusalueen kuvakkeen ja paikallisen web-käyttöliittymän (pelkkää HTML:ää, CSS:ää ja JavaScriptiä). Ohuet natiivikuoret käärivät sen <code>varsto-ffi</code>:n kautta: Swift macOS:lle ja iOS:lle, Kotlin Androidille.</p></section>
+      <section class="card"><h3>Testit, jotka ajavat kokonaisia verkkoja</h3><p>Yksikkö- ja integraatiotestien lisäksi virtuaalikonelaboratorio esittää kannettavia, pöytäkoneita ja palvelimia kotireitittimien ja symmetrisen NATin takana sekä julkisessa internetissä. Mukana on S3-palvelin, ja tallennuskatkot, kaatumiset ja kellojen heitot saa käyttöön tarvittaessa. Katso <a href="{{P}}docs/testing.html">Testing</a> (en).</p></section>
+    </div>
+
+    <h2>Missä apua tarvitaan</h2>
+    <ul>
+      <li><strong>Tietoturvakatselmointi:</strong> <a href="{{P}}docs/key-hierarchy.html">avainhierarkia</a>, <a href="{{P}}docs/threat-model.html">uhkamalli</a> ja tallennusmuodon määrittely. Löydökset käsitellään <a href="{{P}}docs/security-policy.html">tietoturvakäytännön</a> mukaan.</li>
+      <li><strong>Alustat:</strong> Windowsin ilmoitusalue ja Resurssienhallinta-integraatio, iOS-sovellus oikeilla laitteilla sekä Androidin taustatoiminta eri valmistajien puhelimissa.</li>
+      <li><strong>Verkot:</strong> vertaisverkko ja NAT-läpäisy muissa kuin ylläpitäjän omissa verkoissa, kuten operaattoritason NATin takana, pelkän IPv6:n verkoissa ja yritysten palomuurien takana.</li>
+      <li><strong>Tallennus:</strong> testaus useampia S3-yhteensopivia palveluntarjoajia ja rclone-taustoja vastaan sekä niiden erikoisuudet (osittaiset lukupyynnöt, kellojen heitto, listausten johdonmukaisuus).</li>
+      <li><strong>Paketointi:</strong> Flatpak, Homebrew, AUR, winget ja muut paketinhallintajärjestelmät.</li>
+      <li><strong>Käännökset:</strong> käyttöliittymä ja nämä sivut ovat englanniksi, suomeksi ja ruotsiksi. Uudet kielet ja äidinkielisten tarkistukset ovat tervetulleita. Sanakirjat ovat JSON-tiedostoja hakemistossa <code>crates/varsto-cli/ui/i18n/</code>.</li>
+      <li><strong>Dokumentaatio</strong> ja vikailmoitukset oikeista kokoonpanoista: <a href="{{P}}forum/">foorumi</a> (en) ja issue-seuranta.</li>
+    </ul>
+
+    <h2>Näin pääset alkuun</h2>
+    <pre><code>git clone https://github.com/janttsu/varsto
+cd varsto
+cargo build --release
+cargo test --workspace</code></pre>
+    <p>Ytimeen ja komentoriviin riittää vakaa Rust-työkaluketju, versio 1.85 tai uudempi. <a href="{{P}}docs/quick-start.html">Pikaopas</a> (en) luo holvin paikalliseen hakemistoon minuutissa, joten muutoksia voi kokeilla ilman pilvitiliä. Ennen pull requestia <code>cargo fmt --all --check</code>, <code>cargo clippy --workspace --all-targets</code> ja testit on ajettava läpi, ja uusi toiminnallisuus tarvitsee testit. Avaa issue ennen suuria muutoksia.</p>
+
+    <h2>Lisenssi</h2>
+    <p>Varston lähdekoodi on saatavilla <a href="{{P}}docs/licence.html">PolyForm Shield License 1.0.0</a> -lisenssillä. Saat lukea, käyttää, muuttaa ja jakaa koodia mihin tahansa tarkoitukseen paitsi Varston kanssa kilpailevan tuotteen tarjoamiseen. Lisenssi ei ole OSI:n hyväksymä avoimen lähdekoodin lisenssi. Osallistumalla hyväksyt, että osuutesi jaetaan saman lisenssin alla. Yksityiskohdat ovat <a href="{{P}}docs/contributing.html">osallistumisen säännöissä</a> (en). Repositoriossa kaikki kirjoitetaan englanniksi.</p>

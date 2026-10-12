@@ -9,7 +9,7 @@ description: Varsto: päästä päähän salattu tiedostojen synkronointi ja var
     <p><a class="button" href="{{L}}downloads/">Lataa alfa</a> <a class="button secondary" href="{{P}}docs/quick-start.html">Pika-aloitus</a> <a class="button secondary" href="https://github.com/janttsu/varsto" rel="noopener">Lähdekoodi GitHubissa</a></p>
     <figure class="hero"><picture><source type="image/webp" srcset="{{P}}assets/img/hero.webp"><img src="{{P}}assets/img/hero.png" alt="Kaavio: avaimesi keskellä, salatuin yhteyksin kytkettyinä S3-ämpäriin, kylmäarkistoon, hyllyn kiintolevyihin, NAS-laitteeseen, kannettavaan ja puhelimeen; jokaisessa paikassa on vain lukittuja, salattuja lohkoja." width="1200" height="600"></picture><figcaption>Kopiot sinne, minne itse päätät: ämpäriin, kylmäarkistoon, hyllyn vanhoille levyille, omille koneillesi. Jokainen kopio on salakirjoitusta; avaimet pysyvät sinulla.</figcaption></figure>
 
-    <h2>Mikä toimii jo nyt (alfa, 0.0.1-alpha.11)</h2>
+    <h2>Mikä toimii jo nyt (alfa, {{VERSION}})</h2>
     <div class="grid">
       <section class="card"><h3>Salattu ennen kuin se lähtee laitteeltasi</h3><p>Tiedostot pilkotaan sisällön mukaan määräytyviin paloihin, ja jokainen pala salataan XChaCha20-Poly1305:llä holvistasi johdetuilla avaimilla. Tallennuspaikka näkee vain läpinäkymättömiä objekteja ja kokoja, ei koskaan nimiä, tiivisteitä tai sisältöä. <a href="{{L}}how-it-works/">Näin kaikki toimii</a>.</p></section>
       <section class="card"><h3>Tuo oma tallennuspaikkasi</h3><p>Mikä tahansa hakemisto, johon tämä laite ylettyy, mikä tahansa S3-yhteensopiva ämpäri (AWS, Scaleway, Hetzner, B2, R2, MinIO) omilla avaimillasi tai mikä tahansa rclone-etäkohde. Kylmätallennuksiin ja arkistoluokkiin kirjoitetaan, mutta niistä ei koskaan lueta ilman vahvistustasi.</p></section>
@@ -36,8 +36,11 @@ description: Varsto: päästä päähän salattu tiedostojen synkronointi ja var
       <li>Alfa on ensimmäinen pystysuora läpileikkaus: ydinkirjasto, komentorivi, taustapalvelu, ilmoitusalueen ja valikkorivin kuoret, Android-kuori, noin 54 000 riviä Rustia, yli 200 automaattista testiä ja koti- ja toimisto-NATin taakse sijoitettujen virtuaalikoneiden testilaboratorio, mukaan lukien kahden laitteen offline-yhtenäistyminen, ristiriidat, palautetun laitteen eristys, replikat, jakaminen, säilytyssäännöt, vertaiset, Strongroomit ja levyvarastot. Käytä sitä vain testidatalla.</li>
       <li>Kryptografista suunnittelua ei ole katselmoitu eikä auditoitu. <a href="{{P}}docs/threat-model.html">Uhkamalli</a> ja <a href="{{P}}docs/failure-model.html">vikamalli</a> kertovat, mitä suunnittelulla tavoitellaan ja mihin se päättyy.</li>
       <li>Lähdekoodi on julkisesti osoitteessa <a href="https://github.com/janttsu/varsto" rel="noopener">github.com/janttsu/varsto</a> <a href="{{P}}docs/licence.html">PolyForm Shield License 1.0.0</a> -lisenssillä (lähdekoodi saatavilla, ei avointa lähdekoodia); virheet ja kysymykset kuuluvat siellä olevaan vikaseurantaan. Tallennusmuoto on <a href="{{P}}docs/alpha-0-format.html">dokumentoitu</a>, jotta datasi pysyy palautettavissa.</li>
-      <li>Nimi on väliaikainen, ja sivusto pidetään poissa hakukoneista, kunnes nimi on vahvistettu.</li>
+      <li>Nimi on väliaikainen.</li>
     </ul>
+
+    <h2>Kehittäjille</h2>
+    <p>Varsto on kirjoitettu Rustilla. Lisäksi siinä on Swift- ja Kotlin-kuoret ja tavallinen web-käyttöliittymä. Lähdekoodi ja tallennusmuodon määrittely ovat julkisia. Apu on tervetullutta tietoturvakatselmoinnissa, alustatyössä, verkko- ja tallennustestauksessa, paketoinnissa ja käännöksissä: <a href="{{L}}contribute/">näin osallistut</a>.</p>
 
     <h2>Lataukset</h2>
     {{DOWNLOADS}}

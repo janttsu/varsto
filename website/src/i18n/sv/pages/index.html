@@ -9,7 +9,7 @@ description: Varsto: end-to-end-krypterad filsynkronisering och säkerhetskopier
     <p><a class="button" href="{{L}}downloads/">Ladda ner alfaversionen</a> <a class="button secondary" href="{{P}}docs/quick-start.html">Snabbstart</a> <a class="button secondary" href="https://github.com/janttsu/varsto" rel="noopener">Källkoden på GitHub</a></p>
     <figure class="hero"><picture><source type="image/webp" srcset="{{P}}assets/img/hero.webp"><img src="{{P}}assets/img/hero.png" alt="Diagram: dina nycklar i mitten, förbundna med krypterade länkar till en S3-bucket, ett kallt arkiv, hårddiskar på en hylla, en NAS, en bärbar dator och en telefon; varje plats rymmer bara låsta, krypterade block." width="1200" height="600"></picture><figcaption>Kopior där du bestämmer: en bucket, ett kallt arkiv, gamla diskar på en hylla, dina egna datorer. Varje kopia är chiffertext; nycklarna stannar hos dig.</figcaption></figure>
 
-    <h2>Det här fungerar i dag (alfa, 0.0.1-alpha.11)</h2>
+    <h2>Det här fungerar i dag (alfa, {{VERSION}})</h2>
     <div class="grid">
       <section class="card"><h3>Krypterat innan det lämnar din enhet</h3><p>Filerna delas upp i innehållsdefinierade bitar som var och en krypteras med XChaCha20-Poly1305 under nycklar härledda ur ditt valv. Lagringen ser bara ogenomskinliga objekt och storlekar, aldrig namn, hashvärden eller innehåll. <a href="{{L}}how-it-works/">Så fungerar det</a>.</p></section>
       <section class="card"><h3>Använd din egen lagring</h3><p>Vilken katalog som helst som enheten når, vilken S3-kompatibel bucket som helst (AWS, Scaleway, Hetzner, B2, R2, MinIO) med dina egna nycklar, eller valfri rclone-remote. Kall lagring och arkivklasser skrivs till men läses aldrig utan att du bekräftar.</p></section>
@@ -36,8 +36,11 @@ description: Varsto: end-to-end-krypterad filsynkronisering och säkerhetskopier
       <li>Alfaversionen är en första vertikal skiva: kärnbibliotek, CLI, bakgrundstjänst, skal för systemfältet och menyraden, Android-skal, ungefär 54 000 rader Rust, över 200 automatiska tester och en labbmiljö med virtuella maskiner bakom hem- och kontors-NAT, bland annat konvergens mellan två enheter offline, konflikter, spärr av återställd enhet, repliker, delning, regler, peers, Strongrooms och diskpooler. Använd den bara med testdata.</li>
       <li>Den kryptografiska designen har inte granskats eller reviderats. <a href="{{P}}docs/threat-model.html">Hotmodellen</a> och <a href="{{P}}docs/failure-model.html">felmodellen</a> beskriver vad designen är avsedd att göra och var den tar slut.</li>
       <li>Källkoden är offentlig på <a href="https://github.com/janttsu/varsto" rel="noopener">github.com/janttsu/varsto</a> under <a href="{{P}}docs/licence.html">PolyForm Shield License 1.0.0</a> (källkoden tillgänglig, inte öppen källkod); buggar och frågor tas emot i ärendehanteringen där. Lagringsformatet är <a href="{{P}}docs/alpha-0-format.html">dokumenterat</a> så att dina data förblir återställningsbara.</li>
-      <li>Namnet är preliminärt och webbplatsen hålls borta från sökmotorerna tills det är bestämt.</li>
+      <li>Namnet är preliminärt.</li>
     </ul>
+
+    <h2>För utvecklare</h2>
+    <p>Varsto är skrivet i Rust, med skal i Swift och Kotlin och ett vanligt webbgränssnitt. Källkoden och specifikationen av lagringsformatet är offentliga. Säkerhetsgranskning, plattformsarbete, nätverks- och lagringstester, paketering och översättningar är välkomna: <a href="{{L}}contribute/">så bidrar du</a>.</p>
 
     <h2>Nedladdningar</h2>
     {{DOWNLOADS}}

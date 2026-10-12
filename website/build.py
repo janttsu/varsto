@@ -40,7 +40,7 @@ FOOTER = [
     "No cookies, no tracking. The web server keeps a standard access log for at most seven days.",
     '<a href="{p}docs/security-policy.html">Security policy</a> · <a href="{p}docs/licence.html">Licence</a> · <a href="{p}docs/trademark.html">Trademark</a>',
 ]
-NAV = [("Project", ""), ("Features", "features/"), ("Use cases", "use-cases/"), ("Compare", "compare/"), ("How it works", "how-it-works/"), ("Screenshots", "screenshots/"), ("Docs", "docs/"), ("Downloads", "downloads/"), ("Blog", "blog/"), ("Forum", "forum/"), ("GitHub", REPO)]
+NAV = [("Project", ""), ("Features", "features/"), ("Use cases", "use-cases/"), ("Compare", "compare/"), ("How it works", "how-it-works/"), ("Screenshots", "screenshots/"), ("Docs", "docs/"), ("Downloads", "downloads/"), ("Blog", "blog/"), ("Forum", "forum/"), ("Contribute", "contribute/"), ("GitHub", REPO)]
 
 # Repository documents rendered under docs/: (source path, slug, title, group)
 DOCS = [
@@ -91,10 +91,10 @@ LANGS = [("en", "English"), ("fi", "Suomi"), ("sv", "Svenska")]
 NAV_I18N = {
     "fi": {"Project": "Projekti", "Features": "Ominaisuudet", "Use cases": "Käyttötapaukset", "Compare": "Vertailu",
            "How it works": "Miten se toimii", "Screenshots": "Kuvakaappaukset", "Docs": "Dokumentaatio (en)",
-           "Downloads": "Lataukset", "Blog": "Blogi (en)", "Forum": "Foorumi (en)", "GitHub": "GitHub"},
+           "Downloads": "Lataukset", "Blog": "Blogi (en)", "Forum": "Foorumi (en)", "Contribute": "Osallistu", "GitHub": "GitHub"},
     "sv": {"Project": "Projekt", "Features": "Funktioner", "Use cases": "Användningsfall", "Compare": "Jämförelse",
            "How it works": "Så fungerar det", "Screenshots": "Skärmbilder", "Docs": "Dokumentation (en)",
-           "Downloads": "Nedladdningar", "Blog": "Blogg (en)", "Forum": "Forum (en)", "GitHub": "GitHub"},
+           "Downloads": "Nedladdningar", "Blog": "Blogg (en)", "Forum": "Forum (en)", "Contribute": "Bidra", "GitHub": "GitHub"},
 }
 ENGLISH_ONLY = ("docs/", "blog/", "forum/")
 ALPHA_I18N = {
@@ -114,12 +114,51 @@ FOOTER_I18N = {
     ],
 }
 SKIP_I18N = {"en": "Skip to content", "fi": "Siirry sisältöön", "sv": "Hoppa till innehållet"}
-TAGLINE = {"en": "your files, your storage", "fi": "sinun tiedostosi, sinun tallennuspaikkasi", "sv": "dina filer, din lagring"}
+# The home page title: what people search for.
+TAGLINE = {"en": "encrypted file sync and backup on your own storage",
+           "fi": "salattu tiedostojen synkronointi ja varmuuskopiointi omaan tallennustilaan",
+           "sv": "krypterad filsynkronisering och säkerhetskopiering till din egen lagring"}
 
 
-def page(title: str, description: str, body: str, nav: str, depth: int, lang: str = "en", rel: str = "") -> str:
+OG_LOCALE = {"en": "en_GB", "fi": "fi_FI", "sv": "sv_SE"}
+
+
+def absolute(lang: str, page_rel: str) -> str:
+    return f"{SITE_URL}/" + ("" if lang == "en" else lang + "/") + page_rel
+
+
+def json_ld(data: dict) -> str:
+    text = json.dumps(data, ensure_ascii=False, separators=(",", ":")).replace("</", "<\\/")
+    return f'<script type="application/ld+json">{text}</script>\n'
+
+
+def home_structured_data(lang: str, url: str, description: str) -> str:
+    """The home page describes the site, the application and its source code."""
+    version = cargo_version()
+    return json_ld({
+        "@context": "https://schema.org",
+        "@graph": [
+            {"@type": "WebSite", "@id": f"{SITE_URL}/#site", "url": f"{SITE_URL}/", "name": BRAND,
+             "inLanguage": [code for code, _ in LANGS]},
+            {"@type": "SoftwareApplication", "name": BRAND, "url": url, "description": description,
+             "applicationCategory": "UtilitiesApplication", "applicationSubCategory": "File synchronisation and backup",
+             "operatingSystem": "Linux, Windows, macOS, Android", "softwareVersion": version,
+             "downloadUrl": f"{SITE_URL}/downloads/", "screenshot": f"{SITE_URL}/assets/img/screenshots/desktop-files-light.png",
+             "offers": {"@type": "Offer", "price": "0", "priceCurrency": "EUR"}, "isAccessibleForFree": True},
+            {"@type": "SoftwareSourceCode", "name": f"{BRAND} source code", "codeRepository": REPO,
+             "programmingLanguage": ["Rust", "Swift", "Kotlin", "JavaScript"], "runtimePlatform": "Rust",
+             "license": "https://polyformproject.org/licenses/shield/1.0.0/", "version": version,
+             "targetProduct": {"@type": "SoftwareApplication", "name": BRAND}},
+        ],
+    })
+
+
+def page(title: str, description: str, body: str, nav: str, depth: int, lang: str = "en", rel: str = "",
+         extra_head: str = "") -> str:
     """`depth`: directory levels below the site root; `rel`: the page's path
-    relative to its language root (for the switcher), e.g. "features/index.html"."""
+    relative to its language root (for the switcher, the canonical address and
+    the hreflang links), e.g. "features/index.html"; `extra_head`: page-specific
+    structured data."""
     p = "../" * depth
     labels = NAV_I18N.get(lang, {})
     lang_root = p if lang == "en" else p + lang + "/"
@@ -137,10 +176,15 @@ def page(title: str, description: str, body: str, nav: str, depth: int, lang: st
         if code != "en" and not translated(code, rel):
             continue
         href = (p if code == "en" else p + code + "/") + page_rel
-        alternates.append(f'<link rel="alternate" hreflang="{code}" href="{href or "./"}">')
+        # Search engines want absolute addresses here.
+        alternates.append(f'<link rel="alternate" hreflang="{code}" href="{absolute(code, page_rel)}">')
+        if code == "en":
+            alternates.append(f'<link rel="alternate" hreflang="x-default" href="{absolute(code, page_rel)}">')
         cur = ' aria-current="true"' if code == lang else ""
         switch.append(f'<a href="{href or "./"}" hreflang="{code}" lang="{code}"{cur}>{label}</a>')
     lang_switch = ('    <nav class="langs" aria-label="Language">' + " ".join(switch) + "</nav>\n") if len(switch) > 1 else ""
+    if not rel:  # the 404 page and others without a fixed address
+        alternates = []
     alternates_html = "\n".join(alternates)
     alpha = ALPHA_I18N.get(lang, ALPHA)
     footer_lines = FOOTER_I18N.get(lang, FOOTER)
@@ -149,7 +193,28 @@ def page(title: str, description: str, body: str, nav: str, depth: int, lang: st
     )
     footer = "\n".join(f"    <span>{line.format(p=p)}</span>" for line in footer_lines)
     is_home = nav == "Project" and rel in ("", "index.html")
-    full_title = f"{BRAND}: {TAGLINE[lang]}" if is_home else f"{title}: {BRAND}"
+    if is_home:
+        full_title = f"{BRAND}: {TAGLINE[lang]}"
+    else:
+        full_title = title if BRAND in title else f"{title}: {BRAND}"
+    social = ""
+    if rel:
+        url = absolute(lang, page_rel)
+        social = "\n".join([
+            f'<link rel="canonical" href="{url}">',
+            f'<meta property="og:type" content="{"article" if nav == "Blog" and page_rel.endswith(".html") else "website"}">',
+            f'<meta property="og:site_name" content="{BRAND}">',
+            f'<meta property="og:title" content="{html.escape(full_title)}">',
+            f'<meta property="og:description" content="{html.escape(description)}">',
+            f'<meta property="og:url" content="{url}">',
+            f'<meta property="og:image" content="{SITE_URL}/assets/img/og-card.png">',
+            '<meta property="og:image:width" content="1200">',
+            '<meta property="og:image:height" content="630">',
+            f'<meta property="og:locale" content="{OG_LOCALE[lang]}">',
+            '<meta name="twitter:card" content="summary_large_image">',
+        ]) + "\n"
+        if is_home:
+            extra_head += home_structured_data(lang, url, description)
     return f"""<!doctype html>
 <html lang="{lang}">
 <head>
@@ -159,8 +224,8 @@ def page(title: str, description: str, body: str, nav: str, depth: int, lang: st
 <meta name="description" content="{html.escape(description)}">
 <meta name="color-scheme" content="light dark">
 <link rel="icon" href="{p}favicon.svg" type="image/svg+xml">
-{alternates_html}
-<link rel="alternate" type="application/rss+xml" title="{BRAND} blog" href="{p}blog/feed.xml">
+{social}{alternates_html}
+{extra_head}<link rel="alternate" type="application/rss+xml" title="{BRAND} blog" href="{p}blog/feed.xml">
 <link rel="stylesheet" href="{p}assets/css/site.css?v={asset_version("assets/css/site.css")}">
 <script src="{p}assets/js/theme.js?v={asset_version("assets/js/theme.js")}"></script>
 </head>
@@ -391,12 +456,12 @@ def build_docs() -> dict[str, str]:
             body = rewrite_links(pandoc("\n".join(lines)), slug_by_name)
         body = f"<article class=\"prose\">\n<h1>{html.escape(title)}</h1>\n<p class=\"note\">From <code>{html.escape(path)}</code> in the repository, rendered {datetime.now(timezone.utc).date()}.</p>\n{body}\n</article>"
         (OUT / "docs").mkdir(parents=True, exist_ok=True)
-        (OUT / "docs" / f"{slug}.html").write_text(page(title, f"{BRAND} documentation: {title}", body, "Docs", 1))
+        (OUT / "docs" / f"{slug}.html").write_text(page(title, f"{BRAND} documentation: {title}", body, "Docs", 1, rel=f"docs/{slug}.html"))
         groups.setdefault(group, []).append((slug, title))
     # Licence page from the plain-text LICENSE.
     licence = (ROOT / "LICENSE").read_text()
     body = f"<article class=\"prose\"><h1>Licence</h1><p class=\"note\">PolyForm Shield License 1.0.0, verbatim from <code>LICENSE</code>.</p><pre class=\"licence\">{html.escape(licence)}</pre></article>"
-    (OUT / "docs" / "licence.html").write_text(page("Licence", f"{BRAND} licence", body, "Docs", 1))
+    (OUT / "docs" / "licence.html").write_text(page("Licence", f"{BRAND} licence", body, "Docs", 1, rel="docs/licence.html"))
     groups.setdefault("Project", []).append(("licence", "Licence (PolyForm Shield 1.0.0)"))
     # Index.
     sections = []
@@ -411,7 +476,7 @@ def build_docs() -> dict[str, str]:
         "    <p class=\"lead\">The documents below are rendered from the repository. They describe what alpha-0 does today and what the full design intends; every design document says which parts exist.</p>\n"
         + "\n".join(sections)
     )
-    (OUT / "docs" / "index.html").write_text(page("Docs", f"{BRAND} documentation", body, "Docs", 1))
+    (OUT / "docs" / "index.html").write_text(page("Docs", f"{BRAND} documentation", body, "Docs", 1, rel="docs/index.html"))
     return slug_by_name
 
 
@@ -438,7 +503,12 @@ def build_blog(slug_by_name: dict[str, str]) -> None:
     for post in posts:
         body = rewrite_links(pandoc(post["body"]), slug_by_name, "../docs/")
         body = f'<article class="prose"><h1>{html.escape(post["title"])}</h1><p class="note"><time datetime="{post["date"]}">{post["date"]}</time></p>\n{body}\n</article>'
-        (OUT / "blog" / f'{post["slug"]}.html').write_text(page(post["title"], post["summary"], body, "Blog", 1))
+        (OUT / "blog" / f'{post["slug"]}.html').write_text(page(post["title"], post["summary"], body, "Blog", 1, rel=f'blog/{post["slug"]}.html',
+                 extra_head=json_ld({"@context": "https://schema.org", "@type": "BlogPosting", "headline": post["title"],
+                                     "description": post["summary"], "datePublished": post["date"],
+                                     "url": f'{SITE_URL}/blog/{post["slug"]}.html', "inLanguage": "en",
+                                     "author": {"@type": "Organization", "name": f"The {BRAND} Authors"},
+                                     "image": f"{SITE_URL}/assets/img/og-card.png"})))
     items = "\n".join(
         f"  <item><title>{html.escape(p['title'])}</title><link>{SITE_URL}/blog/{p['slug']}.html</link>"
         f"<guid>{SITE_URL}/blog/{p['slug']}.html</guid><pubDate>{datetime.strptime(p['date'], '%Y-%m-%d').strftime('%a, %d %b %Y 00:00:00 +0000')}</pubDate>"

@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Contribute: Varsto</title>
+<meta name="description" content="Help build Varsto, an end-to-end encrypted sync and backup tool written in Rust: architecture, where help is wanted, how to build and test it, and the licence terms.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="canonical" href="https://varsto.net/contribute/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Varsto">
+<meta property="og:title" content="Contribute: Varsto">
+<meta property="og:description" content="Help build Varsto, an end-to-end encrypted sync and backup tool written in Rust: architecture, where help is wanted, how to build and test it, and the licence terms.">
+<meta property="og:url" content="https://varsto.net/contribute/">
+<meta property="og:image" content="https://varsto.net/assets/img/og-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:locale" content="en_GB">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="alternate" hreflang="en" href="https://varsto.net/contribute/">
+<link rel="alternate" hreflang="x-default" href="https://varsto.net/contribute/">
+<link rel="alternate" hreflang="fi" href="https://varsto.net/fi/contribute/">
+<link rel="alternate" hreflang="sv" href="https://varsto.net/sv/contribute/">
+<link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../blog/feed.xml">
+<link rel="stylesheet" href="../assets/css/site.css?v=b3d2d4f387">
+<script src="../assets/js/theme.js?v=0951491269"></script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="alpha" role="note">
+  <div class="wrap"><strong>Alpha software, not for production data.</strong> Bugs can cause data loss, formats may change without migration, and the cryptography has not been independently audited. Keep your own backups and check that you can restore from them.</div>
+</div>
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="../"><img src="../assets/img/logo.svg" alt="" width="28" height="28"><span>Varsto</span></a>
+    <nav class="langs" aria-label="Language"><a href="../contribute/" hreflang="en" lang="en" aria-current="true">English</a> <a href="../fi/contribute/" hreflang="fi" lang="fi">Suomi</a> <a href="../sv/contribute/" hreflang="sv" lang="sv">Svenska</a></nav>
+
+    <nav class="main" aria-label="Main">
+      <a href="../">Project</a>
+      <a href="../features/">Features</a>
+      <a href="../use-cases/">Use cases</a>
+      <a href="../compare/">Compare</a>
+      <a href="../how-it-works/">How it works</a>
+      <a href="../screenshots/">Screenshots</a>
+      <a href="../docs/">Docs</a>
+      <a href="../downloads/">Downloads</a>
+      <a href="../blog/">Blog</a>
+      <a href="../forum/">Forum</a>
+      <a href="../contribute/" aria-current="page">Contribute</a>
+      <a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a>
+      <button class="theme" id="theme-toggle" type="button" aria-label="Change colour theme">Theme: auto</button>
+    </nav>
+  </div>
+</header>
+<main id="main">
+  <div class="wrap">
+    <h1>Build Varsto with us</h1>
+    <p class="lead">Varsto is an end-to-end encrypted file sync and backup tool for storage you already own: S3 buckets, NAS shares, rclone remotes, old disks and your own devices. The core is written in Rust, the source is public on <a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a>, and the storage format is specified in writing. It is an early alpha, which is the best time to shape it.</p>
+    <p><a class="button" href="https://github.com/janttsu/varsto" rel="noopener">Source on GitHub</a> <a class="button secondary" href="https://github.com/janttsu/varsto/issues" rel="noopener">Issues</a> <a class="button secondary" href="../docs/contributing.html">Contribution rules</a></p>
+
+    <h2>What you would be working on</h2>
+    <div class="grid">
+      <section class="card"><h3>A Rust core with a written spec</h3><p><code>varsto-core</code> holds the engine: content-defined chunking, XChaCha20-Poly1305 encryption, a signed ledger with hybrid Ed25519 + ML-DSA-65 signatures, placement and policies, peer-to-peer block exchange with NAT traversal, and storage backends for directories, S3 and rclone. Every on-storage object is described in the <a href="../docs/alpha-0-format.html">storage format specification</a>.</p></section>
+      <section class="card"><h3>One binary, many shells</h3><p><code>varsto-cli</code> is the command line, the background service, the tray and a local web interface (plain HTML, CSS and JavaScript). Thin native shells wrap it: Swift for macOS and iOS, Kotlin for Android, through <code>varsto-ffi</code>.</p></section>
+      <section class="card"><h3>Tests that run whole networks</h3><p>Besides unit and integration tests, a lab of virtual machines plays laptops, desktops and servers behind home routers, symmetric NAT and a public internet, with an S3 server and storage outages, crashes and clock skew on demand. See <a href="../docs/testing.html">Testing</a>.</p></section>
+    </div>
+
+    <h2>Where help is wanted</h2>
+    <ul>
+      <li><strong>Security review</strong> of the <a href="../docs/key-hierarchy.html">key hierarchy</a>, the <a href="../docs/threat-model.html">threat model</a> and the format specification. Findings go through the <a href="../docs/security-policy.html">security policy</a>.</li>
+      <li><strong>Platforms:</strong> the Windows tray and Explorer integration, the iOS app on real devices, Android background behaviour on different vendors' phones.</li>
+      <li><strong>Networks:</strong> peer-to-peer and NAT traversal on networks other than the maintainer's own: carrier-grade NAT, IPv6-only, corporate firewalls.</li>
+      <li><strong>Storage:</strong> testing against more S3-compatible providers and rclone backends, and their quirks (range reads, clock skew, listing consistency).</li>
+      <li><strong>Packaging:</strong> Flatpak, Homebrew, AUR, winget and other package managers.</li>
+      <li><strong>Translations:</strong> the interface and this website are in English, Finnish and Swedish; more languages and native-speaker review are welcome. The dictionaries are JSON files in <code>crates/varsto-cli/ui/i18n/</code>.</li>
+      <li><strong>Documentation</strong> and bug reports from real setups: the <a href="../forum/">forum</a> and the issue tracker.</li>
+    </ul>
+
+    <h2>Getting started</h2>
+    <pre><code>git clone https://github.com/janttsu/varsto
+cd varsto
+cargo build --release
+cargo test --workspace</code></pre>
+    <p>A stable Rust toolchain (1.85 or newer) is enough for the core and the command line. The <a href="../docs/quick-start.html">quick start</a> creates a vault on a local directory in a minute, so you can try changes without any cloud account. Before a pull request, <code>cargo fmt --all --check</code>, <code>cargo clippy --workspace --all-targets</code> and the tests must pass, and new behaviour needs tests. Please open an issue before large changes.</p>
+
+    <h2>Licence</h2>
+    <p>Varsto is source-available under the <a href="../docs/licence.html">PolyForm Shield License 1.0.0</a>: you may read, use, change and share the code for any purpose except offering a product that competes with Varsto. It is not an OSI open-source licence. By contributing you agree that your contribution is distributed under that licence; the details are in the <a href="../docs/contributing.html">contribution rules</a>. Everything in the repository is written in English.</p>
+
+  </div>
+</main>
+<footer class="site">
+  <div class="wrap">
+    <span>Varsto is a working name. Source: <a href="https://github.com/janttsu/varsto">github.com/janttsu/varsto</a>, under the PolyForm Shield License 1.0.0 (source-available).</span>
+    <span>No cookies, no tracking. The web server keeps a standard access log for at most seven days.</span>
+    <span><a href="../docs/security-policy.html">Security policy</a> · <a href="../docs/licence.html">Licence</a> · <a href="../docs/trademark.html">Trademark</a></span>
+  </div>
+</footer>
+</body>
+</html>

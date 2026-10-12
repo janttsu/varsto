@@ -3,13 +3,26 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Varsto: dina filer, din lagring</title>
+<title>Varsto: krypterad filsynkronisering och säkerhetskopiering till din egen lagring</title>
 <meta name="description" content="Varsto: end-to-end-krypterad filsynkronisering och säkerhetskopiering på lagring du redan äger. Alfa, arbetsnamn.">
 <meta name="color-scheme" content="light dark">
 <link rel="icon" href="../favicon.svg" type="image/svg+xml">
-<link rel="alternate" hreflang="en" href="../">
-<link rel="alternate" hreflang="fi" href="../fi/">
-<link rel="alternate" hreflang="sv" href="../sv/">
+<link rel="canonical" href="https://varsto.net/sv/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Varsto">
+<meta property="og:title" content="Varsto: krypterad filsynkronisering och säkerhetskopiering till din egen lagring">
+<meta property="og:description" content="Varsto: end-to-end-krypterad filsynkronisering och säkerhetskopiering på lagring du redan äger. Alfa, arbetsnamn.">
+<meta property="og:url" content="https://varsto.net/sv/">
+<meta property="og:image" content="https://varsto.net/assets/img/og-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:locale" content="sv_SE">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="alternate" hreflang="en" href="https://varsto.net/">
+<link rel="alternate" hreflang="x-default" href="https://varsto.net/">
+<link rel="alternate" hreflang="fi" href="https://varsto.net/fi/">
+<link rel="alternate" hreflang="sv" href="https://varsto.net/sv/">
+<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"WebSite","@id":"https://varsto.net/#site","url":"https://varsto.net/","name":"Varsto","inLanguage":["en","fi","sv"]},{"@type":"SoftwareApplication","name":"Varsto","url":"https://varsto.net/sv/","description":"Varsto: end-to-end-krypterad filsynkronisering och säkerhetskopiering på lagring du redan äger. Alfa, arbetsnamn.","applicationCategory":"UtilitiesApplication","applicationSubCategory":"File synchronisation and backup","operatingSystem":"Linux, Windows, macOS, Android","softwareVersion":"0.0.1-alpha.11","downloadUrl":"https://varsto.net/downloads/","screenshot":"https://varsto.net/assets/img/screenshots/desktop-files-light.png","offers":{"@type":"Offer","price":"0","priceCurrency":"EUR"},"isAccessibleForFree":true},{"@type":"SoftwareSourceCode","name":"Varsto source code","codeRepository":"https://github.com/janttsu/varsto","programmingLanguage":["Rust","Swift","Kotlin","JavaScript"],"runtimePlatform":"Rust","license":"https://polyformproject.org/licenses/shield/1.0.0/","version":"0.0.1-alpha.11","targetProduct":{"@type":"SoftwareApplication","name":"Varsto"}}]}</script>
 <link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../blog/feed.xml">
 <link rel="stylesheet" href="../assets/css/site.css?v=b3d2d4f387">
 <script src="../assets/js/theme.js?v=0951491269"></script>
@@ -35,6 +48,7 @@
       <a href="../sv/downloads/">Nedladdningar</a>
       <a href="../blog/">Blogg (en)</a>
       <a href="../forum/">Forum (en)</a>
+      <a href="../sv/contribute/">Bidra</a>
       <a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a>
       <button class="theme" id="theme-toggle" type="button" aria-label="Change colour theme">Theme: auto</button>
     </nav>
@@ -74,8 +88,11 @@
       <li>Alfaversionen är en första vertikal skiva: kärnbibliotek, CLI, bakgrundstjänst, skal för systemfältet och menyraden, Android-skal, ungefär 54 000 rader Rust, över 200 automatiska tester och en labbmiljö med virtuella maskiner bakom hem- och kontors-NAT, bland annat konvergens mellan två enheter offline, konflikter, spärr av återställd enhet, repliker, delning, regler, peers, Strongrooms och diskpooler. Använd den bara med testdata.</li>
       <li>Den kryptografiska designen har inte granskats eller reviderats. <a href="../docs/threat-model.html">Hotmodellen</a> och <a href="../docs/failure-model.html">felmodellen</a> beskriver vad designen är avsedd att göra och var den tar slut.</li>
       <li>Källkoden är offentlig på <a href="https://github.com/janttsu/varsto" rel="noopener">github.com/janttsu/varsto</a> under <a href="../docs/licence.html">PolyForm Shield License 1.0.0</a> (källkoden tillgänglig, inte öppen källkod); buggar och frågor tas emot i ärendehanteringen där. Lagringsformatet är <a href="../docs/alpha-0-format.html">dokumenterat</a> så att dina data förblir återställningsbara.</li>
-      <li>Namnet är preliminärt och webbplatsen hålls borta från sökmotorerna tills det är bestämt.</li>
+      <li>Namnet är preliminärt.</li>
     </ul>
+
+    <h2>För utvecklare</h2>
+    <p>Varsto är skrivet i Rust, med skal i Swift och Kotlin och ett vanligt webbgränssnitt. Källkoden och specifikationen av lagringsformatet är offentliga. Säkerhetsgranskning, plattformsarbete, nätverks- och lagringstester, paketering och översättningar är välkomna: <a href="contribute/">så bidrar du</a>.</p>
 
     <h2>Nedladdningar</h2>
     <p class="note">No binaries are published yet. Build from source with <code>cargo build --release</code>.</p>
