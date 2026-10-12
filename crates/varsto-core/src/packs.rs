@@ -35,7 +35,8 @@ pub const MAX_MEMBERS: usize = 256;
 /// How long a loaded pack index is trusted before a miss reloads it.
 const STALE: Duration = Duration::from_secs(30);
 
-const PREFIX: &str = "packs/";
+/// Where packs, their indexes and deletion markers are kept.
+pub const PREFIX: &str = "packs/";
 const FORMAT: u32 = 1;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
