@@ -290,6 +290,10 @@ label.inline { display: inline-flex; align-items: flex-start; gap: 8px; font-wei
 label.inline input[type=checkbox] { margin-top: 2px; }
 .toolbar label.inline, .card-head label.inline { margin: 0; }
 label .hint { display: block; font-size: 12px; font-weight: 400; margin-top: 4px; }
+.field-group { margin: 0 0 12px; }
+.field-group .field-caption { display: block; margin: 0 0 6px; font-size: 13px; font-weight: 500; color: var(--text-2); }
+.field-group label.inline { display: flex; margin: 0 0 6px; }
+.field-group .hint { display: block; font-size: 12px; }
 input[type=text], input[type=password], input[type=number], input[type=tel], input[type=email], input[type=url], input[type=search], input:not([type]) {
   display: block; width: 100%; margin-top: 6px;
   height: 36px; padding: 0 12px;

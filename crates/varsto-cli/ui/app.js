@@ -142,6 +142,13 @@
       var code = $("modal-code"); code.textContent = o.code || ""; code.classList.toggle("hidden", !o.code);
       var fs = $("modal-fields"); fs.innerHTML = "";
       (o.fields || []).forEach(function (f) {
+        if (f.options) {
+          var sl = el("label", "", f.label); var sel = el("select"); sel.name = f.name;
+          f.options.forEach(function (op) { var x = el("option", null, op[1]); x.value = op[0]; sel.appendChild(x); });
+          if (f.value !== undefined && f.value !== null) { sel.value = f.value; }
+          sl.appendChild(sel); if (f.hint) { sl.appendChild(el("span", "hint muted", f.hint)); } fs.appendChild(sl);
+          return;
+        }
         var lab = el("label", "", f.label); var inp = el("input"); inp.name = f.name; inp.type = f.type || "text"; inp.autocomplete = "off";
         if (f.type === "number") { inp.min = "0"; inp.step = "1"; inp.inputMode = "numeric"; }
         if (f.value !== undefined && f.value !== null) { inp.value = f.value; }
@@ -158,7 +165,7 @@
       setTimeout(function () { first.focus(); if (first.select) { first.select(); } }, 30);
     });
   }
-  function dialogValues() { var v = {}; $("modal-fields").querySelectorAll("input").forEach(function (i) { v[i.name] = i.value; }); return v; }
+  function dialogValues() { var v = {}; $("modal-fields").querySelectorAll("input, select").forEach(function (i) { v[i.name] = i.value; }); return v; }
   function closeDialog(action) {
     if (!modalResolve) { return; }
     var r = modalResolve; modalResolve = null;
@@ -254,7 +261,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   $("themeauto").onclick = function () { try { localStorage.removeItem("varsto-theme"); } catch (e) {} applyTheme(""); log("theme follows the system"); };
 
   // Navigation between the pages of the app section.
-  var titles = { overview: "Overview", files: "Files", shared: "Shared", storages: "Storages", policies: "Policies", peers: "Peers", organization: "Organization", settings: "Settings", more: "More" };
+  var titles = { overview: "Overview", files: "Files", shared: "Shared", storages: "Storages", backups: "Backups", policies: "Policies", peers: "Peers", organization: "Organization", settings: "Settings", more: "More" };
   var legacyPages = { folders: "files", sharing: "shared" };
   function pageTitle(p) { return titles[p] || "Overview"; }
   var currentPage = (function () { try { var p = sessionStorage.getItem("varsto-page"); p = legacyPages[p] || p; return titles[p] ? p : "overview"; } catch (e) { return "overview"; } })();
@@ -266,12 +273,13 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     currentPage = page;
     try { sessionStorage.setItem("varsto-page", page); } catch (e) {}
     document.querySelectorAll(".page").forEach(function (d) { d.classList.toggle("hidden", d.dataset.page !== page); });
-    var tab = page === "shared" || page === "policies" || page === "peers" || page === "organization" || page === "settings" ? "more" : page;
+    var tab = page === "shared" || page === "backups" || page === "policies" || page === "peers" || page === "organization" || page === "settings" ? "more" : page;
     document.querySelectorAll(".sidebar .nav-item[data-nav]").forEach(function (b) { if (b.dataset.nav === page) { b.setAttribute("aria-current", "page"); } else { b.removeAttribute("aria-current"); } });
     document.querySelectorAll(".tabbar .nav-item[data-nav]").forEach(function (b) { if (b.dataset.nav === tab) { b.setAttribute("aria-current", "page"); } else { b.removeAttribute("aria-current"); } });
     if (document.body.dataset.view === "app") { $("pagetitle").textContent = pageTitle(page); }
     if (page === "peers") { loadP2p(); }
     if (page === "organization") { loadOrg(); }
+    if (page === "backups") { loadBackups(); }
     if (page === "overview" && lastWhere) { renderWhere(lastWhere); }
     trafficWatch();
     if (page === "files") { ensureFiles(); }
@@ -880,6 +888,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
       if (!org && currentPage === "organization") { nav("settings"); }
       $("replicatoken").classList.toggle("hidden", !!s.member);
       $("replicacard").classList.toggle("hidden", !!s.member);
+      if (currentPage === "backups") { fillBackupStorages(); }
       return api("GET", "/api/service").then(function (sv) { renderService(sv); return api("GET", "/api/ledger"); }).then(function (l) {
         $("ledger").textContent = l.map(function (e) { return e.device.slice(0, 8) + " #" + e.seq + " lamport " + e.lamport + " events " + e.events; }).join("\n") || "(empty)";
       });
@@ -1019,6 +1028,149 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
       return api("POST", "/api/storage/price", body).then(function () { log("prices of " + e.name + " saved"); refreshStatus(); });
     }).catch(function (err) { log("error: " + err.message); });
   }
+
+  // Backups (their own page): read-only snapshots of a directory of this
+  // device, kept on storages only. Snapshots are listed and restored into a
+  // directory the user names; they are never changed or deleted here.
+  var backupsShown = null; // the backup whose snapshots are listed
+  var backupList = [];
+  var SCHEDULES = [["daily", "Daily"], ["weekly", "Weekly"], ["manual", "Only when I ask"]];
+  function scheduleLabel(s) { for (var i = 0; i < SCHEDULES.length; i++) { if (SCHEDULES[i][0] === s) { return SCHEDULES[i][1]; } } return s || "–"; }
+  function loadBackups() {
+    fillBackupStorages();
+    return api("GET", "/api/backups").then(renderBackups).catch(function (e) { log("backups: " + e.message); });
+  }
+  function fillBackupStorages() {
+    var box = $("backupstorages"); var prev = {};
+    box.querySelectorAll("input").forEach(function (i) { prev[i.value] = i.checked; });
+    box.innerHTML = "";
+    var list = ((lastStatus && lastStatus.storages) || []).filter(function (st) { return !st.carrier; });
+    list.forEach(function (st) {
+      var lab = el("label", "inline"); var c = el("input"); c.type = "checkbox"; c.name = "storage"; c.value = st.name;
+      c.checked = prev[st.name] !== undefined ? prev[st.name] : true;
+      lab.appendChild(c); var n = el("span", null, st.name); n.setAttribute("data-no-i18n", ""); lab.appendChild(n);
+      if (st.cold) { lab.appendChild(pill("grey", "cold")); }
+      box.appendChild(lab);
+    });
+    $("backupstorages-empty").classList.toggle("hidden", list.length > 0);
+  }
+  function renderBackups(list) {
+    backupList = list;
+    var tb = $("backups").querySelector("tbody"); tb.innerHTML = "";
+    $("backups-empty").classList.toggle("hidden", list.length > 0);
+    $("backups").classList.toggle("hidden", list.length === 0);
+    list.forEach(function (b) {
+      var tr = el("tr");
+      function td(text, cls, label) { var d = el("td", cls, text); if (label) { d.dataset.label = label; } tr.appendChild(d); return d; }
+      var nameCell = el("td"); var nm = el("span", null, b.name); nm.setAttribute("data-no-i18n", ""); nameCell.appendChild(nm);
+      if (b.stopped) { nameCell.appendChild(document.createTextNode(" ")); nameCell.appendChild(pill("grey", "stopped")); }
+      if (!b.this_device) { nameCell.appendChild(document.createTextNode(" ")); nameCell.appendChild(pill("accent", "other device")); }
+      var sub = el("span", "sub", b.source_path + " · " + b.source_device); sub.title = b.source_path; sub.setAttribute("data-no-i18n", ""); nameCell.appendChild(sub);
+      tr.appendChild(nameCell);
+      td(b.snapshots, "num", "Snapshots");
+      td(b.latest_utc ? fmtWhen(b.latest_utc) : "None yet", "", "Latest snapshot");
+      td(b.latest_utc ? fmtBytes(b.latest_bytes) : "–", "num", "Size");
+      td(b.retention_days + " days", "", "Kept");
+      td(b.this_device ? scheduleLabel(b.schedule) : "On the device it backs up", "", "Schedule");
+      var act = el("td"); var menu = rowMenu(act, "backup:" + b.backup_id);
+      var sn = el("button", "secondary", "Snapshots"); sn.type = "button"; sn.onclick = function () { showSnapshots(b.name); }; act.appendChild(sn);
+      if (b.this_device && !b.stopped) { var tk = el("button", "secondary", "Take snapshot now"); tk.type = "button"; tk.onclick = function () { takeSnapshot(b.name); }; menu.appendChild(tk); }
+      if (b.snapshots > 0) { var rs = el("button", "secondary", "Restore latest…"); rs.type = "button"; rs.onclick = function () { restoreSnapshot(b.name, "latest"); }; menu.appendChild(rs); }
+      if (b.this_device && !b.stopped) { var se = el("button", "secondary", "Settings…"); se.type = "button"; se.onclick = function () { editBackup(b); }; menu.appendChild(se); }
+      if (!b.stopped) { var sp = el("button", "secondary", "Stop…"); sp.type = "button"; sp.onclick = function () { stopBackup(b.name); }; menu.appendChild(sp); }
+      menu.done();
+      tr.appendChild(act); tb.appendChild(tr);
+    });
+    if (backupsShown && list.some(function (b) { return b.name === backupsShown; })) { showSnapshots(backupsShown); } else { backupsShown = null; $("backupsnaps").classList.add("hidden"); }
+  }
+  function showSnapshots(name) {
+    backupsShown = name;
+    return api("GET", "/api/backup/snapshots?backup=" + enc(name)).then(function (list) {
+      $("backupsnaps-name").textContent = name;
+      var tb = $("snapshots").querySelector("tbody"); tb.innerHTML = "";
+      list.slice().reverse().forEach(function (sn) {
+        var tr = el("tr");
+        function td(text, cls, label) { var d = el("td", cls, text); if (label) { d.dataset.label = label; } tr.appendChild(d); }
+        td(sn.seq, "num", "Number"); td(fmtWhen(sn.taken_utc), "", "Taken"); td(sn.files, "num", "Files"); td(fmtBytes(sn.bytes), "num", "Size"); td(fmtDate(sn.expires_utc), "", "Expires");
+        var act = el("td"); var rb = el("button", "secondary", "Restore…"); rb.type = "button"; rb.onclick = function () { restoreSnapshot(name, String(sn.seq)); }; act.appendChild(rb); tr.appendChild(act);
+        tb.appendChild(tr);
+      });
+      if (!list.length) { var tr = el("tr"); var d = el("td", "muted", "No snapshots yet"); d.colSpan = 6; tr.appendChild(d); tb.appendChild(tr); }
+      $("backupsnaps").classList.remove("hidden");
+    }).catch(function (e) { alertBox(e.message); });
+  }
+  function takeSnapshot(name) {
+    busy(true);
+    api("POST", "/api/backup/take", { backup: name }).then(function (r) {
+      log("Snapshot " + r.seq + " of " + r.backup + " taken: " + r.files + " files");
+      if (r.skipped && r.skipped.length) { alertBox(r.skipped.length + " files could not be read and were left out: " + r.skipped.slice(0, 10).join(", ")); }
+    }).catch(function (e) { alertBox(e.message); }).then(function () { busy(false); loadBackups(); });
+  }
+  function restoreSnapshot(name, which, overwrite, values) {
+    var ask = values ? Promise.resolve({ values: values }) : dialog({
+      title: "Restore a snapshot",
+      text: "The files are written into the directory you name, which must be empty. Nothing is changed in the backed-up directory or in the snapshot.",
+      fields: [
+        { name: "to", label: "Restore into directory", placeholder: "/Users/me/Restored", required: true },
+        { name: "paths", label: "Only these files or directories (optional)", placeholder: "Documents, Photos/2026", hint: "paths inside the snapshot, separated by commas" }
+      ],
+      ok: "Restore"
+    });
+    return ask.then(function (r) {
+      if (!r) { return; }
+      busy(true);
+      return api("POST", "/api/backup/restore", { backup: name, snapshot: which, to: r.values.to, paths: r.values.paths || "", overwrite: !!overwrite }).then(function (x) {
+        busy(false);
+        log("Restored " + x.files_restored + " files of snapshot " + x.seq + " into " + x.to);
+        if (x.unavailable && x.unavailable.length) { alertBox(x.unavailable.length + " files could not be restored: " + x.unavailable.slice(0, 10).join("; ")); }
+      }, function (e) {
+        busy(false);
+        if (!overwrite && /not empty/.test(e.message)) {
+          return confirmBox("The directory is not empty. Restore into it anyway, replacing files that have the same names?", { title: "Directory not empty", ok: "Restore anyway", danger: true }).then(function (yes) { if (yes) { return restoreSnapshot(name, which, true, r.values); } });
+        }
+        alertBox(e.message);
+      });
+    });
+  }
+  function editBackup(b) {
+    dialog({
+      title: "Backup settings",
+      text: "A new retention applies to snapshots taken from now on; those already taken keep theirs.",
+      fields: [
+        { name: "retention_days", label: "Keep each snapshot (days)", type: "number", value: b.retention_days, required: true },
+        { name: "schedule", label: "Schedule", options: SCHEDULES, value: b.schedule }
+      ],
+      ok: "Save"
+    }).then(function (r) {
+      if (!r) { return; }
+      var days = parseInt(r.values.retention_days, 10);
+      if (!(days > 0)) { alertBox("Keep each snapshot at least one day."); return; }
+      var body = { backup: b.name, retention_days: days };
+      if (SCHEDULES.some(function (x) { return x[0] === r.values.schedule; })) { body.schedule = r.values.schedule; }
+      return api("POST", "/api/backup/set", body).then(loadBackups);
+    }).catch(function (e) { alertBox(e.message); });
+  }
+  function stopBackup(name) {
+    confirmBox("No more snapshots are taken. The snapshots kept are deleted as their time is up, and then the backup goes.", { title: "Stop this backup?", ok: "Stop backup", danger: true }).then(function (yes) {
+      if (!yes) { return; }
+      return api("POST", "/api/backup/stop", { backup: name }).then(function () { log("Backup stopped: " + name); return loadBackups(); });
+    }).catch(function (e) { alertBox(e.message); });
+  }
+  $("addbackup").onsubmit = function (ev) {
+    ev.preventDefault();
+    var form = ev.target; var d = formData(form);
+    var storages = []; var all = true;
+    $("backupstorages").querySelectorAll("input").forEach(function (c) { if (c.checked) { storages.push(c.value); } else { all = false; } });
+    if (!storages.length) { alertBox("Choose at least one storage."); return; }
+    var days = parseInt(d.retention_days, 10);
+    if (!(days > 0)) { alertBox("Keep each snapshot at least one day."); return; }
+    busy(true);
+    api("POST", "/api/backup", { name: d.name, path: d.path, retention_days: days, schedule: d.schedule, storages: all ? [] : storages, initial: true }).then(function (r) {
+      form.reset(); fillBackupStorages();
+      log("Backup added: " + d.name);
+      if (r.snapshot && r.snapshot.skipped && r.snapshot.skipped.length) { alertBox(r.snapshot.skipped.length + " files could not be read and were left out: " + r.snapshot.skipped.slice(0, 10).join(", ")); }
+    }).catch(function (e) { alertBox(e.message); }).then(function () { busy(false); loadBackups(); });
+  };
 
   // Automatic verification (Policies page): status line, run now, schedule.
   var autoVerify = null;

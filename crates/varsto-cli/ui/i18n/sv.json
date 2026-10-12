@@ -531,7 +531,57 @@
   "Waiting for Wi-Fi": "Väntar på Wi-Fi",
   "Waiting for the charger": "Väntar på laddaren",
   "Waiting for the Varsto service": "Väntar på Varsto-tjänsten",
-  "Waiting for Varsto to be unlocked": "Väntar på att Varsto låses upp"
+  "Waiting for Varsto to be unlocked": "Väntar på att Varsto låses upp",
+  "Backups": "Säkerhetskopior",
+  "A backup keeps read-only snapshots of a directory of this device, encrypted, on your storages only: never on your other devices and never on a transferrer. Each snapshot is kept for the days you choose and then deleted from the storages. To get files back, restore a snapshot into a directory you name.": "En säkerhetskopia sparar skrivskyddade versioner av en katalog på den här enheten, krypterade, bara på dina lagringsplatser: aldrig på dina andra enheter och aldrig på en överföringsdisk. Varje version sparas i det antal dagar du väljer och tas sedan bort från lagringsplatserna. För att få tillbaka filer återställer du en version till en katalog du anger.",
+  "Backup": "Säkerhetskopia",
+  "Snapshots": "Versioner",
+  "Latest snapshot": "Senaste version",
+  "Kept": "Sparas",
+  "No backups yet": "Inga säkerhetskopior än",
+  "Add one below: choose a directory of this device and the storages to keep it on.": "Lägg till en nedan: välj en katalog på den här enheten och lagringsplatserna den ska sparas på.",
+  "Number": "Nummer",
+  "Taken": "Tagen",
+  "Expires": "Upphör",
+  "Snapshots cannot be changed or deleted: each one goes when its time is up.": "Versioner kan inte ändras eller tas bort: var och en försvinner när dess tid är ute.",
+  "Add a backup": "Lägg till en säkerhetskopia",
+  "Photos backup": "Säkerhetskopia av bilder",
+  "a directory of this device; it is only ever read": "en katalog på den här enheten; den läses bara",
+  "Keep each snapshot (days)": "Spara varje version (dagar)",
+  "Daily": "Dagligen",
+  "Weekly": "Varje vecka",
+  "Only when I ask": "Bara när jag ber om det",
+  "This device has no storage a backup can go to. Add one under Storages first.": "Den här enheten har ingen lagringsplats som en säkerhetskopia kan sparas på. Lägg först till en under Lagringsplatser.",
+  "Transferrers are not offered: a backup stays on storages.": "Överföringsdiskar erbjuds inte: en säkerhetskopia stannar på lagringsplatserna.",
+  "Add backup": "Lägg till säkerhetskopia",
+  "The first snapshot is taken right away. Later ones follow the schedule while Varsto runs in the background.": "Den första versionen tas genast. Följande tas enligt schemat medan Varsto körs i bakgrunden.",
+  "stopped": "stoppad",
+  "other device": "annan enhet",
+  "None yet": "Ingen än",
+  "On the device it backs up": "På enheten den säkerhetskopierar",
+  "Take snapshot now": "Ta en version nu",
+  "Restore latest…": "Återställ senaste…",
+  "Settings…": "Inställningar…",
+  "Stop…": "Stoppa…",
+  "Restore…": "Återställ…",
+  "No snapshots yet": "Inga versioner än",
+  "Restore a snapshot": "Återställ en version",
+  "The files are written into the directory you name, which must be empty. Nothing is changed in the backed-up directory or in the snapshot.": "Filerna skrivs till katalogen du anger, som måste vara tom. Ingenting ändras i den säkerhetskopierade katalogen eller i versionen.",
+  "Restore into directory": "Återställ till katalog",
+  "Only these files or directories (optional)": "Bara dessa filer eller kataloger (valfritt)",
+  "Documents, Photos/2026": "Dokument, Bilder/2026",
+  "paths inside the snapshot, separated by commas": "sökvägar i versionen, åtskilda med kommatecken",
+  "Restore": "Återställ",
+  "The directory is not empty. Restore into it anyway, replacing files that have the same names?": "Katalogen är inte tom. Återställa till den ändå och ersätta filer med samma namn?",
+  "Directory not empty": "Katalogen är inte tom",
+  "Restore anyway": "Återställ ändå",
+  "Backup settings": "Inställningar för säkerhetskopian",
+  "A new retention applies to snapshots taken from now on; those already taken keep theirs.": "En ny lagringstid gäller versioner som tas från och med nu; de som redan tagits behåller sin.",
+  "Keep each snapshot at least one day.": "Spara varje version minst en dag.",
+  "No more snapshots are taken. The snapshots kept are deleted as their time is up, and then the backup goes.": "Inga fler versioner tas. De sparade versionerna tas bort när deras tid är ute, och sedan försvinner säkerhetskopian.",
+  "Stop this backup?": "Stoppa den här säkerhetskopian?",
+  "Stop backup": "Stoppa säkerhetskopian",
+  "Choose at least one storage.": "Välj minst en lagringsplats."
  },
  "patterns": [
   [
@@ -585,6 +635,38 @@
   [
    "^(.+) is larger than (\\d+) GiB and was skipped$",
    "$1 är större än $2 GiB och hoppades över"
+  ],
+  [
+   "^(\\d+) days$",
+   "$1 dagar"
+  ],
+  [
+   "^every (\\d+) h$",
+   "var $1:e timme"
+  ],
+  [
+   "^Snapshot (\\d+) of (.+) taken: (\\d+) files$",
+   "Version $1 av $2 tagen: $3 filer"
+  ],
+  [
+   "^(\\d+) files could not be read and were left out: (.+)$",
+   "$1 filer kunde inte läsas och utelämnades: $2"
+  ],
+  [
+   "^Restored (\\d+) files of snapshot (\\d+) into (.+)$",
+   "Återställde $1 filer från version $2 till $3"
+  ],
+  [
+   "^(\\d+) files could not be restored: (.+)$",
+   "$1 filer kunde inte återställas: $2"
+  ],
+  [
+   "^Backup added: (.+)$",
+   "Säkerhetskopia tillagd: $1"
+  ],
+  [
+   "^Backup stopped: (.+)$",
+   "Säkerhetskopia stoppad: $1"
   ]
  ],
  "review": [
