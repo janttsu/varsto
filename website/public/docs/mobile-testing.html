@@ -136,7 +136,7 @@
 <li><strong>Run on the Simulator</strong> from Xcode or from the command line with <code>xcodebuild test -destination 'platform=iOS Simulator,name=...'</code>. XCUITest and Maestro both work.</li>
 <li><strong>Run on a real iPhone</strong> from Xcode over a cable. A free Apple ID works for personal testing with short-lived signing; a paid Apple Developer account is required for TestFlight and the store.</li>
 <li><strong>TestFlight.</strong> Internal testers (up to 100) need no review; external testers (up to 10,000) need a first-build review; builds expire after 90 days.</li>
-<li><strong>CI on macOS.</strong> Options: Xcode Cloud (25 free compute hours per month with the Apple Developer Program, as reported), hosted macOS runners from CI providers, or a self-hosted runner on your own Mac. Standard GitHub-hosted macOS runners are reported to be free for public repositories; this repository is hosted elsewhere, so check what your CI offers.</li>
+<li><strong>CI on macOS.</strong> Options: Xcode Cloud (25 free compute hours per month with the Apple Developer Program, as reported), hosted macOS runners from CI providers, or a self-hosted runner on your own Mac. Standard GitHub-hosted macOS runners are reported to be free for public repositories; this repository uses GitHub-hosted Apple Silicon runners for the macOS app and the iOS Simulator build.</li>
 <li><strong>Cross-compiling the Rust core for iOS</strong> requires the Apple SDK, i.e. macOS and Xcode.</li>
 </ol>
 <h2 id="device-farms-optional">Device farms (optional)</h2>

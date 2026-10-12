@@ -221,7 +221,7 @@ def background():
     K.text(414, 81, "Varsto", "title", "s")
     K.text(396, 100, "Up to date · last sync 12 s ago", "sub", "s")
     K.rule2d(392, 112, 612, 112)
-    for i, item in enumerate(("Open Varsto", "Sync now", "Pause syncing", "Check for updates")):
+    for i, item in enumerate(("Open Varsto", "Pause syncing", "Start at login", "Quit Varsto")):
         y = 138 + i * 24
         ui(tray, K.dot(3.5, "blue300"), 400, y - 4)
         K.text(414, y, item, "row", "s")
@@ -231,7 +231,7 @@ def background():
         ui(c, K.badge("ok", 10.5), 66, y + 20)
         K.text(86, y + 25, name, "title", "s")
         K.text(244, y + 24.5, where, "sub", "e")
-    K.caption("Watches your folders, syncs in seconds, updates with one click.")
+    K.caption("Watches your folders, syncs in seconds, offers updates by itself.")
 
 
 @scene("features/cold")

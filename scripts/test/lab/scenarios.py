@@ -833,24 +833,37 @@ def s_p2p_upload():
     time.sleep(20)  # LAN discovery and a first sync on both
     run("vl-rhome", "sudo tc qdisc replace dev eth1 root tbf rate 4mbit burst 32kbit latency 400ms")
     try:
+        syncs_before = (api("vl-laptop", "GET", "/api/state").get("service") or {}).get("syncs")
         run("vl-laptop", "head -c $((40<<20)) /dev/urandom > ~/data/docs/big-upload.bin")
         want = run("vl-laptop", "sha256sum ~/data/docs/big-upload.bin").stdout.split()[0]
         t0 = time.time()
         got_at = None
         uploading_then = None
+        served = 0
         while time.time() - t0 < 90:
             have = run("vl-desktop", "sha256sum ~/data/docs/big-upload.bin 2>/dev/null || true").stdout.split()
             if have and have[0] == want:
                 got_at = time.time() - t0
-                prog = api("vl-laptop", "GET", "/api/progress")
-                uploading_then = any(t.get("kind") == "upload" for t in prog.get("transfers") or [])
+                # The laptop's sync that carries the upload has not finished yet:
+                # its sync counter has not moved since the file was written. (The
+                # progress list shows a file only until its blocks are queued.)
+                # A sync holds the service, so /api/state not answering within a
+                # few seconds also means the upload's sync is still running.
+                try:
+                    st = api("vl-laptop", "GET", "/api/state", timeout=4).get("service") or {}
+                    uploading_then = st.get("syncs") == syncs_before
+                except Fail:
+                    uploading_then = True
+                served = (api("vl-laptop", "GET", "/api/p2p/traffic").get("totals") or {}).get("objects_out", 0)
                 break
             time.sleep(1)
         CTX["p2p_while_uploading"] = {"desktop_has_it_after_s": got_at and round(got_at, 1),
-                                      "laptop_still_uploading": uploading_then}
+                                      "laptop_still_uploading": uploading_then,
+                                      "blocks_served_by_laptop": served if got_at else None}
         print("      p2p while uploading:", CTX["p2p_while_uploading"], flush=True)
         check(got_at is not None, "the desktop did not get the file within 90 s")
         check(uploading_then, "the laptop had already finished its upload: the file did not go peer to peer first")
+        check(served > 0, "the laptop served no blocks to the desktop")
     finally:
         run("vl-rhome", "sudo tc qdisc del dev eth1 root", check_rc=False)
         for vm in ("vl-laptop", "vl-desktop"):

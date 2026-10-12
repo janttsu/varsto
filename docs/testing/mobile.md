@@ -38,7 +38,7 @@ A guide for people who have not tested mobile apps before. Facts below come from
 2. **Run on the Simulator** from Xcode or from the command line with `xcodebuild test -destination 'platform=iOS Simulator,name=...'`. XCUITest and Maestro both work.
 3. **Run on a real iPhone** from Xcode over a cable. A free Apple ID works for personal testing with short-lived signing; a paid Apple Developer account is required for TestFlight and the store.
 4. **TestFlight.** Internal testers (up to 100) need no review; external testers (up to 10,000) need a first-build review; builds expire after 90 days.
-5. **CI on macOS.** Options: Xcode Cloud (25 free compute hours per month with the Apple Developer Program, as reported), hosted macOS runners from CI providers, or a self-hosted runner on your own Mac. Standard GitHub-hosted macOS runners are reported to be free for public repositories; this repository is hosted elsewhere, so check what your CI offers.
+5. **CI on macOS.** Options: Xcode Cloud (25 free compute hours per month with the Apple Developer Program, as reported), hosted macOS runners from CI providers, or a self-hosted runner on your own Mac. Standard GitHub-hosted macOS runners are reported to be free for public repositories; this repository uses GitHub-hosted Apple Silicon runners for the macOS app and the iOS Simulator build.
 6. **Cross-compiling the Rust core for iOS** requires the Apple SDK, i.e. macOS and Xcode.
 
 ## Device farms (optional)

@@ -17,6 +17,7 @@ cargo build --release --target aarch64-apple-ios-sim -p varsto-ffi
 apps/ios/build.sh   # creates the Xcode project with xcodegen and builds
 ```
 
-Status: the Swift sources and the FFI crate are written; nothing has been built
-or run on a device yet, because this needs macOS. The app store listing,
-background modes and File Provider integration are future work.
+Status: built and launched in the iOS Simulator on GitHub's Apple Silicon
+runners on every change (screenshots included); not yet run on a real iPhone
+or iPad. Video thumbnails are made natively (AVAssetImageGenerator). The app
+store listing, background modes and File Provider integration are future work.

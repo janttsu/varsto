@@ -9,7 +9,7 @@ During alpha development, storage formats may change without migration paths. On
 | Format version | First release | Releases that read it | Standalone reader tool | Archived tag |
 |---|---|---|---|---|
 | 0 (alpha-0) | 0.0.1-alpha.0 | 0.0.1-alpha.0 to 0.0.1-alpha.3 | none (`varsto pull` and `varsto fsck` of those versions) | see the format version 1 note below |
-| 1 (compression, alpha-0-format.md section 16) | 0.0.1-alpha.4 | 0.0.1-alpha.4 and later, including 0.0.1-alpha.9 | none yet (`varsto pull` and `varsto fsck` of the same version) | every tag from `v0.0.1-alpha.4` on |
+| 1 (compression, alpha-0-format.md section 16) | 0.0.1-alpha.4 | 0.0.1-alpha.4 and later, including 0.0.1-alpha.11 | none yet (`varsto pull` and `varsto fsck` of the same version) | every tag from `v0.0.1-alpha.4` on |
 
 ## Release rules
 
@@ -18,6 +18,10 @@ During alpha development, storage formats may change without migration paths. On
 3. Before publishing a new storage format version, ensure the previous version has a reader tool (built-in or standalone).
 4. Update this table before publishing each storage format version, with the release number and reader status.
 5. Once the product launches (first public release), every subsequent format change requires forward compatibility for at least one previous version.
+
+## Block sizes in 0.0.1-alpha.11 (format version 1 unchanged)
+
+Blocks are cut by file size (up to 16 MiB; alpha-0-format.md section 29). Objects, records and batches are unchanged and older readers read them, but no compatibility with the single set of block sizes of earlier versions is kept: a device on an older version cuts large files differently and cannot re-upload their blocks from its own copy, so update every device.
 
 ## Ledger events in 0.0.1-alpha.9 (format version 1 unchanged)
 

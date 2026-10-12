@@ -1,6 +1,6 @@
 # Varsto for macOS
 
-A native app: its own window with the interface (WebKit inside the app, no browser), a menu-bar item with status, sync, pause, updates and "Start at login", and the `varsto` binary inside the bundle, started by the app as the background service and usable as the command line ("Install command-line tool" in the menu, or `Varsto.app/Contents/Helpers/varsto`). Apple Silicon only.
+A native app: its own window with the interface (WebKit inside the app, no browser), a menu-bar item with status, pause, "Start at login" and, when a newer version exists, "Install update" (the app updates itself from the signed disk image), and the `varsto` binary inside the bundle. Background sync runs as a launch agent shared by the app and the command line, so it keeps running after the app quits. The `varsto` command is linked into /opt/homebrew/bin or /usr/local/bin automatically ("Install command-line tool…" in the menu remains as a fallback, or use `Varsto.app/Contents/Helpers/varsto`). Download and Free up space from Finder run in the background without opening the window. Apple Silicon only.
 
 Build on a Mac (Xcode command line tools and rustup installed):
 

@@ -43,7 +43,7 @@
 <p class="note">From <code>TESTING.md</code> in the repository, rendered 2026-10-12.</p>
 <p>Varsto is tested in layers. The goal is that cheaper AI systems and scripts can run most tests from written instructions, while a human covers what cannot be automated (Windows, macOS, Android and iOS on real devices).</p>
 <blockquote>
-<p>Alpha (0.0.1-alpha.9): the Rust core, the CLI, the background service with tray and web interface, and the Android, macOS and iOS (Simulator) shells exist (<code>crates/</code>, <code>apps/</code>). CI builds and tests all of them on GitHub-hosted runners; the VM levels below are prepared for what CI does not cover.</p>
+<p>Alpha (0.0.1-alpha.11): the Rust core, the CLI, the background service with tray and web interface, and the Android, macOS and iOS (Simulator) shells exist (<code>crates/</code>, <code>apps/</code>). CI builds and tests all of them on GitHub-hosted runners; the VM levels below are prepared for what CI does not cover.</p>
 </blockquote>
 <h2 id="principles">Principles</h2>
 <ul>
@@ -79,7 +79,10 @@
 <span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a><span class="ex">scripts/test/collect-logs.sh</span> <span class="op">&lt;</span>vm<span class="op">&gt;</span>          <span class="co"># fetch logs and results</span></span>
 <span id="cb2-4"><a href="#cb2-4" aria-hidden="true" tabindex="-1"></a><span class="ex">scripts/test/destroy-vm.sh</span> <span class="op">&lt;</span>vm<span class="op">&gt;</span>            <span class="co"># always destroy the VM afterwards</span></span></code></pre></div>
 <p>Every script accepts <code>--dry-run</code>, which prints the commands without executing them.</p>
-<p>Only the <code>smoke</code> suite and the <code>debian-stable</code> (x86_64) image exist so far. The smoke suite checks that the VM boots, accepts SSH, finished cloud-init, has a sane clock and has no route out of the test network.</p>
+<p>Only the <code>smoke</code> suite and the <code>debian-stable</code> (x86_64) image exist so far.</p>
+<h3 id="vm-lab-scriptstestlab">VM lab (<code>scripts/test/lab</code>)</h3>
+<p><code>scripts/test/lab/lab.py up</code> builds a small internet on one Linux host with libvirt: a WAN in a documentation range with an S3 server (<code>rclone serve s3</code>) and STUN, a home network behind a cone NAT router, an office network behind a symmetric NAT router, and a public device. <code>lab.py build</code> compiles a static binary in a build VM, <code>install-bin</code> puts it on every device, and <code>scenarios.py</code> plays 27 scenarios against them: setup and pairing, sync and conflicts, selective sync, repair, policies, Strongrooms, organizations and removal, revocation, peer-to-peer on the LAN, through cone and symmetric NAT and during a slow upload, sharing, disk pools, mixed versions, storage outage, a black-holed network, a crash during a push, clock skew and scale (20 000 files and 1 GiB). <code>lab.py release</code> builds the Linux, Windows and Android release packages in the build VM.</p>
+<p>The rest of this section describes the <code>smoke</code> suite. The smoke suite checks that the VM boots, accepts SSH, finished cloud-init, has a sane clock and has no route out of the test network.</p>
 <h3 id="prerequisites">Prerequisites</h3>
 <ul>
 <li>Linux with libvirt and QEMU/KVM (<code>virsh</code>, <code>qemu-img</code>, <code>/dev/kvm</code>), <code>ssh</code>, <code>ssh-keygen</code>, <code>curl</code>, <code>sha512sum</code>.</li>

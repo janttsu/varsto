@@ -41,7 +41,7 @@
     <div class="tech">
     <h1>Benchmarks: peer to peer across Europe</h1>
     <p class="lead">One device in Paris holds the files. Devices in Amsterdam and Warsaw join the vault with an empty folder and download everything: once directly from the Paris device and from each other (peer to peer), once from an S3 bucket in Paris. Measured on 9 and 10 October 2026 on rented cloud machines.</p>
-    <p>This page reports what was measured, how, what limited it, and what changed in Varsto because of it. Every planned case now has numbers, from two runs each unless a table says otherwise. The numbers belong to an alpha: they describe the code as it was on those days. The driver is in the repository under <code>scripts/bench/</code>, and the summarised results are published as <a href="../data/benchmarks-2026-10.json">JSON</a>, so every number on this page can be checked and the run repeated.</p>
+    <p>This page reports what was measured, how, what limited it, and what changed in Varsto because of it. Every planned case now has numbers, from two runs each unless a table says otherwise. The numbers belong to an alpha: they describe the code as it was on those days. Since 0.0.1-alpha.11 large files are cut into larger blocks (1 MiB on average from 32 MiB, 4 MiB from 1 GiB), so the block counts here no longer apply to them. The driver is in the repository under <code>scripts/bench/</code>, and the summarised results are published as <a href="../data/benchmarks-2026-10.json">JSON</a>, so every number on this page can be checked and the run repeated.</p>
 
     <nav class="toc" aria-label="On this page">
       <p class="toc-title">On this page</p>

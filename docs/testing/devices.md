@@ -4,7 +4,7 @@ The maintainer's test fleet (generic descriptions). Update this file when device
 
 | Device | Covers | Limits |
 |---|---|---|
-| Apple Silicon MacBook | macOS app and File Provider, Xcode and the iOS Simulator (all phone sizes, older iOS runtimes), Android emulator on Apple Silicon, self-hosted macOS CI runner, notarisation | No NFC reader. The Simulator has no Secure Enclave. No KVM for Linux VMs |
+| Apple Silicon MacBook | macOS app and File Provider, Xcode and the iOS Simulator (all phone sizes, older iOS runtimes), Android emulator on Apple Silicon, notarisation (once a Developer ID exists) | No NFC reader. The Simulator has no Secure Enclave. No KVM for Linux VMs |
 | M-series iPad | Real iPadOS device: Touch ID and Secure Enclave, USB-C security key, Files / File Provider, background execution and battery, local-network permission and LAN P2P, camera upload, offline pinning | **No NFC reader**, no Face ID, no iPhone layout (use the Simulator), no cellular unless a SIM is present |
 | recent Samsung flagship (Android, One UI) | Real Android: hardware-backed key store, ultrasonic fingerprint, NFC and USB-C security keys, aggressive battery optimisation, camera upload, offline pinning, hotspot for the airplane scenario, remote wipe | One Android version and one vendor skin; older versions and low-end phones come from emulator images |
 | Windows PC | Windows app: Cloud Files placeholders, Defender and indexer behaviour, long paths, Windows Hello and USB security keys, installer and updates, code signing | Dual boot with Linux on the same machine: not both at once |

@@ -32,5 +32,9 @@ capture date, and each MediaStore id and date added is remembered in
 changed or deleted. It asks for READ_MEDIA_IMAGES and READ_MEDIA_VIDEO
 (READ_EXTERNAL_STORAGE before Android 13) when the user turns it on.
 
+Video thumbnails are made natively (`VideoThumbs.kt`, MediaMetadataRetriever);
+no ffmpeg is needed. The file list is compact on a phone: a long press starts
+selecting files to download or free.
+
 Play Store packaging, SAF folder access and the battery-friendly scheduling
 of plan 6.30/6.36 are future work.

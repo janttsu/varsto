@@ -15,18 +15,18 @@ Varsto is an end-to-end encrypted file sync, sharing and backup app that **uses 
 
 - **Bring your own storage.** S3-compatible keys, any rclone-compatible remote, a local folder, or removable disks (for example old hard drives in a USB dock). Cold storage such as Glacier is understood and used for rarely accessed data.
 - **No one to trust, and no shortcuts.** All content, file names and metadata are encrypted on your devices, and keys stay with you. External disks and cloud providers see opaque blocks only. Designed for post-quantum security (hybrid classical + post-quantum). Security is never traded for speed: there is no weaker "fast mode". Hardware security keys (FIDO2 / YubiKey), special-protected folders, and a recovery kit you store physically in several places. See [docs/architecture/security-principles.md](docs/architecture/security-principles.md).
-- **No tracker, no account, no vendor cloud.** Devices find each other on the local network, through a rendezvous record in your own storage, and as a fallback through a DHT. Designed to avoid single points of failure.
+- **No tracker, no account, no vendor cloud.** Devices find each other on the local network, through a rendezvous record in your own storage, and through a rendezvous record in your own storage (a DHT fallback is designed, not built). Designed to avoid single points of failure.
 - **Fast, block-level sync.** Files are split into blocks; only changed blocks move. Peer-to-peer transfer between your own devices, also offline over a LAN, with the cloud brought up to date when you are back online.
 - **Safety nets.** Version history, trash (optionally on cold storage), durability policies with alerts, peer-to-peer transfer between your devices on the LAN and over the internet, zstd compression before encryption, Strongroom folders that open only with a FIDO2 security key (libfido2 tools), a printable recovery kit (24 words, 2-of-3 shares), geographic location awareness, and provider-independent recovery. What the design tolerates, and what it does not, is listed in [docs/failure-model.md](docs/failure-model.md).
-- **Clients.** Linux, Windows, macOS, Android, iOS; a CLI for Linux and macOS; an MCP server so you can manage and organise files by talking to a local or cloud AI of your choice.
+- **Clients.** Linux, Windows, macOS, Android, iOS; a command line on Linux, macOS and Windows; an MCP server so you can manage and organise files by talking to a local or cloud AI of your choice.
 
 None of this is finished. See [docs/architecture](docs/architecture/README.md) for the design principles and [docs/spec](docs/spec/README.md) for the status of the format and protocol specifications.
 
 ## Status
 
-Alpha (0.0.1-alpha.10): the core works on Linux, macOS and Windows (since alpha.9 the macOS and Windows packages are built and tested on GitHub-hosted runners on every change, the Windows one on Windows Server 2025; they have not been through the manual checklists on real machines yet) as a background service with a tray or menu-bar app, a local desktop interface, a command line, and an Android shell (sideloadable APK). Implemented: encrypted chunked sync through any directory, S3-compatible bucket or rclone remote, signed per-device ledger and convergence between devices that are never online together, conflict copies and trash, selective sync with placeholders, transferrer disks, untrusted replica devices, folder sharing with another user by key (sealed to a post-quantum request code), encrypted thumbnails, self-update, hybrid Ed25519 + ML-DSA-65 signatures, an MCP server with per-folder grants, durability policies with alerts, peer-to-peer transfer between your devices on the LAN and over the internet (QUIC with hole punching, and a relay through one of your own reachable devices when punching fails; tested on localhost and on the maintainer's own networks only), zstd compression before encryption, Strongroom folders that open only with a FIDO2 security key (libfido2 tools), a printable recovery kit (24 words, 2-of-3 shares), a pool of removable disks that are filled, checked, ejected and recognised when they come back (with "attach this disk" prompts for files that are on a disk that is away), and Varsto's own last-accessed record with cost advice from open price data. It chunks and encrypts files, stores them in a local-directory storage (a disk, a removable disk or a network mount), keeps a signed per-device ledger in that storage, and syncs a folder between devices that are never online at the same time, with conflict copies and a trash. See [docs/spec/alpha-0-format.md](docs/spec/alpha-0-format.md) for what it does and does not do. The iOS app (`apps/ios`, `crates/varsto-ffi`) is built and launched on the iOS Simulator in CI but has not run on a real device yet; there is no vendor relay for vaults without a reachable device, and no audit yet.
+Alpha (0.0.1-alpha.11): the core works on Linux, macOS and Windows (since alpha.9 the macOS and Windows packages are built and tested on GitHub-hosted runners on every change, the Windows one on Windows Server 2025; they have not been through the manual checklists on real machines yet) as a background service with a tray or menu-bar app, a local desktop interface, a command line, and an Android shell (sideloadable APK). Implemented: organizations for business use (administrators, device approval, removing a person, a signed log), peer-to-peer and the background service on by default, a default durability policy, block sizes that follow the file size, encrypted chunked sync through any directory, S3-compatible bucket or rclone remote, signed per-device ledger and convergence between devices that are never online together, conflict copies and trash, selective sync with placeholders, transferrer disks, untrusted replica devices, folder sharing with another user by key (sealed to a post-quantum request code), encrypted thumbnails, self-update, hybrid Ed25519 + ML-DSA-65 signatures, an MCP server with per-folder grants, durability policies with alerts, peer-to-peer transfer between your devices on the LAN and over the internet (QUIC with hole punching, and a relay through one of your own reachable devices when punching fails; tested on localhost and on the maintainer's own networks only), zstd compression before encryption, Strongroom folders that open only with a FIDO2 security key (libfido2 tools), a printable recovery kit (24 words, 2-of-3 shares), a pool of removable disks that are filled, checked, ejected and recognised when they come back (with "attach this disk" prompts for files that are on a disk that is away), and Varsto's own last-accessed record with cost advice from open price data. It chunks and encrypts files, stores them in a local-directory storage (a disk, a removable disk or a network mount), keeps a signed per-device ledger in that storage, and syncs a folder between devices that are never online at the same time, with conflict copies and a trash. See [docs/spec/alpha-0-format.md](docs/spec/alpha-0-format.md) for what it does and does not do. The iOS app (`apps/ios`, `crates/varsto-ffi`) is built and launched on the iOS Simulator in CI but has not run on a real device yet; there is no vendor relay for vaults without a reachable device, and no audit yet.
 
-### Quick start (alpha-0)
+### Quick start
 
 ```bash
 cargo build --release                      # produces target/release/varsto
@@ -38,9 +38,10 @@ varsto --home ~/.varsto-laptop storage add-s3 cloud --endpoint https://s3.fr-par
 varsto --home ~/.varsto-laptop storage add-rclone hetzner storagebox:varsto   # any rclone remote
 varsto --home ~/.varsto-laptop folder add docs ~/Documents/synced
 varsto --home ~/.varsto-laptop sync
-varsto install                             # Linux: varsto on PATH, service (systemd user unit) and tray at login, menu entry; ./varsto with no arguments does this the first time
+varsto install                             # Linux: varsto on PATH, tray at login, menu entry. Background sync (systemd user unit / macOS launch agent) is set up by any command once a vault exists; varsto uninstall turns it off
 varsto tray                                # Linux/Windows: tray icon + background service (macOS: Varsto.app)
-varsto update --check                      # self-update from the download page
+varsto update --check                      # self-update from the download page (also checked automatically)
+varsto transfers --watch                   # uploads, downloads and peer traffic running now
 
 # on another device that can reach the same storage:
 varsto --home ~/.varsto-desk join --name desk --vault-key <hex> --storage-path /mnt/box
@@ -56,14 +57,16 @@ varsto --home ~/.varsto-laptop recovery kit --shares
 varsto --home ~/.varsto-laptop strongroom create taxes ~/Taxes
 varsto --home ~/.varsto-laptop strongroom unlock taxes --minutes 15
 
-# peer-to-peer: devices exchange encrypted blocks directly (LAN automatically; internet through NAT,
-# with one of your own reachable devices as the relay when hole punching fails)
-varsto --home ~/.varsto-laptop p2p enable --port 17893
-varsto --home ~/.varsto-server p2p enable --port 17893 --public 203.0.113.5:17893   # reachable: relays for the others
+# peer-to-peer is on by default (port 17893): devices exchange encrypted blocks directly (LAN
+# automatically; internet through NAT, with one of your own reachable devices as the relay when
+# hole punching fails); `varsto p2p disable` turns it off
+varsto --home ~/.varsto-server p2p enable --public 203.0.113.5:17893   # reachable: relays for the others
 varsto --home ~/.varsto-laptop p2p status   # NAT guess, public address, path to every peer
 varsto --home ~/.varsto-laptop p2p traffic --watch   # live speed, totals and path per peer
 
-# a durability policy: two cloud copies, one at home, verified within 30 days; exit code 0/1/2/3
+# a durability policy: two cloud copies, one at home, verified within 30 days; exit code 0/1/2/3.
+# A folder without its own policy uses the default: 1 copy on any storage, 1 in external storage,
+# 1 on your own devices or disks, verified by another device within 30 days.
 varsto --home ~/.varsto-laptop policy set docs --min-copies 2 --place cloud=2 --place home=1 --verified-within-days 30
 varsto --home ~/.varsto-laptop policy check
 
