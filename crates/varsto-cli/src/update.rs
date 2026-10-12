@@ -404,6 +404,17 @@ pub fn download_verified(
 /// Returns a human-readable message. The caller restarts the service.
 pub fn apply(check: &Check) -> Result<String> {
     if !check.available {
+        if check.newer {
+            // Never "up to date" while a newer version exists: say why this
+            // copy cannot replace itself and where to get the new one.
+            bail!(
+                "{} is out (you have {}), but this copy cannot install it by itself: there is no package for {} at the download site. Download it from {}",
+                check.latest,
+                check.current,
+                check.target,
+                check.download_page
+            );
+        }
         return Ok(format!("already up to date ({})", check.current));
     }
     // A fresh directory with a random name and mode 0700 (tempfile creates
