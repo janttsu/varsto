@@ -5,6 +5,8 @@
 //! No real NAT is involved; the traversal logic (STUN, punching) is covered
 //! by unit tests and by hand on the maintainer's own networks.
 
+mod common;
+
 use std::fs;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -58,7 +60,7 @@ fn seed(lab: &Lab, who: &str) -> (Engine, String, Vec<u8>) {
     fs::write(lab.dir(who).join("big.bin"), &big).unwrap();
     fs::write(lab.dir(who).join("note.txt"), b"over quic").unwrap();
     a.push("docs").unwrap();
-    fs::remove_dir_all(lab.root.join("storage").join("chunks")).unwrap();
+    common::lose_all_objects(&lab.root.join("storage"));
     (a, key, big)
 }
 

@@ -6,6 +6,8 @@
 //! not accepted, sharing a folder that was re-keyed with the vault key, and
 //! last-accessed times merged across devices.
 
+mod common;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 use varsto_core::chunking::ChunkerParams;
@@ -215,12 +217,12 @@ fn removed_member_reads_nothing_new_and_the_others_read_on() {
         ck.chunk_key(0, &id).unwrap(),
         ck.chunk_aad(&vault, &id, secret.len() as u64),
     );
-    for e in walkdir::WalkDir::new(lab.root.join("storage").join("chunks"))
-        .into_iter()
-        .filter_map(|e| e.ok())
-        .filter(|e| e.file_type().is_file())
-    {
-        assert!(crypto::decrypt(&k, &aad, &fs::read(e.path()).unwrap()).is_err());
+    let store = lab.root.join("storage");
+    let objs = common::object_names(&store);
+    assert!(!objs.is_empty());
+    for n in &objs {
+        let ct = common::read_object(&store, n).unwrap();
+        assert!(crypto::decrypt(&k, &aad, &ct).is_err());
     }
     let mdir = lab
         .root

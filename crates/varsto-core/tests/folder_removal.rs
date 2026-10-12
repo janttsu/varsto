@@ -2,20 +2,13 @@
 //! Folder names are unique in the vault; a folder can be detached on one
 //! device or removed from the vault on all of them, and files stay.
 
+mod common;
+
 use std::fs;
-use std::path::Path;
 use varsto_core::storage::StorageSpec;
 use varsto_core::Engine;
 
 const PASS: &str = "correct horse battery staple";
-
-fn files_under(p: &Path) -> usize {
-    walkdir::WalkDir::new(p)
-        .into_iter()
-        .filter_map(|e| e.ok())
-        .filter(|e| e.file_type().is_file())
-        .count()
-}
 
 #[test]
 fn folders_are_unique_detachable_and_removable() {
@@ -60,10 +53,10 @@ fn folders_are_unique_detachable_and_removable() {
 
     // Remove Spare from the vault on A with its data: B forgets it on its
     // next sync, nobody syncs it, files on disk stay, storage loses its blocks.
-    let before = files_under(&st.join("chunks"));
+    let before = common::object_count(&st);
     let deleted = a.remove_folder("Spare", true).unwrap();
     assert!(deleted > 0);
-    assert!(files_under(&st.join("chunks")) < before);
+    assert!(common::object_count(&st) < before);
     assert!(a.folders().iter().all(|(r, _)| r.name != "Spare"));
     assert!(a_spare.join("x.txt").exists());
     b.sync(None).unwrap();

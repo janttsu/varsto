@@ -35,7 +35,8 @@ pub const MAX_MEMBERS: usize = 256;
 /// How long a loaded pack index is trusted before a miss reloads it.
 const STALE: Duration = Duration::from_secs(30);
 
-const PREFIX: &str = "packs/";
+/// Where packs, their indexes and deletion markers are kept.
+pub const PREFIX: &str = "packs/";
 const FORMAT: u32 = 1;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -70,6 +71,11 @@ pub fn object_of(key: &str) -> Option<&str> {
     let rest = key.strip_prefix("chunks/")?;
     let (_, obj) = rest.split_once('/')?;
     (!obj.is_empty() && !obj.contains('/')).then_some(obj)
+}
+
+/// The pack id of an index key `packs/<xx>/<id>.idx`.
+fn pack_of_index(key: &str) -> Option<&str> {
+    key.strip_suffix(".idx")?.rsplit('/').next()
 }
 
 fn chunk_key(object: &str) -> String {
@@ -138,6 +144,14 @@ impl Cache {
         self.packs.insert(idx.pack.clone(), (names, deleted));
     }
 
+    /// A pack whose index is gone: every object in it was deleted (or the
+    /// pack was lost).
+    fn forget(&mut self, pack: &str) {
+        self.objects.retain(|_, l| l.pack != pack);
+        self.packs.remove(pack);
+        self.seen_index.remove(&index_key(pack));
+    }
+
     fn mark_deleted(&mut self, pack: &str, object: &str) {
         let entry = self.packs.entry(pack.to_string()).or_default();
         entry.1.insert(object.to_string());
@@ -174,10 +188,14 @@ impl PackAware {
         }
     }
 
-    /// Read the pack indexes and markers this device has not seen yet.
+    /// Read the pack indexes and markers this device has not seen yet, and
+    /// forget packs whose index has gone since.
     fn refresh(&self) -> Result<()> {
-        let keys = self.inner.list(PREFIX)?;
+        // Taken before the listing: a pack this device writes meanwhile is
+        // not in it and is not taken for gone.
         let known: BTreeSet<String> = self.cache.lock().unwrap().seen_index.clone();
+        let keys = self.inner.list(PREFIX)?;
+        let listed: BTreeSet<&str> = keys.iter().map(String::as_str).collect();
         let mut fresh = Vec::new();
         let mut tombs = Vec::new();
         for k in &keys {
@@ -197,6 +215,11 @@ impl PackAware {
             }
         }
         let mut c = self.cache.lock().unwrap();
+        for k in known.iter().filter(|k| !listed.contains(k.as_str())) {
+            if let Some(pack) = pack_of_index(k) {
+                c.forget(pack);
+            }
+        }
         for (pack, object) in &tombs {
             c.mark_deleted(pack, object);
         }
@@ -223,6 +246,31 @@ impl PackAware {
         Ok(self.cache.lock().unwrap().objects.get(object).cloned())
     }
 
+    /// Whether a packed object this device located is still there: another
+    /// device may have marked it deleted, or deleted its whole pack, since
+    /// the index was read. Asked before a write is skipped or a copy is
+    /// counted as present, where a stale answer would lose the block.
+    fn still_packed(&self, object: &str, loc: &Loc) -> Result<bool> {
+        if self.inner.exists(&tombstone_key(&loc.pack, object))? {
+            self.cache.lock().unwrap().mark_deleted(&loc.pack, object);
+            return Ok(false);
+        }
+        if !self.inner.exists(&index_key(&loc.pack))? {
+            self.cache.lock().unwrap().forget(&loc.pack);
+            return Ok(false);
+        }
+        Ok(true)
+    }
+
+    /// The object's place in a pack, checked as `still_packed`.
+    fn locate_live(&self, object: &str) -> Result<Option<Loc>> {
+        self.ensure_loaded()?;
+        match self.locate(object, false)? {
+            Some(loc) if self.still_packed(object, &loc)? => Ok(Some(loc)),
+            _ => Ok(None),
+        }
+    }
+
     fn ensure_loaded(&self) -> Result<()> {
         if self.cache.lock().unwrap().loaded.is_none() {
             self.refresh()?;
@@ -238,8 +286,7 @@ impl Storage for PackAware {
 
     fn put_if_absent(&self, key: &str, data: &[u8]) -> Result<bool> {
         if let Some(obj) = object_of(key) {
-            self.ensure_loaded()?;
-            if self.locate(obj, false)?.is_some() {
+            if self.locate_live(obj)?.is_some() {
                 return Ok(false);
             }
         }
@@ -252,24 +299,31 @@ impl Storage for PackAware {
         };
         self.ensure_loaded()?;
         if let Some(loc) = self.locate(obj, false)? {
-            if let Some(b) = self.inner.get_range(&pack_key(&loc.pack), loc.offset, loc.len)? {
+            if let Some(b) = self
+                .inner
+                .get_range(&pack_key(&loc.pack), loc.offset, loc.len)?
+            {
                 return Ok(Some(b));
             }
         }
         if let Some(b) = self.inner.get(key)? {
             return Ok(Some(b));
         }
-        // Packed by another device since the index was read.
-        match self.locate(obj, true)? {
-            Some(loc) => self.inner.get_range(&pack_key(&loc.pack), loc.offset, loc.len),
+        // Packed by another device since the index was read: a read is
+        // asked for a block that should exist, so look again right away.
+        self.refresh()?;
+        let loc = self.cache.lock().unwrap().objects.get(obj).cloned();
+        match loc {
+            Some(loc) => self
+                .inner
+                .get_range(&pack_key(&loc.pack), loc.offset, loc.len),
             None => Ok(None),
         }
     }
 
     fn exists(&self, key: &str) -> Result<bool> {
         if let Some(obj) = object_of(key) {
-            self.ensure_loaded()?;
-            if self.locate(obj, false)?.is_some() {
+            if self.locate_live(obj)?.is_some() {
                 return Ok(true);
             }
         }
@@ -283,7 +337,9 @@ impl Storage for PackAware {
     fn list_after(&self, prefix: &str, start_after: &str) -> Result<Vec<String>> {
         let mut out = self.inner.list_after(prefix, start_after)?;
         if "chunks/".starts_with(prefix) || prefix.starts_with("chunks/") {
-            self.ensure_loaded()?;
+            // A listing reads every index anew: what other devices packed
+            // or deleted since shows.
+            self.refresh()?;
             let c = self.cache.lock().unwrap();
             for obj in c.objects.keys() {
                 let k = chunk_key(obj);
@@ -351,7 +407,7 @@ impl Storage for PackAware {
         let mut fresh: Vec<(String, &[u8])> = Vec::new();
         let mut positions = Vec::new();
         for (i, (o, b)) in members.iter().enumerate() {
-            if self.locate(o, false)?.is_none() && !self.inner.exists(&chunk_key(o))? {
+            if self.locate_live(o)?.is_none() && !self.inner.exists(&chunk_key(o))? {
                 fresh.push((o.clone(), *b));
                 positions.push(i);
             }
@@ -388,7 +444,11 @@ mod tests {
     use crate::storage::LocalDirStorage;
 
     fn store(dir: &std::path::Path, caches: &Caches) -> PackAware {
-        PackAware::new(Box::new(LocalDirStorage::new("box".into(), dir.to_path_buf()).unwrap()), caches, true)
+        PackAware::new(
+            Box::new(LocalDirStorage::new("box".into(), dir.to_path_buf()).unwrap()),
+            caches,
+            true,
+        )
     }
 
     #[test]
@@ -397,9 +457,17 @@ mod tests {
         let caches: Caches = Default::default();
         let s = store(t.path(), &caches);
         let objs: Vec<(String, Vec<u8>)> = (0..5u8)
-            .map(|i| (hex::encode(crate::crypto::hash(&[i])), vec![i; 100 + i as usize]))
+            .map(|i| {
+                (
+                    hex::encode(crate::crypto::hash(&[i])),
+                    vec![i; 100 + i as usize],
+                )
+            })
             .collect();
-        let refs: Vec<(String, &[u8])> = objs.iter().map(|(o, b)| (o.clone(), b.as_slice())).collect();
+        let refs: Vec<(String, &[u8])> = objs
+            .iter()
+            .map(|(o, b)| (o.clone(), b.as_slice()))
+            .collect();
         assert_eq!(s.put_pack(&refs).unwrap(), vec![true; 5]);
         // One pack object and its index, not five objects.
         let packs = s.inner.list("packs/").unwrap();
@@ -408,7 +476,10 @@ mod tests {
         // Another engine (fresh cache) sees them.
         let other = store(t.path(), &Caches::default());
         for (o, b) in &objs {
-            assert_eq!(other.get(&chunk_key(o)).unwrap().as_deref(), Some(b.as_slice()));
+            assert_eq!(
+                other.get(&chunk_key(o)).unwrap().as_deref(),
+                Some(b.as_slice())
+            );
             assert!(other.exists(&chunk_key(o)).unwrap());
         }
         assert_eq!(other.list("chunks/").unwrap().len(), 5);
@@ -418,9 +489,94 @@ mod tests {
         for (o, _) in &objs[..4] {
             other.delete(&chunk_key(o)).unwrap();
         }
-        assert_eq!(store(t.path(), &Caches::default()).list("chunks/").unwrap().len(), 1);
+        assert_eq!(
+            store(t.path(), &Caches::default())
+                .list("chunks/")
+                .unwrap()
+                .len(),
+            1
+        );
         other.delete(&chunk_key(&objs[4].0)).unwrap();
-        assert!(s.inner.list("packs/").unwrap().is_empty(), "{:?}", s.inner.list("packs/").unwrap());
-        assert!(store(t.path(), &Caches::default()).get(&chunk_key(&objs[0].0)).unwrap().is_none());
+        assert!(
+            s.inner.list("packs/").unwrap().is_empty(),
+            "{:?}",
+            s.inner.list("packs/").unwrap()
+        );
+        assert!(store(t.path(), &Caches::default())
+            .get(&chunk_key(&objs[0].0))
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
+    fn deletions_by_another_device_are_seen_before_a_write_is_skipped() {
+        let t = tempfile::tempdir().unwrap();
+        let objs: Vec<(String, Vec<u8>)> = (0..4u8)
+            .map(|i| (hex::encode(crate::crypto::hash(&[i, 1])), vec![i; 64]))
+            .collect();
+        let refs: Vec<(String, &[u8])> = objs
+            .iter()
+            .map(|(o, b)| (o.clone(), b.as_slice()))
+            .collect();
+        let a = store(t.path(), &Caches::default());
+        // Two packs of two.
+        a.put_pack(&refs[..2]).unwrap();
+        a.put_pack(&refs[2..]).unwrap();
+        let key = |i: usize| chunk_key(&objs[i].0);
+        // Another device deletes one object of the first pack and the whole
+        // second pack, while this one keeps its loaded indexes.
+        let b = store(t.path(), &Caches::default());
+        for i in [0, 2, 3] {
+            b.delete(&key(i)).unwrap();
+        }
+        for i in [0, 2] {
+            assert!(!a.exists(&key(i)).unwrap(), "object {i}");
+            // Writing it again writes it, rather than trusting the old index.
+            assert!(a.put_if_absent(&key(i), &objs[i].1).unwrap(), "object {i}");
+            assert_eq!(
+                b.get(&key(i)).unwrap().as_deref(),
+                Some(objs[i].1.as_slice())
+            );
+        }
+        assert!(a.exists(&key(1)).unwrap());
+        assert_eq!(a.put_pack(&refs[3..]).unwrap(), vec![true]);
+        let listed = a.list("chunks/").unwrap();
+        assert_eq!(listed.len(), 4, "{listed:?}");
+    }
+
+    #[test]
+    fn a_listing_leaves_out_what_another_device_deleted() {
+        let t = tempfile::tempdir().unwrap();
+        let objs: Vec<(String, Vec<u8>)> = (0..3u8)
+            .map(|i| (hex::encode(crate::crypto::hash(&[i, 2])), vec![i; 64]))
+            .collect();
+        let refs: Vec<(String, &[u8])> = objs
+            .iter()
+            .map(|(o, b)| (o.clone(), b.as_slice()))
+            .collect();
+        let a = store(t.path(), &Caches::default());
+        a.put_pack(&refs).unwrap();
+        assert_eq!(a.list("chunks/").unwrap().len(), 3);
+        let b = store(t.path(), &Caches::default());
+        b.delete(&chunk_key(&objs[0].0)).unwrap();
+        assert_eq!(a.list("chunks/").unwrap().len(), 2);
+        for (o, _) in &objs[1..] {
+            b.delete(&chunk_key(o)).unwrap();
+        }
+        assert!(a.list("chunks/").unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_reader_sees_packs_written_after_it_loaded_the_indexes() {
+        let t = tempfile::tempdir().unwrap();
+        let reader = store(t.path(), &Caches::default());
+        let o = hex::encode(crate::crypto::hash(b"late"));
+        assert!(reader.get(&chunk_key(&o)).unwrap().is_none());
+        let writer = store(t.path(), &Caches::default());
+        writer.put_pack(&[(o.clone(), b"late".as_slice())]).unwrap();
+        assert_eq!(
+            reader.get(&chunk_key(&o)).unwrap().as_deref(),
+            Some(b"late".as_slice())
+        );
     }
 }
