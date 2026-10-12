@@ -1,0 +1,41 @@
+---
+title: Varsto ja Syncthing
+nav: Compare
+output: compare/syncthing/index.html
+description: Mihin Syncthing on tarkoitettu, miten se toimii ja miten se vertautuu Varstoon.
+---
+    <p class="back-link"><a href="{{L}}compare/">Kaikki vertailut</a></p>
+    <h1>Varsto ja Syncthing</h1>
+    <p class="lead">Syncthing pitää kansiot samanlaisina kaikilla omilla laitteillasi, jatkuvasti ja ilman pilveä. Se on ilmainen, kypsä ja suosittu teknisten käyttäjien ja kotilaboratorioiden keskuudessa: asenna se kannettavaan, pöytäkoneeseen ja NAS-laitteeseen, niin kansiot pysyvät tahdissa.</p>
+
+    <h2>Miten Syncthing toimii</h2>
+    <p>Laitteet muodostavat vertaisyhteyden TLS:n yli, ja ne tunnistetaan varmenteisiin perustuvilla laitetunnuksilla; tiliä ei ole. Projektin ylläpitämät julkiset haku- ja välittäjäpalvelimet auttavat laitteita löytämään toisensa, ja voit ajaa myös omiasi. Tiedot ovat vain mukana olevilla laitteilla: S3- tai rclone-taustajärjestelmää ei ole, eikä palveluntarjoajalla ole kopiota. Versiointi (roskakori, yksinkertainen, porrastettu tai ulkoinen) koskee muilta laitteilta tulleita muutoksia. Valikoiva synkronointi tehdään ohitusmallien avulla; paikkamerkkejä ei ole. Androidin virallisen sovelluksen kehitys lopetettiin vuonna 2024, ja yhteisön haara jatkaa sitä; iOS:lle on vain kolmannen osapuolen asiakasohjelma.</p>
+
+    <h2>Rinnakkain</h2>
+    <table class="compare-table">
+      <thead><tr><th scope="col"></th><th scope="col">Syncthing</th><th scope="col">Varsto</th></tr></thead>
+      <tbody>
+      <tr><th scope="row">Missä tiedostosi ovat</th><td>Vain laitteilla, joilla Syncthing on käynnissä (myös NAS tai palvelin käy, jos siinä ajetaan Syncthingiä).</td><td>Omilla laitteillasi ja valitsemissasi tallennuspaikoissa: S3-yhteensopivissa bucketeissa, missä tahansa rclone-etäkohteessa, paikallisissa tai verkkohakemistoissa sekä irrotettavien levyjen levyvarastoissa.</td></tr>
+      <tr><th scope="row">Tili tai keskuspalvelin</th><td>Ei kumpaakaan; projektin ylläpitämät haku- ja välittäjäpalvelimet (voi ajaa itse).</td><td>Ei kumpaakaan. Varstolla ei ole palvelinta; laitteet löytävät toisensa tallennuspaikkojesi kautta ja lähiverkossa.</td></tr>
+      <tr><th scope="row">Salaus</th><td>TLS siirron aikana; ei omaa salausta levossa. ”Epäluotetut (salatut) laitteet” ovat olemassa, mutta ne on yhä merkitty beetaksi.</td><td>Päästä päähän, asiakaspäässä, ennen kuin mitään lähtee laitteelta; hybridi post-kvanttisalaus (ML-KEM avainten jakamiseen, Ed25519 + ML-DSA-65 -allekirjoitukset). Ei vielä riippumattomasti auditoitu.</td></tr>
+      <tr><th scope="row">Laitteet verkossa yhtä aikaa</th><td>Kyllä: kahden laitteen on oltava verkossa yhtä aikaa vaihtaakseen muutoksia, ellei jokin laite ole aina päällä.</td><td>Ei tarvita: laitteet synkronoituvat tallennuspaikkojesi kautta ja suoraan vertaisyhteydellä, kun ne tavoittavat toisensa.</td></tr>
+      <tr><th scope="row">Tietää, missä jokainen kopio on</th><td>Kopioista tai niiden määrästä ei pidetä kirjaa.</td><td>Kyllä: allekirjoitettu kirjanpito kertoo, mikä tallennuspaikka ja laite säilyttää kunkin lohkon; säilytyssäännöt (oletuksena 1 kopio missä tahansa, 1 ulkoinen ja 1 omilla laitteillasi tai levyilläsi, toisen laitteen tarkistamana 30 päivän sisällä) varoittavat, kun jokin sääntö ei täyty.</td></tr>
+      <tr><th scope="row">Irrotettavat ja verkosta irti olevat levyt</th><td>Ei irrotettavien levyjen työnkulkua.</td><td>Kyllä: levyvarastot täytetään, tarkistetaan ja tunnistetaan, kun levyt palaavat; poissa olevalla levyllä olevat tiedostot pyytävät kyseistä levyä.</td></tr>
+      <tr><th scope="row">Lisenssi ja hinta</th><td>Avoin lähdekoodi (MPL-2.0), ilmainen.</td><td>Lähdekoodi saatavilla (PolyForm Shield 1.0.0), ilmainen; maksat vain tallennuspalvelun tarjoajallesi.</td></tr>
+      <tr><th scope="row">Kypsyys</th><td>Kypsä, pitkäikäinen projekti (2.x).</td><td>Alfa: ei tuotantodatalle, ja formaatit voivat vielä muuttua.</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Kumpi sopii sinulle</h2>
+    <div class="grid two">
+      <div class="card"><h3>Syncthing</h3><p>Valitse Syncthing, kun jokaisen kopion pitää pysyä itse ylläpitämilläsi koneilla, ainakin yksi niistä on aina päällä ja haluat kypsän avoimen lähdekoodin työkalun ilman minkäänlaisia tilejä.</p></div>
+      <div class="card"><h3>Varsto</h3><p>Valitse Varsto, kun haluat lisäksi salatun kopion bucketiin tai irrotettaville levyille, laitteesi ovat harvoin yhtä aikaa verkossa, haluat kirjanpidon siitä, missä jokainen kopio on, tai haluat puhelimen, joka lukee tiedostoja säilyttämättä niitä selväkielisinä.</p></div>
+    </div>
+    <p class="note">Varsto on alfavaiheen ohjelmisto: älä luota sille tietoja, joista sinulla ei ole muuta kopiota. Sen kryptografiaa ei ole myöskään auditoitu riippumattomasti. Muut tässä esitellyt tuotteet ovat kypsiä. Niitä koskevat tiedot tarkistettiin niiden omasta dokumentaatiosta lokakuussa 2026; hinnat ja tilausvaihtoehdot muuttuvat usein, joten katso ajantasaiset tiedot niiden omilta sivuilta. Korjaukset ovat tervetulleita <a href="{{P}}forum/">foorumilla</a> tai GitHubissa.</p>
+
+    <h2>Lähteet</h2>
+    <ul>
+      <li><a href="https://syncthing.net/">Syncthingin verkkosivusto</a></li>
+      <li><a href="https://docs.syncthing.net/users/untrusted.html">Epäluotetut laitteet</a></li>
+      <li><a href="https://docs.syncthing.net/users/versioning.html">Tiedostojen versiointi</a></li>
+    </ul>

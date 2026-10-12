@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="fi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Varsto: sinun tiedostosi, sinun tallennuspaikkasi</title>
+<meta name="description" content="Varsto: päästä päähän salattu tiedostojen synkronointi ja varmuuskopiointi tallennuspaikkoihin, jotka sinulla jo on. Alfa, työnimi.">
+<meta name="robots" content="noindex, nofollow">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="alternate" hreflang="en" href="../">
+<link rel="alternate" hreflang="fi" href="../fi/">
+<link rel="alternate" hreflang="sv" href="../sv/">
+<link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../blog/feed.xml">
+<link rel="stylesheet" href="../assets/css/site.css?v=b3d2d4f387">
+<script src="../assets/js/theme.js?v=0951491269"></script>
+</head>
+<body>
+<a class="skip" href="#main">Siirry sisältöön</a>
+<div class="alpha" role="note">
+  <div class="wrap"><strong>Alpha-ohjelmisto, ei tuotantodatalle.</strong> Virheet voivat hävittää dataa, tallennusmuoto voi muuttua ilman siirtotyökalua, eikä salausta ole vielä auditoitu. Pidä omat varmuuskopiosi ja varmista, että voit palauttaa niistä.</div>
+</div>
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="../fi/"><img src="../assets/img/logo.svg" alt="" width="28" height="28"><span>Varsto</span></a>
+    <nav class="langs" aria-label="Language"><a href="../" hreflang="en" lang="en">English</a> <a href="../fi/" hreflang="fi" lang="fi" aria-current="true">Suomi</a> <a href="../sv/" hreflang="sv" lang="sv">Svenska</a></nav>
+
+    <nav class="main" aria-label="Main">
+      <a href="../fi/" aria-current="page">Projekti</a>
+      <a href="../fi/features/">Ominaisuudet</a>
+      <a href="../fi/use-cases/">Käyttötapaukset</a>
+      <a href="../fi/compare/">Vertailu</a>
+      <a href="../fi/how-it-works/">Miten se toimii</a>
+      <a href="../fi/screenshots/">Kuvakaappaukset</a>
+      <a href="../docs/">Dokumentaatio (en)</a>
+      <a href="../fi/downloads/">Lataukset</a>
+      <a href="../blog/">Blogi (en)</a>
+      <a href="../forum/">Foorumi (en)</a>
+      <a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a>
+      <button class="theme" id="theme-toggle" type="button" aria-label="Change colour theme">Theme: auto</button>
+    </nav>
+  </div>
+</header>
+<main id="main">
+  <div class="wrap">
+    <h1>Sinun tiedostosi. Sinun tallennuspaikkasi.</h1>
+    <p class="lead">Varsto on päästä päähän salattu synkronointi- ja varmuuskopiointisovellus, joka käyttää omia laitteitasi ja valitsemiasi tallennuspalveluja. Levy, NAS-jako, S3-ämpäri tai mikä tahansa rclone-etäkohde: sovellus salaa kaiken laitteillasi, pitää allekirjoitettua kirjaa siitä, missä kukin lohko on, ja pitää synkronissa myös laitteet, jotka eivät ole koskaan verkossa yhtä aikaa, tuon tallennuspaikan kautta.</p>
+    <p><a class="button" href="downloads/">Lataa alfa</a> <a class="button secondary" href="../docs/quick-start.html">Pika-aloitus</a> <a class="button secondary" href="https://github.com/janttsu/varsto" rel="noopener">Lähdekoodi GitHubissa</a></p>
+    <figure class="hero"><picture><source type="image/webp" srcset="../assets/img/hero.webp"><img src="../assets/img/hero.png" alt="Kaavio: avaimesi keskellä, salatuin yhteyksin kytkettyinä S3-ämpäriin, kylmäarkistoon, hyllyn kiintolevyihin, NAS-laitteeseen, kannettavaan ja puhelimeen; jokaisessa paikassa on vain lukittuja, salattuja lohkoja." width="1200" height="600"></picture><figcaption>Kopiot sinne, minne itse päätät: ämpäriin, kylmäarkistoon, hyllyn vanhoille levyille, omille koneillesi. Jokainen kopio on salakirjoitusta; avaimet pysyvät sinulla.</figcaption></figure>
+
+    <h2>Mikä toimii jo nyt (alfa, 0.0.1-alpha.11)</h2>
+    <div class="grid">
+      <section class="card"><h3>Salattu ennen kuin se lähtee laitteeltasi</h3><p>Tiedostot pilkotaan sisällön mukaan määräytyviin paloihin, ja jokainen pala salataan XChaCha20-Poly1305:llä holvistasi johdetuilla avaimilla. Tallennuspaikka näkee vain läpinäkymättömiä objekteja ja kokoja, ei koskaan nimiä, tiivisteitä tai sisältöä. <a href="how-it-works/">Näin kaikki toimii</a>.</p></section>
+      <section class="card"><h3>Tuo oma tallennuspaikkasi</h3><p>Mikä tahansa hakemisto, johon tämä laite ylettyy, mikä tahansa S3-yhteensopiva ämpäri (AWS, Scaleway, Hetzner, B2, R2, MinIO) omilla avaimillasi tai mikä tahansa rclone-etäkohde. Kylmätallennuksiin ja arkistoluokkiin kirjoitetaan, mutta niistä ei koskaan lueta ilman vahvistustasi.</p></section>
+      <section class="card"><h3>Laitteet, jotka eivät koskaan kohtaa, päätyvät silti samaan tilaan</h3><p>Jokainen laite pitää allekirjoitettua, salattua kirjanpitoa ja julkaisee sen tallennuspaikan kautta. Muokkaukset, poistot ja ristiriidat ratkeavat deterministisesti; samanaikaisista muokkauksista säilyvät molemmat versiot, ja poistetut menevät roskakoriin.</p></section>
+      <section class="card"><h3>Taustasovellus jokaisella työpöydällä</h3><p>Taustapalvelu käynnistyy kirjautuessa, valvoo kansioita ja synkronoi sekunneissa ilman nappien painelua; käyttöliittymä avautuu selaimeesi (macOS:ssä omaan ikkunaansa), ja sitä tarjoillaan vain tälle tietokoneelle. Päivitykset tarkistetaan automaattisesti ja tarjotaan, kun uudempi versio on saatavilla.</p></section>
+      <section class="card"><h3>Valikoiva synkronointi, siirtolevyt, epäluotetut replikat, jakaminen</h3><p>Paikkamerkit, kunnes haet tiedoston; USB-tikku, joka kuljettaa vain sen, mitä toiselta laitteelta puuttuu; ystävän NAS, joka säilyttää kopiosi pystymättä avaamaan niitä; kansio, joka jaetaan toiselle käyttäjälle tämän avaimella. Katso <a href="features/">Ominaisuudet</a>, <a href="use-cases/">Käyttötapaukset</a> ja <a href="screenshots/">Kuvakaappaukset</a>.</p></section>
+      <section class="card"><h3>Kvanttiturvallinen hybridikryptografia</h3><p>Jokainen kirjanpidon erä allekirjoitetaan sekä Ed25519:llä että ML-DSA-65:llä, ja molempien on täsmättävä. Jakotunniste sinetöidään vastaanottajan X25519 + ML-KEM-768 -avaimelle, joten sen voi lähettää mitä tahansa kanavaa pitkin. Vanhat pelkällä Ed25519:llä allekirjoitetut erät pysyvät kelvollisina niissä olevan algoritmitunnisteen ansiosta.</p></section>
+      <section class="card"><h3>Avustaja rajatuin oikeuksin</h3><p>MCP-palvelimen kautta valitsemasi tekoälyavustaja voi lukea, analysoida ja järjestellä tiedostoja täsmälleen niissä kansioissa, joihin annat luvan, ja vain lukuoikeuksin, ellet toisin määrää. Varsto itse seuraa, milloin tiedostoja on viimeksi käytetty, ja ehdottaa, missä käyttämätöntä dataa on edullisinta säilyttää.</p></section>
+      <section class="card"><h3>Säännöt, jotka varoittavat ajoissa</h3><p>”Kaksi kopiota pilvessä ja yksi kotona, tarkistettu 30 päivän sisällä.” Jokainen laite tarkistaa tämän kirjanpidosta ja varoittaa sovelluksessa ja ilmoituksella ennen kuin ehto lakkaa täyttymästä.</p></section>
+      <section class="card"><h3>Vertaisyhteys, pakattuna</h3><p>Laitteesi vaihtavat salattuja lohkoja suoraan keskenään torrentin tapaan: lähiverkossa automaattisesti, internetin yli NATin läpi reiänlyönnillä (hole punching) ja jonkin oman tavoitettavan laitteesi kautta, kun reiänlyönti ei onnistu. Ei seurantapalvelimia, ei toimittajan välittäjää. Lohkot pakataan ennen salausta, joten jokainen kopio ja siirto on pieni. NATin takana olevassa kodissa suuret tiedostot saapuivat vertaisilta 8–9 MB/s nopeudella 100 Mbit/s liittymässä, jopa 1,8 kertaa nopeammin kuin ämpäristä: <a href="benchmarks/#home">Suorituskykymittaukset</a>.</p></section>
+      <section class="card"><h3>Strongroom-kansiot</h3><p>Kansio, jonka avain on olemassa vain silloin, kun kosketat FIDO2-suojausavaintasi. Kryptografinen, ei pelkkä valintaikkuna: salalause, holviavain tai varastettu kannettava ei avaa sitä.</p></section>
+      <section class="card"><h3>Vanhat levyt levyvarastoksi</h3><p>Kytke levy telakkaan, lisää se levyvarastoon, ja se täyttyy sillä, mitä varastosta puuttuu, varaukseensa asti. Irrota, kun käsketään, ja säilytä missä tahansa; kun levy palaa, se tunnistetaan merkintätiedostostaan, tarkistetaan ja täydennetään. Tiedosto, jonka ainoa kopio on poissa olevalla levyllä, kertoo sen: ”liitä levy data-01 (hylly)”.</p></section>
+      <section class="card"><h3>Organisaatiot yrityskäyttöön</h3><p>Ylläpitäjät hyväksyvät laitteita nimetyille henkilöille, poistavat henkilön kaikkine laitteineen yhdellä toimenpiteellä, määrittävät, mitä jäsenet saavat tehdä, ja pitävät tästä allekirjoitettua, ketjutettua lokia. Paperilla oleva juuriavain nimittää ylläpitäjät. Holvi ilman organisaatiota ei näe tästä mitään. <a href="features/#organizations">Lisää</a>.</p></section>
+      <section class="card"><h3>Kirjanpito, jonka voit tarkistaa</h3><p><code>varsto fsck --verify</code> vertaa kirjanpitoa siihen, mitä tallennuspaikassa todella on, ja laskee jokaisen objektin tiivisteen uudelleen. Vanhasta varmuuskopiosta palautettu laite havaitaan ja eristetään.</p></section>
+    </div>
+
+    <h2>Mikä on suunniteltu, mutta ei vielä rakennettu</h2>
+    <div class="grid">
+      <section class="card todo"><h3>iOS, laajempi NAT-testaus</h3><p>Seuraavaksi vuorossa on iOS-versio oikeilla laitteilla. NAT-läpäisy on rakennettu, mutta sitä on testattu vain localhostissa ja ylläpitäjän omissa verkoissa; holvilla, jonka kaikki laitteet ovat NATin takana, ei vieläkään ole reittiä internetin yli.</p></section>
+    </div>
+
+    <h2>Rehellinen tilannekuva</h2>
+    <ul>
+      <li>Alfa on ensimmäinen pystysuora läpileikkaus: ydinkirjasto, komentorivi, taustapalvelu, ilmoitusalueen ja valikkorivin kuoret, Android-kuori, noin 54 000 riviä Rustia, yli 200 automaattista testiä ja koti- ja toimisto-NATin taakse sijoitettujen virtuaalikoneiden testilaboratorio, mukaan lukien kahden laitteen offline-yhtenäistyminen, ristiriidat, palautetun laitteen eristys, replikat, jakaminen, säilytyssäännöt, vertaiset, Strongroomit ja levyvarastot. Käytä sitä vain testidatalla.</li>
+      <li>Kryptografista suunnittelua ei ole katselmoitu eikä auditoitu. <a href="../docs/threat-model.html">Uhkamalli</a> ja <a href="../docs/failure-model.html">vikamalli</a> kertovat, mitä suunnittelulla tavoitellaan ja mihin se päättyy.</li>
+      <li>Lähdekoodi on julkisesti osoitteessa <a href="https://github.com/janttsu/varsto" rel="noopener">github.com/janttsu/varsto</a> <a href="../docs/licence.html">PolyForm Shield License 1.0.0</a> -lisenssillä (lähdekoodi saatavilla, ei avointa lähdekoodia); virheet ja kysymykset kuuluvat siellä olevaan vikaseurantaan. Tallennusmuoto on <a href="../docs/alpha-0-format.html">dokumentoitu</a>, jotta datasi pysyy palautettavissa.</li>
+      <li>Nimi on väliaikainen, ja sivusto pidetään poissa hakukoneista, kunnes nimi on vahvistettu.</li>
+    </ul>
+
+    <h2>Lataukset</h2>
+    <p class="note">No binaries are published yet. Build from source with <code>cargo build --release</code>.</p>
+    <p class="note">Tarkista lataus: tarkistussummalista on allekirjoitettu Varston julkaisuavaimella (katso ”Verify your download” yllä): <code>varsto verify-release &lt;file&gt; --github</code> tai minisign ja <code>sha256sum -c SHA256SUMS --ignore-missing</code>. <code>varsto update</code> tarkistaa allekirjoituksen ja GitHub-julkaisun itse.</p>
+
+    <h2>Uusimmat blogissa</h2>
+    <ul class="posts"><li><time datetime="2026-10-10">2026-10-10</time> <a href="../blog/2026-10-10-alpha-9-placement-repair-signed.html">Alpha.9: data where you want it, repair by itself, signed updates, and every platform built in the open</a><br><span class="note">Folders can be placed on chosen storages and moved between them, lost copies are repaired automatically, updates are signed with an offline key, peer-to-peer downloads fetch many blocks at once, and every package is now built, tested and photographed on GitHub&#x27;s runners.</span></li>
+<li><time datetime="2026-10-09">2026-10-09</time> <a href="../blog/2026-10-09-alpha-8-ledger-and-devices.html">Alpha.8: a ledger that stays small, removable devices, and phones that keep nothing in clear text</a><br><span class="note">The ledger now lists only what is new, keeps a cached view and prunes itself behind signed checkpoints; devices can be removed with new keys for everything written afterwards; phones keep encrypted folders as encrypted blocks; and the interface shows where your data is and how peer-to-peer traffic flows.</span></li>
+<li><time datetime="2026-10-09">2026-10-09</time> <a href="../blog/2026-10-09-alpha-7-pairing-and-finder.html">Alpha.7: pair devices with a code, Finder actions, and a real NAT path</a><br><span class="note">Devices now pair from the interface with a one-time code, Finder can download a placeholder or free up space with a right-click, the macOS app installs from a disk image, devices reach each other through NAT, and removable disks can form a pool.</span></li>
+<li><time datetime="2026-10-09">2026-10-09</time> <a href="../blog/2026-10-09-alpha-6-source-on-github.html">Alpha.6: the source is public, and every platform builds in the cloud</a><br><span class="note">The repository is now public on GitHub under the PolyForm Shield licence, the native macOS and iOS apps build on GitHub Actions, Linux, Windows and Android build on short-lived cloud machines, and the interface was redone around a file view.</span></li>
+<li><time datetime="2026-10-08">2026-10-08</time> <a href="../blog/2026-10-08-alpha-0.html">Alpha-0: the first vertical slice</a><br><span class="note">A command-line tool that encrypts, stores and syncs a folder between two devices through storage you own, with a signed ledger you can check.</span></li></ul>
+
+  </div>
+</main>
+<footer class="site">
+  <div class="wrap">
+    <span>Varsto on työnimi. Lähdekoodi: <a href="https://github.com/janttsu/varsto">github.com/janttsu/varsto</a>, PolyForm Shield License 1.0.0 -lisenssillä (lähdekoodi saatavilla).</span>
+    <span>Ei evästeitä, ei seurantaa. Palvelin säilyttää tavallista käyntilokia enintään seitsemän päivää.</span>
+    <span><a href="../docs/security-policy.html">Tietoturvakäytäntö</a> · <a href="../docs/licence.html">Lisenssi</a> · <a href="../docs/trademark.html">Tavaramerkki</a> (englanniksi)</span>
+  </div>
+</footer>
+</body>
+</html>

@@ -1,0 +1,41 @@
+---
+title: Varsto ja Tresorit
+nav: Compare
+output: compare/tresorit/index.html
+description: Mihin Tresorit on tarkoitettu, miten se toimii ja miten se vertautuu Varstoon.
+---
+    <p class="back-link"><a href="{{L}}compare/">Kaikki vertailut</a></p>
+    <h1>Varsto ja Tresorit</h1>
+    <p class="lead">Tresorit on sveitsiläinen päästä päähän salattu pilvitallennus- ja tiedostonjakopalvelu, joka on suunnattu lähinnä yrityksille ja säännellyille aloille, mutta tarjolla on myös henkilökohtaisia tilauksia. Sen selkeä ja huolellisesti tehty käyttöliittymä on yksi Varston oman käyttöliittymän esikuvista.</p>
+
+    <h2>Miten Tresorit toimii</h2>
+    <p>Luot tilin, ja tiedostot tallennetaan Tresoritin datakeskuksiin; yritysasiakkaat voivat valita, missä maassa tiedot säilytetään. Tiedostot ja olennaiset metatiedot salataan päästä päähän, ja avaimet jaetaan julkisen avaimen salauksella. Palvelussa on salatut jakolinkit, versiohistoria (versioiden määrä riippuu tilauksesta), laitteen etätyhjennys sekä sovellukset Windowsille, macOS:lle, Linuxille, Androidille, iOS:lle ja verkkoon.</p>
+
+    <h2>Rinnakkain</h2>
+    <table class="compare-table">
+      <thead><tr><th scope="col"></th><th scope="col">Tresorit</th><th scope="col">Varsto</th></tr></thead>
+      <tbody>
+      <tr><th scope="row">Missä tiedostosi ovat</th><td>Tresoritin pilvessä; ei omia taustajärjestelmiä.</td><td>Omilla laitteillasi ja valitsemissasi tallennuspaikoissa: S3-yhteensopivissa bucketeissa, missä tahansa rclone-etäkohteessa, paikallisissa tai verkkohakemistoissa sekä irrotettavien levyjen levyvarastoissa.</td></tr>
+      <tr><th scope="row">Tili tai keskuspalvelin</th><td>Tili vaaditaan.</td><td>Ei kumpaakaan. Varstolla ei ole palvelinta; laitteet löytävät toisensa tallennuspaikkojesi kautta ja lähiverkossa.</td></tr>
+      <tr><th scope="row">Salaus</th><td>Päästä päähän, nollatietoperiaatteella; suljettu lähdekoodi.</td><td>Päästä päähän, asiakaspäässä, ennen kuin mitään lähtee laitteelta; hybridi post-kvanttisalaus (ML-KEM avainten jakamiseen, Ed25519 + ML-DSA-65 -allekirjoitukset). Ei vielä riippumattomasti auditoitu.</td></tr>
+      <tr><th scope="row">Laitteet verkossa yhtä aikaa</th><td>Ei tarvita: kopio on pilvessä.</td><td>Ei tarvita: laitteet synkronoituvat tallennuspaikkojesi kautta ja suoraan vertaisyhteydellä, kun ne tavoittavat toisensa.</td></tr>
+      <tr><th scope="row">Tietää, missä jokainen kopio on</th><td>Yksi kopio palveluntarjoajalla; omista tallennusvälineistäsi ei pidetä kirjaa.</td><td>Kyllä: allekirjoitettu kirjanpito kertoo, mikä tallennuspaikka ja laite säilyttää kunkin lohkon; säilytyssäännöt (oletuksena 1 kopio missä tahansa, 1 ulkoinen ja 1 omilla laitteillasi tai levyilläsi, toisen laitteen tarkistamana 30 päivän sisällä) varoittavat, kun jokin sääntö ei täyty.</td></tr>
+      <tr><th scope="row">Irrotettavat ja verkosta irti olevat levyt</th><td>Ei irrotettavien levyjen työnkulkua.</td><td>Kyllä: levyvarastot täytetään, tarkistetaan ja tunnistetaan, kun levyt palaavat; poissa olevalla levyllä olevat tiedostot pyytävät kyseistä levyä.</td></tr>
+      <tr><th scope="row">Lisenssi ja hinta</th><td>Suljettu; pieni ilmaisversio sekä maksulliset henkilö- ja yritystilaukset.</td><td>Lähdekoodi saatavilla (PolyForm Shield 1.0.0), ilmainen; maksat vain tallennuspalvelun tarjoajallesi.</td></tr>
+      <tr><th scope="row">Kypsyys</th><td>Kypsä kaupallinen palvelu vaatimustenmukaisuusominaisuuksineen.</td><td>Alfa: ei tuotantodatalle, ja formaatit voivat vielä muuttua.</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Kumpi sopii sinulle</h2>
+    <div class="grid two">
+      <div class="card"><h3>Tresorit</h3><p>Valitse Tresorit, kun tarvitset säännösten mukaisen, tuetun yrityspalvelun, jossa on hallintatyökalut, tietojen sijaintivalinnat ja viimeistelty jakaminen, ja suljetun lähdekoodin palveluntarjoaja on sinulle hyväksyttävä.</p></div>
+      <div class="card"><h3>Varsto</h3><p>Valitse Varsto, kun haluat vastaavan päästä päähän -salauksen ilman välissä olevaa palveluntarjoajaa: omat bucketit ja levyt, vertaissiirrot laitteidesi välillä, kirjanpidon jokaisesta kopiosta ja lähdekoodin, jonka voit lukea. Varston organisaatio-ominaisuudet (ylläpitäjät, hyväksynnät, henkilön poistaminen) ovat uusia ja yhä alfavaiheessa.</p></div>
+    </div>
+    <p class="note">Varsto on alfavaiheen ohjelmisto: älä luota sille tietoja, joista sinulla ei ole muuta kopiota. Sen kryptografiaa ei ole myöskään auditoitu riippumattomasti. Muut tässä esitellyt tuotteet ovat kypsiä. Niitä koskevat tiedot tarkistettiin niiden omasta dokumentaatiosta lokakuussa 2026; hinnat ja tilausvaihtoehdot muuttuvat usein, joten katso ajantasaiset tiedot niiden omilta sivuilta. Korjaukset ovat tervetulleita <a href="{{P}}forum/">foorumilla</a> tai GitHubissa.</p>
+
+    <h2>Lähteet</h2>
+    <ul>
+      <li><a href="https://tresorit.com/">Tresoritin verkkosivusto</a></li>
+      <li><a href="https://tresorit.com/security">Tresoritin tietoturva</a></li>
+      <li><a href="https://tresorit.com/pricing/personal">Tresoritin henkilökohtaiset tilaukset</a></li>
+    </ul>

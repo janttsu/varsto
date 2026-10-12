@@ -1,0 +1,41 @@
+---
+title: Varsto och Filen
+nav: Compare
+output: compare/filen/index.html
+description: Vad Filen är till för, hur det fungerar och hur det står sig mot Varsto.
+---
+    <p class="back-link"><a href="{{L}}compare/">Alla jämförelser</a></p>
+    <h1>Varsto och Filen</h1>
+    <p class="lead">Filen är nollkunskapskrypterad molnlagring från Tyskland, för integritetsmedvetna privatpersoner och team. Tjänsten erbjuder en molndisk, skrivbordssynkronisering, en nätverksenhet med filer på begäran, anteckningar och chatt, till låga priser.</p>
+
+    <h2>Så fungerar Filen</h2>
+    <p>Du skapar ett konto och filerna lagras på Filens servrar i Tyskland, krypterade på klienten (AES-256 per del) före uppladdningen. Klienterna och SDK:erna har öppen källkod under AGPL-3.0. Kommandoradsklienten kan göra din Filen-lagring tillgänglig lokalt via WebDAV eller S3, men data finns fortfarande hos Filen. Gratiskonton kan raderas efter en tids inaktivitet.</p>
+
+    <h2>Sida vid sida</h2>
+    <table class="compare-table">
+      <thead><tr><th scope="col"></th><th scope="col">Filen</th><th scope="col">Varsto</th></tr></thead>
+      <tbody>
+      <tr><th scope="row">Var dina filer finns</th><td>I Filens moln i Tyskland; inga egna backends.</td><td>På dina egna enheter och på lagringsplatser du väljer: S3-kompatibla buckets, valfri rclone-fjärrlagring, lokala kataloger eller nätverkskataloger och pooler av flyttbara diskar.</td></tr>
+      <tr><th scope="row">Konto eller central server</th><td>Konto krävs.</td><td>Inget. Det finns ingen Varsto-server; enheterna hittar varandra via dina lagringsplatser och i det lokala nätverket.</td></tr>
+      <tr><th scope="row">Kryptering</th><td>End-to-end, på klientsidan (AES-256); klienter med öppen källkod.</td><td>End-to-end, på klientsidan, innan något lämnar enheten; hybrid postkvantkryptografi (ML-KEM för nycklar vid delning, signaturer med Ed25519 + ML-DSA-65). Ännu inte oberoende granskad.</td></tr>
+      <tr><th scope="row">Enheterna online samtidigt</th><td>Behövs inte: molnet har kopian.</td><td>Behövs inte: enheterna synkroniserar via dina lagringsplatser, och direkt peer-to-peer när de når varandra.</td></tr>
+      <tr><th scope="row">Vet var varje kopia finns</th><td>En kopia hos leverantören; ingen uppföljning på dina egna lagringsmedier.</td><td>Ja: en signerad liggare registrerar vilken lagringsplats och enhet som har varje block; lagringsregler (som standard 1 kopia var som helst, 1 extern, 1 på dina egna enheter eller diskar, kontrollerad av en annan enhet inom 30 dagar) varnar när en regel inte uppfylls.</td></tr>
+      <tr><th scope="row">Flyttbara diskar och diskar offline</th><td>Inget arbetsflöde för flyttbara diskar.</td><td>Ja: diskpooler fylls, kontrolleras och känns igen när de kommer tillbaka; filer på en disk som är borta ber om just den disken.</td></tr>
+      <tr><th scope="row">Licens och pris</th><td>Klienterna under AGPL-3.0; gratisnivå och billiga betalabonnemang.</td><td>Källkoden tillgänglig (PolyForm Shield 1.0.0), gratis; du betalar bara din lagringsleverantör.</td></tr>
+      <tr><th scope="row">Mognad</th><td>Etablerad tjänst.</td><td>Alfa: inte för produktionsdata, formaten kan fortfarande ändras.</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Vilken passar</h2>
+    <div class="grid two">
+      <div class="card"><h3>Filen</h3><p>Välj Filen när du vill ha billig, krypterad molnlagring inom EU med klienter med öppen källkod, och det passar dig att en enda leverantör har din kopia utanför hemmet.</p></div>
+      <div class="card"><h3>Varsto</h3><p>Välj Varsto när du själv vill välja och byta själva lagringen, när du vill ha kopior hos flera leverantörer och på dina egna diskar, och när du vill att regler som ”minst en kopia utanför huset” kontrolleras åt dig.</p></div>
+    </div>
+    <p class="note">Varsto är alfaprogramvara: anförtro den inga data som du inte har någon annan kopia av, och dess kryptografi har inte granskats av någon oberoende part. De andra produkterna här är mogna. Uppgifterna om dem kontrollerades i deras egen dokumentation i oktober 2026; priser och abonnemang ändras ofta, så se deras egna sidor för aktuella siffror. Rättelser tas gärna emot på <a href="{{P}}forum/">forumet</a> eller på GitHub.</p>
+
+    <h2>Källor</h2>
+    <ul>
+      <li><a href="https://filen.io/">Filens webbplats</a></li>
+      <li><a href="https://filen.io/pricing">Filens priser</a></li>
+      <li><a href="https://github.com/FilenCloudDienste">Filens källkod</a></li>
+    </ul>

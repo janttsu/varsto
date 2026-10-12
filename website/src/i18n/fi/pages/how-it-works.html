@@ -1,0 +1,230 @@
+---
+title: Näin se toimii
+nav: How it works
+output: how-it-works/index.html
+description: Näin Varsto toimii: laitteesi ja omat tallennuspaikkasi, salatut lohkot, avaimet, jokaista kopiota seuraava allekirjoitettu kirjanpito, synkronointi, vertaisyhteys, jakaminen, Strongroom ja palautuspaketti, rehellisine rajoituksineen.
+---
+    <div class="tech">
+    <h1>Näin Varsto toimii</h1>
+    <p class="lead">Varston tekniikka mekanismi kerrallaan: miten tiedostosta tulee salattuja lohkoja, mitä avaimia on olemassa, miten allekirjoitettu kirjanpito pitää kirjaa jokaisesta kopiosta, miten laitteet synkronoivat ja löytävät toisensa ja mikä on vielä kesken.</p>
+    <p>Kaikki tässä kuvattu on toteutettu ytimessä, jonka lähdekoodi on saatavilla (<code>crates/varsto-core</code>), ja kuvattu kenttien tarkkuudella <a href="{{P}}docs/alpha-0-format.html">tallennusmuodossa</a>. Kyse on alfaohjelmistosta: muodot voivat vielä muuttua, eikä suunnittelua tai koodia ole auditoitu. <a href="{{P}}docs/threat-model.html">Uhkamalli</a> ja <a href="{{P}}docs/failure-model.html">vikamalli</a> kertovat, miltä se suojaa ja miltä ei.</p>
+
+    <nav class="toc" aria-label="Tällä sivulla">
+      <p class="toc-title">Tällä sivulla</p>
+      <ol>
+        <li><a href="#overview">Yleiskuva</a></li>
+        <li><a href="#blocks">Tiedostosta salatuiksi lohkoiksi</a></li>
+        <li><a href="#keys">Avaimet</a></li>
+        <li><a href="#ledger">Kirjanpito</a></li>
+        <li><a href="#sync">Tiedostoluettelot ja synkronointi</a></li>
+        <li><a href="#p2p">Vertaisyhteys</a></li>
+        <li><a href="#visibility">Mitä kukin osapuoli näkee</a></li>
+        <li><a href="#sharing">Kansion jakaminen</a></li>
+        <li><a href="#strongroom">Strongroom</a></li>
+        <li><a href="#recovery">Salalauseet ja palautuspaketti</a></li>
+        <li><a href="#limits">Mikä on kesken</a></li>
+      </ol>
+    </nav>
+
+    <section class="feature" id="overview">
+      <h2>Yleiskuva</h2>
+      <picture><source type="image/webp" srcset="{{P}}assets/img/encryption/architecture.webp"><img src="{{P}}assets/img/encryption/architecture.png" alt="Kannettava ja puhelin, joilla kummallakin on avaimet, vaihtavat dataa tallennuspaikkojesi kanssa, joissa ovat allekirjoitetut kirjanpidon erät, tiedostoluettelot ja salatut lohkot; laitteet vaihtavat lohkoja myös suoraan keskenään vertaisyhteydellä lähiverkossa tai internetin yli." width="640" height="320" loading="lazy"></picture>
+      <div>
+        <p>Varstossa on kahdenlaisia osia, eikä niiden välissä ole mitään meidän omaamme.</p>
+        <ul>
+          <li><strong>Laitteillasi</strong> (kannettavat, pöytäkoneet, puhelimet) ovat avaimet. Ne pilkkovat tiedostot lohkoiksi, salaavat ja purkavat salauksen ja ajavat synkronointia taustapalvelussa.</li>
+          <li><strong>Tallennuspaikoissasi</strong> on vain salakirjoitusta: S3-yhteensopiva ämpäri, mikä tahansa rclone-etäkohde, NAS tai verkkojako, paikallinen tai irrotettava levy tai hyllyllä oleva levyvarasto. Varsto ei tarvitse niiltä muuta kuin tallennuksen, haun, listauksen ja poiston.</li>
+        </ul>
+        <p>Jokaisessa tallennuspaikassa on samat kolme objektilajia: tiedostosisällön salatut <strong>lohkot</strong>, kunkin laitteen salatut <strong>tiedostoluettelot</strong> (manifestit) ja kunkin laitteen allekirjoitettu <strong>kirjanpito</strong>, sekä muutama pieni salattu tietue laitteista, kansioista ja säilytyssäännöistä. Jokaisella polulla on täsmälleen yksi kirjoittaja: laite kirjoittaa vain oman tunnisteensa alle, ja lohkot nimetään salakirjoituksensa tiivisteellä eikä niitä koskaan korvata. Siksi tallennuspaikat eivät tarvitse lukituksia, ja jokainen niistä toimii myös postilaatikkona: laitteet, jotka eivät ole koskaan verkossa yhtä aikaa, päätyvät silti samaan tilaan, kunhan niillä on yhteinen tallennuspaikka. Laitteet voivat myös vaihtaa lohkoja suoraan keskenään, lähiverkossa tai internetin yli.</p>
+        <p>Varsto-tiliä, -palvelinta tai -välittäjää ei ole. Jos projekti loppuisi huomenna, asennetut laitteesi jatkaisivat synkronointia tallennuspaikkojesi kautta.</p>
+      </div>
+    </section>
+
+    <section class="feature" id="blocks">
+      <h2>Tiedostosta salatuiksi lohkoiksi</h2>
+      <picture><source type="image/webp" srcset="{{P}}assets/img/encryption/pipeline.webp"><img src="{{P}}assets/img/encryption/pipeline.png" alt="Laitteella tiedosto pilkotaan paloihin, pakataan ja salataan palakohtaisella avaimella; tallennuspaikkaan menevät vain tiivisteellään nimetyt salatut lohkot, ja se näkee tiivisteet ja koot mutta ei nimiä tai sisältöä." width="640" height="320" loading="lazy"></picture>
+      <div>
+        <ol>
+          <li><strong>Pilkkominen.</strong> Tiedosto pilkotaan sisällön mukaan määräytyviin paloihin, joiden koko riippuu tiedostosta: noin 256 KiB alle 32 MiB:n tiedostoille, 1 MiB 1 GiB:hen asti ja 4 MiB sitä suuremmille (liukuva tiiviste valitsee katkaisukohdat), joten keskelle tehty muokkaus muuttaa muutaman palan eikä koko tiedostoa.</li>
+          <li><strong>Tunniste.</strong> Jokainen pala saa tunnisteen: selvätekstinsä avainnetun BLAKE3-tiivisteen kansion deduplikointitiivisteavaimella. Samalla sisällöllä on samassa kansiossa sama tunniste kaikilla laitteilla, mikä saa deduplikoinnin toimimaan ilman verkkoyhteyttä; avain estää ketä tahansa ilman sitä testaamasta, onko sinulla jokin tunnettu tiedosto.</li>
+          <li><strong>Pakkaus.</strong> Pala pakataan zstd:llä, kun se säästää vähintään 5 %. Pakkaustaso on muodon vakio, joten jokainen laite tuottaa samasta palasta samat tavut.</li>
+          <li><strong>Salaus.</strong> XChaCha20-Poly1305 palakohtaisella avaimella ja noncella, jotka johdetaan kansioavaimesta ja palan tunnisteesta; liitetty data nimeää holvin, kansion, palan ja sen pituuden. Deterministiset avaimet ovat tässä turvallisia, koska kukin avain salaa täsmälleen yhden viestin, ja niiden ansiosta kaksi laitetta tuottaa tavu tavulta identtiset objektit keskustelematta keskenään.</li>
+          <li><strong>Nimeäminen.</strong> Tallennettu objekti nimetään salakirjoituksensa BLAKE3-tiivisteellä. Minkä tahansa kopion, missä tahansa, voi tarkistaa nimeään vasten ilman avainta: näin replikat, vertaiset, <code>fsck --verify</code> ja automaattinen tarkistus tarkistavat kopioita, joita ne eivät pysty lukemaan.</li>
+        </ol>
+        <p class="note">Tunnettu kompromissi: deterministinen (konvergentti) salaus kansion sisällä tarkoittaa, että kaksi henkilöä, joilla molemmilla on kansioavain, voivat päätellä, onko heillä identtinen tiedosto, ja pakattujen palojen koot näkyvät tallennuspaikalle. Jaetussa kansiossa tämä pätee yhden avainkauden ajan; jäsenen poistaminen antaa kansiolle uuden satunnaisen avaimen, joten poistettu jäsen ei tunnista mitään sen jälkeen kirjoitettua.</p>
+      </div>
+    </section>
+
+    <section class="feature" id="keys">
+      <h2>Avaimet</h2>
+      <picture><source type="image/webp" srcset="{{P}}assets/img/encryption/hierarchy.webp"><img src="{{P}}assets/img/encryption/hierarchy.png" alt="Satunnaisesta holviavaimesta johdetaan holvinlaajuiset käyttötarkoituskohtaiset avaimet (kirjanpito, rekisteri, kansiotietue ja muut); kansiotietueavain sinetöi kunkin kansion satunnaisen avaimen, josta tulevat metatietoavain ja yksi avain palaa kohden." width="640" height="320" loading="lazy"></picture>
+      <div>
+        <p>Kaikki alkaa yhdestä satunnaisesta 256-bittisestä <strong>holviavaimesta</strong>, joka luodaan ensimmäisellä laitteella eikä sitä koskaan johdeta mistään kirjoittamastasi. Se on ainoa salaisuus, joka on säilytettävä; palautuspaketti on tuo avain paperilla.</p>
+        <ul>
+          <li><strong>Kullakin laitteella</strong> holviavain ja laitteen allekirjoitusavain on tallennettu tiedostoon <code>keys.enc</code>, joka on salattu avaimella, jonka Argon2id johtaa laitteen salalauseesta. Salalauseen vaihtaminen salaa vain tuon tiedoston uudelleen eikä koske mihinkään tallennuspaikassa.</li>
+          <li><strong>Holvinlaajuiset avaimet</strong> johdetaan holviavaimesta käyttötarkoituksen mukaan: kirjanpito, laiterekisteri, kansiotietue, replikan kirjanpito, vertaistunnistus ja majakkatunniste. Yhden johdetun avaimen vaarantuminen ei paljasta muita.</li>
+          <li><strong>Kansiokohtaisesti</strong> satunnainen kansioavain julkaistaan muille laitteillesi salatussa kansiotietueessa. Siitä johdetaan deduplikointitiivisteavain, metatietoavain (tiedostoluettelot ja pikkukuvat) ja yksi avain palaa kohden. Yksi kansioavain avaa sen kansion eikä mitään muuta; juuri sen jakaminen luovuttaa.</li>
+          <li><strong>Laitekohtaisesti</strong> on allekirjoitusavain (Ed25519 + ML-DSA-65), jonka julkinen puolisko on laitteen identiteetti; laitetunniste on sen tiiviste.</li>
+        </ul>
+        <p><strong>Laitteen poistaminen</strong> aloittaa uuden avain<em>kauden</em>: uusi satunnainen holviavain sinetöidään jokaiselle jäljelle jäävälle laitteelle alla kuvatulla hybridiavaintenvaihdolla. Uudet kirjanpidon erät, tietueet, tiedostoluettelot ja lohkot käyttävät uusia avaimia, ja salattujen avainkausitietueiden ketju antaa uuden avaimen avata kaiken vanhemman. Poistettu laite löytää allekirjoitetun mitätöinnin seuraavan kerran, kun se tavoittaa tallennuspaikan, ja lopettaa; tyhjennysmääräyksen kanssa se tyhjentää myös kansionsa ja avaimensa.</p>
+      </div>
+    </section>
+
+    <h3>Algoritmit</h3>
+    <table class="downloads">
+      <thead><tr><th>Käyttötarkoitus</th><th>Algoritmi</th><th>Huomiot</th></tr></thead>
+      <tbody>
+        <tr><td>Sisällön ja metatietojen salaus</td><td>XChaCha20-Poly1305 (AEAD)</td><td>256-bittiset avaimet, 192-bittiset noncet. Jokaisessa salakirjoituksessa on liitetty data, joka nimeää, mikä se on, joten tallennuspaikka ei voi siirtää objektia toiseen rooliin.</td></tr>
+        <tr><td>Tiivisteet ja avainten johtaminen</td><td>BLAKE3 (avainnettu tiiviste ja derive_key)</td><td>Palatunnisteet ja tiedostotiivisteet ovat avainnettuja. Jokaisessa johdetussa avaimessa on konteksti <code>e2ee-sync-format/0/&lt;purpose&gt;</code>.</td></tr>
+        <tr><td>Salalauseesta avaimeksi</td><td>Argon2id</td><td>Vähintään 64 MiB, 3 kierrosta; satunnainen suola laitetta kohden. Salalause ei koskaan poistu laitteelta.</td></tr>
+        <tr><td>Allekirjoitukset (kirjanpito, tietueet)</td><td>Ed25519 + ML-DSA-65, hybridi</td><td>Molemmat allekirjoitukset kattavat samat tavut, ja molempien on täsmättävä. Avain, jossa on kvanttiturvallinen osa, ei koskaan hyväksy pelkkää Ed25519-allekirjoitusta.</td></tr>
+        <tr><td>Avaintenvaihto (jakaminen, uudet avainkaudet)</td><td>X25519 + ML-KEM-768, hybridi</td><td>Molemmat jaetut salaisuudet ja koko viestinvaihto kootaan yhdeksi avaimeksi; sinetöity salaisuus pysyy salassa, ellei molempia algoritmeja ole murrettu.</td></tr>
+        <tr><td>Suojausavainkansiot</td><td>FIDO2 hmac-secret</td><td>Suojausavain johtaa kosketuksen jälkeen 32-tavuisen salaisuuden tunnistetiedosta ja kansiokohtaisesta suolasta.</td></tr>
+        <tr><td>Palautuspaketti</td><td>BIP-39-sanat, Shamir yli GF(256):n</td><td>24 sanaa tarkistussummalla; valinnaisesti 2/3-osuudet.</td></tr>
+      </tbody>
+    </table>
+
+    <section class="feature" id="ledger">
+      <h2>Kirjanpito</h2>
+      <picture><source type="image/webp" srcset="{{P}}assets/img/encryption/ledger-flow.webp"><img src="{{P}}assets/img/encryption/ledger-flow.png" alt="Kannettava kirjoittaa kirjanpidon erän 42 tallennuspaikkoihisi; pöytäkone lukee sen, tarkistaa sen ja yhdistää sen; sen jälkeen jokaisen laitteen näkymä vastaa, missä lohko 7f3a on: boxissa, kannettavan tallentamana ja pöytäkoneen tarkistamana, sekä cloudissa, kannettavan tallentamana mutta vielä tarkistamatta." width="640" height="320" loading="lazy"></picture>
+      <div>
+        <p>Kirjanpito on Varston tapa pitää kirjaa. Jokainen laite pitää omaa <strong>vain lisäyksiä sallivaa lokia tosiasioista</strong>, jotka koskevat sen tekemisiä, eikä mikään laite koskaan kirjoita toisen lokiin. Tosiasiat ovat pieniä ja konkreettisia: ”Kirjoitin lohkon 7f3a tallennuspaikkaan, jota kutsun nimellä box”, ”Latasin lohkon 7f3a boxista ja sen tiiviste täsmäsi”, ”Julkaisin tämän kansion tiedostoluettelon version 12”.</p>
+        <p>Jokainen laite lukee kaikkien muiden laitteiden lokit tallennuspaikkojen kautta ja toistaa ne kaikki samaksi kuvaksi: mitä lohkoja on olemassa, missä kukin kopio on, kuka sen kirjoitti, kuka sen on tarkistanut ja milloin. Mihinkään siinä ei luoteta sen alkuperän perusteella: jokaisen erän on allekirjoittanut sen tehnyt laite, ja kopio lasketaan tarkistetuksi vasta, kun jokin toinen laite on tarkistanut sen.</p>
+        <p>Ilman kirjanpitoa synkronointityökalu voi vain toivoa, että sen kopiot ovat olemassa. Sen avulla Varsto osaa kertoa, kuinka monta kopiota jokaisesta lohkosta on, missä paikoissa, kuinka äskettäin kukin on tarkistettu ja mitä kukaan ei ole vielä tarkistanut.</p>
+      </div>
+    </section>
+
+    <h3>Mitä se kirjaa</h3>
+    <table class="downloads">
+      <thead><tr><th>Tapahtuma</th><th>Merkitys</th></tr></thead>
+      <tbody>
+        <tr><td>Laite rekisteröity</td><td>Tämä laite liittyi holviin tällä nimellä.</td></tr>
+        <tr><td>Kansio lisätty</td><td>Tämä laite loi kansion.</td></tr>
+        <tr><td>Lohko tallennettu</td><td>Tämä laite kirjoitti salatun lohkon tallennuspaikkaan: kansio, palan tunniste, objektin nimi, koko ja tallennuspaikka. Väite, jonka vahvistaa vain kirjoittaja.</td></tr>
+        <tr><td>Lohko tarkistettu</td><td>Tämä laite latasi lohkon tallennuspaikasta, ja sen tiiviste täsmäsi sen nimeen. Kirjataan latauksissa, <code>fsck --verify</code> -ajossa, automaattisessa tarkistuksessa ja täysissä levytarkistuksissa.</td></tr>
+        <tr><td>Lohko laitteella</td><td>Tällä laitteella on lohkon selväteksti osana tiedostoa.</td></tr>
+        <tr><td>Tiedostoluettelo julkaistu</td><td>Tämä laite julkaisi kansion tiedostoluettelon version <em>n</em> tiivisteineen ja tiedostomäärineen.</td></tr>
+        <tr><td>Tallennuspaikka poistettu käytöstä</td><td>Tallennuspaikka poistettiin holvista: ennen tätä tapahtumaa siihen kohdistuneita väitteitä ei enää lasketa kopioiksi.</td></tr>
+      </tbody>
+    </table>
+    <p>Ei tiedostonimiä eikä sisältöä: lohkot tunnistetaan avainnetuilla palatunnisteilla ja salakirjoitusten tiivisteillä, ja koko erä on joka tapauksessa salattu.</p>
+
+    <section class="feature">
+      <h3>Allekirjoitettu, ketjutettu ja sinetöity</h3>
+      <picture><source type="image/webp" srcset="{{P}}assets/img/encryption/chain.webp"><img src="{{P}}assets/img/encryption/chain.png" alt="Kirjanpidon erät 40, 41 ja 42, kukin allekirjoitettu Ed25519:llä ja ML-DSA-65:llä ja ketjutettu edelliseen; aiempaan tilaan palautetun laitteen toinen erä 41 haarauttaa ketjun, ja muut laitteet havaitsevat ja eristävät sen." width="640" height="320" loading="lazy"></picture>
+      <div>
+        <p>Tapahtumat kootaan <strong>eriksi</strong>, tyypillisesti yksi synkronointikertaa eikä tiedostoa kohden. Erässä ovat laitetunniste, järjestysnumero (1, 2, 3, ...), laitteen edellisen erän tiiviste, looginen kello, luontiaika ja tapahtumat.</p>
+        <ol>
+          <li>Runko salataan XChaCha20-Poly1305:llä kirjanpitoavaimella, ja liitettynä datana ovat laitetunniste ja järjestysnumero.</li>
+          <li>Laite allekirjoittaa tunnisteensa, järjestysnumeron ja salatun rungon tiivisteen sekä Ed25519:llä että ML-DSA-65:llä. Koska allekirjoitus kattaa salakirjoituksen tiivisteen, kuka tahansa voi tarkistaa ketjun ilman avainta.</li>
+          <li>Allekirjoitettu erä kirjoitetaan jokaiseen tietueita säilyttävään tallennuspaikkaan polkuun <code>ledger/&lt;device&gt;/&lt;sequence&gt;</code>, eikä sitä koskaan korvata.</li>
+        </ol>
+        <p>Lukija hyväksyy erän vain, kun molemmat allekirjoitukset täsmäävät laiterekisterissä olevaan laitteen julkiseen avaimeen ja edellisen erän tiiviste täsmää. Kvanttiturvallinen allekirjoitus vie noin 3,3 kt, minkä vuoksi tapahtumat kulkevat erinä: kirjanpito kasvaa muutamalla kilotavulla synkronointikertaa, ei tiedostoa kohden.</p>
+      </div>
+    </section>
+
+    <h3>Vaihdetaan tallennuspaikkojesi kautta</h3>
+    <p>Jokainen tallennuspaikka on postilaatikko. Kun laite vahvistaa erän, se lähettää jokaisen oman eränsä, joka tallennuspaikasta puuttuu; jokaisella haulla se listaa kunkin kuuman tallennuspaikan kirjanpidon, ottaa erät, joita se ei ole nähnyt, tarkistaa ne, purkaa niiden salauksen ja säilyttää paikallisen kopion. Koska jokaisessa tallennuspaikassa on koko kirjanpito, yöllä synkronoiva kannettava ja aamulla synkronoiva puhelin näkevät saman historian koskaan kohtaamatta. Kukaan ei järjestä mitään keskitetysti: muutokset järjestää looginen (Lamport-)kello, ei seinäkello. Myös epäluotetut replikat ja henkilöt, joille jaat kansion, kirjoittavat kirjanpitoa, sinetöitynä avaimilla, jotka avaavat vain heidän osuutensa: replikan väitteet nimeävät objekteja, eivät tiedostoja, ja jäsenen väitteet koskevat vain jaettua kansiota.</p>
+
+    <h3>Näkymä: missä kukin lohko on</h3>
+    <p>Kaikkien erien toistaminen antaa jokaiselle laitteelle saman <strong>näkymän</strong>: jokaisen kansion jokaisesta lohkosta sen objektinimi ja koko, tallennuspaikat, jotka väittävät säilyttävänsä kopion, ja mikä laite väitteen esitti, mitkä laitteet ovat tarkistaneet sen siellä ja milloin, ja millä laitteilla on selväteksti. Näkymä tuntee myös kunkin laitteen uusimman tiedostoluettelon kustakin kansiosta, olemassa olevat laitteet ja kansiot sekä käytöstä poistetut tallennuspaikat. Tallennuspaikkojen nimet ovat laitekohtaisia (”box” täällä, ”primary” tuolla), joten jokaisella tallennuspaikalla on satunnainen identiteetti, jonka avulla laitteet yhdistävät toistensa väitteet.</p>
+
+    <h3>Mihin sitä käytetään</h3>
+    <ul>
+      <li><strong>Lähetys vain kerran.</strong> Ennen lähettämistä laite ohittaa jokaisen tallennuspaikan, joka jo väittää säilyttävänsä lohkon, joten kahdella laitteella lisätty tiedosto lähetetään vain kerran.</li>
+      <li><strong>Tilan turvallinen vapauttaminen.</strong> Tiedostosta tulee paikkamerkki vasta, kun kirjanpito näyttää jokaisen sen lohkon olevan tallennuspaikassa, joka ei ole siirtolevy, ja kansion kopiosäännöt täyttyvät edelleen.</li>
+      <li><strong>Säilytyssäännöt.</strong> ”Vähintään kolme kopiota, joista yksi pilvessä, kukin toisen laitteen tarkistama 30 päivän sisällä” arvioidaan pelkän kirjanpidon perusteella, ja palvelu hälyttää, kun kansion tilanne heikkenee.</li>
+      <li><strong>Automaattinen tarkistus.</strong> Taustapalvelu valitsee kopioita, jotka muut laitteet ovat kirjoittaneet ja joita kukaan ei ole hiljattain tarkistanut, lataa ne, vertaa salakirjoituksen tiivistettä nimeen ja kirjaa tuloksen päivittäisen kiintiön puitteissa.</li>
+      <li><strong><code>fsck</code>.</strong> Vertaa kirjanpitoa siihen, mitä tallennuspaikat todella listaavat: väitteet ilman objektia, lohkot, joista ei ole kopiota missään, ja muualla tarkistetut lohkot.</li>
+      <li><strong>Siirtolevyt.</strong> Kuljetuslevy ottaa vain ne lohkot, joita millään muulla laitteella ei vielä ole, ja vapauttaa tilan, kun molemmissa päissä ne on.</li>
+      <li><strong>Tallennuspaikan poistaminen.</strong> Varsto suunnittelee kirjanpidon perusteella, mitkä lohkot jäisivät alle kansion minimin, kopioi ne muualle, tarkistaa uudelleen ja vasta sitten kirjaa käytöstä poistamisen.</li>
+      <li><strong>Kustannukset.</strong> Tallennuspaikan kuukausikustannus on kirjanpitoon sille kirjattujen tavujen määrä kertaa sen hinta.</li>
+      <li><strong>Laitteen poistaminen.</strong> Mitätöinti nimeää poistetun laitteen viimeisen huomioon otettavan erän; kaikki, mitä laite allekirjoittaa myöhemmin, jätetään pois jokaisesta näkymästä, ja vain niiden erien ilmoittamat tiedostoluettelot yhdistetään.</li>
+    </ul>
+
+    <h3>Haarat ja palautetut laitteet</h3>
+    <p>Koska jokainen laite numeroi ja ketjuttaa omat eränsä, historiaa ei voi kirjoittaa hiljaa uudelleen. Kaksi eri erää samalla laitteella ja järjestysnumerolla tai erä, jonka edellisen erän tiiviste ei täsmää, on <strong>haara</strong>: jokainen laite, joka näkee sellaisen, merkitsee kyseisen laitteen haarautuneeksi, ja <code>fsck</code> raportoi sen. Tavallinen syy on vanhasta varmuuskopiosta palautettu laite tai kloonattu levy, joka jatkaisi järjestysnumerosta, jonka laitteen uudempi versio on jo käyttänyt. Kun laite löytää omalla identiteetillään eriä, joita se ei ole kirjoittanut, se <strong>eristää itsensä</strong>: se lopettaa allekirjoittamisen ja lähettämisen, kunnes se rekisteröidään uudelleen uutena laitteena, jotta saman identiteetin kaksi erkanevaa kopiota eivät koskaan molemmat kirjoita historiaa.</p>
+
+    <h3>Rajoitukset</h3>
+    <ul>
+      <li>Allekirjoitus todistaa, että laite <em>ilmoitti</em> tallentaneensa lohkon, ei sitä, että lohko on yhä tallessa. Siksi kopio lasketaan tarkistetuksi vasta, kun toinen laite on tarkistanut sen; haaste–vastaus-tyyppistä todistetta tallennuksesta ei vielä ole.</li>
+      <li>Tallennuspaikkaa, joka tarjoilee vanhempaa mutta kelvollista osaa kirjanpidosta, eivät allekirjoitukset paljasta; se näkyy vasta, kun toisella tallennuspaikalla tai laitteella on uudempia eriä. Palautushyökkäysten havaitseminen on suunnittelutavoite, ei testattu ominaisuus.</li>
+      <li>Kirjanpito kasvaa jokaisella synkronoinnilla. Versiosta alpha.8 lähtien laitteet kirjoittavat tarkistuspisteitä ja karsivat kuitattuja eriä, joten tallennettu määrä pysyy rajattuna; jaettujen kansioiden jäsenet ja replikat säilyttävät yhä jokaisen erän.</li>
+      <li>Tarkistusajat tulevat laitteiden kelloista: pahasti väärässä oleva kello voi aiheuttaa vääriä hälytyksiä, vaikka se ei muutakaan muutosten järjestystä.</li>
+      <li>Tallennuspaikat näkevät kirjanpitohakemistojen määrän (laitteidesi lukumäärän) sekä erien koon ja ajoituksen.</li>
+    </ul>
+
+    <h2 id="sync">Tiedostoluettelot ja synkronointi</h2>
+    <p>Kirjanpito kertoo, missä lohkot ovat; <strong>manifestit</strong> kertovat, mitä tiedostot ovat. Muutoksen jälkeen laite julkaisee koko näkymänsä kansiosta uutena manifestina: jokainen polku kokoineen, muokkausaikoineen, sisältötiivisteineen, lohkoluetteloineen ja versiovektoreineen (kunkin laitteen viimeisimmän muutoksen kello). Se salataan kansion metatietoavaimella ja ilmoitetaan kirjanpidossa. Muut laitteet hakevat manifestit, joita ne eivät ole nähneet, ja yhdistävät ne polku polulta:</p>
+    <ul>
+      <li>versio, joka sisältää toisen, voittaa; identtinen sisältö yhdistyy;</li>
+      <li>muokkaus voittaa samanaikaisen poiston, joten poisto ei koskaan tuhoa kenenkään työtä;</li>
+      <li>kahdesta erilaisesta samanaikaisesta muokkauksesta valitaan deterministinen voittaja (suurempi kello, sitten laitetunniste), ja toinen versio säilytetään nimellä <code>name.conflict-&lt;device&gt;-&lt;clock&gt;.ext</code>, joten molemmat laitteet päätyvät samaan tilaan ilman uutta kierrosta.</li>
+    </ul>
+    <p>Poistetut tiedostot menevät paikalliseen roskakoriin, eikä niitä koskaan poisteta suoraan. Taustapalvelu valvoo kansioitasi ja synkronoi sekunneissa muutoksesta. Valikoivat kansiot näyttävät jokaisen tiedoston mutta pitävät paikkamerkkejä niiden tiedostojen kohdalla, joita et ole hakenut, ja hakevat tiedoston, kun avaat sen. Manifestit ovat nykyään täysiä näkymiä; hyvin suuret kansiot tarvitsevat inkrementaalisia.</p>
+
+    <h2 id="p2p">Vertaisyhteys</h2>
+    <p>Laitteet vaihtavat lohkoja myös suoraan keskenään. Koska salaus on kansion sisällä determinististä, tiedoston omaava laite voi tarjota täsmälleen saman objektin, joka tallennuspaikassa on, ja vastaanottaja tarkistaa sen nimeään vasten kuten minkä tahansa tallennuspaikan kopion. Lohkoa tarvitseva laite kysyy ensin vertaisiltaan ja vasta sitten tallennuspaikoilta, ja se jakaa peräkkäiset lohkot vastaavien vertaisten kesken.</p>
+    <ul>
+      <li><strong>Toistensa löytäminen.</strong> Lähiverkossa multicast-majakka, joka kantaa avainnettua tunnistetta eikä holvin tunnistetta. Internetin yli salattu kohtaamistietue tallennuspaikoissasi, jossa ovat kunkin laitteen osoitteet.</li>
+      <li><strong>NATien ylittäminen.</strong> Lähiverkossa HTTP, internetin yli QUIC UDP:n päällä: STUN kertoo laitteelle sen julkisen osoitteen, molemmat osapuolet lyövät reiät, ja kun se ei onnistu, jokin oma tavoitettava laitteesi toimii välittäjänä. Toimittajan välittäjää ei ole.</li>
+      <li><strong>Kuka saa yhdistää.</strong> Jokaisella laitteella on oma varmenteensa, jonka tiiviste on kiinnitetty sen tietueeseen; jokaisessa pyynnössä on lisäksi lyhytikäinen todiste, joka on tehty holvin vertaistunnistusavaimella. Tuntematon ei saa mitään, ja poistettu laite pudotetaan vertaisluettelosta.</li>
+    </ul>
+    <p class="note">Testattu localhostissa, ylläpitäjän omissa verkoissa ja kolmen laitteen kokoonpanolla NATien yli. Kahta symmetristä NATia ei voi lävistää, joten ne turvautuvat välittäjään, joka vaatii holviin yhden tavoitettavan laitteen (kotipalvelin, VPS, edelleenohjattu portti); socketit ovat vain IPv4:ää.</p>
+    <p><strong>Kuinka nopea.</strong> <a href="{{L}}benchmarks/">Suorituskykymittaukset</a> mittaavat latauksia Pariisin, Amsterdamin ja Varsovan välillä, vertaisyhteydellä S3-ämpäriä vastaan, menetelmineen, lukuineen ja sen kertoen, mikä on vielä hidasta.</p>
+    <p><strong>Siirtoyhteys ja paikallinen käyttöliittymä.</strong> Objektit ovat salakirjoitusta jo ennen kuin ne lähtevät laitteelta, joten siirtoyhteys ei lisää toista kerrosta pelkän kerroksen vuoksi: S3:a puhutaan HTTPS:n yli Signature Version 4:llä, rclone-etäkohteet käyttävät rclonen omaa määritystä, ja S3-salaisuus säilytetään salatussa tiedostossa. Työpöytäkäyttöliittymää tarjoillaan vain osoitteessa 127.0.0.1, jokaisessa pyynnössä on istuntokohtainen tunniste, Host-otsake tarkistetaan, ja sivu toimii tiukan Content Security Policyn alaisena.</p>
+
+    <h2 id="visibility">Mitä kukin osapuoli näkee</h2>
+    <table class="downloads">
+      <thead><tr><th>Osapuoli</th><th>Näkee</th><th>Ei näe</th></tr></thead>
+      <tbody>
+        <tr><td>Tallennuspalvelun tarjoaja (ämpäri, NAS, levy, rclone-etäkohde)</td><td>Objektien nimet (salakirjoitusten tiivisteet), objektien koot, kuinka usein kirjoitat ja luet, laitteidesi lukumäärän kirjanpitohakemistojen määrästä.</td><td>Tiedostonimiä, sisältöä, kansioiden nimiä, mitkä lohkot kuuluvat mihinkin tiedostoon, selvätekstisi tiivistettä.</td></tr>
+        <tr><td>Epäluotettu replika (ystävän NAS)</td><td>Saman kuin tallennuspalvelun tarjoaja, ja lisäksi sen, että objektit täsmäävät nimiinsä. Se allekirjoittaa omat väitteensä vain replikoille tarkoitetulla avaimella.</td><td>Mitään sisältöä, nimeä tai tiedostoluetteloa; se ei koskaan saa kansioavainta eikä holviavainta.</td></tr>
+        <tr><td>Vertainen lähiverkossa tai internetissä</td><td>Sen, että jokin laite pyytää objekteja nimeltä, kun laite on ensin todistanut omaavansa holvin vertaistunnistusavaimen.</td><td>Mitään ilman tuota avainta: tuntematon ei saa yhtään objektia, eikä lähiverkon majakka nimeä holvia.</td></tr>
+        <tr><td>Henkilö, jolle jaat kansion</td><td>Sen kansion: jokaisen siinä olevan tiedoston ja laitteidesi allekirjoitetut väitteet siitä.</td><td>Muita kansioita, holviavainta, laiterekisteriäsi.</td></tr>
+        <tr><td>Tekoälyavustaja MCP-palvelimen kautta</td><td>Kansiot, joihin annoit luvan, vain lukuoikeuksin, ellet toisin määrännyt.</td><td>Kansioita, joihin et antanut lupaa; Strongroom-kansioita ei koskaan.</td></tr>
+        <tr><td>Varas, jolla on lukitsematon kannettavasi</td><td>Kaiken, mitä tavallisessa kansiossa on, niin kauan kuin laite on lukitsematon.</td><td>Strongroom-kansioita ilman suojausavaintasi; mitään, mitä on kirjoitettu sen jälkeen, kun poistit laitteen toiselta laitteelta, paitsi muiden kanssa jaetuissa kansioissa.</td></tr>
+      </tbody>
+    </table>
+
+    <section class="feature" id="sharing">
+      <h2>Kansion jakaminen</h2>
+      <picture><source type="image/webp" srcset="{{P}}assets/img/encryption/sealed.webp"><img src="{{P}}assets/img/encryption/sealed.png" alt="Vastaanottajan laite lähettää pyyntökoodin X25519- ja ML-KEM-768-julkisine avaimineen; sinä lähetät takaisin mitä tahansa kanavaa pitkin sinetöidyn tunnisteen, jossa on yksi kansioavain ja jonka vain pyytävä laite voi avata." width="640" height="320" loading="lazy"></picture>
+      <div>
+        <p>Vastaanottajan laite luo hybridiavainparin (X25519 + ML-KEM-768) ja tulostaa pyyntökoodin, jossa on sen julkinen puolisko. Laitteesi kapseloi molemmille puoliskoille, johtaa yhden avaimen molemmista jaetuista salaisuuksista ja viestinvaihdosta ja salaa sillä kansioavaimen. Syntyvän tunnisteen voi lähettää mitä tahansa kanavaa pitkin: vain pyytänyt laite voi avata sen, ja se avaa yhden kansion.</p>
+        <p>Ennen sinetöintiä vertaatte molemmat sormenjälkeä: kuutta sanaa, jotka johdetaan pyyntökoodista ja siinä olevasta nimestä. Luette ne toisillenne puhelussa tai kasvokkain; matkalla vaihdettu koodi näyttää eri sanat, ja vastaanottajan laite hylkää tunnisteen, jonka vahvistetut sanat eivät ole sen omat.</p>
+        <p>Sen jälkeen vastaanottajan laite kirjoittaa kansiolle oman kirjanpitonsa, sinetöitynä kansioavaimesta johdetulla avaimella: kumpikin osapuoli näkee toisen väitteet tuosta kansiosta eikä mitään muuta. Jäsenen poistaminen tai sellaisen tunnisteen mitätöinti, jota kukaan ei ole vielä hyväksynyt, antaa kansiolle uuden satunnaisen avaimen: laitteesi ja jäljelle jäävät jäsenet saavat sen (sinetöitynä kunkin jäsenen omalle avaimelle), kaikki siitä eteenpäin kirjoitettu on sen alla, ja poistetun jäsenen myöhemmät muutokset jätetään huomiotta. Mitä he ovat jo saaneet, pysyy heille luettavana; avainta ei voi kutsua takaisin.</p>
+      </div>
+    </section>
+
+    <section class="feature" id="strongroom">
+      <h2>Strongroom: kryptografinen, ei pelkkä valintaikkuna</h2>
+      <picture><source type="image/webp" srcset="{{P}}assets/img/encryption/strongroom.webp"><img src="{{P}}assets/img/encryption/strongroom.png" alt="Suojausavaimen kosketus avaa Strongroom-kansion: vain tunnistetiedon tunniste, suola ja kääritty kansioavain tallennetaan, avain pysyy muistissa 15 minuuttia, eikä salalause, holviavain tai varastettu varmuuskopio pysty avaamaan sitä." width="640" height="320" loading="lazy"></picture>
+      <div>
+        <p>Strongroom-kansion avain ei ole koskaan levossa. Luotaessa suojausavain tekee tunnistetiedon ja tuottaa siitä ja satunnaisesta kansiokohtaisesta suolasta 32-tavuisen salaisuuden (FIDO2 hmac-secret). Varsto käärii kansioavaimen tuon salaisuuden alle ja tallentaa vain tunnistetiedon tunnisteen, suolan ja käärityn avaimen. Avaaminen toistaa kosketuksen ja pitää avainta muistissa määräajan (oletuksena 15 minuuttia), minkä jälkeen se unohtaa avaimen. Kansioavaimeen ei pääse ilman fyysistä avainta: ei salalauseen, holviavaimen eikä varastetun varmuuskopion kautta. Varasuojausavaimet saavat oman käärenteensä samasta kansioavaimesta. Olemassa olevan kansion muuntaminen antaa sille uuden tunnisteen ja avaimen, salaa sen uudelleen ja poistaa vanhan salakirjoituksen; Strongroomin avaimen vaihtaminen tekee saman uudella avaimella, joka kääritään jokaiselle rekisteröidylle suojausavaimelle, siltä varalta, että jokin avain on voinut jäädä jonkun haltuun.</p>
+      </div>
+    </section>
+
+    <section class="feature" id="recovery">
+      <h2>Salalauseet ja palautuspaketti</h2>
+      <picture><source type="image/webp" srcset="{{P}}assets/img/encryption/recovery.webp"><img src="{{P}}assets/img/encryption/recovery.png" alt="24 sanan palautuspaketti tai kolme osuutta, joista mitkä tahansa kaksi rakentavat holviavaimen uudelleen, kun taas yksi yksinään ei paljasta mitään." width="640" height="320" loading="lazy"></picture>
+      <div>
+        <p>Laitteen salalause kulkee Argon2id:n läpi ja avaa tiedoston <code>keys.enc</code>; taustasovellus voi säilyttää sen käyttöjärjestelmän avainnipussa, jotta palvelu avautuu itsestään kirjautumisen jälkeen. Salalauseen menettäminen vie kyseisen laitteen kopion avaimista, ei holvia: toinen laite tai palautuspaketti rekisteröi uuden.</p>
+        <p>Palautuspaketti tulostaa holviavaimen 24 BIP-39-sanana (väärin kopioitu sana jää kiinni tarkistussummasta) ja pyydettäessä kolme Shamir-osuutta, joista mitkä tahansa kaksi rakentavat avaimen uudelleen, kun taas yksi yksinään ei paljasta mitään. Tiliä, avaimen talletusta tai nollausta ei ole: palautuspaketti on tapa kantaa vastuu. Tulosta uusi palautuspaketti laitteen poistamisen jälkeen, koska vanhassa on vanha avain.</p>
+      </div>
+    </section>
+
+    <h2 id="limits">Mikä on kesken</h2>
+    <ul>
+      <li><strong>Ei auditoitu.</strong> Algoritmit ovat standardeja ja kirjastot tunnettuja Rust-toteutuksia, mutta ulkopuolinen kryptografi ei ole katselmoinut kokonaisuutta, ja tallennusmuoto voi vielä muuttua.</li>
+      <li><strong>Metatiedot.</strong> Tallennuspaikat näkevät objektien koot, kirjoitus- ja lukuhahmot, laitteiden lukumäärän ja suunnilleen lohkojen määrän. Täytettä ja peiteliikennettä ei ole toteutettu.</li>
+      <li><strong>Konvergentti salaus</strong> kansion sisällä antaa kansioavaimen muille haltijoille mahdollisuuden todeta identtiset tiedostot.</li>
+      <li><strong>Laitteen poistaminen</strong> suojaa sen jälkeen kirjoitetun, ei sitä, mitä laitteella jo oli: olemassa olevaa dataa ei salata uudelleen, jaetut ja Strongroom-kansiot pitävät avaimensa, eikä tallennuspaikkojen tunnistetietoja vaihdeta. Kunnes toinen tekijä on olemassa, mikä tahansa laitteistasi voi poistaa minkä tahansa toisen (holvissa, jossa on organisaatio, vain ylläpitäjät voivat).</li>
+      <li><strong>Jaetun kansion jäsenen poistaminen</strong> suojaa sen jälkeen kirjoitetun; tallennuspaikka, johon molemmat ylettyvät, pysyy hänelle kirjoitettavana, kunnes muutat sen käyttöoikeuksia.</li>
+      <li><strong>Kirjanpidolla</strong> ei ole todistetta tallennuksesta, palautushyökkäysten havaitsemista ei ole testattu, ja tarkistuspisteet ja karsinta (alpha.8) rajaavat sen kokoa vain holvin laitteilla: jaettujen kansioiden jäsenet ja replikat säilyttävät yhä jokaisen erän.</li>
+      <li><strong>Sijoittelu.</strong> Kansion voi kirjoittaa valittuihin tallennuspaikkoihin tai paikkoihin, ja lohkoja voi siirtää tallennuspaikkojen välillä (jolloin käyttämättömistä tiedostoista säilytetään vain kylmä kopio). Tiedostoja, joiden lohkot ovat vain kylmätallennuksessa, ei haeta ennen kuin siirrät ne takaisin, ja versiota 0.0.1-alpha.8 tai vanhempaa käyttävät laitteet lopettavat synkronoinnin, kun siirto on kirjattu.</li>
+      <li><strong>Strongroom</strong> suojaa kansioavaimen, ei tiedostoa, jonka haet ja jätät levylle; palautuspaketti ei kata Strongroom-kansioita.</li>
+      <li><strong>Holviavain</strong> on yksittäinen salaisuus. Säilytä palautuspakettia useammassa kuin yhdessä paikassa.</li>
+    </ul>
+    <p class="note">Kenttätason yksityiskohdat, tavuasettelut ja versiosäännöt: <a href="{{P}}docs/alpha-0-format.html">tallennusmuoto</a>, <a href="{{P}}docs/key-hierarchy.html">avainhierarkia</a>, <a href="{{P}}docs/ledger-signing-notes.html">kirjanpidon allekirjoitusmuistiinpanot</a>, <a href="{{P}}docs/security-principles.html">tietoturvaperiaatteet</a>, <a href="{{P}}docs/failure-model.html">vikamalli</a>.</p>
+    </div>

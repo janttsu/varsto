@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="fi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Varsto ja MEGA: Varsto</title>
+<meta name="description" content="Mihin MEGA on tarkoitettu, miten se toimii ja miten se vertautuu Varstoon.">
+<meta name="robots" content="noindex, nofollow">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="../../../favicon.svg" type="image/svg+xml">
+<link rel="alternate" hreflang="en" href="../../../compare/mega/">
+<link rel="alternate" hreflang="fi" href="../../../fi/compare/mega/">
+<link rel="alternate" hreflang="sv" href="../../../sv/compare/mega/">
+<link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../../../blog/feed.xml">
+<link rel="stylesheet" href="../../../assets/css/site.css?v=b3d2d4f387">
+<script src="../../../assets/js/theme.js?v=0951491269"></script>
+</head>
+<body>
+<a class="skip" href="#main">Siirry sisältöön</a>
+<div class="alpha" role="note">
+  <div class="wrap"><strong>Alpha-ohjelmisto, ei tuotantodatalle.</strong> Virheet voivat hävittää dataa, tallennusmuoto voi muuttua ilman siirtotyökalua, eikä salausta ole vielä auditoitu. Pidä omat varmuuskopiosi ja varmista, että voit palauttaa niistä.</div>
+</div>
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="../../../fi/"><img src="../../../assets/img/logo.svg" alt="" width="28" height="28"><span>Varsto</span></a>
+    <nav class="langs" aria-label="Language"><a href="../../../compare/mega/" hreflang="en" lang="en">English</a> <a href="../../../fi/compare/mega/" hreflang="fi" lang="fi" aria-current="true">Suomi</a> <a href="../../../sv/compare/mega/" hreflang="sv" lang="sv">Svenska</a></nav>
+
+    <nav class="main" aria-label="Main">
+      <a href="../../../fi/">Projekti</a>
+      <a href="../../../fi/features/">Ominaisuudet</a>
+      <a href="../../../fi/use-cases/">Käyttötapaukset</a>
+      <a href="../../../fi/compare/" aria-current="page">Vertailu</a>
+      <a href="../../../fi/how-it-works/">Miten se toimii</a>
+      <a href="../../../fi/screenshots/">Kuvakaappaukset</a>
+      <a href="../../../docs/">Dokumentaatio (en)</a>
+      <a href="../../../fi/downloads/">Lataukset</a>
+      <a href="../../../blog/">Blogi (en)</a>
+      <a href="../../../forum/">Foorumi (en)</a>
+      <a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a>
+      <button class="theme" id="theme-toggle" type="button" aria-label="Change colour theme">Theme: auto</button>
+    </nav>
+  </div>
+</header>
+<main id="main">
+  <div class="wrap">
+    <p class="back-link"><a href="../../compare/">Kaikki vertailut</a></p>
+    <h1>Varsto ja MEGA</h1>
+    <p class="lead">MEGA on päästä päähän salattu pilvitallennuspalvelu kuluttajille ja yrityksille. Siinä on runsaasti tilaa tarjoavat tilaukset, työpöytäsynkronointi, mobiilisovellukset ja oheispalveluja, kuten chat ja VPN.</p>
+
+    <h2>Miten MEGA toimii</h2>
+    <p>Luot tilin, ja tiedostosi tallennetaan MEGAn datakeskuksiin; laitteet synkronoituvat MEGAn palvelinten kautta. Tiedostot salataan asiakaspäässä tiedostokohtaisilla avaimilla, jotka puolestaan on suojattu salasanastasi johdetulla avaimella. Vuonna 2022 ETH Zürichin tutkijat julkaisivat hyökkäyksiä MEGAn kryptografiaa vastaan; MEGA paikkasi ne, ja tutkijat totesivat, että täydellinen korjaus vaatisi uudelleensuunnittelun. Työpöytäsovellukset ovat saatavilla Windowsille, macOS:lle ja Linuxille, ja lisäksi on mobiilisovelluksia ja komentoriviasiakas.</p>
+
+    <h2>Rinnakkain</h2>
+    <table class="compare-table">
+      <thead><tr><th scope="col"></th><th scope="col">MEGA</th><th scope="col">Varsto</th></tr></thead>
+      <tbody>
+      <tr><th scope="row">Missä tiedostosi ovat</th><td>MEGAn pilvessä; omaa tallennustilaa ei voi käyttää levyn pohjana.</td><td>Omilla laitteillasi ja valitsemissasi tallennuspaikoissa: S3-yhteensopivissa bucketeissa, missä tahansa rclone-etäkohteessa, paikallisissa tai verkkohakemistoissa sekä irrotettavien levyjen levyvarastoissa.</td></tr>
+      <tr><th scope="row">Tili tai keskuspalvelin</th><td>Tili vaaditaan; kaikki kulkee MEGAn kautta.</td><td>Ei kumpaakaan. Varstolla ei ole palvelinta; laitteet löytävät toisensa tallennuspaikkojesi kautta ja lähiverkossa.</td></tr>
+      <tr><th scope="row">Salaus</th><td>Päästä päähän, asiakaspäässä; akateemisten tutkijoiden aiemmin löytämät heikkoudet on paikattu.</td><td>Päästä päähän, asiakaspäässä, ennen kuin mitään lähtee laitteelta; hybridi post-kvanttisalaus (ML-KEM avainten jakamiseen, Ed25519 + ML-DSA-65 -allekirjoitukset). Ei vielä riippumattomasti auditoitu.</td></tr>
+      <tr><th scope="row">Laitteet verkossa yhtä aikaa</th><td>Ei tarvita: kopio on pilvessä.</td><td>Ei tarvita: laitteet synkronoituvat tallennuspaikkojesi kautta ja suoraan vertaisyhteydellä, kun ne tavoittavat toisensa.</td></tr>
+      <tr><th scope="row">Tietää, missä jokainen kopio on</th><td>Yksi kopio palveluntarjoajalla; omista tallennusvälineistäsi ei pidetä kirjaa.</td><td>Kyllä: allekirjoitettu kirjanpito kertoo, mikä tallennuspaikka ja laite säilyttää kunkin lohkon; säilytyssäännöt (oletuksena 1 kopio missä tahansa, 1 ulkoinen ja 1 omilla laitteillasi tai levyilläsi, toisen laitteen tarkistamana 30 päivän sisällä) varoittavat, kun jokin sääntö ei täyty.</td></tr>
+      <tr><th scope="row">Irrotettavat ja verkosta irti olevat levyt</th><td>Ei irrotettavien levyjen työnkulkua.</td><td>Kyllä: levyvarastot täytetään, tarkistetaan ja tunnistetaan, kun levyt palaavat; poissa olevalla levyllä olevat tiedostot pyytävät kyseistä levyä.</td></tr>
+      <tr><th scope="row">Lisenssi ja hinta</th><td>Ilmaisversio ja maksulliset tilaukset siirtokiintiöineen; asiakasohjelmien lähdekoodi julkaistu (SDK BSD-lisenssillä, työpöytäsovellus MEGAn omalla lisenssillä).</td><td>Lähdekoodi saatavilla (PolyForm Shield 1.0.0), ilmainen; maksat vain tallennuspalvelun tarjoajallesi.</td></tr>
+      <tr><th scope="row">Kypsyys</th><td>Suuri, pitkäikäinen palvelu.</td><td>Alfa: ei tuotantodatalle, ja formaatit voivat vielä muuttua.</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Kumpi sopii sinulle</h2>
+    <div class="grid two">
+      <div class="card"><h3>MEGA</h3><p>Valitse MEGA, kun haluat paljon salattua pilvitilaa yhdeltä palveluntarjoajalta ja viimeistellyt sovellukset kaikille alustoille, ja sinulle sopii, että ainoa talon ulkopuolinen kopio on palveluntarjoajalla.</p></div>
+      <div class="card"><h3>Varsto</h3><p>Valitse Varsto, kun haluat valita tallennuspaikan itse (tai useita palveluntarjoajia yhtä aikaa), välttää toimittajaloukun, pitää kopioita myös omilla levyilläsi ja tietää joka hetki, missä kukin kopio on.</p></div>
+    </div>
+    <p class="note">Varsto on alfavaiheen ohjelmisto: älä luota sille tietoja, joista sinulla ei ole muuta kopiota. Sen kryptografiaa ei ole myöskään auditoitu riippumattomasti. Muut tässä esitellyt tuotteet ovat kypsiä. Niitä koskevat tiedot tarkistettiin niiden omasta dokumentaatiosta lokakuussa 2026; hinnat ja tilausvaihtoehdot muuttuvat usein, joten katso ajantasaiset tiedot niiden omilta sivuilta. Korjaukset ovat tervetulleita <a href="../../../forum/">foorumilla</a> tai GitHubissa.</p>
+
+    <h2>Lähteet</h2>
+    <ul>
+      <li><a href="https://mega.io/">MEGAn verkkosivusto</a></li>
+      <li><a href="https://github.com/meganz/MEGAsync">MEGAn työpöytäsovelluksen lähdekoodi</a></li>
+      <li><a href="https://eprint.iacr.org/2022/959">MEGA: Malleable Encryption Goes Awry (ETH Zürich)</a></li>
+    </ul>
+
+  </div>
+</main>
+<footer class="site">
+  <div class="wrap">
+    <span>Varsto on työnimi. Lähdekoodi: <a href="https://github.com/janttsu/varsto">github.com/janttsu/varsto</a>, PolyForm Shield License 1.0.0 -lisenssillä (lähdekoodi saatavilla).</span>
+    <span>Ei evästeitä, ei seurantaa. Palvelin säilyttää tavallista käyntilokia enintään seitsemän päivää.</span>
+    <span><a href="../../../docs/security-policy.html">Tietoturvakäytäntö</a> · <a href="../../../docs/licence.html">Lisenssi</a> · <a href="../../../docs/trademark.html">Tavaramerkki</a> (englanniksi)</span>
+  </div>
+</footer>
+</body>
+</html>

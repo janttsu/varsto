@@ -1,0 +1,32 @@
+---
+title: Jämförelser
+nav: Compare
+output: compare/index.html
+description: Hur Varsto står sig mot Syncthing, Resilio Sync, MEGA, Filen, Tresorit och git-annex: vad var och en är till för och var de skiljer sig åt.
+---
+    <h1>Så står sig Varsto</h1>
+    <p class="lead">Verktyg för att hålla filer synkroniserade delas in i tre grupper. Peer-to-peer-verktyg som Syncthing och Resilio Sync kopierar mappar mellan dina egna enheter. Krypterade moln som MEGA, Filen och Tresorit förvarar dina filer hos en enda leverantör. git-annex håller reda på stora filer på alla diskar och fjärrlagringar du äger. Varsto kombinerar delar av alla tre: end-to-end-krypterade filer på lagringsplatser du själv väljer, peer-to-peer-överföring mellan dina enheter och en förteckning över var varje kopia finns.</p>
+
+    <table class="compare-table compare-overview">
+      <thead><tr><th scope="col"></th><th scope="col">Varsto</th><th scope="col"><a href="{{L}}compare/syncthing/">Syncthing</a></th><th scope="col"><a href="{{L}}compare/resilio-sync/">Resilio Sync</a></th><th scope="col"><a href="{{L}}compare/mega/">MEGA</a></th><th scope="col"><a href="{{L}}compare/filen/">Filen</a></th><th scope="col"><a href="{{L}}compare/tresorit/">Tresorit</a></th><th scope="col"><a href="{{L}}compare/git-annex/">git-annex</a></th></tr></thead>
+      <tbody>
+      <tr><th scope="row">Var dina filer finns</th><td><strong>Dina enheter och dina lagringsplatser</strong></td><td>Dina enheter</td><td>Dina enheter</td><td>MEGA:s moln</td><td>Filens moln</td><td>Tresorits moln</td><td>Var du än väljer</td></tr>
+      <tr><th scope="row">Konto eller central server</th><td><strong>Inget</strong></td><td>Inget</td><td>Inget konto</td><td>Konto</td><td>Konto</td><td>Konto</td><td>Inget</td></tr>
+      <tr><th scope="row">Enheterna måste vara online samtidigt</th><td><strong>Nej</strong></td><td>Ja</td><td>Ja</td><td>Nej</td><td>Nej</td><td>Nej</td><td>Nej</td></tr>
+      <tr><th scope="row">Vet var varje kopia finns</th><td><strong>Ja</strong></td><td>Nej</td><td>Nej</td><td>En kopia hos leverantören</td><td>En kopia hos leverantören</td><td>En kopia hos leverantören</td><td>Ja</td></tr>
+      <tr><th scope="row">Flyttbara diskar och diskar offline</th><td><strong>Ja</strong></td><td>Nej</td><td>Nej</td><td>Nej</td><td>Nej</td><td>Nej</td><td>Ja</td></tr>
+      <tr><th scope="row">Licens och pris</th><td><strong>Källkoden tillgänglig, gratis</strong></td><td>Öppen källkod, gratis</td><td>Proprietär, gratisnivå</td><td>Abonnemang, klientens källkod publicerad</td><td>Abonnemang, klienter med öppen källkod</td><td>Proprietära abonnemang</td><td>Fri programvara, gratis</td></tr>
+      </tbody>
+    </table>
+    <p class="note">”En kopia hos leverantören” betyder att kopian utanför hemmet finns hos den leverantören; dina enheter har också sina egna kopior. Varje jämförelsesida förklarar detaljerna och länkar till källorna.</p>
+
+    <h2>Jämförelser</h2>
+    <div class="grid three">
+      <a class="card" href="{{L}}compare/syncthing/"><h3>Varsto och Syncthing</h3><p>Syncthing håller mappar identiska mellan dina egna enheter, kontinuerligt och helt utan moln.</p></a>
+      <a class="card" href="{{L}}compare/resilio-sync/"><h3>Varsto och Resilio Sync</h3><p>Resilio Sync synkroniserar och delar mappar mellan enheter peer-to-peer, byggt på BitTorrent-teknik.</p></a>
+      <a class="card" href="{{L}}compare/mega/"><h3>Varsto och MEGA</h3><p>MEGA är end-to-end-krypterad molnlagring för privatpersoner och företag, med generösa lagringsabonnemang, skrivbordssynkronisering, mobilappar och tillhörande tjänster som chatt och VPN.</p></a>
+      <a class="card" href="{{L}}compare/filen/"><h3>Varsto och Filen</h3><p>Filen är nollkunskapskrypterad molnlagring från Tyskland, för integritetsmedvetna privatpersoner och team.</p></a>
+      <a class="card" href="{{L}}compare/tresorit/"><h3>Varsto och Tresorit</h3><p>Tresorit är end-to-end-krypterad molnlagring och fildelning från Schweiz, främst riktad till företag och reglerade branscher, men med abonnemang för privatpersoner också.</p></a>
+      <a class="card" href="{{L}}compare/git-annex/"><h3>Varsto och git-annex</h3><p>git-annex hanterar stora filer med git utan att lagra deras innehåll i git.</p></a>
+    </div>
+    <p class="note">Varsto är alfaprogramvara: anförtro den inga data som du inte har någon annan kopia av, och dess kryptografi har inte granskats av någon oberoende part. De andra produkterna här är mogna. Uppgifterna om dem kontrollerades i deras egen dokumentation i oktober 2026; priser och abonnemang ändras ofta, så se deras egna sidor för aktuella siffror. Rättelser tas gärna emot på <a href="{{P}}forum/">forumet</a> eller på GitHub.</p>

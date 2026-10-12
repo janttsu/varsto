@@ -824,3 +824,5 @@ body[data-mobile="1"] .sel-count { font-size: 14px; }
 /* Help text for [data-help] */
 .help-tip { position: fixed; z-index: 100; max-width: min(340px, calc(100vw - 16px)); padding: 10px 12px; border-radius: var(--radius-sm); background: var(--text); color: var(--surface); font-size: 13px; line-height: 1.45; box-shadow: 0 6px 20px rgba(0,0,0,.18); pointer-events: none; }
 [data-help] { cursor: help; }
+.sidebar-lang { display: block; padding: 4px 12px; }
+.sidebar-lang select { width: 100%; font-size: 13px; }

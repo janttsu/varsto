@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="sv">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Varsto och git-annex: Varsto</title>
+<meta name="description" content="Vad git-annex är till för, hur det fungerar och hur det står sig mot Varsto.">
+<meta name="robots" content="noindex, nofollow">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="../../../favicon.svg" type="image/svg+xml">
+<link rel="alternate" hreflang="en" href="../../../compare/git-annex/">
+<link rel="alternate" hreflang="fi" href="../../../fi/compare/git-annex/">
+<link rel="alternate" hreflang="sv" href="../../../sv/compare/git-annex/">
+<link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../../../blog/feed.xml">
+<link rel="stylesheet" href="../../../assets/css/site.css?v=b3d2d4f387">
+<script src="../../../assets/js/theme.js?v=0951491269"></script>
+</head>
+<body>
+<a class="skip" href="#main">Hoppa till innehållet</a>
+<div class="alpha" role="note">
+  <div class="wrap"><strong>Alfaprogramvara, inte för produktionsdata.</strong> Fel kan leda till dataförlust, formatet kan ändras utan migrering och krypteringen har ännu inte granskats av utomstående. Behåll egna säkerhetskopior och kontrollera att du kan återställa från dem.</div>
+</div>
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="../../../sv/"><img src="../../../assets/img/logo.svg" alt="" width="28" height="28"><span>Varsto</span></a>
+    <nav class="langs" aria-label="Language"><a href="../../../compare/git-annex/" hreflang="en" lang="en">English</a> <a href="../../../fi/compare/git-annex/" hreflang="fi" lang="fi">Suomi</a> <a href="../../../sv/compare/git-annex/" hreflang="sv" lang="sv" aria-current="true">Svenska</a></nav>
+
+    <nav class="main" aria-label="Main">
+      <a href="../../../sv/">Projekt</a>
+      <a href="../../../sv/features/">Funktioner</a>
+      <a href="../../../sv/use-cases/">Användningsfall</a>
+      <a href="../../../sv/compare/" aria-current="page">Jämförelse</a>
+      <a href="../../../sv/how-it-works/">Så fungerar det</a>
+      <a href="../../../sv/screenshots/">Skärmbilder</a>
+      <a href="../../../docs/">Dokumentation (en)</a>
+      <a href="../../../sv/downloads/">Nedladdningar</a>
+      <a href="../../../blog/">Blogg (en)</a>
+      <a href="../../../forum/">Forum (en)</a>
+      <a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a>
+      <button class="theme" id="theme-toggle" type="button" aria-label="Change colour theme">Theme: auto</button>
+    </nav>
+  </div>
+</header>
+<main id="main">
+  <div class="wrap">
+    <p class="back-link"><a href="../../compare/">Alla jämförelser</a></p>
+    <h1>Varsto och git-annex</h1>
+    <p class="lead">git-annex hanterar stora filer med git utan att lagra deras innehåll i git. Det är ett kraftfullt verktyg för tekniska användare som arkiverar, säkerhetskopierar och flyttar data mellan många diskar och fjärrlagringar, och det är Varstos närmaste släkting på den här listan.</p>
+
+    <h2>Så fungerar git-annex</h2>
+    <p>Varje repository kan finnas på valfri maskin eller disk, och ”special remotes” når S3 och kompatibla lagringar, rclone, rsync, vanliga eller flyttbara kataloger, WebDAV med mera. En git-gren registrerar vilket repository som har varje fil (”git annex whereis”), och numcopies vägrar ta bort innehåll om det inte finns tillräckligt många verifierade kopior på andra ställen. Kryptering är valfri för varje special remote och använder GnuPG; filnamnen i själva git-repositoryt förblir synliga om inte gcrypt används. Det är främst ett kommandoradsverktyg; det finns en enklare assistent, Android fungerar via Termux, och det finns ingen iOS-app.</p>
+
+    <h2>Sida vid sida</h2>
+    <table class="compare-table">
+      <thead><tr><th scope="col"></th><th scope="col">git-annex</th><th scope="col">Varsto</th></tr></thead>
+      <tbody>
+      <tr><th scope="row">Var dina filer finns</th><td>Var du än väljer: egna diskar, NAS, S3, andra moln via rclone.</td><td>På dina egna enheter och på lagringsplatser du väljer: S3-kompatibla buckets, valfri rclone-fjärrlagring, lokala kataloger eller nätverkskataloger och pooler av flyttbara diskar.</td></tr>
+      <tr><th scope="row">Konto eller central server</th><td>Inget.</td><td>Inget. Det finns ingen Varsto-server; enheterna hittar varandra via dina lagringsplatser och i det lokala nätverket.</td></tr>
+      <tr><th scope="row">Kryptering</th><td>Valfri per special remote (GnuPG); namnen i repositoryt är synliga om inte gcrypt används.</td><td>End-to-end, på klientsidan, innan något lämnar enheten; hybrid postkvantkryptografi (ML-KEM för nycklar vid delning, signaturer med Ed25519 + ML-DSA-65). Ännu inte oberoende granskad.</td></tr>
+      <tr><th scope="row">Enheterna online samtidigt</th><td>Behövs inte; synkroniseringen är som standard uttrycklig eller schemalagd snarare än kontinuerlig.</td><td>Behövs inte: enheterna synkroniserar via dina lagringsplatser, och direkt peer-to-peer när de når varandra.</td></tr>
+      <tr><th scope="row">Vet var varje kopia finns</th><td>Ja: platsuppföljning och numcopies, förebilden för Varstos liggare och regler.</td><td>Ja: en signerad liggare registrerar vilken lagringsplats och enhet som har varje block; lagringsregler (som standard 1 kopia var som helst, 1 extern, 1 på dina egna enheter eller diskar, kontrollerad av en annan enhet inom 30 dagar) varnar när en regel inte uppfylls.</td></tr>
+      <tr><th scope="row">Flyttbara diskar och diskar offline</th><td>Ja: fullt stöd, en disks innehåll förblir känt medan den är urkopplad.</td><td>Ja: diskpooler fylls, kontrolleras och känns igen när de kommer tillbaka; filer på en disk som är borta ber om just den disken.</td></tr>
+      <tr><th scope="row">Licens och pris</th><td>Fri programvara (AGPL-3+), gratis.</td><td>Källkoden tillgänglig (PolyForm Shield 1.0.0), gratis; du betalar bara din lagringsleverantör.</td></tr>
+      <tr><th scope="row">Mognad</th><td>Moget, med aktiva utgåvor i mer än ett decennium.</td><td>Alfa: inte för produktionsdata, formaten kan fortfarande ändras.</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Vilken passar</h2>
+    <div class="grid two">
+      <div class="card"><h3>git-annex</h3><p>Välj git-annex när du är van vid git och kommandoraden, vill ha maximal kontroll och insyn och värdesätter ett moget verktyg som är fri programvara framför en färdig app.</p></div>
+      <div class="card"><h3>Varsto</h3><p>Varsto vill ge samma garantier (varje kopia redovisad, regler för hur många kopior som måste finnas, flyttbara diskar som kommer och går) till människor som inte använder git: kontinuerlig synkronisering i bakgrunden, ett gränssnitt för dator och telefon, kryptering som alltid omfattar både namn och innehåll, peer-to-peer-överföring och delning med andra.</p></div>
+    </div>
+    <p class="note">Varsto är alfaprogramvara: anförtro den inga data som du inte har någon annan kopia av, och dess kryptografi har inte granskats av någon oberoende part. De andra produkterna här är mogna. Uppgifterna om dem kontrollerades i deras egen dokumentation i oktober 2026; priser och abonnemang ändras ofta, så se deras egna sidor för aktuella siffror. Rättelser tas gärna emot på <a href="../../../forum/">forumet</a> eller på GitHub.</p>
+
+    <h2>Källor</h2>
+    <ul>
+      <li><a href="https://git-annex.branchable.com/">git-annex webbplats</a></li>
+      <li><a href="https://git-annex.branchable.com/special_remotes/">Special remotes</a></li>
+      <li><a href="https://git-annex.branchable.com/encryption/">Kryptering</a></li>
+      <li><a href="https://git-annex.branchable.com/git-annex-numcopies/">numcopies</a></li>
+    </ul>
+
+  </div>
+</main>
+<footer class="site">
+  <div class="wrap">
+    <span>Varsto är ett arbetsnamn. Källkod: <a href="https://github.com/janttsu/varsto">github.com/janttsu/varsto</a>, under PolyForm Shield License 1.0.0 (källkoden tillgänglig).</span>
+    <span>Inga kakor, ingen spårning. Webbservern sparar en vanlig åtkomstlogg i högst sju dagar.</span>
+    <span><a href="../../../docs/security-policy.html">Säkerhetspolicy</a> · <a href="../../../docs/licence.html">Licens</a> · <a href="../../../docs/trademark.html">Varumärke</a> (på engelska)</span>
+  </div>
+</footer>
+</body>
+</html>

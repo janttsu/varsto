@@ -20,6 +20,19 @@ use varsto_core::Engine;
 
 const INDEX_HTML: &str = include_str!("../ui/index.html");
 const APP_JS: &str = include_str!("../ui/app.js");
+const I18N_JS: &str = include_str!("../ui/i18n.js");
+const I18N_FI: &str = include_str!("../ui/i18n/fi.json");
+const I18N_SV: &str = include_str!("../ui/i18n/sv.json");
+
+/// The interface language chosen in the page ("en", "fi" or "sv"), for the
+/// tray and the menu bar: `home/ui-language`. English when unset.
+pub fn ui_language(home: &std::path::Path) -> String {
+    std::fs::read_to_string(home.join("ui-language"))
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|l| matches!(l.as_str(), "en" | "fi" | "sv"))
+        .unwrap_or_else(|| "en".to_string())
+}
 const APP_CSS: &str = include_str!("../ui/app.css");
 /// Largest single upload through /api/upload (a phone video, not a disk image).
 /// The body is streamed to disk (or encrypted into the block cache as it
@@ -122,6 +135,9 @@ fn handle_unlocked(fixed: &Fixed, request: Request) -> Result<Option<Request>> {
     match path.as_str() {
         "/" => request.respond(html(INDEX_HTML))?,
         "/app.js" => request.respond(text(APP_JS, "text/javascript; charset=utf-8"))?,
+        "/i18n.js" => request.respond(text(I18N_JS, "text/javascript; charset=utf-8"))?,
+        "/i18n/fi.json" => request.respond(text(I18N_FI, "application/json; charset=utf-8"))?,
+        "/i18n/sv.json" => request.respond(text(I18N_SV, "application/json; charset=utf-8"))?,
         "/app.css" => request.respond(text(APP_CSS, "text/css; charset=utf-8"))?,
         "/api/p2p/traffic" | "/api/progress" => {
             let token_ok = request
@@ -713,6 +729,16 @@ fn api(st: &mut State, method: Method, path: &str, query: &str, input: &Value) -
                 .ok_or_else(|| anyhow!("vault is locked"))?
                 .store_thumbnail(&folder, &path, &picture)?;
             Ok(json!({"ok": true}))
+        }
+        (Method::Get, "/api/ui-language") => Ok(json!({"language": ui_language(&st.home)})),
+        (Method::Post, "/api/ui-language") => {
+            let l = s(input, "language")?;
+            if !matches!(l.as_str(), "en" | "fi" | "sv") {
+                bail!("unknown language {l}");
+            }
+            std::fs::create_dir_all(&st.home)?;
+            std::fs::write(st.home.join("ui-language"), &l)?;
+            Ok(json!({"ok": true, "language": l}))
         }
         (Method::Post, "/api/service/restart") => {
             st.service.restart_requested = true;

@@ -1,0 +1,334 @@
+---
+title: Suorituskykymittaukset
+nav: How it works
+output: benchmarks/index.html
+description: Varsto mitattuna Pariisin, Amsterdamin ja Varsovan välillä 9. ja 10. lokakuuta 2026 sekä NATin takana olevalta kotiliittymältä: lataukset vertaisyhteydellä toiselta laitteelta verrattuna samoihin latauksiin S3-bucketista, menetelmä, raakaluvut, ajojen pohjalta tehdyt korjaukset ja mittausten rajoitukset.
+---
+    <div class="tech">
+    <h1>Suorituskykymittaukset: vertaisyhteys halki Euroopan</h1>
+    <p class="lead">Pariisissa oleva laite säilyttää tiedostot. Amsterdamissa ja Varsovassa olevat laitteet liittyvät holviin tyhjällä kansiolla ja lataavat kaiken: kerran suoraan Pariisin laitteelta ja toisiltaan (vertaisyhteydellä) ja kerran Pariisissa sijaitsevasta S3-bucketista. Mitattu 9. ja 10. lokakuuta 2026 vuokratuilla pilvikoneilla.</p>
+    <p>Tämä sivu kertoo, mitä mitattiin, miten, mikä tuloksia rajoitti ja mitä Varstossa muutettiin niiden vuoksi. Jokaisella suunnitellulla tapauksella on nyt lukemat, kustakin kaksi ajoa, ellei taulukossa toisin mainita. Luvut koskevat alfaversiota: ne kuvaavat koodia sellaisena kuin se oli noina päivinä. Versiosta 0.0.1-alpha.11 lähtien suuret tiedostot pilkotaan suurempiin lohkoihin (keskimäärin 1 MiB 32 MiB:n tiedostoista alkaen, 4 MiB 1 GiB:n tiedostoista alkaen), joten tämän sivun lohkomäärät eivät enää päde niihin. Mittausohjelma on repositoriossa hakemistossa <code>scripts/bench/</code>, ja tiivistetyt tulokset on julkaistu <a href="{{P}}data/benchmarks-2026-10.json">JSON-muodossa</a>, joten jokaisen sivun luvun voi tarkistaa ja ajon toistaa.</p>
+
+    <nav class="toc" aria-label="Tällä sivulla">
+      <p class="toc-title">Tällä sivulla</p>
+      <ol>
+        <li><a href="#summary">Yhteenveto</a></li>
+        <li><a href="#home">Kotoa NATin takaa</a></li>
+        <li><a href="#done">Mitä mitattiin</a></li>
+        <li><a href="#setup">Järjestelyt ja vertailutaso</a></li>
+        <li><a href="#p2p-only">Mitä ”pelkkä vertaisyhteys” tarkoittaa</a></li>
+        <li><a href="#large">Suuret tiedostot</a></li>
+        <li><a href="#files">Paljon pieniä tiedostoja</a></li>
+        <li><a href="#text">Pakkautuva teksti</a></li>
+        <li><a href="#writer">Kirjoittajan puoli</a></li>
+        <li><a href="#fixes">Matkan varrella korjattua</a></li>
+        <li><a href="#quic">Kokeiltu ja peruttu: QUIC ensin</a></li>
+        <li><a href="#bottlenecks">Yhä hidasta, ja miksi</a></li>
+        <li><a href="#when">Milloin vertaisyhteys voittaa ja milloin bucket</a></li>
+        <li><a href="#cost">Kustannukset</a></li>
+        <li><a href="#limits">Mittauksen rajoitukset</a></li>
+      </ol>
+    </nav>
+
+    <h2 id="summary">Yhteenveto</h2>
+    <ul>
+      <li><strong>Kotiliittymältä NATin takaa (100 Mbit/s):</strong> kaikki 14 siirtoa kotitietokoneen ja Amsterdamin ja Varsovan palvelinten välillä tulivat pelkästään vertaisilta: kotireitittimen NATin läpi, NATista NATiin ja symmetrisen NATin läpi välittäjän kautta. Suuret tiedostot kulkivat 8.0–9.3 MB/s, 1.3–1.8 kertaa niin nopeasti kuin sama lataus bucketista samalla liittymällä. <a href="#home">Lisätiedot</a>.</li>
+      <li><strong>Paljon pieniä tiedostoja, Pariisista Amsterdamiin (9 ms:n päähän):</strong> 10 000 tiedostoa tuli vertaisyhteydellä 111 sekunnissa (90 tiedostoa/s) ja bucketista 299 sekunnissa (34 tiedostoa/s): vertaisyhteys oli 2.7 kertaa nopeampi. Varsovaan (33 ms:n päähän) ero oli pieni: 260 s ja 294 s. Bucketin nopeus kuitenkin vaihteli kellonajan mukaan: kolme tuntia myöhemmin, kahden lukijan ladatessa yhtä aikaa, se toimitti Amsterdamiin 64 tiedostoa/s ja Varsovaan 53, lähes yhtä paljon kuin vertaisyhteys kahdella lukijalla (70 ja 39).</li>
+      <li><strong>Suuret tiedostot:</strong> Amsterdamiin 4 GiB vertaisyhteydellä 159 sekunnissa (27.0 MB/s) ja bucketista 180 sekunnissa (23.9 MB/s), ja vertaisyhteys oli paljon tasaisempi. Varsovaan bucket oli nopeampi: 190 s (23.4 MB/s) ja vertaisyhteydellä 423 s (10.2 MB/s). Vertaisyhteys avaa jokaista lohkoa varten uuden TCP-yhteyden, mikä maksaa edestakaisia viiveitä, sitä enemmän mitä pidempi matka on.</li>
+      <li><strong>Kaksi lukijaa yhtä aikaa vertaisyhteydellä:</strong> lukijat auttavat toisiaan. Varsova sai 69 % lohkoistaan Amsterdamilta, jolla ne jo olivat, ja vain 31 % Pariisista, joten Pariisin laite lähetti 8.6 GB:n sijaan 5.6 GB. Kumpikaan lukija ei hidastunut.</li>
+      <li><strong>Pakkautuva teksti:</strong> bucket oli hieman nopeampi Amsterdamiin (18.1 vs. 16.7 MB/s) ja yli kaksi kertaa nopeampi Varsovaan (16.7 vs. 7.3 MB/s). Tekstiä jakava laite pakkaa jokaisen lohkon uudelleen jokaista pyyntöä varten tasolla, joka on valittu pientä tallennuskokoa eikä nopeutta silmällä pitäen.</li>
+      <li><strong>Jokainen vertaisajojen lohko tuli vertaiselta:</strong> 202 544 lohkoa 202 544:stä 24 mitatussa latauksessa, ei yhtäkään bucketista, josta lohkot oli poistettu; jokainen tiedosto vastasi jälkikäteen SHA-256-tiivistettään.</li>
+      <li><strong>Ajot paljastivat ja korjasivat yhdeksän ongelmaa</strong>, muun muassa lataukset, jotka hakivat yhden lohkon kerrallaan (nyt kahdeksan matkalla yhtä aikaa, ja pieniä tiedostoja haetaan ennakkoon tiedostojen yli), sekä vertaispalvelimen, joka vastasi yhteen pyyntöön kerrallaan. QUICin asettamista ensisijaiseksi reitiksi internetin yli kokeiltiin, se mitattiin tässä hitaammaksi, ja muutos peruttiin. <a href="#fixes">Lisätiedot ja luvut</a>.</li>
+    </ul>
+
+    <h2 id="home">Kotoa NATin takaa (10. lokakuuta)</h2>
+    <p>Yllä olevat ajot ovat julkisilla osoitteilla varustettujen datakeskusten välillä. Nämä ovat kotoa: pöytäkone 100 Mbit/s:n kuluttajaliittymällä reitittimensä NATin takana, ja Varsto asennettuna niin kuin käyttäjä sen asentaa (Linux-paketti, käyttäjän taustapalvelu). Siihen liittyi kaksi pilvikonetta: yksi Amsterdamissa julkisella osoitteella ja yksi Varsovassa, jossa oli kaksi laitetta verkkonimiavaruuksissa NATin takana, toinen kartio-NATin takana (Linuxin MASQUERADE säilyttää portin) ja toinen symmetrisen NATin takana (MASQUERADE satunnaisilla porteilla, mikä estää reiänlyönnin). Kuten edellä, Pariisin bucketissa oli vain kirjanpito ja tiedostoluettelot: sen lohkot poistettiin ennen jokaista noutoa, joten jokaisen lohkon piti tulla vertaiselta, ja jokainen tiedosto tarkistettiin SHA-256-tiivistettään vasten. Mittausohjelma on <code>scripts/nat-test/home-nat.py</code>.</p>
+    <h3>Liittymä</h3>
+    <table class="downloads bench-table">
+      <thead><tr><th>Kotitietokone ja</th><th>Edestakainen viive</th><th>TCP, yksi virta, kotiin</th><th>TCP, yksi virta, kotoa</th></tr></thead>
+      <tbody>
+        <tr><td>Amsterdam</td><td>31 ms</td><td>9.1 MB/s</td><td>12.1 MB/s</td></tr>
+        <tr><td>Varsova</td><td>21 ms</td><td>10.6 MB/s</td><td>11.9 MB/s</td></tr>
+        <tr><td>Bucket (Pariisi), rclone, 256 MiB</td><td>–</td><td>7.5 MB/s</td><td>4.3 MB/s</td></tr>
+      </tbody>
+    </table>
+    <p>100 Mbit/s on enintään 12.5 MB/s, joten se on katto kaikelle tällä liittymällä.</p>
+    <h3>NATien läpi</h3>
+    <p>STUN luokitteli kotireitittimen kartio-NATiksi. Kukin siirto siirsi yhden 64 MiB:n satunnaisista tavuista koostuvan tiedoston; tässä koossa synkronoinnin kiinteä kustannus (kirjanpito ja tiedostoluettelo bucketissa) on suuri osa ajasta.</p>
+    <table class="downloads bench-table">
+      <thead><tr><th>Mistä</th><th>Mihin</th><th>Vastaanottajan käyttämä reitti</th><th>Aika</th><th>Nopeus</th></tr></thead>
+      <tbody>
+        <tr><td>Koti</td><td>Amsterdam (julkinen)</td><td>suora, kodin NATin sisään</td><td>12.2 s</td><td>5.5 MB/s</td></tr>
+        <tr><td>Amsterdam</td><td>Koti</td><td>suora</td><td>14.3 s</td><td>4.7 MB/s</td></tr>
+        <tr><td>Varsova, kartio-NAT</td><td>Koti</td><td>suora, NATista NATiin (reiänlyönti)</td><td>13.3 s</td><td>5.0 MB/s</td></tr>
+        <tr><td>Koti</td><td>Varsova, kartio-NAT</td><td>suora, NATista NATiin</td><td>14.5 s</td><td>4.6 MB/s</td></tr>
+        <tr><td>Varsova, symmetrinen NAT</td><td>Koti</td><td>välitetty Amsterdamin kautta</td><td>65.7 s</td><td>1.0 MB/s</td></tr>
+        <tr><td>Koti</td><td>Varsova, symmetrinen NAT</td><td>välitetty Amsterdamin kautta</td><td>65.3 s</td><td>1.0 MB/s</td></tr>
+      </tbody>
+    </table>
+    <p>Jokainen reitti toimi suunnitellusti: suoraan, kun NAT säilyttää osoitemuunnoksensa, ja välittäjän kautta jonkin käyttäjän oman tavoitettavan laitteen kautta, kun ei säilytä. Mitään valmistajan palvelinta ei tarvittu; laitteet löysivät toisensa bucketissa olevien tietueiden ja julkisten STUN-palvelinten avulla.</p>
+    <figure class="shot"><img class="shot-light" src="{{P}}assets/img/benchmarks/home-traffic-light.png" alt="Varston Liikenne-kortti kotitietokoneella: viivat tästä laitteesta laitteisiin waw-cone (suora), ams (suora) ja waw-sym (ams:n kautta), taulukko, jossa reitti, osoite, nopeudet ja kokonaismäärät laitteittain, ja oikeassa yläkulmassa juuri päättyneen latauksen käyrä." width="976" height="553" loading="lazy"><img class="shot-dark" src="{{P}}assets/img/benchmarks/home-traffic-dark.png" alt="Sama Liikenne-kortti tummassa tilassa." width="976" height="553" loading="lazy"><figcaption>Kotitietokoneen Liikenne-kortti sekunteja sen jälkeen, kun 512 MiB:n lataus Varsovan kartio-NAT-laitteelta päättyi (käyrä oikeassa yläkulmassa): Varsova ja Amsterdam tavoitettiin suoraan, symmetrisen NATin takana oleva laite Amsterdamin kautta.</figcaption></figure>
+    <h3>Suuret tiedostot</h3>
+    <p>Yksi 512 MiB:n satunnaisista tavuista koostuva tiedosto siirtoa kohden, pelkällä vertaisyhteydellä. Ensimmäinen sarake on versio 0.0.1-alpha.9 alla kuvatulla välittäjäkorjauksella; toisessa ovat mukana saman päivän latausmuutokset (yhteydet pidetään auki vertaiskohtaisesti, objektit lähetetään pakkaamatta niitä uudelleen ja ikkuna mukautuu 8 ja 32 lohkon välillä).</p>
+    <table class="downloads bench-table">
+      <thead><tr><th>Siirto</th><th>Ennen muutoksia</th><th>Muutosten kanssa</th><th>Osuus yhdestä TCP-virrasta</th><th>Osuus 100 Mbit/s:sta</th></tr></thead>
+      <tbody>
+        <tr><td>Amsterdam → koti</td><td>4.7 MB/s</td><td>8.0 MB/s</td><td>88 %</td><td>64 %</td></tr>
+        <tr><td>Varsova (kartio-NAT) → koti</td><td>6.9 MB/s</td><td>9.3 MB/s</td><td>88 %</td><td>74 %</td></tr>
+        <tr><td>Koti → Amsterdam</td><td>8.7 MB/s</td><td>9.3 MB/s</td><td>77 %</td><td>74 %</td></tr>
+        <tr><td>Koti → Varsova (kartio-NAT)</td><td>–</td><td>8.6 MB/s</td><td>72 %</td><td>69 %</td></tr>
+      </tbody>
+    </table>
+    <h3>Sama lataus bucketista</h3>
+    <p>Toinen laite kotitietokoneella, vertaisyhteys pois päältä, nouti saman liittymän kautta 512 MiB:n tiedoston, jonka palvelin oli juuri lähettänyt bucketiin.</p>
+    <table class="downloads bench-table">
+      <thead><tr><th>Kirjoittaja</th><th>Bucketista</th><th>Vertaisyhteydellä (yllä)</th><th>Vertaisyhteys oli</th></tr></thead>
+      <tbody>
+        <tr><td>Amsterdam</td><td>6.1 MB/s</td><td>8.0 MB/s</td><td>1.3 kertaa niin nopea</td></tr>
+        <tr><td>Varsova (kartio-NAT)</td><td>5.2 MB/s</td><td>9.3 MB/s</td><td>1.8 kertaa niin nopea</td></tr>
+      </tbody>
+    </table>
+    <p>Datakeskusten välillä bucket pysyy mukana, koska bucket ja koneet ovat samassa nopeassa runkoverkossa. Kotoa katsottuna bucket on yksi kaukainen välietappi lisää omine pyyntökohtaisine kustannuksineen, kun taas vertainen lähettää suoraan liittymää pitkin.</p>
+    <h3>Löydetty ja korjattu</h3>
+    <ul>
+      <li><strong>Välittäjä ei tavoittanut laitetta, jota se välittää.</strong> Symmetrisen NATin takana oleva laite pitää yhteyttä auki johonkin holvin tavoitettavaan laitteeseen, ja muut laitteet tavoittavat sen tämän välittäjän kautta. Välittäjällä itsellään ei ollut reittiä siihen: se ei välittänyt itsensä kautta ja yritti yhä uudelleen osoitteita, joihin kukaan ei voi yhdistää. Nyt se kysyy tällaiselta laitteelta sen yhteyden kautta, jota laite pitää sen kanssa auki.</li>
+      <li><strong>Vertaislataukset lähes liittymän nopeudella.</strong> Yllä kuvatut muutokset suunnilleen kaksinkertaistivat latauksen Amsterdamista kotiin (4.7:stä 8.0 MB/s:iin).</li>
+    </ul>
+    <h3>Yhä hidasta</h3>
+    <ul>
+      <li><strong>Välitetty reitti</strong> kuljetti vain 1–1.6 MB/s: jokainen lohko kulkee omana pyyntönään kahden välietapin kautta, kotoa Amsterdamiin Varsovaan ja takaisin. Se on varareitti vaikeimmille NATeille, mutta sen pitäisi silti täyttää liittymästä suurempi osa.</li>
+      <li><strong>Pienet siirrot</strong> maksavat kiinteän kustannuksen bucketissa olevasta kirjanpidosta ja tiedostoluettelosta: 64 MiB vei 12–15 s, kun pelkät tavut vaativat noin 7.</li>
+      <li><strong>Palvelun rajapinta</strong> saattoi odottaa vastausta minuutteja, kun synkronointi oli käynnissä ja yritti yhä uudelleen vertaista, jota se ei tavoittanut; tilakutsujen ei pitäisi odottaa synkronointia.</li>
+    </ul>
+    <p class="note">Rajoitukset: yksi kotiliittymä, yksi iltapäivä, yksi ajo tapausta kohden (Varsovasta kotiin toistettu ajo kuvakaappauksen aikana kulki 5.2 MB/s, ja Amsterdam oli hetken tavoittamattomissa); Varsovan NATit ovat Linuxin eivätkä kuluttajareitittimien; palvelimet olivat pieniä (Scaleway DEV1-M). Latausmuutokset ovat katselmoinnissa eikä niitä ole vielä julkaistu.</p>
+
+    <h2 id="done">Mitä mitattiin</h2>
+    <table class="downloads bench-table">
+      <thead><tr><th>Aineisto</th><th>Bucketista (S3)</th><th>Vertaisyhteydellä</th></tr></thead>
+      <tbody>
+        <tr><td>Suuret tiedostot (2 × 2 GiB)</td><td>Amsterdam, Varsova, molemmat yhtä aikaa (9.10.)</td><td>Amsterdam, Varsova (9.10.); molemmat yhtä aikaa (10.10.)</td></tr>
+        <tr><td>Paljon pieniä tiedostoja (10 000)</td><td>Amsterdam, Varsova, molemmat yhtä aikaa (10.10.; 9.10. ajot säilytetty nimellä ”ennen ennakkohakua”)</td><td>Amsterdam, Varsova, molemmat yhtä aikaa (10.10.)</td></tr>
+        <tr><td>Pakkautuva teksti (512 MiB)</td><td>Amsterdam, Varsova (9.10.); molemmat yhtä aikaa (10.10.)</td><td>Amsterdam, Varsova, molemmat yhtä aikaa (10.10.)</td></tr>
+        <tr><td>Kirjoittajan lähetys</td><td>2 ajoa aineistoa kohden, yksi kumpanakin päivänä</td><td>RAM-levy: 2 ajoa aineistoa kohden; paikallinen levy: 1 ajo aineistoa kohden</td></tr>
+      </tbody>
+    </table>
+    <p>Kaksi ajoa tapausta kohden; taulukoiden ajat ovat niiden mediaani (kahden ajon keskiarvo), ja kummankin ajon aika on sen vieressä. Yksittäiset ajot on merkitty erikseen. Päivien välillä latauskoodi muuttui vain tavoilla, jotka eivät koske vertailtua tapausta: 9. lokakuuta suurten tiedostojen ja tekstin ajot hakevat tiedoston sisäiset lohkot täsmälleen kuten 10. lokakuuta koontiversio, ja paljon pieniä tiedostoja -tapauksen bucket-ajot toistettiin 10. lokakuuta, koska ennakkohaku tiedostojen yli on uusi. Kaksi viimeistä tapausta, pakkautuva teksti vertaisyhteydellä ja paljon pieniä tiedostoja bucketista, kumpikin kahdella lukijalla yhtä aikaa, ajettiin kolme tuntia muiden jälkeen uusilla koneilla yhdistetyllä koontiversiolla; bucket oli tuossa istunnossa selvästi nopeampi kuin aiemmassa.</p>
+
+    <h2 id="setup">Järjestelyt ja vertailutaso</h2>
+    <ul>
+      <li><strong>Koneet:</strong> kolme Scaleway POP2-4C-16G -instanssia (4 vCPU AMD EPYC 7543, 16 GB RAM, 80 GB:n verkkolohkotaltio, Ubuntu 24.04), luotu joka päivä uusina: kirjoittaja Pariisissa (fr-par-1), lukijat Amsterdamissa (nl-ams-1) ja Varsovassa (pl-waw-1). Jokaisella koneella oli julkinen IPv4-osoite omassa verkkoliitännässään, joten niiden välillä ei ollut NATia.</li>
+      <li><strong>Bucket:</strong> väliaikainen Scaleway Object Storage -bucket Pariisissa (fr-par), kirjoittajan alueella. Amsterdamin ja Varsovan lukijat lukivat sitä rajojen yli.</li>
+      <li><strong>Varsto:</strong> 0.0.1-alpha.8 alla luetelluilla korjauksilla, staattinen Linux-koontiversio (musl). 9. lokakuuta: commitit <code>37bee19</code>:ään asti (bucket-ajot: <code>0180ca8</code>, joka eroaa vain vertaispalvelimen ja tiedostovahdin osalta). 10. lokakuuta: commit <code>9b93263</code> vertaisajoissa; saman päivän aiemmissa bucket-ajoissa käytettiin versiota <code>a3ba1c0</code>, joka eroaa vain vertaisreittien järjestyksen osalta; viimeisinä ajetuissa kahdessa tapauksessa käytettiin yhdistettyä koontiversiota <code>dc09721</code>, joka on näiden ajojen kannalta sama koodi kuin <code>9b93263</code>.</li>
+      <li><strong>Ajo:</strong> uusi laite liittyy holviin holviavaimella, käynnistää taustapalvelun, keskeyttää sen, liittää tyhjän kansion ja pyytää palvelua synkronoimaan kansion kerran (<code>POST /api/sync</code>). Aika mitataan pyynnöstä sen vastaukseen: tiedostoluettelo luetaan, jokainen lohko haetaan, tarkistetaan tiivistettään vasten, puretaan, tarkistetaan palan tunnistetta vasten ja kirjoitetaan. Lopuksi mittausohjelma vertaa kansion SHA-256-luetteloa kirjoittajan luetteloon. Sen jälkeen laite poistetaan taas. Automaattinen varmennus oli pois päältä kaikilla mittauslaitteilla, koska se lataa ja korjaa lohkoja taustalla.</li>
+    </ul>
+    <h3>Verkon vertailutaso</h3>
+    <table class="downloads bench-table">
+      <thead><tr><th>Välillä</th><th>Edestakainen viive (ping)</th><th>TCP, yksi virta (iperf3, Pariisi lähettää), 9.10. / 10.10.</th><th>TCP, neljä virtaa</th></tr></thead>
+      <tbody>
+        <tr><td>Pariisi – Amsterdam</td><td>9.4 ms</td><td>925 / 958 Mbit/s</td><td>875 / 836 Mbit/s</td></tr>
+        <tr><td>Pariisi – Varsova</td><td>33.4 ms</td><td>738 / 777 Mbit/s</td><td>949 / 909 Mbit/s</td></tr>
+        <tr><td>Amsterdam – Varsova</td><td>20.6 ms</td><td>–</td><td>–</td></tr>
+      </tbody>
+    </table>
+    <table class="downloads bench-table">
+      <thead><tr><th>Lukija</th><th>S3: yksi 256 MiB:n objekti, yksi virta (rclone), 9.10. / 10.10.</th><th>S3: 4 KiB:n objekteja peräkkäin, 9.10. / 10.10.</th></tr></thead>
+      <tbody>
+        <tr><td>Pariisi</td><td>91 / 59 MB/s</td><td>7 / 45 ms kukin</td></tr>
+        <tr><td>Amsterdam</td><td>26 / 21 MB/s</td><td>16 / 107 ms kukin</td></tr>
+        <tr><td>Varsova</td><td>52 / 15 MB/s</td><td>52 / 122 ms kukin</td></tr>
+      </tbody>
+    </table>
+    <p class="note">Koneiden väliset yhteydet kuljettivat yhdessä TCP-virrassa 700–950 Mbit/s (90–120 MB/s), eikä mikään Varston siirroista päässyt lähellekään: kaikkia rajoittivat edestakaiset viiveet ja pyyntökohtainen työ. Bucketin oma nopeus vaihteli paljon päivästä toiseen (toinen mittaus tehtiin varhain aamulla); sen ajot vaihtelivat koko ajan enemmän kuin vertaisajot.</p>
+    <h3>Aineistot</h3>
+    <ul>
+      <li><strong>Suuret tiedostot:</strong> kaksi 2 GiB:n tiedostoa satunnaisia (pakkautumattomia) tavuja, yhteensä 4 GiB, noin 13 400 lohkoa.</li>
+      <li><strong>Paljon pieniä tiedostoja:</strong> 10 000 tiedostoa 500 hakemistossa, koot arvottu log-normaalijakaumasta, jonka mediaani on 16 KiB, rajattuna välille 1 KiB…256 KiB, joka kahdeskymmenes tiedosto toisen kopio; yhteensä 281 MiB. Samanmuotoinen 50 000 tiedoston aineisto lähetettiin, mutta sitä ei ladattu.</li>
+      <li><strong>Pakkautuva teksti:</strong> 128 tiedostoa, kukin 4 MiB generoituja verkkopalvelimen lokirivejä, yhteensä 512 MiB; zstd tallentaa ne 138 MiB:iin.</li>
+    </ul>
+
+    <h2 id="p2p-only">Mitä ”pelkkä vertaisyhteys” tarkoittaa</h2>
+    <p>Varsto kysyy ensin vertaisilta ja vasta sitten tallennuspaikoilta, joten vertaismittauksessa on varmistettava, ettei bucket voi auttaa. Kun kirjoittaja oli lähettänyt tiedot ja bucket-ajot oli tehty, bucketista poistettiin kaikki objektit polun <code>chunks/</code> alta. Bucketiin jäi se, mitä laitteet tarvitsevat löytääkseen toisensa ja tietääkseen, mitä on olemassa (allekirjoitettu kirjanpito, tiedostoluettelot, laite- ja vertaistietueet), mutta ei lainkaan tiedostojen sisältöä: lohko, jota mikään vertainen ei olisi pystynyt toimittamaan, olisi jättänyt tiedoston saavuttamattomiin. Sitten:</p>
+    <ul>
+      <li>kunkin ajon noutoraportti laski vertaisilta tulleet lohkot ja kaikki lohkot, ja mittausohjelma hylkäsi jokaisen ajon, jossa nämä erosivat;</li>
+      <li>lukijoiden liikennelaskurit (<code>/api/p2p/traffic</code>) ja kirjoittajan laskurit täsmäsivät: yhdellä lukijalla lukija vastaanotti laitteelta <code>writer-paris</code> täsmälleen aineiston tallennetun koon ja kirjoittaja lähetti saman verran; kahdella lukijalla se, minkä kumpikin vastaanotti Pariisista ja toiselta lukijalta, oli yhteensä tallennettu koko, ja Pariisin laite lähetti loput;</li>
+      <li>reitti oli jokaisessa ajossa <strong>suora</strong>, TCP:llä kirjoittajan julkiseen osoitteeseen porttiin 17893 (palvelun loki kertoo, mille reitille se asettui), ja kahden lukijan välillä molemmat yhtä aikaa -ajoissa. Välittäjää ei käytetty; lähiverkkoreitti oli mahdoton kolmen maan välillä.</li>
+    </ul>
+<!-- fragment: verify -->
+<table class="downloads bench-table"><tbody><tr><th>Ajo</th><th>Ladattuja paloja</th><th>Vertaisilta</th><th>S3:sta</th><th>Reitti</th></tr><tr><td>tiedostot, Amsterdam, yksin (×2)</td><td>20 240</td><td>20 240</td><td>0</td><td>writer-paris: suora</td></tr><tr><td>tiedostot, Amsterdam, kaksi lukijaa (×2)</td><td>20 240</td><td>20 240</td><td>0</td><td>waw-p2p-files-ams+waw-1: suora, writer-paris: suora</td></tr><tr><td>tiedostot, Varsova, kaksi lukijaa (×2)</td><td>20 240</td><td>20 240</td><td>0</td><td>: suora, ams-p2p-files-ams+waw-2: , writer-paris: suora</td></tr><tr><td>tiedostot, Varsova, yksin (×2)</td><td>20 240</td><td>20 240</td><td>0</td><td>writer-paris: suora</td></tr><tr><td>suuret, Amsterdam, yksin (×2)</td><td>26 946</td><td>26 946</td><td>0</td><td>writer-paris: suora</td></tr><tr><td>suuret, Amsterdam, kaksi lukijaa (×2)</td><td>26 758</td><td>26 758</td><td>0</td><td>: suora, writer-paris: suora</td></tr><tr><td>suuret, Varsova, kaksi lukijaa (×2)</td><td>26 758</td><td>26 758</td><td>0</td><td>ams-p2p-large-ams+waw-1: suora, ams-p2p-large-ams+waw-2: suora, writer-paris: suora</td></tr><tr><td>suuret, Varsova, yksin (×2)</td><td>26 946</td><td>26 946</td><td>0</td><td>writer-paris: suora</td></tr><tr><td>teksti, Amsterdam, yksin (×2)</td><td>3 544</td><td>3 544</td><td>0</td><td>writer-paris: suora</td></tr><tr><td>teksti, Amsterdam, kaksi lukijaa (×2)</td><td>3 544</td><td>3 544</td><td>0</td><td>: suora, writer-paris: suora</td></tr><tr><td>teksti, Varsova, kaksi lukijaa (×2)</td><td>3 544</td><td>3 544</td><td>0</td><td>ams-p2p-text-ams+waw-1: suora, writer-paris: suora</td></tr><tr><td>teksti, Varsova, yksin (×2)</td><td>3 544</td><td>3 544</td><td>0</td><td>writer-paris: suora</td></tr></tbody></table>
+<!-- /fragment -->
+
+    <h2 id="large">Suuret tiedostot</h2>
+    <p>4 GiB kahdessa tiedostossa, satunnaista sisältöä, joten zstd tallentaa sen sellaisenaan.</p>
+<!-- fragment: large -->
+<p class="bench-legend"><span class="bench-key bench-p2p-key"></span>Vertaisyhteys (Pariisin kirjoittajalta) <span class="bench-key bench-s3-key"></span>S3-bucket Pariisissa <span class="note">(MB/s, suurempi on parempi)</span></p>
+<svg class="bench-chart" viewBox="0 0 620 188" role="img" aria-label="suuret tiedostot: MB/s lukijaa kohden, vertaisyhteys ja S3">
+<text class="bench-label" x="162" y="20" text-anchor="end">Amsterdam, yksin</text>
+<rect class="bench-p2p" x="170" y="4" width="215" height="14" rx="3"><title>Amsterdam, yksin, vertaisyhteys: 27.0 MB/s</title></rect>
+<text class="bench-value" x="391" y="15">27.0</text>
+<rect class="bench-s3" x="170" y="21" width="190" height="14" rx="3"><title>Amsterdam, yksin, S3-bucket: 23.9 MB/s</title></rect>
+<text class="bench-value" x="366" y="32">23.9</text>
+<text class="bench-label" x="162" y="68" text-anchor="end">Varsova, yksin</text>
+<rect class="bench-p2p" x="170" y="52" width="81" height="14" rx="3"><title>Varsova, yksin, vertaisyhteys: 10.2 MB/s</title></rect>
+<text class="bench-value" x="257" y="63">10.2</text>
+<rect class="bench-s3" x="170" y="69" width="186" height="14" rx="3"><title>Varsova, yksin, S3-bucket: 23.4 MB/s</title></rect>
+<text class="bench-value" x="362" y="80">23.4</text>
+<text class="bench-label" x="162" y="116" text-anchor="end">Amsterdam, kaksi lukijaa</text>
+<rect class="bench-p2p" x="170" y="100" width="212" height="14" rx="3"><title>Amsterdam, kaksi lukijaa, vertaisyhteys: 26.6 MB/s</title></rect>
+<text class="bench-value" x="388" y="111">26.6</text>
+<rect class="bench-s3" x="170" y="117" width="360" height="14" rx="3"><title>Amsterdam, kaksi lukijaa, S3-bucket: 45.2 MB/s</title></rect>
+<text class="bench-value" x="536" y="128">45.2</text>
+<text class="bench-label" x="162" y="164" text-anchor="end">Varsova, kaksi lukijaa</text>
+<rect class="bench-p2p" x="170" y="148" width="94" height="14" rx="3"><title>Varsova, kaksi lukijaa, vertaisyhteys: 11.8 MB/s</title></rect>
+<text class="bench-value" x="270" y="159">11.8</text>
+<rect class="bench-s3" x="170" y="165" width="166" height="14" rx="3"><title>Varsova, kaksi lukijaa, S3-bucket: 20.9 MB/s</title></rect>
+<text class="bench-value" x="342" y="176">20.9</text>
+<line class="bench-axis" x1="170" y1="0" x2="170" y2="188"/>
+</svg>
+<table class="downloads bench-table"><thead><tr><th>Lukija</th><th>Vertaisyhteys: aika</th><th>MB/s</th><th>S3: aika</th><th>MB/s</th><th>P2P vs. S3</th></tr></thead><tbody><tr><td>Amsterdam, yksin</td><td>159 s <span class="note">(158 s / 161 s)</span></td><td>27.0</td><td>180 s <span class="note">(171 s / 190 s)</span></td><td>23.9</td><td>1.1× nopeampi</td></tr><tr><td>Varsova, yksin</td><td>423 s <span class="note">(420 s / 426 s)</span></td><td>10.2</td><td>190 s <span class="note">(155 s / 226 s)</span></td><td>23.4</td><td>2.2× hitaampi</td></tr><tr><td>Amsterdam, kaksi lukijaa</td><td>162 s <span class="note">(162 s / 161 s)</span></td><td>26.6</td><td>95 s <span class="note">(90 s / 101 s)</span></td><td>45.2</td><td>1.7× hitaampi</td></tr><tr><td>Varsova, kaksi lukijaa</td><td>365 s <span class="note">(367 s / 362 s)</span></td><td>11.8</td><td>208 s <span class="note">(185 s / 232 s)</span></td><td>20.9</td><td>1.8× hitaampi</td></tr></tbody></table>
+<table class="downloads bench-table"><thead><tr><th>Koontiversio</th><th>Lukija</th><th>Aika</th><th>MB/s</th></tr></thead><tbody><tr><td>Vertaisyhteys, QUIC kokeiltu ennen TCP:tä (yksi yhteys vertaista kohden), 10. lokakuuta</td><td>Amsterdam, yksin</td><td>230 s <span class="note">(229 s / 230 s)</span></td><td>18.7</td></tr><tr><td>Vertaisyhteys, QUIC kokeiltu ennen TCP:tä (yksi yhteys vertaista kohden), 10. lokakuuta</td><td>Varsova, yksin</td><td>466 s <span class="note">(466 s)</span></td><td>9.2</td></tr></tbody></table>
+<!-- /fragment -->
+    <p>Amsterdamiin, yhdeksän millisekunnin päähän, vertaisyhteys voitti bucketin niukasti ja oli paljon tasaisempi: jokainen vertaisajo kesti 158–162 s, bucketin ajot 171 s ja 190 s. Varsovaan bucket oli yli kaksi kertaa nopeampi. Jokainen noin 300 KiB:n lohko on yksi HTTP-pyyntö uudella TCP-yhteydellä: kättely ja sitten TCP:n hidas aloitus kymmenestä paketista, joten lohko vaatii useita edestakaisia matkoja, oli yhteys kuinka nopea tahansa. 33 ms:n viiveellä tämä rajaa kahdeksan samanaikaista pyyntöä noin 10 MB/s:iin, ja juuri sen verran mitattiin. Bucketin HTTPS-yhteydet pidetään auki pyyntöjen välillä.</p>
+    <p>Kun molemmat lukijat latasivat yhtä aikaa, Varsova sai 4.30 GB:stään 2.97 GB Amsterdamilta (20 ms:n päässä, lähempänä kuin Pariisi) ja vain 1.3 GB Pariisista; Amsterdam, jolla lohkot olivat ensin, jakoi niitä samalla kun latasi itse. Varsova oli jopa hieman nopeampi kuin yksin (11.8 vs. 10.2 MB/s) ja Amsterdam yhtä nopea kuin yksin. Myös bucket palveli kahta lukijaa yhtä aikaa hidastamatta kumpaakaan (45 ja 21 MB/s); se on jaettua infrastruktuuria, joka on rakennettu monille lukijoille.</p>
+    <p class="note">Lukijan oma työ: noin 40 s prosessoriaikaa 4 GiB:lle (purku, kaksi tiivistettä lohkoa kohden, kirjoitus), enintään 490 MB muistia. Pariisin laite käytti 40 s prosessoriaikaa kunkin 4 GiB:n jakamiseen, yksi ydin noin neljänneksen kuormitettuna.</p>
+
+    <h2 id="files">Paljon pieniä tiedostoja</h2>
+    <p>10 000 tiedostoa, kooltaan 1 KiB – 256 KiB. Kukin tiedosto on yksi lohko. Lokakuun 10. päivästä lähtien nouto hakee enintään 32 tulevan tiedoston lohkot yhdessä, kahdeksan pyyntöä kerrallaan, ennen kuin kirjoittaa ne yksitellen.</p>
+<!-- fragment: files -->
+<p class="bench-legend"><span class="bench-key bench-p2p-key"></span>Vertaisyhteys (Pariisin kirjoittajalta) <span class="bench-key bench-s3-key"></span>S3-bucket Pariisissa <span class="note">(tiedostoa/s, suurempi on parempi)</span></p>
+<svg class="bench-chart" viewBox="0 0 620 188" role="img" aria-label="pienet tiedostot: tiedostoa/s lukijaa kohden, vertaisyhteys ja S3">
+<text class="bench-label" x="162" y="20" text-anchor="end">Amsterdam, yksin</text>
+<rect class="bench-p2p" x="170" y="4" width="360" height="14" rx="3"><title>Amsterdam, yksin, vertaisyhteys: 90.2 tiedostoa/s</title></rect>
+<text class="bench-value" x="536" y="15">90.2</text>
+<rect class="bench-s3" x="170" y="21" width="135" height="14" rx="3"><title>Amsterdam, yksin, S3-bucket: 33.7 tiedostoa/s</title></rect>
+<text class="bench-value" x="311" y="32">33.7</text>
+<text class="bench-label" x="162" y="68" text-anchor="end">Varsova, yksin</text>
+<rect class="bench-p2p" x="170" y="52" width="153" height="14" rx="3"><title>Varsova, yksin, vertaisyhteys: 38.4 tiedostoa/s</title></rect>
+<text class="bench-value" x="329" y="63">38.4</text>
+<rect class="bench-s3" x="170" y="69" width="137" height="14" rx="3"><title>Varsova, yksin, S3-bucket: 34.2 tiedostoa/s</title></rect>
+<text class="bench-value" x="313" y="80">34.2</text>
+<text class="bench-label" x="162" y="116" text-anchor="end">Amsterdam, kaksi lukijaa</text>
+<rect class="bench-p2p" x="170" y="100" width="281" height="14" rx="3"><title>Amsterdam, kaksi lukijaa, vertaisyhteys: 70.3 tiedostoa/s</title></rect>
+<text class="bench-value" x="457" y="111">70.3</text>
+<rect class="bench-s3" x="170" y="117" width="258" height="14" rx="3"><title>Amsterdam, kaksi lukijaa, S3-bucket: 64.7 tiedostoa/s</title></rect>
+<text class="bench-value" x="434" y="128">64.7</text>
+<text class="bench-label" x="162" y="164" text-anchor="end">Varsova, kaksi lukijaa</text>
+<rect class="bench-p2p" x="170" y="148" width="154" height="14" rx="3"><title>Varsova, kaksi lukijaa, vertaisyhteys: 38.6 tiedostoa/s</title></rect>
+<text class="bench-value" x="330" y="159">38.6</text>
+<rect class="bench-s3" x="170" y="165" width="213" height="14" rx="3"><title>Varsova, kaksi lukijaa, S3-bucket: 53.5 tiedostoa/s</title></rect>
+<text class="bench-value" x="389" y="176">53.5</text>
+<line class="bench-axis" x1="170" y1="0" x2="170" y2="188"/>
+</svg>
+<table class="downloads bench-table"><thead><tr><th>Lukija</th><th>Vertaisyhteys: aika</th><th>MB/s</th><th>tiedostoa/s</th><th>S3: aika</th><th>MB/s</th><th>tiedostoa/s</th><th>P2P vs. S3</th></tr></thead><tbody><tr><td>Amsterdam, yksin</td><td>111 s <span class="note">(111 s / 111 s)</span></td><td>2.6</td><td>90.2</td><td>299 s <span class="note">(323 s / 274 s)</span></td><td>1.0</td><td>33.7</td><td>2.7× nopeampi</td></tr><tr><td>Varsova, yksin</td><td>260 s <span class="note">(258 s / 263 s)</span></td><td>1.1</td><td>38.4</td><td>294 s <span class="note">(269 s / 320 s)</span></td><td>1.0</td><td>34.2</td><td>1.1× nopeampi</td></tr><tr><td>Amsterdam, kaksi lukijaa</td><td>156 s <span class="note">(202 s / 110 s)</span></td><td>2.1</td><td>70.3</td><td>156 s <span class="note">(142 s / 170 s)</span></td><td>1.9</td><td>64.7</td><td>1.0× nopeampi</td></tr><tr><td>Varsova, kaksi lukijaa</td><td>259 s <span class="note">(265 s / 253 s)</span></td><td>1.1</td><td>38.6</td><td>192 s <span class="note">(161 s / 223 s)</span></td><td>1.6</td><td>53.5</td><td>1.3× hitaampi</td></tr></tbody></table>
+<table class="downloads bench-table"><thead><tr><th>Koontiversio</th><th>Lukija</th><th>Aika</th><th>MB/s</th><th>tiedostoa/s</th></tr></thead><tbody><tr><td>S3 ennen tiedostojen yli ulottuvaa ennakkohakua (yksi tiedosto kerrallaan), 9. lokakuuta</td><td>Amsterdam, yksin</td><td>404 s <span class="note">(313 s / 495 s)</span></td><td>0.8</td><td>26.1</td></tr><tr><td>S3 ennen tiedostojen yli ulottuvaa ennakkohakua (yksi tiedosto kerrallaan), 9. lokakuuta</td><td>Amsterdam, kaksi lukijaa</td><td>381 s <span class="note">(381 s / 380 s)</span></td><td>0.8</td><td>26.2</td></tr><tr><td>S3 ennen tiedostojen yli ulottuvaa ennakkohakua (yksi tiedosto kerrallaan), 9. lokakuuta</td><td>Varsova, kaksi lukijaa</td><td>528 s <span class="note">(494 s / 563 s)</span></td><td>0.6</td><td>19.1</td></tr><tr><td>S3 ennen tiedostojen yli ulottuvaa ennakkohakua (yksi tiedosto kerrallaan), 9. lokakuuta</td><td>Varsova, yksin</td><td>596 s <span class="note">(536 s / 655 s)</span></td><td>0.5</td><td>16.9</td></tr></tbody></table>
+<!-- /fragment -->
+    <p>Amsterdamiin vertaisyhteys toimitti 90 tiedostoa sekunnissa, 2.7 kertaa bucketin 34. Varsovaan, kolme ja puoli kertaa kauemmas, kumpikin pääsi samaan 34–38 tiedostoon sekunnissa: siellä pyyntökohtainen edestakainen viive hallitsee kummallakin reitillä. Tiedostojen yli ulottuva ennakkohaku kaksinkertaisti bucketin nopeuden Varsovaan (17:stä 34 tiedostoon sekunnissa) ja auttoi Amsterdamiin (26:sta 34:ään). Kun lohkot ovat perillä, kunkin tiedoston kirjoittaminen (data synkronoidaan levylle, uudelleennimeäminen, kirjanpidon tapahtumat) maksaa näillä verkkolohkotaltioilla muutaman millisekunnin, mikä rajaa minkä tahansa lähteen muutamaan sataan tiedostoon sekunnissa.</p>
+    <p>Kun molemmat lukijat latasivat yhtä aikaa, Varsova oli yhtä nopea kuin yksin, ja Amsterdamin kaksi ajoa erosivat toisistaan (202 s ja 110 s): lukijoiden lohkot haetaan siltä vertaiselta, joka vastaa ensin, ja toinen ajo odotti toista lukijaa enemmän kuin toinen. Bucket, joka mitattiin kahdella lukijalla kolme tuntia myöhemmin, toimitti Amsterdamiin 64 tiedostoa sekunnissa ja Varsovaan 53: lähes kaksi kertaa sen, mitä se antoi yksittäisille lukijoille aiemmassa istunnossa. Sen nopeus riippuu kellonajasta enemmän kuin lukijoiden määrästä.</p>
+
+    <h2 id="text">Pakkautuva teksti</h2>
+    <p>512 MiB lokirivejä, tallennettuna 138 MiB:nä. Tavuja kulkee vähemmän, joten lukija saa sekunnissa enemmän tiedostoa kuin satunnaisella datalla.</p>
+<!-- fragment: text -->
+<p class="bench-legend"><span class="bench-key bench-p2p-key"></span>Vertaisyhteys (Pariisin kirjoittajalta) <span class="bench-key bench-s3-key"></span>S3-bucket Pariisissa <span class="note">(MB/s, suurempi on parempi)</span></p>
+<svg class="bench-chart" viewBox="0 0 620 188" role="img" aria-label="teksti: MB/s lukijaa kohden, vertaisyhteys ja S3">
+<text class="bench-label" x="162" y="20" text-anchor="end">Amsterdam, yksin</text>
+<rect class="bench-p2p" x="170" y="4" width="327" height="14" rx="3"><title>Amsterdam, yksin, vertaisyhteys: 16.7 MB/s</title></rect>
+<text class="bench-value" x="503" y="15">16.7</text>
+<rect class="bench-s3" x="170" y="21" width="354" height="14" rx="3"><title>Amsterdam, yksin, S3-bucket: 18.1 MB/s</title></rect>
+<text class="bench-value" x="530" y="32">18.1</text>
+<text class="bench-label" x="162" y="68" text-anchor="end">Varsova, yksin</text>
+<rect class="bench-p2p" x="170" y="52" width="142" height="14" rx="3"><title>Varsova, yksin, vertaisyhteys: 7.2 MB/s</title></rect>
+<text class="bench-value" x="318" y="63">7.2</text>
+<rect class="bench-s3" x="170" y="69" width="327" height="14" rx="3"><title>Varsova, yksin, S3-bucket: 16.7 MB/s</title></rect>
+<text class="bench-value" x="503" y="80">16.7</text>
+<text class="bench-label" x="162" y="116" text-anchor="end">Amsterdam, kaksi lukijaa</text>
+<rect class="bench-p2p" x="170" y="100" width="332" height="14" rx="3"><title>Amsterdam, kaksi lukijaa, vertaisyhteys: 16.9 MB/s</title></rect>
+<text class="bench-value" x="508" y="111">16.9</text>
+<rect class="bench-s3" x="170" y="117" width="360" height="14" rx="3"><title>Amsterdam, kaksi lukijaa, S3-bucket: 18.4 MB/s</title></rect>
+<text class="bench-value" x="536" y="128">18.4</text>
+<text class="bench-label" x="162" y="164" text-anchor="end">Varsova, kaksi lukijaa</text>
+<rect class="bench-p2p" x="170" y="148" width="160" height="14" rx="3"><title>Varsova, kaksi lukijaa, vertaisyhteys: 8.1 MB/s</title></rect>
+<text class="bench-value" x="336" y="159">8.1</text>
+<rect class="bench-s3" x="170" y="165" width="241" height="14" rx="3"><title>Varsova, kaksi lukijaa, S3-bucket: 12.3 MB/s</title></rect>
+<text class="bench-value" x="417" y="176">12.3</text>
+<line class="bench-axis" x1="170" y1="0" x2="170" y2="188"/>
+</svg>
+<table class="downloads bench-table"><thead><tr><th>Lukija</th><th>Vertaisyhteys: aika</th><th>MB/s</th><th>S3: aika</th><th>MB/s</th><th>P2P vs. S3</th></tr></thead><tbody><tr><td>Amsterdam, yksin</td><td>32 s <span class="note">(33 s / 31 s)</span></td><td>16.7</td><td>36 s <span class="note">(21 s / 52 s)</span></td><td>18.1</td><td>1.1× nopeampi</td></tr><tr><td>Varsova, yksin</td><td>74 s <span class="note">(70 s / 79 s)</span></td><td>7.2</td><td>32 s <span class="note">(32 s / 32 s)</span></td><td>16.7</td><td>2.3× hitaampi</td></tr><tr><td>Amsterdam, kaksi lukijaa</td><td>32 s <span class="note">(32 s / 31 s)</span></td><td>16.9</td><td>31 s <span class="note">(23 s / 39 s)</span></td><td>18.4</td><td>1.0× hitaampi</td></tr><tr><td>Varsova, kaksi lukijaa</td><td>66 s <span class="note">(63 s / 69 s)</span></td><td>8.1</td><td>63 s <span class="note">(28 s / 98 s)</span></td><td>12.3</td><td>1.0× hitaampi</td></tr></tbody></table>
+
+<!-- /fragment -->
+    <p>Tässä bucket oli hieman nopeampi Amsterdamiin ja yli kaksi kertaa nopeampi Varsovaan. Kahdella lukijalla vertaisyhteys antoi Amsterdamille samat 16.9 MB/s kuin yksin ja Varsovalle 8.1 MB/s, hieman enemmän kuin yksin; kahdesta ajosta ensimmäisessä Varsova sai kaksi kolmasosaa lohkoistaan Amsterdamilta, toisessa kaikki Pariisista. Lohkon jakava laite ei säilytä pakattua kopiota: se lukee tavallisen tiedoston ja pakkaa lohkon uudelleen zstd-tasolla 12 jokaista pyyntöä varten; Pariisin laite käytti 31 s prosessoriaikaa jokaista jaettua 512 MiB:tä kohden, kun satunnaisen datan 4 GiB vei 40 s. Bucket palauttaa tallennetun objektin sellaisenaan.</p>
+
+    <h2 id="writer">Kirjoittajan puoli</h2>
+    <p>Ennen kuin mitään voi ladata, kirjoittaja pilkkoo tiedostonsa lohkoiksi, pakkaa ja salaa ne ja tallentaa ne. Kolme kohdetta näyttää, mihin aika kuluu: RAM-levy (pelkkä Varston oma työ), koneen levy (verkkolohkotaltio, jolle jokainen objekti kirjoitetaan levysynkronoinnilla) ja bucket.</p>
+<!-- fragment: writer -->
+<table class="downloads bench-table"><tbody><tr><th>Aineisto</th><th>Kohde</th><th>Koontiversio</th><th>Aika</th><th>MB/s</th><th>Prosessoriaika (käyttäjä + järjestelmä)</th><th>Muistin huippukäyttö</th></tr><tr><td>tiedostot: 10 000 tiedostoa, 0.27 GiB</td><td>RAM-levy (tmpfs)</td><td>mitattu koontiversio</td><td>50 s <span class="note">(2 ajon mediaani)</span></td><td>5.9</td><td>12 s (5 + 7)</td><td>68 MiB</td></tr><tr><td>tiedostot: 10 000 tiedostoa, 0.27 GiB</td><td>S3-bucket, sama alue</td><td>mitattu koontiversio</td><td>652 s <span class="note">(2 ajon mediaani)</span></td><td>0.5</td><td>21 s (8 + 13)</td><td>69 MiB</td></tr><tr><td>pienet: 50 000 tiedostoa, 1.36 GiB</td><td>RAM-levy (tmpfs)</td><td>mitattu koontiversio</td><td>255 s <span class="note">(2 ajon mediaani)</span></td><td>5.7</td><td>62 s (27 + 35)</td><td>258 MiB</td></tr><tr><td>pienet: 50 000 tiedostoa, 1.36 GiB</td><td>Paikallinen levy (verkkolohkotaltio)</td><td>mitattu koontiversio</td><td>468 s</td><td>3.1</td><td>67 s (27 + 41)</td><td>258 MiB</td></tr><tr><td>pienet: 50 000 tiedostoa, 1.36 GiB</td><td>Paikallinen levy (verkkolohkotaltio)</td><td>alpha.8 (ennen zstd-korjausta)</td><td>515 s</td><td>2.8</td><td>109 s (31 + 78)</td><td>253 MiB</td></tr><tr><td>suuret: 2 tiedostoa, 4.00 GiB</td><td>S3-bucket, sama alue</td><td>mitattu koontiversio</td><td>932 s <span class="note">(2 ajon mediaani)</span></td><td>4.6</td><td>80 s (37 + 43)</td><td>108 MiB</td></tr><tr><td>isot: 5 tiedostoa, 12.00 GiB</td><td>Paikallinen levy (verkkolohkotaltio)</td><td>mitattu koontiversio</td><td>418 s</td><td>30.9</td><td>197 s (85 + 112)</td><td>147 MiB</td></tr><tr><td>isot: 5 tiedostoa, 12.00 GiB</td><td>Paikallinen levy (verkkolohkotaltio)</td><td>alpha.8 (ennen zstd-korjausta)</td><td>694 s</td><td>18.6</td><td>483 s (110 + 373)</td><td>137 MiB</td></tr><tr><td>teksti: 128 tiedostoa, 0.50 GiB</td><td>RAM-levy (tmpfs)</td><td>mitattu koontiversio</td><td>45 s <span class="note">(2 ajon mediaani)</span></td><td>12.0</td><td>44 s (41 + 2)</td><td>68 MiB</td></tr><tr><td>teksti: 128 tiedostoa, 0.50 GiB</td><td>Paikallinen levy (verkkolohkotaltio)</td><td>mitattu koontiversio</td><td>56 s</td><td>9.6</td><td>45 s (42 + 3)</td><td>68 MiB</td></tr><tr><td>teksti: 128 tiedostoa, 0.50 GiB</td><td>Paikallinen levy (verkkolohkotaltio)</td><td>alpha.8 (ennen zstd-korjausta)</td><td>68 s</td><td>7.9</td><td>56 s (43 + 13)</td><td>68 MiB</td></tr><tr><td>teksti: 128 tiedostoa, 0.50 GiB</td><td>S3-bucket, sama alue</td><td>mitattu koontiversio</td><td>145 s <span class="note">(2 ajon mediaani)</span></td><td>3.7</td><td>45 s (41 + 4)</td><td>77 MiB</td></tr></tbody></table>
+<!-- /fragment -->
+    <ul>
+      <li><strong>Satunnainen data</strong> maksaa zstd-korjauksen jälkeen näillä ytimillä noin 16 s prosessoriaikaa gibitavua kohden (12 GiB: 197 s), kun ennen korjausta kului 40 s gibitavua kohden.</li>
+      <li><strong>Teksti</strong> maksaa noin 85 s prosessoriaikaa gibitavua kohden: zstd tasolla 12, joka on formaatin vakio, on hidas pakkautuvalle datalle; sillä saadaan suhde 3.7 : 1, josta jokainen myöhempi siirto hyötyy.</li>
+      <li><strong>Pienet tiedostot</strong> eivät ole prosessorisidonnaisia edes RAM-levyllä: 10 000 tiedostoa vei 50 s, josta prosessoriaikaa 12 s. Laitteen looginen kello kirjoitetaan levylle kahdella synkronoinnilla jokaista lähetettyä tiedostoa kohden. Tätä ei ole vielä korjattu.</li>
+      <li><strong>Bucket</strong> on ylivoimaisesti hitain: jokainen lohko on HEAD ja PUT peräkkäin. 10 000 tiedostoa vei 622 s ja 681 s, 4 GiB 578 s ja 1 287 s kahtena päivänä. Lähetykset eivät ole vielä rinnakkaisia.</li>
+    </ul>
+
+    <h2 id="fixes">Matkan varrella korjattua</h2>
+    <p>Mittaus oli myös pullonkaulojen metsästystä. Nämä muutokset ovat mukana mitatuissa koontiversioissa, ja kullekin on testi:</p>
+    <table class="downloads bench-table">
+      <thead><tr><th>Ongelma</th><th>Korjaus</th><th>Ennen</th><th>Jälkeen</th></tr></thead>
+      <tbody>
+        <tr><td>Lataus haki yhden lohkon kerrallaan: jokainen lohko odotti kokonaisen edestakaisen viiveen ennen kuin seuraavaa pyydettiin.</td><td>Enintään kahdeksan tiedoston lohkoa matkalla yhtä aikaa vertaisilta tai tallennuspaikoista liukuvassa ikkunassa; ne tarkistetaan ja kirjoitetaan yhä järjestyksessä. S3-asiakas pitää riittävästi vapaita yhteyksiä niitä varten.</td><td>Teksti bucketista Varsovaan: 122 s (4.4 MB/s)</td><td>27.8 s (19.4 MB/s), 4.4 kertaa nopeampi (yksittäiset ajot; välivaiheet: kahdeksan lohkon kiinteät erät 104 s, vapaat yhteydet säilyttäen 61 s)</td></tr>
+        <tr><td>Pienet tiedostot kulkivat yksi kerrallaan: kukin tiedosto on yksi lohko, joten yllä oleva ikkuna ei koskaan vaikuttanut.</td><td>Nouto hakee enintään 32 tulevan yhden lohkon tiedoston lohkot yhdessä (10.10.).</td><td>10 000 tiedostoa bucketista Varsovaan: 596 s (17 tiedostoa/s)</td><td>294 s (34 tiedostoa/s)</td></tr>
+        <tr><td>Vertaisyhteyden HTTP-palvelin vastasi yhteen pyyntöön kerrallaan, joten kahdeksan matkalla olevaa pyyntöä jonottivat palvelimella.</td><td>Kahdeksaan pyyntöön vastataan yhtä aikaa.</td><td>Suuret tiedostot vertaisyhteydellä Amsterdamiin: 363 s (11.8 MB/s), yksi ajo</td><td>159 s (27.0 MB/s)</td></tr>
+        <tr><td>Jokaista lohkoa varten luotiin uusi zstd-konteksti; sen taulukot varattiin ja tyhjennettiin joka kerta, mikä oli enemmän työtä kuin lohkon pakkaaminen.</td><td>Yksi konteksti säiettä kohden, uudelleenkäytettynä (tuloste on tavu tavulta sama, minkä testi tarkistaa).</td><td>12 GiB paikalliselle levylle: 694 s, 483 s prosessoriaikaa</td><td>418 s, 197 s prosessoriaikaa (yksittäiset ajot)</td></tr>
+        <tr><td>S3-asiakas hylkäsi kaikki yli 10 MiB:n vastaukset. Muutaman tuhannen tiedoston lähetyksen jälkeen kirjanpidon erä oli 13 MB, eikä mikään muu laite voinut liittyä tai synkronoida.</td><td>Enintään 2 GiB:n vastaukset luetaan.</td><td>Liittyminen epäonnistui</td><td>Liittyminen toimii; testi 12 MiB:n objektilla</td></tr>
+        <tr><td>Taustapalvelu piti jokaista avattua tiedostoa muutoksena: lohkojen jakaminen vertaisille, varmuuskopiointityökalu tai tiedostojen katseluohjelma käynnisti täyden synkronoinnin muutaman sekunnin välein.</td><td>Avaaminen ja lukeminen eivät ole muutoksia; kirjoittamista varten avatun tiedoston sulkeminen on yhä muutos.</td><td>90 synkronointia 11 minuutissa tiedostoja luettaessa</td><td>Kaikkien 10 000 tiedoston lukeminen: ei ylimääräistä synkronointia</td></tr>
+        <tr><td>Yhtä aikaa matkalla olevat pyynnöt avasivat kukin oman QUIC-yhteytensä vertaiseen, johon ei vielä ollut yhteyttä.</td><td>Yksi yhteysyritys osoitetta kohden; muut odottavat ja käyttävät sitä yhdessä (testi tarkistaa, että koko noudolle riittää yksi yhteys).</td><td colspan="2">Löytyi QUICia testattaessa (alla)</td></tr>
+        <tr><td>Säilytetty QUIC-yhteys uudelleenkäynnistyneeseen vertaiseen epäonnistui jokaisella pyynnöllä, ja vertainen putosi pysyvästi seuraavalle reitille.</td><td>Yhdistetään kerran uudelleen ja kysytään uudestaan.</td><td colspan="2">Löytyi QUICia testattaessa (alla)</td></tr>
+        <tr><td>Vanhalla reitillä valmistuneet pyynnöt saattoivat kumota vaihdon parempaan reittiin, jonka toinen pyyntö oli juuri tehnyt.</td><td>Myöhään tullut vastaus säilyttää nykyisen reitin.</td><td colspan="2">Löytyi QUICia testattaessa (alla)</td></tr>
+      </tbody>
+    </table>
+
+    <h2 id="quic">Kokeiltu ja peruttu: QUIC ensin</h2>
+    <p>Koska TCP-reitti avaa yhteyden jokaista lohkoa kohden, QUIC vaikutti ratkaisulta: Varsto käyttää jo QUICia NATin takana oleviin vertaisiin, yksi yhteys vertaista kohden ja yksi virta pyyntöä kohden. Lokakuun 10. päivänä reittijärjestys muutettiin niin, että lähiverkon ulkopuolisille osoitteille kokeillaan QUICia ennen TCP:tä. Näillä koneilla se oli hitaampi ja käytti yli kaksi kertaa enemmän prosessoriaikaa:</p>
+    <table class="downloads bench-table">
+      <thead><tr><th>Suuret tiedostot, vertaisyhteys</th><th>TCP ensin (säilytetty)</th><th>QUIC ensin (peruttu)</th></tr></thead>
+      <tbody>
+        <tr><td>Amsterdam</td><td>159 s, 27.0 MB/s; lukija 38 s prosessoriaikaa, Pariisi 40 s</td><td>230 s, 18.7 MB/s (229 s / 230 s); lukija 98 s prosessoriaikaa, Pariisi 88 s</td></tr>
+        <tr><td>Varsova</td><td>423 s, 10.2 MB/s</td><td>466 s, 9.2 MB/s (yksi ajo); lukija 130 s prosessoriaikaa</td></tr>
+      </tbody>
+    </table>
+    <p>TCP pysyy siis ensimmäisenä, ja QUIC on edelleen tie NATien läpi. Sitä, mihin QUIC-reitti aikansa menettää, ei käytettävissä olleessa ajassa löydetty; isäntäkone ei pudottanut yhtään UDP-pakettia. Kokeilu toi esiin myös puutteen, jota ei ole vielä korjattu: laitteen vertaistaulukko rakennetaan ennen kuin synkronointi lukee laiterekisterin, joten juuri liittynyt laite saa vertaisiltaan kieltävän vastauksen QUICin kautta niiden seuraavaan synkronointiin asti (TCP:n kautta sitä palvellaan heti).</p>
+
+    <h2 id="bottlenecks">Yhä hidasta, ja miksi</h2>
+    <ul>
+      <li><strong>Yksi TCP-yhteys lohkoa kohden vertaisreitillä</strong> (tässä mitatut koontiversiot). Jokainen pyyntö maksoi kättelyn ja uuden hitaan aloituksen, ja juuri se rajoitti Varsovaa. <em>Muutettu sittemmin:</em> yhteydet vertaiseen pidetään nyt auki pyyntöjen välillä, matkalla voi olla enintään 32 pyyntöä, ikkuna seuraa mitattua läpäisyä, eikä pakkaamattomina tallennettuja lohkoja enää pakata uudelleen jaettaessa. Yhdellä koneella, jossa verkkonimiavaruus jäljitteli 32 ms:n edestakaista viivettä (Pariisi–Varsova) 800 Mbit/s:n nopeudella ja joka kuljetti 62 MB/s yhdessä TCP-virrassa ja 81 MB/s kuudessatoista, vertaisyhteys nopeutui pakkautumattomalla datalla 10.4:stä 44.7 MB/s:iin ja tekstillä 11.3:sta 38.6 MB/s:iin, ja bucket (jota palveli <code>rclone serve s3</code> saman yhteyden yli) 41.5:stä 45.5:een ja 39.1:stä 52.8 MB/s:iin (kahden ajon keskiarvot). Nämä ovat paikallisia mittauksia eivätkä yllä olevien ajojen toistoja; mittausohjelma on <code>scripts/bench/netem-local.sh</code>.</li>
+      <li><strong>Pakkautuvan datan jakaminen kuluttaa prosessoriaikaa,</strong> koska jokainen pyyntö pakkaa lohkon uudelleen; siksi teksti vertaisyhteydellä jää jäljittelyssä bucketin alle. Yhdelle vertaiselle pakatut lohkot pidetään nyt muistissa (oletuksena 64 MiB) seuraavaa pyytävää laitetta varten, esimerkiksi kun useampi laite kirii samaan aikaan ajan tasalle.</li>
+      <li><strong>Lataus, jossa vertaisyhteys on päällä, käyttää nyt myös bucketia,</strong> kun se vastaa nopeammin, nopeutensa suhteessa. Jäljittelyssä molemmat jakoivat yhden yhteyden, joten molempien käyttö ei ollut nopeampaa kuin kumpikaan yksin (44.4 MB/s molemmilla aineistoilla); todellisissa verkoissa reitit eroavat toisistaan.</li>
+      <li><strong>Monen pienen tiedoston kirjoittaminen</strong> maksaa lukijalla yhden levysynkronoinnin tiedostoa kohden ja kirjoittajalla kaksi synkronointia tiedostoa kohden loogisen kellon vuoksi.</li>
+      <li><strong>Lähetykset bucketiin kulkevat lohko kerrallaan,</strong> ja jokaista PUT-pyyntöä edeltää HEAD.</li>
+      <li><strong>Kirjanpito kasvaa noin 1 KB lohkoa kohden:</strong> 4 GiB:n aineiston lähettäminen kirjoitti 13 MB:n kirjanpitoerän, jonka jokainen laite lukee liittyessään.</li>
+    </ul>
+
+    <h2 id="when">Milloin vertaisyhteys voittaa ja milloin bucket</h2>
+    <p>Varsto käyttää tarkoituksella molempia, ja mittaukset näyttävät miksi.</p>
+    <ul>
+      <li><strong>Vertaisyhteys tarvitsee vertaisen verkkoon.</strong> Lukijat pystyivät hakemaan tiedot vain, koska lohkot omistava laite oli käynnissä. Bucket on aina paikalla: suljettu kannettava, laatikossa oleva puhelin ja laitteet, jotka eivät koskaan ole verkossa yhtä aikaa, synkronoituvat kaikki silti sen kautta. Siksi holvissa on aina vähintään yksi tallennuspaikka, ja siksi tiedostoluettelot ja kirjanpito pysyvät siinä.</li>
+      <li><strong>Lähellä olevien laitteiden välillä vertaisyhteys voittaa:</strong> paljon pieniä tiedostoja Amsterdamiin 2.7 kertaa nopeammin kuin bucketista samassa istunnossa (myöhemmässä istunnossa bucket pääsi lähelle) ja suuret tiedostot hieman nopeammin ja paljon tasaisemmin. Lähiverkossa edestakainen viive on millisekunnin murto-osa.</li>
+      <li><strong>Laitteet, joilla data jo on, jakavat sitä.</strong> Kahdella lukijalla Varsova sai suurimman osan lohkoistaan Amsterdamilta; ensimmäisenä synkronoiva laite muuttuu lähteeksi seuraavalle, ja kirjoittajan lähetyskaista säästyy.</li>
+      <li><strong>Kaukana olevilla laitteilla ja pakkautuvalla datalla bucket voitti</strong> näillä yhteyksillä: suuret tiedostot ja teksti Varsovaan sekä niukasti teksti Amsterdamiin. Syyt tunnetaan (yhteys lohkoa kohden, uudelleenpakkaus jaettaessa), eivätkä ne ole verkossa: yhteys Varsovaan kuljetti 777 Mbit/s yhdessä virrassa.</li>
+      <li><strong>Bucket skaalautuu monille lukijoille</strong> kuluttamatta kenenkään lähetyskaistaa; monia muita palveleva kotilaite on lähetysnopeutensa rajoittama, elleivät lukijat auta toisiaan kuten edellä.</li>
+      <li><strong>Vertaisyhteys ei maksa mitään gigatavua kohden eikä jätä kopiota palveluntarjoajalle.</strong> Data kulkee laitteeltasi laitteellesi; bucket tarvitsee lohkot vain niitä laitteita varten, jotka ovat poissa verkosta silloin, kun muut niitä haluavat.</li>
+    </ul>
+
+    <h2 id="cost">Kustannukset</h2>
+    <p>Scalewayn julkinen hinnasto (luettu 9. lokakuuta 2026, Pariisin alue, verottomat hinnat): Object Storage Standard Multi-AZ €0.000022 gigatavutunnilta (noin €0.016 gigatavukuukaudelta), pyynnöt sisältyvät, sisääntuleva liikenne sisältyy, ulosmenevästä liikenteestä ensimmäiset 75 GB kuukaudessa ilmaisia ja sen jälkeen €0.01 gigatavulta. Alueiden väliset siirrot (Pariisi – Amsterdam, Pariisi – Varsova) lasketaan ulosmeneväksi liikenteeksi; alueen sisällä ne ovat ilmaisia.</p>
+    <p>Yksi Amsterdamin lukija, joka lataa 4 GiB:n aineiston Pariisin bucketista, maksaa siis noin €0.04, kun ilmaiset 75 GB on käytetty, ja kotitalous, joka synkronoi 500 GB kuukaudessa bucketin alueen ulkopuolisille laitteille, maksaa ulosmenevästä liikenteestä noin €4 kuukaudessa. Vertaisyhteys siirtää samat tavut laitteiden omien yhteyksien kautta eikä lisää tallennuslaskuun mitään. Muut palveluntarjoajat veloittavat ulosmenevästä liikenteestä tai pyynnöistä enemmän; yllä kuvattu menetelmä soveltuu niihin sellaisenaan. Tämän mittauksen koneet (kolme instanssia hintaan €0.147 tunnilta, noin seitsemän ja puoli tuntia kahtena päivänä) maksoivat noin €3.50.</p>
+
+    <h2 id="limits">Mittauksen rajoitukset</h2>
+    <ul>
+      <li><strong>Kaksi päivää, kaksi koontiversiota.</strong> Suurten tiedostojen ajot yksittäisillä lukijoilla ja osa bucket-ajoista ovat 9. lokakuuta, loput 10. lokakuuta; niiden väliset muutokset eivät koske vertailtuja tapauksia (katso <a href="#done">yllä</a>). Bucketin nopeus erosi päivien välillä.</li>
+      <li><strong>Pilvikoneita, ei koteja.</strong> Datakeskusyhteydet, julkiset osoitteet verkkoliitännässä, ei NATia, ei Wi-Fiä. Kotona vertaisyhteys internetin yli kulkee yleensä QUICilla reiänlyönnillä avatun NATin läpi, ja näissä ajoissa sitä mitattiin vain perutussa kokeilussa; kodin lähetysnopeus olisi usein rajoittava tekijä.</li>
+      <li><strong>Saman palveluntarjoajan kolme aluetta Euroopassa.</strong> Bucket ja koneet jakavat palveluntarjoajan ja sen runkoverkon; muilla palveluntarjoajilla ja pidemmillä etäisyyksillä tulokset ovat erilaisia.</li>
+      <li><strong>Verkkolohkotaltiot</strong> tekevät jokaisesta levysynkronoinnista hitaan (millisekunteja), mikä painaa pienten tiedostojen kohdalla; kannettavan SSD-levy synkronoi nopeammin.</li>
+      <li><strong>Kaksi ajoa tapausta kohden</strong> on vähän; bucketin tulokset vaihtelivat toistojen välillä jopa 58 % pienillä tiedostoilla ja 3.5-kertaisesti tekstillä, ja bucketin nopeus pienillä tiedostoilla lähes kaksinkertaistui saman päivän kahden istunnon välillä.</li>
+      <li><strong>Alfavaiheen ohjelmisto.</strong> Formaatit ja oletusarvot voivat vielä muuttua, ja niin muuttuvat myös nämä luvut.</li>
+    </ul>
+    <p class="note">Toistaminen: <code>scripts/bench/p2p-bench.py</code> luo koneet ja bucketin Scalewayn komentorivityökalulla, ajaa jokaisen vaiheen, kirjoittaa tiedoston <code>results.jsonl</code> ja poistaa lopuksi kaiken; <code>report.py</code> ja <code>page.py</code> muuttavat tulokset tämän sivun yhteenvedoksi ja taulukoiksi.</p>
+    </div>

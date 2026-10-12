@@ -1,0 +1,36 @@
+---
+title: Lataukset
+nav: Downloads
+output: downloads/index.html
+description: Lataa Varston alfa Linuxille, macOS:lle, Windowsille ja Androidille tai lähdekoodina, ja tarkista tarkistussummat.
+---
+    <h1>Lataukset</h1>
+    <p class="note">Katso <a href="{{L}}screenshots/">kuvakaappauksista</a>, miltä alfa näyttää.</p>
+    <p class="lead">Jokaiselle alustalle yksi paketti, jossa ovat taustapalvelu, käyttöliittymä ja sama komentorivi; Linuxissa ja macOS:ssä palvelu käynnistyy kirjautuessa (systemd-käyttäjäyksikkönä tai launch agentina), Windowsissa sitä ajaa ilmoitusalueen sovellus. Linuxissa ja Windowsissa käyttöliittymä avautuu selaimeesi; macOS:ssä natiivisovelluksella on oma ikkunansa. Alfa: käytä vain testidatalla ja pidä huolta omista varmuuskopioistasi.</p>
+    {{DOWNLOADS}}
+    <h2>Asennus ja tarkistus</h2>
+    <pre><code>curl -O https://varsto.net/downloads/SHA256SUMS
+curl -O https://varsto.net/downloads/varsto-{{VERSION}}-x86_64-unknown-linux-musl.tar.gz
+sha256sum -c SHA256SUMS --ignore-missing
+tar xzf varsto-{{VERSION}}-x86_64-unknown-linux-musl.tar.gz
+cd varsto-{{VERSION}}-x86_64-unknown-linux-musl
+./varsto desktop        # opens the desktop interface in your browser
+./varsto --help         # command line</code></pre>
+    <h2>Kääntäminen lähdekoodista</h2>
+    <p>Lähdekoodi on osoitteessa <a href="https://github.com/janttsu/varsto" rel="noopener">github.com/janttsu/varsto</a>; jokainen julkaisu on siellä tagi, jonka <a href="https://github.com/janttsu/varsto/releases" rel="noopener">GitHub-julkaisuun</a> on liitetty samat tiedostot, ja alla oleva lähdekoodiarkisto vastaa sitä. Vakaalla Rust-työkaluketjulla (1.85 tai uudempi): <code>git clone https://github.com/janttsu/varsto.git</code> tai pura arkisto, sitten <code>cargo build --release</code>; ohjelmatiedosto on <code>target/release/varsto</code>. <code>cargo test --workspace</code> ajaa testisarjan, mukaan lukien kahden laitteen skenaariot.</p>
+    <h2>Työpöytäkäyttöliittymä</h2>
+    <p>Linuxissa ja Windowsissa oletus on <code>varsto tray</code>: ilmoitusalueen kuvake, josta voi avata ja keskeyttää ja josta löytyy asennuskohta, kun uudempi versio on saatavilla; taustapalvelu synkronoi muutokset sekunneissa itsestään. <code>varsto desktop</code> käynnistää pienen verkkopalvelimen, joka kuuntelee osoitteessa 127.0.0.1 satunnaisessa portissa, tulostaa kertakäyttöisen linkin istuntotunnisteineen ja avaa sen oletusselaimessasi. Siihen pääsevät vain tämän tietokoneen ohjelmat; sivu hylkää pyynnöt, joissa ei ole tunnistetta, sekä pyynnöt, joiden Host-otsake ei ole paikallinen osoite. Käyttöliittymästä voit luoda holvin tai liittyä holviin, lisätä tallennuspaikkoja ja kansioita, jakaa, asettaa säilytyssääntöjä ja listata kaksoiskappaleita; synkronointi, tarkistus ja korjaus toimivat itsestään. Sovelluspaketti ja <code>Varsto Desktop.cmd</code> tekevät täsmälleen tämän.</p>
+    <h2>Pika-aloitus (komentorivi)</h2>
+    <pre><code>export VARSTO_PASSPHRASE='a long passphrase'
+varsto --home ~/.varsto-laptop init --name laptop            # prints the vault key once; keep it offline
+varsto --home ~/.varsto-laptop storage add-local box /mnt/box
+varsto --home ~/.varsto-laptop folder add docs ~/Documents/synced
+varsto --home ~/.varsto-laptop sync
+
+# another device that can reach the same storage
+varsto --home ~/.varsto-desk join --name desk --vault-key &lt;hex&gt; --storage-path /mnt/box
+varsto --home ~/.varsto-desk folder attach docs ~/synced
+varsto --home ~/.varsto-desk sync
+varsto --home ~/.varsto-desk status --json
+varsto --home ~/.varsto-desk fsck --verify</code></pre>
+    <p class="note">Holviavain on pääavain heksamuodossa. Jos menetät sen ja kaikki laitteesi, menetät datan: tiliä tai avaimen talletusta ei ole.</p>

@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="sv">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Varsto och Resilio Sync: Varsto</title>
+<meta name="description" content="Vad Resilio Sync är till för, hur det fungerar och hur det står sig mot Varsto.">
+<meta name="robots" content="noindex, nofollow">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="../../../favicon.svg" type="image/svg+xml">
+<link rel="alternate" hreflang="en" href="../../../compare/resilio-sync/">
+<link rel="alternate" hreflang="fi" href="../../../fi/compare/resilio-sync/">
+<link rel="alternate" hreflang="sv" href="../../../sv/compare/resilio-sync/">
+<link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../../../blog/feed.xml">
+<link rel="stylesheet" href="../../../assets/css/site.css?v=b3d2d4f387">
+<script src="../../../assets/js/theme.js?v=0951491269"></script>
+</head>
+<body>
+<a class="skip" href="#main">Hoppa till innehållet</a>
+<div class="alpha" role="note">
+  <div class="wrap"><strong>Alfaprogramvara, inte för produktionsdata.</strong> Fel kan leda till dataförlust, formatet kan ändras utan migrering och krypteringen har ännu inte granskats av utomstående. Behåll egna säkerhetskopior och kontrollera att du kan återställa från dem.</div>
+</div>
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="../../../sv/"><img src="../../../assets/img/logo.svg" alt="" width="28" height="28"><span>Varsto</span></a>
+    <nav class="langs" aria-label="Language"><a href="../../../compare/resilio-sync/" hreflang="en" lang="en">English</a> <a href="../../../fi/compare/resilio-sync/" hreflang="fi" lang="fi">Suomi</a> <a href="../../../sv/compare/resilio-sync/" hreflang="sv" lang="sv" aria-current="true">Svenska</a></nav>
+
+    <nav class="main" aria-label="Main">
+      <a href="../../../sv/">Projekt</a>
+      <a href="../../../sv/features/">Funktioner</a>
+      <a href="../../../sv/use-cases/">Användningsfall</a>
+      <a href="../../../sv/compare/" aria-current="page">Jämförelse</a>
+      <a href="../../../sv/how-it-works/">Så fungerar det</a>
+      <a href="../../../sv/screenshots/">Skärmbilder</a>
+      <a href="../../../docs/">Dokumentation (en)</a>
+      <a href="../../../sv/downloads/">Nedladdningar</a>
+      <a href="../../../blog/">Blogg (en)</a>
+      <a href="../../../forum/">Forum (en)</a>
+      <a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a>
+      <button class="theme" id="theme-toggle" type="button" aria-label="Change colour theme">Theme: auto</button>
+    </nav>
+  </div>
+</header>
+<main id="main">
+  <div class="wrap">
+    <p class="back-link"><a href="../../compare/">Alla jämförelser</a></p>
+    <h1>Varsto och Resilio Sync</h1>
+    <p class="lead">Resilio Sync synkroniserar och delar mappar mellan enheter peer-to-peer, byggt på BitTorrent-teknik. Gratisutgåvan Sync Home är för privatpersoner; företagets huvudsakliga verksamhet är filöverföring för storföretag. Resilio köptes av Nasuni i mars 2026.</p>
+
+    <h2>Så fungerar Resilio Sync</h2>
+    <p>Enheterna ansluter direkt till varandra; det finns inget konto, och mappar delas med nycklar eller länkar (skrivskyddade eller med läs- och skrivrätt). Trackers och reläer som Resilio driver hjälper enheterna att hitta varandra. Data finns bara på enheterna; Sync Home har ingen S3- eller rclone-backend. Selektiv synkronisering med platshållarfiler finns, och en ”krypterad mapp” låter en enhet på en opålitlig maskin lagra data som den inte kan läsa (den enheten är skrivskyddad och saknar selektiv synkronisering).</p>
+
+    <h2>Sida vid sida</h2>
+    <table class="compare-table">
+      <thead><tr><th scope="col"></th><th scope="col">Resilio Sync</th><th scope="col">Varsto</th></tr></thead>
+      <tbody>
+      <tr><th scope="row">Var dina filer finns</th><td>Bara på enheterna (en NAS eller server räknas om den kör Resilio).</td><td>På dina egna enheter och på lagringsplatser du väljer: S3-kompatibla buckets, valfri rclone-fjärrlagring, lokala kataloger eller nätverkskataloger och pooler av flyttbara diskar.</td></tr>
+      <tr><th scope="row">Konto eller central server</th><td>Inget konto; trackers och reläer som Resilio driver.</td><td>Inget. Det finns ingen Varsto-server; enheterna hittar varandra via dina lagringsplatser och i det lokala nätverket.</td></tr>
+      <tr><th scope="row">Kryptering</th><td>Krypterat under överföring; krypterade mappar för opålitliga enheter. Stängd källkod, så det går inte att verifiera oberoende.</td><td>End-to-end, på klientsidan, innan något lämnar enheten; hybrid postkvantkryptografi (ML-KEM för nycklar vid delning, signaturer med Ed25519 + ML-DSA-65). Ännu inte oberoende granskad.</td></tr>
+      <tr><th scope="row">Enheterna online samtidigt</th><td>Ja, om inte en enhet hålls ständigt påslagen.</td><td>Behövs inte: enheterna synkroniserar via dina lagringsplatser, och direkt peer-to-peer när de når varandra.</td></tr>
+      <tr><th scope="row">Vet var varje kopia finns</th><td>Ingen uppföljning av kopior eller antal kopior.</td><td>Ja: en signerad liggare registrerar vilken lagringsplats och enhet som har varje block; lagringsregler (som standard 1 kopia var som helst, 1 extern, 1 på dina egna enheter eller diskar, kontrollerad av en annan enhet inom 30 dagar) varnar när en regel inte uppfylls.</td></tr>
+      <tr><th scope="row">Flyttbara diskar och diskar offline</th><td>Inget arbetsflöde för flyttbara diskar.</td><td>Ja: diskpooler fylls, kontrolleras och känns igen när de kommer tillbaka; filer på en disk som är borta ber om just den disken.</td></tr>
+      <tr><th scope="row">Licens och pris</th><td>Proprietär; Sync Home är gratis.</td><td>Källkoden tillgänglig (PolyForm Shield 1.0.0), gratis; du betalar bara din lagringsleverantör.</td></tr>
+      <tr><th scope="row">Mognad</th><td>Mogen kommersiell produkt; dess framtid efter förvärvet 2026 är ännu inte klarlagd.</td><td>Alfa: inte för produktionsdata, formaten kan fortfarande ändras.</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Vilken passar</h2>
+    <div class="grid two">
+      <div class="card"><h3>Resilio Sync</h3><p>Välj Resilio Sync när du vill ha snabb överföring i BitTorrent-stil mellan ständigt påslagna maskiner och enkel delning med nyckel eller länk, och en leverantörsprodukt med stängd källkod är acceptabel.</p></div>
+      <div class="card"><h3>Varsto</h3><p>Varstos peer-to-peer-överföring bygger på samma idé (krypterade block från flera enheter samtidigt), men lägger till dina egna lagringsplatser som den alltid tillgängliga kopian, en förteckning över var varje kopia finns, lagringsregler och en öppen specifikation av formaten.</p></div>
+    </div>
+    <p class="note">Varsto är alfaprogramvara: anförtro den inga data som du inte har någon annan kopia av, och dess kryptografi har inte granskats av någon oberoende part. De andra produkterna här är mogna. Uppgifterna om dem kontrollerades i deras egen dokumentation i oktober 2026; priser och abonnemang ändras ofta, så se deras egna sidor för aktuella siffror. Rättelser tas gärna emot på <a href="../../../forum/">forumet</a> eller på GitHub.</p>
+
+    <h2>Källor</h2>
+    <ul>
+      <li><a href="https://www.resilio.com/sync/">Resilio Syncs webbplats</a></li>
+      <li><a href="https://www.resilio.com/blog/understanding-the-sync-encrypted-folder">Krypterade mappar</a></li>
+      <li><a href="https://www.resilio.com/news/nasuni-acquires-resilio/">Nasuni köper Resilio</a></li>
+    </ul>
+
+  </div>
+</main>
+<footer class="site">
+  <div class="wrap">
+    <span>Varsto är ett arbetsnamn. Källkod: <a href="https://github.com/janttsu/varsto">github.com/janttsu/varsto</a>, under PolyForm Shield License 1.0.0 (källkoden tillgänglig).</span>
+    <span>Inga kakor, ingen spårning. Webbservern sparar en vanlig åtkomstlogg i högst sju dagar.</span>
+    <span><a href="../../../docs/security-policy.html">Säkerhetspolicy</a> · <a href="../../../docs/licence.html">Licens</a> · <a href="../../../docs/trademark.html">Varumärke</a> (på engelska)</span>
+  </div>
+</footer>
+</body>
+</html>

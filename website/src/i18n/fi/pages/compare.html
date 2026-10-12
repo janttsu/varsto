@@ -1,0 +1,32 @@
+---
+title: Vertailu
+nav: Compare
+output: compare/index.html
+description: Miten Varsto vertautuu Syncthingiin, Resilio Synciin, MEGAan, Fileniin, Tresoritiin ja git-anneximiin: mihin kukin on tarkoitettu ja missä ne eroavat.
+---
+    <h1>Varsto vertailussa</h1>
+    <p class="lead">Tiedostojen synkronointityökalut jakautuvat kolmeen ryhmään. Vertaisyhteyttä (P2P) käyttävät työkalut, kuten Syncthing ja Resilio Sync, kopioivat kansioita omien laitteidesi välillä. Salatut pilvet, kuten MEGA, Filen ja Tresorit, säilyttävät tiedostosi yhden palveluntarjoajan luona. git-annex pitää kirjaa suurista tiedostoista kaikilla omistamillasi levyillä ja etäkohteissa. Varsto yhdistää osia kaikista kolmesta: päästä päähän salatut tiedostot valitsemissasi tallennuspaikoissa, siirrot vertaisyhteydellä laitteidesi välillä ja kirjanpidon siitä, missä jokainen kopio on.</p>
+
+    <table class="compare-table compare-overview">
+      <thead><tr><th scope="col"></th><th scope="col">Varsto</th><th scope="col"><a href="{{L}}compare/syncthing/">Syncthing</a></th><th scope="col"><a href="{{L}}compare/resilio-sync/">Resilio Sync</a></th><th scope="col"><a href="{{L}}compare/mega/">MEGA</a></th><th scope="col"><a href="{{L}}compare/filen/">Filen</a></th><th scope="col"><a href="{{L}}compare/tresorit/">Tresorit</a></th><th scope="col"><a href="{{L}}compare/git-annex/">git-annex</a></th></tr></thead>
+      <tbody>
+      <tr><th scope="row">Missä tiedostosi ovat</th><td><strong>Omilla laitteillasi ja omissa tallennuspaikoissasi</strong></td><td>Omilla laitteillasi</td><td>Omilla laitteillasi</td><td>MEGAn pilvessä</td><td>Filenin pilvessä</td><td>Tresoritin pilvessä</td><td>Missä itse haluat</td></tr>
+      <tr><th scope="row">Tili tai keskuspalvelin</th><td><strong>Ei kumpaakaan</strong></td><td>Ei kumpaakaan</td><td>Ei tiliä</td><td>Tili</td><td>Tili</td><td>Tili</td><td>Ei kumpaakaan</td></tr>
+      <tr><th scope="row">Laitteiden oltava verkossa yhtä aikaa</th><td><strong>Ei</strong></td><td>Kyllä</td><td>Kyllä</td><td>Ei</td><td>Ei</td><td>Ei</td><td>Ei</td></tr>
+      <tr><th scope="row">Tietää, missä jokainen kopio on</th><td><strong>Kyllä</strong></td><td>Ei</td><td>Ei</td><td>Yksi kopio palveluntarjoajalla</td><td>Yksi kopio palveluntarjoajalla</td><td>Yksi kopio palveluntarjoajalla</td><td>Kyllä</td></tr>
+      <tr><th scope="row">Irrotettavat ja verkosta irti olevat levyt</th><td><strong>Kyllä</strong></td><td>Ei</td><td>Ei</td><td>Ei</td><td>Ei</td><td>Ei</td><td>Kyllä</td></tr>
+      <tr><th scope="row">Lisenssi ja hinta</th><td><strong>Lähdekoodi saatavilla, ilmainen</strong></td><td>Avoin lähdekoodi, ilmainen</td><td>Suljettu, ilmaisversio</td><td>Maksulliset tilaukset, asiakasohjelmien lähdekoodi julkaistu</td><td>Maksulliset tilaukset, avoimen lähdekoodin asiakasohjelmat</td><td>Suljettu, maksulliset tilaukset</td><td>Vapaa ohjelmisto, ilmainen</td></tr>
+      </tbody>
+    </table>
+    <p class="note">”Yksi kopio palveluntarjoajalla” tarkoittaa, että talon ulkopuolinen kopio on kyseisellä palveluntarjoajalla; myös laitteillasi on omat kopionsa. Kukin vertailusivu kertoo yksityiskohdat ja linkittää lähteisiin.</p>
+
+    <h2>Vertailut</h2>
+    <div class="grid three">
+      <a class="card" href="{{L}}compare/syncthing/"><h3>Varsto ja Syncthing</h3><p>Syncthing pitää kansiot samanlaisina kaikilla omilla laitteillasi, jatkuvasti ja ilman pilveä.</p></a>
+      <a class="card" href="{{L}}compare/resilio-sync/"><h3>Varsto ja Resilio Sync</h3><p>Resilio Sync synkronoi ja jakaa kansioita laitteiden välillä vertaisyhteydellä BitTorrent-tekniikan pohjalta.</p></a>
+      <a class="card" href="{{L}}compare/mega/"><h3>Varsto ja MEGA</h3><p>MEGA on päästä päähän salattu pilvitallennuspalvelu kuluttajille ja yrityksille. Siinä on runsaasti tilaa tarjoavat tilaukset, työpöytäsynkronointi, mobiilisovellukset ja oheispalveluja, kuten chat ja VPN.</p></a>
+      <a class="card" href="{{L}}compare/filen/"><h3>Varsto ja Filen</h3><p>Filen on saksalainen, nollatietoperiaatteella salattu pilvitallennuspalvelu yksityisyyttä arvostaville ihmisille ja tiimeille.</p></a>
+      <a class="card" href="{{L}}compare/tresorit/"><h3>Varsto ja Tresorit</h3><p>Tresorit on sveitsiläinen päästä päähän salattu pilvitallennus- ja tiedostonjakopalvelu, joka on suunnattu lähinnä yrityksille ja säännellyille aloille, mutta tarjolla on myös henkilökohtaisia tilauksia.</p></a>
+      <a class="card" href="{{L}}compare/git-annex/"><h3>Varsto ja git-annex</h3><p>git-annex hallitsee suuria tiedostoja gitillä tallentamatta niiden sisältöä gitiin.</p></a>
+    </div>
+    <p class="note">Varsto on alfavaiheen ohjelmisto: älä luota sille tietoja, joista sinulla ei ole muuta kopiota. Sen kryptografiaa ei ole myöskään auditoitu riippumattomasti. Muut tässä esitellyt tuotteet ovat kypsiä. Niitä koskevat tiedot tarkistettiin niiden omasta dokumentaatiosta lokakuussa 2026; hinnat ja tilausvaihtoehdot muuttuvat usein, joten katso ajantasaiset tiedot niiden omilta sivuilta. Korjaukset ovat tervetulleita <a href="{{P}}forum/">foorumilla</a> tai GitHubissa.</p>

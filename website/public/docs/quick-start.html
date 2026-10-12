@@ -8,6 +8,7 @@
 <meta name="robots" content="noindex, nofollow">
 <meta name="color-scheme" content="light dark">
 <link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="alternate" hreflang="en" href="../">
 <link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../blog/feed.xml">
 <link rel="stylesheet" href="../assets/css/site.css?v=b3d2d4f387">
 <script src="../assets/js/theme.js?v=0951491269"></script>
@@ -20,6 +21,7 @@
 <header class="site">
   <div class="wrap">
     <a class="brand" href="../"><img src="../assets/img/logo.svg" alt="" width="28" height="28"><span>Varsto</span></a>
+
     <nav class="main" aria-label="Main">
       <a href="../">Project</a>
       <a href="../features/">Features</a>
@@ -52,7 +54,7 @@
 <li><strong>Bring your own storage.</strong> S3-compatible keys, any rclone-compatible remote, a local folder, or removable disks (for example old hard drives in a USB dock). Cold storage such as Glacier is understood and used for rarely accessed data.</li>
 <li><strong>No one to trust, and no shortcuts.</strong> All content, file names and metadata are encrypted on your devices, and keys stay with you. External disks and cloud providers see opaque blocks only. Designed for post-quantum security (hybrid classical + post-quantum). Security is never traded for speed: there is no weaker "fast mode". Hardware security keys (FIDO2 / YubiKey), special-protected folders, and a recovery kit you store physically in several places. See <a href="security-principles.html">docs/architecture/security-principles.md</a>.</li>
 <li><strong>No tracker, no account, no vendor cloud.</strong> Devices find each other on the local network, through a rendezvous record in your own storage, and through a rendezvous record in your own storage (a DHT fallback is designed, not built). Designed to avoid single points of failure.</li>
-<li><strong>Fast, block-level sync.</strong> Files are split into blocks; only changed blocks move. Peer-to-peer transfer between your own devices, also offline over a LAN, with the cloud brought up to date when you are back online.</li>
+<li><strong>Fast, block-level sync.</strong> Files are split into blocks whose size follows the file; only changed blocks move, and the blocks of small files travel together in packs, so a folder of thousands of notes is a few objects on the storage, not thousands. Peer-to-peer transfer between your own devices, also offline over a LAN, with the cloud brought up to date when you are back online.</li>
 <li><strong>Safety nets.</strong> Version history, trash (optionally on cold storage), durability policies with alerts, peer-to-peer transfer between your devices on the LAN and over the internet, zstd compression before encryption, Strongroom folders that open only with a FIDO2 security key (libfido2 tools), a printable recovery kit (24 words, 2-of-3 shares), geographic location awareness, and provider-independent recovery. What the design tolerates, and what it does not, is listed in <a href="failure-model.html">docs/failure-model.md</a>.</li>
 <li><strong>Clients.</strong> Linux, Windows, macOS, Android, iOS; a command line on Linux, macOS and Windows; an MCP server so you can manage and organise files by talking to a local or cloud AI of your choice.</li>
 </ul>

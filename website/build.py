@@ -84,15 +84,74 @@ def asset_version(rel: str) -> str:
     return hashlib.sha256(f.read_bytes()).hexdigest()[:10] if f.exists() else "0"
 
 
-def page(title: str, description: str, body: str, nav: str, depth: int) -> str:
+# Website languages: English at the root, the others under /<lang>/ with
+# pages translated in website/src/i18n/<lang>/pages/. Docs, blog and forum
+# stay English (internal documentation is English only).
+LANGS = [("en", "English"), ("fi", "Suomi"), ("sv", "Svenska")]
+NAV_I18N = {
+    "fi": {"Project": "Projekti", "Features": "Ominaisuudet", "Use cases": "Käyttötapaukset", "Compare": "Vertailu",
+           "How it works": "Miten se toimii", "Screenshots": "Kuvakaappaukset", "Docs": "Dokumentaatio (en)",
+           "Downloads": "Lataukset", "Blog": "Blogi (en)", "Forum": "Foorumi (en)", "GitHub": "GitHub"},
+    "sv": {"Project": "Projekt", "Features": "Funktioner", "Use cases": "Användningsfall", "Compare": "Jämförelse",
+           "How it works": "Så fungerar det", "Screenshots": "Skärmbilder", "Docs": "Dokumentation (en)",
+           "Downloads": "Nedladdningar", "Blog": "Blogg (en)", "Forum": "Forum (en)", "GitHub": "GitHub"},
+}
+ENGLISH_ONLY = ("docs/", "blog/", "forum/")
+ALPHA_I18N = {
+    "fi": "<strong>Alpha-ohjelmisto, ei tuotantodatalle.</strong> Virheet voivat hävittää dataa, tallennusmuoto voi muuttua ilman siirtotyökalua, eikä salausta ole vielä auditoitu. Pidä omat varmuuskopiosi ja varmista, että voit palauttaa niistä.",
+    "sv": "<strong>Alfaprogramvara, inte för produktionsdata.</strong> Fel kan leda till dataförlust, formatet kan ändras utan migrering och krypteringen har ännu inte granskats av utomstående. Behåll egna säkerhetskopior och kontrollera att du kan återställa från dem.",
+}
+FOOTER_I18N = {
+    "fi": [
+        f'{BRAND} on työnimi. Lähdekoodi: <a href="{REPO}">github.com/janttsu/varsto</a>, PolyForm Shield License 1.0.0 -lisenssillä (lähdekoodi saatavilla).',
+        "Ei evästeitä, ei seurantaa. Palvelin säilyttää tavallista käyntilokia enintään seitsemän päivää.",
+        '<a href="{p}docs/security-policy.html">Tietoturvakäytäntö</a> · <a href="{p}docs/licence.html">Lisenssi</a> · <a href="{p}docs/trademark.html">Tavaramerkki</a> (englanniksi)',
+    ],
+    "sv": [
+        f'{BRAND} är ett arbetsnamn. Källkod: <a href="{REPO}">github.com/janttsu/varsto</a>, under PolyForm Shield License 1.0.0 (källkoden tillgänglig).',
+        "Inga kakor, ingen spårning. Webbservern sparar en vanlig åtkomstlogg i högst sju dagar.",
+        '<a href="{p}docs/security-policy.html">Säkerhetspolicy</a> · <a href="{p}docs/licence.html">Licens</a> · <a href="{p}docs/trademark.html">Varumärke</a> (på engelska)',
+    ],
+}
+SKIP_I18N = {"en": "Skip to content", "fi": "Siirry sisältöön", "sv": "Hoppa till innehållet"}
+TAGLINE = {"en": "your files, your storage", "fi": "sinun tiedostosi, sinun tallennuspaikkasi", "sv": "dina filer, din lagring"}
+
+
+def page(title: str, description: str, body: str, nav: str, depth: int, lang: str = "en", rel: str = "") -> str:
+    """`depth`: directory levels below the site root; `rel`: the page's path
+    relative to its language root (for the switcher), e.g. "features/index.html"."""
     p = "../" * depth
+    labels = NAV_I18N.get(lang, {})
+    lang_root = p if lang == "en" else p + lang + "/"
+
+    def nav_href(href: str) -> str:
+        if href.startswith("http"):
+            return href
+        if lang != "en" and not href.startswith(ENGLISH_ONLY):
+            return lang_root + href
+        return p + href
+
+    page_rel = rel.removesuffix("index.html")
+    alternates, switch = [], []
+    for code, label in LANGS:
+        if code != "en" and not translated(code, rel):
+            continue
+        href = (p if code == "en" else p + code + "/") + page_rel
+        alternates.append(f'<link rel="alternate" hreflang="{code}" href="{href or "./"}">')
+        cur = ' aria-current="true"' if code == lang else ""
+        switch.append(f'<a href="{href or "./"}" hreflang="{code}" lang="{code}"{cur}>{label}</a>')
+    lang_switch = ('    <nav class="langs" aria-label="Language">' + " ".join(switch) + "</nav>\n") if len(switch) > 1 else ""
+    alternates_html = "\n".join(alternates)
+    alpha = ALPHA_I18N.get(lang, ALPHA)
+    footer_lines = FOOTER_I18N.get(lang, FOOTER)
     nav_html = "\n".join(
-        f'      <a href="{href if href.startswith("http") else p + href}"{" aria-current=\"page\"" if name == nav else ""}{" rel=\"noopener\"" if href.startswith("http") else ""}>{name}</a>' for name, href in NAV
+        f'      <a href="{nav_href(href)}"{" aria-current=\"page\"" if name == nav else ""}{" rel=\"noopener\"" if href.startswith("http") else ""}>{labels.get(name, name)}</a>' for name, href in NAV
     )
-    footer = "\n".join(f"    <span>{line.format(p=p)}</span>" for line in FOOTER)
-    full_title = f"{BRAND}: your files, your storage" if nav == "Project" and depth == 0 else f"{title}: {BRAND}"
+    footer = "\n".join(f"    <span>{line.format(p=p)}</span>" for line in footer_lines)
+    is_home = nav == "Project" and rel in ("", "index.html")
+    full_title = f"{BRAND}: {TAGLINE[lang]}" if is_home else f"{title}: {BRAND}"
     return f"""<!doctype html>
-<html lang="en">
+<html lang="{lang}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -101,18 +160,20 @@ def page(title: str, description: str, body: str, nav: str, depth: int) -> str:
 <meta name="robots" content="noindex, nofollow">
 <meta name="color-scheme" content="light dark">
 <link rel="icon" href="{p}favicon.svg" type="image/svg+xml">
+{alternates_html}
 <link rel="alternate" type="application/rss+xml" title="{BRAND} blog" href="{p}blog/feed.xml">
 <link rel="stylesheet" href="{p}assets/css/site.css?v={asset_version("assets/css/site.css")}">
 <script src="{p}assets/js/theme.js?v={asset_version("assets/js/theme.js")}"></script>
 </head>
 <body>
-<a class="skip" href="#main">Skip to content</a>
+<a class="skip" href="#main">{SKIP_I18N[lang]}</a>
 <div class="alpha" role="note">
-  <div class="wrap">{ALPHA}</div>
+  <div class="wrap">{alpha}</div>
 </div>
 <header class="site">
   <div class="wrap">
-    <a class="brand" href="{p if depth else './'}"><img src="{p}assets/img/logo.svg" alt="" width="28" height="28"><span>{BRAND}</span></a>
+    <a class="brand" href="{lang_root if (depth or lang != 'en') else './'}"><img src="{p}assets/img/logo.svg" alt="" width="28" height="28"><span>{BRAND}</span></a>
+{lang_switch}
     <nav class="main" aria-label="Main">
 {nav_html}
       <button class="theme" id="theme-toggle" type="button" aria-label="Change colour theme">Theme: auto</button>
@@ -265,6 +326,35 @@ def verify_section(pre: str, version: str) -> str:
     )
 
 
+_TRANSLATED: dict[str, set[str]] = {}
+
+
+def translated(lang: str, rel: str) -> bool:
+    """Whether page `rel` (relative to the language root) has a translation."""
+    if lang not in _TRANSLATED:
+        outs = set()
+        for src in (SRC / "i18n" / lang / "pages").glob("*.html"):
+            meta, _ = front_matter(src.read_text())
+            outs.add(meta.get("output", f"{src.stem}.html"))
+        _TRANSLATED[lang] = outs
+    return rel in _TRANSLATED[lang]
+
+
+def build_translated_pages() -> None:
+    for lang, _ in LANGS[1:]:
+        for src in sorted((SRC / "i18n" / lang / "pages").glob("*.html")):
+            meta, body = front_matter(src.read_text())
+            rel = meta.get("output", f"{src.stem}.html")
+            out_rel = f"{lang}/{rel}"
+            depth = out_rel.count("/")
+            body = body.replace("{{DOWNLOADS}}", downloads_table(depth)).replace("{{POSTS}}", posts_list(depth))
+            # {{L}}: this language's root (links between translated pages);
+            # {{P}}: the site root (assets, docs, blog).
+            body = body.replace("{{L}}", "../" * (depth - 1)).replace("{{P}}", "../" * depth)
+            (OUT / out_rel).parent.mkdir(parents=True, exist_ok=True)
+            (OUT / out_rel).write_text(page(meta["title"], meta.get("description", ""), body, meta["nav"], depth, lang, rel))
+
+
 def build_pages(slug_by_name: dict[str, str]) -> None:
     for src in sorted((SRC / "pages").glob("*.html")):
         meta, body = front_matter(src.read_text())
@@ -273,7 +363,7 @@ def build_pages(slug_by_name: dict[str, str]) -> None:
         body = body.replace("{{DOWNLOADS}}", downloads_table(depth)).replace("{{POSTS}}", posts_list(depth))
         body = body.replace("{{P}}", "../" * depth)
         (OUT / out_rel).parent.mkdir(parents=True, exist_ok=True)
-        (OUT / out_rel).write_text(page(meta["title"], meta.get("description", ""), body, meta["nav"], depth))
+        (OUT / out_rel).write_text(page(meta["title"], meta.get("description", ""), body, meta["nav"], depth, "en", out_rel))
 
 
 def build_docs() -> dict[str, str]:
@@ -415,6 +505,7 @@ def main() -> None:
     slugs = build_docs()
     build_blog(slugs)
     build_pages(slugs)
+    build_translated_pages()
     copy_data()
     build_404()
     build_redirects()

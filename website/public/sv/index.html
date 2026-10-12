@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="sv">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Varsto: dina filer, din lagring</title>
+<meta name="description" content="Varsto: end-to-end-krypterad filsynkronisering och säkerhetskopiering på lagring du redan äger. Alfa, arbetsnamn.">
+<meta name="robots" content="noindex, nofollow">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="alternate" hreflang="en" href="../">
+<link rel="alternate" hreflang="fi" href="../fi/">
+<link rel="alternate" hreflang="sv" href="../sv/">
+<link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../blog/feed.xml">
+<link rel="stylesheet" href="../assets/css/site.css?v=b3d2d4f387">
+<script src="../assets/js/theme.js?v=0951491269"></script>
+</head>
+<body>
+<a class="skip" href="#main">Hoppa till innehållet</a>
+<div class="alpha" role="note">
+  <div class="wrap"><strong>Alfaprogramvara, inte för produktionsdata.</strong> Fel kan leda till dataförlust, formatet kan ändras utan migrering och krypteringen har ännu inte granskats av utomstående. Behåll egna säkerhetskopior och kontrollera att du kan återställa från dem.</div>
+</div>
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="../sv/"><img src="../assets/img/logo.svg" alt="" width="28" height="28"><span>Varsto</span></a>
+    <nav class="langs" aria-label="Language"><a href="../" hreflang="en" lang="en">English</a> <a href="../fi/" hreflang="fi" lang="fi">Suomi</a> <a href="../sv/" hreflang="sv" lang="sv" aria-current="true">Svenska</a></nav>
+
+    <nav class="main" aria-label="Main">
+      <a href="../sv/" aria-current="page">Projekt</a>
+      <a href="../sv/features/">Funktioner</a>
+      <a href="../sv/use-cases/">Användningsfall</a>
+      <a href="../sv/compare/">Jämförelse</a>
+      <a href="../sv/how-it-works/">Så fungerar det</a>
+      <a href="../sv/screenshots/">Skärmbilder</a>
+      <a href="../docs/">Dokumentation (en)</a>
+      <a href="../sv/downloads/">Nedladdningar</a>
+      <a href="../blog/">Blogg (en)</a>
+      <a href="../forum/">Forum (en)</a>
+      <a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a>
+      <button class="theme" id="theme-toggle" type="button" aria-label="Change colour theme">Theme: auto</button>
+    </nav>
+  </div>
+</header>
+<main id="main">
+  <div class="wrap">
+    <h1>Dina filer. Din lagring.</h1>
+    <p class="lead">Varsto är en end-to-end-krypterad app för synkronisering och säkerhetskopiering som använder dina egna enheter och de lagringstjänster du själv väljer. En disk, en NAS-utdelning, en S3-bucket eller valfri rclone-remote: appen krypterar allt på dina enheter, för en signerad förteckning över var varje block finns och låter enheter som aldrig är online samtidigt hålla sig synkroniserade via den lagringen.</p>
+    <p><a class="button" href="downloads/">Ladda ner alfaversionen</a> <a class="button secondary" href="../docs/quick-start.html">Snabbstart</a> <a class="button secondary" href="https://github.com/janttsu/varsto" rel="noopener">Källkoden på GitHub</a></p>
+    <figure class="hero"><picture><source type="image/webp" srcset="../assets/img/hero.webp"><img src="../assets/img/hero.png" alt="Diagram: dina nycklar i mitten, förbundna med krypterade länkar till en S3-bucket, ett kallt arkiv, hårddiskar på en hylla, en NAS, en bärbar dator och en telefon; varje plats rymmer bara låsta, krypterade block." width="1200" height="600"></picture><figcaption>Kopior där du bestämmer: en bucket, ett kallt arkiv, gamla diskar på en hylla, dina egna datorer. Varje kopia är chiffertext; nycklarna stannar hos dig.</figcaption></figure>
+
+    <h2>Det här fungerar i dag (alfa, 0.0.1-alpha.11)</h2>
+    <div class="grid">
+      <section class="card"><h3>Krypterat innan det lämnar din enhet</h3><p>Filerna delas upp i innehållsdefinierade bitar som var och en krypteras med XChaCha20-Poly1305 under nycklar härledda ur ditt valv. Lagringen ser bara ogenomskinliga objekt och storlekar, aldrig namn, hashvärden eller innehåll. <a href="how-it-works/">Så fungerar det</a>.</p></section>
+      <section class="card"><h3>Använd din egen lagring</h3><p>Vilken katalog som helst som enheten når, vilken S3-kompatibel bucket som helst (AWS, Scaleway, Hetzner, B2, R2, MinIO) med dina egna nycklar, eller valfri rclone-remote. Kall lagring och arkivklasser skrivs till men läses aldrig utan att du bekräftar.</p></section>
+      <section class="card"><h3>Enheter som aldrig möts blir ändå samstämmiga</h3><p>Varje enhet för en signerad, krypterad liggare och publicerar den via lagringen. Ändringar, raderingar och konflikter avgörs deterministiskt; samtidiga ändringar behåller båda versionerna, raderade filer hamnar i en papperskorg.</p></section>
+      <section class="card"><h3>Bakgrundsapp på varje dator</h3><p>Bakgrundstjänsten startar vid inloggning, bevakar mappar och synkroniserar inom några sekunder, utan knappar att trycka på; gränssnittet öppnas i din webbläsare (i ett eget fönster på macOS) och visas bara för den här datorn. Uppdateringar söks automatiskt och erbjuds när en nyare version finns.</p></section>
+      <section class="card"><h3>Selektiv synkronisering, överföringsdiskar, opålitliga repliker, delning</h3><p>Platshållare tills du hämtar filen; ett USB-minne som bara bär det den andra enheten saknar; en väns NAS som lagrar dina kopior utan att kunna öppna dem; en mapp som delas med en annan användare genom sin nyckel. Se <a href="features/">Funktioner</a>, <a href="use-cases/">Användningsfall</a> och <a href="screenshots/">Skärmbilder</a>.</p></section>
+      <section class="card"><h3>Postkvantsäker hybridkryptografi</h3><p>Varje liggarbatch signeras med Ed25519 och ML-DSA-65, och båda måste verifieras. En delningstoken förseglas till mottagarens X25519 + ML-KEM-768-nyckel, så den kan skickas via vilken kanal som helst. Äldre batcher med enbart Ed25519 förblir giltiga tack vare den algoritmidentifierare de bär.</p></section>
+      <section class="card"><h3>En assistent med begränsad åtkomst</h3><p>En MCP-server låter den AI-assistent du väljer läsa, analysera och omorganisera filer i exakt de mappar du ger åtkomst till, med enbart läsrätt om du inte säger annat. Varsto håller själv reda på när filer senast användes och föreslår var oanvänd data är billigast att förvara.</p></section>
+      <section class="card"><h3>Regler som varnar i tid</h3><p>”Två kopior i molnet och en hemma, verifierade inom 30 dagar.” Varje enhet kontrollerar regeln mot liggaren och varnar, i appen och med en avisering, innan den slutar gälla.</p></section>
+      <section class="card"><h3>Peer-to-peer, komprimerat</h3><p>Dina enheter utbyter krypterade block direkt, som med torrent: automatiskt i det lokala nätverket, över internet genom NAT med hole punching, och via en av dina egna nåbara enheter när det misslyckas. Inga trackers, inget leverantörsrelä. Blocken komprimeras före krypteringen, så varje kopia och överföring blir liten. I ett hem bakom NAT kom stora filer från peers med 8 till 9 MB/s på en 100 Mbit/s-linje, upp till 1,8 gånger så snabbt som från bucketen: <a href="benchmarks/#home">Prestandatester</a>.</p></section>
+      <section class="card"><h3>Strongroom-mappar</h3><p>En mapp vars nyckel bara finns medan du rör vid din FIDO2-säkerhetsnyckel. Kryptografiskt, inte en dialogruta: ingen lösenfras, valvnyckel eller stulen bärbar dator öppnar den.</p></section>
+      <section class="card"><h3>Gamla diskar som en pool</h3><p>Anslut en disk till dockan, lägg till den i poolen, så fylls den med det poolen saknar upp till sin reserv. Mata ut den när du blir ombedd och förvara den var som helst; när den kommer tillbaka känns den igen på sin markör, kontrolleras och fylls på. En fil vars enda kopia finns på en disk som inte är ansluten säger det: ”anslut disken data-01 (hyllan)”.</p></section>
+      <section class="card"><h3>Organisationer för företag</h3><p>Administratörer godkänner enheter för namngivna personer, tar bort en person med alla personens enheter i ett steg, bestämmer vad medlemmarna får göra och för en signerad, kedjad logg över allt detta. En rotnyckel på papper utser administratörerna. Ett valv utan organisation påverkas inte av något av detta. <a href="features/#organizations">Mer</a>.</p></section>
+      <section class="card"><h3>Bokföring du kan kontrollera</h3><p><code>varsto fsck --verify</code> jämför liggaren med vad lagringen faktiskt innehåller och hashar om varje objekt. En enhet som återställts från en gammal säkerhetskopia upptäcks och spärras.</p></section>
+    </div>
+
+    <h2>Det här är utformat men inte byggt än</h2>
+    <div class="grid">
+      <section class="card todo"><h3>iOS, bredare NAT-tester</h3><p>Nästa steg är iOS-versionen på riktiga enheter. NAT-traversering är byggd men bara testad på localhost och i underhållarens egna nätverk; ett valv där alla enheter sitter bakom NAT har fortfarande ingen väg över internet.</p></section>
+    </div>
+
+    <h2>Ärlig status</h2>
+    <ul>
+      <li>Alfaversionen är en första vertikal skiva: kärnbibliotek, CLI, bakgrundstjänst, skal för systemfältet och menyraden, Android-skal, ungefär 54 000 rader Rust, över 200 automatiska tester och en labbmiljö med virtuella maskiner bakom hem- och kontors-NAT, bland annat konvergens mellan två enheter offline, konflikter, spärr av återställd enhet, repliker, delning, regler, peers, Strongrooms och diskpooler. Använd den bara med testdata.</li>
+      <li>Den kryptografiska designen har inte granskats eller reviderats. <a href="../docs/threat-model.html">Hotmodellen</a> och <a href="../docs/failure-model.html">felmodellen</a> beskriver vad designen är avsedd att göra och var den tar slut.</li>
+      <li>Källkoden är offentlig på <a href="https://github.com/janttsu/varsto" rel="noopener">github.com/janttsu/varsto</a> under <a href="../docs/licence.html">PolyForm Shield License 1.0.0</a> (källkoden tillgänglig, inte öppen källkod); buggar och frågor tas emot i ärendehanteringen där. Lagringsformatet är <a href="../docs/alpha-0-format.html">dokumenterat</a> så att dina data förblir återställningsbara.</li>
+      <li>Namnet är preliminärt och webbplatsen hålls borta från sökmotorerna tills det är bestämt.</li>
+    </ul>
+
+    <h2>Nedladdningar</h2>
+    <p class="note">No binaries are published yet. Build from source with <code>cargo build --release</code>.</p>
+    <p class="note">Verifiera en nedladdning: listan med kontrollsummor är signerad med Varstos releasenyckel (se ”Verify your download” ovan): <code>varsto verify-release &lt;file&gt; --github</code>, eller minisign och <code>sha256sum -c SHA256SUMS --ignore-missing</code>. <code>varsto update</code> kontrollerar själv signaturen och GitHub-releasen.</p>
+
+    <h2>Senaste från bloggen</h2>
+    <ul class="posts"><li><time datetime="2026-10-10">2026-10-10</time> <a href="../blog/2026-10-10-alpha-9-placement-repair-signed.html">Alpha.9: data where you want it, repair by itself, signed updates, and every platform built in the open</a><br><span class="note">Folders can be placed on chosen storages and moved between them, lost copies are repaired automatically, updates are signed with an offline key, peer-to-peer downloads fetch many blocks at once, and every package is now built, tested and photographed on GitHub&#x27;s runners.</span></li>
+<li><time datetime="2026-10-09">2026-10-09</time> <a href="../blog/2026-10-09-alpha-8-ledger-and-devices.html">Alpha.8: a ledger that stays small, removable devices, and phones that keep nothing in clear text</a><br><span class="note">The ledger now lists only what is new, keeps a cached view and prunes itself behind signed checkpoints; devices can be removed with new keys for everything written afterwards; phones keep encrypted folders as encrypted blocks; and the interface shows where your data is and how peer-to-peer traffic flows.</span></li>
+<li><time datetime="2026-10-09">2026-10-09</time> <a href="../blog/2026-10-09-alpha-7-pairing-and-finder.html">Alpha.7: pair devices with a code, Finder actions, and a real NAT path</a><br><span class="note">Devices now pair from the interface with a one-time code, Finder can download a placeholder or free up space with a right-click, the macOS app installs from a disk image, devices reach each other through NAT, and removable disks can form a pool.</span></li>
+<li><time datetime="2026-10-09">2026-10-09</time> <a href="../blog/2026-10-09-alpha-6-source-on-github.html">Alpha.6: the source is public, and every platform builds in the cloud</a><br><span class="note">The repository is now public on GitHub under the PolyForm Shield licence, the native macOS and iOS apps build on GitHub Actions, Linux, Windows and Android build on short-lived cloud machines, and the interface was redone around a file view.</span></li>
+<li><time datetime="2026-10-08">2026-10-08</time> <a href="../blog/2026-10-08-alpha-0.html">Alpha-0: the first vertical slice</a><br><span class="note">A command-line tool that encrypts, stores and syncs a folder between two devices through storage you own, with a signed ledger you can check.</span></li></ul>
+
+  </div>
+</main>
+<footer class="site">
+  <div class="wrap">
+    <span>Varsto är ett arbetsnamn. Källkod: <a href="https://github.com/janttsu/varsto">github.com/janttsu/varsto</a>, under PolyForm Shield License 1.0.0 (källkoden tillgänglig).</span>
+    <span>Inga kakor, ingen spårning. Webbservern sparar en vanlig åtkomstlogg i högst sju dagar.</span>
+    <span><a href="../docs/security-policy.html">Säkerhetspolicy</a> · <a href="../docs/licence.html">Licens</a> · <a href="../docs/trademark.html">Varumärke</a> (på engelska)</span>
+  </div>
+</footer>
+</body>
+</html>
