@@ -98,7 +98,6 @@ def page(title: str, description: str, body: str, nav: str, depth: int) -> str:
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{html.escape(full_title)}</title>
 <meta name="description" content="{html.escape(description)}">
-<meta name="robots" content="noindex, nofollow">
 <meta name="color-scheme" content="light dark">
 <link rel="icon" href="{p}favicon.svg" type="image/svg+xml">
 <link rel="alternate" type="application/rss+xml" title="{BRAND} blog" href="{p}blog/feed.xml">
@@ -265,12 +264,18 @@ def verify_section(pre: str, version: str) -> str:
     )
 
 
+def cargo_version() -> str:
+    m = re.search(r'^version = "([^"]+)"', (ROOT / "Cargo.toml").read_text(), re.M)
+    return m.group(1) if m else ""
+
+
 def build_pages(slug_by_name: dict[str, str]) -> None:
     for src in sorted((SRC / "pages").glob("*.html")):
         meta, body = front_matter(src.read_text())
         out_rel = meta.get("output", f"{src.stem}.html")
         depth = out_rel.count("/")
         body = body.replace("{{DOWNLOADS}}", downloads_table(depth)).replace("{{POSTS}}", posts_list(depth))
+        body = body.replace("{{VERSION}}", cargo_version())
         body = body.replace("{{P}}", "../" * depth)
         (OUT / out_rel).parent.mkdir(parents=True, exist_ok=True)
         (OUT / out_rel).write_text(page(meta["title"], meta.get("description", ""), body, meta["nav"], depth))
@@ -418,7 +423,33 @@ def main() -> None:
     copy_data()
     build_404()
     build_redirects()
+    build_sitemap()
     print(f"built into {OUT}")
+
+
+def build_sitemap() -> None:
+    """sitemap.xml with every page (redirect stubs and the 404 page left
+    out), and robots.txt that allows crawling and names the sitemap."""
+    pages = []
+    for f in sorted(OUT.rglob("*.html")):
+        rel = f.relative_to(OUT).as_posix()
+        if rel == "404.html" or rel.startswith("downloads/"):
+            continue
+        text = f.read_text(errors="ignore")
+        if 'http-equiv="refresh"' in text:
+            continue
+        loc = rel.removesuffix("index.html")
+        pages.append((loc, f.stat().st_mtime))
+    from datetime import datetime, timezone as tz
+    rows = "".join(
+        f"  <url><loc>{SITE_URL}/{loc}</loc><lastmod>{datetime.fromtimestamp(m, tz.utc).date()}</lastmod></url>\n"
+        for loc, m in pages
+    )
+    (OUT / "sitemap.xml").write_text(
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n' + rows + "</urlset>\n"
+    )
+    (OUT / "robots.txt").write_text(f"User-agent: *\nAllow: /\n\nSitemap: {SITE_URL}/sitemap.xml\n")
 
 
 if __name__ == "__main__":
