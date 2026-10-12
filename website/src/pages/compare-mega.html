@@ -1,0 +1,41 @@
+---
+title: Varsto and MEGA
+nav: Compare
+output: compare/mega/index.html
+description: What MEGA is for, how it works, and how it compares with Varsto.
+---
+    <p class="back-link"><a href="{{P}}compare/">All comparisons</a></p>
+    <h1>Varsto and MEGA</h1>
+    <p class="lead">MEGA is end-to-end encrypted cloud storage for consumers and businesses, with generous storage plans, desktop sync, mobile apps and related services such as chat and a VPN.</p>
+
+    <h2>How MEGA works</h2>
+    <p>You create an account and your files are stored in MEGA's data centres; devices sync through MEGA's servers. Files are encrypted on the client with per-file keys under a key derived from your password. In 2022 researchers at ETH Zurich published attacks on MEGA's cryptography; MEGA patched them, and the authors noted that a complete fix would need a redesign. There are desktop apps for Windows, macOS and Linux, mobile apps and a command-line client.</p>
+
+    <h2>Side by side</h2>
+    <table class="compare-table">
+      <thead><tr><th scope="col"></th><th scope="col">MEGA</th><th scope="col">Varsto</th></tr></thead>
+      <tbody>
+      <tr><th scope="row">Where your files live</th><td>In MEGA's cloud; you cannot use your own storage for the drive.</td><td>On your own devices and on storages you choose: S3-compatible buckets, any rclone remote, local or network directories, and pools of removable disks.</td></tr>
+      <tr><th scope="row">Account or central server</th><td>Account required; everything goes through MEGA.</td><td>None. There is no Varsto server; devices find each other through your storages and on the LAN.</td></tr>
+      <tr><th scope="row">Encryption</th><td>End-to-end, client-side; earlier weaknesses found by academic researchers were patched.</td><td>End-to-end, client-side, before anything leaves the device; hybrid post-quantum (ML-KEM for sharing keys, Ed25519 + ML-DSA-65 signatures). Not independently audited yet.</td></tr>
+      <tr><th scope="row">Devices online together</th><td>Not needed: the cloud holds the copy.</td><td>Not needed: devices sync through your storages, and directly peer to peer when they can reach each other.</td></tr>
+      <tr><th scope="row">Knows where every copy is</th><td>One provider copy; no tracking across your own media.</td><td>Yes: a signed ledger records which storage and device holds every block; durability policies (by default 1 copy anywhere, 1 external, 1 on your own devices or disks, checked by another device within 30 days) warn when a rule is not met.</td></tr>
+      <tr><th scope="row">Removable and offline disks</th><td>No removable-disk workflow.</td><td>Yes: disk pools are filled, checked and recognised when they come back; files on a disk that is away ask for that disk.</td></tr>
+      <tr><th scope="row">Licence and price</th><td>Free tier and paid plans with transfer quotas; client source published (SDK BSD-licensed, desktop app under MEGA's own licence).</td><td>Source-available (PolyForm Shield 1.0.0), free; you pay only your storage provider.</td></tr>
+      <tr><th scope="row">Maturity</th><td>Large, long-running service.</td><td>Alpha: not for production data, formats may still change.</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Which one fits</h2>
+    <div class="grid two">
+      <div class="card"><h3>MEGA</h3><p>Choose MEGA when you want a lot of encrypted cloud space from one provider, with polished apps everywhere, and you are comfortable with the provider holding the only off-site copy.</p></div>
+      <div class="card"><h3>Varsto</h3><p>Choose Varsto when you want to pick the storage yourself (or several providers at once), avoid lock-in, keep copies on your own disks as well, and know at every moment where each copy is.</p></div>
+    </div>
+    <p class="note">Varsto is alpha software: do not trust it with data you have no other copy of, and its cryptography has not been independently audited. The other products here are mature. Facts about them were checked from their own documentation in October 2026; prices and plans change often, so see their own pages for current figures. Corrections are welcome on the <a href="{{P}}forum/">forum</a> or on GitHub.</p>
+
+    <h2>Sources</h2>
+    <ul>
+      <li><a href="https://mega.io/">MEGA website</a></li>
+      <li><a href="https://github.com/meganz/MEGAsync">MEGA desktop app source</a></li>
+      <li><a href="https://eprint.iacr.org/2022/959">MEGA: Malleable Encryption Goes Awry (ETH Zurich)</a></li>
+    </ul>

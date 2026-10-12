@@ -1,0 +1,32 @@
+---
+title: Compare
+nav: Compare
+output: compare/index.html
+description: How Varsto compares with Syncthing, Resilio Sync, MEGA, Filen, Tresorit and git-annex: what each is for and where they differ.
+---
+    <h1>How Varsto compares</h1>
+    <p class="lead">Tools for keeping files in sync fall into three groups. Peer-to-peer tools such as Syncthing and Resilio Sync copy folders between your own devices. Encrypted clouds such as MEGA, Filen and Tresorit keep your files with one provider. git-annex tracks large files across any disks and remotes you own. Varsto combines parts of all three: end-to-end encrypted files on storages you choose, peer-to-peer transfer between your devices, and a record of where every copy is.</p>
+
+    <table class="compare-table compare-overview">
+      <thead><tr><th scope="col"></th><th scope="col">Varsto</th><th scope="col"><a href="syncthing/">Syncthing</a></th><th scope="col"><a href="resilio-sync/">Resilio Sync</a></th><th scope="col"><a href="mega/">MEGA</a></th><th scope="col"><a href="filen/">Filen</a></th><th scope="col"><a href="tresorit/">Tresorit</a></th><th scope="col"><a href="git-annex/">git-annex</a></th></tr></thead>
+      <tbody>
+      <tr><th scope="row">Where your files live</th><td><strong>Your devices and your storages</strong></td><td>Your devices</td><td>Your devices</td><td>MEGA's cloud</td><td>Filen's cloud</td><td>Tresorit's cloud</td><td>Anywhere you choose</td></tr>
+      <tr><th scope="row">Account or central server</th><td><strong>None</strong></td><td>None</td><td>No account</td><td>Account</td><td>Account</td><td>Account</td><td>None</td></tr>
+      <tr><th scope="row">Devices must be online together</th><td><strong>No</strong></td><td>Yes</td><td>Yes</td><td>No</td><td>No</td><td>No</td><td>No</td></tr>
+      <tr><th scope="row">Knows where every copy is</th><td><strong>Yes</strong></td><td>No</td><td>No</td><td>One provider copy</td><td>One provider copy</td><td>One provider copy</td><td>Yes</td></tr>
+      <tr><th scope="row">Removable and offline disks</th><td><strong>Yes</strong></td><td>No</td><td>No</td><td>No</td><td>No</td><td>No</td><td>Yes</td></tr>
+      <tr><th scope="row">Licence and price</th><td><strong>Source-available, free</strong></td><td>Open source, free</td><td>Proprietary, free tier</td><td>Plans, client source published</td><td>Plans, open-source clients</td><td>Proprietary plans</td><td>Free software, free</td></tr>
+      </tbody>
+    </table>
+    <p class="note">"One provider copy" means the off-site copy is with that provider; your devices keep their own copies too. Each comparison page explains the details and links to the sources.</p>
+
+    <h2>Comparisons</h2>
+    <div class="grid three">
+      <a class="card" href="syncthing/"><h3>Varsto and Syncthing</h3><p>Syncthing keeps folders identical across your own devices, continuously and without any cloud.</p></a>
+      <a class="card" href="resilio-sync/"><h3>Varsto and Resilio Sync</h3><p>Resilio Sync syncs and shares folders between devices peer to peer, built on BitTorrent technology.</p></a>
+      <a class="card" href="mega/"><h3>Varsto and MEGA</h3><p>MEGA is end-to-end encrypted cloud storage for consumers and businesses, with generous storage plans, desktop sync, mobile apps and related services such as chat and a VPN.</p></a>
+      <a class="card" href="filen/"><h3>Varsto and Filen</h3><p>Filen is zero-knowledge encrypted cloud storage from Germany, for privacy-minded individuals and teams.</p></a>
+      <a class="card" href="tresorit/"><h3>Varsto and Tresorit</h3><p>Tresorit is end-to-end encrypted cloud storage and file sharing from Switzerland, aimed mainly at businesses and regulated sectors, with personal plans as well.</p></a>
+      <a class="card" href="git-annex/"><h3>Varsto and git-annex</h3><p>git-annex manages large files with git without storing their contents in git.</p></a>
+    </div>
+    <p class="note">Varsto is alpha software: do not trust it with data you have no other copy of, and its cryptography has not been independently audited. The other products here are mature. Facts about them were checked from their own documentation in October 2026; prices and plans change often, so see their own pages for current figures. Corrections are welcome on the <a href="{{P}}forum/">forum</a> or on GitHub.</p>

@@ -1,0 +1,41 @@
+---
+title: Varsto and Filen
+nav: Compare
+output: compare/filen/index.html
+description: What Filen is for, how it works, and how it compares with Varsto.
+---
+    <p class="back-link"><a href="{{P}}compare/">All comparisons</a></p>
+    <h1>Varsto and Filen</h1>
+    <p class="lead">Filen is zero-knowledge encrypted cloud storage from Germany, for privacy-minded individuals and teams. It offers a drive, desktop sync, a network drive with on-demand files, notes and chat, at low prices.</p>
+
+    <h2>How Filen works</h2>
+    <p>You create an account and files are stored on Filen's servers in Germany, encrypted on the client (AES-256 per chunk) before upload. The clients and SDKs are open source under AGPL-3.0. The command-line client can expose your Filen storage locally over WebDAV or S3, but the data still lives at Filen. Free accounts can be deleted after a period of inactivity.</p>
+
+    <h2>Side by side</h2>
+    <table class="compare-table">
+      <thead><tr><th scope="col"></th><th scope="col">Filen</th><th scope="col">Varsto</th></tr></thead>
+      <tbody>
+      <tr><th scope="row">Where your files live</th><td>In Filen's cloud in Germany; no own backends.</td><td>On your own devices and on storages you choose: S3-compatible buckets, any rclone remote, local or network directories, and pools of removable disks.</td></tr>
+      <tr><th scope="row">Account or central server</th><td>Account required.</td><td>None. There is no Varsto server; devices find each other through your storages and on the LAN.</td></tr>
+      <tr><th scope="row">Encryption</th><td>End-to-end, client-side (AES-256); open-source clients.</td><td>End-to-end, client-side, before anything leaves the device; hybrid post-quantum (ML-KEM for sharing keys, Ed25519 + ML-DSA-65 signatures). Not independently audited yet.</td></tr>
+      <tr><th scope="row">Devices online together</th><td>Not needed: the cloud holds the copy.</td><td>Not needed: devices sync through your storages, and directly peer to peer when they can reach each other.</td></tr>
+      <tr><th scope="row">Knows where every copy is</th><td>One provider copy; no tracking across your own media.</td><td>Yes: a signed ledger records which storage and device holds every block; durability policies (by default 1 copy anywhere, 1 external, 1 on your own devices or disks, checked by another device within 30 days) warn when a rule is not met.</td></tr>
+      <tr><th scope="row">Removable and offline disks</th><td>No removable-disk workflow.</td><td>Yes: disk pools are filled, checked and recognised when they come back; files on a disk that is away ask for that disk.</td></tr>
+      <tr><th scope="row">Licence and price</th><td>Clients AGPL-3.0; free tier and inexpensive paid plans.</td><td>Source-available (PolyForm Shield 1.0.0), free; you pay only your storage provider.</td></tr>
+      <tr><th scope="row">Maturity</th><td>Established service.</td><td>Alpha: not for production data, formats may still change.</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Which one fits</h2>
+    <div class="grid two">
+      <div class="card"><h3>Filen</h3><p>Choose Filen when you want inexpensive, EU-hosted encrypted cloud storage with open-source clients and are happy with one provider holding your off-site copy.</p></div>
+      <div class="card"><h3>Varsto</h3><p>Choose Varsto when the storage itself should be yours to choose and change, when you want copies with several providers and on your own disks, and when you want rules such as "at least one copy outside the house" checked for you.</p></div>
+    </div>
+    <p class="note">Varsto is alpha software: do not trust it with data you have no other copy of, and its cryptography has not been independently audited. The other products here are mature. Facts about them were checked from their own documentation in October 2026; prices and plans change often, so see their own pages for current figures. Corrections are welcome on the <a href="{{P}}forum/">forum</a> or on GitHub.</p>
+
+    <h2>Sources</h2>
+    <ul>
+      <li><a href="https://filen.io/">Filen website</a></li>
+      <li><a href="https://filen.io/pricing">Filen pricing</a></li>
+      <li><a href="https://github.com/FilenCloudDienste">Filen source code</a></li>
+    </ul>

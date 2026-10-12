@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Varsto and Syncthing: Varsto</title>
+<meta name="description" content="What Syncthing is for, how it works, and how it compares with Varsto.">
+<meta name="robots" content="noindex, nofollow">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="../../favicon.svg" type="image/svg+xml">
+<link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../../blog/feed.xml">
+<link rel="stylesheet" href="../../assets/css/site.css?v=b3d2d4f387">
+<script src="../../assets/js/theme.js?v=0951491269"></script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="alpha" role="note">
+  <div class="wrap"><strong>Alpha software, not for production data.</strong> Bugs can cause data loss, formats may change without migration, and the cryptography has not been independently audited. Keep your own backups and check that you can restore from them.</div>
+</div>
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="../../"><img src="../../assets/img/logo.svg" alt="" width="28" height="28"><span>Varsto</span></a>
+    <nav class="main" aria-label="Main">
+      <a href="../../">Project</a>
+      <a href="../../features/">Features</a>
+      <a href="../../use-cases/">Use cases</a>
+      <a href="../../compare/" aria-current="page">Compare</a>
+      <a href="../../how-it-works/">How it works</a>
+      <a href="../../screenshots/">Screenshots</a>
+      <a href="../../docs/">Docs</a>
+      <a href="../../downloads/">Downloads</a>
+      <a href="../../blog/">Blog</a>
+      <a href="../../forum/">Forum</a>
+      <a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a>
+      <button class="theme" id="theme-toggle" type="button" aria-label="Change colour theme">Theme: auto</button>
+    </nav>
+  </div>
+</header>
+<main id="main">
+  <div class="wrap">
+    <p class="back-link"><a href="../../compare/">All comparisons</a></p>
+    <h1>Varsto and Syncthing</h1>
+    <p class="lead">Syncthing keeps folders identical across your own devices, continuously and without any cloud. It is free, mature and popular with technical users and home-lab setups: install it on a laptop, a desktop and a NAS, and the folders stay in step.</p>
+
+    <h2>How Syncthing works</h2>
+    <p>Devices connect peer to peer over TLS, identified by certificate-based device IDs; there is no account. Public discovery and relay servers run by the project help devices find each other, and you can host your own. Data lives only on the participating devices: there is no S3 or rclone backend and no provider copy. Versioning (trash can, simple, staggered or external) applies to changes received from other devices. Selective sync is done with ignore patterns; there are no placeholders. On Android the official app was discontinued in 2024 and a community fork continues; on iOS there is only a third-party client.</p>
+
+    <h2>Side by side</h2>
+    <table class="compare-table">
+      <thead><tr><th scope="col"></th><th scope="col">Syncthing</th><th scope="col">Varsto</th></tr></thead>
+      <tbody>
+      <tr><th scope="row">Where your files live</th><td>Only on the devices that run Syncthing (a NAS or a server counts if it runs Syncthing).</td><td>On your own devices and on storages you choose: S3-compatible buckets, any rclone remote, local or network directories, and pools of removable disks.</td></tr>
+      <tr><th scope="row">Account or central server</th><td>None; project-run discovery and relay servers (self-hostable).</td><td>None. There is no Varsto server; devices find each other through your storages and on the LAN.</td></tr>
+      <tr><th scope="row">Encryption</th><td>TLS in transit; no encryption at rest of its own. "Untrusted (encrypted) devices" exist but are still marked beta.</td><td>End-to-end, client-side, before anything leaves the device; hybrid post-quantum (ML-KEM for sharing keys, Ed25519 + ML-DSA-65 signatures). Not independently audited yet.</td></tr>
+      <tr><th scope="row">Devices online together</th><td>Yes: two devices must be online at the same time to exchange changes, unless an always-on device is kept.</td><td>Not needed: devices sync through your storages, and directly peer to peer when they can reach each other.</td></tr>
+      <tr><th scope="row">Knows where every copy is</th><td>No tracking of copies or copy counts.</td><td>Yes: a signed ledger records which storage and device holds every block; durability policies (by default 1 copy anywhere, 1 external, 1 on your own devices or disks, checked by another device within 30 days) warn when a rule is not met.</td></tr>
+      <tr><th scope="row">Removable and offline disks</th><td>No removable-disk workflow.</td><td>Yes: disk pools are filled, checked and recognised when they come back; files on a disk that is away ask for that disk.</td></tr>
+      <tr><th scope="row">Licence and price</th><td>Open source (MPL-2.0), free.</td><td>Source-available (PolyForm Shield 1.0.0), free; you pay only your storage provider.</td></tr>
+      <tr><th scope="row">Maturity</th><td>Mature, long-running project (2.x).</td><td>Alpha: not for production data, formats may still change.</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Which one fits</h2>
+    <div class="grid two">
+      <div class="card"><h3>Syncthing</h3><p>Choose Syncthing when every copy should stay on machines you run, at least one of them is always on, and you want a mature, open-source tool with no accounts at all.</p></div>
+      <div class="card"><h3>Varsto</h3><p>Choose Varsto when you want an encrypted copy in a bucket or on removable disks as well, devices that are rarely online together, a record of where every copy is, or a phone that reads files without keeping them in clear text.</p></div>
+    </div>
+    <p class="note">Varsto is alpha software: do not trust it with data you have no other copy of, and its cryptography has not been independently audited. The other products here are mature. Facts about them were checked from their own documentation in October 2026; prices and plans change often, so see their own pages for current figures. Corrections are welcome on the <a href="../../forum/">forum</a> or on GitHub.</p>
+
+    <h2>Sources</h2>
+    <ul>
+      <li><a href="https://syncthing.net/">Syncthing website</a></li>
+      <li><a href="https://docs.syncthing.net/users/untrusted.html">Untrusted devices</a></li>
+      <li><a href="https://docs.syncthing.net/users/versioning.html">File versioning</a></li>
+    </ul>
+
+  </div>
+</main>
+<footer class="site">
+  <div class="wrap">
+    <span>Varsto is a working name. Source: <a href="https://github.com/janttsu/varsto">github.com/janttsu/varsto</a>, under the PolyForm Shield License 1.0.0 (source-available).</span>
+    <span>No cookies, no tracking. The web server keeps a standard access log for at most seven days.</span>
+    <span><a href="../../docs/security-policy.html">Security policy</a> · <a href="../../docs/licence.html">Licence</a> · <a href="../../docs/trademark.html">Trademark</a></span>
+  </div>
+</footer>
+</body>
+</html>

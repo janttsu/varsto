@@ -146,3 +146,20 @@ h3 { font-size:1.15rem; margin:2rem 0 .5rem; }
 .bench-key.bench-s3-key { background:var(--series-2); margin-left:1rem; }
 .bench-table td, .bench-table th { white-space:nowrap; }
 .bench-table td .note { font-size:.8rem; }
+
+/* Comparison pages */
+.compare-table th[scope=row] { text-align: left; white-space: nowrap; vertical-align: top; padding-right: 1rem; }
+.compare-table td { vertical-align: top; }
+.compare-table td, .compare-table th { padding: .55rem .6rem; border-bottom: 1px solid var(--border); }
+.compare-table thead th { text-align: left; }
+.compare-overview { font-size: .88rem; }
+.compare-overview td:nth-child(2) { background: var(--surface); }
+a.card { display: block; color: inherit; text-decoration: none; }
+a.card:hover { border-color: var(--accent, currentColor); }
+.compare-table:not(.compare-overview) { display: table; table-layout: fixed; }
+.compare-table:not(.compare-overview) th[scope=row] { width: 24%; white-space: normal; }
+@media (max-width: 700px) {
+  .compare-table:not(.compare-overview) { font-size: .86rem; }
+  .compare-table:not(.compare-overview) th[scope=row] { width: 30%; }
+  .compare-table td, .compare-table th { padding: .45rem .35rem; }
+}
