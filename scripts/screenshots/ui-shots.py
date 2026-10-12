@@ -14,6 +14,9 @@ import os
 import sys
 import time
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import example_data  # noqa: E402
+
 from PIL import Image
 from playwright.sync_api import sync_playwright
 
@@ -48,6 +51,34 @@ with sync_playwright() as p:
         pg.wait_for_selector("#folders tbody tr:nth-child(2)", timeout=60000)
         time.sleep(2)
         pg.screenshot(path=f"{out}/desktop-overview-{scheme}.png")
+        c.close()
+        # Example data (example_data.py) for two views a small demo cannot fill:
+        # where the data of a few folders is kept, and traffic between devices.
+        c = ctx(scheme, scale=1)
+        pg = c.new_page()
+        pg.route("**/api/data/locations*", lambda r: r.fulfill(status=200, content_type="application/json",
+                                                            body=json.dumps(example_data.locations())))
+        pg.route("**/api/p2p/traffic*", lambda r: r.fulfill(status=200, content_type="application/json",
+                                                         body=json.dumps(example_data.traffic())))
+        pg.goto(url("laptop"))
+        pg.wait_for_selector("#folders tbody tr:nth-child(2)", timeout=60000)
+        pg.wait_for_selector("#wherecard:not(.hidden)", timeout=60000)
+        time.sleep(1.5)
+        pg.query_selector("#wherecard").screenshot(path=f"{out}/desktop-where-{scheme}.png")
+        pg.click(".sidebar .nav-item[data-nav=peers]")
+        pg.wait_for_selector("#tr-table:not(.hidden)", timeout=60000)
+        time.sleep(2.5)
+        pg.query_selector("#tr-table").evaluate("t => t.closest('.card').scrollIntoView()")
+        # The sticky top bar would cover the card's head in an element shot.
+        pg.add_style_tag(content=".topbar { position: static !important; }")
+        time.sleep(0.3)
+        card = pg.query_selector("#tr-table").evaluate_handle("t => t.closest('.card')")
+        card.as_element().screenshot(path=f"{out}/desktop-traffic-{scheme}.png")
+        c.close()
+        c = ctx(scheme, scale=1)
+        pg = c.new_page()
+        pg.goto(url("laptop"))
+        pg.wait_for_selector("#folders tbody tr:nth-child(2)", timeout=60000)
         # The organization page of the same vault (the laptop is its administrator).
         pg.click(".sidebar .nav-item[data-nav=organization]")
         pg.wait_for_selector("#org-users li", timeout=60000)
