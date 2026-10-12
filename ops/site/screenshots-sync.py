@@ -7,7 +7,8 @@ every successful build's screenshots as screenshots.tar.gz on the rolling
 GitHub pre-release "screenshots-latest"; this downloads it when it changed,
 accepts only PNG files with plain names and shots.json, copies them into
 <site>/assets/img/screenshots and writes their sizes and the version, commit
-and date they come from into <site>/screenshots/index.html. The page is
+and date they come from into <site>/screenshots/index.html and its
+Finnish and Swedish copies under <site>/fi and <site>/sv. The page is
 patched on every run, so a site deploy that brings the page back from the
 repository is corrected within one period. The server only reads from
 GitHub; nothing on GitHub can write here.
@@ -67,20 +68,33 @@ if data:
     state.write_text(json.dumps(known))
     print(f"screenshots of {known['version']} ({known['commit'][:7]}): {len(files)} files")
 
-page = site / "screenshots/index.html"
-if known.get("version") and page.exists():
+# The caption per language; the English page and its Finnish and Swedish copies.
+CAPTION = {
+    "en": ("Captured automatically from version {v}{c} on {d}{s}.", "GitHub Actions run"),
+    "fi": ("Kuvattu automaattisesti versiosta {v}{c} {d}{s}.", "GitHub Actions -ajo"),
+    "sv": ("Tagna automatiskt från version {v}{c} den {d}{s}.", "GitHub Actions-körning"),
+}
+def stamp(lang, version, commit, date, source, esc=lambda s: s):
+    text, run = CAPTION[lang]
+    source = re.sub(r"^GitHub Actions run", run, source or "")
+    return '<span class="shots-meta">' + text.format(
+        v=esc(version), c=f" (commit {esc(commit[:7])})" if commit else "", d=esc(date),
+        s=f", {esc(source)}" if source else "") + "</span>"
+esc = lambda s: s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+for lang, page in [("en", site / "screenshots/index.html"),
+                   ("fi", site / "fi/screenshots/index.html"),
+                   ("sv", site / "sv/screenshots/index.html")]:
+    if not (known.get("version") and page.exists()):
+        continue
     html = page.read_text()
     new = html
     for name, (w, h) in known.get("sizes", {}).items():
-        new = re.sub(r'(src="\.\./assets/img/screenshots/' + re.escape(name) + r'\.png"[^>]*?) width="\d+" height="\d+"',
+        new = re.sub(r'(src="(?:\.\./)+assets/img/screenshots/' + re.escape(name) + r'\.png"[^>]*?) width="\d+" height="\d+"',
                      rf'\1 width="{int(w)}" height="{int(h)}"', new)
-    esc = lambda s: s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-    stamp = (f'<span class="shots-meta">Captured automatically from version {esc(known["version"])}'
-             + (f' (commit {esc(known["commit"][:7])})' if known.get("commit") else "")
-             + f' on {esc(known["date"])}' + (f', {esc(known["source"])}' if known.get("source") else "") + ".</span>")
-    new = re.sub(r'<span class="shots-meta">.*?</span>', stamp, new, flags=re.S)
+    s = stamp(lang, known["version"], known.get("commit", ""), known["date"], known.get("source", ""), esc)
+    new = re.sub(r'<span class="shots-meta">.*?</span>', lambda _: s, new, flags=re.S)
     if new != html:
         tmp = page.with_name(".index.html.tmp")
         tmp.write_text(new)
         tmp.replace(page)
-        print("screenshots page updated")
+        print(f"screenshots page updated ({lang})")
