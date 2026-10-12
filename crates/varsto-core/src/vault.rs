@@ -856,7 +856,28 @@ pub struct FolderRecord {
     /// folder keys the owner handed over. Hex by epoch; never published.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub epoch_keys: BTreeMap<u32, String>,
+    /// A backup (`engine::backups`): read-only snapshots of a directory on
+    /// one device, kept on storages only. It is never mounted, synced or
+    /// served to peers, and only its source device writes it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub backup: Option<BackupInfo>,
 }
+
+/// What a backup's folder record says about it (published with the record).
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct BackupInfo {
+    /// The only device that takes snapshots.
+    pub source_device: DeviceId,
+    /// The directory backed up, as the source device names it (shown only).
+    pub source_path: String,
+    /// Retention when the backup was made; each snapshot fixes its own
+    /// expiry when it is taken.
+    pub retention_days: u32,
+    pub created_utc: i64,
+}
+
+/// Retention of a new backup unless told otherwise.
+pub const DEFAULT_BACKUP_RETENTION_DAYS: u32 = 90;
 
 fn is_zero(v: &i64) -> bool {
     *v == 0
@@ -878,6 +899,9 @@ impl FolderRecord {
     }
     pub fn is_strongroom(&self) -> bool {
         self.strongroom.is_some()
+    }
+    pub fn is_backup(&self) -> bool {
+        self.backup.is_some()
     }
     pub fn storage_key(device: &DeviceId, folder: &FolderId) -> String {
         format!("vault/folders/{}/{}.enc", device, folder)
@@ -1095,12 +1119,27 @@ impl Keyring {
         )?;
         util::write_atomic(&home.join("keyring.enc"), &blob)
     }
+    /// A folder by name or id; backups are not folders here.
     pub fn find(&self, name_or_id: &str) -> Option<&FolderRecord> {
-        self.folders.values().filter(|r| !r.is_removed()).find(|r| {
-            r.name == name_or_id
-                || r.folder_id.as_str() == name_or_id
-                || r.folder_id.as_str().starts_with(name_or_id) && name_or_id.len() >= 8
-        })
+        self.find_where(name_or_id, |r| !r.is_backup())
+    }
+    /// A backup by name or id.
+    pub fn find_backup(&self, name_or_id: &str) -> Option<&FolderRecord> {
+        self.find_where(name_or_id, |r| r.is_backup())
+    }
+    fn find_where(
+        &self,
+        name_or_id: &str,
+        keep: impl Fn(&FolderRecord) -> bool,
+    ) -> Option<&FolderRecord> {
+        self.folders
+            .values()
+            .filter(|r| !r.is_removed() && keep(r))
+            .find(|r| {
+                r.name == name_or_id
+                    || r.folder_id.as_str() == name_or_id
+                    || r.folder_id.as_str().starts_with(name_or_id) && name_or_id.len() >= 8
+            })
     }
 }
 
@@ -1190,6 +1229,55 @@ pub struct Config {
     /// receive it. Absent: any device that lacks a block.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub carrier_for: std::collections::BTreeMap<String, Vec<DeviceId>>,
+    /// Backups this device is the source of: what it backs up and when.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub backups: Vec<BackupSource>,
+}
+
+/// A backup taken on this device (local, never published).
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct BackupSource {
+    pub folder_id: FolderId,
+    /// The directory backed up; only ever read.
+    pub path: PathBuf,
+    pub schedule: BackupSchedule,
+    /// Retention of the snapshots taken from now on.
+    pub retention_days: u32,
+    #[serde(default)]
+    pub last_taken_utc: i64,
+    /// Sequence number of the newest snapshot written from here.
+    #[serde(default)]
+    pub last_seq: u64,
+    /// Stopped: no more snapshots; the ones kept expire as they would.
+    #[serde(default)]
+    pub stopped: bool,
+}
+
+/// When the background service takes a backup's snapshots.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum BackupSchedule {
+    /// Only when asked (`varsto backup take`, the interface).
+    Manual,
+    /// Once this many hours have passed since the last snapshot.
+    EveryHours(u32),
+}
+
+impl Default for BackupSchedule {
+    fn default() -> Self {
+        BackupSchedule::EveryHours(24)
+    }
+}
+
+impl BackupSchedule {
+    pub fn describe(&self) -> String {
+        match self {
+            BackupSchedule::Manual => "manual".to_string(),
+            BackupSchedule::EveryHours(24) => "daily".to_string(),
+            BackupSchedule::EveryHours(168) => "weekly".to_string(),
+            BackupSchedule::EveryHours(h) => format!("every {h} h"),
+        }
+    }
 }
 
 /// Peer-to-peer settings (per device, local).

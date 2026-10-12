@@ -76,6 +76,28 @@ pub enum Event {
         object: ObjectName,
         storage: String,
     },
+    /// This device wrote snapshot `seq` of a backup (`crate::snapshot`):
+    /// `snapshot_hash` is the hash of the stored object, which a restore
+    /// checks. Only the backup's source device writes these.
+    SnapshotTaken {
+        backup: FolderId,
+        seq: u64,
+        taken_utc: i64,
+        expires_utc: i64,
+        files: u64,
+        bytes: u64,
+        snapshot_hash: String,
+    },
+    /// Snapshot `seq` of `device` expired: it is no longer restored from,
+    /// and blocks only it used are being deleted.
+    SnapshotExpired {
+        backup: FolderId,
+        device: DeviceId,
+        seq: u64,
+    },
+    /// No more snapshots of the backup are taken; the backup goes once its
+    /// last snapshot has expired.
+    BackupStopped { backup: FolderId },
     /// An event type this version does not know (written by a newer one):
     /// read and ignored, so the rest of its batch still counts. Never written.
     #[serde(other)]
@@ -876,7 +898,8 @@ pub struct ViewCache {
 
 impl ViewCache {
     /// 3: chunk records carry drops and claim times (`ChunkDropped`).
-    pub const FORMAT: u32 = 3;
+    /// 4: backup snapshots and stopped backups.
+    pub const FORMAT: u32 = 4;
 
     pub fn new(context: String) -> Self {
         ViewCache {
@@ -1005,6 +1028,42 @@ impl ChunkRecord {
     }
 }
 
+/// A backup snapshot as the ledger knows it.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SnapshotRecord {
+    /// False while only its expiry is known (batches arrive in any order).
+    pub taken: bool,
+    pub taken_utc: i64,
+    pub expires_utc: i64,
+    pub files: u64,
+    pub bytes: u64,
+    pub hash: String,
+    pub expired: bool,
+    /// Which event set the values above.
+    #[serde(default)]
+    pub taken_at: Option<Stamp>,
+}
+
+impl SnapshotRecord {
+    fn take(&mut self, other: &SnapshotRecord) {
+        if other.taken && other.taken_at > self.taken_at {
+            self.taken = true;
+            self.taken_utc = other.taken_utc;
+            self.expires_utc = other.expires_utc;
+            self.files = other.files;
+            self.bytes = other.bytes;
+            self.hash = other.hash.clone();
+            self.taken_at = other.taken_at.clone();
+        }
+        self.expired |= other.expired;
+    }
+
+    /// Taken, and not expired: it can be restored from.
+    pub fn is_live(&self) -> bool {
+        self.taken && !self.expired
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LedgerView {
     #[serde(with = "pairs")]
@@ -1029,6 +1088,12 @@ pub struct LedgerView {
     /// Objects claimed by replicas (folded into chunk records).
     #[serde(default)]
     pub object_claims: u64,
+    /// Backup snapshots by (backup, device, sequence number).
+    #[serde(default, with = "pairs")]
+    pub snapshots: BTreeMap<(FolderId, DeviceId, u64), SnapshotRecord>,
+    /// Backups that take no more snapshots.
+    #[serde(default)]
+    pub backups_stopped: BTreeSet<FolderId>,
 }
 
 impl LedgerView {
@@ -1129,6 +1194,42 @@ impl LedgerView {
                     let d = rec.dropped.entry(storage.clone()).or_insert(0);
                     *d = (*d).max(batch.lamport);
                 }
+                Event::SnapshotTaken {
+                    backup,
+                    seq,
+                    taken_utc,
+                    expires_utc,
+                    files,
+                    bytes,
+                    snapshot_hash,
+                } => {
+                    self.snapshots
+                        .entry((backup.clone(), batch.device.clone(), *seq))
+                        .or_default()
+                        .take(&SnapshotRecord {
+                            taken: true,
+                            taken_utc: *taken_utc,
+                            expires_utc: *expires_utc,
+                            files: *files,
+                            bytes: *bytes,
+                            hash: snapshot_hash.clone(),
+                            expired: false,
+                            taken_at: stamp(),
+                        });
+                }
+                Event::SnapshotExpired {
+                    backup,
+                    device,
+                    seq,
+                } => {
+                    self.snapshots
+                        .entry((backup.clone(), device.clone(), *seq))
+                        .or_default()
+                        .expired = true;
+                }
+                Event::BackupStopped { backup } => {
+                    self.backups_stopped.insert(backup.clone());
+                }
                 Event::Unknown => {}
             }
         }
@@ -1181,6 +1282,11 @@ impl LedgerView {
             *r = (*r).max(*at);
         }
         self.batches += other.batches;
+        for (key, snap) in &other.snapshots {
+            self.snapshots.entry(key.clone()).or_default().take(snap);
+        }
+        self.backups_stopped
+            .extend(other.backups_stopped.iter().cloned());
         for (device, seen) in &other.acks {
             let acks = self.acks.entry(device.clone()).or_default();
             for (d, seq) in seen {
@@ -1446,7 +1552,7 @@ mod tests {
             };
         }
         let folder = |rng: &mut Rng| FolderId::from_bytes(&[1 + rng.below(3) as u8]);
-        match rng.below(10) {
+        match rng.below(11) {
             0 => Event::DeviceEnrolled {
                 name: format!("n{}", rng.below(5)),
             },
@@ -1480,6 +1586,25 @@ mod tests {
             },
             7 => Event::StorageRetired {
                 storage: storage(rng),
+            },
+            8 => match rng.below(4) {
+                0 => Event::SnapshotExpired {
+                    backup: folder(rng),
+                    device: DeviceId::from_bytes(&[rng.below(3) as u8 + 1; 16]),
+                    seq: rng.below(4),
+                },
+                1 => Event::BackupStopped {
+                    backup: folder(rng),
+                },
+                _ => Event::SnapshotTaken {
+                    backup: folder(rng),
+                    seq: rng.below(4),
+                    taken_utc: rng.below(100) as i64,
+                    expires_utc: rng.below(1000) as i64,
+                    files: rng.below(10),
+                    bytes: rng.below(1000),
+                    snapshot_hash: format!("h{}", rng.below(3)),
+                },
             },
             _ => Event::ChunkDropped {
                 folder: folder(rng),

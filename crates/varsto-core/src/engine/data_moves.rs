@@ -137,6 +137,7 @@ impl Engine {
         let rec = self
             .keyring
             .find(folder)
+            .or_else(|| self.keyring.find_backup(folder))
             .cloned()
             .ok_or_else(|| anyhow!("unknown folder {folder}"))?;
         let targets = self.write_targets(&rec);
@@ -189,7 +190,52 @@ impl Engine {
             .find(folder)
             .cloned()
             .ok_or_else(|| anyhow!("unknown folder {folder}"))?;
-        let placement = match placement.filter(|p| !p.is_everywhere()) {
+        let placement = self.checked_placement(placement)?;
+        let now = util::now_utc();
+        let f = self
+            .keyring
+            .folders
+            .get_mut(&rec.folder_id)
+            .ok_or_else(|| anyhow!("unknown folder {folder}"))?;
+        // Strictly newer than what is known, so other devices adopt it.
+        let now = now.max(f.placement_updated_utc + 1);
+        f.placement = placement.clone();
+        f.placement_updated_utc = now;
+        self.keyring.save(
+            &self.home,
+            &self.keys,
+            &self.vault.vault_id,
+            &self.vault.device_id,
+        )?;
+        let prec = PlacementRecord {
+            folder_id: rec.folder_id.clone(),
+            device: self.vault.device_id.clone(),
+            updated_utc: now,
+            placement,
+        };
+        // Signed in an organization, the older form otherwise (see set_policy).
+        let blob = if self.org.is_some() {
+            prec.seal_signed(
+                &self.vault.vault_id,
+                &self.folder_record_key_now(),
+                &self.keys.signer,
+            )?
+        } else {
+            prec.seal(&self.vault.vault_id, &self.folder_record_key_now())?
+        };
+        for (_, backend) in self.metadata_storages(true)? {
+            backend.put_if_absent(&prec.storage_key(), &blob)?;
+        }
+        self.placement(folder)
+    }
+
+    /// A placement checked against this device's storages, with the
+    /// identities of the storages it names; `None` for every storage.
+    pub(super) fn checked_placement(
+        &self,
+        placement: Option<Placement>,
+    ) -> Result<Option<Placement>> {
+        Ok(match placement.filter(|p| !p.is_everywhere()) {
             None => None,
             Some(mut p) => {
                 p.validate()?;
@@ -234,43 +280,7 @@ impl Engine {
                 }
                 Some(p)
             }
-        };
-        let now = util::now_utc();
-        let f = self
-            .keyring
-            .folders
-            .get_mut(&rec.folder_id)
-            .ok_or_else(|| anyhow!("unknown folder {folder}"))?;
-        // Strictly newer than what is known, so other devices adopt it.
-        let now = now.max(f.placement_updated_utc + 1);
-        f.placement = placement.clone();
-        f.placement_updated_utc = now;
-        self.keyring.save(
-            &self.home,
-            &self.keys,
-            &self.vault.vault_id,
-            &self.vault.device_id,
-        )?;
-        let prec = PlacementRecord {
-            folder_id: rec.folder_id.clone(),
-            device: self.vault.device_id.clone(),
-            updated_utc: now,
-            placement,
-        };
-        // Signed in an organization, the older form otherwise (see set_policy).
-        let blob = if self.org.is_some() {
-            prec.seal_signed(
-                &self.vault.vault_id,
-                &self.folder_record_key_now(),
-                &self.keys.signer,
-            )?
-        } else {
-            prec.seal(&self.vault.vault_id, &self.folder_record_key_now())?
-        };
-        for (_, backend) in self.metadata_storages(true)? {
-            backend.put_if_absent(&prec.storage_key(), &blob)?;
-        }
-        self.placement(folder)
+        })
     }
 
     /// Adopt the newest placement record of every folder (as for policies).

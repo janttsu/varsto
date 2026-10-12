@@ -379,6 +379,7 @@ impl Engine {
             strongroom: Some(info),
             removed_utc: 0,
             epoch_keys: BTreeMap::new(),
+            backup: None,
         };
         self.publish_manifest(&new_rec, &mut new_state)?;
         self.ensure_manifest_everywhere(&new_rec, &new_state)?;

@@ -198,7 +198,15 @@ impl Engine {
         let mut up = self.load_manifest_upkeep();
         let mut changed = false;
         let mut storages: Option<OpenStorages> = None;
-        for rec in self.keyring.folders.values().cloned().collect::<Vec<_>>() {
+        // Backups publish no manifests.
+        for rec in self
+            .keyring
+            .folders
+            .values()
+            .filter(|r| !r.is_backup())
+            .cloned()
+            .collect::<Vec<_>>()
+        {
             let state_file = self.state_path(&rec.folder_id);
             if !state_file.exists() {
                 continue;
