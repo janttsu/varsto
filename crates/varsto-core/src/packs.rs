@@ -259,8 +259,11 @@ impl Storage for PackAware {
         if let Some(b) = self.inner.get(key)? {
             return Ok(Some(b));
         }
-        // Packed by another device since the index was read.
-        match self.locate(obj, true)? {
+        // Packed by another device since the index was read: a read is
+        // asked for a block that should exist, so look again right away.
+        self.refresh()?;
+        let loc = self.cache.lock().unwrap().objects.get(obj).cloned();
+        match loc {
             Some(loc) => self.inner.get_range(&pack_key(&loc.pack), loc.offset, loc.len),
             None => Ok(None),
         }
@@ -422,5 +425,16 @@ mod tests {
         other.delete(&chunk_key(&objs[4].0)).unwrap();
         assert!(s.inner.list("packs/").unwrap().is_empty(), "{:?}", s.inner.list("packs/").unwrap());
         assert!(store(t.path(), &Caches::default()).get(&chunk_key(&objs[0].0)).unwrap().is_none());
+    }
+
+    #[test]
+    fn a_reader_sees_packs_written_after_it_loaded_the_indexes() {
+        let t = tempfile::tempdir().unwrap();
+        let reader = store(t.path(), &Caches::default());
+        let o = hex::encode(crate::crypto::hash(b"late"));
+        assert!(reader.get(&chunk_key(&o)).unwrap().is_none());
+        let writer = store(t.path(), &Caches::default());
+        writer.put_pack(&[(o.clone(), b"late".as_slice())]).unwrap();
+        assert_eq!(reader.get(&chunk_key(&o)).unwrap().as_deref(), Some(b"late".as_slice()));
     }
 }
