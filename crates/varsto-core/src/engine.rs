@@ -2607,24 +2607,30 @@ impl Engine {
                         if mine.is_empty() {
                             continue;
                         }
-                        // One object: written as it is. Several (small ones):
-                        // one pack where the storage keeps packs.
-                        let outcomes: Vec<Result<bool>> = if mine.len() == 1 {
-                            vec![backend
-                                .put_if_absent(&chunk_storage_key(&mine[0].object), &mine[0].ct)]
-                        } else {
-                            let members: Vec<(String, &[u8])> = mine
-                                .iter()
-                                .map(|j| (j.object.as_str().to_string(), j.ct.as_slice()))
-                                .collect();
-                            match backend.put_pack(&members) {
-                                Ok(flags) => flags.into_iter().map(Ok).collect(),
-                                Err(e) => {
-                                    let msg = format!("{e:#}");
-                                    mine.iter().map(|_| Err(anyhow!("{msg}"))).collect()
+                        // One object, or a storage without packs: written
+                        // one by one, each with its own outcome (a pool's
+                        // "no room" stays a pool error). Several small ones
+                        // on a storage keeping packs: one pack.
+                        let outcomes: Vec<Result<bool>> =
+                            if mine.len() == 1 || !backend.packs_small_objects() {
+                                mine.iter()
+                                    .map(|j| {
+                                        backend.put_if_absent(&chunk_storage_key(&j.object), &j.ct)
+                                    })
+                                    .collect()
+                            } else {
+                                let members: Vec<(String, &[u8])> = mine
+                                    .iter()
+                                    .map(|j| (j.object.as_str().to_string(), j.ct.as_slice()))
+                                    .collect();
+                                match backend.put_pack(&members) {
+                                    Ok(flags) => flags.into_iter().map(Ok).collect(),
+                                    Err(e) => {
+                                        let msg = format!("{e:#}");
+                                        mine.iter().map(|_| Err(anyhow!("{msg}"))).collect()
+                                    }
                                 }
-                            }
-                        };
+                            };
                         for (job, outcome) in mine.iter().zip(outcomes) {
                             let _ = done_tx.send(UploadDone {
                                 storage: spec.name().to_string(),
