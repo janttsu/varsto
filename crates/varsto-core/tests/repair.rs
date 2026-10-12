@@ -4,15 +4,15 @@
 //! file, or from a peer; a cold storage is read only when asked; a loss that
 //! nothing can repair is reported once with the reason.
 
+mod common;
+
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 use varsto_core::chunking::ChunkerParams;
-use varsto_core::crypto;
 use varsto_core::engine::{DamageKind, RepairOptions};
-use varsto_core::ids::ObjectName;
 use varsto_core::p2p;
 use varsto_core::storage::{StorageCalls, StorageSpec};
 use varsto_core::Engine;
@@ -41,23 +41,37 @@ fn pseudo_random(len: usize, seed: u64) -> Vec<u8> {
         .collect()
 }
 
-/// Chunk object files under a storage directory.
-fn objects(root: &Path) -> Vec<PathBuf> {
-    let mut out: Vec<PathBuf> = walkdir::WalkDir::new(root.join("chunks"))
-        .into_iter()
-        .filter_map(|e| e.ok())
-        .filter(|e| e.file_type().is_file())
-        .map(|e| e.path().to_path_buf())
-        .collect();
-    out.sort();
-    out
+/// A block object on a storage directory (single or packed).
+struct Obj {
+    root: PathBuf,
+    name: String,
 }
 
-fn intact(path: &Path) -> bool {
-    let name = path.file_name().unwrap().to_string_lossy().to_string();
-    fs::read(path)
-        .map(|b| ObjectName::from_bytes(&crypto::hash(&b)).as_str() == name)
-        .unwrap_or(false)
+/// The block objects on a storage directory.
+fn objects(root: &Path) -> Vec<Obj> {
+    common::object_names(root)
+        .into_iter()
+        .map(|name| Obj {
+            root: root.to_path_buf(),
+            name,
+        })
+        .collect()
+}
+
+fn intact(o: &Obj) -> bool {
+    common::intact(&o.root, &o.name)
+}
+
+fn present(o: &Obj) -> bool {
+    common::object_names(&o.root).contains(&o.name)
+}
+
+fn lose(o: &Obj) {
+    common::lose_object(&o.root, &o.name)
+}
+
+fn corrupt(o: &Obj) {
+    common::corrupt_object(&o.root, &o.name)
 }
 
 struct Lab {
@@ -106,8 +120,8 @@ fn missing_copy_is_rewritten_from_another_storage() {
     assert!(all.len() >= 3, "a multi-chunk file");
     // Two objects disappear from "box"; another storage is the first source
     // tried after the block cache.
-    fs::remove_file(&all[0]).unwrap();
-    fs::remove_file(&all[1]).unwrap();
+    lose(&all[0]);
+    lose(&all[1]);
 
     let preview = a
         .repair(&RepairOptions {
@@ -116,7 +130,7 @@ fn missing_copy_is_rewritten_from_another_storage() {
         })
         .unwrap();
     assert_eq!(preview.repaired.len(), 2, "{preview:?}");
-    assert!(!all[0].exists(), "a dry run writes nothing");
+    assert!(!present(&all[0]), "a dry run writes nothing");
 
     let r = a.repair(&RepairOptions::manual()).unwrap();
     assert_eq!(r.repaired.len(), 2, "{r:?}");
@@ -146,8 +160,8 @@ fn corrupt_copy_is_rewritten_from_the_local_file() {
     let lab = Lab::new();
     let (mut a, _) = device(&lab, &[dir("box", &lab.p("box"), false)]);
     let all = objects(&lab.p("box"));
-    fs::write(&all[1], b"bit rot").unwrap();
-    fs::remove_file(&all[2]).unwrap();
+    corrupt(&all[1]);
+    lose(&all[2]);
 
     // fsck --verify finds both and queues them.
     let f = a.fsck(true).unwrap();
@@ -185,7 +199,7 @@ fn verification_queues_damage_and_another_device_repairs_it() {
     b.attach_folder("docs", &lab.p("b-docs"), false).unwrap();
     b.sync(None).unwrap();
     let all = objects(&lab.p("box"));
-    fs::write(&all[0], b"damaged").unwrap();
+    corrupt(&all[0]);
     // B checked every block when it downloaded them: look 40 days ahead,
     // when they are due again.
     let v = b
@@ -216,7 +230,7 @@ fn missing_copy_is_rewritten_from_a_peer() {
     b.attach_folder("docs", &lab.p("b-docs"), true).unwrap();
     b.sync(None).unwrap();
     let all = objects(&lab.p("box"));
-    fs::remove_file(&all[0]).unwrap();
+    lose(&all[0]);
 
     // Without a peer nothing can repair it.
     let r = b.repair(&RepairOptions::manual()).unwrap();
@@ -259,7 +273,7 @@ fn cold_storage_is_read_only_when_asked() {
     );
     assert!(!objects(&lab.p("deep")).is_empty(), "cold storage written");
     let all = objects(&lab.p("box"));
-    fs::remove_file(&all[0]).unwrap();
+    lose(&all[0]);
     fs::remove_file(lab.p("a-docs/big.bin")).unwrap();
 
     let calls = Arc::new(StorageCalls::default());
@@ -274,7 +288,7 @@ fn cold_storage_is_read_only_when_asked() {
     // One read: the damaged copy itself, nothing from the cold storage.
     let c = calls.snapshot();
     assert_eq!(c.chunk_gets, 1, "{c:?}");
-    assert!(!all[0].exists());
+    assert!(!present(&all[0]));
 
     let r = a
         .repair(&RepairOptions {
@@ -292,7 +306,7 @@ fn unrepairable_loss_is_reported_once() {
     let lab = Lab::new();
     let (mut a, _) = device(&lab, &[dir("box", &lab.p("box"), false)]);
     let all = objects(&lab.p("box"));
-    fs::remove_file(&all[0]).unwrap();
+    lose(&all[0]);
     fs::remove_file(lab.p("a-docs/big.bin")).unwrap();
 
     let r = a.repair(&RepairOptions::manual()).unwrap();
@@ -334,7 +348,7 @@ fn transferrers_are_not_repaired() {
     );
     let stick = objects(&lab.p("stick"));
     assert!(!stick.is_empty(), "nobody else has the blocks yet");
-    fs::write(&stick[0], b"scratched").unwrap();
+    corrupt(&stick[0]);
     let f = a.fsck(true).unwrap();
     assert_eq!(f.objects_corrupt.len(), 1, "{f:?}");
     assert_eq!(f.repairs_queued, 0, "transferrers are not queued");
@@ -354,7 +368,7 @@ fn moved_blocks_are_not_repaired_back() {
         ],
     );
     let all = objects(&lab.p("box"));
-    fs::remove_file(&all[0]).unwrap();
+    lose(&all[0]);
     // fsck queues the missing copy on "box"...
     assert_eq!(a.fsck(false).unwrap().repairs_queued, 1);
     // ...then the folder's data is moved off "box" on purpose.

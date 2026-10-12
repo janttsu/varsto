@@ -3,6 +3,8 @@
 //! shared storage. This is the first scenario of plan section 6.19 and of
 //! section 8's blocking question on offline convergence.
 
+mod common;
+
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -716,8 +718,7 @@ fn peers_serve_chunks_when_the_storage_has_none() {
     a.push("docs").unwrap();
 
     // The storage keeps the manifests and ledger but loses every chunk object.
-    let chunks_dir = lab.a_home.with_file_name("storage").join("chunks");
-    fs::remove_dir_all(&chunks_dir).unwrap();
+    common::lose_all_objects(&lab.a_home.with_file_name("storage"));
 
     // Laptop serves its files to peers.
     let server = p2p::Server::bind("127.0.0.1:0".parse().unwrap()).unwrap();
@@ -868,16 +869,12 @@ fn many_chunk_files_arrive_in_order_and_a_missing_chunk_fails_the_file() {
     fs::write(lab.a_dir.join("big.bin"), &big).unwrap();
     a.push("docs").unwrap();
 
-    let chunks_dir = lab.a_home.with_file_name("storage").join("chunks");
-    let objects: Vec<PathBuf> = walkdir::WalkDir::new(&chunks_dir)
-        .into_iter()
-        .filter_map(|e| e.ok())
-        .filter(|e| e.file_type().is_file())
-        .map(|e| e.path().to_path_buf())
-        .collect();
+    let store = lab.a_home.with_file_name("storage");
+    let objects: Vec<String> = common::object_names(&store).into_iter().collect();
     assert!(objects.len() > 20, "{} chunks", objects.len());
-    let hidden = lab.a_home.with_file_name("hidden-object");
-    fs::rename(&objects[objects.len() / 2], &hidden).unwrap();
+    let hidden = &objects[objects.len() / 2];
+    let hidden_bytes = common::read_object(&store, hidden).unwrap();
+    common::lose_object(&store, hidden);
 
     let mut b = Engine::join(&lab.b_home, "desk", PASS, &key, lab.storage.clone()).unwrap();
     b.chunker = ChunkerParams::SMALL;
@@ -889,7 +886,9 @@ fn many_chunk_files_arrive_in_order_and_a_missing_chunk_fails_the_file() {
         "a partial file was left behind"
     );
 
-    fs::rename(&hidden, &objects[objects.len() / 2]).unwrap();
+    let back = store.join("chunks").join(&hidden[..2]).join(hidden);
+    fs::create_dir_all(back.parent().unwrap()).unwrap();
+    fs::write(back, hidden_bytes).unwrap();
     let r = b.pull("docs").unwrap();
     assert!(r.files_unavailable.is_empty(), "{:?}", r.files_unavailable);
     assert_eq!(r.chunks_downloaded as usize, objects.len());

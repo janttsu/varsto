@@ -3,6 +3,8 @@
 //! folder's encrypted blocks in its block cache and never a plain file;
 //! selective sync works as in any folder.
 
+mod common;
+
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -64,7 +66,7 @@ fn assert_no_plaintext(roots: &[&Path], contents: &[&[u8]]) {
     }
 }
 
-/// Object names in a directory with the storage layout (`chunks/xx/<name>`).
+/// Object names in the block cache (`chunks/xx/<name>`, one file each).
 fn objects(root: &Path) -> BTreeSet<String> {
     files(&root.join("chunks"))
         .into_iter()
@@ -144,14 +146,14 @@ fn not_selective_caches_every_block_and_no_plaintext() {
     let (mut b, home, dir) = phone(&s, false);
     b.sync(None).unwrap();
     // Every object of the folder is in the block cache, as stored.
-    let stored = objects(&s.root.join("storage"));
+    let stored = common::object_names(&s.root.join("storage"));
     let cached = objects(&home.join("block-cache"));
     assert!(!stored.is_empty());
     assert_eq!(stored, cached);
     for (p, bytes) in files(&home.join("block-cache").join("chunks")) {
         let name = p.file_name().unwrap().to_string_lossy().to_string();
         assert_eq!(
-            fs::read(s.root.join("storage/chunks").join(&name[..2]).join(&name)).unwrap(),
+            common::read_object(&s.root.join("storage"), &name).unwrap(),
             bytes
         );
     }
@@ -188,7 +190,7 @@ fn selective_caches_fetched_files_only_and_frees_them() {
     assert_eq!(state_of(&b, "docs", "trip/photo.bin"), "placeholder");
     let after_fetch = objects(&home.join("block-cache"));
     assert!(!after_fetch.is_empty());
-    assert!(after_fetch.is_subset(&objects(&s.root.join("storage"))));
+    assert!(after_fetch.is_subset(&common::object_names(&s.root.join("storage"))));
     // Pinned files stay cached through syncs; nothing else is fetched.
     b.sync(None).unwrap();
     assert_eq!(objects(&home.join("block-cache")), after_fetch);

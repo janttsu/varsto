@@ -5,7 +5,8 @@
 //! written afterwards does not open with C's keys, a wipe order empties C,
 //! and a wipe order not signed by a device of the vault is ignored.
 
-use std::collections::BTreeSet;
+mod common;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 use varsto_core::chunking::ChunkerParams;
@@ -90,13 +91,14 @@ fn removed(e: &anyhow::Error) -> Option<&DeviceRemoved> {
     e.downcast_ref::<DeviceRemoved>()
 }
 
-fn chunk_objects(store: &Path) -> BTreeSet<PathBuf> {
-    walkdir::WalkDir::new(store.join("chunks"))
-        .into_iter()
-        .filter_map(|e| e.ok())
-        .filter(|e| e.file_type().is_file())
-        .map(|e| e.path().to_path_buf())
-        .collect()
+/// The bytes of every block object on the storage (single or packed).
+fn chunk_objects(store: &Path) -> Vec<Vec<u8>> {
+    let objs: Vec<Vec<u8>> = common::object_names(store)
+        .iter()
+        .map(|n| common::read_object(store, n).unwrap())
+        .collect();
+    assert!(!objs.is_empty());
+    objs
 }
 
 #[test]
@@ -189,8 +191,7 @@ fn revoked_device_is_cut_off_and_new_data_needs_new_keys() {
         let id = ChunkId::from_bytes(&crypto::keyed_hash(&fk0.hash, secret));
         let k = fk0.chunk_key(0, &id).unwrap();
         let aad = fk0.chunk_aad(&vault, &id, secret.len() as u64);
-        for obj in chunk_objects(&lab.store()) {
-            let ct = fs::read(&obj).unwrap();
+        for ct in chunk_objects(&lab.store()) {
             assert!(
                 crypto::decrypt(&k, &aad, &ct).is_err(),
                 "new chunk opens with an old key"
