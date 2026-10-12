@@ -4,7 +4,7 @@ Status of the documents that will define formats and protocols. Most of what exi
 
 | Document | Status |
 |---|---|
-| Storage layout and pack format | alpha-0 implemented, no packs: [alpha-0-format.md](alpha-0-format.md) |
+| Storage layout and pack format | alpha implemented, packs for small blocks since alpha.12: [alpha-0-format.md](alpha-0-format.md) sections 1 to 5 and 30 |
 | Chunking and hashing | alpha implemented, block sizes by file size since alpha.11: [alpha-0-format.md](alpha-0-format.md) sections 1 to 3 and 29 |
 | Key hierarchy and key wrapping (incl. FIDO2 `hmac-secret`) | draft; parts implemented ([alpha-0-format.md](alpha-0-format.md) sections 21, 24 and 27): [key-hierarchy.md](key-hierarchy.md) |
 | Post-quantum hybrid handshakes and signatures | alpha implemented: [alpha-0-format.md](alpha-0-format.md) section 11 |

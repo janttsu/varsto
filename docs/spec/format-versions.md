@@ -19,6 +19,10 @@ During alpha development, storage formats may change without migration paths. On
 4. Update this table before publishing each storage format version, with the release number and reader status.
 5. Once the product launches (first public release), every subsequent format change requires forward compatibility for at least one previous version.
 
+## Packs in 0.0.1-alpha.12 (format version 1 unchanged)
+
+Small block objects are stored in packs (`packs/`; alpha-0-format.md section 30). Earlier versions do not read packs: a device on 0.0.1-alpha.11 or earlier misses every block another device packed. Update every device.
+
 ## Block sizes in 0.0.1-alpha.11 (format version 1 unchanged)
 
 Blocks are cut by file size (up to 16 MiB; alpha-0-format.md section 29). Objects, records and batches are unchanged and older readers read them, but no compatibility with the single set of block sizes of earlier versions is kept: a device on an older version cuts large files differently and cannot re-upload their blocks from its own copy, so update every device.

@@ -482,6 +482,27 @@ impl Storage for S3Storage {
         }
     }
 
+    fn get_range(&self, key: &str, offset: u64, len: u64) -> Result<Option<Vec<u8>>> {
+        crate::storage::validate_key(key)?;
+        if len == 0 {
+            return Ok(Some(Vec::new()));
+        }
+        let range = format!("bytes={}-{}", offset, offset + len - 1);
+        let (status, body) =
+            self.request("GET", &self.object_path(key), &[], &[("range", &range)], &[])?;
+        match status {
+            206 => Ok(Some(body)),
+            // A server that ignores Range sends the whole object.
+            200 => Ok(Some(
+                body.get(offset as usize..(offset + len) as usize)
+                    .map(<[u8]>::to_vec)
+                    .unwrap_or_default(),
+            )),
+            404 => Ok(None),
+            s => Err(self.explain("GET", key, s, &body)),
+        }
+    }
+
     fn exists(&self, key: &str) -> Result<bool> {
         crate::storage::validate_key(key)?;
         let (status, _) = self.request("HEAD", &self.object_path(key), &[], &[], &[])?;

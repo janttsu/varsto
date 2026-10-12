@@ -124,6 +124,22 @@ impl Storage for RcloneStorage {
         }
     }
 
+    fn get_range(&self, key: &str, offset: u64, len: u64) -> Result<Option<Vec<u8>>> {
+        crate::storage::validate_key(key)?;
+        let (off, count) = (offset.to_string(), len.to_string());
+        let (ok, out, err) = self.run(
+            &["cat", "--offset", &off, "--count", &count, &self.target(key)],
+            None,
+        )?;
+        if ok {
+            Ok(Some(out))
+        } else if is_not_found(&err) {
+            Ok(None)
+        } else {
+            bail!("rclone cat {key}: {}", err.trim())
+        }
+    }
+
     fn exists(&self, key: &str) -> Result<bool> {
         crate::storage::validate_key(key)?;
         let (ok, out, err) = self.run(&["lsjson", "--stat", &self.target(key)], None)?;

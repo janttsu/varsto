@@ -923,3 +923,41 @@ fn turning_selective_sync_off_downloads_the_placeholders() {
     assert!(!lab.b_dir.join("one.txt.varsto-placeholder").exists());
     assert!(!lab.b_dir.join("sub/two.txt.varsto-placeholder").exists());
 }
+
+#[test]
+fn small_files_travel_in_packs() {
+    let lab = lab();
+    let (mut a, key) = Engine::init(&lab.a_home, "laptop", PASS).unwrap();
+    a.add_storage(lab.storage.clone()).unwrap();
+    a.add_folder("docs", &lab.a_dir).unwrap();
+    for i in 0..200 {
+        fs::write(lab.a_dir.join(format!("note-{i:03}.txt")), format!("note number {i}\n").repeat(i % 7 + 1)).unwrap();
+    }
+    fs::write(lab.a_dir.join("big.bin"), vec![7u8; 600_000]).unwrap();
+    a.sync(None).unwrap();
+    let store = lab.a_home.with_file_name("storage");
+    let count = |sub: &str, ext: &str| {
+        walkdir::WalkDir::new(store.join(sub))
+            .into_iter()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_type().is_file() && e.path().to_string_lossy().ends_with(ext))
+            .count()
+    };
+    // 200 small blocks in one pack, the large file's block on its own.
+    assert_eq!(count("packs", ".pack"), 1);
+    assert!(count("chunks", "") <= 2, "{} single objects", count("chunks", ""));
+    // Another device reads every file from the pack.
+    let mut b = Engine::join(&lab.b_home, "desk", PASS, &key, lab.storage.clone()).unwrap();
+    b.attach_folder("docs", &lab.b_dir, false).unwrap();
+    let r = b.sync(None).unwrap();
+    assert!(r[0].0.files_unavailable.is_empty(), "{:?}", r[0].0.files_unavailable);
+    for i in 0..200 {
+        assert_eq!(
+            fs::read_to_string(lab.b_dir.join(format!("note-{i:03}.txt"))).unwrap(),
+            format!("note number {i}\n").repeat(i % 7 + 1)
+        );
+    }
+    // fsck sees the packed objects as stored and intact.
+    let f = b.fsck(true).unwrap();
+    assert!(f.chunks_missing.is_empty() && f.objects_corrupt.is_empty(), "{f:?}");
+}
