@@ -12,6 +12,94 @@ use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+/// Menu and status texts in the interface language the user picked in the
+/// web UI (`<home>/ui-language`): English, Finnish, Swedish. `{}` marks
+/// where [`fill`] puts a value.
+const TR: &[(&str, &str, &str)] = &[
+    (
+        "Not set up yet: open Varsto",
+        "Ei vielä otettu käyttöön: avaa Varsto",
+        "Inte konfigurerat ännu: öppna Varsto",
+    ),
+    (
+        "Locked: open Varsto to unlock",
+        "Lukittu: avaa Varsto ja avaa lukitus",
+        "Låst: öppna Varsto för att låsa upp",
+    ),
+    ("{} s ago", "{} s sitten", "för {} s sedan"),
+    ("{} min ago", "{} min sitten", "för {} min sedan"),
+    ("{} h ago", "{} h sitten", "för {} h sedan"),
+    ("Paused", "Keskeytetty", "Pausad"),
+    ("Up to date", "Ajan tasalla", "Uppdaterad"),
+    ("Problem: {}", "Ongelma: {}", "Problem: {}"),
+    (
+        "{} · last sync {}",
+        "{} · viimeisin synkronointi {}",
+        "{} · senaste synkronisering {}",
+    ),
+    (
+        "{} · no sync yet",
+        "{} · ei vielä synkronoitu",
+        "{} · ingen synkronisering ännu",
+    ),
+    (
+        "Service starting…",
+        "Palvelu käynnistyy…",
+        "Tjänsten startar…",
+    ),
+    ("Starting…", "Käynnistyy…", "Startar…"),
+    (
+        "Updating to {}…",
+        "Päivitetään versioon {}…",
+        "Uppdaterar till {}…",
+    ),
+    (
+        "Update failed: {}",
+        "Päivitys epäonnistui: {}",
+        "Uppdateringen misslyckades: {}",
+    ),
+    (
+        "Download {} from {}",
+        "Lataa {} osoitteesta {}",
+        "Ladda ned {} från {}",
+    ),
+    ("Open Varsto", "Avaa Varsto", "Öppna Varsto"),
+    (
+        "Pause syncing",
+        "Keskeytä synkronointi",
+        "Pausa synkroniseringen",
+    ),
+    (
+        "Install update",
+        "Asenna päivitys",
+        "Installera uppdatering",
+    ),
+    (
+        "Install Varsto {}",
+        "Asenna Varsto {}",
+        "Installera Varsto {}",
+    ),
+    ("Quit Varsto", "Lopeta Varsto", "Avsluta Varsto"),
+];
+
+/// `en` in `lang` ("en", "fi" or "sv"); English when there is no entry.
+fn tr(lang: &str, en: &'static str) -> &'static str {
+    TR.iter()
+        .find(|t| t.0 == en)
+        .map(|t| match lang {
+            "fi" => t.1,
+            "sv" => t.2,
+            _ => t.0,
+        })
+        .unwrap_or(en)
+}
+
+/// Put `args` in place of the `{}` marks of `text`, in order.
+fn fill(text: &str, args: &[&str]) -> String {
+    args.iter()
+        .fold(text.to_string(), |s, a| s.replacen("{}", a, 1))
+}
+
 /// Supervises the service child process.
 pub struct Supervisor {
     home: PathBuf,
@@ -108,38 +196,46 @@ impl Supervisor {
         }
     }
 
+    /// The interface language, read again each time so that a change in the
+    /// web UI reaches the menu at its next refresh.
+    pub fn lang(&self) -> String {
+        crate::desktop::ui_language(&self.home)
+    }
+
     pub fn status_line(&self) -> String {
+        let lang = self.lang();
+        let lang = lang.as_str();
         match self.call("GET", "/api/state", "") {
             Ok(st) => {
                 if !st["has_vault"].as_bool().unwrap_or(false) {
-                    return "Not set up yet: open Varsto".into();
+                    return tr(lang, "Not set up yet: open Varsto").into();
                 }
                 if !st["unlocked"].as_bool().unwrap_or(false) {
-                    return "Locked: open Varsto to unlock".into();
+                    return tr(lang, "Locked: open Varsto to unlock").into();
                 }
                 let sv = &st["service"];
                 let last = sv["last_sync_utc"].as_i64().map(|t| {
                     let ago = (varsto_core::util::now_utc() - t).max(0);
                     if ago < 60 {
-                        format!("{ago} s ago")
+                        fill(tr(lang, "{} s ago"), &[&ago.to_string()])
                     } else if ago < 3600 {
-                        format!("{} min ago", ago / 60)
+                        fill(tr(lang, "{} min ago"), &[&(ago / 60).to_string()])
                     } else {
-                        format!("{} h ago", ago / 3600)
+                        fill(tr(lang, "{} h ago"), &[&(ago / 3600).to_string()])
                     }
                 });
                 let state = if sv["paused"].as_bool().unwrap_or(false) {
-                    "Paused"
+                    tr(lang, "Paused")
                 } else {
-                    "Up to date"
+                    tr(lang, "Up to date")
                 };
                 match (last, sv["last_error"].as_str()) {
-                    (_, Some(e)) if !e.is_empty() => format!("Problem: {e}"),
-                    (Some(l), _) => format!("{state} · last sync {l}"),
-                    (None, _) => format!("{state} · no sync yet"),
+                    (_, Some(e)) if !e.is_empty() => fill(tr(lang, "Problem: {}"), &[e]),
+                    (Some(l), _) => fill(tr(lang, "{} · last sync {}"), &[state, &l]),
+                    (None, _) => fill(tr(lang, "{} · no sync yet"), &[state]),
                 }
             }
-            Err(_) => "Service starting…".into(),
+            Err(_) => tr(lang, "Service starting…").into(),
         }
     }
 
@@ -196,14 +292,15 @@ fn check_newer(s: &mut Supervisor) -> Option<Newer> {
 
 #[cfg(any(target_os = "linux", target_os = "windows"))]
 fn install_newer(s: &mut Supervisor, n: &Newer) -> String {
+    let lang = s.lang();
     if n.available {
         match s.call("POST", "/api/update", "{}") {
-            Ok(_) => format!("Updating to {}…", n.latest),
-            Err(e) => format!("Update failed: {e}"),
+            Ok(_) => fill(tr(&lang, "Updating to {}…"), &[&n.latest]),
+            Err(e) => fill(tr(&lang, "Update failed: {}"), &[&e.to_string()]),
         }
     } else {
         crate::desktop::open_in_browser(&n.page);
-        format!("Download {} from {}", n.latest, n.page)
+        fill(tr(&lang, "Download {} from {}"), &[&n.latest, &n.page])
     }
 }
 
@@ -216,6 +313,7 @@ mod platform {
 
     struct VarstoTray {
         sup: Shared,
+        lang: String,
         status: String,
         paused: bool,
         update_note: String,
@@ -228,6 +326,7 @@ mod platform {
         fn refresh(&mut self) {
             let mut s = self.sup.lock().unwrap();
             let _ = s.ensure_running();
+            self.lang = s.lang();
             self.status = s.status_line();
             self.paused = s
                 .call("GET", "/api/service", "")
@@ -274,6 +373,7 @@ mod platform {
             self.sup.lock().unwrap().open_ui();
         }
         fn menu(&self) -> Vec<MenuItem<Self>> {
+            let lang = self.lang.as_str();
             let mut items: Vec<MenuItem<Self>> = vec![
                 StandardItem {
                     label: self.status.clone(),
@@ -283,13 +383,13 @@ mod platform {
                 .into(),
                 MenuItem::Separator,
                 StandardItem {
-                    label: "Open Varsto".into(),
+                    label: tr(lang, "Open Varsto").into(),
                     activate: Box::new(|t: &mut Self| t.sup.lock().unwrap().open_ui()),
                     ..Default::default()
                 }
                 .into(),
                 CheckmarkItem {
-                    label: "Pause syncing".into(),
+                    label: tr(lang, "Pause syncing").into(),
                     checked: self.paused,
                     activate: Box::new(|t: &mut Self| {
                         let body = format!("{{\"paused\": {}}}", !t.paused);
@@ -308,7 +408,7 @@ mod platform {
                 let n = n.clone();
                 items.push(
                     StandardItem {
-                        label: format!("Install Varsto {}", n.latest),
+                        label: fill(tr(lang, "Install Varsto {}"), &[&n.latest]),
                         activate: Box::new(move |t: &mut Self| {
                             let note = install_newer(&mut t.sup.lock().unwrap(), &n);
                             t.update_note = note;
@@ -331,7 +431,7 @@ mod platform {
             items.push(MenuItem::Separator);
             items.push(
                 StandardItem {
-                    label: "Quit Varsto".into(),
+                    label: tr(lang, "Quit Varsto").into(),
                     activate: Box::new(|t: &mut Self| {
                         t.quit = true;
                     }),
@@ -343,10 +443,12 @@ mod platform {
         }
     }
 
-    pub fn run(sup: Shared, _home: &Path) -> Result<()> {
+    pub fn run(sup: Shared, home: &Path) -> Result<()> {
+        let lang = crate::desktop::ui_language(home);
         let mut tray = VarstoTray {
             sup: sup.clone(),
-            status: "Starting…".into(),
+            status: tr(&lang, "Starting…").into(),
+            lang,
             paused: false,
             update_note: String::new(),
             newer: None,
@@ -383,14 +485,16 @@ mod platform {
         DispatchMessageW, PeekMessageW, TranslateMessage, MSG, PM_REMOVE,
     };
 
-    pub fn run(sup: Shared, _home: &Path) -> Result<()> {
-        let status = MenuItem::with_id("status", "Starting…", false, None);
-        let open = MenuItem::with_id("open", "Open Varsto", true, None);
-        let pause = CheckMenuItem::with_id("pause", "Pause syncing", true, false, None);
+    pub fn run(sup: Shared, home: &Path) -> Result<()> {
+        let mut lang = crate::desktop::ui_language(home);
+        let l = lang.as_str();
+        let status = MenuItem::with_id("status", tr(l, "Starting…"), false, None);
+        let open = MenuItem::with_id("open", tr(l, "Open Varsto"), true, None);
+        let pause = CheckMenuItem::with_id("pause", tr(l, "Pause syncing"), true, false, None);
         // Added to the menu only when the automatic check finds a newer version.
-        let update = MenuItem::with_id("update", "Install update", true, None);
+        let update = MenuItem::with_id("update", tr(l, "Install update"), true, None);
         let note = MenuItem::with_id("note", "", false, None);
-        let quit = MenuItem::with_id("quit", "Quit Varsto", true, None);
+        let quit = MenuItem::with_id("quit", tr(l, "Quit Varsto"), true, None);
         let menu = Menu::new();
         menu.append_items(&[
             &status,
@@ -451,6 +555,17 @@ mod platform {
             if last_refresh.elapsed() >= Duration::from_secs(5) {
                 let mut s = sup.lock().unwrap();
                 let _ = s.ensure_running();
+                // A language picked in the web UI applies without a restart.
+                let now = s.lang();
+                if now != lang {
+                    lang = now;
+                    open.set_text(tr(&lang, "Open Varsto"));
+                    pause.set_text(tr(&lang, "Pause syncing"));
+                    quit.set_text(tr(&lang, "Quit Varsto"));
+                    if let Some(n) = &newer {
+                        update.set_text(fill(tr(&lang, "Install Varsto {}"), &[&n.latest]));
+                    }
+                }
                 status.set_text(s.status_line());
                 if let Ok(v) = s.call("GET", "/api/service", "") {
                     pause.set_checked(v["paused"].as_bool().unwrap_or(false));
@@ -460,7 +575,7 @@ mod platform {
                     newer = check_newer(&mut s);
                     match (&newer, update_shown) {
                         (Some(n), _) => {
-                            update.set_text(format!("Install Varsto {}", n.latest));
+                            update.set_text(fill(tr(&lang, "Install Varsto {}"), &[&n.latest]));
                             if !update_shown {
                                 let _ = menu.insert(&update, 3);
                                 update_shown = true;
@@ -489,5 +604,34 @@ mod platform {
             std::thread::sleep(Duration::from_secs(5));
             sup.lock().unwrap().ensure_running()?;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn translations_keep_placeholders() {
+        for (en, fi, sv) in TR {
+            let n = en.matches("{}").count();
+            assert_eq!(fi.matches("{}").count(), n, "{en}");
+            assert_eq!(sv.matches("{}").count(), n, "{en}");
+        }
+        assert_eq!(tr("fi", "Quit Varsto"), "Lopeta Varsto");
+        assert_eq!(tr("sv", "Open Varsto"), "Öppna Varsto");
+        assert_eq!(tr("en", "Paused"), "Paused");
+        assert_eq!(tr("fi", "not in the table"), "not in the table");
+        assert_eq!(
+            fill(tr("en", "{} · last sync {}"), &["Up to date", "5 s ago"]),
+            "Up to date · last sync 5 s ago"
+        );
+        assert_eq!(
+            fill(
+                tr("fi", "{} · last sync {}"),
+                &["Ajan tasalla", "5 s sitten"]
+            ),
+            "Ajan tasalla · viimeisin synkronointi 5 s sitten"
+        );
     }
 }

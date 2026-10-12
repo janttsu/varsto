@@ -111,7 +111,7 @@ class MainActivity : AppCompatActivity() {
                 putExtra(Intent.EXTRA_ALLOW_MULTIPLE, params.mode == FileChooserParams.MODE_OPEN_MULTIPLE)
             }
             return try {
-                pickFiles.launch(Intent.createChooser(intent, getString(R.string.choose_files)))
+                pickFiles.launch(Intent.createChooser(intent, str(R.string.choose_files)))
                 true
             } catch (e: Exception) {
                 fileChooser = null
@@ -140,6 +140,9 @@ class MainActivity : AppCompatActivity() {
             return true
         }
     }
+
+    /** A string in the language picked in the web UI (see VarstoService.localized). */
+    private fun str(id: Int, vararg args: Any): String = VarstoService.localized(this).getString(id, *args)
 
     private fun urisOf(resultCode: Int, data: Intent?): Array<Uri>? {
         if (resultCode != Activity.RESULT_OK || data == null) return null
@@ -206,14 +209,14 @@ class MainActivity : AppCompatActivity() {
         handler.post {
             val file = File(path)
             if (!file.isFile) {
-                AlertDialog.Builder(this).setMessage(getString(R.string.file_missing, file.name))
+                AlertDialog.Builder(this).setMessage(str(R.string.file_missing, file.name))
                     .setPositiveButton(android.R.string.ok, null).show()
                 return@post
             }
             val uri = try {
                 FileProvider.getUriForFile(this, "$packageName.files", file)
             } catch (e: IllegalArgumentException) {
-                AlertDialog.Builder(this).setMessage(getString(R.string.file_not_shareable, path))
+                AlertDialog.Builder(this).setMessage(str(R.string.file_not_shareable, path))
                     .setPositiveButton(android.R.string.ok, null).show()
                 return@post
             }
@@ -225,7 +228,7 @@ class MainActivity : AppCompatActivity() {
                 Intent(Intent.ACTION_VIEW).apply { setDataAndType(uri, mime) }
             }
             intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            startActivity(Intent.createChooser(intent, getString(if (share) R.string.share_with else R.string.open_with)))
+            startActivity(Intent.createChooser(intent, str(if (share) R.string.share_with else R.string.open_with)))
         }
     }
 
@@ -258,7 +261,7 @@ class MainActivity : AppCompatActivity() {
         if (attempts++ < 100) {
             handler.postDelayed({ load() }, 250)
         } else {
-            web.loadData("<h2>Varsto service did not start</h2>", "text/html", "utf-8")
+            web.loadDataWithBaseURL(null, "<h2>${str(R.string.service_did_not_start)}</h2>", "text/html", "utf-8", null)
         }
     }
 

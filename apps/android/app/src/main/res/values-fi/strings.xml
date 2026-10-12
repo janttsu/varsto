@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="service_running">Varsto synkronoi taustalla</string>
+    <string name="choose_files">Lisää tiedostoja Varstoon</string>
+    <string name="open_with">Avaa sovelluksella</string>
+    <string name="share_with">Jaa</string>
+    <string name="file_missing">%1$s ei ole vielä tällä puhelimella</string>
+    <string name="file_not_shareable">Tätä tiedostoa ei voi antaa muille sovelluksille: %1$s</string>
+    <string name="camera_uploading">Ladataan %1$d/%2$d kansioon %3$s</string>
+    <string name="service_did_not_start">Varsto-palvelu ei käynnistynyt</string>
+</resources>

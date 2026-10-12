@@ -12,6 +12,21 @@ struct VarstoApp: App {
     }
 }
 
+/// `en` in the interface language picked in the web UI (`<home>/ui-language`:
+/// "en", "fi" or "sv"), with `{}` replaced by `arg`.
+func tr(_ en: String, _ arg: String = "") -> String {
+    let home = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Varsto")
+    let lang = (try? String(contentsOf: home.appendingPathComponent("ui-language"), encoding: .utf8))?
+        .trimmingCharacters(in: .whitespacesAndNewlines) ?? "en"
+    let texts: [String: (fi: String, sv: String)] = [
+        "Starting Varsto…": ("Varsto käynnistyy…", "Varsto startar…"),
+        "service failed to start ({})": ("palvelun käynnistys epäonnistui ({})", "tjänsten kunde inte startas ({})"),
+        "service did not start": ("palvelu ei käynnistynyt", "tjänsten startade inte"),
+    ]
+    let t = texts[en].map { lang == "fi" ? $0.fi : lang == "sv" ? $0.sv : en } ?? en
+    return t.replacingOccurrences(of: "{}", with: arg)
+}
+
 final class ServiceHost: ObservableObject {
     @Published var url: URL?
     @Published var error: String?
@@ -30,7 +45,7 @@ final class ServiceHost: ObservableObject {
         setenv("VARSTO_OS_VERSION", UIDevice.current.systemVersion, 1)
         setenv("VARSTO_DEVICE_MODEL", UIDevice.current.model, 1)
         let rc = home.path.withCString { varsto_start($0, 0) }
-        if rc != 0 { error = "service failed to start (\(rc))"; return }
+        if rc != 0 { error = tr("service failed to start ({})", "\(rc)"); return }
         DispatchQueue.global().async {
             for _ in 0..<50 {
                 if let c = varsto_url() {
@@ -41,7 +56,7 @@ final class ServiceHost: ObservableObject {
                 }
                 usleep(100_000)
             }
-            DispatchQueue.main.async { self.error = "service did not start" }
+            DispatchQueue.main.async { self.error = tr("service did not start") }
         }
     }
 }
@@ -55,7 +70,7 @@ struct ContentView: View {
             } else if let e = host.error {
                 VStack(spacing: 12) { Text("Varsto").font(.largeTitle.bold()); Text(e).foregroundColor(.secondary) }
             } else {
-                ProgressView("Starting Varsto…")
+                ProgressView(tr("Starting Varsto…"))
             }
         }
     }

@@ -140,7 +140,7 @@ class CameraUpload(private val context: Context, private val progress: (String?)
         for ((n, item) in items.withIndex()) {
             if (s.wifiOnly && !onWifi()) return setStatus("waiting", "Waiting for Wi-Fi")
             if (s.chargingOnly && !charging()) return setStatus("waiting", "Waiting for the charger")
-            progress("Uploading ${n + 1} of ${items.size} to ${s.folder}")
+            progress(VarstoService.localized(context).getString(R.string.camera_uploading, n + 1, items.size, s.folder))
             if (item.size > MAX_UPLOAD) {
                 remember(item.key)
                 skipped = "${item.name} is larger than ${MAX_UPLOAD shr 30} GiB and was skipped"
