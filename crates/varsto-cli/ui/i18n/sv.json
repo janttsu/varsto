@@ -527,7 +527,11 @@
   "× on average": "× i genomsnitt",
   "← Back": "← Tillbaka",
   "Language": "Språk",
-  "English, Finnish or Swedish. The command line is always in English.": "Engelska, finska eller svenska. Kommandoraden är alltid på engelska."
+  "English, Finnish or Swedish. The command line is always in English.": "Engelska, finska eller svenska. Kommandoraden är alltid på engelska.",
+  "Waiting for Wi-Fi": "Väntar på Wi-Fi",
+  "Waiting for the charger": "Väntar på laddaren",
+  "Waiting for the Varsto service": "Väntar på Varsto-tjänsten",
+  "Waiting for Varsto to be unlocked": "Väntar på att Varsto låses upp"
  },
  "patterns": [
   [
@@ -573,6 +577,14 @@
   [
    "^Sending to the storages: (.+) of (.+)$",
    "Skickar till lagringsplatserna: $1 av $2"
+  ],
+  [
+   "^Folder (.+) is not on this phone$",
+   "Mappen $1 finns inte på den här telefonen"
+  ],
+  [
+   "^(.+) is larger than (\\d+) GiB and was skipped$",
+   "$1 är större än $2 GiB och hoppades över"
   ]
  ],
  "review": [

@@ -534,7 +534,11 @@
   "× on average": "× keskimäärin",
   "← Back": "← Takaisin",
   "Language": "Kieli",
-  "English, Finnish or Swedish. The command line is always in English.": "Englanti, suomi tai ruotsi. Komentorivi on aina englanniksi."
+  "English, Finnish or Swedish. The command line is always in English.": "Englanti, suomi tai ruotsi. Komentorivi on aina englanniksi.",
+  "Waiting for Wi-Fi": "Odotetaan Wi-Fi-yhteyttä",
+  "Waiting for the charger": "Odotetaan laturia",
+  "Waiting for the Varsto service": "Odotetaan Varsto-palvelua",
+  "Waiting for Varsto to be unlocked": "Odotetaan Varston lukituksen avaamista"
  },
  "patterns": [
   [
@@ -580,6 +584,14 @@
   [
    "^Sending to the storages: (.+) of (.+)$",
    "Lähetetään tallennuspaikkoihin: $1 / $2"
+  ],
+  [
+   "^Folder (.+) is not on this phone$",
+   "Kansio $1 ei ole tässä puhelimessa"
+  ],
+  [
+   "^(.+) is larger than (\\d+) GiB and was skipped$",
+   "$1 on yli $2 GiB ja ohitettiin"
   ]
  ],
  "review": [
