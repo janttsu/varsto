@@ -25,6 +25,5 @@ walkdir.workspace = true
 ed25519-dalek.workspace = true
 blake2 = "0.10"
 base64 = "0.22"
-
-[dev-dependencies]
 tempfile.workspace = true
+

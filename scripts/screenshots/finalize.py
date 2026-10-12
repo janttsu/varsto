@@ -20,6 +20,7 @@ from PIL import Image
 WIDTHS = {
     "desktop-overview-light": 1280, "desktop-overview-dark": 1280,
     "desktop-files-light": 1024, "desktop-files-dark": 1024,
+    "desktop-organization-light": 1280, "desktop-organization-dark": 1280,
     "mobile-light": 824, "mobile-dark": 824,
     "macos-app": 1024,
     "linux-app": 1280, "linux-tray": None,

@@ -227,6 +227,7 @@ impl Engine {
         if self.vault.member {
             bail!("a member device cannot share folders further");
         }
+        self.org_allows(|p| p.members_may_share, "share folders with other people")?;
         let rec = self
             .keyring
             .find(folder)

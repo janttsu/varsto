@@ -7,7 +7,7 @@ desktop overview and files, and the phone layout, each light and dark.
 
 Needs `pip install playwright pillow` and `playwright install chromium`
 (CHROMIUM=/path/to/chromium uses another build). Writes the website names:
-desktop-overview-*, desktop-files-*, mobile-* (light and dark).
+desktop-overview-*, desktop-files-*, desktop-organization-*, mobile-* (light and dark).
 """
 import json
 import os
@@ -28,8 +28,9 @@ def url(dev):
     return f"http://127.0.0.1:{j['port']}/?token={j['token']}"
 
 
-THUMBS = ("Array.from(document.querySelectorAll('img.thumb')).length >= 3 && "
-          "Array.from(document.querySelectorAll('img.thumb')).every(i => i.complete && i.naturalWidth > 0)")
+# Desktop rows use img.thumb; the compact phone list puts them in .mrow-thumb.
+_IMGS = "Array.from(document.querySelectorAll('#files img.thumb, #files .mrow-thumb img'))"
+THUMBS = (f"{_IMGS}.length >= 3 && {_IMGS}.every(i => i.complete && i.naturalWidth > 0)")
 
 with sync_playwright() as p:
     exe = os.environ.get("CHROMIUM")
@@ -47,6 +48,11 @@ with sync_playwright() as p:
         pg.wait_for_selector("#folders tbody tr:nth-child(2)", timeout=60000)
         time.sleep(2)
         pg.screenshot(path=f"{out}/desktop-overview-{scheme}.png")
+        # The organization page of the same vault (the laptop is its administrator).
+        pg.click(".sidebar .nav-item[data-nav=organization]")
+        pg.wait_for_selector("#org-users li", timeout=60000)
+        time.sleep(1)
+        pg.screenshot(path=f"{out}/desktop-organization-{scheme}.png")
         c.close()
         # Files of Photos with a file's details, cropped around the layout.
         c = ctx(scheme)

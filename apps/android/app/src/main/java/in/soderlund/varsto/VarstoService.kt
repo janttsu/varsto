@@ -16,6 +16,7 @@ import java.io.File
 class VarstoService : Service() {
     private var process: Process? = null
     private var camera: CameraUpload? = null
+    private val videoThumbs by lazy { VideoThumbs(this) }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -27,6 +28,7 @@ class VarstoService : Service() {
             getSystemService(NotificationManager::class.java).notify(1, notification(text))
         }.also { camera = it }
         cam.start()
+        videoThumbs.start()
         cam.requestScan(if (intent?.action == ACTION_CAMERA_SCAN) 500 else 10_000)
         return START_STICKY
     }
@@ -82,6 +84,7 @@ class VarstoService : Service() {
 
     override fun onDestroy() {
         camera?.stop()
+        videoThumbs.stop()
         process?.destroy()
         super.onDestroy()
     }

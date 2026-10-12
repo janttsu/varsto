@@ -38,6 +38,11 @@ pub struct S3Storage {
     scheme: String,
     /// Path prefix of every request (`/bucket` for path style, empty otherwise).
     base_path: String,
+    /// Seconds to add to this device's clock when signing: learned from the
+    /// server's `Date` header after it refused a request signed with a
+    /// clock that is off (S3 refuses signatures more than 15 minutes from
+    /// its own time; phones and virtual machines are often that far off).
+    clock_offset: std::sync::atomic::AtomicI64,
 }
 
 /// Largest response body read into memory. Chunks are at most a few MiB;
@@ -47,6 +52,60 @@ const MAX_BODY: u64 = 2 << 30;
 const EMPTY_SHA256: &str = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
 
 impl S3Storage {
+    /// A refusal in words a person can act on, then the technical details
+    /// (operation, key, HTTP status, the S3 error code and message).
+    fn explain(&self, op: &str, key: &str, status: u16, body: &[u8]) -> anyhow::Error {
+        let doc = String::from_utf8_lossy(body);
+        let code = xml_tag(&doc, "Code")
+            .map(|c| c.trim().to_string())
+            .unwrap_or_default();
+        let message = xml_tag(&doc, "Message")
+            .map(|m| xml_unescape(m.trim()))
+            .unwrap_or_default();
+        let bucket = &self.cfg.bucket;
+        let endpoint = &self.cfg.endpoint;
+        let words = match (code.as_str(), status) {
+            ("InvalidAccessKeyId", _) => format!(
+                "The storage does not know this access key. Check that the access key ID was copied in full and belongs to {endpoint}."
+            ),
+            ("SignatureDoesNotMatch", _) => {
+                "The secret key does not belong to this access key. Copy the secret key again.".to_string()
+            }
+            ("RequestTimeTooSkewed", _) => {
+                "This device's clock is too far from the storage's clock. Set the date and time automatically and try again.".to_string()
+            }
+            ("NoSuchBucket", _) => format!(
+                "Bucket \"{bucket}\" does not exist at {endpoint}. Check the bucket name and the region of the endpoint."
+            ),
+            ("PermanentRedirect" | "AuthorizationHeaderMalformed" | "IllegalLocationConstraintException", _) | (_, 301) => {
+                let hint = xml_tag(&doc, "Region")
+                    .or_else(|| xml_tag(&doc, "Endpoint"))
+                    .map(|r| format!(" It answered: {}.", r.trim()))
+                    .unwrap_or_default();
+                format!("Bucket \"{bucket}\" is in another region than the endpoint {endpoint}. Use the endpoint and region of the bucket.{hint}")
+            }
+            ("AccessDenied" | "AllAccessDisabled" | "AccountProblem", _) | (_, 401 | 403) => format!(
+                "The storage refused access to bucket \"{bucket}\". The access key needs permission to list, read, write and delete objects in it; check the key's policy (IAM) and the bucket policy. A new key without a policy is refused like this."
+            ),
+            ("QuotaExceeded" | "StorageQuotaExceeded", _) | (_, 507) => {
+                "The storage is full or over its quota. Free space there or raise the quota.".to_string()
+            }
+            ("SlowDown", _) | (_, 429 | 503) => {
+                "The storage asked to slow down or is unavailable for a moment. Varsto tries again by itself.".to_string()
+            }
+            (_, 500..=599) => "The storage had an internal error. Varsto tries again by itself; if it keeps happening, check the provider's status page.".to_string(),
+            _ => format!("The storage answered with HTTP {status}."),
+        };
+        let mut detail = format!("{op} {key}: HTTP {status}");
+        if !code.is_empty() {
+            detail.push_str(&format!(" {code}"));
+        }
+        if !message.is_empty() {
+            detail.push_str(&format!(": {message}"));
+        }
+        anyhow!("{words} (storage {}: {detail})", self.cfg.name)
+    }
+
     pub fn new(cfg: S3Config) -> Result<Self> {
         let endpoint = cfg.endpoint.clone();
         let (scheme, rest) = endpoint
@@ -64,6 +123,11 @@ impl S3Storage {
         let config = ureq::Agent::config_builder()
             .http_status_as_error(false)
             .timeout_global(Some(Duration::from_secs(600)))
+            // A storage that accepts the request and then goes silent must
+            // not freeze a sync for the whole global limit: connecting and
+            // the first byte of the answer each get their own, shorter one.
+            .timeout_connect(Some(Duration::from_secs(20)))
+            .timeout_recv_response(Some(Duration::from_secs(120)))
             // Downloads keep up to 32 objects in flight; with ureq's default
             // of three idle connections per host the others would pay a new
             // TLS handshake for every object.
@@ -76,10 +140,12 @@ impl S3Storage {
             host,
             scheme: scheme.to_string(),
             base_path,
+            clock_offset: std::sync::atomic::AtomicI64::new(0),
         })
     }
 
     fn object_path(&self, key: &str) -> String {
+        // Keys are validated by `checked` before any request is built.
         let full = if self.cfg.prefix.is_empty() {
             key.to_string()
         } else {
@@ -97,7 +163,9 @@ impl S3Storage {
         }
     }
 
-    /// Build and sign a request. `query` must already be sorted by key.
+    /// Build, sign and send a request. A 403 from a server whose clock is
+    /// more than five minutes from ours is retried once with our clock
+    /// corrected to the server's (the offset is kept for later requests).
     fn request(
         &self,
         method: &str,
@@ -106,7 +174,35 @@ impl S3Storage {
         extra_headers: &[(&str, &str)],
         body: &[u8],
     ) -> Result<(u16, Vec<u8>)> {
-        let amz_date = amz_date_now();
+        use std::sync::atomic::Ordering;
+        let (status, bytes, server_date) =
+            self.request_once(method, path, query, extra_headers, body)?;
+        if status == 403 {
+            if let Some(server) = server_date.as_deref().and_then(parse_http_date) {
+                let ours = unix_now() + self.clock_offset.load(Ordering::Relaxed);
+                if (server - ours).abs() > 300 {
+                    self.clock_offset
+                        .store(server - unix_now(), Ordering::Relaxed);
+                    let (status, bytes, _) =
+                        self.request_once(method, path, query, extra_headers, body)?;
+                    return Ok((status, bytes));
+                }
+            }
+        }
+        Ok((status, bytes))
+    }
+
+    /// Build and sign one request. `query` must already be sorted by key.
+    fn request_once(
+        &self,
+        method: &str,
+        path: &str,
+        query: &[(String, String)],
+        extra_headers: &[(&str, &str)],
+        body: &[u8],
+    ) -> Result<(u16, Vec<u8>, Option<String>)> {
+        let amz_date =
+            amz_date_at(unix_now() + self.clock_offset.load(std::sync::atomic::Ordering::Relaxed));
         let date = &amz_date[..8];
         let payload_hash = if body.is_empty() {
             EMPTY_SHA256.to_string()
@@ -189,6 +285,11 @@ impl S3Storage {
         }
         .with_context(|| format!("{method} {}", self.cfg.name))?;
         let status = resp.status().as_u16();
+        let server_date = resp
+            .headers()
+            .get("date")
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.to_string());
         let bytes = if method == "HEAD" {
             Vec::new()
         } else {
@@ -200,10 +301,11 @@ impl S3Storage {
                 .read_to_vec()
                 .with_context(|| format!("{method} {}: reading the response", self.cfg.name))?
         };
-        Ok((status, bytes))
+        Ok((status, bytes, server_date))
     }
 
     fn put(&self, key: &str, data: &[u8], if_none_match: bool) -> Result<u16> {
+        crate::storage::validate_key(key)?;
         let mut headers: Vec<(&str, &str)> = Vec::new();
         if if_none_match {
             headers.push(("if-none-match", "*"));
@@ -213,21 +315,60 @@ impl S3Storage {
         }
         let (status, body) = self.request("PUT", &self.object_path(key), &[], &headers, data)?;
         if status >= 500 {
-            bail!(
-                "PUT {key}: HTTP {status}: {}",
-                String::from_utf8_lossy(&body)
-            );
+            return Err(self.explain("PUT", key, status, &body));
         }
         Ok(status)
     }
 }
 
-/// `YYYYMMDDTHHMMSSZ` for the current UTC time, without a date crate.
-fn amz_date_now() -> String {
-    let secs = std::time::SystemTime::now()
+fn unix_now() -> i64 {
+    std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
-        .unwrap_or(0);
+        .unwrap_or(0)
+}
+
+/// `YYYYMMDDTHHMMSSZ` for the current UTC time, without a date crate.
+#[cfg(test)]
+fn amz_date_now() -> String {
+    amz_date_at(unix_now())
+}
+
+/// Seconds since the epoch of an HTTP date (`Sun, 11 Oct 2026 07:57:54 GMT`).
+fn parse_http_date(s: &str) -> Option<i64> {
+    let mut it = s.split_whitespace().skip(1);
+    let day: i64 = it.next()?.parse().ok()?;
+    let month = match it.next()? {
+        "Jan" => 1,
+        "Feb" => 2,
+        "Mar" => 3,
+        "Apr" => 4,
+        "May" => 5,
+        "Jun" => 6,
+        "Jul" => 7,
+        "Aug" => 8,
+        "Sep" => 9,
+        "Oct" => 10,
+        "Nov" => 11,
+        "Dec" => 12,
+        _ => return None,
+    };
+    let year: i64 = it.next()?.parse().ok()?;
+    let mut hms = it.next()?.split(':').map(|x| x.parse::<i64>().ok());
+    let (h, m, sec) = (hms.next()??, hms.next()??, hms.next()??);
+    // Days from civil (Howard Hinnant's algorithm).
+    let y = if month <= 2 { year - 1 } else { year };
+    let era = y.div_euclid(400);
+    let yoe = y - era * 400;
+    let mp = (month + 9) % 12;
+    let doy = (153 * mp + 2) / 5 + day - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days = era * 146_097 + doe - 719_468;
+    Some(days * 86_400 + h * 3600 + m * 60 + sec)
+}
+
+/// `YYYYMMDDTHHMMSSZ` for `secs` since the epoch.
+fn amz_date_at(secs: i64) -> String {
     let days = secs.div_euclid(86_400);
     let rem = secs.rem_euclid(86_400);
     // Civil-from-days (Howard Hinnant's algorithm).
@@ -310,6 +451,7 @@ impl Storage for S3Storage {
     }
 
     fn put_if_absent(&self, key: &str, data: &[u8]) -> Result<bool> {
+        crate::storage::validate_key(key)?;
         // Some servers silently ignore `If-None-Match`, so check first; the
         // condition then only closes the window between HEAD and PUT on
         // servers that do honour it.
@@ -321,13 +463,14 @@ impl Storage for S3Storage {
             412 => Ok(false),
             400 | 501 => match self.put(key, data, false)? {
                 200 | 201 => Ok(true),
-                s => bail!("PUT {key}: HTTP {s}"),
+                s => Err(self.explain("PUT", key, s, &[])),
             },
-            s => bail!("PUT {key}: HTTP {s}"),
+            s => Err(self.explain("PUT", key, s, &[])),
         }
     }
 
     fn get(&self, key: &str) -> Result<Option<Vec<u8>>> {
+        crate::storage::validate_key(key)?;
         let (status, body) = self.request("GET", &self.object_path(key), &[], &[], &[])?;
         match status {
             200 => Ok(Some(body)),
@@ -335,16 +478,17 @@ impl Storage for S3Storage {
             403 if String::from_utf8_lossy(&body).contains("InvalidObjectState") => {
                 bail!("GET {key}: object is in a cold storage class and must be restored first")
             }
-            s => bail!("GET {key}: HTTP {s}: {}", String::from_utf8_lossy(&body)),
+            s => Err(self.explain("GET", key, s, &body)),
         }
     }
 
     fn exists(&self, key: &str) -> Result<bool> {
+        crate::storage::validate_key(key)?;
         let (status, _) = self.request("HEAD", &self.object_path(key), &[], &[], &[])?;
         match status {
             200 => Ok(true),
             404 => Ok(false),
-            s => bail!("HEAD {key}: HTTP {s}"),
+            s => Err(self.explain("HEAD", key, s, &[])),
         }
     }
 
@@ -380,10 +524,7 @@ impl Storage for S3Storage {
             };
             let (status, body) = self.request("GET", &path, &query, &[], &[])?;
             if status != 200 {
-                bail!(
-                    "LIST {prefix}: HTTP {status}: {}",
-                    String::from_utf8_lossy(&body)
-                );
+                return Err(self.explain("LIST", prefix, status, &body));
             }
             let doc = String::from_utf8_lossy(&body).to_string();
             for k in xml_tags(&doc, "Key") {
@@ -411,10 +552,11 @@ impl Storage for S3Storage {
     }
 
     fn delete(&self, key: &str) -> Result<()> {
+        crate::storage::validate_key(key)?;
         let (status, body) = self.request("DELETE", &self.object_path(key), &[], &[], &[])?;
         match status {
             200 | 202 | 204 | 404 => Ok(()),
-            s => bail!("DELETE {key}: HTTP {s}: {}", String::from_utf8_lossy(&body)),
+            s => Err(self.explain("DELETE", key, s, &body)),
         }
     }
 }
@@ -430,6 +572,39 @@ mod tests {
         assert_eq!(xml_tags(doc, "Key"), vec!["a/b&amp;c", "d"]);
         assert_eq!(xml_unescape("a/b&amp;c"), "a/b&c");
         assert_eq!(xml_tag(doc, "IsTruncated"), Some("false"));
+    }
+
+    #[test]
+    fn refusals_are_explained() {
+        let s = S3Storage::new(S3Config {
+            name: "test".into(),
+            endpoint: "https://s3.example.net".into(),
+            region: "us-east-1".into(),
+            bucket: "photos".into(),
+            prefix: String::new(),
+            access_key_id: "k".into(),
+            secret_access_key: "s".into(),
+            path_style: true,
+            storage_class: None,
+        })
+        .unwrap();
+        let body = b"<?xml version=\"1.0\"?><Error><Code>AccessDenied</Code><Message>Access Denied</Message></Error>";
+        let e = s.explain("GET", "vault/meta.json", 403, body).to_string();
+        assert!(
+            e.starts_with("The storage refused access to bucket \"photos\""),
+            "{e}"
+        );
+        assert!(
+            e.contains("GET vault/meta.json: HTTP 403 AccessDenied: Access Denied"),
+            "{e}"
+        );
+        let e = s.explain("HEAD", "x", 404, b"").to_string();
+        assert!(e.contains("HTTP 404"), "{e}");
+        let body = b"<Error><Code>NoSuchBucket</Code></Error>";
+        assert!(s
+            .explain("LIST", "", 404, body)
+            .to_string()
+            .contains("does not exist"));
     }
 
     #[test]
@@ -457,6 +632,20 @@ mod tests {
         .unwrap();
         assert_eq!(s.get("manifests/x").unwrap().unwrap(), body);
         th.join().unwrap();
+    }
+
+    #[test]
+    fn http_dates_parse_and_round_trip() {
+        let t = parse_http_date("Sun, 11 Oct 2026 07:57:54 GMT").unwrap();
+        assert_eq!(amz_date_at(t), "20261011T075754Z");
+        assert_eq!(parse_http_date("Thu, 01 Jan 1970 00:00:00 GMT"), Some(0));
+        assert_eq!(
+            parse_http_date("Tue, 29 Feb 2028 23:59:59 GMT")
+                .map(amz_date_at)
+                .as_deref(),
+            Some("20280229T235959Z")
+        );
+        assert!(parse_http_date("yesterday").is_none());
     }
 
     #[test]

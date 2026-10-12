@@ -29,6 +29,7 @@
   <symbol id="i-check" viewBox="0 0 20 20"><path d="m4.5 10.5 3.5 3.5 7.5-8"/></symbol>
   <symbol id="i-warn" viewBox="0 0 20 20"><path d="M10 3.5 17 16H3z"/><path d="M10 8v4M10 13.6v.4"/></symbol>
   <symbol id="i-info" viewBox="0 0 20 20"><circle cx="10" cy="10" r="7"/><path d="M10 9v4.5M10 6.6v.4"/></symbol>
+  <symbol id="i-org" viewBox="0 0 20 20"><circle cx="10" cy="5" r="2.2"/><circle cx="4.5" cy="14" r="2.2"/><circle cx="15.5" cy="14" r="2.2"/><path d="M10 7.2v3M10 10.2l-3.8 2M10 10.2l3.8 2"/></symbol>
   <symbol id="i-device" viewBox="0 0 20 20"><rect x="2.5" y="4" width="15" height="10" rx="1.5"/><path d="M7 17h6"/></symbol>
   <symbol id="i-activity" viewBox="0 0 20 20"><path d="M2.5 10h3l2-5 4 10 2-5h4"/></symbol>
   <symbol id="i-plus" viewBox="0 0 20 20"><path d="M10 4.5v11M4.5 10h11"/></symbol>
@@ -60,6 +61,7 @@
     <button type="button" class="nav-item" data-nav="storages"><svg class="icon"><use href="#i-storages"/></svg><span>Storages</span></button>
     <button type="button" class="nav-item" data-nav="policies"><svg class="icon"><use href="#i-policies"/></svg><span>Policies</span></button>
     <button type="button" class="nav-item" data-nav="peers"><svg class="icon"><use href="#i-peers"/></svg><span>Peers</span></button>
+    <button type="button" class="nav-item hidden" data-nav="organization" data-org-only="1"><svg class="icon"><use href="#i-org"/></svg><span>Organization</span></button>
     <button type="button" class="nav-item" data-nav="settings"><svg class="icon"><use href="#i-settings"/></svg><span>Settings</span></button>
   </nav>
   <div class="sidebar-foot">
@@ -130,6 +132,17 @@
         </div>
         <div class="actions"><button type="submit">Join</button></div>
       </form>
+      <form id="orgjoin" class="card">
+        <h3 class="card-title"><svg class="icon accent"><use href="#i-org"/></svg>Join your organization</h3>
+        <label>Name for this device <input name="name" placeholder="work-laptop" required></label>
+        <label>Passphrase for this device <input name="passphrase" type="password" minlength="8" required></label>
+        <p class="muted small">Step 1: send an administrator the request code from this device. Step 2: read its six-word fingerprint to them over a call or in person; they see the same words. Step 3: paste the approval token they send back.</p>
+        <div class="row"><button type="button" id="orgrequest" class="secondary">Show my request code</button></div>
+        <pre id="orgrequestout" class="hidden"></pre>
+        <label>Approval token <input name="token" required autocapitalize="none" autocomplete="off"></label>
+        <div class="actions"><button type="submit">Join</button></div>
+        <p class="muted small">The token carries the vault key and the storage settings, sealed to this device's request key; only this device can open it.</p>
+      </form>
       <form id="acceptshare" class="card">
         <h3 class="card-title"><svg class="icon accent"><use href="#i-sharing"/></svg>Accept a shared folder</h3>
         <label>Device name <input name="name" placeholder="my-laptop" required></label>
@@ -138,7 +151,16 @@
         <div class="row"><button type="button" id="sharerequest" class="secondary">Show my request code</button></div>
         <pre id="sharerequestout" class="hidden"></pre>
         <label>Share token <input name="token" required></label>
-        <label>Storage both of you can reach <input name="storage_path" required></label>
+        <label>Where the owner's vault is <select name="kind" id="sharekind"><option value="local-dir">A directory both of you can reach</option><option value="s3">An S3-compatible bucket</option></select></label>
+        <div data-sharekind="local-dir"><label>Storage both of you can reach <input name="storage_path"></label></div>
+        <div data-sharekind="s3" class="hidden">
+          <label>Endpoint <input name="endpoint" placeholder="https://s3.fr-par.scw.cloud"></label>
+          <label>Region <input name="region" placeholder="fr-par"></label>
+          <label>Bucket <input name="bucket"></label>
+          <label>Access key id <input name="access_key_id" autocomplete="off"></label>
+          <label>Secret access key <input name="secret_access_key" type="password" autocomplete="off"></label>
+          <p class="muted small">Credentials the owner gave you for this bucket. The secret is kept in this device's encrypted secret store.</p>
+        </div>
         <div class="actions"><button type="submit">Accept</button></div>
         <p class="muted small">You get the folder key only: this device can read and write that folder, nothing else of the other vault. A sealed token (vst1… or vst2…) can be opened only here, and this device checks that the owner confirmed its fingerprint; a plain token carries the key itself.</p>
       </form>
@@ -176,10 +198,11 @@
         <div class="service-body">
           <div class="service-head"><span class="card-title">Background service</span><span id="svc-pill" class="pill grey">unknown</span></div>
           <div id="svc-text" class="muted"></div>
+          <div id="update-note" class="small hidden"></div>
         </div>
         <div class="service-actions">
           <button id="pause" type="button" class="secondary">Pause</button>
-          <button id="update" type="button" class="secondary">Check for updates</button>
+          <button id="update" type="button" class="hidden">Install update</button>
         </div>
       </div>
 
@@ -196,12 +219,6 @@
       <div class="card">
         <div class="card-head">
           <h2 class="card-title">Folders</h2>
-          <div class="toolbar">
-            <label class="inline muted"><input id="verify" type="checkbox"> re-hash every object</label>
-            <button id="fsck" type="button" class="secondary" title="Compare the ledger with the storages">Check storage</button>
-            <button id="refresh" type="button" class="secondary icon-btn" title="Refresh"><svg class="icon"><use href="#i-sync"/></svg><span class="sr-only">Refresh</span></button>
-            <button id="sync" type="button" title="Sync every attached folder now"><svg class="icon"><use href="#i-sync"/></svg>Sync all</button>
-          </div>
         </div>
         <div class="table-wrap">
         <table id="folders"><thead><tr><th>Folder</th><th class="num">Files</th><th class="num">Size</th><th class="num">Chunks</th><th class="num">Without storage copy</th><th class="num">Verified elsewhere</th><th>Policy</th><th></th></tr></thead><tbody></tbody></table>
@@ -234,7 +251,7 @@
         <div class="wd-summary">
           <div class="wd-headline">
             <span id="wd-bytes" class="wd-big"></span>
-            <span id="wd-avg" class="wd-avg"></span>
+            <span id="wd-avg" class="wd-avg" tabindex="0"></span>
           </div>
           <div class="wd-copies">
             <span class="wd-copies-cap">Kept copies</span>
@@ -254,7 +271,7 @@
 
       <div class="card">
         <h2 class="card-title"><svg class="icon accent"><use href="#i-activity"/></svg>Activity</h2>
-        <pre id="log" class="log"></pre>
+        <ul id="log" class="activity-list" aria-live="polite"></ul>
       </div>
     </div>
 
@@ -275,13 +292,12 @@
               <select id="filesfolder" class="crumb-select" title="Choose a folder"></select>
               <span class="toolbar-spacer"></span>
               <button id="filesadd" type="button" class="secondary icon-btn" title="Add or attach a folder"><svg class="icon"><use href="#i-plus"/></svg><span class="sr-only">Add folder</span></button>
-              <button id="filesload" type="button" class="secondary icon-btn" title="Refresh the file list"><svg class="icon"><use href="#i-sync"/></svg><span class="sr-only">Refresh</span></button>
+
             </div>
             <div class="files-sub muted small" id="files-sub"></div>
             <div class="files-where small hidden" id="files-where"></div>
           </div>
           <div class="toolbar files-toolbar">
-            <button id="files-sync" type="button" title="Sync this folder now"><svg class="icon"><use href="#i-sync"/></svg>Sync</button>
             <button id="files-upload" type="button" class="secondary" title="Add files from this device to the folder"><svg class="icon"><use href="#i-upload"/></svg>Add files</button>
             <button id="files-mkdir" type="button" class="secondary" title="Create a subfolder"><svg class="icon"><use href="#i-newfolder"/></svg>New folder</button>
             <button id="files-download" type="button" class="secondary" title="Download the selected file to this device" disabled><svg class="icon"><use href="#i-download"/></svg>Download</button>
@@ -294,6 +310,14 @@
           <div id="files-progress" class="status-line progress hidden" role="status"></div>
           <div class="table-wrap">
           <table id="files"><thead><tr><th>Name</th><th class="num">Size</th><th>State</th><th>Last used</th><th></th></tr></thead><tbody></tbody></table>
+          </div>
+          <div id="selbar" class="selbar hidden" role="toolbar" aria-label="Selected files">
+            <button id="sel-cancel" type="button" class="secondary icon-btn" title="Cancel selection"><svg class="icon"><use href="#i-close"/></svg><span class="sr-only">Cancel</span></button>
+            <span id="sel-count" class="sel-count"></span>
+            <span class="toolbar-spacer"></span>
+            <button id="sel-all" type="button" class="secondary">All</button>
+            <button id="sel-download" type="button" class="secondary"><svg class="icon"><use href="#i-download"/></svg>Download</button>
+            <button id="sel-free" type="button" class="secondary"><svg class="icon"><use href="#i-free"/></svg>Free</button>
           </div>
           <div id="files-empty" class="empty-state"><div class="empty-icon"><svg class="icon"><use href="#i-folders"/></svg></div><p class="empty-title">Choose a folder</p><p class="muted">Pick a folder above, or add a new one.</p></div>
         </div>
@@ -480,6 +504,64 @@
       </details>
     </div>
 
+    <!-- Organization (only when the vault has one) -->
+    <div class="page hidden" data-page="organization">
+      <div class="card">
+        <h2 class="card-title"><svg class="icon accent"><use href="#i-org"/></svg><span id="org-name"></span></h2>
+        <p id="org-me" class="muted small"></p>
+        <p id="org-unlisted-note" class="small hidden"></p>
+      </div>
+      <div class="cols">
+        <div class="card">
+          <h2 class="card-title">People and their devices</h2>
+          <ul id="org-users" class="list compact-list"></ul>
+          <p id="org-unlisted-head" class="small hidden">In the vault but not in the organization (ignored by the others until an administrator adds them):</p>
+          <ul id="org-unlisted" class="list compact-list"></ul>
+          <details id="org-removed-box" class="hidden"><summary class="small">Removed</summary><ul id="org-removed" class="list compact-list"></ul></details>
+        </div>
+        <div class="card" id="org-admin-card">
+          <h2 class="card-title">Approve a device</h2>
+          <p class="muted small">The person shows a request code on the new device (Join your organization on its setup screen, or <code>varsto org request</code>). Paste it here, compare the six words with them, name the person, and send the token back.</p>
+          <form id="org-approve" class="form-grid">
+            <label>Request code <input name="code" required autocapitalize="none" autocomplete="off"></label>
+            <label>Person (user name) <input name="user" required placeholder="dana"></label>
+            <div class="actions"><button type="submit">Check and approve…</button></div>
+          </form>
+          <pre id="org-approveout" class="hidden"></pre>
+        </div>
+      </div>
+      <div class="cols">
+        <div class="card" id="org-policy-card">
+          <h2 class="card-title">What members may do</h2>
+          <p class="muted small">Administrators may do everything. Members may, on their own:</p>
+          <form id="org-policy" class="form-grid">
+            <label class="inline"><input name="members_may_share" type="checkbox"> Share folders with people outside the vault</label>
+            <label class="inline"><input name="members_may_add_storages" type="checkbox"> Add or remove storages</label>
+            <label class="inline"><input name="members_may_set_policies" type="checkbox"> Set policies and placement</label>
+            <label class="inline"><input name="members_may_add_devices" type="checkbox"> Add devices and print the recovery kit</label>
+            <div class="actions"><button type="submit" id="org-policy-save">Save</button></div>
+          </form>
+        </div>
+        <div class="card">
+          <h2 class="card-title">Administrators</h2>
+          <ul id="org-admins" class="list compact-list"></ul>
+          <details id="org-rootbox"><summary class="small">Appoint or dismiss with the root words</summary>
+            <form id="org-admin" class="form-grid">
+              <label>Device <input name="device" required placeholder="name or id"></label>
+              <label>Root words (24) <input name="root_words" type="password" required autocomplete="off"></label>
+              <div class="actions"><button type="submit" data-action="add" class="secondary">Make administrator</button><button type="submit" data-action="remove" class="secondary">Dismiss</button></div>
+            </form>
+          </details>
+        </div>
+      </div>
+      <details class="card" open>
+        <summary class="card-title">Log</summary>
+        <p class="muted small">Signed by the administrator devices and chained, so nobody can change it afterwards without the others noticing.</p>
+        <div class="actions"><button type="button" id="org-export" class="secondary">Export as JSON</button></div>
+        <ul id="org-log" class="list compact-list"></ul>
+      </details>
+    </div>
+
     <!-- Settings -->
     <div class="page hidden" data-page="settings">
       <div class="card">
@@ -487,6 +569,11 @@
         <ul id="settingsdevices" class="list compact-list"></ul>
         <p class="muted small">Remove a device you no longer use, or one that was lost or stolen: it stops syncing and cannot read anything written afterwards. Add one with Add a device under Peers.</p>
       </div>
+      <details class="card" id="teamcard">
+        <summary class="card-title">Use with a team</summary>
+        <p class="muted small">An organization adds administrators who approve devices, remove people with every device of theirs at once, set what members may do, and keep a signed log of it. Nothing changes for a vault without one.</p>
+        <div class="actions"><button id="orgcreate" type="button" class="secondary">Set up an organization…</button></div>
+      </details>
       <div class="cols">
         <div class="card">
           <h2 class="card-title">Appearance</h2>
@@ -538,6 +625,7 @@
         <button type="button" class="more-item" data-nav="shared"><svg class="icon"><use href="#i-sharing"/></svg><span>Shared</span><svg class="icon chev"><use href="#i-chevron"/></svg></button>
         <button type="button" class="more-item" data-nav="policies"><svg class="icon"><use href="#i-policies"/></svg><span>Policies</span><svg class="icon chev"><use href="#i-chevron"/></svg></button>
         <button type="button" class="more-item" data-nav="peers"><svg class="icon"><use href="#i-peers"/></svg><span>Peers</span><svg class="icon chev"><use href="#i-chevron"/></svg></button>
+        <button type="button" class="more-item hidden" data-nav="organization" data-org-only="1"><svg class="icon"><use href="#i-org"/></svg><span>Organization</span><svg class="icon chev"><use href="#i-chevron"/></svg></button>
         <button type="button" class="more-item" data-nav="settings"><svg class="icon"><use href="#i-settings"/></svg><span>Settings</span><svg class="icon chev"><use href="#i-chevron"/></svg></button>
       </div>
       <p class="muted small more-version">Varsto v<span id="version2"></span> · local interface on this device only.</p>

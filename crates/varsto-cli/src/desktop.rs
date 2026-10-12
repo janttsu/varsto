@@ -136,7 +136,11 @@ fn handle_unlocked(fixed: &Fixed, request: Request) -> Result<Option<Request>> {
             } else if path == "/api/progress" {
                 // The download running now, answered while it holds the engine.
                 let p = serde_json::to_value(varsto_core::progress::current())?;
-                request.respond(json_response(200, &json!({ "download": p })))?;
+                let all = serde_json::to_value(varsto_core::progress::all())?;
+                request.respond(json_response(
+                    200,
+                    &json!({ "download": p, "transfers": all }),
+                ))?;
             } else {
                 let report = serde_json::to_value(fixed.traffic.report())?;
                 request.respond(json_response(200, &report))?;
@@ -161,8 +165,40 @@ pub fn open_in_browser(url: &str) {
     }
 }
 
+/// A response header. Values are ASCII without control characters;
+/// anything else is dropped from the value rather than tripping the
+/// worker thread (a header value never carries user data verbatim).
 fn header(name: &str, value: &str) -> Header {
-    Header::from_bytes(name.as_bytes(), value.as_bytes()).expect("static header")
+    let clean: String = value
+        .chars()
+        .filter(|c| c.is_ascii() && !c.is_ascii_control())
+        .collect();
+    Header::from_bytes(name.as_bytes(), clean.as_bytes())
+        .unwrap_or_else(|_| Header::from_bytes(name.as_bytes(), b"").expect("empty header"))
+}
+
+/// `Content-Disposition` for a download: an ASCII fallback name plus the
+/// UTF-8 name percent-encoded (RFC 6266 / RFC 8187), so any file name works.
+fn attachment(name: &str) -> String {
+    let ascii: String = name
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_' | ' ') {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    let mut enc = String::new();
+    for b in name.bytes() {
+        if b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b'_') {
+            enc.push(b as char);
+        } else {
+            enc.push_str(&format!("%{b:02X}"));
+        }
+    }
+    format!("attachment; filename=\"{ascii}\"; filename*=UTF-8''{enc}")
 }
 
 fn html(body: &str) -> Response<std::io::Cursor<Vec<u8>>> {
@@ -252,14 +288,11 @@ fn handle(state: &Shared, mut request: Request) -> Result<()> {
         };
         return match result {
             Some(Ok((bytes, p))) => {
-                let name = p.rsplit('/').next().unwrap_or("file").replace('"', "");
+                let name = p.rsplit('/').next().unwrap_or("file");
                 request.respond(
                     Response::from_data(bytes)
                         .with_header(header("Content-Type", "application/octet-stream"))
-                        .with_header(header(
-                            "Content-Disposition",
-                            &format!("attachment; filename=\"{name}\""),
-                        )),
+                        .with_header(header("Content-Disposition", &attachment(name))),
                 )?;
                 Ok(())
             }
@@ -400,6 +433,9 @@ fn upload(state: &Shared, request: &mut Request, folder: String, path: String) -
             Some(e) => e.block_writer(&folder)?,
         }
     };
+    // Known for a file picked in the page or sent by the phone app: the
+    // block sizes then follow the file size.
+    let length = request.body_length().map(|n| n as u64);
     let mut body = Capped {
         inner: request.as_reader(),
         left: MAX_UPLOAD,
@@ -407,7 +443,7 @@ fn upload(state: &Shared, request: &mut Request, folder: String, path: String) -
     };
     let push = match writer {
         Some(w) => {
-            let staged = w.write(&mut body)?;
+            let staged = w.write_sized(&mut body, length)?;
             let mut st = state.lock().unwrap();
             let e = st
                 .engine
@@ -519,6 +555,51 @@ fn plain_root_writable(root: &std::path::Path) -> bool {
     ok
 }
 
+/// The storage a joining device reaches the vault through, from a setup
+/// form: a directory (`storage_path`), or an S3-compatible bucket when
+/// `kind` is "s3" or a bucket is given. Returns the spec and the S3 secret.
+fn storage_from_input(
+    input: &Value,
+    storage_name: &str,
+    default_place: &str,
+) -> Result<(StorageSpec, Option<String>)> {
+    let kind = opt(input, "kind").unwrap_or_default();
+    if kind == "s3" || (kind.is_empty() && opt(input, "bucket").is_some_and(|b| !b.is_empty())) {
+        let secret = s(input, "secret_access_key")?;
+        return Ok((
+            StorageSpec::S3 {
+                name: storage_name.to_string(),
+                endpoint: s(input, "endpoint")?.trim_end_matches('/').to_string(),
+                region: opt(input, "region")
+                    .filter(|r| !r.trim().is_empty())
+                    .unwrap_or_else(|| "auto".into()),
+                bucket: s(input, "bucket")?,
+                prefix: opt(input, "prefix")
+                    .unwrap_or_default()
+                    .trim_matches('/')
+                    .to_string(),
+                access_key_id: s(input, "access_key_id")?,
+                secret_ref: String::new(),
+                path_style: true,
+                storage_class: None,
+                cold: false,
+                place: opt(input, "place").unwrap_or_else(|| default_place.into()),
+            },
+            Some(secret),
+        ));
+    }
+    Ok((
+        StorageSpec::LocalDir {
+            name: storage_name.to_string(),
+            path: PathBuf::from(s(input, "storage_path")?),
+            cold: false,
+            carrier: false,
+            place: String::new(),
+        },
+        None,
+    ))
+}
+
 fn mobile() -> bool {
     std::env::var_os("VARSTO_MOBILE").is_some()
 }
@@ -607,6 +688,36 @@ fn api(st: &mut State, method: Method, path: &str, query: &str, input: &Value) -
             }
             Ok(json!({"ok": true, "updated": c.available, "message": message}))
         }
+        // Phones make video frames with their own media framework.
+        (Method::Get, "/api/thumbnails/wanted") => {
+            let e = st
+                .engine
+                .as_ref()
+                .ok_or_else(|| anyhow!("vault is locked"))?;
+            let list: Vec<Value> = e
+                .videos_without_thumbnails(20)?
+                .into_iter()
+                .map(|(folder, path, disk)| json!({"folder": folder, "path": path, "file": disk}))
+                .collect();
+            Ok(json!({ "videos": list }))
+        }
+        (Method::Post, "/api/thumbnail") => {
+            use base64::Engine as _;
+            let picture = base64::engine::general_purpose::STANDARD
+                .decode(s(input, "jpeg")?)
+                .map_err(|_| anyhow!("jpeg is not base64"))?;
+            let folder = s(input, "folder")?;
+            let path = s(input, "path")?;
+            st.engine
+                .as_mut()
+                .ok_or_else(|| anyhow!("vault is locked"))?
+                .store_thumbnail(&folder, &path, &picture)?;
+            Ok(json!({"ok": true}))
+        }
+        (Method::Post, "/api/service/restart") => {
+            st.service.restart_requested = true;
+            Ok(json!({"ok": true}))
+        }
         (Method::Post, "/api/service/pause") => {
             st.service.paused = input
                 .get("paused")
@@ -664,6 +775,28 @@ fn api(st: &mut State, method: Method, path: &str, query: &str, input: &Value) -
                 "fingerprint": varsto_core::vault::ShareRequest::fingerprint_for(&st.home)?,
             }))
         }
+        // Organization: a request code for this device, and joining with an approval token.
+        (Method::Post, "/api/org/request") => {
+            let name = s(input, "name")?;
+            let code = varsto_core::org::OrgRequest::code_for(&st.home, Some(&name))?;
+            Ok(json!({
+                "request_code": code,
+                "fingerprint": varsto_core::org::OrgRequest::fingerprint_for(&st.home)?,
+            }))
+        }
+        (Method::Post, "/api/org/join") => {
+            let (e, notes, approval) = Engine::org_join(
+                &st.home,
+                &s(input, "name")?,
+                &s(input, "passphrase")?,
+                &s(input, "token")?,
+            )?;
+            st.engine = Some(e);
+            st.service.request_sync();
+            Ok(
+                json!({"ok": true, "organization": approval.org_name, "user": approval.user, "notes": notes}),
+            )
+        }
         (Method::Post, "/api/share/accept") => {
             let raw = s(input, "token")?;
             let token = if varsto_core::vault::SealedShareToken::is_sealed(&raw) {
@@ -671,19 +804,17 @@ fn api(st: &mut State, method: Method, path: &str, query: &str, input: &Value) -
             } else {
                 varsto_core::vault::ShareToken::decode(&raw)?
             };
-            let spec = StorageSpec::LocalDir {
-                name: opt(input, "storage_name").unwrap_or_else(|| "shared".into()),
-                path: PathBuf::from(s(input, "storage_path")?),
-                cold: false,
-                carrier: false,
-                place: String::new(),
-            };
-            let e = Engine::accept_share(
+            let storage_name = opt(input, "storage_name")
+                .filter(|n| !n.trim().is_empty())
+                .unwrap_or_else(|| "shared".into());
+            let (spec, secret) = storage_from_input(input, &storage_name, "")?;
+            let e = Engine::accept_share_with_secret(
                 &st.home,
                 &s(input, "name")?,
                 &s(input, "passphrase")?,
                 &token,
                 spec,
+                secret,
             )?;
             st.engine = Some(e);
             varsto_core::vault::ShareRequest::clear(&st.home);
@@ -743,13 +874,22 @@ fn api(st: &mut State, method: Method, path: &str, query: &str, input: &Value) -
             } else {
                 key.trim().to_string()
             };
-            let mut e = Engine::join(
+            let joined = Engine::join(
                 &st.home,
                 &s(input, "name")?,
                 &s(input, "passphrase")?,
                 &key,
                 spec,
-            )?;
+            );
+            // The secret was needed only while the storage was opened
+            // before the vault existed; children must not inherit it.
+            std::env::remove_var(format!(
+                "VARSTO_S3_SECRET_{}",
+                storage_name
+                    .to_uppercase()
+                    .replace(|c: char| !c.is_ascii_alphanumeric(), "_")
+            ));
+            let mut e = joined?;
             if let Some(secret) = s3_secret {
                 e.store_secret(&storage_name, &secret)?;
             }
@@ -845,6 +985,59 @@ fn api_unlocked(
         (Method::Get, "/api/replica/token") => {
             Ok(json!({"token": engine.replica_token()?.encode()}))
         }
+        // Organization (section 27). Nothing here exists for a vault without one.
+        (Method::Get, "/api/org") => Ok(match engine.org_summary() {
+            Some(s) => serde_json::to_value(s)?,
+            None => json!({"exists": false}),
+        }),
+        (Method::Get, "/api/org/log") => Ok(json!({"log": engine.org_log_entries()})),
+        (Method::Post, "/api/org/create") => {
+            let r = engine.org_create(&s(input, "name")?, &s(input, "user")?)?;
+            service.request_sync();
+            Ok(serde_json::to_value(r)?)
+        }
+        (Method::Post, "/api/org/fingerprint") => {
+            let r = varsto_core::org::OrgRequest::parse(&s(input, "code")?)?;
+            Ok(json!({"fingerprint": r.fingerprint, "name": r.name, "device_id": r.device.to_string()}))
+        }
+        (Method::Post, "/api/org/approve") => {
+            let fp = opt(input, "fingerprint").filter(|f| !f.trim().is_empty());
+            let r = engine.org_approve(&s(input, "code")?, &s(input, "user")?, fp.as_deref())?;
+            service.request_sync();
+            Ok(serde_json::to_value(r)?)
+        }
+        (Method::Post, "/api/org/add-device") => {
+            engine.org_add_device(&s(input, "device")?, &s(input, "user")?)?;
+            service.request_sync();
+            Ok(json!({"ok": true}))
+        }
+        (Method::Post, "/api/org/remove-user") => {
+            let user = s(input, "user")?;
+            if opt(input, "confirm").as_deref() != Some(user.as_str()) {
+                bail!("send {{\"confirm\": \"{user}\"}} to remove this user and every device of theirs");
+            }
+            let wipe = input.get("wipe").and_then(|v| v.as_bool()).unwrap_or(false);
+            let r = engine.org_remove_user(&user, wipe)?;
+            service.request_sync();
+            Ok(serde_json::to_value(r)?)
+        }
+        (Method::Post, "/api/org/policy") => {
+            let p: varsto_core::org::OrgPolicy = serde_json::from_value(input.clone())?;
+            engine.org_set_policy(p)?;
+            service.request_sync();
+            Ok(json!({"ok": true}))
+        }
+        (Method::Post, "/api/org/admin") => {
+            let device = s(input, "device")?;
+            let words = s(input, "root_words")?;
+            match s(input, "action")?.as_str() {
+                "add" => engine.org_admin_add(&device, &words)?,
+                "remove" => engine.org_admin_remove(&device, &words)?,
+                other => bail!("unknown action {other}: use add or remove"),
+            }
+            service.request_sync();
+            Ok(json!({"ok": true}))
+        }
         (Method::Get, "/api/storage/remove-plan") => Ok(serde_json::to_value(
             engine.plan_storage_removal(&query_param(query, "name").unwrap_or_default())?,
         )?),
@@ -929,7 +1122,9 @@ fn api_unlocked(
                 }
             }
             service.request_sync();
-            Ok(json!({"ok": true}))
+            // The sync this starts copies everything to the new storage and
+            // holds the service meanwhile: the page shows this answer at once.
+            Ok(json!({"ok": true, "status": engine.status()?}))
         }
         (Method::Post, "/api/folder") => {
             let name = s(input, "name")?;
@@ -1151,8 +1346,10 @@ fn api_unlocked(
         })),
         (Method::Post, "/api/p2p") => {
             let mut c = engine.p2p_config();
+            let was = (c.enabled, c.port, c.public_addrs.clone(), c.stun.clone());
             if let Some(en) = input.get("enabled").and_then(|v| v.as_bool()) {
                 c.enabled = en;
+                c.user_disabled = !en;
             }
             if let Some(p) = input.get("port").and_then(|v| v.as_u64()) {
                 c.port = p as u16;
@@ -1165,14 +1362,22 @@ fn api_unlocked(
                 c.stun = stun.split(',').map(|a| a.trim().to_string()).filter(|a| !a.is_empty()).collect();
             }
             let enabled = c.enabled;
+            let same_settings = was.1 == c.port && was.2 == c.public_addrs && was.3 == c.stun;
             engine.set_p2p_config(c)?;
             if enabled {
-                engine.p2p_identity()?; // the certificate exists before the service restarts
+                engine.p2p_identity()?;
             }
-            Ok(json!({"ok": true, "note": "restart the background service to apply"}))
+            // Turning it on or off takes effect within a second; a new
+            // port, address or STUN list when the service starts again.
+            let note = if same_settings || !was.0 || !enabled {
+                if enabled { "peer-to-peer is on" } else { "peer-to-peer is off" }
+            } else {
+                "saved; the new port, addresses or STUN servers apply when the background service starts again"
+            };
+            Ok(json!({"ok": true, "applied": same_settings || !was.0 || !enabled, "note": note}))
         }
         (Method::Get, "/api/policy") => Ok(json!({
-            "policies": engine.folders().into_iter().map(|(r, _)| json!({"folder": r.name, "policy": r.policy, "text": r.policy.as_ref().map(|p| p.describe())})).collect::<Vec<_>>(),
+            "policies": engine.folders().into_iter().map(|(r, _)| json!({"folder": r.name, "policy": r.effective_policy(), "default": r.policy.is_none(), "text": r.effective_policy().map(|p| p.describe())})).collect::<Vec<_>>(),
             "reports": engine.policy_check()?,
         })),
         (Method::Post, "/api/policy") => {

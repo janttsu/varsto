@@ -331,7 +331,10 @@ fn offer_exchange(stream: TcpStream, digits: &str, bundle: &Bundle) -> Result<St
     let theirs = read_line(&mut r)
         .ok()
         .and_then(|reply| field(&reply, "confirm").ok());
-    if theirs.as_deref() != Some(confirm(&key, "join").as_str()) {
+    if !theirs
+        .as_deref()
+        .is_some_and(|t| crypto::ct_eq(t.as_bytes(), confirm(&key, "join").as_bytes()))
+    {
         return Err(Attempt::Wrong);
     }
     let plain = serde_json::to_vec(bundle).map_err(|_| Attempt::Broken)?;
@@ -433,7 +436,10 @@ pub fn fetch(code: &str, my_name: &str, addr: SocketAddr) -> Result<Bundle> {
             .finish(&msg_a)
             .map_err(|e| anyhow!("pairing failed: {e}"))?,
     )?;
-    if field(&answer, "confirm")? != confirm(&key, "offer") {
+    if !crypto::ct_eq(
+        field(&answer, "confirm")?.as_bytes(),
+        confirm(&key, "offer").as_bytes(),
+    ) {
         let _ = write_line(&mut w, &serde_json::json!({"error": "wrong code"}));
         bail!("wrong pairing code");
     }

@@ -24,6 +24,9 @@ use std::time::{Duration, Instant};
 const WINDOW_START: usize = 16;
 const WINDOW_MIN: usize = 8;
 pub(super) const WINDOW_MAX: usize = 32;
+/// At most about this many bytes of blocks in flight for one file: the
+/// window is shallower for the large blocks of big files.
+const WINDOW_BYTES: u64 = 96 << 20;
 const WINDOW_STEP: usize = 4;
 /// The throughput is measured over this long (and at least 8 objects)
 /// before the window moves.
@@ -368,6 +371,8 @@ pub(super) fn fetch_in_order(
         stop: false,
     });
     let changed = std::sync::Condvar::new();
+    let largest = chunks.iter().map(|c| c.size).max().unwrap_or(1).max(1);
+    let cap = ((WINDOW_BYTES / largest) as usize).clamp(2, WINDOW_MAX);
     std::thread::scope(|s| {
         for _ in 0..WINDOW_MAX.min(chunks.len()) {
             s.spawn(|| loop {
@@ -377,7 +382,7 @@ pub(super) fn fetch_in_order(
                         if w.stop || w.next >= chunks.len() {
                             return;
                         }
-                        let window = stats.window();
+                        let window = stats.window().min(cap);
                         if w.next < w.consumed + window && w.active < window {
                             break;
                         }

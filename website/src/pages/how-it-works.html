@@ -149,7 +149,7 @@ description: How Varsto works: your devices and your own storages, encrypted blo
     <ul>
       <li>A signature proves that a device <em>said</em> it stored a block, not that the block is still there. That is why a copy counts as verified only after another device has checked it; there is no challenge-response proof of storage yet.</li>
       <li>A storage that serves an older but valid part of the ledger is not caught by signatures; it shows only when another storage or device has newer batches. Rollback detection is a design goal, not a tested property.</li>
-      <li>The ledger grows with every sync and every device replays it whole. Keeping it compact over years of use is work in progress.</li>
+      <li>The ledger grows with every sync. Since alpha.8 devices write checkpoints and prune acknowledged batches, so what is stored stays bounded; members of shared folders and replicas still keep every batch.</li>
       <li>Verification times come from device clocks: a badly wrong clock can cause false alerts, though it does not change the order of changes.</li>
       <li>Storages see the number of ledger directories (your device count) and the size and timing of batches.</li>
     </ul>
@@ -221,7 +221,7 @@ description: How Varsto works: your devices and your own storages, encrypted blo
       <li><strong>Convergent encryption</strong> inside a folder lets co-holders of the folder key confirm identical files.</li>
       <li><strong>Removing a device</strong> protects what is written afterwards, not what the device already held: existing data is not re-encrypted, shared and Strongroom folders keep their keys, and storage credentials are not rotated. Until a second factor exists, any of your devices can remove any other.</li>
       <li><strong>Removing a member</strong> of a shared folder protects what is written afterwards; the storage you both reach stays writable to them until you change its access.</li>
-      <li><strong>The ledger</strong> has no proof of storage, rollback detection is untested, and keeping it compact over years is still being built.</li>
+      <li><strong>The ledger</strong> has no proof of storage, rollback detection is untested, and checkpoints and pruning (alpha.8) bound its size for vault devices only: members of shared folders and replicas still keep every batch.</li>
       <li><strong>Placement.</strong> A folder can be written to chosen storages or places, and blocks can be moved between storages (keeping only a cold copy of idle files). Files whose blocks are only on cold storage are not fetched until you move them back, and devices on 0.0.1-alpha.8 or older stop syncing once a move is recorded.</li>
       <li><strong>Strongroom</strong> protects the folder key, not a file you fetched and left on disk; the recovery kit does not cover Strongroom folders.</li>
       <li><strong>The vault key</strong> is a single secret. Keep the recovery kit in more than one place.</li>

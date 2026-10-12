@@ -2,7 +2,7 @@
 
 Varsto is tested in layers. The goal is that cheaper AI systems and scripts can run most tests from written instructions, while a human covers what cannot be automated (Windows, macOS, Android and iOS on real devices).
 
-> Alpha-0: only the Rust core and the CLI exist (`crates/`). The VM levels below are prepared for the application that is still to come.
+> Alpha (0.0.1-alpha.9): the Rust core, the CLI, the background service with tray and web interface, and the Android, macOS and iOS (Simulator) shells exist (`crates/`, `apps/`). CI builds and tests all of them on GitHub-hosted runners; the VM levels below are prepared for what CI does not cover.
 
 ## Principles
 

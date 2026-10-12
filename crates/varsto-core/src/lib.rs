@@ -7,10 +7,10 @@
 //! that is replicated through the storage ("mailbox"), and a two-way folder
 //! sync between devices that are never online at the same time.
 //!
-//! Everything here is **alpha**: formats may change without migration, the
-//! post-quantum hybrid signatures and key agreement are not implemented yet
-//! (algorithm identifiers are recorded so that they can be added), and the
-//! cryptography has not been reviewed. Do not use it for real data.
+//! Everything here is **alpha**: formats may change without migration, and
+//! the cryptography (hybrid Ed25519 + ML-DSA-65 signatures, X25519 + ML-KEM-768
+//! key encapsulation, XChaCha20-Poly1305) has not been reviewed independently.
+//! Do not use it as the only copy of anything.
 
 pub mod advice;
 pub mod autoverify;
@@ -21,6 +21,7 @@ pub mod ids;
 pub mod kem;
 pub mod ledger;
 pub mod manifest;
+pub mod org;
 pub mod p2p;
 pub mod pack;
 pub mod pair;

@@ -44,7 +44,22 @@ impl RcloneStorage {
 
     fn run(&self, args: &[&str], stdin: Option<&[u8]>) -> Result<(bool, Vec<u8>, String)> {
         let mut cmd = Command::new(&self.binary);
-        cmd.args(args)
+        // Flags first, then `--`, then the remote path: a path that starts
+        // with a dash is never read as a flag.
+        let (flags, paths): (Vec<&&str>, Vec<&&str>) = args
+            .iter()
+            .partition(|a| a.starts_with('-') || !a.contains(':'));
+        let (mut head, mut tail): (Vec<&str>, Vec<&str>) = (Vec::new(), Vec::new());
+        for a in args {
+            if paths.contains(&a) && !flags.contains(&a) {
+                tail.push(a);
+            } else {
+                head.push(a);
+            }
+        }
+        cmd.args(&head)
+            .arg("--")
+            .args(&tail)
             .stdin(if stdin.is_some() {
                 Stdio::piped()
             } else {
@@ -61,17 +76,23 @@ impl RcloneStorage {
             drop(pipe);
         }
         let out = child.wait_with_output()?;
-        Ok((
-            out.status.success(),
-            out.stdout,
-            String::from_utf8_lossy(&out.stderr).to_string(),
-        ))
+        // rclone's exit codes: 3 = directory not found, 4 = file not found.
+        // Anything else that fails is an error, never "absent": a transport
+        // failure must not look like a missing object.
+        let code = out.status.code().unwrap_or(-1);
+        let stderr = if !out.status.success() && (code == 3 || code == 4) {
+            format!("{NOT_FOUND_MARK}{}", String::from_utf8_lossy(&out.stderr))
+        } else {
+            String::from_utf8_lossy(&out.stderr).to_string()
+        };
+        Ok((out.status.success(), out.stdout, stderr))
     }
 }
 
+const NOT_FOUND_MARK: &str = "\u{1}rclone-not-found\u{1}";
+
 fn is_not_found(stderr: &str) -> bool {
-    let s = stderr.to_lowercase();
-    s.contains("not found") || s.contains("doesn't exist") || s.contains("no such")
+    stderr.starts_with(NOT_FOUND_MARK)
 }
 
 impl Storage for RcloneStorage {
@@ -80,6 +101,7 @@ impl Storage for RcloneStorage {
     }
 
     fn put_if_absent(&self, key: &str, data: &[u8]) -> Result<bool> {
+        crate::storage::validate_key(key)?;
         if self.exists(key)? {
             return Ok(false);
         }
@@ -91,6 +113,7 @@ impl Storage for RcloneStorage {
     }
 
     fn get(&self, key: &str) -> Result<Option<Vec<u8>>> {
+        crate::storage::validate_key(key)?;
         let (ok, out, err) = self.run(&["cat", &self.target(key)], None)?;
         if ok {
             Ok(Some(out))
@@ -102,6 +125,7 @@ impl Storage for RcloneStorage {
     }
 
     fn exists(&self, key: &str) -> Result<bool> {
+        crate::storage::validate_key(key)?;
         let (ok, out, err) = self.run(&["lsjson", "--stat", &self.target(key)], None)?;
         if ok {
             Ok(!out.is_empty() && String::from_utf8_lossy(&out).trim() != "null")
@@ -144,6 +168,7 @@ impl Storage for RcloneStorage {
     }
 
     fn delete(&self, key: &str) -> Result<()> {
+        crate::storage::validate_key(key)?;
         let (ok, _, err) = self.run(&["deletefile", &self.target(key)], None)?;
         if ok || is_not_found(&err) {
             Ok(())

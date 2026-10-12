@@ -180,6 +180,10 @@ impl Engine {
         if self.vault.member {
             bail!("a member device cannot change where the owner's folders are stored");
         }
+        self.org_allows(
+            |p| p.members_may_set_policies,
+            "change where folders are stored",
+        )?;
         let rec = self
             .keyring
             .find(folder)
@@ -253,7 +257,16 @@ impl Engine {
             updated_utc: now,
             placement,
         };
-        let blob = prec.seal(&self.vault.vault_id, &self.folder_record_key_now())?;
+        // Signed in an organization, the older form otherwise (see set_policy).
+        let blob = if self.org.is_some() {
+            prec.seal_signed(
+                &self.vault.vault_id,
+                &self.folder_record_key_now(),
+                &self.keys.signer,
+            )?
+        } else {
+            prec.seal(&self.vault.vault_id, &self.folder_record_key_now())?
+        };
         for (_, backend) in self.metadata_storages(true)? {
             backend.put_if_absent(&prec.storage_key(), &blob)?;
         }
@@ -280,6 +293,13 @@ impl Engine {
                 let Some(local) = self.keyring.folders.get(&fid) else {
                     continue;
                 };
+                let Some(named) = key
+                    .strip_prefix(PlacementRecord::PREFIX)
+                    .and_then(|r| r.split('/').nth(1))
+                    .and_then(|d| DeviceId::from_hex(d).ok())
+                else {
+                    continue;
+                };
                 // The object name ends with the update time: skip anything not newer.
                 let stamp: i64 = key
                     .rsplit('/')
@@ -293,12 +313,21 @@ impl Engine {
                 let Some(blob) = backend.get(&key)? else {
                     continue;
                 };
-                let Some(rec) = fr_keys
-                    .iter()
-                    .find_map(|k| PlacementRecord::open(&blob, &self.vault.vault_id, &fid, k).ok())
-                else {
+                let verify = |d: &DeviceId| self.device_key(d);
+                let Ok(rec) = PlacementRecord::open_any(
+                    &blob,
+                    &self.vault.vault_id,
+                    &fid,
+                    &named,
+                    &fr_keys,
+                    &verify,
+                    self.org.is_none(),
+                ) else {
                     continue;
                 };
+                if !self.trusted(&rec.device) || !self.org_accepts_policy_from(&rec.device) {
+                    continue;
+                }
                 if let Some(f) = self.keyring.folders.get_mut(&fid) {
                     if rec.updated_utc > f.placement_updated_utc {
                         f.placement = rec.placement;
@@ -460,7 +489,7 @@ impl Engine {
             .map(|s| s.name().to_string())
             .collect();
         let copy_rules = rec
-            .policy
+            .effective_policy()
             .as_ref()
             .filter(|p| p.min_copies > 0 || !p.min_per_place.is_empty())
             .map(|p| Policy {
@@ -510,6 +539,22 @@ impl Engine {
                 .collect();
             let mut reason = None;
             if let Some(rules) = &copy_rules {
+                // Only what dropping this copy makes worse counts: a
+                // requirement the copies did not meet before (no external
+                // storage yet, say) does not keep a copy elsewhere.
+                let before: Vec<(String, String)> = r
+                    .storages
+                    .iter()
+                    .filter(|(n, l)| !l.claimed_by.is_empty() && !carriers.contains(*n))
+                    .map(|(n, _)| (n.clone(), place_of(n)))
+                    .collect();
+                let mut capped = rules.clone();
+                capped.min_copies = capped.min_copies.min(before.len() as u32);
+                for (place, n) in capped.min_per_place.iter_mut() {
+                    let have = before.iter().filter(|(_, p)| p == place).count() as u32;
+                    *n = (*n).min(have);
+                }
+                let rules = &capped;
                 let verdict = crate::policy::evaluate(
                     &rec.name,
                     rules,
@@ -906,26 +951,35 @@ impl Engine {
             let Ok(file) = fs::File::open(path) else {
                 continue;
             };
-            let Ok(chunker) = Chunker::new(std::io::BufReader::new(&file), self.chunker) else {
-                continue;
-            };
-            for piece in chunker {
-                let Ok(piece) = piece else { break };
-                let id = ChunkId::from_bytes(&crypto::keyed_hash(&fk.hash, &piece));
-                let Some(item) = wanted.get(&id) else {
+            let size = file.metadata().map(|m| m.len()).unwrap_or(0);
+            for params in [self.chunker_for(size)] {
+                if wanted.keys().all(|c| out.contains_key(&wanted[c].object)) {
+                    break;
+                }
+                let Ok(handle) = fs::File::open(path) else {
                     continue;
                 };
-                let ct = (|| {
-                    crypto::encrypt_with_nonce(
-                        &fk.chunk_key(item.epoch, &id)?,
-                        &fk.chunk_nonce(item.epoch, &id)?,
-                        &fk.chunk_aad(&self.vault.vault_id, &id, piece.len() as u64),
-                        &crate::pack::pack(&piece),
-                    )
-                })();
-                if let Ok(ct) = ct {
-                    if ObjectName::from_bytes(&crypto::hash(&ct)) == item.object {
-                        out.insert(item.object.clone(), ct);
+                let Ok(chunker) = Chunker::new(std::io::BufReader::new(&handle), params) else {
+                    continue;
+                };
+                for piece in chunker {
+                    let Ok(piece) = piece else { break };
+                    let id = ChunkId::from_bytes(&crypto::keyed_hash(&fk.hash, &piece));
+                    let Some(item) = wanted.get(&id) else {
+                        continue;
+                    };
+                    let ct = (|| {
+                        crypto::encrypt_with_nonce(
+                            &fk.chunk_key(item.epoch, &id)?,
+                            &fk.chunk_nonce(item.epoch, &id)?,
+                            &fk.chunk_aad(&self.vault.vault_id, &id, piece.len() as u64),
+                            &crate::pack::pack(&piece),
+                        )
+                    })();
+                    if let Ok(ct) = ct {
+                        if ObjectName::from_bytes(&crypto::hash(&ct)) == item.object {
+                            out.insert(item.object.clone(), ct);
+                        }
                     }
                 }
             }

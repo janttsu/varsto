@@ -142,6 +142,63 @@ impl PlacementRecord {
         }
         Ok(rec)
     }
+    /// Seal and sign (alpha.10), see `PolicyRecord::seal_signed`.
+    pub fn seal_signed(
+        &self,
+        vault: &VaultId,
+        key: &SecretKey,
+        signer: &crate::crypto::SigningKey,
+    ) -> Result<Vec<u8>> {
+        let ct = self.seal(vault, key)?;
+        crate::vault::SignedRecord::wrap(
+            "placement-record-signature",
+            vault,
+            &self.folder_id,
+            &self.device,
+            self.updated_utc,
+            ct,
+            signer,
+        )
+    }
+    /// See `PolicyRecord::open_any`.
+    pub fn open_any(
+        blob: &[u8],
+        vault: &VaultId,
+        folder: &FolderId,
+        named_device: &DeviceId,
+        keys: &[SecretKey],
+        verify: &dyn Fn(&DeviceId) -> Option<crate::crypto::VerifyingKey>,
+        allow_unsigned: bool,
+    ) -> Result<Self> {
+        match crate::vault::SignedRecord::parse(blob) {
+            Some(env) => {
+                let pk = verify(&env.device).ok_or_else(|| anyhow::anyhow!("unknown writer"))?;
+                let ct = env.verify("placement-record-signature", vault, folder, &pk)?;
+                let rec = keys
+                    .iter()
+                    .find_map(|k| Self::open(&ct, vault, folder, k).ok())
+                    .ok_or_else(|| anyhow::anyhow!("placement record does not open"))?;
+                if rec.device != env.device
+                    || &rec.device != named_device
+                    || rec.updated_utc != env.updated_utc
+                {
+                    bail!("placement record does not match its envelope");
+                }
+                Ok(rec)
+            }
+            None if allow_unsigned => {
+                let rec = keys
+                    .iter()
+                    .find_map(|k| Self::open(blob, vault, folder, k).ok())
+                    .ok_or_else(|| anyhow::anyhow!("placement record does not open"))?;
+                if &rec.device != named_device {
+                    bail!("placement record does not match its name");
+                }
+                Ok(rec)
+            }
+            None => bail!("unsigned placement record"),
+        }
+    }
 }
 
 /// Amounts by currency (never converted).

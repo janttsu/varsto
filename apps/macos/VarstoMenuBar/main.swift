@@ -126,6 +126,17 @@ final class MainWindow: NSWindowController, WKNavigationDelegate, WKUIDelegate, 
         completionHandler(a.runModal() == .alertFirstButtonReturn ? field.stringValue : nil)
     }
 
+    // <input type="file"> (Add files, Upload): WebKit asks the app to show the
+    // open panel; without this method the button does nothing.
+    func webView(_ webView: WKWebView, runOpenPanelWith parameters: WKOpenPanelParameters,
+                 initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping ([URL]?) -> Void) {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = parameters.allowsMultipleSelection
+        panel.canChooseDirectories = parameters.allowsDirectories
+        panel.canChooseFiles = true
+        panel.begin { result in completionHandler(result == .OK ? panel.urls : nil) }
+    }
+
     // Closing the window keeps the app running in the menu bar.
     func windowShouldClose(_ sender: NSWindow) -> Bool {
         sender.orderOut(nil)
@@ -140,6 +151,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var home: URL!
     var binary: URL!
     var timer: Timer?
+    var fastTimer: Timer?
+    var updateTimer: Timer?
+    let updateItem = NSMenuItem(title: "Install update…", action: nil, keyEquivalent: "")
     let main = MainWindow()
     let statusMenuItem = NSMenuItem(title: "Starting…", action: nil, keyEquivalent: "")
     let pauseItem = NSMenuItem(title: "Pause syncing", action: #selector(togglePause), keyEquivalent: "")
@@ -168,9 +182,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(statusMenuItem)
         menu.addItem(.separator())
         menu.addItem(withTitle: "Open Varsto", action: #selector(openUI), keyEquivalent: "o")
-        menu.addItem(withTitle: "Sync now", action: #selector(syncNow), keyEquivalent: "s")
         menu.addItem(pauseItem)
-        menu.addItem(withTitle: "Check for updates", action: #selector(checkUpdates), keyEquivalent: "")
+        // Shown only when a newer version exists (checked by itself).
+        updateItem.action = #selector(checkUpdates)
+        updateItem.isHidden = true
+        menu.addItem(updateItem)
         updateNote.isEnabled = false
         updateNote.isHidden = true
         menu.addItem(updateNote)
@@ -186,6 +202,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ensureService()
         refresh()
         timer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in self?.refresh() }
+        // The menu follows the window quickly too (a reset, an unlock, a new vault).
+        fastTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+            if self?.main.window?.isVisible == true { self?.refresh() }
+        }
+        installCliQuietly()
+        // Updates are looked for without asking: shortly after start and every
+        // six hours. A new version is offered once; the menu keeps the item.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 15) { [weak self] in self?.autoCheckUpdates() }
+        updateTimer = Timer.scheduledTimer(withTimeInterval: 6 * 3600, repeats: true) { [weak self] _ in self?.autoCheckUpdates() }
         if ProcessInfo.processInfo.environment["VARSTO_NO_OPEN"] == nil {
             // Not when Finder started us to open a placeholder.
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { if !self.launchedForFiles { self.openUI() } }
@@ -280,9 +305,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.mainMenu = mainMenu
     }
 
+    var agentTried = false
     func ensureService() {
         if let p = process, p.isRunning { return }
         if client.info() != nil, client.call("GET", "/api/service") != nil { return } // started elsewhere (launch agent)
+        // Background sync runs as a launch agent, so it keeps going when this
+        // window app quits and is the same service the command line uses.
+        // Only if that cannot be set up does the app run the service itself.
+        if !agentTried {
+            agentTried = true
+            let off = home.appendingPathComponent("service-off")
+            if !FileManager.default.fileExists(atPath: off.path) {
+                // Installed earlier or not: (re)load it, pointing at this app.
+                let i = Process()
+                i.executableURL = binary
+                i.arguments = ["--home", home.path, "service", "install", "--interval", "300"]
+                i.standardOutput = FileHandle.nullDevice
+                i.standardError = FileHandle.nullDevice
+                if (try? i.run()) != nil {
+                    i.waitUntilExit()
+                    if i.terminationStatus == 0 { return }
+                }
+            }
+        }
         let p = Process()
         p.executableURL = binary
         p.arguments = ["--home", home.path, "service", "run", "--port", "0", "--interval", "300"]
@@ -298,8 +343,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         process = p
     }
 
+    /// The version this process was started from; when the bundle on disk
+    /// changes (an update from the menu or from `varsto update`), start the
+    /// new app and quit this one.
+    let startedVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String
+    var relaunching = false
+    func relaunchIfUpdated() {
+        if relaunching { return }
+        let plist = Bundle.main.bundleURL.appendingPathComponent("Contents/Info.plist")
+        guard let d = NSDictionary(contentsOf: plist),
+              let v = d["CFBundleShortVersionString"] as? String,
+              let started = startedVersion, v != started else { return }
+        relaunching = true
+        let open = Process()
+        open.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+        open.arguments = ["-n", Bundle.main.bundleURL.path]
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+            NSApp.terminate(nil)
+        }
+        // Started by launchd after this process exits: open waits for nothing.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { try? open.run() }
+    }
+
     var refreshing = false
     func refresh() {
+        relaunchIfUpdated()
+        if relaunching { return }
         ensureService()
         if refreshing { return }
         refreshing = true
@@ -313,7 +382,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func apply(state: [String: Any]?) {
         guard let state = state else { statusMenuItem.title = "Service starting…"; return }
         if main.window?.isVisible == true, main.loadedURL.isEmpty { main.show(url: client.uiURL()) }
-        if state["has_vault"] as? Bool != true { statusMenuItem.title = "Not set up yet: open Varsto"; return }
+        if state["has_vault"] as? Bool != true {
+            // No vault (first start, or just reset): nothing of the old one stays.
+            statusMenuItem.title = "Not set up yet: open Varsto"
+            pauseItem.state = .off
+            updateNote.isHidden = true
+            return
+        }
         if state["unlocked"] as? Bool != true {
             statusMenuItem.title = "Locked"
             promptUnlockIfNeeded()
@@ -375,6 +450,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         _ = client.call("POST", "/api/service/pause", body: ["paused": paused])
         refresh()
     }
+    func autoCheckUpdates() {
+        DispatchQueue.global().async {
+            let c = self.client.call("GET", "/api/update/check")
+            DispatchQueue.main.async {
+                guard let c = c, c["newer"] as? Bool == true, let latest = c["latest"] as? String else {
+                    self.updateItem.isHidden = true
+                    return
+                }
+                self.updateItem.title = "Install Varsto \(latest)…"
+                self.updateItem.isHidden = false
+                if UserDefaults.standard.string(forKey: "offeredUpdate") != latest {
+                    UserDefaults.standard.set(latest, forKey: "offeredUpdate")
+                    self.checkUpdates()
+                }
+            }
+        }
+    }
+
     @objc func checkUpdates() {
         updateNote.isHidden = false
         updateNote.title = "Checking…"
@@ -395,7 +488,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 if c["available"] as? Bool == true {
                     self.updateNote.title = "Update available: \(latest)"
                     a.messageText = "Varsto \(latest) is available"
-                    a.informativeText = "You have \(current). The background service downloads the new version, checks its SHA-256 and restarts itself. This window app is replaced the next time you download Varsto.app; the service keeps working with it meanwhile."
+                    a.informativeText = "You have \(current). Varsto downloads the new version, checks its signature, replaces Varsto.app and starts again."
                     a.addButton(withTitle: "Update now")
                     a.addButton(withTitle: "Later")
                     if a.runModal() == .alertFirstButtonReturn {
@@ -404,9 +497,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                             DispatchQueue.main.async {
                                 let done = NSAlert()
                                 if let r = r, r["ok"] as? Bool == true || r["error"] == nil {
-                                    self.updateNote.title = "Updated to \(latest); service restarting"
-                                    done.messageText = "Update installed"
-                                    done.informativeText = "The service restarts with \(latest) in a few seconds."
+                                    // The bundle was replaced: start the new app and leave.
+                                    self.updateNote.title = "Updated to \(latest)"
+                                    self.relaunchIfUpdated()
+                                    return
                                 } else {
                                     self.updateNote.title = "Update failed"
                                     done.messageText = "Update failed"
@@ -436,6 +530,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
     }
+    /// The command-line tool by default: a link in the first directory of the
+    /// usual PATH that this user can write (/opt/homebrew/bin, /usr/local/bin),
+    /// pointing into this app, so an updated app is an updated command line.
+    /// A link to another copy, or an old standalone binary, is replaced. When
+    /// no such directory is writable, the menu item asks for an administrator.
+    func installCliQuietly() {
+        let fm = FileManager.default
+        for dir in ["/opt/homebrew/bin", "/usr/local/bin"] {
+            let target = dir + "/varsto"
+            if let dest = try? fm.destinationOfSymbolicLink(atPath: target), dest == binary.path { return }
+            guard fm.isWritableFile(atPath: dir) else { continue }
+            try? fm.removeItem(atPath: target)
+            if (try? fm.createSymbolicLink(atPath: target, withDestinationPath: binary.path)) != nil { return }
+        }
+    }
+
     @objc func installCli() {
         // Symlink the bundled binary into /usr/local/bin so `varsto` works in Terminal.
         let target = "/usr/local/bin/varsto"
@@ -468,9 +578,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         timer?.invalidate()
+        fastTimer?.invalidate()
+        updateTimer?.invalidate()
         process?.terminationHandler = nil
-        _ = client.call("POST", "/api/quit", body: [:])
+        // A launch agent keeps syncing after the app quits; only a service
+        // this app started itself is stopped with it.
         if let p = process, p.isRunning {
+            _ = client.call("POST", "/api/quit", body: [:])
             let deadline = Date().addingTimeInterval(3)
             while p.isRunning && Date() < deadline { usleep(100_000) }
             if p.isRunning { p.terminate() }

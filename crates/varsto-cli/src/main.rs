@@ -4,7 +4,7 @@
 
 use anyhow::{anyhow, bail, Context, Result};
 use clap::{Parser, Subcommand};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use varsto_core::storage::StorageSpec;
 use varsto_core::Engine;
 
@@ -40,12 +40,14 @@ struct Cli {
 enum Cmd {
     /// Create a new vault on this device and print the vault key once.
     Init {
-        #[arg(long)]
+        /// Name of this device (default: the computer's name).
+        #[arg(long, default_value_t = default_device_name())]
         name: String,
     },
     /// Join an existing vault through a storage that holds it.
     Join {
-        #[arg(long)]
+        /// Name of this device (default: the computer's name).
+        #[arg(long, default_value_t = default_device_name())]
         name: String,
         /// Vault key in hex (from `init`), or use --words.
         #[arg(long, conflicts_with = "words")]
@@ -183,6 +185,13 @@ enum Cmd {
     },
     /// Undo `install`; the vault and folders stay.
     Uninstall,
+    /// Uploads and downloads running now in the background service: each
+    /// file with its progress and speed, and the traffic with every peer.
+    Transfers {
+        /// Refresh every second until interrupted.
+        #[arg(long)]
+        watch: bool,
+    },
     /// Share a folder with another Varsto user, or accept a folder shared with you.
     Share {
         #[command(subcommand)]
@@ -247,6 +256,11 @@ enum Cmd {
         #[command(subcommand)]
         cmd: RecoveryCmd,
     },
+    /// Organization: administrators who approve devices and remove people (business use).
+    Org {
+        #[command(subcommand)]
+        cmd: OrgCmd,
+    },
     /// Strongroom folders: opened only with a touch of your FIDO2 security key.
     Strongroom {
         #[command(subcommand)]
@@ -307,7 +321,8 @@ enum PairCmd {
     Offer,
     /// On the new device: join the vault of the device showing the code.
     Join {
-        #[arg(long)]
+        /// Name of this device (default: the computer's name).
+        #[arg(long, default_value_t = default_device_name())]
         name: String,
         /// The nine digits shown on the other device.
         #[arg(long)]
@@ -329,6 +344,99 @@ enum RecoveryCmd {
     Combine {
         #[arg(required = true, num_args = 2..)]
         shares: Vec<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum OrgCmd {
+    /// Turn this vault into an organization's vault: this device becomes the first
+    /// administrator, every current device belongs to --user, and the root key is printed
+    /// once as 24 words (keep them offline; they appoint and dismiss administrators).
+    Create {
+        #[arg(long)]
+        name: String,
+        /// The person who owns the devices in the vault today.
+        #[arg(long)]
+        user: String,
+    },
+    /// Administrators, people and their devices, the policy, devices waiting to be added.
+    Status,
+    /// (New device) Print a request code and its six-word fingerprint for an administrator.
+    Request {
+        /// Name of this device, bound to the code.
+        /// Name of this device (default: the computer's name).
+        #[arg(long, default_value_t = default_device_name())]
+        name: String,
+    },
+    /// (Administrator) Approve a request code: the device joins under --user and gets a token
+    /// to paste. Compare the six words with the person first.
+    Approve {
+        code: String,
+        #[arg(long)]
+        user: String,
+        /// The fingerprint the person read to you; it must match the code's.
+        #[arg(long)]
+        fingerprint: Option<String>,
+        /// Approve without asking whether the fingerprint matches.
+        #[arg(long)]
+        yes: bool,
+    },
+    /// (New device) Join the vault with the approval token.
+    Join {
+        /// Name of this device (default: the computer's name).
+        #[arg(long, default_value_t = default_device_name())]
+        name: String,
+        #[arg(long)]
+        token: String,
+    },
+    /// (Administrator) Add a device that already holds the vault key (it paired, or joined
+    /// with the key) to the organization; until then the others ignore it.
+    AddDevice {
+        device: String,
+        #[arg(long)]
+        user: String,
+    },
+    /// (Administrator) Remove a person: every device of theirs is cut off in one step and the
+    /// vault gets new keys; with --wipe they delete their keys and folder contents.
+    RemoveUser {
+        user: String,
+        #[arg(long)]
+        wipe: bool,
+        #[arg(long)]
+        yes: bool,
+    },
+    /// (Administrator) What members may do on their own: share, add-storages, set-policies,
+    /// add-devices. Without arguments, show the policy.
+    Policy {
+        #[arg(long, value_delimiter = ',')]
+        allow: Vec<String>,
+        #[arg(long, value_delimiter = ',')]
+        deny: Vec<String>,
+    },
+    /// Administrators: appoint or dismiss one with the organization's root words.
+    Admin {
+        #[command(subcommand)]
+        cmd: OrgAdminCmd,
+    },
+    /// Who approved, added, removed or changed what, oldest first (signed by the
+    /// administrator devices; use --json to export).
+    Log,
+}
+
+#[derive(Subcommand)]
+enum OrgAdminCmd {
+    /// Make a device of the organization an administrator.
+    Add {
+        device: String,
+        /// The 24 root words printed when the organization was created.
+        #[arg(long)]
+        root_words: String,
+    },
+    /// Take the administrator role from a device (it stays a member).
+    Remove {
+        device: String,
+        #[arg(long)]
+        root_words: String,
     },
 }
 
@@ -503,17 +611,33 @@ enum ShareCmd {
         #[arg(long)]
         yes: bool,
     },
-    /// (Recipient) Accept a shared folder into a new device directory (one per shared vault).
+    /// (Recipient) Accept a shared folder into a new device directory (one per shared vault),
+    /// through a directory or an S3 bucket that both users can reach.
     Accept {
-        #[arg(long)]
+        /// Name of this device (default: the computer's name).
+        #[arg(long, default_value_t = default_device_name())]
         name: String,
         #[arg(long)]
         token: String,
         /// Storage directory that both users can reach and that holds the owner's vault.
-        #[arg(long)]
-        storage_path: PathBuf,
+        #[arg(long, required_unless_present = "s3_bucket")]
+        storage_path: Option<PathBuf>,
         #[arg(long, default_value = "shared")]
         storage_name: String,
+        /// Accept through an S3-compatible bucket instead of a directory.
+        #[arg(long, requires = "s3_endpoint")]
+        s3_bucket: Option<String>,
+        #[arg(long)]
+        s3_endpoint: Option<String>,
+        #[arg(long, default_value = "us-east-1")]
+        s3_region: String,
+        #[arg(long, default_value = "")]
+        s3_prefix: String,
+        #[arg(long)]
+        s3_access_key_id: Option<String>,
+        /// Secret access key; read from VARSTO_S3_SECRET if omitted.
+        #[arg(long, env = "VARSTO_S3_SECRET", hide_env_values = true)]
+        s3_secret_access_key: Option<String>,
     },
 }
 
@@ -523,7 +647,8 @@ enum ReplicaCmd {
     Token,
     /// (Replica) Set up this directory as a replica of a vault.
     Init {
-        #[arg(long)]
+        /// Name of this device (default: the computer's name).
+        #[arg(long, default_value_t = default_device_name())]
         name: String,
         #[arg(long)]
         token: String,
@@ -799,6 +924,35 @@ fn folder_and_path(
     }
 }
 
+/// This computer's name, for devices joined without `--name`.
+fn default_device_name() -> String {
+    let name = if cfg!(target_os = "macos") {
+        std::process::Command::new("scutil")
+            .args(["--get", "ComputerName"])
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+    } else if cfg!(windows) {
+        std::env::var("COMPUTERNAME").ok()
+    } else {
+        std::fs::read_to_string("/proc/sys/kernel/hostname")
+            .or_else(|_| std::fs::read_to_string("/etc/hostname"))
+            .ok()
+            .map(|h| h.trim().to_string())
+    };
+    name.filter(|n| !n.is_empty() && !n.contains('.'))
+        .or_else(name_before_dot)
+        .unwrap_or_else(|| "this-device".into())
+}
+
+fn name_before_dot() -> Option<String> {
+    std::fs::read_to_string("/proc/sys/kernel/hostname")
+        .ok()
+        .and_then(|h| h.trim().split('.').next().map(|s| s.to_string()))
+        .filter(|s| !s.is_empty())
+}
+
 fn bail_usage<T>(msg: &str) -> Result<T> {
     Err(anyhow!("{msg}"))
 }
@@ -944,6 +1098,359 @@ fn print<T: serde::Serialize>(
     Ok(())
 }
 
+/// Organization commands. When the background service runs it owns the
+/// engine, so changes go through its API; otherwise the engine is opened here.
+fn run_org(cli: &Cli, home: &Path, cmd: &OrgCmd) -> Result<()> {
+    use varsto_core::org::OrgRequest;
+    let via_service = service::status(home);
+    let call = |method: &str, path: &str, body: serde_json::Value| -> Result<serde_json::Value> {
+        let (sf, _) = via_service.as_ref().expect("service running");
+        let url = format!("http://127.0.0.1:{}{path}", sf.port);
+        let r = if method == "GET" {
+            service::http_get(&url, &sf.token)?
+        } else {
+            service::http_post(&url, &sf.token, &body.to_string())?
+        };
+        Ok(serde_json::from_str(&r)?)
+    };
+    match cmd {
+        OrgCmd::Request { name } => {
+            let code = OrgRequest::code_for(home, Some(name))?;
+            let words = OrgRequest::fingerprint_for(home)?;
+            if cli.json {
+                println!(
+                    "{}",
+                    serde_json::json!({"request_code": code, "fingerprint": words})
+                );
+            } else {
+                println!("organization request code for this device (give it to an administrator; it contains no secret):\n  {code}\n\nfingerprint: {words}\nThe administrator sees the same six words for this code. Read them to each other over a call or in person before they approve: different words mean the code was changed on its way.");
+            }
+        }
+        OrgCmd::Join { name, token } => {
+            let (engine, notes, approval) = Engine::org_join(home, name, &passphrase()?, token)?;
+            if cli.json {
+                println!(
+                    "{}",
+                    serde_json::json!({ "vault_id": engine.vault_id().to_string(), "device_id": engine.device_id().to_string(), "organization": approval.org_name, "user": approval.user, "notes": notes })
+                );
+            } else {
+                println!(
+                    "joined the vault of {} as {} for {} (approved by {})",
+                    approval.org_name, name, approval.user, approval.bundle.from
+                );
+                for n in notes {
+                    println!("  {n}");
+                }
+                println!("Attach folders under Files (`varsto folder attach`) and sync.");
+            }
+        }
+        OrgCmd::Create { name, user } => {
+            let created: varsto_core::engine::OrgCreated = if via_service.is_some() {
+                serde_json::from_value(call(
+                    "POST",
+                    "/api/org/create",
+                    serde_json::json!({"name": name, "user": user}),
+                )?)?
+            } else {
+                let mut engine = Engine::open(home, &passphrase()?)?;
+                engine.org_create(name, user)?
+            };
+            if cli.json {
+                println!("{}", serde_json::to_string_pretty(&created)?);
+            } else {
+                println!(
+                    "Organization {} ({}) created; this device is its administrator, and {} now belong to {user}.\n",
+                    created.name,
+                    &created.org_id[..8],
+                    created.devices.join(", ")
+                );
+                print!("{}", created.root_kit);
+            }
+        }
+        OrgCmd::Status => {
+            let summary: Option<varsto_core::engine::OrgSummary> = if via_service.is_some() {
+                let v = call("GET", "/api/org", serde_json::Value::Null)?;
+                if v.get("exists") == Some(&serde_json::Value::Bool(false)) {
+                    None
+                } else {
+                    Some(serde_json::from_value(v)?)
+                }
+            } else {
+                Engine::open(home, &passphrase()?)?.org_summary()
+            };
+            match summary {
+                None => {
+                    if cli.json {
+                        println!("{{\"exists\": false}}");
+                    } else {
+                        println!("This vault has no organization. `varsto org create --name <org> --user <you>` makes one; a vault without one works as before.");
+                    }
+                }
+                Some(s) => print(cli, &s, org_status_text)?,
+            }
+        }
+        OrgCmd::Approve {
+            code,
+            user,
+            fingerprint,
+            yes,
+        } => {
+            let info = OrgRequest::parse(code)?;
+            let confirmed = match fingerprint {
+                Some(f) => Some(f.clone()),
+                None if *yes => None,
+                None => {
+                    eprintln!(
+                        "Request from device {} ({})\nfingerprint: {}\nAsk the person to read the fingerprint their device shows (varsto org request).",
+                        if info.name.is_empty() { "(no name)" } else { &info.name },
+                        info.device.short(),
+                        info.fingerprint
+                    );
+                    if !confirm("Do the six words match exactly?")? {
+                        bail!("not approved: the fingerprint was not confirmed");
+                    }
+                    Some(info.fingerprint.clone())
+                }
+            };
+            let approved: varsto_core::engine::OrgApproved = if via_service.is_some() {
+                serde_json::from_value(call(
+                    "POST",
+                    "/api/org/approve",
+                    serde_json::json!({"code": code, "user": user, "fingerprint": confirmed}),
+                )?)?
+            } else {
+                let mut engine = Engine::open(home, &passphrase()?)?;
+                engine.org_approve(code, user, confirmed.as_deref())?
+            };
+            if cli.json {
+                println!("{}", serde_json::to_string_pretty(&approved)?);
+            } else {
+                println!(
+                    "approved {} for {}. Send this token back; only that device can open it:\n  {}\n\nOn the device: varsto org join --name {} --token <token>",
+                    approved.name, approved.user, approved.token, approved.name
+                );
+            }
+        }
+        OrgCmd::AddDevice { device, user } => {
+            if via_service.is_some() {
+                call(
+                    "POST",
+                    "/api/org/add-device",
+                    serde_json::json!({"device": device, "user": user}),
+                )?;
+            } else {
+                Engine::open(home, &passphrase()?)?.org_add_device(device, user)?;
+            }
+            println!("added {device} to the organization for {user}");
+        }
+        OrgCmd::RemoveUser { user, wipe, yes } => {
+            if !*yes {
+                bail_usage::<()>(&format!(
+                    "this removes every device of {user} from the vault: their later ledger entries are ignored, peers refuse them, and the vault gets new keys for everything written from now on. Everything they already held stays readable to them, and their storage credentials work until you change them at the provider. {}Run again with --yes",
+                    if *wipe { "With --wipe their devices also delete their keys, sync state and folder contents when they next reach a storage. " } else { "" }
+                ))?;
+            }
+            let report: varsto_core::engine::OrgRemoveReport = if via_service.is_some() {
+                serde_json::from_value(call(
+                    "POST",
+                    "/api/org/remove-user",
+                    serde_json::json!({"user": user, "wipe": wipe, "confirm": user}),
+                )?)?
+            } else {
+                let mut engine = Engine::open(home, &passphrase()?)?;
+                engine.org_remove_user(user, *wipe)?
+            };
+            print(cli, &report, |r| {
+                format!(
+                    "removed {} with {}{}; vault key epoch {}; new keys sent to {}{}",
+                    r.user,
+                    r.devices.join(", "),
+                    if r.revoke.wipe { " (wipe ordered)" } else { "" },
+                    r.revoke.key_epoch,
+                    if r.revoke.keys_sent_to.is_empty() {
+                        "no other device".to_string()
+                    } else {
+                        r.revoke.keys_sent_to.join(", ")
+                    },
+                    if r.revoke.keys_pending_for.is_empty() {
+                        String::new()
+                    } else {
+                        format!("; waiting for {}", r.revoke.keys_pending_for.join(", "))
+                    }
+                )
+            })?;
+        }
+        OrgCmd::Policy { allow, deny } => {
+            let current: Option<varsto_core::org::OrgPolicy> = if via_service.is_some() {
+                let v = call("GET", "/api/org", serde_json::Value::Null)?;
+                v.get("policy")
+                    .cloned()
+                    .map(serde_json::from_value)
+                    .transpose()?
+            } else {
+                Engine::open(home, &passphrase()?)?
+                    .org_summary()
+                    .map(|s| s.policy)
+            };
+            let Some(mut p) = current else {
+                bail!("this vault has no organization");
+            };
+            if allow.is_empty() && deny.is_empty() {
+                print(cli, &p, policy_text)?;
+                return Ok(());
+            }
+            for (list, value) in [(allow, true), (deny, false)] {
+                for what in list {
+                    match what.trim() {
+                        "share" => p.members_may_share = value,
+                        "add-storages" => p.members_may_add_storages = value,
+                        "set-policies" => p.members_may_set_policies = value,
+                        "add-devices" => p.members_may_add_devices = value,
+                        other => bail!("unknown permission {other}: use share, add-storages, set-policies or add-devices"),
+                    }
+                }
+            }
+            if via_service.is_some() {
+                call("POST", "/api/org/policy", serde_json::to_value(&p)?)?;
+            } else {
+                Engine::open(home, &passphrase()?)?.org_set_policy(p.clone())?;
+            }
+            print(cli, &p, policy_text)?;
+        }
+        OrgCmd::Admin { cmd } => {
+            let (action, device, words) = match cmd {
+                OrgAdminCmd::Add { device, root_words } => ("add", device, root_words),
+                OrgAdminCmd::Remove { device, root_words } => ("remove", device, root_words),
+            };
+            if via_service.is_some() {
+                call(
+                    "POST",
+                    "/api/org/admin",
+                    serde_json::json!({"action": action, "device": device, "root_words": words}),
+                )?;
+            } else {
+                let mut engine = Engine::open(home, &passphrase()?)?;
+                if action == "add" {
+                    engine.org_admin_add(device, words)?;
+                } else {
+                    engine.org_admin_remove(device, words)?;
+                }
+            }
+            println!(
+                "{device} is {} an administrator",
+                if action == "add" { "now" } else { "no longer" }
+            );
+        }
+        OrgCmd::Log => {
+            let log: Vec<varsto_core::engine::LogView> = if via_service.is_some() {
+                serde_json::from_value(
+                    call("GET", "/api/org/log", serde_json::Value::Null)?["log"].clone(),
+                )?
+            } else {
+                Engine::open(home, &passphrase()?)?.org_log_entries()
+            };
+            print(cli, &log, |l| {
+                if l.is_empty() {
+                    return "no organization log".to_string();
+                }
+                l.iter()
+                    .map(|e| format!("{}  {}", varsto_core::util::format_date(e.utc), e.text))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            })?;
+        }
+    }
+    Ok(())
+}
+
+fn policy_text(p: &varsto_core::org::OrgPolicy) -> String {
+    let yn = |b: bool| if b { "yes" } else { "no (administrators only)" };
+    format!(
+        "members may share folders with other people: {}\nmembers may add or remove storages: {}\nmembers may set policies and placement: {}\nmembers may add devices and print the recovery kit: {}",
+        yn(p.members_may_share),
+        yn(p.members_may_add_storages),
+        yn(p.members_may_set_policies),
+        yn(p.members_may_add_devices)
+    )
+}
+
+fn org_status_text(s: &varsto_core::engine::OrgSummary) -> String {
+    let mut out = format!(
+        "Organization {} ({}), manifest {}, roster {}\nThis device: {}{}",
+        s.name,
+        &s.org_id[..8],
+        s.manifest_seq,
+        s.roster_seq,
+        if s.this_device_admin {
+            "administrator"
+        } else if s.this_device_listed {
+            "member"
+        } else {
+            "NOT IN THE ORGANIZATION (ask an administrator to add it; the others ignore it until then)"
+        },
+        s.this_user
+            .as_ref()
+            .map(|u| format!(", user {u}"))
+            .unwrap_or_default()
+    );
+    out.push_str("\n\nAdministrators:");
+    for a in &s.admins {
+        out.push_str(&format!(
+            "\n  {} ({}){}",
+            a.name,
+            &a.device_id[..8],
+            if a.this_device { ", this device" } else { "" }
+        ));
+    }
+    out.push_str("\n\nUsers and devices:");
+    for u in &s.users {
+        out.push_str(&format!("\n  {}", u.user));
+        for d in &u.devices {
+            out.push_str(&format!(
+                "\n    {} ({}){}{}{}",
+                d.name,
+                &d.device_id[..8],
+                if d.admin { ", administrator" } else { "" },
+                if d.this_device { ", this device" } else { "" },
+                if d.revoked { ", removed" } else { "" }
+            ));
+        }
+    }
+    if !s.unlisted.is_empty() {
+        out.push_str("\n\nDevices in the vault that are not in the organization (ignored until an administrator adds them with `varsto org add-device`):");
+        for d in &s.unlisted {
+            out.push_str(&format!(
+                "\n  {} ({}), enrolled {}",
+                d.name,
+                &d.device_id[..8],
+                varsto_core::util::format_date(d.enrolled_utc)
+            ));
+        }
+    }
+    if !s.removed.is_empty() {
+        out.push_str("\n\nRemoved:");
+        for r in &s.removed {
+            out.push_str(&format!(
+                "\n  {} ({}) of {}, removed {}{}",
+                r.name,
+                r.device.short(),
+                r.user,
+                varsto_core::util::format_date(r.removed_utc),
+                if r.wipe { " with a wipe order" } else { "" }
+            ));
+        }
+    }
+    out.push_str("\n\nPolicy:\n");
+    out.push_str(
+        &policy_text(&s.policy)
+            .lines()
+            .map(|l| format!("  {l}"))
+            .collect::<Vec<_>>()
+            .join("\n"),
+    );
+    out
+}
+
 fn run(cli: &Cli) -> Result<()> {
     let home = home(cli)?;
     match &cli.cmd {
@@ -1026,7 +1533,14 @@ fn run(cli: &Cli) -> Result<()> {
                 (None, Some(w)) => varsto_core::recovery::key_from_words(w)?,
                 (None, None) => bail_usage("give --vault-key <hex> or --words \"<24 words>\"")?,
             };
-            let mut engine = Engine::join(&home, name, &passphrase()?, &key_hex, spec)?;
+            let joined = Engine::join(&home, name, &passphrase()?, &key_hex, spec);
+            std::env::remove_var(format!(
+                "VARSTO_S3_SECRET_{}",
+                storage_name
+                    .to_uppercase()
+                    .replace(|c: char| !c.is_ascii_alphanumeric(), "_")
+            ));
+            let mut engine = joined?;
             if let Some(secret) = s3_secret {
                 engine.store_secret(storage_name, &secret)?;
             }
@@ -1279,7 +1793,11 @@ fn run(cli: &Cli) -> Result<()> {
                                 .unwrap_or_default(),
                             fmt_bytes(r.bytes_added),
                             r.objects_added
-                        )
+                        ) + &r
+                            .warning
+                            .as_ref()
+                            .map(|w| format!("\nwarning: {w}"))
+                            .unwrap_or_default()
                     })?;
                 }
                 DiskCmd::List => {
@@ -1695,8 +2213,14 @@ fn run(cli: &Cli) -> Result<()> {
                 interval_secs: *interval,
                 open_browser: false,
             })?,
-            ServiceCmd::Install { interval } => println!("{}", service::install(&home, *interval)?),
-            ServiceCmd::Uninstall => println!("{}", service::uninstall()?),
+            ServiceCmd::Install { interval } => {
+                service::set_opted_out(&home, false);
+                println!("{}", service::install(&home, *interval)?)
+            }
+            ServiceCmd::Uninstall => {
+                service::set_opted_out(&home, true);
+                println!("{}", service::uninstall()?)
+            }
             ServiceCmd::Remember => {
                 let pass = passphrase()?;
                 Engine::open(&home, &pass)?; // wrong passphrases are not stored
@@ -1741,8 +2265,14 @@ fn run(cli: &Cli) -> Result<()> {
                 None => println!("not running"),
             },
         },
-        Cmd::Install { interval } => println!("{}", service::install(&home, *interval)?),
-        Cmd::Uninstall => println!("{}", service::uninstall()?),
+        Cmd::Install { interval } => {
+            service::set_opted_out(&home, false);
+            println!("{}", service::install(&home, *interval)?)
+        }
+        Cmd::Uninstall => {
+            service::set_opted_out(&home, true);
+            println!("{}", service::uninstall()?)
+        }
         Cmd::Tray { interval, open } => {
             // The tray app has no terminal output: on Windows, let go of the
             // console window that a double-click or the .cmd starter opened.
@@ -1817,20 +2347,63 @@ fn run(cli: &Cli) -> Result<()> {
                 token,
                 storage_path,
                 storage_name,
+                s3_bucket,
+                s3_endpoint,
+                s3_region,
+                s3_prefix,
+                s3_access_key_id,
+                s3_secret_access_key,
             } => {
                 let token = if varsto_core::vault::SealedShareToken::is_sealed(token) {
                     varsto_core::vault::ShareRequest::open_token(&home, token)?
                 } else {
                     varsto_core::vault::ShareToken::decode(token)?
                 };
-                let spec = StorageSpec::LocalDir {
-                    name: storage_name.clone(),
-                    path: storage_path.clone(),
-                    cold: false,
-                    carrier: false,
-                    place: String::new(),
+                let (spec, secret) = match (s3_bucket, storage_path) {
+                    (Some(bucket), _) => (
+                        StorageSpec::S3 {
+                            name: storage_name.clone(),
+                            endpoint: s3_endpoint
+                                .clone()
+                                .unwrap_or_default()
+                                .trim_end_matches('/')
+                                .to_string(),
+                            region: s3_region.clone(),
+                            bucket: bucket.clone(),
+                            prefix: s3_prefix.trim_matches('/').to_string(),
+                            access_key_id: s3_access_key_id
+                                .clone()
+                                .ok_or_else(|| anyhow!("give --s3-access-key-id"))?,
+                            secret_ref: String::new(),
+                            path_style: true,
+                            storage_class: None,
+                            cold: false,
+                            place: String::new(),
+                        },
+                        Some(s3_secret_access_key.clone().ok_or_else(|| {
+                            anyhow!("give --s3-secret-access-key or set VARSTO_S3_SECRET")
+                        })?),
+                    ),
+                    (None, Some(path)) => (
+                        StorageSpec::LocalDir {
+                            name: storage_name.clone(),
+                            path: path.clone(),
+                            cold: false,
+                            carrier: false,
+                            place: String::new(),
+                        },
+                        None,
+                    ),
+                    (None, None) => bail_usage("give --storage-path <dir> or --s3-bucket ...")?,
                 };
-                let engine = Engine::accept_share(&home, name, &passphrase()?, &token, spec)?;
+                let engine = Engine::accept_share_with_secret(
+                    &home,
+                    name,
+                    &passphrase()?,
+                    &token,
+                    spec,
+                    secret,
+                )?;
                 varsto_core::vault::ShareRequest::clear(&home);
                 if !token.fingerprint.is_empty() {
                     println!(
@@ -1988,10 +2561,15 @@ fn run(cli: &Cli) -> Result<()> {
                     let mut out = format!("vault key epoch {}\n", engine.key_epoch());
                     for d in list {
                         out += &format!(
-                            "{} ({}){}{}\n",
+                            "{} ({}){}{}{}\n",
                             d.name,
                             &d.device_id[..8],
                             if d.this_device { ", this device" } else { "" },
+                            match (&d.user, &d.role) {
+                                (Some(u), Some(r)) => format!(", {u} ({r})"),
+                                (Some(u), None) => format!(", {u}"),
+                                _ => String::new(),
+                            },
                             match (&d.revoked_by, d.revoked_utc) {
                                 (Some(by), Some(t)) => format!(
                                     ", removed by {by} on {}{}",
@@ -2135,6 +2713,7 @@ fn run(cli: &Cli) -> Result<()> {
                 println!("words: {}", varsto_core::recovery::words_from_key(&key)?);
             }
         },
+        Cmd::Org { cmd } => run_org(cli, &home, cmd)?,
         Cmd::Strongroom { cmd } => {
             let mut engine = Engine::open(&home, &passphrase()?)?;
             match cmd {
@@ -2335,11 +2914,47 @@ fn run(cli: &Cli) -> Result<()> {
                 }
             }
         }
+        Cmd::Transfers { watch } => transfers(&home, *watch, cli.json)?,
         // Counted by the running service; no passphrase needed.
         Cmd::P2p {
             cmd: P2pCmd::Traffic { watch },
         } => p2p_traffic(&home, *watch, cli.json)?,
         Cmd::P2p { cmd } => {
+            // With the background service running, settings go through it:
+            // it applies them (on and off at once), and its own copy of the
+            // configuration does not overwrite them later.
+            if let (Some((sf, _)), P2pCmd::Enable { .. } | P2pCmd::Disable) =
+                (service::status(&home), cmd)
+            {
+                let body = match cmd {
+                    P2pCmd::Enable {
+                        port,
+                        public_addrs,
+                        stun,
+                        no_stun,
+                    } => {
+                        let stun = if *no_stun {
+                            String::new()
+                        } else if stun.is_empty() {
+                            varsto_core::vault::default_stun().join(",")
+                        } else {
+                            stun.join(",")
+                        };
+                        serde_json::json!({
+                            "enabled": true,
+                            "port": port,
+                            "public_addrs": public_addrs.iter().map(|a| a.to_string()).collect::<Vec<_>>().join(","),
+                            "stun": stun,
+                        })
+                    }
+                    _ => serde_json::json!({"enabled": false}),
+                };
+                let url = format!("http://127.0.0.1:{}/api/p2p", sf.port);
+                let r: serde_json::Value =
+                    serde_json::from_str(&service::http_post(&url, &sf.token, &body.to_string())?)?;
+                println!("{}", r["note"].as_str().unwrap_or("saved"));
+                return Ok(());
+            }
             let mut engine = Engine::open(&home, &passphrase()?)?;
             match cmd {
                 P2pCmd::Enable {
@@ -2360,30 +2975,22 @@ fn run(cli: &Cli) -> Result<()> {
                         port: *port,
                         public_addrs: public_addrs.clone(),
                         stun,
+                        user_disabled: false,
                     })?;
                     let id = engine.p2p_identity()?;
                     println!(
-                        "p2p enabled on port {port}{}; certificate {}; restart the background service to apply",
-                        if public_addrs.is_empty() {
-                            String::new()
-                        } else {
-                            format!(
-                                ", public {}",
-                                public_addrs
-                                    .iter()
-                                    .map(|a| a.to_string())
-                                    .collect::<Vec<_>>()
-                                    .join(", ")
-                            )
-                        },
+                        "peer-to-peer is on (port {port}, certificate {}); the background service uses it when it starts",
                         &id.sha256[..16]
                     );
                 }
                 P2pCmd::Disable => {
                     let mut c = engine.p2p_config();
                     c.enabled = false;
+                    c.user_disabled = true;
                     engine.set_p2p_config(c)?;
-                    println!("p2p disabled; restart the background service to apply");
+                    println!(
+                        "peer-to-peer is off; the background service stays off it when it starts"
+                    );
                 }
                 P2pCmd::Status => p2p_status(&engine, &home, cli.json)?,
                 P2pCmd::Traffic { .. } => unreachable!("handled above"),
@@ -2420,9 +3027,13 @@ fn run(cli: &Cli) -> Result<()> {
                         println!(
                             "{}: {}",
                             rec.name,
-                            rec.policy
-                                .as_ref()
-                                .map(|p| p.describe())
+                            rec.effective_policy()
+                                .map(|p| p.describe()
+                                    + if rec.policy.is_none() {
+                                        " (default)"
+                                    } else {
+                                        ""
+                                    })
                                 .unwrap_or_else(|| "no policy".into())
                         );
                     }
@@ -2492,6 +3103,9 @@ fn run(cli: &Cli) -> Result<()> {
                 })?;
             } else {
                 println!("{}", update::apply(&c)?);
+                if c.available && service::restart_running(&home) {
+                    println!("the background service restarts with {}", c.latest);
+                }
             }
         }
         Cmd::VerifyRelease {
@@ -2659,13 +3273,30 @@ fn after_command(cli: &Cli) {
                 cmd: PairCmd::Join { .. }
             }
     );
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     {
         use std::io::IsTerminal;
-        // Only for the user's own vault in a terminal: never for test homes
+        // Background sync always runs once this computer holds a vault, also
+        // for people who only use the command line: any command sets it up
+        // when it is missing, until `varsto uninstall` turns it off. Only for
+        // the user's own vault in a terminal: never for test homes
         // (--home / VARSTO_HOME) or scripts.
         let own = cli.home.is_none() && std::env::var_os("VARSTO_NO_INSTALL").is_none();
-        if setup && own && std::io::stdout().is_terminal() && !service::linux::installed() {
+        let uninstalling = matches!(
+            cli.cmd,
+            Cmd::Uninstall
+                | Cmd::Reset { .. }
+                | Cmd::Service {
+                    cmd: ServiceCmd::Uninstall | ServiceCmd::Run { .. }
+                }
+        );
+        if own
+            && !uninstalling
+            && std::io::stdout().is_terminal()
+            && home.join("vault.json").exists()
+            && !service::opted_out(&home)
+            && !service::login_service_installed()
+        {
             match service::install(&home, 300) {
                 Ok(report) => println!("Background sync is set up:\n{report}"),
                 Err(e) => eprintln!(
@@ -2673,7 +3304,18 @@ fn after_command(cli: &Cli) {
                 ),
             }
         }
-        if setup && own && std::io::stdin().is_terminal() {
+    }
+    #[cfg(target_os = "linux")]
+    {
+        use std::io::IsTerminal;
+        let own = cli.home.is_none() && std::env::var_os("VARSTO_NO_INSTALL").is_none();
+        let locked_here = service::keyring_locked() == Some(true) && !service::has_display();
+        if setup && own && std::io::stdin().is_terminal() && locked_here && typed.is_some() {
+            // Asking would only lead to a store that waits for an unlock
+            // window that cannot appear in this session.
+            eprintln!("Your keyring is locked and this session has no desktop to unlock it, so the passphrase is not stored: after a restart the background service waits until any varsto command that asks for the passphrase unlocks it. To store it, run `varsto service remember` from your desktop session.");
+        }
+        if setup && own && std::io::stdin().is_terminal() && !locked_here {
             if let Some(pass) = &typed {
                 print!("Keep the passphrase in your keyring so background sync unlocks itself after a restart? [Y/n] ");
                 let _ = std::io::Write::flush(&mut std::io::stdout());
@@ -3007,6 +3649,114 @@ fn strongroom_rekey(
 
 /// `p2p traffic`: the running service's counters as a table, once or every
 /// second. Only the service counts; without it there is nothing to show.
+fn transfers(home: &std::path::Path, watch: bool, json: bool) -> Result<()> {
+    let sf = service::read_service_file(home).ok_or_else(|| {
+        anyhow!("the background service is not running, so nothing is being transferred (start it with `varsto service run` or `varsto install`)")
+    })?;
+    let base = format!("http://127.0.0.1:{}", sf.port);
+    loop {
+        let get = |path: &str| -> Result<serde_json::Value> {
+            let body = service::http_get(&format!("{base}{path}"), &sf.token)
+                .context("the background service did not answer; is it running?")?;
+            Ok(serde_json::from_str(&body)?)
+        };
+        let progress = get("/api/progress")?;
+        let traffic = get("/api/p2p/traffic")?;
+        // The summary waits while a sync holds the engine: then say so.
+        let summary = service::http_get_within(&format!("{base}/api/service"), &sf.token, 2)
+            .ok()
+            .and_then(|b| serde_json::from_str::<serde_json::Value>(&b).ok());
+        if json {
+            println!(
+                "{}",
+                serde_json::json!({"transfers": progress["transfers"], "service": summary, "p2p": traffic})
+            );
+        } else {
+            if watch {
+                print!("\x1b[H\x1b[2J");
+            }
+            let mut out = String::new();
+            let list = progress["transfers"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default();
+            if list.is_empty() {
+                out.push_str("No file is being uploaded or downloaded right now.\n");
+            } else {
+                out.push_str(&format!(
+                    "{:<9} {:>4}  {:>21}  {:>11}  file\n",
+                    "", "%", "done / size", "speed"
+                ));
+                for t in &list {
+                    let n = |k: &str| t[k].as_u64().unwrap_or(0);
+                    out.push_str(&format!(
+                        "{:<9} {:>3}%  {:>21}  {:>11}  {}/{}\n",
+                        t["kind"].as_str().unwrap_or(""),
+                        n("percent"),
+                        format!("{} / {}", fmt_bytes(n("done")), fmt_bytes(n("total"))),
+                        format!("{}/s", fmt_bytes(n("bytes_per_sec"))),
+                        t["folder"].as_str().unwrap_or(""),
+                        t["path"].as_str().unwrap_or(""),
+                    ));
+                }
+            }
+            match &summary {
+                Some(s) => {
+                    let paused = s["paused"].as_bool() == Some(true);
+                    let last = s["last_sync_utc"]
+                        .as_i64()
+                        .map(ago)
+                        .unwrap_or_else(|| "never".into());
+                    out.push_str(&format!(
+                        "Background sync: {}; last sync {last}{}\n",
+                        if paused { "paused" } else { "on" },
+                        s["last_result"]
+                            .as_str()
+                            .filter(|r| !r.is_empty())
+                            .map(|r| format!(" ({r})"))
+                            .unwrap_or_default(),
+                    ));
+                }
+                None => out.push_str("Background sync: syncing now\n"),
+            }
+            if let Ok(r) =
+                serde_json::from_value::<varsto_core::p2p::traffic::TrafficReport>(traffic)
+            {
+                let busy: Vec<_> = r
+                    .peers
+                    .iter()
+                    .filter(|p| p.active > 0 || p.rx_bps > 0 || p.tx_bps > 0)
+                    .collect();
+                if busy.is_empty() {
+                    out.push_str("Peers: no transfer with another device right now\n");
+                } else {
+                    for p in busy {
+                        out.push_str(&format!(
+                            "Peer {}: down {}/s, up {}/s, {} requests in flight ({})\n",
+                            if p.name.is_empty() {
+                                p.device.short().to_string()
+                            } else {
+                                p.name.clone()
+                            },
+                            fmt_bytes(p.rx_bps),
+                            fmt_bytes(p.tx_bps),
+                            p.active,
+                            if p.path.is_empty() { "-" } else { &p.path },
+                        ));
+                    }
+                }
+            }
+            print!("{out}");
+        }
+        if !watch {
+            return Ok(());
+        }
+        use std::io::Write;
+        std::io::stdout().flush()?;
+        std::thread::sleep(std::time::Duration::from_secs(1));
+    }
+}
+
 fn p2p_traffic(home: &std::path::Path, watch: bool, json: bool) -> Result<()> {
     let sf = service::read_service_file(home).ok_or_else(|| {
         anyhow!("the background service is not running; traffic is counted by the service")

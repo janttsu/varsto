@@ -165,6 +165,15 @@ class CameraUpload(private val context: Context, private val progress: (String?)
             existing[path] = item.size
             remember(item.key)
             uploaded++
+            if (item.key.startsWith("video:")) {
+                // The service has no ffmpeg on a phone: the frame comes from Android.
+                VideoThumbs.frameOf(context, item.uri)?.let { jpeg ->
+                    try {
+                        api.post("/api/thumbnail", JSONObject().put("folder", s.folder).put("path", path)
+                            .put("jpeg", VideoThumbs.base64(jpeg)).toString())
+                    } catch (e: Exception) {}
+                }
+            }
             if (encrypted) {
                 // Folders kept encrypted on the phone need not keep the uploaded blocks
                 // once a storage has them (the service refuses otherwise); the original

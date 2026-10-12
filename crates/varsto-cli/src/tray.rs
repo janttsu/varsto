@@ -48,11 +48,14 @@ impl Supervisor {
         } else if service::status(&self.home).is_some() {
             return Ok(()); // started by something else (launch agent, CLI)
         }
-        let log = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(self.home.join("service.log"))
-            .ok();
+        let mut opts = std::fs::OpenOptions::new();
+        opts.create(true).append(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            opts.mode(0o600);
+        }
+        let log = opts.open(self.home.join("service.log")).ok();
         let exe = std::env::current_exe()?;
         let mut cmd = Command::new(exe);
         cmd.arg("--home")
@@ -166,6 +169,44 @@ pub fn run(home: PathBuf, interval: u64, open_at_start: bool) -> Result<()> {
     platform::run(sup, &home)
 }
 
+/// A newer version found by the automatic check (no menu item asks for it).
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+#[derive(Clone)]
+struct Newer {
+    latest: String,
+    /// The service can install it itself.
+    available: bool,
+    page: String,
+}
+
+/// How often the tray asks the service whether a newer version is out.
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+const UPDATE_EVERY: Duration = Duration::from_secs(6 * 3600);
+
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+fn check_newer(s: &mut Supervisor) -> Option<Newer> {
+    let c = s.call("GET", "/api/update/check", "").ok()?;
+    c["newer"].as_bool().filter(|n| *n)?;
+    Some(Newer {
+        latest: c["latest"].as_str().unwrap_or("").to_string(),
+        available: c["available"].as_bool().unwrap_or(false),
+        page: c["download_page"].as_str().unwrap_or("").to_string(),
+    })
+}
+
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+fn install_newer(s: &mut Supervisor, n: &Newer) -> String {
+    if n.available {
+        match s.call("POST", "/api/update", "{}") {
+            Ok(_) => format!("Updating to {}…", n.latest),
+            Err(e) => format!("Update failed: {e}"),
+        }
+    } else {
+        crate::desktop::open_in_browser(&n.page);
+        format!("Download {} from {}", n.latest, n.page)
+    }
+}
+
 #[cfg(target_os = "linux")]
 mod platform {
     use super::*;
@@ -178,6 +219,8 @@ mod platform {
         status: String,
         paused: bool,
         update_note: String,
+        newer: Option<Newer>,
+        update_checked: Option<Instant>,
         quit: bool,
     }
 
@@ -190,6 +233,13 @@ mod platform {
                 .call("GET", "/api/service", "")
                 .map(|v| v["paused"].as_bool().unwrap_or(false))
                 .unwrap_or(false);
+            if self
+                .update_checked
+                .is_none_or(|t| t.elapsed() >= UPDATE_EVERY)
+            {
+                self.update_checked = Some(Instant::now());
+                self.newer = check_newer(&mut s);
+            }
         }
     }
 
@@ -238,15 +288,6 @@ mod platform {
                     ..Default::default()
                 }
                 .into(),
-                StandardItem {
-                    label: "Sync now".into(),
-                    activate: Box::new(|t: &mut Self| {
-                        let _ = t.sup.lock().unwrap().call("POST", "/api/sync", "{}");
-                        t.refresh();
-                    }),
-                    ..Default::default()
-                }
-                .into(),
                 CheckmarkItem {
                     label: "Pause syncing".into(),
                     checked: self.paused,
@@ -262,30 +303,21 @@ mod platform {
                     ..Default::default()
                 }
                 .into(),
-                StandardItem {
-                    label: "Check for updates".into(),
-                    activate: Box::new(|t: &mut Self| {
-                        let r = t.sup.lock().unwrap().call("GET", "/api/update/check", "");
-                        t.update_note = match r {
-                            Ok(c) if c["available"].as_bool().unwrap_or(false) => {
-                                let _ = t.sup.lock().unwrap().call("POST", "/api/update", "{}");
-                                format!("Updating to {}…", c["latest"].as_str().unwrap_or(""))
-                            }
-                            Ok(c) if c["newer"].as_bool().unwrap_or(false) => format!(
-                                "{} is out: download it from {}",
-                                c["latest"].as_str().unwrap_or(""),
-                                c["download_page"].as_str().unwrap_or("")
-                            ),
-                            Ok(c) => {
-                                format!("Up to date ({})", c["current"].as_str().unwrap_or(""))
-                            }
-                            Err(e) => format!("Update check failed: {e}"),
-                        };
-                    }),
-                    ..Default::default()
-                }
-                .into(),
             ];
+            if let Some(n) = &self.newer {
+                let n = n.clone();
+                items.push(
+                    StandardItem {
+                        label: format!("Install Varsto {}", n.latest),
+                        activate: Box::new(move |t: &mut Self| {
+                            let note = install_newer(&mut t.sup.lock().unwrap(), &n);
+                            t.update_note = note;
+                        }),
+                        ..Default::default()
+                    }
+                    .into(),
+                );
+            }
             if !self.update_note.is_empty() {
                 items.push(
                     StandardItem {
@@ -317,6 +349,8 @@ mod platform {
             status: "Starting…".into(),
             paused: false,
             update_note: String::new(),
+            newer: None,
+            update_checked: None,
             quit: false,
         };
         tray.refresh();
@@ -352,9 +386,9 @@ mod platform {
     pub fn run(sup: Shared, _home: &Path) -> Result<()> {
         let status = MenuItem::with_id("status", "Starting…", false, None);
         let open = MenuItem::with_id("open", "Open Varsto", true, None);
-        let sync = MenuItem::with_id("sync", "Sync now", true, None);
         let pause = CheckMenuItem::with_id("pause", "Pause syncing", true, false, None);
-        let update = MenuItem::with_id("update", "Check for updates", true, None);
+        // Added to the menu only when the automatic check finds a newer version.
+        let update = MenuItem::with_id("update", "Install update", true, None);
         let note = MenuItem::with_id("note", "", false, None);
         let quit = MenuItem::with_id("quit", "Quit Varsto", true, None);
         let menu = Menu::new();
@@ -362,16 +396,14 @@ mod platform {
             &status,
             &PredefinedMenuItem::separator(),
             &open,
-            &sync,
             &pause,
-            &update,
             &note,
             &PredefinedMenuItem::separator(),
             &quit,
         ])?;
         let icon = Icon::from_rgba(crate::icon::rgba(32), 32, 32)?;
         let _tray = TrayIconBuilder::new()
-            .with_menu(Box::new(menu))
+            .with_menu(Box::new(menu.clone()))
             .with_tooltip("Varsto")
             .with_icon(icon)
             .with_menu_on_left_click(true)
@@ -381,6 +413,9 @@ mod platform {
             let _ = tx.send(e.id().0.clone());
         }));
         let mut last_refresh = Instant::now() - Duration::from_secs(60);
+        let mut update_checked: Option<Instant> = None;
+        let mut newer: Option<Newer> = None;
+        let mut update_shown = false;
         loop {
             unsafe {
                 let mut msg: MSG = std::mem::zeroed();
@@ -393,9 +428,6 @@ mod platform {
                 let mut s = sup.lock().unwrap();
                 match id.as_str() {
                     "open" => s.open_ui(),
-                    "sync" => {
-                        let _ = s.call("POST", "/api/sync", "{}");
-                    }
                     "pause" => {
                         let _ = s.call(
                             "POST",
@@ -404,22 +436,9 @@ mod platform {
                         );
                     }
                     "update" => {
-                        let text = match s.call("GET", "/api/update/check", "") {
-                            Ok(c) if c["available"].as_bool().unwrap_or(false) => {
-                                let _ = s.call("POST", "/api/update", "{}");
-                                format!("Updating to {}…", c["latest"].as_str().unwrap_or(""))
-                            }
-                            Ok(c) if c["newer"].as_bool().unwrap_or(false) => format!(
-                                "{} is out: download it from {}",
-                                c["latest"].as_str().unwrap_or(""),
-                                c["download_page"].as_str().unwrap_or("")
-                            ),
-                            Ok(c) => {
-                                format!("Up to date ({})", c["current"].as_str().unwrap_or(""))
-                            }
-                            Err(e) => format!("Update check failed: {e}"),
-                        };
-                        note.set_text(text);
+                        if let Some(n) = &newer {
+                            note.set_text(install_newer(&mut s, n));
+                        }
                     }
                     "quit" => {
                         s.stop();
@@ -435,6 +454,24 @@ mod platform {
                 status.set_text(s.status_line());
                 if let Ok(v) = s.call("GET", "/api/service", "") {
                     pause.set_checked(v["paused"].as_bool().unwrap_or(false));
+                }
+                if update_checked.is_none_or(|t| t.elapsed() >= UPDATE_EVERY) {
+                    update_checked = Some(Instant::now());
+                    newer = check_newer(&mut s);
+                    match (&newer, update_shown) {
+                        (Some(n), _) => {
+                            update.set_text(format!("Install Varsto {}", n.latest));
+                            if !update_shown {
+                                let _ = menu.insert(&update, 3);
+                                update_shown = true;
+                            }
+                        }
+                        (None, true) => {
+                            let _ = menu.remove(&update);
+                            update_shown = false;
+                        }
+                        (None, false) => {}
+                    }
                 }
                 last_refresh = Instant::now();
             }

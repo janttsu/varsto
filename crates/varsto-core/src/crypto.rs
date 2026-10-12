@@ -6,8 +6,8 @@
 //! - AEAD: XChaCha20-Poly1305 with a 192-bit nonce.
 //! - Keyed hash and KDF: BLAKE3 (keyed mode and derive_key mode).
 //! - Passphrase stretching: Argon2id with fixed minimum parameters.
-//! - Signatures: Ed25519 only. The hybrid ML-DSA signature of the plan is
-//!   not implemented yet; the algorithm identifier makes that visible.
+//! - Signatures: Ed25519 plus ML-DSA-65 (hybrid, both must verify); devices
+//!   from alpha-0 keep Ed25519-only keys, which the algorithm identifier marks.
 //!
 //! Every key has exactly one purpose; derivations carry a context string and
 //! length-prefixed scope identifiers so that two scopes never share a key.
@@ -111,6 +111,16 @@ impl KeyedHasher {
     }
 }
 
+/// Constant-time equality of two byte strings (unequal lengths differ in
+/// constant time too). For MACs, confirmation values and tokens.
+pub fn ct_eq(a: &[u8], b: &[u8]) -> bool {
+    let mut diff = (a.len() ^ b.len()) as u8;
+    for i in 0..a.len().max(b.len()) {
+        diff |= a.get(i).copied().unwrap_or(0) ^ b.get(i).copied().unwrap_or(0);
+    }
+    diff == 0
+}
+
 /// Plain BLAKE3 hash of ciphertext or signed bodies (no secret involved).
 pub fn hash(data: &[u8]) -> [u8; 32] {
     *blake3::hash(data).as_bytes()
@@ -209,9 +219,24 @@ impl Default for PassphraseParams {
     }
 }
 
+/// The passphrase as it is stretched: Unicode NFKC, so that the same
+/// characters typed on a keyboard that composes them differently (a macOS
+/// "ä" versus a Windows "ä") give the same key (plan 6.15). Key files from
+/// before this normalisation are opened with the raw string as a fallback.
+pub fn normalize_passphrase(passphrase: &str) -> String {
+    use unicode_normalization::UnicodeNormalization as _;
+    passphrase.nfkc().collect()
+}
+
 /// Stretch a passphrase into a wrapping key. The passphrase is NFKC-normalised
-/// by the caller (alpha-0: not yet, see plan 6.15) and may be any length.
+/// here and may be any length.
 pub fn passphrase_key(passphrase: &str, params: &PassphraseParams) -> Result<SecretKey> {
+    passphrase_key_raw(&normalize_passphrase(passphrase), params)
+}
+
+/// Like `passphrase_key` without normalisation: for key files written
+/// before alpha.10 by a passphrase that NFKC changes.
+pub fn passphrase_key_raw(passphrase: &str, params: &PassphraseParams) -> Result<SecretKey> {
     if params.kdf != PASSPHRASE_KDF {
         bail!("unsupported passphrase KDF {}", params.kdf);
     }
@@ -469,6 +494,17 @@ mod tests {
         pk.verify(SIG_ALG_LEGACY, b"old batch", &sig).unwrap();
         assert!(pk.verify(SIG_ALG, b"old batch", &sig).is_err());
         assert_eq!(legacy.to_bytes().len(), 32);
+    }
+
+    #[test]
+    fn passphrases_are_nfkc_normalised() {
+        // "ä" composed (U+00E4) and decomposed (a + U+0308) give the same key.
+        let p = PassphraseParams::new();
+        let a = passphrase_key("p\u{e4}ss", &p).unwrap();
+        let b = passphrase_key("pa\u{308}ss", &p).unwrap();
+        assert_eq!(a.0, b.0);
+        assert_ne!(passphrase_key_raw("pa\u{308}ss", &p).unwrap().0, a.0);
+        assert_eq!(normalize_passphrase("\u{fb01}"), "fi");
     }
 
     #[test]

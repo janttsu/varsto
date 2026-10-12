@@ -23,6 +23,9 @@ impl Id {
 
     pub fn from_hex(s: &str) -> anyhow::Result<Self> {
         let bytes = hex::decode(s.trim())?;
+        if bytes.is_empty() || bytes.len() > 64 {
+            anyhow::bail!("an identifier has 1 to 64 bytes, not {}", bytes.len());
+        }
         Ok(Id(hex::encode(bytes)))
     }
 
@@ -59,3 +62,18 @@ pub type DeviceId = Id;
 pub type ChunkId = Id;
 /// Hash of a chunk's ciphertext (hex); the storage object name.
 pub type ObjectName = Id;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn identifiers_have_a_fixed_size() {
+        assert!(Id::from_hex("").is_err());
+        assert!(Id::from_hex("ab").is_ok());
+        assert!(Id::from_hex(&"ab".repeat(16)).is_ok());
+        assert!(Id::from_hex(&"ab".repeat(32)).is_ok());
+        assert!(Id::from_hex(&"ab".repeat(65)).is_err());
+        assert!(Id::from_hex("zz".repeat(16).as_str()).is_err());
+    }
+}

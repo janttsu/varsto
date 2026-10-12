@@ -200,6 +200,15 @@ impl Engine {
         }
         let pool = self.open_pool(&spec)?;
         let disk = pool.add_disk_at(mount, label, place)?;
+        // A disk no larger than the space the pool keeps free on every disk
+        // would silently take nothing: say so.
+        let warning = (!pool.has_room(&disk.id, 1)).then(|| {
+            format!(
+                "{label} has no room above the reserve the pool keeps free on every disk ({} of {}): nothing will be written to it. Use a larger disk, or a pool with a smaller reserve",
+                crate::util::human_bytes(pool.reserve(disk.capacity_bytes)),
+                crate::util::human_bytes(disk.capacity_bytes)
+            )
+        });
         let (objects_added, bytes_added) = self.fill_disk(&spec, &pool, &disk.id)?;
         pool.flush()?;
         let disks = pool.disks();
@@ -210,6 +219,7 @@ impl Engine {
             disk,
             objects_added,
             bytes_added,
+            warning,
         })
     }
 }

@@ -21,7 +21,10 @@
 
 use super::stun;
 use super::traffic::{Direction, Traffic};
-use super::{auth_header, handle_from, is_object, log, verify_auth, PeerInfo, Route, Snapshot};
+use super::{
+    auth_header, handle_from, is_object, log, verify_auth, verify_auth_relayed, PeerInfo, Route,
+    Snapshot,
+};
 use crate::crypto::SecretKey;
 use crate::ids::DeviceId;
 use anyhow::{anyhow, bail, Context, Result};
@@ -50,6 +53,9 @@ const CONNECT_TIMEOUT: Duration = Duration::from_millis(1500);
 /// How long punching toward a peer behind NAT goes on before giving up.
 pub const PUNCH_TIMEOUT: Duration = Duration::from_secs(3);
 const PUNCH_INTERVAL: Duration = Duration::from_millis(250);
+/// How long a failed connection attempt keeps an address from being tried
+/// again by requests (the background punching runs on its own schedule).
+const FAILED_TTL: Duration = Duration::from_secs(15);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 /// Keeps NAT mappings of idle connections (relay registrations) alive.
 const KEEP_ALIVE: Duration = Duration::from_secs(15);
@@ -496,6 +502,10 @@ pub struct Node {
     /// One connection attempt per address at a time: requests in flight
     /// together wait for it and then share the connection it opened.
     connecting: tokio::sync::Mutex<HashMap<SocketAddr, Arc<tokio::sync::Mutex<()>>>>,
+    /// Addresses whose last connection attempt failed, and when. Requests
+    /// that queued behind that attempt (a download asks many blocks at
+    /// once) give up at once instead of each waiting out its own timeout.
+    failed: Mutex<HashMap<SocketAddr, Instant>>,
     /// Connections this node opened as a client (for tests and diagnostics).
     opened: std::sync::atomic::AtomicUsize,
     /// Relays we are registered with (device -> connection).
@@ -603,6 +613,7 @@ impl Node {
             serving,
             conns: tokio::sync::Mutex::new(HashMap::new()),
             connecting: tokio::sync::Mutex::new(HashMap::new()),
+            failed: Mutex::new(HashMap::new()),
             opened: std::sync::atomic::AtomicUsize::new(0),
             relays: Mutex::new(BTreeMap::new()),
             punched: Mutex::new(Vec::new()),
@@ -809,6 +820,14 @@ impl Node {
         if let Some(c) = self.reusable(addr, expected).await {
             return Ok(c);
         }
+        if let Some(when) = self.failed.lock().unwrap().get(&addr) {
+            if when.elapsed() < FAILED_TTL {
+                bail!(
+                    "quic {addr}: no answer {} s ago; not asked again yet",
+                    when.elapsed().as_secs()
+                );
+            }
+        }
         if expected.is_empty() {
             bail!("peer has no certificate hash yet");
         }
@@ -850,6 +869,7 @@ impl Node {
         let conn = match outcome {
             Ok(c) => c,
             Err(e) => {
+                self.failed.lock().unwrap().insert(addr, Instant::now());
                 log(&format!("quic connect {addr} failed: {e:#}"));
                 if punch {
                     // Our own mapping may be stale; have the record corrected.
@@ -867,6 +887,7 @@ impl Node {
                 String::new()
             }
         ));
+        self.failed.lock().unwrap().remove(&addr);
         self.conns.lock().await.insert(addr, conn.clone());
         self.opened
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -1003,7 +1024,12 @@ impl Node {
     /// Ask a device that keeps its relay registration with us, on that
     /// connection. We are its relay, so there is no third device to go
     /// through, and a device behind a symmetric NAT cannot be dialled.
-    pub fn request_registrant(&self, dev: &DeviceId, path: &str, auth: &str) -> Result<(u16, Vec<u8>)> {
+    pub fn request_registrant(
+        &self,
+        dev: &DeviceId,
+        path: &str,
+        auth: &str,
+    ) -> Result<(u16, Vec<u8>)> {
         let conn = self
             .serving
             .registrants
@@ -1013,7 +1039,11 @@ impl Node {
             .cloned()
             .ok_or_else(|| anyhow!("not registered here"))?;
         let r = self.rt.block_on(async {
-            tokio::time::timeout(Duration::from_secs(60), request_on(&conn, "GET", path, auth)).await
+            tokio::time::timeout(
+                Duration::from_secs(60),
+                request_on(&conn, "GET", path, auth),
+            )
+            .await
         });
         match r {
             Ok(Ok(x)) => Ok(x),
@@ -1173,7 +1203,7 @@ async fn relay_request(sv: &Serving, rest: &str, auth: &str) -> (u16, Vec<u8>) {
         return (400, b"bad device".to_vec());
     };
     let inner = format!("/{inner}");
-    let Some(asker) = verify_auth(&sv.peer_key(), auth, &inner) else {
+    let Some(asker) = verify_auth_relayed(&sv.peer_key(), auth, &inner) else {
         return (403, b"forbidden".to_vec());
     };
     let target = sv.registrants.lock().unwrap().get(&dev).cloned();

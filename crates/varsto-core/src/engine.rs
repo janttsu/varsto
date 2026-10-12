@@ -49,6 +49,7 @@ mod fetch;
 mod ledger_upkeep;
 mod manifest_upkeep;
 mod membership;
+mod org_ops;
 mod placement;
 mod repair;
 mod share_ops;
@@ -63,7 +64,11 @@ pub use disk_groups::DiskGroupStatus;
 pub use manifest_upkeep::ManifestPolicy;
 pub use membership::{
     removal_notice, DeviceInfo, DeviceRemoved, EpochRecord, Grant, KemRecord, Removal, Revocation,
-    RevokeReport, Revoked, SignedRevocation,
+    RevokeReport, Revoked, SignedEpoch, SignedRevocation,
+};
+pub use org_ops::{
+    LogView, OrgApproved, OrgBrief, OrgCreated, OrgDevice, OrgRemoveReport, OrgSummary, OrgUser,
+    UnlistedDevice,
 };
 pub use repair::{
     Damage, DamageKind, RepairOptions, RepairReport, RepairStatus, RepairedCopy, Unrepairable,
@@ -98,6 +103,10 @@ struct FolderState {
     /// Content hashes whose thumbnail this device has generated and stored.
     #[serde(default)]
     thumbs_done: BTreeSet<String>,
+    /// 2 once videos marked done by older versions (which gave up when
+    /// ffmpeg was not found) were let go, so that they are tried again.
+    #[serde(default)]
+    thumbs_rev: u32,
     /// Varsto's own "last accessed" record per path (seconds since the Unix
     /// epoch): updated when a file is fetched, opened or read through Varsto
     /// (interface, CLI, MCP) and from the filesystem access time seen at scan.
@@ -283,6 +292,9 @@ pub struct StatusReport {
     /// Destination devices of transferrers, by storage name.
     #[serde(default)]
     pub carrier_for: BTreeMap<String, Vec<String>>,
+    /// The organization the vault belongs to, if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub org: Option<OrgBrief>,
 }
 
 #[derive(Clone, Debug, Serialize, Default)]
@@ -318,6 +330,10 @@ pub struct DiskAddReport {
     pub disk: PoolDisk,
     pub objects_added: u64,
     pub bytes_added: u64,
+    /// Why nothing (or less than expected) went to the disk, when the
+    /// reason is the disk itself: smaller than the space the pool keeps free.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub warning: Option<String>,
 }
 
 /// What `disk check` did (the reattach routine).
@@ -405,6 +421,8 @@ pub struct Engine {
     epochs: membership::VaultEpochs,
     /// Set once this device has seen its own revocation: it no longer syncs.
     removal: Option<Removal>,
+    /// The organization this vault belongs to, if any (`org_ops`).
+    org: Option<crate::org::OrgState>,
     pub chunker: ChunkerParams,
     /// Counts the calls made to every storage this engine opens (measurements).
     storage_calls: Option<std::sync::Arc<crate::storage::StorageCalls>>,
@@ -420,6 +438,72 @@ pub struct Engine {
 
 /// Open storages with their specs.
 type OpenStorages = Vec<(StorageSpec, Box<dyn Storage>)>;
+
+/// Threads that write objects during a push, and how many encrypted
+/// blocks may wait for them.
+const UPLOADERS: usize = 8;
+const UPLOAD_QUEUE: usize = 16;
+/// At most this much encrypted data waits for or is with the uploaders:
+/// with the large blocks of big files (up to 16 MiB) the queue alone would
+/// otherwise hold hundreds of megabytes, too much for a phone.
+const UPLOAD_BYTES: u64 = 128 << 20;
+
+/// Count one finished write in the report and the ledger.
+fn apply_upload(
+    me: &mut Engine,
+    folder_id: &FolderId,
+    d: UploadDone,
+    report: &mut PushReport,
+    first_error: &mut Option<anyhow::Error>,
+) {
+    match d.outcome {
+        Ok(written) => {
+            if written {
+                report.chunks_uploaded += 1;
+                report.bytes_uploaded += d.size;
+            }
+            me.pending.push(Event::ChunkStored {
+                folder: folder_id.clone(),
+                chunk: d.chunk,
+                object: d.object,
+                storage: d.storage,
+                size: d.size,
+            });
+        }
+        // A pool with no disk attached (or no room) is left out for the rest
+        // of this push and tried again next time.
+        Err(e)
+            if matches!(
+                pool::pool_error(&e),
+                Some(PoolError::NoDiskAttached { .. } | PoolError::NoRoom { .. })
+            ) =>
+        {
+            if !report.storages_unavailable.contains(&d.storage) {
+                report.storages_unavailable.push(d.storage);
+            }
+        }
+        Err(e) => {
+            first_error.get_or_insert(e);
+        }
+    }
+}
+
+/// One object to write to some storages during a push.
+struct UploadJob {
+    targets: Vec<String>,
+    chunk: ChunkId,
+    object: ObjectName,
+    ct: Vec<u8>,
+}
+
+/// How one write went.
+struct UploadDone {
+    storage: String,
+    chunk: ChunkId,
+    object: ObjectName,
+    size: u64,
+    outcome: Result<bool>,
+}
 
 /// Suffix of placeholder files in selective folders (plan 6.34, Resilio-style).
 pub const PLACEHOLDER_SUFFIX: &str = ".varsto-placeholder";
@@ -455,9 +539,7 @@ impl Engine {
     /// vault key (hex) that other devices need to join. The vault key is shown
     /// once and never stored in clear text.
     pub fn init(home: &Path, device_name: &str, passphrase: &str) -> Result<(Engine, String)> {
-        if home.join("vault.json").exists() {
-            bail!("{} already holds a vault", home.display());
-        }
+        ensure_no_vault(home)?;
         fs::create_dir_all(home)?;
         let keys = Keys {
             master: SecretKey::random(),
@@ -498,9 +580,30 @@ impl Engine {
         storage: StorageSpec,
         secret: Option<String>,
     ) -> Result<Engine> {
-        if home.join("vault.json").exists() {
-            bail!("{} already holds a vault", home.display());
-        }
+        Self::join_with_signer(
+            home,
+            device_name,
+            passphrase,
+            vault_key_hex,
+            storage,
+            secret,
+            None,
+        )
+    }
+
+    /// Like `join_with_secret`, with the signing key the device already made
+    /// (an organization request): its device id is then the one the admin
+    /// approved. Without one a fresh key is generated.
+    pub(crate) fn join_with_signer(
+        home: &Path,
+        device_name: &str,
+        passphrase: &str,
+        vault_key_hex: &str,
+        storage: StorageSpec,
+        secret: Option<String>,
+        signer: Option<crypto::SigningKey>,
+    ) -> Result<Engine> {
+        ensure_no_vault(home)?;
         let backend = storage.open_with(&|_| secret.clone())?;
         let meta_bytes = backend.get(VaultMeta::STORAGE_KEY)?.ok_or_else(|| {
             anyhow!(
@@ -522,7 +625,7 @@ impl Engine {
         fs::create_dir_all(home)?;
         let keys = Keys {
             master,
-            signer: crypto::SigningKey::generate(),
+            signer: signer.unwrap_or_else(crypto::SigningKey::generate),
         };
         let device_id = ledger::device_id_for(&keys.signer.public());
         let vault = LocalVault {
@@ -534,7 +637,7 @@ impl Engine {
             member: false,
         };
         let mut engine = Self::write_new(home, vault, keys, passphrase, epochs)?;
-        engine.add_storage_with_secret(storage, secret)?;
+        engine.add_storage_internal(storage, secret)?;
         engine.pull_registry()?;
         engine.pull_ledger()?;
         // Publish the enrolment now: the other devices list this one from
@@ -551,6 +654,16 @@ impl Engine {
         device_name: &str,
         passphrase: &str,
         bundle: &crate::pair::Bundle,
+    ) -> Result<(Engine, Vec<String>)> {
+        Self::join_paired_with(home, device_name, passphrase, bundle, None)
+    }
+
+    pub(crate) fn join_paired_with(
+        home: &Path,
+        device_name: &str,
+        passphrase: &str,
+        bundle: &crate::pair::Bundle,
+        signer: Option<crypto::SigningKey>,
     ) -> Result<(Engine, Vec<String>)> {
         let mut notes = Vec::new();
         let mut first = None;
@@ -571,13 +684,14 @@ impl Engine {
             );
         };
         let chosen = &bundle.storages[first];
-        let mut engine = Self::join_with_secret(
+        let mut engine = Self::join_with_signer(
             home,
             device_name,
             passphrase,
             &bundle.vault_key,
             chosen.spec.clone(),
             chosen.secret.clone(),
+            signer,
         )?;
         if engine.vault.vault_id.to_string() != bundle.vault_id {
             bail!(
@@ -588,7 +702,7 @@ impl Engine {
         notes.push(format!("{}: joined through it", chosen.spec.name()));
         for s in bundle.storages.iter().skip(first + 1) {
             let r = Self::reachable(s)
-                .and_then(|()| engine.add_storage_with_secret(s.spec.clone(), s.secret.clone()));
+                .and_then(|()| engine.add_storage_internal(s.spec.clone(), s.secret.clone()));
             notes.push(match r {
                 Ok(()) => format!("{}: added", s.spec.name()),
                 Err(e) => format!("{}: not reachable here ({e:#})", s.spec.name()),
@@ -625,6 +739,7 @@ impl Engine {
         if self.vault.member {
             bail!("a member device cannot add devices");
         }
+        self.org_allows(|p| p.members_may_add_devices, "add devices")?;
         let store = self.secret_store()?;
         let storages = self
             .config
@@ -694,6 +809,7 @@ impl Engine {
             forked_self: false,
             epochs,
             removal: None,
+            org: crate::org::OrgState::load(home),
             chunker: ChunkerParams::DEFAULT,
             storage_calls: None,
             view_cache: Default::default(),
@@ -733,10 +849,22 @@ impl Engine {
         token: &ShareToken,
         storage: StorageSpec,
     ) -> Result<Engine> {
-        if home.join("vault.json").exists() {
-            bail!("{} already holds a vault", home.display());
-        }
-        let backend = storage.open()?;
+        Self::accept_share_with_secret(home, device_name, passphrase, token, storage, None)
+    }
+
+    /// Like `accept_share`, through a storage that needs a secret (an S3
+    /// bucket both users can reach); the secret goes into this device's
+    /// encrypted secret store.
+    pub fn accept_share_with_secret(
+        home: &Path,
+        device_name: &str,
+        passphrase: &str,
+        token: &ShareToken,
+        storage: StorageSpec,
+        secret: Option<String>,
+    ) -> Result<Engine> {
+        ensure_no_vault(home)?;
+        let backend = storage.open_with(&|_| secret.clone())?;
         let meta: VaultMeta = serde_json::from_slice(
             &backend
                 .get(VaultMeta::STORAGE_KEY)?
@@ -793,7 +921,7 @@ impl Engine {
             &engine.vault.vault_id,
             &engine.vault.device_id,
         )?;
-        engine.add_storage(storage)?;
+        engine.add_storage_internal(storage, secret)?;
         engine.pending.push(Event::DeviceEnrolled {
             name: engine.vault.device_name.clone(),
         });
@@ -860,6 +988,7 @@ impl Engine {
             forked_self: false,
             epochs,
             removal,
+            org: crate::org::OrgState::load(home),
             chunker: ChunkerParams::DEFAULT,
             storage_calls: None,
             view_cache: Default::default(),
@@ -933,13 +1062,25 @@ impl Engine {
     }
 
     fn tick(&mut self) -> Result<u64> {
-        self.clock.lamport += 1;
+        self.clock.lamport = self
+            .clock
+            .lamport
+            .checked_add(1)
+            .ok_or_else(|| anyhow!("the logical clock of this vault is exhausted"))?;
         util::write_json(&self.home.join("clock.json"), &self.clock)?;
         Ok(self.clock.lamport)
     }
 
+    /// Most a clock seen elsewhere may be ahead of ours: a device cannot
+    /// have made more events than this since we last heard from the vault.
+    /// Larger values are a damaged or hostile batch and are not adopted, so
+    /// one bad value cannot push everyone's clock to the end and win every
+    /// later ordering.
+    const CLOCK_LEAP: u64 = 1 << 40;
+
     fn observe_clock(&mut self, seen: u64) -> Result<()> {
-        if seen > self.clock.lamport {
+        if seen > self.clock.lamport && seen <= self.clock.lamport.saturating_add(Self::CLOCK_LEAP)
+        {
             self.clock.lamport = seen;
             util::write_json(&self.home.join("clock.json"), &self.clock)?;
         }
@@ -1034,6 +1175,14 @@ impl Engine {
         spec: StorageSpec,
         secret: Option<String>,
     ) -> Result<()> {
+        self.org_allows(|p| p.members_may_add_storages, "add storages")?;
+        self.add_storage_internal(spec, secret)
+    }
+
+    /// `add_storage_with_secret` without the organization's policy check:
+    /// for joining, where the storages come from the device that approved
+    /// or paired this one.
+    fn add_storage_internal(&mut self, spec: StorageSpec, secret: Option<String>) -> Result<()> {
         if self.config.storages.iter().any(|s| s.name() == spec.name()) {
             bail!("a storage named {} already exists", spec.name());
         }
@@ -1128,7 +1277,7 @@ impl Engine {
         let view = self.view()?;
         let mut targets_used = BTreeSet::new();
         for (rec, _) in self.folders() {
-            let policy = rec.policy.clone().unwrap_or_default();
+            let policy = rec.effective_policy().unwrap_or_default();
             let required = policy.min_copies.max(1) as usize;
             // Blocks no file refers to any more need no copies; a folder never
             // pulled here has no state, so then every block counts.
@@ -1230,6 +1379,7 @@ impl Engine {
         name: &str,
         delete_data: bool,
     ) -> Result<StorageRemovalReport> {
+        self.org_allows(|p| p.members_may_add_storages, "remove storages")?;
         let plan = self.plan_storage_removal(name)?;
         if let Some(why) = plan.blocked {
             bail!("{why}");
@@ -1803,7 +1953,9 @@ impl Engine {
                 else {
                     continue;
                 };
-                let id = DeviceId::from_hex(id)?;
+                let Ok(id) = DeviceId::from_hex(id) else {
+                    continue;
+                };
                 if self.devices.devices.contains_key(&id) {
                     continue;
                 }
@@ -1835,7 +1987,9 @@ impl Engine {
                 else {
                     continue;
                 };
-                let id = DeviceId::from_hex(id)?;
+                let Ok(id) = DeviceId::from_hex(id) else {
+                    continue;
+                };
                 if self.devices.replicas.contains_key(&id) {
                     continue;
                 }
@@ -1858,7 +2012,9 @@ impl Engine {
                 let Some((dev, fid)) = rest.split_once('/') else {
                     continue;
                 };
-                let (dev, fid) = (DeviceId::from_hex(dev)?, FolderId::from_hex(fid)?);
+                let (Ok(dev), Ok(fid)) = (DeviceId::from_hex(dev), FolderId::from_hex(fid)) else {
+                    continue;
+                };
                 if self.keyring.folders.contains_key(&fid) {
                     continue;
                 }
@@ -1891,6 +2047,15 @@ impl Engine {
                     let Some(local) = self.keyring.folders.get(&fid) else {
                         continue;
                     };
+                    // `vault/policies/<folder>/<device>/<utc>.enc`: the name
+                    // says who wrote it, the envelope proves it.
+                    let Some(named) = key
+                        .strip_prefix(vault::PolicyRecord::PREFIX)
+                        .and_then(|r| r.split('/').nth(1))
+                        .and_then(|d| DeviceId::from_hex(d).ok())
+                    else {
+                        continue;
+                    };
                     // The object name ends with the update time: skip anything not newer.
                     let stamp: i64 = key
                         .rsplit('/')
@@ -1902,9 +2067,21 @@ impl Engine {
                         continue;
                     }
                     if let Some(blob) = backend.get(&key)? {
-                        if let Some(rec) = fr_keys.iter().find_map(|k| {
-                            vault::PolicyRecord::open(&blob, &self.vault.vault_id, &fid, k).ok()
-                        }) {
+                        let verify = |d: &DeviceId| self.device_key(d);
+                        if let Ok(rec) = vault::PolicyRecord::open_any(
+                            &blob,
+                            &self.vault.vault_id,
+                            &fid,
+                            &named,
+                            &fr_keys,
+                            &verify,
+                            self.org.is_none(),
+                        ) {
+                            if !self.trusted(&rec.device)
+                                || !self.org_accepts_policy_from(&rec.device)
+                            {
+                                continue;
+                            }
                             if let Some(f) = self.keyring.folders.get_mut(&fid) {
                                 if rec.updated_utc > f.policy_updated_utc {
                                     f.policy = rec.policy;
@@ -2152,7 +2329,8 @@ impl Engine {
             let file = fs::File::open(entry.path())?;
             let mut hasher = KeyedHasher::new(&fk.hash);
             let mut chunks = Vec::new();
-            for chunk in Chunker::new(std::io::BufReader::new(file), self.chunker)? {
+            let params = self.chunker_for(size);
+            for chunk in Chunker::new(std::io::BufReader::new(file), params)? {
                 let chunk = chunk?;
                 hasher.update(&chunk);
                 let chunk_id = ChunkId::from_bytes(&crypto::keyed_hash(&fk.hash, &chunk));
@@ -2340,13 +2518,116 @@ impl Engine {
                 .collect()
         };
         let encrypted_here = self.mount_is_encrypted(&folder_id);
-        for file in state.files.values().filter(|f| !f.deleted) {
-            if file.chunks.iter().all(|c| missing_on(c).is_empty()) {
-                continue;
+        // Reading, chunking and encrypting stay on this thread; the writes go
+        // to a few uploader threads, so that many small objects do not each
+        // wait for the previous one's round trip to the storage. The queue is
+        // bounded: at most UPLOAD_QUEUE encrypted blocks wait in memory.
+        let (job_tx, job_rx) = std::sync::mpsc::sync_channel::<UploadJob>(UPLOAD_QUEUE);
+        let job_rx = std::sync::Mutex::new(job_rx);
+        let (done_tx, done_rx) = std::sync::mpsc::channel::<UploadDone>();
+        let storages_ref = &storages;
+        let mut first_error: Option<anyhow::Error> = None;
+        let budget = (std::sync::Mutex::new(0u64), std::sync::Condvar::new());
+        let budget_ref = &budget;
+        std::thread::scope(|s| -> Result<()> {
+            // Owned by this closure: however it returns (an error reading a
+            // file included), the sender goes and the uploaders stop.
+            let job_tx = job_tx;
+            for _ in 0..UPLOADERS {
+                let (job_rx, done_tx) = (&job_rx, done_tx.clone());
+                s.spawn(move || loop {
+                    let job = match job_rx.lock().unwrap().recv() {
+                        Ok(j) => j,
+                        Err(_) => break,
+                    };
+                    let key = chunk_storage_key(&job.object);
+                    let held = job.ct.len() as u64;
+                    for (spec, backend) in storages_ref
+                        .iter()
+                        .filter(|(spec, _)| job.targets.iter().any(|t| t == spec.name()))
+                    {
+                        let outcome = backend.put_if_absent(&key, &job.ct);
+                        let _ = done_tx.send(UploadDone {
+                            storage: spec.name().to_string(),
+                            chunk: job.chunk.clone(),
+                            object: job.object.clone(),
+                            size: job.ct.len() as u64,
+                            outcome,
+                        });
+                    }
+                    *budget_ref.0.lock().unwrap() -= held;
+                    budget_ref.1.notify_all();
+                });
             }
-            if encrypted_here {
-                // Kept encrypted here: the objects come from the block cache.
-                for expected in &file.chunks {
+            drop(done_tx);
+            let mut send = |me: &mut Self, report: &mut PushReport, job: UploadJob| -> bool {
+                while let Ok(d) = done_rx.try_recv() {
+                    apply_upload(me, &folder_id, d, report, &mut first_error);
+                }
+                if first_error.is_some() {
+                    return false;
+                }
+                let len = job.ct.len() as u64;
+                {
+                    let mut used = budget_ref.0.lock().unwrap();
+                    while *used > 0 && *used + len > UPLOAD_BYTES {
+                        used = budget_ref.1.wait(used).unwrap();
+                    }
+                    *used += len;
+                }
+                job_tx.send(job).is_ok()
+            };
+            'files: for file in state.files.values().filter(|f| !f.deleted) {
+                if file.chunks.iter().all(|c| missing_on(c).is_empty()) {
+                    continue;
+                }
+                if encrypted_here {
+                    // Kept encrypted here: the objects come from the block cache.
+                    let progress =
+                        crate::progress::Transfer::upload(&rec.name, &file.path, file.size);
+                    for expected in &file.chunks {
+                        progress.advance(expected.size);
+                        let targets: Vec<String> = missing_on(expected)
+                            .into_iter()
+                            .filter(|t| !report.storages_unavailable.iter().any(|u| u == t))
+                            .collect();
+                        if targets.is_empty() {
+                            continue;
+                        }
+                        let Some(ct) = self.cached_object(&expected.object) else {
+                            continue;
+                        };
+                        let job = UploadJob {
+                            targets,
+                            chunk: expected.chunk.clone(),
+                            object: expected.object.clone(),
+                            ct,
+                        };
+                        if !send(self, report, job) {
+                            break 'files;
+                        }
+                    }
+                    continue;
+                }
+                let disk = root.join(&file.path);
+                let Ok(handle) = fs::File::open(&disk) else {
+                    continue;
+                };
+                let progress = crate::progress::Transfer::upload(&rec.name, &file.path, file.size);
+                for (index, chunk) in
+                    Chunker::new(std::io::BufReader::new(handle), self.chunker_for(file.size))?
+                        .enumerate()
+                {
+                    let chunk = chunk?;
+                    progress.advance(chunk.len() as u64);
+                    let chunk_id = ChunkId::from_bytes(&crypto::keyed_hash(&fk.hash, &chunk));
+                    let Some(expected) = file.chunks.get(index) else {
+                        break;
+                    };
+                    if expected.chunk != chunk_id {
+                        // The file changed under us; the next scan will pick it up.
+                        break;
+                    }
                     let targets: Vec<String> = missing_on(expected)
                         .into_iter()
                         .filter(|t| !report.storages_unavailable.iter().any(|u| u == t))
@@ -2354,102 +2635,32 @@ impl Engine {
                     if targets.is_empty() {
                         continue;
                     }
-                    let Some(ct) = self.cached_object(&expected.object) else {
-                        continue;
-                    };
-                    self.put_object(
-                        &storages,
-                        &targets,
-                        &folder_id,
-                        &expected.chunk,
-                        &expected.object,
-                        &ct,
-                        report,
+                    let ct = crypto::encrypt_with_nonce(
+                        &fk.chunk_key(expected.epoch, &chunk_id)?,
+                        &fk.chunk_nonce(expected.epoch, &chunk_id)?,
+                        &fk.chunk_aad(&self.vault.vault_id, &chunk_id, chunk.len() as u64),
+                        &crate::pack::pack(&chunk),
                     )?;
+                    let object = ObjectName::from_bytes(&crypto::hash(&ct));
+                    let job = UploadJob {
+                        targets,
+                        chunk: chunk_id,
+                        object,
+                        ct,
+                    };
+                    if !send(self, report, job) {
+                        break 'files;
+                    }
                 }
-                continue;
             }
-            let disk = root.join(&file.path);
-            let Ok(handle) = fs::File::open(&disk) else {
-                continue;
-            };
-            for (index, chunk) in
-                Chunker::new(std::io::BufReader::new(handle), self.chunker)?.enumerate()
-            {
-                let chunk = chunk?;
-                let chunk_id = ChunkId::from_bytes(&crypto::keyed_hash(&fk.hash, &chunk));
-                let Some(expected) = file.chunks.get(index) else {
-                    break;
-                };
-                if expected.chunk != chunk_id {
-                    // The file changed under us; the next scan will pick it up.
-                    break;
-                }
-                let targets: Vec<String> = missing_on(expected)
-                    .into_iter()
-                    .filter(|t| !report.storages_unavailable.iter().any(|u| u == t))
-                    .collect();
-                if targets.is_empty() {
-                    continue;
-                }
-                let ct = crypto::encrypt_with_nonce(
-                    &fk.chunk_key(expected.epoch, &chunk_id)?,
-                    &fk.chunk_nonce(expected.epoch, &chunk_id)?,
-                    &fk.chunk_aad(&self.vault.vault_id, &chunk_id, chunk.len() as u64),
-                    &crate::pack::pack(&chunk),
-                )?;
-                let object = ObjectName::from_bytes(&crypto::hash(&ct));
-                self.put_object(
-                    &storages, &targets, &folder_id, &chunk_id, &object, &ct, report,
-                )?;
+            drop(job_tx);
+            for d in done_rx.iter() {
+                apply_upload(self, &folder_id, d, report, &mut first_error);
             }
-        }
-        Ok(())
-    }
-
-    /// Write one object to the `targets` among `storages` and record it.
-    #[allow(clippy::too_many_arguments)]
-    fn put_object(
-        &mut self,
-        storages: &OpenStorages,
-        targets: &[String],
-        folder_id: &FolderId,
-        chunk_id: &ChunkId,
-        object: &ObjectName,
-        ct: &[u8],
-        report: &mut PushReport,
-    ) -> Result<()> {
-        let key = chunk_storage_key(object);
-        for (spec, backend) in storages
-            .iter()
-            .filter(|(spec, _)| targets.iter().any(|t| t == spec.name()))
-        {
-            match backend.put_if_absent(&key, ct) {
-                Ok(true) => {
-                    report.chunks_uploaded += 1;
-                    report.bytes_uploaded += ct.len() as u64;
-                }
-                Ok(false) => {}
-                // A pool with no disk attached (or no room) is left out
-                // for the rest of this push and tried again next time.
-                Err(e)
-                    if matches!(
-                        pool::pool_error(&e),
-                        Some(PoolError::NoDiskAttached { .. } | PoolError::NoRoom { .. })
-                    ) =>
-                {
-                    report.storages_unavailable.push(spec.name().to_string());
-                    continue;
-                }
-                Err(e) => return Err(e),
-            }
-            self.pending.push(Event::ChunkStored {
-                folder: folder_id.clone(),
-                chunk: chunk_id.clone(),
-                object: object.clone(),
-                storage: spec.name().to_string(),
-                size: ct.len() as u64,
-            });
+            Ok(())
+        })?;
+        if let Some(e) = first_error {
+            return Err(e);
         }
         Ok(())
     }
@@ -2461,6 +2672,19 @@ impl Engine {
         root: &Path,
         state: &mut FolderState,
     ) -> Result<u64> {
+        if state.thumbs_rev < 2 {
+            let videos: Vec<String> = state
+                .files
+                .values()
+                .filter(|f| thumbs::is_video(&f.path))
+                .map(|f| f.content_hash.clone())
+                .collect();
+            for h in videos {
+                state.thumbs_done.remove(&h);
+            }
+            state.thumbs_rev = 2;
+        }
+        let videos_here = thumbs::video_tool_available();
         let candidates: Vec<(String, String)> = state
             .files
             .values()
@@ -2484,6 +2708,12 @@ impl Engine {
         let encrypted_here = self.mount_is_encrypted(&rec.folder_id);
         let mut made = 0u64;
         for (path, hash) in candidates {
+            // Without a tool for videos (a phone, a computer without ffmpeg)
+            // they wait: the app around the service may hand in a frame
+            // (`store_thumbnail`), or ffmpeg is installed later.
+            if thumbs::is_video(&path) && !encrypted_here && !videos_here {
+                continue;
+            }
             let key = thumbs::storage_key(&rec.folder_id, &hash);
             if storages
                 .iter()
@@ -2522,6 +2752,62 @@ impl Engine {
             made += 1;
         }
         Ok(made)
+    }
+
+    /// Videos in plain folders on this device that have no thumbnail yet,
+    /// for an app that makes frames itself (a phone): (folder, path, file).
+    pub fn videos_without_thumbnails(
+        &self,
+        limit: usize,
+    ) -> Result<Vec<(String, String, PathBuf)>> {
+        let mut out = Vec::new();
+        for (rec, root) in self.folders() {
+            let Some(root) = root else { continue };
+            if self.mount_is_encrypted(&rec.folder_id) {
+                continue;
+            }
+            let state = self.load_state(&rec.folder_id)?;
+            for f in state.files.values().filter(|f| {
+                !f.deleted
+                    && thumbs::is_video(&f.path)
+                    && !f.content_hash.is_empty()
+                    && !state.thumbs_done.contains(&f.content_hash)
+            }) {
+                let disk = root.join(&f.path);
+                if disk.is_file() {
+                    out.push((rec.name.clone(), f.path.clone(), disk));
+                    if out.len() >= limit {
+                        return Ok(out);
+                    }
+                }
+            }
+        }
+        Ok(out)
+    }
+
+    /// Store a thumbnail made outside the engine (a video frame from the
+    /// phone's media framework) for the current version of a file: it is
+    /// decoded and encoded again, encrypted and written like any other.
+    pub fn store_thumbnail(&mut self, folder: &str, path: &str, picture: &[u8]) -> Result<()> {
+        let (rec, _) = self.resolve_folder(folder)?;
+        let mut state = self.load_state(&rec.folder_id)?;
+        let file = state
+            .files
+            .get(path)
+            .filter(|f| !f.deleted && !f.content_hash.is_empty())
+            .ok_or_else(|| anyhow!("{path} is not a file of {folder}"))?;
+        let hash = file.content_hash.clone();
+        let jpeg = thumbs::normalize(picture).ok_or_else(|| anyhow!("not a picture"))?;
+        let fk = self.folder_keys(&rec)?;
+        let blob = thumbs::seal(&jpeg, &self.vault.vault_id, &rec.folder_id, &hash, &fk.meta)?;
+        let key = thumbs::storage_key(&rec.folder_id, &hash);
+        for (spec, backend) in self.metadata_storages(false)? {
+            if !spec.is_carrier() {
+                backend.put_if_absent(&key, &blob)?;
+            }
+        }
+        state.thumbs_done.insert(hash);
+        self.save_state(&rec.folder_id, &state)
     }
 
     /// Decrypted thumbnail of a file, fetched from the first storage that has it.
@@ -2968,15 +3254,16 @@ impl Engine {
         if self.mount_is_encrypted(&rec.folder_id) {
             return self.apply_remote_cached(rec, fk, state, remote, storages, report);
         }
-        let disk = root.join(&remote.path);
+        // Manifests are validated when opened; this is the last line of
+        // defence before a path from another device touches the disk.
+        let disk = util::safe_join(root, &remote.path)?;
         if remote.deleted {
             let _ = fs::remove_file(placeholder_path(&disk));
             if disk.exists() {
-                let trash = self
-                    .home
-                    .join("trash")
-                    .join(rec.folder_id.as_str())
-                    .join(format!("{}.{}", remote.path, util::now_utc()));
+                let trash = util::safe_join(
+                    &self.home.join("trash").join(rec.folder_id.as_str()),
+                    &format!("{}.{}", remote.path, util::now_utc()),
+                )?;
                 if let Some(p) = trash.parent() {
                     fs::create_dir_all(p)?;
                 }
@@ -3052,6 +3339,12 @@ impl Engine {
     ) -> Result<()> {
         if let Some(parent) = disk.parent() {
             fs::create_dir_all(parent)?;
+            if fs::symlink_metadata(parent).is_ok_and(|m| m.file_type().is_symlink()) {
+                bail!(
+                    "{} is a symbolic link; files are not written through links",
+                    parent.display()
+                );
+            }
         }
         let tmp = disk.with_file_name(format!(".varsto-tmp-{}", std::process::id()));
         let progress = crate::progress::Download::begin(&rec.name, &file.path, file.size);
@@ -3216,6 +3509,12 @@ impl Engine {
     fn write_placeholder(disk: &Path, file: &FileState) -> Result<()> {
         if let Some(parent) = disk.parent() {
             fs::create_dir_all(parent)?;
+            if fs::symlink_metadata(parent).is_ok_and(|m| m.file_type().is_symlink()) {
+                bail!(
+                    "{} is a symbolic link; files are not written through links",
+                    parent.display()
+                );
+            }
         }
         let info = serde_json::json!({ "varsto": "placeholder", "size": file.size, "mtime_ns": file.mtime, "hint": "run `varsto folder fetch` or use the app to download this file" });
         util::write_atomic(&placeholder_path(disk), &serde_json::to_vec(&info)?)
@@ -3376,6 +3675,7 @@ impl Engine {
         if self.vault.member {
             bail!("a member device cannot set policies on the owner's folders");
         }
+        self.org_allows(|p| p.members_may_set_policies, "set policies")?;
         let (rec, _) = self.resolve_folder(folder)?;
         let now = util::now_utc();
         let f = self
@@ -3383,6 +3683,8 @@ impl Engine {
             .folders
             .get_mut(&rec.folder_id)
             .ok_or_else(|| anyhow!("unknown folder {folder}"))?;
+        // Cleared: an empty policy, so the default does not come back.
+        let policy = Some(policy.unwrap_or_default());
         f.policy = policy.clone();
         f.policy_updated_utc = now;
         self.keyring.save(
@@ -3398,7 +3700,16 @@ impl Engine {
             policy,
         };
         let fr_key = self.folder_record_key_now();
-        let blob = prec.seal(&self.vault.vault_id, &fr_key)?;
+        // Signed in an organization (where only some devices may set
+        // policies, and every device runs a version that reads signatures);
+        // the older, unsigned form otherwise, so devices still on alpha.9
+        // keep reading it. Without an organization any device may set a
+        // policy, so a signature would prove nothing more.
+        let blob = if self.org.is_some() {
+            prec.seal_signed(&self.vault.vault_id, &fr_key, &self.keys.signer)?
+        } else {
+            prec.seal(&self.vault.vault_id, &fr_key)?
+        };
         for (_, backend) in self.metadata_storages(true)? {
             backend.put_if_absent(&prec.storage_key(), &blob)?;
         }
@@ -3447,7 +3758,7 @@ impl Engine {
         }
         let mut reports = Vec::new();
         for (rec, _) in self.folders() {
-            let Some(policy) = rec.policy.clone() else {
+            let Some(policy) = rec.effective_policy() else {
                 continue;
             };
             let state = self.load_state(&rec.folder_id)?;
@@ -3520,6 +3831,10 @@ impl Engine {
         if self.vault.member {
             bail!("a member device holds folder keys only, not the vault key");
         }
+        self.org_allows(
+            |p| p.members_may_add_devices,
+            "print the recovery kit or export the vault key",
+        )?;
         // The current epoch's key: it opens the older epochs through the
         // epoch records, while a key from before a revocation opens nothing new.
         Ok(self.current_vault_key().to_hex())
@@ -3680,6 +3995,25 @@ impl Engine {
         self.config.save(&self.home)
     }
 
+    /// Block sizes for a file of `size` bytes: the same everywhere, so the
+    /// same content gives the same blocks. Tests that set their own sizes
+    /// keep them.
+    pub(crate) fn chunker_for(&self, size: u64) -> ChunkerParams {
+        if self.chunker == ChunkerParams::DEFAULT {
+            ChunkerParams::for_size(size)
+        } else {
+            self.chunker
+        }
+    }
+
+    /// Tell the other devices over peer-to-peer that something new was
+    /// published; on a thread of its own, so a slow peer holds nothing up.
+    pub fn notify_peers_changed(&self) {
+        if let Some(peers) = self.peers.clone() {
+            std::thread::spawn(move || peers.notify_changed());
+        }
+    }
+
     /// Peers to try before storages (None disables).
     pub fn set_peers(&mut self, peers: Option<std::sync::Arc<crate::p2p::Peers>>) {
         self.peers = peers;
@@ -3749,7 +4083,15 @@ impl Engine {
             folder_keys,
             pieces,
             local_roots,
-            revoked: self.devices.revoked.keys().cloned().collect(),
+            // Refused at the door: revoked devices, and in an organization
+            // every device the roster does not list.
+            revoked: self
+                .devices
+                .revoked
+                .keys()
+                .chain(self.devices.devices.keys().filter(|d| !self.trusted(d)))
+                .cloned()
+                .collect(),
         })
     }
 
@@ -3858,7 +4200,7 @@ impl Engine {
     /// Create or overwrite a file inside a folder (relative path), then push.
     /// Used by the MCP server for notes and reorganisation; refuses to leave the folder.
     pub fn write_file(&mut self, folder: &str, path: &str, bytes: &[u8]) -> Result<PushReport> {
-        self.write_from_reader(folder, path, bytes)
+        self.write_from_reader_sized(folder, path, bytes, Some(bytes.len() as u64))
     }
 
     /// `write_file` with the content streamed from `reader`. In a folder kept
@@ -3871,9 +4213,21 @@ impl Engine {
         path: &str,
         reader: impl std::io::Read,
     ) -> Result<PushReport> {
+        self.write_from_reader_sized(folder, path, reader, None)
+    }
+
+    /// `write_from_reader` when the size is known beforehand (an upload with
+    /// a Content-Length): the block sizes then follow the file size.
+    pub fn write_from_reader_sized(
+        &mut self,
+        folder: &str,
+        path: &str,
+        reader: impl std::io::Read,
+        size: Option<u64>,
+    ) -> Result<PushReport> {
         block_cache::check_rel_path(path)?;
         if let Some(writer) = self.block_writer(folder)? {
-            let staged = writer.write(reader)?;
+            let staged = writer.write_sized(reader, size)?;
             return self.commit_staged(folder, path, staged);
         }
         let (_, root) = self.resolve_folder(folder)?;
@@ -3955,6 +4309,10 @@ impl Engine {
             let bytes = self.view_range(folder, path, 0, size)?;
             self.touch_access(folder, path)?;
             return Ok(bytes);
+        }
+        block_cache::check_rel_path(path)?;
+        if !self.load_state(&rec.folder_id)?.files.contains_key(path) {
+            bail!("unknown file {path} in {folder}");
         }
         let disk = root.join(path);
         if !disk.exists() {
@@ -4207,7 +4565,7 @@ impl Engine {
                 chunks_verified_elsewhere: verified,
                 published_seq: state.published_seq,
                 shared: rec.shared,
-                policy: rec.policy.as_ref().map(|p| p.describe()),
+                policy: rec.effective_policy().map(|p| p.describe()),
                 strongroom: rec.strongroom.as_ref().map(|_| {
                     match self.unlocked.get(&rec.folder_id) {
                         Some((_, until)) if *until > util::now_utc() => {
@@ -4257,6 +4615,7 @@ impl Engine {
                 .collect(),
             key_epoch: self.key_epoch(),
             carrier_for: self.carrier_destination_names(),
+            org: self.org_brief(),
             replicas: self
                 .devices
                 .replicas
@@ -4696,18 +5055,21 @@ impl Engine {
         chunk: &ChunkId,
         epoch: u32,
     ) -> Result<Vec<u8>> {
-        let file = fs::File::open(path)?;
-        for piece in Chunker::new(std::io::BufReader::new(file), self.chunker)? {
-            let piece = piece?;
-            if ChunkId::from_bytes(&crypto::keyed_hash(&fk.hash, &piece)) != *chunk {
-                continue;
+        let size = fs::metadata(path)?.len();
+        for params in [self.chunker_for(size)] {
+            let file = fs::File::open(path)?;
+            for piece in Chunker::new(std::io::BufReader::new(file), params)? {
+                let piece = piece?;
+                if ChunkId::from_bytes(&crypto::keyed_hash(&fk.hash, &piece)) != *chunk {
+                    continue;
+                }
+                return crypto::encrypt_with_nonce(
+                    &fk.chunk_key(epoch, chunk)?,
+                    &fk.chunk_nonce(epoch, chunk)?,
+                    &fk.chunk_aad(&self.vault.vault_id, chunk, piece.len() as u64),
+                    &crate::pack::pack(&piece),
+                );
             }
-            return crypto::encrypt_with_nonce(
-                &fk.chunk_key(epoch, chunk)?,
-                &fk.chunk_nonce(epoch, chunk)?,
-                &fk.chunk_aad(&self.vault.vault_id, chunk, piece.len() as u64),
-                &crate::pack::pack(&piece),
-            );
         }
         bail!("chunk {} is not in {}", chunk.short(), path.display())
     }
@@ -4880,6 +5242,28 @@ impl Engine {
 /// exported copies) so it can start over. The user's files in attached
 /// folders are left untouched; the storages are not changed either, so other
 /// devices keep working.
+/// Refuse to set up a vault where one already is, saying which one and
+/// how to start over.
+pub fn ensure_no_vault(home: &Path) -> Result<()> {
+    let p = home.join("vault.json");
+    if !p.exists() {
+        return Ok(());
+    }
+    let what = util::read_json::<LocalVault>(&p)
+        .map(|v| {
+            format!(
+                "vault {} as device \"{}\"",
+                v.vault_id.short(),
+                v.device_name
+            )
+        })
+        .unwrap_or_else(|_| "a vault".to_string());
+    bail!(
+        "this device already holds {what} ({}). To start over here, run `varsto reset --yes` first: it removes this device's keys and settings; files in folders stay, and the vault's other devices and storages are not touched",
+        home.display()
+    )
+}
+
 pub fn reset_device(home: &Path) -> Result<Vec<String>> {
     let mut removed = Vec::new();
     for name in [
@@ -4897,6 +5281,8 @@ pub fn reset_device(home: &Path) -> Result<Vec<String>> {
         membership::RESET_EXTRA[0],
         membership::RESET_EXTRA[1],
         membership::RESET_EXTRA[2],
+        org_ops::RESET_ORG[0],
+        org_ops::RESET_ORG[1],
     ] {
         let p = home.join(name);
         if p.exists() {

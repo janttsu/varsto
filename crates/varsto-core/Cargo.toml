@@ -36,12 +36,16 @@ hmac = "0.12"
 zstd = "0.13"
 base64 = "0.22"
 bip39 = "3"
+unicode-normalization = "0.1"
 sharks = "0.5"
 spake2 = "0.4"
 socket2 = { version = "0.6", features = ["all"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+tempfile.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = ["Win32_Storage_FileSystem", "Win32_Foundation"] }

@@ -45,17 +45,16 @@ impl Grants {
             .map(|s| s.as_str())
             .or(self.all.as_deref())
     }
+    /// A grant on every folder never covers a Strongroom: those need their
+    /// own line in the grants file.
+    pub fn explicit(&self, folder: &str) -> bool {
+        self.folders.contains_key(folder)
+    }
     pub fn can_read(&self, folder: &str) -> bool {
         self.level(folder).is_some()
     }
     pub fn can_write(&self, folder: &str) -> bool {
         self.level(folder) == Some("rw")
-    }
-    fn readable<'a>(&self, names: impl Iterator<Item = &'a str>) -> Vec<String> {
-        names
-            .filter(|n| self.can_read(n))
-            .map(|n| n.to_string())
-            .collect()
     }
 }
 
@@ -291,16 +290,30 @@ fn arg<'a>(args: &'a Value, name: &str) -> Result<&'a str> {
 }
 
 fn call_tool(backend: &mut Backend, grants: &Grants, name: &str, args: &Value) -> Result<Value> {
+    // A grant on every folder never reaches a Strongroom: those need a
+    // grant of their own, by name.
+    let strongrooms: std::collections::BTreeSet<String> = backend
+        .folders()?
+        .iter()
+        .filter(|f| f["strongroom"].as_bool().unwrap_or(false))
+        .filter_map(|f| f["name"].as_str().map(|s| s.to_string()))
+        .collect();
+    let can_read = |folder: &str| -> bool {
+        grants.can_read(folder) && (!strongrooms.contains(folder) || grants.explicit(folder))
+    };
+    let can_write = |folder: &str| -> bool {
+        grants.can_write(folder) && (!strongrooms.contains(folder) || grants.explicit(folder))
+    };
     let granted_folders = |b: &mut Backend| -> Result<Vec<String>> {
         let names: Vec<String> = b
             .folders()?
             .iter()
             .filter_map(|f| f["name"].as_str().map(|s| s.to_string()))
             .collect();
-        Ok(grants.readable(names.iter().map(|s| s.as_str())))
+        Ok(names.into_iter().filter(|n| can_read(n)).collect())
     };
     let need_read = |folder: &str| -> Result<()> {
-        if grants.can_read(folder) {
+        if can_read(folder) {
             Ok(())
         } else {
             bail!(
@@ -312,7 +325,7 @@ fn call_tool(backend: &mut Backend, grants: &Grants, name: &str, args: &Value) -
         "varsto_status" => {
             let mut st = backend.status()?;
             if let Some(folders) = st.get_mut("folders").and_then(|f| f.as_array_mut()) {
-                folders.retain(|f| f["name"].as_str().is_some_and(|n| grants.can_read(n)));
+                folders.retain(|f| f["name"].as_str().is_some_and(can_read));
             }
             Ok(text_result(serde_json::to_string_pretty(&st)?))
         }
@@ -320,10 +333,10 @@ fn call_tool(backend: &mut Backend, grants: &Grants, name: &str, args: &Value) -
             let all = backend.folders()?;
             let visible: Vec<Value> = all
                 .into_iter()
-                .filter(|f| f["name"].as_str().is_some_and(|n| grants.can_read(n)))
+                .filter(|f| f["name"].as_str().is_some_and(can_read))
                 .map(|mut f| {
                     let n = f["name"].as_str().unwrap_or("").to_string();
-                    f["access"] = json!(if grants.can_write(&n) { "rw" } else { "ro" });
+                    f["access"] = json!(if can_write(&n) { "rw" } else { "ro" });
                     f
                 })
                 .collect();
@@ -356,7 +369,7 @@ fn call_tool(backend: &mut Backend, grants: &Grants, name: &str, args: &Value) -
         }
         "varsto_move" => {
             let (folder, from, to) = (arg(args, "folder")?, arg(args, "from")?, arg(args, "to")?);
-            if !grants.can_write(folder) {
+            if !can_write(folder) {
                 bail!("folder {folder} is read-only for the assistant: the user must run `varsto mcp grant {folder} --write`");
             }
             Ok(text_result(serde_json::to_string_pretty(
@@ -365,7 +378,7 @@ fn call_tool(backend: &mut Backend, grants: &Grants, name: &str, args: &Value) -
         }
         "varsto_mkdir" => {
             let (folder, path) = (arg(args, "folder")?, arg(args, "path")?);
-            if !grants.can_write(folder) {
+            if !can_write(folder) {
                 bail!("folder {folder} is read-only for the assistant: the user must run `varsto mcp grant {folder} --write`");
             }
             backend.mkdir(folder, path)?;
@@ -374,7 +387,7 @@ fn call_tool(backend: &mut Backend, grants: &Grants, name: &str, args: &Value) -
         "varsto_write" => {
             let (folder, path, text) =
                 (arg(args, "folder")?, arg(args, "path")?, arg(args, "text")?);
-            if !grants.can_write(folder) {
+            if !can_write(folder) {
                 bail!("folder {folder} is read-only for the assistant: the user must run `varsto mcp grant {folder} --write`");
             }
             if text.len() > 2 * 1024 * 1024 {

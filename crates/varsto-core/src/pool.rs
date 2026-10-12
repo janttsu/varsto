@@ -483,14 +483,7 @@ impl PoolStorage {
     }
 
     fn data_path(mount: &Path, key: &str) -> Result<PathBuf> {
-        if key.is_empty()
-            || key.starts_with('/')
-            || key
-                .split('/')
-                .any(|c| c == ".." || c.is_empty() || c == ".")
-        {
-            bail!("invalid object key {key:?}");
-        }
+        crate::storage::validate_key(key)?;
         Ok(mount.join(DATA_DIR).join(key))
     }
 
@@ -566,6 +559,15 @@ impl PoolStorage {
         let idx = DiskIndex::read(mount).unwrap_or_default();
         let mut used = 0u64;
         for (key, size) in &idx.objects {
+            // A disk's own index is a claim: count only objects that are
+            // really there, under a key that stays inside the data directory.
+            let present = Self::data_path(mount, key)
+                .ok()
+                .and_then(|p| fs::metadata(p).ok())
+                .is_some_and(|md| md.len() == *size);
+            if !present {
+                continue;
+            }
             used += size;
             match st.index.objects.get_mut(key) {
                 Some(e) => {

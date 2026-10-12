@@ -62,26 +62,71 @@ pub(crate) fn log(what: &str) {
     eprintln!("p2p: {what}");
 }
 
-/// `X-Varsto-Peer: <device>:<ts>:<mac>` where mac = keyed_hash(peer_key, device || ts || path).
+/// `X-Varsto-Peer: <device>:<ts>:<nonce>:<mac>` where
+/// mac = keyed_hash(peer_key, device || ts || nonce || path). The nonce is
+/// random per request; a server remembers the nonces it accepted inside the
+/// time window, so a token seen on the wire cannot be replayed to it.
 pub fn auth_header(key: &SecretKey, device: &DeviceId, path: &str) -> String {
     let ts = now();
+    let mut n = [0u8; 12];
+    rand::RngCore::fill_bytes(&mut rand::rngs::OsRng, &mut n);
+    let nonce = hex::encode(n);
     let mac = hex::encode(crypto::keyed_hash(
         key,
-        format!("{}|{}|{}", device.as_str(), ts, path).as_bytes(),
+        format!("{}|{}|{}|{}", device.as_str(), ts, nonce, path).as_bytes(),
     ));
-    format!("{}:{}:{}", device.as_str(), ts, mac)
+    format!("{}:{}:{}:{}", device.as_str(), ts, nonce, mac)
 }
 
+/// Nonces accepted recently (with their time), so each token is good once.
+type NonceCache = (
+    std::collections::HashSet<String>,
+    std::collections::VecDeque<(i64, String)>,
+);
+static SEEN_NONCES: std::sync::Mutex<Option<NonceCache>> = std::sync::Mutex::new(None);
+const SEEN_NONCES_MAX: usize = 100_000;
+
+/// Record `nonce`; false when it was used already inside the window.
+fn nonce_fresh(nonce: &str, ts: i64) -> bool {
+    let mut guard = SEEN_NONCES.lock().unwrap_or_else(|e| e.into_inner());
+    let (set, order) = guard.get_or_insert_with(Default::default);
+    let now = now();
+    while let Some((t, _)) = order.front() {
+        if now - *t > AUTH_WINDOW_SECS || order.len() > SEEN_NONCES_MAX {
+            let (_, n) = order.pop_front().expect("checked front");
+            set.remove(&n);
+        } else {
+            break;
+        }
+    }
+    if !set.insert(nonce.to_string()) {
+        return false;
+    }
+    order.push_back((ts.max(now), nonce.to_string()));
+    true
+}
+
+/// Check a token and spend its nonce: for the device that answers.
 pub fn verify_auth(key: &SecretKey, header: &str, path: &str) -> Option<DeviceId> {
-    let mut parts = header.splitn(3, ':');
-    let (dev, ts, mac) = (parts.next()?, parts.next()?, parts.next()?);
+    verify_auth_inner(key, header, path, true)
+}
+
+/// Check a token without spending its nonce: for a relay, which passes the
+/// request on to the device that answers (and spends it there).
+pub fn verify_auth_relayed(key: &SecretKey, header: &str, path: &str) -> Option<DeviceId> {
+    verify_auth_inner(key, header, path, false)
+}
+
+fn verify_auth_inner(key: &SecretKey, header: &str, path: &str, spend: bool) -> Option<DeviceId> {
+    let mut parts = header.splitn(4, ':');
+    let (dev, ts, nonce, mac) = (parts.next()?, parts.next()?, parts.next()?, parts.next()?);
     let ts: i64 = ts.parse().ok()?;
-    if (now() - ts).abs() > AUTH_WINDOW_SECS {
+    if now().abs_diff(ts) > AUTH_WINDOW_SECS as u64 || nonce.len() != 24 {
         return None;
     }
     let expected = hex::encode(crypto::keyed_hash(
         key,
-        format!("{dev}|{ts}|{path}").as_bytes(),
+        format!("{dev}|{ts}|{nonce}|{path}").as_bytes(),
     ));
     // Constant-time comparison of equal-length hex strings.
     if expected.len() != mac.len()
@@ -91,6 +136,9 @@ pub fn verify_auth(key: &SecretKey, header: &str, path: &str) -> Option<DeviceId
             .fold(0u8, |acc, (a, b)| acc | (a ^ b))
             != 0
     {
+        return None;
+    }
+    if spend && !nonce_fresh(nonce, ts) {
         return None;
     }
     DeviceId::from_hex(dev).ok()
@@ -127,6 +175,9 @@ impl Snapshot {
     /// Produce the ciphertext object for `name`, from a stored copy or by
     /// re-encrypting the piece (deterministic, so the bytes are identical).
     pub fn object(&self, name: &ObjectName) -> Result<Option<Vec<u8>>> {
+        if name.as_str().len() < 2 || !name.as_str().bytes().all(|b| b.is_ascii_hexdigit()) {
+            bail!("malformed object name");
+        }
         for root in &self.local_roots {
             let p = root
                 .join("chunks")
@@ -381,8 +432,15 @@ impl Server {
             let spawned = std::thread::Builder::new()
                 .name("p2p-conn".into())
                 .spawn(move || {
+                    // Counted down when the thread ends, however it ends.
+                    struct Done(Arc<AtomicUsize>);
+                    impl Drop for Done {
+                        fn drop(&mut self) {
+                            self.0.fetch_sub(1, Ordering::Relaxed);
+                        }
+                    }
+                    let _done = Done(conns);
                     let _ = serve_connection(sock, remote, &snapshot, &stop, &slots, &traffic);
-                    conns.fetch_sub(1, Ordering::Relaxed);
                 });
             if spawned.is_err() {
                 open.fetch_sub(1, Ordering::Relaxed);
@@ -534,7 +592,21 @@ pub(crate) fn is_object(path: &str, status: u16) -> bool {
     status == 200 && path.starts_with("/p2p/object/")
 }
 
+/// Set when another device of the vault said it has published something
+/// new (`/p2p/changed`): the service then syncs at once instead of at its
+/// next interval.
+static CHANGE_HEARD: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Whether a peer announced a change since the last call.
+pub fn take_change_heard() -> bool {
+    CHANGE_HEARD.swap(false, std::sync::atomic::Ordering::SeqCst)
+}
+
 fn answer(snap: &Snapshot, path: &str) -> (u16, Vec<u8>) {
+    if path == "/p2p/changed" {
+        CHANGE_HEARD.store(true, std::sync::atomic::Ordering::SeqCst);
+        return (200, b"ok".to_vec());
+    }
     if path == "/p2p/info" {
         let body = serde_json::json!({
             "device": snap.device_id.to_string(),
@@ -759,7 +831,9 @@ enum Route {
 impl Route {
     fn label(&self) -> String {
         match self {
-            Route::Tcp(a) | Route::Quic(a) | Route::Registered(a) if is_lan(a.ip()) => "direct-lan".into(),
+            Route::Tcp(a) | Route::Quic(a) | Route::Registered(a) if is_lan(a.ip()) => {
+                "direct-lan".into()
+            }
             Route::Tcp(_) | Route::Quic(_) | Route::Registered(_) => "direct".into(),
             Route::Relay(dev, name, _) => format!(
                 "relayed via {}",
@@ -915,9 +989,12 @@ fn exchange(
             body.truncate(len);
             Ok((status, body, (!close).then_some(s)))
         }
-        // No length: the body ends with the connection.
+        // No length: the body ends with the connection (bounded like the
+        // length-prefixed case).
         _ => {
-            s.read_to_end(&mut body)?;
+            std::io::Read::by_ref(&mut s)
+                .take(64 << 20)
+                .read_to_end(&mut body)?;
             let body = if chunked {
                 decode_chunked(&body)?
             } else {
@@ -945,11 +1022,15 @@ pub fn decode_chunked(body: &[u8]) -> Result<Vec<u8>> {
         if size == 0 {
             break;
         }
-        if pos + size > body.len() {
-            bail!("truncated chunked body");
+        let end = pos
+            .checked_add(size)
+            .filter(|e| *e + 2 <= body.len())
+            .ok_or_else(|| anyhow!("truncated chunked body"))?;
+        if &body[end..end + 2] != b"\r\n" {
+            bail!("malformed chunked body");
         }
-        out.extend_from_slice(&body[pos..pos + size]);
-        pos += size + 2;
+        out.extend_from_slice(&body[pos..end]);
+        pos = end + 2;
     }
     Ok(out)
 }
@@ -974,6 +1055,33 @@ pub struct Peers {
     traffic: Arc<Traffic>,
     /// Kept-alive TCP connections, carried over when the table is rebuilt.
     pool: Mutex<Arc<TcpPool>>,
+    /// Per device: how its object requests went (`ObjectStats`), so that
+    /// peers that have what is asked, and answer fast, are asked first.
+    objects: Mutex<BTreeMap<DeviceId, ObjectStats>>,
+}
+
+/// How a peer answered object requests lately.
+#[derive(Clone, Debug, Default)]
+struct ObjectStats {
+    /// Requests in a row it did not have the object for (404), since its
+    /// last hit. A peer that lacks one block of a file usually lacks the rest.
+    miss_streak: u32,
+    /// Smoothed seconds per successful object request.
+    secs: f64,
+}
+
+impl ObjectStats {
+    /// Lower is asked first. A miss streak outweighs any speed difference;
+    /// within the same streak, faster peers go first; a peer never measured
+    /// sits in the middle so that it gets tried.
+    fn rank(&self) -> (u32, u64) {
+        let speed = if self.secs > 0.0 {
+            (self.secs * 1e6) as u64
+        } else {
+            50_000
+        };
+        (self.miss_streak.min(8), speed)
+    }
 }
 
 const ROUTE_TTL: Duration = Duration::from_secs(60);
@@ -1031,6 +1139,7 @@ impl Peers {
             timeout: Duration::from_millis(1500),
             traffic,
             pool: Mutex::default(),
+            objects: Mutex::default(),
         }
     }
 
@@ -1051,10 +1160,28 @@ impl Peers {
 
     /// Carry the remembered routes and address states over from the table
     /// this one replaces, so a rebuild (every sync) forgets nothing.
+    /// A peer found unreachable whose record has changed since (new
+    /// addresses, or a relay it registered with) is tried again at once
+    /// instead of resting: the new route may be the one that works.
     pub fn inherit(&self, previous: &Peers) {
-        *self.routes.lock().unwrap() = previous.routes.lock().unwrap().clone();
+        let mut routes = previous.routes.lock().unwrap().clone();
+        routes.retain(|dev, (route, _, _)| {
+            if route.is_some() {
+                return true;
+            }
+            let old = previous.peers.iter().find(|p| &p.device == dev);
+            let new = self.peers.iter().find(|p| &p.device == dev);
+            match (old, new) {
+                (Some(o), Some(n)) => {
+                    o.tcp == n.tcp && o.udp == n.udp && o.relay_via == n.relay_via
+                }
+                _ => true,
+            }
+        });
+        *self.routes.lock().unwrap() = routes;
         *self.state.lock().unwrap() = previous.state.lock().unwrap().clone();
         *self.pool.lock().unwrap() = previous.pool.lock().unwrap().clone();
+        *self.objects.lock().unwrap() = previous.objects.lock().unwrap().clone();
     }
 
     /// Peers worth asking now: unreachable ones rest for a minute, the ones
@@ -1180,7 +1307,11 @@ impl Peers {
         // A peer that keeps its relay registration with us is reached on
         // that connection first: it is open already, and behind a symmetric
         // NAT nothing else reaches it from here.
-        if let Some(a) = self.quic.as_ref().and_then(|n| n.registrant_addr(&p.device)) {
+        if let Some(a) = self
+            .quic
+            .as_ref()
+            .and_then(|n| n.registrant_addr(&p.device))
+        {
             routes.insert(0, Route::Registered(a));
         }
         routes
@@ -1263,18 +1394,56 @@ impl Peers {
         None
     }
 
-    /// Fetch one object from the first peer that has it.
+    /// Fetch one object from the first peer that has it. Peers with a
+    /// working route come first (`ordered`), and among them the ones that
+    /// had the objects asked lately and answered fastest: asking a peer
+    /// that lacks the object through a relay before one on the LAN that has
+    /// it would cost a round trip for every block.
     pub fn get(&self, name: &ObjectName) -> Option<(DeviceId, Vec<u8>)> {
         let path = format!("/p2p/object/{name}");
-        for p in self.ordered() {
+        let mut order = self.ordered();
+        {
+            let routes = self.routes.lock().unwrap();
+            let stats = self.objects.lock().unwrap();
+            order.sort_by_key(|p| {
+                let routed = matches!(routes.get(&p.device), Some((Some(_), _, _)));
+                let rank = stats.get(&p.device).cloned().unwrap_or_default().rank();
+                (!routed, rank)
+            });
+        }
+        for p in order {
             let auth = auth_header(&self.key, &self.me, &path);
-            if let Some((200, body, _)) = self.fetch(&p, &path, &auth) {
-                if ObjectName::from_bytes(&crypto::hash(&body)) == *name {
+            let t = Instant::now();
+            let got = self.fetch(&p, &path, &auth);
+            let mut stats = self.objects.lock().unwrap();
+            let e = stats.entry(p.device.clone()).or_default();
+            match got {
+                Some((200, body, _)) if ObjectName::from_bytes(&crypto::hash(&body)) == *name => {
+                    let secs = t.elapsed().as_secs_f64();
+                    e.secs = if e.secs > 0.0 {
+                        e.secs * 0.8 + secs * 0.2
+                    } else {
+                        secs
+                    };
+                    e.miss_streak = 0;
                     return Some((p.device, body));
                 }
+                Some((404, _, _)) => e.miss_streak = e.miss_streak.saturating_add(1),
+                _ => {}
             }
         }
         None
+    }
+
+    /// Tell every peer that this device published something new (a folder,
+    /// changed files), so that it syncs now. Best effort: a peer that does
+    /// not answer finds the change at its next interval anyway.
+    pub fn notify_changed(&self) {
+        let path = "/p2p/changed";
+        for p in self.ordered() {
+            let auth = auth_header(&self.key, &self.me, path);
+            let _ = self.fetch(&p, path, &auth);
+        }
     }
 
     /// Which peers answer right now, and over which path.
@@ -1410,6 +1579,68 @@ pub fn local_ipv4_addrs() -> Vec<IpAddr> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn chunked_bodies_are_decoded_within_bounds() {
+        assert_eq!(decode_chunked(b"3\r\nabc\r\n0\r\n\r\n").unwrap(), b"abc");
+        for bad in [
+            &b"1\r\nA"[..],
+            b"5\r\nabc\r\n0\r\n\r\n",
+            b"3\r\nabcXX0\r\n\r\n",
+            b"zz\r\n",
+            b"3\r\nab",
+        ] {
+            assert!(decode_chunked(bad).is_err(), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn peers_that_have_objects_and_answer_fast_rank_first() {
+        let fast = ObjectStats {
+            miss_streak: 0,
+            secs: 0.002,
+        };
+        let slow = ObjectStats {
+            miss_streak: 0,
+            secs: 0.2,
+        };
+        let lacking = ObjectStats {
+            miss_streak: 3,
+            secs: 0.001,
+        };
+        let unknown = ObjectStats::default();
+        let mut v = [lacking.rank(), slow.rank(), unknown.rank(), fast.rank()];
+        v.sort();
+        assert_eq!(
+            v,
+            [fast.rank(), unknown.rank(), slow.rank(), lacking.rank()]
+        );
+    }
+
+    #[test]
+    fn a_peer_token_is_good_once() {
+        let key = SecretKey::random();
+        let dev = DeviceId::random();
+        let h = auth_header(&key, &dev, "/p2p/info");
+        assert_eq!(verify_auth(&key, &h, "/p2p/info"), Some(dev.clone()));
+        assert_eq!(verify_auth(&key, &h, "/p2p/info"), None, "replayed");
+        assert_eq!(
+            verify_auth(&key, &auth_header(&key, &dev, "/p2p/info"), "/p2p/other"),
+            None
+        );
+        assert_eq!(
+            verify_auth(&SecretKey::random(), &auth_header(&key, &dev, "/x"), "/x"),
+            None
+        );
+        assert_eq!(
+            verify_auth(
+                &key,
+                &format!("{dev}:{}:{}", i64::MIN, "00".repeat(32)),
+                "/x"
+            ),
+            None
+        );
+    }
 
     #[test]
     fn revoked_devices_are_refused_even_with_a_valid_token() {
