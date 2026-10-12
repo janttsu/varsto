@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Alpha.12: small files in packs, and Varsto in Finnish and Swedish</title>
+<meta name="description" content="Small encrypted blocks are now written in packs, so a folder of 20,000 small files becomes 79 objects on a bucket instead of 20,000. The interface, tray, menu bar, mobile shells and this website are available in Finnish and Swedish as well as English.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="canonical" href="https://varsto.net/blog/2026-10-12-alpha-12-packs-and-languages.html">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Varsto">
+<meta property="og:title" content="Alpha.12: small files in packs, and Varsto in Finnish and Swedish">
+<meta property="og:description" content="Small encrypted blocks are now written in packs, so a folder of 20,000 small files becomes 79 objects on a bucket instead of 20,000. The interface, tray, menu bar, mobile shells and this website are available in Finnish and Swedish as well as English.">
+<meta property="og:url" content="https://varsto.net/blog/2026-10-12-alpha-12-packs-and-languages.html">
+<meta property="og:image" content="https://varsto.net/assets/img/og-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:locale" content="en_GB">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="alternate" hreflang="en" href="https://varsto.net/blog/2026-10-12-alpha-12-packs-and-languages.html">
+<link rel="alternate" hreflang="x-default" href="https://varsto.net/blog/2026-10-12-alpha-12-packs-and-languages.html">
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","headline":"Alpha.12: small files in packs, and Varsto in Finnish and Swedish","description":"Small encrypted blocks are now written in packs, so a folder of 20,000 small files becomes 79 objects on a bucket instead of 20,000. The interface, tray, menu bar, mobile shells and this website are available in Finnish and Swedish as well as English.","datePublished":"2026-10-12","url":"https://varsto.net/blog/2026-10-12-alpha-12-packs-and-languages.html","inLanguage":"en","author":{"@type":"Organization","name":"The Varsto Authors"},"image":"https://varsto.net/assets/img/og-card.png"}</script>
+<link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../blog/feed.xml">
+<link rel="stylesheet" href="../assets/css/site.css?v=b3d2d4f387">
+<script src="../assets/js/theme.js?v=0951491269"></script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="alpha" role="note">
+  <div class="wrap"><strong>Alpha software, not for production data.</strong> Bugs can cause data loss, formats may change without migration, and the cryptography has not been independently audited. Keep your own backups and check that you can restore from them.</div>
+</div>
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="../"><img src="../assets/img/logo.svg" alt="" width="28" height="28"><span>Varsto</span></a>
+
+    <nav class="main" aria-label="Main">
+      <a href="../">Project</a>
+      <a href="../features/">Features</a>
+      <a href="../use-cases/">Use cases</a>
+      <a href="../compare/">Compare</a>
+      <a href="../how-it-works/">How it works</a>
+      <a href="../screenshots/">Screenshots</a>
+      <a href="../docs/">Docs</a>
+      <a href="../downloads/">Downloads</a>
+      <a href="../blog/" aria-current="page">Blog</a>
+      <a href="../forum/">Forum</a>
+      <a href="../contribute/">Contribute</a>
+      <a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a>
+      <button class="theme" id="theme-toggle" type="button" aria-label="Change colour theme">Theme: auto</button>
+    </nav>
+  </div>
+</header>
+<main id="main">
+  <div class="wrap">
+<article class="prose"><h1>Alpha.12: small files in packs, and Varsto in Finnish and Swedish</h1><p class="note"><time datetime="2026-10-12">2026-10-12</time></p>
+<p>Alpha.12 has two themes: fewer objects on your storage, and the interface in more languages.</p>
+<h2 id="small-blocks-in-packs">Small blocks in packs</h2>
+<p>Until now every encrypted block was its own object on the storage. That is simple and robust, but a folder of many small files, such as notes, source code or a photo library's sidecar files, turns into tens of thousands of tiny objects. Many providers charge per request, some per object, and listing and checking them all is slow.</p>
+<p>From this version, blocks up to 128 KiB are collected into packs of about 4 MiB or 256 members. A pack is written with an index that names its members and where each one starts, and a member is read with a ranged request, so reading one small file still downloads only its own bytes. Large blocks are still written one by one. Packs are used on S3 buckets, rclone remotes and directories; cold storage, disk pools and transferrer disks keep single objects.</p>
+<p>In the lab, a folder of 20,000 small files went to the bucket as 79 packs instead of 20,000 objects. Every member was checked against its name after the run.</p>
+<p>Deleting a block that lives in a pack writes a small deletion marker, and the pack itself goes once every member is gone. Repair, verification, replicas, data moves and storage removal all understand packs. The storage format is described in section 30 of the <a href="../docs/alpha-0-format.html">format specification</a>.</p>
+<p>There is no compatibility with older versions: a device on alpha.11 or earlier does not see blocks in packs. Update every device.</p>
+<h2 id="fixes-found-on-the-way">Fixes found on the way</h2>
+<p>The lab runs found problems that unit tests had missed:</p>
+<ul>
+<li><code>rclone serve s3</code> answers a ranged read with status 200 and only the requested bytes. Varsto now accepts that as well as the usual 206, so packs read correctly from such servers.</li>
+<li>A device that had just read the pack indexes did not look again for packs another device wrote moments later. A read that misses now reloads the indexes at once.</li>
+<li>A device could trust a pack index after another device had deleted members from it. Before deciding that a block already exists and need not be written, Varsto now checks that it is still in its pack.</li>
+<li>Disk pools and other storages without packs write their blocks one at a time again, so a full or missing disk is reported as such instead of failing the whole push.</li>
+<li>An S3 server with the clock more than a few minutes off is now corrected in both directions, also when it answers with status 400 instead of 403.</li>
+</ul>
+<h2 id="finnish-and-swedish">Finnish and Swedish</h2>
+<p>The desktop interface, the tray and the macOS menu bar, the Android and iOS shells, and this website are now available in Finnish and Swedish. English stays the default. The language is chosen in the interface's settings or at the bottom of the sidebar, and the tray and the apps follow the same choice. The command line, the documentation and everything in the repository stay in English.</p>
+<p>Translations of the safety-critical texts, such as those about deleting, revoking devices and recovery words, are marked for review by native speakers. Corrections are welcome.</p>
+<h2 id="building-varsto-with-us">Building Varsto with us</h2>
+<p>The new <a href="../docs/./">Contribute</a> page describes how Varsto is built and where help is wanted: a review of the cryptography and the storage format, Windows, iOS and Android, NAT traversal on networks other than the maintainer's, more S3 providers, packaging and translations.</p>
+
+</article>
+  </div>
+</main>
+<footer class="site">
+  <div class="wrap">
+    <span>Varsto is a working name. Source: <a href="https://github.com/janttsu/varsto">github.com/janttsu/varsto</a>, under the PolyForm Shield License 1.0.0 (source-available).</span>
+    <span>No cookies, no tracking. The web server keeps a standard access log for at most seven days.</span>
+    <span><a href="../docs/security-policy.html">Security policy</a> · <a href="../docs/licence.html">Licence</a> · <a href="../docs/trademark.html">Trademark</a></span>
+  </div>
+</footer>
+</body>
+</html>
