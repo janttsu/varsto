@@ -1714,7 +1714,11 @@ pub mod linux {
             )?;
             stop_running(home);
             systemctl(&["daemon-reload"])?;
-            systemctl(&["enable", "--now", UNIT])?;
+            systemctl(&["enable", UNIT])?;
+            // Restart, not just start: a service that lost its service file
+            // (a reset removes it) is not found by stop_running, and would
+            // keep running the old binary.
+            systemctl(&["restart", UNIT])?;
             done.push(format!(
                 "background service: systemd user unit {UNIT}, started and enabled at login"
             ));
