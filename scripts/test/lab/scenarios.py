@@ -822,10 +822,45 @@ PY""")
     check(max(x[1] for x in res.values()) < 1200, f"peak memory above 1.2 GiB: {res}")
 
 
+@scenario("p2p-while-uploading")
+def s_p2p_upload():
+    """A new large file reaches a device on the same LAN peer to peer while
+    the slow upload to the bucket is still running: the home's link to the
+    internet is held to 4 Mbit/s, so the 40 MiB upload takes over a minute."""
+    fresh_pair()
+    for vm in ("vl-laptop", "vl-desktop"):
+        start_service(vm)
+    time.sleep(20)  # LAN discovery and a first sync on both
+    run("vl-rhome", "sudo tc qdisc replace dev eth1 root tbf rate 4mbit burst 32kbit latency 400ms")
+    try:
+        run("vl-laptop", "head -c $((40<<20)) /dev/urandom > ~/data/docs/big-upload.bin")
+        want = run("vl-laptop", "sha256sum ~/data/docs/big-upload.bin").stdout.split()[0]
+        t0 = time.time()
+        got_at = None
+        uploading_then = None
+        while time.time() - t0 < 90:
+            have = run("vl-desktop", "sha256sum ~/data/docs/big-upload.bin 2>/dev/null || true").stdout.split()
+            if have and have[0] == want:
+                got_at = time.time() - t0
+                prog = api("vl-laptop", "GET", "/api/progress")
+                uploading_then = any(t.get("kind") == "upload" for t in prog.get("transfers") or [])
+                break
+            time.sleep(1)
+        CTX["p2p_while_uploading"] = {"desktop_has_it_after_s": got_at and round(got_at, 1),
+                                      "laptop_still_uploading": uploading_then}
+        print("      p2p while uploading:", CTX["p2p_while_uploading"], flush=True)
+        check(got_at is not None, "the desktop did not get the file within 90 s")
+        check(uploading_then, "the laptop had already finished its upload: the file did not go peer to peer first")
+    finally:
+        run("vl-rhome", "sudo tc qdisc del dev eth1 root", check_rc=False)
+        for vm in ("vl-laptop", "vl-desktop"):
+            run(vm, "pkill -x varsto; true", check_rc=False)
+
+
 SCENARIOS = [s_reset, s_init, s_pair, s_sync, s_words, s_conflict, s_selective, s_repair, s_policy,
              s_strongroom, s_org, s_remove_user, s_revoke,
              s_p2p_setup, s_p2p_lan, s_p2p_pub, s_p2p_sym, s_p2p_stop, s_share, s_disks, s_mixed,
-             s_outage, s_blackhole, s_crash, s_clock, s_scale]
+             s_outage, s_blackhole, s_crash, s_clock, s_p2p_upload, s_scale]
 
 
 def main():

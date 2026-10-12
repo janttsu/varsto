@@ -349,6 +349,9 @@ def stun_server(addr):
 
 
 def cmd_services(a):
+    # Never two of each: stop the ones a previous call started first, or the
+    # old S3 server keeps the port and "the storage is down" tests see it up.
+    cmd_services_stop(a)
     run = DIR / "run"
     run.mkdir(exist_ok=True)
     s3dir = DIR / "s3"

@@ -401,6 +401,9 @@ pub struct LedgerEntry {
 pub struct Engine {
     /// Peers to try before storages when downloading (set by the service).
     peers: Option<std::sync::Arc<crate::p2p::Peers>>,
+    /// Where the peer-to-peer server takes what it serves from: refreshed
+    /// as soon as a push has published new files, before their upload.
+    snapshot_sink: Option<SnapshotSink>,
     /// Objects of small files fetched ahead during a pull (see `prefetch_small`).
     prefetched: HashMap<ObjectName, Fetched>,
     /// How fast peers and storages answered during recent downloads.
@@ -435,6 +438,10 @@ pub struct Engine {
     /// When manifests are listed in full and whether old ones are pruned.
     manifest_policy: manifest_upkeep::ManifestPolicy,
 }
+
+/// What the peer-to-peer server serves from (see `Engine::set_snapshot_sink`).
+pub type SnapshotSink =
+    std::sync::Arc<std::sync::Mutex<Option<std::sync::Arc<crate::p2p::Snapshot>>>>;
 
 /// Open storages with their specs.
 type OpenStorages = Vec<(StorageSpec, Box<dyn Storage>)>;
@@ -794,6 +801,7 @@ impl Engine {
         util::write_json(&home.join("vault.json"), &vault)?;
         let mut engine = Engine {
             peers: None,
+            snapshot_sink: None,
             prefetched: HashMap::new(),
             fetch_stats: Default::default(),
             unlocked: BTreeMap::new(),
@@ -973,6 +981,7 @@ impl Engine {
         let removal = util::read_json(&home.join("removed.json")).ok();
         let mut engine = Engine {
             peers: None,
+            snapshot_sink: None,
             prefetched: HashMap::new(),
             fetch_stats: Default::default(),
             unlocked: BTreeMap::new(),
@@ -2456,9 +2465,37 @@ impl Engine {
         let (scanned, changed) = self.scan(&rec, &root, &mut state)?;
         report.files_scanned = scanned;
         report.files_changed = changed;
+        // Unpublished changes (this scan's, or ones a pull's scan recorded
+        // before it): publish them first.
+        // Only with peers: without them nobody can fetch from this device
+        // before the upload, and the sync keeps to one ledger batch.
+        let has_peers = self.peers.as_ref().is_some_and(|p| !p.is_empty());
+        if has_peers && Manifest::files_hash(&state.files) != state.published_hash {
+            // Tell the other devices about the new files before uploading
+            // them: they fetch the blocks from this device peer to peer while
+            // the storages receive their copies (a large file would otherwise
+            // reach them only once its whole upload is done). A device that
+            // cannot reach this one finds the blocks on the storages later.
+            report.manifest_seq = self.publish_manifest(&rec, &mut state)?;
+            self.ensure_manifest_everywhere(&rec, &state)?;
+            // Now, not at the end of the sync: the other devices learn of the
+            // new manifest from this batch.
+            let cycle = self.cycle.take();
+            let committed = self.commit_batch();
+            self.cycle = cycle;
+            committed?;
+            self.save_state(&rec.folder_id, &state)?;
+            self.refresh_snapshot();
+            self.notify_peers_changed();
+            if std::env::var_os("VARSTO_P2P_DEBUG").is_some() {
+                eprintln!("push {}: file list published before the upload", rec.name);
+            }
+        }
         self.upload_missing(&rec, &root, &state, &mut report)?;
         report.thumbnails = self.make_thumbnails(&rec, &root, &mut state)?;
-        report.manifest_seq = self.publish_manifest(&rec, &mut state)?;
+        if let Some(seq) = self.publish_manifest(&rec, &mut state)? {
+            report.manifest_seq = Some(seq);
+        }
         self.ensure_manifest_everywhere(&rec, &state)?;
         report.batch_seq = self.commit_batch()?;
         self.save_state(&rec.folder_id, &state)?;
@@ -3526,6 +3563,35 @@ impl Engine {
         util::write_atomic(&placeholder_path(disk), &serde_json::to_vec(&info)?)
     }
 
+    /// In a folder that is not selective (any more), download every file
+    /// that is still a placeholder here. Files that cannot be fetched now
+    /// are listed and stay placeholders until the next sync. Returns how
+    /// many were downloaded.
+    fn fill_placeholders(&mut self, folder: &str, unavailable: &mut Vec<String>) -> Result<u64> {
+        let (rec, root) = self.resolve_folder(folder)?;
+        if self.mount_is_selective(&rec.folder_id) || self.mount_is_encrypted(&rec.folder_id) {
+            return Ok(0);
+        }
+        let state = self.load_state(&rec.folder_id)?;
+        let wanted: Vec<String> = state
+            .files
+            .values()
+            .filter(|f| {
+                let disk = root.join(&f.path);
+                !f.deleted && !disk.exists() && placeholder_path(&disk).exists()
+            })
+            .map(|f| f.path.clone())
+            .collect();
+        let mut done = 0;
+        for path in wanted {
+            match self.fetch_file(folder, &path) {
+                Ok(_) => done += 1,
+                Err(_) => unavailable.push(path),
+            }
+        }
+        Ok(done)
+    }
+
     /// Download a placeholder file of a selective folder and keep it here.
     pub fn fetch_file(&mut self, folder: &str, path: &str) -> Result<PullReport> {
         let (rec, root) = self.resolve_folder(folder)?;
@@ -4041,6 +4107,22 @@ impl Engine {
         Ok(signature(self) != before)
     }
 
+    /// Hand the peer-to-peer server (the background service's) the place it
+    /// reads its snapshot from, so a push can refresh it early.
+    pub fn set_snapshot_sink(&mut self, sink: Option<SnapshotSink>) {
+        self.snapshot_sink = sink;
+    }
+
+    fn refresh_snapshot(&self) {
+        let Some(sink) = &self.snapshot_sink else {
+            return;
+        };
+        match self.peer_snapshot() {
+            Ok(s) => *sink.lock().unwrap() = Some(std::sync::Arc::new(s)),
+            Err(e) => eprintln!("p2p snapshot after publishing failed: {e:#}"),
+        }
+    }
+
     /// Tell the other devices over peer-to-peer that something new was
     /// published; on a thread of its own, so a slow peer holds nothing up.
     pub fn notify_peers_changed(&self) {
@@ -4486,10 +4568,12 @@ impl Engine {
             self.pull_ledger()?;
         }
         for name in names {
-            let pull = self.pull(&name)?;
+            let mut pull = self.pull(&name)?;
             if self.keyring.find(&name).is_none() {
                 continue; // converted while pulling
             }
+            // Selective sync turned off: the placeholders become files.
+            pull.files_updated += self.fill_placeholders(&name, &mut pull.files_unavailable)?;
             let push = self.push(&name)?;
             out.push((pull, push));
         }

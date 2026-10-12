@@ -636,6 +636,7 @@ impl P2p {
         *slot = Some(p.clone());
         drop(slot);
         e.set_peers(Some(p));
+        e.set_snapshot_sink(Some(self.snapshot.clone()));
     }
 
     /// Refresh what we serve, show the paths in use, and re-publish our
@@ -1207,6 +1208,7 @@ pub fn run(opts: Options) -> Result<()> {
                 let mut st = state.lock().unwrap();
                 if let Some(e) = st.engine.as_mut() {
                     e.set_peers(None);
+                    e.set_snapshot_sink(None);
                 }
                 st.service.p2p_listen = None;
                 eprintln!("service: p2p stopped (turned off)");
@@ -1272,7 +1274,31 @@ pub fn run(opts: Options) -> Result<()> {
             if let Some(e) = st.engine.as_mut() {
                 e.expire_strongrooms();
             }
+            let why = if due_change {
+                "files changed"
+            } else if requested {
+                "requested"
+            } else {
+                "interval"
+            };
+            let started = Instant::now();
             let result = st.engine.as_mut().map(|e| e.sync(None));
+            if let Some(Ok(reports)) = &result {
+                {
+                    let (pulled, pushed) = reports.iter().fold((0, 0), |(a, b), (pl, ps)| {
+                        (
+                            a + pl.files_updated + pl.files_deleted,
+                            b + ps.files_changed,
+                        )
+                    });
+                    if pulled + pushed > 0 || started.elapsed() > Duration::from_secs(10) {
+                        eprintln!(
+                            "service: sync ({why}) took {:.1} s: {pulled} files from other devices, {pushed} changed here",
+                            started.elapsed().as_secs_f64()
+                        );
+                    }
+                }
+            }
             if let Some(p) = &p2p {
                 p.refresh_after_sync(&mut st);
             }

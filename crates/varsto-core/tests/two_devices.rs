@@ -895,3 +895,31 @@ fn many_chunk_files_arrive_in_order_and_a_missing_chunk_fails_the_file() {
     assert_eq!(r.chunks_downloaded as usize, objects.len());
     assert_eq!(fs::read(lab.b_dir.join("big.bin")).unwrap(), big);
 }
+
+#[test]
+fn turning_selective_sync_off_downloads_the_placeholders() {
+    let lab = lab();
+    let (mut a, key) = Engine::init(&lab.a_home, "laptop", PASS).unwrap();
+    a.add_storage(lab.storage.clone()).unwrap();
+    a.add_folder("docs", &lab.a_dir).unwrap();
+    fs::write(lab.a_dir.join("one.txt"), b"first").unwrap();
+    fs::create_dir_all(lab.a_dir.join("sub")).unwrap();
+    fs::write(lab.a_dir.join("sub/two.txt"), b"second").unwrap();
+    a.sync(None).unwrap();
+
+    let mut b = Engine::join(&lab.b_home, "desk", PASS, &key, lab.storage.clone()).unwrap();
+    b.attach_folder("docs", &lab.b_dir, true).unwrap();
+    b.sync(None).unwrap();
+    assert!(
+        !lab.b_dir.join("one.txt").exists(),
+        "selective: placeholders only"
+    );
+    assert!(lab.b_dir.join("one.txt.varsto-placeholder").exists());
+
+    b.set_selective("docs", false).unwrap();
+    b.sync(None).unwrap();
+    assert_eq!(fs::read(lab.b_dir.join("one.txt")).unwrap(), b"first");
+    assert_eq!(fs::read(lab.b_dir.join("sub/two.txt")).unwrap(), b"second");
+    assert!(!lab.b_dir.join("one.txt.varsto-placeholder").exists());
+    assert!(!lab.b_dir.join("sub/two.txt.varsto-placeholder").exists());
+}

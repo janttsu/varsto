@@ -1582,6 +1582,8 @@ fn api_unlocked(
                 input.get("on").and_then(|b| b.as_bool()).unwrap_or(true),
             )?;
             service.folders_changed = true;
+            // Turned off: the next sync downloads the placeholders.
+            service.request_sync();
             Ok(json!({"ok": true}))
         }
         (Method::Get, "/api/dupes") => {

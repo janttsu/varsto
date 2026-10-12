@@ -213,7 +213,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         updateTimer = Timer.scheduledTimer(withTimeInterval: 6 * 3600, repeats: true) { [weak self] _ in self?.autoCheckUpdates() }
         if ProcessInfo.processInfo.environment["VARSTO_NO_OPEN"] == nil {
             // Not when Finder started us to open a placeholder.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { if !self.launchedForFiles { self.openUI() } }
+            // Finder may hand over a Download or Free request just after starting
+            // us; wait a moment so that such a start opens no window.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { if !self.launchedForFiles { self.openUI() } }
         }
     }
 
@@ -599,11 +601,15 @@ final class FinderService: NSObject {
     weak var owner: AppDelegate?
     init(owner: AppDelegate) { self.owner = owner }
 
+    // Download / Free up space from Finder happen in the background: Varsto's
+    // window does not open for them (only a failure shows a dialog).
     @objc func fetchFiles(_ pboard: NSPasteboard, userData: String, error: AutoreleasingUnsafeMutablePointer<NSString>) {
+        owner?.launchedForFiles = true
         owner?.actOnPaths("fetch", paths(pboard), openAfter: false)
     }
 
     @objc func freeFiles(_ pboard: NSPasteboard, userData: String, error: AutoreleasingUnsafeMutablePointer<NSString>) {
+        owner?.launchedForFiles = true
         owner?.actOnPaths("free", paths(pboard), openAfter: false)
     }
 
