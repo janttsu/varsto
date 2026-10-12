@@ -7,9 +7,21 @@
 <meta name="description" content="Lataa Varston alfa Linuxille, macOS:lle, Windowsille ja Androidille tai lähdekoodina, ja tarkista tarkistussummat.">
 <meta name="color-scheme" content="light dark">
 <link rel="icon" href="../../favicon.svg" type="image/svg+xml">
-<link rel="alternate" hreflang="en" href="../../downloads/">
-<link rel="alternate" hreflang="fi" href="../../fi/downloads/">
-<link rel="alternate" hreflang="sv" href="../../sv/downloads/">
+<link rel="canonical" href="https://varsto.net/fi/downloads/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Varsto">
+<meta property="og:title" content="Lataukset: Varsto">
+<meta property="og:description" content="Lataa Varston alfa Linuxille, macOS:lle, Windowsille ja Androidille tai lähdekoodina, ja tarkista tarkistussummat.">
+<meta property="og:url" content="https://varsto.net/fi/downloads/">
+<meta property="og:image" content="https://varsto.net/assets/img/og-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:locale" content="fi_FI">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="alternate" hreflang="en" href="https://varsto.net/downloads/">
+<link rel="alternate" hreflang="x-default" href="https://varsto.net/downloads/">
+<link rel="alternate" hreflang="fi" href="https://varsto.net/fi/downloads/">
+<link rel="alternate" hreflang="sv" href="https://varsto.net/sv/downloads/">
 <link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../../blog/feed.xml">
 <link rel="stylesheet" href="../../assets/css/site.css?v=b3d2d4f387">
 <script src="../../assets/js/theme.js?v=0951491269"></script>
@@ -35,6 +47,7 @@
       <a href="../../fi/downloads/" aria-current="page">Lataukset</a>
       <a href="../../blog/">Blogi (en)</a>
       <a href="../../forum/">Foorumi (en)</a>
+      <a href="../../fi/contribute/">Osallistu</a>
       <a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a>
       <button class="theme" id="theme-toggle" type="button" aria-label="Change colour theme">Theme: auto</button>
     </nav>
@@ -48,10 +61,10 @@
     <p class="note">No binaries are published yet. Build from source with <code>cargo build --release</code>.</p>
     <h2>Asennus ja tarkistus</h2>
     <pre><code>curl -O https://varsto.net/downloads/SHA256SUMS
-curl -O https://varsto.net/downloads/varsto-0.0.1-alpha.11-x86_64-unknown-linux-musl.tar.gz
+curl -O https://varsto.net/downloads/varsto-0.0.1-alpha.12-x86_64-unknown-linux-musl.tar.gz
 sha256sum -c SHA256SUMS --ignore-missing
-tar xzf varsto-0.0.1-alpha.11-x86_64-unknown-linux-musl.tar.gz
-cd varsto-0.0.1-alpha.11-x86_64-unknown-linux-musl
+tar xzf varsto-0.0.1-alpha.12-x86_64-unknown-linux-musl.tar.gz
+cd varsto-0.0.1-alpha.12-x86_64-unknown-linux-musl
 ./varsto desktop        # opens the desktop interface in your browser
 ./varsto --help         # command line</code></pre>
     <h2>Kääntäminen lähdekoodista</h2>

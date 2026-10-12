@@ -2,6 +2,8 @@
 //! Removable-disk pool (plan 6.35, 6.41): disks are temporary directories
 //! under a scan root; capacity is simulated through the free-space hook.
 
+mod common;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 use varsto_core::chunking::ChunkerParams;
@@ -190,7 +192,7 @@ fn detached_disk_is_reported_and_recognised_again_elsewhere() {
     a.push("docs").unwrap();
     // The box carries records, ledger and manifests but loses its chunks:
     // the disk is the only place that has them.
-    fs::remove_dir_all(lab.root.join("box/chunks")).unwrap();
+    common::lose_all_objects(&lab.root.join("box"));
     a.disk_eject("data-01").unwrap();
     let idx = DiskIndex::read(&d1).expect("eject writes the disk index");
     assert!(!idx.objects.is_empty());

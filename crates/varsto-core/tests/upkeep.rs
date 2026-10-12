@@ -2,6 +2,8 @@
 //! Upkeep the background service does or offers: automatic verification by
 //! another device, storage prices, and carrying out a placement suggestion.
 
+mod common;
+
 use std::fs;
 use std::path::PathBuf;
 use varsto_core::autoverify::VerifySchedule;
@@ -164,12 +166,9 @@ fn automatic_verification_skips_cold_storage_and_reports_corruption() {
     .unwrap();
     b.add_storage(cold).unwrap();
     // Damage one object on the hot storage.
-    let victim = walkdir::WalkDir::new(lab.root.join("storage").join("chunks"))
-        .into_iter()
-        .filter_map(|e| e.ok())
-        .find(|e| e.file_type().is_file())
-        .unwrap();
-    fs::write(victim.path(), b"bit rot").unwrap();
+    let hot = lab.root.join("storage");
+    let victim = common::object_names(&hot).into_iter().next().unwrap();
+    common::corrupt_object(&hot, &victim);
     let r = b.auto_verify().unwrap();
     assert_eq!(r.storages_skipped, vec!["archive".to_string()]);
     assert_eq!(r.due, chunks, "only the hot copies are candidates");

@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="sv">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bidra: Varsto</title>
+<meta name="description" content="Hjälp till att bygga Varsto, ett totalsträckskrypterat verktyg för synkronisering och säkerhetskopiering skrivet i Rust: arkitektur, var hjälp behövs, hur man bygger och testar det och licensvillkoren.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="../../favicon.svg" type="image/svg+xml">
+<link rel="canonical" href="https://varsto.net/sv/contribute/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Varsto">
+<meta property="og:title" content="Bidra: Varsto">
+<meta property="og:description" content="Hjälp till att bygga Varsto, ett totalsträckskrypterat verktyg för synkronisering och säkerhetskopiering skrivet i Rust: arkitektur, var hjälp behövs, hur man bygger och testar det och licensvillkoren.">
+<meta property="og:url" content="https://varsto.net/sv/contribute/">
+<meta property="og:image" content="https://varsto.net/assets/img/og-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:locale" content="sv_SE">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="alternate" hreflang="en" href="https://varsto.net/contribute/">
+<link rel="alternate" hreflang="x-default" href="https://varsto.net/contribute/">
+<link rel="alternate" hreflang="fi" href="https://varsto.net/fi/contribute/">
+<link rel="alternate" hreflang="sv" href="https://varsto.net/sv/contribute/">
+<link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../../blog/feed.xml">
+<link rel="stylesheet" href="../../assets/css/site.css?v=b3d2d4f387">
+<script src="../../assets/js/theme.js?v=0951491269"></script>
+</head>
+<body>
+<a class="skip" href="#main">Hoppa till innehållet</a>
+<div class="alpha" role="note">
+  <div class="wrap"><strong>Alfaprogramvara, inte för produktionsdata.</strong> Fel kan leda till dataförlust, formatet kan ändras utan migrering och krypteringen har ännu inte granskats av utomstående. Behåll egna säkerhetskopior och kontrollera att du kan återställa från dem.</div>
+</div>
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="../../sv/"><img src="../../assets/img/logo.svg" alt="" width="28" height="28"><span>Varsto</span></a>
+    <nav class="langs" aria-label="Language"><a href="../../contribute/" hreflang="en" lang="en">English</a> <a href="../../fi/contribute/" hreflang="fi" lang="fi">Suomi</a> <a href="../../sv/contribute/" hreflang="sv" lang="sv" aria-current="true">Svenska</a></nav>
+
+    <nav class="main" aria-label="Main">
+      <a href="../../sv/">Projekt</a>
+      <a href="../../sv/features/">Funktioner</a>
+      <a href="../../sv/use-cases/">Användningsfall</a>
+      <a href="../../sv/compare/">Jämförelse</a>
+      <a href="../../sv/how-it-works/">Så fungerar det</a>
+      <a href="../../sv/screenshots/">Skärmbilder</a>
+      <a href="../../docs/">Dokumentation (en)</a>
+      <a href="../../sv/downloads/">Nedladdningar</a>
+      <a href="../../blog/">Blogg (en)</a>
+      <a href="../../forum/">Forum (en)</a>
+      <a href="../../sv/contribute/" aria-current="page">Bidra</a>
+      <a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a>
+      <button class="theme" id="theme-toggle" type="button" aria-label="Change colour theme">Theme: auto</button>
+    </nav>
+  </div>
+</header>
+<main id="main">
+  <div class="wrap">
+    <h1>Bygg Varsto med oss</h1>
+    <p class="lead">Varsto är ett totalsträckskrypterat verktyg för filsynkronisering och säkerhetskopiering till lagring du redan har: S3-buckets, NAS-utdelningar, rclone-fjärrmål, gamla diskar och dina egna enheter. Kärnan är skriven i Rust, källkoden är offentlig på <a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a> och lagringsformatet är specificerat i skrift. Det är en tidig alfa, och därför är det nu man kan påverka den mest.</p>
+    <p><a class="button" href="https://github.com/janttsu/varsto" rel="noopener">Källkoden på GitHub</a> <a class="button secondary" href="https://github.com/janttsu/varsto/issues" rel="noopener">Ärenden</a> <a class="button secondary" href="../../docs/contributing.html">Regler för bidrag (en)</a></p>
+
+    <h2>Det här skulle du arbeta med</h2>
+    <div class="grid">
+      <section class="card"><h3>En Rust-kärna med skriven specifikation</h3><p><code>varsto-core</code> innehåller motorn:</p><ul><li>innehållsdefinierad uppdelning i block och XChaCha20-Poly1305-kryptering;</li><li>en signerad liggare med hybridsignaturer Ed25519 + ML-DSA-65;</li><li>placering och lagringsregler;</li><li>blockutbyte mellan enheter med NAT-traversering;</li><li>lagringsbakändar för kataloger, S3 och rclone.</li></ul><p>Varje objekt i lagringen beskrivs i <a href="../../docs/alpha-0-format.html">specifikationen av lagringsformatet</a> (en).</p></section>
+      <section class="card"><h3>Ett program, många skal</h3><p><code>varsto-cli</code> är kommandoraden, bakgrundstjänsten, ikonen i aktivitetsfältet och ett lokalt webbgränssnitt (ren HTML, CSS och JavaScript). Tunna inbyggda skal omsluter det via <code>varsto-ffi</code>: Swift för macOS och iOS, Kotlin för Android.</p></section>
+      <section class="card"><h3>Tester som kör hela nätverk</h3><p>Utöver enhets- och integrationstester finns ett labb med virtuella maskiner. De spelar bärbara datorer, stationära datorer och servrar bakom hemroutrar, symmetrisk NAT och ett publikt internet. Labbet har en S3-server, och lagringsavbrott, krascher och klockavvikelser kan slås på vid behov. Se <a href="../../docs/testing.html">Testing</a> (en).</p></section>
+    </div>
+
+    <h2>Här behövs hjälp</h2>
+    <ul>
+      <li><strong>Säkerhetsgranskning</strong> av <a href="../../docs/key-hierarchy.html">nyckelhierarkin</a>, <a href="../../docs/threat-model.html">hotmodellen</a> och formatspecifikationen. Fynd hanteras enligt <a href="../../docs/security-policy.html">säkerhetspolicyn</a>.</li>
+      <li><strong>Plattformar:</strong> aktivitetsfältet och Utforskaren-integrationen i Windows, iOS-appen på riktiga enheter och Androids bakgrundsbeteende på telefoner från olika tillverkare.</li>
+      <li><strong>Nätverk:</strong> blockutbyte mellan enheter och NAT-traversering i andra nät än underhållarens egna, till exempel bakom operatörs-NAT, i nät med enbart IPv6 och bakom företagsbrandväggar.</li>
+      <li><strong>Lagring:</strong> tester mot fler S3-kompatibla leverantörer och rclone-bakändar och deras egenheter (delvisa läsningar, klockavvikelse, konsekvens i listningar).</li>
+      <li><strong>Paketering:</strong> Flatpak, Homebrew, AUR, winget och andra pakethanterare.</li>
+      <li><strong>Översättningar:</strong> gränssnittet och den här webbplatsen finns på engelska, finska och svenska. Fler språk och granskning av modersmålstalare är välkomna. Ordlistorna är JSON-filer i <code>crates/varsto-cli/ui/i18n/</code>.</li>
+      <li><strong>Dokumentation</strong> och felrapporter från verkliga uppsättningar: <a href="../../forum/">forumet</a> (en) och ärendehanteringen.</li>
+    </ul>
+
+    <h2>Kom igång</h2>
+    <pre><code>git clone https://github.com/janttsu/varsto
+cd varsto
+cargo build --release
+cargo test --workspace</code></pre>
+    <p>En stabil Rust-verktygskedja (1.85 eller nyare) räcker för kärnan och kommandoraden. <a href="../../docs/quick-start.html">Snabbstarten</a> (en) skapar ett valv i en lokal katalog på en minut, så du kan prova ändringar utan något molnkonto. Före en pull request ska <code>cargo fmt --all --check</code>, <code>cargo clippy --workspace --all-targets</code> och testerna gå igenom, och nytt beteende behöver tester. Öppna gärna ett ärende före stora ändringar.</p>
+
+    <h2>Licens</h2>
+    <p>Varstos källkod är tillgänglig under <a href="../../docs/licence.html">PolyForm Shield License 1.0.0</a>. Du får läsa, använda, ändra och dela koden för alla ändamål utom att erbjuda en produkt som konkurrerar med Varsto. Licensen är inte en OSI-godkänd öppen källkodslicens. Genom att bidra godkänner du att ditt bidrag distribueras under den licensen. Detaljerna finns i <a href="../../docs/contributing.html">reglerna för bidrag</a> (en). Allt i repot skrivs på engelska.</p>
+
+  </div>
+</main>
+<footer class="site">
+  <div class="wrap">
+    <span>Varsto är ett arbetsnamn. Källkod: <a href="https://github.com/janttsu/varsto">github.com/janttsu/varsto</a>, under PolyForm Shield License 1.0.0 (källkoden tillgänglig).</span>
+    <span>Inga kakor, ingen spårning. Webbservern sparar en vanlig åtkomstlogg i högst sju dagar.</span>
+    <span><a href="../../docs/security-policy.html">Säkerhetspolicy</a> · <a href="../../docs/licence.html">Licens</a> · <a href="../../docs/trademark.html">Varumärke</a> (på engelska)</span>
+  </div>
+</footer>
+</body>
+</html>

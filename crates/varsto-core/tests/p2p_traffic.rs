@@ -4,6 +4,8 @@
 //! a relay. Both ends (and the relay) must agree on bytes, objects,
 //! direction and path.
 
+mod common;
+
 use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -60,7 +62,7 @@ fn seed(lab: &Lab, who: &str, name: &str) -> (Engine, String) {
         .collect();
     fs::write(lab.dir(who).join("big.bin"), big).unwrap();
     e.push("docs").unwrap();
-    fs::remove_dir_all(lab.root.join("storage").join("chunks")).unwrap();
+    common::lose_all_objects(&lab.root.join("storage"));
     (e, key)
 }
 
@@ -351,7 +353,7 @@ fn many_blocks_and_small_files_share_one_quic_connection() {
         fs::write(lab.dir("a").join(format!("small-{i:02}.bin")), body).unwrap();
     }
     a.push("docs").unwrap();
-    fs::remove_dir_all(lab.root.join("storage").join("chunks")).unwrap();
+    common::lose_all_objects(&lab.root.join("storage"));
 
     let traffic_a = Arc::new(Traffic::new());
     let node_a = node(&a, served(&a), &traffic_a);

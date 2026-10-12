@@ -128,7 +128,14 @@ impl Storage for RcloneStorage {
         crate::storage::validate_key(key)?;
         let (off, count) = (offset.to_string(), len.to_string());
         let (ok, out, err) = self.run(
-            &["cat", "--offset", &off, "--count", &count, &self.target(key)],
+            &[
+                "cat",
+                "--offset",
+                &off,
+                "--count",
+                &count,
+                &self.target(key),
+            ],
             None,
         )?;
         if ok {

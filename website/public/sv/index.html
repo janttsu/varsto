@@ -3,13 +3,26 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Varsto: dina filer, din lagring</title>
+<title>Varsto: krypterad filsynkronisering och säkerhetskopiering till din egen lagring</title>
 <meta name="description" content="Varsto: end-to-end-krypterad filsynkronisering och säkerhetskopiering på lagring du redan äger. Alfa, arbetsnamn.">
 <meta name="color-scheme" content="light dark">
 <link rel="icon" href="../favicon.svg" type="image/svg+xml">
-<link rel="alternate" hreflang="en" href="../">
-<link rel="alternate" hreflang="fi" href="../fi/">
-<link rel="alternate" hreflang="sv" href="../sv/">
+<link rel="canonical" href="https://varsto.net/sv/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Varsto">
+<meta property="og:title" content="Varsto: krypterad filsynkronisering och säkerhetskopiering till din egen lagring">
+<meta property="og:description" content="Varsto: end-to-end-krypterad filsynkronisering och säkerhetskopiering på lagring du redan äger. Alfa, arbetsnamn.">
+<meta property="og:url" content="https://varsto.net/sv/">
+<meta property="og:image" content="https://varsto.net/assets/img/og-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:locale" content="sv_SE">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="alternate" hreflang="en" href="https://varsto.net/">
+<link rel="alternate" hreflang="x-default" href="https://varsto.net/">
+<link rel="alternate" hreflang="fi" href="https://varsto.net/fi/">
+<link rel="alternate" hreflang="sv" href="https://varsto.net/sv/">
+<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"WebSite","@id":"https://varsto.net/#site","url":"https://varsto.net/","name":"Varsto","inLanguage":["en","fi","sv"]},{"@type":"SoftwareApplication","name":"Varsto","url":"https://varsto.net/sv/","description":"Varsto: end-to-end-krypterad filsynkronisering och säkerhetskopiering på lagring du redan äger. Alfa, arbetsnamn.","applicationCategory":"UtilitiesApplication","applicationSubCategory":"File synchronisation and backup","operatingSystem":"Linux, Windows, macOS, Android","softwareVersion":"0.0.1-alpha.12","downloadUrl":"https://varsto.net/downloads/","screenshot":"https://varsto.net/assets/img/screenshots/desktop-files-light.png","offers":{"@type":"Offer","price":"0","priceCurrency":"EUR"},"isAccessibleForFree":true},{"@type":"SoftwareSourceCode","name":"Varsto source code","codeRepository":"https://github.com/janttsu/varsto","programmingLanguage":["Rust","Swift","Kotlin","JavaScript"],"runtimePlatform":"Rust","license":"https://polyformproject.org/licenses/shield/1.0.0/","version":"0.0.1-alpha.12","targetProduct":{"@type":"SoftwareApplication","name":"Varsto"}}]}</script>
 <link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../blog/feed.xml">
 <link rel="stylesheet" href="../assets/css/site.css?v=b3d2d4f387">
 <script src="../assets/js/theme.js?v=0951491269"></script>
@@ -35,6 +48,7 @@
       <a href="../sv/downloads/">Nedladdningar</a>
       <a href="../blog/">Blogg (en)</a>
       <a href="../forum/">Forum (en)</a>
+      <a href="../sv/contribute/">Bidra</a>
       <a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a>
       <button class="theme" id="theme-toggle" type="button" aria-label="Change colour theme">Theme: auto</button>
     </nav>
@@ -47,7 +61,7 @@
     <p><a class="button" href="downloads/">Ladda ner alfaversionen</a> <a class="button secondary" href="../docs/quick-start.html">Snabbstart</a> <a class="button secondary" href="https://github.com/janttsu/varsto" rel="noopener">Källkoden på GitHub</a></p>
     <figure class="hero"><picture><source type="image/webp" srcset="../assets/img/hero.webp"><img src="../assets/img/hero.png" alt="Diagram: dina nycklar i mitten, förbundna med krypterade länkar till en S3-bucket, ett kallt arkiv, hårddiskar på en hylla, en NAS, en bärbar dator och en telefon; varje plats rymmer bara låsta, krypterade block." width="1200" height="600"></picture><figcaption>Kopior där du bestämmer: en bucket, ett kallt arkiv, gamla diskar på en hylla, dina egna datorer. Varje kopia är chiffertext; nycklarna stannar hos dig.</figcaption></figure>
 
-    <h2>Det här fungerar i dag (alfa, 0.0.1-alpha.11)</h2>
+    <h2>Det här fungerar i dag (alfa, 0.0.1-alpha.12)</h2>
     <div class="grid">
       <section class="card"><h3>Krypterat innan det lämnar din enhet</h3><p>Filerna delas upp i innehållsdefinierade bitar som var och en krypteras med XChaCha20-Poly1305 under nycklar härledda ur ditt valv. Lagringen ser bara ogenomskinliga objekt och storlekar, aldrig namn, hashvärden eller innehåll. <a href="how-it-works/">Så fungerar det</a>.</p></section>
       <section class="card"><h3>Använd din egen lagring</h3><p>Vilken katalog som helst som enheten når, vilken S3-kompatibel bucket som helst (AWS, Scaleway, Hetzner, B2, R2, MinIO) med dina egna nycklar, eller valfri rclone-remote. Kall lagring och arkivklasser skrivs till men läses aldrig utan att du bekräftar.</p></section>
@@ -74,15 +88,19 @@
       <li>Alfaversionen är en första vertikal skiva: kärnbibliotek, CLI, bakgrundstjänst, skal för systemfältet och menyraden, Android-skal, ungefär 54 000 rader Rust, över 200 automatiska tester och en labbmiljö med virtuella maskiner bakom hem- och kontors-NAT, bland annat konvergens mellan två enheter offline, konflikter, spärr av återställd enhet, repliker, delning, regler, peers, Strongrooms och diskpooler. Använd den bara med testdata.</li>
       <li>Den kryptografiska designen har inte granskats eller reviderats. <a href="../docs/threat-model.html">Hotmodellen</a> och <a href="../docs/failure-model.html">felmodellen</a> beskriver vad designen är avsedd att göra och var den tar slut.</li>
       <li>Källkoden är offentlig på <a href="https://github.com/janttsu/varsto" rel="noopener">github.com/janttsu/varsto</a> under <a href="../docs/licence.html">PolyForm Shield License 1.0.0</a> (källkoden tillgänglig, inte öppen källkod); buggar och frågor tas emot i ärendehanteringen där. Lagringsformatet är <a href="../docs/alpha-0-format.html">dokumenterat</a> så att dina data förblir återställningsbara.</li>
-      <li>Namnet är preliminärt och webbplatsen hålls borta från sökmotorerna tills det är bestämt.</li>
+      <li>Namnet är preliminärt.</li>
     </ul>
+
+    <h2>För utvecklare</h2>
+    <p>Varsto är skrivet i Rust, med skal i Swift och Kotlin och ett vanligt webbgränssnitt. Källkoden och specifikationen av lagringsformatet är offentliga. Säkerhetsgranskning, plattformsarbete, nätverks- och lagringstester, paketering och översättningar är välkomna: <a href="contribute/">så bidrar du</a>.</p>
 
     <h2>Nedladdningar</h2>
     <p class="note">No binaries are published yet. Build from source with <code>cargo build --release</code>.</p>
     <p class="note">Verifiera en nedladdning: listan med kontrollsummor är signerad med Varstos releasenyckel (se ”Verify your download” ovan): <code>varsto verify-release &lt;file&gt; --github</code>, eller minisign och <code>sha256sum -c SHA256SUMS --ignore-missing</code>. <code>varsto update</code> kontrollerar själv signaturen och GitHub-releasen.</p>
 
     <h2>Senaste från bloggen</h2>
-    <ul class="posts"><li><time datetime="2026-10-10">2026-10-10</time> <a href="../blog/2026-10-10-alpha-9-placement-repair-signed.html">Alpha.9: data where you want it, repair by itself, signed updates, and every platform built in the open</a><br><span class="note">Folders can be placed on chosen storages and moved between them, lost copies are repaired automatically, updates are signed with an offline key, peer-to-peer downloads fetch many blocks at once, and every package is now built, tested and photographed on GitHub&#x27;s runners.</span></li>
+    <ul class="posts"><li><time datetime="2026-10-12">2026-10-12</time> <a href="../blog/2026-10-12-alpha-12-packs-and-languages.html">Alpha.12: small files in packs, and Varsto in Finnish and Swedish</a><br><span class="note">Small encrypted blocks are now written in packs, so a folder of 20,000 small files becomes 79 objects on a bucket instead of 20,000. The interface, tray, menu bar, mobile shells and this website are available in Finnish and Swedish as well as English.</span></li>
+<li><time datetime="2026-10-10">2026-10-10</time> <a href="../blog/2026-10-10-alpha-9-placement-repair-signed.html">Alpha.9: data where you want it, repair by itself, signed updates, and every platform built in the open</a><br><span class="note">Folders can be placed on chosen storages and moved between them, lost copies are repaired automatically, updates are signed with an offline key, peer-to-peer downloads fetch many blocks at once, and every package is now built, tested and photographed on GitHub&#x27;s runners.</span></li>
 <li><time datetime="2026-10-09">2026-10-09</time> <a href="../blog/2026-10-09-alpha-8-ledger-and-devices.html">Alpha.8: a ledger that stays small, removable devices, and phones that keep nothing in clear text</a><br><span class="note">The ledger now lists only what is new, keeps a cached view and prunes itself behind signed checkpoints; devices can be removed with new keys for everything written afterwards; phones keep encrypted folders as encrypted blocks; and the interface shows where your data is and how peer-to-peer traffic flows.</span></li>
 <li><time datetime="2026-10-09">2026-10-09</time> <a href="../blog/2026-10-09-alpha-7-pairing-and-finder.html">Alpha.7: pair devices with a code, Finder actions, and a real NAT path</a><br><span class="note">Devices now pair from the interface with a one-time code, Finder can download a placeholder or free up space with a right-click, the macOS app installs from a disk image, devices reach each other through NAT, and removable disks can form a pool.</span></li>
 <li><time datetime="2026-10-09">2026-10-09</time> <a href="../blog/2026-10-09-alpha-6-source-on-github.html">Alpha.6: the source is public, and every platform builds in the cloud</a><br><span class="note">The repository is now public on GitHub under the PolyForm Shield licence, the native macOS and iOS apps build on GitHub Actions, Linux, Windows and Android build on short-lived cloud machines, and the interface was redone around a file view.</span></li>

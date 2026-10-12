@@ -3,6 +3,8 @@
 //! shared storage. This is the first scenario of plan section 6.19 and of
 //! section 8's blocking question on offline convergence.
 
+mod common;
+
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -716,8 +718,7 @@ fn peers_serve_chunks_when_the_storage_has_none() {
     a.push("docs").unwrap();
 
     // The storage keeps the manifests and ledger but loses every chunk object.
-    let chunks_dir = lab.a_home.with_file_name("storage").join("chunks");
-    fs::remove_dir_all(&chunks_dir).unwrap();
+    common::lose_all_objects(&lab.a_home.with_file_name("storage"));
 
     // Laptop serves its files to peers.
     let server = p2p::Server::bind("127.0.0.1:0".parse().unwrap()).unwrap();
@@ -868,16 +869,12 @@ fn many_chunk_files_arrive_in_order_and_a_missing_chunk_fails_the_file() {
     fs::write(lab.a_dir.join("big.bin"), &big).unwrap();
     a.push("docs").unwrap();
 
-    let chunks_dir = lab.a_home.with_file_name("storage").join("chunks");
-    let objects: Vec<PathBuf> = walkdir::WalkDir::new(&chunks_dir)
-        .into_iter()
-        .filter_map(|e| e.ok())
-        .filter(|e| e.file_type().is_file())
-        .map(|e| e.path().to_path_buf())
-        .collect();
+    let store = lab.a_home.with_file_name("storage");
+    let objects: Vec<String> = common::object_names(&store).into_iter().collect();
     assert!(objects.len() > 20, "{} chunks", objects.len());
-    let hidden = lab.a_home.with_file_name("hidden-object");
-    fs::rename(&objects[objects.len() / 2], &hidden).unwrap();
+    let hidden = &objects[objects.len() / 2];
+    let hidden_bytes = common::read_object(&store, hidden).unwrap();
+    common::lose_object(&store, hidden);
 
     let mut b = Engine::join(&lab.b_home, "desk", PASS, &key, lab.storage.clone()).unwrap();
     b.chunker = ChunkerParams::SMALL;
@@ -889,7 +886,9 @@ fn many_chunk_files_arrive_in_order_and_a_missing_chunk_fails_the_file() {
         "a partial file was left behind"
     );
 
-    fs::rename(&hidden, &objects[objects.len() / 2]).unwrap();
+    let back = store.join("chunks").join(&hidden[..2]).join(hidden);
+    fs::create_dir_all(back.parent().unwrap()).unwrap();
+    fs::write(back, hidden_bytes).unwrap();
     let r = b.pull("docs").unwrap();
     assert!(r.files_unavailable.is_empty(), "{:?}", r.files_unavailable);
     assert_eq!(r.chunks_downloaded as usize, objects.len());
@@ -931,7 +930,11 @@ fn small_files_travel_in_packs() {
     a.add_storage(lab.storage.clone()).unwrap();
     a.add_folder("docs", &lab.a_dir).unwrap();
     for i in 0..200 {
-        fs::write(lab.a_dir.join(format!("note-{i:03}.txt")), format!("note number {i}\n").repeat(i % 7 + 1)).unwrap();
+        fs::write(
+            lab.a_dir.join(format!("note-{i:03}.txt")),
+            format!("note number {i}\n").repeat(i % 7 + 1),
+        )
+        .unwrap();
     }
     fs::write(lab.a_dir.join("big.bin"), vec![7u8; 600_000]).unwrap();
     a.sync(None).unwrap();
@@ -945,12 +948,20 @@ fn small_files_travel_in_packs() {
     };
     // 200 small blocks in one pack, the large file's block on its own.
     assert_eq!(count("packs", ".pack"), 1);
-    assert!(count("chunks", "") <= 2, "{} single objects", count("chunks", ""));
+    assert!(
+        count("chunks", "") <= 2,
+        "{} single objects",
+        count("chunks", "")
+    );
     // Another device reads every file from the pack.
     let mut b = Engine::join(&lab.b_home, "desk", PASS, &key, lab.storage.clone()).unwrap();
     b.attach_folder("docs", &lab.b_dir, false).unwrap();
     let r = b.sync(None).unwrap();
-    assert!(r[0].0.files_unavailable.is_empty(), "{:?}", r[0].0.files_unavailable);
+    assert!(
+        r[0].0.files_unavailable.is_empty(),
+        "{:?}",
+        r[0].0.files_unavailable
+    );
     for i in 0..200 {
         assert_eq!(
             fs::read_to_string(lab.b_dir.join(format!("note-{i:03}.txt"))).unwrap(),
@@ -959,5 +970,8 @@ fn small_files_travel_in_packs() {
     }
     // fsck sees the packed objects as stored and intact.
     let f = b.fsck(true).unwrap();
-    assert!(f.chunks_missing.is_empty() && f.objects_corrupt.is_empty(), "{f:?}");
+    assert!(
+        f.chunks_missing.is_empty() && f.objects_corrupt.is_empty(),
+        "{f:?}"
+    );
 }
