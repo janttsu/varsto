@@ -1121,6 +1121,16 @@ pub fn run(opts: Options) -> Result<()> {
     // Syncs run through the local API (`POST /api/sync`, the CLI) change what
     // we can serve; the snapshot follows them as it follows our own syncs.
     let mut snapshot_syncs = 0u64;
+    // The local files another process may change under us (the command line
+    // attaching a folder or adding a storage): reloaded when they change.
+    let local_files = [opts.home.join("config.json"), opts.home.join("keyring.enc")];
+    let stamp = |paths: &[PathBuf]| -> Vec<Option<std::time::SystemTime>> {
+        paths
+            .iter()
+            .map(|p| fs::metadata(p).and_then(|m| m.modified()).ok())
+            .collect()
+    };
+    let mut local_stamp = stamp(&local_files);
 
     while !QUIT.load(Ordering::SeqCst) {
         // Removable disks: notice what was attached or taken away.
@@ -1131,6 +1141,25 @@ pub fn run(opts: Options) -> Result<()> {
             match listed {
                 Some(Ok(disks)) => st.service.record_disks(disks),
                 Some(Err(e)) => eprintln!("service: disk check failed: {e:#}"),
+                None => {}
+            }
+        }
+        // Changed by another process: read them again, watch what is now
+        // attached and sync. (Our own writes land here too, harmlessly.)
+        let now_stamp = stamp(&local_files);
+        if now_stamp != local_stamp {
+            local_stamp = now_stamp;
+            let mut st = state.lock().unwrap();
+            let reloaded = st.engine.as_mut().map(|e| e.reload_local());
+            match reloaded {
+                Some(Ok(true)) => {
+                    st.service.folders_changed = true;
+                    st.service.request_sync();
+                }
+                Some(Ok(false)) => {}
+                Some(Err(e)) => {
+                    eprintln!("service: reloading the local configuration failed: {e:#}")
+                }
                 None => {}
             }
         }

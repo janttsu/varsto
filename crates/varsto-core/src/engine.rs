@@ -1062,6 +1062,12 @@ impl Engine {
     }
 
     fn tick(&mut self) -> Result<u64> {
+        // Another process on this device (the command line beside the
+        // background service) may have ticked meanwhile: go on from the
+        // higher of the two, so no value is ever handed out twice.
+        if let Ok(disk) = util::read_json::<Clock>(&self.home.join("clock.json")) {
+            self.clock.lamport = self.clock.lamport.max(disk.lamport);
+        }
         self.clock.lamport = self
             .clock
             .lamport
@@ -4004,6 +4010,35 @@ impl Engine {
         } else {
             self.chunker
         }
+    }
+
+    /// Read the local configuration and keyring again: another process on
+    /// this device (the command line) changed them while this engine was
+    /// open. Keys stay as they are; nothing is written. True when what this
+    /// device syncs (folders, where they are, storages) is now different.
+    pub fn reload_local(&mut self) -> Result<bool> {
+        let signature = |e: &Engine| -> String {
+            let folders: Vec<_> = e
+                .folders()
+                .into_iter()
+                .map(|(r, m)| (r.folder_id, r.name, m))
+                .collect();
+            format!(
+                "{}|{}",
+                serde_json::to_string(&e.config).unwrap_or_default(),
+                serde_json::to_string(&folders).unwrap_or_default()
+            )
+        };
+        let before = signature(self);
+        self.config = Config::load(&self.home)?;
+        self.keyring = Keyring::load(
+            &self.home,
+            &self.keys,
+            &self.vault.vault_id,
+            &self.vault.device_id,
+        )?;
+        self.view_cache = Default::default();
+        Ok(signature(self) != before)
     }
 
     /// Tell the other devices over peer-to-peer that something new was

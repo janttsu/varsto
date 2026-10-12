@@ -1146,11 +1146,13 @@ fn api_unlocked(
         }
         (Method::Post, "/api/folder/detach") => {
             engine.detach_folder(&s(input, "name")?)?;
+            service.folders_changed = true;
             Ok(json!({"ok": true}))
         }
         (Method::Post, "/api/folder/remove") => {
             let purge = input.get("purge").and_then(|v| v.as_bool()).unwrap_or(false);
             let deleted = engine.remove_folder(&s(input, "name")?, purge)?;
+            service.folders_changed = true;
             Ok(json!({"ok": true, "objects_deleted": deleted}))
         }
         (Method::Post, "/api/folder/attach") => {

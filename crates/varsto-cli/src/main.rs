@@ -1029,9 +1029,13 @@ fn share_members_text(l: &varsto_core::engine::ShareMembers) -> String {
 /// locked background service can be unlocked with it (and, after setup,
 /// kept in the keyring if the user wants).
 static TYPED: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+/// The passphrase this command used, typed or from VARSTO_PASSPHRASE: it
+/// unlocks a background service that waits for it.
+static USED: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
 
 fn passphrase() -> Result<String> {
     if let Ok(p) = std::env::var("VARSTO_PASSPHRASE") {
+        *USED.lock().unwrap() = Some(p.clone());
         return Ok(p);
     }
     use std::io::IsTerminal;
@@ -1042,6 +1046,7 @@ fn passphrase() -> Result<String> {
             bail_usage::<()>("empty passphrase")?;
         }
         *TYPED.lock().unwrap() = Some(p.clone());
+        *USED.lock().unwrap() = Some(p.clone());
         return Ok(p);
     }
     Err(anyhow!(
@@ -1931,6 +1936,13 @@ fn run(cli: &Cli) -> Result<()> {
             )?;
         }
         Cmd::Folder { cmd } => {
+            // With the background service running, changes to which folders
+            // this device syncs go through it: it starts (or stops) watching
+            // at once, and its own copy of the configuration stays current.
+            if let Some(done) = folder_via_service(&home, cmd)? {
+                println!("{done}");
+                return Ok(());
+            }
             let mut engine = Engine::open(&home, &passphrase()?)?;
             match cmd {
                 FolderCmd::Placement {
@@ -3260,7 +3272,8 @@ fn main() {
 fn after_command(cli: &Cli) {
     let Ok(home) = home(cli) else { return };
     let typed = TYPED.lock().unwrap().clone();
-    if let Some(pass) = &typed {
+    let used = USED.lock().unwrap().clone();
+    if let Some(pass) = &used {
         if service::unlock_running(&home, pass) {
             eprintln!("(the background service is unlocked too)");
         }
@@ -3649,6 +3662,117 @@ fn strongroom_rekey(
 
 /// `p2p traffic`: the running service's counters as a table, once or every
 /// second. Only the service counts; without it there is nothing to show.
+/// POST to the running service, unlocking it first with the passphrase when
+/// it waits to be unlocked. None when no service runs for this home.
+fn call_service(
+    home: &std::path::Path,
+    path: &str,
+    body: serde_json::Value,
+) -> Result<Option<serde_json::Value>> {
+    let Some((sf, _)) = service::status(home) else {
+        return Ok(None);
+    };
+    let url = format!("http://127.0.0.1:{}{path}", sf.port);
+    let post = || service::http_post(&url, &sf.token, &body.to_string());
+    let answer = match post() {
+        Err(e) if format!("{e:#}").contains("locked") => {
+            let pass = passphrase()?;
+            if !service::unlock_running(home, &pass) {
+                bail!("the background service could not be unlocked with that passphrase");
+            }
+            post()
+        }
+        other => other,
+    };
+    match answer {
+        Ok(text) => Ok(Some(
+            serde_json::from_str(&text).unwrap_or(serde_json::Value::Null),
+        )),
+        Err(e) => {
+            // "service answered 400: {"error": "..."}": show the message itself.
+            let msg = format!("{e:#}");
+            let inner = msg
+                .split_once(": ")
+                .and_then(|(_, b)| serde_json::from_str::<serde_json::Value>(b).ok())
+                .and_then(|v| v["error"].as_str().map(str::to_string));
+            Err(anyhow!(inner.unwrap_or(msg)))
+        }
+    }
+}
+
+/// Folder commands that change what this device syncs, through the running
+/// service. None: no service, or a command the service need not run.
+fn folder_via_service(home: &std::path::Path, cmd: &FolderCmd) -> Result<Option<String>> {
+    let abs = |p: &std::path::Path| -> Result<String> {
+        Ok(std::path::absolute(p)?.display().to_string())
+    };
+    let (path, body) = match cmd {
+        FolderCmd::Add { name, path } => (
+            "/api/folder",
+            serde_json::json!({"name": name, "path": abs(path)?, "plain": true}),
+        ),
+        FolderCmd::Attach {
+            name_or_id,
+            path,
+            selective,
+        } => (
+            "/api/folder/attach",
+            serde_json::json!({"name_or_id": name_or_id, "path": abs(path)?, "selective": selective, "plain": true}),
+        ),
+        FolderCmd::Detach { name } => ("/api/folder/detach", serde_json::json!({"name": name})),
+        FolderCmd::Remove { name, purge, yes } => {
+            if !*yes {
+                return Ok(None); // the usual refusal below
+            }
+            (
+                "/api/folder/remove",
+                serde_json::json!({"name": name, "purge": purge}),
+            )
+        }
+        FolderCmd::Selective { name_or_id, on } => (
+            "/api/selective",
+            serde_json::json!({"folder": name_or_id, "on": on}),
+        ),
+        _ => return Ok(None),
+    };
+    let Some(r) = call_service(home, path, body)? else {
+        return Ok(None);
+    };
+    let id = r["id"]
+        .as_str()
+        .map(|i| i.chars().take(8).collect::<String>())
+        .unwrap_or_default();
+    Ok(Some(match cmd {
+        FolderCmd::Add { name, path } => format!(
+            "folder {name} ({id}) created at {}; the background service is syncing it",
+            path.display()
+        ),
+        FolderCmd::Attach { path, .. } => format!(
+            "folder {id} attached at {}; the background service is syncing it",
+            path.display()
+        ),
+        FolderCmd::Detach { name } => {
+            format!("{name} is no longer synced on this device; its files stay where they are")
+        }
+        FolderCmd::Remove { name, purge, .. } => format!(
+            "{name} removed from the vault{}",
+            if *purge {
+                format!(
+                    "; {} objects deleted from the storages",
+                    r["objects_deleted"].as_u64().unwrap_or(0)
+                )
+            } else {
+                String::new()
+            }
+        ),
+        FolderCmd::Selective { name_or_id, on } => format!(
+            "selective sync {} for {name_or_id}",
+            if *on { "on" } else { "off" }
+        ),
+        _ => String::new(),
+    }))
+}
+
 fn transfers(home: &std::path::Path, watch: bool, json: bool) -> Result<()> {
     let sf = service::read_service_file(home).ok_or_else(|| {
         anyhow!("the background service is not running, so nothing is being transferred (start it with `varsto service run` or `varsto install`)")
@@ -3700,7 +3824,15 @@ fn transfers(home: &std::path::Path, watch: bool, json: bool) -> Result<()> {
                     ));
                 }
             }
+            let locked = service::http_get_within(&format!("{base}/api/state"), &sf.token, 2)
+                .ok()
+                .and_then(|b| serde_json::from_str::<serde_json::Value>(&b).ok())
+                .is_some_and(|v| v["has_vault"] == true && v["unlocked"] == false);
+            if locked {
+                out.push_str("Background sync: LOCKED, waiting for the passphrase; nothing syncs until any varsto command that uses it runs (or `varsto service remember` keeps it in the keyring)\n");
+            }
             match &summary {
+                Some(_) if locked => {}
                 Some(s) => {
                     let paused = s["paused"].as_bool() == Some(true);
                     let last = s["last_sync_utc"]
