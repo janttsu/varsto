@@ -67,6 +67,42 @@ pub enum SnapshotPick {
     OnOrBefore(i64),
 }
 
+impl SnapshotPick {
+    /// "latest", a sequence number, or a day "YYYY-MM-DD" (the newest
+    /// snapshot taken by the end of that day, UTC).
+    pub fn parse(s: &str) -> Result<SnapshotPick> {
+        let s = s.trim();
+        if s.is_empty() || s.eq_ignore_ascii_case("latest") {
+            return Ok(SnapshotPick::Latest);
+        }
+        if let Ok(n) = s.parse::<u64>() {
+            return Ok(SnapshotPick::Seq(n));
+        }
+        let parts: Vec<&str> = s.split('-').collect();
+        if let [y, m, d] = parts.as_slice() {
+            if let (Ok(y), Ok(m), Ok(d)) = (y.parse::<i64>(), m.parse::<i64>(), d.parse::<i64>()) {
+                if (1..=12).contains(&m) && (1..=31).contains(&d) && y >= 1970 {
+                    return Ok(SnapshotPick::OnOrBefore(
+                        days_from_civil(y, m, d) * DAY + DAY - 1,
+                    ));
+                }
+            }
+        }
+        bail!("give a snapshot number, \"latest\" or a day as YYYY-MM-DD, not {s:?}")
+    }
+}
+
+/// Days since 1970-01-01 of a calendar day (Howard Hinnant's algorithm).
+fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
+    let y = if month <= 2 { year - 1 } else { year };
+    let era = y.div_euclid(400);
+    let yoe = y - era * 400;
+    let mp = (month + 9) % 12;
+    let doy = (153 * mp + 2) / 5 + day - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    era * 146_097 + doe - 719_468
+}
+
 #[derive(Clone, Debug, Serialize)]
 pub struct BackupSummary {
     pub backup_id: String,
@@ -1074,7 +1110,24 @@ impl Engine {
 
 #[cfg(test)]
 mod tests {
-    use super::path_wanted;
+    use super::{path_wanted, SnapshotPick};
+
+    #[test]
+    fn snapshot_picks_parse() {
+        assert_eq!(SnapshotPick::parse("latest").unwrap(), SnapshotPick::Latest);
+        assert_eq!(SnapshotPick::parse("12").unwrap(), SnapshotPick::Seq(12));
+        // 2026-10-12 ends at 1_791_849_599 UTC.
+        assert_eq!(
+            SnapshotPick::parse("2026-10-12").unwrap(),
+            SnapshotPick::OnOrBefore(1_791_849_599)
+        );
+        assert_eq!(
+            SnapshotPick::parse("1970-01-01").unwrap(),
+            SnapshotPick::OnOrBefore(86_399)
+        );
+        assert!(SnapshotPick::parse("2026-13-01").is_err());
+        assert!(SnapshotPick::parse("yesterday").is_err());
+    }
 
     #[test]
     fn restore_paths_match_files_and_directories() {

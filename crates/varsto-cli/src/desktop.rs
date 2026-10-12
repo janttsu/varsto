@@ -514,6 +514,22 @@ fn opt(v: &Value, key: &str) -> Option<String> {
         .filter(|x| !x.is_empty())
 }
 
+/// A backup schedule field: "daily", "weekly", "manual", or the form the
+/// command line sends (`{"every_hours": N}`). Absent: none given.
+fn backup_schedule(v: &Value) -> Result<Option<varsto_core::vault::BackupSchedule>> {
+    use varsto_core::vault::BackupSchedule;
+    Ok(match v.get("schedule") {
+        None | Some(Value::Null) => None,
+        Some(Value::String(t)) => Some(match t.as_str() {
+            "daily" => BackupSchedule::EveryHours(24),
+            "weekly" => BackupSchedule::EveryHours(168),
+            "manual" => BackupSchedule::Manual,
+            other => return Err(anyhow!("unknown schedule {other}")),
+        }),
+        Some(other) => Some(serde_json::from_value(other.clone())?),
+    })
+}
+
 /// A list field: a JSON array of strings, or one comma-separated string.
 fn string_list(v: &Value, key: &str) -> Vec<String> {
     match v.get(key) {
@@ -1207,6 +1223,79 @@ fn api_unlocked(
             service.folders_changed = true;
             service.request_sync();
             Ok(json!({"ok": true, "id": id.to_string()}))
+        }
+        // Backups: snapshots of a directory of this device, on storages only.
+        (Method::Get, "/api/backups") => Ok(serde_json::to_value(engine.backups()?)?),
+        (Method::Get, "/api/backup/snapshots") => {
+            let backup = query_param(query, "backup")
+                .ok_or_else(|| anyhow!("backup query parameter required"))?;
+            Ok(serde_json::to_value(engine.backup_snapshots(&backup)?)?)
+        }
+        (Method::Post, "/api/backup") => {
+            let name = s(input, "name")?;
+            let path = PathBuf::from(s(input, "path")?);
+            let mut placement: Option<varsto_core::placement::Placement> = match input.get("placement") {
+                Some(p) if !p.is_null() => Some(serde_json::from_value(p.clone())?),
+                _ => None,
+            };
+            let storages = string_list(input, "storages");
+            if !storages.is_empty() {
+                placement = Some(varsto_core::placement::Placement {
+                    storages,
+                    ..Default::default()
+                });
+            }
+            let opts = varsto_core::engine::BackupOptions {
+                retention_days: input
+                    .get("retention_days")
+                    .and_then(|v| v.as_u64())
+                    .map(|d| d.min(u32::MAX as u64) as u32)
+                    .unwrap_or(varsto_core::vault::DEFAULT_BACKUP_RETENTION_DAYS),
+                schedule: backup_schedule(input)?.unwrap_or_default(),
+                placement,
+            };
+            let id = engine.add_backup(&name, &path, opts)?;
+            let snapshot = if input.get("initial").and_then(|v| v.as_bool()).unwrap_or(true) {
+                Some(engine.take_snapshot(id.as_str())?)
+            } else {
+                None
+            };
+            Ok(json!({"ok": true, "id": id.to_string(), "snapshot": snapshot}))
+        }
+        (Method::Post, "/api/backup/take") => {
+            Ok(serde_json::to_value(engine.take_snapshot(&s(input, "backup")?)?)?)
+        }
+        (Method::Post, "/api/backup/restore") => {
+            let pick = varsto_core::engine::SnapshotPick::parse(
+                &opt(input, "snapshot").unwrap_or_else(|| "latest".to_string()),
+            )?;
+            let flag = |k: &str| input.get(k).and_then(|v| v.as_bool()).unwrap_or(false);
+            let r = engine.restore_snapshot(
+                &s(input, "backup")?,
+                pick,
+                &PathBuf::from(s(input, "to")?),
+                &string_list(input, "paths"),
+                flag("overwrite"),
+                flag("confirm_cold_read"),
+            )?;
+            Ok(serde_json::to_value(r)?)
+        }
+        (Method::Post, "/api/backup/set") => {
+            let days = input
+                .get("retention_days")
+                .and_then(|v| v.as_u64())
+                .map(|d| d.min(u32::MAX as u64) as u32);
+            engine.set_backup(&s(input, "backup")?, days, backup_schedule(input)?)?;
+            Ok(json!({"ok": true}))
+        }
+        (Method::Post, "/api/backup/stop") => {
+            engine.stop_backup(&s(input, "backup")?)?;
+            Ok(json!({"ok": true}))
+        }
+        (Method::Post, "/api/backup/expire") => {
+            let r = engine.backup_upkeep()?;
+            service.record_backup_upkeep(&r);
+            Ok(serde_json::to_value(r)?)
         }
         (Method::Post, "/api/sync") => {
             let folder = opt(input, "folder");

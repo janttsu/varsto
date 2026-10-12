@@ -74,7 +74,15 @@ pub struct ServiceState {
     pub auto_verify: Option<varsto_core::autoverify::VerifyStatus>,
     /// Automatic repair: queue, last run and copies that could not be repaired.
     pub repair: Option<varsto_core::engine::RepairStatus>,
+    /// Backups: when expiry last ran, the last snapshot taken here, and the
+    /// backups whose last scheduled snapshot failed (with the reason).
+    pub backup_upkeep_utc: Option<i64>,
+    pub backup_last: Option<String>,
+    pub backup_errors: std::collections::BTreeMap<String, String>,
 }
+
+/// Expired backup snapshots are looked for at most this often.
+const BACKUP_UPKEEP_EVERY: i64 = 6 * 3600;
 
 impl ServiceState {
     pub fn summary(&self) -> Value {
@@ -104,6 +112,9 @@ impl ServiceState {
             "auto_verify_text": self.auto_verify.as_ref().map(|v| v.describe()),
             "repair": self.repair,
             "repair_text": self.repair.as_ref().map(|r| r.describe()),
+            "backup_upkeep_utc": self.backup_upkeep_utc,
+            "backup_last": self.backup_last,
+            "backup_errors": self.backup_errors,
         })
     }
     /// Store the disk listing; log and notify when a disk appeared or went
@@ -234,6 +245,54 @@ impl ServiceState {
             }
         }
         self.repair = Some(engine.repair_status());
+    }
+    /// Take the scheduled backup snapshots that are due and, at most every
+    /// six hours, expire old ones (called after a sync, like repair).
+    pub fn backups_if_due(&mut self, engine: &mut Engine) {
+        let now = varsto_core::util::now_utc();
+        for name in engine.backups_due(now) {
+            match engine.take_snapshot(&name) {
+                Ok(r) => {
+                    let msg = format!(
+                        "backup {name}: snapshot {} taken, {} files, {} blocks uploaded",
+                        r.seq, r.files, r.chunks_uploaded
+                    );
+                    eprintln!("service: {msg}");
+                    self.backup_last = Some(msg);
+                    self.backup_errors.remove(&name);
+                }
+                Err(e) => {
+                    let why = format!("{e:#}");
+                    eprintln!("service: backup {name} failed: {why}");
+                    // Once per new reason, not on every retry.
+                    if self.backup_errors.get(&name) != Some(&why) {
+                        notify("Varsto backup", &format!("{name}: {why}"));
+                    }
+                    self.backup_errors.insert(name, why);
+                }
+            }
+        }
+        if self
+            .backup_upkeep_utc
+            .is_none_or(|t| now - t >= BACKUP_UPKEEP_EVERY)
+        {
+            self.backup_upkeep_utc = Some(now);
+            match engine.backup_upkeep() {
+                Ok(r) => self.record_backup_upkeep(&r),
+                Err(e) => eprintln!("service: backup expiry failed: {e:#}"),
+            }
+        }
+    }
+    pub fn record_backup_upkeep(&mut self, r: &varsto_core::engine::ExpireReport) {
+        self.backup_upkeep_utc = Some(varsto_core::util::now_utc());
+        if r.snapshots_expired + r.objects_deleted > 0 || !r.backups_removed.is_empty() {
+            eprintln!(
+                "service: backups: {} snapshots expired, {} blocks deleted, {} backups removed",
+                r.snapshots_expired,
+                r.objects_deleted,
+                r.backups_removed.len()
+            );
+        }
     }
     pub fn request_sync(&mut self) {
         self.sync_requested = true;
@@ -1320,6 +1379,7 @@ pub fn run(opts: Options) -> Result<()> {
                     if let Some(e) = st.engine.as_mut() {
                         st.service.auto_verify_if_due(e);
                         st.service.repair_if_due(e);
+                        st.service.backups_if_due(e);
                         if let Err(err) = e.publish_device_details(st.service.last_sync_utc) {
                             eprintln!("service: device details not published: {err:#}");
                         }
