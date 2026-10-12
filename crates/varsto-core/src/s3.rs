@@ -495,7 +495,10 @@ impl Storage for S3Storage {
             self.request("GET", &self.object_path(key), &[], &[("range", &range)], &[])?;
         match status {
             206 => Ok(Some(body)),
-            // A server that ignores Range sends the whole object.
+            // Some servers (rclone serve s3) send the range with 200; one that
+            // ignores Range sends the whole object, which is longer whenever
+            // the offset is not 0.
+            200 if body.len() as u64 == len => Ok(Some(body)),
             200 => Ok(Some(
                 body.get(offset as usize..(offset + len) as usize)
                     .map(<[u8]>::to_vec)
