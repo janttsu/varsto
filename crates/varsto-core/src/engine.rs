@@ -1133,7 +1133,11 @@ impl Engine {
             // transferrers keep one object per block (restores and removals
             // work per object there). Packs are read wherever they are.
             let packing = !spec.is_cold() && !spec.is_carrier();
-            Box::new(crate::packs::PackAware::new(inner, &self.pack_caches, packing))
+            Box::new(crate::packs::PackAware::new(
+                inner,
+                &self.pack_caches,
+                packing,
+            ))
         };
         Ok(match &self.storage_calls {
             Some(calls) => Box::new(crate::storage::CountingStorage::new(backend, calls.clone())),
@@ -2606,7 +2610,8 @@ impl Engine {
                         // One object: written as it is. Several (small ones):
                         // one pack where the storage keeps packs.
                         let outcomes: Vec<Result<bool>> = if mine.len() == 1 {
-                            vec![backend.put_if_absent(&chunk_storage_key(&mine[0].object), &mine[0].ct)]
+                            vec![backend
+                                .put_if_absent(&chunk_storage_key(&mine[0].object), &mine[0].ct)]
                         } else {
                             let members: Vec<(String, &[u8])> = mine
                                 .iter()
@@ -2637,43 +2642,47 @@ impl Engine {
             drop(done_tx);
             // Small blocks wait here until a pack's worth is together.
             let mut small: Vec<UploadJob> = Vec::new();
-            let mut send_batch = |me: &mut Self, report: &mut PushReport, batch: Vec<UploadJob>| -> bool {
-                while let Ok(d) = done_rx.try_recv() {
-                    apply_upload(me, &folder_id, d, report, &mut first_error);
-                }
-                if first_error.is_some() {
-                    return false;
-                }
-                let len: u64 = batch.iter().map(|j| j.ct.len() as u64).sum();
-                {
-                    let mut used = budget_ref.0.lock().unwrap();
-                    while *used > 0 && *used + len > UPLOAD_BYTES {
-                        used = budget_ref.1.wait(used).unwrap();
+            let mut send_batch =
+                |me: &mut Self, report: &mut PushReport, batch: Vec<UploadJob>| -> bool {
+                    while let Ok(d) = done_rx.try_recv() {
+                        apply_upload(me, &folder_id, d, report, &mut first_error);
                     }
-                    *used += len;
-                }
-                job_tx.send(batch).is_ok()
-            };
-            // `None` sends what is still waiting (at the end).
-            let mut send = |me: &mut Self, report: &mut PushReport, job: Option<UploadJob>| -> bool {
-                match job {
-                    Some(job) if job.ct.len() <= crate::packs::MAX_MEMBER => {
-                        small.push(job);
-                        let bytes: usize = small.iter().map(|j| j.ct.len()).sum();
-                        if bytes >= crate::packs::TARGET_BYTES || small.len() >= crate::packs::MAX_MEMBERS {
-                            let batch = std::mem::take(&mut small);
-                            return send_batch(me, report, batch);
+                    if first_error.is_some() {
+                        return false;
+                    }
+                    let len: u64 = batch.iter().map(|j| j.ct.len() as u64).sum();
+                    {
+                        let mut used = budget_ref.0.lock().unwrap();
+                        while *used > 0 && *used + len > UPLOAD_BYTES {
+                            used = budget_ref.1.wait(used).unwrap();
                         }
-                        true
+                        *used += len;
                     }
-                    Some(job) => send_batch(me, report, vec![job]),
-                    None if small.is_empty() => true,
-                    None => {
-                        let batch = std::mem::take(&mut small);
-                        send_batch(me, report, batch)
+                    job_tx.send(batch).is_ok()
+                };
+            // `None` sends what is still waiting (at the end).
+            let mut send =
+                |me: &mut Self, report: &mut PushReport, job: Option<UploadJob>| -> bool {
+                    match job {
+                        Some(job) if job.ct.len() <= crate::packs::MAX_MEMBER => {
+                            small.push(job);
+                            let bytes: usize = small.iter().map(|j| j.ct.len()).sum();
+                            if bytes >= crate::packs::TARGET_BYTES
+                                || small.len() >= crate::packs::MAX_MEMBERS
+                            {
+                                let batch = std::mem::take(&mut small);
+                                return send_batch(me, report, batch);
+                            }
+                            true
+                        }
+                        Some(job) => send_batch(me, report, vec![job]),
+                        None if small.is_empty() => true,
+                        None => {
+                            let batch = std::mem::take(&mut small);
+                            send_batch(me, report, batch)
+                        }
                     }
-                }
-            };
+                };
             'files: for file in state.files.values().filter(|f| !f.deleted) {
                 if file.chunks.iter().all(|c| missing_on(c).is_empty()) {
                     continue;

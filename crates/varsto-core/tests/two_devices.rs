@@ -931,7 +931,11 @@ fn small_files_travel_in_packs() {
     a.add_storage(lab.storage.clone()).unwrap();
     a.add_folder("docs", &lab.a_dir).unwrap();
     for i in 0..200 {
-        fs::write(lab.a_dir.join(format!("note-{i:03}.txt")), format!("note number {i}\n").repeat(i % 7 + 1)).unwrap();
+        fs::write(
+            lab.a_dir.join(format!("note-{i:03}.txt")),
+            format!("note number {i}\n").repeat(i % 7 + 1),
+        )
+        .unwrap();
     }
     fs::write(lab.a_dir.join("big.bin"), vec![7u8; 600_000]).unwrap();
     a.sync(None).unwrap();
@@ -945,12 +949,20 @@ fn small_files_travel_in_packs() {
     };
     // 200 small blocks in one pack, the large file's block on its own.
     assert_eq!(count("packs", ".pack"), 1);
-    assert!(count("chunks", "") <= 2, "{} single objects", count("chunks", ""));
+    assert!(
+        count("chunks", "") <= 2,
+        "{} single objects",
+        count("chunks", "")
+    );
     // Another device reads every file from the pack.
     let mut b = Engine::join(&lab.b_home, "desk", PASS, &key, lab.storage.clone()).unwrap();
     b.attach_folder("docs", &lab.b_dir, false).unwrap();
     let r = b.sync(None).unwrap();
-    assert!(r[0].0.files_unavailable.is_empty(), "{:?}", r[0].0.files_unavailable);
+    assert!(
+        r[0].0.files_unavailable.is_empty(),
+        "{:?}",
+        r[0].0.files_unavailable
+    );
     for i in 0..200 {
         assert_eq!(
             fs::read_to_string(lab.b_dir.join(format!("note-{i:03}.txt"))).unwrap(),
@@ -959,5 +971,8 @@ fn small_files_travel_in_packs() {
     }
     // fsck sees the packed objects as stored and intact.
     let f = b.fsck(true).unwrap();
-    assert!(f.chunks_missing.is_empty() && f.objects_corrupt.is_empty(), "{f:?}");
+    assert!(
+        f.chunks_missing.is_empty() && f.objects_corrupt.is_empty(),
+        "{f:?}"
+    );
 }

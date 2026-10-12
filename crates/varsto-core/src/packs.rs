@@ -252,7 +252,10 @@ impl Storage for PackAware {
         };
         self.ensure_loaded()?;
         if let Some(loc) = self.locate(obj, false)? {
-            if let Some(b) = self.inner.get_range(&pack_key(&loc.pack), loc.offset, loc.len)? {
+            if let Some(b) = self
+                .inner
+                .get_range(&pack_key(&loc.pack), loc.offset, loc.len)?
+            {
                 return Ok(Some(b));
             }
         }
@@ -264,7 +267,9 @@ impl Storage for PackAware {
         self.refresh()?;
         let loc = self.cache.lock().unwrap().objects.get(obj).cloned();
         match loc {
-            Some(loc) => self.inner.get_range(&pack_key(&loc.pack), loc.offset, loc.len),
+            Some(loc) => self
+                .inner
+                .get_range(&pack_key(&loc.pack), loc.offset, loc.len),
             None => Ok(None),
         }
     }
@@ -391,7 +396,11 @@ mod tests {
     use crate::storage::LocalDirStorage;
 
     fn store(dir: &std::path::Path, caches: &Caches) -> PackAware {
-        PackAware::new(Box::new(LocalDirStorage::new("box".into(), dir.to_path_buf()).unwrap()), caches, true)
+        PackAware::new(
+            Box::new(LocalDirStorage::new("box".into(), dir.to_path_buf()).unwrap()),
+            caches,
+            true,
+        )
     }
 
     #[test]
@@ -400,9 +409,17 @@ mod tests {
         let caches: Caches = Default::default();
         let s = store(t.path(), &caches);
         let objs: Vec<(String, Vec<u8>)> = (0..5u8)
-            .map(|i| (hex::encode(crate::crypto::hash(&[i])), vec![i; 100 + i as usize]))
+            .map(|i| {
+                (
+                    hex::encode(crate::crypto::hash(&[i])),
+                    vec![i; 100 + i as usize],
+                )
+            })
             .collect();
-        let refs: Vec<(String, &[u8])> = objs.iter().map(|(o, b)| (o.clone(), b.as_slice())).collect();
+        let refs: Vec<(String, &[u8])> = objs
+            .iter()
+            .map(|(o, b)| (o.clone(), b.as_slice()))
+            .collect();
         assert_eq!(s.put_pack(&refs).unwrap(), vec![true; 5]);
         // One pack object and its index, not five objects.
         let packs = s.inner.list("packs/").unwrap();
@@ -411,7 +428,10 @@ mod tests {
         // Another engine (fresh cache) sees them.
         let other = store(t.path(), &Caches::default());
         for (o, b) in &objs {
-            assert_eq!(other.get(&chunk_key(o)).unwrap().as_deref(), Some(b.as_slice()));
+            assert_eq!(
+                other.get(&chunk_key(o)).unwrap().as_deref(),
+                Some(b.as_slice())
+            );
             assert!(other.exists(&chunk_key(o)).unwrap());
         }
         assert_eq!(other.list("chunks/").unwrap().len(), 5);
@@ -421,10 +441,23 @@ mod tests {
         for (o, _) in &objs[..4] {
             other.delete(&chunk_key(o)).unwrap();
         }
-        assert_eq!(store(t.path(), &Caches::default()).list("chunks/").unwrap().len(), 1);
+        assert_eq!(
+            store(t.path(), &Caches::default())
+                .list("chunks/")
+                .unwrap()
+                .len(),
+            1
+        );
         other.delete(&chunk_key(&objs[4].0)).unwrap();
-        assert!(s.inner.list("packs/").unwrap().is_empty(), "{:?}", s.inner.list("packs/").unwrap());
-        assert!(store(t.path(), &Caches::default()).get(&chunk_key(&objs[0].0)).unwrap().is_none());
+        assert!(
+            s.inner.list("packs/").unwrap().is_empty(),
+            "{:?}",
+            s.inner.list("packs/").unwrap()
+        );
+        assert!(store(t.path(), &Caches::default())
+            .get(&chunk_key(&objs[0].0))
+            .unwrap()
+            .is_none());
     }
 
     #[test]
@@ -435,6 +468,9 @@ mod tests {
         assert!(reader.get(&chunk_key(&o)).unwrap().is_none());
         let writer = store(t.path(), &Caches::default());
         writer.put_pack(&[(o.clone(), b"late".as_slice())]).unwrap();
-        assert_eq!(reader.get(&chunk_key(&o)).unwrap().as_deref(), Some(b"late".as_slice()));
+        assert_eq!(
+            reader.get(&chunk_key(&o)).unwrap().as_deref(),
+            Some(b"late".as_slice())
+        );
     }
 }

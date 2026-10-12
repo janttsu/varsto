@@ -491,8 +491,13 @@ impl Storage for S3Storage {
             return Ok(Some(Vec::new()));
         }
         let range = format!("bytes={}-{}", offset, offset + len - 1);
-        let (status, body) =
-            self.request("GET", &self.object_path(key), &[], &[("range", &range)], &[])?;
+        let (status, body) = self.request(
+            "GET",
+            &self.object_path(key),
+            &[],
+            &[("range", &range)],
+            &[],
+        )?;
         match status {
             206 => Ok(Some(body)),
             // Some servers (rclone serve s3) send the range with 200; one that
