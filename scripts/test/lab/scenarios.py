@@ -110,6 +110,7 @@ def scenario(name):
 def s_reset():
     for vm in lab.DEVICES:
         run(vm, "pkill -x varsto; sleep 0.5; rm -rf ~/.local/share/varsto ~/data ~/sel ~/sr ~/*.log; mkdir -p ~/data", check_rc=False)
+        fix_clock(vm)
     s3 = lab.DIR / "s3"
     for d in s3.glob("*"):
         import shutil
@@ -747,6 +748,13 @@ def s_crash():
     check(not st.get("forked_devices"), f"a crash left a fork: {st.get('forked_devices')}")
 
 
+def fix_clock(vm):
+    """The host's time on `vm`, and time sync back on (a run cut off in a
+    clock scenario must not leave a device days off)."""
+    now = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime())
+    run(vm, f"sudo date -u -s '{now}' >/dev/null; sudo timedatectl set-ntp true 2>/dev/null; true", check_rc=False)
+
+
 @scenario("clock-two-days-ahead")
 def s_clock():
     run("vl-desktop", "sudo timedatectl set-ntp false 2>/dev/null; sudo date -s '+2 days' >/dev/null")
@@ -764,7 +772,21 @@ def s_clock():
         got = run("vl-desktop", "cat ~/data/docs/future.txt").stdout.strip()
         check(got == "now-correct", f"the later edit lost to a device with a clock ahead: {got}")
     finally:
-        run("vl-desktop", "sudo date -s '-2 days' >/dev/null", check_rc=False)
+        fix_clock("vl-desktop")
+
+
+@scenario("clock-two-days-behind")
+def s_clock_behind():
+    # Some S3 servers refuse a signature from the past with HTTP 400, not 403.
+    run("vl-desktop", "sudo timedatectl set-ntp false 2>/dev/null; sudo date -s '-2 days' >/dev/null")
+    try:
+        run("vl-desktop", "echo from-the-past > ~/data/docs/past.txt")
+        v("vl-desktop", "sync")
+        v("vl-laptop", "sync")
+        check(run("vl-laptop", "cat ~/data/docs/past.txt", check_rc=False).stdout.strip() == "from-the-past",
+              "a device with a clock behind could not sync")
+    finally:
+        fix_clock("vl-desktop")
 
 
 # ----- scale: many small files and one large one -------------------------------------------
@@ -873,10 +895,17 @@ def s_p2p_upload():
 SCENARIOS = [s_reset, s_init, s_pair, s_sync, s_words, s_conflict, s_selective, s_repair, s_policy,
              s_strongroom, s_org, s_remove_user, s_revoke,
              s_p2p_setup, s_p2p_lan, s_p2p_pub, s_p2p_sym, s_p2p_stop, s_share, s_disks, s_mixed,
-             s_outage, s_blackhole, s_crash, s_clock, s_p2p_upload, s_scale]
+             s_outage, s_blackhole, s_crash, s_clock, s_clock_behind, s_p2p_upload, s_scale]
 
 
 def main():
+    # One run at a time: two runs against the same VMs and bucket ruin both.
+    import fcntl
+    lock = open(lab.DIR / "scenarios.lock", "w")
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        raise SystemExit("another scenarios.py run is using the lab; wait for it to finish")
     ap = argparse.ArgumentParser()
     ap.add_argument("--only", default="")
     a = ap.parse_args()

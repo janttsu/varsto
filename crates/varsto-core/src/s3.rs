@@ -163,7 +163,7 @@ impl S3Storage {
         }
     }
 
-    /// Build, sign and send a request. A 403 from a server whose clock is
+    /// Build, sign and send a request. A 403 (or 400) from a server whose clock is
     /// more than five minutes from ours is retried once with our clock
     /// corrected to the server's (the offset is kept for later requests).
     fn request(
@@ -177,7 +177,10 @@ impl S3Storage {
         use std::sync::atomic::Ordering;
         let (status, bytes, server_date) =
             self.request_once(method, path, query, extra_headers, body)?;
-        if status == 403 {
+        // Refused (403, or 400 from some servers for a signature outside the
+        // allowed window) by a server whose clock is far from ours: retry
+        // once with our clock set to the server's.
+        if status == 403 || status == 400 {
             if let Some(server) = server_date.as_deref().and_then(parse_http_date) {
                 let ours = unix_now() + self.clock_offset.load(Ordering::Relaxed);
                 if (server - ours).abs() > 300 {
