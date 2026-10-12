@@ -179,6 +179,28 @@ def _sel_row(card, y, icon, name, status, done, x_icon=274, x_name=292, x_status
         ui(card, K.cloud_icon(0.7), x_mark, y)
 
 
+@scene("features/backups")
+def backups():
+    node(K.laptop("lines"), 92, 124, 0.35, "Your computer", "any folder")
+    bk = node(K.bucket(), 268, 126, 0.3, "Your storage", "S3, rclone, NAS")
+    lock_at(bk, "tr", dx=0, dy=0, lift=0.4)
+    for i, (label, sub, tone) in enumerate([("Today", "read-only", "white"),
+                                            ("Yesterday", "read-only", "white"),
+                                            ("Day 90", "expires, deleted", "#fdeef0")]):
+        x0, y0 = 404, 52 + i * 62
+        c = card_at(x0, y0, 176, 50, tone=tone)
+        g = K.empty("snapblocks")
+        K.cipher_blocks(g, 4, 1, s=0.09, g=0.04, h=0.02)
+        ui(c, g, x0 + 40, y0 + 25, toward=0.01)
+        K.text(x0 + 120, y0 + 22, label, "title", free=True)
+        K.text(x0 + 120, y0 + 39, sub, "sub", color="#c2414a" if i == 2 else None, free=True)
+        if i == 2:
+            badge_at(c, "x", "tr", dx=0, dy=0)
+    L((160, 116), (206, 116))
+    L((332, 116), (398, 100))
+    K.caption("Encrypted, read-only snapshots, kept as long as you choose.")
+
+
 @scene("features/selective")
 def selective():
     node(K.phone("rows"), 110, 140, 0.42, "Phone")

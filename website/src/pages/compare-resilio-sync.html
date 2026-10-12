@@ -21,6 +21,7 @@ description: What Resilio Sync is for, how it works, and how it compares with Va
       <tr><th scope="row">Devices online together</th><td>Yes, unless an always-on peer is kept.</td><td>Not needed: devices sync through your storages, and directly peer to peer when they can reach each other.</td></tr>
       <tr><th scope="row">Knows where every copy is</th><td>No tracking of copies or copy counts.</td><td>Yes: a signed ledger records which storage and device holds every block; durability policies (by default 1 copy anywhere, 1 external, 1 on your own devices or disks, checked by another device within 30 days) warn when a rule is not met.</td></tr>
       <tr><th scope="row">Removable and offline disks</th><td>No removable-disk workflow.</td><td>Yes: disk pools are filled, checked and recognised when they come back; files on a disk that is away ask for that disk.</td></tr>
+      <tr><th scope="row">Backups</th><td>An Archive folder on each device keeps deleted and replaced files, 30 days by default on desktops; no separate off-site backup.</td><td>Yes: pick a folder on any device and Varsto keeps encrypted, read-only snapshots of it on your external storages only, never on your devices, for the number of days you choose (90 by default), then deletes the expired ones. Restore any snapshot into a directory you name, from the app or the command line.</td></tr>
       <tr><th scope="row">Licence and price</th><td>Proprietary; Sync Home is free.</td><td>Source-available (PolyForm Shield 1.0.0), free; you pay only your storage provider.</td></tr>
       <tr><th scope="row">Maturity</th><td>Mature commercial product; its future after the 2026 acquisition is not yet stated.</td><td>Alpha: not for production data, formats may still change.</td></tr>
       </tbody>
@@ -38,4 +39,5 @@ description: What Resilio Sync is for, how it works, and how it compares with Va
       <li><a href="https://www.resilio.com/sync/">Resilio Sync website</a></li>
       <li><a href="https://www.resilio.com/blog/understanding-the-sync-encrypted-folder">Encrypted folders</a></li>
       <li><a href="https://www.resilio.com/news/nasuni-acquires-resilio/">Nasuni acquires Resilio</a></li>
+      <li><a href="https://help.resilio.com/hc/en-us/articles/204754239-Does-Sync-support-versioning-">Does Sync support versioning?</a></li>
     </ul>

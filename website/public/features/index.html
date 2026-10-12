@@ -72,6 +72,16 @@
       </div>
     </section>
 
+    <section class="feature" id="backups">
+      <h2>Backups: encrypted off-site copies that nothing can change</h2>
+      <picture><source type="image/webp" srcset="../assets/img/features/backups.webp"><img src="../assets/img/features/backups.png" alt="Your computer sends a folder to your storage, which keeps encrypted read-only snapshots: today, yesterday, and one from day 90 that expires and is deleted." width="640" height="320" loading="lazy"></picture>
+      <div>
+        <p>Pick any folder on any device, say your documents, a project or a server's data directory, and Varsto backs it up to your external storages: an S3 bucket, an rclone remote, a NAS or cold storage. Each backup is a read-only snapshot, encrypted exactly like everything else Varsto keeps, and it lives only on those storages, never on your other devices. Snapshots are taken daily, weekly or when you ask. Each one is kept for the number of days you choose, 90 by default, and is deleted from storage once it expires. Blocks that did not change are stored once, however many snapshots use them.</p>
+        <p>Nothing edits a snapshot after it is taken. A restore always goes into a directory you name, from the app's Backups page or with <code>varsto backup restore</code>, and you can pick the newest snapshot, a numbered one or the one from a given date.</p>
+        <p class="note">Use case: a small office backs up the accounting folder of one PC and a shared drive of another to a bucket at a second provider every night. Three months of history stay available, ransomware on the PCs cannot rewrite them, and nobody has to remember to plug in a disk.</p>
+      </div>
+    </section>
+
     <section class="feature">
       <h2>Selective sync with placeholders</h2>
       <picture><source type="image/webp" srcset="../assets/img/features/selective.webp"><img src="../assets/img/features/selective.png" alt="A phone showing a file list where large files are placeholders and small ones are downloaded." width="640" height="320" loading="lazy"></picture>

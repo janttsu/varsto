@@ -229,6 +229,7 @@ org/manifest/&lt;seq&gt;-&lt;attempt&gt;.json        organization: administrator
 org/roster/&lt;seq&gt;-&lt;attempt&gt;.json          organization: people, devices, policy, signed by an administrator device (section 27)
 org/log/&lt;device&gt;/&lt;seq&gt;-&lt;attempt&gt;.json    organization: one administrator device&#39;s chained log (section 27)
 manifests/&lt;folder&gt;/&lt;device&gt;/&lt;seq&gt;.enc    full folder view of one device
+snapshots/&lt;backup&gt;/&lt;device&gt;/&lt;seq&gt;.enc    one snapshot of a backup, never changed (section 31)
 chunks/&lt;first two hex&gt;/&lt;object name&gt;     encrypted chunk</code></pre>
 <p>Every path has one writer: a device writes only under its own device id, and chunk objects are content-addressed and written with put-if-absent. No conditional writes, locks or leases are needed on the storage. Objects are never overwritten.</p>
 <h2 id="6-ledger">6. Ledger</h2>
@@ -272,6 +273,18 @@ chunks/&lt;first two hex&gt;/&lt;object name&gt;     encrypted chunk</code></pre
 <tr>
 <td><code>chunk_dropped</code></td>
 <td>this device deliberately removed the object from a storage: claims on that storage made before this event no longer count, later ones count again (section 23)</td>
+</tr>
+<tr>
+<td><code>snapshot_taken</code></td>
+<td>this device wrote snapshot <code>seq</code> of a backup, with its times, size and the hash of the stored object (section 31)</td>
+</tr>
+<tr>
+<td><code>snapshot_expired</code></td>
+<td>a snapshot of a backup expired and is deleted with the blocks only it used (section 31)</td>
+</tr>
+<tr>
+<td><code>backup_stopped</code></td>
+<td>a backup takes no more snapshots (section 31)</td>
 </tr>
 </tbody>
 </table>
@@ -723,6 +736,65 @@ trash/          deleted files</code></pre>
 <p><code>&lt;id&gt;</code> is the hex hash of the pack's bytes, so writing the same pack twice is harmless. Packs are written to hot storages that are not transferrers (S3 buckets, rclone remotes, directories); cold storage, transferrers and disk pools keep one object per block, because restores, deliveries and disk placement work per object there. A storage may hold both single objects and packs.</p>
 <p><strong>Reading.</strong> Every storage is opened through a layer that knows its packs (<code>packs::PackAware</code>): it lists <code>packs/</code> once, reads the indexes and markers it has not seen, and answers <code>chunks/&lt;xx&gt;/&lt;object&gt;</code> for a packed object with a ranged read of the pack (<code>Range</code> on S3, <code>rclone cat --offset --count</code>, a seek on directories). A miss reloads the indexes at most every 30 seconds. Listing <code>chunks/</code> includes packed objects, so verification, fsck and repair see them like any other; every reader checks the object's hash as before.</p>
 <p><strong>Deleting.</strong> Deleting a packed object writes its marker; when every object of a pack is marked, the pack, its index and the markers are deleted. A repair of a damaged packed object marks it deleted and writes a single object in its place. The ledger is unchanged: it records objects by name, wherever their bytes are.</p>
+<h2 id="31-backups-001-alpha13">31. Backups (0.0.1-alpha.13)</h2>
+<p><strong>What.</strong> A backup keeps read-only snapshots of a directory of one device, encrypted like every folder, on the storages only: never on the vault's other devices (no device records <code>chunk_on_device</code> for it, and peers neither serve nor are asked for its blocks) and never on a transferrer. Each snapshot is kept for a number of days (90 unless the user chooses otherwise) and then deleted from the storages. Files come back only by restoring a snapshot into a directory the user names (<code>varsto backup restore</code>, the interface's Backups page).</p>
+<p><strong>Record.</strong> A backup is a folder record (section 5) with a <code>backup</code> field: <code>{source_device, source_path, retention_days, created_utc}</code>. It has its own folder key, key epochs, placement (default: every storage of the source device that is not a transferrer) and ledger chunk records like any folder, but it is never mounted and only the source device writes it. <code>Keyring::find</code> and the folder listings leave backups out; sync, sharing, manifests, the peer-to-peer snapshot and <code>folder attach</code> never see one, and folder and backup names are unique together. The source device keeps its own settings in <code>config.json</code> (<code>backups</code>: path, schedule <code>manual</code> or <code>{"every_hours": N}</code>, retention for the next snapshots, last snapshot time and sequence number, stopped).</p>
+<p><strong>Snapshot.</strong> <code>snapshots/&lt;backup&gt;/&lt;device&gt;/&lt;seq 16 digits&gt;.enc</code>: zstd-compressed JSON <code>{format_version, backup, device, seq, taken_utc, expires_utc, retention_days, files, skipped}</code> encrypted with XChaCha20-Poly1305 under the backup's folder metadata key of the newest epoch, associated data <code>snapshot, vault, backup, device, seq</code>. <code>files</code> maps paths to file states as in a manifest (live files only) and passes the same checks when opened; <code>skipped</code> names files that could not be read or stored completely. <code>expires_utc</code> is fixed when the snapshot is taken, so a later retention change applies to later snapshots only. A snapshot is written once with put-if-absent to every metadata storage that is not a transferrer, cold ones included, and never changed; a sequence number an interrupted attempt already wrote is skipped.</p>
+<p><strong>Ledger.</strong></p>
+<table>
+<thead>
+<tr>
+<th>Event</th>
+<th>Fields</th>
+<th>View</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>snapshot_taken</code></td>
+<td><code>backup, seq, taken_utc, expires_utc, files, bytes, snapshot_hash</code> (BLAKE3 hex of the stored object)</td>
+<td><code>snapshots[(backup, device, seq)]</code> set; the event with the largest stamp wins if two disagree</td>
+</tr>
+<tr>
+<td><code>snapshot_expired</code></td>
+<td><code>backup, device, seq</code></td>
+<td>that snapshot is marked expired (in any arrival order)</td>
+</tr>
+<tr>
+<td><code>backup_stopped</code></td>
+<td><code>backup</code></td>
+<td>added to <code>backups_stopped</code></td>
+</tr>
+</tbody>
+</table>
+<p>The view (and with it checkpoints, section 22) carries both maps; the cached view's format is 4. A member device sealing per-folder batches files these events under the backup.</p>
+<p><strong>Taking a snapshot</strong> (source device only, <code>varsto backup take</code>, the schedule):</p>
+<ol type="1">
+<li>Pull the ledger; scan the directory read-only (files that cannot be read are skipped, not fatal); upload the blocks the storages lack (never to a transferrer; blocks dropped by an earlier expiry are written again).</li>
+<li>Every live file must have each block claimed on a storage in the view; a file that is not is scanned and uploaded once more, and left out (named in <code>skipped</code>) if it still is not.</li>
+<li>Seal and write the snapshot, record <code>snapshot_taken</code>, seal and push the batch. A snapshot is written also when nothing changed.</li>
+<li>Pull the ledger again and write back any block of the snapshot that another device dropped meanwhile (an expiry that had not seen the snapshot yet).</li>
+</ol>
+<p><strong>Restoring.</strong> A snapshot is chosen by number, <code>latest</code>, or a day <code>YYYY-MM-DD</code> (the newest one taken by the end of that day, UTC). Its object is read from the first metadata storage whose copy has the hash recorded in <code>snapshot_taken</code>; a copy that differs is refused ("altered"), and cold storages are read only when confirmed. The target directory must be empty unless overwriting is asked for; files (or only the given paths and the directories under them) are fetched from storages only, checked like any block, written through a temporary file and given their recorded modification times. Paths pass <code>safe_join</code>. Any full device of the vault can restore; nothing is recorded as held on a device.</p>
+<p><strong>Expiry.</strong> A snapshot is due once <code>expires_utc</code> plus a grace day has passed. The source device expires its backups' snapshots; another device does so only when the backup is stopped, the source device was removed from the vault, or two days have passed since <code>expires_utc</code>. The service looks at most every six hours; <code>varsto backup expire</code> runs it at once. For each backup with something due:</p>
+<ol type="1">
+<li>Record <code>snapshot_expired</code> for each due snapshot.</li>
+<li>Read the live snapshots (cached per device in <code>state/backups/&lt;backup&gt;.json</code>); if one cannot be read, nothing is deleted this time.</li>
+<li>The candidates are the backup's blocks that no live snapshot uses (and that no other folder names, as a safeguard). Record <code>chunk_dropped</code> for every storage of this device that claims one, then seal and push the batch before deleting anything.</li>
+<li>List <code>snapshots/&lt;backup&gt;/</code> again; a snapshot the ledger does not know yet is read (after pulling the ledger once more) and its blocks are kept.</li>
+<li>Delete the candidates from this device's storages (packed ones through their deletion markers, section 30) and the expired snapshot objects.</li>
+</ol>
+<p>A stopped backup whose last snapshot has expired is removed from the vault like a removed folder with its data purged (<code>vault/removed/</code>, blocks, <code>snapshots/&lt;backup&gt;/</code>). Stopping deletes nothing early.</p>
+<p><strong>Other parts.</strong> Storage removal plans and fsck count the blocks of the live snapshots a device has read or written; repair rewrites a backup's damaged copies from another storage (never from a peer). The service takes scheduled snapshots after a sync and reports the last snapshot, failing backups and the last expiry run in its summary. Local API: <code>GET /api/backups</code>, <code>GET /api/backup/snapshots?backup=</code>, <code>POST /api/backup</code> (add; <code>initial</code> takes the first snapshot), <code>/api/backup/take</code>, <code>/restore</code>, <code>/set</code>, <code>/stop</code>, <code>/expire</code>.</p>
+<p><strong>Limits.</strong></p>
+<ul>
+<li>Expiry follows each device's clock: a device whose clock runs days ahead deletes early (the grace day and the two days for other devices soften this).</li>
+<li>A snapshot written to a storage and not yet listed there (no read-after-write) could lose blocks to a concurrent expiry by another device; step 4 of taking a snapshot writes them back while the files are unchanged.</li>
+<li>The default durability policy is not applied to backups yet: they are not in the policy reports.</li>
+<li>Storage names are local: only the source device's storages receive snapshots, and another device deletes only from its own storages.</li>
+<li>The first snapshot of a large directory holds the engine for as long as its upload takes.</li>
+</ul>
+<p>Tests: <code>crates/varsto-core/tests/backups.rs</code> (byte-identical restores by number, date and latest, paths, refusal of a non-empty directory, restores on another device, nothing on devices or transferrers, altered snapshots refused, expiry deleting only unused blocks including packed ones while other folders stay, other devices waiting for the source, a stopped backup removed with its last snapshot, schedules), <code>snapshot::tests</code>, <code>engine::backups::tests</code> and the random-event view tests in <code>ledger::tests</code>.</p>
 
 </article>
   </div>
