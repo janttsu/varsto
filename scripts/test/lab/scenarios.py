@@ -241,8 +241,12 @@ def s_repair():
     victim.write_bytes(bytes(data))
     gone = chunks[len(chunks) // 3]
     gone.unlink()
+    # rclone serve s3 lists from a 5 s directory cache and drops the
+    # connection when a listed file is gone: let it notice first.
+    time.sleep(6)
     r = v("vl-laptop", "fsck --verify", check_rc=False)
     fsck = r.get("_out", r) if isinstance(r, dict) else {}
+    check(isinstance(fsck, dict), f"fsck gave no report: {r}")
     bad = len(fsck.get("chunks_missing", [])) + len(fsck.get("objects_corrupt", []))
     check(bad >= 2, f"fsck found {bad} problems: {fsck}")
     rep = v("vl-laptop", "repair", check_rc=False)
