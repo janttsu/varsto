@@ -1,0 +1,37 @@
+---
+title: Contribute
+nav: Contribute
+output: contribute/index.html
+description: Help build Varsto, an end-to-end encrypted sync and backup tool written in Rust: architecture, where help is wanted, how to build and test it, and the licence terms.
+---
+    <h1>Build Varsto with us</h1>
+    <p class="lead">Varsto is an end-to-end encrypted file sync and backup tool for storage you already own: S3 buckets, NAS shares, rclone remotes, old disks and your own devices. The core is written in Rust, the source is public on <a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a>, and the storage format is specified in writing. It is an early alpha, which is the best time to shape it.</p>
+    <p><a class="button" href="https://github.com/janttsu/varsto" rel="noopener">Source on GitHub</a> <a class="button secondary" href="https://github.com/janttsu/varsto/issues" rel="noopener">Issues</a> <a class="button secondary" href="{{P}}docs/contributing.html">Contribution rules</a></p>
+
+    <h2>What you would be working on</h2>
+    <div class="grid">
+      <section class="card"><h3>A Rust core with a written spec</h3><p><code>varsto-core</code> holds the engine: content-defined chunking, XChaCha20-Poly1305 encryption, a signed ledger with hybrid Ed25519 + ML-DSA-65 signatures, placement and policies, peer-to-peer block exchange with NAT traversal, and storage backends for directories, S3 and rclone. Every on-storage object is described in the <a href="{{P}}docs/alpha-0-format.html">storage format specification</a>.</p></section>
+      <section class="card"><h3>One binary, many shells</h3><p><code>varsto-cli</code> is the command line, the background service, the tray and a local web interface (plain HTML, CSS and JavaScript). Thin native shells wrap it: Swift for macOS and iOS, Kotlin for Android, through <code>varsto-ffi</code>.</p></section>
+      <section class="card"><h3>Tests that run whole networks</h3><p>Besides unit and integration tests, a lab of virtual machines plays laptops, desktops and servers behind home routers, symmetric NAT and a public internet, with an S3 server and storage outages, crashes and clock skew on demand. See <a href="{{P}}docs/testing.html">Testing</a>.</p></section>
+    </div>
+
+    <h2>Where help is wanted</h2>
+    <ul>
+      <li><strong>Security review</strong> of the <a href="{{P}}docs/key-hierarchy.html">key hierarchy</a>, the <a href="{{P}}docs/threat-model.html">threat model</a> and the format specification. Findings go through the <a href="{{P}}docs/security-policy.html">security policy</a>.</li>
+      <li><strong>Platforms:</strong> the Windows tray and Explorer integration, the iOS app on real devices, Android background behaviour on different vendors' phones.</li>
+      <li><strong>Networks:</strong> peer-to-peer and NAT traversal on networks other than the maintainer's own: carrier-grade NAT, IPv6-only, corporate firewalls.</li>
+      <li><strong>Storage:</strong> testing against more S3-compatible providers and rclone backends, and their quirks (range reads, clock skew, listing consistency).</li>
+      <li><strong>Packaging:</strong> Flatpak, Homebrew, AUR, winget and other package managers.</li>
+      <li><strong>Translations:</strong> the interface and this website are in English, Finnish and Swedish; more languages and native-speaker review are welcome. The dictionaries are JSON files in <code>crates/varsto-cli/ui/i18n/</code>.</li>
+      <li><strong>Documentation</strong> and bug reports from real setups: the <a href="{{P}}forum/">forum</a> and the issue tracker.</li>
+    </ul>
+
+    <h2>Getting started</h2>
+    <pre><code>git clone https://github.com/janttsu/varsto
+cd varsto
+cargo build --release
+cargo test --workspace</code></pre>
+    <p>A stable Rust toolchain (1.85 or newer) is enough for the core and the command line. The <a href="{{P}}docs/quick-start.html">quick start</a> creates a vault on a local directory in a minute, so you can try changes without any cloud account. Before a pull request, <code>cargo fmt --all --check</code>, <code>cargo clippy --workspace --all-targets</code> and the tests must pass, and new behaviour needs tests. Please open an issue before large changes.</p>
+
+    <h2>Licence</h2>
+    <p>Varsto is source-available under the <a href="{{P}}docs/licence.html">PolyForm Shield License 1.0.0</a>: you may read, use, change and share the code for any purpose except offering a product that competes with Varsto. It is not an OSI open-source licence. By contributing you agree that your contribution is distributed under that licence; the details are in the <a href="{{P}}docs/contributing.html">contribution rules</a>. Everything in the repository is written in English.</p>

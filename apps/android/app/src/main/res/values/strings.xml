@@ -1,10 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Varsto</string>
+    <string name="app_name" translatable="false">Varsto</string>
     <string name="service_running">Varsto is syncing in the background</string>
     <string name="choose_files">Add files to Varsto</string>
     <string name="open_with">Open with</string>
     <string name="share_with">Share</string>
     <string name="file_missing">%1$s is not on this phone yet</string>
     <string name="file_not_shareable">This file cannot be handed to other apps: %1$s</string>
+    <string name="camera_uploading">Uploading %1$d of %2$d to %3$s</string>
+    <string name="service_did_not_start">Varsto service did not start</string>
 </resources>

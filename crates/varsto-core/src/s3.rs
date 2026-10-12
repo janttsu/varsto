@@ -163,7 +163,7 @@ impl S3Storage {
         }
     }
 
-    /// Build, sign and send a request. A 403 from a server whose clock is
+    /// Build, sign and send a request. A 403 (or 400) from a server whose clock is
     /// more than five minutes from ours is retried once with our clock
     /// corrected to the server's (the offset is kept for later requests).
     fn request(
@@ -177,7 +177,10 @@ impl S3Storage {
         use std::sync::atomic::Ordering;
         let (status, bytes, server_date) =
             self.request_once(method, path, query, extra_headers, body)?;
-        if status == 403 {
+        // Refused (403, or 400 from some servers for a signature outside the
+        // allowed window) by a server whose clock is far from ours: retry
+        // once with our clock set to the server's.
+        if status == 403 || status == 400 {
             if let Some(server) = server_date.as_deref().and_then(parse_http_date) {
                 let ours = unix_now() + self.clock_offset.load(Ordering::Relaxed);
                 if (server - ours).abs() > 300 {
@@ -478,6 +481,35 @@ impl Storage for S3Storage {
             403 if String::from_utf8_lossy(&body).contains("InvalidObjectState") => {
                 bail!("GET {key}: object is in a cold storage class and must be restored first")
             }
+            s => Err(self.explain("GET", key, s, &body)),
+        }
+    }
+
+    fn get_range(&self, key: &str, offset: u64, len: u64) -> Result<Option<Vec<u8>>> {
+        crate::storage::validate_key(key)?;
+        if len == 0 {
+            return Ok(Some(Vec::new()));
+        }
+        let range = format!("bytes={}-{}", offset, offset + len - 1);
+        let (status, body) = self.request(
+            "GET",
+            &self.object_path(key),
+            &[],
+            &[("range", &range)],
+            &[],
+        )?;
+        match status {
+            206 => Ok(Some(body)),
+            // Some servers (rclone serve s3) send the range with 200; one that
+            // ignores Range sends the whole object, which is longer whenever
+            // the offset is not 0.
+            200 if body.len() as u64 == len => Ok(Some(body)),
+            200 => Ok(Some(
+                body.get(offset as usize..(offset + len) as usize)
+                    .map(<[u8]>::to_vec)
+                    .unwrap_or_default(),
+            )),
+            404 => Ok(None),
             s => Err(self.explain("GET", key, s, &body)),
         }
     }

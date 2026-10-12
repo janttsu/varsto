@@ -1,0 +1,334 @@
+---
+title: Prestandamätningar
+nav: How it works
+output: benchmarks/index.html
+description: Varsto uppmätt mellan Paris, Amsterdam och Warszawa den 9 och 10 oktober 2026, och från en hemanslutning bakom NAT: nedladdningar peer-to-peer från en annan enhet jämförda med samma nedladdningar från en S3-bucket, med metod, rådata, de åtgärder körningarna ledde till och deras begränsningar.
+---
+    <div class="tech">
+    <h1>Prestandamätningar: peer-to-peer tvärs över Europa</h1>
+    <p class="lead">En enhet i Paris har filerna. Enheter i Amsterdam och Warszawa ansluter till valvet med en tom mapp och laddar ned allt: en gång direkt från enheten i Paris och från varandra (peer-to-peer), en gång från en S3-bucket i Paris. Uppmätt den 9 och 10 oktober 2026 på hyrda molnmaskiner.</p>
+    <p>Den här sidan redovisar vad som mättes, hur, vad som begränsade det och vad som ändrades i Varsto till följd av det. Alla planerade fall har nu siffror, från två körningar vardera om inte en tabell säger annat. Siffrorna gäller en alfaversion: de beskriver koden som den såg ut de dagarna. Sedan 0.0.1-alpha.11 delas stora filer upp i större block (i genomsnitt 1 MiB från 32 MiB, 4 MiB från 1 GiB), så blockantalen här gäller inte längre för dem. Mätskriptet finns i repositoryt under <code>scripts/bench/</code>, och de sammanfattade resultaten publiceras som <a href="{{P}}data/benchmarks-2026-10.json">JSON</a>, så att varje siffra på sidan kan kontrolleras och körningen upprepas.</p>
+
+    <nav class="toc" aria-label="På den här sidan">
+      <p class="toc-title">På den här sidan</p>
+      <ol>
+        <li><a href="#summary">Sammanfattning</a></li>
+        <li><a href="#home">Från ett hem bakom NAT</a></li>
+        <li><a href="#done">Vad som mättes</a></li>
+        <li><a href="#setup">Uppställning och referensvärden</a></li>
+        <li><a href="#p2p-only">Vad ”bara peer-to-peer” betyder</a></li>
+        <li><a href="#large">Stora filer</a></li>
+        <li><a href="#files">Många små filer</a></li>
+        <li><a href="#text">Komprimerbar text</a></li>
+        <li><a href="#writer">Skrivarens sida</a></li>
+        <li><a href="#fixes">Åtgärdat på vägen</a></li>
+        <li><a href="#quic">Provat och återställt: QUIC först</a></li>
+        <li><a href="#bottlenecks">Fortfarande långsamt, och varför</a></li>
+        <li><a href="#when">När peer-to-peer vinner, och när bucketen gör det</a></li>
+        <li><a href="#cost">Kostnad</a></li>
+        <li><a href="#limits">Begränsningar i den här mätningen</a></li>
+      </ol>
+    </nav>
+
+    <h2 id="summary">Sammanfattning</h2>
+    <ul>
+      <li><strong>Från en hemanslutning bakom NAT (100 Mbit/s):</strong> var och en av 14 överföringar mellan en hemdator och servrar i Amsterdam och Warszawa kom enbart från andra enheter: genom hemrouterns NAT, från NAT till NAT och genom en symmetrisk NAT via relä. Stora filer gick i 8.0 till 9.3 MB/s, 1.3 till 1.8 gånger så snabbt som samma nedladdning från bucketen på samma linje. <a href="#home">Detaljer</a>.</li>
+      <li><strong>Många små filer, Paris till Amsterdam (9 ms ifrån varandra):</strong> 10 000 filer kom fram peer-to-peer på 111 s (90 filer/s) och från bucketen på 299 s (34 filer/s): peer-to-peer var 2.7 gånger snabbare. Till Warszawa (33 ms bort) låg de nära varandra: 260 s mot 294 s. Bucketens hastighet varierade dock med tiden på dygnet: tre timmar senare, med två läsare samtidigt, levererade den 64 filer/s till Amsterdam och 53 till Warszawa, nära peer-to-peers 70 och 39 med två läsare.</li>
+      <li><strong>Stora filer:</strong> till Amsterdam 4 GiB peer-to-peer på 159 s (27.0 MB/s) mot 180 s (23.9 MB/s) från bucketen, och betydligt jämnare. Till Warszawa var bucketen snabbare: 190 s (23.4 MB/s) mot 423 s (10.2 MB/s). Peer-to-peer-vägen öppnar en TCP-anslutning för varje block, vilket kostar rundresor; ju längre avstånd, desto mer.</li>
+      <li><strong>Två läsare samtidigt, peer-to-peer:</strong> läsarna hjälper varandra. Warszawa hämtade 69 % av sina block från Amsterdam, som redan hade dem, och bara 31 % från Paris, så enheten i Paris skickade 5.6 GB i stället för 8.6 GB. Ingen av läsarna blev långsammare.</li>
+      <li><strong>Komprimerbar text:</strong> bucketen var lite snabbare till Amsterdam (18.1 mot 16.7 MB/s) och mer än dubbelt så snabb till Warszawa (16.7 mot 7.3 MB/s). En enhet som levererar text komprimerar varje block på nytt för varje begäran, på en nivå vald för liten lagring, inte för hastighet.</li>
+      <li><strong>Varje block i peer-to-peer-körningarna kom från en annan enhet:</strong> 202 544 av 202 544 block i 24 uppmätta nedladdningar, inget från bucketen, vars block hade raderats; varje fil stämde med sin SHA-256 efteråt.</li>
+      <li><strong>Körningarna hittade och åtgärdade nio problem</strong>, bland dem nedladdningar som hämtade ett block i taget (nu åtta samtidigt, och små filer hämtas i förväg över filgränserna) och en peer-to-peer-server som besvarade en begäran i taget. Att göra QUIC till föredragen väg över internet provades, mättes som långsammare här och återställdes. <a href="#fixes">Detaljer och siffror</a>.</li>
+    </ul>
+
+    <h2 id="home">Från ett hem bakom NAT (10 oktober)</h2>
+    <p>Körningarna ovan är mellan datacenter med publika adresser. Dessa är från ett hem: en stationär dator på en konsumentanslutning på 100 Mbit/s bakom routerns NAT, med Varsto installerat så som en användare installerar det (Linux-paketet, en bakgrundstjänst för användaren). Två molnmaskiner anslöt till den: en i Amsterdam med publik adress, och en i Warszawa med två enheter i nätverksnamnrymder bakom NAT, en bakom en kon-NAT (Linux MASQUERADE behåller porten) och en bakom en symmetrisk NAT (MASQUERADE med slumpmässiga portar, vilket omintetgör hålslagning). Liksom ovan innehöll bucketen i Paris bara liggaren och fillistorna: före varje hämtning raderades dess block, så att varje block måste komma från en annan enhet, och varje fil kontrollerades mot sin SHA-256. Mätskriptet är <code>scripts/nat-test/home-nat.py</code>.</p>
+    <h3>Linjen</h3>
+    <table class="downloads bench-table">
+      <thead><tr><th>Hemdatorn och</th><th>Rundresa</th><th>TCP, en ström, till hemmet</th><th>TCP, en ström, från hemmet</th></tr></thead>
+      <tbody>
+        <tr><td>Amsterdam</td><td>31 ms</td><td>9.1 MB/s</td><td>12.1 MB/s</td></tr>
+        <tr><td>Warszawa</td><td>21 ms</td><td>10.6 MB/s</td><td>11.9 MB/s</td></tr>
+        <tr><td>Bucketen (Paris), rclone, 256 MiB</td><td>–</td><td>7.5 MB/s</td><td>4.3 MB/s</td></tr>
+      </tbody>
+    </table>
+    <p>100 Mbit/s är högst 12.5 MB/s, så det är taket för allt på den här linjen.</p>
+    <h3>Genom NAT</h3>
+    <p>STUN klassade hemroutern som en kon-NAT. Varje överföring flyttade en fil på 64 MiB med slumpmässiga byte; vid den storleken utgör den fasta kostnaden för en synkronisering (liggare och fillista i bucketen) en stor del av tiden.</p>
+    <table class="downloads bench-table">
+      <thead><tr><th>Från</th><th>Till</th><th>Väg som mottagaren använde</th><th>Tid</th><th>Hastighet</th></tr></thead>
+      <tbody>
+        <tr><td>Hemmet</td><td>Amsterdam (publik)</td><td>direkt, in genom hemmets NAT</td><td>12.2 s</td><td>5.5 MB/s</td></tr>
+        <tr><td>Amsterdam</td><td>Hemmet</td><td>direkt</td><td>14.3 s</td><td>4.7 MB/s</td></tr>
+        <tr><td>Warszawa, kon-NAT</td><td>Hemmet</td><td>direkt, NAT till NAT (hålslagning)</td><td>13.3 s</td><td>5.0 MB/s</td></tr>
+        <tr><td>Hemmet</td><td>Warszawa, kon-NAT</td><td>direkt, NAT till NAT</td><td>14.5 s</td><td>4.6 MB/s</td></tr>
+        <tr><td>Warszawa, symmetrisk NAT</td><td>Hemmet</td><td>via relä i Amsterdam</td><td>65.7 s</td><td>1.0 MB/s</td></tr>
+        <tr><td>Hemmet</td><td>Warszawa, symmetrisk NAT</td><td>via relä i Amsterdam</td><td>65.3 s</td><td>1.0 MB/s</td></tr>
+      </tbody>
+    </table>
+    <p>Varje väg fungerade så som designen säger: direkt där en NAT behåller sin mappning, via ett relä genom en av användarens egna nåbara enheter där den inte gör det. Ingen leverantörsserver var inblandad; enheterna hittade varandra genom poster i bucketen och publika STUN-servrar.</p>
+    <figure class="shot"><img class="shot-light" src="{{P}}assets/img/benchmarks/home-traffic-light.png" alt="Varstos trafikkort på hemdatorn: linjer från den här enheten till waw-cone (direkt), ams (direkt) och waw-sym (via ams), en tabell med väg, adress, hastigheter och summor per enhet, och uppe till höger kurvan för en nedladdning som just avslutats." width="976" height="553" loading="lazy"><img class="shot-dark" src="{{P}}assets/img/benchmarks/home-traffic-dark.png" alt="Samma trafikkort i mörkt läge." width="976" height="553" loading="lazy"><figcaption>Hemdatorns trafikkort några sekunder efter en nedladdning på 512 MiB från enheten bakom kon-NAT i Warszawa (kurvan uppe till höger): Warszawa och Amsterdam nås direkt, enheten bakom symmetrisk NAT via Amsterdam.</figcaption></figure>
+    <h3>Stora filer</h3>
+    <p>En fil på 512 MiB med slumpmässiga byte per överföring, enbart peer-to-peer. Första kolumnen är version 0.0.1-alpha.9 med reläåtgärden nedan; den andra lägger till samma dags ändringar i nedladdningen (anslutningar hålls öppna per enhet, objekt skickas utan att komprimeras på nytt, ett fönster som anpassar sig mellan 8 och 32 block).</p>
+    <table class="downloads bench-table">
+      <thead><tr><th>Överföring</th><th>Före ändringarna</th><th>Med ändringarna</th><th>Andel av en TCP-ström</th><th>Andel av 100 Mbit/s</th></tr></thead>
+      <tbody>
+        <tr><td>Amsterdam → hemmet</td><td>4.7 MB/s</td><td>8.0 MB/s</td><td>88 %</td><td>64 %</td></tr>
+        <tr><td>Warszawa (kon-NAT) → hemmet</td><td>6.9 MB/s</td><td>9.3 MB/s</td><td>88 %</td><td>74 %</td></tr>
+        <tr><td>Hemmet → Amsterdam</td><td>8.7 MB/s</td><td>9.3 MB/s</td><td>77 %</td><td>74 %</td></tr>
+        <tr><td>Hemmet → Warszawa (kon-NAT)</td><td>–</td><td>8.6 MB/s</td><td>72 %</td><td>69 %</td></tr>
+      </tbody>
+    </table>
+    <h3>Samma nedladdning från bucketen</h3>
+    <p>En andra enhet på hemdatorn, med peer-to-peer avstängt, hämtade en fil på 512 MiB som en server just hade laddat upp till bucketen, över samma linje.</p>
+    <table class="downloads bench-table">
+      <thead><tr><th>Skriven av</th><th>Från bucketen</th><th>Peer-to-peer (ovan)</th><th>Peer-to-peer var</th></tr></thead>
+      <tbody>
+        <tr><td>Amsterdam</td><td>6.1 MB/s</td><td>8.0 MB/s</td><td>1.3 gånger så snabb</td></tr>
+        <tr><td>Warszawa (kon-NAT)</td><td>5.2 MB/s</td><td>9.3 MB/s</td><td>1.8 gånger så snabb</td></tr>
+      </tbody>
+    </table>
+    <p>Mellan datacenter hänger bucketen med, eftersom bucketen och maskinerna sitter på samma snabba stamnät. Från ett hem är bucketen ytterligare ett avlägset steg med sin egen kostnad per begäran, medan en annan enhet skickar rakt ned i linjen.</p>
+    <h3>Hittat och åtgärdat</h3>
+    <ul>
+      <li><strong>Reläet kunde inte nå enheten det reläar för.</strong> En enhet bakom en symmetrisk NAT håller en anslutning öppen till en nåbar enhet i valvet, och andra enheter når den genom det reläet. Själva reläet hade ingen väg till den: det reläade inte genom sig självt och fortsatte ringa upp adresser som ingen kan nå. Nu frågar det en sådan enhet över den anslutning som enheten håller öppen till det.</li>
+      <li><strong>Peer-to-peer-nedladdningar nära linjens hastighet.</strong> Ändringarna ovan ungefär fördubblade nedladdningen från Amsterdam till hemmet (4.7 till 8.0 MB/s).</li>
+    </ul>
+    <h3>Fortfarande långsamt</h3>
+    <ul>
+      <li><strong>Vägen via relä</strong> klarade bara 1 till 1.6 MB/s: varje block färdas som en egen begäran över två steg, hemmet till Amsterdam till Warszawa och tillbaka. Det är reservvägen för de svåraste NAT-typerna, men den borde ändå fylla mer av linjen.</li>
+      <li><strong>Små överföringar</strong> betalar en fast kostnad för liggaren och fillistan i bucketen: 64 MiB tog 12 till 15 s där enbart byten behöver ungefär 7.</li>
+      <li><strong>Tjänstens gränssnitt</strong> kunde vänta i minuter på svar medan en synkronisering pågick och fortsatte försöka nå en enhet som inte gick att nå; statusanropen borde inte vänta på synkroniseringen.</li>
+    </ul>
+    <p class="note">Begränsningar: en hemanslutning, en eftermiddag, en körning per fall (en upprepning av Warszawa till hemmet under skärmbilden gick i 5.2 MB/s, med Amsterdam tillfälligt onåbart); NAT i Warszawa är Linux egen, inte en konsumentrouters; servrarna var små (Scaleway DEV1-M). Ändringarna i nedladdningen granskas och är ännu inte släppta.</p>
+
+    <h2 id="done">Vad som mättes</h2>
+    <table class="downloads bench-table">
+      <thead><tr><th>Datamängd</th><th>Från bucketen (S3)</th><th>Peer-to-peer</th></tr></thead>
+      <tbody>
+        <tr><td>Stora filer (2 × 2 GiB)</td><td>Amsterdam, Warszawa, båda samtidigt (9 okt)</td><td>Amsterdam, Warszawa (9 okt); båda samtidigt (10 okt)</td></tr>
+        <tr><td>Många små filer (10 000)</td><td>Amsterdam, Warszawa, båda samtidigt (10 okt; körningarna från 9 okt behålls som ”före förhandshämtning”)</td><td>Amsterdam, Warszawa, båda samtidigt (10 okt)</td></tr>
+        <tr><td>Komprimerbar text (512 MiB)</td><td>Amsterdam, Warszawa (9 okt); båda samtidigt (10 okt)</td><td>Amsterdam, Warszawa, båda samtidigt (10 okt)</td></tr>
+        <tr><td>Skrivarens uppladdning</td><td>2 körningar per mängd, en varje dag</td><td>RAM-disk: 2 körningar per mängd; lokal disk: 1 körning per mängd</td></tr>
+      </tbody>
+    </table>
+    <p>Två körningar per fall; tiderna i tabellerna är deras median (medelvärdet av två), med båda körningarna bredvid. Enskilda körningar anges som sådana. Mellan de två dagarna ändrades nedladdningskoden bara på sätt som inte berör de jämförda fallen: körningarna med stora filer och text den 9 oktober hämtar block inom en fil exakt som versionen från den 10 oktober gör, och bucketkörningarna med många små filer upprepades den 10 oktober eftersom förhandshämtning över filgränserna är ny. De två sista fallen, komprimerbar text peer-to-peer och många små filer från bucketen, båda med två läsare samtidigt, kördes tre timmar efter de andra på nya maskiner med den sammanslagna versionen; bucketen var tydligt snabbare under den sessionen än under den tidigare.</p>
+
+    <h2 id="setup">Uppställning och referensvärden</h2>
+    <ul>
+      <li><strong>Maskiner:</strong> tre Scaleway POP2-4C-16G-instanser (4 vCPU AMD EPYC 7543, 16 GB RAM, 80 GB nätverksblockvolym, Ubuntu 24.04), nyskapade varje dag: skrivaren i Paris (fr-par-1), läsare i Amsterdam (nl-ams-1) och Warszawa (pl-waw-1). Varje maskin hade en publik IPv4-adress på sitt eget gränssnitt, så det fanns ingen NAT mellan dem.</li>
+      <li><strong>Bucket:</strong> en tillfällig bucket i Scaleway Object Storage i Paris (fr-par), skrivarens region. Läsarna i Amsterdam och Warszawa läste den över landsgränser.</li>
+      <li><strong>Varsto:</strong> 0.0.1-alpha.8 med åtgärderna nedan, en statisk Linux-version (musl). 9 oktober: commits till och med <code>37bee19</code> (bucketkörningar: <code>0180ca8</code>, som bara skiljer sig i peer-to-peer-servern och filbevakaren). 10 oktober: commit <code>9b93263</code> för peer-to-peer-körningarna; dagens tidigare bucketkörningar använde <code>a3ba1c0</code>, som bara skiljer sig i ordningen mellan peer-to-peer-vägarna; de två fall som kördes sist använde den sammanslagna versionen <code>dc09721</code>, samma kod som <code>9b93263</code> för dessa körningar.</li>
+      <li><strong>En körning:</strong> en ny enhet ansluter till valvet med valvnyckeln, startar bakgrundstjänsten, pausar den, kopplar in en tom mapp och ber tjänsten om en synkronisering av den mappen (<code>POST /api/sync</code>). Tiden räknas från den begäran till svaret: fillistan läses, varje block hämtas, kontrolleras mot sin hash, dekrypteras, kontrolleras mot chunk-id:t och skrivs. Efteråt jämför mätskriptet en SHA-256-lista över mappen med skrivarens. Sedan tas enheten bort igen. Automatisk verifiering var avstängd på alla mätenheter, eftersom den laddar ned och reparerar block i bakgrunden.</li>
+    </ul>
+    <h3>Nätverkets referensvärden</h3>
+    <table class="downloads bench-table">
+      <thead><tr><th>Mellan</th><th>Rundresa (ping)</th><th>TCP, en ström (iperf3, Paris skickar), 9 / 10 okt</th><th>TCP, fyra strömmar</th></tr></thead>
+      <tbody>
+        <tr><td>Paris – Amsterdam</td><td>9.4 ms</td><td>925 / 958 Mbit/s</td><td>875 / 836 Mbit/s</td></tr>
+        <tr><td>Paris – Warszawa</td><td>33.4 ms</td><td>738 / 777 Mbit/s</td><td>949 / 909 Mbit/s</td></tr>
+        <tr><td>Amsterdam – Warszawa</td><td>20.6 ms</td><td>–</td><td>–</td></tr>
+      </tbody>
+    </table>
+    <table class="downloads bench-table">
+      <thead><tr><th>Läsare</th><th>S3: ett objekt på 256 MiB, en ström (rclone), 9 / 10 okt</th><th>S3: objekt på 4 KiB efter varandra, 9 / 10 okt</th></tr></thead>
+      <tbody>
+        <tr><td>Paris</td><td>91 / 59 MB/s</td><td>7 / 45 ms styck</td></tr>
+        <tr><td>Amsterdam</td><td>26 / 21 MB/s</td><td>16 / 107 ms styck</td></tr>
+        <tr><td>Warszawa</td><td>52 / 15 MB/s</td><td>52 / 122 ms styck</td></tr>
+      </tbody>
+    </table>
+    <p class="note">Förbindelserna mellan maskinerna klarade 700 till 950 Mbit/s (90 till 120 MB/s) i en TCP-ström, och ingen av Varstos överföringar kom i närheten: alla begränsades av rundresor och arbete per begäran. Bucketens egen hastighet varierade mycket från en dag till nästa (den andra mätningen gjordes tidigt på morgonen); dess körningar varierade genomgående mer än peer-to-peer-körningarna.</p>
+    <h3>Datamängder</h3>
+    <ul>
+      <li><strong>Stora filer:</strong> två filer på 2 GiB med slumpmässiga (okomprimerbara) byte, 4 GiB totalt, omkring 13 400 block.</li>
+      <li><strong>Många små filer:</strong> 10 000 filer i 500 kataloger, storlekar dragna ur en log-normalfördelning med median 16 KiB, begränsade till 1 KiB…256 KiB, var tjugonde fil en kopia av en annan; 281 MiB totalt. En mängd på 50 000 filer med samma form laddades upp, men inte ned.</li>
+      <li><strong>Komprimerbar text:</strong> 128 filer på 4 MiB med genererade loggrader från en webbserver, 512 MiB totalt; zstd lagrar dem på 138 MiB.</li>
+    </ul>
+
+    <h2 id="p2p-only">Vad ”bara peer-to-peer” betyder</h2>
+    <p>Varsto frågar andra enheter först och lagringsplatser i andra hand, så en peer-to-peer-mätning måste se till att bucketen inte kan hjälpa till. När skrivaren hade laddat upp och bucketkörningarna var klara raderades varje objekt under <code>chunks/</code> från bucketen. Bucketen behöll det som enheterna behöver för att hitta varandra och veta vad som finns (signerad liggare, fillistor, enhets- och peer-poster), men inget filinnehåll: ett block som ingen enhet kunde leverera skulle ha gjort filen otillgänglig. Sedan:</p>
+    <ul>
+      <li>varje körnings hämtningsrapport räknade block från andra enheter och block totalt, och mätskriptet underkände varje körning där de två skilde sig;</li>
+      <li>läsarnas trafikräknare (<code>/api/p2p/traffic</code>) och skrivarens stämde överens: med en läsare tog läsaren emot exakt datamängdens lagrade storlek från <code>writer-paris</code> och skrivaren skickade lika mycket; med två läsare blev det som var och en tog emot från Paris och från den andra läsaren tillsammans den lagrade storleken, och enheten i Paris skickade resten;</li>
+      <li>vägen var <strong>direkt</strong> i varje körning, över TCP till skrivarens publika adress på port 17893 (tjänstens logg anger vilken väg den valde), och mellan de två läsarna i körningarna med båda samtidigt. Inget relä var inblandat; en LAN-väg var omöjlig mellan tre länder.</li>
+    </ul>
+<!-- fragment: verify -->
+<table class="downloads bench-table"><tbody><tr><th>Körning</th><th>Nedladdade chunks</th><th>Från andra enheter</th><th>Från S3</th><th>Väg</th></tr><tr><td>filer, Amsterdam, ensam (×2)</td><td>20 240</td><td>20 240</td><td>0</td><td>writer-paris: direkt</td></tr><tr><td>filer, Amsterdam, båda samtidigt (×2)</td><td>20 240</td><td>20 240</td><td>0</td><td>waw-p2p-files-ams+waw-1: direkt, writer-paris: direkt</td></tr><tr><td>filer, Warszawa, båda samtidigt (×2)</td><td>20 240</td><td>20 240</td><td>0</td><td>: direkt, ams-p2p-files-ams+waw-2: , writer-paris: direkt</td></tr><tr><td>filer, Warszawa, ensam (×2)</td><td>20 240</td><td>20 240</td><td>0</td><td>writer-paris: direkt</td></tr><tr><td>stora, Amsterdam, ensam (×2)</td><td>26 946</td><td>26 946</td><td>0</td><td>writer-paris: direkt</td></tr><tr><td>stora, Amsterdam, båda samtidigt (×2)</td><td>26 758</td><td>26 758</td><td>0</td><td>: direkt, writer-paris: direkt</td></tr><tr><td>stora, Warszawa, båda samtidigt (×2)</td><td>26 758</td><td>26 758</td><td>0</td><td>ams-p2p-large-ams+waw-1: direkt, ams-p2p-large-ams+waw-2: direkt, writer-paris: direkt</td></tr><tr><td>stora, Warszawa, ensam (×2)</td><td>26 946</td><td>26 946</td><td>0</td><td>writer-paris: direkt</td></tr><tr><td>text, Amsterdam, ensam (×2)</td><td>3 544</td><td>3 544</td><td>0</td><td>writer-paris: direkt</td></tr><tr><td>text, Amsterdam, båda samtidigt (×2)</td><td>3 544</td><td>3 544</td><td>0</td><td>: direkt, writer-paris: direkt</td></tr><tr><td>text, Warszawa, båda samtidigt (×2)</td><td>3 544</td><td>3 544</td><td>0</td><td>ams-p2p-text-ams+waw-1: direkt, writer-paris: direkt</td></tr><tr><td>text, Warszawa, ensam (×2)</td><td>3 544</td><td>3 544</td><td>0</td><td>writer-paris: direkt</td></tr></tbody></table>
+<!-- /fragment -->
+
+    <h2 id="large">Stora filer</h2>
+    <p>4 GiB i två filer, slumpmässigt innehåll, så zstd lagrar det som det är.</p>
+<!-- fragment: large -->
+<p class="bench-legend"><span class="bench-key bench-p2p-key"></span>Peer-to-peer (från skrivaren i Paris) <span class="bench-key bench-s3-key"></span>S3-bucket i Paris <span class="note">(MB/s, mer är bättre)</span></p>
+<svg class="bench-chart" viewBox="0 0 620 188" role="img" aria-label="stora filer: MB/s per läsare, peer-to-peer och S3">
+<text class="bench-label" x="162" y="20" text-anchor="end">Amsterdam, ensam</text>
+<rect class="bench-p2p" x="170" y="4" width="215" height="14" rx="3"><title>Amsterdam, ensam, peer-to-peer: 27.0 MB/s</title></rect>
+<text class="bench-value" x="391" y="15">27.0</text>
+<rect class="bench-s3" x="170" y="21" width="190" height="14" rx="3"><title>Amsterdam, ensam, S3-bucket: 23.9 MB/s</title></rect>
+<text class="bench-value" x="366" y="32">23.9</text>
+<text class="bench-label" x="162" y="68" text-anchor="end">Warszawa, ensam</text>
+<rect class="bench-p2p" x="170" y="52" width="81" height="14" rx="3"><title>Warszawa, ensam, peer-to-peer: 10.2 MB/s</title></rect>
+<text class="bench-value" x="257" y="63">10.2</text>
+<rect class="bench-s3" x="170" y="69" width="186" height="14" rx="3"><title>Warszawa, ensam, S3-bucket: 23.4 MB/s</title></rect>
+<text class="bench-value" x="362" y="80">23.4</text>
+<text class="bench-label" x="162" y="116" text-anchor="end">Amsterdam, båda samtidigt</text>
+<rect class="bench-p2p" x="170" y="100" width="212" height="14" rx="3"><title>Amsterdam, båda samtidigt, peer-to-peer: 26.6 MB/s</title></rect>
+<text class="bench-value" x="388" y="111">26.6</text>
+<rect class="bench-s3" x="170" y="117" width="360" height="14" rx="3"><title>Amsterdam, båda samtidigt, S3-bucket: 45.2 MB/s</title></rect>
+<text class="bench-value" x="536" y="128">45.2</text>
+<text class="bench-label" x="162" y="164" text-anchor="end">Warszawa, båda samtidigt</text>
+<rect class="bench-p2p" x="170" y="148" width="94" height="14" rx="3"><title>Warszawa, båda samtidigt, peer-to-peer: 11.8 MB/s</title></rect>
+<text class="bench-value" x="270" y="159">11.8</text>
+<rect class="bench-s3" x="170" y="165" width="166" height="14" rx="3"><title>Warszawa, båda samtidigt, S3-bucket: 20.9 MB/s</title></rect>
+<text class="bench-value" x="342" y="176">20.9</text>
+<line class="bench-axis" x1="170" y1="0" x2="170" y2="188"/>
+</svg>
+<table class="downloads bench-table"><thead><tr><th>Läsare</th><th>Peer-to-peer: tid</th><th>MB/s</th><th>S3: tid</th><th>MB/s</th><th>P2P mot S3</th></tr></thead><tbody><tr><td>Amsterdam, ensam</td><td>159 s <span class="note">(158 s / 161 s)</span></td><td>27.0</td><td>180 s <span class="note">(171 s / 190 s)</span></td><td>23.9</td><td>1.1× snabbare</td></tr><tr><td>Warszawa, ensam</td><td>423 s <span class="note">(420 s / 426 s)</span></td><td>10.2</td><td>190 s <span class="note">(155 s / 226 s)</span></td><td>23.4</td><td>2.2× långsammare</td></tr><tr><td>Amsterdam, båda samtidigt</td><td>162 s <span class="note">(162 s / 161 s)</span></td><td>26.6</td><td>95 s <span class="note">(90 s / 101 s)</span></td><td>45.2</td><td>1.7× långsammare</td></tr><tr><td>Warszawa, båda samtidigt</td><td>365 s <span class="note">(367 s / 362 s)</span></td><td>11.8</td><td>208 s <span class="note">(185 s / 232 s)</span></td><td>20.9</td><td>1.8× långsammare</td></tr></tbody></table>
+<table class="downloads bench-table"><thead><tr><th>Version</th><th>Läsare</th><th>Tid</th><th>MB/s</th></tr></thead><tbody><tr><td>Peer-to-peer med QUIC provat före TCP (en anslutning per enhet), 10 oktober</td><td>Amsterdam, ensam</td><td>230 s <span class="note">(229 s / 230 s)</span></td><td>18.7</td></tr><tr><td>Peer-to-peer med QUIC provat före TCP (en anslutning per enhet), 10 oktober</td><td>Warszawa, ensam</td><td>466 s <span class="note">(466 s)</span></td><td>9.2</td></tr></tbody></table>
+<!-- /fragment -->
+    <p>Till Amsterdam, nio millisekunder bort, slog peer-to-peer bucketen med liten marginal och var betydligt jämnare: varje peer-to-peer-körning tog 158 s till 162 s, bucketens 171 s och 190 s. Till Warszawa var bucketen mer än dubbelt så snabb. Varje block på omkring 300 KiB är en HTTP-begäran på en ny TCP-anslutning: en handskakning, sedan TCP slow start från tio paket, så ett block behöver flera rundresor hur snabb förbindelsen än är. Vid 33 ms begränsar det åtta samtidiga begäranden till ungefär 10 MB/s, vilket är just vad som uppmättes. Bucketens HTTPS-anslutningar hålls öppna mellan begärandena.</p>
+    <p>Med båda läsarna samtidigt hämtade Warszawa 2.97 GB av sina 4.30 GB från Amsterdam (20 ms bort, närmare än Paris) och bara 1.3 GB från Paris; Amsterdam, som hade blocken först, levererade dem medan det laddade ned. Warszawa var till och med lite snabbare än ensamt (11.8 mot 10.2 MB/s) och Amsterdam lika snabbt som ensamt. Bucketen betjänade också två läsare samtidigt utan att någon av dem blev långsammare (45 och 21 MB/s); den är delad infrastruktur byggd för många läsare.</p>
+    <p class="note">Läsarens eget arbete: omkring 40 s CPU-tid för 4 GiB (dekryptering, två hashar per block, skrivning), högst 490 MB minne. Enheten i Paris använde 40 s CPU-tid för att leverera varje 4 GiB, en kärna ungefär till en fjärdedel upptagen.</p>
+
+    <h2 id="files">Många små filer</h2>
+    <p>10 000 filer på 1 KiB till 256 KiB. Varje fil är ett block. Sedan den 10 oktober hämtar en hämtning blocken för upp till 32 kommande filer tillsammans, åtta begäranden åt gången, innan de skrivs en och en.</p>
+<!-- fragment: files -->
+<p class="bench-legend"><span class="bench-key bench-p2p-key"></span>Peer-to-peer (från skrivaren i Paris) <span class="bench-key bench-s3-key"></span>S3-bucket i Paris <span class="note">(filer/s, mer är bättre)</span></p>
+<svg class="bench-chart" viewBox="0 0 620 188" role="img" aria-label="filer: filer/s per läsare, peer-to-peer och S3">
+<text class="bench-label" x="162" y="20" text-anchor="end">Amsterdam, ensam</text>
+<rect class="bench-p2p" x="170" y="4" width="360" height="14" rx="3"><title>Amsterdam, ensam, peer-to-peer: 90.2 filer/s</title></rect>
+<text class="bench-value" x="536" y="15">90.2</text>
+<rect class="bench-s3" x="170" y="21" width="135" height="14" rx="3"><title>Amsterdam, ensam, S3-bucket: 33.7 filer/s</title></rect>
+<text class="bench-value" x="311" y="32">33.7</text>
+<text class="bench-label" x="162" y="68" text-anchor="end">Warszawa, ensam</text>
+<rect class="bench-p2p" x="170" y="52" width="153" height="14" rx="3"><title>Warszawa, ensam, peer-to-peer: 38.4 filer/s</title></rect>
+<text class="bench-value" x="329" y="63">38.4</text>
+<rect class="bench-s3" x="170" y="69" width="137" height="14" rx="3"><title>Warszawa, ensam, S3-bucket: 34.2 filer/s</title></rect>
+<text class="bench-value" x="313" y="80">34.2</text>
+<text class="bench-label" x="162" y="116" text-anchor="end">Amsterdam, båda samtidigt</text>
+<rect class="bench-p2p" x="170" y="100" width="281" height="14" rx="3"><title>Amsterdam, båda samtidigt, peer-to-peer: 70.3 filer/s</title></rect>
+<text class="bench-value" x="457" y="111">70.3</text>
+<rect class="bench-s3" x="170" y="117" width="258" height="14" rx="3"><title>Amsterdam, båda samtidigt, S3-bucket: 64.7 filer/s</title></rect>
+<text class="bench-value" x="434" y="128">64.7</text>
+<text class="bench-label" x="162" y="164" text-anchor="end">Warszawa, båda samtidigt</text>
+<rect class="bench-p2p" x="170" y="148" width="154" height="14" rx="3"><title>Warszawa, båda samtidigt, peer-to-peer: 38.6 filer/s</title></rect>
+<text class="bench-value" x="330" y="159">38.6</text>
+<rect class="bench-s3" x="170" y="165" width="213" height="14" rx="3"><title>Warszawa, båda samtidigt, S3-bucket: 53.5 filer/s</title></rect>
+<text class="bench-value" x="389" y="176">53.5</text>
+<line class="bench-axis" x1="170" y1="0" x2="170" y2="188"/>
+</svg>
+<table class="downloads bench-table"><thead><tr><th>Läsare</th><th>Peer-to-peer: tid</th><th>MB/s</th><th>filer/s</th><th>S3: tid</th><th>MB/s</th><th>filer/s</th><th>P2P mot S3</th></tr></thead><tbody><tr><td>Amsterdam, ensam</td><td>111 s <span class="note">(111 s / 111 s)</span></td><td>2.6</td><td>90.2</td><td>299 s <span class="note">(323 s / 274 s)</span></td><td>1.0</td><td>33.7</td><td>2.7× snabbare</td></tr><tr><td>Warszawa, ensam</td><td>260 s <span class="note">(258 s / 263 s)</span></td><td>1.1</td><td>38.4</td><td>294 s <span class="note">(269 s / 320 s)</span></td><td>1.0</td><td>34.2</td><td>1.1× snabbare</td></tr><tr><td>Amsterdam, båda samtidigt</td><td>156 s <span class="note">(202 s / 110 s)</span></td><td>2.1</td><td>70.3</td><td>156 s <span class="note">(142 s / 170 s)</span></td><td>1.9</td><td>64.7</td><td>1.0× snabbare</td></tr><tr><td>Warszawa, båda samtidigt</td><td>259 s <span class="note">(265 s / 253 s)</span></td><td>1.1</td><td>38.6</td><td>192 s <span class="note">(161 s / 223 s)</span></td><td>1.6</td><td>53.5</td><td>1.3× långsammare</td></tr></tbody></table>
+<table class="downloads bench-table"><thead><tr><th>Version</th><th>Läsare</th><th>Tid</th><th>MB/s</th><th>filer/s</th></tr></thead><tbody><tr><td>S3 före förhandshämtning över filgränserna (en fil i taget), 9 oktober</td><td>Amsterdam, ensam</td><td>404 s <span class="note">(313 s / 495 s)</span></td><td>0.8</td><td>26.1</td></tr><tr><td>S3 före förhandshämtning över filgränserna (en fil i taget), 9 oktober</td><td>Amsterdam, båda samtidigt</td><td>381 s <span class="note">(381 s / 380 s)</span></td><td>0.8</td><td>26.2</td></tr><tr><td>S3 före förhandshämtning över filgränserna (en fil i taget), 9 oktober</td><td>Warszawa, båda samtidigt</td><td>528 s <span class="note">(494 s / 563 s)</span></td><td>0.6</td><td>19.1</td></tr><tr><td>S3 före förhandshämtning över filgränserna (en fil i taget), 9 oktober</td><td>Warszawa, ensam</td><td>596 s <span class="note">(536 s / 655 s)</span></td><td>0.5</td><td>16.9</td></tr></tbody></table>
+<!-- /fragment -->
+    <p>Till Amsterdam levererade peer-to-peer 90 filer i sekunden, 2.7 gånger bucketens 34. Till Warszawa, tre och en halv gånger längre bort, kom båda upp i samma 34 till 38 filer i sekunden: där dominerar rundresan per begäran, på båda vägarna. Förhandshämtning över filgränserna fördubblade bucketens hastighet till Warszawa (från 17 till 34 filer i sekunden) och hjälpte till Amsterdam (26 till 34). När blocken väl är på plats kostar skrivningen av varje fil (data synkade till disk, ett namnbyte, händelser i liggaren) några millisekunder på dessa nätverksblockvolymer, vilket begränsar varje källa till några hundra filer i sekunden.</p>
+    <p>Med båda läsarna samtidigt var Warszawa lika snabbt som ensamt, och Amsterdams två körningar skilde sig åt (202 s och 110 s): läsarnas block hämtas från den enhet som svarar först, och den ena körningen väntade mer på den andra läsaren än den andra körningen gjorde. Bucketen, uppmätt med båda läsarna tre timmar senare, levererade 64 filer i sekunden till Amsterdam och 53 till Warszawa: nästan dubbelt så mycket som den gav enskilda läsare i den tidigare sessionen. Dess hastighet beror mer på tiden på dygnet än på antalet läsare.</p>
+
+    <h2 id="text">Komprimerbar text</h2>
+    <p>512 MiB loggrader, lagrade som 138 MiB. Färre byte färdas, så en läsare får mer fil per sekund än med slumpmässiga data.</p>
+<!-- fragment: text -->
+<p class="bench-legend"><span class="bench-key bench-p2p-key"></span>Peer-to-peer (från skrivaren i Paris) <span class="bench-key bench-s3-key"></span>S3-bucket i Paris <span class="note">(MB/s, mer är bättre)</span></p>
+<svg class="bench-chart" viewBox="0 0 620 188" role="img" aria-label="text: MB/s per läsare, peer-to-peer och S3">
+<text class="bench-label" x="162" y="20" text-anchor="end">Amsterdam, ensam</text>
+<rect class="bench-p2p" x="170" y="4" width="327" height="14" rx="3"><title>Amsterdam, ensam, peer-to-peer: 16.7 MB/s</title></rect>
+<text class="bench-value" x="503" y="15">16.7</text>
+<rect class="bench-s3" x="170" y="21" width="354" height="14" rx="3"><title>Amsterdam, ensam, S3-bucket: 18.1 MB/s</title></rect>
+<text class="bench-value" x="530" y="32">18.1</text>
+<text class="bench-label" x="162" y="68" text-anchor="end">Warszawa, ensam</text>
+<rect class="bench-p2p" x="170" y="52" width="142" height="14" rx="3"><title>Warszawa, ensam, peer-to-peer: 7.2 MB/s</title></rect>
+<text class="bench-value" x="318" y="63">7.2</text>
+<rect class="bench-s3" x="170" y="69" width="327" height="14" rx="3"><title>Warszawa, ensam, S3-bucket: 16.7 MB/s</title></rect>
+<text class="bench-value" x="503" y="80">16.7</text>
+<text class="bench-label" x="162" y="116" text-anchor="end">Amsterdam, båda samtidigt</text>
+<rect class="bench-p2p" x="170" y="100" width="332" height="14" rx="3"><title>Amsterdam, båda samtidigt, peer-to-peer: 16.9 MB/s</title></rect>
+<text class="bench-value" x="508" y="111">16.9</text>
+<rect class="bench-s3" x="170" y="117" width="360" height="14" rx="3"><title>Amsterdam, båda samtidigt, S3-bucket: 18.4 MB/s</title></rect>
+<text class="bench-value" x="536" y="128">18.4</text>
+<text class="bench-label" x="162" y="164" text-anchor="end">Warszawa, båda samtidigt</text>
+<rect class="bench-p2p" x="170" y="148" width="160" height="14" rx="3"><title>Warszawa, båda samtidigt, peer-to-peer: 8.1 MB/s</title></rect>
+<text class="bench-value" x="336" y="159">8.1</text>
+<rect class="bench-s3" x="170" y="165" width="241" height="14" rx="3"><title>Warszawa, båda samtidigt, S3-bucket: 12.3 MB/s</title></rect>
+<text class="bench-value" x="417" y="176">12.3</text>
+<line class="bench-axis" x1="170" y1="0" x2="170" y2="188"/>
+</svg>
+<table class="downloads bench-table"><thead><tr><th>Läsare</th><th>Peer-to-peer: tid</th><th>MB/s</th><th>S3: tid</th><th>MB/s</th><th>P2P mot S3</th></tr></thead><tbody><tr><td>Amsterdam, ensam</td><td>32 s <span class="note">(33 s / 31 s)</span></td><td>16.7</td><td>36 s <span class="note">(21 s / 52 s)</span></td><td>18.1</td><td>1.1× snabbare</td></tr><tr><td>Warszawa, ensam</td><td>74 s <span class="note">(70 s / 79 s)</span></td><td>7.2</td><td>32 s <span class="note">(32 s / 32 s)</span></td><td>16.7</td><td>2.3× långsammare</td></tr><tr><td>Amsterdam, båda samtidigt</td><td>32 s <span class="note">(32 s / 31 s)</span></td><td>16.9</td><td>31 s <span class="note">(23 s / 39 s)</span></td><td>18.4</td><td>1.0× långsammare</td></tr><tr><td>Warszawa, båda samtidigt</td><td>66 s <span class="note">(63 s / 69 s)</span></td><td>8.1</td><td>63 s <span class="note">(28 s / 98 s)</span></td><td>12.3</td><td>1.0× långsammare</td></tr></tbody></table>
+
+<!-- /fragment -->
+    <p>Här var bucketen lite snabbare till Amsterdam och mer än dubbelt så snabb till Warszawa. Med båda läsarna samtidigt gav peer-to-peer Amsterdam samma 16.9 MB/s som ensamt och Warszawa 8.1 MB/s, något mer än ensamt; i den första av de två körningarna hämtade Warszawa två tredjedelar av sina block från Amsterdam, i den andra alla från Paris. En enhet som levererar ett block behåller inte den komprimerade kopian: den läser den okomprimerade filen och komprimerar blocket på nytt, med zstd nivå 12, för varje begäran; enheten i Paris använde 31 s CPU-tid per levererade 512 MiB, mot 40 s för 4 GiB slumpmässiga data. Bucketen returnerar det lagrade objektet som det är.</p>
+
+    <h2 id="writer">Skrivarens sida</h2>
+    <p>Innan något kan laddas ned delar skrivaren upp sina filer i block, komprimerar, krypterar och lagrar dem. Tre destinationer visar var tiden går: en RAM-disk (bara Varstos eget arbete), maskinens disk (en nätverksblockvolym, där varje objekt skrivs med en synkning till disk) och bucketen.</p>
+<!-- fragment: writer -->
+<table class="downloads bench-table"><tbody><tr><th>Datamängd</th><th>Destination</th><th>Version</th><th>Tid</th><th>MB/s</th><th>CPU (användare + system)</th><th>Minnestopp</th></tr><tr><td>filer: 10 000 filer, 0.27 GiB</td><td>RAM-disk (tmpfs)</td><td>uppmätt version</td><td>50 s <span class="note">(median av 2)</span></td><td>5.9</td><td>12 s (5 + 7)</td><td>68 MiB</td></tr><tr><td>filer: 10 000 filer, 0.27 GiB</td><td>S3-bucket, samma region</td><td>uppmätt version</td><td>652 s <span class="note">(median av 2)</span></td><td>0.5</td><td>21 s (8 + 13)</td><td>69 MiB</td></tr><tr><td>små: 50 000 filer, 1.36 GiB</td><td>RAM-disk (tmpfs)</td><td>uppmätt version</td><td>255 s <span class="note">(median av 2)</span></td><td>5.7</td><td>62 s (27 + 35)</td><td>258 MiB</td></tr><tr><td>små: 50 000 filer, 1.36 GiB</td><td>Lokal disk (nätverksblockvolym)</td><td>uppmätt version</td><td>468 s</td><td>3.1</td><td>67 s (27 + 41)</td><td>258 MiB</td></tr><tr><td>små: 50 000 filer, 1.36 GiB</td><td>Lokal disk (nätverksblockvolym)</td><td>alpha.8 (före zstd-åtgärden)</td><td>515 s</td><td>2.8</td><td>109 s (31 + 78)</td><td>253 MiB</td></tr><tr><td>stora: 2 filer, 4.00 GiB</td><td>S3-bucket, samma region</td><td>uppmätt version</td><td>932 s <span class="note">(median av 2)</span></td><td>4.6</td><td>80 s (37 + 43)</td><td>108 MiB</td></tr><tr><td>mycket stora: 5 filer, 12.00 GiB</td><td>Lokal disk (nätverksblockvolym)</td><td>uppmätt version</td><td>418 s</td><td>30.9</td><td>197 s (85 + 112)</td><td>147 MiB</td></tr><tr><td>mycket stora: 5 filer, 12.00 GiB</td><td>Lokal disk (nätverksblockvolym)</td><td>alpha.8 (före zstd-åtgärden)</td><td>694 s</td><td>18.6</td><td>483 s (110 + 373)</td><td>137 MiB</td></tr><tr><td>text: 128 filer, 0.50 GiB</td><td>RAM-disk (tmpfs)</td><td>uppmätt version</td><td>45 s <span class="note">(median av 2)</span></td><td>12.0</td><td>44 s (41 + 2)</td><td>68 MiB</td></tr><tr><td>text: 128 filer, 0.50 GiB</td><td>Lokal disk (nätverksblockvolym)</td><td>uppmätt version</td><td>56 s</td><td>9.6</td><td>45 s (42 + 3)</td><td>68 MiB</td></tr><tr><td>text: 128 filer, 0.50 GiB</td><td>Lokal disk (nätverksblockvolym)</td><td>alpha.8 (före zstd-åtgärden)</td><td>68 s</td><td>7.9</td><td>56 s (43 + 13)</td><td>68 MiB</td></tr><tr><td>text: 128 filer, 0.50 GiB</td><td>S3-bucket, samma region</td><td>uppmätt version</td><td>145 s <span class="note">(median av 2)</span></td><td>3.7</td><td>45 s (41 + 4)</td><td>77 MiB</td></tr></tbody></table>
+<!-- /fragment -->
+    <ul>
+      <li><strong>Slumpmässiga data</strong> kostar omkring 16 s CPU per GiB på dessa kärnor efter zstd-åtgärden (12 GiB: 197 s), mot 40 s per GiB före den.</li>
+      <li><strong>Text</strong> kostar omkring 85 s CPU per GiB: zstd på nivå 12, en konstant i formatet, är långsam på komprimerbara data; den ger förhållandet 3.7 : 1 som varje senare överföring drar nytta av.</li>
+      <li><strong>Små filer</strong> begränsas inte av CPU:n ens på en RAM-disk: 10 000 filer tog 50 s, varav 12 s CPU. Enhetens logiska klocka skrivs till disk, med två synkningar, för varje uppladdad fil. Ännu inte åtgärdat.</li>
+      <li><strong>Bucketen</strong> är överlägset långsammast: varje block är en HEAD och en PUT, efter varandra. 10 000 filer tog 622 s och 681 s, 4 GiB 578 s och 1 287 s de två dagarna. Uppladdningar sker ännu inte parallellt.</li>
+    </ul>
+
+    <h2 id="fixes">Åtgärdat på vägen</h2>
+    <p>Mätningen var också en jakt på flaskhalsar. Dessa ändringar finns i de uppmätta versionerna, var och en med ett test:</p>
+    <table class="downloads bench-table">
+      <thead><tr><th>Problem</th><th>Åtgärd</th><th>Före</th><th>Efter</th></tr></thead>
+      <tbody>
+        <tr><td>En nedladdning hämtade ett block i taget: varje block väntade en hel rundresa innan nästa begärdes.</td><td>Upp till åtta block i en fil samtidigt på väg, från andra enheter eller lagringsplatser, i ett glidande fönster; de kontrolleras och skrivs fortfarande i ordning. S3-klienten håller tillräckligt många vilande anslutningar för dem.</td><td>Text från bucketen till Warszawa: 122 s (4.4 MB/s)</td><td>27.8 s (19.4 MB/s), 4.4 gånger snabbare (enskilda körningar; steg på vägen: fasta omgångar om åtta 104 s, med vilande anslutningar kvar 61 s)</td></tr>
+        <tr><td>Små filer gick en i taget: varje fil är ett block, så fönstret ovan gällde aldrig.</td><td>En hämtning hämtar blocken för upp till 32 kommande filer med ett block var tillsammans (10 okt).</td><td>10 000 filer från bucketen till Warszawa: 596 s (17 filer/s)</td><td>294 s (34 filer/s)</td></tr>
+        <tr><td>Peer-to-peer-servern för HTTP besvarade en begäran i taget, så åtta samtidiga begäranden köade hos servern.</td><td>Åtta begäranden besvaras samtidigt.</td><td>Stora filer peer-to-peer till Amsterdam: 363 s (11.8 MB/s), en körning</td><td>159 s (27.0 MB/s)</td></tr>
+        <tr><td>En ny zstd-kontext skapades för varje block; dess tabeller allokerades och nollställdes varje gång, vilket var mer arbete än att komprimera blocket.</td><td>En kontext per tråd som återanvänds (utdata är identiska byte för byte, vilket ett test kontrollerar).</td><td>12 GiB till lokal disk: 694 s, 483 s CPU</td><td>418 s, 197 s CPU (enskilda körningar)</td></tr>
+        <tr><td>S3-klienten vägrade alla svar över 10 MiB. Efter en uppladdning av några tusen filer var liggarens batch 13 MB, och ingen annan enhet kunde ansluta eller synkronisera.</td><td>Svar på upp till 2 GiB läses.</td><td>Anslutningen misslyckades</td><td>Anslutningen fungerar; test med ett objekt på 12 MiB</td></tr>
+        <tr><td>Bakgrundstjänsten behandlade varje öppnad fil som en ändring: att leverera block till andra enheter, ett säkerhetskopieringsverktyg eller ett filvisningsprogram startade en fullständig synkronisering med några sekunders mellanrum.</td><td>Att öppna och läsa är inga ändringar; att stänga en fil som öppnats för skrivning är det fortfarande.</td><td>90 synkroniseringar på 11 minuter medan filer lästes</td><td>Läsning av alla 10 000 filer: ingen extra synkronisering</td></tr>
+        <tr><td>Samtidiga begäranden öppnade var och en sin egen QUIC-anslutning till en enhet som de ännu inte hade någon anslutning till.</td><td>Ett anslutningsförsök per adress; de andra väntar och delar på det (ett test kontrollerar en enda anslutning för en hel hämtning).</td><td colspan="2">Hittat vid test av QUIC (nedan)</td></tr>
+        <tr><td>En kvarhållen QUIC-anslutning till en enhet som hade startats om fick varje begäran över den att misslyckas, och enheten föll permanent tillbaka till nästa väg.</td><td>Anslut på nytt en gång och fråga igen.</td><td colspan="2">Hittat vid test av QUIC (nedan)</td></tr>
+        <tr><td>Begäranden som blev klara på en gammal väg kunde ångra ett byte till en bättre väg som en annan begäran just hade gjort.</td><td>Ett sent svar behåller den aktuella vägen.</td><td colspan="2">Hittat vid test av QUIC (nedan)</td></tr>
+      </tbody>
+    </table>
+
+    <h2 id="quic">Provat och återställt: QUIC först</h2>
+    <p>Eftersom TCP-vägen öppnar en anslutning per block såg QUIC ut som botemedlet: Varsto talar redan QUIC med enheter bakom NAT, med en anslutning per enhet och en ström per begäran. Den 10 oktober ändrades vägordningen så att QUIC provas före TCP för adresser utanför det lokala nätverket. Det var långsammare på dessa maskiner och använde mer än dubbelt så mycket CPU-tid:</p>
+    <table class="downloads bench-table">
+      <thead><tr><th>Stora filer, peer-to-peer</th><th>TCP först (behållet)</th><th>QUIC först (återställt)</th></tr></thead>
+      <tbody>
+        <tr><td>Amsterdam</td><td>159 s, 27.0 MB/s; läsaren 38 s CPU, Paris 40 s</td><td>230 s, 18.7 MB/s (229 s / 230 s); läsaren 98 s CPU, Paris 88 s</td></tr>
+        <tr><td>Warszawa</td><td>423 s, 10.2 MB/s</td><td>466 s, 9.2 MB/s (en körning); läsaren 130 s CPU</td></tr>
+      </tbody>
+    </table>
+    <p>Så TCP förblir förstahandsvalet och QUIC är fortsatt vägen genom NAT. Var QUIC-vägen förlorar sin tid hann inte utredas; värden tappade inga UDP-paket. Experimentet avslöjade också en brist som ännu inte är åtgärdad: en enhets peer-tabell byggs innan en synkronisering läser enhetsregistret, så en enhet som just har anslutit nekas över QUIC av de andra enheterna fram till deras nästa synkronisering (över TCP betjänas den direkt).</p>
+
+    <h2 id="bottlenecks">Fortfarande långsamt, och varför</h2>
+    <ul>
+      <li><strong>En TCP-anslutning per block på peer-to-peer-vägen</strong> (i de versioner som mättes här). Varje begäran betalade en handskakning och en ny slow start, vilket var det som begränsade Warszawa. <em>Ändrat sedan dess:</em> anslutningar till en enhet hålls nu öppna mellan begärandena, upp till 32 begäranden är på väg samtidigt, fönstret följer den uppmätta genomströmningen, och block som lagrats okomprimerade komprimeras inte längre på nytt när de levereras. På en maskin med en nätverksnamnrymd som emulerade en rundresa på 32 ms (Paris–Warszawa) vid 800 Mbit/s, som klarade 62 MB/s i en TCP-ström och 81 MB/s i 16, gick peer-to-peer från 10.4 till 44.7 MB/s för okomprimerbara data och från 11.3 till 38.6 MB/s för text, och bucketen (levererad av <code>rclone serve s3</code> över samma förbindelse) från 41.5 till 45.5 och från 39.1 till 52.8 MB/s (medelvärden av två körningar). Detta är lokala mätningar, inte en upprepning av körningarna ovan; mätskriptet är <code>scripts/bench/netem-local.sh</code>.</li>
+      <li><strong>Att leverera komprimerbara data kostar CPU,</strong> eftersom varje begäran komprimerar blocket på nytt; därför ligger text peer-to-peer under bucketen i emuleringen. Block som komprimerats för en enhet behålls nu i minnet (64 MiB som standard) för nästa enhet som frågar, till exempel när flera enheter kommer ikapp samtidigt.</li>
+      <li><strong>En nedladdning med peer-to-peer påslaget använder nu även bucketen</strong> när den svarar snabbare, i proportion till dess hastighet. I emuleringen delade båda på en förbindelse, så att använda båda var inte snabbare än vardera för sig (44.4 MB/s för båda datamängderna); över verkliga nätverk skiljer sig de två vägarna åt.</li>
+      <li><strong>Att skriva många små filer</strong> kostar en disksynkning per fil hos läsaren, och hos skrivaren två synkningar per fil för den logiska klockan.</li>
+      <li><strong>Uppladdningar till en bucket sker ett block i taget,</strong> med en HEAD före varje PUT.</li>
+      <li><strong>Liggaren växer med omkring 1 KB per block:</strong> uppladdningen av mängden på 4 GiB skrev en liggarbatch på 13 MB, som varje enhet läser när den ansluter.</li>
+    </ul>
+
+    <h2 id="when">När peer-to-peer vinner, och när bucketen gör det</h2>
+    <p>Varsto använder båda med avsikt, och mätningarna visar varför.</p>
+    <ul>
+      <li><strong>Peer-to-peer kräver en annan enhet online.</strong> Läsarna kunde hämta bara för att en enhet som hade blocken var igång. Bucketen finns alltid där: en hopfälld bärbar dator, en telefon i en låda, enheter som aldrig är online samtidigt synkroniserar alla ändå genom den. Därför har ett valv alltid minst en lagringsplats, och därför ligger fillistorna och liggaren kvar i den.</li>
+      <li><strong>Mellan närliggande enheter vinner peer-to-peer:</strong> 2.7 gånger snabbare för många små filer till Amsterdam än bucketen under samma session (under en senare session kom bucketen nära), lite snabbare och betydligt jämnare för stora filer. I ett lokalt nätverk är rundresan en bråkdel av en millisekund.</li>
+      <li><strong>Enheter som redan har data delar med sig av dem.</strong> Med två läsare hämtade Warszawa de flesta av sina block från Amsterdam; den första enheten som synkroniserar blir en källa för nästa, och skrivarens uppladdning skonas.</li>
+      <li><strong>Mellan avlägsna enheter och för komprimerbara data vann bucketen</strong> på dessa förbindelser: stora filer och text till Warszawa, text till Amsterdam med liten marginal. Orsakerna är kända (en anslutning per block, ny komprimering vid leverans) och ligger inte i nätverket: förbindelsen till Warszawa klarade 777 Mbit/s i en ström.</li>
+      <li><strong>Bucketen skalar till många läsare</strong> utan att belasta någons uppladdning; en enhet i hemmet som betjänar många andra begränsas av sin uppladdningshastighet, om inte läsarna hjälper varandra som ovan.</li>
+      <li><strong>Peer-to-peer kostar ingenting per gigabyte och lämnar ingen kopia hos någon leverantör.</strong> Data går från din enhet till din enhet; bucketen behöver blocken bara för de enheter som är offline när andra vill ha dem.</li>
+    </ul>
+
+    <h2 id="cost">Kostnad</h2>
+    <p>Scaleways publika prislista (läst den 9 oktober 2026, regionen Paris, exklusive moms): Object Storage Standard Multi-AZ €0.000022 per GB-timme (omkring €0.016 per GB-månad), begäranden ingår, inkommande trafik ingår, utgående trafik gratis för de första 75 GB i månaden och därefter €0.01 per GB. Överföringar mellan regioner (Paris – Amsterdam, Paris – Warszawa) räknas som utgående trafik; inom en region är de gratis.</p>
+    <p>En läsare i Amsterdam som laddar ned mängden på 4 GiB från bucketen i Paris kostar alltså omkring €0.04 när de fria 75 GB är förbrukade, och ett hushåll som synkroniserar 500 GB i månaden till enheter utanför bucketens region betalar omkring €4 i månaden för utgående trafik. Peer-to-peer flyttar samma byte över enheternas egna anslutningar och lägger inget till lagringsräkningen. Andra leverantörer tar mer betalt för utgående trafik eller per begäran; metoden ovan gäller för dem oförändrad. Maskinerna för den här mätningen (tre instanser à €0.147 i timmen, omkring sju och en halv timme under de två dagarna) kostade omkring €3.50.</p>
+
+    <h2 id="limits">Begränsningar i den här mätningen</h2>
+    <ul>
+      <li><strong>Två dagar, två versioner.</strong> Körningarna med stora filer från enskilda läsare och en del av bucketkörningarna är från den 9 oktober, resten från den 10 oktober; ändringarna mellan dem berör inte de jämförda fallen (se <a href="#done">ovan</a>). Bucketens hastighet skilde sig mellan dagarna.</li>
+      <li><strong>Molnmaskiner, inte hem.</strong> Förbindelser i datacenter, publika adresser på gränssnittet, ingen NAT, inget wifi. Hemma går peer-to-peer-vägen över internet oftast via QUIC genom en NAT med hålslagning, vilket dessa körningar bara mätte i det återställda experimentet; hemmets uppladdningshastighet skulle ofta vara gränsen.</li>
+      <li><strong>Tre regioner hos en leverantör, i Europa.</strong> Bucketen och maskinerna delar leverantör och stamnät; andra leverantörer och längre avstånd ger andra resultat.</li>
+      <li><strong>Nätverksblockvolymer</strong> gör varje disksynkning långsam (millisekunder), vilket väger tungt för små filer; en bärbar dators SSD synkar snabbare.</li>
+      <li><strong>Två körningar per fall</strong> är få; bucketens resultat varierade med upp till 58 % mellan upprepningar för små filer och med en faktor 3.5 för text, och bucketens hastighet för små filer nästan fördubblades mellan två sessioner samma dag.</li>
+      <li><strong>Alfaprogramvara.</strong> Format och standardvärden kan fortfarande ändras, och det kommer även de här siffrorna att göra.</li>
+    </ul>
+    <p class="note">Upprepa: <code>scripts/bench/p2p-bench.py</code> skapar maskinerna och bucketen med Scaleways kommandoradsverktyg, kör varje steg, skriver <code>results.jsonl</code> och raderar allt igen; <code>report.py</code> och <code>page.py</code> gör om resultaten till sammanfattningen och tabellerna på den här sidan.</p>
+    </div>

@@ -1,0 +1,41 @@
+---
+title: Alternativ till Resilio Sync: Varsto och Resilio Sync jämförda
+nav: Compare
+output: compare/resilio-sync/index.html
+description: Söker du ett alternativ till Resilio Sync med totalsträckskryptering på din egen lagring (S3, NAS, diskar, rclone)? Vad Resilio Sync är till för, hur det fungerar och hur det står sig mot Varsto.
+---
+    <p class="back-link"><a href="{{L}}compare/">Alla jämförelser</a></p>
+    <h1>Varsto och Resilio Sync</h1>
+    <p class="lead">Resilio Sync synkroniserar och delar mappar mellan enheter peer-to-peer, byggt på BitTorrent-teknik. Gratisutgåvan Sync Home är för privatpersoner; företagets huvudsakliga verksamhet är filöverföring för storföretag. Resilio köptes av Nasuni i mars 2026.</p>
+
+    <h2>Så fungerar Resilio Sync</h2>
+    <p>Enheterna ansluter direkt till varandra; det finns inget konto, och mappar delas med nycklar eller länkar (skrivskyddade eller med läs- och skrivrätt). Trackers och reläer som Resilio driver hjälper enheterna att hitta varandra. Data finns bara på enheterna; Sync Home har ingen S3- eller rclone-backend. Selektiv synkronisering med platshållarfiler finns, och en ”krypterad mapp” låter en enhet på en opålitlig maskin lagra data som den inte kan läsa (den enheten är skrivskyddad och saknar selektiv synkronisering).</p>
+
+    <h2>Sida vid sida</h2>
+    <table class="compare-table">
+      <thead><tr><th scope="col"></th><th scope="col">Resilio Sync</th><th scope="col">Varsto</th></tr></thead>
+      <tbody>
+      <tr><th scope="row">Var dina filer finns</th><td>Bara på enheterna (en NAS eller server räknas om den kör Resilio).</td><td>På dina egna enheter och på lagringsplatser du väljer: S3-kompatibla buckets, valfri rclone-fjärrlagring, lokala kataloger eller nätverkskataloger och pooler av flyttbara diskar.</td></tr>
+      <tr><th scope="row">Konto eller central server</th><td>Inget konto; trackers och reläer som Resilio driver.</td><td>Inget. Det finns ingen Varsto-server; enheterna hittar varandra via dina lagringsplatser och i det lokala nätverket.</td></tr>
+      <tr><th scope="row">Kryptering</th><td>Krypterat under överföring; krypterade mappar för opålitliga enheter. Stängd källkod, så det går inte att verifiera oberoende.</td><td>End-to-end, på klientsidan, innan något lämnar enheten; hybrid postkvantkryptografi (ML-KEM för nycklar vid delning, signaturer med Ed25519 + ML-DSA-65). Ännu inte oberoende granskad.</td></tr>
+      <tr><th scope="row">Enheterna online samtidigt</th><td>Ja, om inte en enhet hålls ständigt påslagen.</td><td>Behövs inte: enheterna synkroniserar via dina lagringsplatser, och direkt peer-to-peer när de når varandra.</td></tr>
+      <tr><th scope="row">Vet var varje kopia finns</th><td>Ingen uppföljning av kopior eller antal kopior.</td><td>Ja: en signerad liggare registrerar vilken lagringsplats och enhet som har varje block; lagringsregler (som standard 1 kopia var som helst, 1 extern, 1 på dina egna enheter eller diskar, kontrollerad av en annan enhet inom 30 dagar) varnar när en regel inte uppfylls.</td></tr>
+      <tr><th scope="row">Flyttbara diskar och diskar offline</th><td>Inget arbetsflöde för flyttbara diskar.</td><td>Ja: diskpooler fylls, kontrolleras och känns igen när de kommer tillbaka; filer på en disk som är borta ber om just den disken.</td></tr>
+      <tr><th scope="row">Licens och pris</th><td>Proprietär; Sync Home är gratis.</td><td>Källkoden tillgänglig (PolyForm Shield 1.0.0), gratis; du betalar bara din lagringsleverantör.</td></tr>
+      <tr><th scope="row">Mognad</th><td>Mogen kommersiell produkt; dess framtid efter förvärvet 2026 är ännu inte klarlagd.</td><td>Alfa: inte för produktionsdata, formaten kan fortfarande ändras.</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Vilken passar</h2>
+    <div class="grid two">
+      <div class="card"><h3>Resilio Sync</h3><p>Välj Resilio Sync när du vill ha snabb överföring i BitTorrent-stil mellan ständigt påslagna maskiner och enkel delning med nyckel eller länk, och en leverantörsprodukt med stängd källkod är acceptabel.</p></div>
+      <div class="card"><h3>Varsto</h3><p>Varstos peer-to-peer-överföring bygger på samma idé (krypterade block från flera enheter samtidigt), men lägger till dina egna lagringsplatser som den alltid tillgängliga kopian, en förteckning över var varje kopia finns, lagringsregler och en öppen specifikation av formaten.</p></div>
+    </div>
+    <p class="note">Varsto är alfaprogramvara: anförtro den inga data som du inte har någon annan kopia av, och dess kryptografi har inte granskats av någon oberoende part. De andra produkterna här är mogna. Uppgifterna om dem kontrollerades i deras egen dokumentation i oktober 2026; priser och abonnemang ändras ofta, så se deras egna sidor för aktuella siffror. Rättelser tas gärna emot på <a href="{{P}}forum/">forumet</a> eller på GitHub.</p>
+
+    <h2>Källor</h2>
+    <ul>
+      <li><a href="https://www.resilio.com/sync/">Resilio Syncs webbplats</a></li>
+      <li><a href="https://www.resilio.com/blog/understanding-the-sync-encrypted-folder">Krypterade mappar</a></li>
+      <li><a href="https://www.resilio.com/news/nasuni-acquires-resilio/">Nasuni köper Resilio</a></li>
+    </ul>

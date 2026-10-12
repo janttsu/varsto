@@ -7,6 +7,19 @@
 <meta name="description" content="Varsto documentation: Alpha-0 storage format and sync model">
 <meta name="color-scheme" content="light dark">
 <link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="canonical" href="https://varsto.net/docs/alpha-0-format.html">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Varsto">
+<meta property="og:title" content="Alpha-0 storage format and sync model: Varsto">
+<meta property="og:description" content="Varsto documentation: Alpha-0 storage format and sync model">
+<meta property="og:url" content="https://varsto.net/docs/alpha-0-format.html">
+<meta property="og:image" content="https://varsto.net/assets/img/og-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:locale" content="en_GB">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="alternate" hreflang="en" href="https://varsto.net/docs/alpha-0-format.html">
+<link rel="alternate" hreflang="x-default" href="https://varsto.net/docs/alpha-0-format.html">
 <link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../blog/feed.xml">
 <link rel="stylesheet" href="../assets/css/site.css?v=b3d2d4f387">
 <script src="../assets/js/theme.js?v=0951491269"></script>
@@ -19,6 +32,7 @@
 <header class="site">
   <div class="wrap">
     <a class="brand" href="../"><img src="../assets/img/logo.svg" alt="" width="28" height="28"><span>Varsto</span></a>
+
     <nav class="main" aria-label="Main">
       <a href="../">Project</a>
       <a href="../features/">Features</a>
@@ -30,6 +44,7 @@
       <a href="../downloads/">Downloads</a>
       <a href="../blog/">Blog</a>
       <a href="../forum/">Forum</a>
+      <a href="../contribute/">Contribute</a>
       <a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a>
       <button class="theme" id="theme-toggle" type="button" aria-label="Change colour theme">Theme: auto</button>
     </nav>
@@ -710,6 +725,17 @@ trash/          deleted files</code></pre>
 <p><strong>Block sizes.</strong> The chunker parameters follow the file size: below 32 MiB 64 KiB to 1 MiB (average 256 KiB), below 1 GiB 256 KiB to 4 MiB (average 1 MiB), larger 1 to 16 MiB (average 4 MiB). The size alone decides; no compatibility with the single set of earlier versions is kept. Memory stays bounded: at most 128 MiB of encrypted data waits for the uploaders, and about 96 MiB of blocks is in flight per downloaded file.</p>
 <p><strong>Default policy.</strong> A folder without a policy of its own uses 1 copy on any storage, 1 at place <code>cloud</code>, 1 at place <code>home</code>, verified by another device within 30 days. <code>policy clear</code> stores an empty policy, so the default does not return. A move keeps a copy only when dropping it makes the policy worse; freeing advice ignores places the vault has no storage in.</p>
 <p><strong>Other.</strong> <code>varsto transfers [--watch] [--json]</code> lists uploads and downloads running in the service (<code>/api/progress</code> field <code>transfers</code>) with peer traffic. S3 refusals are explained in words before the technical detail. Turning selective sync off downloads the placeholders on the next sync. Temporary files of atomic writes are unique per write.</p>
+<h2 id="30-packs-for-small-blocks-001-alpha12">30. Packs for small blocks (0.0.1-alpha.12)</h2>
+<p><strong>Why.</strong> A folder of small files is one block per file, and every block was one object on every storage: twenty thousand notes meant twenty thousand uploads, list entries and verifications, and on storage classes with a minimum billable object size each one cost as much as a much larger object.</p>
+<p><strong>Layout.</strong> A push collects the encrypted objects of blocks up to 128 KiB and writes them together once 4 MiB or 256 of them are waiting (and what is left at the end of the push):</p>
+<ul>
+<li><code>packs/&lt;id[..2]&gt;/&lt;id&gt;.pack</code>: the objects' bytes one after another, unchanged (each is still ciphertext named by its hash);</li>
+<li><code>packs/&lt;id[..2]&gt;/&lt;id&gt;.idx</code>: JSON <code>{"format": 1, "pack": &lt;id&gt;, "members": [{"object", "offset", "len"}]}</code>, written after the pack, which makes its objects visible;</li>
+<li><code>packs/&lt;id[..2]&gt;/&lt;id&gt;.del.&lt;object&gt;</code>: an empty marker per object deleted from the pack.</li>
+</ul>
+<p><code>&lt;id&gt;</code> is the hex hash of the pack's bytes, so writing the same pack twice is harmless. Packs are written to hot storages that are not transferrers (S3 buckets, rclone remotes, directories); cold storage, transferrers and disk pools keep one object per block, because restores, deliveries and disk placement work per object there. A storage may hold both single objects and packs.</p>
+<p><strong>Reading.</strong> Every storage is opened through a layer that knows its packs (<code>packs::PackAware</code>): it lists <code>packs/</code> once, reads the indexes and markers it has not seen, and answers <code>chunks/&lt;xx&gt;/&lt;object&gt;</code> for a packed object with a ranged read of the pack (<code>Range</code> on S3, <code>rclone cat --offset --count</code>, a seek on directories). A miss reloads the indexes at most every 30 seconds. Listing <code>chunks/</code> includes packed objects, so verification, fsck and repair see them like any other; every reader checks the object's hash as before.</p>
+<p><strong>Deleting.</strong> Deleting a packed object writes its marker; when every object of a pack is marked, the pack, its index and the markers are deleted. A repair of a damaged packed object marks it deleted and writes a single object in its place. The ledger is unchanged: it records objects by name, wherever their bytes are.</p>
 
 </article>
   </div>

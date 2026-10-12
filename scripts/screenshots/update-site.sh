@@ -5,7 +5,8 @@
 #   scripts/screenshots/update-site.sh <run id>        # that run (e.g. a release tag's run)
 #   scripts/screenshots/update-site.sh --dir <dir>     # finalize.py output from elsewhere
 # Copies the pictures into website/public/assets/img/screenshots, sets their
-# width and height on the Screenshots page, states the version, commit and
+# width and height on the Screenshots page (and its Finnish and Swedish
+# copies), states the version, commit and
 # date they were captured from, and rebuilds the site (deploy separately with
 # website/deploy.sh).
 set -euo pipefail
@@ -27,25 +28,41 @@ else
 fi
 [ -f "$src/shots.json" ] || { echo "$src has no shots.json (run finalize.py first)" >&2; exit 1; }
 mkdir -p "$dest"
-python3 - "$src" "$dest" "$root/website/src/pages/screenshots.html" <<'PY'
+python3 - "$src" "$dest" "$root/website/src" <<'PY'
 import json, pathlib, re, shutil, sys
-src, dest, page = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2]), pathlib.Path(sys.argv[3])
+src, dest, pages = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2]), pathlib.Path(sys.argv[3])
 meta = json.loads((src / "shots.json").read_text())
-html = page.read_text()
-for name, (w, h) in sorted(meta["sizes"].items()):
+# The caption per language; the English page and its Finnish and Swedish copies.
+CAPTION = {
+    "en": ("Captured automatically from version {v}{c} on {d}{s}.", "GitHub Actions run"),
+    "fi": ("Kuvattu automaattisesti versiosta {v}{c} {d}{s}.", "GitHub Actions -ajo"),
+    "sv": ("Tagna automatiskt från version {v}{c} den {d}{s}.", "GitHub Actions-körning"),
+}
+def stamp(lang, version, commit, date, source, esc=lambda s: s):
+    text, run = CAPTION[lang]
+    source = re.sub(r"^GitHub Actions run", run, source or "")
+    return '<span class="shots-meta">' + text.format(
+        v=esc(version), c=f" (commit {esc(commit[:7])})" if commit else "", d=esc(date),
+        s=f", {esc(source)}" if source else "") + "</span>"
+for name in meta["sizes"]:
     shutil.copyfile(src / f"{name}.png", dest / f"{name}.png")
-    pat = re.compile(r'(src="\.\./assets/img/screenshots/' + re.escape(name) + r'\.png"[^>]*?) width="\d+" height="\d+"')
-    html, n = pat.subn(rf'\1 width="{w}" height="{h}"', html)
-    print(f"{name}.png {w}x{h}" + ("" if n else "  (not on the page)"))
-commit = meta.get("commit", "")[:7]
-stamp = f'<span class="shots-meta">Captured automatically from version {meta["version"]}' + \
-        (f' (commit {commit})' if commit else '') + f' on {meta["date"]}' + \
-        (f', {meta["source"]}' if meta.get("source") else '') + '.</span>'
-html, n = re.subn(r'<span class="shots-meta">.*?</span>', stamp, html, flags=re.S)
-if not n:
-    print("!! the page has no shots-meta span", file=sys.stderr)
-page.write_text(html)
-print(stamp)
+for lang, page in [("en", pages / "pages/screenshots.html"),
+                   ("fi", pages / "i18n/fi/pages/screenshots.html"),
+                   ("sv", pages / "i18n/sv/pages/screenshots.html")]:
+    if not page.exists():
+        continue
+    html = page.read_text()
+    for name, (w, h) in sorted(meta["sizes"].items()):
+        pat = re.compile(r'(src="(?:\.\./|\{\{P\}\})*assets/img/screenshots/' + re.escape(name) + r'\.png"[^>]*?) width="\d+" height="\d+"')
+        html, n = pat.subn(rf'\1 width="{w}" height="{h}"', html)
+        if lang == "en":
+            print(f"{name}.png {w}x{h}" + ("" if n else "  (not on the page)"))
+    s = stamp(lang, meta["version"], meta.get("commit", ""), meta["date"], meta.get("source", ""))
+    html, n = re.subn(r'<span class="shots-meta">.*?</span>', lambda _: s, html, flags=re.S)
+    if not n:
+        print(f"!! {page} has no shots-meta span", file=sys.stderr)
+    page.write_text(html)
+    print(s)
 PY
 python3 "$root/website/build.py" >/dev/null
 echo "site rebuilt; deploy with website/deploy.sh"

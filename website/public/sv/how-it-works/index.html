@@ -1,0 +1,293 @@
+<!doctype html>
+<html lang="sv">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Så fungerar det: Varsto</title>
+<meta name="description" content="Så fungerar Varsto: dina enheter och dina egna lagringsplatser, krypterade block, nycklar, den signerade liggaren som håller reda på varje kopia, synkronisering, peer-to-peer-överföring, delning, Strongroom och återställningspaketet, med de ärliga begränsningarna.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="../../favicon.svg" type="image/svg+xml">
+<link rel="canonical" href="https://varsto.net/sv/how-it-works/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Varsto">
+<meta property="og:title" content="Så fungerar det: Varsto">
+<meta property="og:description" content="Så fungerar Varsto: dina enheter och dina egna lagringsplatser, krypterade block, nycklar, den signerade liggaren som håller reda på varje kopia, synkronisering, peer-to-peer-överföring, delning, Strongroom och återställningspaketet, med de ärliga begränsningarna.">
+<meta property="og:url" content="https://varsto.net/sv/how-it-works/">
+<meta property="og:image" content="https://varsto.net/assets/img/og-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:locale" content="sv_SE">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="alternate" hreflang="en" href="https://varsto.net/how-it-works/">
+<link rel="alternate" hreflang="x-default" href="https://varsto.net/how-it-works/">
+<link rel="alternate" hreflang="fi" href="https://varsto.net/fi/how-it-works/">
+<link rel="alternate" hreflang="sv" href="https://varsto.net/sv/how-it-works/">
+<link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../../blog/feed.xml">
+<link rel="stylesheet" href="../../assets/css/site.css?v=b3d2d4f387">
+<script src="../../assets/js/theme.js?v=0951491269"></script>
+</head>
+<body>
+<a class="skip" href="#main">Hoppa till innehållet</a>
+<div class="alpha" role="note">
+  <div class="wrap"><strong>Alfaprogramvara, inte för produktionsdata.</strong> Fel kan leda till dataförlust, formatet kan ändras utan migrering och krypteringen har ännu inte granskats av utomstående. Behåll egna säkerhetskopior och kontrollera att du kan återställa från dem.</div>
+</div>
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="../../sv/"><img src="../../assets/img/logo.svg" alt="" width="28" height="28"><span>Varsto</span></a>
+    <nav class="langs" aria-label="Language"><a href="../../how-it-works/" hreflang="en" lang="en">English</a> <a href="../../fi/how-it-works/" hreflang="fi" lang="fi">Suomi</a> <a href="../../sv/how-it-works/" hreflang="sv" lang="sv" aria-current="true">Svenska</a></nav>
+
+    <nav class="main" aria-label="Main">
+      <a href="../../sv/">Projekt</a>
+      <a href="../../sv/features/">Funktioner</a>
+      <a href="../../sv/use-cases/">Användningsfall</a>
+      <a href="../../sv/compare/">Jämförelse</a>
+      <a href="../../sv/how-it-works/" aria-current="page">Så fungerar det</a>
+      <a href="../../sv/screenshots/">Skärmbilder</a>
+      <a href="../../docs/">Dokumentation (en)</a>
+      <a href="../../sv/downloads/">Nedladdningar</a>
+      <a href="../../blog/">Blogg (en)</a>
+      <a href="../../forum/">Forum (en)</a>
+      <a href="../../sv/contribute/">Bidra</a>
+      <a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a>
+      <button class="theme" id="theme-toggle" type="button" aria-label="Change colour theme">Theme: auto</button>
+    </nav>
+  </div>
+</header>
+<main id="main">
+  <div class="wrap">
+    <div class="tech">
+    <h1>Så fungerar Varsto</h1>
+    <p class="lead">Tekniken bakom Varsto, en mekanism i taget: hur en fil blir krypterade block, vilka nycklar som finns, hur den signerade liggaren håller reda på varje kopia, hur enheter synkroniserar och hittar varandra, och vad som ännu inte är klart.</p>
+    <p>Allt här är implementerat i kärnan, vars källkod är tillgänglig (<code>crates/varsto-core</code>), och beskrivs med exakta fältlayouter i <a href="../../docs/alpha-0-format.html">lagringsformatet</a>. Det är alfaprogramvara: formaten kan fortfarande ändras, och varken designen eller koden har granskats. <a href="../../docs/threat-model.html">Hotmodellen</a> och <a href="../../docs/failure-model.html">felmodellen</a> beskriver vad den skyddar mot och inte.</p>
+
+    <nav class="toc" aria-label="På den här sidan">
+      <p class="toc-title">På den här sidan</p>
+      <ol>
+        <li><a href="#overview">Översikt</a></li>
+        <li><a href="#blocks">Från fil till krypterade block</a></li>
+        <li><a href="#keys">Nycklar</a></li>
+        <li><a href="#ledger">Liggaren</a></li>
+        <li><a href="#sync">Fillistor och synkronisering</a></li>
+        <li><a href="#p2p">Peer-to-peer</a></li>
+        <li><a href="#visibility">Vad varje part kan se</a></li>
+        <li><a href="#sharing">Dela en mapp</a></li>
+        <li><a href="#strongroom">Strongroom</a></li>
+        <li><a href="#recovery">Lösenfraser och återställningspaketet</a></li>
+        <li><a href="#limits">Vad som inte är klart</a></li>
+      </ol>
+    </nav>
+
+    <section class="feature" id="overview">
+      <h2>Översikt</h2>
+      <picture><source type="image/webp" srcset="../../assets/img/encryption/architecture.webp"><img src="../../assets/img/encryption/architecture.png" alt="En bärbar dator och en telefon, som båda har nycklarna, utbyter data med dina lagringsplatser, som rymmer de signerade liggarbatcherna, fillistorna och de krypterade blocken; de två enheterna utbyter också block direkt, peer-to-peer, i det lokala nätverket eller över internet." width="640" height="320" loading="lazy"></picture>
+      <div>
+        <p>Varsto består av två sorters delar, och inget av vårt däremellan.</p>
+        <ul>
+          <li><strong>Dina enheter</strong> (bärbara datorer, stationära datorer, telefoner) har nycklarna. De delar upp filer i block, krypterar och dekrypterar, och kör synkroniseringen i en bakgrundstjänst.</li>
+          <li><strong>Dina lagringsplatser</strong> rymmer bara chiffertext: en S3-kompatibel bucket, valfri rclone-remote, en NAS eller nätverksutdelning, en lokal eller flyttbar disk, eller en pool av diskar på en hylla. Varsto behöver inget av dem utöver put, get, list och delete.</li>
+        </ul>
+        <p>Varje lagringsplats rymmer samma tre sorters objekt: krypterade <strong>block</strong> med filinnehåll, varje enhets krypterade <strong>fillistor</strong> (manifest) och varje enhets signerade <strong>liggare</strong>, plus några små krypterade poster för enheter, mappar och regler. Varje sökväg har exakt en skrivare: en enhet skriver bara under sitt eget id, och block namnges efter hashvärdet av sin chiffertext och skrivs aldrig över. Lagringsplatserna behöver därför inga lås, och var och en fungerar också som brevlåda: enheter som aldrig är online samtidigt blir ändå samstämmiga, så länge de delar en lagringsplats. Enheter kan också utbyta block direkt, i det lokala nätverket eller över internet.</p>
+        <p>Det finns inget Varsto-konto, ingen server och inget relä. Om projektet upphörde i morgon skulle dina installerade enheter fortsätta synkronisera via dina lagringsplatser.</p>
+      </div>
+    </section>
+
+    <section class="feature" id="blocks">
+      <h2>Från fil till krypterade block</h2>
+      <picture><source type="image/webp" srcset="../../assets/img/encryption/pipeline.webp"><img src="../../assets/img/encryption/pipeline.png" alt="På enheten delas en fil upp i bitar som komprimeras och krypteras med en nyckel per bit; bara de krypterade blocken, namngivna efter sitt hashvärde, går till lagringsplatsen, som ser hashvärden och storlekar men inga namn eller innehåll." width="640" height="320" loading="lazy"></picture>
+      <div>
+        <ol>
+          <li><strong>Uppdelning.</strong> Filen delas upp i innehållsdefinierade bitar vars storlek följer filen: ungefär 256 KiB för filer under 32 MiB, 1 MiB upp till 1 GiB, 4 MiB därutöver (en rullande hash väljer delningspunkterna), så att en ändring mitt i filen påverkar några bitar, inte hela filen.</li>
+          <li><strong>Identitet.</strong> Varje bit får ett id: en nyckelad BLAKE3-hash av klartexten under mappens dedup-hashnyckel. Samma innehåll i samma mapp får samma id på varje enhet, vilket gör att deduplicering fungerar offline; nyckeln hindrar den som saknar den från att testa om du har en känd fil.</li>
+          <li><strong>Komprimering.</strong> Biten komprimeras med zstd när det sparar minst 5 %. Nivån är en formatkonstant, så varje enhet producerar samma byte för samma bit.</li>
+          <li><strong>Kryptering.</strong> XChaCha20-Poly1305 under en bitnyckel och en nonce som härleds ur mappnyckeln och bitens id, med associerade data som anger valvet, mappen, biten och dess längd. Deterministiska nycklar är säkra här eftersom varje nyckel krypterar exakt ett meddelande, och de gör att två enheter kan producera byte-identiska objekt utan att kommunicera.</li>
+          <li><strong>Namngivning.</strong> Det lagrade objektet namnges efter BLAKE3-hashen av sin chiffertext. Varje kopia, var den än finns, kan kontrolleras mot sitt namn utan någon nyckel: det är så repliker, peers, <code>fsck --verify</code> och den automatiska verifieringen kontrollerar kopior de inte kan läsa.</li>
+        </ol>
+        <p class="note">Känd avvägning: deterministisk (konvergent) kryptering inom en mapp innebär att två personer som båda har mappnyckeln kan avgöra om de har en identisk fil, och de komprimerade bitarnas storlekar syns för lagringsplatsen. I en delad mapp gäller det under en nyckelepok; när en medlem tas bort får mappen en ny slumpmässig nyckel, så en borttagen medlem kan inte känna igen något som skrivs därefter.</p>
+      </div>
+    </section>
+
+    <section class="feature" id="keys">
+      <h2>Nycklar</h2>
+      <picture><source type="image/webp" srcset="../../assets/img/encryption/hierarchy.webp"><img src="../../assets/img/encryption/hierarchy.png" alt="En slumpmässig valvnyckel härleder valvets ändamålsnycklar (liggare, register, mapppost med flera); mapppostnyckeln förseglar varje mapps slumpmässiga nyckel, ur vilken metadatanyckeln och en nyckel per bit kommer." width="640" height="320" loading="lazy"></picture>
+      <div>
+        <p>Allt utgår från en enda slumpmässig 256-bitars <strong>valvnyckel</strong>, som skapas på den första enheten och aldrig härleds ur något du skriver. Den är den enda hemligheten att ta vara på; återställningspaketet är den nyckeln på papper.</p>
+        <ul>
+          <li><strong>På varje enhet</strong> lagras valvnyckeln och enhetens signeringsnyckel i <code>keys.enc</code>, krypterade under en nyckel som Argon2id härleder ur enhetens lösenfras. Att byta lösenfras krypterar om den filen och rör ingenting på lagringsplatserna.</li>
+          <li><strong>Valvövergripande nycklar</strong> härleds ur valvnyckeln efter ändamål: liggare, enhetsregister, mapppost, replikliggare, peer-autentisering och beacon-tagg. Om en härledd nyckel röjs avslöjas inte de andra.</li>
+          <li><strong>Per mapp</strong> publiceras en slumpmässig mappnyckel till dina andra enheter i en krypterad mapppost. Ur den kommer dedup-hashnyckeln, metadatanyckeln (fillistor och miniatyrer) och en nyckel per bit. En mappnyckel öppnar den mappen och inget annat; det är den som lämnas över vid delning.</li>
+          <li><strong>Per enhet</strong> finns en signeringsnyckel (Ed25519 + ML-DSA-65) vars publika del är enhetens identitet; enhetens id är en hash av den.</li>
+        </ul>
+        <p><strong>När en enhet tas bort</strong> inleds en ny nyckel<em>epok</em>: en ny slumpmässig valvnyckel, förseglad till var och en av de kvarvarande enheterna med det hybrida nyckelutbytet nedan. Nya liggarbatcher, poster, fillistor och block använder de nya nycklarna, och en kedja av krypterade epokposter låter den nya nyckeln öppna allt äldre. Den borttagna enheten hittar en signerad återkallelse nästa gång den når en lagringsplats och slutar; med en raderingsorder tömmer den också sina mappar och nycklar.</p>
+      </div>
+    </section>
+
+    <h3>Algoritmerna</h3>
+    <table class="downloads">
+      <thead><tr><th>Ändamål</th><th>Algoritm</th><th>Anmärkningar</th></tr></thead>
+      <tbody>
+        <tr><td>Kryptering av innehåll och metadata</td><td>XChaCha20-Poly1305 (AEAD)</td><td>256-bitars nycklar, 192-bitars nonces. Varje chiffertext bär associerade data som anger vad den är, så en lagringsplats kan inte flytta ett objekt till en annan roll.</td></tr>
+        <tr><td>Hashning och nyckelhärledning</td><td>BLAKE3 (nyckelad hash och derive_key)</td><td>Bit-id:n och filhashar är nyckelade. Varje härledd nyckel bär kontexten <code>e2ee-sync-format/0/&lt;purpose&gt;</code>.</td></tr>
+        <tr><td>Från lösenfras till nyckel</td><td>Argon2id</td><td>Minst 64 MiB, 3 pass; ett slumpmässigt salt per enhet. Lösenfrasen lämnar aldrig enheten.</td></tr>
+        <tr><td>Signaturer (liggare, poster)</td><td>Ed25519 + ML-DSA-65, hybrid</td><td>Båda signaturerna täcker samma byte och båda måste verifieras. En nyckel med en postkvantdel godtar aldrig en signatur med enbart Ed25519.</td></tr>
+        <tr><td>Nyckelutbyte (delning, nya epoker)</td><td>X25519 + ML-KEM-768, hybrid</td><td>Båda delade hemligheterna och hela transkriptet går in i en nyckel; en förseglad hemlighet förblir privat om inte båda algoritmerna knäcks.</td></tr>
+        <tr><td>Mappar med säkerhetsnyckel</td><td>FIDO2 hmac-secret</td><td>Säkerhetsnyckeln härleder en 32-byte hemlighet ur en credential och ett salt per mapp efter en beröring.</td></tr>
+        <tr><td>Återställningspaket</td><td>BIP-39-ord, Shamir över GF(256)</td><td>24 ord med kontrollsumma; valfritt 2-av-3-andelar.</td></tr>
+      </tbody>
+    </table>
+
+    <section class="feature" id="ledger">
+      <h2>Liggaren</h2>
+      <picture><source type="image/webp" srcset="../../assets/img/encryption/ledger-flow.webp"><img src="../../assets/img/encryption/ledger-flow.png" alt="Den bärbara datorn skriver liggarbatch 42 till dina lagringsplatser; den stationära datorn läser den, kontrollerar den och slår samman den; varje enhets vy svarar sedan på var block 7f3a finns: på box, lagrat av den bärbara datorn och verifierat av den stationära, och på cloud, lagrat av den bärbara datorn men ännu inte verifierat." width="640" height="320" loading="lazy"></picture>
+      <div>
+        <p>Liggaren är Varstos bokföring. Varje enhet för sin egen <strong>logg över fakta som bara kan läggas till</strong> om vad den har gjort, och ingen enhet skriver någonsin i en annans logg. Fakta är små och konkreta: ”Jag skrev block 7f3a till lagringsplatsen jag kallar box”, ”Jag laddade ner 7f3a från box och hashvärdet stämde”, ”Jag publicerade version 12 av den här mappens fillista”.</p>
+        <p>Varje enhet läser alla andra enheters loggar via lagringsplatserna och spelar upp dem alla till samma bild: vilka block som finns, var varje kopia finns, vem som skrev den, vem som har kontrollerat den och när. Inget i den betros på grund av var det kom ifrån: varje batch är signerad av enheten som skapade den, och en kopia räknas som verifierad först när en annan enhet har kontrollerat den.</p>
+        <p>Utan liggaren kan ett synkroniseringsverktyg bara hoppas att dess kopior finns. Med den kan Varsto säga hur många kopior av varje block som finns, på vilka platser, hur nyligen var och en kontrollerades och vilka ingen har kontrollerat än.</p>
+      </div>
+    </section>
+
+    <h3>Vad den registrerar</h3>
+    <table class="downloads">
+      <thead><tr><th>Händelse</th><th>Betydelse</th></tr></thead>
+      <tbody>
+        <tr><td>Enhet registrerad</td><td>Den här enheten anslöt till valvet, under det här namnet.</td></tr>
+        <tr><td>Mapp tillagd</td><td>Den här enheten skapade en mapp.</td></tr>
+        <tr><td>Block lagrat</td><td>Den här enheten skrev ett krypterat block till en lagringsplats: mapp, bit-id, objektnamn, storlek och lagringsplats. Ett påstående som bara intygas av skrivaren.</td></tr>
+        <tr><td>Block verifierat</td><td>Den här enheten laddade ner blocket från en lagringsplats och hashvärdet stämde med namnet. Registreras vid nedladdningar, <code>fsck --verify</code>, automatisk verifiering och fullständiga diskkontroller.</td></tr>
+        <tr><td>Block på enhet</td><td>Den här enheten har blockets klartext, som del av en fil.</td></tr>
+        <tr><td>Fillista publicerad</td><td>Den här enheten publicerade version <em>n</em> av en mapps fillista, med dess hash och antal filer.</td></tr>
+        <tr><td>Lagringsplats avvecklad</td><td>En lagringsplats togs bort från valvet: påståenden om den som gjorts före den här händelsen räknas inte längre som kopior.</td></tr>
+      </tbody>
+    </table>
+    <p>Inga filnamn och inget innehåll: block identifieras med nyckelade bit-id:n och chiffertexthashar, och hela batchen är dessutom krypterad.</p>
+
+    <section class="feature">
+      <h3>Signerad, kedjad och förseglad</h3>
+      <picture><source type="image/webp" srcset="../../assets/img/encryption/chain.webp"><img src="../../assets/img/encryption/chain.png" alt="Liggarbatcherna 40, 41 och 42, var och en signerad med Ed25519 och ML-DSA-65 och kedjad till den föregående; en andra batch 41 från en tillbakarullad enhet förgrenar kedjan och upptäcks och spärras av de andra enheterna." width="640" height="320" loading="lazy"></picture>
+      <div>
+        <p>Händelser samlas i <strong>batcher</strong>, vanligen en per synkronisering snarare än en per fil. En batch bär enhetens id, ett sekvensnummer (1, 2, 3, ...), hashen av enhetens föregående batch, en logisk klocka, när den skapades och händelserna.</p>
+        <ol>
+          <li>Innehållet krypteras med XChaCha20-Poly1305 under liggarnyckeln, med enhetens id och sekvensnumret som associerade data.</li>
+          <li>Enheten signerar sitt id, sekvensnumret och hashen av det krypterade innehållet med både Ed25519 och ML-DSA-65. Eftersom chiffertextens hash signeras kan vem som helst kontrollera kedjan utan nyckeln.</li>
+          <li>Den signerade batchen skrivs till varje lagringsplats som rymmer poster som <code>ledger/&lt;device&gt;/&lt;sequence&gt;</code>, och skrivs aldrig över.</li>
+        </ol>
+        <p>En läsare godtar en batch bara när båda signaturerna verifieras mot enhetens publika nyckel i enhetsregistret och dess föregående hash stämmer. Postkvantsignaturen kostar ungefär 3,3 KB, och därför färdas händelserna i batcher: liggaren växer med några kilobyte per synkronisering, inte per fil.</p>
+      </div>
+    </section>
+
+    <h3>Utbyts via dina lagringsplatser</h3>
+    <p>Varje lagringsplats är en brevlåda. När en enhet har sparat en batch laddar den upp alla egna batcher som en lagringsplats saknar; vid varje hämtning listar den liggaren på varje varm lagringsplats, tar de batcher den inte har sett, kontrollerar dem, dekrypterar dem och behåller en lokal kopia. Eftersom varje lagringsplats bär hela liggaren ser en bärbar dator som synkroniserar på natten och en telefon som synkroniserar på morgonen samma historik utan att någonsin mötas. Ingen ordnar något centralt: en logisk klocka (Lamport) ordnar ändringarna, inte väggklockan. Opålitliga repliker och de personer du delar en mapp med skriver också liggare, förseglade under nycklar som bara öppnar deras del: en repliks påståenden anger objekt, inte filer, och en medlems påståenden gäller bara den delade mappen.</p>
+
+    <h3>Vyn: var varje block finns</h3>
+    <p>När alla batcher spelas upp får varje enhet samma <strong>vy</strong>: för varje block i varje mapp dess objektnamn och storlek, de lagringsplatser som påstår sig ha en kopia och vilken enhet som påstod det, vilka enheter som verifierade det där och när, och vilka enheter som har klartexten. Den känner också till varje enhets senaste fillista för varje mapp, vilka enheter och mappar som finns och vilka lagringsplatser som är avvecklade. Lagringsplatsernas namn är lokala för varje enhet (”box” här, ”primary” där), så varje lagringsplats bär en slumpmässig identitet, och enheterna matchar varandras påståenden med den.</p>
+
+    <h3>Vad den används till</h3>
+    <ul>
+      <li><strong>Ladda upp en gång.</strong> Innan en enhet skickar hoppar den över varje lagringsplats som redan påstår sig ha blocket, så en fil som läggs till på två enheter laddas upp en gång.</li>
+      <li><strong>Frigöra utrymme säkert.</strong> En fil blir en platshållare först när liggaren visar varje block på en lagringsplats som inte är en överföringsdisk, och mappens kopieringsregler fortfarande uppfylls.</li>
+      <li><strong>Lagringsregler.</strong> ”Minst tre kopior, varav en i molnet, var och en verifierad av en annan enhet inom 30 dagar” utvärderas enbart utifrån liggaren, och tjänsten larmar när en mapp försämras.</li>
+      <li><strong>Automatisk verifiering.</strong> Bakgrundstjänsten väljer kopior som andra enheter har skrivit och som ingen har kontrollerat nyligen, laddar ner dem, jämför chiffertextens hash med namnet och registrerar resultatet, inom en daglig budget.</li>
+      <li><strong><code>fsck</code>.</strong> Jämför liggaren med vad lagringsplatserna faktiskt listar: påståenden utan objekt, block utan kopia någonstans, block som verifierats på annat håll.</li>
+      <li><strong>Överföringsdiskar.</strong> En bärardisk tar bara de block som ingen annan enhet har än, och lämnar tillbaka utrymmet när båda ändar har dem.</li>
+      <li><strong>Ta bort en lagringsplats.</strong> Varsto planerar utifrån liggaren vilka block som skulle hamna under mappens minimum, kopierar dem till andra platser, kontrollerar igen och registrerar först då avvecklingen.</li>
+      <li><strong>Kostnader.</strong> Månadskostnaden för en lagringsplats är de byte som liggaren registrerar på den gånger dess pris.</li>
+      <li><strong>Ta bort en enhet.</strong> En återkallelse anger den borttagna enhetens sista batch som räknas; allt den signerar därefter utelämnas ur varje vy, och bara de fillistor som de batcherna annonserade slås samman.</li>
+    </ul>
+
+    <h3>Förgreningar och återställda enheter</h3>
+    <p>Eftersom varje enhet numrerar och kedjar sina egna batcher kan historiken inte skrivas om i det tysta. Två olika batcher med samma enhet och sekvensnummer, eller en batch vars föregående hash inte stämmer, är en <strong>förgrening</strong>: varje enhet som ser en sådan markerar enheten som förgrenad, och <code>fsck</code> rapporterar det. Den vanliga orsaken är en enhet som återställts från en gammal säkerhetskopia eller en klonad disk, som skulle fortsätta från ett sekvensnummer som dess nyare jag redan har använt. När en enhet hittar batcher under sin egen identitet som den aldrig skrivit <strong>spärrar den sig själv</strong>: den slutar signera och skicka tills den registreras på nytt som en ny enhet, så att två divergerande kopior av en identitet aldrig båda skriver historik.</p>
+
+    <h3>Begränsningar</h3>
+    <ul>
+      <li>En signatur bevisar att en enhet <em>sade</em> att den lagrade ett block, inte att blocket fortfarande finns kvar. Därför räknas en kopia som verifierad först när en annan enhet har kontrollerat den; det finns ännu inget lagringsbevis med challenge-response.</li>
+      <li>En lagringsplats som serverar en äldre men giltig del av liggaren avslöjas inte av signaturerna; det syns först när en annan lagringsplats eller enhet har nyare batcher. Att upptäcka tillbakarullning är ett designmål, inte en testad egenskap.</li>
+      <li>Liggaren växer vid varje synkronisering. Sedan alpha.8 skriver enheterna kontrollpunkter och rensar bekräftade batcher, så det som lagras förblir begränsat; medlemmar i delade mappar och repliker behåller fortfarande varje batch.</li>
+      <li>Verifieringstiderna kommer från enheternas klockor: en klocka som går kraftigt fel kan ge falska larm, men ändrar inte ordningen på ändringarna.</li>
+      <li>Lagringsplatserna ser antalet liggarkataloger (ditt antal enheter) och batchernas storlek och tidpunkter.</li>
+    </ul>
+
+    <h2 id="sync">Fillistor och synkronisering</h2>
+    <p>Liggaren säger var blocken finns; <strong>manifesten</strong> säger vad filerna är. Efter en ändring publicerar en enhet hela sin bild av en mapp som ett nytt manifest: varje sökväg med storlek, ändringstid, innehållshash, blocklista och en versionsvektor (för varje enhet klockan för dess senaste ändring). Det krypteras under mappens metadatanyckel och annonseras i liggaren. Andra enheter hämtar de manifest de inte har sett och slår samman dem sökväg för sökväg:</p>
+    <ul>
+      <li>en version som innefattar den andra vinner; identiskt innehåll slås samman;</li>
+      <li>en ändring vinner över en samtidig radering, så en radering förstör aldrig någons arbete;</li>
+      <li>två olika samtidiga ändringar ger en deterministisk vinnare (högre klocka, sedan enhetens id), och den andra versionen behålls som <code>name.conflict-&lt;device&gt;-&lt;clock&gt;.ext</code>, så att båda enheterna blir samstämmiga utan ytterligare en runda.</li>
+    </ul>
+    <p>Raderade filer hamnar i en lokal papperskorg och tas aldrig bort direkt. Bakgrundstjänsten bevakar dina mappar och synkroniserar inom några sekunder efter en ändring. Selektiva mappar visar alla filer men behåller platshållare för dem du inte har hämtat, och hämtar en fil när du öppnar den. Manifesten är i dag fullständiga vyer; mycket stora mappar kommer att behöva inkrementella.</p>
+
+    <h2 id="p2p">Peer-to-peer</h2>
+    <p>Enheter utbyter också block direkt. Eftersom krypteringen är deterministisk inom en mapp kan en enhet som har en fil leverera exakt det objekt som lagringsplatsen har, och mottagaren kontrollerar det mot namnet precis som en kopia från en lagringsplats. En enhet som behöver ett block frågar först sina peers och sedan lagringsplatserna, och fördelar på varandra följande block över de peers som svarar.</p>
+    <ul>
+      <li><strong>Hitta varandra.</strong> I det lokala nätverket en multicast-beacon som bär en nyckelad tagg, inte valvets id. Över internet en krypterad mötespost på dina lagringsplatser med varje enhets adresser.</li>
+      <li><strong>Ta sig igenom NAT.</strong> HTTP i det lokala nätverket, QUIC över UDP över internet: STUN berättar för en enhet vilken dess publika adress är, båda sidor slår hål, och när det misslyckas vidarebefordrar en av dina egna nåbara enheter trafiken. Det finns inget leverantörsrelä.</li>
+      <li><strong>Vem som får ansluta.</strong> Varje enhet har ett eget certifikat vars hash är fäst i dess post; varje förfrågan bär också ett kortlivat bevis som skapats med valvets nyckel för peer-autentisering. En främling får ingenting, och en borttagen enhet stryks från listan över peers.</li>
+    </ul>
+    <p class="note">Testat på localhost, i underhållarens egna nätverk och i en uppställning med tre enheter bakom olika NAT. Två symmetriska NAT kan inte genomslås och faller tillbaka på ett relä, vilket kräver en nåbar enhet i valvet (en hemserver, en VPS, en vidarebefordrad port); socketar stöder bara IPv4.</p>
+    <p><strong>Hur snabbt.</strong> <a href="../benchmarks/">Prestandatester</a> mäter nedladdningar mellan Paris, Amsterdam och Warszawa, peer-to-peer jämfört med en S3-bucket, med metoden, siffrorna och vad som fortfarande är långsamt.</p>
+    <p><strong>Transport och det lokala gränssnittet.</strong> Objekten är chiffertext innan de lämnar enheten, så transporten lägger inte till ett andra lager bara för sakens skull: S3 talas över HTTPS med Signature Version 4, rclone-remotes använder rclones egen konfiguration, och S3-hemligheten förvaras i en krypterad fil. Skrivbordsgränssnittet levereras bara på 127.0.0.1, varje förfrågan bär en sessionstoken, Host-huvudet kontrolleras och sidan körs under en strikt Content Security Policy.</p>
+
+    <h2 id="visibility">Vad varje part kan se</h2>
+    <table class="downloads">
+      <thead><tr><th>Part</th><th>Ser</th><th>Kan inte se</th></tr></thead>
+      <tbody>
+        <tr><td>En lagringsleverantör (bucket, NAS, disk, rclone-remote)</td><td>Objektnamn (hashar av chiffertext), objektstorlekar, hur ofta du skriver och läser, ditt antal enheter utifrån antalet liggarkataloger.</td><td>Filnamn, innehåll, mappnamn, vilka block som hör till vilken fil, hashen av din klartext.</td></tr>
+        <tr><td>En opålitlig replik (en väns NAS)</td><td>Samma som en lagringsleverantör, plus att objekten stämmer mot sina namn. Den signerar sina egna påståenden under en nyckel som bara gäller repliken.</td><td>Något innehåll, namn eller någon fillista; den får aldrig en mappnyckel eller valvnyckeln.</td></tr>
+        <tr><td>En peer i det lokala nätverket eller på internet</td><td>Att någon enhet begär objekt efter namn, efter att ha bevisat att den har valvets nyckel för peer-autentisering.</td><td>Något alls utan den nyckeln: en främling får inget objekt, och beaconen i det lokala nätverket namnger inte valvet.</td></tr>
+        <tr><td>Någon du delar en mapp med</td><td>Den mappen: varje fil i den, och dina enheters signerade påståenden om den.</td><td>Någon annan mapp, valvnyckeln, ditt enhetsregister.</td></tr>
+        <tr><td>En AI-assistent via MCP-servern</td><td>De mappar du gav åtkomst till, med enbart läsrätt om du inte sade annat.</td><td>Mappar du inte gav åtkomst till; Strongroom-mappar, aldrig.</td></tr>
+        <tr><td>En tjuv med din upplåsta bärbara dator</td><td>Allt som en vanlig mapp innehåller medan enheten är upplåst.</td><td>Strongroom-mappar utan din säkerhetsnyckel; inget som skrivits efter att du tagit bort enheten från en annan, utom i mappar som delas med andra personer.</td></tr>
+      </tbody>
+    </table>
+
+    <section class="feature" id="sharing">
+      <h2>Dela en mapp</h2>
+      <picture><source type="image/webp" srcset="../../assets/img/encryption/sealed.webp"><img src="../../assets/img/encryption/sealed.png" alt="Mottagarens enhet skickar en förfrågningskod med sina publika X25519- och ML-KEM-768-nycklar; du skickar tillbaka en förseglad token med en mappnyckel, som bara den begärande enheten kan öppna, via vilken kanal som helst." width="640" height="320" loading="lazy"></picture>
+      <div>
+        <p>Mottagarens enhet skapar ett hybridnyckelpar (X25519 + ML-KEM-768) och skriver ut en förfrågningskod med den publika halvan. Din enhet kapslar in mot båda halvorna, härleder en nyckel ur båda delade hemligheterna och transkriptet, och krypterar mappnyckeln med den. Den resulterande token kan skickas via vilken kanal som helst: bara den begärande enheten kan öppna den, och den öppnar en mapp.</p>
+        <p>Innan förseglingen jämför ni båda ett fingeravtryck: sex ord som härleds ur förfrågningskoden och namnet i den. Ni läser upp dem för varandra i ett samtal eller personligen; en kod som bytts ut på vägen ger andra ord, och mottagarens enhet vägrar en token vars bekräftade ord inte är dess egna.</p>
+        <p>Mottagarens enhet skriver sedan sin egen liggare för den mappen, förseglad under en nyckel som härleds ur mappnyckeln: båda sidor ser varandras påståenden för den mappen och inget annat. När en medlem tas bort, eller en token som ingen ännu har godtagit återkallas, får mappen en ny slumpmässig nyckel: dina enheter och de medlemmar som stannar kvar får den (förseglad till varje medlems egen nyckel), allt som skrivs därefter använder den, och den borttagna medlemmens senare ändringar ignoreras. Det de redan har fått förblir läsbart för dem; en nyckel kan inte kallas tillbaka.</p>
+      </div>
+    </section>
+
+    <section class="feature" id="strongroom">
+      <h2>Strongroom: kryptografiskt, inte en dialogruta</h2>
+      <picture><source type="image/webp" srcset="../../assets/img/encryption/strongroom.webp"><img src="../../assets/img/encryption/strongroom.png" alt="En beröring av säkerhetsnyckeln låser upp en Strongroom-mapp: bara credential-id, saltet och den inslagna mappnyckeln lagras, nyckeln stannar i minnet i 15 minuter, och lösenfrasen, valvnyckeln eller en stulen säkerhetskopia kan inte öppna den." width="640" height="320" loading="lazy"></picture>
+      <div>
+        <p>En Strongroom-mapps nyckel finns aldrig i vila. När mappen skapas gör säkerhetsnyckeln en credential och tar sedan fram en 32-byte hemlighet ur den och ett slumpmässigt salt per mapp (FIDO2 hmac-secret). Varsto slår in mappnyckeln under den hemligheten och lagrar bara credential-id, saltet och den inslagna nyckeln. Upplåsning upprepar beröringen och håller nyckeln i minnet under en tidsperiod (15 minuter som standard) och glömmer den sedan. Det finns ingen väg till mappnyckeln utan den fysiska nyckeln: inte via lösenfrasen, valvnyckeln eller en stulen säkerhetskopia. Reservsäkerhetsnycklar får sin egen inslagning av samma mappnyckel. Att konvertera en befintlig mapp ger den ett nytt id och en ny nyckel, krypterar om den och raderar den gamla chiffertexten; att byta nyckel för ett Strongroom gör detsamma med en ny nyckel inslagen för varje registrerad säkerhetsnyckel, för de fall då någon kan ha behållit en nyckel.</p>
+      </div>
+    </section>
+
+    <section class="feature" id="recovery">
+      <h2>Lösenfraser och återställningspaketet</h2>
+      <picture><source type="image/webp" srcset="../../assets/img/encryption/recovery.webp"><img src="../../assets/img/encryption/recovery.png" alt="Ett återställningspaket med 24 ord, eller tre andelar av vilka två valfria återskapar valvnyckeln medan en ensam inte avslöjar något." width="640" height="320" loading="lazy"></picture>
+      <div>
+        <p>Enhetens lösenfras går genom Argon2id för att låsa upp <code>keys.enc</code>; bakgrundsappen kan förvara den i operativsystemets nyckelring så att tjänsten låser upp sig själv efter inloggning. Att förlora en lösenfras innebär att förlora den enhetens kopia av nycklarna, inte valvet: en annan enhet, eller återställningspaketet, registrerar en ny.</p>
+        <p>Återställningspaketet skriver ut valvnyckeln som 24 BIP-39-ord (ett felskrivet ord fångas av kontrollsumman) och, om du vill, tre Shamir-andelar av vilka två valfria återskapar nyckeln medan en ensam inte avslöjar något. Det finns inget konto, ingen deponering och ingen återställning av lösenord: paketet är hur du bär ansvaret. Skriv ut ett nytt paket efter att du tagit bort en enhet, eftersom det gamla innehåller den gamla nyckeln.</p>
+      </div>
+    </section>
+
+    <h2 id="limits">Vad som inte är klart</h2>
+    <ul>
+      <li><strong>Inte granskat.</strong> Algoritmerna är standardalgoritmer och biblioteken välkända Rust-implementationer, men sammansättningen har inte granskats av en extern kryptograf, och lagringsformatet kan fortfarande ändras.</li>
+      <li><strong>Metadata.</strong> Lagringsplatserna ser objektstorlekar, skriv- och läsmönster, antalet enheter och ungefär antalet block. Utfyllnad och skyddstrafik är inte implementerade.</li>
+      <li><strong>Konvergent kryptering</strong> inom en mapp låter de som delar mappnyckeln bekräfta identiska filer.</li>
+      <li><strong>Att ta bort en enhet</strong> skyddar det som skrivs därefter, inte det som enheten redan hade: befintliga data krypteras inte om, delade mappar och Strongroom-mappar behåller sina nycklar, och lagringsplatsernas inloggningsuppgifter byts inte ut. Tills en andra faktor finns kan vilken som helst av dina enheter ta bort vilken annan som helst (i ett valv med en organisation kan bara administratörer det).</li>
+      <li><strong>Att ta bort en medlem</strong> i en delad mapp skyddar det som skrivs därefter; den lagringsplats ni båda når förblir skrivbar för dem tills du ändrar dess åtkomst.</li>
+      <li><strong>Liggaren</strong> har inget lagringsbevis, upptäckt av tillbakarullning är otestad, och kontrollpunkter och rensning (alpha.8) begränsar dess storlek bara för valvets enheter: medlemmar i delade mappar och repliker behåller fortfarande varje batch.</li>
+      <li><strong>Placering.</strong> En mapp kan skrivas till valda lagringsplatser eller platser, och block kan flyttas mellan lagringsplatser (så att bara en kall kopia av oanvända filer behålls). Filer vars block bara finns i kall lagring hämtas inte förrän du flyttar tillbaka dem, och enheter med 0.0.1-alpha.8 eller äldre slutar synkronisera när en flytt har registrerats.</li>
+      <li><strong>Strongroom</strong> skyddar mappnyckeln, inte en fil du har hämtat och lämnat på disken; återställningspaketet omfattar inte Strongroom-mappar.</li>
+      <li><strong>Valvnyckeln</strong> är en enda hemlighet. Förvara återställningspaketet på mer än ett ställe.</li>
+    </ul>
+    <p class="note">Detaljer på fältnivå, bytelayouter och versionsregler: <a href="../../docs/alpha-0-format.html">lagringsformat</a>, <a href="../../docs/key-hierarchy.html">nyckelhierarki</a>, <a href="../../docs/ledger-signing-notes.html">anteckningar om liggarsignering</a>, <a href="../../docs/security-principles.html">säkerhetsprinciper</a>, <a href="../../docs/failure-model.html">felmodell</a>.</p>
+    </div>
+
+  </div>
+</main>
+<footer class="site">
+  <div class="wrap">
+    <span>Varsto är ett arbetsnamn. Källkod: <a href="https://github.com/janttsu/varsto">github.com/janttsu/varsto</a>, under PolyForm Shield License 1.0.0 (källkoden tillgänglig).</span>
+    <span>Inga kakor, ingen spårning. Webbservern sparar en vanlig åtkomstlogg i högst sju dagar.</span>
+    <span><a href="../../docs/security-policy.html">Säkerhetspolicy</a> · <a href="../../docs/licence.html">Licens</a> · <a href="../../docs/trademark.html">Varumärke</a> (på engelska)</span>
+  </div>
+</footer>
+</body>
+</html>

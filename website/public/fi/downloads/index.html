@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="fi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lataukset: Varsto</title>
+<meta name="description" content="Lataa Varston alfa Linuxille, macOS:lle, Windowsille ja Androidille tai lähdekoodina, ja tarkista tarkistussummat.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="../../favicon.svg" type="image/svg+xml">
+<link rel="canonical" href="https://varsto.net/fi/downloads/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Varsto">
+<meta property="og:title" content="Lataukset: Varsto">
+<meta property="og:description" content="Lataa Varston alfa Linuxille, macOS:lle, Windowsille ja Androidille tai lähdekoodina, ja tarkista tarkistussummat.">
+<meta property="og:url" content="https://varsto.net/fi/downloads/">
+<meta property="og:image" content="https://varsto.net/assets/img/og-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:locale" content="fi_FI">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="alternate" hreflang="en" href="https://varsto.net/downloads/">
+<link rel="alternate" hreflang="x-default" href="https://varsto.net/downloads/">
+<link rel="alternate" hreflang="fi" href="https://varsto.net/fi/downloads/">
+<link rel="alternate" hreflang="sv" href="https://varsto.net/sv/downloads/">
+<link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../../blog/feed.xml">
+<link rel="stylesheet" href="../../assets/css/site.css?v=b3d2d4f387">
+<script src="../../assets/js/theme.js?v=0951491269"></script>
+</head>
+<body>
+<a class="skip" href="#main">Siirry sisältöön</a>
+<div class="alpha" role="note">
+  <div class="wrap"><strong>Alpha-ohjelmisto, ei tuotantodatalle.</strong> Virheet voivat hävittää dataa, tallennusmuoto voi muuttua ilman siirtotyökalua, eikä salausta ole vielä auditoitu. Pidä omat varmuuskopiosi ja varmista, että voit palauttaa niistä.</div>
+</div>
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="../../fi/"><img src="../../assets/img/logo.svg" alt="" width="28" height="28"><span>Varsto</span></a>
+    <nav class="langs" aria-label="Language"><a href="../../downloads/" hreflang="en" lang="en">English</a> <a href="../../fi/downloads/" hreflang="fi" lang="fi" aria-current="true">Suomi</a> <a href="../../sv/downloads/" hreflang="sv" lang="sv">Svenska</a></nav>
+
+    <nav class="main" aria-label="Main">
+      <a href="../../fi/">Projekti</a>
+      <a href="../../fi/features/">Ominaisuudet</a>
+      <a href="../../fi/use-cases/">Käyttötapaukset</a>
+      <a href="../../fi/compare/">Vertailu</a>
+      <a href="../../fi/how-it-works/">Miten se toimii</a>
+      <a href="../../fi/screenshots/">Kuvakaappaukset</a>
+      <a href="../../docs/">Dokumentaatio (en)</a>
+      <a href="../../fi/downloads/" aria-current="page">Lataukset</a>
+      <a href="../../blog/">Blogi (en)</a>
+      <a href="../../forum/">Foorumi (en)</a>
+      <a href="../../fi/contribute/">Osallistu</a>
+      <a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a>
+      <button class="theme" id="theme-toggle" type="button" aria-label="Change colour theme">Theme: auto</button>
+    </nav>
+  </div>
+</header>
+<main id="main">
+  <div class="wrap">
+    <h1>Lataukset</h1>
+    <p class="note">Katso <a href="../screenshots/">kuvakaappauksista</a>, miltä alfa näyttää.</p>
+    <p class="lead">Jokaiselle alustalle yksi paketti, jossa ovat taustapalvelu, käyttöliittymä ja sama komentorivi; Linuxissa ja macOS:ssä palvelu käynnistyy kirjautuessa (systemd-käyttäjäyksikkönä tai launch agentina), Windowsissa sitä ajaa ilmoitusalueen sovellus. Linuxissa ja Windowsissa käyttöliittymä avautuu selaimeesi; macOS:ssä natiivisovelluksella on oma ikkunansa. Alfa: käytä vain testidatalla ja pidä huolta omista varmuuskopioistasi.</p>
+    <p class="note">No binaries are published yet. Build from source with <code>cargo build --release</code>.</p>
+    <h2>Asennus ja tarkistus</h2>
+    <pre><code>curl -O https://varsto.net/downloads/SHA256SUMS
+curl -O https://varsto.net/downloads/varsto-0.0.1-alpha.12-x86_64-unknown-linux-musl.tar.gz
+sha256sum -c SHA256SUMS --ignore-missing
+tar xzf varsto-0.0.1-alpha.12-x86_64-unknown-linux-musl.tar.gz
+cd varsto-0.0.1-alpha.12-x86_64-unknown-linux-musl
+./varsto desktop        # opens the desktop interface in your browser
+./varsto --help         # command line</code></pre>
+    <h2>Kääntäminen lähdekoodista</h2>
+    <p>Lähdekoodi on osoitteessa <a href="https://github.com/janttsu/varsto" rel="noopener">github.com/janttsu/varsto</a>; jokainen julkaisu on siellä tagi, jonka <a href="https://github.com/janttsu/varsto/releases" rel="noopener">GitHub-julkaisuun</a> on liitetty samat tiedostot, ja alla oleva lähdekoodiarkisto vastaa sitä. Vakaalla Rust-työkaluketjulla (1.85 tai uudempi): <code>git clone https://github.com/janttsu/varsto.git</code> tai pura arkisto, sitten <code>cargo build --release</code>; ohjelmatiedosto on <code>target/release/varsto</code>. <code>cargo test --workspace</code> ajaa testisarjan, mukaan lukien kahden laitteen skenaariot.</p>
+    <h2>Työpöytäkäyttöliittymä</h2>
+    <p>Linuxissa ja Windowsissa oletus on <code>varsto tray</code>: ilmoitusalueen kuvake, josta voi avata ja keskeyttää ja josta löytyy asennuskohta, kun uudempi versio on saatavilla; taustapalvelu synkronoi muutokset sekunneissa itsestään. <code>varsto desktop</code> käynnistää pienen verkkopalvelimen, joka kuuntelee osoitteessa 127.0.0.1 satunnaisessa portissa, tulostaa kertakäyttöisen linkin istuntotunnisteineen ja avaa sen oletusselaimessasi. Siihen pääsevät vain tämän tietokoneen ohjelmat; sivu hylkää pyynnöt, joissa ei ole tunnistetta, sekä pyynnöt, joiden Host-otsake ei ole paikallinen osoite. Käyttöliittymästä voit luoda holvin tai liittyä holviin, lisätä tallennuspaikkoja ja kansioita, jakaa, asettaa säilytyssääntöjä ja listata kaksoiskappaleita; synkronointi, tarkistus ja korjaus toimivat itsestään. Sovelluspaketti ja <code>Varsto Desktop.cmd</code> tekevät täsmälleen tämän.</p>
+    <h2>Pika-aloitus (komentorivi)</h2>
+    <pre><code>export VARSTO_PASSPHRASE='a long passphrase'
+varsto --home ~/.varsto-laptop init --name laptop            # prints the vault key once; keep it offline
+varsto --home ~/.varsto-laptop storage add-local box /mnt/box
+varsto --home ~/.varsto-laptop folder add docs ~/Documents/synced
+varsto --home ~/.varsto-laptop sync
+
+# another device that can reach the same storage
+varsto --home ~/.varsto-desk join --name desk --vault-key &lt;hex&gt; --storage-path /mnt/box
+varsto --home ~/.varsto-desk folder attach docs ~/synced
+varsto --home ~/.varsto-desk sync
+varsto --home ~/.varsto-desk status --json
+varsto --home ~/.varsto-desk fsck --verify</code></pre>
+    <p class="note">Holviavain on pääavain heksamuodossa. Jos menetät sen ja kaikki laitteesi, menetät datan: tiliä tai avaimen talletusta ei ole.</p>
+
+  </div>
+</main>
+<footer class="site">
+  <div class="wrap">
+    <span>Varsto on työnimi. Lähdekoodi: <a href="https://github.com/janttsu/varsto">github.com/janttsu/varsto</a>, PolyForm Shield License 1.0.0 -lisenssillä (lähdekoodi saatavilla).</span>
+    <span>Ei evästeitä, ei seurantaa. Palvelin säilyttää tavallista käyntilokia enintään seitsemän päivää.</span>
+    <span><a href="../../docs/security-policy.html">Tietoturvakäytäntö</a> · <a href="../../docs/licence.html">Lisenssi</a> · <a href="../../docs/trademark.html">Tavaramerkki</a> (englanniksi)</span>
+  </div>
+</footer>
+</body>
+</html>

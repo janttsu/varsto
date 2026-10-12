@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="sv">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Alternativ till Syncthing: Varsto och Syncthing jämförda</title>
+<meta name="description" content="Söker du ett alternativ till Syncthing med totalsträckskryptering på din egen lagring (S3, NAS, diskar, rclone)? Vad Syncthing är till för, hur det fungerar och hur det står sig mot Varsto.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="../../../favicon.svg" type="image/svg+xml">
+<link rel="canonical" href="https://varsto.net/sv/compare/syncthing/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Varsto">
+<meta property="og:title" content="Alternativ till Syncthing: Varsto och Syncthing jämförda">
+<meta property="og:description" content="Söker du ett alternativ till Syncthing med totalsträckskryptering på din egen lagring (S3, NAS, diskar, rclone)? Vad Syncthing är till för, hur det fungerar och hur det står sig mot Varsto.">
+<meta property="og:url" content="https://varsto.net/sv/compare/syncthing/">
+<meta property="og:image" content="https://varsto.net/assets/img/og-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:locale" content="sv_SE">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="alternate" hreflang="en" href="https://varsto.net/compare/syncthing/">
+<link rel="alternate" hreflang="x-default" href="https://varsto.net/compare/syncthing/">
+<link rel="alternate" hreflang="fi" href="https://varsto.net/fi/compare/syncthing/">
+<link rel="alternate" hreflang="sv" href="https://varsto.net/sv/compare/syncthing/">
+<link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../../../blog/feed.xml">
+<link rel="stylesheet" href="../../../assets/css/site.css?v=b3d2d4f387">
+<script src="../../../assets/js/theme.js?v=0951491269"></script>
+</head>
+<body>
+<a class="skip" href="#main">Hoppa till innehållet</a>
+<div class="alpha" role="note">
+  <div class="wrap"><strong>Alfaprogramvara, inte för produktionsdata.</strong> Fel kan leda till dataförlust, formatet kan ändras utan migrering och krypteringen har ännu inte granskats av utomstående. Behåll egna säkerhetskopior och kontrollera att du kan återställa från dem.</div>
+</div>
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="../../../sv/"><img src="../../../assets/img/logo.svg" alt="" width="28" height="28"><span>Varsto</span></a>
+    <nav class="langs" aria-label="Language"><a href="../../../compare/syncthing/" hreflang="en" lang="en">English</a> <a href="../../../fi/compare/syncthing/" hreflang="fi" lang="fi">Suomi</a> <a href="../../../sv/compare/syncthing/" hreflang="sv" lang="sv" aria-current="true">Svenska</a></nav>
+
+    <nav class="main" aria-label="Main">
+      <a href="../../../sv/">Projekt</a>
+      <a href="../../../sv/features/">Funktioner</a>
+      <a href="../../../sv/use-cases/">Användningsfall</a>
+      <a href="../../../sv/compare/" aria-current="page">Jämförelse</a>
+      <a href="../../../sv/how-it-works/">Så fungerar det</a>
+      <a href="../../../sv/screenshots/">Skärmbilder</a>
+      <a href="../../../docs/">Dokumentation (en)</a>
+      <a href="../../../sv/downloads/">Nedladdningar</a>
+      <a href="../../../blog/">Blogg (en)</a>
+      <a href="../../../forum/">Forum (en)</a>
+      <a href="../../../sv/contribute/">Bidra</a>
+      <a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a>
+      <button class="theme" id="theme-toggle" type="button" aria-label="Change colour theme">Theme: auto</button>
+    </nav>
+  </div>
+</header>
+<main id="main">
+  <div class="wrap">
+    <p class="back-link"><a href="../../compare/">Alla jämförelser</a></p>
+    <h1>Varsto och Syncthing</h1>
+    <p class="lead">Syncthing håller mappar identiska mellan dina egna enheter, kontinuerligt och helt utan moln. Det är gratis, moget och populärt bland tekniska användare och i hemmalabb: installera det på en bärbar dator, en stationär dator och en NAS, så håller mapparna jämna steg.</p>
+
+    <h2>Så fungerar Syncthing</h2>
+    <p>Enheterna ansluter peer-to-peer över TLS och identifieras med certifikatbaserade enhets-ID:n; det finns inget konto. Publika upptäckts- och reläservrar som projektet driver hjälper enheterna att hitta varandra, och du kan driva egna. Data finns bara på de deltagande enheterna: det finns ingen S3- eller rclone-backend och ingen kopia hos någon leverantör. Versionshantering (papperskorg, enkel, stegvis eller extern) gäller ändringar som tas emot från andra enheter. Selektiv synkronisering görs med ignoreringsmönster; det finns inga platshållare. På Android lades den officiella appen ned 2024 och en gemenskapsfork lever vidare; på iOS finns bara en klient från tredje part.</p>
+
+    <h2>Sida vid sida</h2>
+    <table class="compare-table">
+      <thead><tr><th scope="col"></th><th scope="col">Syncthing</th><th scope="col">Varsto</th></tr></thead>
+      <tbody>
+      <tr><th scope="row">Var dina filer finns</th><td>Bara på enheterna som kör Syncthing (en NAS eller en server räknas om den kör Syncthing).</td><td>På dina egna enheter och på lagringsplatser du väljer: S3-kompatibla buckets, valfri rclone-fjärrlagring, lokala kataloger eller nätverkskataloger och pooler av flyttbara diskar.</td></tr>
+      <tr><th scope="row">Konto eller central server</th><td>Inget; upptäckts- och reläservrar som projektet driver (kan drivas själv).</td><td>Inget. Det finns ingen Varsto-server; enheterna hittar varandra via dina lagringsplatser och i det lokala nätverket.</td></tr>
+      <tr><th scope="row">Kryptering</th><td>TLS under överföring; ingen egen kryptering av lagrade data. ”Opålitliga (krypterade) enheter” finns men är fortfarande märkta som beta.</td><td>End-to-end, på klientsidan, innan något lämnar enheten; hybrid postkvantkryptografi (ML-KEM för nycklar vid delning, signaturer med Ed25519 + ML-DSA-65). Ännu inte oberoende granskad.</td></tr>
+      <tr><th scope="row">Enheterna online samtidigt</th><td>Ja: två enheter måste vara online samtidigt för att utbyta ändringar, om inte en enhet hålls ständigt påslagen.</td><td>Behövs inte: enheterna synkroniserar via dina lagringsplatser, och direkt peer-to-peer när de når varandra.</td></tr>
+      <tr><th scope="row">Vet var varje kopia finns</th><td>Ingen uppföljning av kopior eller antal kopior.</td><td>Ja: en signerad liggare registrerar vilken lagringsplats och enhet som har varje block; lagringsregler (som standard 1 kopia var som helst, 1 extern, 1 på dina egna enheter eller diskar, kontrollerad av en annan enhet inom 30 dagar) varnar när en regel inte uppfylls.</td></tr>
+      <tr><th scope="row">Flyttbara diskar och diskar offline</th><td>Inget arbetsflöde för flyttbara diskar.</td><td>Ja: diskpooler fylls, kontrolleras och känns igen när de kommer tillbaka; filer på en disk som är borta ber om just den disken.</td></tr>
+      <tr><th scope="row">Licens och pris</th><td>Öppen källkod (MPL-2.0), gratis.</td><td>Källkoden tillgänglig (PolyForm Shield 1.0.0), gratis; du betalar bara din lagringsleverantör.</td></tr>
+      <tr><th scope="row">Mognad</th><td>Moget, långlivat projekt (2.x).</td><td>Alfa: inte för produktionsdata, formaten kan fortfarande ändras.</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Vilken passar</h2>
+    <div class="grid two">
+      <div class="card"><h3>Syncthing</h3><p>Välj Syncthing när varje kopia ska stanna på maskiner du själv driver, minst en av dem alltid är påslagen och du vill ha ett moget verktyg med öppen källkod helt utan konton.</p></div>
+      <div class="card"><h3>Varsto</h3><p>Välj Varsto när du också vill ha en krypterad kopia i en bucket eller på flyttbara diskar, har enheter som sällan är online samtidigt, vill ha en förteckning över var varje kopia finns eller en telefon som läser filer utan att förvara dem i klartext.</p></div>
+    </div>
+    <p class="note">Varsto är alfaprogramvara: anförtro den inga data som du inte har någon annan kopia av, och dess kryptografi har inte granskats av någon oberoende part. De andra produkterna här är mogna. Uppgifterna om dem kontrollerades i deras egen dokumentation i oktober 2026; priser och abonnemang ändras ofta, så se deras egna sidor för aktuella siffror. Rättelser tas gärna emot på <a href="../../../forum/">forumet</a> eller på GitHub.</p>
+
+    <h2>Källor</h2>
+    <ul>
+      <li><a href="https://syncthing.net/">Syncthings webbplats</a></li>
+      <li><a href="https://docs.syncthing.net/users/untrusted.html">Opålitliga enheter</a></li>
+      <li><a href="https://docs.syncthing.net/users/versioning.html">Versionshantering av filer</a></li>
+    </ul>
+
+  </div>
+</main>
+<footer class="site">
+  <div class="wrap">
+    <span>Varsto är ett arbetsnamn. Källkod: <a href="https://github.com/janttsu/varsto">github.com/janttsu/varsto</a>, under PolyForm Shield License 1.0.0 (källkoden tillgänglig).</span>
+    <span>Inga kakor, ingen spårning. Webbservern sparar en vanlig åtkomstlogg i högst sju dagar.</span>
+    <span><a href="../../../docs/security-policy.html">Säkerhetspolicy</a> · <a href="../../../docs/licence.html">Licens</a> · <a href="../../../docs/trademark.html">Varumärke</a> (på engelska)</span>
+  </div>
+</footer>
+</body>
+</html>

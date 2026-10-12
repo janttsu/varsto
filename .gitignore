@@ -17,3 +17,4 @@ apps/ios/Varsto/Info.plist
 apps/android/local.properties
 apps/android/app/src/main/jniLibs/
 __pycache__/
+/target

@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="sv">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nedladdningar: Varsto</title>
+<meta name="description" content="Ladda ner alfaversionen av Varsto för Linux, macOS, Windows och Android, eller källkoden, och verifiera kontrollsummorna.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="../../favicon.svg" type="image/svg+xml">
+<link rel="canonical" href="https://varsto.net/sv/downloads/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Varsto">
+<meta property="og:title" content="Nedladdningar: Varsto">
+<meta property="og:description" content="Ladda ner alfaversionen av Varsto för Linux, macOS, Windows och Android, eller källkoden, och verifiera kontrollsummorna.">
+<meta property="og:url" content="https://varsto.net/sv/downloads/">
+<meta property="og:image" content="https://varsto.net/assets/img/og-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:locale" content="sv_SE">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="alternate" hreflang="en" href="https://varsto.net/downloads/">
+<link rel="alternate" hreflang="x-default" href="https://varsto.net/downloads/">
+<link rel="alternate" hreflang="fi" href="https://varsto.net/fi/downloads/">
+<link rel="alternate" hreflang="sv" href="https://varsto.net/sv/downloads/">
+<link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../../blog/feed.xml">
+<link rel="stylesheet" href="../../assets/css/site.css?v=b3d2d4f387">
+<script src="../../assets/js/theme.js?v=0951491269"></script>
+</head>
+<body>
+<a class="skip" href="#main">Hoppa till innehållet</a>
+<div class="alpha" role="note">
+  <div class="wrap"><strong>Alfaprogramvara, inte för produktionsdata.</strong> Fel kan leda till dataförlust, formatet kan ändras utan migrering och krypteringen har ännu inte granskats av utomstående. Behåll egna säkerhetskopior och kontrollera att du kan återställa från dem.</div>
+</div>
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="../../sv/"><img src="../../assets/img/logo.svg" alt="" width="28" height="28"><span>Varsto</span></a>
+    <nav class="langs" aria-label="Language"><a href="../../downloads/" hreflang="en" lang="en">English</a> <a href="../../fi/downloads/" hreflang="fi" lang="fi">Suomi</a> <a href="../../sv/downloads/" hreflang="sv" lang="sv" aria-current="true">Svenska</a></nav>
+
+    <nav class="main" aria-label="Main">
+      <a href="../../sv/">Projekt</a>
+      <a href="../../sv/features/">Funktioner</a>
+      <a href="../../sv/use-cases/">Användningsfall</a>
+      <a href="../../sv/compare/">Jämförelse</a>
+      <a href="../../sv/how-it-works/">Så fungerar det</a>
+      <a href="../../sv/screenshots/">Skärmbilder</a>
+      <a href="../../docs/">Dokumentation (en)</a>
+      <a href="../../sv/downloads/" aria-current="page">Nedladdningar</a>
+      <a href="../../blog/">Blogg (en)</a>
+      <a href="../../forum/">Forum (en)</a>
+      <a href="../../sv/contribute/">Bidra</a>
+      <a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a>
+      <button class="theme" id="theme-toggle" type="button" aria-label="Change colour theme">Theme: auto</button>
+    </nav>
+  </div>
+</header>
+<main id="main">
+  <div class="wrap">
+    <h1>Nedladdningar</h1>
+    <p class="note">Se <a href="../screenshots/">skärmbilderna</a> för att se hur alfaversionen ser ut.</p>
+    <p class="lead">Ett paket per plattform med bakgrundstjänsten, gränssnittet och samma kommandorad; på Linux och macOS startar tjänsten vid inloggning (en systemd-användarenhet eller en launch agent), på Windows körs den av appen i systemfältet. På Linux och Windows öppnas gränssnittet i din webbläsare; på macOS har den inbyggda appen ett eget fönster. Alfa: använd den bara med testdata och behåll egna säkerhetskopior.</p>
+    <p class="note">No binaries are published yet. Build from source with <code>cargo build --release</code>.</p>
+    <h2>Installera och verifiera</h2>
+    <pre><code>curl -O https://varsto.net/downloads/SHA256SUMS
+curl -O https://varsto.net/downloads/varsto-0.0.1-alpha.12-x86_64-unknown-linux-musl.tar.gz
+sha256sum -c SHA256SUMS --ignore-missing
+tar xzf varsto-0.0.1-alpha.12-x86_64-unknown-linux-musl.tar.gz
+cd varsto-0.0.1-alpha.12-x86_64-unknown-linux-musl
+./varsto desktop        # opens the desktop interface in your browser
+./varsto --help         # command line</code></pre>
+    <h2>Bygg från källkod</h2>
+    <p>Källkoden finns på <a href="https://github.com/janttsu/varsto" rel="noopener">github.com/janttsu/varsto</a>; varje release är en tagg där, med samma filer bifogade till sin <a href="https://github.com/janttsu/varsto/releases" rel="noopener">GitHub-release</a>, och källkodsarkivet nedan motsvarar den. Med en stabil Rust-verktygskedja (1.85 eller nyare): <code>git clone https://github.com/janttsu/varsto.git</code> eller packa upp arkivet, och sedan <code>cargo build --release</code>; den körbara filen är <code>target/release/varsto</code>. <code>cargo test --workspace</code> kör testsviten, inklusive scenarierna med två enheter.</p>
+    <h2>Skrivbordsgränssnitt</h2>
+    <p>På Linux och Windows är standard <code>varsto tray</code>: en ikon i systemfältet med öppna och pausa, och ett installationsval när en nyare version finns; bakgrundstjänsten synkroniserar ändringar inom några sekunder på egen hand. <code>varsto desktop</code> startar en liten webbserver bunden till 127.0.0.1 på en slumpmässig port, skriver ut en engångslänk med en sessionstoken och öppnar den i din standardwebbläsare. Bara program på den här datorn når den; sidan avvisar förfrågningar utan token och förfrågningar vars Host-huvud inte är den lokala adressen. I gränssnittet kan du skapa eller ansluta till ett valv, lägga till lagringsplatser och mappar, dela, ställa in regler och lista dubbletter; synkronisering, verifiering och reparation sköts automatiskt. Appaketet och <code>Varsto Desktop.cmd</code> gör precis detta.</p>
+    <h2>Snabbstart (kommandorad)</h2>
+    <pre><code>export VARSTO_PASSPHRASE='a long passphrase'
+varsto --home ~/.varsto-laptop init --name laptop            # prints the vault key once; keep it offline
+varsto --home ~/.varsto-laptop storage add-local box /mnt/box
+varsto --home ~/.varsto-laptop folder add docs ~/Documents/synced
+varsto --home ~/.varsto-laptop sync
+
+# another device that can reach the same storage
+varsto --home ~/.varsto-desk join --name desk --vault-key &lt;hex&gt; --storage-path /mnt/box
+varsto --home ~/.varsto-desk folder attach docs ~/synced
+varsto --home ~/.varsto-desk sync
+varsto --home ~/.varsto-desk status --json
+varsto --home ~/.varsto-desk fsck --verify</code></pre>
+    <p class="note">Valvnyckeln är huvudnyckeln i hex. Förlorar du den och alla enheter förlorar du dina data: det finns inget konto och ingen deponering.</p>
+
+  </div>
+</main>
+<footer class="site">
+  <div class="wrap">
+    <span>Varsto är ett arbetsnamn. Källkod: <a href="https://github.com/janttsu/varsto">github.com/janttsu/varsto</a>, under PolyForm Shield License 1.0.0 (källkoden tillgänglig).</span>
+    <span>Inga kakor, ingen spårning. Webbservern sparar en vanlig åtkomstlogg i högst sju dagar.</span>
+    <span><a href="../../docs/security-policy.html">Säkerhetspolicy</a> · <a href="../../docs/licence.html">Licens</a> · <a href="../../docs/trademark.html">Varumärke</a> (på engelska)</span>
+  </div>
+</footer>
+</body>
+</html>

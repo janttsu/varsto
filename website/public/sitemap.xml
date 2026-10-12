@@ -6,6 +6,7 @@
   <url><loc>https://varsto.net/blog/2026-10-09-alpha-7-pairing-and-finder.html</loc><lastmod>2026-10-12</lastmod></url>
   <url><loc>https://varsto.net/blog/2026-10-09-alpha-8-ledger-and-devices.html</loc><lastmod>2026-10-12</lastmod></url>
   <url><loc>https://varsto.net/blog/2026-10-10-alpha-9-placement-repair-signed.html</loc><lastmod>2026-10-12</lastmod></url>
+  <url><loc>https://varsto.net/blog/2026-10-12-alpha-12-packs-and-languages.html</loc><lastmod>2026-10-12</lastmod></url>
   <url><loc>https://varsto.net/blog/</loc><lastmod>2026-10-12</lastmod></url>
   <url><loc>https://varsto.net/compare/filen/</loc><lastmod>2026-10-12</lastmod></url>
   <url><loc>https://varsto.net/compare/git-annex/</loc><lastmod>2026-10-12</lastmod></url>
@@ -14,6 +15,7 @@
   <url><loc>https://varsto.net/compare/resilio-sync/</loc><lastmod>2026-10-12</lastmod></url>
   <url><loc>https://varsto.net/compare/syncthing/</loc><lastmod>2026-10-12</lastmod></url>
   <url><loc>https://varsto.net/compare/tresorit/</loc><lastmod>2026-10-12</lastmod></url>
+  <url><loc>https://varsto.net/contribute/</loc><lastmod>2026-10-12</lastmod></url>
   <url><loc>https://varsto.net/docs/alpha-0-format.html</loc><lastmod>2026-10-12</lastmod></url>
   <url><loc>https://varsto.net/docs/contributing.html</loc><lastmod>2026-10-12</lastmod></url>
   <url><loc>https://varsto.net/docs/failure-model.html</loc><lastmod>2026-10-12</lastmod></url>
@@ -34,9 +36,39 @@
   <url><loc>https://varsto.net/docs/threat-model.html</loc><lastmod>2026-10-12</lastmod></url>
   <url><loc>https://varsto.net/docs/trademark.html</loc><lastmod>2026-10-12</lastmod></url>
   <url><loc>https://varsto.net/features/</loc><lastmod>2026-10-12</lastmod></url>
+  <url><loc>https://varsto.net/fi/benchmarks/</loc><lastmod>2026-10-12</lastmod></url>
+  <url><loc>https://varsto.net/fi/compare/filen/</loc><lastmod>2026-10-12</lastmod></url>
+  <url><loc>https://varsto.net/fi/compare/git-annex/</loc><lastmod>2026-10-12</lastmod></url>
+  <url><loc>https://varsto.net/fi/compare/</loc><lastmod>2026-10-12</lastmod></url>
+  <url><loc>https://varsto.net/fi/compare/mega/</loc><lastmod>2026-10-12</lastmod></url>
+  <url><loc>https://varsto.net/fi/compare/resilio-sync/</loc><lastmod>2026-10-12</lastmod></url>
+  <url><loc>https://varsto.net/fi/compare/syncthing/</loc><lastmod>2026-10-12</lastmod></url>
+  <url><loc>https://varsto.net/fi/compare/tresorit/</loc><lastmod>2026-10-12</lastmod></url>
+  <url><loc>https://varsto.net/fi/contribute/</loc><lastmod>2026-10-12</lastmod></url>
+  <url><loc>https://varsto.net/fi/downloads/</loc><lastmod>2026-10-12</lastmod></url>
+  <url><loc>https://varsto.net/fi/features/</loc><lastmod>2026-10-12</lastmod></url>
+  <url><loc>https://varsto.net/fi/how-it-works/</loc><lastmod>2026-10-12</lastmod></url>
+  <url><loc>https://varsto.net/fi/</loc><lastmod>2026-10-12</lastmod></url>
+  <url><loc>https://varsto.net/fi/screenshots/</loc><lastmod>2026-10-12</lastmod></url>
+  <url><loc>https://varsto.net/fi/use-cases/</loc><lastmod>2026-10-12</lastmod></url>
   <url><loc>https://varsto.net/forum/</loc><lastmod>2026-10-12</lastmod></url>
   <url><loc>https://varsto.net/how-it-works/</loc><lastmod>2026-10-12</lastmod></url>
   <url><loc>https://varsto.net/</loc><lastmod>2026-10-12</lastmod></url>
   <url><loc>https://varsto.net/screenshots/</loc><lastmod>2026-10-12</lastmod></url>
+  <url><loc>https://varsto.net/sv/benchmarks/</loc><lastmod>2026-10-12</lastmod></url>
+  <url><loc>https://varsto.net/sv/compare/filen/</loc><lastmod>2026-10-12</lastmod></url>
+  <url><loc>https://varsto.net/sv/compare/git-annex/</loc><lastmod>2026-10-12</lastmod></url>
+  <url><loc>https://varsto.net/sv/compare/</loc><lastmod>2026-10-12</lastmod></url>
+  <url><loc>https://varsto.net/sv/compare/mega/</loc><lastmod>2026-10-12</lastmod></url>
+  <url><loc>https://varsto.net/sv/compare/resilio-sync/</loc><lastmod>2026-10-12</lastmod></url>
+  <url><loc>https://varsto.net/sv/compare/syncthing/</loc><lastmod>2026-10-12</lastmod></url>
+  <url><loc>https://varsto.net/sv/compare/tresorit/</loc><lastmod>2026-10-12</lastmod></url>
+  <url><loc>https://varsto.net/sv/contribute/</loc><lastmod>2026-10-12</lastmod></url>
+  <url><loc>https://varsto.net/sv/downloads/</loc><lastmod>2026-10-12</lastmod></url>
+  <url><loc>https://varsto.net/sv/features/</loc><lastmod>2026-10-12</lastmod></url>
+  <url><loc>https://varsto.net/sv/how-it-works/</loc><lastmod>2026-10-12</lastmod></url>
+  <url><loc>https://varsto.net/sv/</loc><lastmod>2026-10-12</lastmod></url>
+  <url><loc>https://varsto.net/sv/screenshots/</loc><lastmod>2026-10-12</lastmod></url>
+  <url><loc>https://varsto.net/sv/use-cases/</loc><lastmod>2026-10-12</lastmod></url>
   <url><loc>https://varsto.net/use-cases/</loc><lastmod>2026-10-12</lastmod></url>
 </urlset>

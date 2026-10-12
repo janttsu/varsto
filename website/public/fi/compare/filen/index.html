@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="fi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Filen-vaihtoehto: Varsto ja Filen vertailussa</title>
+<meta name="description" content="Etsitkö Filen-vaihtoehtoa, joka salaa päästä päähän ja tallentaa omaan tallennustilaan (S3, NAS, levyt, rclone)? Mihin Filen on tarkoitettu, miten se toimii ja miten se vertautuu Varstoon.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="../../../favicon.svg" type="image/svg+xml">
+<link rel="canonical" href="https://varsto.net/fi/compare/filen/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Varsto">
+<meta property="og:title" content="Filen-vaihtoehto: Varsto ja Filen vertailussa">
+<meta property="og:description" content="Etsitkö Filen-vaihtoehtoa, joka salaa päästä päähän ja tallentaa omaan tallennustilaan (S3, NAS, levyt, rclone)? Mihin Filen on tarkoitettu, miten se toimii ja miten se vertautuu Varstoon.">
+<meta property="og:url" content="https://varsto.net/fi/compare/filen/">
+<meta property="og:image" content="https://varsto.net/assets/img/og-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:locale" content="fi_FI">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="alternate" hreflang="en" href="https://varsto.net/compare/filen/">
+<link rel="alternate" hreflang="x-default" href="https://varsto.net/compare/filen/">
+<link rel="alternate" hreflang="fi" href="https://varsto.net/fi/compare/filen/">
+<link rel="alternate" hreflang="sv" href="https://varsto.net/sv/compare/filen/">
+<link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../../../blog/feed.xml">
+<link rel="stylesheet" href="../../../assets/css/site.css?v=b3d2d4f387">
+<script src="../../../assets/js/theme.js?v=0951491269"></script>
+</head>
+<body>
+<a class="skip" href="#main">Siirry sisältöön</a>
+<div class="alpha" role="note">
+  <div class="wrap"><strong>Alpha-ohjelmisto, ei tuotantodatalle.</strong> Virheet voivat hävittää dataa, tallennusmuoto voi muuttua ilman siirtotyökalua, eikä salausta ole vielä auditoitu. Pidä omat varmuuskopiosi ja varmista, että voit palauttaa niistä.</div>
+</div>
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="../../../fi/"><img src="../../../assets/img/logo.svg" alt="" width="28" height="28"><span>Varsto</span></a>
+    <nav class="langs" aria-label="Language"><a href="../../../compare/filen/" hreflang="en" lang="en">English</a> <a href="../../../fi/compare/filen/" hreflang="fi" lang="fi" aria-current="true">Suomi</a> <a href="../../../sv/compare/filen/" hreflang="sv" lang="sv">Svenska</a></nav>
+
+    <nav class="main" aria-label="Main">
+      <a href="../../../fi/">Projekti</a>
+      <a href="../../../fi/features/">Ominaisuudet</a>
+      <a href="../../../fi/use-cases/">Käyttötapaukset</a>
+      <a href="../../../fi/compare/" aria-current="page">Vertailu</a>
+      <a href="../../../fi/how-it-works/">Miten se toimii</a>
+      <a href="../../../fi/screenshots/">Kuvakaappaukset</a>
+      <a href="../../../docs/">Dokumentaatio (en)</a>
+      <a href="../../../fi/downloads/">Lataukset</a>
+      <a href="../../../blog/">Blogi (en)</a>
+      <a href="../../../forum/">Foorumi (en)</a>
+      <a href="../../../fi/contribute/">Osallistu</a>
+      <a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a>
+      <button class="theme" id="theme-toggle" type="button" aria-label="Change colour theme">Theme: auto</button>
+    </nav>
+  </div>
+</header>
+<main id="main">
+  <div class="wrap">
+    <p class="back-link"><a href="../../compare/">Kaikki vertailut</a></p>
+    <h1>Varsto ja Filen</h1>
+    <p class="lead">Filen on saksalainen, nollatietoperiaatteella salattu pilvitallennuspalvelu yksityisyyttä arvostaville ihmisille ja tiimeille. Se tarjoaa edulliseen hintaan tallennustilan, työpöytäsynkronoinnin, verkkolevyn tarvittaessa ladattavine tiedostoineen, muistiinpanot ja chatin.</p>
+
+    <h2>Miten Filen toimii</h2>
+    <p>Luot tilin, ja tiedostot tallennetaan Filenin palvelimille Saksaan asiakaspäässä salattuina (AES-256 paloittain) ennen lähetystä. Asiakasohjelmat ja SDK:t ovat avointa lähdekoodia AGPL-3.0-lisenssillä. Komentoriviasiakas voi tarjota Filen-tallennustilasi paikallisesti WebDAVin tai S3:n kautta, mutta tiedot ovat silti Filenillä. Ilmaiset tilit voidaan poistaa, kun niitä ei ole käytetty tietyn ajan.</p>
+
+    <h2>Rinnakkain</h2>
+    <table class="compare-table">
+      <thead><tr><th scope="col"></th><th scope="col">Filen</th><th scope="col">Varsto</th></tr></thead>
+      <tbody>
+      <tr><th scope="row">Missä tiedostosi ovat</th><td>Filenin pilvessä Saksassa; ei omia taustajärjestelmiä.</td><td>Omilla laitteillasi ja valitsemissasi tallennuspaikoissa: S3-yhteensopivissa bucketeissa, missä tahansa rclone-etäkohteessa, paikallisissa tai verkkohakemistoissa sekä irrotettavien levyjen levyvarastoissa.</td></tr>
+      <tr><th scope="row">Tili tai keskuspalvelin</th><td>Tili vaaditaan.</td><td>Ei kumpaakaan. Varstolla ei ole palvelinta; laitteet löytävät toisensa tallennuspaikkojesi kautta ja lähiverkossa.</td></tr>
+      <tr><th scope="row">Salaus</th><td>Päästä päähän, asiakaspäässä (AES-256); avoimen lähdekoodin asiakasohjelmat.</td><td>Päästä päähän, asiakaspäässä, ennen kuin mitään lähtee laitteelta; hybridi post-kvanttisalaus (ML-KEM avainten jakamiseen, Ed25519 + ML-DSA-65 -allekirjoitukset). Ei vielä riippumattomasti auditoitu.</td></tr>
+      <tr><th scope="row">Laitteet verkossa yhtä aikaa</th><td>Ei tarvita: kopio on pilvessä.</td><td>Ei tarvita: laitteet synkronoituvat tallennuspaikkojesi kautta ja suoraan vertaisyhteydellä, kun ne tavoittavat toisensa.</td></tr>
+      <tr><th scope="row">Tietää, missä jokainen kopio on</th><td>Yksi kopio palveluntarjoajalla; omista tallennusvälineistäsi ei pidetä kirjaa.</td><td>Kyllä: allekirjoitettu kirjanpito kertoo, mikä tallennuspaikka ja laite säilyttää kunkin lohkon; säilytyssäännöt (oletuksena 1 kopio missä tahansa, 1 ulkoinen ja 1 omilla laitteillasi tai levyilläsi, toisen laitteen tarkistamana 30 päivän sisällä) varoittavat, kun jokin sääntö ei täyty.</td></tr>
+      <tr><th scope="row">Irrotettavat ja verkosta irti olevat levyt</th><td>Ei irrotettavien levyjen työnkulkua.</td><td>Kyllä: levyvarastot täytetään, tarkistetaan ja tunnistetaan, kun levyt palaavat; poissa olevalla levyllä olevat tiedostot pyytävät kyseistä levyä.</td></tr>
+      <tr><th scope="row">Lisenssi ja hinta</th><td>Asiakasohjelmat AGPL-3.0; ilmaisversio ja edulliset maksulliset tilaukset.</td><td>Lähdekoodi saatavilla (PolyForm Shield 1.0.0), ilmainen; maksat vain tallennuspalvelun tarjoajallesi.</td></tr>
+      <tr><th scope="row">Kypsyys</th><td>Vakiintunut palvelu.</td><td>Alfa: ei tuotantodatalle, ja formaatit voivat vielä muuttua.</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Kumpi sopii sinulle</h2>
+    <div class="grid two">
+      <div class="card"><h3>Filen</h3><p>Valitse Filen, kun haluat edullista, EU:ssa sijaitsevaa salattua pilvitallennusta avoimen lähdekoodin asiakasohjelmilla ja sinulle sopii, että talon ulkopuolinen kopio on yhdellä palveluntarjoajalla.</p></div>
+      <div class="card"><h3>Varsto</h3><p>Valitse Varsto, kun haluat itse valita ja vaihtaa tallennuspaikan, haluat kopioita usealle palveluntarjoajalle ja omille levyillesi ja haluat, että sääntöjen kuten ”vähintään yksi kopio talon ulkopuolella” täyttyminen tarkistetaan puolestasi.</p></div>
+    </div>
+    <p class="note">Varsto on alfavaiheen ohjelmisto: älä luota sille tietoja, joista sinulla ei ole muuta kopiota. Sen kryptografiaa ei ole myöskään auditoitu riippumattomasti. Muut tässä esitellyt tuotteet ovat kypsiä. Niitä koskevat tiedot tarkistettiin niiden omasta dokumentaatiosta lokakuussa 2026; hinnat ja tilausvaihtoehdot muuttuvat usein, joten katso ajantasaiset tiedot niiden omilta sivuilta. Korjaukset ovat tervetulleita <a href="../../../forum/">foorumilla</a> tai GitHubissa.</p>
+
+    <h2>Lähteet</h2>
+    <ul>
+      <li><a href="https://filen.io/">Filenin verkkosivusto</a></li>
+      <li><a href="https://filen.io/pricing">Filenin hinnasto</a></li>
+      <li><a href="https://github.com/FilenCloudDienste">Filenin lähdekoodi</a></li>
+    </ul>
+
+  </div>
+</main>
+<footer class="site">
+  <div class="wrap">
+    <span>Varsto on työnimi. Lähdekoodi: <a href="https://github.com/janttsu/varsto">github.com/janttsu/varsto</a>, PolyForm Shield License 1.0.0 -lisenssillä (lähdekoodi saatavilla).</span>
+    <span>Ei evästeitä, ei seurantaa. Palvelin säilyttää tavallista käyntilokia enintään seitsemän päivää.</span>
+    <span><a href="../../../docs/security-policy.html">Tietoturvakäytäntö</a> · <a href="../../../docs/licence.html">Lisenssi</a> · <a href="../../../docs/trademark.html">Tavaramerkki</a> (englanniksi)</span>
+  </div>
+</footer>
+</body>
+</html>

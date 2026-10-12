@@ -1,0 +1,42 @@
+---
+title: git-annex-vaihtoehto: Varsto ja git-annex vertailussa
+nav: Compare
+output: compare/git-annex/index.html
+description: Etsitkö git-annex-vaihtoehtoa, joka salaa päästä päähän ja tallentaa omaan tallennustilaan (S3, NAS, levyt, rclone)? Mihin git-annex on tarkoitettu, miten se toimii ja miten se vertautuu Varstoon.
+---
+    <p class="back-link"><a href="{{L}}compare/">Kaikki vertailut</a></p>
+    <h1>Varsto ja git-annex</h1>
+    <p class="lead">git-annex hallitsee suuria tiedostoja gitillä tallentamatta niiden sisältöä gitiin. Se on tehokas työkalu teknisille käyttäjille, jotka arkistoivat, varmuuskopioivat ja siirtelevät tietoja monien levyjen ja etäkohteiden välillä, ja se on tämän listan lähin sukulainen Varstolle.</p>
+
+    <h2>Miten git-annex toimii</h2>
+    <p>Kukin repositorio voi sijaita millä tahansa koneella tai levyllä, ja ”special remote” -etäkohteiden kautta tavoitetaan S3 ja yhteensopivat palvelut, rclone, rsync, tavalliset tai irrotettavat hakemistot, WebDAV ja muuta. Git-haara kirjaa, mikä repositorio säilyttää kunkin tiedoston (”git annex whereis”), ja numcopies kieltäytyy poistamasta sisältöä, ellei muualla ole riittävästi varmennettuja kopioita. Salaus on valinnainen kullekin special remotelle erikseen, ja se käyttää GnuPG:tä; tiedostonimet itse git-repositoriossa jäävät näkyviin, ellei käytetä gcryptiä. Se on pääasiassa komentorivityökalu; tarjolla on yksinkertaisempi avustaja, Androidilla se toimii Termuxin kautta, eikä iOS-sovellusta ole.</p>
+
+    <h2>Rinnakkain</h2>
+    <table class="compare-table">
+      <thead><tr><th scope="col"></th><th scope="col">git-annex</th><th scope="col">Varsto</th></tr></thead>
+      <tbody>
+      <tr><th scope="row">Missä tiedostosi ovat</th><td>Missä itse haluat: omat levyt, NAS, S3, muut pilvet rclonen kautta.</td><td>Omilla laitteillasi ja valitsemissasi tallennuspaikoissa: S3-yhteensopivissa bucketeissa, missä tahansa rclone-etäkohteessa, paikallisissa tai verkkohakemistoissa sekä irrotettavien levyjen levyvarastoissa.</td></tr>
+      <tr><th scope="row">Tili tai keskuspalvelin</th><td>Ei kumpaakaan.</td><td>Ei kumpaakaan. Varstolla ei ole palvelinta; laitteet löytävät toisensa tallennuspaikkojesi kautta ja lähiverkossa.</td></tr>
+      <tr><th scope="row">Salaus</th><td>Valinnainen kullekin special remotelle (GnuPG); repositorion nimet näkyvät, ellei käytetä gcryptiä.</td><td>Päästä päähän, asiakaspäässä, ennen kuin mitään lähtee laitteelta; hybridi post-kvanttisalaus (ML-KEM avainten jakamiseen, Ed25519 + ML-DSA-65 -allekirjoitukset). Ei vielä riippumattomasti auditoitu.</td></tr>
+      <tr><th scope="row">Laitteet verkossa yhtä aikaa</th><td>Ei tarvita; synkronointi on oletuksena erikseen käynnistettävää tai ajastettua eikä jatkuvaa.</td><td>Ei tarvita: laitteet synkronoituvat tallennuspaikkojesi kautta ja suoraan vertaisyhteydellä, kun ne tavoittavat toisensa.</td></tr>
+      <tr><th scope="row">Tietää, missä jokainen kopio on</th><td>Kyllä: sijaintien seuranta ja numcopies, jotka ovat Varston kirjanpidon ja säilytyssääntöjen esikuva.</td><td>Kyllä: allekirjoitettu kirjanpito kertoo, mikä tallennuspaikka ja laite säilyttää kunkin lohkon; säilytyssäännöt (oletuksena 1 kopio missä tahansa, 1 ulkoinen ja 1 omilla laitteillasi tai levyilläsi, toisen laitteen tarkistamana 30 päivän sisällä) varoittavat, kun jokin sääntö ei täyty.</td></tr>
+      <tr><th scope="row">Irrotettavat ja verkosta irti olevat levyt</th><td>Kyllä: täysivaltainen ominaisuus, levyn sisältö pysyy tiedossa, vaikka levy on irrotettu.</td><td>Kyllä: levyvarastot täytetään, tarkistetaan ja tunnistetaan, kun levyt palaavat; poissa olevalla levyllä olevat tiedostot pyytävät kyseistä levyä.</td></tr>
+      <tr><th scope="row">Lisenssi ja hinta</th><td>Vapaa ohjelmisto (AGPL-3+), ilmainen.</td><td>Lähdekoodi saatavilla (PolyForm Shield 1.0.0), ilmainen; maksat vain tallennuspalvelun tarjoajallesi.</td></tr>
+      <tr><th scope="row">Kypsyys</th><td>Kypsä, ja uusia versioita on julkaistu aktiivisesti yli vuosikymmenen ajan.</td><td>Alfa: ei tuotantodatalle, ja formaatit voivat vielä muuttua.</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Kumpi sopii sinulle</h2>
+    <div class="grid two">
+      <div class="card"><h3>git-annex</h3><p>Valitse git-annex, kun gitin ja komentorivin käyttö on sinulle tuttua, haluat mahdollisimman paljon hallintaa ja läpinäkyvyyttä ja arvostat kypsää vapaata ohjelmistoa enemmän kuin valmista sovellusta.</p></div>
+      <div class="card"><h3>Varsto</h3><p>Varsto pyrkii antamaan samat takuut (jokainen kopio on tiedossa, säännöt sille, montako kopiota on oltava olemassa, irrotettavat levyt, jotka tulevat ja menevät) ihmisille, jotka eivät käytä gitiä: jatkuvan taustasynkronoinnin, työpöytä- ja puhelinkäyttöliittymän, salauksen, joka kattaa aina nimet ja sisällön, vertaissiirrot sekä jakamisen muille ihmisille.</p></div>
+    </div>
+    <p class="note">Varsto on alfavaiheen ohjelmisto: älä luota sille tietoja, joista sinulla ei ole muuta kopiota. Sen kryptografiaa ei ole myöskään auditoitu riippumattomasti. Muut tässä esitellyt tuotteet ovat kypsiä. Niitä koskevat tiedot tarkistettiin niiden omasta dokumentaatiosta lokakuussa 2026; hinnat ja tilausvaihtoehdot muuttuvat usein, joten katso ajantasaiset tiedot niiden omilta sivuilta. Korjaukset ovat tervetulleita <a href="{{P}}forum/">foorumilla</a> tai GitHubissa.</p>
+
+    <h2>Lähteet</h2>
+    <ul>
+      <li><a href="https://git-annex.branchable.com/">git-annexin verkkosivusto</a></li>
+      <li><a href="https://git-annex.branchable.com/special_remotes/">Special remotes</a></li>
+      <li><a href="https://git-annex.branchable.com/encryption/">Salaus</a></li>
+      <li><a href="https://git-annex.branchable.com/git-annex-numcopies/">numcopies</a></li>
+    </ul>

@@ -3,6 +3,8 @@
 //! enrolling backup security keys, across two devices that share one storage.
 //! The software key stands in for a FIDO2 authenticator.
 
+mod common;
+
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -57,6 +59,13 @@ fn pseudo_random(len: usize, seed: u64) -> Vec<u8> {
 
 /// Every object key in the storage under `prefix`.
 fn objects(storage: &Path, prefix: &str) -> BTreeSet<String> {
+    if prefix == "chunks" {
+        // Block objects, single or packed, by their key.
+        return common::object_names(storage)
+            .into_iter()
+            .map(|n| format!("chunks/{}/{n}", &n[..2]))
+            .collect();
+    }
     let base = storage.join(prefix);
     walkdir::WalkDir::new(&base)
         .into_iter()
@@ -205,9 +214,11 @@ fn an_interrupted_conversion_deletes_nothing_and_resumes_with_the_same_key() {
     let away = lab.root.join("away");
     fs::create_dir_all(&away).unwrap();
     for k in &old_chunks {
-        let from = storage.join(k);
-        if fs::metadata(&from).unwrap().len() > 1000 {
-            fs::rename(&from, away.join(k.replace('/', "_"))).unwrap();
+        let name = k.rsplit('/').next().unwrap();
+        let bytes = common::read_object(&storage, name).unwrap();
+        if bytes.len() > 1000 {
+            fs::write(away.join(k.replace('/', "_")), bytes).unwrap();
+            common::lose_object(&storage, name);
         }
     }
     let sk = SoftwareKey {
@@ -228,9 +239,10 @@ fn an_interrupted_conversion_deletes_nothing_and_resumes_with_the_same_key() {
         a.strongroom_conversions(),
         vec![("docs".to_string(), false)]
     );
+    let present = objects(&storage, "chunks");
     for k in &old_chunks {
         let moved = away.join(k.replace('/', "_"));
-        assert!(storage.join(k).exists() || moved.exists());
+        assert!(present.contains(k) || moved.exists());
     }
     b.sync(None).unwrap();
     assert!(!b.folders()[0].0.is_strongroom(), "B was not told anything");
@@ -240,6 +252,7 @@ fn an_interrupted_conversion_deletes_nothing_and_resumes_with_the_same_key() {
     for k in &old_chunks {
         let moved = away.join(k.replace('/', "_"));
         if moved.exists() {
+            fs::create_dir_all(storage.join(k).parent().unwrap()).unwrap();
             fs::rename(&moved, storage.join(k)).unwrap();
         }
     }

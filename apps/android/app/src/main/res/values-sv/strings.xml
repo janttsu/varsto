@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="service_running">Varsto synkroniserar i bakgrunden</string>
+    <string name="choose_files">Lägg till filer i Varsto</string>
+    <string name="open_with">Öppna med</string>
+    <string name="share_with">Dela</string>
+    <string name="file_missing">%1$s finns inte på den här telefonen ännu</string>
+    <string name="file_not_shareable">Den här filen kan inte lämnas över till andra appar: %1$s</string>
+    <string name="camera_uploading">Laddar upp %1$d av %2$d till %3$s</string>
+    <string name="service_did_not_start">Varsto-tjänsten startade inte</string>
+</resources>

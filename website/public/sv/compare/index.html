@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="sv">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Jämförelser: Varsto</title>
+<meta name="description" content="Hur Varsto står sig mot Syncthing, Resilio Sync, MEGA, Filen, Tresorit och git-annex: vad var och en är till för och var de skiljer sig åt.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="../../favicon.svg" type="image/svg+xml">
+<link rel="canonical" href="https://varsto.net/sv/compare/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Varsto">
+<meta property="og:title" content="Jämförelser: Varsto">
+<meta property="og:description" content="Hur Varsto står sig mot Syncthing, Resilio Sync, MEGA, Filen, Tresorit och git-annex: vad var och en är till för och var de skiljer sig åt.">
+<meta property="og:url" content="https://varsto.net/sv/compare/">
+<meta property="og:image" content="https://varsto.net/assets/img/og-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:locale" content="sv_SE">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="alternate" hreflang="en" href="https://varsto.net/compare/">
+<link rel="alternate" hreflang="x-default" href="https://varsto.net/compare/">
+<link rel="alternate" hreflang="fi" href="https://varsto.net/fi/compare/">
+<link rel="alternate" hreflang="sv" href="https://varsto.net/sv/compare/">
+<link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../../blog/feed.xml">
+<link rel="stylesheet" href="../../assets/css/site.css?v=b3d2d4f387">
+<script src="../../assets/js/theme.js?v=0951491269"></script>
+</head>
+<body>
+<a class="skip" href="#main">Hoppa till innehållet</a>
+<div class="alpha" role="note">
+  <div class="wrap"><strong>Alfaprogramvara, inte för produktionsdata.</strong> Fel kan leda till dataförlust, formatet kan ändras utan migrering och krypteringen har ännu inte granskats av utomstående. Behåll egna säkerhetskopior och kontrollera att du kan återställa från dem.</div>
+</div>
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="../../sv/"><img src="../../assets/img/logo.svg" alt="" width="28" height="28"><span>Varsto</span></a>
+    <nav class="langs" aria-label="Language"><a href="../../compare/" hreflang="en" lang="en">English</a> <a href="../../fi/compare/" hreflang="fi" lang="fi">Suomi</a> <a href="../../sv/compare/" hreflang="sv" lang="sv" aria-current="true">Svenska</a></nav>
+
+    <nav class="main" aria-label="Main">
+      <a href="../../sv/">Projekt</a>
+      <a href="../../sv/features/">Funktioner</a>
+      <a href="../../sv/use-cases/">Användningsfall</a>
+      <a href="../../sv/compare/" aria-current="page">Jämförelse</a>
+      <a href="../../sv/how-it-works/">Så fungerar det</a>
+      <a href="../../sv/screenshots/">Skärmbilder</a>
+      <a href="../../docs/">Dokumentation (en)</a>
+      <a href="../../sv/downloads/">Nedladdningar</a>
+      <a href="../../blog/">Blogg (en)</a>
+      <a href="../../forum/">Forum (en)</a>
+      <a href="../../sv/contribute/">Bidra</a>
+      <a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a>
+      <button class="theme" id="theme-toggle" type="button" aria-label="Change colour theme">Theme: auto</button>
+    </nav>
+  </div>
+</header>
+<main id="main">
+  <div class="wrap">
+    <h1>Så står sig Varsto</h1>
+    <p class="lead">Verktyg för att hålla filer synkroniserade delas in i tre grupper. Peer-to-peer-verktyg som Syncthing och Resilio Sync kopierar mappar mellan dina egna enheter. Krypterade moln som MEGA, Filen och Tresorit förvarar dina filer hos en enda leverantör. git-annex håller reda på stora filer på alla diskar och fjärrlagringar du äger. Varsto kombinerar delar av alla tre: end-to-end-krypterade filer på lagringsplatser du själv väljer, peer-to-peer-överföring mellan dina enheter och en förteckning över var varje kopia finns.</p>
+
+    <table class="compare-table compare-overview">
+      <thead><tr><th scope="col"></th><th scope="col">Varsto</th><th scope="col"><a href="../compare/syncthing/">Syncthing</a></th><th scope="col"><a href="../compare/resilio-sync/">Resilio Sync</a></th><th scope="col"><a href="../compare/mega/">MEGA</a></th><th scope="col"><a href="../compare/filen/">Filen</a></th><th scope="col"><a href="../compare/tresorit/">Tresorit</a></th><th scope="col"><a href="../compare/git-annex/">git-annex</a></th></tr></thead>
+      <tbody>
+      <tr><th scope="row">Var dina filer finns</th><td><strong>Dina enheter och dina lagringsplatser</strong></td><td>Dina enheter</td><td>Dina enheter</td><td>MEGA:s moln</td><td>Filens moln</td><td>Tresorits moln</td><td>Var du än väljer</td></tr>
+      <tr><th scope="row">Konto eller central server</th><td><strong>Inget</strong></td><td>Inget</td><td>Inget konto</td><td>Konto</td><td>Konto</td><td>Konto</td><td>Inget</td></tr>
+      <tr><th scope="row">Enheterna måste vara online samtidigt</th><td><strong>Nej</strong></td><td>Ja</td><td>Ja</td><td>Nej</td><td>Nej</td><td>Nej</td><td>Nej</td></tr>
+      <tr><th scope="row">Vet var varje kopia finns</th><td><strong>Ja</strong></td><td>Nej</td><td>Nej</td><td>En kopia hos leverantören</td><td>En kopia hos leverantören</td><td>En kopia hos leverantören</td><td>Ja</td></tr>
+      <tr><th scope="row">Flyttbara diskar och diskar offline</th><td><strong>Ja</strong></td><td>Nej</td><td>Nej</td><td>Nej</td><td>Nej</td><td>Nej</td><td>Ja</td></tr>
+      <tr><th scope="row">Licens och pris</th><td><strong>Källkoden tillgänglig, gratis</strong></td><td>Öppen källkod, gratis</td><td>Proprietär, gratisnivå</td><td>Abonnemang, klientens källkod publicerad</td><td>Abonnemang, klienter med öppen källkod</td><td>Proprietära abonnemang</td><td>Fri programvara, gratis</td></tr>
+      </tbody>
+    </table>
+    <p class="note">”En kopia hos leverantören” betyder att kopian utanför hemmet finns hos den leverantören; dina enheter har också sina egna kopior. Varje jämförelsesida förklarar detaljerna och länkar till källorna.</p>
+
+    <h2>Jämförelser</h2>
+    <div class="grid three">
+      <a class="card" href="../compare/syncthing/"><h3>Varsto och Syncthing</h3><p>Syncthing håller mappar identiska mellan dina egna enheter, kontinuerligt och helt utan moln.</p></a>
+      <a class="card" href="../compare/resilio-sync/"><h3>Varsto och Resilio Sync</h3><p>Resilio Sync synkroniserar och delar mappar mellan enheter peer-to-peer, byggt på BitTorrent-teknik.</p></a>
+      <a class="card" href="../compare/mega/"><h3>Varsto och MEGA</h3><p>MEGA är end-to-end-krypterad molnlagring för privatpersoner och företag, med generösa lagringsabonnemang, skrivbordssynkronisering, mobilappar och tillhörande tjänster som chatt och VPN.</p></a>
+      <a class="card" href="../compare/filen/"><h3>Varsto och Filen</h3><p>Filen är nollkunskapskrypterad molnlagring från Tyskland, för integritetsmedvetna privatpersoner och team.</p></a>
+      <a class="card" href="../compare/tresorit/"><h3>Varsto och Tresorit</h3><p>Tresorit är end-to-end-krypterad molnlagring och fildelning från Schweiz, främst riktad till företag och reglerade branscher, men med abonnemang för privatpersoner också.</p></a>
+      <a class="card" href="../compare/git-annex/"><h3>Varsto och git-annex</h3><p>git-annex hanterar stora filer med git utan att lagra deras innehåll i git.</p></a>
+    </div>
+    <p class="note">Varsto är alfaprogramvara: anförtro den inga data som du inte har någon annan kopia av, och dess kryptografi har inte granskats av någon oberoende part. De andra produkterna här är mogna. Uppgifterna om dem kontrollerades i deras egen dokumentation i oktober 2026; priser och abonnemang ändras ofta, så se deras egna sidor för aktuella siffror. Rättelser tas gärna emot på <a href="../../forum/">forumet</a> eller på GitHub.</p>
+
+  </div>
+</main>
+<footer class="site">
+  <div class="wrap">
+    <span>Varsto är ett arbetsnamn. Källkod: <a href="https://github.com/janttsu/varsto">github.com/janttsu/varsto</a>, under PolyForm Shield License 1.0.0 (källkoden tillgänglig).</span>
+    <span>Inga kakor, ingen spårning. Webbservern sparar en vanlig åtkomstlogg i högst sju dagar.</span>
+    <span><a href="../../docs/security-policy.html">Säkerhetspolicy</a> · <a href="../../docs/licence.html">Licens</a> · <a href="../../docs/trademark.html">Varumärke</a> (på engelska)</span>
+  </div>
+</footer>
+</body>
+</html>

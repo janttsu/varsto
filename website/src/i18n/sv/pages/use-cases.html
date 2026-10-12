@@ -1,0 +1,133 @@
+---
+title: Användningsfall
+nav: Use cases
+output: use-cases/index.html
+description: Tretton situationer som Varsto är utformat för, från ett flygplan utan internet till en husbrand, med en ärlig kommentar om vad alfan redan gör.
+---
+    <h1>Användningsfall</h1>
+    <p class="lead">Det här är de situationer som designen prövas mot. De kommer från projektplanen och styr kraven, de automatiska testerna och <a href="{{L}}features/">funktionslistan</a>. Varje fall anger vad alfan gör i dag och vad som är utformat men ännu inte byggt. Inget här är ett löfte om alfan; <a href="{{P}}docs/failure-model.html">felmodellen</a> listar vad som fortfarande kan gå fel.</p>
+
+    <section class="feature" id="uc-1">
+      <h2>1. ”Jag glömde att kopiera filen före resan”</h2>
+      <picture><source type="image/webp" srcset="{{P}}assets/img/usecases/plane.webp"><img src="{{P}}assets/img/usecases/plane.png" alt="Två enheter på ett flygplan synkroniserar via telefonens surfzon; molnet är överstruket tills planet har landat." width="640" height="320" loading="lazy"></picture>
+      <div>
+        <p><strong>Situation.</strong> På flygplanet inser du att filen du behöver arbeta med finns på telefonen, inte på den bärbara datorn. Det finns inget internet.</p>
+        <p><strong>Så hjälper Varsto.</strong> De två enheterna hittar varandra lokalt (telefonens surfzon, Wi-Fi Direct eller en parkopplad anslutning) och filen flyttas direkt från den ena till den andra. På den bärbara datorn är mappen i selektivt läge, så filen syns redan som en platshållare; ett klick hämtar den från telefonen. Dina ändringar går tillbaka samma väg.</p>
+        <p><strong>När nätverket är tillbaka</strong> på flygplatsen eller hotellet skickar båda enheterna ändringarna till din molnlagring och de andra enheterna kommer ikapp. Liggaren vet i varje ögonblick vilken version som finns var.</p>
+        <p class="note">Ärliga kommentarer: wifi på flygplan isolerar oftast klienterna från varandra, så telefonens egen surfzon är det dokumenterade förstahandsvalet. Medan båda enheterna ligger i samma väska finns ändringarna bara på ett ställe; appen visar ”bara på de här två enheterna, ännu inte i molnet” och påminner dig om att synkronisera när ett nätverk finns tillgängligt. Inloggning, även med en säkerhetsnyckel, fungerar offline eftersom det inte finns någon server att fråga. I dag: selektiv synkronisering, platshållare, liggaren och direkt överföring mellan enheter i det lokala nätverket finns (telefonens surfzon är ett lokalt nätverk); molnet kommer ikapp när det går att nå. Över internet hittar enheterna en väg genom NAT med STUN och hålslagning, eller via en av dina egna nåbara enheter som relä; ett valv där alla enheter står bakom NAT har fortfarande ingen väg.</p>
+      </div>
+    </section>
+
+    <section class="feature" id="uc-2">
+      <h2>2. Den stulna bärbara datorn</h2>
+      <picture><source type="image/webp" srcset="{{P}}assets/img/usecases/stolen.webp"><img src="{{P}}assets/img/usecases/stolen.png" alt="En stulen bärbar dator: Strongroom-mappen förblir låst, enheten återkallas och raderas från en telefon." width="640" height="320" loading="lazy"></picture>
+      <div>
+        <p>Tjuven lyckas ta sig in i datorn. Strongroom-mappar förblir låsta eftersom de kräver din säkerhetsnyckel, inte ett lösenord som kan ligga cachat. Från en annan enhet återkallar du den bärbara datorn och köar ett raderingskommando som körs i samma stund som den kommer online. Allt går fortfarande att återställa från dina egna lagringsplatser. Liggarens brytpunkt för återkallelsen innebär att händelser som den stulna enheten signerar efter den tidpunkten sätts i karantän i stället för att betraktas som pålitliga.</p>
+        <p class="note">I dag: Strongroom-mappar finns (nyckeln finns bara medan din säkerhetsnyckel berörs, med en reservnyckel om du registrerar en), och en enhet som har återställts från en gammal säkerhetskopia upptäcks och spärras i liggaren. Att ta bort en enhet fungerar från vilken annan enhet som helst (Peers, Enheter, ”Ta bort enhet…” eller <code>varsto device revoke laptop --wipe</code>): dess senare liggarposter ignoreras, dina enheter vägrar dess peer-anslutningar och valvet får nya nycklar som bara dina kvarvarande enheter får, så inget som skrivs därefter går att öppna med det som den bärbara datorn har. Raderingsordern är signerad av din enhet och körs nästa gång den bärbara datorn når någon av dina lagringsplatser. Det som den bärbara datorn kunde läsa tidigare förblir läsbart för den, mappar som delats med andra personer behåller sina nycklar, och dess inloggningsuppgifter till lagringen fungerar tills du ändrar dem hos leverantören.</p>
+      </div>
+    </section>
+
+    <section class="feature" id="uc-3">
+      <h2>3. En leverantör stänger ditt konto eller förlorar dina data</h2>
+      <picture><source type="image/webp" srcset="{{P}}assets/img/usecases/provider.webp"><img src="{{P}}assets/img/usecases/provider.png" alt="En leverantör har lagt ned; kopior hos en andra leverantör och på en disk hemma finns kvar och appen reparerar." width="640" height="320" loading="lazy"></picture>
+      <div>
+        <p>Din lagringstjänst stängs ned utan förvarning. Dina data finns också hos en andra leverantör och på dina egna enheter, eftersom Varsto aldrig förlitar sig på en enda lagringsplats. Appen varnar dig för att en regel inte längre uppfylls, reparerar de saknade kopiorna till en annan lagringsplats, och ”drain” flyttar bort allt från den döda leverantörens register. Att byta leverantör är en vanlig åtgärd, inte ett migreringsprojekt.</p>
+        <p class="note">I dag: valfritt antal lagringsplatser (kataloger, S3-buckets, rclone-remotes), lagringsregler som varnar i appen och med en avisering när en regel är i fara eller bruten, <code>fsck</code> rapporterar vilka påstådda kopior en lagringsplats inte längre kan styrka, saknade eller skadade kopior på dina lagringsplatser repareras automatiskt från en annan kopia, och nya lagringsplatser får det de saknar. Drain är utformat.</p>
+      </div>
+    </section>
+
+    <section class="feature" id="uc-4">
+      <h2>4. Husbranden</h2>
+      <picture><source type="image/webp" srcset="{{P}}assets/img/usecases/fire.webp"><img src="{{P}}assets/img/usecases/fire.png" alt="Ett hus i brand; varje fil har också en kopia hos släktingar i en annan stad och i en moln-bucket." width="640" height="320" loading="lazy"></picture>
+      <div>
+        <p>Allt hemma försvinner på en gång: datorn, NAS:en, diskarna i skåpet. Placeringsregler efter plats (”en kopia utanför den här platsen”) har sett till att varje fil också finns i en annan stad eller ett annat land, i en moln-bucket, på en disk som förvaras hos släktingar eller på en <a href="#uc-11">opålitlig replik</a> hos en vän. Enheter på samma plats behandlas som en enda feldomän, så två kopior i samma rum räknas aldrig som två.</p>
+        <p class="note">I dag: varje lagringsplats har en platsetikett (hem, moln, extern, ...) och en mappregel som ”minst en kopia på platsen moln” kontrolleras utifrån liggaren på varje enhet, med en varning innan den bryts. En diskpool kan hålla två kopior på diskar som förvaras på olika platser, och en mapp kan skrivas enbart till valda platser. Att gruppera hela enheter i anläggningar är utformat.</p>
+      </div>
+    </section>
+
+    <section class="feature" id="uc-5">
+      <h2>5. Kamerarullen är full</h2>
+      <picture><source type="image/webp" srcset="{{P}}assets/img/usecases/camera.webp"><img src="{{P}}assets/img/usecases/camera.png" alt="En telefons fulla kamerarulle laddas upp krypterad; utrymme frigörs när en andra kopia har verifierats." width="640" height="320" loading="lazy"></picture>
+      <div>
+        <p>Automatisk kamerauppladdning flyttar foton och videor till dina lagringsplatser, krypterade på telefonen innan de lämnar den. ”Frigör utrymme” raderar originalen först när din lagringsregel är uppfylld och kopiorna har verifierats via hash, inte bara laddats upp. Miniatyrbilderna stannar på telefonen så att galleriet fortfarande ser ut som ett galleri.</p>
+        <p class="note">I dag: Android-appen laddar upp nya foton och videor till en valfri mapp (YYYY/MM efter fotograferingsdatum, valfritt bara via Wi-Fi eller under laddning), var och en en gång, och krypterade miniatyrbilder och verifierade kopior finns i kärnan. Den raderar aldrig originalen: att frigöra utrymme i galleriet återstår.</p>
+      </div>
+    </section>
+
+    <section class="feature" id="uc-6">
+      <h2>6. En ny enhet, eller en liten telefon</h2>
+      <picture><source type="image/webp" srcset="{{P}}assets/img/usecases/newdevice.webp"><img src="{{P}}assets/img/usecases/newdevice.png" alt="En ny liten telefon ser hela mappträdet som platshållare och har bara laddat ned några få objekt." width="640" height="320" loading="lazy"></picture>
+      <div>
+        <p>Anslut en ny enhet med din nyckel så visas hela mappträdet direkt som platshållare. Bara det du öppnar laddas ned, och stora mappar fyller aldrig en liten disk. En telefon med 128 GB kan bära ett valv på 2 TB. ”Frigör utrymme” gör en fil till en platshållare igen när den är säkert lagrad någon annanstans.</p>
+        <p class="note">I dag: <code>varsto folder attach --selective</code>, hämta och frigör, på kommandoraden och i skrivbordsgränssnittet. Finder, Explorer och filhanterarna för Linux laddar ned och frigör filer från sina snabbmenyer; inbyggda platshållare i Finder, Explorer och Filer kommer senare.</p>
+      </div>
+    </section>
+
+    <section class="feature" id="uc-7">
+      <h2>7. ”Städa den här mappen åt mig”</h2>
+      <picture><source type="image/webp" srcset="{{P}}assets/img/usecases/cheapest.webp"><img src="{{P}}assets/img/usecases/cheapest.png" alt="En chatt med en assistent som arbetar i en beviljad mapp och föreslår en snyggare struktur, med en Bekräfta-knapp." width="640" height="320" loading="lazy"></picture>
+      <div>
+        <p>Tio års skannade brev, kvitton och anteckningar i en enda mapp. Du ger en språkmodell åtkomst till just den mappen via Varstos MCP-server: en lokal modell på din egen dator (Ollama, LM Studio eller vad som helst som talar Model Context Protocol), så att innehållet aldrig lämnar dina enheter, eller en molnassistent om du föredrar det. Den läser filerna, listar ut vad de är och vad som hör ihop, och föreslår en struktur med dina egna ord: per år, per motpart, per projekt, ”skattepapper per år, allt annat efter avsändare”. När du har bekräftat skapar den katalogerna, flyttar och byter namn på filerna in i dem och skriver ett register över vad som hamnade var. Den nya strukturen synkroniseras till dina andra enheter som vilken ändring du själv gör.</p>
+        <p>Reglerna är fastlagda i Varsto, inte överlämnade åt modellen: den ser bara de mappar du har beviljat, skrivskyddat om du inte tillåter ändringar, aldrig dina Strongrooms, och den kan inte förstöra något. Det finns inget raderingsverktyg; skrivning skapar bara nya filer, och en flytt eller ett namnbyte görs bara till ett namn som är ledigt på alla enheter, så ingen fil ersätts någonsin av en annan. Om modellen gör fel finns allt fortfarande kvar, under en annan sökväg.</p>
+        <p>Var inaktiva data ska ligga avgör Varsto själv, inte assistenten: appen håller reda på när varje fil senast användes och föreslår i gränssnittet vad som inte har rörts på månader och vad det skulle kosta i en kall lagringsklass, med källor och datum.</p>
+        <p class="note">I dag: <code>varsto mcp</code> med åtkomst per mapp (<code>varsto mcp grant Letters --write</code>): läsa, lista, skapa kataloger, flytta och byta namn till lediga namn samt skapa nya anteckningar, utan möjlighet att radera eller skriva över; Varstos egen placeringsuppskattning i gränssnittet och på kommandoraden, prissatt med dina egna lagringspriser, ett klick (eller <code>varsto advice apply</code>) för att frigöra inaktiva filer på den här enheten när deras kopior är verifierade och mappens regel fortfarande uppfylls, och, när du har en billigare kall lagring, ett klick för att flytta de inaktiva filernas block dit så att själva kostnaden sjunker, aldrig under mappens regel (<code>varsto move Letters --from box --to glacier --idle-days 180</code> gör detsamma för hand, med <code>--dry-run</code> för att se kostnaderna först).</p>
+      </div>
+    </section>
+
+    <section class="feature" id="uc-8">
+      <h2>8. Känsliga dokument</h2>
+      <picture><source type="image/webp" srcset="{{P}}assets/img/usecases/sensitive.webp"><img src="{{P}}assets/img/usecases/sensitive.png" alt="En skattemapp i ett Strongroom: öppnas bara med en säkerhetsnyckel, ingen klartext på telefonen, dold för AI-assistenten." width="640" height="320" loading="lazy"></picture>
+      <div>
+        <p>Skattemappen ligger i ett Strongroom: den öppnas bara med en beröring av din FIDO2-säkerhetsnyckel, något som upprätthålls av kryptografin, inte av en dialogruta. På telefonen skrivs aldrig något från den i klartext, och assistenten kan inte se att mappen finns. När mappen har stängts lämnar nyckeln minnet.</p>
+        <p class="note">I dag: Strongroom-mappar öppnas bara med en FIDO2-säkerhetsnyckel (libfido2-verktygen), kan ha en reservnyckel och är osynliga för assistenter; inget skrivs i klartext på lagringen. En befintlig skattemapp kan göras om till ett Strongroom: omkrypterad under en ny nyckel, de gamla kopiorna raderade från lagringen, okrypterade kopior på andra enheter ersatta med platshållare. Mappar som hålls krypterade på telefonen innehåller där bara krypterade block, även för de filer som sparas för offlineanvändning; Android-appen visar bilder, video, ljud och text i sin egen visare, dekrypterade i minnet utan att någon kopia skrivs till telefonen; PDF:er och andra filer öppnas fortfarande i en annan app, som får en dekrypterad kopia som Varsto tar bort när den låses eller startas om.</p>
+      </div>
+    </section>
+
+    <section class="feature" id="uc-9">
+      <h2>9. Tiotals terabyte på gamla diskar</h2>
+      <picture><source type="image/webp" srcset="{{P}}assets/img/features/disks.webp"><img src="{{P}}assets/img/features/disks.png" alt="Hårddiskar på en hylla bredvid en dator med en USB-docka." width="640" height="320" loading="lazy"></picture>
+      <div>
+        <p><strong>Situation.</strong> Du förvaltar ett enormt arkiv på gamla hårddiskar via en USB-docka. Diskarna står i ett skåp; några förvaras någon annanstans. I dag håller du reda på dem med ett kalkylark, eller med git-annex.</p>
+        <p><strong>Så hjälper Varsto.</strong> Anslut disken ”data-01” och säg åt appen att använda den. Den fyller disken enligt din lagringsregel, talar om när den kan matas ut och registrerar i liggaren vad som finns på den, var den förvaras och när den senast verifierades. När du behöver en stor fil på den bärbara datorn och nedladdningen från molnet skulle ta timmar föreslår appen: ”Anslut disken data-01 (hylla: hem); cirka 12 minuter i stället för 9 timmar från molnet”. En mapp kan hållas enbart på diskar, replikerad så många gånger du vill, utan molnkopia.</p>
+        <p class="note">I dag: en diskpool är en lagringsplats; <code>varsto disk add</code> registrerar en disk, fyller den inom dess reserv och kommer ihåg vad som finns på den, <code>disk check</code> verifierar och fyller på den när den kommer tillbaka, <code>disk eject</code> talar om när den säkert kan tas bort, och en fil vars kopia finns på en disk som är borta visar ”anslut disken data-01 (hylla)” i appen och på kommandoraden. Regler räknar en frånkopplad disk utifrån dess senaste verifiering. Diskgrupper håller ett antal kopior på diskar som förvaras på olika platser (<code>varsto disk group shelf --copies 2</code>, varje disk med sin plats), regler räknar varje diskkopia på dess plats, och en mapp som bara skrivs till poolen (<code>varsto folder placement Archive --storage shelf</code>) har ingen molnkopia. Ännu inte: tidsuppskattningar i förslaget och import från git-annex.</p>
+      </div>
+    </section>
+
+
+    <section class="feature" id="uc-10">
+      <h2>10. Gigabyte mellan hem och kontor, utan uppladdning</h2>
+      <picture><source type="image/webp" srcset="{{P}}assets/img/features/transferrer.webp"><img src="{{P}}assets/img/features/transferrer.png" alt="Ett USB-minne markerat som överföringsdisk mellan en dator hemma och en dator på kontoret." width="640" height="320" loading="lazy"></picture>
+      <div>
+        <p>Markera ett USB-minne eller en extern disk som <em>överföringsdisk</em> och anslut den till båda datorerna. Den tar bara emot de krypterade block som den andra sidan fortfarande saknar; när båda ändarna har ett block raderas det från minnet, som också bär liggarbatcharna, så att de två datorerna är överens om vad som har hänt även om de aldrig delar nätverk. Redigera material på kontoret, ta med minnet hem, anslut det, klart.</p>
+        <p class="note"><code>varsto storage add-local stick /media/usb --carrier</code> på båda enheterna.</p>
+      </div>
+    </section>
+
+    <section class="feature" id="uc-11">
+      <h2>11. Två vänner lagrar varandras säkerhetskopior</h2>
+      <picture><source type="image/webp" srcset="{{P}}assets/img/features/untrusted.webp"><img src="{{P}}assets/img/features/untrusted.png" alt="Du med nycklarna, en delad lagringsplats och en väns NAS som lagrar verifierade krypterade kopior som den inte kan öppna." width="640" height="320" loading="lazy"></picture>
+      <div>
+        <p>Du ger en vän en <em>repliktoken</em>. Vännens enhet kopierar dina krypterade objekt från en lagringsplats som ni båda når till sin egen disk, verifierar varje hash och skriver sin egen signerade rapport i din liggare. Den får aldrig någon nyckel som öppnar något; den får veta objektens namn och storlekar, exakt det som en molnleverantör får veta. I din app visas kopiorna som verifierade. Vännen gör likadant med din NAS. Ingen av er kan läsa den andras filer, och båda har en kopia på annan ort gratis.</p>
+        <p class="note"><code>varsto replica token</code> på din sida; <code>varsto replica init</code> och <code>replica run</code> på vännens. Samma mekanism fungerar för en hyrd server som du inte litar på.</p>
+      </div>
+    </section>
+
+    <section class="feature" id="uc-12">
+      <h2>12. Dela en mapp med en annan Varsto-användare</h2>
+      <picture><source type="image/webp" srcset="{{P}}assets/img/features/sharing.webp"><img src="{{P}}assets/img/features/sharing.png" alt="Två användare; en mappnyckel lämnas över så att den andra användaren kan synkronisera och läsa mappen." width="640" height="320" loading="lazy"></picture>
+      <div>
+        <p>Den andra användarens enhet skriver ut en begärandekod; du förseglar mappnyckeln till den (hybrid X25519 + ML-KEM-768) och skickar tillbaka token via valfri kanal, eftersom bara deras enhet kan öppna den. De pekar mappen mot lagring som ni båda når och kan därefter synkronisera och läsa den som vilken av sina egna mappar som helst. Deras enhet skriver sin egen signerade liggare under mappnyckeln, så att du också ser deras kopior. Sedan alpha.9 bekräftar du vem som skickade en begärandekod genom att jämföra sex ord via en annan kanal, och en medlem eller en token som inte har accepterats kan tas bort, vilket ger mappen en ny nyckel. QR-inbjudningar är nästa steg.</p>
+        <p class="note"><code>varsto share create docs</code> och, för mottagaren, <code>varsto share accept</code>, eller samma knappar i skrivbordsgränssnittet.</p>
+      </div>
+    </section>
+
+    <section class="feature" id="uc-13">
+      <h2>13. Bläddra bland foton på en enhet som inte har laddat ned dem</h2>
+      <picture><source type="image/webp" srcset="{{P}}assets/img/usecases/reader.webp"><img src="{{P}}assets/img/usecases/reader.png" alt="En stationär dator skapar miniatyrbilder och lagrar dem krypterade, och en telefon visar förhandsvisningar av filer som den inte har laddat ned." width="640" height="320" loading="lazy"></picture>
+      <div>
+        <p>Enheten som har fotona och videorna skapar miniatyrbilder en gång, krypterar dem under mappnyckeln och lagrar dem bredvid data. Varje annan enhet med nyckeln, även en telefon vars mapp bara består av platshållare, visar förhandsvisningarna utan att hämta en enda bild. Lagringsleverantörerna ser bara chiffertext, för miniatyrbilderna som för allt annat.</p>
+      </div>
+    </section>
+
+    <h2>Så testas de här fallen</h2>
+    <p>Den automatiska testsviten i kodförrådet spelar upp flera av de här scenarierna med två eller tre simulerade enheter som aldrig är online samtidigt: synkronisering offline, samtidiga ändringar med konfliktkopior, en enhet som har återställts från en gammal säkerhetskopia, en replik, en delad mapp, en överföringsdisk, selektiv synkronisering och miniatyrbilder. Ett labb av virtuella maskiner med hem- och kontorsnätverk bakom NAT spelar upp scenarierna för peer-to-peer, lokalt nätverk, avbrott, klockavvikelse och skala vid varje release; tester med flyttbara diskar i virtuella maskiner (urkoppling under skrivning, bitröta, en klonad disk) är planerade. Se <a href="{{P}}docs/testing.html">Testning</a> och <a href="{{P}}docs/failure-model.html">felmodellen</a>.</p>

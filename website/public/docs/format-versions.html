@@ -7,6 +7,19 @@
 <meta name="description" content="Varsto documentation: Storage format versions">
 <meta name="color-scheme" content="light dark">
 <link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="canonical" href="https://varsto.net/docs/format-versions.html">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Varsto">
+<meta property="og:title" content="Storage format versions: Varsto">
+<meta property="og:description" content="Varsto documentation: Storage format versions">
+<meta property="og:url" content="https://varsto.net/docs/format-versions.html">
+<meta property="og:image" content="https://varsto.net/assets/img/og-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:locale" content="en_GB">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="alternate" hreflang="en" href="https://varsto.net/docs/format-versions.html">
+<link rel="alternate" hreflang="x-default" href="https://varsto.net/docs/format-versions.html">
 <link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../blog/feed.xml">
 <link rel="stylesheet" href="../assets/css/site.css?v=b3d2d4f387">
 <script src="../assets/js/theme.js?v=0951491269"></script>
@@ -19,6 +32,7 @@
 <header class="site">
   <div class="wrap">
     <a class="brand" href="../"><img src="../assets/img/logo.svg" alt="" width="28" height="28"><span>Varsto</span></a>
+
     <nav class="main" aria-label="Main">
       <a href="../">Project</a>
       <a href="../features/">Features</a>
@@ -30,6 +44,7 @@
       <a href="../downloads/">Downloads</a>
       <a href="../blog/">Blog</a>
       <a href="../forum/">Forum</a>
+      <a href="../contribute/">Contribute</a>
       <a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a>
       <button class="theme" id="theme-toggle" type="button" aria-label="Change colour theme">Theme: auto</button>
     </nav>
@@ -64,7 +79,7 @@
 <tr>
 <td>1 (compression, alpha-0-format.md section 16)</td>
 <td>0.0.1-alpha.4</td>
-<td>0.0.1-alpha.4 and later, including 0.0.1-alpha.11</td>
+<td>0.0.1-alpha.4 and later, including 0.0.1-alpha.12</td>
 <td>none yet (<code>varsto pull</code> and <code>varsto fsck</code> of the same version)</td>
 <td>every tag from <code>v0.0.1-alpha.4</code> on</td>
 </tr>
@@ -78,6 +93,8 @@
 <li>Update this table before publishing each storage format version, with the release number and reader status.</li>
 <li>Once the product launches (first public release), every subsequent format change requires forward compatibility for at least one previous version.</li>
 </ol>
+<h2 id="packs-in-001-alpha12-format-version-1-unchanged">Packs in 0.0.1-alpha.12 (format version 1 unchanged)</h2>
+<p>Small block objects are stored in packs (<code>packs/</code>; alpha-0-format.md section 30). Earlier versions do not read packs: a device on 0.0.1-alpha.11 or earlier misses every block another device packed. Update every device.</p>
 <h2 id="block-sizes-in-001-alpha11-format-version-1-unchanged">Block sizes in 0.0.1-alpha.11 (format version 1 unchanged)</h2>
 <p>Blocks are cut by file size (up to 16 MiB; alpha-0-format.md section 29). Objects, records and batches are unchanged and older readers read them, but no compatibility with the single set of block sizes of earlier versions is kept: a device on an older version cuts large files differently and cannot re-upload their blocks from its own copy, so update every device.</p>
 <h2 id="ledger-events-in-001-alpha9-format-version-1-unchanged">Ledger events in 0.0.1-alpha.9 (format version 1 unchanged)</h2>

@@ -21,7 +21,7 @@
 use crate::crypto::{self, SecretKey, SigningKey};
 use crate::ids::{ChunkId, DeviceId, FolderId, ObjectName, VaultId};
 use crate::ledger::{self, Event, LedgerStore, SignedBatch, KEY_REPLICA};
-use crate::storage::StorageSpec;
+use crate::storage::{Storage, StorageSpec};
 use crate::util;
 use crate::vault::{DeviceRecord, VaultMeta};
 use anyhow::{anyhow, bail, Context, Result};
@@ -215,12 +215,25 @@ impl Replica {
     /// One replication round: copy every object the target lacks from the
     /// source, verify chunk hashes, and record claims in the replica ledger.
     pub fn run_once(&mut self) -> Result<ReplicaReport> {
-        let src = self.local.source.open()?;
-        let tgt = self.local.target.open()?;
+        // Packed objects are read out of their packs and copied as single
+        // objects; the packs themselves (and their deletion markers) are
+        // not copied as they are (crate::packs).
+        let open = |spec: &StorageSpec| -> Result<crate::packs::PackAware> {
+            Ok(crate::packs::PackAware::new(
+                spec.open()?,
+                &Default::default(),
+                false,
+            ))
+        };
+        let src = open(&self.local.source)?;
+        let tgt = open(&self.local.target)?;
         let mut report = ReplicaReport::default();
         let have: HashSet<String> = tgt.list("")?.into_iter().collect();
         let mut events = Vec::new();
         for key in src.list("")? {
+            if key.starts_with(crate::packs::PREFIX) {
+                continue;
+            }
             report.objects_seen += 1;
             if have.contains(&key) {
                 continue;

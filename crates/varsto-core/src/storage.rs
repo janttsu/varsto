@@ -47,6 +47,28 @@ pub trait Storage: Send + Sync {
             .collect())
     }
     fn delete(&self, key: &str) -> Result<()>;
+    /// `len` bytes of an object from `offset` (a block inside a pack).
+    /// Backends that can read part of an object override it.
+    fn get_range(&self, key: &str, offset: u64, len: u64) -> Result<Option<Vec<u8>>> {
+        Ok(self.get(key)?.map(|b| {
+            let start = (offset as usize).min(b.len());
+            let end = (start + len as usize).min(b.len());
+            b[start..end].to_vec()
+        }))
+    }
+    /// Write several block objects (name, bytes). A storage that keeps
+    /// packs (`packs::PackAware`) writes small ones as one pack; others
+    /// write them one by one. One flag per object: written now.
+    fn put_pack(&self, members: &[(String, &[u8])]) -> Result<Vec<bool>> {
+        members
+            .iter()
+            .map(|(o, b)| self.put_if_absent(&format!("chunks/{}/{o}", &o[..2.min(o.len())]), b))
+            .collect()
+    }
+    /// Whether small block objects are written as packs here.
+    fn packs_small_objects(&self) -> bool {
+        false
+    }
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
@@ -314,6 +336,20 @@ impl Storage for LocalDirStorage {
         &self.name
     }
 
+    fn get_range(&self, key: &str, offset: u64, len: u64) -> Result<Option<Vec<u8>>> {
+        use std::io::{Read, Seek, SeekFrom};
+        let path = self.path_for(key)?;
+        let mut f = match fs::File::open(&path) {
+            Ok(f) => f,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(e) => return Err(e).with_context(|| format!("open {}", path.display())),
+        };
+        f.seek(SeekFrom::Start(offset))?;
+        let mut buf = Vec::with_capacity(len as usize);
+        f.take(len).read_to_end(&mut buf)?;
+        Ok(Some(buf))
+    }
+
     fn put_if_absent(&self, key: &str, data: &[u8]) -> Result<bool> {
         let path = self.path_for(key)?;
         if path.exists() {
@@ -498,6 +534,17 @@ impl CountingStorage {
 impl Storage for CountingStorage {
     fn name(&self) -> &str {
         self.inner.name()
+    }
+    fn get_range(&self, key: &str, offset: u64, len: u64) -> Result<Option<Vec<u8>>> {
+        self.calls.gets.fetch_add(1, Ordering::Relaxed);
+        self.inner.get_range(key, offset, len)
+    }
+    fn put_pack(&self, members: &[(String, &[u8])]) -> Result<Vec<bool>> {
+        self.calls.puts.fetch_add(1, Ordering::Relaxed);
+        self.inner.put_pack(members)
+    }
+    fn packs_small_objects(&self) -> bool {
+        self.inner.packs_small_objects()
     }
     fn put_if_absent(&self, key: &str, data: &[u8]) -> Result<bool> {
         self.calls.puts.fetch_add(1, Ordering::Relaxed);

@@ -1,0 +1,41 @@
+---
+title: Alternativ till Tresorit: Varsto och Tresorit jämförda
+nav: Compare
+output: compare/tresorit/index.html
+description: Söker du ett alternativ till Tresorit med totalsträckskryptering på din egen lagring (S3, NAS, diskar, rclone)? Vad Tresorit är till för, hur det fungerar och hur det står sig mot Varsto.
+---
+    <p class="back-link"><a href="{{L}}compare/">Alla jämförelser</a></p>
+    <h1>Varsto och Tresorit</h1>
+    <p class="lead">Tresorit är end-to-end-krypterad molnlagring och fildelning från Schweiz, främst riktad till företag och reglerade branscher, men med abonnemang för privatpersoner också. Dess rena, omsorgsfulla gränssnitt är en av förebilderna för Varstos eget.</p>
+
+    <h2>Så fungerar Tresorit</h2>
+    <p>Du skapar ett konto och filerna lagras i Tresorits datacenter, där företagskunder kan välja var deras data ska finnas. Filer och relevanta metadata krypteras end-to-end; nycklar delas med asymmetrisk kryptografi. Tjänsten erbjuder krypterade delningslänkar, versionshistorik (antalet versioner beror på abonnemanget), fjärradering av enheter och appar för Windows, macOS, Linux, Android, iOS och webben.</p>
+
+    <h2>Sida vid sida</h2>
+    <table class="compare-table">
+      <thead><tr><th scope="col"></th><th scope="col">Tresorit</th><th scope="col">Varsto</th></tr></thead>
+      <tbody>
+      <tr><th scope="row">Var dina filer finns</th><td>I Tresorits moln; inga egna backends.</td><td>På dina egna enheter och på lagringsplatser du väljer: S3-kompatibla buckets, valfri rclone-fjärrlagring, lokala kataloger eller nätverkskataloger och pooler av flyttbara diskar.</td></tr>
+      <tr><th scope="row">Konto eller central server</th><td>Konto krävs.</td><td>Inget. Det finns ingen Varsto-server; enheterna hittar varandra via dina lagringsplatser och i det lokala nätverket.</td></tr>
+      <tr><th scope="row">Kryptering</th><td>End-to-end, nollkunskap; stängd källkod.</td><td>End-to-end, på klientsidan, innan något lämnar enheten; hybrid postkvantkryptografi (ML-KEM för nycklar vid delning, signaturer med Ed25519 + ML-DSA-65). Ännu inte oberoende granskad.</td></tr>
+      <tr><th scope="row">Enheterna online samtidigt</th><td>Behövs inte: molnet har kopian.</td><td>Behövs inte: enheterna synkroniserar via dina lagringsplatser, och direkt peer-to-peer när de når varandra.</td></tr>
+      <tr><th scope="row">Vet var varje kopia finns</th><td>En kopia hos leverantören; ingen uppföljning på dina egna lagringsmedier.</td><td>Ja: en signerad liggare registrerar vilken lagringsplats och enhet som har varje block; lagringsregler (som standard 1 kopia var som helst, 1 extern, 1 på dina egna enheter eller diskar, kontrollerad av en annan enhet inom 30 dagar) varnar när en regel inte uppfylls.</td></tr>
+      <tr><th scope="row">Flyttbara diskar och diskar offline</th><td>Inget arbetsflöde för flyttbara diskar.</td><td>Ja: diskpooler fylls, kontrolleras och känns igen när de kommer tillbaka; filer på en disk som är borta ber om just den disken.</td></tr>
+      <tr><th scope="row">Licens och pris</th><td>Proprietär; en liten gratisnivå och betalabonnemang för privatpersoner och företag.</td><td>Källkoden tillgänglig (PolyForm Shield 1.0.0), gratis; du betalar bara din lagringsleverantör.</td></tr>
+      <tr><th scope="row">Mognad</th><td>Mogen kommersiell tjänst med funktioner för regelefterlevnad.</td><td>Alfa: inte för produktionsdata, formaten kan fortfarande ändras.</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Vilken passar</h2>
+    <div class="grid two">
+      <div class="card"><h3>Tresorit</h3><p>Välj Tresorit när du behöver en företagstjänst med regelefterlevnad och support, med administration, val av dataplacering och genomarbetad delning, och en leverantör med stängd källkod är acceptabel.</p></div>
+      <div class="card"><h3>Varsto</h3><p>Välj Varsto när du vill ha jämförbar end-to-end-kryptering utan någon leverantör i mitten: dina egna buckets och diskar, peer-to-peer-överföring mellan dina enheter, en förteckning över varje kopia och källkod du kan läsa. Varstos organisationsfunktioner (administratörer, godkännanden, att ta bort en person) är nya och fortfarande i alfa.</p></div>
+    </div>
+    <p class="note">Varsto är alfaprogramvara: anförtro den inga data som du inte har någon annan kopia av, och dess kryptografi har inte granskats av någon oberoende part. De andra produkterna här är mogna. Uppgifterna om dem kontrollerades i deras egen dokumentation i oktober 2026; priser och abonnemang ändras ofta, så se deras egna sidor för aktuella siffror. Rättelser tas gärna emot på <a href="{{P}}forum/">forumet</a> eller på GitHub.</p>
+
+    <h2>Källor</h2>
+    <ul>
+      <li><a href="https://tresorit.com/">Tresorits webbplats</a></li>
+      <li><a href="https://tresorit.com/security">Säkerhet hos Tresorit</a></li>
+      <li><a href="https://tresorit.com/pricing/personal">Tresorits abonnemang för privatpersoner</a></li>
+    </ul>

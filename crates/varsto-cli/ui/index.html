@@ -6,6 +6,7 @@
 <meta name="color-scheme" content="light dark">
 <title>Varsto</title>
 <link rel="stylesheet" href="/app.css">
+<script src="/i18n.js"></script>
 <script src="/app.js" defer></script>
 </head>
 <body data-view="loading" data-mobile="0">
@@ -66,6 +67,7 @@
   </nav>
   <div class="sidebar-foot">
     <button type="button" id="themetoggle" class="nav-item" aria-pressed="false"><svg class="icon icon-sun"><use href="#i-sun"/></svg><svg class="icon icon-moon"><use href="#i-moon"/></svg><span class="theme-label">Dark mode</span></button>
+    <label class="sidebar-lang muted"><span class="sr-only">Language</span><select class="lang-select" aria-label="Language"></select></label>
     <div class="sidebar-version muted">Local interface · v<span id="version"></span></div>
   </div>
 </aside>
@@ -579,6 +581,8 @@
           <h2 class="card-title">Appearance</h2>
           <p class="muted small">The interface follows the system theme unless you choose one.</p>
           <div class="actions"><button id="themeauto" type="button" class="secondary">Follow system theme</button><button id="themetoggle2" type="button" class="secondary mobile-only">Switch light / dark</button></div>
+          <label>Language <select class="lang-select"></select></label>
+          <p class="muted small">English, Finnish or Swedish. The command line is always in English.</p>
         </div>
         <div class="card hidden" id="allfilescard">
           <h2 class="card-title">Plain files on this phone</h2>

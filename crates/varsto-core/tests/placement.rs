@@ -3,6 +3,8 @@
 //! between storages (policy kept, never the last copy, resumable) and disk
 //! group rules.
 
+mod common;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
@@ -32,11 +34,7 @@ fn dir(name: &str, path: &Path, cold: bool, place: &str) -> StorageSpec {
 }
 
 fn objects(path: &Path) -> usize {
-    walkdir::WalkDir::new(path.join("chunks"))
-        .into_iter()
-        .filter_map(|e| e.ok())
-        .filter(|e| e.file_type().is_file())
-        .count()
+    common::object_count(path)
 }
 
 /// Blocks of a folder the ledger shows on a storage.
@@ -590,20 +588,17 @@ fn an_interrupted_move_is_carried_on_by_running_it_again() {
         .add_storage(dir("spare", &spare, false, "cloud"))
         .unwrap();
     let mut copied = 0;
-    for entry in walkdir::WalkDir::new(lab.p("h1").join("chunks"))
-        .into_iter()
-        .filter_map(|e| e.ok())
-        .filter(|e| e.file_type().is_file())
-        .take(2)
-    {
-        let rel = entry.path().strip_prefix(lab.p("h1")).unwrap();
-        fs::create_dir_all(spare.join(rel).parent().unwrap()).unwrap();
-        fs::copy(entry.path(), spare.join(rel)).unwrap();
+    for name in common::object_names(&lab.p("h1")).iter().take(2) {
+        let path = spare.join("chunks").join(&name[..2]).join(name);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, common::read_object(&lab.p("h1"), name).unwrap()).unwrap();
         copied += 1;
     }
     // Deleting from hot1 fails: the drops are recorded, the objects stay.
-    let chunk_dirs: Vec<PathBuf> = fs::read_dir(lab.p("h1").join("chunks"))
-        .unwrap()
+    let chunk_dirs: Vec<PathBuf> = ["chunks", "packs"]
+        .iter()
+        .filter_map(|d| fs::read_dir(lab.p("h1").join(d)).ok())
+        .flatten()
         .map(|e| e.unwrap().path())
         .collect();
     for d in &chunk_dirs {

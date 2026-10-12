@@ -6,11 +6,14 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.content.Context
 import android.content.Intent
+import android.content.res.Configuration
 import android.os.Build
 import android.os.Environment
 import android.os.IBinder
 import java.io.File
+import java.util.Locale
 
 /** Foreground service that runs the Rust `varsto service` binary shipped as a native library. */
 class VarstoService : Service() {
@@ -75,7 +78,7 @@ class VarstoService : Service() {
         val open = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
         return Notification.Builder(this, channelId)
             .setContentTitle("Varsto")
-            .setContentText(text ?: getString(R.string.service_running))
+            .setContentText(text ?: localized(this).getString(R.string.service_running))
             .setSmallIcon(R.drawable.ic_launcher_foreground)
             .setContentIntent(open)
             .setOngoing(true)
@@ -96,6 +99,20 @@ class VarstoService : Service() {
         /** Where plain-file folders go: Internal storage/Varsto. */
         @Suppress("DEPRECATION")
         fun plainRoot(): File = File(Environment.getExternalStorageDirectory(), "Varsto")
+
+        /** [c] in the language picked in the web UI (`ui-language` in the service home);
+         *  without that choice, the system language. */
+        fun localized(c: Context): Context {
+            val lang = try {
+                File(File(c.filesDir, "vault"), "ui-language").readText().trim()
+            } catch (e: Exception) {
+                return c
+            }
+            if (lang !in listOf("en", "fi", "sv")) return c
+            val conf = Configuration(c.resources.configuration)
+            conf.setLocale(Locale.forLanguageTag(lang))
+            return c.createConfigurationContext(conf)
+        }
 
         fun serviceUrl(filesDir: File): String? {
             val f = File(File(filesDir, "vault"), "service.json")

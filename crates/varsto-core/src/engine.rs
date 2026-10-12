@@ -404,6 +404,8 @@ pub struct Engine {
     /// Where the peer-to-peer server takes what it serves from: refreshed
     /// as soon as a push has published new files, before their upload.
     snapshot_sink: Option<SnapshotSink>,
+    /// What this device knows of the packs on each storage.
+    pack_caches: crate::packs::Caches,
     /// Objects of small files fetched ahead during a pull (see `prefetch_small`).
     prefetched: HashMap<ObjectName, Fetched>,
     /// How fast peers and storages answered during recent downloads.
@@ -802,6 +804,7 @@ impl Engine {
         let mut engine = Engine {
             peers: None,
             snapshot_sink: None,
+            pack_caches: Default::default(),
             prefetched: HashMap::new(),
             fetch_stats: Default::default(),
             unlocked: BTreeMap::new(),
@@ -982,6 +985,7 @@ impl Engine {
         let mut engine = Engine {
             peers: None,
             snapshot_sink: None,
+            pack_caches: Default::default(),
             prefetched: HashMap::new(),
             fetch_stats: Default::default(),
             unlocked: BTreeMap::new(),
@@ -1124,7 +1128,16 @@ impl Engine {
             Box::new(self.open_pool(spec)?)
         } else {
             let store = self.secret_store()?;
-            spec.open_with(&|r| store.secrets.get(r).cloned())?
+            let inner = spec.open_with(&|r| store.secrets.get(r).cloned())?;
+            // Small blocks go into packs on hot storages; cold storage and
+            // transferrers keep one object per block (restores and removals
+            // work per object there). Packs are read wherever they are.
+            let packing = !spec.is_cold() && !spec.is_carrier();
+            Box::new(crate::packs::PackAware::new(
+                inner,
+                &self.pack_caches,
+                packing,
+            ))
         };
         Ok(match &self.storage_calls {
             Some(calls) => Box::new(crate::storage::CountingStorage::new(backend, calls.clone())),
@@ -2565,7 +2578,9 @@ impl Engine {
         // to a few uploader threads, so that many small objects do not each
         // wait for the previous one's round trip to the storage. The queue is
         // bounded: at most UPLOAD_QUEUE encrypted blocks wait in memory.
-        let (job_tx, job_rx) = std::sync::mpsc::sync_channel::<UploadJob>(UPLOAD_QUEUE);
+        // A batch: one block, or small blocks that storages keeping packs
+        // write as one pack (crate::packs).
+        let (job_tx, job_rx) = std::sync::mpsc::sync_channel::<Vec<UploadJob>>(UPLOAD_QUEUE);
         let job_rx = std::sync::Mutex::new(job_rx);
         let (done_tx, done_rx) = std::sync::mpsc::channel::<UploadDone>();
         let storages_ref = &storages;
@@ -2579,47 +2594,101 @@ impl Engine {
             for _ in 0..UPLOADERS {
                 let (job_rx, done_tx) = (&job_rx, done_tx.clone());
                 s.spawn(move || loop {
-                    let job = match job_rx.lock().unwrap().recv() {
+                    let batch = match job_rx.lock().unwrap().recv() {
                         Ok(j) => j,
                         Err(_) => break,
                     };
-                    let key = chunk_storage_key(&job.object);
-                    let held = job.ct.len() as u64;
-                    for (spec, backend) in storages_ref
-                        .iter()
-                        .filter(|(spec, _)| job.targets.iter().any(|t| t == spec.name()))
-                    {
-                        let outcome = backend.put_if_absent(&key, &job.ct);
-                        let _ = done_tx.send(UploadDone {
-                            storage: spec.name().to_string(),
-                            chunk: job.chunk.clone(),
-                            object: job.object.clone(),
-                            size: job.ct.len() as u64,
-                            outcome,
-                        });
+                    let held: u64 = batch.iter().map(|j| j.ct.len() as u64).sum();
+                    for (spec, backend) in storages_ref.iter() {
+                        let mine: Vec<&UploadJob> = batch
+                            .iter()
+                            .filter(|j| j.targets.iter().any(|t| t == spec.name()))
+                            .collect();
+                        if mine.is_empty() {
+                            continue;
+                        }
+                        // One object, or a storage without packs: written
+                        // one by one, each with its own outcome (a pool's
+                        // "no room" stays a pool error). Several small ones
+                        // on a storage keeping packs: one pack.
+                        let outcomes: Vec<Result<bool>> =
+                            if mine.len() == 1 || !backend.packs_small_objects() {
+                                mine.iter()
+                                    .map(|j| {
+                                        backend.put_if_absent(&chunk_storage_key(&j.object), &j.ct)
+                                    })
+                                    .collect()
+                            } else {
+                                let members: Vec<(String, &[u8])> = mine
+                                    .iter()
+                                    .map(|j| (j.object.as_str().to_string(), j.ct.as_slice()))
+                                    .collect();
+                                match backend.put_pack(&members) {
+                                    Ok(flags) => flags.into_iter().map(Ok).collect(),
+                                    Err(e) => {
+                                        let msg = format!("{e:#}");
+                                        mine.iter().map(|_| Err(anyhow!("{msg}"))).collect()
+                                    }
+                                }
+                            };
+                        for (job, outcome) in mine.iter().zip(outcomes) {
+                            let _ = done_tx.send(UploadDone {
+                                storage: spec.name().to_string(),
+                                chunk: job.chunk.clone(),
+                                object: job.object.clone(),
+                                size: job.ct.len() as u64,
+                                outcome,
+                            });
+                        }
                     }
                     *budget_ref.0.lock().unwrap() -= held;
                     budget_ref.1.notify_all();
                 });
             }
             drop(done_tx);
-            let mut send = |me: &mut Self, report: &mut PushReport, job: UploadJob| -> bool {
-                while let Ok(d) = done_rx.try_recv() {
-                    apply_upload(me, &folder_id, d, report, &mut first_error);
-                }
-                if first_error.is_some() {
-                    return false;
-                }
-                let len = job.ct.len() as u64;
-                {
-                    let mut used = budget_ref.0.lock().unwrap();
-                    while *used > 0 && *used + len > UPLOAD_BYTES {
-                        used = budget_ref.1.wait(used).unwrap();
+            // Small blocks wait here until a pack's worth is together.
+            let mut small: Vec<UploadJob> = Vec::new();
+            let mut send_batch =
+                |me: &mut Self, report: &mut PushReport, batch: Vec<UploadJob>| -> bool {
+                    while let Ok(d) = done_rx.try_recv() {
+                        apply_upload(me, &folder_id, d, report, &mut first_error);
                     }
-                    *used += len;
-                }
-                job_tx.send(job).is_ok()
-            };
+                    if first_error.is_some() {
+                        return false;
+                    }
+                    let len: u64 = batch.iter().map(|j| j.ct.len() as u64).sum();
+                    {
+                        let mut used = budget_ref.0.lock().unwrap();
+                        while *used > 0 && *used + len > UPLOAD_BYTES {
+                            used = budget_ref.1.wait(used).unwrap();
+                        }
+                        *used += len;
+                    }
+                    job_tx.send(batch).is_ok()
+                };
+            // `None` sends what is still waiting (at the end).
+            let mut send =
+                |me: &mut Self, report: &mut PushReport, job: Option<UploadJob>| -> bool {
+                    match job {
+                        Some(job) if job.ct.len() <= crate::packs::MAX_MEMBER => {
+                            small.push(job);
+                            let bytes: usize = small.iter().map(|j| j.ct.len()).sum();
+                            if bytes >= crate::packs::TARGET_BYTES
+                                || small.len() >= crate::packs::MAX_MEMBERS
+                            {
+                                let batch = std::mem::take(&mut small);
+                                return send_batch(me, report, batch);
+                            }
+                            true
+                        }
+                        Some(job) => send_batch(me, report, vec![job]),
+                        None if small.is_empty() => true,
+                        None => {
+                            let batch = std::mem::take(&mut small);
+                            send_batch(me, report, batch)
+                        }
+                    }
+                };
             'files: for file in state.files.values().filter(|f| !f.deleted) {
                 if file.chunks.iter().all(|c| missing_on(c).is_empty()) {
                     continue;
@@ -2646,7 +2715,7 @@ impl Engine {
                             object: expected.object.clone(),
                             ct,
                         };
-                        if !send(self, report, job) {
+                        if !send(self, report, Some(job)) {
                             break 'files;
                         }
                     }
@@ -2691,11 +2760,13 @@ impl Engine {
                         object,
                         ct,
                     };
-                    if !send(self, report, job) {
+                    if !send(self, report, Some(job)) {
                         break 'files;
                     }
                 }
             }
+            send(self, report, None);
+            drop(send);
             drop(job_tx);
             for d in done_rx.iter() {
                 apply_upload(self, &folder_id, d, report, &mut first_error);

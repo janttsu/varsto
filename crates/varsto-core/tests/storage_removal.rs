@@ -2,6 +2,8 @@
 //! Removing a storage: blocks keep enough copies elsewhere (copied first when
 //! needed), the retirement is in the ledger, and the last storage stays.
 
+mod common;
+
 use std::fs;
 use std::path::Path;
 use varsto_core::policy::Policy;
@@ -21,11 +23,7 @@ fn dir(name: &str, path: &Path) -> StorageSpec {
 }
 
 fn objects(path: &Path) -> usize {
-    walkdir::WalkDir::new(path.join("chunks"))
-        .into_iter()
-        .filter_map(|e| e.ok())
-        .filter(|e| e.file_type().is_file())
-        .count()
+    common::object_count(path)
 }
 
 fn on_storage(e: &Engine, storage: &str) -> usize {

@@ -7,6 +7,21 @@
 <meta name="description" content="What Varsto does, with the use cases behind each feature: your own storage, signed bookkeeping, transferrer disks, untrusted replicas, selective sync, sharing.">
 <meta name="color-scheme" content="light dark">
 <link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="canonical" href="https://varsto.net/features/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Varsto">
+<meta property="og:title" content="Features: Varsto">
+<meta property="og:description" content="What Varsto does, with the use cases behind each feature: your own storage, signed bookkeeping, transferrer disks, untrusted replicas, selective sync, sharing.">
+<meta property="og:url" content="https://varsto.net/features/">
+<meta property="og:image" content="https://varsto.net/assets/img/og-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:locale" content="en_GB">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="alternate" hreflang="en" href="https://varsto.net/features/">
+<link rel="alternate" hreflang="x-default" href="https://varsto.net/features/">
+<link rel="alternate" hreflang="fi" href="https://varsto.net/fi/features/">
+<link rel="alternate" hreflang="sv" href="https://varsto.net/sv/features/">
 <link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../blog/feed.xml">
 <link rel="stylesheet" href="../assets/css/site.css?v=b3d2d4f387">
 <script src="../assets/js/theme.js?v=0951491269"></script>
@@ -19,6 +34,8 @@
 <header class="site">
   <div class="wrap">
     <a class="brand" href="../"><img src="../assets/img/logo.svg" alt="" width="28" height="28"><span>Varsto</span></a>
+    <nav class="langs" aria-label="Language"><a href="../features/" hreflang="en" lang="en" aria-current="true">English</a> <a href="../fi/features/" hreflang="fi" lang="fi">Suomi</a> <a href="../sv/features/" hreflang="sv" lang="sv">Svenska</a></nav>
+
     <nav class="main" aria-label="Main">
       <a href="../">Project</a>
       <a href="../features/" aria-current="page">Features</a>
@@ -30,6 +47,7 @@
       <a href="../downloads/">Downloads</a>
       <a href="../blog/">Blog</a>
       <a href="../forum/">Forum</a>
+      <a href="../contribute/">Contribute</a>
       <a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a>
       <button class="theme" id="theme-toggle" type="button" aria-label="Change colour theme">Theme: auto</button>
     </nav>
@@ -95,7 +113,7 @@
       <h2>Your own buckets, rclone remotes and cold storage</h2>
       <picture><source type="image/webp" srcset="../assets/img/features/cold.webp"><img src="../assets/img/features/cold.png" alt="Laptop, hot storage and a cold archive with a note that cold storage is never read by surprise." width="640" height="320" loading="lazy"></picture>
       <div>
-        <p>A storage is a directory, an S3-compatible bucket with your own access keys (AWS, Scaleway, Hetzner, Backblaze B2, Cloudflare R2, MinIO) or any rclone remote, so SFTP, WebDAV, Google Drive and the rest come for free. Secrets stay encrypted on your device; rclone keeps its own. Archive classes such as Deep Archive are written but never read without an explicit confirmation, and the app reports an object that must be restored first instead of retrying. Every storage can carry a price per GB-month, for egress and for restore, set by you or taken from the open price data when the provider, region and class are recognised, so the app shows what each storage and each folder costs a month.</p>
+        <p>A storage is a directory, an S3-compatible bucket with your own access keys (AWS, Scaleway, Hetzner, Backblaze B2, Cloudflare R2, MinIO) or any rclone remote, so SFTP, WebDAV, Google Drive and the rest come for free. Files are cut into blocks whose size follows the file, and the blocks of small files are written together in packs: a folder of thousands of notes becomes a handful of objects on the storage instead of thousands, which saves requests and the minimum object charges some providers make. Secrets stay encrypted on your device; rclone keeps its own. Archive classes such as Deep Archive are written but never read without an explicit confirmation, and the app reports an object that must be restored first instead of retrying. Every storage can carry a price per GB-month, for egress and for restore, set by you or taken from the open price data when the provider, region and class are recognised, so the app shows what each storage and each folder costs a month.</p>
         <p class="note">Status: directories, S3 and rclone work; per-storage prices with monthly costs on the Storages page, <code>varsto storage price</code> and <code>varsto storage list</code>. A folder can be written to chosen storages or places only (<code>varsto folder placement</code>), and <code>varsto move</code> (or the "Move to" suggestion) moves its blocks, or those of its idle files, to another storage such as a cold one: copied, checked, recorded, then removed from the old storage, never below the folder's policy and never the last copy, with the change in the monthly bill shown first. Blocks kept only on cold storage are read only after you move them back with a confirmed cold read.</p>
       </div>
     </section>

@@ -627,3 +627,19 @@ Tests: `util::tests`, `manifest::tests`, `ids::tests`, `p2p::tests` (chunked bod
 
 **Other.** `varsto transfers [--watch] [--json]` lists uploads and downloads running in the service (`/api/progress` field `transfers`) with peer traffic. S3 refusals are explained in words before the technical detail. Turning selective sync off downloads the placeholders on the next sync. Temporary files of atomic writes are unique per write.
 
+## 30. Packs for small blocks (0.0.1-alpha.12)
+
+**Why.** A folder of small files is one block per file, and every block was one object on every storage: twenty thousand notes meant twenty thousand uploads, list entries and verifications, and on storage classes with a minimum billable object size each one cost as much as a much larger object.
+
+**Layout.** A push collects the encrypted objects of blocks up to 128 KiB and writes them together once 4 MiB or 256 of them are waiting (and what is left at the end of the push):
+
+- `packs/<id[..2]>/<id>.pack`: the objects' bytes one after another, unchanged (each is still ciphertext named by its hash);
+- `packs/<id[..2]>/<id>.idx`: JSON `{"format": 1, "pack": <id>, "members": [{"object", "offset", "len"}]}`, written after the pack, which makes its objects visible;
+- `packs/<id[..2]>/<id>.del.<object>`: an empty marker per object deleted from the pack.
+
+`<id>` is the hex hash of the pack's bytes, so writing the same pack twice is harmless. Packs are written to hot storages that are not transferrers (S3 buckets, rclone remotes, directories); cold storage, transferrers and disk pools keep one object per block, because restores, deliveries and disk placement work per object there. A storage may hold both single objects and packs.
+
+**Reading.** Every storage is opened through a layer that knows its packs (`packs::PackAware`): it lists `packs/` once, reads the indexes and markers it has not seen, and answers `chunks/<xx>/<object>` for a packed object with a ranged read of the pack (`Range` on S3, `rclone cat --offset --count`, a seek on directories). A miss reloads the indexes at most every 30 seconds. Listing `chunks/` includes packed objects, so verification, fsck and repair see them like any other; every reader checks the object's hash as before.
+
+**Deleting.** Deleting a packed object writes its marker; when every object of a pack is marked, the pack, its index and the markers are deleted. A repair of a damaged packed object marks it deleted and writes a single object in its place. The ledger is unchanged: it records objects by name, wherever their bytes are.
+
