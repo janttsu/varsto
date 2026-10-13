@@ -40,6 +40,7 @@ pub mod providers;
 pub mod rclone;
 pub mod recovery;
 pub mod replica;
+pub mod restic;
 pub mod s3;
 pub mod scrub;
 pub mod share;

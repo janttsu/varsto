@@ -1274,11 +1274,80 @@ open(e, "a").write("an edit\\n")
     same_tree(tree_hashes("vl-desktop", "/home/varsto/data/docs"), tree_hashes("vl-laptop", "/home/varsto/data/docs"), "after sync")
 
 
+
+def ensure_restic(vm):
+    """restic on the VM: the image's, Debian's package, or a copy of the
+    binary named by VARSTO_LAB_RESTIC (best a static release build) or of
+    the host's /usr/bin/restic, put in ~/bin."""
+    if run(vm, "PATH=$HOME/bin:$PATH restic version", check_rc=False).returncode == 0:
+        return
+    run(vm, "sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq restic >/dev/null 2>&1", check_rc=False)
+    if run(vm, "PATH=$HOME/bin:$PATH restic version", check_rc=False).returncode == 0:
+        return
+    import os
+    import subprocess
+    src = pathlib.Path(os.environ.get("VARSTO_LAB_RESTIC", "/usr/bin/restic"))
+    check(src.is_file(), f"no restic for {vm}: set VARSTO_LAB_RESTIC to a static restic binary")
+    r = subprocess.run(lab.ssh_cmd(vm, "mkdir -p ~/bin && cat > ~/bin/restic && chmod +x ~/bin/restic"),
+                       input=src.read_bytes(), capture_output=True)
+    check(r.returncode == 0, f"copying restic to {vm} failed: {r.stderr[-300:]!r}")
+    v_ = run(vm, "PATH=$HOME/bin:$PATH restic version", check_rc=False)
+    check(v_.returncode == 0, f"{src} does not run on {vm} (use a static build): {(v_.stderr or v_.stdout)[-300:]}")
+
+
+@scenario("restic")
+def s_restic():
+    """The desktop becomes the restic device: `restic setup --move` moves its
+    docs folder into the mirror, `restic run` backs it up into a local
+    repository, and `restic restore` alone gives back the laptop's files;
+    a second run goes through the running service's API (hold and check)
+    and a later file arrives in the next snapshot."""
+    fresh_pair()
+    vm = "vl-desktop"
+    ensure_restic(vm)
+    renv = "PATH=$HOME/bin:$PATH"
+    run(vm, "rm -rf ~/restic-repo ~/restic-restore ~/data/mirror; printf 'lab restic password\\n' > ~/restic-pw; chmod 600 ~/restic-pw")
+    r = run(vm, f"{renv} {ENV} varsto restic setup --root /home/varsto/data/mirror --repo /home/varsto/restic-repo "
+                "--password-file /home/varsto/restic-pw --init --manual", check_rc=False)
+    check(r.returncode != 0 and "--move" in r.stderr, f"setup did not refuse the attached folder: {r.stderr[-400:]}")
+    r = run(vm, f"{renv} {ENV} varsto --json restic setup --root /home/varsto/data/mirror --repo /home/varsto/restic-repo "
+                "--password-file /home/varsto/restic-pw --init --manual --move").stdout
+    setup = json.loads(r)
+    check(setup["setup"]["moved"], f"docs was not moved: {setup}")
+    short = setup["config"]["vault_short"]
+    out = run(vm, f"{renv} {ENV} varsto --json restic run", check_rc=False)
+    check(out.returncode == 0, f"restic run failed ({out.returncode}): {out.stdout[-600:]} {out.stderr[-600:]}")
+    rep = json.loads(out.stdout)
+    check(rep["result"] == "ok" and rep["record"]["snapshot_id"], f"run: {rep}")
+    rr = run(vm, f"{renv} RESTIC_REPOSITORY=~/restic-repo RESTIC_PASSWORD_FILE=~/restic-pw restic restore latest "
+                 f"--tag varsto,vault:{short} --target ~/restic-restore", check_rc=False)
+    check(rr.returncode == 0, f"restic restore: {rr.stderr[-400:]}")
+    same_tree(tree_hashes("vl-laptop", "/home/varsto/data/docs"),
+              tree_hashes(vm, "/home/varsto/restic-restore/home/varsto/data/mirror/docs"), "restored from restic")
+    check(run(vm, "grep -q 'folder: docs' ~/restic-restore/home/varsto/data/mirror/VARSTO-SNAPSHOT.txt",
+              check_rc=False).returncode == 0, "no VARSTO-SNAPSHOT.txt in the snapshot")
+    # A new file on the laptop; the second run goes through the desktop's service.
+    run("vl-laptop", "echo 'after the first snapshot' > ~/data/docs/later.txt")
+    v("vl-laptop", "sync")
+    start_service(vm)
+    try:
+        out = run(vm, f"{renv} {ENV} varsto --json restic run --no-check", check_rc=False)
+        check(out.returncode == 0, f"second run ({out.returncode}): {out.stdout[-600:]} {out.stderr[-600:]}")
+        ls = run(vm, f"{renv} RESTIC_REPOSITORY=~/restic-repo RESTIC_PASSWORD_FILE=~/restic-pw restic ls latest "
+                     f"--tag varsto,vault:{short}").stdout
+        check("/home/varsto/data/mirror/docs/later.txt" in ls, "the later file is not in the second snapshot")
+        st = run(vm, f"{renv} {ENV} varsto --json restic status").stdout
+        st = json.loads(st)
+        check(st["state"]["last_run"]["result"] == "ok" and not st["held_now"], f"status: {st}")
+    finally:
+        run(vm, "pkill -x varsto; true", check_rc=False)
+
+
 SCENARIOS = [s_reset, s_init, s_pair, s_sync, s_words, s_conflict, s_selective, s_repair, s_policy,
              s_strongroom, s_org, s_remove_user, s_revoke,
              s_p2p_setup, s_p2p_lan, s_p2p_pub, s_p2p_sym, s_p2p_stop, s_share, s_disks, s_mixed,
              s_outage, s_blackhole, s_crash, s_clock, s_clock_behind, s_p2p_upload, s_scale,
-             s_backup, s_activity, s_disk_init, s_disk_fetch_plan, s_scrub]
+             s_backup, s_activity, s_disk_init, s_disk_fetch_plan, s_scrub, s_restic]
 
 
 def main():

@@ -22,6 +22,8 @@ mod desktop;
 mod drive_mount;
 #[path = "../../varsto-cli/src/filemanager.rs"]
 mod filemanager;
+#[path = "../../varsto-cli/src/mcp_keys.rs"]
+mod mcp_keys;
 #[path = "../../varsto-cli/src/service.rs"]
 mod service;
 #[path = "../../varsto-cli/src/update.rs"]

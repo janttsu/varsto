@@ -53,9 +53,11 @@ mod fetch;
 mod ledger_upkeep;
 mod manifest_upkeep;
 mod membership;
+mod notes;
 mod org_ops;
 mod placement;
 mod repair;
+mod restic_mirror;
 mod scrub;
 mod share_ops;
 mod strongroom_ops;
@@ -80,6 +82,10 @@ pub use membership::{
     removal_notice, DeviceInfo, DeviceRemoved, EpochRecord, Grant, KemRecord, Removal, Revocation,
     RevokeReport, Revoked, SignedEpoch, SignedRevocation,
 };
+pub use notes::{
+    check_analysis, AnalysisHit, FileAnalysis, NotesExchangeReport, ANALYSIS_MAX_BYTES,
+    LISTING_CHARS, TAGS_MAX, TAG_MAX_CHARS,
+};
 pub use org_ops::{
     LogView, OrgApproved, OrgBrief, OrgCreated, OrgDevice, OrgRemoveReport, OrgSummary, OrgUser,
     UnlistedDevice,
@@ -87,6 +93,7 @@ pub use org_ops::{
 pub use repair::{
     Damage, DamageKind, RepairOptions, RepairReport, RepairStatus, RepairedCopy, Unrepairable,
 };
+pub use restic_mirror::{CheckOptions, SetupReport};
 pub use scrub::ScrubOptions;
 pub use share_ops::{ShareMember, ShareMembers, ShareRevokeReport};
 pub use strongroom_ops::{CleanupReport, ConvertReport, StrongroomKeySummary};
@@ -398,6 +405,26 @@ pub struct FileEntry {
     pub modified_utc: i64,
     /// Varsto's own last-accessed time on this device, if any.
     pub last_accessed_utc: Option<i64>,
+    /// What the file contains, as recorded by an assistant or the user
+    /// (`notes`): the first `LISTING_CHARS` characters in a listing.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub analysis: Option<String>,
+    /// The analysis is longer than shown (`Engine::analysis` has it all).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub analysis_truncated: bool,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub analysis_tags: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub analysis_utc: Option<i64>,
+    /// The file changed since it was analysed.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub analysis_stale: bool,
+    /// The model or tool that wrote the analysis, as it said.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub analysis_by: Option<String>,
+    /// The device the analysis was written on.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub analysis_author: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -458,6 +485,9 @@ pub struct Engine {
     ledger_policy: ledger_upkeep::LedgerPolicy,
     /// When manifests are listed in full and whether old ones are pruned.
     manifest_policy: manifest_upkeep::ManifestPolicy,
+    /// The token of the restic hold this engine works under (its own run's
+    /// completeness check), which the hold does not stop (`restic_mirror`).
+    hold_exempt: Option<String>,
 }
 
 /// What the peer-to-peer server serves from (see `Engine::set_snapshot_sink`).
@@ -846,6 +876,7 @@ impl Engine {
             cycle: None,
             ledger_policy: Default::default(),
             manifest_policy: Default::default(),
+            hold_exempt: None,
         };
         engine.config.save(home)?;
         if !engine.vault.member {
@@ -1028,6 +1059,7 @@ impl Engine {
             cycle: None,
             ledger_policy: Default::default(),
             manifest_policy: Default::default(),
+            hold_exempt: None,
         };
         // Command-line runs use the peers other devices advertised, over TCP
         // only; the service adds LAN peers and the QUIC node.
@@ -1738,6 +1770,7 @@ impl Engine {
 
     fn forget_folder(&mut self, folder: &FolderId, removed_utc: i64) -> Result<()> {
         self.detach_mount(folder)?;
+        self.forget_notes(folder);
         if self.config.backups.iter().any(|b| &b.folder_id == folder) {
             self.config.backups.retain(|b| &b.folder_id != folder);
             self.config.save(&self.home)?;
@@ -1801,6 +1834,7 @@ impl Engine {
                     format!("manifests/{}/", rec.folder_id),
                     format!("thumbs/{}/", rec.folder_id),
                     format!("vault/access/{}/", rec.folder_id),
+                    notes::folder_prefix(&rec.folder_id),
                     crate::snapshot::Snapshot::backup_prefix(&rec.folder_id),
                 ] {
                     for key in backend.list(&prefix)? {
@@ -1841,7 +1875,7 @@ impl Engine {
 
     /// Switch selective sync on or off for an attached folder.
     pub fn set_selective(&mut self, name_or_id: &str, selective: bool) -> Result<()> {
-        let (rec, _) = self.resolve_folder(name_or_id)?;
+        let (rec, _) = self.resolve_for_write(name_or_id)?;
         for m in self
             .config
             .folders
@@ -1901,7 +1935,7 @@ impl Engine {
     /// storages hold the content. Returns (freed, kept): files not yet stored
     /// elsewhere are kept.
     pub fn free_folder(&mut self, folder: &str) -> Result<(u64, u64)> {
-        let (rec, root) = self.resolve_folder(folder)?;
+        let (rec, root) = self.resolve_for_write(folder)?;
         let state = self.load_state(&rec.folder_id)?;
         if self.mount_is_encrypted(&rec.folder_id) {
             let paths: Vec<String> = state.local_index.keys().cloned().collect();
@@ -2003,6 +2037,14 @@ impl Engine {
         self.unlocked
             .get(folder)
             .is_some_and(|(_, until)| *until > util::now_utc())
+    }
+
+    /// `resolve_folder` for what writes into the folder's directory: refused
+    /// while a restic run holds the folder (`restic_mirror`).
+    fn resolve_for_write(&self, name_or_id: &str) -> Result<(FolderRecord, PathBuf)> {
+        let found = self.resolve_folder(name_or_id)?;
+        self.ensure_not_held(&found.0)?;
+        Ok(found)
     }
 
     fn resolve_folder(&self, name_or_id: &str) -> Result<(FolderRecord, PathBuf)> {
@@ -2612,7 +2654,7 @@ impl Engine {
         if self.forked_self {
             bail!("this device's ledger is forked; it must be re-enrolled as a new device");
         }
-        let (rec, root) = self.resolve_folder(folder)?;
+        let (rec, root) = self.resolve_for_write(folder)?;
         let mut state = self.load_state(&rec.folder_id)?;
         let mut report = PushReport {
             folder: rec.name.clone(),
@@ -3210,7 +3252,7 @@ impl Engine {
 
     pub fn pull(&mut self, folder: &str) -> Result<PullReport> {
         self.ensure_active()?;
-        let (rec, root) = self.resolve_folder(folder)?;
+        let (rec, root) = self.resolve_for_write(folder)?;
         let mut state = self.load_state(&rec.folder_id)?;
         let mut report = PullReport {
             folder: rec.name.clone(),
@@ -3866,7 +3908,7 @@ impl Engine {
     /// are listed and stay placeholders until the next sync. Returns how
     /// many were downloaded.
     fn fill_placeholders(&mut self, folder: &str, unavailable: &mut Vec<String>) -> Result<u64> {
-        let (rec, root) = self.resolve_folder(folder)?;
+        let (rec, root) = self.resolve_for_write(folder)?;
         if self.mount_is_selective(&rec.folder_id) || self.mount_is_encrypted(&rec.folder_id) {
             return Ok(0);
         }
@@ -3892,7 +3934,7 @@ impl Engine {
 
     /// Download a placeholder file of a selective folder and keep it here.
     pub fn fetch_file(&mut self, folder: &str, path: &str) -> Result<PullReport> {
-        let (rec, root) = self.resolve_folder(folder)?;
+        let (rec, root) = self.resolve_for_write(folder)?;
         if self.mount_is_encrypted(&rec.folder_id) {
             return self.fetch_cached(&rec, path);
         }
@@ -3973,7 +4015,7 @@ impl Engine {
     /// unless every chunk is on at least one storage that is not a carrier,
     /// and unless the file on disk is the version that was synced.
     pub fn free_file(&mut self, folder: &str, path: &str) -> Result<()> {
-        let (rec, root) = self.resolve_folder(folder)?;
+        let (rec, root) = self.resolve_for_write(folder)?;
         if self.mount_is_encrypted(&rec.folder_id) {
             // Its cached blocks go, except those other cached files use.
             return match self.free_cached(&rec, &[path.to_string()])?.pop() {
@@ -4669,7 +4711,7 @@ impl Engine {
             let staged = writer.write_sized(reader, size)?;
             return self.commit_staged(folder, path, staged);
         }
-        let (_, root) = self.resolve_folder(folder)?;
+        let (_, root) = self.resolve_for_write(folder)?;
         let disk = root.join(path);
         if placeholder_path(&disk).exists() {
             bail!("{path} is a placeholder here; fetch it before overwriting");
@@ -4718,7 +4760,7 @@ impl Engine {
     /// Create a directory inside a folder. Folder lists name files only; in a
     /// folder kept encrypted here a directory exists once a file is in it.
     pub fn mkdir(&mut self, folder: &str, path: &str) -> Result<()> {
-        let (rec, root) = self.resolve_folder(folder)?;
+        let (rec, root) = self.resolve_for_write(folder)?;
         block_cache::check_rel_path(path)?;
         if self.mount_is_encrypted(&rec.folder_id) {
             return Ok(());
@@ -4765,7 +4807,15 @@ impl Engine {
     /// Rename or move a file inside a folder (both paths relative to the
     /// folder root), then push so other devices see the move.
     pub fn move_file(&mut self, folder: &str, from: &str, to: &str) -> Result<PushReport> {
-        let (_, root) = self.resolve_folder(folder)?;
+        let report = self.move_file_only(folder, from, to)?;
+        // The file's analysis goes along (`notes`).
+        let rec = self.resolve_folder(folder)?.0;
+        self.notes_follow_move(&rec.folder_id, from, to)?;
+        Ok(report)
+    }
+
+    fn move_file_only(&mut self, folder: &str, from: &str, to: &str) -> Result<PushReport> {
+        let (_, root) = self.resolve_for_write(folder)?;
         for p in [from, to] {
             if p.is_empty()
                 || Path::new(p).is_absolute()
@@ -4814,6 +4864,7 @@ impl Engine {
         let encrypted_here = self.mount_is_encrypted(&rec.folder_id);
         // Newest use on any device of the folder (`access_sync`).
         let accessed = self.merged_access(&rec.folder_id, &state);
+        let analyses = self.analyses_for_listing(&rec.folder_id, &state);
         let mut out = Vec::new();
         for f in state.files.values().filter(|f| !f.deleted) {
             let disk = root.join(&f.path);
@@ -4844,7 +4895,24 @@ impl Engine {
                 media: thumbs::is_image(&f.path) || thumbs::is_video(&f.path),
                 modified_utc: f.mtime / 1_000_000_000,
                 last_accessed_utc: accessed.get(&f.path).copied(),
+                analysis: None,
+                analysis_truncated: false,
+                analysis_tags: Vec::new(),
+                analysis_utc: None,
+                analysis_stale: false,
+                analysis_by: None,
+                analysis_author: None,
             });
+            if let (Some(a), Some(e)) = (analyses.get(&f.path), out.last_mut()) {
+                let shown: String = a.analysis.chars().take(LISTING_CHARS).collect();
+                e.analysis_truncated = shown.len() < a.analysis.len();
+                e.analysis = Some(shown);
+                e.analysis_tags = a.tags.clone();
+                e.analysis_utc = Some(a.analysed_utc);
+                e.analysis_stale = a.stale;
+                e.analysis_by = a.by.clone();
+                e.analysis_author = Some(a.author.clone());
+            }
         }
         Ok(out)
     }
@@ -4862,6 +4930,8 @@ impl Engine {
         let _ = self.ledger_upkeep();
         // Last-accessed records of every device, when due (`access_sync`).
         let _ = self.access_upkeep(false);
+        // File analyses: follow renames, publish and read (`notes`).
+        let _ = self.notes_upkeep(false);
         let _ = self.manifest_upkeep();
         Ok(out)
     }
@@ -4872,13 +4942,18 @@ impl Engine {
         // adopted before it is synced under its old key.
         self.pull_registry()?;
         self.finish_strongroom_conversions();
+        // The restic device keeps every folder: new ones are attached in
+        // its mirror as soon as their record is here.
+        self.restic_auto_attach();
         let names: Vec<String> = match folder {
             Some(f) => vec![f.to_string()],
             None => self
                 .folders()
                 .into_iter()
                 .filter(|(r, m)| {
-                    m.is_some() && (!r.is_strongroom() || self.is_unlocked(&r.folder_id))
+                    m.is_some()
+                        && (!r.is_strongroom() || self.is_unlocked(&r.folder_id))
+                        && !self.is_held(&r.folder_id)
                 })
                 .map(|(r, _)| r.folder_id.to_string())
                 .collect(),

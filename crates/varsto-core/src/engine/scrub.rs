@@ -696,6 +696,12 @@ impl Engine {
             {
                 continue; // kept encrypted here: the block cache is checked instead
             }
+            if self.is_held(&rec.folder_id) {
+                report
+                    .skipped
+                    .push(format!("folder {} (held for a restic backup)", rec.name));
+                continue;
+            }
             let Ok(rec) = self.with_key(&rec) else {
                 report
                     .skipped
@@ -880,7 +886,7 @@ impl Engine {
     /// the damaged file aside and put the recorded version in its place.
     /// Nothing is moved when the recorded version cannot be had.
     #[allow(clippy::too_many_arguments)]
-    fn restore_damaged(
+    pub(super) fn restore_damaged(
         &mut self,
         rec: &FolderRecord,
         fk: &FolderKeys,

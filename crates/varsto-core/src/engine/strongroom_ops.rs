@@ -424,6 +424,8 @@ impl Engine {
             m.selective = true;
         }
         self.config.save(&self.home)?;
+        // File analyses stay with the files (content hashes are per key).
+        self.notes_rekeyed(&old_id, new_id, &state, &new_state);
         let _ = fs::remove_file(self.state_path(&old_id));
         self.unlocked.remove(&old_id);
         self.unlocked.insert(
@@ -668,6 +670,8 @@ impl Engine {
                     format!("{}{}/", KeysRecord::PREFIX, old.folder_id),
                     // Last-accessed records under the old key name files.
                     format!("vault/access/{}/", old.folder_id),
+                    // So do file analyses.
+                    super::notes::folder_prefix(&old.folder_id),
                 ];
                 for prefix in prefixes {
                     for key in backend.list(&prefix)? {
@@ -831,6 +835,8 @@ impl Engine {
             }
             self.config.save(&self.home)?;
             let _ = fs::remove_file(self.state_path(&old.folder_id));
+            // The converting device carried the analyses over.
+            self.forget_notes(&old.folder_id);
         }
         self.unlocked.remove(&old.folder_id);
         self.keyring.folders.remove(&old.folder_id);
