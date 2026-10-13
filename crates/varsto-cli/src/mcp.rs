@@ -347,10 +347,16 @@ fn folder_root(backend: &mut Backend, folder: &str) -> Result<Option<PathBuf>> {
 }
 
 /// Only a synced plain file on this disk has a local path: the assistant
-/// reads it itself; Varsto never hands out contents.
-fn local_path(root: Option<&Path>, path: &Value, state: &Value) -> Option<String> {
-    let p = root?.join(path.as_str()?);
-    (state.as_str() == Some("local") && p.is_file()).then(|| p.display().to_string())
+/// reads it itself; Varsto never hands out contents. The entry's `disk` is
+/// where the engine keeps it (a name Windows does not allow, such as
+/// `12:30.jpg`, is written there with look-alike characters).
+fn local_path(root: Option<&Path>, entry: &Value) -> Option<String> {
+    let root = root?;
+    let p = match entry["disk"].as_str() {
+        Some(d) => PathBuf::from(d),
+        None => root.join(entry["path"].as_str()?),
+    };
+    (entry["state"].as_str() == Some("local") && p.is_file()).then(|| p.display().to_string())
 }
 
 fn str_list(args: &Value, name: &str) -> Vec<String> {
@@ -459,7 +465,7 @@ fn call_tool(backend: &mut Backend, grants: &Grants, name: &str, args: &Value) -
             let mut files = backend.files(folder)?;
             if let Some(list) = files.as_array_mut() {
                 for f in list {
-                    let local = local_path(root.as_deref(), &f["path"], &f["state"]);
+                    let local = local_path(root.as_deref(), f);
                     f["local_path"] = json!(local);
                     if let (false, Some(o)) = (with_analysis, f.as_object_mut()) {
                         o.retain(|k, _| !k.starts_with("analysis"));
@@ -531,7 +537,7 @@ fn call_tool(backend: &mut Backend, grants: &Grants, name: &str, args: &Value) -
                     .cloned()
                     .unwrap_or_default()
                 {
-                    let local = local_path(root.as_deref(), &h["path"], &h["state"]);
+                    let local = local_path(root.as_deref(), &h);
                     h["local_path"] = json!(local);
                     if let Some(o) = h.as_object_mut() {
                         o.remove("disk");

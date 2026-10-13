@@ -1817,6 +1817,10 @@
   [
    "The file system on (.+) has errors that could not be repaired automatically; nothing was read or written\\. Run `sudo e2fsck -f (\\S+)` by hand or retire the disk\\.",
    "Filsystemet på $1 har fel som inte kunde repareras automatiskt; inget lästes eller skrevs. Kör `sudo e2fsck -f $2` för hand eller pensionera disken."
+  ],
+  [
+   "kept under another name here because the disk ignores case:",
+   "behålls här under ett annat namn eftersom disken inte skiljer på stora och små bokstäver:"
   ]
  ]
 }

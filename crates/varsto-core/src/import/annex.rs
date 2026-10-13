@@ -473,6 +473,22 @@ impl ImportSource for AnnexSource {
                     continue;
                 }
             };
+            // Names are kept as they are (`crate::names`); only what could
+            // leave the folder, and Varsto's own names, are refused.
+            if let Err(e) = crate::util::check_rel_path(&path) {
+                listing.skipped.push(Note {
+                    path,
+                    reason: format!("the name cannot be used in Varsto: {e}"),
+                });
+                continue;
+            }
+            if path.split('/').any(|c| c.starts_with(".varsto")) {
+                listing.skipped.push(Note {
+                    path,
+                    reason: "names starting with .varsto are Varsto's own".into(),
+                });
+                continue;
+            }
             let mut f = head.split_whitespace();
             let (Some(mode), Some(kind), Some(blob), Some(size)) =
                 (f.next(), f.next(), f.next(), f.next())

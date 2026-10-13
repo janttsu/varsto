@@ -915,9 +915,13 @@ impl Engine {
             wanted.iter().map(|f| f.size).sum(),
             crate::activity::Unit::Bytes,
         );
+        // Names the target's filesystem does not take are mapped as a
+        // synced folder maps them (`crate::names`).
+        let rules = self.local_rules(&root);
+        let mut names = crate::names::LocalNames::default();
         for f in &wanted {
-            let disk = match util::safe_join(&root, &f.path) {
-                Ok(d) => d,
+            let disk = match names.place(&root, rules, &f.path) {
+                Ok((d, _)) => d,
                 Err(e) => {
                     report.unavailable.push(format!("{}: {e:#}", f.path));
                     continue;

@@ -484,21 +484,26 @@ impl Engine {
     }
 
     /// Copies of `entry` in this device's local trash: files named
-    /// `<path>.<time>` with its size and content.
+    /// `<path>.<time>` with its size and content, written under the local
+    /// form of that name (`crate::names`, as a pull writes them).
     fn local_copies(&self, fk: &FolderKeys, entry: &TrashEntry) -> Vec<PathBuf> {
-        let Ok(base) = util::safe_join(&self.local_trash_dir(&fk.folder), &entry.path) else {
+        let trash_root = self.local_trash_dir(&fk.folder);
+        let rules = self.local_rules(&trash_root);
+        let Ok(base) = util::safe_join(&trash_root, &rules.default_local(&entry.path)) else {
             return Vec::new();
         };
-        let (Some(dir), Some(name)) = (base.parent(), base.file_name()) else {
+        let Some(dir) = base.parent() else {
             return Vec::new();
         };
-        let prefix = format!("{}.", name.to_string_lossy());
+        let name = entry.path.rsplit('/').next().unwrap_or(&entry.path);
+        let prefix = format!("{name}.");
         let Ok(list) = fs::read_dir(dir) else {
             return Vec::new();
         };
         let mut out = Vec::new();
         for e in list.flatten() {
-            let n = e.file_name().to_string_lossy().to_string();
+            let local = e.file_name().to_string_lossy().to_string();
+            let n = rules.default_vault(&local);
             let Some(stamp) = n.strip_prefix(&prefix) else {
                 continue;
             };
@@ -1596,10 +1601,8 @@ impl Engine {
                 if encrypted {
                     return false;
                 }
-                match util::safe_join(root, p) {
-                    Ok(d) => d.exists() || placeholder_path(&d).exists(),
-                    Err(_) => true,
-                }
+                let d = self.disk_of(root, &state, p);
+                d.exists() || placeholder_path(&d).exists()
             };
             let mut target = base.clone();
             let mut n = 1;
@@ -1796,7 +1799,11 @@ impl Engine {
             if encrypted {
                 cache_writes.push((target.clone(), tmp, e.size));
             } else {
-                let disk = util::safe_join(&root, &target)?;
+                // The local name (mapped where this filesystem needs it) is
+                // recorded before the push's scan finds the file.
+                let mut state = self.load_state(&rec.folder_id)?;
+                let disk = self.place(&root, &mut state, &target, None)?;
+                self.save_state(&rec.folder_id, &state)?;
                 if disk.exists() || placeholder_path(&disk).exists() {
                     let _ = fs::remove_file(&tmp);
                     report

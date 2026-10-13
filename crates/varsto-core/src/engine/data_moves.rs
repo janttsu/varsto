@@ -514,7 +514,7 @@ impl Engine {
             files += 1;
             let local = match &root {
                 Some(r) if !encrypted_here && state.local_index.contains_key(&f.path) => {
-                    Some(r.join(&f.path))
+                    Some(self.disk_of(r, &state, &f.path))
                 }
                 _ => None,
             };

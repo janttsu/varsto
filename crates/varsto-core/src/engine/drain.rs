@@ -333,7 +333,7 @@ impl Engine {
             for f in state.files.values().filter(|f| !f.deleted) {
                 let path = match &root {
                     Some(r) if plain_here && state.local_index.contains_key(&f.path) => {
-                        Some(r.join(&f.path))
+                        Some(self.disk_of(r, &state, &f.path))
                     }
                     _ => None,
                 };

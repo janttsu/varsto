@@ -70,6 +70,8 @@ fn mtime_ns(md: &fs::Metadata) -> i64 {
 struct ToHash {
     folder: usize,
     path: String,
+    /// Where the file is on disk (its local name, `crate::names`).
+    disk: PathBuf,
     size: u64,
     mtime: i64,
     want: String,
@@ -541,7 +543,8 @@ impl Engine {
                 .iter()
                 .map(|(d, s)| (d.short().to_string(), *s))
                 .collect();
-            // What is on disk: files and placeholders.
+            // What is on disk: files and placeholders, by vault path.
+            let rules = self.local_rules(target);
             let mut on_disk: BTreeSet<String> = BTreeSet::new();
             let mut placeholders: BTreeSet<String> = BTreeSet::new();
             let walker = walkdir::WalkDir::new(target)
@@ -562,10 +565,10 @@ impl Engine {
                 };
                 match p.strip_suffix(PLACEHOLDER_SUFFIX) {
                     Some(real) => {
-                        placeholders.insert(real.to_string());
+                        placeholders.insert(state.local_names.vault_of_local(rules, real));
                     }
                     None => {
-                        on_disk.insert(p);
+                        on_disk.insert(state.local_names.vault_of_local(rules, &p));
                     }
                 }
             }
@@ -595,7 +598,8 @@ impl Engine {
                 digest.push(0);
                 digest.extend_from_slice(f.content_hash.as_bytes());
                 digest.push(b'\n');
-                let Ok(disk) = util::safe_join(target, path) else {
+                let Ok(disk) = util::safe_join(target, &state.local_names.local_rel(rules, path))
+                else {
                     fc.problems.push(problem(
                         ProblemKind::Unreadable,
                         "the path is not usable here",
@@ -669,6 +673,7 @@ impl Engine {
                 to_hash.push(ToHash {
                     folder: c.folders.len(),
                     path: path.to_string(),
+                    disk: disk.clone(),
                     size,
                     mtime,
                     want: f.content_hash.clone(),
@@ -698,7 +703,7 @@ impl Engine {
                 continue;
             };
             let fc = &mut c.folders[t.folder];
-            let disk = fc.path.join(&t.path);
+            let disk = t.disk.clone();
             let mut hasher = KeyedHasher::new(&fk.hash);
             let read = (|| -> std::io::Result<()> {
                 let mut f = fs::File::open(&disk)?;
@@ -809,7 +814,11 @@ impl Engine {
                 ..Default::default()
             };
             for p in fixable {
-                let Ok(disk) = util::safe_join(&root, &p.path) else {
+                let local = state
+                    .local_names
+                    .local_rel(self.local_rules(&root), &p.path)
+                    .into_owned();
+                let Ok(disk) = util::safe_join(&root, &local) else {
                     continue;
                 };
                 match p.kind {

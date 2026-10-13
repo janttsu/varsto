@@ -80,80 +80,35 @@ pub fn write_json<T: Serialize>(path: &Path, value: &T) -> Result<()> {
     write_atomic(path, &bytes)
 }
 
-/// Normalise a relative path to the manifest form: forward slashes, no leading
-/// `./`. Returns `None` for paths that escape the folder.
-/// Whether `path` (slashes as separators) names a file strictly inside a
-/// root: relative, every component a plain name, no `..`, `.`, empty
-/// components, backslashes, drive letters, NUL or other control
-/// characters, and no Windows reserved device names. Paths from other
-/// devices (manifests) and object keys from storages go through this
-/// before they touch a file system.
+/// Whether `path` is a valid vault path (see [`crate::names`]): relative,
+/// `/` as the separator, no empty, `.` or `..` component, no NUL. Any
+/// other name is kept as it is; a device whose filesystem does not take
+/// it writes it under a mapped local name (`names::LocalNames`).
 pub fn check_rel_path(path: &str) -> Result<()> {
-    if path.is_empty() || path.len() > 4096 {
-        anyhow::bail!("path must be relative to the folder and must not contain '..': {path:?}");
+    crate::names::check_vault_path(path)
+}
+
+/// The stricter rule for object keys on storages, which every platform
+/// must be able to write as they are: [`check_rel_path`], and no
+/// backslash, `:`, control character or Windows device name.
+pub fn check_portable_rel_path(path: &str) -> Result<()> {
+    check_rel_path(path)?;
+    if path.bytes().any(|b| b < 0x20 || b == 0x7f) || path.contains('\\') || path.contains(':') {
+        anyhow::bail!("path contains a control character, a backslash or ':': {path:?}");
     }
-    if path.bytes().any(|b| b < 0x20 || b == 0x7f) || path.contains('\\') {
-        anyhow::bail!("path contains a control character or a backslash: {path:?}");
-    }
-    if Path::new(path).is_absolute() || path.starts_with('/') {
-        anyhow::bail!("path must be relative to the folder: {path:?}");
-    }
-    for c in path.split('/') {
-        if c.is_empty() || c == "." || c == ".." || c.contains(':') {
-            anyhow::bail!(
-                "path must be relative to the folder and must not contain '..': {path:?}"
-            );
-        }
-        let stem = c.split('.').next().unwrap_or("").to_ascii_uppercase();
-        if matches!(
-            stem.as_str(),
-            "CON"
-                | "PRN"
-                | "AUX"
-                | "NUL"
-                | "COM1"
-                | "COM2"
-                | "COM3"
-                | "COM4"
-                | "COM5"
-                | "COM6"
-                | "COM7"
-                | "COM8"
-                | "COM9"
-                | "LPT1"
-                | "LPT2"
-                | "LPT3"
-                | "LPT4"
-                | "LPT5"
-                | "LPT6"
-                | "LPT7"
-                | "LPT8"
-                | "LPT9"
-        ) {
-            anyhow::bail!("path uses a name that is reserved on Windows: {path:?}");
-        }
+    if path.split('/').any(crate::names::mapped_on_windows) {
+        anyhow::bail!("path uses a name Windows does not allow: {path:?}");
     }
     Ok(())
 }
 
-/// `root/rel` for writing: the relative path is checked, and no component
-/// of the existing part of the path may be a symbolic link (a link inside
-/// the folder would otherwise let another device write outside it).
+/// `root/rel` for writing, where `rel` is the local path (already mapped
+/// for this device's filesystem, see `names::LocalNames`): the path is
+/// checked, and no component of the existing part of the path may be a
+/// symbolic link (a link inside the folder would otherwise let another
+/// device write outside it).
 pub fn safe_join(root: &Path, rel: &str) -> Result<PathBuf> {
-    check_rel_path(rel)?;
-    let mut p = root.to_path_buf();
-    for c in rel.split('/') {
-        p.push(c);
-        if let Ok(md) = std::fs::symlink_metadata(&p) {
-            if md.file_type().is_symlink() {
-                anyhow::bail!(
-                    "{} is a symbolic link; files are not written through links",
-                    p.display()
-                );
-            }
-        }
-    }
-    Ok(p)
+    crate::names::checked_join(root, rel)
 }
 
 /// Decimal sizes for messages ("3.2 GB", "410 MB").
@@ -172,6 +127,9 @@ pub fn human_bytes(n: u64) -> String {
     }
 }
 
+/// Normalise a relative path to the manifest form: forward slashes, no
+/// leading `./`. Returns `None` for paths that escape the folder and for
+/// names that are not UTF-8 (those are not synced).
 pub fn manifest_path(rel: &Path) -> Option<String> {
     let mut parts = Vec::new();
     for c in rel.components() {
@@ -199,6 +157,14 @@ mod tests {
             "dir/sub/file",
             "spaces in name/x.y",
             "ünïcode/ä.txt",
+            // Original names are kept (spec: "Paths").
+            "C:/x",
+            "c:x",
+            "a\\b",
+            "nul",
+            "con.txt",
+            "dir/LPT1",
+            "a\nb",
         ] {
             check_rel_path(ok).unwrap_or_else(|e| panic!("{ok}: {e}"));
         }
@@ -210,18 +176,24 @@ mod tests {
             "a/./b",
             "a//b",
             "a/",
-            "C:/x",
-            "c:x",
-            "a\\b",
-            "nul",
-            "con.txt",
-            "dir/LPT1",
             "a\u{0}b",
-            "a\nb",
             "..",
         ] {
             assert!(check_rel_path(bad).is_err(), "{bad:?} must be refused");
+            assert!(
+                check_portable_rel_path(bad).is_err(),
+                "{bad:?} must be refused"
+            );
         }
+        for bad in [
+            "C:/x", "c:x", "a\\b", "nul", "con.txt", "dir/LPT1", "a\nb", "x.",
+        ] {
+            assert!(
+                check_portable_rel_path(bad).is_err(),
+                "{bad:?} is not a portable key"
+            );
+        }
+        check_portable_rel_path("chunks/ab/abcdef").unwrap();
     }
 
     #[cfg(unix)]

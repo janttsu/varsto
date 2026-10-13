@@ -53,18 +53,24 @@ are listed in the report as not imported. Export them in the provider's app
   other imports. Without `--dest` the folder is attached selectively (files
   are placeholders on this computer, the blocks are on your storages).
 - `--transfers N`: parallel downloads (default 4).
+- `--staging DIR`: where downloads wait until they are in the folder. The
+  default is a hidden `.varsto-import-staging` directory in the folder's own
+  directory, on the same disk as the folder. Each batch (up to 256 files or
+  1 GiB) needs its size plus 1 GiB free there, or the import stops and says
+  so; run it again after freeing space or with another `--staging`.
 - `--hash-type T`: `dropbox`, `quickxor`, `sha256`, `sha1`, `md5`, `blake3`
   or `none`.
 
 ## How it works
 
 Varsto lists the remote with `rclone lsjson`, then downloads the files that
-are new or changed in batches with one `rclone copy` per batch into a
-temporary directory of the Varsto home, checks each file's hash, encrypts
-and uploads it, and deletes the temporary copy. A file whose hash does not
-match is downloaded once more; if it still does not match it is reported
-and left out. Files whose names differ only in case are imported and noted
-(they cannot sit side by side on Windows or macOS). Names Varsto cannot use
-(with `:` or `\`, Windows reserved names) are reported.
+are new or changed in batches with one `rclone copy` per batch into the
+staging directory, checks each file's hash, encrypts and uploads it, and
+deletes the staged copy; the staging directory is removed at the end. A
+file whose hash does not match is downloaded once more; if it still does
+not match it is reported and left out. File names are kept as they are
+(`12:30.jpg` too; a Windows computer shows such names with look-alike
+characters). Files whose names differ only in case are imported and noted:
+on Windows and macOS one of them is kept under a name with " (2)".
 
 `varsto import status` shows every imported folder with its last run.

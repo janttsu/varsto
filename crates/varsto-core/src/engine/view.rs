@@ -14,11 +14,11 @@ impl Engine {
     pub fn view_size(&self, folder: &str, path: &str) -> Result<u64> {
         let (rec, root) = self.resolve_folder(folder)?;
         block_cache::check_rel_path(path)?;
-        let disk = root.join(path);
+        let state = self.load_state(&rec.folder_id)?;
+        let disk = self.disk_of(&root, &state, path);
         if !self.mount_is_encrypted(&rec.folder_id) && disk.is_file() {
             return Ok(fs::metadata(&disk)?.len());
         }
-        let state = self.load_state(&rec.folder_id)?;
         match state.files.get(path) {
             Some(f) if !f.deleted => Ok(f.size),
             _ => bail!("unknown file {path}"),
@@ -31,7 +31,7 @@ impl Engine {
     pub fn view_range(&self, folder: &str, path: &str, start: u64, end: u64) -> Result<Vec<u8>> {
         let (rec, root) = self.resolve_folder(folder)?;
         block_cache::check_rel_path(path)?;
-        let disk = root.join(path);
+        let disk = self.disk_path(&rec.folder_id, &root, path);
         if !self.mount_is_encrypted(&rec.folder_id) && disk.is_file() {
             use std::io::{Read, Seek, SeekFrom};
             let mut f =

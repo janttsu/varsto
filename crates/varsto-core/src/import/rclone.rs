@@ -148,8 +148,9 @@ pub struct RcloneSource {
 impl RcloneSource {
     /// `spec` is `remote:path`; `expect_type` (dropbox, onedrive) is checked
     /// against the configuration; `hash` overrides the hash type (`none`
-    /// for none); `scratch` is an empty directory of this device for the
-    /// downloads in progress.
+    /// for none); `scratch` is where downloads in progress are staged until
+    /// the import says where (`ImportSource::stage_in`: on the destination
+    /// folder's filesystem). It is created when the first batch starts.
     pub fn open(
         spec: &str,
         expect_type: Option<&str>,
@@ -207,7 +208,6 @@ impl RcloneSource {
         } else {
             label.to_string()
         };
-        std::fs::create_dir_all(scratch)?;
         Ok(RcloneSource {
             info: SourceInfo {
                 kind: super::KIND_RCLONE,
@@ -361,7 +361,7 @@ impl ImportSource for RcloneSource {
                 listing.warnings.push(Note {
                     path: path.clone(),
                     reason: format!(
-                        "differs from {other} only by case: both are imported, but they cannot sit side by side on Windows or macOS"
+                        "differs from {other} only by case: both are imported; on Windows and macOS one of them is kept under a local name with \" (2)\""
                     ),
                 });
             }
@@ -397,11 +397,24 @@ impl ImportSource for RcloneSource {
         Ok(listing)
     }
 
+    fn stage_in(&mut self, dir: &Path) -> Result<()> {
+        self.scratch = dir.to_path_buf();
+        Ok(())
+    }
+
     fn deliver(&mut self, wanted: &[Wanted], sink: &mut super::Sink) -> Result<()> {
         let mut order: Vec<usize> = (0..wanted.len()).collect();
         order.sort_by(|a, b| wanted[*a].path.cmp(&wanted[*b].path));
         let mut at = 0;
         let dir = self.scratch.join(format!("batch-{}", std::process::id()));
+        // The batch directory goes however the delivery ends.
+        struct Cleanup<'a>(&'a Path);
+        impl Drop for Cleanup<'_> {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(self.0);
+            }
+        }
+        let _cleanup = Cleanup(&dir);
         while at < order.len() {
             // A batch: up to `batch_files` files and `batch_bytes` bytes.
             let mut end = at;
@@ -415,6 +428,7 @@ impl ImportSource for RcloneSource {
             }
             let _ = std::fs::remove_dir_all(&dir);
             std::fs::create_dir_all(&dir)?;
+            check_free_space(&dir, bytes)?;
             // Names with a line break cannot go in a list; those one by one.
             let (listable, single): (Vec<usize>, Vec<usize>) = order[at..end]
                 .iter()
@@ -425,17 +439,26 @@ impl ImportSource for RcloneSource {
             } else {
                 self.copy_batch(&paths, &dir)?
             };
+            let one = |i: usize| dir.join("one").join(i.to_string());
             for i in single {
-                let to = dir.join("files").join(&wanted[i].path);
-                if let Some(p) = to.parent() {
-                    std::fs::create_dir_all(p)?;
-                }
-                let _ = self.copy_one(&wanted[i].path, &to);
+                std::fs::create_dir_all(dir.join("one"))?;
+                let _ = self.copy_one(&wanted[i].path, &one(i));
             }
             for &i in &order[at..end] {
                 let w = &wanted[i];
-                let local = crate::util::safe_join(&dir.join("files"), &w.path);
-                let verdict = match local.as_ref().ok().filter(|p| p.is_file()) {
+                // Where the batch put it; a name this filesystem does not
+                // take as it is (rclone encodes `:` and the like on Windows)
+                // is fetched once more under a plain staging name.
+                let mut local = Some(crate::names::join(&dir.join("files"), &w.path))
+                    .filter(|p| p.is_file())
+                    .or_else(|| Some(one(i)).filter(|p| p.is_file()));
+                if local.is_none() {
+                    std::fs::create_dir_all(dir.join("one"))?;
+                    if self.copy_one(&w.path, &one(i)).unwrap_or(false) {
+                        local = Some(one(i));
+                    }
+                }
+                let verdict = match local.as_ref() {
                     None => sink(
                         i,
                         Delivery::Failed(if errors.is_empty() {
@@ -461,15 +484,34 @@ impl ImportSource for RcloneSource {
                     }
                 };
                 if verdict == Verdict::Stop {
-                    let _ = std::fs::remove_dir_all(&dir);
                     return Ok(());
                 }
             }
             at = end;
         }
-        let _ = std::fs::remove_dir_all(&dir);
         Ok(())
     }
+}
+
+/// Room kept free on the staging filesystem besides a batch.
+pub const STAGING_MARGIN: u64 = 1 << 30;
+
+/// A batch of `bytes` is downloaded only when the staging filesystem has
+/// that much free and [`STAGING_MARGIN`] besides.
+fn check_free_space(dir: &Path, bytes: u64) -> Result<()> {
+    let Some(space) = crate::pool::disk_space(dir) else {
+        return Ok(());
+    };
+    if space.free < bytes.saturating_add(STAGING_MARGIN) {
+        bail!(
+            "not enough free space to download the next files into {}: {} free, {} needed ({} of files and 1 GiB to spare). Free some space, or give --staging DIR on a disk with more room",
+            dir.display(),
+            crate::util::human_bytes(space.free),
+            crate::util::human_bytes(bytes.saturating_add(STAGING_MARGIN)),
+            crate::util::human_bytes(bytes)
+        );
+    }
+    Ok(())
 }
 
 fn last_line(s: &str) -> &str {

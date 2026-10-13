@@ -28,6 +28,7 @@ pub mod ledger;
 pub mod logging;
 pub mod manifest;
 pub mod media;
+pub mod names;
 pub mod org;
 pub mod p2p;
 pub mod pack;

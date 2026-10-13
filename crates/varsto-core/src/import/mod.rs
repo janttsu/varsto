@@ -159,6 +159,13 @@ pub trait ImportSource {
     fn info(&self) -> &SourceInfo;
     /// Everything in the source, with what is readable from here.
     fn list(&mut self) -> anyhow::Result<Listing>;
+    /// Where to keep downloads in progress (a source that downloads:
+    /// rclone). The import passes a directory on the destination folder's
+    /// filesystem, `<folder>/.varsto-import-staging`, unless `--staging`
+    /// names one; it is removed after the run.
+    fn stage_in(&mut self, _dir: &std::path::Path) -> anyhow::Result<()> {
+        Ok(())
+    }
     /// Hand over the content of each wanted id once (by index into
     /// `wanted`), in the order that reads the source fastest.
     fn deliver(&mut self, wanted: &[Wanted], sink: &mut Sink) -> anyhow::Result<()>;

@@ -69,7 +69,7 @@
         if (d && d.total > 0) {
           var note = b.nextElementSibling && b.nextElementSibling.classList.contains("busy-note") ? b.nextElementSibling : null;
           if (!note) { note = el("span", "busy-note muted small"); b.after(note); }
-          note.textContent = "Downloading " + d.path.split("/").pop() + ": " + fmtBytes(d.done) + " of " + fmtBytes(d.total) + " (" + d.percent + " %" + (d.bytes_per_sec > 0 ? ", " + fmtBytes(d.bytes_per_sec) + "/s" : "") + ")";
+          note.textContent = "Downloading " + showName(d.path.split("/").pop()) + ": " + fmtBytes(d.done) + " of " + fmtBytes(d.total) + " (" + d.percent + " %" + (d.bytes_per_sec > 0 ? ", " + fmtBytes(d.bytes_per_sec) + "/s" : "") + ")";
         }
       }).catch(function () {}).then(function () { if (!stop) { setTimeout(tick, 400); } });
     })();
@@ -130,6 +130,9 @@
   document.addEventListener("click", function (e) { var t = e.target.closest && e.target.closest("[data-help]"); if (t) { showHelp(t); } else { hideHelp(); } });
   window.addEventListener("scroll", hideHelp, true);
   function el(tag, cls, text) { var e = document.createElement(tag); if (cls) { e.className = cls; } if (text !== undefined) { e.textContent = text; } return e; }
+  // A file name as it is (":" and backslash included), with control characters and
+  // direction overrides shown as \u{..} so that a name cannot pass for another.
+  function showName(s) { return String(s).replace(/[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/g, function (c) { return "\\u{" + c.charCodeAt(0).toString(16) + "}"; }); }
   function pill(cls, text) { return el("span", "pill " + cls, text); }
   function icon(name, cls) { var s = document.createElementNS("http://www.w3.org/2000/svg", "svg"); s.setAttribute("class", "icon" + (cls ? " " + cls : "")); var u = document.createElementNS("http://www.w3.org/2000/svg", "use"); u.setAttribute("href", "#i-" + name); s.appendChild(u); return s; }
   function enc(s) { return encodeURIComponent(s); }
@@ -1548,7 +1551,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     $("import-waiting-box").classList.toggle("hidden", !c || !c.waiting_count);
     if (!c) { return; }
     c.waiting.forEach(function (w) {
-      var li = el("li"); var p = el("span", null, w.path); p.setAttribute("data-no-i18n", ""); li.appendChild(p);
+      var li = el("li"); var p = el("span", null, showName(w.path)); p.setAttribute("data-no-i18n", ""); li.appendChild(p);
       li.appendChild(el("span", "sub", w.reason)); box.appendChild(li);
     });
   }
@@ -2150,7 +2153,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   function runSync(folder) {
     busy(true); log("sync " + (folder || "all") + " started");
     return api("POST", "/api/sync", folder ? { folder: folder } : {}).then(function (r) {
-      r.forEach(function (x) { log(x.pull.folder + ": pulled " + x.pull.files_updated + " updated, " + x.pull.files_deleted + " deleted, " + x.pull.conflicts + " conflicts; pushed " + x.push.files_changed + " changed, " + x.push.chunks_uploaded + " chunks" + (x.pull.files_unavailable.length ? "; unavailable: " + x.pull.files_unavailable.join(", ") : "") + (x.pull.forked_devices.length ? "; FORKED: " + x.pull.forked_devices.join(", ") : "")); });
+      r.forEach(function (x) { log(x.pull.folder + ": pulled " + x.pull.files_updated + " updated, " + x.pull.files_deleted + " deleted, " + x.pull.conflicts + " conflicts; pushed " + x.push.files_changed + " changed, " + x.push.chunks_uploaded + " chunks" + (x.pull.files_unavailable.length ? "; unavailable: " + x.pull.files_unavailable.join(", ") : "") + (x.pull.forked_devices.length ? "; FORKED: " + x.pull.forked_devices.join(", ") : "") + ((x.pull.renamed_locally || []).length ? "; kept under another name here because the disk ignores case: " + x.pull.renamed_locally.join(", ") : "")); });
     }).catch(function (e) { log("sync failed: " + e.message); }).then(function () { busy(false); return refreshStatus().then(function () { if (currentPage === "files") { loadFiles(); } }); });
   }
 
@@ -2233,7 +2236,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   function showViewerItem() {
     var f = viewer.list[viewer.i]; var kind = viewKind(f.path); var url = viewUrl(viewer.folder, f.path);
     clearStage(); var st = $("viewer-stage");
-    $("viewer-name").textContent = f.path.split("/").pop(); $("viewer-name").title = f.path;
+    $("viewer-name").textContent = showName(f.path.split("/").pop()); $("viewer-name").title = showName(f.path);
     $("viewer-prev").disabled = viewer.i <= 0; $("viewer-next").disabled = viewer.i >= viewer.list.length - 1;
     var fail = function () { clearStage(); st.appendChild(viewerMsg("This file cannot be shown here. Use Open in another app.")); };
     if (kind === "image") { var im = document.createElement("img"); im.alt = f.path; im.onerror = fail; im.src = url; st.appendChild(im); }
@@ -2292,7 +2295,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     var d = $("filedetails"); d.classList.remove("hidden"); document.querySelector(".files-layout").classList.add("with-details");
     var pv = $("fd-preview"); pv.innerHTML = "";
     if (f.media) { var im = document.createElement("img"); im.alt = ""; im.src = "/api/thumb?folder=" + enc(folder) + "&path=" + enc(f.path) + "&token=" + enc(token); im.onerror = function () { im.remove(); pv.appendChild(icon("image")); }; pv.appendChild(im); } else { pv.appendChild(icon("files")); }
-    $("fd-name").textContent = f.path;
+    $("fd-name").textContent = showName(f.path);
     var st = $("fd-state"); st.innerHTML = ""; st.appendChild(stateSquare(f)); st.appendChild(document.createTextNode(fileStateLabel(f)));
     $("fd-size").textContent = fmtBytes(f.size);
     $("fd-modified").textContent = fmtDate(f.modified_utc) || "unknown";
@@ -2583,8 +2586,8 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
           row.appendChild(media);
           var slash = f.path.lastIndexOf("/");
           var body = el("div", "mrow-body");
-          body.appendChild(el("div", "mrow-name", slash >= 0 ? f.path.slice(slash + 1) : f.path));
-          body.appendChild(el("div", "mrow-sub", [slash >= 0 ? f.path.slice(0, slash) : null, fmtBytes(f.size), fileStateLabel(f)].filter(Boolean).join(" · ")));
+          body.appendChild(el("div", "mrow-name", showName(slash >= 0 ? f.path.slice(slash + 1) : f.path)));
+          body.appendChild(el("div", "mrow-sub", [slash >= 0 ? showName(f.path.slice(0, slash)) : null, fmtBytes(f.size), fileStateLabel(f)].filter(Boolean).join(" · ")));
           row.appendChild(body);
           row.appendChild(stateSquare(f));
           cell.appendChild(row); tr.appendChild(cell); tb.appendChild(tr);
@@ -2603,7 +2606,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
         wrap.appendChild(stateSquare(f));
         if (f.media) { var im = document.createElement("img"); im.className = "thumb"; im.alt = ""; im.loading = "lazy"; im.src = "/api/thumb?folder=" + enc(folder) + "&path=" + enc(f.path) + "&token=" + enc(token); im.onerror = function () { var fi = el("span", "file-icon"); fi.appendChild(icon("image")); im.replaceWith(fi); }; wrap.appendChild(im); }
         else { var fi = el("span", "file-icon"); fi.appendChild(icon("files")); wrap.appendChild(fi); }
-        wrap.appendChild(document.createTextNode(f.path));
+        var fname = el("span", null, showName(f.path)); fname.setAttribute("data-no-i18n", ""); wrap.appendChild(fname);
         if (f.analysis) { var ap = pill(f.analysis_stale ? "risk" : "accent", f.analysis_stale ? "Analysis stale" : "Analysed"); ap.title = f.analysis.slice(0, 200); ap.classList.add("analysis-pill"); wrap.appendChild(ap); }
         nameCell.appendChild(wrap); tr.appendChild(nameCell);
         td(fmtBytes(f.size), "num");
