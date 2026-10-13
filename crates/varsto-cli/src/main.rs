@@ -651,6 +651,11 @@ enum P2pCmd {
         no_stun: bool,
     },
     Disable,
+    /// Ask the home router to forward the peer-to-peer port (PCP, NAT-PMP, UPnP): on (default) or off.
+    PortMapping {
+        #[arg(value_parser = ["on", "off"])]
+        state: String,
+    },
     /// Show settings, NAT guess, public address and the path to every peer.
     Status,
     /// Live traffic per peer: speed, totals and path, from the running service.
@@ -3134,6 +3139,7 @@ fn run(cli: &Cli) -> Result<()> {
                 }
                 return Ok(());
             }
+            quit_on_signals();
             service::run(service::Options {
                 home,
                 port: *port,
@@ -3142,12 +3148,15 @@ fn run(cli: &Cli) -> Result<()> {
             })?;
         }
         Cmd::Service { cmd } => match cmd {
-            ServiceCmd::Run { port, interval } => service::run(service::Options {
-                home,
-                port: *port,
-                interval_secs: *interval,
-                open_browser: false,
-            })?,
+            ServiceCmd::Run { port, interval } => {
+                quit_on_signals();
+                service::run(service::Options {
+                    home,
+                    port: *port,
+                    interval_secs: *interval,
+                    open_browser: false,
+                })?
+            }
             ServiceCmd::Install { interval } => {
                 service::set_opted_out(&home, false);
                 println!("{}", service::install(&home, *interval)?)
@@ -3901,10 +3910,15 @@ fn run(cli: &Cli) -> Result<()> {
             // With the background service running, settings go through it:
             // it applies them (on and off at once), and its own copy of the
             // configuration does not overwrite them later.
-            if let (Some((sf, _)), P2pCmd::Enable { .. } | P2pCmd::Disable) =
-                (service::status(&home), cmd)
+            if let (
+                Some((sf, _)),
+                P2pCmd::Enable { .. } | P2pCmd::Disable | P2pCmd::PortMapping { .. },
+            ) = (service::status(&home), cmd)
             {
                 let body = match cmd {
+                    P2pCmd::PortMapping { state } => {
+                        serde_json::json!({"port_mapping": state == "on"})
+                    }
                     P2pCmd::Enable {
                         port,
                         public_addrs,
@@ -3930,7 +3944,18 @@ fn run(cli: &Cli) -> Result<()> {
                 let url = format!("http://127.0.0.1:{}/api/p2p", sf.port);
                 let r: serde_json::Value =
                     serde_json::from_str(&service::http_post(&url, &sf.token, &body.to_string())?)?;
-                println!("{}", r["note"].as_str().unwrap_or("saved"));
+                if let P2pCmd::PortMapping { state } = cmd {
+                    println!(
+                        "router port mapping is {state}{}",
+                        if state == "on" {
+                            " (the service asks the router now)"
+                        } else {
+                            " (the service removed its mappings)"
+                        }
+                    );
+                } else {
+                    println!("{}", r["note"].as_str().unwrap_or("saved"));
+                }
                 return Ok(());
             }
             let mut engine = open_engine(&home)?;
@@ -3954,6 +3979,7 @@ fn run(cli: &Cli) -> Result<()> {
                         public_addrs: public_addrs.clone(),
                         stun,
                         user_disabled: false,
+                        port_mapping: engine.p2p_config().port_mapping,
                     })?;
                     let id = engine.p2p_identity()?;
                     println!(
@@ -3968,6 +3994,14 @@ fn run(cli: &Cli) -> Result<()> {
                     engine.set_p2p_config(c)?;
                     println!(
                         "peer-to-peer is off; the background service stays off it when it starts"
+                    );
+                }
+                P2pCmd::PortMapping { state } => {
+                    let mut c = engine.p2p_config();
+                    c.port_mapping = state == "on";
+                    engine.set_p2p_config(c)?;
+                    println!(
+                        "router port mapping is {state}; the background service applies it when it starts"
                     );
                 }
                 P2pCmd::Status => p2p_status(&engine, &home, cli.json)?,
@@ -5417,6 +5451,39 @@ fn traffic_table(r: &varsto_core::p2p::traffic::TrafficReport) -> String {
     out
 }
 
+/// SIGTERM (systemd, launchd) and SIGINT (Ctrl-C) end the service loop the
+/// way the interface's Quit does, so that what it set up outside this
+/// computer (the router port mappings) is removed and the service file goes.
+/// Should a long sync hold the loop, the process exits ten seconds later
+/// regardless, as it did at once before.
+#[cfg(unix)]
+fn quit_on_signals() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    static SIGNALLED: AtomicBool = AtomicBool::new(false);
+    extern "C" fn on_signal(_: libc::c_int) {
+        SIGNALLED.store(true, Ordering::SeqCst);
+    }
+    let handler = on_signal as extern "C" fn(libc::c_int) as libc::sighandler_t;
+    // SAFETY: the handler only stores to an atomic, which is async-signal-safe.
+    unsafe {
+        libc::signal(libc::SIGTERM, handler);
+        libc::signal(libc::SIGINT, handler);
+    }
+    let _ = std::thread::Builder::new()
+        .name("signals".into())
+        .spawn(|| loop {
+            std::thread::sleep(std::time::Duration::from_millis(200));
+            if SIGNALLED.load(Ordering::SeqCst) {
+                service::quit();
+                std::thread::sleep(std::time::Duration::from_secs(10));
+                std::process::exit(0);
+            }
+        });
+}
+
+#[cfg(not(unix))]
+fn quit_on_signals() {}
+
 /// `p2p status`: the running service's view when there is one (its socket
 /// is the one the NAT maps), otherwise the records plus a probe over TCP and
 /// a STUN query from a temporary socket.
@@ -5471,6 +5538,12 @@ fn p2p_status(engine: &Engine, home: &std::path::Path, json: bool) -> Result<()>
                 ),
                 _ => String::new(),
             }
+        );
+        println!(
+            "{}",
+            v["portmap_text"]
+                .as_str()
+                .unwrap_or("router port mapping: not available")
         );
         let paths = v["paths"].as_array().cloned().unwrap_or_default();
         if paths.is_empty() {
@@ -5538,6 +5611,10 @@ fn p2p_status(engine: &Engine, home: &std::path::Path, json: bool) -> Result<()>
         }
     );
     println!("background service not running; probing over TCP from this command");
+    println!(
+        "router port mapping: {} (the background service asks the router when it runs)",
+        if c.port_mapping { "on" } else { "off" }
+    );
     match &stun {
         Some(p) => println!(
             "NAT guess {} ({}, from a temporary socket)",

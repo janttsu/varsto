@@ -73,6 +73,8 @@ pub struct ServiceState {
     pub p2p_relays: Vec<String>,
     pub p2p_paths: Vec<varsto_core::p2p::PeerStatus>,
     pub p2p_cert_sha256: String,
+    /// The port the home router forwards to us (PCP, NAT-PMP, UPnP), if any.
+    pub p2p_portmap: varsto_core::p2p::portmap::PortMapStatus,
     /// Automatic verification: schedule, last run and next run.
     pub auto_verify: Option<varsto_core::autoverify::VerifyStatus>,
     /// Automatic repair: queue, last run and copies that could not be repaired.
@@ -133,6 +135,8 @@ impl ServiceState {
             "p2p_reachable": self.p2p_reachable,
             "p2p_relays": self.p2p_relays,
             "p2p_paths": self.p2p_paths,
+            "p2p_portmap": self.p2p_portmap,
+            "p2p_portmap_text": self.p2p_portmap.describe(),
             "auto_verify": self.auto_verify,
             "auto_verify_text": self.auto_verify.as_ref().map(|v| v.describe()),
             "repair": self.repair,
@@ -591,6 +595,18 @@ struct P2p {
     republish: Arc<std::sync::atomic::AtomicBool>,
     /// The service's traffic counters (`State::traffic`).
     traffic: Arc<varsto_core::p2p::Traffic>,
+    /// Router port mapping: wanted (the setting), its status, and the
+    /// thread that keeps it (joined on drop, after it removed the mappings).
+    portmap_on: Arc<AtomicBool>,
+    portmap: Arc<Mutex<varsto_core::p2p::portmap::PortMapStatus>>,
+    portmap_thread: Option<std::thread::JoinHandle<()>>,
+}
+
+/// Router port mapping is on in the settings, and not switched off for this
+/// process with `VARSTO_NO_PORT_MAPPING` (tests and throwaway services must
+/// never touch the router of the network they run in).
+fn port_mapping_wanted(cfg: &varsto_core::vault::P2pConfig) -> bool {
+    cfg.port_mapping && std::env::var_os("VARSTO_NO_PORT_MAPPING").is_none()
 }
 
 /// STUN again this often, and at the earliest this soon after the last
@@ -726,6 +742,20 @@ impl P2p {
                 stop.clone(),
             );
         }
+        let portmap_on = Arc::new(AtomicBool::new(port_mapping_wanted(&cfg)));
+        let portmap = Arc::new(Mutex::new(if port_mapping_wanted(&cfg) {
+            varsto_core::p2p::portmap::PortMapStatus::default()
+        } else {
+            varsto_core::p2p::portmap::PortMapStatus::off()
+        }));
+        let portmap_thread = Self::spawn_portmap_thread(
+            listen.port(),
+            portmap_on.clone(),
+            portmap.clone(),
+            quic.clone(),
+            republish.clone(),
+            stop.clone(),
+        );
         {
             let mut st = state.lock().unwrap();
             st.service.p2p_listen = Some(listen);
@@ -748,7 +778,93 @@ impl P2p {
             last_publish: Mutex::new(None),
             republish,
             traffic,
+            portmap_on,
+            portmap,
+            portmap_thread,
         })
+    }
+
+    /// Keep the peer-to-peer port forwarded on the home router (TCP and
+    /// UDP) while the setting is on: map at start, renew at half the lease,
+    /// map again after a network change, try again every half hour when no
+    /// router offered any of the protocols, and remove the mappings when
+    /// the setting goes off or the service stops. Silent unless
+    /// `VARSTO_P2P_DEBUG` is set: no router support is the common case.
+    fn spawn_portmap_thread(
+        port: u16,
+        on: Arc<AtomicBool>,
+        status: Arc<Mutex<varsto_core::p2p::portmap::PortMapStatus>>,
+        node: Option<Arc<varsto_core::p2p::quic::Node>>,
+        republish: Arc<AtomicBool>,
+        stop: Arc<AtomicBool>,
+    ) -> Option<std::thread::JoinHandle<()>> {
+        use varsto_core::p2p::portmap::{Options, PortMapStatus, PortMapper, Proto};
+        std::thread::Builder::new()
+            .name("p2p-portmap".into())
+            .spawn(move || {
+                let mut mapper: Option<PortMapper> = None;
+                // The local address the mappings point at; another one means
+                // another network, and everything is mapped again.
+                let mut local = varsto_core::p2p::local_ipv4_addrs();
+                let mut next_local_check = Instant::now();
+                while !stop.load(Ordering::Relaxed) && !QUIT.load(Ordering::Relaxed) {
+                    if !on.load(Ordering::Relaxed) {
+                        if let Some(mut m) = mapper.take() {
+                            m.remove_all();
+                            republish.store(true, Ordering::Relaxed);
+                        }
+                        *status.lock().unwrap() = PortMapStatus::off();
+                        Self::pause(&stop, Duration::from_secs(1));
+                        continue;
+                    }
+                    let now = Instant::now();
+                    if now >= next_local_check {
+                        next_local_check = now + Duration::from_secs(60);
+                        let current = varsto_core::p2p::local_ipv4_addrs();
+                        if current != local {
+                            local = current;
+                            if let Some(mut m) = mapper.take() {
+                                m.remove_all();
+                                republish.store(true, Ordering::Relaxed);
+                            }
+                        }
+                    }
+                    let m = mapper.get_or_insert_with(|| PortMapper::new(port, Options::system()));
+                    if m.mappings().is_empty() && m.next_due().is_none_or(|t| now >= t) {
+                        // Ask the routing table again: the gateway may be another.
+                        m.set_options(Options::system());
+                    }
+                    if m.tick(now) {
+                        // Does the mapped UDP address lead back to us? (A
+                        // router may not loop it back; then this stays false.)
+                        let verified = match (&node, m.external(Proto::Udp)) {
+                            (Some(n), Some(a)) => n.probe_self(a),
+                            _ => false,
+                        };
+                        m.set_verified(verified);
+                        republish.store(true, Ordering::Relaxed);
+                    }
+                    *status.lock().unwrap() = m.status();
+                    Self::pause(&stop, Duration::from_secs(1));
+                }
+                if let Some(mut m) = mapper {
+                    m.remove_all();
+                }
+                *status.lock().unwrap() = PortMapStatus::off();
+            })
+            .ok()
+    }
+
+    /// The router port mapping setting changed while running.
+    fn set_port_mapping(&self, on: bool) {
+        self.portmap_on.store(
+            on && std::env::var_os("VARSTO_NO_PORT_MAPPING").is_none(),
+            Ordering::Relaxed,
+        );
+    }
+
+    fn portmap_status(&self) -> varsto_core::p2p::portmap::PortMapStatus {
+        self.portmap.lock().unwrap().clone()
     }
 
     /// Sleep in half-second steps so a stop request is honoured promptly.
@@ -958,6 +1074,12 @@ impl P2p {
         rec.udp_public = info.probe.public_addrs();
         rec.nat = info.probe.nat;
         rec.reachable |= info.reachable;
+        // The router forwards our port: the most direct way in from outside.
+        let pm = self.portmap_status();
+        rec.mapped_tcp = pm.tcp.into_iter().collect();
+        rec.mapped_udp = pm.udp.into_iter().collect();
+        rec.reachable |= pm.verified;
+        st.service.p2p_portmap = pm;
         if let Some(node) = &self.quic {
             rec.relay_via = node.registered_relays();
         }
@@ -996,6 +1118,11 @@ impl P2p {
 impl Drop for P2p {
     fn drop(&mut self) {
         self.stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        // Wait for the router mappings to be removed (a few seconds at most:
+        // every request has a short timeout).
+        if let Some(t) = self.portmap_thread.take() {
+            let _ = t.join();
+        }
     }
 }
 
@@ -1050,6 +1177,12 @@ fn write_service_file(home: &Path, f: &ServiceFile) -> Result<()> {
 }
 
 pub fn request_quit(_state: &Shared) {
+    QUIT.store(true, Ordering::SeqCst);
+}
+
+/// Stop the service loop (a termination signal): it ends within a second
+/// unless a sync holds it, removing the router port mappings on the way.
+pub fn quit() {
     QUIT.store(true, Ordering::SeqCst);
 }
 
@@ -1507,13 +1640,20 @@ pub fn run(opts: Options) -> Result<()> {
         }
         // Turned off while running: stop serving and fetching from peers.
         if p2p.is_some() {
-            let wanted = {
+            let (wanted, mapping) = {
                 let st = state.lock().unwrap();
                 st.engine
                     .as_ref()
-                    .map(|e| e.p2p_config().enabled)
-                    .unwrap_or(true)
+                    .map(|e| {
+                        let c = e.p2p_config();
+                        (c.enabled, c.port_mapping)
+                    })
+                    .unwrap_or((true, true))
             };
+            if let Some(p) = &p2p {
+                p.set_port_mapping(mapping);
+                state.lock().unwrap().service.p2p_portmap = p.portmap_status();
+            }
             if !wanted {
                 if let Some(p) = p2p.take() {
                     p.stop.store(true, std::sync::atomic::Ordering::SeqCst);
@@ -1524,6 +1664,7 @@ pub fn run(opts: Options) -> Result<()> {
                     e.set_snapshot_sink(None);
                 }
                 st.service.p2p_listen = None;
+                st.service.p2p_portmap = varsto_core::p2p::portmap::PortMapStatus::off();
                 varsto_core::activity::global().set_peers(None, None);
                 eprintln!("service: p2p stopped (turned off)");
             }
@@ -1677,6 +1818,8 @@ pub fn run(opts: Options) -> Result<()> {
         std::thread::sleep(Duration::from_millis(500));
     }
     activity_stop.store(true, Ordering::Relaxed);
+    // Stop peer-to-peer first: the router mappings are removed on the way.
+    drop(p2p);
     let restart = state.lock().unwrap().service.restart_requested;
     let _ = fs::remove_file(service_file(&opts.home));
     server.unblock();

@@ -51,9 +51,9 @@ mod disk_groups;
 mod disk_insert;
 mod disk_suggest;
 mod fetch;
-mod ledger_recovery;
 mod guide;
 mod imports;
+mod ledger_recovery;
 mod ledger_upkeep;
 mod manifest_upkeep;
 mod membership;
@@ -80,14 +80,14 @@ pub use disk_fetch::{
     RemoteOption, StepOutcome,
 };
 pub use disk_groups::DiskGroupStatus;
-pub use ledger_recovery::{
-    LedgerDeviceStatus, LedgerHealth, LedgerHolding, LedgerProblem, LedgerRebuildOptions,
-    LedgerRebuildReport, LedgerStatus, StorageRebuildReport,
-};
 pub use disk_insert::{DiskInsertReport, DiskProgress, FillOutcome, InsertOptions};
 pub use imports::{
     CleanupFile, ImportCleanupReport, ImportOptions, ImportReport, ImportStatus, ImportVerify,
     MissingFile,
+};
+pub use ledger_recovery::{
+    LedgerDeviceStatus, LedgerHealth, LedgerHolding, LedgerProblem, LedgerRebuildOptions,
+    LedgerRebuildReport, LedgerStatus, StorageRebuildReport,
 };
 pub use manifest_upkeep::ManifestPolicy;
 pub use membership::{
@@ -4691,6 +4691,8 @@ impl Engine {
             nat: crate::p2p::stun::Nat::Unknown,
             relay_via: Vec::new(),
             reachable: !self.config.p2p.public_addrs.is_empty(),
+            mapped_tcp: Vec::new(),
+            mapped_udp: Vec::new(),
         }
     }
 

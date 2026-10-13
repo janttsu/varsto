@@ -1854,6 +1854,8 @@ fn api_unlocked(
             "relays": service.p2p_relays,
             "paths": service.p2p_paths,
             "cert_sha256": service.p2p_cert_sha256,
+            "portmap": service.p2p_portmap,
+            "portmap_text": service.p2p_portmap.describe(),
         })),
         (Method::Post, "/api/p2p") => {
             let mut c = engine.p2p_config();
@@ -1871,6 +1873,11 @@ fn api_unlocked(
             if let Some(stun) = input.get("stun").and_then(|v| v.as_str()) {
                 // An empty field disables STUN on purpose.
                 c.stun = stun.split(',').map(|a| a.trim().to_string()).filter(|a| !a.is_empty()).collect();
+            }
+            // Router port mapping takes effect at once (the service's loop
+            // reads the setting every half second).
+            if let Some(pm) = input.get("port_mapping").and_then(|v| v.as_bool()) {
+                c.port_mapping = pm;
             }
             let enabled = c.enabled;
             let same_settings = was.1 == c.port && was.2 == c.public_addrs && was.3 == c.stun;

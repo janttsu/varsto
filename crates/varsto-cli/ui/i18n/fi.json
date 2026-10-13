@@ -968,7 +968,12 @@
   "Tags": "Tunnisteet",
   "separated by commas": "pilkuilla erotettuina",
   "No files match the filter": "Mikään tiedosto ei vastaa suodatinta",
-  "Analysis stale": "Analyysi vanhentunut"
+  "Analysis stale": "Analyysi vanhentunut",
+  "Open the port on the router automatically": "Avaa portti reitittimeen automaattisesti",
+  "PCP, NAT-PMP or UPnP: only the peer-to-peer port, TCP and UDP, with a lease that is renewed and removed when the service stops. Mappings made by hand are left alone.": "PCP, NAT-PMP tai UPnP: vain vertaisyhteyksien portti, TCP ja UDP, vuokra-ajalla, joka uusitaan ja joka poistetaan, kun palvelu pysähtyy. Käsin tehtyihin uudelleenohjauksiin ei kosketa.",
+  "Router port mapping is off.": "Reitittimen porttiohjaus on pois päältä.",
+  "Router port: asking the router…": "Reitittimen portti: kysytään reitittimeltä…",
+  "Router port: not available.": "Reitittimen portti: ei saatavilla."
  },
  "patterns": [
   [
@@ -1286,6 +1291,14 @@
   [
    "^cleared the analysis of (.+)$",
    "tyhjennettiin tiedoston $1 analyysi"
+  ],
+  [
+   "^Router port opened via ([^:]+): (.+)\\.$",
+   "Reitittimen portti avattu ($1): $2."
+  ],
+  [
+   "^Router port already open via ([^:]+): (.+)\\.$",
+   "Reitittimen portti oli jo auki ($1): $2."
   ]
  ],
  "review": [

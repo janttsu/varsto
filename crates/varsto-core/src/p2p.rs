@@ -16,6 +16,7 @@
 //! relay through one of the user's own reachable devices. There are no
 //! trackers and no vendor servers: the user's storage is the rendezvous.
 
+pub mod portmap;
 pub mod quic;
 pub mod stun;
 pub mod traffic;
@@ -713,11 +714,18 @@ pub struct PeerRecord {
     /// other devices can connect directly, and may relay through us.
     #[serde(default)]
     pub reachable: bool,
+    /// Ports the home router forwards to us (`portmap`: PCP, NAT-PMP or
+    /// UPnP), TCP and UDP: tried right after the LAN addresses.
+    #[serde(default)]
+    pub mapped_tcp: Vec<SocketAddr>,
+    #[serde(default)]
+    pub mapped_udp: Vec<SocketAddr>,
 }
 
 impl PeerRecord {
     pub const PREFIX: &'static str = "vault/peers/";
-    pub const VERSION: u32 = 1;
+    /// Version 2 added the router-mapped addresses.
+    pub const VERSION: u32 = 2;
     pub fn storage_key(device: &DeviceId) -> String {
         format!("{}{}.enc", Self::PREFIX, device)
     }
@@ -742,22 +750,29 @@ impl PeerRecord {
         }
         Ok(rec)
     }
-    /// TCP addresses, LAN first.
+    /// TCP addresses: LAN first, then the router-mapped one, then those the
+    /// user configured.
     pub fn addrs(&self) -> Vec<SocketAddr> {
         let mut out: Vec<SocketAddr> = self
             .lan_addrs
             .iter()
             .map(|ip| SocketAddr::new(*ip, self.port))
             .collect();
-        out.extend(self.public_addrs.iter().cloned());
+        for a in self.mapped_tcp.iter().chain(self.public_addrs.iter()) {
+            if !out.contains(a) {
+                out.push(*a);
+            }
+        }
         out
     }
-    /// UDP (QUIC) addresses, public first: a LAN peer was already tried over TCP.
+    /// UDP (QUIC) addresses, public first (router-mapped before STUN-learned):
+    /// a LAN peer was already tried over TCP.
     pub fn udp_addrs(&self) -> Vec<SocketAddr> {
         let mut out: Vec<SocketAddr> = Vec::new();
         for a in self
-            .udp_public
+            .mapped_udp
             .iter()
+            .chain(self.udp_public.iter())
             .chain(self.public_addrs.iter())
             .chain(self.udp_local.iter())
         {
@@ -1795,6 +1810,8 @@ mod tests {
             nat: stun::Nat::Cone,
             relay_via: vec![relay.clone()],
             reachable: false,
+            mapped_tcp: vec![],
+            mapped_udp: vec![],
         };
         let blob = rec.seal(&vault, &key).unwrap();
         let back = PeerRecord::open(&blob, &vault, &dev, &key).unwrap();
@@ -1810,6 +1827,23 @@ mod tests {
         assert!(later.same_as(&rec));
         later.reachable = true;
         assert!(!later.same_as(&rec));
+
+        // A port the router forwards comes right after the LAN for TCP and
+        // first for QUIC.
+        let mut mapped = rec.clone();
+        mapped.public_addrs = vec!["198.51.100.2:17893".parse().unwrap()];
+        mapped.mapped_tcp = vec!["203.0.113.7:17893".parse().unwrap()];
+        mapped.mapped_udp = vec!["203.0.113.7:17894".parse().unwrap()];
+        assert_eq!(
+            mapped.addrs(),
+            vec![
+                "192.168.1.5:17893".parse().unwrap(),
+                "203.0.113.7:17893".parse().unwrap(),
+                "198.51.100.2:17893".parse().unwrap()
+            ]
+        );
+        assert_eq!(mapped.udp_addrs()[0], "203.0.113.7:17894".parse().unwrap());
+        assert_eq!(mapped.udp_addrs()[1], rec.udp_public[0]);
 
         // A version 0 record written by alpha.4 has none of the new fields.
         let old = serde_json::json!({

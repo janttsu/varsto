@@ -961,7 +961,12 @@
   "Tags": "Taggar",
   "separated by commas": "åtskilda med kommatecken",
   "No files match the filter": "Inga filer matchar filtret",
-  "Analysis stale": "Analysen inaktuell"
+  "Analysis stale": "Analysen inaktuell",
+  "Open the port on the router automatically": "Öppna porten i routern automatiskt",
+  "PCP, NAT-PMP or UPnP: only the peer-to-peer port, TCP and UDP, with a lease that is renewed and removed when the service stops. Mappings made by hand are left alone.": "PCP, NAT-PMP eller UPnP: bara peer-to-peer-porten, TCP och UDP, med en lånetid som förnyas och tas bort när tjänsten stannar. Vidarebefordringar som gjorts för hand lämnas orörda.",
+  "Router port mapping is off.": "Portmappning i routern är avstängd.",
+  "Router port: asking the router…": "Routerport: frågar routern…",
+  "Router port: not available.": "Routerport: inte tillgänglig."
  },
  "patterns": [
   [
@@ -1279,6 +1284,14 @@
   [
    "^cleared the analysis of (.+)$",
    "rensade analysen av $1"
+  ],
+  [
+   "^Router port opened via ([^:]+): (.+)\\.$",
+   "Routerport öppnad via $1: $2."
+  ],
+  [
+   "^Router port already open via ([^:]+): (.+)\\.$",
+   "Routerport redan öppen via $1: $2."
   ]
  ],
  "review": [

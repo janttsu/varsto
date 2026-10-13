@@ -1329,6 +1329,14 @@ pub struct P2pConfig {
     /// it was are switched on unless this is set.
     #[serde(default)]
     pub user_disabled: bool,
+    /// Ask the home router to forward the port (PCP, NAT-PMP, UPnP) before
+    /// the other ways through NAT; `varsto p2p port-mapping on|off`.
+    #[serde(default = "yes")]
+    pub port_mapping: bool,
+}
+
+fn yes() -> bool {
+    true
 }
 
 /// The port peer-to-peer listens on unless told otherwise: a fixed one is
@@ -1350,6 +1358,7 @@ impl Default for P2pConfig {
             public_addrs: Vec::new(),
             stun: default_stun(),
             user_disabled: false,
+            port_mapping: true,
         }
     }
 }

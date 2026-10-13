@@ -16,6 +16,7 @@ fn cmd(root: &Path, home: &Path) -> Command {
         .arg(home)
         .env("VARSTO_PASSPHRASE", "test passphrase")
         .env("VARSTO_NO_INSTALL", "1")
+        .env("VARSTO_NO_PORT_MAPPING", "1")
         .env("HOME", root)
         .env("XDG_DATA_HOME", root.join("xdg-data"))
         .env("XDG_CONFIG_HOME", root.join("xdg-config"))

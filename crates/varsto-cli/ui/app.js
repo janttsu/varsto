@@ -2584,12 +2584,14 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     api("GET", "/api/p2p").then(function (p) {
       var f = $("p2pform");
       f.enabled.checked = !!p.config.enabled; f.port.value = p.config.port || 17893;
+      f.port_mapping.checked = p.config.port_mapping !== false;
       f.public_addrs.value = (p.config.public_addrs || []).join(", ");
       f.stun.value = (p.config.stun || []).join(", ");
       var peers = p.peers || [];
       $("p2pstatus").textContent = (p.listen ? "Listening on " + p.listen + ". " : "Not listening (enable and restart the service). ") + peers.length + " peers known (" + p.lan_peers + " on the LAN), " + p.chunks_from_peers + " blocks received from peers since start.";
       var nat = p.listen ? ("NAT: " + (p.nat || "unknown") + ". " + ((p.public || []).length ? "Public address " + p.public.join(", ") + ". " : "No public address observed. ") + (p.reachable ? "Reachable from the internet; this device relays for the others." : "Not reachable directly" + ((p.relays || []).length ? "; registered with relay " + p.relays.join(", ") + "." : "; no relay yet.")) + (p.cert_sha256 ? " Certificate " + p.cert_sha256.slice(0, 16) + "." : "")) : "";
       $("p2pnat").textContent = nat;
+      $("p2pmap").textContent = p.listen ? portmapText(p.portmap) : "";
       var paths = p.paths || [];
       var tb = $("p2ppaths").querySelector("tbody"); tb.innerHTML = "";
       $("p2ppaths").classList.toggle("hidden", !paths.length);
@@ -2599,6 +2601,16 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
         tb.appendChild(tr);
       });
     }).catch(function () {});
+  }
+  // "Router port opened via UPnP: 203.0.113.5:17893" or "not available".
+  function portmapText(m) {
+    if (!m || !m.state) { return ""; }
+    if (m.state === "off") { return "Router port mapping is off."; }
+    if (m.state === "trying" || m.state === "") { return "Router port: asking the router\u2026"; }
+    if (m.state !== "mapped") { return "Router port: not available."; }
+    var via = { "pcp": "PCP", "nat-pmp": "NAT-PMP", "upnp": "UPnP" }[m.method] || m.method;
+    var addrs = m.tcp && m.udp && m.tcp === m.udp ? m.tcp : [m.tcp ? m.tcp + " (TCP)" : "", m.udp ? m.udp + " (UDP)" : ""].filter(Boolean).join(", ");
+    return (m.existing ? "Router port already open via " : "Router port opened via ") + via + ": " + addrs + ".";
   }
   $("p2pbox").ontoggle = function () { if ($("p2pbox").open) { loadP2p(); } };
   // Live activity (Overview "Now" card, Devices page): /api/activity every two
