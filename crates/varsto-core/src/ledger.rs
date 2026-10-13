@@ -272,18 +272,248 @@ pub struct LedgerStore {
     dir: PathBuf,
     heads: HeadsFile,
     pushed: PushedFile,
+    /// The heads file did not exist when the store was opened.
+    heads_absent: bool,
+    /// Local files that could not be read when the store was opened (or
+    /// rescanned); each was moved aside to `<name>.damaged-<utc>`.
+    damaged: Vec<String>,
+}
+
+/// What `LedgerStore::rescan` found in the local directory.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Rescan {
+    /// Devices with batches or checkpoints held here.
+    pub devices: u64,
+    pub batches: u64,
+    pub checkpoints: u64,
+    /// Files that did not parse, moved aside.
+    pub damaged: Vec<String>,
+}
+
+/// Read a local JSON file; one that does not parse is moved aside (kept,
+/// never deleted) and the default is used, noting its name in `damaged`.
+fn read_or_set_aside<T: serde::de::DeserializeOwned + Default>(
+    path: &Path,
+    damaged: &mut Vec<String>,
+) -> Result<T> {
+    if !path.exists() {
+        return Ok(T::default());
+    }
+    match util::read_json(path) {
+        Ok(v) => Ok(v),
+        Err(_) => {
+            set_aside(path)?;
+            damaged.push(
+                path.file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_default(),
+            );
+            Ok(T::default())
+        }
+    }
+}
+
+/// Move a damaged local file aside as `<name>.damaged-<utc>[-n]`.
+pub(crate) fn set_aside(path: &Path) -> Result<PathBuf> {
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let stamp = util::now_utc();
+    let mut to = path.with_file_name(format!("{name}.damaged-{stamp}"));
+    let mut n = 2;
+    while to.exists() {
+        to = path.with_file_name(format!("{name}.damaged-{stamp}-{n}"));
+        n += 1;
+    }
+    std::fs::rename(path, &to)?;
+    Ok(to)
 }
 
 impl LedgerStore {
     pub fn open(dir: &Path) -> Result<Self> {
         std::fs::create_dir_all(dir)?;
-        let heads = util::read_json_or_default(&dir.join("heads.json"))?;
-        let pushed = util::read_json_or_default(&dir.join("pushed.json"))?;
+        let mut damaged = Vec::new();
+        let heads_path = dir.join("heads.json");
+        let heads_absent = !heads_path.exists();
+        let heads = read_or_set_aside(&heads_path, &mut damaged)?;
+        let pushed = read_or_set_aside(&dir.join("pushed.json"), &mut damaged)?;
         Ok(LedgerStore {
             dir: dir.to_path_buf(),
             heads,
             pushed,
+            heads_absent,
+            damaged,
         })
+    }
+
+    /// The heads file was missing when the store was opened: the local
+    /// ledger directory was deleted (or this is a new device).
+    pub fn heads_absent(&self) -> bool {
+        self.heads_absent
+    }
+
+    /// Local files that did not parse and were set aside.
+    pub fn damaged(&self) -> &[String] {
+        &self.damaged
+    }
+
+    /// The highest own batch any storage is known to hold (`pushed.json`).
+    pub fn pushed_max(&self) -> u64 {
+        self.pushed.storages.values().copied().max().unwrap_or(0)
+    }
+
+    /// Forget the fork mark of a device (after its history was checked).
+    pub fn clear_fork(&mut self, device: &DeviceId) -> Result<()> {
+        if let Some(h) = self.heads.heads.get_mut(device) {
+            if h.forked {
+                h.forked = false;
+                self.save_heads()?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Write the heads file as it is (so a store rebuilt with nothing in
+    /// it is not taken for a lost one next time).
+    pub fn save(&mut self) -> Result<()> {
+        self.save_heads()?;
+        self.heads_absent = false;
+        Ok(())
+    }
+
+    /// Move this device's own batch `seq` aside (`discarded/`), as the
+    /// newest one: it was never published and another batch holds its
+    /// number on the storages. The head goes back to `seq - 1`.
+    pub fn discard_own(&mut self, device: &DeviceId, seq: u64) -> Result<()> {
+        let mut h = self.head(device);
+        if seq != h.seq || seq == 0 {
+            bail!("only the newest batch can be set aside");
+        }
+        let from = self.batch_path(device, seq);
+        let to = self
+            .dir
+            .join("discarded")
+            .join(format!("{device}-{seq:016}-{}.json", util::now_utc()));
+        std::fs::create_dir_all(to.parent().expect("has a parent"))?;
+        if from.exists() {
+            std::fs::rename(&from, &to)?;
+        }
+        h.seq = seq - 1;
+        h.hash = if h.seq == 0 {
+            None
+        } else if let Some(b) = self.get(device, h.seq)? {
+            Some(b.hash)
+        } else {
+            h.base
+                .as_ref()
+                .filter(|b| b.seq == h.seq)
+                .map(|b| b.head_hash.clone())
+        };
+        self.heads.heads.insert(device.clone(), h);
+        self.save_heads()
+    }
+
+    /// Hash of batch `seq` of `device` as held here: the batch's, or the
+    /// newest checkpoint's when it ends there; `None` for 0 or unknown.
+    pub fn hash_at(&self, device: &DeviceId, seq: u64) -> Result<Option<String>> {
+        if seq == 0 {
+            return Ok(None);
+        }
+        if let Some(b) = self.get(device, seq)? {
+            return Ok(Some(b.hash));
+        }
+        Ok(self
+            .head(device)
+            .base
+            .filter(|b| b.seq == seq)
+            .map(|b| b.head_hash))
+    }
+
+    /// Rebuild the heads from the batch and checkpoint files held here (a
+    /// lost or damaged heads file). Files that do not parse are moved
+    /// aside. Each device's head is the end of the unbroken run of batches
+    /// after its newest checkpoint, so a pull fetches whatever is missing
+    /// after it again; batches held beyond a gap are kept and count once
+    /// the gap is filled. Fork marks of the old heads are kept.
+    pub fn rescan(&mut self) -> Result<Rescan> {
+        let mut out = Rescan::default();
+        let mut heads = BTreeMap::new();
+        for entry in std::fs::read_dir(&self.dir)? {
+            let entry = entry?;
+            if !entry.file_type()?.is_dir() {
+                continue;
+            }
+            let Ok(device) = DeviceId::from_hex(&entry.file_name().to_string_lossy()) else {
+                continue;
+            };
+            let mut batches: BTreeMap<u64, String> = BTreeMap::new();
+            let mut checkpoints: BTreeMap<u64, SignedCheckpoint> = BTreeMap::new();
+            for f in std::fs::read_dir(entry.path())? {
+                let f = f?;
+                let name = f.file_name().to_string_lossy().to_string();
+                let Some(obj) = LedgerObject::parse(&name) else {
+                    continue;
+                };
+                match obj {
+                    LedgerObject::Batch(seq) => match util::read_json::<SignedBatch>(&f.path()) {
+                        Ok(b) if b.device == device && b.seq == seq => {
+                            batches.insert(seq, b.hash);
+                        }
+                        _ => {
+                            set_aside(&f.path())?;
+                            out.damaged.push(format!("{device}/{name}"));
+                        }
+                    },
+                    LedgerObject::Checkpoint(seq) => {
+                        match util::read_json::<SignedCheckpoint>(&f.path()) {
+                            Ok(c) if c.device == device && c.seq == seq => {
+                                checkpoints.insert(seq, c);
+                            }
+                            _ => {
+                                set_aside(&f.path())?;
+                                out.damaged.push(format!("{device}/{name}"));
+                            }
+                        }
+                    }
+                }
+            }
+            if batches.is_empty() && checkpoints.is_empty() {
+                continue;
+            }
+            out.devices += 1;
+            out.batches += batches.len() as u64;
+            out.checkpoints += checkpoints.len() as u64;
+            let base = checkpoints.values().next_back().map(|c| Base {
+                seq: c.seq,
+                key_id: c.key_id.clone(),
+                head_hash: c.head_hash.clone(),
+            });
+            let start = base.as_ref().map(|b| b.seq).unwrap_or(0);
+            let mut seq = start;
+            let mut hash = base.as_ref().map(|b| b.head_hash.clone());
+            while let Some(h) = batches.get(&(seq + 1)) {
+                seq += 1;
+                hash = Some(h.clone());
+            }
+            let first = batches.keys().next().copied().unwrap_or(0);
+            let dropped = if first > 1 { (first - 1).min(start) } else { 0 };
+            let forked = self.heads.heads.get(&device).is_some_and(|h| h.forked);
+            heads.insert(
+                device,
+                Head {
+                    seq,
+                    hash,
+                    forked,
+                    base,
+                    dropped,
+                },
+            );
+        }
+        self.heads.heads = heads;
+        self.save()?;
+        self.damaged.extend(out.damaged.iter().cloned());
+        Ok(out)
     }
 
     /// Own batches up to this sequence number are on the named storage.

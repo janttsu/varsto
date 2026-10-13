@@ -291,9 +291,7 @@ impl Engine {
     /// One repair run (see the module documentation).
     pub fn repair(&mut self, opts: &RepairOptions) -> Result<RepairReport> {
         self.ensure_active()?;
-        if self.forked_self {
-            bail!("this device's ledger is forked; it must be re-enrolled as a new device");
-        }
+        self.ensure_ledger_writable()?;
         let result = self.one_batch(|e| e.run_repair(opts));
         if opts.dry_run {
             return result.map(|(r, _)| r);

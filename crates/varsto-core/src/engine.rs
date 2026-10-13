@@ -48,6 +48,7 @@ mod data_moves;
 mod devinfo;
 mod disk_groups;
 mod fetch;
+mod ledger_recovery;
 mod ledger_upkeep;
 mod manifest_upkeep;
 mod membership;
@@ -68,6 +69,10 @@ pub use backups::{
 pub use block_cache::{BlockWriter, StagedFile, BLOCK_CACHE_DIR, EXPORT_DIR};
 pub use devinfo::DeviceDetails;
 pub use disk_groups::DiskGroupStatus;
+pub use ledger_recovery::{
+    LedgerDeviceStatus, LedgerHealth, LedgerHolding, LedgerProblem, LedgerRebuildOptions,
+    LedgerRebuildReport, LedgerStatus, StorageRebuildReport,
+};
 pub use manifest_upkeep::ManifestPolicy;
 pub use membership::{
     removal_notice, DeviceInfo, DeviceRemoved, EpochRecord, Grant, KemRecord, Removal, Revocation,
@@ -307,6 +312,8 @@ pub struct StatusReport {
     /// The organization the vault belongs to, if any.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub org: Option<OrgBrief>,
+    /// Whether this device's ledger needs a rebuild (`ledger_recovery`).
+    pub ledger_health: LedgerHealth,
 }
 
 #[derive(Clone, Debug, Serialize, Default)]
@@ -333,6 +340,9 @@ pub struct FsckReport {
     /// Damaged copies on this device's storages put in the repair queue.
     #[serde(default)]
     pub repairs_queued: u64,
+    /// Whether this device's ledger needs a rebuild (`ledger_recovery`).
+    #[serde(default)]
+    pub ledger_health: LedgerHealth,
 }
 
 /// What `disk add` did.
@@ -434,6 +444,8 @@ pub struct Engine {
     devices: DeviceCache,
     pending: Vec<Event>,
     forked_self: bool,
+    /// What is known to be wrong with this device's ledger (`ledger_recovery`).
+    ledger_alarm: ledger_recovery::Alarm,
     /// Vault keys per epoch (they change when a device is revoked).
     epochs: membership::VaultEpochs,
     /// Set once this device has seen its own revocation: it no longer syncs.
@@ -830,6 +842,7 @@ impl Engine {
             devices: DeviceCache::default(),
             pending: Vec::new(),
             forked_self: false,
+            ledger_alarm: Default::default(),
             epochs,
             removal: None,
             org: crate::org::OrgState::load(home),
@@ -1010,8 +1023,9 @@ impl Engine {
             vault,
             keys,
             keyring,
-            pending: ledger_upkeep::load_deferred(home),
+            pending: Vec::new(),
             forked_self: false,
+            ledger_alarm: Default::default(),
             epochs,
             removal,
             org: crate::org::OrgState::load(home),
@@ -1022,6 +1036,13 @@ impl Engine {
             ledger_policy: Default::default(),
             manifest_policy: Default::default(),
         };
+        let (pending, pending_lost) = ledger_upkeep::load_deferred(home);
+        engine.pending = pending;
+        engine.ledger_alarm = ledger_recovery::Alarm::at_open(&engine, pending_lost);
+        if engine.ledger_alarm.fork_marked() {
+            // A real fork was found earlier: this identity signs nothing more.
+            engine.forked_self = true;
+        }
         // Command-line runs use the peers other devices advertised, over TCP
         // only; the service adds LAN peers and the QUIC node.
         if engine.config.p2p.enabled {
@@ -2246,13 +2267,23 @@ impl Engine {
             self.clear_deferred();
             return self.ensure_active().map(|_| None);
         }
-        if self.forked_self {
-            bail!("this device's ledger is forked; it must be re-enrolled as a new device");
+        if let Err(e) = self.ensure_ledger_writable() {
+            // Nothing is signed until the ledger is restored; the events
+            // wait for it in `ledger/pending.json`.
+            let _ = self.defer_events();
+            return Err(e);
         }
         if self.cycle.is_some() {
             // One batch at the end of the action (see `one_batch`).
             self.defer_events()?;
             return Ok(None);
+        }
+        // A storage holding newer batches of this identity than this device
+        // has (a copy restored from an old backup): signing now would sign a
+        // number that exists already. One short listing, usually empty.
+        if let Err(e) = self.check_storage_before_signing() {
+            let _ = self.defer_events();
+            return Err(e);
         }
         let lamport = self.tick()?;
         let events = std::mem::take(&mut self.pending);
@@ -2568,9 +2599,7 @@ impl Engine {
 
     pub fn push(&mut self, folder: &str) -> Result<PushReport> {
         self.ensure_active()?;
-        if self.forked_self {
-            bail!("this device's ledger is forked; it must be re-enrolled as a new device");
-        }
+        self.ensure_ledger_writable()?;
         let (rec, root) = self.resolve_folder(folder)?;
         let mut state = self.load_state(&rec.folder_id)?;
         let mut report = PushReport {
@@ -4772,11 +4801,16 @@ impl Engine {
         // Last-accessed records of every device, when due (`access_sync`).
         let _ = self.access_upkeep(false);
         let _ = self.manifest_upkeep();
+        // No claims at all while manifests name blocks: the ledger is gone
+        // everywhere (checked at most hourly, and only without claims).
+        let _ = self.ledger_lost_everywhere(false);
         Ok(out)
     }
 
     fn sync_folders(&mut self, folder: Option<&str>) -> Result<Vec<(PullReport, PushReport)>> {
         self.ensure_active()?;
+        // A lost or damaged local ledger is restored before anything else.
+        self.ensure_ledger_writable()?;
         // A folder another device converted into a Strongroom must be
         // adopted before it is synced under its old key.
         self.pull_registry()?;
@@ -4992,6 +5026,7 @@ impl Engine {
                     None
                 })
                 .collect(),
+            ledger_health: self.ledger_health(),
         })
     }
 
@@ -5006,6 +5041,8 @@ impl Engine {
         repair::merge_damage(&mut damage, found);
         report.repairs_queued = damage.len() as u64;
         self.queue_damage(damage)?;
+        let _ = self.ledger_lost_everywhere(false);
+        report.ledger_health = self.ledger_health();
         Ok(report)
     }
 

@@ -95,8 +95,21 @@ const TYPICAL_BATCH_BYTES: u64 = 8 * 1024;
 /// Events recorded but not yet sealed into a batch, kept across restarts.
 const DEFERRED_FILE: &str = "ledger/pending.json";
 
-pub(super) fn load_deferred(home: &Path) -> Vec<Event> {
-    util::read_json_or_default(&home.join(DEFERRED_FILE)).unwrap_or_default()
+/// The events waiting for the next batch, and whether the file holding
+/// them could not be read (it is then moved aside and its events are lost:
+/// `docs/spec/alpha-0-format.md` section 34 says which come back).
+pub(super) fn load_deferred(home: &Path) -> (Vec<Event>, bool) {
+    let path = home.join(DEFERRED_FILE);
+    if !path.exists() {
+        return (Vec::new(), false);
+    }
+    match util::read_json(&path) {
+        Ok(events) => (events, false),
+        Err(_) => {
+            let _ = ledger::set_aside(&path);
+            (Vec::new(), true)
+        }
+    }
 }
 
 /// One action whose ledger events go into a single batch.
@@ -215,7 +228,11 @@ impl Engine {
     /// this device's own, locally for everyone's). Cold storages are left
     /// as they are.
     pub fn ledger_upkeep(&mut self) -> Result<()> {
-        if self.vault.member || self.forked_self || self.removal.is_some() {
+        if self.vault.member
+            || self.forked_self
+            || self.removal.is_some()
+            || self.ledger_alarm.needs_rebuild()
+        {
             return Ok(());
         }
         let me = self.vault.device_id.clone();
@@ -311,6 +328,17 @@ impl Engine {
             }
         }
         Ok(())
+    }
+
+    /// Write a checkpoint after `checkpoint_every` own batches and keep
+    /// `keep_before` batches before it (tests and measurements; the
+    /// defaults are `LedgerPolicy::default()`).
+    #[doc(hidden)]
+    pub fn set_ledger_policy(&mut self, checkpoint_every: u64, keep_before: u64) {
+        self.ledger_policy = LedgerPolicy {
+            checkpoint_every,
+            keep_before,
+        };
     }
 
     /// Pull the ledger, once per `one_batch` action.
@@ -423,6 +451,18 @@ impl Engine {
         }
         let refs: Vec<&[u8]> = parts.iter().map(|p| p.as_slice()).collect();
         hex::encode(crypto::hash(&crypto::aad("ledger-view-context", &refs)))
+    }
+
+    /// Forget the cached view (memory and `ledger/view.enc`): the next
+    /// call rebuilds it from the batches.
+    pub(super) fn reset_view_cache(&self) {
+        let mut slot = self.view_cache.lock().unwrap_or_else(|e| e.into_inner());
+        *slot = ViewSlot {
+            cache: None,
+            loaded: true,
+            unsaved: 0,
+        };
+        let _ = fs::remove_file(self.view_cache_path());
     }
 
     fn view_cache_path(&self) -> PathBuf {
@@ -618,7 +658,7 @@ impl Engine {
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use super::*;
     use crate::storage::{CallCounts, StorageCalls};
     use std::sync::Arc;
@@ -1205,7 +1245,7 @@ mod tests {
         assert!(restored.commit_batch().is_err());
     }
 
-    fn copy_tree(from: &Path, to: &Path) {
+    pub(crate) fn copy_tree(from: &Path, to: &Path) {
         for e in walkdir::WalkDir::new(from)
             .into_iter()
             .filter_map(|e| e.ok())

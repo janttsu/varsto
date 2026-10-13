@@ -150,9 +150,7 @@ impl Engine {
 
     /// One run, deciding what is due as of `now_utc` (tests look ahead in time).
     pub fn auto_verify_at(&mut self, now_utc: i64) -> Result<VerifyRunReport> {
-        if self.forked_self {
-            bail!("this device's ledger is forked; it must be re-enrolled as a new device");
-        }
+        self.ensure_ledger_writable()?;
         let result = self.run_auto_verify(now_utc);
         let mut st = self.load_verify_state();
         st.last_run_utc = Some(now_utc);

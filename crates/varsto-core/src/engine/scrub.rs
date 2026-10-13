@@ -195,9 +195,7 @@ impl Engine {
     /// One run as of `now_utc` (tests look ahead in time).
     pub fn scrub_at(&mut self, opts: &ScrubOptions, now_utc: i64) -> Result<ScrubReport> {
         self.ensure_active()?;
-        if self.forked_self {
-            bail!("this device's ledger is forked; it must be re-enrolled as a new device");
-        }
+        self.ensure_ledger_writable()?;
         for n in &opts.storages {
             if !self.config.storages.iter().any(|s| s.name() == n) {
                 bail!("unknown storage {n}");

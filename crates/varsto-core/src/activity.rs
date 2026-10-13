@@ -57,6 +57,9 @@ pub const DATA_MOVE: &str = "data_move";
 pub const STORAGE_REMOVAL: &str = "storage_removal";
 /// Bit-rot check; steps "storage", "disk", "files" and "cache".
 pub const SCRUB: &str = "scrub";
+/// Rebuilding the ledger (`engine::ledger_recovery`); steps "local",
+/// "own", "others", "manifests", "list", "verify" and "seal".
+pub const LEDGER_REBUILD: &str = "ledger_rebuild";
 
 /// What `done` and `total` count.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
