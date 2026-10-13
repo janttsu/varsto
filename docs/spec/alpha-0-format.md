@@ -695,3 +695,27 @@ A stopped backup whose last snapshot has expired is removed from the vault like 
 - The first snapshot of a large directory holds the engine for as long as its upload takes.
 
 Tests: `crates/varsto-core/tests/backups.rs` (byte-identical restores by number, date and latest, paths, refusal of a non-empty directory, restores on another device, nothing on devices or transferrers, altered snapshots refused, expiry deleting only unused blocks including packed ones while other folders stay, other devices waiting for the source, a stopped backup removed with its last snapshot, schedules), `snapshot::tests`, `engine::backups::tests` and the random-event view tests in `ledger::tests`.
+
+## 32. Live activity between devices (after 0.0.1-alpha.13)
+
+Every device tells the other devices of the vault what it is doing right now (checking the blocks of a disk, uploading a folder, restoring a backup), so that one device's interface can show "laptop: checking the blocks of disk «Blue 4TB» 42 %, ready about 14.35". Nothing of it is stored: not in the ledger, not in a log, not on disk.
+
+**Tasks.** A device keeps an in-memory list of the long operations running in it (`activity`): folder scans (`sync_scan`), uploads (`upload`), downloads during a pull (`download`), disk checks (`disk_check`, steps `verify` and `fill`), filling a new disk (`disk_fill`), backup snapshots (`backup_snapshot`) and restores (`restore`), repair (`repair`), automatic verification (`verify`), fsck (`fsck`, steps `scan` and `verify`), data moves (`data_move`) and storage removal (`storage_removal`, steps `copy` and `delete`). A task is listed once it has run for two seconds. A command run in a terminal while the service runs sends its tasks to the service every second over the local API (`POST /api/activity/report`); the service counts them as the device's own and forgets them five seconds after the last report.
+
+**`GET /p2p/activity`** is served on both transports and through relays like every other peer request, with the same membership token (`X-Varsto-Peer`, section 15). A revoked device, a token of another vault or a replayed token gets 403; a locked service 503. The answer is JSON:
+
+```json
+{"device": "<device id>", "name": "laptop", "state": "busy", "service_version": "0.0.1-alpha.13", "updated_utc": 1791876245,
+ "tasks": [{"id": 3, "kind": "disk_check", "phase": "verify", "subject": "Blue 4TB", "done": 13314398618, "total": 31675383808,
+            "unit": "bytes", "percent": 42, "started_utc": 1791875900, "updated_utc": 1791876245, "rate": 85000000, "eta_utc": 1791876461}]}
+```
+
+`state` is `idle` when `tasks` is empty. `total` 0 and `percent` null mean the amount is not known (a pull learns it file by file). `rate` is units per second over the last twenty seconds; `eta_utc` is set when a total and a rate are known. `detail` (optional) is the file being uploaded or downloaded: its name only. Unknown fields and kinds are ignored, and a device that answers 404 runs an older version.
+
+**What is shared, and with whom.** The kind and step of each task, the display name of the folder, disk, backup or storage it works on, the current file name of a transfer, the counts, rate and finish time, the device name and version. Never file contents and never paths. Names are user data that every full device of the vault already holds, and they travel only to authenticated devices of the vault, over the same encrypted or LAN paths as blocks. In an organization (section 27) a device answers, and asks, only the devices the roster gives to the same user, as with the other details of one's own devices; a device not in the roster answers nobody. Members of a shared folder (section 24) hold no vault key and cannot ask.
+
+**Rate limits.** A device asks its peers only while someone watches: the local interface or `varsto activity` asked `GET /api/activity` within the last fifteen seconds. It then asks each peer that the peer table does not rest (an unreachable peer rests for a minute, as for blocks) at most every 2.5 seconds, all peers at once, with the short timeouts of block requests, and keeps the answers in memory. Nothing is pushed: polling while watched costs nothing when nobody looks, and a push on every start and end of a task would wake every device for syncs that last milliseconds. Answering costs one lock and a few hundred bytes.
+
+**Local API.** `GET /api/activity` (answered without waiting for a sync): `{"me": <the device's own answer>, "peers": [{"device", "name", "status", "stale", "age_secs", "activity"}]}` with `status` one of `ok`, `pending` (not asked yet), `unreachable`, `unsupported` (an older version), `refused` (another user's device in an organization), and `stale` when the last answer is older than ten seconds. The command line prints it with `varsto activity [--watch]`; the interface shows a "Now" card on the Overview and a progress line under every device, hidden when all are idle.
+
+Tests: `activity::tests` (task lifecycle, nesting, the quiet period, rate and finish time, throttled samples, tasks of other processes, no asking while nobody watches), `p2p::tests::activity_is_told_to_authenticated_devices_of_the_audience_only`, `crates/varsto-core/tests/activity.rs` (a device sees another device's slow fsck with its progress over TCP), `crates/varsto-cli/tests/activity_cli.rs` (a terminal command's task in the service's activity) and the lab scenario `activity`.
