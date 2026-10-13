@@ -596,7 +596,16 @@
   "A bucket at any S3-compatible provider (AWS, Scaleway, Hetzner, Backblaze B2, Cloudflare R2, MinIO and others), with your own keys.": "Säilö millä tahansa S3-yhteensopivalla palveluntarjoajalla (AWS, Scaleway, Hetzner, Backblaze B2, Cloudflare R2, MinIO ja muut), omilla avaimillasi.",
   "Any remote you have set up in rclone, for example Google Drive, OneDrive, SFTP or WebDAV.": "Mikä tahansa rclonessa määrittämäsi etäkohde, esimerkiksi Google Drive, OneDrive, SFTP tai WebDAV.",
   "Folder path": "Kansion polku",
-  "Add a folder, an S3 bucket, an rclone remote or a pool of swappable disks below.": "Lisää alla kansio, S3-säilö, rclone-etäkohde tai vaihdettavien levyjen varasto."
+  "Add a folder, an S3 bucket, an rclone remote or a pool of swappable disks below.": "Lisää alla kansio, S3-säilö, rclone-etäkohde tai vaihdettavien levyjen varasto.",
+  "Bit-rot check": "Bittimädän tarkistus",
+  "Stored data can decay without anyone noticing. The background service re-reads, within a budget, every block on your storages and attached disks, whoever wrote it, and every synced file on this device, so that everything is checked at least once in the period. A damaged block is repaired from another copy. A file on this device that changed without being edited is never overwritten: it is moved aside as name.damaged-date and the synced version is put back. Cold storages are read only when you include them.": "Tallennettu data voi turmeltua kenenkään huomaamatta. Taustapalvelu lukee budjetin rajoissa uudelleen jokaisen lohkon tallennuspaikoissasi ja liitetyillä levyillä, kirjoittipa sen kuka tahansa, sekä jokaisen tämän laitteen synkronoidun tiedoston, niin että kaikki tarkistetaan vähintään kerran jakson aikana. Vioittunut lohko korjataan toisesta kopiosta. Tämän laitteen tiedostoa, joka on muuttunut ilman muokkausta, ei koskaan kirjoiteta yli: se siirretään sivuun nimellä nimi.damaged-päiväys ja synkronoitu versio palautetaan sen tilalle. Kylmätallennusta luetaan vain, jos otat sen mukaan.",
+  "Check now": "Tarkista nyt",
+  "Everything is re-read at least once in this period. A run reads at most this much; remote storages may bill the downloads.": "Kaikki luetaan uudelleen vähintään kerran tämän jakson aikana. Yksi ajo lukee enintään tämän verran; ulkoiset tallennuspaikat voivat laskuttaa latauksista.",
+  "Days to check everything": "Päiviä kaiken tarkistamiseen",
+  "Most MiB per run from this device's disks": "Enintään MiB ajoa kohden tämän laitteen levyiltä",
+  "Most MiB per run from remote storages": "Enintään MiB ajoa kohden ulkoisista tallennuspaikoista",
+  "next run at the next sync": "seuraava ajo seuraavan synkronoinnin yhteydessä",
+  "bit-rot check started": "bittimädän tarkistus käynnistetty"
  },
  "patterns": [
   [
@@ -698,6 +707,46 @@
   [
    "^(.+) holds (\\d+) blocks? of your files\\. (\\d+) already have enough copies elsewhere; (\\d+) cop(?:y|ies) \\((.+)\\) will first be made on (.+)\\. Then no device counts \\1 as a copy any more\\. Remove leaves its data in place; you can also delete it\\.$",
    "Tallennuspaikassa $1 on $2 lohkoa tiedostoistasi. Lohkoista $3 on jo tarpeeksi kopioita muualla; ensin tehdään $4 kopiota ($5) kohteisiin $6. Sen jälkeen mikään laite ei enää laske tallennuspaikkaa $1 kopioksi. Poista jättää sen datan paikalleen; voit myös poistaa datan."
+  ],
+  [
+   "^On: everything is checked within (\\d+) days, up to (\\d+) MiB from this device's disks and (\\d+) MiB from remote storages per run$",
+   "Käytössä: kaikki tarkistetaan $1 päivän sisällä, ajoa kohden enintään $2 MiB tämän laitteen levyiltä ja $3 MiB ulkoisista tallennuspaikoista"
+  ],
+  [
+   "^cold storages included: (.+)$",
+   "mukana kylmätallennus: $1"
+  ],
+  [
+   "^last run (.+): (\\d+) objects and (\\d+) files checked, (\\d+) problems found$",
+   "viimeisin ajo $1: $2 objektia ja $3 tiedostoa tarkistettu, $4 ongelmaa löytyi"
+  ],
+  [
+   "^(\\d+) problems found and (\\d+) files restored in all$",
+   "yhteensä $1 ongelmaa löytyi ja $2 tiedostoa palautettu"
+  ],
+  [
+   "^next run (.+)$",
+   "seuraava ajo $1"
+  ],
+  [
+   "^last error: (.+)$",
+   "viimeisin virhe: $1"
+  ],
+  [
+   "^(.+): (.+) is damaged on disk and waits for a good copy$",
+   "$1: $2 on vioittunut levyllä ja odottaa ehjää kopiota"
+  ],
+  [
+   "^(.+): (.+) was damaged on disk; moved to (.+) and the synced version restored$",
+   "$1: $2 oli vioittunut levyllä; siirretty nimelle $3 ja synkronoitu versio palautettu"
+  ],
+  [
+   "^bit-rot check: (\\d+) objects and (\\d+) files checked, (\\d+) problems found$",
+   "bittimädän tarkistus: $1 objektia ja $2 tiedostoa tarkistettu, $3 ongelmaa löytyi"
+  ],
+  [
+   "^bit-rot check failed: (.+)$",
+   "bittimädän tarkistus epäonnistui: $1"
   ]
  ],
  "review": [

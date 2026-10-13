@@ -589,7 +589,16 @@
   "A bucket at any S3-compatible provider (AWS, Scaleway, Hetzner, Backblaze B2, Cloudflare R2, MinIO and others), with your own keys.": "En bucket hos valfri S3-kompatibel leverantör (AWS, Scaleway, Hetzner, Backblaze B2, Cloudflare R2, MinIO med flera), med dina egna nycklar.",
   "Any remote you have set up in rclone, for example Google Drive, OneDrive, SFTP or WebDAV.": "Valfritt fjärrmål som du har konfigurerat i rclone, till exempel Google Drive, OneDrive, SFTP eller WebDAV.",
   "Folder path": "Mappens sökväg",
-  "Add a folder, an S3 bucket, an rclone remote or a pool of swappable disks below.": "Lägg till en mapp, en S3-bucket, en rclone-fjärrplats eller en pool med utbytbara diskar nedan."
+  "Add a folder, an S3 bucket, an rclone remote or a pool of swappable disks below.": "Lägg till en mapp, en S3-bucket, en rclone-fjärrplats eller en pool med utbytbara diskar nedan.",
+  "Bit-rot check": "Kontroll av bitröta",
+  "Stored data can decay without anyone noticing. The background service re-reads, within a budget, every block on your storages and attached disks, whoever wrote it, and every synced file on this device, so that everything is checked at least once in the period. A damaged block is repaired from another copy. A file on this device that changed without being edited is never overwritten: it is moved aside as name.damaged-date and the synced version is put back. Cold storages are read only when you include them.": "Lagrade data kan förfalla utan att någon märker det. Bakgrundstjänsten läser, inom en budget, om varje block i dina lagringar och anslutna diskar, vem som än skrev det, och varje synkroniserad fil på den här enheten, så att allt kontrolleras minst en gång under perioden. Ett skadat block repareras från en annan kopia. En fil på den här enheten som ändrats utan att redigeras skrivs aldrig över: den flyttas undan som namn.damaged-datum och den synkroniserade versionen läggs tillbaka. Kall lagring läses bara om du tar med den.",
+  "Check now": "Kontrollera nu",
+  "Everything is re-read at least once in this period. A run reads at most this much; remote storages may bill the downloads.": "Allt läses om minst en gång under den här perioden. En körning läser högst så här mycket; externa lagringar kan debitera nedladdningarna.",
+  "Days to check everything": "Dagar för att kontrollera allt",
+  "Most MiB per run from this device's disks": "Högst MiB per körning från den här enhetens diskar",
+  "Most MiB per run from remote storages": "Högst MiB per körning från externa lagringar",
+  "next run at the next sync": "nästa körning vid nästa synkronisering",
+  "bit-rot check started": "kontroll av bitröta startad"
  },
  "patterns": [
   [
@@ -691,6 +700,46 @@
   [
    "^(.+) holds (\\d+) blocks? of your files\\. (\\d+) already have enough copies elsewhere; (\\d+) cop(?:y|ies) \\((.+)\\) will first be made on (.+)\\. Then no device counts \\1 as a copy any more\\. Remove leaves its data in place; you can also delete it\\.$",
    "Lagringen $1 innehåller $2 block av dina filer. $3 av dem har redan tillräckligt många kopior på annat håll; först görs $4 kopior ($5) på $6. Därefter räknar ingen enhet $1 som en kopia längre. Ta bort lämnar dess data kvar; du kan också radera den."
+  ],
+  [
+   "^On: everything is checked within (\\d+) days, up to (\\d+) MiB from this device's disks and (\\d+) MiB from remote storages per run$",
+   "På: allt kontrolleras inom $1 dagar, högst $2 MiB från den här enhetens diskar och $3 MiB från externa lagringar per körning"
+  ],
+  [
+   "^cold storages included: (.+)$",
+   "kall lagring medtagen: $1"
+  ],
+  [
+   "^last run (.+): (\\d+) objects and (\\d+) files checked, (\\d+) problems found$",
+   "senaste körning $1: $2 objekt och $3 filer kontrollerade, $4 problem hittade"
+  ],
+  [
+   "^(\\d+) problems found and (\\d+) files restored in all$",
+   "totalt $1 problem hittade och $2 filer återställda"
+  ],
+  [
+   "^next run (.+)$",
+   "nästa körning $1"
+  ],
+  [
+   "^last error: (.+)$",
+   "senaste fel: $1"
+  ],
+  [
+   "^(.+): (.+) is damaged on disk and waits for a good copy$",
+   "$1: $2 är skadad på disken och väntar på en hel kopia"
+  ],
+  [
+   "^(.+): (.+) was damaged on disk; moved to (.+) and the synced version restored$",
+   "$1: $2 var skadad på disken; flyttad till $3 och den synkroniserade versionen återställd"
+  ],
+  [
+   "^bit-rot check: (\\d+) objects and (\\d+) files checked, (\\d+) problems found$",
+   "kontroll av bitröta: $1 objekt och $2 filer kontrollerade, $3 problem hittade"
+  ],
+  [
+   "^bit-rot check failed: (.+)$",
+   "kontroll av bitröta misslyckades: $1"
   ]
  ],
  "review": [

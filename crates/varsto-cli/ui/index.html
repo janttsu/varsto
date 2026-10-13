@@ -506,6 +506,13 @@
         <ul id="ar-losses" class="list small"></ul>
         <div class="actions"><button id="ar-run" type="button">Check and repair now</button><button id="ar-preview" type="button" class="secondary">Preview</button><button id="ar-cold" type="button" class="secondary hidden">Repair from cold storage</button></div>
       </div>
+      <div class="card" id="scrub">
+        <h2 class="card-title">Bit-rot check</h2>
+        <p class="muted small">Stored data can decay without anyone noticing. The background service re-reads, within a budget, every block on your storages and attached disks, whoever wrote it, and every synced file on this device, so that everything is checked at least once in the period. A damaged block is repaired from another copy. A file on this device that changed without being edited is never overwritten: it is moved aside as name.damaged-date and the synced version is put back. Cold storages are read only when you include them.</p>
+        <div id="sc-text" class="status-line"></div>
+        <ul id="sc-files" class="list small"></ul>
+        <div class="actions"><button id="sc-run" type="button">Check now</button><button id="sc-settings" type="button" class="secondary">Schedule</button><button id="sc-toggle" type="button" class="secondary">Turn off</button></div>
+      </div>
     </div>
 
     <!-- Peers -->
