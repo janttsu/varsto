@@ -15,7 +15,13 @@ targets:
       properties:
         CFBundleDisplayName: Varsto
         UILaunchScreen: {}
-        UIBackgroundModes: [fetch]
+        # Background app refresh (sync) and a processing task for camera upload; see Background.swift.
+        UIBackgroundModes: [fetch, processing]
+        BGTaskSchedulerPermittedIdentifiers: [in.soderlund.varsto.ios.refresh, in.soderlund.varsto.ios.camera-upload]
+        # Camera upload reads new photos and videos; Varsto never changes or deletes them.
+        NSPhotoLibraryUsageDescription: Camera upload reads new photos and videos on this phone and uploads them, encrypted, to the Varsto folder you choose. Varsto only reads them; the originals are never changed or deleted.
+        # Varsto asks for full access itself; with limited access the status in Settings says so.
+        PHPhotoLibraryPreventAutomaticLimitedAccessAlert: true
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
         # Pairing and peer-to-peer transfer talk to your other devices on the LAN.
