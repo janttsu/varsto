@@ -667,7 +667,15 @@
   "Checking storage «{s}» for bit rot": "Tarkistaa tallennuspaikan «{s}» bittimädän varalta",
   "Checking disk «{s}» for bit rot": "Tarkistaa levyn «{s}» bittimädän varalta",
   "Checking the files of folder «{s}» for bit rot": "Tarkistaa kansion «{s}» tiedostot bittimädän varalta",
-  "Checking the block cache for bit rot": "Tarkistaa lohkovälimuistin bittimädän varalta"
+  "Checking the block cache for bit rot": "Tarkistaa lohkovälimuistin bittimädän varalta",
+  "By default every block goes to every storage. Tick storages or places to write this folder only there; a place means every storage in it, now and later. Blocks already stored stay where they are until you move them; policies still count every copy.": "Oletuksena jokainen lohko menee jokaiseen tallennuspaikkaan. Rastita tallennuspaikat tai paikat, niin tämä kansio kirjoitetaan vain niihin; paikka tarkoittaa kaikkia sen tallennuspaikkoja, nyt ja myöhemmin. Jo tallennetut lohkot pysyvät paikallaan, kunnes siirrät ne; säännöt laskevat silti jokaisen kopion.",
+  "Tick the device (or devices) this transferrer is taken to. It then carries the blocks they still lack and is emptied as they receive them. Tick none to carry what any device lacks.": "Rastita laite (tai laitteet), jolle tämä siirtolevy viedään. Se kuljettaa lohkot, jotka niiltä vielä puuttuvat, ja tyhjenee sitä mukaa kuin ne saavat ne. Jätä kaikki rastimatta, niin se kuljettaa sen, mitä miltä tahansa laitteelta puuttuu.",
+  "No other device yet": "Ei vielä muita laitteita",
+  "at home": "kotona",
+  "external": "ulkoinen",
+  "at home, cold": "kotona, kylmä",
+  "external, cold": "ulkoinen, kylmä",
+  "Destination…": "Kohde…"
  },
  "patterns": [
   [
@@ -829,6 +837,10 @@
   [
    "^bit-rot check failed: (.+)$",
    "bittimädän tarkistus epäonnistui: $1"
+  ],
+  [
+   "^(.+), cold$",
+   "$1, kylmä"
   ]
  ],
  "review": [

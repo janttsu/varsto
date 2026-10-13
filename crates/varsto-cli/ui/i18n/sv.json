@@ -660,7 +660,15 @@
   "Checking storage «{s}» for bit rot": "Kontrollerar lagringen «{s}» för bitröta",
   "Checking disk «{s}» for bit rot": "Kontrollerar disken «{s}» för bitröta",
   "Checking the files of folder «{s}» for bit rot": "Kontrollerar filerna i mappen «{s}» för bitröta",
-  "Checking the block cache for bit rot": "Kontrollerar blockcachen för bitröta"
+  "Checking the block cache for bit rot": "Kontrollerar blockcachen för bitröta",
+  "By default every block goes to every storage. Tick storages or places to write this folder only there; a place means every storage in it, now and later. Blocks already stored stay where they are until you move them; policies still count every copy.": "Som standard skrivs varje block till alla lagringsplatser. Kryssa i lagringsplatser eller platser för att bara skriva den här mappen dit; en plats betyder alla lagringsplatser i den, nu och senare. Block som redan har lagrats ligger kvar där de är tills du flyttar dem; reglerna räknar ändå varje kopia.",
+  "Tick the device (or devices) this transferrer is taken to. It then carries the blocks they still lack and is emptied as they receive them. Tick none to carry what any device lacks.": "Kryssa i enheten (eller enheterna) som den här överföringsdisken tas till. Den bär de block som de fortfarande saknar och töms i takt med att de tar emot dem. Kryssa inte i någon för att bära det som någon enhet saknar.",
+  "No other device yet": "Inga andra enheter ännu",
+  "at home": "hemma",
+  "external": "extern",
+  "at home, cold": "hemma, kall",
+  "external, cold": "extern, kall",
+  "Destination…": "Mål…"
  },
  "patterns": [
   [
@@ -822,6 +830,10 @@
   [
    "^bit-rot check failed: (.+)$",
    "kontroll av bitröta misslyckades: $1"
+  ],
+  [
+   "^(.+), cold$",
+   "$1, kall"
   ]
  ],
  "review": [
