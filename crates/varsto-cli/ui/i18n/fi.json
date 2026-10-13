@@ -667,7 +667,11 @@
   "Checking storage «{s}» for bit rot": "Tarkistaa tallennuspaikan «{s}» bittimädän varalta",
   "Checking disk «{s}» for bit rot": "Tarkistaa levyn «{s}» bittimädän varalta",
   "Checking the files of folder «{s}» for bit rot": "Tarkistaa kansion «{s}» tiedostot bittimädän varalta",
-  "Checking the block cache for bit rot": "Tarkistaa lohkovälimuistin bittimädän varalta"
+  "Checking the block cache for bit rot": "Tarkistaa lohkovälimuistin bittimädän varalta",
+  "Checking that the restic mirror is complete": "Tarkistaa, että resticin peilikopio on täydellinen",
+  "Backing up the mirror with restic": "Varmuuskopioi peilikopiota resticillä",
+  "Removing old restic snapshots": "Poistaa vanhoja restic-tilannekuvia",
+  "Checking the restic repository": "Tarkistaa restic-varaston"
  },
  "patterns": [
   [

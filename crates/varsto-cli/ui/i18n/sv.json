@@ -660,7 +660,11 @@
   "Checking storage «{s}» for bit rot": "Kontrollerar lagringen «{s}» för bitröta",
   "Checking disk «{s}» for bit rot": "Kontrollerar disken «{s}» för bitröta",
   "Checking the files of folder «{s}» for bit rot": "Kontrollerar filerna i mappen «{s}» för bitröta",
-  "Checking the block cache for bit rot": "Kontrollerar blockcachen för bitröta"
+  "Checking the block cache for bit rot": "Kontrollerar blockcachen för bitröta",
+  "Checking that the restic mirror is complete": "Kontrollerar att restic-speglingen är fullständig",
+  "Backing up the mirror with restic": "Säkerhetskopierar speglingen med restic",
+  "Removing old restic snapshots": "Tar bort gamla restic-ögonblicksbilder",
+  "Checking the restic repository": "Kontrollerar restic-förrådet"
  },
  "patterns": [
   [
