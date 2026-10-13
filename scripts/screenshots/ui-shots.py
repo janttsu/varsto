@@ -60,6 +60,8 @@ with sync_playwright() as p:
                                                             body=json.dumps(example_data.locations())))
         pg.route("**/api/p2p/traffic*", lambda r: r.fulfill(status=200, content_type="application/json",
                                                          body=json.dumps(example_data.traffic())))
+        # No event stream here: its live traffic events would replace the example.
+        pg.route("**/api/events*", lambda r: r.abort())
         pg.goto(url("laptop"))
         pg.wait_for_selector("#folders tbody tr:nth-child(2)", timeout=60000)
         pg.wait_for_selector("#wherecard:not(.hidden)", timeout=60000)

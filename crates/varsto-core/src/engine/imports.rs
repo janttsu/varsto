@@ -817,7 +817,9 @@ impl Engine {
                 self.check_source_path(src, opts.remove_source)?;
             }
             if let Some(dest) = &opts.dest {
-                let d = std::path::absolute(dest)?;
+                // Resolved like the source (macOS: /var is /private/var),
+                // through the part of the path that exists already.
+                let d = resolve_existing(&std::path::absolute(dest)?);
                 if d.starts_with(src) || src.starts_with(&d) {
                     bail!(
                         "the destination {} and the source {} overlap",
@@ -2114,4 +2116,23 @@ fn holder_list(
             .then(a.name.cmp(&b.name))
     });
     v
+}
+
+/// `p` with its longest existing ancestor resolved (links, `..`), the rest
+/// appended as given.
+fn resolve_existing(p: &Path) -> PathBuf {
+    let mut base = p.to_path_buf();
+    let mut rest = Vec::new();
+    loop {
+        if let Ok(c) = fs::canonicalize(&base) {
+            return rest.iter().rev().fold(c, |acc: PathBuf, n| acc.join(n));
+        }
+        match (base.file_name().map(|n| n.to_os_string()), base.parent()) {
+            (Some(n), Some(parent)) => {
+                rest.push(n);
+                base = parent.to_path_buf();
+            }
+            _ => return p.to_path_buf(),
+        }
+    }
 }

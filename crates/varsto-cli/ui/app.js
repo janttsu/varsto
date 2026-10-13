@@ -4167,12 +4167,22 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   };
   // Traffic view (Peers page): /api/p2p/traffic every second while the page is shown.
   // The service answers it without waiting for a sync, so it stays live during long transfers.
-  var trafficTimer = null, trafficBusy = false, lastTraffic = null;
+  var trafficTimer = null, trafficBusy = false, lastTraffic = null, trafficPrimed = false;
   var SVGNS = "http://www.w3.org/2000/svg";
   function trafficWanted() { return currentPage === "peers" && document.body.dataset.view === "app" && document.visibilityState !== "hidden"; }
   function trafficWatch() {
     streamUpdate();
-    if (!trafficWanted() || evsOk) { if (trafficTimer) { clearTimeout(trafficTimer); trafficTimer = null; } return; }
+    if (!trafficWanted() || evsOk) {
+      if (trafficTimer) { clearTimeout(trafficTimer); trafficTimer = null; }
+      if (!trafficWanted()) { trafficPrimed = false; return; }
+      // With the event stream up its `traffic` events keep the view live;
+      // one request fills it at once when the page opens.
+      if (!trafficPrimed && !trafficBusy) {
+        trafficPrimed = true; trafficBusy = true;
+        api("GET", "/api/p2p/traffic").then(renderTraffic).catch(function () {}).then(function () { trafficBusy = false; });
+      }
+      return;
+    }
     if (trafficTimer || trafficBusy) { return; }
     trafficBusy = true;
     api("GET", "/api/p2p/traffic").then(renderTraffic).catch(function () {}).then(function () {
