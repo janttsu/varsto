@@ -441,6 +441,7 @@ fn a_bad_copy_on_a_pool_disk_is_dropped_and_written_again() {
         disks: vec![],
         scan_roots: vec![mounts.clone()],
         copies: 1,
+        verify_after_days: varsto_core::pool::DEFAULT_VERIFY_AFTER_DAYS,
     })
     .unwrap();
     a.disk_add(&d1, "shelf", "data-01").unwrap();
