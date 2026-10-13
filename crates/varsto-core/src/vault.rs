@@ -1238,6 +1238,9 @@ pub struct Config {
     /// When large fetches propose pool disks instead of the network.
     #[serde(default)]
     pub disk_fetch: crate::engine::DiskFetchSettings,
+    /// The "next disk to dock" reminder (`crate::disksuggest`).
+    #[serde(default)]
+    pub disk_suggest: crate::disksuggest::SuggestSettings,
 }
 
 /// A backup taken on this device (local, never published).

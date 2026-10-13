@@ -19,6 +19,7 @@ pub mod blockdev;
 pub mod chunking;
 pub mod crypto;
 pub mod diskconf;
+pub mod disksuggest;
 pub mod engine;
 pub mod ids;
 pub mod kem;

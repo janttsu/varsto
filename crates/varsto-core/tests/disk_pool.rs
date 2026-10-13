@@ -691,3 +691,210 @@ fn insert_tidies_from_listings_rehashes_only_stale_copies_and_fills_within_the_r
         .unwrap();
     assert_eq!(r.verified_objects + r.fill.objects, 0);
 }
+
+fn row(e: &mut Engine, label: &str) -> varsto_core::pool::DiskStatus {
+    e.disk_report()
+        .unwrap()
+        .into_iter()
+        .find(|d| d.label == label)
+        .unwrap()
+}
+
+#[test]
+fn bookkeeping_follows_add_check_fill_and_eject_and_the_overdue_disk_is_suggested() {
+    use varsto_core::blockdev::{FsckOutcome, FsckVerdict};
+    use varsto_core::diskconf::{self, DiskConf, Drive};
+    let lab = Lab::new();
+    let home = lab.root.join("a-home");
+    let (mut a, _) = engine(&home, "laptop");
+    a.add_storage(lab.box_spec()).unwrap();
+    a.add_storage(lab.pool_spec("shelf")).unwrap();
+    let d1 = lab.mount("d1", 50 * GIB, 100 * GIB);
+    a.disk_add(&d1, "shelf", "Blue 4TB").unwrap();
+    // Add: measured.
+    let r = row(&mut a, "Blue 4TB");
+    assert_eq!(
+        (r.free_bytes, r.capacity_bytes),
+        (Some(50 * GIB), 100 * GIB)
+    );
+    assert_eq!(r.reserve_bytes, 5 * GIB);
+    assert!(r.space_measured_utc > 0);
+    assert_eq!(r.verify_after_days, pool::DEFAULT_VERIFY_AFTER_DAYS);
+
+    let docs = lab.root.join("a-docs");
+    fs::create_dir_all(&docs).unwrap();
+    fs::write(docs.join("one.bin"), pseudo_random(120_000, 41)).unwrap();
+    a.add_folder("docs", &docs).unwrap();
+    a.push("docs").unwrap();
+    let r = row(&mut a, "Blue 4TB");
+    assert!(r.objects > 1);
+    assert_eq!(r.copies_overdue, 0, "written and read back just now");
+    assert_eq!(r.only_copy_objects, Some(0), "the box holds them too");
+    assert_eq!(r.lacking_bytes, Some(0));
+    assert_eq!(r.reclaimable_bytes, 0);
+
+    // Check: measured again.
+    pool::set_fake_space(
+        &d1,
+        Some(DiskSpace {
+            free: 40 * GIB,
+            total: 100 * GIB,
+        }),
+    );
+    a.disk_check("Blue 4TB", false).unwrap();
+    let recorded = |mount: &Path| -> (u64, i64) {
+        let idx: serde_json::Value =
+            serde_json::from_slice(&fs::read(pool_index_path(&home, mount)).unwrap()).unwrap();
+        let id = DiskMarker::read(mount).unwrap().disk_id;
+        let d = &idx["disks"][&id];
+        (
+            d["free_bytes"].as_u64().unwrap(),
+            d["space_measured_utc"].as_i64().unwrap(),
+        )
+    };
+    assert_eq!(recorded(&d1).0, 40 * GIB);
+    pool::set_fake_space(
+        &d1,
+        Some(DiskSpace {
+            free: 41 * GIB,
+            total: 100 * GIB,
+        }),
+    );
+    // Fill (a second disk added and filled; the insert routine measures at its end).
+    let d2 = lab.mount("d2", 30 * GIB, 60 * GIB);
+    a.disk_add(&d2, "shelf", "Red 2TB").unwrap();
+    fs::write(docs.join("two.bin"), pseudo_random(60_000, 42)).unwrap();
+    pool::set_fake_space(
+        &d1,
+        Some(DiskSpace {
+            free: 5 * GIB,
+            total: 100 * GIB,
+        }),
+    );
+    a.push("docs").unwrap();
+    pool::set_fake_space(
+        &d2,
+        Some(DiskSpace {
+            free: 29 * GIB,
+            total: 60 * GIB,
+        }),
+    );
+    let ins = a
+        .disk_insert("Red 2TB", Default::default(), &mut |_| {})
+        .unwrap();
+    assert_eq!(
+        ins.fill.objects, 0,
+        "the push already wrote two.bin to Red 2TB"
+    );
+    assert_eq!(recorded(&d2).0, 29 * GIB);
+
+    // Eject: measured; away, the last measurement stays.
+    pool::set_fake_space(
+        &d1,
+        Some(DiskSpace {
+            free: 45 * GIB,
+            total: 100 * GIB,
+        }),
+    );
+    a.disk_eject("Blue 4TB").unwrap();
+    let away = lab.root.join("away");
+    fs::create_dir_all(&away).unwrap();
+    fs::rename(&d1, away.join("d1")).unwrap();
+    let before = row(&mut a, "Blue 4TB");
+    assert!(!before.attached);
+    assert_eq!(before.free_bytes, Some(45 * GIB));
+    assert!(before.space_measured_utc > 0);
+
+    // Its copies were last checked long ago; one of its blocks was deleted while away.
+    let idx_path = pool_index_path(&home, &away.join("d1"));
+    let mut idx: serde_json::Value = serde_json::from_slice(&fs::read(&idx_path).unwrap()).unwrap();
+    let disk_id = DiskMarker::read(&away.join("d1")).unwrap().disk_id;
+    let keys: Vec<String> = idx["objects"]
+        .as_object()
+        .unwrap()
+        .iter()
+        .filter(|(_, e)| e["disk"] == serde_json::json!(disk_id))
+        .map(|(k, _)| k.clone())
+        .collect();
+    for k in &keys {
+        idx["objects"][k]["checked"][&disk_id] = serde_json::json!(1_000);
+    }
+    fs::write(&idx_path, serde_json::to_vec(&idx).unwrap()).unwrap();
+    {
+        let pool = a.open_storage("shelf").unwrap();
+        pool.delete(&keys[0]).unwrap();
+    }
+    let r = row(&mut a, "Blue 4TB");
+    assert_eq!(r.copies_overdue, r.objects);
+    assert_eq!(r.overdue_share, 1.0);
+    assert_eq!(r.oldest_check_utc, Some(1_000));
+    assert_eq!(r.pending_deletes, 1);
+    assert!(r.reclaimable_bytes > 0 && r.reclaimable_bytes == r.pending_delete_bytes);
+    // The deleted block is still referenced: the pool lacks it, Red 2TB can take it.
+    let red = row(&mut a, "Red 2TB");
+    assert!(red.lacking_bytes.unwrap() > 0);
+    assert_eq!(red.fill_potential_bytes, red.lacking_bytes);
+
+    let s = a.disk_suggestions().unwrap();
+    let top = s.top.as_ref().expect("the overdue disk is suggested");
+    assert_eq!(top.label, "Blue 4TB");
+    assert_eq!(top.reasons[0].kind, "overdue");
+    assert!(
+        top.summary.starts_with("«Blue 4TB»: 100 % of its copies"),
+        "{}",
+        top.summary
+    );
+    assert!(top.summary.contains("(oldest 1970-01-01)"));
+    assert_eq!(top.command, "varsto disk insert \"Blue 4TB\"");
+    assert_eq!(s.overdue, vec!["Blue 4TB".to_string()]);
+    assert_eq!(s.attached.len(), 1);
+    assert_eq!(s.attached[0].label, "Red 2TB");
+    // The weekly reminder: once, then not again within the week; off when turned off.
+    let now = varsto_core::util::now_utc();
+    let msg = a.disk_overdue_reminder(&s, now).expect("first reminder");
+    assert!(msg.contains("varsto disk insert \"Blue 4TB\""), "{msg}");
+    assert!(a.disk_overdue_reminder(&s, now + 86_400).is_none());
+    assert!(a.disk_overdue_reminder(&s, now + 8 * 86_400).is_some());
+    let mut st = a.disk_suggest_settings();
+    st.notify_overdue = false;
+    a.set_disk_suggest_settings(st).unwrap();
+    assert!(a.disk_overdue_reminder(&s, now + 30 * 86_400).is_none());
+
+    // A file system check that left errors: listed apart, never suggested.
+    let uuid = "0a1b2c3d-0000-4000-8000-00000000abcd";
+    let mut conf = DiskConf::load(&home).unwrap();
+    conf.upsert(Drive {
+        partuuid: uuid.into(),
+        pool: "shelf".into(),
+        label: "Blue 4TB".into(),
+    })
+    .unwrap();
+    conf.save(&home).unwrap();
+    diskconf::record_check(
+        &home,
+        uuid,
+        &FsckOutcome {
+            partition: "/dev/sdx1".into(),
+            code: 4,
+            verdict: FsckVerdict::Uncorrected,
+            summary: String::new(),
+            stderr: String::new(),
+            checked_utc: now,
+        },
+    )
+    .unwrap();
+    let r = row(&mut a, "Blue 4TB");
+    assert!(r.failing);
+    assert_eq!(r.fsck.as_ref().unwrap().verdict, FsckVerdict::Uncorrected);
+    let s = a.disk_suggestions().unwrap();
+    assert!(s.top.is_none());
+    assert_eq!(s.excluded.len(), 1);
+    assert!(
+        s.excluded[0].warning.contains("could not be repaired"),
+        "{}",
+        s.excluded[0].warning
+    );
+    // The cheap listing carries the file system check as well.
+    let cheap = a.disks().unwrap();
+    assert!(cheap.iter().any(|d| d.label == "Blue 4TB" && d.failing));
+}
