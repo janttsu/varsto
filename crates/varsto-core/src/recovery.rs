@@ -37,11 +37,13 @@ pub fn key_from_words(words: &str) -> Result<String> {
 }
 
 /// One share: an index 1..=255 and 24 words.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct Share {
     pub index: u8,
     pub words: String,
 }
+
+crate::redacted_debug!(Share { index ; words });
 
 impl Share {
     pub fn encode(&self) -> String {

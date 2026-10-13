@@ -78,6 +78,8 @@ pub struct Identity {
     pub sha256: String,
 }
 
+crate::redacted_debug!(Identity { sha256 ; key });
+
 impl Identity {
     pub fn fingerprint(cert_der: &[u8]) -> String {
         hex::encode(Sha256::digest(cert_der))

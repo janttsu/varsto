@@ -23,6 +23,7 @@ pub mod engine;
 pub mod ids;
 pub mod kem;
 pub mod ledger;
+pub mod logging;
 pub mod manifest;
 pub mod org;
 pub mod p2p;

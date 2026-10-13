@@ -32,6 +32,8 @@ pub struct DecapsKey {
     pq_seed: [u8; PQ_SEED_LEN],
 }
 
+crate::redacted_opaque!(DecapsKey);
+
 impl DecapsKey {
     pub fn generate() -> Self {
         let mut xs = [0u8; X_LEN];

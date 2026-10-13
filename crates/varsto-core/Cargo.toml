@@ -39,6 +39,7 @@ bip39 = "3"
 unicode-normalization = "0.1"
 sharks = "0.5"
 spake2 = "0.4"
+log = { version = "0.4", features = ["std", "kv"] }
 socket2 = { version = "0.6", features = ["all"] }
 
 [target.'cfg(unix)'.dependencies]

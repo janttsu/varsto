@@ -31,6 +31,8 @@ pub struct S3Config {
     pub storage_class: Option<String>,
 }
 
+crate::redacted_debug!(S3Config { name, endpoint, region, bucket, prefix, access_key_id, path_style ; secret_access_key });
+
 pub struct S3Storage {
     cfg: S3Config,
     agent: ureq::Agent,
@@ -107,6 +109,7 @@ impl S3Storage {
     }
 
     pub fn new(cfg: S3Config) -> Result<Self> {
+        crate::logging::register_secret(&cfg.secret_access_key);
         let endpoint = cfg.endpoint.clone();
         let (scheme, rest) = endpoint
             .split_once("://")

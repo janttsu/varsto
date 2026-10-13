@@ -82,7 +82,7 @@ pub struct OrgSummary {
 }
 
 /// What `org_create` hands back, once.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct OrgCreated {
     pub org_id: String,
     pub name: String,
@@ -93,8 +93,10 @@ pub struct OrgCreated {
     pub devices: Vec<String>,
 }
 
+crate::redacted_debug!(OrgCreated { org_id, name, devices ; root_words, root_kit });
+
 /// What `org_approve` hands back.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct OrgApproved {
     pub token: String,
     pub device_id: String,
@@ -102,6 +104,8 @@ pub struct OrgApproved {
     pub user: String,
     pub fingerprint: String,
 }
+
+crate::redacted_debug!(OrgApproved { device_id, name, user, fingerprint ; token });
 
 /// What `org_remove_user` did.
 #[derive(Clone, Debug, Serialize, Deserialize)]

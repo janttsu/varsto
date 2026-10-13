@@ -39,7 +39,7 @@ pub struct SetupReport {
 }
 
 /// How `restic_check` runs.
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Default, Serialize, Deserialize)]
 pub struct CheckOptions {
     /// The hold this check works under (a run's own): the check may fetch
     /// and restore files in held folders.
@@ -55,6 +55,8 @@ pub struct CheckOptions {
     #[serde(default)]
     pub quick: bool,
 }
+
+crate::redacted_debug!(CheckOptions { rehash_all ; token });
 
 fn mtime_ns(md: &fs::Metadata) -> i64 {
     md.modified()

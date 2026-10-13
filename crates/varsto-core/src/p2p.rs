@@ -175,6 +175,8 @@ pub struct Snapshot {
     pub activity_audience: Option<std::collections::BTreeSet<DeviceId>>,
 }
 
+crate::redacted_opaque!(Snapshot);
+
 impl Snapshot {
     /// Produce the ciphertext object for `name`, from a stored copy or by
     /// re-encrypting the piece (deterministic, so the bytes are identical).
@@ -1076,6 +1078,8 @@ pub struct Peers {
     /// peers that have what is asked, and answer fast, are asked first.
     objects: Mutex<BTreeMap<DeviceId, ObjectStats>>,
 }
+
+crate::redacted_opaque!(Peers);
 
 /// How a peer answered object requests lately.
 #[derive(Clone, Debug, Default)]
