@@ -701,7 +701,40 @@
   "Checking that the restic mirror is complete": "Tarkistaa, että resticin peilikopio on täydellinen",
   "Backing up the mirror with restic": "Varmuuskopioi peilikopiota resticillä",
   "Removing old restic snapshots": "Poistaa vanhoja restic-tilannekuvia",
-  "Checking the restic repository": "Tarkistaa restic-varaston"
+  "Checking the restic repository": "Tarkistaa restic-varaston",
+  "Drain…": "Tyhjennä…",
+  "Empty this storage onto the others, without weakening any policy": "Siirrä tämän tallennuspaikan sisältö muihin heikentämättä yhtään sääntöä",
+  "Price and quota": "Hinta ja kiintiö",
+  "Quota (most data Varsto keeps here)": "Kiintiö (enintään näin paljon dataa tänne)",
+  "Every device respects it and keeps 1 % free; blocks then go to your other storages or wait. Empty: no quota.": "Jokainen laite noudattaa sitä ja jättää 1 % vapaaksi; lohkot menevät silloin muihin tallennuspaikkoihin tai odottavat. Tyhjä: ei kiintiötä.",
+  "Most objects (optional)": "Enintään objekteja (valinnainen)",
+  "Prices are used for the monthly cost and the placement suggestions. Empty means unknown, not free.": "Hintoja käytetään kuukausikustannukseen ja sijoitteluehdotuksiin. Tyhjä tarkoittaa tuntematonta, ei ilmaista.",
+  "Quota": "Kiintiö",
+  "Drained: it holds nothing Varsto needs.": "Tyhjennetty: siinä ei ole mitään, mitä Varsto tarvitsee.",
+  "Drained so far": "Tyhjennetty tähän mennessä",
+  "removed when empty": "poistetaan tyhjänä",
+  "drained": "tyhjennetty",
+  "draining": "tyhjennetään",
+  "drain waiting": "tyhjennys odottaa",
+  "Stop draining": "Lopeta tyhjennys",
+  "Use again": "Ota taas käyttöön",
+  "Draining empties the storage onto your other storages in the background, without ever weakening a folder's policy: each block is copied and read back before its copy here is deleted, and blocks that cannot keep their policy elsewhere stay. Nothing new is written here meanwhile; it stays readable. Afterwards the storage holds nothing Varsto needs.": "Tyhjennys siirtää tallennuspaikan sisällön taustalla muihin tallennuspaikkoihisi heikentämättä koskaan kansion sääntöä: jokainen lohko kopioidaan ja luetaan takaisin ennen kuin sen kopio täältä poistetaan, ja lohkot, joiden sääntö ei toteudu muualla, jäävät. Tänne ei sillä välin kirjoiteta mitään uutta; se pysyy luettavana. Lopuksi tallennuspaikassa ei ole mitään, mitä Varsto tarvitsee.",
+  "Blocks on this storage": "Lohkoja tässä tallennuspaikassa",
+  "Only deleted (enough copies elsewhere)": "Vain poistetaan (riittävästi kopioita muualla)",
+  "Copied first, read back before deleting": "Kopioidaan ensin ja luetaan takaisin ennen poistoa",
+  "Read from this storage": "Luetaan tästä tallennuspaikasta",
+  "Minimum storage duration still billed": "Vähimmäissäilytysajasta laskutetaan vielä",
+  "Note": "Huomio",
+  "Every folder's policy holds without it.": "Jokaisen kansion sääntö pysyy voimassa ilman sitä.",
+  "Most GB copied per day (empty: no limit)": "Enintään kopioitavia gigatavuja päivässä (tyhjä: ei rajaa)",
+  "Limits egress costs; blocks that only need deleting do not count.": "Rajoittaa siirtokuluja; pelkästään poistettavia lohkoja ei lasketa.",
+  "Options": "Valinnat",
+  "Remove the storage when it is empty": "Poista tallennuspaikka, kun se on tyhjä",
+  "Read from this cold storage (retrieval fees and restore delays apply)": "Lue tästä kylmästä tallennuspaikasta (noutomaksuja ja palautusviiveitä)",
+  "Start draining": "Aloita tyhjennys",
+  "The storage takes new blocks again. Blocks already moved stay where they are now.": "Tallennuspaikka ottaa taas vastaan uusia lohkoja. Jo siirretyt lohkot pysyvät nykyisillä paikoillaan.",
+  "Draining storage «{s}»": "Tyhjentää tallennuspaikkaa «{s}»",
+  "Copying the records off storage «{s}»": "Kopioi tietueet pois tallennuspaikasta «{s}»"
  },
  "patterns": [
   [
@@ -903,6 +936,74 @@
   [
    "^(.+): stopped; nothing more is fetched from the disks$",
    "$1: lopetettu; levyiltä ei haeta enempää"
+  ],
+  [
+   "^Prices and quota of (.+)$",
+   "Tallennuspaikan $1 hinnat ja kiintiö"
+  ],
+  [
+   "^Prices are used for the monthly cost and the placement suggestions\\. Empty means unknown, not free\\. Now: (.+)\\.$",
+   "Hintoja käytetään kuukausikustannukseen ja sijoitteluehdotuksiin. Tyhjä tarkoittaa tuntematonta, ei ilmaista. Nyt: $1."
+  ],
+  [
+   "^Drain storage (.+)\\?$",
+   "Tyhjennetäänkö tallennuspaikka $1?"
+  ],
+  [
+   "^Stop draining (.+)\\?$",
+   "Lopetetaanko tallennuspaikan $1 tyhjennys?"
+  ],
+  [
+   "^Use (.+) again\\?$",
+   "Otetaanko $1 taas käyttöön?"
+  ],
+  [
+   "^draining (.+) started; the service moves its blocks after the next sync$",
+   "tallennuspaikan $1 tyhjennys aloitettu; palvelu siirtää sen lohkot seuraavan synkronoinnin jälkeen"
+  ],
+  [
+   "^draining (.+) stopped$",
+   "tallennuspaikan $1 tyhjennys lopetettu"
+  ],
+  [
+   "^quota of (.+) saved$",
+   "tallennuspaikan $1 kiintiö tallennettu"
+  ],
+  [
+   "^storage (.+) is at its quota \\((.+) of (.+)\\): new blocks cannot go there$",
+   "tallennuspaikka $1 on kiintiössään ($2 / $3): uusia lohkoja ei voi viedä sinne"
+  ],
+  [
+   "^storage (.+) is at its quota \\((.+) of (.+)\\)$",
+   "tallennuspaikka $1 on kiintiössään ($2 / $3)"
+  ],
+  [
+   "^storage (.+) is nearly full: (.+) of (.+) \\((\\d+) %\\)$",
+   "tallennuspaikka $1 on lähes täynnä: $2 / $3 ($4 %)"
+  ],
+  [
+   "^storage (.+) is being drained: it takes no new blocks$",
+   "tallennuspaikkaa $1 tyhjennetään: se ei ota vastaan uusia lohkoja"
+  ],
+  [
+   "^folder (.+) needs (\\d+) cop(?:y|ies) (.+) and no other storage there can take (?:it|them): add another (.+) storage or lower the policy(.*)$",
+   "kansio $1 tarvitsee $2 kopio(ta) ($3), eikä mikään muu sellainen tallennuspaikka voi ottaa niitä: lisää toinen $4-tallennuspaikka tai kevennä sääntöä$5"
+  ],
+  [
+   "^folder (.+) needs (\\d+) copies and no other storage can take another one: add another storage or lower the policy(.*)$",
+   "kansio $1 tarvitsee $2 kopiota, eikä mikään muu tallennuspaikka voi ottaa lisää: lisää tallennuspaikka tai kevennä sääntöä$3"
+  ],
+  [
+   "^the only copy to read is on cold storage (.+): confirm the cold read \\(retrieval fees and restore delays apply\\)$",
+   "ainoa luettava kopio on kylmässä tallennuspaikassa $1: vahvista kylmäluku (noutomaksuja ja palautusviiveitä)"
+  ],
+  [
+   "^(.+) is the only storage that holds the vault's records and ledger: add another storage \\(not a disk pool\\) first$",
+   "$1 on ainoa tallennuspaikka, jossa on holvin tietueet ja kirjanpito: lisää ensin toinen tallennuspaikka (ei levyvarasto)"
+  ],
+  [
+   "^a block of (.+) has no other copy and no other storage can take one: add another storage$",
+   "kansion $1 lohkolla ei ole muuta kopiota, eikä mikään muu tallennuspaikka voi ottaa sitä: lisää tallennuspaikka"
   ]
  ],
  "review": [
@@ -1024,7 +1125,9 @@
   "The prices were not verified for this region; it may be priced differently.",
   "Replace the part in braces in the endpoint with your own value, for example your account id.",
   "plan",
-  "(old)"
+  "(old)",
+  "Every device respects it and keeps 1 % free; blocks then go to your other storages or wait. Empty: no quota.",
+  "Draining empties the storage onto your other storages in the background, without ever weakening a folder's policy: each block is copied and read back before its copy here is deleted, and blocks that cannot keep their policy elsewhere stay. Nothing new is written here meanwhile; it stays readable. Afterwards the storage holds nothing Varsto needs."
  ],
  "parts": [
   [
@@ -1074,6 +1177,14 @@
   [
    "(\\d+) blocks in (\\d+) folders?",
    "$1 lohkoa $2 kansiossa"
+  ],
+  [
+   "storage (\\S+) is being drained: it takes no new blocks",
+   "tallennuspaikkaa $1 tyhjennetään: se ei ota vastaan uusia lohkoja"
+  ],
+  [
+   "storage (\\S+) is at its quota \\(([^)]+) of ([^)]+)\\): new blocks cannot go there",
+   "tallennuspaikka $1 on kiintiössään ($2 / $3): uusia lohkoja ei voi viedä sinne"
   ]
  ]
 }

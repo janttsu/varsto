@@ -1157,6 +1157,69 @@ fn api_unlocked(
             service.request_sync();
             Ok(serde_json::to_value(r)?)
         }
+        (Method::Get, "/api/storage/quotas") => Ok(serde_json::to_value(engine.quota_statuses()?)?),
+        (Method::Post, "/api/storage/quota") => {
+            let name = s(input, "name")?;
+            let clear = input.get("clear").and_then(|v| v.as_bool()).unwrap_or(false);
+            let status = if clear {
+                engine.set_storage_quota(&name, Some(None), Some(None))?
+            } else {
+                // Empty fields clear that figure; sizes as text ("1TB") or bytes.
+                let bytes = match input.get("bytes") {
+                    Some(Value::Number(n)) => Some(n.as_u64()),
+                    Some(Value::String(t)) if t.trim().is_empty() => Some(None),
+                    Some(Value::String(t)) => Some(Some(varsto_core::storage_settings::parse_size(t)?)),
+                    _ => None,
+                };
+                let objects = match input.get("objects") {
+                    Some(Value::Number(n)) => Some(n.as_u64()),
+                    Some(Value::String(t)) if t.trim().is_empty() => Some(None),
+                    Some(Value::String(t)) => Some(Some(t.trim().parse::<u64>().map_err(|_| anyhow!("not a number of objects: {t}"))?)),
+                    _ => None,
+                };
+                engine.set_storage_quota(&name, bytes, objects)?
+            };
+            service.request_sync();
+            Ok(serde_json::to_value(status)?)
+        }
+        (Method::Get, "/api/storage/drains") => Ok(serde_json::to_value(engine.drain_statuses()?)?),
+        (Method::Get, "/api/storage/drain-plan") => {
+            let name = query_param(query, "name").unwrap_or_default();
+            let opts = varsto_core::engine::DrainOptions {
+                remove_when_empty: false,
+                budget_bytes_per_day: query_param(query, "budget_gb_per_day")
+                    .and_then(|v| v.trim().parse::<f64>().ok())
+                    .filter(|g| g.is_finite() && *g > 0.0)
+                    .map(|g| (g * 1e9) as u64),
+                confirm_cold_read: query_param(query, "confirm_cold_read").as_deref() == Some("true"),
+            };
+            Ok(serde_json::to_value(engine.drain_plan(&name, &opts)?)?)
+        }
+        (Method::Post, "/api/storage/drain") => {
+            let name = s(input, "name")?;
+            if input.get("stop").and_then(|v| v.as_bool()).unwrap_or(false) {
+                engine.drain_stop(&name)?;
+                service.request_sync();
+                return Ok(json!({"ok": true, "stopped": true}));
+            }
+            let flag = |k: &str| input.get(k).and_then(|v| v.as_bool()).unwrap_or(false);
+            let budget = input
+                .get("budget_gb_per_day")
+                .and_then(|v| v.as_f64().or_else(|| v.as_str().and_then(|t| t.trim().parse().ok())))
+                .filter(|g| g.is_finite() && *g > 0.0)
+                .map(|g| (g * 1e9) as u64);
+            let plan = engine.drain_start(
+                &name,
+                &varsto_core::engine::DrainOptions {
+                    remove_when_empty: flag("remove_when_empty"),
+                    budget_bytes_per_day: budget,
+                    confirm_cold_read: flag("confirm_cold_read"),
+                },
+            )?;
+            // The service moves the blocks after its next sync.
+            service.request_sync();
+            Ok(serde_json::to_value(plan)?)
+        }
         (Method::Post, "/api/storage/carrier-for") => {
             let names = engine.set_carrier_for(&s(input, "name")?, &string_list(input, "devices"))?;
             Ok(json!({"ok": true, "devices": names}))

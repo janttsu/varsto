@@ -694,7 +694,40 @@
   "Checking that the restic mirror is complete": "Kontrollerar att restic-speglingen är fullständig",
   "Backing up the mirror with restic": "Säkerhetskopierar speglingen med restic",
   "Removing old restic snapshots": "Tar bort gamla restic-ögonblicksbilder",
-  "Checking the restic repository": "Kontrollerar restic-förrådet"
+  "Checking the restic repository": "Kontrollerar restic-förrådet",
+  "Drain…": "Töm…",
+  "Empty this storage onto the others, without weakening any policy": "Flytta innehållet till de andra lagringsplatserna utan att försvaga någon regel",
+  "Price and quota": "Pris och kvot",
+  "Quota (most data Varsto keeps here)": "Kvot (högst så mycket data här)",
+  "Every device respects it and keeps 1 % free; blocks then go to your other storages or wait. Empty: no quota.": "Varje enhet följer den och lämnar 1 % ledigt; block går då till dina andra lagringsplatser eller väntar. Tomt: ingen kvot.",
+  "Most objects (optional)": "Högst antal objekt (valfritt)",
+  "Prices are used for the monthly cost and the placement suggestions. Empty means unknown, not free.": "Priserna används för månadskostnaden och placeringsförslagen. Tomt betyder okänt, inte gratis.",
+  "Quota": "Kvot",
+  "Drained: it holds nothing Varsto needs.": "Tömd: den innehåller inget som Varsto behöver.",
+  "Drained so far": "Tömt hittills",
+  "removed when empty": "tas bort när den är tom",
+  "drained": "tömd",
+  "draining": "töms",
+  "drain waiting": "tömningen väntar",
+  "Stop draining": "Avbryt tömningen",
+  "Use again": "Använd igen",
+  "Draining empties the storage onto your other storages in the background, without ever weakening a folder's policy: each block is copied and read back before its copy here is deleted, and blocks that cannot keep their policy elsewhere stay. Nothing new is written here meanwhile; it stays readable. Afterwards the storage holds nothing Varsto needs.": "Tömningen flyttar lagringsplatsens innehåll i bakgrunden till dina andra lagringsplatser utan att någonsin försvaga en mapps regel: varje block kopieras och läses tillbaka innan kopian här raderas, och block vars regel inte kan uppfyllas på annat håll stannar. Inget nytt skrivs hit under tiden; den förblir läsbar. Efteråt innehåller lagringsplatsen inget som Varsto behöver.",
+  "Blocks on this storage": "Block på den här lagringsplatsen",
+  "Only deleted (enough copies elsewhere)": "Raderas bara (tillräckligt med kopior på annat håll)",
+  "Copied first, read back before deleting": "Kopieras först och läses tillbaka före radering",
+  "Read from this storage": "Läses från den här lagringsplatsen",
+  "Minimum storage duration still billed": "Minsta lagringstid som ännu faktureras",
+  "Note": "Obs",
+  "Every folder's policy holds without it.": "Varje mapps regel håller utan den.",
+  "Most GB copied per day (empty: no limit)": "Högst antal GB som kopieras per dag (tomt: ingen gräns)",
+  "Limits egress costs; blocks that only need deleting do not count.": "Begränsar kostnaderna för utgående trafik; block som bara ska raderas räknas inte.",
+  "Options": "Alternativ",
+  "Remove the storage when it is empty": "Ta bort lagringsplatsen när den är tom",
+  "Read from this cold storage (retrieval fees and restore delays apply)": "Läs från den här kalla lagringsplatsen (hämtningsavgifter och återställningsfördröjning)",
+  "Start draining": "Börja tömma",
+  "The storage takes new blocks again. Blocks already moved stay where they are now.": "Lagringsplatsen tar emot nya block igen. Block som redan flyttats stannar där de är nu.",
+  "Draining storage «{s}»": "Tömmer lagringsplatsen «{s}»",
+  "Copying the records off storage «{s}»": "Kopierar posterna från lagringsplatsen «{s}»"
  },
  "patterns": [
   [
@@ -896,6 +929,74 @@
   [
    "^(.+): stopped; nothing more is fetched from the disks$",
    "$1: avbrutet; inget mer hämtas från diskarna"
+  ],
+  [
+   "^Prices and quota of (.+)$",
+   "Priser och kvot för $1"
+  ],
+  [
+   "^Prices are used for the monthly cost and the placement suggestions\\. Empty means unknown, not free\\. Now: (.+)\\.$",
+   "Priserna används för månadskostnaden och placeringsförslagen. Tomt betyder okänt, inte gratis. Nu: $1."
+  ],
+  [
+   "^Drain storage (.+)\\?$",
+   "Töm lagringsplatsen $1?"
+  ],
+  [
+   "^Stop draining (.+)\\?$",
+   "Avbryta tömningen av $1?"
+  ],
+  [
+   "^Use (.+) again\\?$",
+   "Använda $1 igen?"
+  ],
+  [
+   "^draining (.+) started; the service moves its blocks after the next sync$",
+   "tömningen av $1 har börjat; tjänsten flyttar dess block efter nästa synkronisering"
+  ],
+  [
+   "^draining (.+) stopped$",
+   "tömningen av $1 avbröts"
+  ],
+  [
+   "^quota of (.+) saved$",
+   "kvoten för $1 sparad"
+  ],
+  [
+   "^storage (.+) is at its quota \\((.+) of (.+)\\): new blocks cannot go there$",
+   "lagringsplatsen $1 har nått sin kvot ($2 av $3): nya block kan inte gå dit"
+  ],
+  [
+   "^storage (.+) is at its quota \\((.+) of (.+)\\)$",
+   "lagringsplatsen $1 har nått sin kvot ($2 av $3)"
+  ],
+  [
+   "^storage (.+) is nearly full: (.+) of (.+) \\((\\d+) %\\)$",
+   "lagringsplatsen $1 är nästan full: $2 av $3 ($4 %)"
+  ],
+  [
+   "^storage (.+) is being drained: it takes no new blocks$",
+   "lagringsplatsen $1 töms: den tar inte emot nya block"
+  ],
+  [
+   "^folder (.+) needs (\\d+) cop(?:y|ies) (.+) and no other storage there can take (?:it|them): add another (.+) storage or lower the policy(.*)$",
+   "mappen $1 behöver $2 kopi(or) ($3) och ingen annan lagringsplats där kan ta emot dem: lägg till en annan $4-lagringsplats eller sänk regeln$5"
+  ],
+  [
+   "^folder (.+) needs (\\d+) copies and no other storage can take another one: add another storage or lower the policy(.*)$",
+   "mappen $1 behöver $2 kopior och ingen annan lagringsplats kan ta emot fler: lägg till en lagringsplats eller sänk regeln$3"
+  ],
+  [
+   "^the only copy to read is on cold storage (.+): confirm the cold read \\(retrieval fees and restore delays apply\\)$",
+   "den enda kopian att läsa finns på den kalla lagringsplatsen $1: bekräfta kall läsning (hämtningsavgifter och återställningsfördröjning)"
+  ],
+  [
+   "^(.+) is the only storage that holds the vault's records and ledger: add another storage \\(not a disk pool\\) first$",
+   "$1 är den enda lagringsplatsen med valvets poster och liggare: lägg först till en annan lagringsplats (inte en diskpool)"
+  ],
+  [
+   "^a block of (.+) has no other copy and no other storage can take one: add another storage$",
+   "ett block i $1 har ingen annan kopia och ingen annan lagringsplats kan ta emot det: lägg till en lagringsplats"
   ]
  ],
  "review": [
@@ -1072,7 +1173,9 @@
   "The prices were not verified for this region; it may be priced differently.",
   "Replace the part in braces in the endpoint with your own value, for example your account id.",
   "plan",
-  "(old)"
+  "(old)",
+  "Every device respects it and keeps 1 % free; blocks then go to your other storages or wait. Empty: no quota.",
+  "Draining empties the storage onto your other storages in the background, without ever weakening a folder's policy: each block is copied and read back before its copy here is deleted, and blocks that cannot keep their policy elsewhere stay. Nothing new is written here meanwhile; it stays readable. Afterwards the storage holds nothing Varsto needs."
  ],
  "parts": [
   [
@@ -1122,6 +1225,14 @@
   [
    "(\\d+) blocks in (\\d+) folders?",
    "$1 block i $2 mappar"
+  ],
+  [
+   "storage (\\S+) is being drained: it takes no new blocks",
+   "lagringsplatsen $1 töms: den tar inte emot nya block"
+  ],
+  [
+   "storage (\\S+) is at its quota \\(([^)]+) of ([^)]+)\\): new blocks cannot go there",
+   "lagringsplatsen $1 har nått sin kvot ($2 av $3): nya block kan inte gå dit"
   ]
  ]
 }

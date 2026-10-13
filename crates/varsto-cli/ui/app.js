@@ -162,6 +162,10 @@
       $("modal-title").textContent = o.title || "Varsto";
       var tx = $("modal-text"); tx.textContent = o.text || ""; tx.classList.toggle("hidden", !o.text);
       var code = $("modal-code"); code.textContent = o.code || ""; code.classList.toggle("hidden", !o.code);
+      // facts: [label, value] pairs; the label is translated, the value shown as given.
+      var facts = $("modal-facts"); facts.innerHTML = "";
+      (o.facts || []).forEach(function (f) { facts.appendChild(el("dt", null, f[0])); var dd = el("dd", null, f[1]); dd.setAttribute("data-no-i18n", ""); facts.appendChild(dd); });
+      facts.classList.toggle("hidden", !(o.facts || []).length);
       var fs = $("modal-fields"); fs.innerHTML = "";
       (o.fields || []).forEach(function (f) {
         // A group of checkboxes; its value is the ticked ones, comma-separated.
@@ -1035,12 +1039,14 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
         if (!s.member) {
           var ra = el("div", "li-actions");
           if (st.carrier) { var cb = el("button", "secondary", "Destination\u2026"); cb.type = "button"; cb.onclick = function () { carrierDestination(st.name, dest); }; ra.appendChild(cb); }
+          if (!st.carrier) { var db = el("button", "secondary drain-btn", "Drain\u2026"); db.type = "button"; db.title = "Empty this storage onto the others, without weakening any policy"; db.onclick = function () { drainStorage(st.name); }; ra.appendChild(db); }
           var rb = el("button", "secondary", "Remove"); rb.type = "button"; rb.onclick = function () { removeStorage(st.name); }; ra.appendChild(rb); li.appendChild(ra);
         }
         ul.appendChild(li);
       });
       $("storages-empty").classList.toggle("hidden", s.storages.length > 0);
       loadStorageCosts();
+      loadStorageUsage();
       renderPools(s.storages);
       var names = Object.keys(s.devices).map(function (k) { return s.devices[k] + " (" + k.slice(0, 8) + ")"; });
       var reps = Object.keys(s.replicas || {}).map(function (k) { return s.replicas[k]; });
@@ -1175,24 +1181,113 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
         var li = null; $("storages").querySelectorAll("li").forEach(function (x) { if (x.dataset.storage === e.name) { li = x; } });
         if (!li || li.querySelector(".li-price")) { return; }
         li.querySelector(".li-body").appendChild(el("div", "li-sub li-price", (e.price ? priceText(e.price) : "No price set") + " · " + fmtBytes(e.bytes) + " stored" + (e.monthly_cost != null ? " · " + approx(e.monthly_cost, e.currency) + " a month" : "")));
-        var acts = el("div", "li-actions"); var pb = el("button", "secondary", "Price"); pb.type = "button"; pb.onclick = function () { editPrice(e); }; acts.appendChild(pb); li.appendChild(acts);
+        var acts = el("div", "li-actions"); var pb = el("button", "secondary", "Price and quota"); pb.type = "button"; pb.onclick = function () { editPrice(e); }; acts.appendChild(pb); li.appendChild(acts);
       });
     }).catch(function () {});
   }
   function editPrice(e) {
     var p = e.price || {};
     var v = function (x) { return x == null ? "" : String(x); };
-    dialog({ title: "Prices of " + e.name, text: "Used for the monthly cost and the placement suggestions. Empty means unknown, not free." + (p.source ? " Now: " + p.source + "." : ""), fields: [
+    var q = storageQuotas[e.name] || {};
+    var pool = e.kind === "pool" || e.carrier;
+    var fields = [
       { name: "gb_month", label: "Storage per GB-month", value: v(p.storage_per_gb_month), placeholder: "0.006" },
       { name: "egress", label: "Egress per GB", value: v(p.egress_per_gb), placeholder: "0.01" },
       { name: "retrieval", label: "Retrieval per GB (cold classes)", value: v(p.retrieval_per_gb) },
       { name: "min_days", label: "Minimum storage days (cold classes)", value: v(p.minimum_storage_days) },
       { name: "currency", label: "Currency", value: p.currency || "", placeholder: "EUR" }
-    ], ok: "Save", extra: "Clear my prices" }).then(function (r) {
+    ];
+    if (!pool) {
+      fields.push({ name: "quota", label: "Quota (most data Varsto keeps here)", value: q.quota_bytes != null ? String(q.quota_bytes / 1e9) + "GB" : "", placeholder: "1TB", hint: "Every device respects it and keeps 1 % free; blocks then go to your other storages or wait. Empty: no quota." });
+      fields.push({ name: "quota_objects", label: "Most objects (optional)", type: "number", value: v(q.quota_objects) });
+    }
+    dialog({ title: "Prices and quota of " + e.name, text: "Prices are used for the monthly cost and the placement suggestions. Empty means unknown, not free." + (p.source ? " Now: " + p.source + "." : ""), fields: fields, ok: "Save", extra: "Clear my prices" }).then(function (r) {
       if (!r) { return; }
       var body = r.action === "extra" ? { name: e.name, clear: true } : { name: e.name, gb_month: r.values.gb_month, egress: r.values.egress, retrieval: r.values.retrieval, min_days: r.values.min_days, currency: r.values.currency };
-      return api("POST", "/api/storage/price", body).then(function () { log("prices of " + e.name + " saved"); refreshStatus(); });
-    }).catch(function (err) { log("error: " + err.message); });
+      return api("POST", "/api/storage/price", body).then(function () {
+        log("prices of " + e.name + " saved");
+        if (pool || r.action === "extra") { return null; }
+        var oldQ = q.quota_bytes != null ? String(q.quota_bytes / 1e9) + "GB" : "";
+        if ((r.values.quota || "").trim() === oldQ && (r.values.quota_objects || "") === v(q.quota_objects)) { return null; }
+        return api("POST", "/api/storage/quota", { name: e.name, bytes: (r.values.quota || "").trim(), objects: (r.values.quota_objects || "").trim() }).then(function () { log("quota of " + e.name + " saved"); });
+      }).then(function () { refreshStatus(); });
+    }).catch(function (err) { alertBox(err.message); });
+  }
+
+  // Quotas and drains on the storage rows: use against the quota, and a
+  // drain's progress with its Stop button (/api/storage/quotas, /drains).
+  var storageQuotas = {};
+  function usageBar(percent, cls) { var b = el("div", "usage-bar" + (cls ? " " + cls : "")); var f = el("span"); f.style.width = Math.max(0, Math.min(100, percent || 0)) + "%"; b.appendChild(f); return b; }
+  function rawSpan(text, cls) { var x = el("span", cls || null, text); x.setAttribute("data-no-i18n", ""); return x; }
+  function loadStorageUsage() {
+    Promise.all([api("GET", "/api/storage/quotas"), api("GET", "/api/storage/drains")]).then(function (r) {
+      var drains = r[1]; storageQuotas = {};
+      r[0].forEach(function (q) { storageQuotas[q.storage] = q; });
+      $("storages").querySelectorAll("li").forEach(function (li) {
+        var name = li.dataset.storage; var body = li.querySelector(".li-body"); if (!body) { return; }
+        body.querySelectorAll(".li-usage").forEach(function (x) { x.remove(); });
+        var q = storageQuotas[name];
+        if (q && q.state !== "none") {
+          var u = el("div", "li-sub li-usage");
+          u.appendChild(usageBar(q.percent, q.state === "full" ? "bad" : q.state === "warning" ? "risk" : ""));
+          u.appendChild(el("span", null, "Quota"));
+          u.appendChild(rawSpan(fmtBytes(q.used_bytes) + " / " + (q.quota_bytes != null ? fmtBytes(q.quota_bytes) : q.used_objects + " / " + q.quota_objects) + " (" + (q.percent || 0) + " %)"));
+          if (q.message) { u.appendChild(rawSpan(actTr(q.message), "usage-note " + (q.state === "full" ? "bad" : "risk"))); }
+          body.appendChild(u);
+        }
+        var d = drains.filter(function (x) { return x.storage === name; })[0];
+        var btn = li.querySelector("button.drain-btn");
+        if (!d) { return; }
+        var title = li.querySelector(".li-title");
+        if (title && !title.querySelector(".drain-pill")) { var dp = pill(d.phase === "drained" ? "grey" : d.phase === "blocked" ? "bad" : "risk", d.phase === "drained" ? "drained" : d.phase === "blocked" ? "drain waiting" : "draining"); dp.classList.add("drain-pill"); title.appendChild(dp); }
+        var w = el("div", "li-sub li-usage");
+        w.appendChild(usageBar(d.percent, d.phase === "blocked" ? "risk" : ""));
+        if (d.phase === "drained") { w.appendChild(el("span", null, "Drained: it holds nothing Varsto needs.")); } else {
+          w.appendChild(el("span", null, "Drained so far"));
+          w.appendChild(rawSpan(d.percent + " % · " + fmtBytes(d.bytes_left) + (d.eta_utc ? " · \u2248 " + new Date(d.eta_utc * 1000).toLocaleString() : "")));
+          if (d.remove_when_empty) { w.appendChild(el("span", "muted", "removed when empty")); }
+        }
+        (d.phase === "drained" ? [] : d.blocked).forEach(function (b) { w.appendChild(rawSpan(actTr(b), "usage-note risk")); });
+        if (d.last_error) { w.appendChild(rawSpan(d.last_error, "usage-note bad")); }
+        body.appendChild(w);
+        if (btn) { btn.textContent = d.phase === "drained" ? "Use again" : "Stop draining"; btn.title = ""; btn.onclick = function () { stopDrain(name, d.phase === "drained"); }; }
+      });
+    }).catch(function () {});
+  }
+  // Draining: show what it takes (bytes to move and where, egress, time at
+  // the budget, whether every policy holds), then start it in the service.
+  function drainStorage(name) {
+    busy(true);
+    api("GET", "/api/storage/drain-plan?name=" + enc(name)).then(function (p) {
+      busy(false);
+      if (p.records_blocked) { alertBox(actTr(p.records_blocked)); return null; }
+      var money = function (c) { return Object.keys(c || {}).map(function (k) { return c[k].toFixed(2) + " " + k; }).join(" + "); };
+      var facts = [
+        ["Blocks on this storage", p.blocks + " · " + fmtBytes(p.bytes)],
+        ["Only deleted (enough copies elsewhere)", String(p.blocks_drop_only)],
+        ["Copied first, read back before deleting", p.blocks_to_copy + " · " + fmtBytes(p.bytes_to_copy) + (Object.keys(p.targets).length ? " \u2192 " + Object.keys(p.targets).map(function (t) { return t + " " + fmtBytes(p.targets[t]); }).join(", ") : "")],
+        ["Read from this storage", fmtBytes(p.bytes_read_here) + (money(p.egress_cost) ? " · \u2248 " + money(p.egress_cost) : "")]
+      ];
+      if (money(p.early_deletion_cost)) { facts.push(["Minimum storage duration still billed", "\u2248 " + money(p.early_deletion_cost)]); }
+      facts.push(["Policies", p.policy === "ok" ? actTr("Every folder's policy holds without it.") : p.blocks_blocked + " \u00d7 " + p.blocked.map(actTr).join("; ")]);
+      (p.notes || []).forEach(function (n) { facts.push(["Note", actTr(n)]); });
+      var checks = [["remove", "Remove the storage when it is empty", false]];
+      if (p.cold) { checks.push(["cold", "Read from this cold storage (retrieval fees and restore delays apply)", false]); }
+      return dialog({ title: "Drain storage " + name + "?", text: "Draining empties the storage onto your other storages in the background, without ever weakening a folder's policy: each block is copied and read back before its copy here is deleted, and blocks that cannot keep their policy elsewhere stay. Nothing new is written here meanwhile; it stays readable. Afterwards the storage holds nothing Varsto needs.", facts: facts, fields: [
+        { name: "budget", label: "Most GB copied per day (empty: no limit)", type: "number", value: "", hint: "Limits egress costs; blocks that only need deleting do not count." },
+        { name: "opts", label: "Options", checks: checks }
+      ], ok: "Start draining" }).then(function (r) {
+        if (!r) { return null; }
+        var o = (r.values.opts || "").split(",");
+        return api("POST", "/api/storage/drain", { name: name, budget_gb_per_day: r.values.budget, remove_when_empty: o.indexOf("remove") >= 0, confirm_cold_read: o.indexOf("cold") >= 0 }).then(function () { log("draining " + name + " started; the service moves its blocks after the next sync"); });
+      });
+    }).catch(function (e) { alertBox(e.message); }).then(function () { busy(false); return refreshStatus(); });
+  }
+  function stopDrain(name, drained) {
+    dialog({ title: drained ? "Use " + name + " again?" : "Stop draining " + name + "?", text: "The storage takes new blocks again. Blocks already moved stay where they are now.", ok: drained ? "Use again" : "Stop draining" }).then(function (r) {
+      if (!r) { return null; }
+      return api("POST", "/api/storage/drain", { name: name, stop: true }).then(function () { log("draining " + name + " stopped"); });
+    }).catch(function (e) { alertBox(e.message); }).then(function () { return refreshStatus(); });
   }
 
   // Backups (their own page): read-only snapshots of a directory of this
@@ -2314,7 +2409,9 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     "restic": "Checking that the restic mirror is complete",
     "restic.backup": "Backing up the mirror with restic",
     "restic.forget": "Removing old restic snapshots",
-    "restic.repo_check": "Checking the restic repository"
+    "restic.repo_check": "Checking the restic repository",
+    "drain": "Draining storage «{s}»",
+    "drain.records": "Copying the records off storage «{s}»"
   };
   var actTimer = null, actBusy = false, lastActivity = null;
   function actTr(s) { return window.varstoLang ? window.varstoLang.t(s) : s; }

@@ -89,6 +89,12 @@ pub struct ServiceState {
     /// Not before this time: a run that failed before it could record why.
     pub restic_not_before_utc: i64,
     pub restic_text: Option<String>,
+    /// Storages being drained or drained, as of the last run.
+    pub drains: Vec<varsto_core::engine::DrainStatus>,
+    /// Drains already announced as finished or waiting (not repeated).
+    pub drain_notified: std::collections::BTreeSet<String>,
+    /// Storages at their quota during the last sync, one sentence each.
+    pub quota_full: Vec<String>,
 }
 
 /// Expired backup snapshots are looked for at most this often.
@@ -128,6 +134,8 @@ impl ServiceState {
             "backup_last": self.backup_last,
             "backup_errors": self.backup_errors,
             "restic_text": self.restic_text,
+            "drains": self.drains,
+            "quota_full": self.quota_full,
         })
     }
     /// Store the disk listing; log and notify when a disk appeared or went
@@ -305,6 +313,45 @@ impl ServiceState {
         }
         self.repair = Some(engine.repair_status());
     }
+    /// Run the drains this device drives (called after a sync, like
+    /// repair), within the service's share per run and their daily
+    /// budgets; notify once when one finishes or cannot go on.
+    pub fn drains_if_due(&mut self, engine: &mut Engine) {
+        for name in engine.drains_to_run() {
+            match engine.drain_run(&name, &varsto_core::engine::DrainRunLimits::service()) {
+                Ok(r) => {
+                    if r.blocks_dropped > 0 || r.drained {
+                        eprintln!("service: drain: {}", r.summary);
+                    }
+                    if r.drained && self.drain_notified.insert(format!("done:{name}")) {
+                        notify(
+                            "Varsto",
+                            &if r.removed {
+                                format!("Storage {name} is empty and was removed.")
+                            } else {
+                                format!("Storage {name} is drained: it holds nothing Varsto needs.")
+                            },
+                        );
+                    }
+                    if r.blocks_dropped == 0
+                        && r.blocks_copied == 0
+                        && !r.drained
+                        && !r.kept.is_empty()
+                        && self.drain_notified.insert(format!("stuck:{name}"))
+                    {
+                        let msg = format!("Draining {name} cannot go on: {}", r.kept.join("; "));
+                        eprintln!("service: {msg}");
+                        notify("Varsto", &msg);
+                    }
+                    if r.blocks_dropped > 0 {
+                        self.drain_notified.remove(&format!("stuck:{name}"));
+                    }
+                }
+                Err(e) => eprintln!("service: draining {name} failed: {e:#}"),
+            }
+        }
+        self.drains = engine.drain_statuses().unwrap_or_default();
+    }
     /// Take the scheduled backup snapshots that are due and, at most every
     /// six hours, expire old ones (called after a sync, like repair).
     pub fn backups_if_due(&mut self, engine: &mut Engine) {
@@ -437,7 +484,13 @@ impl ServiceState {
         let mut unavailable = 0;
         let mut forked = false;
         let mut disks: Vec<String> = Vec::new();
+        let mut full: Vec<String> = Vec::new();
         for (pl, ps) in reports {
+            for f in &ps.storages_full {
+                if !full.contains(f) {
+                    full.push(f.clone());
+                }
+            }
             self.p2p_chunks += pl.chunks_from_peers;
             updated += pl.files_updated;
             deleted += pl.files_deleted;
@@ -452,6 +505,15 @@ impl ServiceState {
             }
         }
         self.last_result = format!("{} folders: {updated} updated, {deleted} deleted, {conflicts} conflicts, {uploaded} chunks uploaded{}{}{}", reports.len(), if unavailable > 0 { format!(", {unavailable} unavailable") } else { String::new() }, if disks.is_empty() { String::new() } else { format!(" (attach disk {})", disks.join(", ")) }, if forked { ", FORKED device" } else { "" });
+        // A storage at its quota: blocks go elsewhere or wait here; say so once.
+        for f in full.iter().filter(|f| !self.quota_full.contains(f)) {
+            eprintln!("service: {f}");
+            notify("Varsto", &format!("{f}. New blocks go to the other storages or wait on this device; raise the quota or add a storage."));
+        }
+        if !full.is_empty() {
+            self.last_result += &format!("; {}", full.join("; "));
+        }
+        self.quota_full = full;
         self.last_error = None;
     }
 }
@@ -1521,6 +1583,7 @@ pub fn run(opts: Options) -> Result<()> {
                         st.service.auto_verify_if_due(e);
                         st.service.scrub_if_due(e);
                         st.service.repair_if_due(e);
+                        st.service.drains_if_due(e);
                         st.service.backups_if_due(e);
                         st.service.restic_if_due(e);
                         if let Err(err) = e.publish_device_details(st.service.last_sync_utc) {

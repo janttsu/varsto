@@ -849,6 +849,46 @@ enum StorageCmd {
         #[arg(long)]
         clear: bool,
     },
+    /// Empty a storage onto the others without weakening any folder's
+    /// policy (to switch providers); `storage drain status` shows progress.
+    Drain {
+        /// The storage, or `status` for every drain.
+        name: String,
+        /// Stop draining: the storage takes new blocks again.
+        #[arg(long, conflicts_with_all = ["plan", "remove_when_empty"])]
+        stop: bool,
+        /// Show what draining takes, change nothing.
+        #[arg(long)]
+        plan: bool,
+        /// Remove the storage from this device once it is empty.
+        #[arg(long)]
+        remove_when_empty: bool,
+        /// Copy at most this many GB (decimal) to other storages per day (egress costs).
+        #[arg(long)]
+        budget_gb_per_day: Option<f64>,
+        /// Allow reading from this cold storage (retrieval fees, restore delays).
+        #[arg(long)]
+        confirm_cold_read: bool,
+        /// Leave the work to the background service instead of running now.
+        #[arg(long)]
+        background: bool,
+    },
+    /// Show or set a storage's quota, which every device respects.
+    Quota {
+        name: String,
+        /// Most bytes Varsto keeps there: 500GB, 1TB, 2TiB, ...
+        #[arg(long, conflicts_with = "clear")]
+        bytes: Option<String>,
+        /// Most objects Varsto keeps there.
+        #[arg(long, conflicts_with = "clear")]
+        objects: Option<u64>,
+        /// Remove the quota.
+        #[arg(long)]
+        clear: bool,
+        /// List the storage to count its objects and measure its records.
+        #[arg(long)]
+        measure: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1804,19 +1844,58 @@ fn run(cli: &Cli) -> Result<()> {
                         }
                     );
                 }
+                StorageCmd::Drain {
+                    name,
+                    stop,
+                    plan,
+                    remove_when_empty,
+                    budget_gb_per_day,
+                    confirm_cold_read,
+                    background,
+                } => upkeep::drain(
+                    cli,
+                    &mut engine,
+                    upkeep::DrainArgs {
+                        name,
+                        stop: *stop,
+                        plan: *plan,
+                        remove_when_empty: *remove_when_empty,
+                        budget_gb_per_day: *budget_gb_per_day,
+                        confirm_cold_read: *confirm_cold_read,
+                        background: *background,
+                    },
+                )?,
+                StorageCmd::Quota {
+                    name,
+                    bytes,
+                    objects,
+                    clear,
+                    measure,
+                } => upkeep::quota(
+                    cli,
+                    &mut engine,
+                    name,
+                    bytes.as_deref(),
+                    *objects,
+                    *clear,
+                    *measure,
+                )?,
                 StorageCmd::List => {
                     let estimates = engine.storage_estimates()?;
+                    let quotas = engine.quota_statuses()?;
                     // The specs, each with its price, stored bytes and monthly cost.
                     let listed: Vec<serde_json::Value> = engine
                         .storages()
                         .iter()
                         .zip(&estimates)
-                        .map(|(spec, e)| {
+                        .zip(&quotas)
+                        .map(|((spec, e), q)| {
                             let mut v = serde_json::to_value(spec).unwrap_or_default();
                             v["price"] = serde_json::to_value(&e.price).unwrap_or_default();
                             v["bytes"] = e.bytes.into();
                             v["monthly_cost"] =
                                 serde_json::to_value(e.monthly_cost).unwrap_or_default();
+                            v["quota"] = serde_json::to_value(q).unwrap_or_default();
                             v
                         })
                         .collect();
@@ -1825,9 +1904,10 @@ fn run(cli: &Cli) -> Result<()> {
                             .storages()
                             .iter()
                             .zip(&estimates)
-                            .map(|(x, e)| {
+                            .zip(&quotas)
+                            .map(|((x, e), q)| {
                                 format!(
-                                    "{}{}{}{} | {} stored | {}{}",
+                                    "{}{}{}{}{} | {} stored{} | {}{}",
                                     x.name(),
                                     if x.is_cold() { " (cold)" } else { "" },
                                     if x.is_carrier() { " (carrier)" } else { "" },
@@ -1836,7 +1916,32 @@ fn run(cli: &Cli) -> Result<()> {
                                     } else {
                                         String::new()
                                     },
+                                    q.drain
+                                        .as_ref()
+                                        .map(|d| format!(" ({d})"))
+                                        .unwrap_or_default(),
                                     fmt_bytes(e.bytes),
+                                    match (q.quota_bytes, q.quota_objects) {
+                                        (None, None) => String::new(),
+                                        (Some(b), _) => format!(
+                                            ", quota {} ({} used, {} %{})",
+                                            fmt_bytes(b),
+                                            fmt_bytes(q.used_bytes),
+                                            q.percent.unwrap_or(0),
+                                            if q.state == "full" {
+                                                ", FULL"
+                                            } else if q.state == "warning" {
+                                                ", nearly full"
+                                            } else {
+                                                ""
+                                            }
+                                        ),
+                                        (None, Some(o)) => format!(
+                                            ", quota {o} objects ({} used{})",
+                                            q.used_objects,
+                                            if q.state == "full" { ", FULL" } else { "" }
+                                        ),
+                                    },
                                     e.price
                                         .as_ref()
                                         .map(|p| p.describe())
