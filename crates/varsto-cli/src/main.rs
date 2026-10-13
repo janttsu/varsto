@@ -378,6 +378,23 @@ enum RecoveryCmd {
         #[arg(required = true, num_args = 2..)]
         shares: Vec<String>,
     },
+    /// What to keep outside your devices to restore everything if all of them are lost, and
+    /// the restore steps for a new device. Personal to this vault; holds no secret.
+    Guide {
+        #[arg(long, value_enum, default_value_t = GuideFormat::Text)]
+        format: GuideFormat,
+        /// Write to this file instead of standard output.
+        #[arg(long)]
+        output: Option<PathBuf>,
+    },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
+enum GuideFormat {
+    Text,
+    Markdown,
+    /// A printable page with checkboxes.
+    Html,
 }
 
 #[derive(Subcommand)]
@@ -1568,6 +1585,7 @@ fn run(cli: &Cli) -> Result<()> {
                 );
                 println!("Vault key (needed to join other devices; shown once, keep it offline):");
                 println!("  {vault_key}");
+                println!("Next: print the recovery kit (`varsto recovery kit`) and, once storages are added, see `varsto recovery guide` for everything to keep in case all your devices are lost.");
             }
         }
         Cmd::Join {
@@ -2978,6 +2996,35 @@ fn run(cli: &Cli) -> Result<()> {
                     "{}",
                     varsto_core::recovery::kit_text(&engine.vault_id().to_string(), &key, sh)?
                 );
+                varsto_core::recovery_guide::record_kit_printed(
+                    &home,
+                    engine.key_epoch(),
+                    *shares,
+                )?;
+                println!("\nThe words alone are not the whole recovery package: `varsto recovery guide` lists what else to keep (storage keys, disks, security keys) and how to restore on a new device.");
+            }
+            RecoveryCmd::Guide { format, output } => {
+                let engine = Engine::open(&home, &passphrase()?)?;
+                let guide = engine.recovery_guide();
+                let body = if cli.json {
+                    serde_json::to_string_pretty(&guide)?
+                } else {
+                    match format {
+                        GuideFormat::Text => varsto_core::recovery_guide::render_text(&guide),
+                        GuideFormat::Markdown => {
+                            varsto_core::recovery_guide::render_markdown(&guide)
+                        }
+                        GuideFormat::Html => varsto_core::recovery_guide::render_html(&guide),
+                    }
+                };
+                match output {
+                    Some(path) => {
+                        std::fs::write(path, body.as_bytes())
+                            .with_context(|| format!("write {}", path.display()))?;
+                        eprintln!("wrote the recovery guide to {}", path.display());
+                    }
+                    None => print!("{body}"),
+                }
             }
             RecoveryCmd::Combine { shares } => {
                 let parsed: Vec<varsto_core::recovery::Share> = shares
@@ -4607,4 +4654,253 @@ fn p2p_status(engine: &Engine, home: &std::path::Path, json: bool) -> Result<()>
         );
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod recovery_guide_tests {
+    use super::*;
+    use varsto_core::recovery_guide::{self as rg, Inputs};
+
+    /// Split a shell line the way a POSIX shell would for the quoting the
+    /// guide uses (double quotes with backslash escapes, single quotes).
+    fn shell_words(line: &str) -> Vec<String> {
+        let mut out = Vec::new();
+        let mut cur = String::new();
+        let mut any = false;
+        let mut chars = line.chars();
+        while let Some(c) = chars.next() {
+            match c {
+                '"' => {
+                    any = true;
+                    while let Some(c) = chars.next() {
+                        match c {
+                            '"' => break,
+                            '\\' => cur.extend(chars.next()),
+                            c => cur.push(c),
+                        }
+                    }
+                }
+                '\'' => {
+                    any = true;
+                    for c in chars.by_ref() {
+                        if c == '\'' {
+                            break;
+                        }
+                        cur.push(c);
+                    }
+                }
+                c if c.is_whitespace() => {
+                    if any || !cur.is_empty() {
+                        out.push(std::mem::take(&mut cur));
+                        any = false;
+                    }
+                }
+                c => cur.push(c),
+            }
+        }
+        if any || !cur.is_empty() {
+            out.push(cur);
+        }
+        out
+    }
+
+    fn pool(name: &str, copies: u32) -> StorageSpec {
+        StorageSpec::Pool {
+            name: name.into(),
+            place: "offsite".into(),
+            reserve_percent: 5,
+            min_reserve_bytes: 0,
+            disks: vec![],
+            scan_roots: vec![],
+            copies,
+            verify_after_days: 180,
+        }
+    }
+
+    fn every_kind() -> Inputs {
+        Inputs {
+            vault_id: "v".into(),
+            device: "laptop".into(),
+            other_devices: vec!["desk \"top\"".into()],
+            storages: vec![
+                StorageSpec::LocalDir {
+                    name: "nas".into(),
+                    path: "/mnt/nas/varsto".into(),
+                    cold: false,
+                    carrier: false,
+                    place: String::new(),
+                },
+                StorageSpec::LocalDir {
+                    name: "stick".into(),
+                    path: "/media/u/stick".into(),
+                    cold: false,
+                    carrier: true,
+                    place: String::new(),
+                },
+                StorageSpec::S3 {
+                    name: "b2".into(),
+                    endpoint: "https://s3.example".into(),
+                    region: "eu".into(),
+                    bucket: "bk".into(),
+                    prefix: "p/x".into(),
+                    access_key_id: "AKIA".into(),
+                    secret_ref: String::new(),
+                    path_style: false,
+                    storage_class: Some("DEEP_ARCHIVE".into()),
+                    cold: true,
+                    place: "cloud".into(),
+                },
+                StorageSpec::S3 {
+                    name: "hot bucket".into(),
+                    endpoint: "https://s3.example".into(),
+                    region: "eu".into(),
+                    bucket: "hb".into(),
+                    prefix: String::new(),
+                    access_key_id: "AKIA".into(),
+                    secret_ref: String::new(),
+                    path_style: true,
+                    storage_class: None,
+                    cold: false,
+                    place: String::new(),
+                },
+                StorageSpec::Rclone {
+                    name: "drive".into(),
+                    remote: "gdrive:v".into(),
+                    cold: false,
+                    place: "cloud".into(),
+                },
+                pool("shelf", 2),
+            ],
+            disk_conf: vec![("u1".into(), "shelf".into(), "Blue 4TB".into())],
+            folders: vec![
+                rg::FolderInput {
+                    name: "docs".into(),
+                    path: Some("/home/u/docs".into()),
+                    selective: false,
+                    strongroom: false,
+                },
+                rg::FolderInput {
+                    name: "my $secret".into(),
+                    path: None,
+                    selective: true,
+                    strongroom: true,
+                },
+            ],
+            strongrooms: vec![rg::StrongroomInput {
+                folder: "my $secret".into(),
+                keys: vec!["blue".into()],
+                software: false,
+            }],
+            backups: vec![rg::BackupInput {
+                name: "home".into(),
+                source: "/home/u".into(),
+            }],
+            org: Some(rg::OrgInput {
+                name: "Acme".into(),
+                admins: vec!["laptop".into()],
+            }),
+            restic: Some(rg::ResticInput {
+                repository: "/srv/restic".into(),
+                password: rg::ResticPassword::Command,
+                env_file: None,
+            }),
+            ..Default::default()
+        }
+    }
+
+    /// Every `varsto ...` line of a guide parses with this command line.
+    fn assert_commands_parse(g: &rg::RecoveryGuide) -> usize {
+        let mut n = 0;
+        for step in g.steps.iter().chain(&g.alternatives) {
+            for line in &step.commands {
+                let words = shell_words(line);
+                if words.first().map(String::as_str) != Some("varsto") {
+                    continue;
+                }
+                if let Err(e) = Cli::try_parse_from(&words) {
+                    panic!("`{line}` does not parse: {e}");
+                }
+                n += 1;
+            }
+        }
+        n
+    }
+
+    #[test]
+    fn guide_commands_parse_with_the_cli() {
+        // `storage add-s3` takes the secret from this variable, as the guide says.
+        std::env::set_var("VARSTO_S3_SECRET", "placeholder");
+        let full = rg::build(&every_kind());
+        let n = assert_commands_parse(&full);
+        assert!(n >= 15, "only {n} commands");
+        let joins: Vec<&String> = full
+            .steps
+            .iter()
+            .flat_map(|s| &s.commands)
+            .filter(|c| c.starts_with("varsto join"))
+            .collect();
+        assert_eq!(joins.len(), 1);
+        assert!(
+            joins[0].contains("--s3-bucket \"hb\""),
+            "a hot bucket is joined through: {}",
+            joins[0]
+        );
+        assert!(
+            !full
+                .steps
+                .iter()
+                .flat_map(|s| &s.commands)
+                .any(|c| c.contains("stick")),
+            "a transferrer is no recovery source"
+        );
+        assert!(full
+            .steps
+            .iter()
+            .flat_map(|s| &s.commands)
+            .any(|c| c.contains("strongroom unlock \"my \\$secret\"")));
+
+        // Joining through a directory, and with only an rclone remote.
+        let mut local = every_kind();
+        local
+            .storages
+            .retain(|s| !matches!(s, StorageSpec::S3 { .. }));
+        let g = rg::build(&local);
+        assert_commands_parse(&g);
+        assert!(g
+            .steps
+            .iter()
+            .flat_map(|s| &s.commands)
+            .any(|c| c.starts_with("varsto join")
+                && c.contains("--storage-path \"/mnt/nas/varsto\"")));
+        let mut rclone_only = every_kind();
+        rclone_only
+            .storages
+            .retain(|s| matches!(s, StorageSpec::Rclone { .. }));
+        let g = rg::build(&rclone_only);
+        assert_commands_parse(&g);
+        assert!(g
+            .steps
+            .iter()
+            .flat_map(|s| &s.commands)
+            .any(|c| c.starts_with("rclone mount")));
+        let member = rg::build(&Inputs {
+            member: true,
+            ..every_kind()
+        });
+        assert_commands_parse(&member);
+    }
+
+    #[test]
+    fn recovery_guide_command_parses() {
+        for args in [
+            vec!["varsto", "recovery", "guide"],
+            vec!["varsto", "recovery", "guide", "--format", "markdown"],
+            vec![
+                "varsto", "recovery", "guide", "--format", "html", "--output", "g.html",
+            ],
+        ] {
+            Cli::try_parse_from(args).unwrap();
+        }
+        assert!(Cli::try_parse_from(["varsto", "recovery", "guide", "--format", "pdf"]).is_err());
+    }
 }

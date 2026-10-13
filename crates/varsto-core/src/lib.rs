@@ -37,6 +37,7 @@ pub mod progress;
 pub mod providers;
 pub mod rclone;
 pub mod recovery;
+pub mod recovery_guide;
 pub mod replica;
 pub mod s3;
 pub mod scrub;

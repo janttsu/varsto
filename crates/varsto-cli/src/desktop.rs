@@ -1068,6 +1068,15 @@ fn api_unlocked(
             service.request_sync();
             Ok(serde_json::to_value(r)?)
         }
+        // The recovery package checklist: structured sentences ({t, p}) the
+        // interface translates, or the English text for "Download as text".
+        (Method::Get, "/api/recovery/guide") => {
+            let guide = engine.recovery_guide();
+            Ok(match query_param(query, "format").as_deref() {
+                Some("text") => json!({ "text": varsto_core::recovery_guide::render_text(&guide) }),
+                _ => serde_json::to_value(guide)?,
+            })
+        }
         (Method::Get, "/api/devices") => Ok(json!({
             "devices": engine.devices_list(),
             "key_epoch": engine.key_epoch(),

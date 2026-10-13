@@ -50,6 +50,7 @@ mod disk_fetch;
 mod disk_groups;
 mod disk_insert;
 mod fetch;
+mod guide;
 mod ledger_upkeep;
 mod manifest_upkeep;
 mod membership;
