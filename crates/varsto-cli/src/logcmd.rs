@@ -79,23 +79,35 @@ pub fn run(home: &Path, cmd: &LogCmd, json: bool) -> Result<()> {
             follow,
         } => tail(&dir, component, *lines, *follow)?,
         LogCmd::Bundle { output } => {
-            let out = output
-                .clone()
-                .unwrap_or_else(|| PathBuf::from(format!("varsto-logs-{}.tar.zst", crate::desktop::log_stamp())));
-            let state = crate::service::read_service_file(home).and_then(|f| {
-                crate::service::http_get(&format!("http://127.0.0.1:{}/api/state", f.port), &f.token).ok()
+            let out = output.clone().unwrap_or_else(|| {
+                PathBuf::from(format!(
+                    "varsto-logs-{}.tar.zst",
+                    crate::desktop::log_stamp()
+                ))
             });
-            let file = std::fs::File::create(&out).with_context(|| format!("create {}", out.display()))?;
+            let state = crate::service::read_service_file(home).and_then(|f| {
+                crate::service::http_get(
+                    &format!("http://127.0.0.1:{}/api/state", f.port),
+                    &f.token,
+                )
+                .ok()
+            });
+            let file =
+                std::fs::File::create(&out).with_context(|| format!("create {}", out.display()))?;
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;
                 let _ = std::fs::set_permissions(&out, std::fs::Permissions::from_mode(0o600));
             }
-            let mut file = logging::bundle(home, &crate::desktop::bundle_extras(home, state), file)?;
+            let mut file =
+                logging::bundle(home, &crate::desktop::bundle_extras(home, state), file)?;
             file.flush()?;
             log::info!(path = out.display().to_string(); "log bundle written");
             if json {
-                println!("{}", serde_json::json!({"bundle": out, "note": crate::desktop::BUNDLE_REMINDER}));
+                println!(
+                    "{}",
+                    serde_json::json!({"bundle": out, "note": crate::desktop::BUNDLE_REMINDER})
+                );
             } else {
                 println!("Wrote {}", out.display());
                 println!("{}", crate::desktop::BUNDLE_REMINDER);

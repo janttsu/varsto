@@ -165,12 +165,41 @@ fn cut_prefixed(s: &str, prefix: &str) -> String {
     out
 }
 
-const MARKERS: [&str; 6] = ["passphrase", "password", "secret", "token", "mnemonic", "bearer"];
+const MARKERS: [&str; 6] = [
+    "passphrase",
+    "password",
+    "secret",
+    "token",
+    "mnemonic",
+    "bearer",
+];
 
 /// Words after `passphrase:` and the like that are prose, not a secret.
 const PROSE: [&str; 24] = [
-    "set", "the", "a", "an", "is", "not", "no", "missing", "none", "wrong", "required", "given", "from",
-    "for", "and", "or", "was", "in", "of", "to", "needed", "empty", "stored", "unchanged",
+    "set",
+    "the",
+    "a",
+    "an",
+    "is",
+    "not",
+    "no",
+    "missing",
+    "none",
+    "wrong",
+    "required",
+    "given",
+    "from",
+    "for",
+    "and",
+    "or",
+    "was",
+    "in",
+    "of",
+    "to",
+    "needed",
+    "empty",
+    "stored",
+    "unchanged",
 ];
 
 fn has_marker(s: &str) -> bool {
@@ -194,7 +223,9 @@ fn cut_assignments(s: &str) -> String {
             }
             // The name may go on (`token_hex`, `secret_access_key`, `tokens`).
             let mut j = start + m.len();
-            while j < bytes.len() && (bytes[j].is_ascii_alphanumeric() || bytes[j] == b'_' || bytes[j] == b'-') {
+            while j < bytes.len()
+                && (bytes[j].is_ascii_alphanumeric() || bytes[j] == b'_' || bytes[j] == b'-')
+            {
                 j += 1;
             }
             if j < bytes.len() && bytes[j] == b'"' {
@@ -224,7 +255,10 @@ fn cut_assignments(s: &str) -> String {
                 (k + 1, close)
             } else {
                 let end = s[k..]
-                    .find(|c: char| c.is_whitespace() || matches!(c, '&' | ',' | ';' | ')' | '"' | '\'' | ']' | '}'))
+                    .find(|c: char| {
+                        c.is_whitespace()
+                            || matches!(c, '&' | ',' | ';' | ')' | '"' | '\'' | ']' | '}')
+                    })
                     .map(|e| k + e)
                     .unwrap_or(s.len());
                 (k, end)
@@ -319,7 +353,10 @@ fn cut_bip39(s: &str) -> Option<String> {
     let mut run_end = 0usize;
     let mut run_len = 0usize;
     let mut idx = 0usize;
-    let close = |run_start: &mut Option<usize>, run_len: &mut usize, run_end: usize, cuts: &mut Vec<(usize, usize)>| {
+    let close = |run_start: &mut Option<usize>,
+                 run_len: &mut usize,
+                 run_end: usize,
+                 cuts: &mut Vec<(usize, usize)>| {
         if let Some(st) = run_start.take() {
             if *run_len >= MIN_RUN {
                 cuts.push((st, run_end));
@@ -331,7 +368,12 @@ fn cut_bip39(s: &str) -> Option<String> {
         let w_start = idx;
         idx += word.len();
         let core = word.trim_end_matches(|c: char| c.is_whitespace());
-        let core_trim = core.trim_matches(|c: char| matches!(c, ',' | '.' | '"' | '\'' | ';' | ':' | '(' | ')' | '[' | ']'));
+        let core_trim = core.trim_matches(|c: char| {
+            matches!(
+                c,
+                ',' | '.' | '"' | '\'' | ';' | ':' | '(' | ')' | '[' | ']'
+            )
+        });
         if core_trim.is_empty() {
             // Whitespace only: does not break a run.
             continue;
@@ -341,11 +383,17 @@ fn cut_bip39(s: &str) -> Option<String> {
             && list.binary_search(&core_trim).is_ok();
         if is_word {
             if run_start.is_none() {
-                let lead = core.len() - core.trim_start_matches(|c: char| !c.is_ascii_lowercase()).len();
+                let lead = core.len()
+                    - core
+                        .trim_start_matches(|c: char| !c.is_ascii_lowercase())
+                        .len();
                 run_start = Some(w_start + lead);
             }
             run_len += 1;
-            let trail = core.len() - core.trim_end_matches(|c: char| !c.is_ascii_lowercase()).len();
+            let trail = core.len()
+                - core
+                    .trim_end_matches(|c: char| !c.is_ascii_lowercase())
+                    .len();
             run_end = w_start + core.len() - trail;
         } else {
             close(&mut run_start, &mut run_len, run_end, &mut cuts);
@@ -376,7 +424,8 @@ mod tests {
 
     #[test]
     fn token_shapes_are_cut() {
-        let s = scrub("accepted vst2.AbC-123_x.yz and vst1.qqq vmk_0123456789abcdef and vot1.aa.bb");
+        let s =
+            scrub("accepted vst2.AbC-123_x.yz and vst1.qqq vmk_0123456789abcdef and vot1.aa.bb");
         assert!(!s.contains("AbC"), "{s}");
         assert!(!s.contains("qqq"), "{s}");
         assert!(!s.contains("0123456789abcdef"), "{s}");
@@ -442,7 +491,15 @@ mod tests {
 
     #[test]
     fn secret_field_names() {
-        for n in ["token", "service_token", "passphrase", "secret_access_key", "key_hex", "words", "pin"] {
+        for n in [
+            "token",
+            "service_token",
+            "passphrase",
+            "secret_access_key",
+            "key_hex",
+            "words",
+            "pin",
+        ] {
             assert!(secret_field(n), "{n}");
         }
         for n in ["key", "key_id", "key_epoch", "path", "bytes", "folder"] {

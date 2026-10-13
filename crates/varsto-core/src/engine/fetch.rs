@@ -240,8 +240,8 @@ impl FetchStats {
         if s.window == WINDOW_MAX || s.window == WINDOW_MIN {
             s.climb.up = s.window == WINDOW_MIN;
         }
-        if std::env::var_os("VARSTO_P2P_DEBUG").is_some() {
-            eprintln!(
+        {
+            log::debug!(
                 "fetch: {:.1} MB/s, window {} peers {:.3}s ({}) storages {:.3}s ({})",
                 rate / 1e6,
                 s.window,

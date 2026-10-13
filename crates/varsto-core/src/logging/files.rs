@@ -191,9 +191,11 @@ impl Sink {
     /// and start a new active file.
     fn rotate(&mut self) -> io::Result<()> {
         let path = active_path(&self.dir, &self.component);
-        let aside = self
-            .dir
-            .join(format!("varsto-{}.rotating-{}.log", self.component, std::process::id()));
+        let aside = self.dir.join(format!(
+            "varsto-{}.rotating-{}.log",
+            self.component,
+            std::process::id()
+        ));
         fs::rename(&path, &aside)?;
         self.file = None;
         self.open();
@@ -205,7 +207,10 @@ impl Sink {
             for compressed in [true, false] {
                 let from = rotated_path(&self.dir, &self.component, n, compressed);
                 if from.exists() {
-                    let _ = fs::rename(&from, rotated_path(&self.dir, &self.component, n + 1, compressed));
+                    let _ = fs::rename(
+                        &from,
+                        rotated_path(&self.dir, &self.component, n + 1, compressed),
+                    );
                 }
             }
         }
@@ -380,8 +385,14 @@ mod tests {
             .map(|f| f.path.file_name().unwrap().to_string_lossy().to_string())
             .collect();
         assert!(names.contains(&"varsto-test.log".to_string()), "{names:?}");
-        assert!(names.contains(&"varsto-test.1.log.zst".to_string()), "{names:?}");
-        assert!(names.contains(&"varsto-test.2.log.zst".to_string()), "{names:?}");
+        assert!(
+            names.contains(&"varsto-test.1.log.zst".to_string()),
+            "{names:?}"
+        );
+        assert!(
+            names.contains(&"varsto-test.2.log.zst".to_string()),
+            "{names:?}"
+        );
         assert!(!names.iter().any(|n| n.contains(".3.")), "{names:?}");
         assert!(fs::metadata(active_path(dir.path(), "test")).unwrap().len() <= 4096);
         let text = read_text(&dir.path().join("varsto-test.1.log.zst")).unwrap();

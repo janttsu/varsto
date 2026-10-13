@@ -57,9 +57,9 @@ fn now() -> i64 {
 
 /// One line in the service log about a path decision, a punch or a relay:
 /// the events a user needs when a transfer does not cross a NAT. Per-request
-/// chatter stays behind `VARSTO_P2P_DEBUG`.
+/// chatter is logged at debug and trace level (`crate::logging`).
 pub(crate) fn log(what: &str) {
-    eprintln!("p2p: {what}");
+    log::info!("{what}");
 }
 
 /// `X-Varsto-Peer: <device>:<ts>:<nonce>:<mac>` where
@@ -582,6 +582,29 @@ pub fn handle_from(
     path: &str,
     auth: &str,
 ) -> (u16, Vec<u8>, Option<DeviceId>) {
+    let t = crate::logging::Timer::start();
+    let r = handle_from_inner(snap, path, auth);
+    let level = if path.starts_with("/p2p/object/") && (r.0 == 200 || r.0 == 404) {
+        log::Level::Trace
+    } else {
+        log::Level::Debug
+    };
+    if log::log_enabled!(level) {
+        let who = r.1.len();
+        let peer =
+            r.2.as_ref()
+                .map(|d| d.short().to_string())
+                .unwrap_or_else(|| "-".into());
+        log::log!(level, peer = peer, path = path, status = r.0, bytes = who, ms = t.ms(); "p2p request served");
+    }
+    r
+}
+
+fn handle_from_inner(
+    snap: Option<&Snapshot>,
+    path: &str,
+    auth: &str,
+) -> (u16, Vec<u8>, Option<DeviceId>) {
     let Some(snap) = snap else {
         return (503, b"locked".to_vec(), None);
     };
@@ -971,9 +994,7 @@ fn exchange(
         raw.extend_from_slice(&buf[..n]);
     };
     let head = String::from_utf8_lossy(&raw[..sep]).to_string();
-    if std::env::var_os("VARSTO_P2P_DEBUG").is_some() {
-        eprintln!("p2p: response head: {}", head.replace("\r\n", " | "));
-    }
+    log::trace!("response head: {}", head.replace("\r\n", " | "));
     let status: u16 = head
         .lines()
         .next()
@@ -1233,9 +1254,7 @@ impl Peers {
     }
 
     fn debug(&self, what: &str) {
-        if std::env::var_os("VARSTO_P2P_DEBUG").is_some() {
-            eprintln!("p2p: {what}");
-        }
+        log::debug!("{what}");
     }
 
     fn try_tcp(&self, addr: SocketAddr, path: &str, auth: &str) -> Result<(u16, Vec<u8>)> {
@@ -1343,7 +1362,29 @@ impl Peers {
     /// of path, so the service log tells how a NAT was (not) crossed.
     fn fetch(&self, p: &PeerInfo, path: &str, auth: &str) -> Option<(u16, Vec<u8>, Route)> {
         let _active = self.traffic.begin(&p.device);
+        let t = crate::logging::Timer::start();
         let got = self.fetch_uncounted(p, path, auth);
+        let chatty = path.starts_with("/p2p/object/");
+        let level = if chatty && got.as_ref().is_some_and(|g| g.0 == 200 || g.0 == 404) {
+            log::Level::Trace
+        } else {
+            log::Level::Debug
+        };
+        if log::log_enabled!(level) {
+            let peer = if p.name.is_empty() {
+                p.device.short().to_string()
+            } else {
+                p.name.clone()
+            };
+            match &got {
+                Some((status, body, route)) => {
+                    log::log!(level, peer = peer, path = path, status = *status, bytes = body.len(), route = route.label(), ms = t.ms(); "p2p request")
+                }
+                None => {
+                    log::log!(level, peer = peer, path = path, ms = t.ms(); "p2p request: no route reached the peer")
+                }
+            }
+        }
         if let Some((status, body, route)) = &got {
             self.traffic.record(
                 &p.device,

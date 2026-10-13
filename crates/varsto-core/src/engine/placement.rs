@@ -529,6 +529,12 @@ impl Engine {
     /// frees the folder's idle files on this device after the checks above.
     /// Files that cannot go are listed in the report and left alone.
     pub fn apply_suggestion(&mut self, id: &str, idle_days: i64) -> Result<ApplyReport> {
+        crate::logged_op!("apply suggestion", id, {
+            self.apply_suggestion_inner(id, idle_days)
+        })
+    }
+
+    fn apply_suggestion_inner(&mut self, id: &str, idle_days: i64) -> Result<ApplyReport> {
         if let Some(folder) = id.strip_prefix(COLD_IDLE_PREFIX) {
             // A move seals its own batches: drops are published before deletes.
             let moved = self.apply_cold_idle(folder, idle_days)?;

@@ -211,7 +211,8 @@ impl ServiceState {
                 Ok(r) => {
                     log::info!(
                         "automatic verification: {} blocks verified, {} left for the next run",
-                        r.blocks_verified, r.left_for_next_run
+                        r.blocks_verified,
+                        r.left_for_next_run
                     );
                     if !r.corrupt.is_empty() || !r.missing.is_empty() {
                         let msg = format!(
@@ -535,10 +536,7 @@ impl P2p {
             if cfg.port == 0 {
                 return Err(e);
             }
-            log::warn!(
-                "p2p port {} is taken ({e:#}); using a free one",
-                cfg.port
-            );
+            log::warn!("p2p port {} is taken ({e:#}); using a free one", cfg.port);
             varsto_core::p2p::Server::bind(([0, 0, 0, 0], 0).into())
         });
         let server = match bound {
@@ -671,13 +669,11 @@ impl P2p {
                     let last_probe = Instant::now();
                     let reachable = !cfg.public_addrs.is_empty()
                         || probe.public_addrs().iter().any(|a| node.probe_self(*a));
-                    if std::env::var_os("VARSTO_P2P_DEBUG").is_some() {
-                        log::info!(
-                            "stun {:?} nat {} reachable {reachable}",
-                            probe.mapped,
-                            probe.nat.as_str()
-                        );
-                    }
+                    log::debug!(
+                        "stun {:?} nat {} reachable {reachable}",
+                        probe.mapped,
+                        probe.nat.as_str()
+                    );
                     *nat.lock().unwrap() = NatInfo {
                         probe,
                         reachable,
@@ -1354,6 +1350,7 @@ pub fn run(opts: Options) -> Result<()> {
         let now_stamp = stamp(&local_files);
         if now_stamp != local_stamp {
             local_stamp = now_stamp;
+            log::debug!("local configuration changed on disk; reloading");
             let mut st = state.lock().unwrap();
             let reloaded = st.engine.as_mut().map(|e| e.reload_local());
             match reloaded {
@@ -1496,6 +1493,7 @@ pub fn run(opts: Options) -> Result<()> {
                             b + ps.files_changed,
                         )
                     });
+                    log::debug!(why = why, ms = started.elapsed().as_millis() as u64, pulled = pulled, pushed = pushed, folders = reports.len(); "service sync round");
                     if pulled + pushed > 0 || started.elapsed() > Duration::from_secs(10) {
                         log::info!(
                             "sync ({why}) took {:.1} s: {pulled} files from other devices, {pushed} changed here",
@@ -1522,6 +1520,7 @@ pub fn run(opts: Options) -> Result<()> {
                     }
                     snapshot_syncs = st.service.syncs; // the snapshot above is current
                     let st = &mut *st;
+                    let upkeep = varsto_core::logging::Timer::start();
                     if let Some(e) = st.engine.as_mut() {
                         st.service.auto_verify_if_due(e);
                         st.service.scrub_if_due(e);
@@ -1532,6 +1531,7 @@ pub fn run(opts: Options) -> Result<()> {
                             log::info!("device details not published: {err:#}");
                         }
                     }
+                    log::debug!(ms = upkeep.ms(); "service upkeep after sync (verify, scrub, repair, backups, restic, device details)");
                     let checked = st.engine.as_ref().map(|e| e.policy_check());
                     match checked {
                         Some(Ok(reps)) => st.service.record_policies(reps),

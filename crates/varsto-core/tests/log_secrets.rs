@@ -59,7 +59,9 @@ fn no_secret_reaches_the_log() {
     // Constructing the storage registers its secret; here register directly.
     logging::register_secret(s3_secret);
     let mut store = SecretStore::default();
-    store.secrets.insert("bucket-store".into(), s3_secret.into());
+    store
+        .secrets
+        .insert("bucket-store".into(), s3_secret.into());
     let rclone_token = r#"{"access_token":"ya29.canaryRcloneAccessToken"}"#;
     let restic_password = "canary-restic-pw-991";
     // Recovery words.
@@ -81,10 +83,23 @@ fn no_secret_reaches_the_log() {
         ("rclone", "ya29.canaryRcloneAccessToken".to_string()),
         ("restic", restic_password.to_string()),
         // Any five consecutive words of the phrase.
-        ("words", words.split_whitespace().take(5).collect::<Vec<_>>().join(" ")),
+        (
+            "words",
+            words
+                .split_whitespace()
+                .take(5)
+                .collect::<Vec<_>>()
+                .join(" "),
+        ),
         (
             "share words",
-            shares[0].words.split_whitespace().skip(3).take(5).collect::<Vec<_>>().join(" "),
+            shares[0]
+                .words
+                .split_whitespace()
+                .skip(3)
+                .take(5)
+                .collect::<Vec<_>>()
+                .join(" "),
         ),
     ];
 
@@ -93,9 +108,16 @@ fn no_secret_reaches_the_log() {
     log::info!("share {share:?} replica {replica:?} s3 {s3:?} store {store:?}");
     log::trace!("recovery share {:?}", shares[0]);
     // Display / encoded forms in message text.
-    log::warn!("share token {share_text} replica token {replica_text} sealed {sealed} mcp {mcp_key}");
-    log::error!("failed: {}", format_args!("http://127.0.0.1:1/?token={service_token}&x=1"));
-    log::debug!("restic env RESTIC_PASSWORD={restic_password} rclone config token = {rclone_token}");
+    log::warn!(
+        "share token {share_text} replica token {replica_text} sealed {sealed} mcp {mcp_key}"
+    );
+    log::error!(
+        "failed: {}",
+        format_args!("http://127.0.0.1:1/?token={service_token}&x=1")
+    );
+    log::debug!(
+        "restic env RESTIC_PASSWORD={restic_password} rclone config token = {rclone_token}"
+    );
     log::debug!("recovery words: {words}");
     log::debug!("kit:\n1: {}\n2: {}", shares[0].words, shares[1].words);
     log::debug!("master hex by mistake {master_hex} and folder key {folder_hex}");
@@ -115,14 +137,23 @@ fn no_secret_reaches_the_log() {
         eprintln!("{text}");
     }
     assert!(text.contains("allowed: names and sizes"), "{text}");
-    assert!(text.contains("Photos/2026/IMG_0001.jpg"), "file names are allowed in the local log");
+    assert!(
+        text.contains("Photos/2026/IMG_0001.jpg"),
+        "file names are allowed in the local log"
+    );
     assert!(text.contains("[redacted]"));
     for (what, s) in &secrets {
-        assert!(!text.contains(s.as_str()), "{what} leaked into the log:\n{text}");
+        assert!(
+            !text.contains(s.as_str()),
+            "{what} leaked into the log:\n{text}"
+        );
     }
 
     // The bundle is scrubbed again and holds the extras.
-    let extra = vec![("note.txt".to_string(), format!("token={service_token}").into_bytes())];
+    let extra = vec![(
+        "note.txt".to_string(),
+        format!("token={service_token}").into_bytes(),
+    )];
     let bundle = logging::bundle(home.path(), &extra, Vec::new()).unwrap();
     let tar = zstd::decode_all(&bundle[..]).unwrap();
     let tar = String::from_utf8_lossy(&tar);

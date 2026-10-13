@@ -142,26 +142,35 @@ impl Filter {
         for part in spec.split(',').map(str::trim).filter(|p| !p.is_empty()) {
             match part.split_once('=') {
                 Some((module, level)) => {
-                    let l = parse_level(level)
-                        .ok_or_else(|| format!("unknown log level `{level}` (use error, warn, info, debug or trace)"))?;
+                    let l = parse_level(level).ok_or_else(|| {
+                        format!(
+                            "unknown log level `{level}` (use error, warn, info, debug or trace)"
+                        )
+                    })?;
                     f.directives.push((module.trim().to_string(), l));
                 }
                 None => {
-                    f.own = parse_level(part)
-                        .ok_or_else(|| format!("unknown log level `{part}` (use error, warn, info, debug or trace)"))?;
+                    f.own = parse_level(part).ok_or_else(|| {
+                        format!(
+                            "unknown log level `{part}` (use error, warn, info, debug or trace)"
+                        )
+                    })?;
                     // Other crates follow only when asked for less than warn.
                     f.foreign = f.own.min(LevelFilter::Warn);
                 }
             }
         }
-        f.directives.sort_by_key(|(m, _)| std::cmp::Reverse(m.len()));
+        f.directives
+            .sort_by_key(|(m, _)| std::cmp::Reverse(m.len()));
         Ok(f)
     }
 
     /// The level that applies to a log target (a module path).
     pub fn level_for(&self, target: &str) -> LevelFilter {
         for (m, l) in &self.directives {
-            if target == m || (target.starts_with(m.as_str()) && target[m.len()..].starts_with("::")) {
+            if target == m
+                || (target.starts_with(m.as_str()) && target[m.len()..].starts_with("::"))
+            {
                 return *l;
             }
         }
@@ -396,7 +405,9 @@ fn push_value(out: &mut String, v: &str) {
         && !v
             .chars()
             .any(|c| c.is_whitespace() || c == '"' || c == '=' || c == '\\' || c.is_control());
-    if plain {
+    // JSON summaries stay readable: written as they are when on one line.
+    let json = (v.starts_with('{') && v.ends_with('}')) || (v.starts_with('[') && v.ends_with(']'));
+    if plain || (json && !v.chars().any(char::is_control)) {
         out.push_str(v);
         return;
     }
@@ -420,7 +431,11 @@ fn push_value(out: &mut String, v: &str) {
 struct Fields<'a>(&'a mut String);
 
 impl<'kvs> log::kv::VisitSource<'kvs> for Fields<'_> {
-    fn visit_pair(&mut self, key: log::kv::Key<'kvs>, value: log::kv::Value<'kvs>) -> Result<(), log::kv::Error> {
+    fn visit_pair(
+        &mut self,
+        key: log::kv::Key<'kvs>,
+        value: log::kv::Value<'kvs>,
+    ) -> Result<(), log::kv::Error> {
         self.0.push(' ');
         self.0.push_str(key.as_str());
         self.0.push('=');
@@ -434,15 +449,32 @@ impl<'kvs> log::kv::VisitSource<'kvs> for Fields<'_> {
 }
 
 /// One finished line (before scrubbing), with its newline.
-fn format_line(component: &str, level: Level, target: &str, message: &std::fmt::Arguments<'_>, record: Option<&Record<'_>>) -> String {
+fn format_line(
+    component: &str,
+    level: Level,
+    target: &str,
+    message: &std::fmt::Arguments<'_>,
+    record: Option<&Record<'_>>,
+) -> String {
     let mut s = String::with_capacity(160);
     s.push_str(&rfc3339_millis(SystemTime::now()));
-    let _ = write!(s, " {:<5} {}[{}/{}] {}: ", level, component, std::process::id(), thread_label(), target);
+    let _ = write!(
+        s,
+        " {:<5} {}[{}/{}] {}: ",
+        level,
+        component,
+        std::process::id(),
+        thread_label(),
+        target
+    );
     let start = s.len();
     let _ = write!(s, "{message}");
     if s[start..].contains(['\n', '\r']) {
         // Continuation lines are indented, so every record starts at column 0.
-        let msg = s[start..].replace("\r\n", "\n").replace('\r', "\n").replace('\n', "\n    ");
+        let msg = s[start..]
+            .replace("\r\n", "\n")
+            .replace('\r', "\n")
+            .replace('\n', "\n    ");
         s.truncate(start);
         s.push_str(msg.trim_end());
     }
@@ -482,7 +514,13 @@ impl Log for Logger {
         if record.level() > c.filter.level_for(record.target()) {
             return;
         }
-        let line = format_line(&c.component, record.level(), record.target(), record.args(), Some(record));
+        let line = format_line(
+            &c.component,
+            record.level(),
+            record.target(),
+            record.args(),
+            Some(record),
+        );
         let line = scrub_body(&line);
         if let Some(se) = c.stderr {
             if record.level() <= se {
@@ -520,7 +558,10 @@ fn install_panic_hook() {
                 &c.component,
                 Level::Error,
                 "panic",
-                &format_args!("thread {} panicked at {at}: {payload}\nbacktrace:\n{bt}", thread_label()),
+                &format_args!(
+                    "thread {} panicked at {at}: {payload}\nbacktrace:\n{bt}",
+                    thread_label()
+                ),
                 None,
             );
             let line = scrub_body(&line);
@@ -543,12 +584,20 @@ pub fn usage(home: &Path) -> (u64, usize) {
 /// A diagnostics bundle: the home's log files (decompressed and scrubbed
 /// again), `service.log`, and the given extra files (scrubbed too), as a
 /// zstd-compressed tar written to `out`.
-pub fn bundle<W: std::io::Write>(home: &Path, extras: &[(String, Vec<u8>)], out: W) -> std::io::Result<W> {
+pub fn bundle<W: std::io::Write>(
+    home: &Path,
+    extras: &[(String, Vec<u8>)],
+    out: W,
+) -> std::io::Result<W> {
     flush();
     let enc = zstd::Encoder::new(out, 3)?;
     let mut tar = files::TarWriter::new(enc);
     let now = crate::util::now_utc().max(0) as u64;
-    let add = |tar: &mut files::TarWriter<_>, name: String, text: &str, mtime: u64| -> std::io::Result<()> {
+    let add = |tar: &mut files::TarWriter<_>,
+               name: String,
+               text: &str,
+               mtime: u64|
+     -> std::io::Result<()> {
         let mut clean = String::with_capacity(text.len());
         for l in text.split_inclusive('\n') {
             clean.push_str(&scrub(l));
@@ -556,8 +605,15 @@ pub fn bundle<W: std::io::Write>(home: &Path, extras: &[(String, Vec<u8>)], out:
         tar.add(&name, clean.as_bytes(), mtime)
     };
     for f in files::list(&dir(home)) {
-        let Ok(text) = files::read_text(&f.path) else { continue };
-        let name = f.path.file_name().unwrap_or_default().to_string_lossy().to_string();
+        let Ok(text) = files::read_text(&f.path) else {
+            continue;
+        };
+        let name = f
+            .path
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
         let name = name.trim_end_matches(".zst").to_string();
         let mtime = f
             .modified
@@ -570,13 +626,143 @@ pub fn bundle<W: std::io::Write>(home: &Path, extras: &[(String, Vec<u8>)], out:
         if let Ok(raw) = std::fs::read(home.join(extra)) {
             // Only the end of a large file.
             let tail = &raw[raw.len().saturating_sub(4 << 20)..];
-            add(&mut tar, format!("varsto-logs/{extra}"), &String::from_utf8_lossy(tail), now)?;
+            add(
+                &mut tar,
+                format!("varsto-logs/{extra}"),
+                &String::from_utf8_lossy(tail),
+                now,
+            )?;
         }
     }
     for (name, data) in extras {
-        add(&mut tar, format!("varsto-logs/{name}"), &String::from_utf8_lossy(data), now)?;
+        add(
+            &mut tar,
+            format!("varsto-logs/{name}"),
+            &String::from_utf8_lossy(data),
+            now,
+        )?;
     }
     tar.finish()?.finish()
+}
+
+/// Run an operation with a debug line at its start and one at its end
+/// (duration and a compact JSON summary of its report, or the error).
+/// The report must hold no secrets and no file contents: use
+/// [`logged_op_plain!`] for anything else.
+///
+/// ```ignore
+/// pub fn push(&mut self, folder: &str) -> Result<PushReport> {
+///     crate::logged_op!("push", folder, { … })
+/// }
+/// ```
+#[macro_export]
+macro_rules! logged_op {
+    ($what:expr, $subject:expr, $body:block) => {
+        $crate::logging::run_op(module_path!(), $what, &$subject, true, || $body)
+    };
+}
+
+/// Like [`logged_op!`] without the report in the end line: for results
+/// that may hold keys or contents, or have no `Serialize`.
+#[macro_export]
+macro_rules! logged_op_plain {
+    ($what:expr, $subject:expr, $body:block) => {
+        $crate::logging::run_op_plain(module_path!(), $what, &$subject, || $body)
+    };
+}
+
+#[doc(hidden)]
+pub fn run_op<T: serde::Serialize, F: FnOnce() -> anyhow::Result<T>>(
+    target: &str,
+    what: &str,
+    subject: &dyn std::fmt::Display,
+    report: bool,
+    f: F,
+) -> anyhow::Result<T> {
+    if !log::log_enabled!(target: target, Level::Debug) {
+        return f();
+    }
+    let t = Timer::start();
+    log::debug!(target: target, subject:% = subject; "{what} start");
+    let r = f();
+    match &r {
+        Ok(v) if report => {
+            let summary = serde_json::to_value(v)
+                .map(|v| summarize(v).to_string())
+                .unwrap_or_default();
+            let summary = if summary.len() > 2000 {
+                let mut cut = 2000;
+                while !summary.is_char_boundary(cut) {
+                    cut -= 1;
+                }
+                format!("{}…", &summary[..cut])
+            } else {
+                summary
+            };
+            log::debug!(target: target, subject:% = subject, ms = t.ms(), result = summary; "{what} done");
+        }
+        Ok(_) => log::debug!(target: target, subject:% = subject, ms = t.ms(); "{what} done"),
+        Err(e) => {
+            log::debug!(target: target, subject:% = subject, ms = t.ms(); "{what} failed: {e:#}")
+        }
+    }
+    r
+}
+
+#[doc(hidden)]
+pub fn run_op_plain<T, F: FnOnce() -> anyhow::Result<T>>(
+    target: &str,
+    what: &str,
+    subject: &dyn std::fmt::Display,
+    f: F,
+) -> anyhow::Result<T> {
+    if !log::log_enabled!(target: target, Level::Debug) {
+        return f();
+    }
+    let t = Timer::start();
+    log::debug!(target: target, subject:% = subject; "{what} start");
+    let r = f();
+    match &r {
+        Ok(_) => log::debug!(target: target, subject:% = subject, ms = t.ms(); "{what} done"),
+        Err(e) => {
+            log::debug!(target: target, subject:% = subject, ms = t.ms(); "{what} failed: {e:#}")
+        }
+    }
+    r
+}
+
+/// Shorten a report for the log: long lists become their length and first
+/// few items, empty values and zeros go.
+fn summarize(v: serde_json::Value) -> serde_json::Value {
+    use serde_json::Value;
+    match v {
+        Value::Array(a) if a.len() > 8 => {
+            let n = a.len();
+            let head: Vec<Value> = a.into_iter().take(5).map(summarize).collect();
+            serde_json::json!({"len": n, "first": head})
+        }
+        Value::Array(a) => Value::Array(a.into_iter().map(summarize).collect()),
+        Value::Object(o) => Value::Object(
+            o.into_iter()
+                .filter(|(_, v)| match v {
+                    Value::Null => false,
+                    Value::Bool(b) => *b,
+                    Value::Number(n) => n.as_f64() != Some(0.0),
+                    Value::String(s) => !s.is_empty(),
+                    Value::Array(a) => !a.is_empty(),
+                    Value::Object(o) => !o.is_empty(),
+                })
+                .map(|(k, v)| {
+                    if redact::secret_field(&k) {
+                        (k, Value::String(REDACTED.into()))
+                    } else {
+                        (k, summarize(v))
+                    }
+                })
+                .collect(),
+        ),
+        other => other,
+    }
 }
 
 /// Time an operation: `let t = logging::Timer::start(); …; t.ms()`.
@@ -610,7 +796,10 @@ mod tests {
         let e = Filter::parse("error").unwrap();
         assert_eq!(e.level_for("quinn"), LevelFilter::Error);
         assert!(Filter::parse("loud").is_err());
-        assert_eq!(Filter::parse("").unwrap().level_for("varsto_cli"), LevelFilter::Debug);
+        assert_eq!(
+            Filter::parse("").unwrap().level_for("varsto_cli"),
+            LevelFilter::Debug
+        );
     }
 
     #[test]
@@ -621,7 +810,13 @@ mod tests {
 
     #[test]
     fn line_format() {
-        let l = format_line("cli", Level::Debug, "varsto_core::x", &format_args!("two\nlines"), None);
+        let l = format_line(
+            "cli",
+            Level::Debug,
+            "varsto_core::x",
+            &format_args!("two\nlines"),
+            None,
+        );
         assert!(l.contains(" DEBUG cli["), "{l}");
         assert!(l.ends_with("varsto_core::x: two\n    lines\n"), "{l}");
         let mut s = String::new();

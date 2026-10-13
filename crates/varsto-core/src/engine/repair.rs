@@ -290,6 +290,10 @@ impl Engine {
 
     /// One repair run (see the module documentation).
     pub fn repair(&mut self, opts: &RepairOptions) -> Result<RepairReport> {
+        crate::logged_op!("repair", "", { self.repair_inner(opts) })
+    }
+
+    fn repair_inner(&mut self, opts: &RepairOptions) -> Result<RepairReport> {
         self.ensure_active()?;
         if self.forked_self {
             bail!("this device's ledger is forked; it must be re-enrolled as a new device");

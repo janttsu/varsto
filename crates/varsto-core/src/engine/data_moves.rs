@@ -110,6 +110,14 @@ impl Engine {
             .filter(|p| !p.is_everywhere())
             .map(|p| self.placement_names(p))
             .filter(|n| !n.is_empty());
+        if log::log_enabled!(log::Level::Trace) {
+            log::trace!(
+                folder = rec.name.as_str(),
+                storages:? = names,
+                carriers:? = carriers;
+                "placement: write targets (none = every storage)"
+            );
+        }
         WriteTargets { names, carriers }
     }
 
@@ -174,6 +182,16 @@ impl Engine {
     /// every device writes the folder the same way. Blocks already stored
     /// stay where they are; `move_data` moves them.
     pub fn set_placement(
+        &mut self,
+        folder: &str,
+        placement: Option<Placement>,
+    ) -> Result<PlacementInfo> {
+        crate::logged_op!("set placement", folder, {
+            self.set_placement_inner(folder, placement)
+        })
+    }
+
+    fn set_placement_inner(
         &mut self,
         folder: &str,
         placement: Option<Placement>,
@@ -358,6 +376,10 @@ impl Engine {
     /// costs. Moving a whole folder also changes its placement, so new
     /// blocks go to the new storage.
     pub fn move_data(&mut self, req: &MoveRequest) -> Result<MoveReport> {
+        crate::logged_op!("move data", "", { self.move_data_inner(req) })
+    }
+
+    fn move_data_inner(&mut self, req: &MoveRequest) -> Result<MoveReport> {
         self.ensure_active()?;
         if self.vault.member {
             bail!("a member device cannot move the owner's data");

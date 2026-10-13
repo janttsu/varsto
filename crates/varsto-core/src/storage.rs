@@ -591,6 +591,190 @@ impl Storage for CountingStorage {
     }
 }
 
+/// Log one request of a storage backend: debug for errors and for objects
+/// other than blocks, trace for block reads and writes (many per sync).
+#[allow(clippy::too_many_arguments)]
+pub fn log_request(
+    storage: &str,
+    backend: &str,
+    op: &str,
+    key: &str,
+    sent: u64,
+    status: Option<u16>,
+    got: u64,
+    ms: u64,
+    err: Option<&anyhow::Error>,
+) {
+    let chatty = is_block_key(key);
+    let failed = err.is_some() || status.map(|s| s >= 400 && s != 404).unwrap_or(false);
+    let level = if failed || !chatty {
+        log::Level::Debug
+    } else {
+        log::Level::Trace
+    };
+    if !log::log_enabled!(level) {
+        return;
+    }
+    // `result`: bytes read, keys listed, or 1/0 for put (new / already
+    // there) and exists; `status` and `got` for HTTP requests.
+    match (err, status) {
+        (Some(e), _) => {
+            log::log!(level, storage = storage, backend = backend, op = op, key = key, sent = sent, ms = ms; "storage request failed: {e:#}")
+        }
+        (None, Some(st)) => {
+            log::log!(level, storage = storage, backend = backend, op = op, key = key, sent = sent, status = st, got = got, ms = ms; "storage request")
+        }
+        (None, None) => {
+            log::log!(level, storage = storage, backend = backend, op = op, key = key, sent = sent, result = got, ms = ms; "storage request")
+        }
+    }
+}
+
+/// Block objects: chunks and packs, read and written by the thousand.
+fn is_block_key(key: &str) -> bool {
+    let k = key.trim_start_matches('/');
+    let k = k.split_once("chunks/").map(|_| "chunks/").unwrap_or(k);
+    k.starts_with("chunks/")
+        || k.starts_with("packs/")
+        || key.contains("/chunks/")
+        || key.contains("/packs/")
+}
+
+/// Logs every call made through it (the engine's storages): operation,
+/// object name, bytes, result and duration. Object names are fine in the
+/// local log; contents never appear.
+pub struct LoggedStorage {
+    inner: Box<dyn Storage>,
+    backend: &'static str,
+}
+
+impl LoggedStorage {
+    pub fn new(inner: Box<dyn Storage>, backend: &'static str) -> Self {
+        LoggedStorage { inner, backend }
+    }
+    fn done<T>(
+        &self,
+        op: &str,
+        key: &str,
+        sent: u64,
+        got: impl Fn(&T) -> u64,
+        t: crate::logging::Timer,
+        r: &Result<T>,
+    ) {
+        let (got, err) = match r {
+            Ok(v) => (got(v), None),
+            Err(e) => (0, Some(e)),
+        };
+        log_request(
+            self.inner.name(),
+            self.backend,
+            op,
+            key,
+            sent,
+            None,
+            got,
+            t.ms(),
+            err,
+        );
+    }
+}
+
+impl Storage for LoggedStorage {
+    fn name(&self) -> &str {
+        self.inner.name()
+    }
+    fn get_range(&self, key: &str, offset: u64, len: u64) -> Result<Option<Vec<u8>>> {
+        let t = crate::logging::Timer::start();
+        let r = self.inner.get_range(key, offset, len);
+        self.done(
+            "get_range",
+            key,
+            0,
+            |v: &Option<Vec<u8>>| v.as_ref().map(|b| b.len() as u64).unwrap_or(0),
+            t,
+            &r,
+        );
+        r
+    }
+    fn put_pack(&self, members: &[(String, &[u8])]) -> Result<Vec<bool>> {
+        let t = crate::logging::Timer::start();
+        let sent: u64 = members.iter().map(|(_, d)| d.len() as u64).sum();
+        let r = self.inner.put_pack(members);
+        let first = members.first().map(|m| m.0.as_str()).unwrap_or("");
+        if log::log_enabled!(log::Level::Debug) {
+            match &r {
+                Ok(v) => {
+                    log::debug!(storage = self.inner.name(), op = "put_pack", members = members.len(), new = v.iter().filter(|b| **b).count(), first = first, sent = sent, ms = t.ms(); "storage request")
+                }
+                Err(e) => {
+                    log::debug!(storage = self.inner.name(), op = "put_pack", members = members.len(), first = first, ms = t.ms(); "storage request failed: {e:#}")
+                }
+            }
+        }
+        r
+    }
+    fn packs_small_objects(&self) -> bool {
+        self.inner.packs_small_objects()
+    }
+    fn put_if_absent(&self, key: &str, data: &[u8]) -> Result<bool> {
+        let t = crate::logging::Timer::start();
+        let r = self.inner.put_if_absent(key, data);
+        self.done(
+            "put",
+            key,
+            data.len() as u64,
+            |new: &bool| *new as u64,
+            t,
+            &r,
+        );
+        r
+    }
+    fn get(&self, key: &str) -> Result<Option<Vec<u8>>> {
+        let t = crate::logging::Timer::start();
+        let r = self.inner.get(key);
+        self.done(
+            "get",
+            key,
+            0,
+            |v: &Option<Vec<u8>>| v.as_ref().map(|b| b.len() as u64).unwrap_or(0),
+            t,
+            &r,
+        );
+        r
+    }
+    fn exists(&self, key: &str) -> Result<bool> {
+        let t = crate::logging::Timer::start();
+        let r = self.inner.exists(key);
+        self.done("exists", key, 0, |b: &bool| *b as u64, t, &r);
+        r
+    }
+    fn list(&self, prefix: &str) -> Result<Vec<String>> {
+        let t = crate::logging::Timer::start();
+        let r = self.inner.list(prefix);
+        self.done("list", prefix, 0, |v: &Vec<String>| v.len() as u64, t, &r);
+        r
+    }
+    fn list_after(&self, prefix: &str, start_after: &str) -> Result<Vec<String>> {
+        let t = crate::logging::Timer::start();
+        let r = self.inner.list_after(prefix, start_after);
+        self.done(
+            "list_after",
+            prefix,
+            0,
+            |v: &Vec<String>| v.len() as u64,
+            t,
+            &r,
+        );
+        r
+    }
+    fn delete(&self, key: &str) -> Result<()> {
+        let t = crate::logging::Timer::start();
+        let r = self.inner.delete(key);
+        self.done("delete", key, 0, |_: &()| 0, t, &r);
+        r
+    }
+}
+
 /// Helper for tests and tools: open a local storage at `path`.
 pub fn local(name: &str, path: &Path) -> Result<Box<dyn Storage>> {
     Ok(Box::new(LocalDirStorage::new(

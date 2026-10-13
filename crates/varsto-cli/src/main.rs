@@ -3582,7 +3582,12 @@ fn init_logging(cli: &Cli) {
         matches!(cli.cmd, Cmd::Mcp { .. }),
     );
     // The service keeps writing notable events to stderr too (service.log).
-    if let Err(e) = logcmd::init(&home, component, cli.log_level.as_deref(), service_run || desktop) {
+    if let Err(e) = logcmd::init(
+        &home,
+        component,
+        cli.log_level.as_deref(),
+        service_run || desktop,
+    ) {
         eprintln!("error: {e:#}");
         std::process::exit(2);
     }
@@ -3600,9 +3605,19 @@ fn init_logging(cli: &Cli) {
 fn loggable_args(args: impl Iterator<Item = String>) -> String {
     let secret = |a: &str| {
         let a = a.trim_start_matches('-').to_ascii_lowercase();
-        ["key", "secret", "words", "passphrase", "password", "token", "pin", "code", "kit"]
-            .iter()
-            .any(|w| a.contains(w))
+        [
+            "key",
+            "secret",
+            "words",
+            "passphrase",
+            "password",
+            "token",
+            "pin",
+            "code",
+            "kit",
+        ]
+        .iter()
+        .any(|w| a.contains(w))
             && !a.ends_with("key-id")
             && !a.ends_with("key-file")
     };

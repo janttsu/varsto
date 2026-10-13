@@ -149,6 +149,17 @@ impl Engine {
     /// file system only) and keeps what this device knows of it.
     pub fn restic_setup(
         &mut self,
+        cfg: ResticConfig,
+        names: Option<&[String]>,
+        move_attached: bool,
+    ) -> Result<SetupReport> {
+        crate::logged_op!("restic setup", cfg.root.display().to_string(), {
+            self.restic_setup_inner(cfg, names, move_attached)
+        })
+    }
+
+    fn restic_setup_inner(
+        &mut self,
         mut cfg: ResticConfig,
         names: Option<&[String]>,
         move_attached: bool,
@@ -436,6 +447,10 @@ impl Engine {
 
     /// Check that the mirror is complete (see the module documentation).
     pub fn restic_check(&mut self, opts: &CheckOptions) -> Result<Completeness> {
+        crate::logged_op!("restic check", "", { self.restic_check_inner(opts) })
+    }
+
+    fn restic_check_inner(&mut self, opts: &CheckOptions) -> Result<Completeness> {
         let Some(cfg) = self.config.restic.clone() else {
             bail!("this device is not set up for restic (varsto restic setup)");
         };

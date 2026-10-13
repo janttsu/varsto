@@ -178,8 +178,28 @@ impl S3Storage {
         body: &[u8],
     ) -> Result<(u16, Vec<u8>)> {
         use std::sync::atomic::Ordering;
-        let (status, bytes, server_date) =
-            self.request_once(method, path, query, extra_headers, body)?;
+        let t = crate::logging::Timer::start();
+        let first = self.request_once(method, path, query, extra_headers, body);
+        let failed = match &first {
+            Ok((st, _, _)) => *st >= 400 && *st != 404,
+            Err(_) => true,
+        };
+        // The engine logs each logical request; the HTTP level only adds
+        // failures (and everything at trace).
+        if failed || log::log_enabled!(log::Level::Trace) {
+            crate::storage::log_request(
+                &self.cfg.name,
+                "s3",
+                method,
+                path,
+                body.len() as u64,
+                first.as_ref().map(|r| r.0).ok(),
+                first.as_ref().map(|r| r.1.len() as u64).unwrap_or(0),
+                t.ms(),
+                first.as_ref().err(),
+            );
+        }
+        let (status, bytes, server_date) = first?;
         // Refused (403, or 400 from some servers for a signature outside the
         // allowed window) by a server whose clock is far from ours: retry
         // once with our clock set to the server's.
@@ -187,6 +207,11 @@ impl S3Storage {
             if let Some(server) = server_date.as_deref().and_then(parse_http_date) {
                 let ours = unix_now() + self.clock_offset.load(Ordering::Relaxed);
                 if (server - ours).abs() > 300 {
+                    log::warn!(
+                        storage = self.cfg.name.as_str(),
+                        skew_s = server - ours;
+                        "s3: refused with our clock far from the server's; retrying with the server's time"
+                    );
                     self.clock_offset
                         .store(server - unix_now(), Ordering::Relaxed);
                     let (status, bytes, _) =

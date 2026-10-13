@@ -504,6 +504,10 @@ impl Engine {
     /// first administrator, every current device belongs to `founder`, and
     /// the root key is returned as 24 words, once.
     pub fn org_create(&mut self, name: &str, founder: &str) -> Result<OrgCreated> {
+        crate::logged_op_plain!("org create", name, { self.org_create_inner(name, founder) })
+    }
+
+    fn org_create_inner(&mut self, name: &str, founder: &str) -> Result<OrgCreated> {
         if self.vault.member {
             bail!("a member device holds shared folders only; organizations are created on a full device");
         }
@@ -603,6 +607,17 @@ impl Engine {
         user: &str,
         confirmed: Option<&str>,
     ) -> Result<OrgApproved> {
+        crate::logged_op_plain!("org approve", user, {
+            self.org_approve_inner(code, user, confirmed)
+        })
+    }
+
+    fn org_approve_inner(
+        &mut self,
+        code: &str,
+        user: &str,
+        confirmed: Option<&str>,
+    ) -> Result<OrgApproved> {
         self.ensure_active()?;
         self.sync_org()?;
         self.require_admin()?;
@@ -676,6 +691,17 @@ impl Engine {
         passphrase: &str,
         token: &str,
     ) -> Result<(Engine, Vec<String>, Approval)> {
+        crate::logged_op_plain!("org join", device_name, {
+            Self::org_join_inner(home, device_name, passphrase, token)
+        })
+    }
+
+    fn org_join_inner(
+        home: &Path,
+        device_name: &str,
+        passphrase: &str,
+        token: &str,
+    ) -> Result<(Engine, Vec<String>, Approval)> {
         let (approval, signer) = org::open_approval(home, token)?;
         super::ensure_no_vault(home)?;
         // Pin the organization before anything is read from the storages:
@@ -711,6 +737,12 @@ impl Engine {
     /// Admin: add a device that already holds the vault key (it paired, or
     /// joined with the key) to the roster under `user`.
     pub fn org_add_device(&mut self, name_or_id: &str, user: &str) -> Result<()> {
+        crate::logged_op_plain!("org add device", name_or_id, {
+            self.org_add_device_inner(name_or_id, user)
+        })
+    }
+
+    fn org_add_device_inner(&mut self, name_or_id: &str, user: &str) -> Result<()> {
         self.ensure_active()?;
         self.pull_registry()?;
         self.sync_org()?;
@@ -763,6 +795,12 @@ impl Engine {
     /// epoch (optionally with a wipe order), the roster moves them to the
     /// removed list, and the log records it.
     pub fn org_remove_user(&mut self, user: &str, wipe: bool) -> Result<OrgRemoveReport> {
+        crate::logged_op!("org remove user", user, {
+            self.org_remove_user_inner(user, wipe)
+        })
+    }
+
+    fn org_remove_user_inner(&mut self, user: &str, wipe: bool) -> Result<OrgRemoveReport> {
         self.ensure_active()?;
         // Like `revoke_device`: the newest ledger (for the cut-offs) and
         // registry (for who stays) first.
@@ -852,6 +890,10 @@ impl Engine {
 
     /// Admin: change what members may do.
     pub fn org_set_policy(&mut self, policy: OrgPolicy) -> Result<()> {
+        crate::logged_op_plain!("org set policy", "", { self.org_set_policy_inner(policy) })
+    }
+
+    fn org_set_policy_inner(&mut self, policy: OrgPolicy) -> Result<()> {
         self.ensure_active()?;
         self.sync_org()?;
         self.require_admin()?;
@@ -863,6 +905,12 @@ impl Engine {
 
     /// Root key holder: make a device of the organization an administrator.
     pub fn org_admin_add(&mut self, name_or_id: &str, root_words: &str) -> Result<()> {
+        crate::logged_op_plain!("org admin add", name_or_id, {
+            self.org_admin_add_inner(name_or_id, root_words)
+        })
+    }
+
+    fn org_admin_add_inner(&mut self, name_or_id: &str, root_words: &str) -> Result<()> {
         self.ensure_active()?;
         self.pull_registry()?;
         self.sync_org()?;
@@ -907,6 +955,12 @@ impl Engine {
 
     /// Root key holder: take the admin role from a device (it stays a member).
     pub fn org_admin_remove(&mut self, name_or_id: &str, root_words: &str) -> Result<()> {
+        crate::logged_op_plain!("org admin remove", name_or_id, {
+            self.org_admin_remove_inner(name_or_id, root_words)
+        })
+    }
+
+    fn org_admin_remove_inner(&mut self, name_or_id: &str, root_words: &str) -> Result<()> {
         self.ensure_active()?;
         self.pull_registry()?;
         self.sync_org()?;
