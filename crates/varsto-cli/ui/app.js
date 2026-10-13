@@ -2088,8 +2088,61 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     var acts = $("fd-actions"); acts.innerHTML = "";
     fileActions(folder, f, true).forEach(function (b) { acts.appendChild(b); });
     showAnalysis(folder, f);
+    showChanges(folder, f);
     updateToolbar();
   }
+  // Change history (`/api/changes`): who changed what and when, from the
+  // signed manifests. One line per version.
+  var ACTION_LABELS = { created: "Created", modified: "Modified", deleted: "Deleted", restored: "Restored" };
+  function changeItem(c, withPath) {
+    var li = el("li"); var body = el("div", "li-body"); var title = el("div", "li-title");
+    if (c.action === "renamed") {
+      title.appendChild(el("span", null, c.from ? "Renamed from" : "Renamed to"));
+      title.appendChild(document.createTextNode(" "));
+      var other = el("span", null, c.from || c.to || ""); other.setAttribute("data-no-i18n", ""); title.appendChild(other);
+    } else {
+      title.appendChild(el("span", null, ACTION_LABELS[c.action] || c.action));
+    }
+    if (withPath) { title.appendChild(document.createTextNode(" ")); var pth = el("span", "muted", c.path); pth.setAttribute("data-no-i18n", ""); title.appendChild(pth); }
+    if (!c.verified) { var nv = pill("grey", "not verified"); nv.title = "The file list that named this version was not announced in a signed ledger entry this device holds"; title.appendChild(nv); }
+    body.appendChild(title);
+    var who = c.device_name + (c.user ? " (" + c.user + ")" : "");
+    var parts = [c.time_utc ? new Date(c.time_utc * 1000).toLocaleString() : "", who];
+    if (c.action !== "deleted" && !(c.action === "renamed" && c.to)) { parts.push(fmtBytes(c.size)); }
+    if (c.hash) { parts.push(c.hash.slice(0, 8)); }
+    var sub = el("div", "li-sub", parts.filter(Boolean).join(" · ")); sub.setAttribute("data-no-i18n", ""); body.appendChild(sub);
+    li.appendChild(body);
+    return li;
+  }
+  function showChanges(folder, f) {
+    var ul = $("fd-changes-list"); ul.innerHTML = "";
+    api("GET", "/api/changes?folder=" + enc(folder) + "&path=" + enc(f.path) + "&limit=20").then(function (r) {
+      if (selectedFile !== f) { return; }
+      ul.innerHTML = "";
+      r.changes.forEach(function (c) { ul.appendChild(changeItem(c, c.path !== f.path)); });
+      if (!r.changes.length) { ul.appendChild(el("li", "muted small", "No changes recorded yet")); }
+    }).catch(function () {});
+  }
+  function loadRecentChanges() {
+    var folder = $("filesfolder").value; if (!folder) { return; }
+    var v = formData($("rc-form"));
+    var q = "folder=" + enc(folder) + "&limit=200";
+    ["path", "device", "user", "since"].forEach(function (k) { if ((v[k] || "").trim()) { q += "&" + k + "=" + enc(v[k].trim()); } });
+    var ul = $("rc-list");
+    api("GET", "/api/changes?" + q).then(function (r) {
+      ul.innerHTML = "";
+      r.changes.forEach(function (c) { ul.appendChild(changeItem(c, true)); });
+      if (!r.changes.length) { ul.appendChild(el("li", "muted small", "No changes match")); }
+      if (r.truncated) { ul.appendChild(el("li", "muted small", "Older changes are left out; narrow the search.")); }
+    }).catch(function (e) { alertBox(e.message); });
+  }
+  $("files-changes").onclick = function () {
+    var box = $("recentchanges"); var show = box.classList.contains("hidden");
+    box.classList.toggle("hidden", !show);
+    if (show) { loadRecentChanges(); }
+  };
+  $("rc-close").onclick = function () { $("recentchanges").classList.add("hidden"); };
+  $("rc-form").onsubmit = function (ev) { ev.preventDefault(); loadRecentChanges(); };
   // The file's analysis (`/api/analysis`): what an assistant or the user
   // recorded about its contents. A listing has the first 500 characters; the
   // whole text is asked for when there is more.
@@ -2399,7 +2452,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
       renderSel();
     }).catch(function (e) { log("error: " + e.message); });
   }
-  $("filesfolder").onchange = function () { multi.sel = {}; multi.on = false; markTree($("filesfolder").value); updateFilesHead(); clearSelection(); setScreen("folder"); loadFiles(); };
+  $("filesfolder").onchange = function () { multi.sel = {}; multi.on = false; markTree($("filesfolder").value); updateFilesHead(); clearSelection(); setScreen("folder"); loadFiles(); if (!$("recentchanges").classList.contains("hidden")) { loadRecentChanges(); } };
   $("selectivetoggle").onchange = function () { api("POST", "/api/selective", { folder: $("filesfolder").value, on: $("selectivetoggle").checked }).then(function () { log("selective sync " + ($("selectivetoggle").checked ? "on" : "off")); return refreshStatus(); }).catch(function (e) { log("error: " + e.message); }); };
   $("dupes").onclick = function () {
     api("GET", "/api/dupes?folder=" + enc($("dupefolder").value)).then(function (g) {

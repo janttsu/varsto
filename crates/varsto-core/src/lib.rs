@@ -16,6 +16,7 @@ pub mod activity;
 pub mod advice;
 pub mod autoverify;
 pub mod blockdev;
+pub mod changes;
 pub mod chunking;
 pub mod crypto;
 pub mod diskconf;

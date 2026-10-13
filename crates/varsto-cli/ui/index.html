@@ -321,12 +321,25 @@
             <button id="files-download" type="button" class="secondary" title="Download the selected file to this device" disabled><svg class="icon"><use href="#i-download"/></svg>Download</button>
             <button id="files-free" type="button" class="secondary" title="Keep only a placeholder of the selected file here" disabled><svg class="icon"><use href="#i-free"/></svg>Free up space</button>
             <button id="files-share" type="button" class="secondary" title="Share this folder with another Varsto user"><svg class="icon"><use href="#i-sharing"/></svg>Share</button>
+            <button id="files-changes" type="button" class="secondary" title="Who changed what in this folder, and when"><svg class="icon"><use href="#i-activity"/></svg>Recent changes</button>
             <input id="files-filter" type="search" class="files-filter" placeholder="Filter by name, tag or analysis" aria-label="Filter files" autocomplete="off">
             <span class="toolbar-spacer"></span>
             <label class="inline muted" id="selectivelabel" title="Files appear as placeholders until you download them"><input id="selectivetoggle" type="checkbox"> selective sync</label>
           </div>
           <input type="file" id="fileinput" multiple class="hidden" aria-hidden="true" tabindex="-1">
           <div id="files-progress" class="status-line progress hidden" role="status"></div>
+          <section id="recentchanges" class="recent-changes hidden" aria-label="Recent changes">
+            <div class="details-head"><span class="card-title">Recent changes</span><button type="button" id="rc-close" class="secondary icon-btn" title="Close recent changes"><svg class="icon"><use href="#i-close"/></svg></button></div>
+            <form id="rc-form" class="rc-form">
+              <input name="path" placeholder="Under directory" aria-label="Under directory" autocomplete="off">
+              <input name="device" placeholder="Device" aria-label="Device" autocomplete="off">
+              <input name="user" placeholder="Person" aria-label="Person" autocomplete="off">
+              <input name="since" placeholder="Since (YYYY-MM-DD or 7d)" aria-label="Since" autocomplete="off">
+              <button type="submit" class="secondary">Show</button>
+            </form>
+            <p class="muted small">From the signed file lists of the devices; this device keeps the newest changes of each file.</p>
+            <ul id="rc-list" class="list compact-list"></ul>
+          </section>
           <div class="table-wrap">
           <table id="files"><thead><tr><th>Name</th><th class="num">Size</th><th>State</th><th>Last used</th><th></th></tr></thead><tbody></tbody></table>
           </div>
@@ -362,6 +375,10 @@
               <dt>Analysed</dt><dd id="fd-analysis-date"></dd>
             </dl>
             <div class="actions fd-analysis-actions"><button type="button" class="secondary" id="fd-analysis-edit">Write analysis</button><button type="button" class="secondary" id="fd-analysis-clear">Clear analysis</button></div>
+          </section>
+          <section class="fd-changes" id="fd-changes" aria-label="Changes">
+            <div class="fd-analysis-head"><span class="field-caption">Changes</span></div>
+            <ul id="fd-changes-list" class="list compact-list"></ul>
           </section>
           <div class="actions fd-actions" id="fd-actions"></div>
         </aside>

@@ -174,6 +174,25 @@ enum Cmd {
     },
     /// Show vault, devices, storages and folders.
     Status,
+    /// Who changed what and when: the versions of one file (renames followed), or the recent
+    /// changes in a folder or under a directory, newest first, from the signed manifests.
+    Changes {
+        folder: String,
+        /// A file, or a directory to show the changes under.
+        path: Option<String>,
+        /// Only changes made on this device (name or id).
+        #[arg(long)]
+        device: Option<String>,
+        /// Only changes by this person (organizations).
+        #[arg(long)]
+        user: Option<String>,
+        /// Only changes since: YYYY-MM-DD[THH:MM] (UTC), seconds since 1970, or an age (7d, 12h).
+        #[arg(long)]
+        since: Option<String>,
+        /// At most this many (0: all).
+        #[arg(long, default_value_t = 100)]
+        limit: usize,
+    },
     /// How files would be fetched: from pool disks (which ones, in which order) or the network,
     /// with the time and cost of each way. Run `varsto folder fetch` to fetch.
     FetchPlan {
@@ -1309,6 +1328,62 @@ fn url_escape(s: &str) -> String {
             _ => format!("%{b:02X}"),
         })
         .collect()
+}
+
+/// `varsto changes` as lines, newest first.
+fn changes_text(r: &varsto_core::engine::ChangesReport) -> String {
+    let mut out = format!(
+        "{}{}: {} change(s){}",
+        r.folder,
+        r.path
+            .as_ref()
+            .map(|p| format!(" {}{p}", if r.file { "" } else { "under " }))
+            .unwrap_or_default(),
+        r.changes.len(),
+        if r.truncated {
+            " (more with --limit 0)"
+        } else {
+            ""
+        }
+    );
+    for c in &r.changes {
+        let e = &c.event;
+        let what = match (e.action.as_str(), &e.from, &e.to) {
+            ("renamed", Some(f), _) => format!("renamed from {f}"),
+            ("renamed", _, Some(t)) => format!("renamed to {t}"),
+            (a, _, _) => a.to_string(),
+        };
+        let secs = e.time_utc.rem_euclid(86_400);
+        out.push_str(&format!(
+            "\n{} {:02}:{:02}  {}  {}  by {}{}{}{}{}",
+            varsto_core::util::format_date(e.time_utc),
+            secs / 3600,
+            secs % 3600 / 60,
+            e.path,
+            what,
+            c.device_name,
+            c.user
+                .as_ref()
+                .map(|u| format!(" ({u})"))
+                .unwrap_or_default(),
+            if e.action.as_str() == "deleted" || e.to.is_some() || e.hash.is_empty() {
+                String::new()
+            } else {
+                format!(", {} bytes, {}", e.size, e.hash)
+            },
+            if e.verified {
+                ""
+            } else {
+                ", not verified against the ledger"
+            },
+            if e.backfilled {
+                ", time from the file (history started later)"
+            } else {
+                ""
+            }
+        ));
+    }
+    out
 }
 
 /// Where a read-only folder's local changes went.
@@ -3191,6 +3266,50 @@ fn run(cli: &Cli) -> Result<()> {
             let mut engine = Engine::open(&home, &passphrase()?)?;
             let plan = engine.fetch_plan(folder, paths)?;
             print(cli, &plan, drives::plan_text)?;
+        }
+        Cmd::Changes {
+            folder,
+            path,
+            device,
+            user,
+            since,
+            limit,
+        } => {
+            let since_utc = since
+                .as_deref()
+                .map(|s| varsto_core::changes::parse_since(s, varsto_core::util::now_utc()))
+                .transpose()?;
+            let report: varsto_core::engine::ChangesReport =
+                if let Some((sf, _)) = service::status(&home) {
+                    let mut url = format!(
+                        "http://127.0.0.1:{}/api/changes?folder={}&limit={limit}",
+                        sf.port,
+                        url_escape(folder)
+                    );
+                    for (k, v) in [("path", path), ("device", device), ("user", user)] {
+                        if let Some(v) = v {
+                            url.push_str(&format!("&{k}={}", url_escape(v)));
+                        }
+                    }
+                    if let Some(t) = since_utc {
+                        url.push_str(&format!("&since={t}"));
+                    }
+                    serde_json::from_str(&service::http_get(&url, &sf.token)?)?
+                } else {
+                    let mut engine = open_engine(&home)?;
+                    engine.history_start(folder)?;
+                    engine.changes(
+                        folder,
+                        &varsto_core::engine::ChangesQuery {
+                            path: path.clone(),
+                            device: device.clone(),
+                            user: user.clone(),
+                            since_utc,
+                            limit: *limit,
+                        },
+                    )?
+                };
+            print(cli, &report, changes_text)?;
         }
         Cmd::Status => {
             // The running service answers without a passphrase while it is

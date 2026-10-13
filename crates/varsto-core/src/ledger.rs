@@ -1129,7 +1129,8 @@ pub struct ViewCache {
 impl ViewCache {
     /// 3: chunk records carry drops and claim times (`ChunkDropped`).
     /// 4: backup snapshots and stopped backups.
-    pub const FORMAT: u32 = 4;
+    /// 5: the hash of each device's newest announced manifest.
+    pub const FORMAT: u32 = 5;
 
     pub fn new(context: String) -> Self {
         ViewCache {
@@ -1301,6 +1302,10 @@ pub struct LedgerView {
     /// Highest manifest sequence published per (folder, device).
     #[serde(with = "pairs")]
     pub manifests: BTreeMap<(FolderId, DeviceId), u64>,
+    /// The hash of that newest announced manifest, as its signed batch
+    /// gives it: a manifest read from a storage is verified against it.
+    #[serde(default, with = "pairs")]
+    pub manifest_hashes: BTreeMap<(FolderId, DeviceId), (u64, String)>,
     pub devices: BTreeMap<DeviceId, String>,
     /// Which enrolment event set each device name.
     #[serde(default)]
@@ -1399,12 +1404,26 @@ impl LedgerView {
                     rec.set_size(*size, stamp());
                     rec.devices.insert(batch.device.clone());
                 }
-                Event::ManifestPublished { folder, seq, .. } => {
+                Event::ManifestPublished {
+                    folder,
+                    seq,
+                    manifest_hash,
+                    ..
+                } => {
                     let e = self
                         .manifests
                         .entry((folder.clone(), batch.device.clone()))
                         .or_insert(0);
                     *e = (*e).max(*seq);
+                    if !manifest_hash.is_empty() {
+                        let h = self
+                            .manifest_hashes
+                            .entry((folder.clone(), batch.device.clone()))
+                            .or_insert((0, String::new()));
+                        if *seq > h.0 {
+                            *h = (*seq, manifest_hash.clone());
+                        }
+                    }
                 }
                 Event::StorageRetired { storage } => {
                     let r = self.retired.entry(storage.clone()).or_insert(0);

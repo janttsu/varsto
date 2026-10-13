@@ -44,6 +44,7 @@ use std::path::{Path, PathBuf};
 mod access_sync;
 mod backups;
 mod block_cache;
+mod changes_ops;
 mod data_moves;
 mod devinfo;
 mod disk_fetch;
@@ -75,6 +76,7 @@ pub use backups::{
     SnapshotReport,
 };
 pub use block_cache::{BlockWriter, StagedFile, BLOCK_CACHE_DIR, EXPORT_DIR};
+pub use changes_ops::{ChangeView, ChangesQuery, ChangesReport};
 pub use devinfo::DeviceDetails;
 pub use disk_fetch::{
     DiskFetchSettings, DiskStep, FetchPlan, FetchPlanReport, InsertAnswer, PlanDriver, PlanFile,
@@ -3329,13 +3331,14 @@ impl Engine {
         }
         let seq = state.published_seq + 1;
         let lamport = self.tick()?;
+        let created_utc = util::now_utc();
         let m = Manifest {
             format_version: crate::FORMAT_VERSION,
             folder: rec.folder_id.clone(),
             device: self.vault.device_id.clone(),
             seq,
             lamport,
-            created_utc: util::now_utc(),
+            created_utc,
             files: state.files.clone(),
         };
         let blob = m.seal(&self.vault.vault_id, &self.folder_keys(rec)?.meta)?;
@@ -3351,6 +3354,8 @@ impl Engine {
         });
         state.published_seq = seq;
         state.published_hash = hash;
+        // This device's own versions enter its change history as published.
+        let _ = self.history_from_own(rec, state, created_utc);
         Ok(Some(seq))
     }
 
@@ -3404,6 +3409,15 @@ impl Engine {
         // Changes made by read-only members (after they stopped being
         // editors) are not taken, even when another device relays them.
         let viewer_clocks = self.share_viewer_clocks(&rec);
+        let refused = |f: &FileState| {
+            viewer_clocks
+                .get(&f.modified_by)
+                .is_some_and(|c| f.modified_clock > *c)
+        };
+        // Change history (`changes_ops`): started once from what is held,
+        // then fed by every manifest taken. Never in the way of syncing.
+        let mut hist = self.open_history(&rec.folder_id);
+        let _ = self.history_backfill(&mut hist, &rec, &state, &storages);
         for (dev, (seq, idx)) in newest {
             if !self.share_manifest_source_ok(&rec, &dev) {
                 // A device that is not a participant of the shared folder.
@@ -3466,10 +3480,7 @@ impl Engine {
                 if fetch_ahead && i >= ahead_from {
                     ahead_from = self.prefetch_small(&m, i, &state, &storages);
                 }
-                if viewer_clocks
-                    .get(&remote.modified_by)
-                    .is_some_and(|c| remote.modified_clock > *c)
-                {
+                if refused(remote) {
                     continue;
                 }
                 match manifest::merge(state.files.get(path), remote) {
@@ -3566,11 +3577,13 @@ impl Engine {
                     }
                 }
             }
+            let _ = self.history_from_manifest(&mut hist, &m, &blob, &refused);
             state.last_seen.insert(dev, seq);
             // Whatever was fetched ahead and not used (a file that failed
             // earlier in its batch) is not kept past its manifest.
             self.prefetched.clear();
         }
+        let _ = hist.save();
         if encrypted_here {
             self.cache_wanted(&rec, &fk, &mut state, &storages, &mut report)?;
         }

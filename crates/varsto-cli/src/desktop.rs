@@ -1639,6 +1639,25 @@ fn api_unlocked(
             service.request_sync();
             Ok(serde_json::to_value(r)?)
         }
+        // Change history of a folder or a file (`varsto changes`).
+        (Method::Get, "/api/changes") => {
+            let folder = query_param(query, "folder")
+                .ok_or_else(|| anyhow!("folder query parameter required"))?;
+            let since_utc = query_param(query, "since")
+                .filter(|s| !s.is_empty())
+                .map(|s| varsto_core::changes::parse_since(&s, varsto_core::util::now_utc()))
+                .transpose()?;
+            let q = varsto_core::engine::ChangesQuery {
+                path: query_param(query, "path").filter(|s| !s.is_empty()),
+                device: query_param(query, "device").filter(|s| !s.is_empty()),
+                user: query_param(query, "user").filter(|s| !s.is_empty()),
+                since_utc,
+                limit: query_param(query, "limit")
+                    .and_then(|l| l.parse().ok())
+                    .unwrap_or(200),
+            };
+            Ok(serde_json::to_value(engine.changes(&folder, &q)?)?)
+        }
         (Method::Get, "/api/files") => {
             let folder = query_param(query, "folder")
                 .ok_or_else(|| anyhow!("folder query parameter required"))?;

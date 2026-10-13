@@ -1304,6 +1304,12 @@ pub struct Config {
     /// The "next disk to dock" reminder (`crate::disksuggest`).
     #[serde(default)]
     pub disk_suggest: crate::disksuggest::SuggestSettings,
+    /// How much change history of files this device keeps (`crate::changes`).
+    #[serde(
+        default,
+        skip_serializing_if = "crate::changes::ChangeLimits::is_default"
+    )]
+    pub changes: crate::changes::ChangeLimits,
 }
 
 /// A backup taken on this device (local, never published).
