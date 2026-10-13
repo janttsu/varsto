@@ -104,7 +104,7 @@ pub use share_ops::{ShareMember, ShareMembers, ShareRevokeReport};
 pub use strongroom_ops::{CleanupReport, ConvertReport, StrongroomKeySummary};
 pub use where_data::{CopyStats, DataLocations, DeviceShare, FolderShare, StorageShare};
 
-#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+#[derive(Clone, Debug, Serialize, Deserialize, Default, PartialEq, Eq)]
 struct LocalIndexEntry {
     size: u64,
     mtime: i64,
@@ -1251,7 +1251,41 @@ impl Engine {
     }
 
     fn open_pool(&self, spec: &StorageSpec) -> Result<PoolStorage> {
-        PoolStorage::open(spec, &self.home, self.pool_identity(spec.name()))
+        Ok(
+            PoolStorage::open(spec, &self.home, self.pool_identity(spec.name()))?
+                .with_verify_parallelism(self.verify_setting(spec.name())),
+        )
+    }
+
+    /// The device's verification setting for a storage, pool, `folder:<name>`
+    /// or `block-cache` (`config.json`, `verify_parallelism`; `*` for the rest).
+    pub(crate) fn verify_setting(&self, name: &str) -> crate::parverify::Parallelism {
+        let p = &self.config.verify_parallelism;
+        p.get(name)
+            .or_else(|| p.get("*"))
+            .copied()
+            .unwrap_or_default()
+    }
+
+    /// How verification reads a storage: S3 and rclone are network
+    /// storages; a directory is on whatever medium its path is.
+    pub(crate) fn storage_lane(&self, spec: &StorageSpec) -> crate::parverify::LanePlan {
+        use crate::media::{storage_media, Media};
+        let media = match spec {
+            StorageSpec::S3 { .. } | StorageSpec::Rclone { .. } => Media::Network,
+            StorageSpec::LocalDir { path, .. } => storage_media(path),
+            // The disks attached now (their marker is where they were last
+            // mounted), read as one: `get` takes whichever holds a copy.
+            StorageSpec::Pool { disks, .. } => Media::combined(
+                &disks
+                    .iter()
+                    .filter_map(|d| d.last_mount.as_ref())
+                    .filter(|m| crate::pool::DiskMarker::path(m).is_file())
+                    .map(|m| storage_media(m))
+                    .collect::<Vec<_>>(),
+            ),
+        };
+        crate::parverify::lane_plan(media, self.verify_setting(spec.name()))
     }
 
     /// Keep a storage secret (S3 secret access key) in `secrets.enc`, for a
@@ -3060,7 +3094,7 @@ impl Engine {
                 if !disk.exists() {
                     continue;
                 }
-                thumbs::make(&disk, &path)
+                thumbs::make_with(&disk, &path, &self.config.thumbnails)
             };
             let Some(bytes) = made_here else {
                 state.thumbs_done.insert(hash); // cannot make one; do not retry every time
@@ -5324,12 +5358,44 @@ impl Engine {
         if verify_content {
             let mut corrupt_pools: BTreeSet<String> = BTreeSet::new();
             task.step("verify", referenced.len() as u64, activity::Unit::Items);
-            for ((folder, chunk), object) in &referenced {
-                task.advance(1);
-                let key = chunk_storage_key(object);
-                for (spec, backend) in &storages {
-                    let ct = match backend.get(&key) {
-                        Ok(ct) => ct,
+            // Every referenced object on every storage, read ahead on each
+            // storage's own readers (parallel where its medium allows); the
+            // results come back here in the order of the plain loop.
+            let refs: Vec<(&(FolderId, ChunkId), &ObjectName)> = referenced.iter().collect();
+            let plans: Vec<crate::parverify::LanePlan> = storages
+                .iter()
+                .map(|(spec, _)| self.storage_lane(spec))
+                .collect();
+            let mut jobs: Vec<crate::parverify::Job<(usize, usize)>> = Vec::new();
+            for (r, ((folder, chunk), _)) in refs.iter().enumerate() {
+                let size = view.locate(folder, chunk).map_or(0, |c| c.size);
+                for s in 0..storages.len() {
+                    jobs.push(crate::parverify::Job {
+                        item: (r, s),
+                        lane: s,
+                        size,
+                    });
+                }
+            }
+            if storages.is_empty() {
+                task.advance(refs.len() as u64);
+            }
+            let mut failed: Option<anyhow::Error> = None;
+            let storages_ref = &storages;
+            let refs_ref = &refs;
+            crate::parverify::run_ordered(
+                &jobs,
+                &plans,
+                |&(r, s)| storages_ref[s].1.get(&chunk_storage_key(refs_ref[r].1)),
+                |_, got| got.map(|ct| ct.map(|ct| crypto::hash(&ct))),
+                |_, &(r, s), got| {
+                    if s == 0 {
+                        task.advance(1);
+                    }
+                    let ((folder, chunk), object) = refs[r];
+                    let spec = &storages[s].0;
+                    let hash = match got {
+                        Ok(h) => h,
                         Err(e)
                             if matches!(
                                 pool::pool_error(&e),
@@ -5337,12 +5403,15 @@ impl Engine {
                             ) =>
                         {
                             report.objects_offline += 1;
-                            continue;
+                            return true;
                         }
-                        Err(e) => return Err(e),
+                        Err(e) => {
+                            failed = Some(e);
+                            return false;
+                        }
                     };
-                    if let Some(ct) = ct {
-                        if ObjectName::from_bytes(&crypto::hash(&ct)) == *object {
+                    if let Some(hash) = hash {
+                        if ObjectName::from_bytes(&hash) == *object {
                             report.objects_verified_now += 1;
                             self.pending.push(Event::ChunkVerified {
                                 folder: folder.clone(),
@@ -5370,7 +5439,11 @@ impl Engine {
                             }
                         }
                     }
-                }
+                    true
+                },
+            );
+            if let Some(e) = failed {
+                return Err(e);
             }
             self.commit_batch()?;
             // The attached disks of every pool were read in full: record the check.
