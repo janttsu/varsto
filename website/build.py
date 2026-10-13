@@ -85,6 +85,13 @@ def asset_version(rel: str) -> str:
     return hashlib.sha256(f.read_bytes()).hexdigest()[:10] if f.exists() else "0"
 
 
+def version_images(body: str) -> str:
+    """Add the content hash to every picture under assets/img in a page body, so a
+    re-rendered illustration replaces the cached one at once."""
+    return re.sub(r'(assets/img/[A-Za-z0-9_/.-]+\.(?:png|webp|jpg|svg))(?=")',
+                  lambda m: f"{m.group(1)}?v={asset_version(m.group(1))}", body)
+
+
 # Website languages: English at the root, the others under /<lang>/ with
 # pages translated in website/src/i18n/<lang>/pages/. Docs, blog and forum
 # stay English (internal documentation is English only).
@@ -161,6 +168,7 @@ def page(title: str, description: str, body: str, nav: str, depth: int, lang: st
     the hreflang links), e.g. "features/index.html"; `extra_head`: page-specific
     structured data."""
     p = "../" * depth
+    body = version_images(body)
     labels = NAV_I18N.get(lang, {})
     lang_root = p if lang == "en" else p + lang + "/"
 

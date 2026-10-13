@@ -23,7 +23,7 @@
 <link rel="alternate" hreflang="fi" href="https://varsto.net/fi/how-it-works/">
 <link rel="alternate" hreflang="sv" href="https://varsto.net/sv/how-it-works/">
 <link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../blog/feed.xml">
-<link rel="stylesheet" href="../assets/css/site.css?v=d738b157e3">
+<link rel="stylesheet" href="../assets/css/site.css?v=a993e06bd6">
 <script src="../assets/js/theme.js?v=0951491269"></script>
 </head>
 <body>
@@ -79,7 +79,7 @@
 
     <section class="feature" id="overview">
       <h2>Overview</h2>
-      <picture><source type="image/webp" srcset="../assets/img/encryption/architecture.webp"><img src="../assets/img/encryption/architecture.png" alt="A laptop and a phone, each holding the keys, exchange data with your storages, which hold the signed ledger batches, the file lists and the encrypted blocks; the two devices also exchange blocks directly, peer to peer, on the LAN or over the internet." width="640" height="320" loading="lazy"></picture>
+      <picture class="theme-light"><source type="image/webp" srcset="../assets/img/encryption/architecture.webp?v=9b5c21b512"><img src="../assets/img/encryption/architecture.png?v=13f1f46def" alt="A laptop and a phone, each holding the keys, exchange data with your storages, which hold the signed ledger batches, the file lists and the encrypted blocks; the two devices also exchange blocks directly, peer to peer, on the LAN or over the internet." width="640" height="320" loading="lazy"></picture><picture class="theme-dark"><source type="image/webp" srcset="../assets/img/encryption/architecture-dark.webp?v=ec153bc689"><img src="../assets/img/encryption/architecture-dark.png?v=a40e068fdb" alt="A laptop and a phone, each holding the keys, exchange data with your storages, which hold the signed ledger batches, the file lists and the encrypted blocks; the two devices also exchange blocks directly, peer to peer, on the LAN or over the internet." width="640" height="320" loading="lazy"></picture>
       <div>
         <p>Varsto has two kinds of parts, and nothing of ours in between.</p>
         <ul>
@@ -93,7 +93,7 @@
 
     <section class="feature" id="blocks">
       <h2>From file to encrypted blocks</h2>
-      <picture><source type="image/webp" srcset="../assets/img/encryption/pipeline.webp"><img src="../assets/img/encryption/pipeline.png" alt="On the device a file is cut into chunks, compressed and encrypted with a key per chunk; only the encrypted blocks, named by their hash, go to the storage, which sees hashes and sizes but no names or content." width="640" height="320" loading="lazy"></picture>
+      <picture class="theme-light"><source type="image/webp" srcset="../assets/img/encryption/pipeline.webp?v=ec9b790c8c"><img src="../assets/img/encryption/pipeline.png?v=036c0617fc" alt="On the device a file is cut into chunks, compressed and encrypted with a key per chunk; only the encrypted blocks, named by their hash, go to the storage, which sees hashes and sizes but no names or content." width="640" height="320" loading="lazy"></picture><picture class="theme-dark"><source type="image/webp" srcset="../assets/img/encryption/pipeline-dark.webp?v=8c5d0c8562"><img src="../assets/img/encryption/pipeline-dark.png?v=af588393ba" alt="On the device a file is cut into chunks, compressed and encrypted with a key per chunk; only the encrypted blocks, named by their hash, go to the storage, which sees hashes and sizes but no names or content." width="640" height="320" loading="lazy"></picture>
       <div>
         <ol>
           <li><strong>Chunking.</strong> The file is cut into content-defined chunks whose size follows the file: about 256 KiB for files under 32 MiB, 1 MiB up to 1 GiB, 4 MiB above (a rolling hash picks the cut points), so an edit in the middle changes a few chunks, not the whole file.</li>
@@ -108,7 +108,7 @@
 
     <section class="feature" id="keys">
       <h2>Keys</h2>
-      <picture><source type="image/webp" srcset="../assets/img/encryption/hierarchy.webp"><img src="../assets/img/encryption/hierarchy.png" alt="A random vault key derives the vault-wide purpose keys (ledger, registry, folder record and others); the folder record key seals each folder's random key, from which come the metadata key and one key per chunk." width="640" height="320" loading="lazy"></picture>
+      <picture class="theme-light"><source type="image/webp" srcset="../assets/img/encryption/hierarchy.webp?v=c3acd84b0f"><img src="../assets/img/encryption/hierarchy.png?v=c6c2f06231" alt="A random vault key derives the vault-wide purpose keys (ledger, registry, folder record and others); the folder record key seals each folder's random key, from which come the metadata key and one key per chunk." width="640" height="320" loading="lazy"></picture><picture class="theme-dark"><source type="image/webp" srcset="../assets/img/encryption/hierarchy-dark.webp?v=b8ed2b39a3"><img src="../assets/img/encryption/hierarchy-dark.png?v=3247a28773" alt="A random vault key derives the vault-wide purpose keys (ledger, registry, folder record and others); the folder record key seals each folder's random key, from which come the metadata key and one key per chunk." width="640" height="320" loading="lazy"></picture>
       <div>
         <p>Everything starts from one random 256-bit <strong>vault key</strong>, created on the first device and never derived from anything you type. It is the one secret to keep; the recovery kit is that key on paper.</p>
         <ul>
@@ -137,7 +137,7 @@
 
     <section class="feature" id="ledger">
       <h2>The ledger</h2>
-      <picture><source type="image/webp" srcset="../assets/img/encryption/ledger-flow.webp"><img src="../assets/img/encryption/ledger-flow.png" alt="The laptop writes ledger batch 42 to your storages; the desktop reads it, checks it and merges it; every device's view then answers where block 7f3a is: on box, stored by the laptop and verified by the desktop, and on cloud, stored by the laptop but not verified yet." width="640" height="320" loading="lazy"></picture>
+      <picture class="theme-light"><source type="image/webp" srcset="../assets/img/encryption/ledger-flow.webp?v=4286f1c1d3"><img src="../assets/img/encryption/ledger-flow.png?v=91538508f9" alt="The laptop writes ledger batch 42 to your storages; the desktop reads it, checks it and merges it; every device's view then answers where block 7f3a is: on box, stored by the laptop and verified by the desktop, and on cloud, stored by the laptop but not verified yet." width="640" height="320" loading="lazy"></picture><picture class="theme-dark"><source type="image/webp" srcset="../assets/img/encryption/ledger-flow-dark.webp?v=5ab49dc01d"><img src="../assets/img/encryption/ledger-flow-dark.png?v=c3f0d869f0" alt="The laptop writes ledger batch 42 to your storages; the desktop reads it, checks it and merges it; every device's view then answers where block 7f3a is: on box, stored by the laptop and verified by the desktop, and on cloud, stored by the laptop but not verified yet." width="640" height="320" loading="lazy"></picture>
       <div>
         <p>The ledger is Varsto's bookkeeping. Every device keeps its own <strong>append-only log of facts</strong> about what it did, and no device ever writes into another one's log. The facts are small and concrete: "I wrote block 7f3a to the storage I call box", "I downloaded 7f3a from box and its hash matched", "I published version 12 of this folder's file list".</p>
         <p>Every device reads every other device's log through the storages and replays all of them into the same picture: which blocks exist, where every copy is, who wrote it, who has checked it and when. Nothing in it is trusted for where it came from: each batch is signed by the device that made it, and a copy counts as verified only when a different device has checked it.</p>
@@ -162,7 +162,7 @@
 
     <section class="feature">
       <h3>Signed, chained and sealed</h3>
-      <picture><source type="image/webp" srcset="../assets/img/encryption/chain.webp"><img src="../assets/img/encryption/chain.png" alt="Ledger batches 40, 41 and 42, each signed with Ed25519 and ML-DSA-65 and chained to the one before; a second batch 41 from a rolled-back device forks the chain and is detected and fenced by the other devices." width="640" height="320" loading="lazy"></picture>
+      <picture class="theme-light"><source type="image/webp" srcset="../assets/img/encryption/chain.webp?v=c64e438f0f"><img src="../assets/img/encryption/chain.png?v=bc7a2a1512" alt="Ledger batches 40, 41 and 42, each signed with Ed25519 and ML-DSA-65 and chained to the one before; a second batch 41 from a rolled-back device forks the chain and is detected and fenced by the other devices." width="640" height="320" loading="lazy"></picture><picture class="theme-dark"><source type="image/webp" srcset="../assets/img/encryption/chain-dark.webp?v=ae0317ce6c"><img src="../assets/img/encryption/chain-dark.png?v=21e3113ecb" alt="Ledger batches 40, 41 and 42, each signed with Ed25519 and ML-DSA-65 and chained to the one before; a second batch 41 from a rolled-back device forks the chain and is detected and fenced by the other devices." width="640" height="320" loading="lazy"></picture>
       <div>
         <p>Events are collected into <strong>batches</strong>, typically one per sync rather than one per file. A batch carries the device id, a sequence number (1, 2, 3, ...), the hash of the device's previous batch, a logical clock, its creation time and the events.</p>
         <ol>
@@ -241,7 +241,7 @@
 
     <section class="feature" id="sharing">
       <h2>Sharing a folder</h2>
-      <picture><source type="image/webp" srcset="../assets/img/encryption/sealed.webp"><img src="../assets/img/encryption/sealed.png" alt="The recipient's device sends a request code with its X25519 and ML-KEM-768 public keys; you send back a sealed token holding one folder key, which only the requesting device can open, over any channel." width="640" height="320" loading="lazy"></picture>
+      <picture class="theme-light"><source type="image/webp" srcset="../assets/img/encryption/sealed.webp?v=730d526d3d"><img src="../assets/img/encryption/sealed.png?v=a2915c47c2" alt="The recipient's device sends a request code with its X25519 and ML-KEM-768 public keys; you send back a sealed token holding one folder key, which only the requesting device can open, over any channel." width="640" height="320" loading="lazy"></picture><picture class="theme-dark"><source type="image/webp" srcset="../assets/img/encryption/sealed-dark.webp?v=ac9a67c2b4"><img src="../assets/img/encryption/sealed-dark.png?v=13956789c9" alt="The recipient's device sends a request code with its X25519 and ML-KEM-768 public keys; you send back a sealed token holding one folder key, which only the requesting device can open, over any channel." width="640" height="320" loading="lazy"></picture>
       <div>
         <p>The recipient's device creates a hybrid key pair (X25519 + ML-KEM-768) and prints a request code with the public half. Your device encapsulates to both halves, derives one key from both shared secrets and the transcript, and encrypts the folder key with it. The resulting token can travel over any channel: only the requesting device can open it, and it opens one folder.</p>
         <p>Before sealing, both of you compare a fingerprint: six words derived from the request code and the name in it. You read them to each other over a call or in person; a code swapped on its way shows other words, and the recipient's device refuses a token whose confirmed words are not its own.</p>
@@ -251,7 +251,7 @@
 
     <section class="feature" id="strongroom">
       <h2>Strongroom: cryptographic, not a dialog</h2>
-      <picture><source type="image/webp" srcset="../assets/img/encryption/strongroom.webp"><img src="../assets/img/encryption/strongroom.png" alt="A touch of the security key unlocks a Strongroom folder: only the credential id, the salt and the wrapped folder key are stored, the key stays in memory for 15 minutes, and the passphrase, the vault key or a stolen backup cannot open it." width="640" height="320" loading="lazy"></picture>
+      <picture class="theme-light"><source type="image/webp" srcset="../assets/img/encryption/strongroom.webp?v=e2d5e5077f"><img src="../assets/img/encryption/strongroom.png?v=b292562005" alt="A touch of the security key unlocks a Strongroom folder: only the credential id, the salt and the wrapped folder key are stored, the key stays in memory for 15 minutes, and the passphrase, the vault key or a stolen backup cannot open it." width="640" height="320" loading="lazy"></picture><picture class="theme-dark"><source type="image/webp" srcset="../assets/img/encryption/strongroom-dark.webp?v=e9a0d2dc95"><img src="../assets/img/encryption/strongroom-dark.png?v=45041fccd5" alt="A touch of the security key unlocks a Strongroom folder: only the credential id, the salt and the wrapped folder key are stored, the key stays in memory for 15 minutes, and the passphrase, the vault key or a stolen backup cannot open it." width="640" height="320" loading="lazy"></picture>
       <div>
         <p>A Strongroom folder's key is never at rest. At creation the security key makes a credential, then produces a 32-byte secret from it and a random per-folder salt (FIDO2 hmac-secret). Varsto wraps the folder key under that secret and stores only the credential id, the salt and the wrapped key. Unlocking repeats the touch and keeps the key in memory for a window (15 minutes by default), then forgets it. There is no path to the folder key without the physical key: not through the passphrase, the vault key or a stolen backup. Backup security keys get their own wrap of the same folder key. Converting an existing folder gives it a new id and key, re-encrypts it and deletes the old ciphertext; re-keying a Strongroom does the same with a new key wrapped for every enrolled security key, for when a key may have been kept by someone.</p>
       </div>
@@ -259,7 +259,7 @@
 
     <section class="feature" id="recovery">
       <h2>Passphrases and the recovery kit</h2>
-      <picture><source type="image/webp" srcset="../assets/img/encryption/recovery.webp"><img src="../assets/img/encryption/recovery.png" alt="A recovery kit of 24 words, or three shares of which any two rebuild the vault key while one alone reveals nothing." width="640" height="320" loading="lazy"></picture>
+      <picture class="theme-light"><source type="image/webp" srcset="../assets/img/encryption/recovery.webp?v=7446aa430f"><img src="../assets/img/encryption/recovery.png?v=0e09060e87" alt="A recovery kit of 24 words, or three shares of which any two rebuild the vault key while one alone reveals nothing." width="640" height="320" loading="lazy"></picture><picture class="theme-dark"><source type="image/webp" srcset="../assets/img/encryption/recovery-dark.webp?v=1c3e761199"><img src="../assets/img/encryption/recovery-dark.png?v=dab0f11bf0" alt="A recovery kit of 24 words, or three shares of which any two rebuild the vault key while one alone reveals nothing." width="640" height="320" loading="lazy"></picture>
       <div>
         <p>The device passphrase goes through Argon2id to unlock <code>keys.enc</code>; the background app can keep it in the operating system's keychain so the service unlocks itself after login. Losing a passphrase loses that device's copy of the keys, not the vault: another device, or the recovery kit, enrols a new one.</p>
         <p>The recovery kit prints the vault key as 24 BIP-39 words (a miscopied word is caught by the checksum) and, if you ask, three Shamir shares of which any two rebuild the key while one alone reveals nothing. There is no account, no escrow and no reset: the kit is how you carry the responsibility. Print a new kit after removing a device, because the old one holds the old key.</p>

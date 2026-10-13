@@ -402,7 +402,10 @@ td.policy-placement button { margin-top: 4px; }
 td .policy-text { display: block; font-size: 12px; color: var(--muted); margin-top: 4px; min-width: 160px; white-space: normal; overflow-wrap: anywhere; }
 td .muted { font-size: 12.5px; }
 #files tbody tr { cursor: pointer; }
-#files td:first-child { white-space: normal; }
+/* Whole words in names and dates: overflow-wrap: anywhere (td) lets the table
+   squeeze these columns until "sunset.jpg" or a date splits mid-word. */
+#files td:first-child { white-space: normal; overflow-wrap: break-word; }
+#files td:nth-child(4) { white-space: nowrap; }
 img.thumb { width: 40px; height: 40px; object-fit: cover; border-radius: var(--radius-sm); vertical-align: middle; margin-right: 12px; border: 1px solid var(--border); background: var(--surface-2); }
 .file-icon { width: 40px; height: 40px; border-radius: var(--radius-sm); background: var(--surface-2); border: 1px solid var(--border); color: var(--muted); display: inline-flex; align-items: center; justify-content: center; margin-right: 12px; flex: none; }
 .file-icon .icon { width: 20px; height: 20px; }
@@ -464,7 +467,7 @@ svg.spark { width: 120px; height: 32px; display: block; flex: none; }
 
 /* Files view */
 .files-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; align-items: start; }
-.files-layout.with-details { grid-template-columns: minmax(0, 1fr) 300px; }
+.files-layout.with-details { grid-template-columns: minmax(0, 1fr) 280px; }
 .files-head { margin-bottom: 16px; }
 .crumbs { display: flex; align-items: center; gap: 6px; }
 .crumbs .icon-btn { width: 32px; height: 32px; flex: none; }

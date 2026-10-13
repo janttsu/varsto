@@ -61,6 +61,8 @@ if [ -n "$pos" ]; then
   left=$(( $1 - 260 > 0 ? $1 - 260 : 0 ))
   convert "$raw/linux-tray-menu.png" -crop 520x300+${left}+0 +repage "$out/linux-tray.png"
   xdotool key Escape; sleep 1
+  # Off the icon, or its tooltip covers the app window's top bar later.
+  xdotool mousemove 120 620; sleep 1
   echo "tray icon at $1 $2"
 else
   echo "tray icon not found on the panel" >&2

@@ -115,14 +115,20 @@ figure.hero figcaption { color: var(--muted); font-size: .95rem; margin-top: .5r
 .dl-all { margin:1rem 0; }
 .dl-all table { margin-top:.5rem; }
 
-/* Screenshots follow the page theme: one of the pair is shown. */
-.shot-dark { display:none; }
+/* Screenshots and illustrations follow the page theme (the toggle, or the system
+   setting in auto): one of each pair is shown. The hidden one is display:none, so
+   with loading="lazy" it is not fetched and takes no space. */
+.shot-dark, .theme-dark { display:none; }
 @media (prefers-color-scheme: dark) {
   :root[data-theme="auto"] .shot-dark { display:block; }
   :root[data-theme="auto"] .shot-light { display:none; }
+  :root[data-theme="auto"] .theme-dark { display:revert; }
+  :root[data-theme="auto"] .theme-light { display:none; }
 }
 :root[data-theme="dark"] .shot-dark { display:block; }
 :root[data-theme="dark"] .shot-light { display:none; }
+:root[data-theme="dark"] .theme-dark { display:revert; }
+:root[data-theme="dark"] .theme-light { display:none; }
 .shots-single { grid-template-columns: 1fr; max-width: 20rem; }
 
 /* On-this-page table of contents (How it works). */
