@@ -1421,6 +1421,42 @@ fn api_unlocked(
             }
             Ok(serde_json::to_value(st)?)
         }
+        // The version history of overwritten files.
+        (Method::Get, "/api/history") => {
+            let folder = query_param(query, "folder").unwrap_or_default();
+            let path = query_param(query, "path").unwrap_or_default();
+            Ok(serde_json::to_value(engine.history_list(&folder, &path)?)?)
+        }
+        (Method::Get, "/api/history/status") => {
+            Ok(serde_json::to_value(engine.history_status()?)?)
+        }
+        (Method::Post, "/api/history/restore-plan") | (Method::Post, "/api/history/restore") => {
+            let plan_only = path.ends_with("-plan");
+            let target = varsto_core::engine::HistoryTarget {
+                to: opt(input, "to").filter(|t| !t.trim().is_empty()),
+                as_name: opt(input, "as").filter(|t| !t.trim().is_empty()),
+            };
+            let (folder, path, version) =
+                (s(input, "folder")?, s(input, "path")?, s(input, "version")?);
+            if plan_only {
+                return Ok(serde_json::to_value(
+                    engine.history_restore_plan(&folder, &path, &version, &target)?,
+                )?);
+            }
+            let cold = input.get("confirm_cold_read").and_then(|v| v.as_bool()).unwrap_or(false);
+            let r = engine.history_restore(&folder, &path, &version, &target, cold)?;
+            service.request_sync();
+            Ok(serde_json::to_value(r)?)
+        }
+        (Method::Post, "/api/history/set") => {
+            let days = input
+                .get("days")
+                .and_then(|v| v.as_u64())
+                .map(|d| d.min(u32::MAX as u64) as u32);
+            let folder = opt(input, "folder").filter(|f| !f.is_empty());
+            let off = input.get("off").and_then(|v| v.as_bool()).unwrap_or(false);
+            Ok(serde_json::to_value(engine.history_set(days, folder.as_deref(), off)?)?)
+        }
         (Method::Post, "/api/trash/upkeep") => {
             let r = engine.trash_upkeep()?;
             service.record_trash_upkeep(&r);

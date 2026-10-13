@@ -425,10 +425,16 @@ impl ServiceState {
         }
     }
     pub fn record_trash_upkeep(&mut self, r: &varsto_core::engine::TrashUpkeepReport) {
-        if r.expired + r.blocks_dropped + r.blocks_moved + r.local_copies_removed > 0 {
+        if r.expired
+            + r.versions_dropped
+            + r.blocks_dropped
+            + r.blocks_moved
+            + r.local_copies_removed
+            > 0
+        {
             eprintln!(
-                "service: trash: {} files expired, {} blocks deleted, {} blocks moved to the trash storage, {} local copies removed",
-                r.expired, r.blocks_dropped, r.blocks_moved, r.local_copies_removed
+                "service: trash: {} files expired, {} earlier versions let go, {} blocks deleted, {} blocks moved to the trash storage, {} local copies removed",
+                r.expired, r.versions_dropped, r.blocks_dropped, r.blocks_moved, r.local_copies_removed
             );
         }
         for n in &r.notes {

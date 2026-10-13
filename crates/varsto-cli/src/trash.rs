@@ -201,8 +201,9 @@ fn describe_purge(r: &Value) -> String {
 
 fn describe_upkeep(r: &Value) -> String {
     let mut s = format!(
-        "{} files expired; {} blocks ({}) deleted, {} blocks ({}) moved to the trash storage, {} local trash copies removed",
+        "{} files expired, {} earlier versions let go; {} blocks ({}) deleted, {} blocks ({}) moved to the trash storage, {} local trash copies removed",
         r["expired"].as_u64().unwrap_or(0),
+        r["versions_dropped"].as_u64().unwrap_or(0),
         r["blocks_dropped"].as_u64().unwrap_or(0),
         fmt_bytes(r["bytes_dropped"].as_u64().unwrap_or(0)),
         r["blocks_moved"].as_u64().unwrap_or(0),
