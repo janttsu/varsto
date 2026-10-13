@@ -13,7 +13,7 @@ Status of the documents that will define formats and protocols. Most of what exi
 | Peer-to-peer transfer protocol | alpha implemented (HTTP and QUIC, NAT traversal): [alpha-0-format.md](alpha-0-format.md) section 15 |
 | Version, trash and retention model | alpha-0 merge rules and trash: [alpha-0-format.md](alpha-0-format.md) section 7; retention not started |
 | Durability policy language | alpha implemented: [alpha-0-format.md](alpha-0-format.md) section 14 |
-| Removable-disk layout | alpha implemented (disk pool): [alpha-0-format.md](alpha-0-format.md) section 19 |
+| Removable-disk layout | alpha implemented (disk pool): [alpha-0-format.md](alpha-0-format.md) sections 19, 34 and 35 |
 | Local control API and MCP surface | alpha implemented: [alpha-0-format.md](alpha-0-format.md) sections 10 and 13 |
 | Recovery kit | alpha implemented: [alpha-0-format.md](alpha-0-format.md) section 18 |
 | Data placement, moving data and disk groups | alpha implemented: [alpha-0-format.md](alpha-0-format.md) section 23 |
