@@ -44,6 +44,7 @@ mod access_sync;
 mod backups;
 mod block_cache;
 mod data_moves;
+mod device_copies;
 mod devinfo;
 mod disk_groups;
 mod fetch;
@@ -1668,10 +1669,16 @@ impl Engine {
     /// of reading missing files as deletions.
     pub fn detach_folder(&mut self, name: &str) -> Result<()> {
         let (rec, _) = self.resolve_folder(name)?;
-        self.detach_mount(&rec.folder_id)
+        self.detach_mount(&rec.folder_id)?;
+        // Recorded here even when no storage can be reached now (the batch
+        // goes out with the next sync, which would also record it).
+        let _ = self.commit_batch();
+        Ok(())
     }
 
     fn detach_mount(&mut self, folder: &FolderId) -> Result<()> {
+        // This device's copies of the folder's blocks no longer count.
+        let _ = self.release_device_copies(Some(folder));
         let before = self.config.folders.len();
         self.config.folders.retain(|m| &m.folder_id != folder);
         if self.config.folders.len() != before {
@@ -1756,6 +1763,7 @@ impl Engine {
             }
         }
         self.forget_folder(&rec.folder_id, removal.removed_utc)?;
+        let _ = self.commit_batch();
         Ok(deleted)
     }
 
@@ -2267,6 +2275,7 @@ impl Engine {
                 Event::ChunkStored { folder, .. }
                 | Event::ChunkVerified { folder, .. }
                 | Event::ChunkOnDevice { folder, .. }
+                | Event::ChunkOffDevice { folder, .. }
                 | Event::ManifestPublished { folder, .. }
                 | Event::ChunkDropped { folder, .. }
                 | Event::FolderAdded { folder } => Some(folder.clone()),
@@ -2596,6 +2605,7 @@ impl Engine {
             report.manifest_seq = Some(seq);
         }
         self.ensure_manifest_everywhere(&rec, &state)?;
+        self.reconcile_device_copies(&rec, &state)?;
         report.batch_seq = self.commit_batch()?;
         self.save_state(&rec.folder_id, &state)?;
         Ok(report)
@@ -2633,7 +2643,7 @@ impl Engine {
                 .locate(&folder_id, &cref.chunk)
                 .filter(|r| r.object == cref.object);
             let held_elsewhere = known
-                .map(|r| r.devices.iter().any(|d| d != &me))
+                .map(|r| r.holders().any(|d| d != &me))
                 .unwrap_or(false);
             storages
                 .iter()
@@ -2660,7 +2670,7 @@ impl Engine {
                         Some(targets) => {
                             !targets.is_empty()
                                 && known
-                                    .map(|r| targets.iter().any(|t| !r.devices.contains(t)))
+                                    .map(|r| targets.iter().any(|t| !r.held_by(t)))
                                     .unwrap_or(true)
                         }
                         None => !held_elsewhere,
@@ -3344,15 +3354,15 @@ impl Engine {
             if folder != &rec.folder_id {
                 continue;
             }
-            let held_by_other = r.devices.iter().any(|d| d != &me);
+            let held_by_other = r.holders().any(|d| d != &me);
             for (spec, backend) in &carriers {
                 if !r.storages.contains_key(spec.name()) {
                     continue;
                 }
                 let delivered = match need.get(spec.name()) {
                     // Emptied as soon as every destination that uses the folder holds it.
-                    Some(targets) => targets.iter().all(|t| r.devices.contains(t)),
-                    None => held_by_other && r.devices.contains(&me),
+                    Some(targets) => targets.iter().all(|t| r.held_by(t)),
+                    None => held_by_other && r.held_by(&me),
                 };
                 if delivered {
                     backend.delete(&chunk_storage_key(&r.object))?;
@@ -3375,7 +3385,7 @@ impl Engine {
                 || view
                     .chunks
                     .iter()
-                    .any(|((f, _), r)| f == folder && r.devices.contains(d))
+                    .any(|((f, _), r)| f == folder && r.held_by(d))
         };
         self.config
             .carrier_for
@@ -4016,7 +4026,11 @@ impl Engine {
                         continue;
                     }
                     let mut copies = Vec::new();
+                    let mut devices = 0;
                     if let Some(record) = view.locate(&rec.folder_id, &cr.chunk) {
+                        // Every device of the vault holding the chunk in its
+                        // files is a copy at home (revoked ones are not).
+                        devices = record.holders().filter(|d| self.trusted(d)).count() as u32;
                         for (name, loc) in &record.storages {
                             if loc.claimed_by.is_empty() || carriers.contains(name) {
                                 continue;
@@ -4054,7 +4068,7 @@ impl Engine {
                             copies.push((name.clone(), place, verified, verified_utc));
                         }
                     }
-                    facts.push(crate::policy::ChunkFacts { copies });
+                    facts.push(crate::policy::ChunkFacts { copies, devices });
                 }
             }
             let mut report = crate::policy::evaluate(
@@ -4751,6 +4765,11 @@ impl Engine {
             pull.files_updated += self.fill_placeholders(&name, &mut pull.files_unavailable)?;
             let push = self.push(&name)?;
             out.push((pull, push));
+        }
+        if folder.is_none() {
+            // Folders detached or removed here: their blocks are not held
+            // here any more.
+            self.release_device_copies(None)?;
         }
         if self.block_cache_root().is_dir() {
             // Blocks no cached file needs any more (a newer version arrived,

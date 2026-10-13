@@ -456,8 +456,9 @@ fn policy_counts_an_offline_disk_at_its_last_verification() {
     a.push("docs").unwrap();
     a.set_policy(
         "docs",
+        // Three copies: the two storages and this device's files.
         Some(varsto_core::policy::Policy {
-            min_copies: 2,
+            min_copies: 3,
             min_per_place: [("shelf".to_string(), 1)].into_iter().collect(),
             verified_within_days: Some(30),
         }),
@@ -472,7 +473,7 @@ fn policy_counts_an_offline_disk_at_its_last_verification() {
         "{:?}",
         reports[0]
     );
-    // Away: still two copies, but the margin is zero and one copy cannot be read.
+    // Away: still three copies, but the margin is zero and one copy cannot be read.
     fs::rename(&d1, lab.root.join("away")).unwrap();
     let reports = a.policy_check().unwrap();
     assert_eq!(

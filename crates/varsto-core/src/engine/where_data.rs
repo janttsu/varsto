@@ -118,7 +118,8 @@ impl Engine {
     ///
     /// Storages hold a block when the ledger records a claim or a verification
     /// there (retired storages' older claims are already dropped). Other
-    /// devices hold a block when they recorded holding it; for this device
+    /// devices hold a block when their newest record says they hold it (not
+    /// that they let it go: a file deleted or freed there); for this device
     /// the files on disk decide, so freed files and placeholders do not count.
     ///
     /// Only folders whose file list this device has count (a folder never
@@ -227,7 +228,7 @@ impl Engine {
                             kept += 1;
                         }
                     }
-                    for d in r.devices.iter().filter(|d| **d != me) {
+                    for d in r.holders().filter(|d| **d != me) {
                         let e = devices.entry(d.clone()).or_insert_with(|| device_entry(d));
                         e.bytes += size;
                         e.blocks += 1;

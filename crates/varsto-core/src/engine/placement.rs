@@ -350,6 +350,9 @@ impl Engine {
                         (n.clone(), place, false, 0)
                     })
                     .collect(),
+                // Storage copies only: this device's copy is the one going,
+                // and a copy on another device is not one Varsto keeps.
+                devices: 0,
             });
         }
         if let Some(p) = rec

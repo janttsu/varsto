@@ -1071,7 +1071,7 @@ mod tests {
                 .unwrap()
                 .chunks
                 .values()
-                .filter(|c| c.devices.contains(&me))
+                .filter(|c| c.held_by(&me))
                 .count()
         };
         assert_eq!(on_b(b), 0);

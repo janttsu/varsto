@@ -4,6 +4,11 @@
 //! folder record, and is evaluated on every device from the ledger alone, so
 //! every device reaches the same verdict without talking to the others.
 //!
+//! Copies are the storages holding a chunk and the vault's own devices that
+//! hold it in their files (`ChunkOnDevice`, place "home"). Only storage
+//! copies are verified: a device copy counts towards the copy rules, never
+//! towards `verified_within_days`.
+//!
 //! States: `ok`, `at_risk` (still true, but about to stop being true: a
 //! verification is ageing out, or the margin is zero and a copy sits on
 //! media that cannot be read right now), `violated`, `unknown` (a storage
@@ -14,10 +19,12 @@ use std::collections::BTreeMap;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct Policy {
-    /// Minimum number of storages (any place, carriers excluded) holding every chunk.
+    /// Minimum number of copies of every chunk: storages (any place,
+    /// carriers excluded) and own devices holding it in their files.
     #[serde(default)]
     pub min_copies: u32,
-    /// Minimum copies per place, e.g. {"cloud": 2, "home": 1}.
+    /// Minimum copies per place, e.g. {"cloud": 2, "home": 1}. A device
+    /// copy is at place "home".
     #[serde(default)]
     pub min_per_place: BTreeMap<String, u32>,
     /// Every chunk must have been verified by a device other than its writer
@@ -27,8 +34,8 @@ pub struct Policy {
 }
 
 /// How a place reads in sentences: the two default places by what they
-/// are (a directory or disk pool is "home", S3 and rclone are "cloud"),
-/// other labels as given.
+/// are (a directory or disk pool is "home", and so are your devices' own
+/// copies; S3 and rclone are "cloud"), other labels as given.
 pub fn place_phrase(place: &str) -> String {
     match place {
         "home" => "on your own devices and disks".to_string(),
@@ -103,10 +110,17 @@ impl PolicyState {
 }
 
 /// One chunk's standing against the policy.
+#[derive(Default)]
 pub struct ChunkFacts {
     /// Storage name -> (place, verified by someone other than the writer, newest verification time).
     pub copies: Vec<(String, String, bool, i64)>,
+    /// Own devices holding the chunk in their files: each is one copy at
+    /// place "home", always readable, never verified.
+    pub devices: u32,
 }
+
+/// The place of a device copy.
+pub const DEVICE_PLACE: &str = "home";
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PolicyReport {
@@ -140,7 +154,7 @@ pub fn evaluate(
     let mut ageing = 0u64;
     let window = policy.verified_within_days.map(|d| d as i64 * 86_400);
     for c in chunks {
-        let copies = c.copies.len() as u64;
+        let copies = c.copies.len() as u64 + c.devices as u64;
         if copies < policy.min_copies as u64 {
             short_copies += 1;
         } else if copies == policy.min_copies as u64
@@ -154,7 +168,10 @@ pub fn evaluate(
             zero_margin_on_unreadable += 1;
         }
         for (place, n) in &policy.min_per_place {
-            let have = c.copies.iter().filter(|(_, p, _, _)| p == place).count() as u32;
+            let mut have = c.copies.iter().filter(|(_, p, _, _)| p == place).count() as u32;
+            if place == DEVICE_PLACE {
+                have += c.devices;
+            }
             if have < *n {
                 *short_place.entry(place.clone()).or_default() += 1;
             }
@@ -254,6 +271,7 @@ mod tests {
                 .iter()
                 .map(|(n, p, v, t)| (n.to_string(), p.to_string(), *v, *t))
                 .collect(),
+            devices: 0,
         }
     }
 
@@ -348,5 +366,79 @@ mod tests {
         );
         assert_eq!(r.state, PolicyState::Unknown);
         assert_eq!(parse_place_spec("cloud=2"), Some(("cloud".to_string(), 2)));
+    }
+
+    #[test]
+    fn device_copies_count_at_home_and_are_never_verified() {
+        let now = 2_000_000_000;
+        let day = 86_400;
+        let none = BTreeMap::new();
+        let policy = Policy::folder_default();
+        let with_devices = |copies: &[(&str, &str, bool, i64)], devices| ChunkFacts {
+            devices,
+            ..chunk(copies)
+        };
+        // One cloud storage verified by another device and one device: ok.
+        let r = evaluate(
+            "f",
+            &policy,
+            &[with_devices(&[("s3", "cloud", true, now - day)], 1)],
+            &none,
+            &[],
+            now,
+        );
+        assert_eq!(r.state, PolicyState::Ok, "{:?}", r.reasons);
+        // Without the device: short at home.
+        let r = evaluate(
+            "f",
+            &policy,
+            &[with_devices(&[("s3", "cloud", true, now - day)], 0)],
+            &none,
+            &[],
+            now,
+        );
+        assert_eq!(r.chunks_short_per_place["home"], 1);
+        // Devices alone meet the copy counts, not the verification.
+        let r = evaluate(
+            "f",
+            &Policy {
+                min_copies: 2,
+                min_per_place: [("home".to_string(), 2)].into_iter().collect(),
+                verified_within_days: Some(30),
+            },
+            &[with_devices(&[], 2)],
+            &none,
+            &[],
+            now,
+        );
+        assert_eq!(r.chunks_short_of_copies, 0);
+        assert!(r.chunks_short_per_place.is_empty());
+        assert_eq!(r.chunks_unverified_in_window, 1);
+        // A device copy is readable: exactly the minimum with a device and
+        // a cold copy is at risk, a device and a hot copy is ok.
+        let mut unreadable = BTreeMap::new();
+        unreadable.insert("cloud".to_string(), vec!["glacier".to_string()]);
+        let two = Policy {
+            min_copies: 2,
+            ..Default::default()
+        };
+        let r = evaluate(
+            "f",
+            &two,
+            &[with_devices(&[("glacier", "cloud", true, now)], 1)],
+            &unreadable,
+            &[],
+            now,
+        );
+        assert_eq!(r.state, PolicyState::AtRisk);
+        let r = evaluate(
+            "f",
+            &two,
+            &[with_devices(&[("s3", "cloud", true, now)], 1)],
+            &unreadable,
+            &[],
+            now,
+        );
+        assert_eq!(r.state, PolicyState::Ok);
     }
 }
