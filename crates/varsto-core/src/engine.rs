@@ -51,10 +51,11 @@ mod disk_groups;
 mod disk_insert;
 mod disk_suggest;
 mod fetch;
-mod ledger_recovery;
 mod guide;
 mod imports;
+mod ledger_recovery;
 mod ledger_upkeep;
+mod local_names;
 mod manifest_upkeep;
 mod membership;
 mod notes;
@@ -80,14 +81,14 @@ pub use disk_fetch::{
     RemoteOption, StepOutcome,
 };
 pub use disk_groups::DiskGroupStatus;
-pub use ledger_recovery::{
-    LedgerDeviceStatus, LedgerHealth, LedgerHolding, LedgerProblem, LedgerRebuildOptions,
-    LedgerRebuildReport, LedgerStatus, StorageRebuildReport,
-};
 pub use disk_insert::{DiskInsertReport, DiskProgress, FillOutcome, InsertOptions};
 pub use imports::{
     CleanupFile, ImportCleanupReport, ImportOptions, ImportReport, ImportStatus, ImportVerify,
     MissingFile,
+};
+pub use ledger_recovery::{
+    LedgerDeviceStatus, LedgerHealth, LedgerHolding, LedgerProblem, LedgerRebuildOptions,
+    LedgerRebuildReport, LedgerStatus, StorageRebuildReport,
 };
 pub use manifest_upkeep::ManifestPolicy;
 pub use membership::{
@@ -160,6 +161,10 @@ struct FolderState {
     /// the snapshot and named in it).
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     unreadable: BTreeSet<String>,
+    /// Vault paths written under another local name on this device (the
+    /// Windows mapping, a case collision): see `crate::names`.
+    #[serde(default, skip_serializing_if = "crate::names::LocalNames::is_empty")]
+    local_names: crate::names::LocalNames,
 }
 
 fn now_secs() -> i64 {
@@ -227,6 +232,11 @@ pub struct PullReport {
     /// Pool disks that must be attached for unavailable files: "label (place)".
     #[serde(default)]
     pub disks_needed: Vec<String>,
+    /// Files written under another local name because this device's
+    /// filesystem already has a file whose name differs only in case:
+    /// "vault path -> local path".
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub renamed_locally: Vec<String>,
 }
 
 /// Blocks of a folder by where they are: on a storage (verified by another
@@ -507,6 +517,9 @@ pub struct Engine {
     /// The token of the restic hold this engine works under (its own run's
     /// completeness check), which the hold does not stop (`restic_mirror`).
     hold_exempt: Option<String>,
+    /// The filesystem rules to assume for every folder instead of probing
+    /// them (tests simulate Windows or a case-insensitive disk with it).
+    local_rules: Option<crate::names::LocalRules>,
 }
 
 /// What the peer-to-peer server serves from (see `Engine::set_snapshot_sink`).
@@ -884,6 +897,7 @@ impl Engine {
             snapshot_sink: None,
             pack_caches: Default::default(),
             prefetched: HashMap::new(),
+            local_rules: None,
             fetch_stats: Default::default(),
             unlocked: BTreeMap::new(),
             home: home.to_path_buf(),
@@ -1068,6 +1082,7 @@ impl Engine {
             snapshot_sink: None,
             pack_caches: Default::default(),
             prefetched: HashMap::new(),
+            local_rules: None,
             fetch_stats: Default::default(),
             unlocked: BTreeMap::new(),
             config: Config::load(home)?,
@@ -1991,7 +2006,7 @@ impl Engine {
         let paths: Vec<String> = state
             .files
             .values()
-            .filter(|f| !f.deleted && root.join(&f.path).exists())
+            .filter(|f| !f.deleted && self.disk_of(&root, &state, &f.path).exists())
             .map(|f| f.path.clone())
             .collect();
         let (mut freed, mut kept) = (0u64, 0u64);
@@ -2029,7 +2044,11 @@ impl Engine {
                 .cloned()
                 .collect();
             for f in files {
-                let disk = m.path.join(&f.path);
+                let disk = state.local_names.disk(
+                    &m.path,
+                    crate::names::LocalRules::detect(&m.path),
+                    &f.path,
+                );
                 let Ok(md) = fs::metadata(&disk) else {
                     continue;
                 };
@@ -2506,6 +2525,7 @@ impl Engine {
         let mut scanned = 0u64;
         let mut changed = 0u64;
         let mut new_index = BTreeMap::new();
+        let rules = self.local_rules(root);
         // A backup takes what it can read; the rest is named in its snapshot.
         let backup = rec.is_backup();
         state.unreadable.clear();
@@ -2524,6 +2544,7 @@ impl Engine {
                         .and_then(|p| p.strip_prefix(root).ok())
                         .and_then(util::manifest_path)
                     {
+                        let p = state.local_names.vault_of(rules, &p);
                         state.unreadable.insert(p);
                     }
                     continue;
@@ -2534,13 +2555,15 @@ impl Engine {
                 continue;
             }
             let rel = entry.path().strip_prefix(root)?;
-            let Some(path) = util::manifest_path(rel) else {
+            let Some(local) = util::manifest_path(rel) else {
                 continue;
             };
-            if let Some(real) = path.strip_suffix(PLACEHOLDER_SUFFIX) {
-                placeholders.insert(real.to_string());
+            // Local names map back to vault paths (`crate::names`).
+            if let Some(real) = local.strip_suffix(PLACEHOLDER_SUFFIX) {
+                placeholders.insert(state.local_names.vault_of(rules, real));
                 continue;
             }
+            let path = state.local_names.vault_of(rules, &local);
             let md = entry.metadata()?;
             let size = md.len();
             let mtime = md
@@ -2679,6 +2702,7 @@ impl Engine {
             .map(|(p, _)| p.clone())
             .collect();
         for path in gone {
+            state.local_names.forget(rules, &path);
             let clock = self.tick()?;
             let prev = state.files.get(&path).cloned().unwrap();
             let mut version = prev.version.clone();
@@ -2988,7 +3012,7 @@ impl Engine {
                     }
                     continue;
                 }
-                let disk = root.join(&file.path);
+                let disk = self.disk_of(root, state, &file.path);
                 let Ok(handle) = fs::File::open(&disk) else {
                     continue;
                 };
@@ -3115,7 +3139,7 @@ impl Engine {
                 }
                 self.thumbnail_from_cache(&fk, state, &path)
             } else {
-                let disk = root.join(&path);
+                let disk = self.disk_of(root, state, &path);
                 if !disk.exists() {
                     continue;
                 }
@@ -3154,7 +3178,7 @@ impl Engine {
                     && !f.content_hash.is_empty()
                     && !state.thumbs_done.contains(&f.content_hash)
             }) {
-                let disk = root.join(&f.path);
+                let disk = self.disk_of(&root, &state, &f.path);
                 if disk.is_file() {
                     out.push((rec.name.clone(), f.path.clone(), disk));
                     if out.len() >= limit {
@@ -3423,12 +3447,18 @@ impl Engine {
                                 .get(path)
                                 .map(|l| l.content_hash == loser.content_hash)
                                 .unwrap_or(false);
-                            let disk = root.join(&cpath);
+                            let disk = self.place(
+                                &root,
+                                &mut state,
+                                &cpath,
+                                Some(&mut report.renamed_locally),
+                            )?;
                             if let Some(parent) = disk.parent() {
                                 fs::create_dir_all(parent)?;
                             }
-                            if local_is_loser && root.join(path).exists() {
-                                fs::rename(root.join(path), &disk)?;
+                            let local = self.disk_of(&root, &state, path);
+                            if local_is_loser && local.exists() {
+                                fs::rename(&local, &disk)?;
                             } else {
                                 self.download_to(&rec, &fk, &disk, &loser, &storages, &mut report)?;
                             }
@@ -3467,7 +3497,7 @@ impl Engine {
                                 || if encrypted_here {
                                     state.local_index.contains_key(path)
                                 } else {
-                                    root.join(path).exists()
+                                    self.disk_of(&root, &state, path).exists()
                                 });
                         if local_has_winner {
                             state.files.insert(path.clone(), winner);
@@ -3639,13 +3669,22 @@ impl Engine {
         }
         // Manifests are validated when opened; this is the last line of
         // defence before a path from another device touches the disk.
-        let disk = util::safe_join(root, &remote.path)?;
+        util::check_rel_path(&remote.path)?;
+        let rules = self.local_rules(root);
         if remote.deleted {
+            let local = state
+                .local_names
+                .local_rel(rules, &remote.path)
+                .into_owned();
+            let disk = util::safe_join(root, &local)?;
             let _ = fs::remove_file(placeholder_path(&disk));
             if disk.exists() {
+                // The trash is in Varsto's home, named like the file.
+                let trash_root = self.home.join("trash").join(rec.folder_id.as_str());
+                let trash_name = format!("{}.{}", remote.path, util::now_utc());
                 let trash = util::safe_join(
-                    &self.home.join("trash").join(rec.folder_id.as_str()),
-                    &format!("{}.{}", remote.path, util::now_utc()),
+                    &trash_root,
+                    &self.local_rules(&trash_root).default_local(&trash_name),
                 )?;
                 if let Some(p) = trash.parent() {
                     fs::create_dir_all(p)?;
@@ -3657,11 +3696,13 @@ impl Engine {
                 })?;
                 report.files_deleted += 1;
             }
+            state.local_names.forget(rules, &remote.path);
             state.local_index.remove(&remote.path);
             state.pending_remote.remove(&remote.path);
             state.files.insert(remote.path.clone(), remote);
             return Ok(());
         }
+        let disk = self.place(root, state, &remote.path, Some(&mut report.renamed_locally))?;
         let selective = self.mount_is_selective(&rec.folder_id);
         if selective && !state.pinned.contains(&remote.path) && !disk.exists() {
             // Selective sync: show the file as a placeholder; fetch on demand.
@@ -3974,7 +4015,7 @@ impl Engine {
             .files
             .values()
             .filter(|f| {
-                let disk = root.join(&f.path);
+                let disk = self.disk_of(&root, &state, &f.path);
                 !f.deleted && !disk.exists() && placeholder_path(&disk).exists()
             })
             .map(|f| f.path.clone())
@@ -4019,7 +4060,7 @@ impl Engine {
             folder: rec.name.clone(),
             ..Default::default()
         };
-        let disk = root.join(path);
+        let disk = self.place(&root, &mut state, path, Some(&mut report.renamed_locally))?;
         self.download_to(&rec, &fk, &disk, &file, &storages, &mut report)?;
         state.accessed.insert(path.to_string(), now_secs());
         let _ = fs::remove_file(placeholder_path(&disk));
@@ -4071,7 +4112,15 @@ impl Engine {
                 if rel.is_empty() {
                     bail!("{} is the folder itself", abs.display());
                 }
-                return Ok((rec.folder_id.to_string(), rel.join("/")));
+                // The local name maps back to the vault path.
+                let local = rel.join("/");
+                let path = match self.load_state(&rec.folder_id) {
+                    Ok(state) => state
+                        .local_names
+                        .vault_of_local(self.local_rules(&root), &local),
+                    Err(_) => local,
+                };
+                return Ok((rec.folder_id.to_string(), path));
             }
         }
         bail!("{} is not in a Varsto folder on this device", abs.display())
@@ -4116,7 +4165,7 @@ impl Engine {
                 bail!("{path} is not fully stored elsewhere yet; sync first");
             }
         }
-        let disk = root.join(path);
+        let disk = self.disk_of(&root, &state, path);
         if disk.exists() {
             // Only the synced version may go: a file changed since the last
             // sync (or never indexed here) holds the only copy of its changes.
@@ -4585,7 +4634,7 @@ impl Engine {
             let state = self.load_state(&rec.folder_id)?;
             let plain_here = !self.mount_is_encrypted(&rec.folder_id);
             for f in state.files.values().filter(|f| plain_here && !f.deleted) {
-                let disk = root.join(&f.path);
+                let disk = self.disk_of(&root, &state, &f.path);
                 if !disk.is_file() {
                     continue;
                 }
@@ -4796,8 +4845,12 @@ impl Engine {
             let staged = writer.write_sized(reader, size)?;
             return self.commit_staged(folder, path, staged);
         }
-        let (_, root) = self.resolve_for_write(folder)?;
-        let disk = root.join(path);
+        let (rec, root) = self.resolve_for_write(folder)?;
+        // The file's local name (mapped where this filesystem needs it) is
+        // recorded before the scan of the push finds it.
+        let mut state = self.load_state(&rec.folder_id)?;
+        let disk = self.place(&root, &mut state, path, None)?;
+        self.save_state(&rec.folder_id, &state)?;
         if placeholder_path(&disk).exists() {
             bail!("{path} is a placeholder here; fetch it before overwriting");
         }
@@ -4830,12 +4883,9 @@ impl Engine {
     /// A path no file of the folder uses, on this device or any other.
     fn ensure_path_free(&self, folder: &str, path: &str) -> Result<()> {
         let (rec, root) = self.resolve_folder(folder)?;
-        let disk = root.join(path);
-        let known = self
-            .load_state(&rec.folder_id)?
-            .files
-            .get(path)
-            .is_some_and(|f| !f.deleted);
+        let state = self.load_state(&rec.folder_id)?;
+        let disk = self.disk_of(&root, &state, path);
+        let known = state.files.get(path).is_some_and(|f| !f.deleted);
         if known || disk.exists() || placeholder_path(&disk).exists() {
             bail!("{path} already exists; files are never replaced, choose another name");
         }
@@ -4850,7 +4900,8 @@ impl Engine {
         if self.mount_is_encrypted(&rec.folder_id) {
             return Ok(());
         }
-        fs::create_dir_all(root.join(path))?;
+        let local = self.local_rules(&root).default_local(path).into_owned();
+        fs::create_dir_all(util::safe_join(&root, &local)?)?;
         Ok(())
     }
 
@@ -4877,10 +4928,11 @@ impl Engine {
             return Ok(bytes);
         }
         block_cache::check_rel_path(path)?;
-        if !self.load_state(&rec.folder_id)?.files.contains_key(path) {
+        let state = self.load_state(&rec.folder_id)?;
+        if !state.files.contains_key(path) {
             bail!("unknown file {path} in {folder}");
         }
-        let disk = root.join(path);
+        let disk = self.disk_of(&root, &state, path);
         if !disk.exists() {
             self.fetch_file(folder, path)?;
         }
@@ -4902,12 +4954,7 @@ impl Engine {
     fn move_file_only(&mut self, folder: &str, from: &str, to: &str) -> Result<PushReport> {
         let (_, root) = self.resolve_for_write(folder)?;
         for p in [from, to] {
-            if p.is_empty()
-                || Path::new(p).is_absolute()
-                || p.split('/').any(|c| c == ".." || c.is_empty())
-            {
-                bail!("path must be relative to the folder and must not contain '..': {p}");
-            }
+            util::check_rel_path(p)?;
         }
         // Moving never replaces a file, also not one only another device has.
         self.ensure_path_free(folder, to)?;
@@ -4915,8 +4962,13 @@ impl Engine {
         if self.mount_is_encrypted(&rec.folder_id) {
             return self.move_cached(&rec, folder, from, to);
         }
-        let src = root.join(from);
-        let dst = root.join(to);
+        // Where the file is, and where its new name goes on this disk; the
+        // new local name is recorded before the push's scan finds it.
+        let mut state = self.load_state(&rec.folder_id)?;
+        let src = self.disk_of(&root, &state, from);
+        // (The old name's record goes when the push's scan finds it gone.)
+        let dst = self.place(&root, &mut state, to, None)?;
+        self.save_state(&rec.folder_id, &state)?;
         if !src.exists() {
             // A placeholder can be moved as well.
             let ph = placeholder_path(&src);
@@ -4952,7 +5004,7 @@ impl Engine {
         let analyses = self.analyses_for_listing(&rec.folder_id, &state);
         let mut out = Vec::new();
         for f in state.files.values().filter(|f| !f.deleted) {
-            let disk = root.join(&f.path);
+            let disk = self.disk_of(&root, &state, &f.path);
             let state_str = if encrypted_here {
                 // Blocks in the cache, or not (yet) on this device.
                 if state.local_index.contains_key(&f.path) {
@@ -5154,7 +5206,7 @@ impl Engine {
                                 && if encrypted_here {
                                     !state.local_index.contains_key(&f.path)
                                 } else {
-                                    placeholder_path(&m.join(&f.path)).exists()
+                                    placeholder_path(&self.disk_of(m, &state, &f.path)).exists()
                                 }
                         })
                         .count() as u64

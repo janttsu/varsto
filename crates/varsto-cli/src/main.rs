@@ -1536,6 +1536,26 @@ fn suggest_text(s: &varsto_core::disksuggest::DiskSuggestions) -> String {
     out
 }
 
+/// A file name for the terminal: as it is, `:` and `\` included, with
+/// control characters and direction overrides shown as `\u{..}` escapes so
+/// that a name cannot move the cursor or recolour the terminal.
+pub(crate) fn show(name: &str) -> std::borrow::Cow<'_, str> {
+    varsto_core::names::display(name)
+}
+
+/// The files a case-insensitive disk made this device keep under another
+/// local name ("vault path -> local path"), for the pull and sync lines.
+fn renamed_note(renamed: &[String]) -> String {
+    if renamed.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "; kept under another name here because the disk ignores case: {}",
+            renamed.join(", ")
+        )
+    }
+}
+
 fn fmt_bytes(n: u64) -> String {
     const UNITS: [&str; 5] = ["B", "kB", "MB", "GB", "TB"];
     let mut v = n as f64;
@@ -2941,7 +2961,7 @@ fn run(cli: &Cli) -> Result<()> {
                                     "{:<12} {:>10} {}{}",
                                     f.state,
                                     f.size,
-                                    f.path,
+                                    show(&f.path),
                                     if f.pinned { " (pinned)" } else { "" }
                                 )
                             })
@@ -2990,7 +3010,7 @@ fn run(cli: &Cli) -> Result<()> {
             let mut engine = open_engine(&home)?;
             let r = engine.pull(folder)?;
             print(cli, &r, |r| {
-                format!("{}: {} manifests, {} updated, {} deleted, {} conflicts, {} chunks downloaded; unavailable: {:?}; forked: {:?}{}", r.folder, r.manifests_applied, r.files_updated, r.files_deleted, r.conflicts, r.chunks_downloaded, r.files_unavailable, r.forked_devices, if r.disks_needed.is_empty() { String::new() } else { format!("; attach disk {}", r.disks_needed.join(", ")) })
+                format!("{}: {} manifests, {} updated, {} deleted, {} conflicts, {} chunks downloaded; unavailable: {:?}; forked: {:?}{}{}", r.folder, r.manifests_applied, r.files_updated, r.files_deleted, r.conflicts, r.chunks_downloaded, r.files_unavailable, r.forked_devices, if r.disks_needed.is_empty() { String::new() } else { format!("; attach disk {}", r.disks_needed.join(", ")) }, renamed_note(&r.renamed_locally))
             })?;
         }
         Cmd::Sync { folder } => {
@@ -2998,7 +3018,7 @@ fn run(cli: &Cli) -> Result<()> {
             let r = engine.sync(folder.as_deref())?;
             warn_ledger(&engine.ledger_health());
             print(cli, &r, |r| {
-                r.iter().map(|(pl, ps)| format!("{}: pulled {} updated/{} deleted/{} conflicts, pushed {} changed/{} chunks{}{}", pl.folder, pl.files_updated, pl.files_deleted, pl.conflicts, ps.files_changed, ps.chunks_uploaded, if pl.disks_needed.is_empty() { String::new() } else { format!("; attach disk {}", pl.disks_needed.join(", ")) }, if ps.storages_unavailable.is_empty() { String::new() } else { format!("; not written to {}", ps.storages_unavailable.join(", ")) })).collect::<Vec<_>>().join("\n")
+                r.iter().map(|(pl, ps)| format!("{}: pulled {} updated/{} deleted/{} conflicts, pushed {} changed/{} chunks{}{}{}", pl.folder, pl.files_updated, pl.files_deleted, pl.conflicts, ps.files_changed, ps.chunks_uploaded, if pl.disks_needed.is_empty() { String::new() } else { format!("; attach disk {}", pl.disks_needed.join(", ")) }, if ps.storages_unavailable.is_empty() { String::new() } else { format!("; not written to {}", ps.storages_unavailable.join(", ")) }, renamed_note(&pl.renamed_locally))).collect::<Vec<_>>().join("\n")
             })?;
         }
         Cmd::FetchPlan { folder, paths } => {

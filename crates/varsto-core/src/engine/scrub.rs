@@ -776,12 +776,15 @@ impl Engine {
             let mut failed: Option<anyhow::Error> = None;
             let root_ref = &root;
             let fk_ref = &fk;
+            let rules = self.local_rules(&root);
+            let names = state.local_names.clone();
+            let names_ref = &names;
             parverify::run_ordered(
                 &jobs,
                 &[lane],
                 |(path, _, entry)| {
                     let entry = entry.as_ref()?;
-                    let disk = util::safe_join(root_ref, path).ok()?;
+                    let disk = util::safe_join(root_ref, &names_ref.local_rel(rules, path)).ok()?;
                     Some(check_file(fk_ref, &disk, entry))
                 },
                 |_, outcome| outcome,
@@ -796,7 +799,7 @@ impl Engine {
                         }
                         return true;
                     };
-                    let Ok(disk) = util::safe_join(&root, &path) else {
+                    let Ok(disk) = util::safe_join(&root, &names.local_rel(rules, &path)) else {
                         return true;
                     };
                     let outcome = match outcome {
@@ -903,8 +906,12 @@ impl Engine {
             reason: None,
             found_utc: now,
         };
-        let (Ok(disk), Some(file)) = (util::safe_join(root, path), state.files.get(path).cloned())
-        else {
+        let rules = self.local_rules(root);
+        let local = state.local_names.local_rel(rules, path).into_owned();
+        let (Ok(disk), Some(file)) = (
+            util::safe_join(root, &local),
+            state.files.get(path).cloned(),
+        ) else {
             out.reason = Some("the path is not usable here".to_string());
             return out;
         };
@@ -948,9 +955,11 @@ impl Engine {
             ));
             return out;
         }
+        // The name set aside as the next scan reads it.
+        let aside_vault = rules.default_vault(&aside_name).into_owned();
         let rel = match path.rsplit_once('/') {
-            Some((dir, _)) => format!("{dir}/{aside_name}"),
-            None => aside_name,
+            Some((dir, _)) => format!("{dir}/{aside_vault}"),
+            None => aside_vault,
         };
         if let Ok(md) = fs::metadata(&disk) {
             state.local_index.insert(

@@ -484,7 +484,7 @@ impl Engine {
             if !all {
                 continue;
             }
-            let disk = root.join(&f.path);
+            let disk = self.disk_of(&root, &state, &f.path);
             let current = state.files.get(&f.path).map(|s| s.content_hash.as_str());
             hits.push(AnalysisHit {
                 folder: rec.name.clone(),

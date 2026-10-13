@@ -154,7 +154,7 @@ impl Engine {
                         copies: record.map(|r| r.storages.len()).unwrap_or(0),
                     });
                     if let Some(m) = &mount {
-                        n.files.push(m.join(&f.path));
+                        n.files.push(self.disk_of(m, &state, &f.path));
                     }
                     if !objs.contains(&c.object) {
                         objs.push(c.object.clone());

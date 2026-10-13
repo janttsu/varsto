@@ -315,7 +315,7 @@ impl Engine {
                 continue;
             }
             task.advance(1);
-            let disk = root.join(&file.path);
+            let disk = self.disk_of(&root, &state, &file.path);
             let local = fs::metadata(&disk).ok().filter(|md| {
                 state.local_index.get(&file.path).is_some_and(|ix| {
                     ix.size == md.len()
@@ -816,7 +816,7 @@ impl Engine {
             let included = state.published_seq <= c.covered.get(&me).copied().unwrap_or(0);
             if included {
                 for f in state.files.values().filter(|f| !f.deleted) {
-                    let disk = root.join(&f.path);
+                    let disk = self.disk_of(&root, &state, &f.path);
                     let Ok(md) = fs::metadata(&disk) else {
                         continue;
                     };

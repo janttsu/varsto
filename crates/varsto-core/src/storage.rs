@@ -25,7 +25,8 @@ use std::sync::Arc;
 /// listed by a replica, a disk's own index) go through this before a
 /// backend touches a path or builds a remote target.
 pub fn validate_key(key: &str) -> Result<()> {
-    crate::util::check_rel_path(key).map_err(|_| anyhow::anyhow!("invalid object key {key:?}"))
+    crate::util::check_portable_rel_path(key)
+        .map_err(|_| anyhow::anyhow!("invalid object key {key:?}"))
 }
 
 pub trait Storage: Send + Sync {

@@ -1497,6 +1497,10 @@
   [
    "The file system on (.+) has errors that could not be repaired automatically; nothing was read or written\\. Run `sudo e2fsck -f (\\S+)` by hand or retire the disk\\.",
    "Levyn $1 tiedostojärjestelmässä on virheitä, joita ei voitu korjata automaattisesti; mitään ei luettu eikä kirjoitettu. Aja `sudo e2fsck -f $2` käsin tai poista levy käytöstä."
+  ],
+  [
+   "kept under another name here because the disk ignores case:",
+   "pidetään täällä toisella nimellä, koska levy ei erota isoja ja pieniä kirjaimia:"
   ]
  ]
 }

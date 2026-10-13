@@ -392,7 +392,7 @@ impl Engine {
                         files: Vec::new(),
                     });
                     if on_disk {
-                        e.files.push(mount.join(&f.path));
+                        e.files.push(self.disk_of(&mount, &state, &f.path));
                     }
                 }
             }

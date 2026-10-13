@@ -839,13 +839,10 @@ fn wipe_root(root: &Path, home: &Path, tracked: &[String]) -> u64 {
         return removed;
     }
     for rel in tracked {
-        if Path::new(rel)
-            .components()
-            .any(|c| !matches!(c, std::path::Component::Normal(_)))
-        {
+        if crate::util::check_rel_path(rel).is_err() {
             continue;
         }
-        let disk = root.join(rel);
+        let disk = crate::names::join(root, rel);
         for p in [placeholder_path(&disk), disk] {
             if fs::symlink_metadata(&p).is_ok() && fs::remove_file(&p).is_ok() {
                 removed += 1;
@@ -1731,13 +1728,15 @@ impl Engine {
     /// on this device are lost: that is the point of wiping a lost device.
     fn wipe_this_device(&mut self, removal: &Removal) -> Result<()> {
         for m in self.config.folders.clone() {
+            // The local names of the files (`crate::names`).
+            let rules = self.local_rules(&m.path);
             let tracked: Vec<String> = self
                 .load_state(&m.folder_id)
                 .map(|s| {
                     s.files
                         .keys()
                         .chain(s.pending_remote.keys())
-                        .cloned()
+                        .map(|p| s.local_names.local_rel(rules, p).into_owned())
                         .collect()
                 })
                 .unwrap_or_default();
