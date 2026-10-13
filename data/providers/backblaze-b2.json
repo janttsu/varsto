@@ -1,0 +1,217 @@
+{
+  "$schema": "schema.json",
+  "schema_version": 1,
+  "id": "backblaze-b2",
+  "name": "Backblaze B2 Cloud Storage",
+  "kind": "service",
+  "website_url": "https://www.backblaze.com/cloud-storage",
+  "signup_url": "https://www.backblaze.com/sign-up/cloud-storage",
+  "pricing_url": "https://www.backblaze.com/cloud-storage/pricing",
+  "currency": "USD",
+  "prices_include_tax": null,
+  "protocols": [
+    "s3",
+    "rclone"
+  ],
+  "protocols_source": {
+    "source_url": "https://www.backblaze.com/docs/en/cloud-storage-call-the-s3-compatible-api",
+    "last_verified": "2026-10-13"
+  },
+  "regions": [
+    {
+      "code": "us-east-005",
+      "city": "Reston",
+      "country": "US",
+      "source_url": "https://www.backblaze.com/docs/cloud-storage-data-regions",
+      "last_verified": "2026-10-13",
+      "note": "US East region (Reston, Virginia, per the data-regions doc). The code us-east-005 is the example used in the official S3-compatible API doc."
+    },
+    {
+      "code": "us-west-{nnn}",
+      "city": "Sacramento / Phoenix",
+      "country": "US",
+      "source_url": "https://www.backblaze.com/docs/cloud-storage-data-regions",
+      "last_verified": "2026-10-13",
+      "note": "US West region; data stored in both the Sacramento and Phoenix data centers. The exact region code includes an account-specific cluster number (for example us-east-005 in the official S3 doc). Backblaze docs do not list the codes; read it from the bucket's S3 endpoint in the B2 web console and replace {nnn}."
+    },
+    {
+      "code": "eu-central-{nnn}",
+      "city": "Amsterdam",
+      "country": "NL",
+      "source_url": "https://www.backblaze.com/docs/cloud-storage-data-regions",
+      "last_verified": "2026-10-13",
+      "note": "EU Central region (Amsterdam data center). The exact region code includes an account-specific cluster number (for example us-east-005 in the official S3 doc). Backblaze docs do not list the codes; read it from the bucket's S3 endpoint in the B2 web console and replace {nnn}."
+    },
+    {
+      "code": "ca-east-{nnn}",
+      "city": "Toronto",
+      "country": "CA",
+      "source_url": "https://www.backblaze.com/docs/cloud-storage-data-regions",
+      "last_verified": "2026-10-13",
+      "note": "CA East region (Toronto, Ontario). The exact region code includes an account-specific cluster number (for example us-east-005 in the official S3 doc). Backblaze docs do not list the codes; read it from the bucket's S3 endpoint in the B2 web console and replace {nnn}."
+    }
+  ],
+  "storage_classes": [
+    {
+      "id": "standard",
+      "name": "B2 Cloud Storage (pay as you go)",
+      "kind": "hot",
+      "applies_to_regions": [
+        "us-east-005",
+        "us-west-{nnn}",
+        "eu-central-{nnn}",
+        "ca-east-{nnn}"
+      ],
+      "pricing_model": "per_gb_month",
+      "storage_price_per_gb_month": [
+        {
+          "from_gb": 0,
+          "up_to_gb": null,
+          "price": {
+            "value": 0.00695,
+            "source_url": "https://www.backblaze.com/cloud-storage/pricing",
+            "last_verified": "2026-10-13",
+            "note": "Pricing page: 'Starts at $6.95 / TB / mo'; FAQ: billed per byte-hour 'at a rate of $6.95/TB/30-days'. Converted to per GB with 1 TB = 1,000 GB: the page does not define TB; the older line on the transaction pricing page ('$0.005/GB/month', the former $5/TB rate) implies decimal TB. Same price in all regions per the data-regions FAQ ('your data storage costs do not change'). First 10 GB free (see free_tier)."
+          }
+        }
+      ],
+      "requests": {
+        "put_per_1000": {
+          "value": 0,
+          "source_url": "https://www.backblaze.com/cloud-storage/pricing",
+          "last_verified": "2026-10-13",
+          "note": "Pricing page: 'Class A, B, and C API calls are free for pay-as-you-go customers.' Transaction pricing page lists Class A, B and C as 'Cost: Free'. PutObject/UploadPart are Class A."
+        },
+        "get_per_1000": {
+          "value": 0,
+          "source_url": "https://www.backblaze.com/cloud-storage/pricing",
+          "last_verified": "2026-10-13",
+          "note": "Pricing page: 'Class A, B, and C API calls are free for pay-as-you-go customers.' Transaction pricing page lists Class A, B and C as 'Cost: Free'. GetObject/HeadObject are Class B."
+        },
+        "list_per_1000": {
+          "value": 0,
+          "source_url": "https://www.backblaze.com/cloud-storage/pricing",
+          "last_verified": "2026-10-13",
+          "note": "Pricing page: 'Class A, B, and C API calls are free for pay-as-you-go customers.' Transaction pricing page lists Class A, B and C as 'Cost: Free'. ListObjectsV2/ListBuckets are Class C (not Class A as with other providers)."
+        }
+      },
+      "retrieval": {
+        "price_per_gb": {
+          "value": null,
+          "note": "No retrieval fee line on the pricing page (always-hot storage); absence of a line item, not an explicit statement."
+        },
+        "typical_delay": {
+          "value": null,
+          "note": "Not stated; the pricing page describes the class as 'always-hot object storage'."
+        }
+      },
+      "minimum_storage_duration_days": {
+        "value": 0,
+        "source_url": "https://www.backblaze.com/cloud-storage/pricing",
+        "last_verified": "2026-10-13",
+        "note": "Pricing page: 'No minimum storage duration fees'."
+      },
+      "minimum_billable_object_size_kb": {
+        "value": 0,
+        "source_url": "https://www.backblaze.com/cloud-storage/pricing",
+        "last_verified": "2026-10-13",
+        "note": "Pricing page: 'No minimum file size fees'."
+      },
+      "notes": [
+        "Class D transactions (outbound event notifications): first 2,500 per day free, then $0.004 per 10,000 (pricing page and transaction pricing page); not modelled in requests.",
+        "The transaction pricing page still prints '$0.005/GB/month' for storage; the main pricing page ($6.95/TB/30 days) is used here as the current rate.",
+        "Capacity (1-5 year term) pricing and B2 Overdrive ($15/TB/mo, multi-petabyte commitment) are not modelled."
+      ]
+    }
+  ],
+  "default_storage_class": "standard",
+  "egress": {
+    "applies_to_regions": [
+      "us-east-005",
+      "us-west-{nnn}",
+      "eu-central-{nnn}",
+      "ca-east-{nnn}"
+    ],
+    "free_allowance_gb_per_month": {
+      "value": null,
+      "note": "Not a fixed amount: free egress is up to 3x the average monthly data stored (byte-hours over the billing cycle), see free_allowance_scope and egress_fair_use."
+    },
+    "free_allowance_scope": "Up to 3x the account's average monthly stored data, calculated from byte-hours over the billing cycle (pricing page FAQ).",
+    "price_per_gb": [
+      {
+        "from_gb": 0,
+        "up_to_gb": null,
+        "price": {
+          "value": 0.01,
+          "source_url": "https://www.backblaze.com/cloud-storage/pricing",
+          "last_verified": "2026-10-13",
+          "note": "Pricing page: 'Egress beyond 3x is just $0.01/GB'; transaction pricing page: 'any additional egress priced at $0.01/GB'. Applies only after the 3x allowance."
+        }
+      }
+    ],
+    "notes": [
+      "Egress above 3x is also free to or through partner CDNs and compute services (Fastly, Cloudflare, bunny.net, CacheFly, CoreWeave, Equinix Metal, Vultr, phoenixNAP), per the pricing page FAQ.",
+      "Uploads (ingress) are free: 'There is no charge to send data (upload) to Backblaze B2' (transaction pricing page).",
+      "No egress fees for Cloud Replication between regions (data-regions FAQ)."
+    ]
+  },
+  "egress_fair_use": {
+    "value": "Free egress up to 3x the average monthly data stored (byte-hours over the billing cycle); beyond that $0.01/GB, unless downloaded through a listed CDN/compute partner.",
+    "source_url": "https://www.backblaze.com/cloud-storage/pricing",
+    "last_verified": "2026-10-13"
+  },
+  "free_tier": {
+    "value": "First 10 GB of storage is always free; Class A, B and C API calls are free; Class D: first 2,500 calls per day free.",
+    "source_url": "https://www.backblaze.com/cloud-storage/pricing",
+    "last_verified": "2026-10-13"
+  },
+  "object_lock": {
+    "value": true,
+    "source_url": "https://www.backblaze.com/docs/cloud-storage-object-lock",
+    "last_verified": "2026-10-13",
+    "note": "Object Lock (formerly File Lock) with governance and compliance modes and legal hold; 1 to 3,000 days; cannot be disabled once enabled on a bucket."
+  },
+  "s3_endpoints": [
+    {
+      "region": "us-east-005",
+      "label": "US East (Reston)",
+      "endpoint": "https://s3.us-east-005.backblazeb2.com",
+      "path_style": false,
+      "source_url": "https://www.backblaze.com/docs/en/cloud-storage-call-the-s3-compatible-api",
+      "last_verified": "2026-10-13",
+      "note": "The S3 doc lists both https://bucketname.s3.<region>.backblazeb2.com and https://s3.<region>.backblazeb2.com/bucketname as valid; SDKs need only the endpoint without the bucket. Virtual-hosted is the SDK default; path-style also works. HTTPS only, SigV4 only."
+    },
+    {
+      "region": "us-west-{nnn}",
+      "label": "US West",
+      "endpoint": "https://s3.us-west-{nnn}.backblazeb2.com",
+      "path_style": false,
+      "source_url": "https://www.backblaze.com/docs/en/cloud-storage-call-the-s3-compatible-api",
+      "last_verified": "2026-10-13",
+      "note": "Endpoint format https://s3.<region>.backblazeb2.com from the S3 doc; replace {nnn} in both region and endpoint with the cluster number shown in the B2 console."
+    },
+    {
+      "region": "eu-central-{nnn}",
+      "label": "EU Central (Amsterdam)",
+      "endpoint": "https://s3.eu-central-{nnn}.backblazeb2.com",
+      "path_style": false,
+      "source_url": "https://www.backblaze.com/docs/en/cloud-storage-call-the-s3-compatible-api",
+      "last_verified": "2026-10-13",
+      "note": "Endpoint format from the S3 doc; replace {nnn} in both region and endpoint with the cluster number shown in the B2 console."
+    },
+    {
+      "region": "ca-east-{nnn}",
+      "label": "CA East (Toronto)",
+      "endpoint": "https://s3.ca-east-{nnn}.backblazeb2.com",
+      "path_style": false,
+      "source_url": "https://www.backblaze.com/docs/en/cloud-storage-call-the-s3-compatible-api",
+      "last_verified": "2026-10-13",
+      "note": "Endpoint format from the S3 doc; replace {nnn} in both region and endpoint with the cluster number shown in the B2 console."
+    }
+  ],
+  "notes": [
+    "A Backblaze account is tied to one region chosen at sign-up and cannot be changed; storing data in another region needs a separate account (data-regions doc).",
+    "Tax: the pricing page does not say whether prices include tax; the help-center tax articles could not be read (HTTP 403), so prices_include_tax is null.",
+    "rclone has a native B2 backend and also works via S3; Backblaze documents rclone at https://www.backblaze.com/docs/cloud-storage-integrate-rclone-with-backblaze-b2 ."
+  ]
+}

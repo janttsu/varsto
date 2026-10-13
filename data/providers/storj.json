@@ -1,0 +1,216 @@
+{
+  "$schema": "schema.json",
+  "schema_version": 1,
+  "id": "storj",
+  "name": "Storj Object Storage",
+  "kind": "service",
+  "website_url": "https://www.storj.io/",
+  "signup_url": "https://www.storj.io/signup/",
+  "pricing_url": "https://www.storj.io/pricing",
+  "currency": "USD",
+  "prices_include_tax": null,
+  "protocols": [
+    "s3",
+    "rclone"
+  ],
+  "protocols_source": {
+    "source_url": "https://storj.dev/dcs/getting-started",
+    "last_verified": "2026-10-13"
+  },
+  "tax_note": "Docs pricing overview: 'US sales tax will be included on all US invoices in accordance with state and local regulations (effective November 1, 2025).' Nothing is stated for other countries.",
+  "regions": [
+    {
+      "code": "us1",
+      "city": null,
+      "country": "ZZ",
+      "source_url": "https://storj.dev/dcs/api/s3/s3-compatible-gateway",
+      "last_verified": "2026-10-13",
+      "note": "Single hosted gateway endpoint that routes to the nearest gateway instance automatically. Storj docs do not document a SigV4 signing region; 'us1' is a placeholder value (posts on the Storj community forum say the region field is ignored). Data placement is chosen per bucket by location constraint (global-1, regional-1, archive-1; legacy global, us-select-1), not by region. Country ZZ = globally distributed, not a single country."
+    }
+  ],
+  "storage_classes": [
+    {
+      "id": "standard",
+      "name": "Standard",
+      "kind": "hot",
+      "applies_to_regions": [
+        "us1"
+      ],
+      "pricing_model": "per_gb_month",
+      "storage_price_per_gb_month": [
+        {
+          "from_gb": 0,
+          "up_to_gb": null,
+          "price": {
+            "value": 0.007,
+            "source_url": "https://storj.dev/dcs/pricing/simplified",
+            "last_verified": "2026-10-13",
+            "note": "Simplified pricing doc (effective July 1, 2026): storage $7/TB/month; converted to per GB with Storj's stated base-10 units ('1 TB = 1,000 GB'). Storage is measured hourly and the monthly total is rounded up to a whole GB per tier. Standard = globally distributed placement (successor of Global Collaboration, Active Archive and Legacy Global; location constraints global-1 / archive-1)."
+          }
+        }
+      ],
+      "requests": {
+        "put_per_1000": {
+          "value": 0,
+          "source_url": "https://www.storj.io/pricing",
+          "last_verified": "2026-10-13",
+          "note": "Pricing page FAQ: 'No API fees'; segment fees 'have been eliminated across all new tiers' (they still apply to legacy plans)."
+        },
+        "get_per_1000": {
+          "value": 0,
+          "source_url": "https://www.storj.io/pricing",
+          "last_verified": "2026-10-13",
+          "note": "Pricing page FAQ: 'No API fees'; segment fees 'have been eliminated across all new tiers' (they still apply to legacy plans)."
+        },
+        "list_per_1000": {
+          "value": 0,
+          "source_url": "https://www.storj.io/pricing",
+          "last_verified": "2026-10-13",
+          "note": "Pricing page FAQ: 'No API fees'; segment fees 'have been eliminated across all new tiers' (they still apply to legacy plans)."
+        }
+      },
+      "retrieval": {
+        "price_per_gb": {
+          "value": null,
+          "note": "No retrieval fee line in the simplified pricing doc; absence of a line item, not an explicit statement."
+        },
+        "typical_delay": {
+          "value": null,
+          "note": "Not stated in the sources checked."
+        }
+      },
+      "minimum_storage_duration_days": {
+        "value": 30,
+        "source_url": "https://storj.dev/dcs/pricing/simplified",
+        "last_verified": "2026-10-13",
+        "note": "Simplified pricing doc: 'Data deleted before 30 days will still be billed for the full 1 month period'; Object Mount users are excluded."
+      },
+      "minimum_billable_object_size_kb": {
+        "value": 50,
+        "source_url": "https://storj.dev/dcs/pricing/simplified",
+        "last_verified": "2026-10-13",
+        "note": "Simplified pricing doc: minimum object size 50 kB (base-10 units); smaller objects are billed as 50 kB."
+      },
+      "notes": [
+        "Minimum monthly fee $5 for active storage accounts (a floor on the invoice, not a credit); USDC-paying accounts and the free trial are exempt (simplified pricing doc).",
+        "Projects created before July 1, 2026 moved from legacy or tiered pricing; EU customers had to opt in by July 30, 2026 (pricing overview doc https://storj.dev/dcs/pricing)."
+      ]
+    },
+    {
+      "id": "advanced",
+      "name": "Advanced",
+      "kind": "hot",
+      "applies_to_regions": [
+        "us1"
+      ],
+      "pricing_model": "per_gb_month",
+      "storage_price_per_gb_month": [
+        {
+          "from_gb": 0,
+          "up_to_gb": null,
+          "price": {
+            "value": 0.01,
+            "source_url": "https://storj.dev/dcs/pricing/simplified",
+            "last_verified": "2026-10-13",
+            "note": "Simplified pricing doc (effective July 1, 2026): storage $10/TB/month; converted to per GB with Storj's stated base-10 units ('1 TB = 1,000 GB'). Storage is measured hourly and the monthly total is rounded up to a whole GB per tier. Advanced = region-specific storage in US SOC 2 Type 2 facilities (successor of Regional Workflows and Legacy US Select; location constraint regional-1)."
+          }
+        }
+      ],
+      "requests": {
+        "put_per_1000": {
+          "value": 0,
+          "source_url": "https://www.storj.io/pricing",
+          "last_verified": "2026-10-13",
+          "note": "Pricing page FAQ: 'No API fees'; segment fees 'have been eliminated across all new tiers' (they still apply to legacy plans)."
+        },
+        "get_per_1000": {
+          "value": 0,
+          "source_url": "https://www.storj.io/pricing",
+          "last_verified": "2026-10-13",
+          "note": "Pricing page FAQ: 'No API fees'; segment fees 'have been eliminated across all new tiers' (they still apply to legacy plans)."
+        },
+        "list_per_1000": {
+          "value": 0,
+          "source_url": "https://www.storj.io/pricing",
+          "last_verified": "2026-10-13",
+          "note": "Pricing page FAQ: 'No API fees'; segment fees 'have been eliminated across all new tiers' (they still apply to legacy plans)."
+        }
+      },
+      "retrieval": {
+        "price_per_gb": {
+          "value": null,
+          "note": "No retrieval fee line in the simplified pricing doc; absence of a line item, not an explicit statement."
+        },
+        "typical_delay": {
+          "value": null,
+          "note": "Not stated in the sources checked."
+        }
+      },
+      "minimum_storage_duration_days": {
+        "value": 30,
+        "source_url": "https://storj.dev/dcs/pricing/simplified",
+        "last_verified": "2026-10-13",
+        "note": "Simplified pricing doc: 'Data deleted before 30 days will still be billed for the full 1 month period'; Object Mount users are excluded."
+      },
+      "minimum_billable_object_size_kb": {
+        "value": 50,
+        "source_url": "https://storj.dev/dcs/pricing/simplified",
+        "last_verified": "2026-10-13",
+        "note": "Simplified pricing doc: minimum object size 50 kB (base-10 units); smaller objects are billed as 50 kB."
+      }
+    }
+  ],
+  "default_storage_class": "standard",
+  "egress": {
+    "applies_to_regions": [
+      "us1"
+    ],
+    "free_allowance_gb_per_month": {
+      "value": null,
+      "note": "No free egress allowance is listed; egress is billed per GB (monthly total rounded up to a whole GB per tier)."
+    },
+    "price_per_gb": [
+      {
+        "from_gb": 0,
+        "up_to_gb": null,
+        "price": {
+          "value": 0.007,
+          "source_url": "https://storj.dev/dcs/pricing/simplified",
+          "last_verified": "2026-10-13",
+          "note": "Simplified pricing doc: egress $7/TB for both Standard and Advanced; converted with 1 TB = 1,000 GB as stated by Storj. Bandwidth includes all data transferred out of the Storj network."
+        }
+      }
+    ]
+  },
+  "egress_fair_use": {
+    "value": null,
+    "note": "No egress fair-use rule is stated; the pricing page reserves the right to apply minimum retention fees or restrict service for Object Mount usage with disproportionate infrastructure load."
+  },
+  "free_tier": {
+    "value": "Free trial of Object Storage with Object Mount: $0 for 30 days, works with S3-compatible apps, no credit card required, 2 free Object Mount licenses.",
+    "source_url": "https://www.storj.io/pricing",
+    "last_verified": "2026-10-13",
+    "note": "The Object Mount section of the page mentions '25GB free storage for 30 days' for the trial. No permanent free tier."
+  },
+  "object_lock": {
+    "value": true,
+    "source_url": "https://storj.dev/dcs/api/s3/object-lock",
+    "last_verified": "2026-10-13",
+    "note": "S3 Object Lock with governance mode, compliance mode and legal hold, via the hosted gateway."
+  },
+  "s3_endpoints": [
+    {
+      "region": "us1",
+      "label": "Global (auto-routed)",
+      "endpoint": "https://gateway.storjshare.io",
+      "path_style": true,
+      "source_url": "https://storj.dev/dcs/api/s3/s3-compatible-gateway",
+      "last_verified": "2026-10-13",
+      "note": "Hosted gateway endpoint routes to the closest instance automatically. Path-style: Storj's s3fs guide (https://storj.dev/dcs/third-party-tools/s3fs) mounts with use_path_request_style; no general recommendation found. The rclone quickstart uses provider = Storj with this endpoint."
+    }
+  ],
+  "notes": [
+    "Copying via CopyObject is limited to about 671 GB per object (S3 compatibility doc https://storj.dev/dcs/api/s3/s3-compatibility).",
+    "Object Mount licenses (Teams $29/license/month incl. 500 GB storage) are not modelled."
+  ]
+}

@@ -587,6 +587,106 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     form.addEventListener("reset", function () { setTimeout(sync, 0); });
     $("storagekind").addEventListener("change", sync);
   })();
+  // S3 providers from the built-in price data: picking one fills in the
+  // endpoint, region and URL style and shows its headline prices with their
+  // source and date; "Compare providers" lists them side by side. Numbers and
+  // provider names are not translated; an unknown price says so.
+  (function () {
+    var form = $("addstorage"), sel = $("s3provider"), regionSel = $("s3region"), card = $("s3price");
+    var providers = [], loaded = false;
+    function raw(text) { var s = el("span", null, text); s.setAttribute("data-no-i18n", ""); return s; }
+    function money(f, cur, suffix) {
+      if (!f || f.value === null || f.value === undefined) { var u = el("span", "muted", "unknown"); if (f && f.note) { u.title = f.note; } return u; }
+      var s = raw(f.value + (cur ? " " + cur : "") + (suffix || "")); if (f.note) { s.title = f.note; } return s;
+    }
+    function current() { var id = sel.value; return providers.filter(function (p) { return p.id === id; })[0] || null; }
+    function endpointOf(p) { return p ? p.endpoints[+regionSel.value] || p.endpoints[0] : null; }
+    function row(dl, label, node) { dl.appendChild(el("dt", null, label)); var dd = el("dd"); dd.appendChild(node); dl.appendChild(dd); }
+    function pair(a, sep, b) { var s = el("span"); s.appendChild(a); s.appendChild(raw(sep)); s.appendChild(b); return s; }
+    function warn(text) { return el("div", "notice warn", text); }
+    function renderCard() {
+      var p = current(), e = endpointOf(p); card.innerHTML = "";
+      if (p && e && e.region_prices) { p = Object.assign({}, p, e.region_prices); }
+      card.classList.toggle("hidden", !p);
+      if (!p) { return; }
+      var head = el("p", "price-head"); head.appendChild(raw(p.name + (p.class ? " · " + p.class.name : ""))); card.appendChild(head);
+      if (p.kind === "self_hosted") {
+        card.appendChild(el("p", "muted small", "Self-hosted: there is no provider price. Replace the endpoint with your own server's address."));
+      } else {
+        var cur = p.currency || "", dl = el("dl");
+        if (p.plan) { row(dl, "Plan per month", raw((p.plan.capacity_gb && p.plan.capacity_gb.value !== null ? p.plan.capacity_gb.value + " GB: " : "") + (p.plan.monthly_price && p.plan.monthly_price.value !== null ? p.plan.monthly_price.value + " " + cur : "?"))); }
+        else { var st = money(p.storage_per_gb_month, cur); if (p.storage_tiered) { st = pair(st, " ", el("span", "muted", "(first volume band)")); } row(dl, "Storage per GB-month", st); }
+        row(dl, "Free egress per month", money(p.egress_free_gb_per_month, "", " GB"));
+        row(dl, "Egress per GB after that", money(p.egress_per_gb, cur));
+        if (p.egress_fair_use && p.egress_fair_use.value) { row(dl, "Egress rules", raw(p.egress_fair_use.value)); }
+        row(dl, "PUT / GET per 1000 requests", pair(money(p.put_per_1000, cur), " / ", money(p.get_per_1000, cur)));
+        row(dl, "Minimum storage duration (days)", money(p.minimum_storage_days, ""));
+        row(dl, "Minimum billable object size (KB)", money(p.minimum_object_kb, ""));
+        row(dl, "Free tier", p.free_tier && p.free_tier.value ? raw(p.free_tier.value) : money(p.free_tier, ""));
+        row(dl, "Tax", p.tax_note ? raw(p.tax_note) : el("span", null, p.prices_include_tax === true ? "included" : p.prices_include_tax === false ? "not included" : "unknown"));
+        card.appendChild(dl);
+        var foot = el("p", "muted small");
+        if (p.last_verified) { foot.appendChild(el("span", null, "verified")); foot.appendChild(raw(" " + p.last_verified + " · ")); }
+        var src = p.source_url || p.pricing_url;
+        if (src) { var a = el("a", null, "price source"); a.href = src; a.target = "_blank"; a.rel = "noopener"; foot.appendChild(a); }
+        if (p.signup_url) { foot.appendChild(raw(" · ")); var s = el("a", null, "sign up"); s.href = p.signup_url; s.target = "_blank"; s.rel = "noopener"; foot.appendChild(s); }
+        card.appendChild(foot);
+        if (p.stale) { card.appendChild(warn("These prices were verified more than 90 days ago and may have changed; check the source.")); }
+        if (e && !e.prices_verified) { card.appendChild(warn("The prices were not verified for this region; it may be priced differently.")); }
+      }
+      if (e && e.has_placeholder) { card.appendChild(el("p", "muted small", "Replace the part in braces in the endpoint with your own value, for example your account id.")); }
+      if (e && e.note) { var n = el("p", "muted small"); n.appendChild(raw(e.note)); card.appendChild(n); }
+    }
+    function fill() {
+      var e = endpointOf(current()); if (!e) { return; }
+      form.querySelector("input[name=endpoint]").value = e.endpoint;
+      form.querySelector("input[name=region]").value = e.region;
+      form.querySelector("input[name=virtual_host]").checked = !e.path_style;
+    }
+    function pickProvider() {
+      var p = current(); regionSel.innerHTML = "";
+      $("s3regionrow").classList.toggle("hidden", !p || p.endpoints.length < 2);
+      if (p) {
+        p.endpoints.forEach(function (e, i) {
+          var o = el("option", null, e.label + (e.label !== e.region ? " (" + e.region + ")" : "") + (e.country ? ", " + e.country : "")); o.value = String(i); o.setAttribute("data-no-i18n", ""); regionSel.appendChild(o);
+        });
+        fill();
+      }
+      renderCard();
+    }
+    function renderCompare() {
+      var tb = $("s3comparetable").querySelector("tbody"); tb.innerHTML = "";
+      providers.forEach(function (p) {
+        if (p.kind === "self_hosted") { return; }
+        var tr = el("tr"), cur = p.currency || "";
+        var name = el("td"); var a = el("a", null, p.name); a.href = "#"; a.setAttribute("data-no-i18n", "");
+        a.onclick = function (ev) { ev.preventDefault(); sel.value = p.id; pickProvider(); sel.scrollIntoView({ block: "nearest" }); };
+        name.appendChild(a); tr.appendChild(name);
+        function cell(label, node) { var td = el("td", "num"); td.setAttribute("data-label", label); td.appendChild(node); tr.appendChild(td); }
+        cell("Storage /GB-month", p.plan && !p.storage_per_gb_month.value ? el("span", "muted", "plan") : money(p.storage_per_gb_month, cur));
+        cell("Egress /GB", money(p.egress_per_gb, cur));
+        cell("Free egress", money(p.egress_free_gb_per_month, "", " GB"));
+        cell("PUT /1000", money(p.put_per_1000, cur));
+        cell("GET /1000", money(p.get_per_1000, cur));
+        cell("Minimum days", money(p.minimum_storage_days, ""));
+        var v = el("td"); v.setAttribute("data-label", "Verified"); v.appendChild(raw(p.last_verified || "")); if (p.stale) { v.appendChild(raw(" ")); v.appendChild(el("span", "muted", "(old)")); }
+        tr.appendChild(v); tb.appendChild(tr);
+      });
+    }
+    function load() {
+      if (loaded) { return; }
+      loaded = true;
+      api("GET", "/api/providers").then(function (r) {
+        providers = r.providers || [];
+        providers.forEach(function (p) { var o = el("option", null, p.name); o.value = p.id; o.setAttribute("data-no-i18n", ""); sel.appendChild(o); });
+        renderCompare();
+      }).catch(function () { loaded = false; });
+    }
+    sel.addEventListener("change", pickProvider);
+    regionSel.addEventListener("change", function () { fill(); renderCard(); });
+    $("storagekind").addEventListener("change", function () { if (this.value === "s3") { load(); } });
+    form.addEventListener("reset", function () { setTimeout(pickProvider, 0); });
+  })();
   // Removing a storage: first show what has to be copied elsewhere to keep
   // every block's copies (one, or the folder policy's minimum), then do it.
   function removeStorage(name) {

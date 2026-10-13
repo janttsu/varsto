@@ -1,0 +1,431 @@
+{
+  "$schema": "schema.json",
+  "schema_version": 1,
+  "id": "wasabi",
+  "name": "Wasabi Hot Cloud Storage",
+  "kind": "service",
+  "website_url": "https://wasabi.com/",
+  "signup_url": "https://wasabi.com/try-free",
+  "pricing_url": "https://wasabi.com/pricing",
+  "currency": "USD",
+  "prices_include_tax": false,
+  "protocols": [
+    "s3",
+    "rclone"
+  ],
+  "protocols_source": {
+    "source_url": "https://docs.wasabi.com/docs/how-do-i-use-rclone-with-wasabi",
+    "last_verified": "2026-10-13"
+  },
+  "tax_note": "Tax collection doc: 'The prices listed on Wasabi's website do not include any indirect taxes. Indirect taxes, if applicable, will be added to your invoice as a separate line item.' VAT/GST is collected in the EU, UK, Canada, India and Japan; US sales tax per state.",
+  "regions": [
+    {
+      "code": "us-east-1",
+      "city": "N. Virginia",
+      "country": "US",
+      "source_url": "https://docs.wasabi.com/docs/service-urls-for-wasabis-storage-regions",
+      "last_verified": "2026-10-13",
+      "note": "US East 1 (N. Virginia). Alias s3.us-east-1.wasabisys.com."
+    },
+    {
+      "code": "us-east-2",
+      "city": "N. Virginia",
+      "country": "US",
+      "source_url": "https://docs.wasabi.com/docs/service-urls-for-wasabis-storage-regions",
+      "last_verified": "2026-10-13",
+      "note": "US East 2 (N. Virginia)."
+    },
+    {
+      "code": "us-central-1",
+      "city": "Texas",
+      "country": "US",
+      "source_url": "https://docs.wasabi.com/docs/service-urls-for-wasabis-storage-regions",
+      "last_verified": "2026-10-13",
+      "note": "US Central 1 (Texas)."
+    },
+    {
+      "code": "us-west-1",
+      "city": "Oregon",
+      "country": "US",
+      "source_url": "https://docs.wasabi.com/docs/service-urls-for-wasabis-storage-regions",
+      "last_verified": "2026-10-13",
+      "note": "US West 1 (Oregon)."
+    },
+    {
+      "code": "us-west-2",
+      "city": "San Jose",
+      "country": "US",
+      "source_url": "https://docs.wasabi.com/docs/service-urls-for-wasabis-storage-regions",
+      "last_verified": "2026-10-13",
+      "note": "US West 2 (San Jose)."
+    },
+    {
+      "code": "ca-central-1",
+      "city": "Toronto",
+      "country": "CA",
+      "source_url": "https://docs.wasabi.com/docs/service-urls-for-wasabis-storage-regions",
+      "last_verified": "2026-10-13",
+      "note": "CA Central 1 (Toronto)."
+    },
+    {
+      "code": "eu-central-1",
+      "city": "Amsterdam",
+      "country": "NL",
+      "source_url": "https://docs.wasabi.com/docs/service-urls-for-wasabis-storage-regions",
+      "last_verified": "2026-10-13",
+      "note": "EU Central 1 (Amsterdam). Alias s3.nl-1.wasabisys.com."
+    },
+    {
+      "code": "eu-central-2",
+      "city": "Frankfurt",
+      "country": "DE",
+      "source_url": "https://docs.wasabi.com/docs/service-urls-for-wasabis-storage-regions",
+      "last_verified": "2026-10-13",
+      "note": "EU Central 2 (Frankfurt). Alias s3.de-1.wasabisys.com."
+    },
+    {
+      "code": "eu-west-1",
+      "city": null,
+      "country": "GB",
+      "source_url": "https://docs.wasabi.com/docs/service-urls-for-wasabis-storage-regions",
+      "last_verified": "2026-10-13",
+      "note": "EU West 1 (United Kingdom; the doc gives no city). Alias s3.uk-1.wasabisys.com."
+    },
+    {
+      "code": "eu-west-2",
+      "city": "Paris",
+      "country": "FR",
+      "source_url": "https://docs.wasabi.com/docs/service-urls-for-wasabis-storage-regions",
+      "last_verified": "2026-10-13",
+      "note": "EU West 2 (Paris). Alias s3.fr-1.wasabisys.com."
+    },
+    {
+      "code": "eu-west-3",
+      "city": null,
+      "country": "GB",
+      "source_url": "https://docs.wasabi.com/docs/service-urls-for-wasabis-storage-regions",
+      "last_verified": "2026-10-13",
+      "note": "EU West 3 (United Kingdom; the doc gives no city). Alias s3.uk-2.wasabisys.com."
+    },
+    {
+      "code": "eu-south-1",
+      "city": "Milan",
+      "country": "IT",
+      "source_url": "https://docs.wasabi.com/docs/service-urls-for-wasabis-storage-regions",
+      "last_verified": "2026-10-13",
+      "note": "EU South 1 (Milan). Alias s3.it-1.wasabisys.com."
+    },
+    {
+      "code": "ap-northeast-1",
+      "city": "Tokyo",
+      "country": "JP",
+      "source_url": "https://docs.wasabi.com/docs/service-urls-for-wasabis-storage-regions",
+      "last_verified": "2026-10-13",
+      "note": "AP Northeast 1 (Tokyo)."
+    },
+    {
+      "code": "ap-northeast-2",
+      "city": "Osaka",
+      "country": "JP",
+      "source_url": "https://docs.wasabi.com/docs/service-urls-for-wasabis-storage-regions",
+      "last_verified": "2026-10-13",
+      "note": "AP Northeast 2 (Osaka)."
+    },
+    {
+      "code": "ap-southeast-1",
+      "city": "Singapore",
+      "country": "SG",
+      "source_url": "https://docs.wasabi.com/docs/service-urls-for-wasabis-storage-regions",
+      "last_verified": "2026-10-13",
+      "note": "AP Southeast 1 (Singapore)."
+    },
+    {
+      "code": "ap-southeast-2",
+      "city": "Sydney",
+      "country": "AU",
+      "source_url": "https://docs.wasabi.com/docs/service-urls-for-wasabis-storage-regions",
+      "last_verified": "2026-10-13",
+      "note": "AP Southeast 2 (Sydney)."
+    }
+  ],
+  "storage_classes": [
+    {
+      "id": "hot",
+      "name": "Wasabi Object Storage (Pay as You Go)",
+      "kind": "hot",
+      "applies_to_regions": [
+        "us-east-1",
+        "us-east-2",
+        "us-central-1",
+        "us-west-1",
+        "us-west-2",
+        "ca-central-1",
+        "eu-central-1",
+        "eu-central-2",
+        "eu-west-1",
+        "eu-west-2",
+        "eu-west-3",
+        "eu-south-1",
+        "ap-northeast-1",
+        "ap-northeast-2",
+        "ap-southeast-1",
+        "ap-southeast-2"
+      ],
+      "pricing_model": "per_gb_month",
+      "storage_price_per_gb_month": [
+        {
+          "from_gb": 0,
+          "up_to_gb": null,
+          "price": {
+            "value": 0.0078,
+            "source_url": "https://wasabi.com/pricing/faq",
+            "last_verified": "2026-10-13",
+            "note": "Pricing FAQ: '$7.99 TB/mo ($0.0078 GB/mo)', listed identically for North America, EMEA and APAC, so applied to all regions. Wasabi's own conversion uses 1 TB = 1024 GB: '($7.99) / (1024 GB per TB) = $.0078 GB/mo' (exact quotient 0.0078027). Minimum monthly charge equals 1 TB of active storage (see notes)."
+          }
+        }
+      ],
+      "requests": {
+        "put_per_1000": {
+          "value": 0,
+          "source_url": "https://wasabi.com/pricing/faq",
+          "last_verified": "2026-10-13",
+          "note": "Pricing FAQ table: 'API Requests = Free*' (*subject to Wasabi's free egress and API request policies); the invoice shows the request volume but does not charge it."
+        },
+        "get_per_1000": {
+          "value": 0,
+          "source_url": "https://wasabi.com/pricing/faq",
+          "last_verified": "2026-10-13",
+          "note": "Pricing FAQ table: 'API Requests = Free*' (*subject to Wasabi's free egress and API request policies); the invoice shows the request volume but does not charge it."
+        },
+        "list_per_1000": {
+          "value": 0,
+          "source_url": "https://wasabi.com/pricing/faq",
+          "last_verified": "2026-10-13",
+          "note": "Pricing FAQ table: 'API Requests = Free*' (*subject to Wasabi's free egress and API request policies); the invoice shows the request volume but does not charge it."
+        }
+      },
+      "retrieval": {
+        "price_per_gb": {
+          "value": null,
+          "note": "No retrieval fee line in the pricing FAQ; absence of a line item, not an explicit statement."
+        },
+        "typical_delay": {
+          "value": null,
+          "note": "Not stated in the sources checked."
+        }
+      },
+      "minimum_storage_duration_days": {
+        "value": 90,
+        "source_url": "https://wasabi.com/pricing/faq",
+        "last_verified": "2026-10-13",
+        "note": "Pricing FAQ: objects deleted before 90 days (Pay as You Go) incur a Timed Deleted Storage charge for the remaining days. Reserved Capacity Storage uses 30 days; the 90-to-30-day change on request is described in the minimum storage duration doc (https://docs.wasabi.com/docs/how-does-wasabis-minimum-storage-duration-policy-work)."
+      },
+      "minimum_billable_object_size_kb": {
+        "value": 4,
+        "source_url": "https://wasabi.com/pricing/faq",
+        "last_verified": "2026-10-13",
+        "note": "Pricing FAQ: 'Wasabi's minimum file size from a charging perspective is 4 KB'; smaller objects are billed as 4 KB."
+      },
+      "notes": [
+        "Minimum monthly charge: Pay as You Go accounts are charged for at least 1 TB of active storage per month (pricing FAQ).",
+        "Overwriting an object counts as deleting the old version: it incurs deleted-storage charges for the rest of the minimum period (pricing FAQ).",
+        "Reserved Capacity Storage (1, 3 or 5 year terms) is not modelled."
+      ]
+    }
+  ],
+  "default_storage_class": "hot",
+  "egress": {
+    "applies_to_regions": [
+      "us-east-1",
+      "us-east-2",
+      "us-central-1",
+      "us-west-1",
+      "us-west-2",
+      "ca-central-1",
+      "eu-central-1",
+      "eu-central-2",
+      "eu-west-1",
+      "eu-west-2",
+      "eu-west-3",
+      "eu-south-1",
+      "ap-northeast-1",
+      "ap-northeast-2",
+      "ap-southeast-1",
+      "ap-southeast-2"
+    ],
+    "free_allowance_gb_per_month": {
+      "value": null,
+      "note": "Not a metered allowance: egress is free subject to the free egress policy (monthly egress at most the active storage volume), see egress_fair_use."
+    },
+    "free_allowance_scope": "Free egress policy: monthly egress up to the account's active storage volume is a good fit; exceeding it regularly may lead to limits or suspension.",
+    "price_per_gb": [
+      {
+        "from_gb": 0,
+        "up_to_gb": null,
+        "price": {
+          "value": 0,
+          "source_url": "https://wasabi.com/pricing/faq",
+          "last_verified": "2026-10-13",
+          "note": "Pricing FAQ table: 'Egress Data Transfer = Free*', subject to the free egress policy; no per-GB overage price is published."
+        }
+      }
+    ],
+    "notes": [
+      "Ingress is free (pricing FAQ)."
+    ]
+  },
+  "egress_fair_use": {
+    "value": "If monthly egress is less than or equal to the active storage volume the use case fits the free egress policy; if it is greater, it does not, and Wasabi reserves the right to limit or suspend service when this happens regularly.",
+    "source_url": "https://wasabi.com/pricing/faq",
+    "last_verified": "2026-10-13",
+    "note": "The free API request policy is similar: validated commercial applications are generally compliant; inefficient non-validated applications may be limited or suspended."
+  },
+  "free_tier": {
+    "value": "No permanent free tier. Free trial: 100 GB for 30 days with a company email domain, 10 GB for 14 days with a freemail domain; no credit card required.",
+    "source_url": "https://wasabi.com/try-free",
+    "last_verified": "2026-10-13",
+    "note": "The docs index entry 'Signing Up for Wasabi' says 'store up to 1 TB for 30 days'; the sign-up page values are used here."
+  },
+  "object_lock": {
+    "value": true,
+    "source_url": "https://docs.wasabi.com/docs/object-locking",
+    "last_verified": "2026-10-13",
+    "note": "Object Lock with governance and compliance retention modes and legal hold; a bucket uses either Object Lock or Wasabi's Compliance feature, not both."
+  },
+  "s3_endpoints": [
+    {
+      "region": "us-east-1",
+      "endpoint": "https://s3.wasabisys.com",
+      "path_style": true,
+      "source_url": "https://docs.wasabi.com/docs/service-urls-for-wasabis-storage-regions",
+      "last_verified": "2026-10-13",
+      "note": "Service URL s3.wasabisys.com (alias s3.us-east-1.wasabisys.com). REST API introduction: Wasabi supports path-style and virtual-hosted requests and 'recommends using path-style requests' for flexibility in bucket names."
+    },
+    {
+      "region": "us-east-2",
+      "endpoint": "https://s3.us-east-2.wasabisys.com",
+      "path_style": true,
+      "source_url": "https://docs.wasabi.com/docs/service-urls-for-wasabis-storage-regions",
+      "last_verified": "2026-10-13",
+      "note": "REST API introduction: Wasabi supports path-style and virtual-hosted requests and 'recommends using path-style requests' for flexibility in bucket names."
+    },
+    {
+      "region": "us-central-1",
+      "endpoint": "https://s3.us-central-1.wasabisys.com",
+      "path_style": true,
+      "source_url": "https://docs.wasabi.com/docs/service-urls-for-wasabis-storage-regions",
+      "last_verified": "2026-10-13",
+      "note": "REST API introduction: Wasabi supports path-style and virtual-hosted requests and 'recommends using path-style requests' for flexibility in bucket names."
+    },
+    {
+      "region": "us-west-1",
+      "endpoint": "https://s3.us-west-1.wasabisys.com",
+      "path_style": true,
+      "source_url": "https://docs.wasabi.com/docs/service-urls-for-wasabis-storage-regions",
+      "last_verified": "2026-10-13",
+      "note": "REST API introduction: Wasabi supports path-style and virtual-hosted requests and 'recommends using path-style requests' for flexibility in bucket names."
+    },
+    {
+      "region": "us-west-2",
+      "endpoint": "https://s3.us-west-2.wasabisys.com",
+      "path_style": true,
+      "source_url": "https://docs.wasabi.com/docs/service-urls-for-wasabis-storage-regions",
+      "last_verified": "2026-10-13",
+      "note": "REST API introduction: Wasabi supports path-style and virtual-hosted requests and 'recommends using path-style requests' for flexibility in bucket names."
+    },
+    {
+      "region": "ca-central-1",
+      "endpoint": "https://s3.ca-central-1.wasabisys.com",
+      "path_style": true,
+      "source_url": "https://docs.wasabi.com/docs/service-urls-for-wasabis-storage-regions",
+      "last_verified": "2026-10-13",
+      "note": "REST API introduction: Wasabi supports path-style and virtual-hosted requests and 'recommends using path-style requests' for flexibility in bucket names."
+    },
+    {
+      "region": "eu-central-1",
+      "endpoint": "https://s3.eu-central-1.wasabisys.com",
+      "path_style": true,
+      "source_url": "https://docs.wasabi.com/docs/service-urls-for-wasabis-storage-regions",
+      "last_verified": "2026-10-13",
+      "note": "REST API introduction: Wasabi supports path-style and virtual-hosted requests and 'recommends using path-style requests' for flexibility in bucket names."
+    },
+    {
+      "region": "eu-central-2",
+      "endpoint": "https://s3.eu-central-2.wasabisys.com",
+      "path_style": true,
+      "source_url": "https://docs.wasabi.com/docs/service-urls-for-wasabis-storage-regions",
+      "last_verified": "2026-10-13",
+      "note": "REST API introduction: Wasabi supports path-style and virtual-hosted requests and 'recommends using path-style requests' for flexibility in bucket names."
+    },
+    {
+      "region": "eu-west-1",
+      "endpoint": "https://s3.eu-west-1.wasabisys.com",
+      "path_style": true,
+      "source_url": "https://docs.wasabi.com/docs/service-urls-for-wasabis-storage-regions",
+      "last_verified": "2026-10-13",
+      "note": "REST API introduction: Wasabi supports path-style and virtual-hosted requests and 'recommends using path-style requests' for flexibility in bucket names."
+    },
+    {
+      "region": "eu-west-2",
+      "endpoint": "https://s3.eu-west-2.wasabisys.com",
+      "path_style": true,
+      "source_url": "https://docs.wasabi.com/docs/service-urls-for-wasabis-storage-regions",
+      "last_verified": "2026-10-13",
+      "note": "REST API introduction: Wasabi supports path-style and virtual-hosted requests and 'recommends using path-style requests' for flexibility in bucket names."
+    },
+    {
+      "region": "eu-west-3",
+      "endpoint": "https://s3.eu-west-3.wasabisys.com",
+      "path_style": true,
+      "source_url": "https://docs.wasabi.com/docs/service-urls-for-wasabis-storage-regions",
+      "last_verified": "2026-10-13",
+      "note": "REST API introduction: Wasabi supports path-style and virtual-hosted requests and 'recommends using path-style requests' for flexibility in bucket names."
+    },
+    {
+      "region": "eu-south-1",
+      "endpoint": "https://s3.eu-south-1.wasabisys.com",
+      "path_style": true,
+      "source_url": "https://docs.wasabi.com/docs/service-urls-for-wasabis-storage-regions",
+      "last_verified": "2026-10-13",
+      "note": "REST API introduction: Wasabi supports path-style and virtual-hosted requests and 'recommends using path-style requests' for flexibility in bucket names."
+    },
+    {
+      "region": "ap-northeast-1",
+      "endpoint": "https://s3.ap-northeast-1.wasabisys.com",
+      "path_style": true,
+      "source_url": "https://docs.wasabi.com/docs/service-urls-for-wasabis-storage-regions",
+      "last_verified": "2026-10-13",
+      "note": "REST API introduction: Wasabi supports path-style and virtual-hosted requests and 'recommends using path-style requests' for flexibility in bucket names."
+    },
+    {
+      "region": "ap-northeast-2",
+      "endpoint": "https://s3.ap-northeast-2.wasabisys.com",
+      "path_style": true,
+      "source_url": "https://docs.wasabi.com/docs/service-urls-for-wasabis-storage-regions",
+      "last_verified": "2026-10-13",
+      "note": "REST API introduction: Wasabi supports path-style and virtual-hosted requests and 'recommends using path-style requests' for flexibility in bucket names."
+    },
+    {
+      "region": "ap-southeast-1",
+      "endpoint": "https://s3.ap-southeast-1.wasabisys.com",
+      "path_style": true,
+      "source_url": "https://docs.wasabi.com/docs/service-urls-for-wasabis-storage-regions",
+      "last_verified": "2026-10-13",
+      "note": "REST API introduction: Wasabi supports path-style and virtual-hosted requests and 'recommends using path-style requests' for flexibility in bucket names."
+    },
+    {
+      "region": "ap-southeast-2",
+      "endpoint": "https://s3.ap-southeast-2.wasabisys.com",
+      "path_style": true,
+      "source_url": "https://docs.wasabi.com/docs/service-urls-for-wasabis-storage-regions",
+      "last_verified": "2026-10-13",
+      "note": "REST API introduction: Wasabi supports path-style and virtual-hosted requests and 'recommends using path-style requests' for flexibility in bucket names."
+    }
+  ],
+  "notes": [
+    "Prices exclude indirect taxes (tax collection doc https://docs.wasabi.com/docs/how-does-wasabi-handle-tax-collection).",
+    "Wasabi lists prices in USD only on the pages checked; no EUR price list was found.",
+    "Use the service URL that matches the bucket's region; a wrong regional URL allows GET but not PUT or DELETE (S3 API reference).",
+    "Wasabi Cloud NAS ($9.99/TB/mo) and Surveillance Cloud are separate products and are not modelled."
+  ]
+}

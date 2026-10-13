@@ -31,6 +31,7 @@ pub mod policy;
 pub mod pool;
 pub mod price;
 pub mod progress;
+pub mod providers;
 pub mod rclone;
 pub mod recovery;
 pub mod replica;

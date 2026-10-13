@@ -1,0 +1,198 @@
+{
+  "$schema": "schema.json",
+  "schema_version": 1,
+  "id": "filebase",
+  "name": "Filebase Object Storage",
+  "kind": "service",
+  "website_url": "https://filebase.com/",
+  "signup_url": "https://console.filebase.com/signup",
+  "pricing_url": "https://filebase.com/pricing/",
+  "currency": "USD",
+  "prices_include_tax": null,
+  "tax_note": "The pricing documentation says the currency is USD; tax is not mentioned.",
+  "protocols": [
+    "s3",
+    "rclone"
+  ],
+  "protocols_source": {
+    "source_url": "https://filebase.com/docs/tools/cli/rclone",
+    "last_verified": "2026-10-13"
+  },
+  "regions": [
+    {
+      "code": "auto",
+      "city": null,
+      "country": "ZZ",
+      "source_url": "https://filebase.com/docs/s3-api/overview",
+      "last_verified": "2026-10-13",
+      "note": "Not a physical location: Filebase exposes one global endpoint and no per-region endpoints; region 'auto' is the signing region. Country ZZ = not applicable / not documented."
+    }
+  ],
+  "storage_classes": [
+    {
+      "id": "standard",
+      "name": "Object Storage (Pro plan)",
+      "kind": "hot",
+      "applies_to_regions": [
+        "auto"
+      ],
+      "pricing_model": "per_gb_month",
+      "storage_price_per_gb_month": [
+        {
+          "from_gb": 0,
+          "up_to_gb": 500,
+          "price": {
+            "value": 0,
+            "source_url": "https://filebase.com/pricing/",
+            "last_verified": "2026-10-13",
+            "note": "Included in the Pro plan (USD 7.50/month): 'Storage 500 GB', shared across Object Storage and IPFS (see plans)."
+          }
+        },
+        {
+          "from_gb": 500,
+          "up_to_gb": null,
+          "price": {
+            "value": 0.015,
+            "source_url": "https://filebase.com/pricing/",
+            "last_verified": "2026-10-13",
+            "note": "Pro plan 'Additional Storage $0.015/GB'. The pricing doc states USD 0.015 per GB-month measured in binary GB (2^30 bytes)."
+          }
+        }
+      ],
+      "plans": [
+        {
+          "id": "free",
+          "capacity_gb": {
+            "value": 5,
+            "source_url": "https://filebase.com/pricing/",
+            "last_verified": "2026-10-13",
+            "note": "Free plan storage 5 GB, shared across Object Storage and IPFS; no overage on the free plan (account becomes read-only, pricing doc)."
+          },
+          "monthly_price": {
+            "value": 0,
+            "source_url": "https://filebase.com/pricing/",
+            "last_verified": "2026-10-13",
+            "note": "Free plan: $0/month."
+          }
+        },
+        {
+          "id": "pro",
+          "capacity_gb": {
+            "value": 500,
+            "source_url": "https://filebase.com/pricing/",
+            "last_verified": "2026-10-13",
+            "note": "Pro plan includes 500 GB; storage above it is billed at USD 0.015/GB."
+          },
+          "monthly_price": {
+            "value": 7.5,
+            "source_url": "https://filebase.com/pricing/",
+            "last_verified": "2026-10-13",
+            "note": "Pro plan: $7.50/month, billed monthly."
+          }
+        }
+      ],
+      "requests": {
+        "put_per_1000": {
+          "value": 0.0045,
+          "source_url": "https://filebase.com/pricing/",
+          "last_verified": "2026-10-13",
+          "note": "Pro plan: 1M Class A operations included, then '$4.50 / million requests' (converted to per 1,000). The pricing doc says operations are billed per million, rounded up."
+        },
+        "get_per_1000": {
+          "value": 0.00036,
+          "source_url": "https://filebase.com/pricing/",
+          "last_verified": "2026-10-13",
+          "note": "Pro plan: 10M Class B operations included, then '$0.36 / million requests' (converted to per 1,000)."
+        },
+        "list_per_1000": {
+          "value": 0.0045,
+          "source_url": "https://filebase.com/pricing/",
+          "last_verified": "2026-10-13",
+          "note": "ListObjects/ListObjectsV2 are Class A operations (pricing doc): $4.50 per million after the included 1M, converted to per 1,000."
+        }
+      },
+      "retrieval": {
+        "price_per_gb": {
+          "value": null,
+          "note": "No retrieval fee line; the pricing doc says there is one storage class and no archive tier."
+        },
+        "typical_delay": {
+          "value": null,
+          "note": "Not stated; there is no archive tier (RestoreObject is not supported)."
+        }
+      },
+      "minimum_storage_duration_days": {
+        "value": 0,
+        "source_url": "https://filebase.com/docs/account/pricing",
+        "last_verified": "2026-10-13",
+        "note": "'There is no 30-day, 90-day, or any other minimum charge.'"
+      },
+      "minimum_billable_object_size_kb": {
+        "value": 0,
+        "source_url": "https://filebase.com/docs/account/pricing",
+        "last_verified": "2026-10-13",
+        "note": "'A 1-byte object is billed as 1 byte ... There is no minimum object-size charge.'"
+      },
+      "notes": [
+        "Plan model: Pro USD 7.50/month includes 500 GB storage, 1M Class A and 10M Class B operations; overage USD 0.015/GB, USD 4.50 per million Class A, USD 0.36 per million Class B. Enterprise has custom volume pricing.",
+        "The pricing doc's plan table and worked examples (5 GB free storage, 1M/10M free operations for every plan) do not match the current pricing page; the pricing page is used here.",
+        "DeleteObject, DeleteObjects, DeleteBucket and AbortMultipartUpload are free; failed requests (401, 403, 404, 503) are not charged."
+      ]
+    }
+  ],
+  "default_storage_class": "standard",
+  "egress": {
+    "applies_to_regions": [
+      "auto"
+    ],
+    "free_allowance_gb_per_month": {
+      "value": null,
+      "note": "No allowance is needed on paid plans: S3 object egress is free with no monthly cap."
+    },
+    "price_per_gb": [
+      {
+        "from_gb": 0,
+        "up_to_gb": null,
+        "price": {
+          "value": 0,
+          "source_url": "https://filebase.com/docs/account/pricing",
+          "last_verified": "2026-10-13",
+          "note": "'For S3-compatible object storage buckets at s3.filebase.io, outbound data transfer is free of charge on every paid plan with no monthly cap.' The pricing page lists 'Object Egress Free' for Free and Pro."
+        }
+      }
+    ],
+    "notes": [
+      "IPFS bandwidth is separate and billable (Pro includes 250 GB, then USD 0.015/GB); it does not apply to S3 object storage buckets.",
+      "Free plan: the pricing page lists object egress as Free, while the pricing doc and service limits say 5 GB/month, after which downloads return 403 until the next month."
+    ]
+  },
+  "egress_fair_use": {
+    "value": null,
+    "note": "No fair-use limit on S3 egress is stated. The pricing page footnote says API requests are unlimited for normal product usage and Filebase may ask very high-volume users to move to another plan."
+  },
+  "free_tier": {
+    "value": "Free plan, $0/month: 5 GB storage shared across Object Storage and IPFS, object egress free, 100K Class A and 1M Class B operations included, 1 bucket.",
+    "source_url": "https://filebase.com/pricing/",
+    "last_verified": "2026-10-13",
+    "note": "The pricing doc instead lists 5 GB/month egress and 1M Class A / 10M Class B for the free tier; the account becomes read-only when limits are exceeded."
+  },
+  "object_lock": {
+    "value": null,
+    "note": "Not documented. The S3 compatibility matrix (the stated source of truth) lists no Object Lock operations, and PutBucketVersioning is not supported (versioning is read-only metadata)."
+  },
+  "s3_endpoints": [
+    {
+      "region": "auto",
+      "label": "Global",
+      "endpoint": "https://s3.filebase.io",
+      "path_style": false,
+      "source_url": "https://filebase.com/docs/s3-api/overview",
+      "last_verified": "2026-10-13",
+      "note": "Single global endpoint; region 'auto' (use us-east-1 if a tool rejects auto). Path-style and virtual-host style are both supported; the docs say to keep the SDK default and use virtual-host URLs for public reads."
+    }
+  ],
+  "notes": [
+    "S3 API rate limit: 500 requests per second per account (service limits).",
+    "Older documentation used s3.filebase.com; current docs recommend s3.filebase.io with region auto."
+  ]
+}

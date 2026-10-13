@@ -9,18 +9,9 @@ use crate::price::StoragePrice;
 use serde::Serialize;
 use std::collections::BTreeMap;
 
-const PROVIDERS: &[&str] = &[
-    include_str!("../../../data/providers/aws-s3.json"),
-    include_str!("../../../data/providers/scaleway-object-storage.json"),
-    include_str!("../../../data/providers/hetzner-storage-box.json"),
-];
-
 /// The embedded provider profiles, parsed (profiles that fail to parse are left out).
 pub fn provider_profiles() -> Vec<serde_json::Value> {
-    PROVIDERS
-        .iter()
-        .filter_map(|raw| serde_json::from_str(raw).ok())
-        .collect()
+    crate::providers::profiles()
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -205,10 +196,7 @@ pub fn storage_advice(
         "Prices come from the open data set in the repository (data/providers), each with a source URL and the date it was verified; they are estimates, not quotes, and exclude request fees, egress and tax unless stated.".to_string(),
         "Last-accessed times are what Varsto recorded on this device (fetch, open, read) plus the filesystem access time seen at scan; other devices' use is not included yet.".to_string(),
     ];
-    for raw in PROVIDERS {
-        let Ok(doc) = serde_json::from_str::<serde_json::Value>(raw) else {
-            continue;
-        };
+    for doc in crate::providers::profiles() {
         let provider = doc["name"].as_str().unwrap_or("?").to_string();
         let currency = doc["currency"].as_str().unwrap_or("?").to_string();
         for class in doc["storage_classes"].as_array().into_iter().flatten() {
@@ -219,7 +207,10 @@ pub fn storage_advice(
                 ));
                 continue;
             };
-            let Some(first) = tiers.first() else { continue };
+            if tiers.is_empty() {
+                continue;
+            }
+            let first = crate::providers::headline_band(class);
             let Some(price) = num(&first["price"]["value"]) else {
                 continue;
             };

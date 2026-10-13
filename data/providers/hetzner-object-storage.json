@@ -1,0 +1,201 @@
+{
+  "$schema": "schema.json",
+  "schema_version": 1,
+  "id": "hetzner-object-storage",
+  "name": "Hetzner Object Storage",
+  "kind": "service",
+  "website_url": "https://www.hetzner.com/storage/object-storage/",
+  "signup_url": "https://console.hetzner.com/",
+  "pricing_url": "https://www.hetzner.com/storage/object-storage/",
+  "currency": "EUR",
+  "prices_include_tax": false,
+  "tax_note": "Product page FAQ: 'All prices are exclusive of VAT'; docs: additional storage is billed as '(net price * TB-hours) + VAT'.",
+  "protocols": [
+    "s3",
+    "rclone"
+  ],
+  "protocols_source": {
+    "source_url": "https://docs.hetzner.com/storage/object-storage/getting-started/using-s3-api-tools",
+    "last_verified": "2026-10-13"
+  },
+  "regions": [
+    {
+      "code": "fsn1",
+      "city": "Falkenstein",
+      "country": "DE",
+      "source_url": "https://www.hetzner.com/storage/object-storage/",
+      "last_verified": "2026-10-13",
+      "note": "Product page FAQ: 'Falkenstein, DE (FSN1)'. The location code is also the region name used in the docs' tool examples (region = fsn1)."
+    },
+    {
+      "code": "nbg1",
+      "city": "Nuremberg",
+      "country": "DE",
+      "source_url": "https://www.hetzner.com/storage/object-storage/",
+      "last_verified": "2026-10-13",
+      "note": "Product page FAQ: 'Nuremberg, DE (NBG1)'."
+    },
+    {
+      "code": "hel1",
+      "city": "Helsinki",
+      "country": "FI",
+      "source_url": "https://www.hetzner.com/storage/object-storage/",
+      "last_verified": "2026-10-13",
+      "note": "Product page FAQ: 'Helsinki, FI (HEL1)'."
+    }
+  ],
+  "storage_classes": [
+    {
+      "id": "standard",
+      "name": "Object Storage",
+      "kind": "hot",
+      "applies_to_regions": [
+        "fsn1",
+        "nbg1",
+        "hel1"
+      ],
+      "pricing_model": "fixed_plan",
+      "plans": [
+        {
+          "id": "base-price",
+          "capacity_gb": {
+            "value": 1000,
+            "source_url": "https://www.hetzner.com/storage/object-storage/",
+            "last_verified": "2026-10-13",
+            "note": "FAQ: 'This base price includes 1 TB of storage (up to 744 TB-hours) and 1 TB of egress traffic.' Not a hard cap: usage above the included quota is billed per TB-hour (see notes). TB is decimal: docs bill excess 'in increments of 100 MB ( = 0.0001 TB)'."
+          },
+          "monthly_price": {
+            "value": 6.49,
+            "source_url": "https://website-price-api.hetzner.com/api/v1/products/CLOUD_84",
+            "last_verified": "2026-10-13",
+            "note": "Base price per account, product CLOUD_84, datacenter ALL, monthly EUR 6.49 (hourly EUR 0.0104, capped at the monthly price). This is the official price API the product page uses to fill its FAQ text 'We charge a base price of ... per month'; billed for every hour with at least one bucket, even if empty."
+          }
+        }
+      ],
+      "requests": {
+        "put_per_1000": {
+          "value": 0,
+          "source_url": "https://www.hetzner.com/storage/object-storage/",
+          "last_verified": "2026-10-13",
+          "note": "FAQ 'What traffic is free of charge?': 'S3 API calls such as PUT, GET, or DELETE requests.' Docs overview confirms S3 operations are free (egress caused by them is billed)."
+        },
+        "get_per_1000": {
+          "value": 0,
+          "source_url": "https://www.hetzner.com/storage/object-storage/",
+          "last_verified": "2026-10-13",
+          "note": "FAQ: S3 API calls such as PUT, GET, or DELETE are free of charge."
+        },
+        "list_per_1000": {
+          "value": 0,
+          "source_url": "https://docs.hetzner.com/storage/object-storage/overview",
+          "last_verified": "2026-10-13",
+          "note": "Docs 'Pricing': 'S3 operations such as PUT, GET, or DELETE' are free of charge; LIST is not named explicitly but falls under S3 operations."
+        }
+      },
+      "retrieval": {
+        "price_per_gb": {
+          "value": null,
+          "note": "No retrieval fee line for this single hot class; only egress traffic is billed. Absence of a line item, not an explicit statement."
+        },
+        "typical_delay": {
+          "value": null,
+          "note": "Not applicable (hot storage); no delay stated."
+        }
+      },
+      "minimum_storage_duration_days": {
+        "value": null,
+        "note": "No minimum storage duration is stated on the product page or docs overview checked; storage is billed per TB-hour."
+      },
+      "minimum_billable_object_size_kb": {
+        "value": 64,
+        "source_url": "https://docs.hetzner.com/storage/object-storage/overview",
+        "last_verified": "2026-10-13",
+        "note": "Docs 'Minimum billable object size': 'Minimum: 64 kB'; smaller objects are charged as if they had this size (also in the product page FAQ)."
+      },
+      "notes": [
+        "Modelled as a fixed plan because a base price is mandatory: EUR 6.49/month per account includes 1 TB storage and 1 TB egress (quota accrues per hour of use; unused quota expires at month end).",
+        "Storage above the included quota: EUR 0.0087 per TB-hour (price API product CLOUD_85, read 2026-10-13, https://website-price-api.hetzner.com/api/v1/products/CLOUD_85). Hetzner states only the hourly price, so no per GB-month value is recorded.",
+        "Docs table of maximum included storage: 744 TB-hours in a 31-day month, 720 in 30 days, 696 in 29 days, 672 in 28 days.",
+        "One price for all locations: the price API lists datacenter 'ALL'."
+      ]
+    }
+  ],
+  "default_storage_class": "standard",
+  "egress": {
+    "applies_to_regions": [
+      "fsn1",
+      "nbg1",
+      "hel1"
+    ],
+    "free_allowance_gb_per_month": {
+      "value": 1000,
+      "source_url": "https://www.hetzner.com/storage/object-storage/",
+      "last_verified": "2026-10-13",
+      "note": "FAQ: base price includes '1 TB of egress traffic'. The docs table gives a per-hour accruing traffic quota of max. 1.0080 TB (28-day month) to max. 1.1160 TB (31-day month); the product page figure is used here."
+    },
+    "free_allowance_scope": "Per account, across all buckets, projects and locations; included with the base price and accrued per hour of use; expires at month end.",
+    "price_per_gb": [
+      {
+        "from_gb": 0,
+        "up_to_gb": null,
+        "price": {
+          "value": 0.001,
+          "source_url": "https://website-price-api.hetzner.com/api/v1/products/CLOUD_86",
+          "last_verified": "2026-10-13",
+          "note": "Price API product CLOUD_86 (datacenter ALL): EUR 1.00, shown on the product page as 'Egress traffic: ... per TB'. Normalised to per GB with decimal TB (docs: 100 MB = 0.0001 TB)."
+        }
+      }
+    ],
+    "notes": [
+      "Free of charge (product page and docs): ingress traffic and internal traffic within the eu-central network zone.",
+      "Excess storage and traffic are billed in increments of 100 MB (0.0001 TB)."
+    ]
+  },
+  "egress_fair_use": {
+    "value": null,
+    "note": "No fair-use rule for egress was found on the product page or docs overview; egress above the included quota is billed per TB."
+  },
+  "free_tier": {
+    "value": null,
+    "note": "No free tier is mentioned on the product page or docs overview; the base price is charged for every hour with at least one bucket."
+  },
+  "object_lock": {
+    "value": true,
+    "source_url": "https://docs.hetzner.com/storage/object-storage/howto-protect-objects/protect-object-lock-retention",
+    "last_verified": "2026-10-13",
+    "note": "Docs how-to 'Object Lock: Retention' (also Legal Hold); product page lists 'Object locking: Lock objects against deletion or overwriting'."
+  },
+  "s3_endpoints": [
+    {
+      "region": "fsn1",
+      "label": "Falkenstein",
+      "endpoint": "https://fsn1.your-objectstorage.com",
+      "path_style": false,
+      "source_url": "https://docs.hetzner.com/storage/object-storage/overview",
+      "last_verified": "2026-10-13",
+      "note": "Docs 'Available endpoints'. Docs document virtual-hosted URLs (https://<bucket-name>.<location>.your-objectstorage.com) and the s3cmd guide sets the DNS-style template %(bucket)s.fsn1.your-objectstorage.com."
+    },
+    {
+      "region": "nbg1",
+      "label": "Nuremberg",
+      "endpoint": "https://nbg1.your-objectstorage.com",
+      "path_style": false,
+      "source_url": "https://docs.hetzner.com/storage/object-storage/overview",
+      "last_verified": "2026-10-13",
+      "note": "Docs 'Available endpoints'; virtual-hosted style as documented."
+    },
+    {
+      "region": "hel1",
+      "label": "Helsinki",
+      "endpoint": "https://hel1.your-objectstorage.com",
+      "path_style": false,
+      "source_url": "https://docs.hetzner.com/storage/object-storage/overview",
+      "last_verified": "2026-10-13",
+      "note": "Docs 'Available endpoints'; virtual-hosted style as documented."
+    }
+  ],
+  "notes": [
+    "Separate product from Hetzner Storage Box.",
+    "Limits (docs): up to 100 buckets, 100 TB and 50,000,000 objects per bucket, 5 TB per object."
+  ]
+}

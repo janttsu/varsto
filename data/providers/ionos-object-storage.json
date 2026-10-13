@@ -1,0 +1,271 @@
+{
+  "$schema": "schema.json",
+  "schema_version": 1,
+  "id": "ionos-object-storage",
+  "name": "IONOS CLOUD Object Storage",
+  "kind": "service",
+  "website_url": "https://cloud.ionos.com/storage/object-storage",
+  "signup_url": "https://cloud.ionos.com/storage/object-storage/sign-up",
+  "pricing_url": "https://docs.ionos.com/support/general-information/price-list/ionos-cloud-eur-en",
+  "currency": "EUR",
+  "prices_include_tax": false,
+  "tax_note": "EUR price list: 'Prices are net prices and do not include any applicable taxes or duties, including but not limited to sales or value-added taxes.' The offer is for commercial use only.",
+  "protocols": [
+    "s3",
+    "rclone"
+  ],
+  "protocols_source": {
+    "source_url": "https://docs.ionos.com/cloud/backup-and-storage/ionos-object-storage/s3-tools/rclone",
+    "last_verified": "2026-10-13"
+  },
+  "regions": [
+    {
+      "code": "eu-central-4",
+      "city": "Frankfurt",
+      "country": "DE",
+      "source_url": "https://docs.ionos.com/cloud/backup-and-storage/ionos-object-storage/endpoints",
+      "last_verified": "2026-10-13",
+      "note": "Contract-owned buckets."
+    },
+    {
+      "code": "eu-central-3",
+      "city": "Berlin",
+      "country": "DE",
+      "source_url": "https://docs.ionos.com/cloud/backup-and-storage/ionos-object-storage/endpoints",
+      "last_verified": "2026-10-13",
+      "note": "Contract-owned buckets. The endpoints page says BSI IT-Grundschutz certification for this region is pending."
+    },
+    {
+      "code": "de",
+      "city": "Frankfurt",
+      "country": "DE",
+      "source_url": "https://docs.ionos.com/cloud/backup-and-storage/ionos-object-storage/endpoints",
+      "last_verified": "2026-10-13",
+      "note": "User-owned buckets; endpoint host is s3.eu-central-1.ionoscloud.com."
+    },
+    {
+      "code": "eu-central-2",
+      "city": "Berlin",
+      "country": "DE",
+      "source_url": "https://docs.ionos.com/cloud/backup-and-storage/ionos-object-storage/endpoints",
+      "last_verified": "2026-10-13",
+      "note": "User-owned buckets."
+    },
+    {
+      "code": "eu-south-2",
+      "city": "Logroño",
+      "country": "ES",
+      "source_url": "https://docs.ionos.com/cloud/backup-and-storage/ionos-object-storage/endpoints",
+      "last_verified": "2026-10-13",
+      "note": "User-owned buckets."
+    },
+    {
+      "code": "us-central-1",
+      "city": "Lenexa",
+      "country": "US",
+      "source_url": "https://docs.ionos.com/cloud/backup-and-storage/ionos-object-storage/endpoints",
+      "last_verified": "2026-10-13",
+      "note": "Contract-owned buckets. Billed by IONOS CLOUD Inc. under a separate (USD) price list; prices in this file do not apply."
+    }
+  ],
+  "storage_classes": [
+    {
+      "id": "standard",
+      "name": "IONOS CLOUD Object Storage",
+      "kind": "hot",
+      "applies_to_regions": [
+        "eu-central-4",
+        "eu-central-3",
+        "de",
+        "eu-central-2",
+        "eu-south-2"
+      ],
+      "pricing_model": "per_gb_month",
+      "storage_price_per_gb_month": [
+        {
+          "from_gb": 0,
+          "up_to_gb": null,
+          "price": {
+            "value": 0.007,
+            "source_url": "https://docs.ionos.com/support/general-information/price-list/ionos-cloud-eur-en",
+            "last_verified": "2026-10-13",
+            "note": "EUR price list (v2026-09-15, valid from 15/09/2026), IONOS CLOUD Object Storage, Storage: '1 GB 0,007 €' per 30 days (price group C1). The list says 1 GB = 1024 MB and storage is billed with one-hour granularity. One price is listed for the product, with no location distinction; it is applied to the EU regions in this file."
+          }
+        }
+      ],
+      "requests": {
+        "put_per_1000": {
+          "value": 0,
+          "source_url": "https://docs.ionos.com/support/general-information/price-list/ionos-cloud-eur-en",
+          "last_verified": "2026-10-13",
+          "note": "EUR price list, IONOS CLOUD Object Storage, 'API Call types Price per 10.000 Calls': PUT/COPY/POST/LIST, GET and DELETE are all 'no charge'. The pricing-model doc also says 'Using the API is free of charge.'"
+        },
+        "get_per_1000": {
+          "value": 0,
+          "source_url": "https://docs.ionos.com/support/general-information/price-list/ionos-cloud-eur-en",
+          "last_verified": "2026-10-13",
+          "note": "EUR price list, IONOS CLOUD Object Storage, 'API Call types Price per 10.000 Calls': PUT/COPY/POST/LIST, GET and DELETE are all 'no charge'. The pricing-model doc also says 'Using the API is free of charge.'"
+        },
+        "list_per_1000": {
+          "value": 0,
+          "source_url": "https://docs.ionos.com/support/general-information/price-list/ionos-cloud-eur-en",
+          "last_verified": "2026-10-13",
+          "note": "EUR price list, IONOS CLOUD Object Storage, 'API Call types Price per 10.000 Calls': PUT/COPY/POST/LIST, GET and DELETE are all 'no charge'. The pricing-model doc also says 'Using the API is free of charge.'"
+        }
+      },
+      "retrieval": {
+        "price_per_gb": {
+          "value": 0,
+          "source_url": "https://docs.ionos.com/support/general-information/price-list/ionos-cloud-eur-en",
+          "last_verified": "2026-10-13",
+          "note": "EUR price list, 'Data Storage Access Price per GB': Write and Read are 'no charge'. Internet egress is billed separately as data transfer."
+        },
+        "typical_delay": {
+          "value": null,
+          "note": "Single online class; no restore step is documented."
+        }
+      },
+      "minimum_storage_duration_days": {
+        "value": null,
+        "note": "No minimum storage duration is stated in the price list, pricing-model doc or FAQ checked."
+      },
+      "minimum_billable_object_size_kb": {
+        "value": null,
+        "note": "Not stated. The FAQ says 'There are no minimum storage charges, allowing you to start using the Object Storage by uploading as little as one byte of data', which is about the account, not a per-object billing minimum."
+      },
+      "notes": [
+        "Contract-owned buckets (eu-central-4 Frankfurt, eu-central-3 Berlin) are the model IONOS says future updates focus on; user-owned buckets (de Frankfurt, eu-central-2 Berlin, eu-south-2 Logrono) use separate endpoints."
+      ]
+    }
+  ],
+  "default_storage_class": "standard",
+  "egress": {
+    "applies_to_regions": [
+      "eu-central-4",
+      "eu-central-3",
+      "de",
+      "eu-central-2",
+      "eu-south-2"
+    ],
+    "free_allowance_gb_per_month": {
+      "value": 2048,
+      "source_url": "https://docs.ionos.com/support/general-information/price-list/ionos-cloud-eur-en",
+      "last_verified": "2026-10-13",
+      "note": "EUR price list, Network services, Data transfer: 'Outgoing public traffic up to 2 TB (≤ 2 TB) no charge'; the list says 1 TB equals 1,024 GB."
+    },
+    "free_allowance_scope": "Per contract and month, shared by all IONOS Public Cloud services: 'Tiered pricing applies to all outgoing traffic from all IONOS Public Cloud services within the same contract.'",
+    "price_per_gb": [
+      {
+        "from_gb": 0,
+        "up_to_gb": 8192,
+        "price": {
+          "value": 0.03,
+          "source_url": "https://docs.ionos.com/support/general-information/price-list/ionos-cloud-eur-en",
+          "last_verified": "2026-10-13",
+          "note": "EUR price list, Network services, Data transfer: 'next 8 TB (> 2 TB ≤ 10 TB) 0,030 €/GB' (1 TB = 1,024 GB)."
+        }
+      },
+      {
+        "from_gb": 8192,
+        "up_to_gb": 49152,
+        "price": {
+          "value": 0.025,
+          "source_url": "https://docs.ionos.com/support/general-information/price-list/ionos-cloud-eur-en",
+          "last_verified": "2026-10-13",
+          "note": "EUR price list, Network services, Data transfer: 'next 40 TB (> 10 TB ≤ 50 TB) 0,025 €/GB'."
+        }
+      },
+      {
+        "from_gb": 49152,
+        "up_to_gb": 151552,
+        "price": {
+          "value": 0.02,
+          "source_url": "https://docs.ionos.com/support/general-information/price-list/ionos-cloud-eur-en",
+          "last_verified": "2026-10-13",
+          "note": "EUR price list, Network services, Data transfer: 'next 100 TB (> 50 TB ≤ 150 TB) 0,020 €/GB'."
+        }
+      },
+      {
+        "from_gb": 151552,
+        "up_to_gb": null,
+        "price": {
+          "value": 0.015,
+          "source_url": "https://docs.ionos.com/support/general-information/price-list/ionos-cloud-eur-en",
+          "last_verified": "2026-10-13",
+          "note": "EUR price list, Network services, Data transfer: 'greater than 150 TB (> 150 TB) 0,015 €/GB'."
+        }
+      }
+    ],
+    "notes": [
+      "Bands are counted after the 2 TB free allowance and cover all outgoing public traffic of the contract.",
+      "Incoming traffic and internal private traffic are 'no charge'. Traffic from contract-owned buckets to services in the same data center or to IONOS Public Cloud data centers in the same country is not charged; traffic from user-owned buckets is always charged as regular public traffic (price list section 5).",
+      "Replication traffic within and across regions is free; other inter-bucket transfer is charged (price list 5.4)."
+    ]
+  },
+  "egress_fair_use": {
+    "value": null,
+    "note": "No fair-use rule is stated; egress beyond the 2 TB allowance is billed in the listed bands."
+  },
+  "free_tier": {
+    "value": null,
+    "note": "No free storage or request allowance for Object Storage is listed in the EUR price list. The 2 TB monthly free egress is modelled under egress."
+  },
+  "object_lock": {
+    "value": true,
+    "source_url": "https://docs.ionos.com/cloud/backup-and-storage/ionos-object-storage/settings/object-lock",
+    "last_verified": "2026-10-13",
+    "note": "WORM Object Lock (Governance and Compliance modes, Legal Hold) for contract-owned and user-owned buckets; must be enabled at bucket creation and enables versioning."
+  },
+  "s3_endpoints": [
+    {
+      "region": "eu-central-4",
+      "label": "Frankfurt (contract-owned)",
+      "endpoint": "https://s3.eu-central-4.ionoscloud.com",
+      "path_style": true,
+      "source_url": "https://docs.ionos.com/cloud/backup-and-storage/ionos-object-storage/endpoints",
+      "last_verified": "2026-10-13",
+      "note": "Path style: the S3 Browser guide says to leave 'Addressing model' on 'Path style' (https://docs.ionos.com/cloud/backup-and-storage/ionos-object-storage/s3-tools/s3browser); virtual-hosted support is not documented either way."
+    },
+    {
+      "region": "eu-central-3",
+      "label": "Berlin (contract-owned)",
+      "endpoint": "https://s3.eu-central-3.ionoscloud.com",
+      "path_style": true,
+      "source_url": "https://docs.ionos.com/cloud/backup-and-storage/ionos-object-storage/endpoints",
+      "last_verified": "2026-10-13",
+      "note": "Path style per the S3 Browser guide (https://docs.ionos.com/cloud/backup-and-storage/ionos-object-storage/s3-tools/s3browser)."
+    },
+    {
+      "region": "de",
+      "label": "Frankfurt (user-owned)",
+      "endpoint": "https://s3.eu-central-1.ionoscloud.com",
+      "path_style": true,
+      "source_url": "https://docs.ionos.com/cloud/backup-and-storage/ionos-object-storage/endpoints",
+      "last_verified": "2026-10-13",
+      "note": "Region name 'de' with host s3.eu-central-1.ionoscloud.com, as listed. Path style per the S3 Browser guide (https://docs.ionos.com/cloud/backup-and-storage/ionos-object-storage/s3-tools/s3browser)."
+    },
+    {
+      "region": "eu-central-2",
+      "label": "Berlin (user-owned)",
+      "endpoint": "https://s3.eu-central-2.ionoscloud.com",
+      "path_style": true,
+      "source_url": "https://docs.ionos.com/cloud/backup-and-storage/ionos-object-storage/endpoints",
+      "last_verified": "2026-10-13",
+      "note": "Path style per the S3 Browser guide (https://docs.ionos.com/cloud/backup-and-storage/ionos-object-storage/s3-tools/s3browser)."
+    },
+    {
+      "region": "eu-south-2",
+      "label": "Logroño (user-owned)",
+      "endpoint": "https://s3.eu-south-2.ionoscloud.com",
+      "path_style": true,
+      "source_url": "https://docs.ionos.com/cloud/backup-and-storage/ionos-object-storage/endpoints",
+      "last_verified": "2026-10-13",
+      "note": "Path style per the S3 Browser guide (https://docs.ionos.com/cloud/backup-and-storage/ionos-object-storage/s3-tools/s3browser)."
+    }
+  ],
+  "notes": [
+    "Prices are from the IONOS CLOUD (EUR) price list v2026-09-15 (valid from 15/09/2026), which applies to IONOS CLOUD GmbH, IONOS Cloud Solutions Spain S.L.U. and IONOS CLOUD France SAS. The UK (IONOS CLOUD Ltd.) and US (IONOS CLOUD Inc.) price lists are separate and were not checked.",
+    "Storage is listed per GB per 30 days, not per calendar month; 1 GB = 1024 MB.",
+    "Pricing model doc: storage is charged per GB per hour, data transfer per GB, inbound free, API use free (https://docs.ionos.com/cloud/backup-and-storage/ionos-object-storage/overview/pricing)."
+  ]
+}

@@ -1,0 +1,236 @@
+{
+  "$schema": "schema.json",
+  "schema_version": 1,
+  "id": "cloudflare-r2",
+  "name": "Cloudflare R2",
+  "kind": "service",
+  "website_url": "https://www.cloudflare.com/products/r2/",
+  "signup_url": "https://dash.cloudflare.com/sign-up",
+  "pricing_url": "https://developers.cloudflare.com/r2/pricing/",
+  "currency": "USD",
+  "prices_include_tax": null,
+  "protocols": [
+    "s3",
+    "rclone"
+  ],
+  "protocols_source": {
+    "source_url": "https://developers.cloudflare.com/r2/examples/rclone/",
+    "last_verified": "2026-10-13"
+  },
+  "tax_note": "Cloudflare billing policy: 'Cloudflare also collects sales tax as governed by local laws', computed from the billing or shipping address; the R2 pricing page does not say whether listed prices include tax.",
+  "regions": [
+    {
+      "code": "auto",
+      "city": null,
+      "country": "ZZ",
+      "source_url": "https://developers.cloudflare.com/r2/api/s3/api/",
+      "last_verified": "2026-10-13",
+      "note": "S3 API region is always 'auto' (empty and us-east-1 alias to auto). Bucket location is chosen automatically near the creator or by a location hint (wnam, enam, weur, eeur, apac, oc); a jurisdiction (eu, fedramp, us) guarantees residency and uses its own endpoint. Country ZZ = not a single country (schema requires a code)."
+    }
+  ],
+  "storage_classes": [
+    {
+      "id": "standard",
+      "name": "Standard",
+      "kind": "hot",
+      "applies_to_regions": [
+        "auto"
+      ],
+      "pricing_model": "per_gb_month",
+      "storage_price_per_gb_month": [
+        {
+          "from_gb": 0,
+          "up_to_gb": null,
+          "price": {
+            "value": 0.015,
+            "source_url": "https://developers.cloudflare.com/r2/pricing/",
+            "last_verified": "2026-10-13",
+            "note": "Pricing page (last updated Oct 1, 2026), Standard storage: $0.015 / GB-month (GB-month = average of daily peak storage over 30 days; usage rounded up to the next billing unit). One global price; no regional price list. First 10 GB-month free (see free_tier)."
+          }
+        }
+      ],
+      "requests": {
+        "put_per_1000": {
+          "value": 0.0045,
+          "source_url": "https://developers.cloudflare.com/r2/pricing/",
+          "last_verified": "2026-10-13",
+          "note": "Pricing page (last updated Oct 1, 2026), Standard storage: $4.50 per million Class A operations, converted to per 1,000. PutObject, CopyObject, multipart parts are Class A."
+        },
+        "get_per_1000": {
+          "value": 0.00036,
+          "source_url": "https://developers.cloudflare.com/r2/pricing/",
+          "last_verified": "2026-10-13",
+          "note": "Pricing page (last updated Oct 1, 2026), Standard storage: $0.36 per million Class B operations, converted to per 1,000. GetObject and HeadObject are Class B."
+        },
+        "list_per_1000": {
+          "value": 0.0045,
+          "source_url": "https://developers.cloudflare.com/r2/pricing/",
+          "last_verified": "2026-10-13",
+          "note": "Pricing page (last updated Oct 1, 2026), Standard storage: $4.50 per million Class A operations, converted to per 1,000. ListObjects and ListBuckets are Class A."
+        }
+      },
+      "retrieval": {
+        "price_per_gb": {
+          "value": 0,
+          "source_url": "https://developers.cloudflare.com/r2/pricing/",
+          "last_verified": "2026-10-13",
+          "note": "Pricing page (last updated Oct 1, 2026), Standard storage: Data Retrieval (processing) 'None'."
+        },
+        "typical_delay": {
+          "value": null,
+          "note": "Not stated in the sources checked."
+        }
+      },
+      "minimum_storage_duration_days": {
+        "value": 0,
+        "source_url": "https://developers.cloudflare.com/r2/pricing/",
+        "last_verified": "2026-10-13",
+        "note": "Pricing page, minimum storage duration table: Standard storage 'None'."
+      },
+      "minimum_billable_object_size_kb": {
+        "value": 0,
+        "source_url": "https://developers.cloudflare.com/r2/buckets/storage-classes/",
+        "last_verified": "2026-10-13",
+        "note": "Storage classes page: all classes have 'No minimum object size'."
+      },
+      "notes": [
+        "S3 storage class header value STANDARD (S3 API compatibility page). Default class for new buckets unless set otherwise.",
+        "DeleteObject, DeleteBucket and AbortMultipartUpload are free operations.",
+        "Usage is rounded up to the next billing unit (for example 1,000,001 operations are billed as 2 million)."
+      ]
+    },
+    {
+      "id": "infrequent-access",
+      "name": "Infrequent Access",
+      "kind": "infrequent",
+      "applies_to_regions": [
+        "auto"
+      ],
+      "pricing_model": "per_gb_month",
+      "storage_price_per_gb_month": [
+        {
+          "from_gb": 0,
+          "up_to_gb": null,
+          "price": {
+            "value": 0.01,
+            "source_url": "https://developers.cloudflare.com/r2/pricing/",
+            "last_verified": "2026-10-13",
+            "note": "Pricing page (last updated Oct 1, 2026), Infrequent Access storage: $0.01 / GB-month. The free tier does not apply to this class."
+          }
+        }
+      ],
+      "requests": {
+        "put_per_1000": {
+          "value": 0.009,
+          "source_url": "https://developers.cloudflare.com/r2/pricing/",
+          "last_verified": "2026-10-13",
+          "note": "Pricing page (last updated Oct 1, 2026), Infrequent Access storage: $9.00 per million Class A operations, converted to per 1,000. PutObject, CopyObject, multipart parts are Class A."
+        },
+        "get_per_1000": {
+          "value": 0.0009,
+          "source_url": "https://developers.cloudflare.com/r2/pricing/",
+          "last_verified": "2026-10-13",
+          "note": "Pricing page (last updated Oct 1, 2026), Infrequent Access storage: $0.90 per million Class B operations, converted to per 1,000. GetObject and HeadObject are Class B."
+        },
+        "list_per_1000": {
+          "value": 0.009,
+          "source_url": "https://developers.cloudflare.com/r2/pricing/",
+          "last_verified": "2026-10-13",
+          "note": "Pricing page (last updated Oct 1, 2026), Infrequent Access storage: $9.00 per million Class A operations, converted to per 1,000. ListObjects and ListBuckets are Class A."
+        }
+      },
+      "retrieval": {
+        "price_per_gb": {
+          "value": 0.01,
+          "source_url": "https://developers.cloudflare.com/r2/pricing/",
+          "last_verified": "2026-10-13",
+          "note": "Pricing page (last updated Oct 1, 2026), Infrequent Access storage: Data Retrieval (processing) $0.01 / GB; applies whenever objects are read or copied."
+        },
+        "typical_delay": {
+          "value": null,
+          "note": "Not stated in the sources checked."
+        }
+      },
+      "minimum_storage_duration_days": {
+        "value": 30,
+        "source_url": "https://developers.cloudflare.com/r2/pricing/",
+        "last_verified": "2026-10-13",
+        "note": "Pricing page: Infrequent Access minimum storage duration 30 days; objects deleted, moved or replaced earlier are charged for the full duration."
+      },
+      "minimum_billable_object_size_kb": {
+        "value": 0,
+        "source_url": "https://developers.cloudflare.com/r2/buckets/storage-classes/",
+        "last_verified": "2026-10-13",
+        "note": "Storage classes page: all classes have 'No minimum object size'."
+      },
+      "notes": [
+        "S3 storage class header value STANDARD_IA (S3 API compatibility page)."
+      ]
+    }
+  ],
+  "default_storage_class": "standard",
+  "egress": {
+    "applies_to_regions": [
+      "auto"
+    ],
+    "free_allowance_gb_per_month": {
+      "value": null,
+      "note": "Not applicable: egress is free without a cap (price 0), so no separate allowance is defined."
+    },
+    "free_allowance_scope": "Egress to the Internet is free for all storage classes; no allowance or cap is stated.",
+    "price_per_gb": [
+      {
+        "from_gb": 0,
+        "up_to_gb": null,
+        "price": {
+          "value": 0,
+          "source_url": "https://developers.cloudflare.com/r2/pricing/",
+          "last_verified": "2026-10-13",
+          "note": "Pricing page: 'There are no charges for egress bandwidth for any storage class'; footnote: egress directly from R2 via the Workers API, S3 API and r2.dev domains is free."
+        }
+      }
+    ],
+    "notes": [
+      "Footnote: other metered Cloudflare services connected to an R2 bucket may charge separately."
+    ]
+  },
+  "egress_fair_use": {
+    "value": null,
+    "note": "No fair-use limit on egress is stated on the R2 pricing page."
+  },
+  "free_tier": {
+    "value": "Each month free: 10 GB-month storage, 1 million Class A and 10 million Class B operations; Standard storage only, not Infrequent Access.",
+    "source_url": "https://developers.cloudflare.com/r2/pricing/",
+    "last_verified": "2026-10-13"
+  },
+  "object_lock": {
+    "value": true,
+    "source_url": "https://developers.cloudflare.com/r2/buckets/bucket-locks/",
+    "last_verified": "2026-10-13",
+    "note": "Via R2 bucket lock rules (retention per prefix, for a period or indefinitely, set in the dashboard, Wrangler or the API). The S3 Object Lock API (PutObjectLockConfiguration, x-amz-object-lock-* headers) is not supported per the S3 API compatibility page."
+  },
+  "s3_endpoints": [
+    {
+      "region": "auto",
+      "label": "Automatic location",
+      "endpoint": "https://{account_id}.r2.cloudflarestorage.com",
+      "path_style": false,
+      "source_url": "https://developers.cloudflare.com/r2/api/s3/api/",
+      "last_verified": "2026-10-13",
+      "note": "Docs configure SDKs with only the account endpoint and region 'auto'; the presigned-URL examples produce virtual-hosted URLs (https://my-bucket.<ACCOUNT_ID>.r2.cloudflarestorage.com/...). No path-style requirement is documented. See also https://developers.cloudflare.com/r2/api/s3/presigned-urls/"
+    },
+    {
+      "region": "auto",
+      "label": "EU jurisdiction",
+      "endpoint": "https://{account_id}.eu.r2.cloudflarestorage.com",
+      "path_style": false,
+      "source_url": "https://developers.cloudflare.com/r2/reference/data-location/",
+      "last_verified": "2026-10-13",
+      "note": "Data location doc: buckets in a jurisdiction must be reached at https://<ACCOUNT_ID>.<JURISDICTION>.r2.cloudflarestorage.com; the example uses region 'auto'. This endpoint cannot reach buckets outside the EU jurisdiction."
+    }
+  ],
+  "notes": [
+    "Unauthorized requests (HTTP 401) are not charged (pricing page FAQ).",
+    "Billing policy: https://developers.cloudflare.com/billing/understand/billing-policy/"
+  ]
+}

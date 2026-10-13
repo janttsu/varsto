@@ -1,0 +1,230 @@
+{
+  "$schema": "schema.json",
+  "schema_version": 1,
+  "id": "safespring-storage",
+  "name": "Safespring Storage (S3)",
+  "kind": "service",
+  "website_url": "https://www.safespring.com/en/services/storage/",
+  "pricing_url": "https://www.safespring.com/en/price/",
+  "currency": "EUR",
+  "prices_include_tax": null,
+  "tax_note": "The price page does not say whether prices include VAT.",
+  "protocols": [
+    "s3",
+    "rclone"
+  ],
+  "protocols_source": {
+    "source_url": "https://docs.safespring.com/storage/s3-compatibility/",
+    "last_verified": "2026-10-13"
+  },
+  "regions": [
+    {
+      "code": "osl2",
+      "city": null,
+      "country": "NO",
+      "source_url": "https://docs.safespring.com/storage/getting-started/",
+      "last_verified": "2026-10-13",
+      "note": "'Norwegian site - https://s3.osl2.safedc.net'; city not stated."
+    },
+    {
+      "code": "sto1",
+      "city": null,
+      "country": "SE",
+      "source_url": "https://docs.safespring.com/storage/getting-started/",
+      "last_verified": "2026-10-13",
+      "note": "'Swedish site - https://s3.sto1.safedc.net'; city not stated."
+    },
+    {
+      "code": "sto2",
+      "city": null,
+      "country": "SE",
+      "source_url": "https://docs.safespring.com/storage/getting-started/",
+      "last_verified": "2026-10-13",
+      "note": "'Swedish secondary site - https://s3.sto2.safedc.net'; city not stated."
+    }
+  ],
+  "storage_classes": [
+    {
+      "id": "s3-storage",
+      "name": "S3-storage",
+      "kind": "hot",
+      "applies_to_regions": [
+        "osl2",
+        "sto1",
+        "sto2"
+      ],
+      "pricing_model": "per_gb_month",
+      "storage_price_per_gb_month": [
+        {
+          "from_gb": 0,
+          "up_to_gb": null,
+          "price": {
+            "value": null,
+            "note": "Price page, Safespring Storage (S3): 'S3-storage' ('Tailored for applications that actively use the S3 protocol') 44,50 € 'Per TB for 30 days'. Not converted to GB because the page does not define TB (1000 or 1024 GB). One price is listed without site distinction."
+          }
+        }
+      ],
+      "requests": {
+        "put_per_1000": {
+          "value": null,
+          "note": "The price page lists no request fee for Safespring Storage (S3); absence of a fee line, not an explicit statement that requests are free."
+        },
+        "get_per_1000": {
+          "value": null,
+          "note": "The price page lists no request fee for Safespring Storage (S3); absence of a fee line, not an explicit statement that requests are free."
+        },
+        "list_per_1000": {
+          "value": null,
+          "note": "The price page lists no request fee for Safespring Storage (S3); absence of a fee line, not an explicit statement that requests are free."
+        }
+      },
+      "retrieval": {
+        "price_per_gb": {
+          "value": null,
+          "note": "No retrieval fee line on the price page."
+        },
+        "typical_delay": {
+          "value": null,
+          "note": "No restore step is documented."
+        }
+      },
+      "minimum_storage_duration_days": {
+        "value": null,
+        "note": "Not stated on the price page or docs checked."
+      },
+      "minimum_billable_object_size_kb": {
+        "value": null,
+        "note": "Not stated on the price page or docs checked."
+      },
+      "notes": [
+        "Default quotas: 10 buckets per project, 1 million objects and 1 TB per bucket, optimal object size 1 MB (quota page)."
+      ]
+    },
+    {
+      "id": "s3-archive",
+      "name": "S3-archive",
+      "kind": "infrequent",
+      "applies_to_regions": [
+        "osl2",
+        "sto1",
+        "sto2"
+      ],
+      "pricing_model": "per_gb_month",
+      "storage_price_per_gb_month": [
+        {
+          "from_gb": 0,
+          "up_to_gb": null,
+          "price": {
+            "value": null,
+            "note": "Price page, Safespring Storage (S3): 'S3-archive' ('Tailored for larger storage volumes over longer periods') 31,15 € 'Per TB for 30 days'. Not converted to GB because the page does not define TB (1000 or 1024 GB). One price is listed without site distinction."
+          }
+        }
+      ],
+      "requests": {
+        "put_per_1000": {
+          "value": null,
+          "note": "The price page lists no request fee for Safespring Storage (S3); absence of a fee line, not an explicit statement that requests are free."
+        },
+        "get_per_1000": {
+          "value": null,
+          "note": "The price page lists no request fee for Safespring Storage (S3); absence of a fee line, not an explicit statement that requests are free."
+        },
+        "list_per_1000": {
+          "value": null,
+          "note": "The price page lists no request fee for Safespring Storage (S3); absence of a fee line, not an explicit statement that requests are free."
+        }
+      },
+      "retrieval": {
+        "price_per_gb": {
+          "value": null,
+          "note": "No retrieval fee line on the price page."
+        },
+        "typical_delay": {
+          "value": null,
+          "note": "No restore step is documented."
+        }
+      },
+      "minimum_storage_duration_days": {
+        "value": null,
+        "note": "Not stated on the price page or docs checked."
+      },
+      "minimum_billable_object_size_kb": {
+        "value": null,
+        "note": "Not stated on the price page or docs checked."
+      },
+      "notes": [
+        "Separate S3 account requested from support; designed for bigger objects written once and read occasionally. Default quotas: 2 buckets, 1 million objects and 32 TB per bucket, optimal object size 32 MB (quota page)."
+      ]
+    }
+  ],
+  "default_storage_class": "s3-storage",
+  "egress": {
+    "applies_to_regions": [
+      "osl2",
+      "sto1",
+      "sto2"
+    ],
+    "free_allowance_gb_per_month": {
+      "value": null,
+      "note": "Not a capped allowance: all traffic is free (see price_per_gb)."
+    },
+    "price_per_gb": [
+      {
+        "from_gb": 0,
+        "up_to_gb": null,
+        "price": {
+          "value": 0,
+          "source_url": "https://www.safespring.com/en/price/",
+          "last_verified": "2026-10-13",
+          "note": "Price page, 'No Traffic Cost': 'Safespring does not charge any traffic cost for data sent to or from our services.' The Network section also lists 'data traffic (ingress and egress) at no extra cost'."
+        }
+      }
+    ]
+  },
+  "egress_fair_use": {
+    "value": null,
+    "note": "No fair-use limit on traffic is stated on the price page."
+  },
+  "free_tier": {
+    "value": null,
+    "note": "No free tier or trial for Storage is stated on the price page."
+  },
+  "object_lock": {
+    "value": null,
+    "note": "Object locking page: 'Object locking is a new feature, that exists for certain test accounts at Safespring storage.' COMPLIANCE and GOVERNANCE modes are documented, but general availability is not stated (https://docs.safespring.com/storage/object-locking/)."
+  },
+  "s3_endpoints": [
+    {
+      "region": "osl2",
+      "label": "Norwegian site",
+      "endpoint": "https://s3.osl2.safedc.net",
+      "path_style": true,
+      "source_url": "https://docs.safespring.com/storage/getting-started/",
+      "last_verified": "2026-10-13",
+      "note": "Compatibility matrix: path-style access is the 'Default and the only one supported'; virtual-hosted style is not supported (https://docs.safespring.com/storage/s3-compatibility/). Region values are not used by the endpoints; us-east-1 is accepted (https://docs.safespring.com/storage/howto/configs/aws-cli/)."
+    },
+    {
+      "region": "sto1",
+      "label": "Swedish site",
+      "endpoint": "https://s3.sto1.safedc.net",
+      "path_style": true,
+      "source_url": "https://docs.safespring.com/storage/getting-started/",
+      "last_verified": "2026-10-13",
+      "note": "Compatibility matrix: path-style access is the 'Default and the only one supported'; virtual-hosted style is not supported (https://docs.safespring.com/storage/s3-compatibility/). Region values are not used by the endpoints; us-east-1 is accepted (https://docs.safespring.com/storage/howto/configs/aws-cli/)."
+    },
+    {
+      "region": "sto2",
+      "label": "Swedish secondary site",
+      "endpoint": "https://s3.sto2.safedc.net",
+      "path_style": true,
+      "source_url": "https://docs.safespring.com/storage/getting-started/",
+      "last_verified": "2026-10-13",
+      "note": "Compatibility matrix: path-style access is the 'Default and the only one supported'; virtual-hosted style is not supported (https://docs.safespring.com/storage/s3-compatibility/). Region values are not used by the endpoints; us-east-1 is accepted (https://docs.safespring.com/storage/howto/configs/aws-cli/)."
+    }
+  ],
+  "notes": [
+    "No self-service sign-up: S3 Storage credentials come with a Safespring Compute project; the archive tier needs a separate account from support (getting-started page).",
+    "Storage prices are listed per TB per 30 days and are left null per GB until the TB definition is confirmed: S3-storage 44,50 €, S3-archive 31,15 €.",
+    "An optional SUPPORT-standard level is billed at 3 % of total volume (price page); SUPPORT-base costs 0,00 €."
+  ]
+}

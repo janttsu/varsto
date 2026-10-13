@@ -1,0 +1,405 @@
+{
+  "$schema": "schema.json",
+  "schema_version": 1,
+  "id": "google-cloud-storage",
+  "name": "Google Cloud Storage (XML API, S3 interoperability)",
+  "kind": "service",
+  "website_url": "https://cloud.google.com/storage",
+  "signup_url": "https://cloud.google.com/free",
+  "pricing_url": "https://cloud.google.com/storage/pricing",
+  "currency": "USD",
+  "prices_include_tax": null,
+  "tax_note": "The Cloud Storage pricing page lists prices in USD and does not say whether tax is included. If you pay in another currency, the prices on Cloud Platform SKUs apply.",
+  "protocols": [
+    "s3",
+    "rclone"
+  ],
+  "protocols_source": {
+    "source_url": "https://docs.cloud.google.com/storage/docs/interoperability",
+    "last_verified": "2026-10-13"
+  },
+  "regions": [
+    {
+      "code": "europe-north1",
+      "city": null,
+      "country": "FI",
+      "source_url": "https://docs.cloud.google.com/storage/docs/locations",
+      "last_verified": "2026-10-13",
+      "note": "Listed as 'Finland' (no city given)."
+    },
+    {
+      "code": "europe-west1",
+      "city": null,
+      "country": "BE",
+      "source_url": "https://docs.cloud.google.com/storage/docs/locations",
+      "last_verified": "2026-10-13",
+      "note": "Listed as 'Belgium' (no city given)."
+    },
+    {
+      "code": "europe-west4",
+      "city": null,
+      "country": "NL",
+      "source_url": "https://docs.cloud.google.com/storage/docs/locations",
+      "last_verified": "2026-10-13",
+      "note": "Listed as 'Netherlands' (no city given)."
+    }
+  ],
+  "storage_classes": [
+    {
+      "id": "standard",
+      "name": "Standard storage",
+      "kind": "hot",
+      "applies_to_regions": [
+        "europe-north1",
+        "europe-west1",
+        "europe-west4"
+      ],
+      "pricing_model": "per_gb_month",
+      "storage_price_per_gb_month": [
+        {
+          "from_gb": 0,
+          "up_to_gb": null,
+          "price": {
+            "value": 0.02,
+            "source_url": "https://cloud.google.com/storage/pricing",
+            "last_verified": "2026-10-13",
+            "note": "Pricing page, Data storage, location type Region, identical for Finland (europe-north1), Belgium (europe-west1) and Netherlands (europe-west4): $0.02 / 1 gibibyte month (also listed hourly). Billed per GiB, prorated to the sub-second."
+          }
+        }
+      ],
+      "requests": {
+        "put_per_1000": {
+          "value": 0.005,
+          "source_url": "https://cloud.google.com/storage/pricing",
+          "last_verified": "2026-10-13",
+          "note": "Pricing page, Operation charges, buckets located in a single region, flat namespace, per 1,000 operations. Class A $0.005; XML API PUT and POST are Class A."
+        },
+        "get_per_1000": {
+          "value": 0.0004,
+          "source_url": "https://cloud.google.com/storage/pricing",
+          "last_verified": "2026-10-13",
+          "note": "Pricing page, Operation charges, buckets located in a single region, flat namespace, per 1,000 operations. Class B $0.0004; XML API GET Object and HEAD are Class B."
+        },
+        "list_per_1000": {
+          "value": 0.005,
+          "source_url": "https://cloud.google.com/storage/pricing",
+          "last_verified": "2026-10-13",
+          "note": "Pricing page, Operation charges, buckets located in a single region, flat namespace, per 1,000 operations. Class A $0.005; XML API GET Bucket when listing objects is Class A. Operations on a bucket are billed at the bucket's default storage class rate."
+        }
+      },
+      "retrieval": {
+        "price_per_gb": {
+          "value": 0,
+          "source_url": "https://cloud.google.com/storage/pricing",
+          "last_verified": "2026-10-13",
+          "note": "Pricing page, Retrieval fees: Standard storage $0 / 1 gibibyte (the table lists $0 for Standard storage)."
+        },
+        "typical_delay": {
+          "value": null,
+          "note": "Access latency is not stated on the pricing page."
+        }
+      },
+      "minimum_storage_duration_days": {
+        "value": 0,
+        "source_url": "https://cloud.google.com/storage/pricing",
+        "last_verified": "2026-10-13",
+        "note": "Pricing page, Minimum storage duration table: Standard storage 'None'."
+      },
+      "minimum_billable_object_size_kb": {
+        "value": null,
+        "note": "No minimum billable object size is stated on the pricing page; not an explicit statement that none applies."
+      }
+    },
+    {
+      "id": "nearline",
+      "name": "Nearline storage",
+      "kind": "infrequent",
+      "applies_to_regions": [
+        "europe-north1",
+        "europe-west1",
+        "europe-west4"
+      ],
+      "pricing_model": "per_gb_month",
+      "storage_price_per_gb_month": [
+        {
+          "from_gb": 0,
+          "up_to_gb": null,
+          "price": {
+            "value": 0.01,
+            "source_url": "https://cloud.google.com/storage/pricing",
+            "last_verified": "2026-10-13",
+            "note": "Pricing page, Data storage, location type Region, identical for Finland (europe-north1), Belgium (europe-west1) and Netherlands (europe-west4): $0.01 / 1 gibibyte month (also listed hourly). Billed per GiB, prorated to the sub-second."
+          }
+        }
+      ],
+      "requests": {
+        "put_per_1000": {
+          "value": 0.01,
+          "source_url": "https://cloud.google.com/storage/pricing",
+          "last_verified": "2026-10-13",
+          "note": "Pricing page, Operation charges, buckets located in a single region, flat namespace, per 1,000 operations. Class A $0.01; XML API PUT and POST are Class A."
+        },
+        "get_per_1000": {
+          "value": 0.001,
+          "source_url": "https://cloud.google.com/storage/pricing",
+          "last_verified": "2026-10-13",
+          "note": "Pricing page, Operation charges, buckets located in a single region, flat namespace, per 1,000 operations. Class B $0.001; XML API GET Object and HEAD are Class B."
+        },
+        "list_per_1000": {
+          "value": 0.01,
+          "source_url": "https://cloud.google.com/storage/pricing",
+          "last_verified": "2026-10-13",
+          "note": "Pricing page, Operation charges, buckets located in a single region, flat namespace, per 1,000 operations. Class A $0.01; XML API GET Bucket when listing objects is Class A. Operations on a bucket are billed at the bucket's default storage class rate."
+        }
+      },
+      "retrieval": {
+        "price_per_gb": {
+          "value": 0.01,
+          "source_url": "https://cloud.google.com/storage/pricing",
+          "last_verified": "2026-10-13",
+          "note": "Pricing page, Retrieval fees: Nearline storage $0.01 / 1 gibibyte; in addition to operation and network charges."
+        },
+        "typical_delay": {
+          "value": null,
+          "note": "Access latency is not stated on the pricing page."
+        }
+      },
+      "minimum_storage_duration_days": {
+        "value": 30,
+        "source_url": "https://cloud.google.com/storage/pricing",
+        "last_verified": "2026-10-13",
+        "note": "Pricing page, Minimum storage duration table: Nearline storage 30 days; early deletion is charged as if stored for the minimum duration."
+      },
+      "minimum_billable_object_size_kb": {
+        "value": null,
+        "note": "No minimum billable object size is stated on the pricing page; not an explicit statement that none applies."
+      }
+    },
+    {
+      "id": "coldline",
+      "name": "Coldline storage",
+      "kind": "cold",
+      "applies_to_regions": [
+        "europe-north1",
+        "europe-west1",
+        "europe-west4"
+      ],
+      "pricing_model": "per_gb_month",
+      "storage_price_per_gb_month": [
+        {
+          "from_gb": 0,
+          "up_to_gb": null,
+          "price": {
+            "value": 0.004,
+            "source_url": "https://cloud.google.com/storage/pricing",
+            "last_verified": "2026-10-13",
+            "note": "Pricing page, Data storage, location type Region, identical for Finland (europe-north1), Belgium (europe-west1) and Netherlands (europe-west4): $0.004 / 1 gibibyte month (also listed hourly). Billed per GiB, prorated to the sub-second."
+          }
+        }
+      ],
+      "requests": {
+        "put_per_1000": {
+          "value": 0.02,
+          "source_url": "https://cloud.google.com/storage/pricing",
+          "last_verified": "2026-10-13",
+          "note": "Pricing page, Operation charges, buckets located in a single region, flat namespace, per 1,000 operations. Class A $0.02; XML API PUT and POST are Class A."
+        },
+        "get_per_1000": {
+          "value": 0.01,
+          "source_url": "https://cloud.google.com/storage/pricing",
+          "last_verified": "2026-10-13",
+          "note": "Pricing page, Operation charges, buckets located in a single region, flat namespace, per 1,000 operations. Class B $0.01; XML API GET Object and HEAD are Class B."
+        },
+        "list_per_1000": {
+          "value": 0.02,
+          "source_url": "https://cloud.google.com/storage/pricing",
+          "last_verified": "2026-10-13",
+          "note": "Pricing page, Operation charges, buckets located in a single region, flat namespace, per 1,000 operations. Class A $0.02; XML API GET Bucket when listing objects is Class A. Operations on a bucket are billed at the bucket's default storage class rate."
+        }
+      },
+      "retrieval": {
+        "price_per_gb": {
+          "value": 0.02,
+          "source_url": "https://cloud.google.com/storage/pricing",
+          "last_verified": "2026-10-13",
+          "note": "Pricing page, Retrieval fees: Coldline storage $0.02 / 1 gibibyte; in addition to operation and network charges."
+        },
+        "typical_delay": {
+          "value": null,
+          "note": "Access latency is not stated on the pricing page."
+        }
+      },
+      "minimum_storage_duration_days": {
+        "value": 90,
+        "source_url": "https://cloud.google.com/storage/pricing",
+        "last_verified": "2026-10-13",
+        "note": "Pricing page, Minimum storage duration table: Coldline storage 90 days; early deletion is charged as if stored for the minimum duration."
+      },
+      "minimum_billable_object_size_kb": {
+        "value": null,
+        "note": "No minimum billable object size is stated on the pricing page; not an explicit statement that none applies."
+      }
+    },
+    {
+      "id": "archive",
+      "name": "Archive storage",
+      "kind": "archive",
+      "applies_to_regions": [
+        "europe-north1",
+        "europe-west1",
+        "europe-west4"
+      ],
+      "pricing_model": "per_gb_month",
+      "storage_price_per_gb_month": [
+        {
+          "from_gb": 0,
+          "up_to_gb": null,
+          "price": {
+            "value": 0.0012,
+            "source_url": "https://cloud.google.com/storage/pricing",
+            "last_verified": "2026-10-13",
+            "note": "Pricing page, Data storage, location type Region, identical for Finland (europe-north1), Belgium (europe-west1) and Netherlands (europe-west4): $0.0012 / 1 gibibyte month (also listed hourly). Billed per GiB, prorated to the sub-second."
+          }
+        }
+      ],
+      "requests": {
+        "put_per_1000": {
+          "value": 0.05,
+          "source_url": "https://cloud.google.com/storage/pricing",
+          "last_verified": "2026-10-13",
+          "note": "Pricing page, Operation charges, buckets located in a single region, flat namespace, per 1,000 operations. Class A $0.05; XML API PUT and POST are Class A."
+        },
+        "get_per_1000": {
+          "value": 0.05,
+          "source_url": "https://cloud.google.com/storage/pricing",
+          "last_verified": "2026-10-13",
+          "note": "Pricing page, Operation charges, buckets located in a single region, flat namespace, per 1,000 operations. Class B $0.05; XML API GET Object and HEAD are Class B."
+        },
+        "list_per_1000": {
+          "value": 0.05,
+          "source_url": "https://cloud.google.com/storage/pricing",
+          "last_verified": "2026-10-13",
+          "note": "Pricing page, Operation charges, buckets located in a single region, flat namespace, per 1,000 operations. Class A $0.05; XML API GET Bucket when listing objects is Class A. Operations on a bucket are billed at the bucket's default storage class rate."
+        }
+      },
+      "retrieval": {
+        "price_per_gb": {
+          "value": 0.05,
+          "source_url": "https://cloud.google.com/storage/pricing",
+          "last_verified": "2026-10-13",
+          "note": "Pricing page, Retrieval fees: Archive storage $0.05 / 1 gibibyte; in addition to operation and network charges."
+        },
+        "typical_delay": {
+          "value": null,
+          "note": "Access latency is not stated on the pricing page."
+        }
+      },
+      "minimum_storage_duration_days": {
+        "value": 365,
+        "source_url": "https://cloud.google.com/storage/pricing",
+        "last_verified": "2026-10-13",
+        "note": "Pricing page, Minimum storage duration table: Archive storage 365 days; early deletion is charged as if stored for the minimum duration."
+      },
+      "minimum_billable_object_size_kb": {
+        "value": null,
+        "note": "No minimum billable object size is stated on the pricing page; not an explicit statement that none applies."
+      }
+    }
+  ],
+  "default_storage_class": "standard",
+  "egress": {
+    "applies_to_regions": [
+      "europe-north1",
+      "europe-west1",
+      "europe-west4"
+    ],
+    "free_allowance_gb_per_month": {
+      "value": 0,
+      "source_url": "https://cloud.google.com/storage/pricing",
+      "last_verified": "2026-10-13",
+      "note": "No free internet egress for these regions: the Always Free tier's 100 GB data transfer is 'from North America', and Always Free quotas apply only to US-WEST1, US-CENTRAL1 and US-EAST1."
+    },
+    "free_allowance_scope": "Always Free (US regions only) does not cover buckets in Europe.",
+    "price_per_gb": [
+      {
+        "from_gb": 0,
+        "up_to_gb": 10240,
+        "price": {
+          "value": 0.12,
+          "source_url": "https://cloud.google.com/storage/pricing",
+          "last_verified": "2026-10-13",
+          "note": "Pricing page, General network usage, 'Data transfer to Worldwide Destinations (excluding Asia & Australia)', per GiB: 0 to 10 TiB $0.12 / 1 gibibyte per month per account. Bands converted to GiB (1 TiB = 1024 GiB)."
+        }
+      },
+      {
+        "from_gb": 10240,
+        "up_to_gb": 153600,
+        "price": {
+          "value": 0.11,
+          "source_url": "https://cloud.google.com/storage/pricing",
+          "last_verified": "2026-10-13",
+          "note": "Pricing page, General network usage, 'Data transfer to Worldwide Destinations (excluding Asia & Australia)', per GiB: 10 to 150 TiB $0.11."
+        }
+      },
+      {
+        "from_gb": 153600,
+        "up_to_gb": null,
+        "price": {
+          "value": 0.08,
+          "source_url": "https://cloud.google.com/storage/pricing",
+          "last_verified": "2026-10-13",
+          "note": "Pricing page, General network usage, 'Data transfer to Worldwide Destinations (excluding Asia & Australia)', per GiB: 150 TiB and above $0.08."
+        }
+      }
+    ],
+    "notes": [
+      "Asia destinations have the same bands; China ($0.23/$0.22/$0.20) and Australia ($0.19/$0.18/$0.15) cost more. Inbound transfer is free.",
+      "Transfer to other Google Cloud locations is priced per the within-Google-Cloud matrix (Europe to Europe $0.02/GiB) and is not modelled."
+    ]
+  },
+  "egress_fair_use": {
+    "value": null,
+    "note": "No fair-use rule for egress is stated on the pricing page; all internet egress is billed."
+  },
+  "object_lock": {
+    "value": null,
+    "note": "Cloud Storage has Bucket Lock and Object Retention Lock (the XML API names the modes GOVERNANCE and COMPLIANCE, https://docs.cloud.google.com/storage/docs/object-lock), but no source checked says that S3 Object Lock calls or x-amz-object-lock headers work through the S3-compatible XML API."
+  },
+  "free_tier": {
+    "value": "Always Free: 5 GB-months of Standard storage, 5,000 Class A and 50,000 Class B operations, and 100 GB data transfer from North America per month; only in US-WEST1, US-CENTRAL1 and US-EAST1 (aggregated).",
+    "source_url": "https://cloud.google.com/storage/pricing",
+    "last_verified": "2026-10-13",
+    "note": "Does not apply to the European regions in this profile. Subject to change; eligibility per the Google Cloud Free Tier FAQ."
+  },
+  "s3_endpoints": [
+    {
+      "region": "europe-north1",
+      "endpoint": "https://storage.googleapis.com",
+      "path_style": false,
+      "source_url": "https://docs.cloud.google.com/storage/docs/interoperability",
+      "last_verified": "2026-10-13",
+      "note": "One global XML API endpoint; use HMAC keys. For V4 signing 'you can use any value for LOCATION', the bucket's location is recommended (https://docs.cloud.google.com/storage/docs/authentication/signatures). Both virtual-hosted (BUCKET.storage.googleapis.com) and path-style are documented without a preference; domain-named (dotted) buckets need path style (https://docs.cloud.google.com/storage/docs/request-endpoints)."
+    },
+    {
+      "region": "europe-west1",
+      "endpoint": "https://storage.googleapis.com",
+      "path_style": false,
+      "source_url": "https://docs.cloud.google.com/storage/docs/interoperability",
+      "last_verified": "2026-10-13",
+      "note": "One global XML API endpoint; use HMAC keys. For V4 signing 'you can use any value for LOCATION', the bucket's location is recommended (https://docs.cloud.google.com/storage/docs/authentication/signatures). Both virtual-hosted (BUCKET.storage.googleapis.com) and path-style are documented without a preference; domain-named (dotted) buckets need path style (https://docs.cloud.google.com/storage/docs/request-endpoints)."
+    },
+    {
+      "region": "europe-west4",
+      "endpoint": "https://storage.googleapis.com",
+      "path_style": false,
+      "source_url": "https://docs.cloud.google.com/storage/docs/interoperability",
+      "last_verified": "2026-10-13",
+      "note": "One global XML API endpoint; use HMAC keys. For V4 signing 'you can use any value for LOCATION', the bucket's location is recommended (https://docs.cloud.google.com/storage/docs/authentication/signatures). Both virtual-hosted (BUCKET.storage.googleapis.com) and path-style are documented without a preference; domain-named (dotted) buckets need path style (https://docs.cloud.google.com/storage/docs/request-endpoints)."
+    }
+  ],
+  "notes": [
+    "Prices are USD list prices for buckets in a single region (location type Region); dual-region and multi-region buckets cost more and are not modelled.",
+    "The pricing page renders its regional price tables from data embedded in the page; values were read from that data on 2026-10-13 for europe-north1, europe-west1 and europe-west4 (all identical). Other EU regions (for example europe-west3 Frankfurt, Standard $0.023) differ and are not modelled.",
+    "Prices are per GiB (the page says 'gibibyte')."
+  ]
+}

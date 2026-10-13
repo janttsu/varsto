@@ -3,9 +3,13 @@
   "schema_version": 1,
   "id": "scaleway-object-storage",
   "name": "Scaleway Object Storage",
+  "kind": "service",
   "website_url": "https://www.scaleway.com/en/object-storage/",
+  "signup_url": "https://account.scaleway.com/register",
+  "pricing_url": "https://www.scaleway.com/en/pricing/storage/",
   "currency": "EUR",
   "prices_include_tax": false,
+  "tax_note": "Pricing page: 'Prices before tax'.",
   "protocols": [
     "s3",
     "rclone"
@@ -20,32 +24,32 @@
       "city": "Paris",
       "country": "FR",
       "source_url": "https://www.scaleway.com/en/docs/object-storage/concepts/",
-      "last_verified": "2026-10-08",
-      "note": "Prices in this file were verified for Paris only."
+      "last_verified": "2026-10-13",
+      "note": "Prices verified (pricing page, region Paris, plus the per-region price data embedded in the page)."
     },
     {
       "code": "nl-ams",
       "city": "Amsterdam",
       "country": "NL",
       "source_url": "https://www.scaleway.com/en/docs/object-storage/concepts/",
-      "last_verified": "2026-10-08",
-      "note": "Region exists; prices not verified here."
+      "last_verified": "2026-10-13",
+      "note": "Standard Multi-AZ, Standard One Zone, Glacier and egress prices verified from the per-region price data embedded in the pricing page."
     },
     {
       "code": "pl-waw",
       "city": "Warsaw",
       "country": "PL",
       "source_url": "https://www.scaleway.com/en/docs/object-storage/concepts/",
-      "last_verified": "2026-10-08",
-      "note": "Region exists; prices not verified here. Glacier cannot yet be written to in Warsaw (FAQ)."
+      "last_verified": "2026-10-13",
+      "note": "Standard Multi-AZ, Standard One Zone and egress prices verified from the per-region price data embedded in the pricing page. Glacier cannot yet be written to in Warsaw (FAQ)."
     },
     {
       "code": "it-mil",
       "city": "Milan",
       "country": "IT",
       "source_url": "https://www.scaleway.com/en/docs/object-storage/concepts/",
-      "last_verified": "2026-10-08",
-      "note": "Region exists; prices not verified here."
+      "last_verified": "2026-10-13",
+      "note": "Standard One Zone and egress prices verified from the per-region price data embedded in the pricing page. The concepts page lists Standard Multi-AZ only for Paris, Amsterdam and Warsaw, and Glacier only for fr-par and nl-ams."
     }
   ],
   "storage_classes": [
@@ -54,7 +58,9 @@
       "name": "Standard Multi-AZ",
       "kind": "hot",
       "applies_to_regions": [
-        "fr-par"
+        "fr-par",
+        "nl-ams",
+        "pl-waw"
       ],
       "pricing_model": "per_gb_month",
       "storage_price_per_gb_month": [
@@ -64,8 +70,8 @@
           "price": {
             "value": 0.01606,
             "source_url": "https://www.scaleway.com/en/pricing/storage/",
-            "last_verified": "2026-10-08",
-            "note": "Pricing page, region Paris: EUR 0.01606/GB per month (shown as approximate per month; billed hourly at EUR 0.000022/GB per hour, and a started billable unit counts as one GB-hour)"
+            "last_verified": "2026-10-13",
+            "note": "Pricing page, region Paris: EUR 0.01606/GB per month (shown as approximate per month; billed hourly at EUR 0.000022/GB per hour, and a started billable unit counts as one GB-hour) Same value in the per-region price data embedded in the pricing page (SKU /storage/obj/usage-new-gen-bucket-standard/<region>, hourly EUR 0.000022) for fr-par, nl-ams, pl-waw."
           }
         }
       ],
@@ -73,20 +79,20 @@
         "put_per_1000": {
           "value": 0,
           "source_url": "https://www.scaleway.com/en/pricing/storage/",
-          "last_verified": "2026-10-08",
-          "note": "Pricing page, region Paris: requests are listed as 'Request: Included' (no per-request fee)."
+          "last_verified": "2026-10-13",
+          "note": "Pricing page: requests are listed as 'Request: Included' (no per-request fee); the row is not region-specific."
         },
         "get_per_1000": {
           "value": 0,
           "source_url": "https://www.scaleway.com/en/pricing/storage/",
-          "last_verified": "2026-10-08",
-          "note": "Pricing page, region Paris: requests are listed as 'Request: Included' (no per-request fee)."
+          "last_verified": "2026-10-13",
+          "note": "Pricing page: requests are listed as 'Request: Included' (no per-request fee); the row is not region-specific."
         },
         "list_per_1000": {
           "value": 0,
           "source_url": "https://www.scaleway.com/en/pricing/storage/",
-          "last_verified": "2026-10-08",
-          "note": "Pricing page, region Paris: requests are listed as 'Request: Included' (no per-request fee)."
+          "last_verified": "2026-10-13",
+          "note": "Pricing page: requests are listed as 'Request: Included' (no per-request fee); the row is not region-specific."
         }
       },
       "retrieval": {
@@ -101,19 +107,25 @@
       },
       "minimum_storage_duration_days": {
         "value": null,
-        "note": "Not stated on the pricing page, concepts page or FAQ checked."
+        "note": "Not stated on the pricing page, concepts page, FAQ or Specific Conditions Storage (version 07/04/2026) checked on 2026-10-13. The pricing page says a started billable unit is due (1 KB for 1 second is billed as 1 GB-hour)."
       },
       "minimum_billable_object_size_kb": {
         "value": null,
-        "note": "Not stated on the pricing page, concepts page or FAQ checked."
-      }
+        "note": "Not stated on the pricing page, concepts page, FAQ or Specific Conditions Storage (version 07/04/2026) checked on 2026-10-13. The pricing page says a started billable unit is due (1 KB for 1 second is billed as 1 GB-hour)."
+      },
+      "notes": [
+        "The page's price data also has an it-mil SKU at the same price, but the concepts page lists this class only for Paris, Amsterdam and Warsaw, so it-mil is not included."
+      ]
     },
     {
       "id": "standard-one-zone",
       "name": "Standard One Zone",
       "kind": "infrequent",
       "applies_to_regions": [
-        "fr-par"
+        "fr-par",
+        "nl-ams",
+        "pl-waw",
+        "it-mil"
       ],
       "pricing_model": "per_gb_month",
       "storage_price_per_gb_month": [
@@ -123,8 +135,8 @@
           "price": {
             "value": 0.00803,
             "source_url": "https://www.scaleway.com/en/pricing/storage/",
-            "last_verified": "2026-10-08",
-            "note": "Pricing page, region Paris: EUR 0.00803/GB per month (shown as approximate per month; billed hourly at EUR 0.000011/GB per hour, and a started billable unit counts as one GB-hour)"
+            "last_verified": "2026-10-13",
+            "note": "Pricing page, region Paris: EUR 0.00803/GB per month (shown as approximate per month; billed hourly at EUR 0.000011/GB per hour, and a started billable unit counts as one GB-hour) Same value in the per-region price data embedded in the pricing page (SKU /storage/obj/usage-onezone_ia/<region>, hourly EUR 0.000011) for fr-par, nl-ams, pl-waw, it-mil."
           }
         }
       ],
@@ -132,20 +144,20 @@
         "put_per_1000": {
           "value": 0,
           "source_url": "https://www.scaleway.com/en/pricing/storage/",
-          "last_verified": "2026-10-08",
-          "note": "Pricing page, region Paris: requests are listed as 'Request: Included' (no per-request fee)."
+          "last_verified": "2026-10-13",
+          "note": "Pricing page: requests are listed as 'Request: Included' (no per-request fee); the row is not region-specific."
         },
         "get_per_1000": {
           "value": 0,
           "source_url": "https://www.scaleway.com/en/pricing/storage/",
-          "last_verified": "2026-10-08",
-          "note": "Pricing page, region Paris: requests are listed as 'Request: Included' (no per-request fee)."
+          "last_verified": "2026-10-13",
+          "note": "Pricing page: requests are listed as 'Request: Included' (no per-request fee); the row is not region-specific."
         },
         "list_per_1000": {
           "value": 0,
           "source_url": "https://www.scaleway.com/en/pricing/storage/",
-          "last_verified": "2026-10-08",
-          "note": "Pricing page, region Paris: requests are listed as 'Request: Included' (no per-request fee)."
+          "last_verified": "2026-10-13",
+          "note": "Pricing page: requests are listed as 'Request: Included' (no per-request fee); the row is not region-specific."
         }
       },
       "retrieval": {
@@ -160,11 +172,11 @@
       },
       "minimum_storage_duration_days": {
         "value": null,
-        "note": "Not stated on the pricing page, concepts page or FAQ checked."
+        "note": "Not stated on the pricing page, concepts page, FAQ or Specific Conditions Storage (version 07/04/2026) checked on 2026-10-13. The pricing page says a started billable unit is due (1 KB for 1 second is billed as 1 GB-hour)."
       },
       "minimum_billable_object_size_kb": {
         "value": null,
-        "note": "Not stated on the pricing page, concepts page or FAQ checked."
+        "note": "Not stated on the pricing page, concepts page, FAQ or Specific Conditions Storage (version 07/04/2026) checked on 2026-10-13. The pricing page says a started billable unit is due (1 KB for 1 second is billed as 1 GB-hour)."
       }
     },
     {
@@ -172,7 +184,8 @@
       "name": "Glacier",
       "kind": "archive",
       "applies_to_regions": [
-        "fr-par"
+        "fr-par",
+        "nl-ams"
       ],
       "pricing_model": "per_gb_month",
       "storage_price_per_gb_month": [
@@ -182,8 +195,8 @@
           "price": {
             "value": 0.00254,
             "source_url": "https://www.scaleway.com/en/pricing/storage/",
-            "last_verified": "2026-10-08",
-            "note": "Pricing page, region Paris: EUR 0.00254/GB per month (shown as approximate per month; billed hourly at EUR 0.0000035/GB per hour, and a started billable unit counts as one GB-hour)"
+            "last_verified": "2026-10-13",
+            "note": "Pricing page, region Paris: EUR 0.00254/GB per month (shown as approximate per month; billed hourly at EUR 0.0000035/GB per hour, and a started billable unit counts as one GB-hour) Same value in the per-region price data embedded in the pricing page (SKU /storage/obj/usage-glacier/<region>, hourly EUR 0.00000348 (monthly approximation 0.0025404)) for fr-par, nl-ams."
           }
         }
       ],
@@ -191,59 +204,63 @@
         "put_per_1000": {
           "value": 0,
           "source_url": "https://www.scaleway.com/en/pricing/storage/",
-          "last_verified": "2026-10-08",
-          "note": "Pricing page, region Paris: requests are listed as 'Request: Included' (no per-request fee)."
+          "last_verified": "2026-10-13",
+          "note": "Pricing page: requests are listed as 'Request: Included' (no per-request fee); the row is not region-specific."
         },
         "get_per_1000": {
           "value": 0,
           "source_url": "https://www.scaleway.com/en/pricing/storage/",
-          "last_verified": "2026-10-08",
-          "note": "Pricing page, region Paris: requests are listed as 'Request: Included' (no per-request fee)."
+          "last_verified": "2026-10-13",
+          "note": "Pricing page: requests are listed as 'Request: Included' (no per-request fee); the row is not region-specific."
         },
         "list_per_1000": {
           "value": 0,
           "source_url": "https://www.scaleway.com/en/pricing/storage/",
-          "last_verified": "2026-10-08",
-          "note": "Pricing page, region Paris: requests are listed as 'Request: Included' (no per-request fee)."
+          "last_verified": "2026-10-13",
+          "note": "Pricing page: requests are listed as 'Request: Included' (no per-request fee); the row is not region-specific."
         }
       },
       "retrieval": {
         "price_per_gb": {
           "value": 0.009,
           "source_url": "https://www.scaleway.com/en/pricing/storage/",
-          "last_verified": "2026-10-08",
-          "note": "Pricing page, region Paris: 'Restore from Glacier EUR 0.009/GB'"
+          "last_verified": "2026-10-13",
+          "note": "Pricing page, region Paris: 'Restore from Glacier EUR 0.009/GB'. Same value in the embedded price data (SKU /storage/obj/restore/standard/<region>) for fr-par and nl-ams."
         },
         "typical_delay": {
           "value": "a few minutes to 24 hours for the restore to start (objects larger than 1 MB); no estimate per use case",
           "source_url": "https://www.scaleway.com/en/docs/object-storage/faq/",
-          "last_verified": "2026-10-08",
-          "note": "FAQ: the restore time depends on object size and multipart configuration."
+          "last_verified": "2026-10-13",
+          "note": "FAQ: 'anywhere from a few minutes to 24 hours for restore to start (for objects larger than 1 MB)'; Scaleway cannot estimate retrieval times per use case."
         }
       },
       "minimum_storage_duration_days": {
         "value": null,
-        "note": "Not stated on the pricing page, concepts page or FAQ checked."
+        "note": "Not stated on the pricing page, concepts page, FAQ or Specific Conditions Storage (version 07/04/2026) checked on 2026-10-13. The pricing page says a started billable unit is due (1 KB for 1 second is billed as 1 GB-hour)."
       },
       "minimum_billable_object_size_kb": {
         "value": null,
-        "note": "Not stated on the pricing page, concepts page or FAQ checked."
+        "note": "Not stated on the pricing page, concepts page, FAQ or Specific Conditions Storage (version 07/04/2026) checked on 2026-10-13. The pricing page says a started billable unit is due (1 KB for 1 second is billed as 1 GB-hour)."
       },
       "notes": [
-        "Glacier is stored in one Paris data centre and is available for the fr-par and nl-ams regions; it cannot yet be written to in Warsaw (FAQ checked 2026-10-08).",
-        "Objects must be restored before they can be read."
+        "Glacier is available from buckets in Paris and Amsterdam; it is not yet possible to transfer files to Glacier in Warsaw (FAQ checked 2026-10-13).",
+        "Objects must be restored before they can be read; restored content goes to Standard Multi-AZ when available in the bucket's region, otherwise One Zone (Specific Conditions, version 07/04/2026)."
       ]
     }
   ],
+  "default_storage_class": "standard-multi-az",
   "egress": {
     "applies_to_regions": [
-      "fr-par"
+      "fr-par",
+      "nl-ams",
+      "pl-waw",
+      "it-mil"
     ],
     "free_allowance_gb_per_month": {
       "value": 75,
       "source_url": "https://www.scaleway.com/en/pricing/storage/",
-      "last_verified": "2026-10-08",
-      "note": "Pricing page, region Paris: 'Egress: 75GB free every month then EUR 0.01/GB'"
+      "last_verified": "2026-10-13",
+      "note": "Pricing page: 'Egress: 75GB free every month then EUR 0.01/GB' (rendered for Paris; the text comes from a region-independent page template). Scope across projects or regions is not stated."
     },
     "free_allowance_scope": "Per month, as listed on the pricing page; scope across projects or regions was not verified.",
     "price_per_gb": [
@@ -253,24 +270,69 @@
         "price": {
           "value": 0.01,
           "source_url": "https://www.scaleway.com/en/pricing/storage/",
-          "last_verified": "2026-10-08",
-          "note": "Pricing page, region Paris: EUR 0.01/GB after the free allowance (the page prints the unit as 'GB / MONTH'; interpreted as per GB transferred)"
+          "last_verified": "2026-10-13",
+          "note": "Pricing page: EUR 0.01/GB after the free allowance (the unit is printed as 'GB / MONTH'; interpreted as per GB transferred). The embedded price data has EUR 0.01 for SKU /storage/obj/bandwidth/to-external/<region> in fr-par, nl-ams, pl-waw and it-mil."
         }
       }
     ],
     "notes": [
-      "Inter-regional transfer (AMS-PAR, AMS-WAW, PAR-WAW) is counted as egress; intra-regional transfer is free of charge (pricing page footnote).",
+      "Inter-regional transfer is counted as egress; intra-regional transfer (PAR-PAR, AMS-AMS, WAW-WAW) is free of charge (pricing page footnote). The Specific Conditions also state that outgoing traffic to another Scaleway region is charged like traffic to the internet.",
       "Ingress is listed as included."
     ]
   },
+  "egress_fair_use": {
+    "value": null,
+    "note": "No fair-use rule for egress is stated on the pricing page, FAQ or Specific Conditions Storage checked on 2026-10-13."
+  },
   "object_lock": {
     "value": true,
-    "source_url": "https://www.scaleway.com/en/docs/object-storage/api-cli/object-lock/",
-    "last_verified": "2026-10-08",
-    "note": "Supported on Standard Multi-AZ, Standard One Zone and Glacier; requires versioning; cannot be disabled once enabled on a bucket."
+    "source_url": "https://www.scaleway.com/en/docs/object-storage/how-to/use-object-lock/",
+    "last_verified": "2026-10-13",
+    "note": "Supported on Standard Multi-AZ, Standard One Zone and Glacier; only in buckets with versioning enabled; once enabled it cannot be disabled and versioning cannot be suspended."
   },
+  "free_tier": {
+    "value": "75 GB of egress free every month. New-user trial: 750 GB of free storage in total across Standard Multi-AZ and Standard One Zone for 90 days, for accounts that never used Standard Multi-AZ before 30 November 2023; excess Multi-AZ storage during the trial is billed.",
+    "source_url": "https://www.scaleway.com/en/docs/object-storage/faq/",
+    "last_verified": "2026-10-13",
+    "note": "The 75 GB egress allowance is from the pricing page and is modelled under egress; the trial is not modelled."
+  },
+  "s3_endpoints": [
+    {
+      "region": "fr-par",
+      "endpoint": "https://s3.fr-par.scw.cloud",
+      "path_style": false,
+      "source_url": "https://www.scaleway.com/en/docs/object-storage/concepts/",
+      "last_verified": "2026-10-13",
+      "note": "Concepts page: both virtual-host and path-style 'are valid ... though the virtual-host style is generally preferred'. Bucket names containing dots must use path style (FAQ)."
+    },
+    {
+      "region": "nl-ams",
+      "endpoint": "https://s3.nl-ams.scw.cloud",
+      "path_style": false,
+      "source_url": "https://www.scaleway.com/en/docs/object-storage/concepts/",
+      "last_verified": "2026-10-13",
+      "note": "Concepts page: both virtual-host and path-style 'are valid ... though the virtual-host style is generally preferred'. Bucket names containing dots must use path style (FAQ)."
+    },
+    {
+      "region": "pl-waw",
+      "endpoint": "https://s3.pl-waw.scw.cloud",
+      "path_style": false,
+      "source_url": "https://www.scaleway.com/en/docs/object-storage/concepts/",
+      "last_verified": "2026-10-13",
+      "note": "Concepts page: both virtual-host and path-style 'are valid ... though the virtual-host style is generally preferred'. Bucket names containing dots must use path style (FAQ)."
+    },
+    {
+      "region": "it-mil",
+      "endpoint": "https://s3.it-mil.scw.cloud",
+      "path_style": false,
+      "source_url": "https://www.scaleway.com/en/docs/object-storage/concepts/",
+      "last_verified": "2026-10-13",
+      "note": "Concepts page: both virtual-host and path-style 'are valid ... though the virtual-host style is generally preferred'. Bucket names containing dots must use path style (FAQ)."
+    }
+  ],
   "notes": [
     "Prices are in EUR before tax (the pricing page states 'Prices before tax').",
-    "The free trial (750 GB for 90 days for new users) is not modelled."
+    "Per-region prices come from the price data embedded in the pricing page (the page shows one region at a time via a region selector; Paris is rendered by default). All verified regions have the same prices.",
+    "The free trial (750 GB for 90 days for eligible new users) is not modelled."
   ]
 }
