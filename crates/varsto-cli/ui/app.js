@@ -1146,6 +1146,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   // device, kept on storages only. Snapshots are listed and restored into a
   // directory the user names; they are never changed or deleted here.
   var backupsShown = null; // the backup whose snapshots are listed
+  var backupsPoll = null;
   var backupList = [];
   var SCHEDULES = [["daily", "Daily"], ["weekly", "Weekly"], ["manual", "Only when I ask"]];
   function scheduleLabel(s) { for (var i = 0; i < SCHEDULES.length; i++) { if (SCHEDULES[i][0] === s) { return SCHEDULES[i][1]; } } return s || "–"; }
@@ -1153,9 +1154,9 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     fillBackupStorages();
     return api("GET", "/api/backups").then(renderBackups).catch(function (e) { log("backups: " + e.message); });
   }
-  function fillBackupStorages() {
+  function fillBackupStorages(fresh) {
     var box = $("backupstorages"); var prev = {};
-    box.querySelectorAll("input").forEach(function (i) { prev[i.value] = i.checked; });
+    if (!fresh) { box.querySelectorAll("input").forEach(function (i) { prev[i.value] = i.checked; }); }
     box.innerHTML = "";
     var list = ((lastStatus && lastStatus.storages) || []).filter(function (st) { return !st.carrier; });
     list.forEach(function (st) {
@@ -1181,7 +1182,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
       var sub = el("span", "sub", b.source_path + " · " + b.source_device); sub.title = b.source_path; sub.setAttribute("data-no-i18n", ""); nameCell.appendChild(sub);
       tr.appendChild(nameCell);
       td(b.snapshots, "num", "Snapshots");
-      td(b.latest_utc ? fmtWhen(b.latest_utc) : "None yet", "", "Latest snapshot");
+      td(b.snapshot_requested ? "Taking a snapshot…" : b.latest_utc ? fmtWhen(b.latest_utc) : "None yet", "", "Latest snapshot");
       td(b.latest_utc ? fmtBytes(b.latest_bytes) : "–", "num", "Size");
       td(b.retention_days + " days", "", "Kept");
       td(b.this_device ? scheduleLabel(b.schedule) : "On the device it backs up", "", "Schedule");
@@ -1194,12 +1195,26 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
       menu.done();
       tr.appendChild(act); tb.appendChild(tr);
     });
-    if (backupsShown && list.some(function (b) { return b.name === backupsShown; })) { showSnapshots(backupsShown); } else { backupsShown = null; $("backupsnaps").classList.add("hidden"); }
+    if (backupsShown && list.some(function (b) { return b.name === backupsShown; })) { showSnapshots(backupsShown, true); } else { backupsShown = null; $("backupsnaps").classList.add("hidden"); }
+    // A requested snapshot is taken by the service: look again until it is.
+    clearTimeout(backupsPoll);
+    if (list.some(function (b) { return b.snapshot_requested; })) { backupsPoll = setTimeout(function () { if (currentPage === "backups") { loadBackups(); } }, 5000); }
   }
-  function showSnapshots(name) {
+  // `refresh`: redraw the open list (after a reload) instead of toggling it.
+  function showSnapshots(name, refresh) {
+    var card = $("backupsnaps");
+    if (!refresh && backupsShown === name && !card.classList.contains("hidden")) { backupsShown = null; card.classList.add("hidden"); return Promise.resolve(); }
     backupsShown = name;
+    $("backupsnaps-name").textContent = name;
+    if (!refresh) {
+      // Shown at once, so the click is seen even while the service is busy.
+      var tb0 = $("snapshots").querySelector("tbody"); tb0.innerHTML = "";
+      var lr = el("tr"); var ld = el("td", "muted", "Loading…"); ld.colSpan = 6; lr.appendChild(ld); tb0.appendChild(lr);
+      card.classList.remove("hidden");
+      card.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
     return api("GET", "/api/backup/snapshots?backup=" + enc(name)).then(function (list) {
-      $("backupsnaps-name").textContent = name;
+      if (backupsShown !== name) { return; }
       var tb = $("snapshots").querySelector("tbody"); tb.innerHTML = "";
       list.slice().reverse().forEach(function (sn) {
         var tr = el("tr");
@@ -1214,7 +1229,8 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   }
   function takeSnapshot(name) {
     busy(true);
-    api("POST", "/api/backup/take", { backup: name }).then(function (r) {
+    api("POST", "/api/backup/take", { backup: name, background: true }).then(function (r) {
+      if (r.queued) { log("Snapshot of " + r.backup + " requested; it is taken in the background"); return; }
       log("Snapshot " + r.seq + " of " + r.backup + " taken: " + r.files + " files");
       if (r.skipped && r.skipped.length) { alertBox(r.skipped.length + " files could not be read and were left out: " + r.skipped.slice(0, 10).join(", ")); }
     }).catch(function (e) { alertBox(e.message); }).then(function () { busy(false); loadBackups(); });
@@ -1278,9 +1294,11 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     var days = parseInt(d.retention_days, 10);
     if (!(days > 0)) { alertBox("Keep each snapshot at least one day."); return; }
     busy(true);
-    api("POST", "/api/backup", { name: d.name, path: d.path, retention_days: days, schedule: d.schedule, storages: all ? [] : storages, initial: true }).then(function (r) {
-      form.reset(); fillBackupStorages();
-      log("Backup added: " + d.name);
+    api("POST", "/api/backup", { name: d.name, path: d.path, retention_days: days, schedule: d.schedule, storages: all ? [] : storages, initial: true, background: true }).then(function (r) {
+      // Back to a fresh form: the old name and directory would only be
+      // refused as a duplicate.
+      form.reset(); fillBackupStorages(true);
+      log(r.queued ? "Backup added: " + d.name + "; its first snapshot is being taken in the background" : "Backup added: " + d.name);
       if (r.snapshot && r.snapshot.skipped && r.snapshot.skipped.length) { alertBox(r.snapshot.skipped.length + " files could not be read and were left out: " + r.snapshot.skipped.slice(0, 10).join(", ")); }
     }).catch(function (e) { alertBox(e.message); }).then(function () { busy(false); loadBackups(); });
   };

@@ -590,6 +590,8 @@
   "Any remote you have set up in rclone, for example Google Drive, OneDrive, SFTP or WebDAV.": "Valfritt fjärrmål som du har konfigurerat i rclone, till exempel Google Drive, OneDrive, SFTP eller WebDAV.",
   "Folder path": "Mappens sökväg",
   "Add a folder, an S3 bucket, an rclone remote or a pool of swappable disks below.": "Lägg till en mapp, en S3-bucket, en rclone-fjärrplats eller en pool med utbytbara diskar nedan.",
+  "Taking a snapshot…": "Tar en version…",
+  "Loading…": "Läser in…",
   "Provider": "Leverantör",
   "Other / custom endpoint": "Annan / egen slutpunkt",
   "fills in the endpoint, region and URL style; you can still change them": "fyller i slutpunkt, region och URL-stil; du kan fortfarande ändra dem",
@@ -726,6 +728,22 @@
   [
    "^(.+) holds (\\d+) blocks? of your files\\. (\\d+) already have enough copies elsewhere; (\\d+) cop(?:y|ies) \\((.+)\\) will first be made on (.+)\\. Then no device counts \\1 as a copy any more\\. Remove leaves its data in place; you can also delete it\\.$",
    "Lagringen $1 innehåller $2 block av dina filer. $3 av dem har redan tillräckligt många kopior på annat håll; först görs $4 kopior ($5) på $6. Därefter räknar ingen enhet $1 som en kopia längre. Ta bort lämnar dess data kvar; du kan också radera den."
+  ],
+  [
+   "^Backup added: (.+); its first snapshot is being taken in the background$",
+   "Säkerhetskopia tillagd: $1; dess första version tas i bakgrunden"
+  ],
+  [
+   "^Snapshot of (.+) requested; it is taken in the background$",
+   "Version av $1 begärd; den tas i bakgrunden"
+  ],
+  [
+   "^Since the service started: (.+) received in (\\d+) blocks, (.+) sent in (\\d+) blocks, (.+) relayed for other devices\\. Speeds are averages over the last (\\d+) seconds\\.$",
+   "Sedan tjänsten startade: $1 mottaget i $2 block, $3 skickat i $4 block, $5 vidarebefordrat åt andra enheter. Hastigheterna är medelvärden över de senaste $6 sekunderna."
+  ],
+  [
+   "^Since the service started: (.+) received in (\\d+) blocks, (.+) sent in (\\d+) blocks\\. Speeds are averages over the last (\\d+) seconds\\.$",
+   "Sedan tjänsten startade: $1 mottaget i $2 block, $3 skickat i $4 block. Hastigheterna är medelvärden över de senaste $5 sekunderna."
   ]
  ],
  "review": [

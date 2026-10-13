@@ -1251,6 +1251,10 @@ pub struct BackupSource {
     /// Stopped: no more snapshots; the ones kept expire as they would.
     #[serde(default)]
     pub stopped: bool,
+    /// A snapshot was asked for (a new backup, or "take a snapshot now"):
+    /// the service takes it on its next run, whatever the schedule.
+    #[serde(default)]
+    pub take_now: bool,
 }
 
 /// When the background service takes a backup's snapshots.
