@@ -1174,6 +1174,120 @@ pub struct FolderMount {
     /// means plain files as on a desktop.
     #[serde(default)]
     pub encrypted: bool,
+    /// Whether this device publishes its own changes and applies the other
+    /// devices' (local setting; `FolderMode`).
+    #[serde(default, skip_serializing_if = "FolderMode::is_normal")]
+    pub mode: FolderMode,
+    /// When a scan or another device deletes too many files at once (absent:
+    /// `DeletionGuard::default`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deletion_guard: Option<DeletionGuard>,
+}
+
+/// How a folder takes part in syncing on this device (a local setting: the
+/// same folder can be send-only on a camera phone and normal elsewhere).
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum FolderMode {
+    /// Publishes its changes and applies everyone else's.
+    #[default]
+    Normal,
+    /// Publishes its changes; never applies other devices' changes to its
+    /// files (it still reads their file lists to know what differs).
+    SendOnly,
+    /// Applies other devices' changes; never publishes its own local changes.
+    ReceiveOnly,
+}
+
+impl FolderMode {
+    pub fn is_normal(&self) -> bool {
+        *self == FolderMode::Normal
+    }
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            FolderMode::Normal => "normal",
+            FolderMode::SendOnly => "send-only",
+            FolderMode::ReceiveOnly => "receive-only",
+        }
+    }
+}
+
+impl std::str::FromStr for FolderMode {
+    type Err = anyhow::Error;
+    fn from_str(s: &str) -> Result<Self> {
+        match s.trim().to_ascii_lowercase().replace('_', "-").as_str() {
+            "normal" | "send-receive" => Ok(FolderMode::Normal),
+            "send-only" | "send" => Ok(FolderMode::SendOnly),
+            "receive-only" | "receive" => Ok(FolderMode::ReceiveOnly),
+            other => bail!("unknown folder mode {other}: use normal, send-only or receive-only"),
+        }
+    }
+}
+
+/// The mass-deletion guard of a folder: a scan that finds more files gone at
+/// once than this, or another device's file list that would delete that
+/// many here, is held until the user confirms it.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct DeletionGuard {
+    /// Off: deletions are never held.
+    #[serde(default = "yes")]
+    pub enabled: bool,
+    /// More than this share of the folder's files (percent; 100 or more:
+    /// no share rule) ...
+    pub percent: u32,
+    /// ... and more than this many files.
+    pub min_files: u64,
+    /// More than this many files whatever the share (0: no such limit).
+    pub max_files: u64,
+}
+
+fn yes() -> bool {
+    true
+}
+
+impl Default for DeletionGuard {
+    fn default() -> Self {
+        DeletionGuard {
+            enabled: true,
+            percent: 50,
+            min_files: 100,
+            max_files: 1000,
+        }
+    }
+}
+
+impl DeletionGuard {
+    /// Whether deleting `deleted` of `total` files at once is held.
+    pub fn trips(&self, deleted: u64, total: u64) -> bool {
+        if !self.enabled || deleted == 0 {
+            return false;
+        }
+        let share = self.percent < 100
+            && deleted.saturating_mul(100) > (self.percent as u64).saturating_mul(total)
+            && deleted > self.min_files;
+        let count = self.max_files > 0 && deleted > self.max_files;
+        share || count
+    }
+
+    pub fn describe(&self) -> String {
+        if !self.enabled {
+            return "off".into();
+        }
+        let mut parts = Vec::new();
+        if self.percent < 100 {
+            parts.push(format!(
+                "more than {} % and more than {} files",
+                self.percent, self.min_files
+            ));
+        }
+        if self.max_files > 0 {
+            parts.push(format!("more than {} files", self.max_files));
+        }
+        if parts.is_empty() {
+            return "off".into();
+        }
+        parts.join(", or ")
+    }
 }
 
 /// Storage credentials: `home/secrets.enc`, encrypted under a key derived

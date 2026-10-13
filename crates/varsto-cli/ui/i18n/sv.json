@@ -690,99 +690,6 @@
   "Copying blocks from disk «{s}»": "Kopierar block från disken «{s}»",
   "Writing files fetched from disk «{s}»": "Skriver filer hämtade från disken «{s}»",
   "Unmounting disk «{s}»": "Avmonterar disken «{s}»",
-  "The interface starts in your system's theme; the switch keeps your choice.": "Gränssnittet börjar i systemets tema; reglaget kommer ihåg ditt val.",
-  "Checking that the restic mirror is complete": "Kontrollerar att restic-speglingen är fullständig",
-  "Backing up the mirror with restic": "Säkerhetskopierar speglingen med restic",
-  "Removing old restic snapshots": "Tar bort gamla restic-ögonblicksbilder",
-  "Checking the restic repository": "Kontrollerar restic-förrådet",
-  "Logs": "Loggar",
-  "Varsto keeps a detailed log on this device for finding problems. It never contains keys, passphrases or file contents and is never uploaded.": "Varsto för en detaljerad logg på den här enheten för att hitta problem. Den innehåller aldrig nycklar, lösenfraser eller filinnehåll och laddas aldrig upp.",
-  "Detail": "Detaljnivå",
-  "Everything (trace)": "Allt (trace)",
-  "Detailed (debug, default)": "Detaljerad (debug, standard)",
-  "Normal (info)": "Normal (info)",
-  "Warnings": "Varningar",
-  "Errors only": "Endast fel",
-  "Open log folder": "Öppna loggmappen",
-  "Save log bundle": "Spara loggpaket",
-  "The VARSTO_LOG environment variable overrides this setting.": "Miljövariabeln VARSTO_LOG åsidosätter den här inställningen.",
-  "The --log-level option the service was started with overrides this setting.": "Alternativet --log-level som tjänsten startades med åsidosätter den här inställningen.",
-  "The bundle has no keys or passphrases, but it does contain file and folder names, device and storage names. Look through it before you share it.": "Paketet innehåller inga nycklar eller lösenfraser, men det innehåller fil- och mappnamn samt namn på enheter och lagringsplatser. Gå igenom det innan du delar det.",
-  "Log bundle saved": "Loggpaketet sparat",
-  "Drain…": "Töm…",
-  "Empty this storage onto the others, without weakening any policy": "Flytta innehållet till de andra lagringsplatserna utan att försvaga någon regel",
-  "Price and quota": "Pris och kvot",
-  "Quota (most data Varsto keeps here)": "Kvot (högst så mycket data här)",
-  "Every device respects it and keeps 1 % free; blocks then go to your other storages or wait. Empty: no quota.": "Varje enhet följer den och lämnar 1 % ledigt; block går då till dina andra lagringsplatser eller väntar. Tomt: ingen kvot.",
-  "Most objects (optional)": "Högst antal objekt (valfritt)",
-  "Prices are used for the monthly cost and the placement suggestions. Empty means unknown, not free.": "Priserna används för månadskostnaden och placeringsförslagen. Tomt betyder okänt, inte gratis.",
-  "Quota": "Kvot",
-  "Drained: it holds nothing Varsto needs.": "Tömd: den innehåller inget som Varsto behöver.",
-  "Drained so far": "Tömt hittills",
-  "removed when empty": "tas bort när den är tom",
-  "drained": "tömd",
-  "draining": "töms",
-  "drain waiting": "tömningen väntar",
-  "Stop draining": "Avbryt tömningen",
-  "Use again": "Använd igen",
-  "Draining empties the storage onto your other storages in the background, without ever weakening a folder's policy: each block is copied and read back before its copy here is deleted, and blocks that cannot keep their policy elsewhere stay. Nothing new is written here meanwhile; it stays readable. Afterwards the storage holds nothing Varsto needs.": "Tömningen flyttar lagringsplatsens innehåll i bakgrunden till dina andra lagringsplatser utan att någonsin försvaga en mapps regel: varje block kopieras och läses tillbaka innan kopian här raderas, och block vars regel inte kan uppfyllas på annat håll stannar. Inget nytt skrivs hit under tiden; den förblir läsbar. Efteråt innehåller lagringsplatsen inget som Varsto behöver.",
-  "Blocks on this storage": "Block på den här lagringsplatsen",
-  "Only deleted (enough copies elsewhere)": "Raderas bara (tillräckligt med kopior på annat håll)",
-  "Copied first, read back before deleting": "Kopieras först och läses tillbaka före radering",
-  "Read from this storage": "Läses från den här lagringsplatsen",
-  "Minimum storage duration still billed": "Minsta lagringstid som ännu faktureras",
-  "Note": "Obs",
-  "Every folder's policy holds without it.": "Varje mapps regel håller utan den.",
-  "Most GB copied per day (empty: no limit)": "Högst antal GB som kopieras per dag (tomt: ingen gräns)",
-  "Limits egress costs; blocks that only need deleting do not count.": "Begränsar kostnaderna för utgående trafik; block som bara ska raderas räknas inte.",
-  "Options": "Alternativ",
-  "Remove the storage when it is empty": "Ta bort lagringsplatsen när den är tom",
-  "Read from this cold storage (retrieval fees and restore delays apply)": "Läs från den här kalla lagringsplatsen (hämtningsavgifter och återställningsfördröjning)",
-  "Start draining": "Börja tömma",
-  "The storage takes new blocks again. Blocks already moved stay where they are now.": "Lagringsplatsen tar emot nya block igen. Block som redan flyttats stannar där de är nu.",
-  "Draining storage «{s}»": "Tömmer lagringsplatsen «{s}»",
-  "Copying the records off storage «{s}»": "Kopierar posterna från lagringsplatsen «{s}»",
-  "Trash": "Papperskorg",
-  "Files deleted on any of your devices are kept here for the days set below, encrypted on your storages, and can be restored on any device. Restoring never overwrites a file: when its name is taken, it comes back as \"name (restored)\".": "Filer som raderats på någon av dina enheter sparas här i det antal dagar som anges nedan, krypterade på dina lagringsplatser, och kan återställas på vilken enhet som helst. En återställning skriver aldrig över en fil: om namnet är upptaget kommer filen tillbaka som \"namn (restored)\".",
-  "Search the trash": "Sök i papperskorgen",
-  "All folders": "Alla mappar",
-  "Delete permanently…": "Radera permanent…",
-  "Empty trash…": "Töm papperskorgen…",
-  "Select all": "Markera alla",
-  "Select": "Markera",
-  "Deleted": "Raderad",
-  "By": "Av",
-  "The trash is empty": "Papperskorgen är tom",
-  "Files deleted on any of your devices appear here.": "Filer som raderats på någon av dina enheter visas här.",
-  "Trash settings": "Inställningar för papperskorgen",
-  "Keep deleted files (days)": "Spara raderade filer (dagar)",
-  "Trash storage": "Lagringsplats för papperskorgen",
-  "Deleted files move to this storage only, for example a cheap cold storage, and leave your other storages. Restoring from cold storage asks first, because retrieval is billed and can take hours.": "Raderade filer flyttas bara till den här lagringsplatsen, till exempel en billig kall lagring, och lämnar dina andra lagringsplatser. Återställning från kall lagring frågar först, eftersom hämtningen debiteras och kan ta timmar.",
-  "None: deleted files stay where they are": "Ingen: raderade filer stannar där de är",
-  "cold": "kall",
-  "Nothing in the trash matches": "Inget i papperskorgen matchar",
-  "In the trash": "I papperskorgen",
-  "Kept on": "Sparas på",
-  "Folders with their own days": "Mappar med egna dagar",
-  "Copies on this device": "Kopior på den här enheten",
-  "Next expiry": "Nästa utgång",
-  "Last cleanup": "Senaste städning",
-  "never": "aldrig",
-  "Each file goes back where it was. If that name is taken now, it comes back as \"name (restored)\": nothing is overwritten. The restored files sync to your other devices.": "Varje fil kommer tillbaka dit den var. Om namnet är upptaget nu kommer den tillbaka som \"namn (restored)\": inget skrivs över. De återställda filerna synkroniseras till dina andra enheter.",
-  "Into another directory of the folder (optional)": "Till en annan katalog i mappen (valfritt)",
-  "Restored": "Återställda",
-  "empty: the original place": "tomt: den ursprungliga platsen",
-  "Read from cold storage?": "Läsa från kall lagring?",
-  "Delete permanently?": "Radera permanent?",
-  "Delete permanently": "Radera permanent",
-  "Empty the trash?": "Tömma papperskorgen?",
-  "Empty trash": "Töm papperskorgen",
-  "empty": "töm",
-  "Keep deleted files from 1 to 3650 days.": "Spara raderade filer i 1–3650 dagar.",
-  "Trash settings saved": "Inställningarna för papperskorgen sparades",
-  "Restoring files of folder «{s}» from the trash": "Återställer filer i mappen «{s}» från papperskorgen",
-  "Deleting files from the trash for good": "Raderar filer från papperskorgen permanent",
-  "Moving deleted files of folder «{s}» to the trash storage": "Flyttar raderade filer i mappen «{s}» till papperskorgens lagringsplats",
   "Import": "Import",
   "Import into Varsto": "Importera till Varsto",
   "Bring files that live elsewhere under Varsto's care. Each source becomes one folder; importing the same source again brings over what changed and never deletes anything in Varsto.": "Låt Varsto ta hand om filer som finns någon annanstans. Varje källa blir en mapp; att importera samma källa igen för över det som ändrats och tar aldrig bort något i Varsto.",
@@ -997,6 +904,7 @@
   "Last seen": "Senast sedd",
   "File system": "Filsystem",
   "Sort by this column (again: reverse)": "Sortera efter den här kolumnen (igen: omvänt)",
+  "never": "aldrig",
   "now": "nu",
   "offline": "frånkopplad",
   "retired": "pensionerad",
@@ -1029,6 +937,11 @@
   "Listing the stored blocks": "Listar de lagrade blocken",
   "Checking the stored blocks": "Kontrollerar de lagrade blocken",
   "Recording where the blocks are": "Registrerar var blocken finns",
+  "The interface starts in your system's theme; the switch keeps your choice.": "Gränssnittet börjar i systemets tema; reglaget kommer ihåg ditt val.",
+  "Checking that the restic mirror is complete": "Kontrollerar att restic-speglingen är fullständig",
+  "Backing up the mirror with restic": "Säkerhetskopierar speglingen med restic",
+  "Removing old restic snapshots": "Tar bort gamla restic-ögonblicksbilder",
+  "Checking the restic repository": "Kontrollerar restic-förrådet",
   "Filter by name, tag or analysis": "Filtrera på namn, tagg eller analys",
   "Filter files": "Filtrera filer",
   "Analysis": "Analys",
@@ -1036,6 +949,7 @@
   "The file changed after it was analysed": "Filen har ändrats efter att den analyserades",
   "No analysis yet. An assistant can record one through MCP, or write one yourself.": "Ingen analys ännu. En assistent kan spara en via MCP, eller så skriver du en själv.",
   "Written on": "Skriven på",
+  "By": "Av",
   "Analysed": "Analyserad",
   "Write analysis": "Skriv analys",
   "Edit analysis": "Redigera analys",
@@ -1047,7 +961,128 @@
   "Tags": "Taggar",
   "separated by commas": "åtskilda med kommatecken",
   "No files match the filter": "Inga filer matchar filtret",
-  "Analysis stale": "Analysen inaktuell"
+  "Analysis stale": "Analysen inaktuell",
+  "The directory is right": "Katalogen är rätt",
+  "Write the marker": "Skriv markören",
+  "Restore them": "Återställ dem",
+  "Delete them everywhere": "Ta bort dem överallt",
+  "Delete everywhere": "Ta bort överallt",
+  "Keep them and restore them everywhere": "Behåll dem och återställ dem överallt",
+  "Delete them here too": "Ta bort dem här också",
+  "Delete here": "Ta bort här",
+  "Override: make everyone match this device": "Åsidosätt: låt alla matcha den här enheten",
+  "Override": "Åsidosätt",
+  "Revert: restore the vault version": "Återställ: holvets version tillbaka",
+  "Revert": "Återställ",
+  "Show files": "Visa filer",
+  "The files waiting for your decision:": "Filerna som väntar på ditt beslut:",
+  "Nothing waits for a decision.": "Inget väntar på ett beslut.",
+  "Sync settings…": "Synkroniseringsinställningar…",
+  "Mode on this device and the deletion guard": "Läget på den här enheten och borttagningsskyddet",
+  "These settings apply to this device only.": "Inställningarna gäller bara den här enheten.",
+  "Mode on this device": "Läge på den här enheten",
+  "Normal (send and receive)": "Normal (skicka och ta emot)",
+  "Send only": "Endast skicka",
+  "Receive only": "Endast ta emot",
+  "This device publishes its changes and applies everyone else's.": "Den här enheten publicerar sina ändringar och tar emot alla andras.",
+  "This device publishes its changes but never applies other devices' changes to its files (for a camera phone, say). Differences are listed; an override makes everyone match this device.": "Den här enheten publicerar sina ändringar men tillämpar aldrig andra enheters ändringar på sina filer (till exempel en kameratelefon). Skillnaderna listas; en åsidosättning låter alla matcha den här enheten.",
+  "This device applies other devices' changes but never publishes its own. Local changes are listed; a revert restores the vault's versions.": "Den här enheten tar emot andra enheters ändringar men publicerar aldrig sina egna. Lokala ändringar listas; en återställning hämtar holvets versioner tillbaka.",
+  "Hold mass deletions for confirmation": "Håll kvar massborttagningar för bekräftelse",
+  "Yes": "Ja",
+  "No": "Nej",
+  "Deletions are held when more than the share and more than the files below are deleted at once, or more than the limit.": "Borttagningar hålls kvar när mer än andelen och fler än antalet filer nedan tas bort på en gång, eller fler än gränsen.",
+  "Share of the folder's files (%)": "Andel av mappens filer (%)",
+  "and more than this many files": "och fler än så här många filer",
+  "or more than this many files (0: no limit)": "eller fler än så här många filer (0: ingen gräns)",
+  "send-only": "endast skicka",
+  "receive-only": "endast ta emot",
+  "paused": "pausad",
+  "Logs": "Loggar",
+  "Varsto keeps a detailed log on this device for finding problems. It never contains keys, passphrases or file contents and is never uploaded.": "Varsto för en detaljerad logg på den här enheten för att hitta problem. Den innehåller aldrig nycklar, lösenfraser eller filinnehåll och laddas aldrig upp.",
+  "Detail": "Detaljnivå",
+  "Everything (trace)": "Allt (trace)",
+  "Detailed (debug, default)": "Detaljerad (debug, standard)",
+  "Normal (info)": "Normal (info)",
+  "Warnings": "Varningar",
+  "Errors only": "Endast fel",
+  "Open log folder": "Öppna loggmappen",
+  "Save log bundle": "Spara loggpaket",
+  "The VARSTO_LOG environment variable overrides this setting.": "Miljövariabeln VARSTO_LOG åsidosätter den här inställningen.",
+  "The --log-level option the service was started with overrides this setting.": "Alternativet --log-level som tjänsten startades med åsidosätter den här inställningen.",
+  "The bundle has no keys or passphrases, but it does contain file and folder names, device and storage names. Look through it before you share it.": "Paketet innehåller inga nycklar eller lösenfraser, men det innehåller fil- och mappnamn samt namn på enheter och lagringsplatser. Gå igenom det innan du delar det.",
+  "Log bundle saved": "Loggpaketet sparat",
+  "Drain…": "Töm…",
+  "Empty this storage onto the others, without weakening any policy": "Flytta innehållet till de andra lagringsplatserna utan att försvaga någon regel",
+  "Price and quota": "Pris och kvot",
+  "Quota (most data Varsto keeps here)": "Kvot (högst så mycket data här)",
+  "Every device respects it and keeps 1 % free; blocks then go to your other storages or wait. Empty: no quota.": "Varje enhet följer den och lämnar 1 % ledigt; block går då till dina andra lagringsplatser eller väntar. Tomt: ingen kvot.",
+  "Most objects (optional)": "Högst antal objekt (valfritt)",
+  "Prices are used for the monthly cost and the placement suggestions. Empty means unknown, not free.": "Priserna används för månadskostnaden och placeringsförslagen. Tomt betyder okänt, inte gratis.",
+  "Quota": "Kvot",
+  "Drained: it holds nothing Varsto needs.": "Tömd: den innehåller inget som Varsto behöver.",
+  "Drained so far": "Tömt hittills",
+  "removed when empty": "tas bort när den är tom",
+  "drained": "tömd",
+  "draining": "töms",
+  "drain waiting": "tömningen väntar",
+  "Stop draining": "Avbryt tömningen",
+  "Use again": "Använd igen",
+  "Draining empties the storage onto your other storages in the background, without ever weakening a folder's policy: each block is copied and read back before its copy here is deleted, and blocks that cannot keep their policy elsewhere stay. Nothing new is written here meanwhile; it stays readable. Afterwards the storage holds nothing Varsto needs.": "Tömningen flyttar lagringsplatsens innehåll i bakgrunden till dina andra lagringsplatser utan att någonsin försvaga en mapps regel: varje block kopieras och läses tillbaka innan kopian här raderas, och block vars regel inte kan uppfyllas på annat håll stannar. Inget nytt skrivs hit under tiden; den förblir läsbar. Efteråt innehåller lagringsplatsen inget som Varsto behöver.",
+  "Blocks on this storage": "Block på den här lagringsplatsen",
+  "Only deleted (enough copies elsewhere)": "Raderas bara (tillräckligt med kopior på annat håll)",
+  "Copied first, read back before deleting": "Kopieras först och läses tillbaka före radering",
+  "Read from this storage": "Läses från den här lagringsplatsen",
+  "Minimum storage duration still billed": "Minsta lagringstid som ännu faktureras",
+  "Note": "Obs",
+  "Every folder's policy holds without it.": "Varje mapps regel håller utan den.",
+  "Most GB copied per day (empty: no limit)": "Högst antal GB som kopieras per dag (tomt: ingen gräns)",
+  "Limits egress costs; blocks that only need deleting do not count.": "Begränsar kostnaderna för utgående trafik; block som bara ska raderas räknas inte.",
+  "Options": "Alternativ",
+  "Remove the storage when it is empty": "Ta bort lagringsplatsen när den är tom",
+  "Read from this cold storage (retrieval fees and restore delays apply)": "Läs från den här kalla lagringsplatsen (hämtningsavgifter och återställningsfördröjning)",
+  "Start draining": "Börja tömma",
+  "The storage takes new blocks again. Blocks already moved stay where they are now.": "Lagringsplatsen tar emot nya block igen. Block som redan flyttats stannar där de är nu.",
+  "Draining storage «{s}»": "Tömmer lagringsplatsen «{s}»",
+  "Copying the records off storage «{s}»": "Kopierar posterna från lagringsplatsen «{s}»",
+  "Trash": "Papperskorg",
+  "Files deleted on any of your devices are kept here for the days set below, encrypted on your storages, and can be restored on any device. Restoring never overwrites a file: when its name is taken, it comes back as \"name (restored)\".": "Filer som raderats på någon av dina enheter sparas här i det antal dagar som anges nedan, krypterade på dina lagringsplatser, och kan återställas på vilken enhet som helst. En återställning skriver aldrig över en fil: om namnet är upptaget kommer filen tillbaka som \"namn (restored)\".",
+  "Search the trash": "Sök i papperskorgen",
+  "All folders": "Alla mappar",
+  "Delete permanently…": "Radera permanent…",
+  "Empty trash…": "Töm papperskorgen…",
+  "Select all": "Markera alla",
+  "Select": "Markera",
+  "Deleted": "Raderad",
+  "The trash is empty": "Papperskorgen är tom",
+  "Files deleted on any of your devices appear here.": "Filer som raderats på någon av dina enheter visas här.",
+  "Trash settings": "Inställningar för papperskorgen",
+  "Keep deleted files (days)": "Spara raderade filer (dagar)",
+  "Trash storage": "Lagringsplats för papperskorgen",
+  "Deleted files move to this storage only, for example a cheap cold storage, and leave your other storages. Restoring from cold storage asks first, because retrieval is billed and can take hours.": "Raderade filer flyttas bara till den här lagringsplatsen, till exempel en billig kall lagring, och lämnar dina andra lagringsplatser. Återställning från kall lagring frågar först, eftersom hämtningen debiteras och kan ta timmar.",
+  "None: deleted files stay where they are": "Ingen: raderade filer stannar där de är",
+  "cold": "kall",
+  "Nothing in the trash matches": "Inget i papperskorgen matchar",
+  "In the trash": "I papperskorgen",
+  "Kept on": "Sparas på",
+  "Folders with their own days": "Mappar med egna dagar",
+  "Copies on this device": "Kopior på den här enheten",
+  "Next expiry": "Nästa utgång",
+  "Last cleanup": "Senaste städning",
+  "Each file goes back where it was. If that name is taken now, it comes back as \"name (restored)\": nothing is overwritten. The restored files sync to your other devices.": "Varje fil kommer tillbaka dit den var. Om namnet är upptaget nu kommer den tillbaka som \"namn (restored)\": inget skrivs över. De återställda filerna synkroniseras till dina andra enheter.",
+  "Into another directory of the folder (optional)": "Till en annan katalog i mappen (valfritt)",
+  "Restored": "Återställda",
+  "empty: the original place": "tomt: den ursprungliga platsen",
+  "Read from cold storage?": "Läsa från kall lagring?",
+  "Delete permanently?": "Radera permanent?",
+  "Delete permanently": "Radera permanent",
+  "Empty the trash?": "Tömma papperskorgen?",
+  "Empty trash": "Töm papperskorgen",
+  "empty": "töm",
+  "Keep deleted files from 1 to 3650 days.": "Spara raderade filer i 1–3650 dagar.",
+  "Trash settings saved": "Inställningarna för papperskorgen sparades",
+  "Restoring files of folder «{s}» from the trash": "Återställer filer i mappen «{s}» från papperskorgen",
+  "Deleting files from the trash for good": "Raderar filer från papperskorgen permanent",
+  "Moving deleted files of folder «{s}» to the trash storage": "Flyttar raderade filer i mappen «{s}» till papperskorgens lagringsplats"
  },
  "patterns": [
   [
@@ -1251,6 +1286,174 @@
    "$1: avbrutet; inget mer hämtas från diskarna"
   ],
   [
+   "^Imported (\\d+) file\\(s\\) \\((.+)\\) into folder (.+)$",
+   "Importerade $1 fil(er) ($2) till mappen $3"
+  ],
+  [
+   "^(\\d+) file\\(s\\) were imported before$",
+   "$1 fil(er) hade importerats tidigare"
+  ],
+  [
+   "^(\\d+) file\\(s\\) could not be read: (.+)$",
+   "$1 fil(er) kunde inte läsas: $2"
+  ],
+  [
+   "^(\\d+) item\\(s\\) not imported \\(links, special files, names Varsto cannot use\\): (.+)$",
+   "$1 objekt importerades inte (länkar, specialfiler, namn som Varsto inte kan använda): $2"
+  ],
+  [
+   "^(\\d+) file\\(s\\) were changed in Varsto and kept as they are$",
+   "$1 fil(er) hade ändrats i Varsto och lämnades som de är"
+  ],
+  [
+   "^(\\d+) file\\(s\\) are gone from the source and kept in Varsto$",
+   "$1 fil(er) har försvunnit från källan och behålls i Varsto"
+  ],
+  [
+   "^(\\d+) file\\(s\\) \\((.+)\\) can be removed from (.+) now\\.$",
+   "$1 fil(er) ($2) kan nu tas bort från $3."
+  ],
+  [
+   "^Remove (\\d+) file\\(s\\) \\((.+)\\) from (.+)\\? Each one is checked once more first\\.$",
+   "Ta bort $1 fil(er) ($2) från $3? Varje fil kontrolleras en gång till först."
+  ],
+  [
+   "^Removed (\\d+) file\\(s\\) \\((.+)\\) from the source$",
+   "Tog bort $1 fil(er) ($2) från källan"
+  ],
+  [
+   "^waiting for the policy \\((.+)\\): (.+)$",
+   "väntar på policyn ($1): $2"
+  ],
+  [
+   "^Imported into (.+)$",
+   "Importerat till $1"
+  ],
+  [
+   "^(\\d+) % overdue$",
+   "$1 % försenade"
+  ],
+  [
+   "^Measured (.+)$",
+   "Mätt $1"
+  ],
+  [
+   "^(\\d+) pending deletes?$",
+   "$1 väntande borttagningar"
+  ],
+  [
+   "^copied: (.+)$",
+   "kopierat: $1"
+  ],
+  [
+   "^(.+) % of its copies \\((.+)\\) were last checked over (\\d+) days ago \\(oldest (\\S+)\\)$",
+   "$1 % av dess kopior ($2) kontrollerades senast för över $3 dagar sedan (äldsta $4)"
+  ],
+  [
+   "^(.+) % of its copies \\((.+)\\) were last checked over (\\d+) days ago \\(some never checked\\)$",
+   "$1 % av dess kopior ($2) kontrollerades senast för över $3 dagar sedan (vissa aldrig)"
+  ],
+  [
+   "^(.+) % of its copies \\((.+)\\) are due for a check \\(verify-after-days is 0; oldest (\\S+)\\)$",
+   "$1 % av dess kopior ($2) ska kontrolleras (verify-after-days är 0; äldsta $3)"
+  ],
+  [
+   "^(.+) % of its copies \\((.+)\\) are due for a check \\(verify-after-days is 0; some never checked\\)$",
+   "$1 % av dess kopior ($2) ska kontrolleras (verify-after-days är 0; vissa aldrig)"
+  ],
+  [
+   "^(\\d+) objects? \\((.+)\\) exists? on no other disk or storage, (\\d+) of them not checked for over (\\d+) days$",
+   "$1 objekt ($2) finns inte på någon annan disk eller lagring; $3 av dem har inte kontrollerats på över $4 dagar"
+  ],
+  [
+   "^(\\d+) objects? \\((.+)\\) exists? on no other disk or storage$",
+   "$1 objekt ($2) finns inte på någon annan disk eller lagring"
+  ],
+  [
+   "^the fetch plan waits for it \\((\\d+) blocks?, (.+)\\)$",
+   "hämtningsplanen väntar på den ($1 block, $2)"
+  ],
+  [
+   "^a queued repair needs (\\d+) objects? it holds$",
+   "en köad reparation behöver $1 objekt från den"
+  ],
+  [
+   "^it can take all (.+) the pool lacks$",
+   "den rymmer allt poolen saknar ($1)"
+  ],
+  [
+   "^it can take (.+) of the (.+) the pool lacks$",
+   "den rymmer $1 av de $2 som poolen saknar"
+  ],
+  [
+   "^(.+) can be freed$",
+   "$1 kan frigöras"
+  ],
+  [
+   "^its last file system check \\((\\S+)\\) corrected errors$",
+   "dess senaste filsystemskontroll ($1) rättade fel"
+  ],
+  [
+   "^saved the analysis of (.+)$",
+   "sparade analysen av $1"
+  ],
+  [
+   "^cleared the analysis of (.+)$",
+   "rensade analysen av $1"
+  ],
+  [
+   "^Folder (.+) is paused: the marker \\.varsto-folder is missing at (.+)\\. Is the disk mounted\\? Nothing is synced until it is back\\.$",
+   "Mappen $1 är pausad: markören .varsto-folder saknas i $2. Är disken monterad? Inget synkroniseras förrän den är tillbaka."
+  ],
+  [
+   "^Folder (.+) is paused: the directory (.+) holds another folder's marker\\. Is the right disk mounted\\? Nothing is synced until it is fixed\\.$",
+   "Mappen $1 är pausad: katalogen $2 har en annan mapps markör. Är rätt disk monterad? Inget synkroniseras förrän det är åtgärdat."
+  ],
+  [
+   "^Folder (.+) is paused: (\\d+) of (\\d+) files were deleted at once on this device\\. Nothing is synced until you decide\\.$",
+   "Mappen $1 är pausad: $2 av $3 filer togs bort på en gång på den här enheten. Inget synkroniseras förrän du bestämmer dig."
+  ],
+  [
+   "^Folder (.+) is paused: (.+) deleted (\\d+) of (\\d+) files at once\\. Nothing is deleted here until you decide\\.$",
+   "Mappen $1 är pausad: $2 tog bort $3 av $4 filer på en gång. Inget tas bort här förrän du bestämmer dig."
+  ],
+  [
+   "^Folder (.+) is send-only on this device: (\\d+) remote changes are not applied here\\.$",
+   "Mappen $1 är endast sändande på den här enheten: $2 ändringar från andra enheter har inte tillämpats här."
+  ],
+  [
+   "^Folder (.+) is receive-only on this device: (\\d+) local changes are not published\\.$",
+   "Mappen $1 är endast mottagande på den här enheten: $2 lokala ändringar har inte publicerats."
+  ],
+  [
+   "^Write the marker into (.+) and sync this directory as (.+)\\? Only do this if the directory holds the folder's files: if it is an empty mount point, its files would be read as deleted \\(the deletion guard would still ask first\\)\\.$",
+   "Skriva markören i $1 och synkronisera katalogen som $2? Gör det bara om katalogen innehåller mappens filer: om den är en tom monteringspunkt skulle filerna läsas som borttagna (borttagningsskyddet frågar ändå först)."
+  ],
+  [
+   "^Mark (.+) as folder (.+)\\? Only do this if the directory really holds this folder's files\\.$",
+   "Markera $1 som mappen $2? Gör det bara om katalogen verkligen innehåller den här mappens filer."
+  ],
+  [
+   "^Delete these (\\d+) files on every device\\? Other devices move them to their trash\\.$",
+   "Ta bort de här $1 filerna på alla enheter? Andra enheter flyttar dem till sin papperskorg."
+  ],
+  [
+   "^Delete these (\\d+) files on this device too\\? They go to this device's trash\\.$",
+   "Ta bort de här $1 filerna på den här enheten också? De hamnar i den här enhetens papperskorg."
+  ],
+  [
+   "^Publish this device's state of these (\\d+) files as the newest version\\? The other devices then match this one\\.$",
+   "Publicera den här enhetens tillstånd för de här $1 filerna som den nyaste versionen? De andra enheterna matchar sedan den här."
+  ],
+  [
+   "^Replace the (\\d+) locally changed files with the vault's versions\\? The local copies go to this device's trash\\.$",
+   "Ersätta de $1 lokalt ändrade filerna med holvets versioner? De lokala kopiorna hamnar i den här enhetens papperskorg."
+  ],
+  [
+   "^Sync settings of (.+)$",
+   "Synkroniseringsinställningar för $1"
+  ],
+  [
    "^Using (.+) in (\\d+) files$",
    "Använder $1 i $2 filer"
   ],
@@ -1373,122 +1576,6 @@
   [
    "^(\\d+) blocks wait for the cold storage's minimum storage time before they are deleted$",
    "$1 block väntar på den kalla lagringens minsta lagringstid innan de raderas"
-  ],
-  [
-   "^Imported (\\d+) file\\(s\\) \\((.+)\\) into folder (.+)$",
-   "Importerade $1 fil(er) ($2) till mappen $3"
-  ],
-  [
-   "^(\\d+) file\\(s\\) were imported before$",
-   "$1 fil(er) hade importerats tidigare"
-  ],
-  [
-   "^(\\d+) file\\(s\\) could not be read: (.+)$",
-   "$1 fil(er) kunde inte läsas: $2"
-  ],
-  [
-   "^(\\d+) item\\(s\\) not imported \\(links, special files, names Varsto cannot use\\): (.+)$",
-   "$1 objekt importerades inte (länkar, specialfiler, namn som Varsto inte kan använda): $2"
-  ],
-  [
-   "^(\\d+) file\\(s\\) were changed in Varsto and kept as they are$",
-   "$1 fil(er) hade ändrats i Varsto och lämnades som de är"
-  ],
-  [
-   "^(\\d+) file\\(s\\) are gone from the source and kept in Varsto$",
-   "$1 fil(er) har försvunnit från källan och behålls i Varsto"
-  ],
-  [
-   "^(\\d+) file\\(s\\) \\((.+)\\) can be removed from (.+) now\\.$",
-   "$1 fil(er) ($2) kan nu tas bort från $3."
-  ],
-  [
-   "^Remove (\\d+) file\\(s\\) \\((.+)\\) from (.+)\\? Each one is checked once more first\\.$",
-   "Ta bort $1 fil(er) ($2) från $3? Varje fil kontrolleras en gång till först."
-  ],
-  [
-   "^Removed (\\d+) file\\(s\\) \\((.+)\\) from the source$",
-   "Tog bort $1 fil(er) ($2) från källan"
-  ],
-  [
-   "^waiting for the policy \\((.+)\\): (.+)$",
-   "väntar på policyn ($1): $2"
-  ],
-  [
-   "^Imported into (.+)$",
-   "Importerat till $1"
-  ],
-  [
-   "^(\\d+) % overdue$",
-   "$1 % försenade"
-  ],
-  [
-   "^Measured (.+)$",
-   "Mätt $1"
-  ],
-  [
-   "^(\\d+) pending deletes?$",
-   "$1 väntande borttagningar"
-  ],
-  [
-   "^copied: (.+)$",
-   "kopierat: $1"
-  ],
-  [
-   "^(.+) % of its copies \\((.+)\\) were last checked over (\\d+) days ago \\(oldest (\\S+)\\)$",
-   "$1 % av dess kopior ($2) kontrollerades senast för över $3 dagar sedan (äldsta $4)"
-  ],
-  [
-   "^(.+) % of its copies \\((.+)\\) were last checked over (\\d+) days ago \\(some never checked\\)$",
-   "$1 % av dess kopior ($2) kontrollerades senast för över $3 dagar sedan (vissa aldrig)"
-  ],
-  [
-   "^(.+) % of its copies \\((.+)\\) are due for a check \\(verify-after-days is 0; oldest (\\S+)\\)$",
-   "$1 % av dess kopior ($2) ska kontrolleras (verify-after-days är 0; äldsta $3)"
-  ],
-  [
-   "^(.+) % of its copies \\((.+)\\) are due for a check \\(verify-after-days is 0; some never checked\\)$",
-   "$1 % av dess kopior ($2) ska kontrolleras (verify-after-days är 0; vissa aldrig)"
-  ],
-  [
-   "^(\\d+) objects? \\((.+)\\) exists? on no other disk or storage, (\\d+) of them not checked for over (\\d+) days$",
-   "$1 objekt ($2) finns inte på någon annan disk eller lagring; $3 av dem har inte kontrollerats på över $4 dagar"
-  ],
-  [
-   "^(\\d+) objects? \\((.+)\\) exists? on no other disk or storage$",
-   "$1 objekt ($2) finns inte på någon annan disk eller lagring"
-  ],
-  [
-   "^the fetch plan waits for it \\((\\d+) blocks?, (.+)\\)$",
-   "hämtningsplanen väntar på den ($1 block, $2)"
-  ],
-  [
-   "^a queued repair needs (\\d+) objects? it holds$",
-   "en köad reparation behöver $1 objekt från den"
-  ],
-  [
-   "^it can take all (.+) the pool lacks$",
-   "den rymmer allt poolen saknar ($1)"
-  ],
-  [
-   "^it can take (.+) of the (.+) the pool lacks$",
-   "den rymmer $1 av de $2 som poolen saknar"
-  ],
-  [
-   "^(.+) can be freed$",
-   "$1 kan frigöras"
-  ],
-  [
-   "^its last file system check \\((\\S+)\\) corrected errors$",
-   "dess senaste filsystemskontroll ($1) rättade fel"
-  ],
-  [
-   "^saved the analysis of (.+)$",
-   "sparade analysen av $1"
-  ],
-  [
-   "^cleared the analysis of (.+)$",
-   "rensade analysen av $1"
   ]
  ],
  "review": [
@@ -1771,14 +1858,6 @@
    "$1 block i $2 mappar"
   ],
   [
-   "storage (\\S+) is being drained: it takes no new blocks",
-   "lagringsplatsen $1 töms: den tar inte emot nya block"
-  ],
-  [
-   "storage (\\S+) is at its quota \\(([^)]+) of ([^)]+)\\): new blocks cannot go there",
-   "lagringsplatsen $1 har nått sin kvot ($2 av $3): nya block kan inte gå dit"
-  ],
-  [
    "its file system was last checked",
    "dess filsystem kontrollerades senast"
   ],
@@ -1817,6 +1896,18 @@
   [
    "The file system on (.+) has errors that could not be repaired automatically; nothing was read or written\\. Run `sudo e2fsck -f (\\S+)` by hand or retire the disk\\.",
    "Filsystemet på $1 har fel som inte kunde repareras automatiskt; inget lästes eller skrevs. Kör `sudo e2fsck -f $2` för hand eller pensionera disken."
+  ],
+  [
+   ", (\\d+) paused",
+   ", $1 pausade"
+  ],
+  [
+   "storage (\\S+) is being drained: it takes no new blocks",
+   "lagringsplatsen $1 töms: den tar inte emot nya block"
+  ],
+  [
+   "storage (\\S+) is at its quota \\(([^)]+) of ([^)]+)\\): new blocks cannot go there",
+   "lagringsplatsen $1 har nått sin kvot ($2 av $3): nya block kan inte gå dit"
   ],
   [
    "kept under another name here because the disk ignores case:",

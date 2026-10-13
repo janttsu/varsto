@@ -107,6 +107,9 @@ pub struct ServiceState {
     pub drain_notified: std::collections::BTreeSet<String>,
     /// Storages at their quota during the last sync, one sentence each.
     pub quota_full: Vec<String>,
+    /// Folders paused on this device (marker missing, deletions held), by
+    /// name, with the reason; notified once when a folder pauses.
+    pub paused_folders: std::collections::BTreeMap<String, String>,
 }
 
 /// The storages are asked this often whether they hold newer ledger
@@ -155,6 +158,7 @@ impl ServiceState {
             "restic_text": self.restic_text,
             "drains": self.drains,
             "quota_full": self.quota_full,
+            "paused_folders": self.paused_folders,
         })
     }
     /// Rank the pool disks for docking next (`disk suggest`) and, at most
@@ -616,11 +620,19 @@ impl ServiceState {
         let mut forked = false;
         let mut disks: Vec<String> = Vec::new();
         let mut full: Vec<String> = Vec::new();
+        let mut paused = std::collections::BTreeMap::new();
         for (pl, ps) in reports {
             for f in &ps.storages_full {
                 if !full.contains(f) {
                     full.push(f.clone());
                 }
+            }
+            if let Some(p) = &pl.paused {
+                if self.paused_folders.get(&p.folder) != Some(&p.message) {
+                    eprintln!("service: {}", p.message);
+                    notify("Varsto folder paused", &p.message);
+                }
+                paused.insert(p.folder.clone(), p.message.clone());
             }
             self.p2p_chunks += pl.chunks_from_peers;
             updated += pl.files_updated;
@@ -635,7 +647,15 @@ impl ServiceState {
                 }
             }
         }
-        self.last_result = format!("{} folders: {updated} updated, {deleted} deleted, {conflicts} conflicts, {uploaded} chunks uploaded{}{}{}", reports.len(), if unavailable > 0 { format!(", {unavailable} unavailable") } else { String::new() }, if disks.is_empty() { String::new() } else { format!(" (attach disk {})", disks.join(", ")) }, if forked { ", FORKED device" } else { "" });
+        // A sync of one folder says nothing about the others.
+        if reports.len() == 1 {
+            let name = &reports[0].0.folder;
+            self.paused_folders.remove(name);
+            self.paused_folders.extend(paused);
+        } else {
+            self.paused_folders = paused;
+        }
+        self.last_result = format!("{} folders: {updated} updated, {deleted} deleted, {conflicts} conflicts, {uploaded} chunks uploaded{}{}{}{}", reports.len(), if unavailable > 0 { format!(", {unavailable} unavailable") } else { String::new() }, if disks.is_empty() { String::new() } else { format!(" (attach disk {})", disks.join(", ")) }, if forked { ", FORKED device" } else { "" }, if self.paused_folders.is_empty() { String::new() } else { format!(", {} paused", self.paused_folders.len()) });
         // A storage at its quota: blocks go elsewhere or wait here; say so once.
         for f in full.iter().filter(|f| !self.quota_full.contains(f)) {
             log::info!("{f}");
