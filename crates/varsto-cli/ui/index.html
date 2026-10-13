@@ -312,6 +312,7 @@
             <button id="files-download" type="button" class="secondary" title="Download the selected file to this device" disabled><svg class="icon"><use href="#i-download"/></svg>Download</button>
             <button id="files-free" type="button" class="secondary" title="Keep only a placeholder of the selected file here" disabled><svg class="icon"><use href="#i-free"/></svg>Free up space</button>
             <button id="files-share" type="button" class="secondary" title="Share this folder with another Varsto user"><svg class="icon"><use href="#i-sharing"/></svg>Share</button>
+            <input id="files-filter" type="search" class="files-filter" placeholder="Filter by name, tag or analysis" aria-label="Filter files" autocomplete="off">
             <span class="toolbar-spacer"></span>
             <label class="inline muted" id="selectivelabel" title="Files appear as placeholders until you download them"><input id="selectivetoggle" type="checkbox"> selective sync</label>
           </div>
@@ -341,6 +342,18 @@
             <dt>Last used here</dt><dd id="fd-used"></dd>
             <dt>Copies</dt><dd id="fd-copies"></dd>
           </dl>
+          <section class="fd-analysis" id="fd-analysis" aria-label="Analysis">
+            <div class="fd-analysis-head"><span class="field-caption">Analysis</span><span id="fd-analysis-stale" class="pill risk hidden" title="The file changed after it was analysed">Stale</span></div>
+            <p id="fd-analysis-empty" class="muted small">No analysis yet. An assistant can record one through MCP, or write one yourself.</p>
+            <div id="fd-analysis-text" class="fd-analysis-text" data-no-i18n></div>
+            <div id="fd-analysis-tags" class="fd-tags" data-no-i18n></div>
+            <dl class="fd-list fd-analysis-meta" id="fd-analysis-meta">
+              <dt>Written on</dt><dd id="fd-analysis-device" data-no-i18n></dd>
+              <dt>By</dt><dd id="fd-analysis-by" data-no-i18n></dd>
+              <dt>Analysed</dt><dd id="fd-analysis-date"></dd>
+            </dl>
+            <div class="actions fd-analysis-actions"><button type="button" class="secondary" id="fd-analysis-edit">Write analysis</button><button type="button" class="secondary" id="fd-analysis-clear">Clear analysis</button></div>
+          </section>
           <div class="actions fd-actions" id="fd-actions"></div>
         </aside>
       </div>

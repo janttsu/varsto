@@ -675,7 +675,27 @@
   "external": "ulkoinen",
   "at home, cold": "kotona, kylmä",
   "external, cold": "ulkoinen, kylmä",
-  "Destination…": "Kohde…"
+  "Destination…": "Kohde…",
+  "Filter by name, tag or analysis": "Suodata nimen, tunnisteen tai analyysin mukaan",
+  "Filter files": "Suodata tiedostoja",
+  "Analysis": "Analyysi",
+  "Stale": "Vanhentunut",
+  "The file changed after it was analysed": "Tiedosto on muuttunut analyysin jälkeen",
+  "No analysis yet. An assistant can record one through MCP, or write one yourself.": "Ei vielä analyysia. Avustaja voi tallentaa sen MCP:n kautta, tai voit kirjoittaa sen itse.",
+  "Written on": "Kirjoitettu laitteella",
+  "By": "Tekijä",
+  "Analysed": "Analysoitu",
+  "Write analysis": "Kirjoita analyysi",
+  "Edit analysis": "Muokkaa analyysia",
+  "Clear analysis": "Tyhjennä analyysi",
+  "Clear analysis?": "Tyhjennetäänkö analyysi?",
+  "The analysis of this file is removed on every device.": "Tämän tiedoston analyysi poistetaan kaikilta laitteilta.",
+  "File analysis": "Tiedoston analyysi",
+  "What the file contains": "Mitä tiedosto sisältää",
+  "Tags": "Tunnisteet",
+  "separated by commas": "pilkuilla erotettuina",
+  "No files match the filter": "Mikään tiedosto ei vastaa suodatinta",
+  "Analysis stale": "Analyysi vanhentunut"
  },
  "patterns": [
   [
@@ -841,6 +861,14 @@
   [
    "^(.+), cold$",
    "$1, kylmä"
+  ],
+  [
+   "^saved the analysis of (.+)$",
+   "tallennettiin tiedoston $1 analyysi"
+  ],
+  [
+   "^cleared the analysis of (.+)$",
+   "tyhjennettiin tiedoston $1 analyysi"
   ]
  ],
  "review": [

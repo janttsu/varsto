@@ -668,7 +668,27 @@
   "external": "extern",
   "at home, cold": "hemma, kall",
   "external, cold": "extern, kall",
-  "Destination…": "Mål…"
+  "Destination…": "Mål…",
+  "Filter by name, tag or analysis": "Filtrera på namn, tagg eller analys",
+  "Filter files": "Filtrera filer",
+  "Analysis": "Analys",
+  "Stale": "Inaktuell",
+  "The file changed after it was analysed": "Filen har ändrats efter att den analyserades",
+  "No analysis yet. An assistant can record one through MCP, or write one yourself.": "Ingen analys ännu. En assistent kan spara en via MCP, eller så skriver du en själv.",
+  "Written on": "Skriven på",
+  "By": "Av",
+  "Analysed": "Analyserad",
+  "Write analysis": "Skriv analys",
+  "Edit analysis": "Redigera analys",
+  "Clear analysis": "Rensa analys",
+  "Clear analysis?": "Rensa analysen?",
+  "The analysis of this file is removed on every device.": "Filens analys tas bort på alla enheter.",
+  "File analysis": "Filanalys",
+  "What the file contains": "Vad filen innehåller",
+  "Tags": "Taggar",
+  "separated by commas": "åtskilda med kommatecken",
+  "No files match the filter": "Inga filer matchar filtret",
+  "Analysis stale": "Analysen inaktuell"
  },
  "patterns": [
   [
@@ -834,6 +854,14 @@
   [
    "^(.+), cold$",
    "$1, kall"
+  ],
+  [
+   "^saved the analysis of (.+)$",
+   "sparade analysen av $1"
+  ],
+  [
+   "^cleared the analysis of (.+)$",
+   "rensade analysen av $1"
   ]
  ],
  "review": [
