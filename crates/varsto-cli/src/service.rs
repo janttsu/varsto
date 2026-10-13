@@ -62,6 +62,9 @@ pub struct ServiceState {
     pub p2p_chunks: u64,
     /// Removable disks of every pool as of the last check (every 30 seconds).
     pub disks: Vec<varsto_core::pool::DiskStatus>,
+    /// The next pool disk to dock, recomputed after syncs and disk changes
+    /// (from the pool index and the ledger; no disk is read).
+    pub disk_suggest: Option<varsto_core::disksuggest::DiskSuggestions>,
     /// NAT traversal: what STUN saw, the NAT guess, whether we are reachable,
     /// the relays we are registered with, and the path to every peer.
     pub p2p_nat: varsto_core::p2p::stun::Nat,
@@ -124,6 +127,7 @@ impl ServiceState {
             "p2p_lan_peers": self.p2p_lan_peers,
             "p2p_chunks": self.p2p_chunks,
             "disks": self.disks,
+            "disk_suggest": self.disk_suggest,
             "p2p_nat": self.p2p_nat,
             "p2p_public": self.p2p_public,
             "p2p_reachable": self.p2p_reachable,
@@ -143,9 +147,29 @@ impl ServiceState {
             "restic_text": self.restic_text,
         })
     }
+    /// Rank the pool disks for docking next (`disk suggest`) and, at most
+    /// once a week and unless turned off, remind of a disk that is away and
+    /// overdue for a check.
+    pub fn suggest_disks(&mut self, engine: &mut Engine) {
+        match engine.disk_suggestions() {
+            Ok(s) if s.ranked.is_empty() && s.attached.is_empty() && s.excluded.is_empty() => {
+                self.disk_suggest = None;
+            }
+            Ok(s) => {
+                if let Some(msg) = engine.disk_overdue_reminder(&s, varsto_core::util::now_utc()) {
+                    eprintln!("service: {msg}");
+                    notify("Varsto disk check due", &msg);
+                }
+                self.disk_suggest = Some(s);
+            }
+            Err(e) => eprintln!("service: disk suggestion failed: {e:#}"),
+        }
+    }
     /// Store the disk listing; log and notify when a disk appeared or went
     /// away, and ask for a sync when one appeared (pending files may be on it).
-    pub fn record_disks(&mut self, disks: Vec<varsto_core::pool::DiskStatus>) {
+    /// Returns whether a disk appeared or went away.
+    pub fn record_disks(&mut self, disks: Vec<varsto_core::pool::DiskStatus>) -> bool {
+        let mut changed = false;
         // The first listing after start is the baseline: no notifications.
         let baseline = self.disks.is_empty();
         for d in &disks {
@@ -161,6 +185,7 @@ impl ServiceState {
                 _ => None,
             };
             if let Some(ev) = event {
+                changed = true;
                 let msg = format!("{} {ev}", d.label);
                 eprintln!("service: disk {msg}");
                 notify("Varsto disk", &msg);
@@ -169,7 +194,9 @@ impl ServiceState {
                 }
             }
         }
+        changed |= disks.len() != self.disks.len();
         self.disks = disks;
+        changed
     }
     /// Store policy reports; raise a desktop notification when a folder's
     /// state got worse (ok -> at risk -> violated) or a violation persists
@@ -1418,7 +1445,15 @@ pub fn run(opts: Options) -> Result<()> {
             }
             let listed = st.engine.as_mut().map(|e| e.disks());
             match listed {
-                Some(Ok(disks)) => st.service.record_disks(disks),
+                Some(Ok(disks)) => {
+                    let first = st.service.disk_suggest.is_none() && !disks.is_empty();
+                    if st.service.record_disks(disks) || first {
+                        let st = &mut *st;
+                        if let Some(e) = st.engine.as_mut() {
+                            st.service.suggest_disks(e);
+                        }
+                    }
+                }
                 Some(Err(e)) => eprintln!("service: disk check failed: {e:#}"),
                 None => {}
             }
@@ -1609,6 +1644,7 @@ pub fn run(opts: Options) -> Result<()> {
                         st.service.repair_if_due(e);
                         st.service.backups_if_due(e);
                         st.service.restic_if_due(e);
+                        st.service.suggest_disks(e);
                         if let Err(err) = e.publish_device_details(st.service.last_sync_utc) {
                             eprintln!("service: device details not published: {err:#}");
                         }

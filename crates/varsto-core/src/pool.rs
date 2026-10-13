@@ -74,6 +74,23 @@ pub struct PoolDisk {
     /// pool's place. Disk groups keep copies on disks in different places.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub place: String,
+    /// Free bytes of the disk's file system at the last measurement
+    /// (statvfs), next to `capacity_bytes`.
+    #[serde(default)]
+    pub free_bytes: u64,
+    /// When `capacity_bytes` and `free_bytes` were last measured: at every
+    /// attach, add, insert, check, fill and eject (0: never).
+    #[serde(default)]
+    pub space_measured_utc: i64,
+    /// When a write to the disk last read back wrong twice
+    /// (`PoolError::WriteNotVerified`); cleared by a later write that reads
+    /// back right. 0: never.
+    #[serde(default, skip_serializing_if = "is_zero_i64")]
+    pub write_failed_utc: i64,
+}
+
+fn is_zero_i64(v: &i64) -> bool {
+    *v == 0
 }
 
 /// `<mount>/.varsto-disk.json`.
@@ -332,6 +349,18 @@ fn take_corruption(path: &Path) -> bool {
     false
 }
 
+/// Record a disk's capacity and free space as measured now (statvfs).
+/// Returns false when the file system could not be asked.
+fn measure(d: &mut PoolDisk, mount: &Path, now: i64) -> bool {
+    let Some(sp) = disk_space(mount) else {
+        return false;
+    };
+    d.capacity_bytes = sp.total;
+    d.free_bytes = sp.free;
+    d.space_measured_utc = now;
+    true
+}
+
 /// The object name a key ends with, when it is one (64 hex digits).
 fn object_name_of(key: &str) -> Option<&str> {
     let name = key.rsplit('/').next()?;
@@ -498,6 +527,76 @@ pub struct DiskStatus {
     pub last_verified_utc: i64,
     pub pending_deletes: u64,
     pub retired: bool,
+    /// Bytes the pool keeps free on the disk (`reserve(capacity_bytes)`).
+    pub reserve_bytes: u64,
+    /// When `capacity_bytes` and `free_bytes` were measured (0: never).
+    /// `free_bytes` is live for an attached disk and the last measurement
+    /// for one that is away.
+    pub space_measured_utc: i64,
+    /// Bytes of the deletions queued for the disk.
+    pub pending_delete_bytes: u64,
+    /// Bytes waiting to be freed at the next insert: the queued deletions
+    /// plus `unneeded_bytes` when known.
+    pub reclaimable_bytes: u64,
+    /// The pool's `verify_after_days`.
+    pub verify_after_days: u32,
+    /// Oldest per-copy check on the disk (`Some(0)`: a copy was never
+    /// checked here; `None`: the disk holds nothing).
+    pub oldest_check_utc: Option<i64>,
+    /// Copies whose last check is older than `verify_after_days` (or that
+    /// were never checked), their bytes, and their share of all copies.
+    pub copies_overdue: u64,
+    pub bytes_overdue: u64,
+    pub overdue_share: f64,
+    /// See `PoolDisk::write_failed_utc`.
+    pub write_failed_utc: i64,
+    /// The disk should not be suggested: its last file system check left
+    /// errors or failed, or a write read back wrong twice.
+    pub failing: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub failing_reason: Option<String>,
+    /// The last forced file system check of the disk's partition
+    /// (`disk-checks.json`), when this device knows its partition.
+    pub fsck: Option<crate::blockdev::FsckOutcome>,
+    /// Facts that need the ledger (`BookInput`); `None` in the cheap listing.
+    /// Copies on the disk the ledger no longer wants on this pool.
+    pub unneeded_objects: Option<u64>,
+    pub unneeded_bytes: Option<u64>,
+    /// Objects of which this disk holds the only copy anywhere (no other
+    /// disk, no other storage), their bytes, and how many of them are overdue.
+    pub only_copy_objects: Option<u64>,
+    pub only_copy_bytes: Option<u64>,
+    pub only_copy_overdue: Option<u64>,
+    /// Bytes the pool lacks that this disk could take (first copies, and
+    /// further copies its place lacks under a disk group rule), and how
+    /// much of that fits: `min(free - reserve, lacking)` (0 when retired).
+    pub lacking_bytes: Option<u64>,
+    pub fill_potential_bytes: Option<u64>,
+    /// Objects on the disk that a queued repair needs.
+    pub repair_objects: Option<u64>,
+    /// Objects (and bytes) a pending step of the fetch plan reads from it.
+    pub fetch_objects: Option<u64>,
+    pub fetch_bytes: Option<u64>,
+}
+
+/// What the ledger knows, for the per-disk facts of `statuses_with`.
+#[derive(Default)]
+pub struct BookInput<'a> {
+    /// Object names (lower-case hex) the ledger still wants on this pool;
+    /// `None`: not known, nothing counts as unneeded.
+    pub wanted: Option<&'a std::collections::HashSet<String>>,
+    /// Object names with a copy on a storage other than this pool.
+    pub elsewhere: Option<&'a std::collections::HashSet<String>>,
+    /// Object names a queued repair needs.
+    pub repair: Option<&'a std::collections::HashSet<String>>,
+    /// Disk id -> object keys a pending fetch plan step reads from it.
+    pub fetch: Option<&'a BTreeMap<String, Vec<String>>>,
+    /// Bytes of blocks of current files placed on this pool that it holds
+    /// on no disk (any disk can take them).
+    pub first_copy_bytes: u64,
+    /// Object keys of current files: further copies under a disk group
+    /// rule are counted for these only (`None`: every object of the index).
+    pub current: Option<&'a std::collections::HashSet<String>>,
 }
 
 /// Where an object of the pool is.
@@ -739,11 +838,12 @@ impl PoolStorage {
                     d.last_seen_utc = now;
                     changed = true;
                 }
-                if let Some(sp) = disk_space(mount) {
-                    if d.capacity_bytes != sp.total {
-                        d.capacity_bytes = sp.total;
-                        changed = true;
-                    }
+                // Free space while attached, at most once a minute.
+                let stale = now - d.space_measured_utc > 60;
+                if (stale || disk_space(mount).is_some_and(|sp| sp.total != d.capacity_bytes))
+                    && measure(d, mount, now)
+                {
+                    changed = true;
                 }
             }
         }
@@ -783,20 +883,17 @@ impl PoolStorage {
                 }
             }
         }
-        st.index.disks.insert(
-            marker.disk_id.clone(),
-            PoolDisk {
-                id: marker.disk_id.clone(),
-                label: marker.label.clone(),
-                last_mount: Some(mount.to_path_buf()),
-                capacity_bytes: disk_space(mount).map(|s| s.total).unwrap_or(0),
-                used_bytes: used,
-                last_seen_utc: util::now_utc(),
-                last_verified_utc: 0,
-                retired: false,
-                place: idx.place.clone(),
-            },
-        );
+        let mut disk = PoolDisk {
+            id: marker.disk_id.clone(),
+            label: marker.label.clone(),
+            last_mount: Some(mount.to_path_buf()),
+            used_bytes: used,
+            last_seen_utc: util::now_utc(),
+            place: idx.place.clone(),
+            ..Default::default()
+        };
+        measure(&mut disk, mount, util::now_utc());
+        st.index.disks.insert(marker.disk_id.clone(), disk);
     }
 
     /// The attached, non-retired disk with the most free space that keeps its
@@ -863,7 +960,15 @@ impl PoolStorage {
             .get(disk_id)
             .map(|d| d.label.clone())
             .unwrap_or_default();
-        write_checked(&path, key, data, &label)?;
+        if let Err(e) = write_checked(&path, key, data, &label) {
+            if matches!(pool_error(&e), Some(PoolError::WriteNotVerified { .. })) {
+                if let Some(d) = st.index.disks.get_mut(disk_id) {
+                    d.write_failed_utc = util::now_utc();
+                }
+                let _ = self.save_index(st);
+            }
+            return Err(e);
+        }
         let now = util::now_utc();
         match st.index.objects.get_mut(key) {
             Some(e) => {
@@ -880,9 +985,17 @@ impl PoolStorage {
         }
         if let Some(d) = st.index.disks.get_mut(disk_id) {
             d.used_bytes += data.len() as u64;
+            d.write_failed_utc = 0;
         }
         st.dirty.insert(disk_id.to_string());
         self.save_index(st)
+    }
+
+    /// Measure an attached disk's space now and keep it in the index.
+    fn measure_now(st: &mut State, disk_id: &str, mount: &Path) {
+        if let Some(d) = st.index.disks.get_mut(disk_id) {
+            measure(d, mount, util::now_utc());
+        }
     }
 
     /// Bytes that can still go to an attached disk within its reserve.
@@ -1080,18 +1193,16 @@ impl PoolStorage {
             &DiskMarker::path(&mount),
             &serde_json::to_vec_pretty(&marker)?,
         )?;
-        let sp = disk_space(&mount);
-        let disk = PoolDisk {
+        let mut disk = PoolDisk {
             id: id.clone(),
             label: label.to_string(),
             last_mount: Some(mount.clone()),
-            capacity_bytes: sp.map(|s| s.total).unwrap_or(0),
-            used_bytes: 0,
             last_seen_utc: util::now_utc(),
             last_verified_utc: util::now_utc(),
-            retired: false,
             place: place.trim().to_string(),
+            ..Default::default()
         };
+        measure(&mut disk, &mount, util::now_utc());
         st.index.disks.insert(id.clone(), disk.clone());
         if let Some(a) = st.attached.as_mut() {
             a.insert(id.clone(), mount.clone());
@@ -1128,10 +1239,16 @@ impl PoolStorage {
         let mut st = self.state.lock().unwrap();
         let attached = self.attached(&mut st);
         let dirty = std::mem::take(&mut st.dirty);
+        let mut measured = false;
         for id in dirty {
             if let Some(mount) = attached.get(&id) {
                 self.write_disk_index(&st, &id, mount)?;
+                Self::measure_now(&mut st, &id, mount);
+                measured = true;
             }
+        }
+        if measured {
+            self.save_index(&st)?;
         }
         Ok(())
     }
@@ -1155,6 +1272,7 @@ impl PoolStorage {
         if let Some(d) = st.index.disks.get_mut(disk_id) {
             d.last_seen_utc = util::now_utc();
         }
+        Self::measure_now(&mut st, disk_id, &mount);
         self.save_index(&st)?;
         Ok(mount)
     }
@@ -1184,6 +1302,7 @@ impl PoolStorage {
             }
         }
         st.dirty.insert(disk_id.to_string());
+        Self::measure_now(st, disk_id, mount);
         self.save_index(st)?;
         Ok((n, bytes))
     }
@@ -1294,6 +1413,7 @@ impl PoolStorage {
             d.used_bytes = used;
             d.last_seen_utc = util::now_utc();
         }
+        Self::measure_now(&mut st, disk_id, &mount);
         st.dirty.insert(disk_id.to_string());
         self.save_index(&st)?;
         Ok(out)
@@ -1433,6 +1553,7 @@ impl PoolStorage {
             d.last_verified_utc = oldest;
             d.last_seen_utc = now;
         }
+        Self::measure_now(&mut st, disk_id, &mount);
         out.verified_keys = good;
         st.dirty.insert(disk_id.to_string());
         self.save_index(&st)?;
@@ -1456,6 +1577,8 @@ impl PoolStorage {
                 let _ = d.sync_all();
             }
         }
+        Self::measure_now(&mut st, disk_id, &mount);
+        self.save_index(&st)?;
         Ok(mount)
     }
 
@@ -1634,6 +1757,7 @@ impl PoolStorage {
             d.last_verified_utc = util::now_utc();
             d.last_seen_utc = util::now_utc();
         }
+        Self::measure_now(&mut st, disk_id, &mount);
         st.dirty.insert(disk_id.to_string());
         self.save_index(&st)?;
         Ok(out)
@@ -1788,14 +1912,118 @@ impl PoolStorage {
             .collect()
     }
 
-    /// Listing rows for every disk.
+    /// Listing rows for every disk, from the index alone (no ledger facts).
     pub fn statuses(&self) -> Vec<DiskStatus> {
+        self.statuses_with(None)
+    }
+
+    /// Copies whose last check is older than this are overdue (`i64::MAX`
+    /// with `verify_after_days` 0: every copy, as the insert routine does).
+    pub fn verify_cutoff(&self, now: i64) -> i64 {
+        if self.verify_after_days == 0 {
+            i64::MAX
+        } else {
+            now - self.verify_after_days as i64 * 86_400
+        }
+    }
+
+    /// Listing rows for every disk with its bookkeeping: space as last
+    /// measured, queued deletions, the age of its copy checks and, given
+    /// what the ledger knows (`input`), what could be freed, what exists
+    /// only there, what the pool lacks that it could take and what a
+    /// repair or a fetch plan needs from it. Reads no disk beyond the
+    /// attach detection.
+    pub fn statuses_with(&self, input: Option<&BookInput>) -> Vec<DiskStatus> {
         let mut st = self.state.lock().unwrap();
         let attached = self.attached(&mut st);
-        let mut counts: BTreeMap<&str, u64> = BTreeMap::new();
-        for e in st.index.objects.values() {
-            for d in e.holders() {
-                *counts.entry(d.as_str()).or_default() += 1;
+        let now = util::now_utc();
+        let cutoff = self.verify_cutoff(now);
+        #[derive(Default)]
+        struct Acc {
+            copies: u64,
+            oldest: Option<i64>,
+            overdue: u64,
+            overdue_bytes: u64,
+            unneeded: u64,
+            unneeded_bytes: u64,
+            only: u64,
+            only_bytes: u64,
+            only_overdue: u64,
+            repair: u64,
+            short_bytes: u64,
+        }
+        let mut acc: BTreeMap<String, Acc> = st
+            .index
+            .disks
+            .keys()
+            .map(|k| (k.clone(), Acc::default()))
+            .collect();
+        let place_of: BTreeMap<String, String> = st
+            .index
+            .disks
+            .iter()
+            .map(|(id, d)| (id.clone(), self.disk_place(d)))
+            .collect();
+        let takers: Vec<(String, String)> = st
+            .index
+            .disks
+            .values()
+            .filter(|d| !d.retired)
+            .map(|d| (d.id.clone(), self.disk_place(d)))
+            .collect();
+        for (key, e) in &st.index.objects {
+            let name = object_name_of(key).map(|n| n.to_ascii_lowercase());
+            let unneeded = match (input.and_then(|i| i.wanted), &name) {
+                (Some(w), Some(n)) => !w.contains(n),
+                _ => false,
+            };
+            let holders: Vec<&String> = e.holders().collect();
+            let elsewhere = match (input.and_then(|i| i.elsewhere), &name) {
+                (Some(x), Some(n)) => x.contains(n),
+                _ => true,
+            };
+            let in_repair = match (input.and_then(|i| i.repair), &name) {
+                (Some(r), Some(n)) => r.contains(n),
+                _ => false,
+            };
+            for d in &holders {
+                let a = acc.entry((*d).clone()).or_default();
+                a.copies += 1;
+                let checked = e.checked.get(*d).copied().unwrap_or(0);
+                a.oldest = Some(a.oldest.map_or(checked, |o| o.min(checked)));
+                let overdue = checked < cutoff;
+                if overdue {
+                    a.overdue += 1;
+                    a.overdue_bytes += e.size;
+                }
+                if unneeded {
+                    a.unneeded += 1;
+                    a.unneeded_bytes += e.size;
+                } else if holders.len() == 1 && !elsewhere {
+                    a.only += 1;
+                    a.only_bytes += e.size;
+                    if overdue {
+                        a.only_overdue += 1;
+                    }
+                }
+                if in_repair {
+                    a.repair += 1;
+                }
+            }
+            // Disk groups: further copies a disk of a place without one could take.
+            let current = input
+                .and_then(|i| i.current)
+                .is_none_or(|c| c.contains(key));
+            if self.copies > 1 && !unneeded && current {
+                let places: BTreeSet<&String> =
+                    holders.iter().filter_map(|d| place_of.get(*d)).collect();
+                if (places.len() as u32) < self.copies {
+                    for (id, place) in &takers {
+                        if !places.contains(place) && !e.held_by(id) {
+                            acc.entry(id.clone()).or_default().short_bytes += e.size;
+                        }
+                    }
+                }
             }
         }
         let mut disks: Vec<&PoolDisk> = st.index.disks.values().collect();
@@ -1804,26 +2032,93 @@ impl PoolStorage {
             .into_iter()
             .map(|d| {
                 let mount = attached.get(&d.id).cloned();
+                let live = mount.as_ref().and_then(|m| disk_space(m));
+                let a = acc.remove(&d.id).unwrap_or_default();
+                let (free, total, measured) = match live {
+                    Some(sp) => (Some(sp.free), sp.total, now),
+                    None if d.space_measured_utc > 0 => {
+                        (Some(d.free_bytes), d.capacity_bytes, d.space_measured_utc)
+                    }
+                    None => (None, d.capacity_bytes, 0),
+                };
+                let reserve = self.reserve(total);
+                let pending: Option<&BTreeMap<String, u64>> = st.index.pending_deletes.get(&d.id);
+                let pending_bytes: u64 = pending.map(|p| p.values().sum()).unwrap_or(0);
+                let failing_reason = (d.write_failed_utc > 0).then(|| {
+                    format!(
+                        "it returned different bytes than were written to it, twice, on {}: the disk, its cable or dock may be failing",
+                        util::format_date(d.write_failed_utc)
+                    )
+                });
+                let with = |v: u64| input.map(|_| v);
+                let (lacking, fill) = match input {
+                    Some(i) => {
+                        let lacking = i.first_copy_bytes + a.short_bytes;
+                        let room = free
+                            .unwrap_or_else(|| total.saturating_sub(d.used_bytes))
+                            .saturating_sub(reserve);
+                        let fill = if d.retired || failing_reason.is_some() {
+                            0
+                        } else {
+                            room.min(lacking)
+                        };
+                        (Some(lacking), Some(fill))
+                    }
+                    None => (None, None),
+                };
+                let (fetch_objects, fetch_bytes) = match input.and_then(|i| i.fetch) {
+                    Some(f) => {
+                        let keys = f.get(&d.id).map(|v| v.as_slice()).unwrap_or(&[]);
+                        let bytes = keys
+                            .iter()
+                            .filter_map(|k| st.index.objects.get(k).map(|e| e.size))
+                            .sum();
+                        (Some(keys.len() as u64), Some(bytes))
+                    }
+                    None => (with(0), with(0)),
+                };
                 DiskStatus {
                     pool: self.name.clone(),
                     place: self.disk_place(d),
                     label: d.label.clone(),
                     disk_id: d.id.clone(),
                     attached: mount.is_some(),
-                    free_bytes: mount.as_ref().and_then(|m| disk_space(m)).map(|s| s.free),
+                    free_bytes: free,
                     mount: mount.or_else(|| d.last_mount.clone()),
-                    capacity_bytes: d.capacity_bytes,
+                    capacity_bytes: total,
                     used_bytes: d.used_bytes,
-                    objects: counts.get(d.id.as_str()).copied().unwrap_or(0),
+                    objects: a.copies,
                     last_seen_utc: d.last_seen_utc,
                     last_verified_utc: d.last_verified_utc,
-                    pending_deletes: st
-                        .index
-                        .pending_deletes
-                        .get(&d.id)
-                        .map(|p| p.len() as u64)
-                        .unwrap_or(0),
+                    pending_deletes: pending.map(|p| p.len() as u64).unwrap_or(0),
                     retired: d.retired,
+                    reserve_bytes: reserve,
+                    space_measured_utc: measured,
+                    pending_delete_bytes: pending_bytes,
+                    reclaimable_bytes: pending_bytes + a.unneeded_bytes,
+                    verify_after_days: self.verify_after_days,
+                    oldest_check_utc: a.oldest,
+                    copies_overdue: a.overdue,
+                    bytes_overdue: a.overdue_bytes,
+                    overdue_share: if a.copies == 0 {
+                        0.0
+                    } else {
+                        a.overdue as f64 / a.copies as f64
+                    },
+                    write_failed_utc: d.write_failed_utc,
+                    failing: failing_reason.is_some(),
+                    failing_reason,
+                    fsck: None,
+                    unneeded_objects: with(a.unneeded),
+                    unneeded_bytes: with(a.unneeded_bytes),
+                    only_copy_objects: with(a.only),
+                    only_copy_bytes: with(a.only_bytes),
+                    only_copy_overdue: with(a.only_overdue),
+                    lacking_bytes: lacking,
+                    fill_potential_bytes: fill,
+                    repair_objects: with(a.repair),
+                    fetch_objects,
+                    fetch_bytes,
                 }
             })
             .collect()
@@ -2025,6 +2320,162 @@ mod tests {
         assert_eq!(p.reserve(100 << 30), 5 << 30);
         assert_eq!(p.reserve(10 << 30), 2 << 30);
         assert_eq!(p.place(), "home");
+    }
+
+    fn object(data: &[u8]) -> String {
+        let name = hex::encode(crate::crypto::hash(data));
+        format!("chunks/{}/{name}", &name[..2])
+    }
+
+    #[test]
+    fn bookkeeping_comes_from_the_index_and_what_the_ledger_knows() {
+        const GIB: u64 = 1 << 30;
+        let tmp = tempfile::tempdir().unwrap();
+        let mounts = tmp.path().join("mounts");
+        let (a, b) = (mounts.join("a"), mounts.join("b"));
+        fs::create_dir_all(&a).unwrap();
+        fs::create_dir_all(&b).unwrap();
+        let spec = StorageSpec::Pool {
+            name: "shelf".into(),
+            place: "home".into(),
+            reserve_percent: 5,
+            min_reserve_bytes: 2 * GIB,
+            disks: vec![],
+            scan_roots: vec![mounts.clone()],
+            copies: 2,
+            verify_after_days: DEFAULT_VERIFY_AFTER_DAYS,
+        };
+        let id = || PoolIdentity {
+            pool_id: "p".into(),
+            vault_tag: "t".into(),
+        };
+        let home = tmp.path().join("home");
+        fs::create_dir_all(&home).unwrap();
+        set_fake_space(
+            &a,
+            Some(DiskSpace {
+                free: 50 * GIB,
+                total: 100 * GIB,
+            }),
+        );
+        set_fake_space(
+            &b,
+            Some(DiskSpace {
+                free: 20 * GIB,
+                total: 40 * GIB,
+            }),
+        );
+        let (da, db) = {
+            let p = PoolStorage::open(&spec, &home, id()).unwrap();
+            let da = p.add_disk_at(&a, "A", "").unwrap();
+            let db = p.add_disk_at(&b, "B", "offsite").unwrap();
+            assert_eq!(da.free_bytes, 50 * GIB);
+            assert!(da.space_measured_utc > 0);
+            (da.id, db.id)
+        };
+        // B goes away; three objects go to A alone.
+        let away = tmp.path().join("away");
+        fs::create_dir_all(&away).unwrap();
+        fs::rename(&b, away.join("b")).unwrap();
+        let (x1, x2, x3) = (
+            b"one".to_vec(),
+            b"two two".to_vec(),
+            b"three three three".to_vec(),
+        );
+        {
+            let p = PoolStorage::open(&spec, &home, id()).unwrap();
+            // A write that reads back wrong twice marks the disk failing ...
+            corrupt_writes_under(&a, 2);
+            assert!(p.put_if_absent(&object(b"bad"), b"bad").is_err());
+            let row = p.statuses().into_iter().find(|d| d.label == "A").unwrap();
+            assert!(row.failing && row.write_failed_utc > 0, "{row:?}");
+            assert!(row.failing_reason.unwrap().contains("may be failing"));
+            // ... and a later write that reads back right clears it.
+            for x in [&x1, &x2, &x3] {
+                assert!(p.put_if_absent(&object(x), x).unwrap());
+            }
+            assert!(!p.statuses().iter().any(|d| d.failing));
+            p.state
+                .lock()
+                .unwrap()
+                .index
+                .objects
+                .get_mut(&object(&x1))
+                .unwrap()
+                .checked
+                .insert(da.clone(), 1_000);
+            // Measured again when the disk's index is flushed (after a fill).
+            set_fake_space(
+                &a,
+                Some(DiskSpace {
+                    free: 45 * GIB,
+                    total: 100 * GIB,
+                }),
+            );
+            p.flush().unwrap();
+        }
+        // A goes away too; deleting x3 queues it.
+        fs::rename(&a, away.join("a")).unwrap();
+        let p = PoolStorage::open(&spec, &home, id()).unwrap();
+        p.delete(&object(&x3)).unwrap();
+        let wanted: std::collections::HashSet<String> =
+            [object_name_of(&object(&x1)).unwrap().to_string()].into();
+        let elsewhere = std::collections::HashSet::new();
+        let fetch: BTreeMap<String, Vec<String>> = [(da.clone(), vec![object(&x1)])].into();
+        let input = BookInput {
+            wanted: Some(&wanted),
+            elsewhere: Some(&elsewhere),
+            repair: Some(&wanted),
+            fetch: Some(&fetch),
+            first_copy_bytes: 100,
+            current: None,
+        };
+        let rows = p.statuses_with(Some(&input));
+        let ra = rows.iter().find(|d| d.label == "A").unwrap();
+        let rb = rows.iter().find(|d| d.label == "B").unwrap();
+        assert!(!ra.attached && !rb.attached);
+        // Space as last measured, with the reserve.
+        assert_eq!(ra.free_bytes, Some(45 * GIB));
+        assert_eq!(ra.capacity_bytes, 100 * GIB);
+        assert_eq!(ra.reserve_bytes, 5 * GIB);
+        assert_eq!(rb.free_bytes, Some(20 * GIB));
+        assert_eq!(rb.reserve_bytes, 2 * GIB);
+        // x1 and x2 are on A; x3 waits to be deleted, x2 is unneeded.
+        assert_eq!(ra.objects, 2);
+        assert_eq!(ra.pending_deletes, 1);
+        assert_eq!(ra.pending_delete_bytes, x3.len() as u64);
+        assert_eq!(ra.unneeded_objects, Some(1));
+        assert_eq!(ra.unneeded_bytes, Some(x2.len() as u64));
+        assert_eq!(ra.reclaimable_bytes, (x2.len() + x3.len()) as u64);
+        // x1: only copy anywhere, checked long ago; a repair and the fetch plan want it.
+        assert_eq!(ra.oldest_check_utc, Some(1_000));
+        assert_eq!(ra.copies_overdue, 1);
+        assert_eq!(ra.overdue_share, 0.5);
+        assert_eq!(ra.only_copy_objects, Some(1));
+        assert_eq!(ra.only_copy_overdue, Some(1));
+        assert_eq!(ra.repair_objects, Some(1));
+        assert_eq!(
+            (ra.fetch_objects, ra.fetch_bytes),
+            (Some(1), Some(x1.len() as u64))
+        );
+        // The pool lacks 100 bytes of first copies; B's place also lacks x1.
+        assert_eq!(ra.lacking_bytes, Some(100));
+        assert_eq!(ra.fill_potential_bytes, Some(100));
+        assert_eq!(rb.lacking_bytes, Some(100 + x1.len() as u64));
+        assert_eq!(rb.fill_potential_bytes, rb.lacking_bytes);
+        assert_eq!(rb.objects, 0);
+        assert_eq!(rb.oldest_check_utc, None);
+        // Without the ledger only the index facts are there.
+        let cheap = p.statuses();
+        let ca = cheap.iter().find(|d| d.label == "A").unwrap();
+        assert_eq!(ca.unneeded_bytes, None);
+        assert_eq!(ca.reclaimable_bytes, x3.len() as u64);
+        assert_eq!(ca.copies_overdue, 1);
+        // A retired disk can take nothing.
+        p.set_retired(&db, true).unwrap();
+        let rows = p.statuses_with(Some(&input));
+        let rb = rows.iter().find(|d| d.label == "B").unwrap();
+        assert_eq!(rb.fill_potential_bytes, Some(0));
     }
 
     #[test]

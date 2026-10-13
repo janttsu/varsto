@@ -49,6 +49,7 @@ mod devinfo;
 mod disk_fetch;
 mod disk_groups;
 mod disk_insert;
+mod disk_suggest;
 mod fetch;
 mod ledger_recovery;
 mod ledger_upkeep;
@@ -5514,8 +5515,9 @@ impl Engine {
             .collect()
     }
 
-    /// Every disk of every pool with its attached state (refreshes the
-    /// registry, adopting disks other devices filled).
+    /// Every disk of every pool with its attached state and the bookkeeping
+    /// the pool index has (refreshes the registry, adopting disks other
+    /// devices filled). `disk_report` adds what needs the ledger.
     pub fn disks(&mut self) -> Result<Vec<DiskStatus>> {
         let mut out = Vec::new();
         for spec in self.pool_specs() {
@@ -5525,6 +5527,7 @@ impl Engine {
             drop(pool);
             self.save_pool_disks(spec.name(), disks)?;
         }
+        self.add_fsck_facts(&mut out);
         Ok(out)
     }
 

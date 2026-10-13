@@ -1020,8 +1020,26 @@ enum DiskCmd {
         #[arg(long)]
         copies: Option<u32>,
     },
-    /// Every disk of every pool: attached or away, free space, last verified, pending deletes.
-    List,
+    /// Every disk of every pool: attached or away, free and total space (as last measured),
+    /// what can be freed, the oldest copy check, last seen, the last file system check.
+    List {
+        /// Sort by name, free, used, checked (oldest first), reclaimable or seen (longest ago first).
+        #[arg(long, default_value = "name")]
+        sort: String,
+        /// Reverse the order.
+        #[arg(long)]
+        reverse: bool,
+    },
+    /// Which disk to dock next and why: copies overdue for a check, data only on that disk,
+    /// space to free, what the pool lacks, a repair or fetch waiting, long unseen.
+    Suggest {
+        /// Only the disks of this pool.
+        #[arg(long)]
+        pool: Option<String>,
+        /// Turn the weekly "disk is overdue" reminder of the background service on or off.
+        #[arg(long, value_parser = ["on", "off"])]
+        remind: Option<String>,
+    },
     /// Reattach routine: verify the marker and the objects, apply queued deletions, add new objects.
     Check {
         label: String,
@@ -1346,6 +1364,154 @@ fn default_home() -> Result<PathBuf> {
 }
 
 /// Decimal sizes for messages ("3.2 GB", "410 MB").
+/// `varsto disk list` as a table: name (sticker), pool, place, state,
+/// free/total, reclaimable, oldest check, last seen, file system check.
+fn disk_table(disks: &[varsto_core::pool::DiskStatus]) -> String {
+    use varsto_core::disksuggest::ago;
+    let now = varsto_core::util::now_utc();
+    let date = |t: i64| varsto_core::util::format_date(t);
+    let mut rows: Vec<[String; 9]> = vec![[
+        "NAME".into(),
+        "POOL".into(),
+        "PLACE".into(),
+        "STATE".into(),
+        "FREE / TOTAL".into(),
+        "RECLAIMABLE".into(),
+        "OLDEST CHECK".into(),
+        "LAST SEEN".into(),
+        "FSCK".into(),
+    ]];
+    for d in disks {
+        let mut state = vec![if d.attached { "attached" } else { "away" }];
+        if d.retired {
+            state.push("retired");
+        }
+        if d.failing {
+            state.push("failing");
+        }
+        let space = match d.free_bytes {
+            Some(f) => format!("{} / {}", fmt_bytes(f), fmt_bytes(d.capacity_bytes)),
+            None => format!("? / {}", fmt_bytes(d.capacity_bytes)),
+        };
+        let checked = match d.oldest_check_utc {
+            None => "-".to_string(),
+            Some(0) => "never".to_string(),
+            Some(t) => date(t),
+        } + &if d.copies_overdue > 0 {
+            format!(" ({:.0} % due)", d.overdue_share * 100.0)
+        } else {
+            String::new()
+        };
+        let seen = if d.attached {
+            "now".to_string()
+        } else if d.last_seen_utc > 0 {
+            ago(now, d.last_seen_utc)
+        } else {
+            "never".to_string()
+        };
+        let fsck = d
+            .fsck
+            .as_ref()
+            .map(|c| format!("{:?} {}", c.verdict, date(c.checked_utc)).to_lowercase())
+            .unwrap_or_else(|| "-".to_string());
+        rows.push([
+            d.label.clone(),
+            d.pool.clone(),
+            d.place.clone(),
+            state.join(", "),
+            space,
+            fmt_bytes(d.reclaimable_bytes),
+            checked,
+            seen,
+            fsck,
+        ]);
+    }
+    let mut widths = [0usize; 9];
+    for r in &rows {
+        for (i, c) in r.iter().enumerate() {
+            widths[i] = widths[i].max(c.chars().count());
+        }
+    }
+    let mut out = String::new();
+    for r in &rows {
+        let line: Vec<String> = r
+            .iter()
+            .enumerate()
+            .map(|(i, c)| format!("{c}{}", " ".repeat(widths[i] - c.chars().count())))
+            .collect();
+        out.push_str(line.join("  ").trim_end());
+        out.push('\n');
+    }
+    out
+}
+
+/// `varsto disk suggest` as text: the suggestion with its reasons and the
+/// command to run, the other disks, attached ones and the ones left out.
+fn suggest_text(s: &varsto_core::disksuggest::DiskSuggestions) -> String {
+    let mut out = String::new();
+    let reasons = |d: &varsto_core::disksuggest::DiskSuggestion| -> String {
+        if d.reasons.is_empty() {
+            return "  - nothing due\n".to_string();
+        }
+        d.reasons
+            .iter()
+            .map(|r| format!("  - {}\n", r.text))
+            .collect()
+    };
+    match &s.top {
+        Some(t) => {
+            out += &format!(
+                "Suggested next: «{}» (pool {}, {}), score {:.1}\n{}  Run: {}\n",
+                t.label,
+                t.pool,
+                t.place,
+                t.score,
+                reasons(t),
+                t.command
+            );
+        }
+        None => out += "No disk needs docking now.\n",
+    }
+    let rest: Vec<_> = s
+        .ranked
+        .iter()
+        .filter(|d| s.top.as_ref().is_none_or(|t| t.disk_id != d.disk_id))
+        .collect();
+    if !rest.is_empty() {
+        out += "\nOther disks that are away:\n";
+        for d in rest {
+            out += &format!(
+                "«{}» (pool {}, {}), score {:.1}\n{}",
+                d.label,
+                d.pool,
+                d.place,
+                d.score,
+                reasons(d)
+            );
+        }
+    }
+    if !s.attached.is_empty() {
+        out += "\nAttached now (no docking needed; `varsto disk check <label>` checks one):\n";
+        for d in &s.attached {
+            out += &format!(
+                "«{}» (pool {}, {}), score {:.1}\n{}",
+                d.label,
+                d.pool,
+                d.place,
+                d.score,
+                reasons(d)
+            );
+        }
+    }
+    if !s.excluded.is_empty() {
+        out += "\nNot suggested:\n";
+        for d in &s.excluded {
+            out += &format!("«{}» (pool {}): {}\n", d.label, d.pool, d.warning);
+        }
+    }
+    out
+}
+
 fn fmt_bytes(n: u64) -> String {
     const UNITS: [&str; 5] = ["B", "kB", "MB", "GB", "TB"];
     let mut v = n as f64;
@@ -2397,44 +2563,34 @@ fn run(cli: &Cli) -> Result<()> {
                             .unwrap_or_default()
                     })?;
                 }
-                DiskCmd::List => {
-                    let disks = engine.disks()?;
+                DiskCmd::List { sort, reverse } => {
+                    let mut disks = engine.disk_report()?;
+                    varsto_core::disksuggest::sort_disks(&mut disks, sort, *reverse)?;
                     // The drives of disks.conf: their partition and whether they are plugged in.
                     let known = drives::known_drives(&home);
-                    let drive_of = |label: &str| known.iter().find(|(d, _)| d.label == label);
+                    let drive_of = |pool: &str, label: &str| {
+                        known
+                            .iter()
+                            .find(|(d, _)| d.pool == pool && d.label == label)
+                    };
                     if cli.json {
                         let mut rows = serde_json::to_value(&disks)?;
                         for row in rows.as_array_mut().into_iter().flatten() {
                             let label = row["label"].as_str().unwrap_or_default().to_string();
-                            if let Some((d, at)) = drive_of(&label) {
+                            let pool = row["pool"].as_str().unwrap_or_default().to_string();
+                            if let Some((d, at)) = drive_of(&pool, &label) {
                                 row["partuuid"] = serde_json::json!(d.partuuid);
                                 row["plugged_in"] = serde_json::json!(at.is_some());
                                 row["partition"] = serde_json::json!(at.as_ref().map(|a| &a.0));
-                                row["fsck"] = serde_json::json!(varsto_core::diskconf::checks(
-                                    &home
-                                )
-                                .get(&d.partuuid));
                             }
                         }
                         println!("{}", serde_json::to_string_pretty(&rows)?);
                         return Ok(());
                     }
                     let mut text = String::new();
-                    let checks = varsto_core::diskconf::checks(&home);
                     for (d, at) in &known {
-                        let check = checks
-                            .get(&d.partuuid)
-                            .map(|c| {
-                                format!(
-                                    "; file system checked {}: {:?}",
-                                    varsto_core::util::format_date(c.checked_utc),
-                                    c.verdict
-                                )
-                                .to_lowercase()
-                            })
-                            .unwrap_or_else(|| "; file system not checked yet".into());
                         text.push_str(&format!(
-                            "drive \"{}\" (pool {}, PARTUUID {}{check}): {}\n",
+                            "drive \"{}\" (pool {}, PARTUUID {}): {}\n",
                             d.label,
                             d.pool,
                             d.partuuid,
@@ -2449,47 +2605,37 @@ fn run(cli: &Cli) -> Result<()> {
                             }
                         ));
                     }
+                    if !text.is_empty() {
+                        text.push('\n');
+                    }
+                    if disks.is_empty() {
+                        text.push_str("no disks; add a pool with `varsto storage add-pool <name>` and a disk with `varsto disk add`\n");
+                    } else {
+                        text.push_str(&disk_table(&disks));
+                    }
                     print!("{text}");
-                    print(cli, &disks, |disks| {
-                        if disks.is_empty() {
-                            return "no disks; add a pool with `varsto storage add-pool <name>` and a disk with `varsto disk add`".to_string();
+                }
+                DiskCmd::Suggest { pool, remind } => {
+                    if let Some(r) = remind {
+                        let mut st = engine.disk_suggest_settings();
+                        st.notify_overdue = r == "on";
+                        engine.set_disk_suggest_settings(st)?;
+                    }
+                    let s = engine.disk_suggestions_for(pool.as_deref())?;
+                    if cli.json {
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(&serde_json::json!({
+                                "suggestions": s,
+                                "settings": engine.disk_suggest_settings(),
+                            }))?
+                        );
+                    } else {
+                        print!("{}", suggest_text(&s));
+                        if let Some(r) = remind {
+                            println!("weekly reminder of overdue disks: {r}");
                         }
-                        disks
-                            .iter()
-                            .map(|d| {
-                                let state = if d.attached {
-                                    format!(
-                                        "attached at {}, {} free",
-                                        d.mount.as_ref().map(|p| p.display().to_string()).unwrap_or_default(),
-                                        d.free_bytes.map(fmt_bytes).unwrap_or_else(|| "? ".into())
-                                    )
-                                } else {
-                                    "offline".to_string()
-                                };
-                                format!(
-                                    "{} (pool {}, {}): {}{}; {} objects, {} used; last verified {}{}",
-                                    d.label,
-                                    d.pool,
-                                    d.place,
-                                    state,
-                                    if d.retired { ", retired" } else { "" },
-                                    d.objects,
-                                    fmt_bytes(d.used_bytes),
-                                    if d.last_verified_utc > 0 {
-                                        varsto_core::util::format_date(d.last_verified_utc)
-                                    } else {
-                                        "never".to_string()
-                                    },
-                                    if d.pending_deletes > 0 {
-                                        format!("; {} pending deletes", d.pending_deletes)
-                                    } else {
-                                        String::new()
-                                    }
-                                )
-                            })
-                            .collect::<Vec<_>>()
-                            .join("\n")
-                    })?;
+                    }
                 }
                 DiskCmd::Check { label, full } => {
                     let r = engine.disk_check(label, *full)?;

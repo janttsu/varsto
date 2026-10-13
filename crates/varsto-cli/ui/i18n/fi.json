@@ -668,21 +668,6 @@
   "Checking disk «{s}» for bit rot": "Tarkistaa levyn «{s}» bittimädän varalta",
   "Checking the files of folder «{s}» for bit rot": "Tarkistaa kansion «{s}» tiedostot bittimädän varalta",
   "Checking the block cache for bit rot": "Tarkistaa lohkovälimuistin bittimädän varalta",
-  "This device's ledger was lost or damaged. It is being restored from the storages before anything else is synced.": "Tämän laitteen kirjanpito katosi tai vaurioitui. Se palautetaan tallennuspaikoista ennen kuin mitään muuta synkronoidaan.",
-  "Restoring this device's ledger from the storages…": "Palautetaan tämän laitteen kirjanpitoa tallennuspaikoista…",
-  "The storages hold newer ledger entries of this device than it has: it was probably restored from an older copy. It records nothing until it continues from them.": "Tallennuspaikoissa on tämän laitteen kirjanpidosta uudempia merkintöjä kuin laitteella itsellään: se on luultavasti palautettu vanhemmasta kopiosta. Se ei kirjaa mitään ennen kuin jatkaa niistä.",
-  "Another copy of this device has written a different ledger history. This device records nothing more: remove it from the vault on another device and pair this computer again as a new device.": "Toinen kopio tästä laitteesta on kirjoittanut erilaisen kirjanpitohistorian. Tämä laite ei kirjaa enää mitään: poista se holvista toisella laitteella ja liitä tämä tietokone uudelleen uutena laitteena.",
-  "No storage holds the record of where the blocks are any more. It is being rebuilt from the folders' file lists and the stored blocks.": "Missään tallennuspaikassa ei ole enää tietoa siitä, missä lohkot ovat. Se rakennetaan uudelleen kansioiden tiedostoluetteloista ja tallennetuista lohkoista.",
-  "Restore now": "Palauta nyt",
-  "Continue from the storages": "Jatka tallennuspaikkojen tiedoista",
-  "Rebuild now": "Rakenna uudelleen nyt",
-  "Rebuilding the ledger": "Rakentaa kirjanpitoa uudelleen",
-  "Restoring this device's ledger from the storages": "Palauttaa tämän laitteen kirjanpitoa tallennuspaikoista",
-  "Fetching the other devices' ledgers again": "Hakee muiden laitteiden kirjanpidot uudelleen",
-  "Reading the folders' file lists": "Lukee kansioiden tiedostoluetteloita",
-  "Listing the stored blocks": "Luetteloi tallennettuja lohkoja",
-  "Checking the stored blocks": "Tarkistaa tallennettuja lohkoja",
-  "Recording where the blocks are": "Kirjaa, missä lohkot ovat",
   "By default every block goes to every storage. Tick storages or places to write this folder only there; a place means every storage in it, now and later. Blocks already stored stay where they are until you move them; policies still count every copy.": "Oletuksena jokainen lohko menee jokaiseen tallennuspaikkaan. Rastita tallennuspaikat tai paikat, niin tämä kansio kirjoitetaan vain niihin; paikka tarkoittaa kaikkia sen tallennuspaikkoja, nyt ja myöhemmin. Jo tallennetut lohkot pysyvät paikallaan, kunnes siirrät ne; säännöt laskevat silti jokaisen kopion.",
   "Tick the device (or devices) this transferrer is taken to. It then carries the blocks they still lack and is emptied as they receive them. Tick none to carry what any device lacks.": "Rastita laite (tai laitteet), jolle tämä siirtolevy viedään. Se kuljettaa lohkot, jotka niiltä vielä puuttuvat, ja tyhjenee sitä mukaa kuin ne saavat ne. Jätä kaikki rastimatta, niin se kuljettaa sen, mitä miltä tahansa laitteelta puuttuu.",
   "No other device yet": "Ei vielä muita laitteita",
@@ -712,6 +697,46 @@
   "Copying blocks from disk «{s}»": "Kopioi lohkoja levyltä «{s}»",
   "Writing files fetched from disk «{s}»": "Kirjoittaa levyltä «{s}» haettuja tiedostoja",
   "Unmounting disk «{s}»": "Irrottaa levyä «{s}»",
+  "Free space": "Vapaa tila",
+  "Used": "Käytetty",
+  "Reclaimable": "Vapautettavissa",
+  "Last checked": "Tarkistettu viimeksi",
+  "Last seen": "Nähty viimeksi",
+  "File system": "Tiedostojärjestelmä",
+  "Sort by this column (again: reverse)": "Järjestä tämän sarakkeen mukaan (uudelleen: käänteisesti)",
+  "never": "ei koskaan",
+  "now": "nyt",
+  "offline": "poissa",
+  "retired": "käytöstä poistettu",
+  "failing": "vikaantumassa",
+  "clean": "virheetön",
+  "corrected": "korjattu",
+  "uncorrected": "korjaamatta",
+  "failed": "epäonnistui",
+  "Suggested next:": "Liitä seuraavaksi:",
+  "Copy": "Kopioi",
+  "Copy the command; run it in a terminal with the disk plugged in": "Kopioi komento ja suorita se päätteessä, kun levy on kytketty",
+  "No disk needs docking now.": "Mitään levyä ei tarvitse kytkeä nyt.",
+  "is attached:": "on liitetty:",
+  "Remind me weekly when a disk is overdue for a check": "Muistuta viikoittain, kun levyn tarkistus on myöhässä",
+  "weekly disk reminder on": "viikoittainen levymuistutus päällä",
+  "weekly disk reminder off": "viikoittainen levymuistutus pois",
+  "never seen by this device": "tämä laite ei ole koskaan nähnyt sitä",
+  "This device's ledger was lost or damaged. It is being restored from the storages before anything else is synced.": "Tämän laitteen kirjanpito katosi tai vaurioitui. Se palautetaan tallennuspaikoista ennen kuin mitään muuta synkronoidaan.",
+  "Restoring this device's ledger from the storages…": "Palautetaan tämän laitteen kirjanpitoa tallennuspaikoista…",
+  "The storages hold newer ledger entries of this device than it has: it was probably restored from an older copy. It records nothing until it continues from them.": "Tallennuspaikoissa on tämän laitteen kirjanpidosta uudempia merkintöjä kuin laitteella itsellään: se on luultavasti palautettu vanhemmasta kopiosta. Se ei kirjaa mitään ennen kuin jatkaa niistä.",
+  "Another copy of this device has written a different ledger history. This device records nothing more: remove it from the vault on another device and pair this computer again as a new device.": "Toinen kopio tästä laitteesta on kirjoittanut erilaisen kirjanpitohistorian. Tämä laite ei kirjaa enää mitään: poista se holvista toisella laitteella ja liitä tämä tietokone uudelleen uutena laitteena.",
+  "No storage holds the record of where the blocks are any more. It is being rebuilt from the folders' file lists and the stored blocks.": "Missään tallennuspaikassa ei ole enää tietoa siitä, missä lohkot ovat. Se rakennetaan uudelleen kansioiden tiedostoluetteloista ja tallennetuista lohkoista.",
+  "Restore now": "Palauta nyt",
+  "Continue from the storages": "Jatka tallennuspaikkojen tiedoista",
+  "Rebuild now": "Rakenna uudelleen nyt",
+  "Rebuilding the ledger": "Rakentaa kirjanpitoa uudelleen",
+  "Restoring this device's ledger from the storages": "Palauttaa tämän laitteen kirjanpitoa tallennuspaikoista",
+  "Fetching the other devices' ledgers again": "Hakee muiden laitteiden kirjanpidot uudelleen",
+  "Reading the folders' file lists": "Lukee kansioiden tiedostoluetteloita",
+  "Listing the stored blocks": "Luetteloi tallennettuja lohkoja",
+  "Checking the stored blocks": "Tarkistaa tallennettuja lohkoja",
+  "Recording where the blocks are": "Kirjaa, missä lohkot ovat",
   "The interface starts in your system's theme; the switch keeps your choice.": "Käyttöliittymä alkaa järjestelmän teemalla; kytkin muistaa valintasi.",
   "Checking that the restic mirror is complete": "Tarkistaa, että resticin peilikopio on täydellinen",
   "Backing up the mirror with restic": "Varmuuskopioi peilikopiota resticillä",
@@ -940,6 +965,70 @@
    "$1: lopetettu; levyiltä ei haeta enempää"
   ],
   [
+   "^(\\d+) % overdue$",
+   "$1 % myöhässä"
+  ],
+  [
+   "^Measured (.+)$",
+   "Mitattu $1"
+  ],
+  [
+   "^(\\d+) pending deletes?$",
+   "$1 odottavaa poistoa"
+  ],
+  [
+   "^copied: (.+)$",
+   "kopioitu: $1"
+  ],
+  [
+   "^(.+) % of its copies \\((.+)\\) were last checked over (\\d+) days ago \\(oldest (\\S+)\\)$",
+   "$1 % sen kopioista ($2) tarkistettiin viimeksi yli $3 päivää sitten (vanhin $4)"
+  ],
+  [
+   "^(.+) % of its copies \\((.+)\\) were last checked over (\\d+) days ago \\(some never checked\\)$",
+   "$1 % sen kopioista ($2) tarkistettiin viimeksi yli $3 päivää sitten (osaa ei ole tarkistettu koskaan)"
+  ],
+  [
+   "^(.+) % of its copies \\((.+)\\) are due for a check \\(verify-after-days is 0; oldest (\\S+)\\)$",
+   "$1 % sen kopioista ($2) on tarkistettava (verify-after-days on 0; vanhin $3)"
+  ],
+  [
+   "^(.+) % of its copies \\((.+)\\) are due for a check \\(verify-after-days is 0; some never checked\\)$",
+   "$1 % sen kopioista ($2) on tarkistettava (verify-after-days on 0; osaa ei ole tarkistettu koskaan)"
+  ],
+  [
+   "^(\\d+) objects? \\((.+)\\) exists? on no other disk or storage, (\\d+) of them not checked for over (\\d+) days$",
+   "$1 objektia ($2) ei ole millään muulla levyllä tai tallennuspaikalla; niistä $3 on tarkistamatta yli $4 päivää"
+  ],
+  [
+   "^(\\d+) objects? \\((.+)\\) exists? on no other disk or storage$",
+   "$1 objektia ($2) ei ole millään muulla levyllä tai tallennuspaikalla"
+  ],
+  [
+   "^the fetch plan waits for it \\((\\d+) blocks?, (.+)\\)$",
+   "noutosuunnitelma odottaa sitä ($1 lohkoa, $2)"
+  ],
+  [
+   "^a queued repair needs (\\d+) objects? it holds$",
+   "jonossa oleva korjaus tarvitsee siltä $1 objektia"
+  ],
+  [
+   "^it can take all (.+) the pool lacks$",
+   "siihen mahtuu kaikki levyvarastosta puuttuva ($1)"
+  ],
+  [
+   "^it can take (.+) of the (.+) the pool lacks$",
+   "siihen mahtuu $1 levyvarastosta puuttuvasta $2:stä"
+  ],
+  [
+   "^(.+) can be freed$",
+   "$1 voidaan vapauttaa"
+  ],
+  [
+   "^its last file system check \\((\\S+)\\) corrected errors$",
+   "sen viimeisin tiedostojärjestelmän tarkistus ($1) korjasi virheitä"
+  ],
+  [
    "^saved the analysis of (.+)$",
    "tallennettiin tiedoston $1 analyysi"
   ],
@@ -1117,6 +1206,46 @@
   [
    "(\\d+) blocks in (\\d+) folders?",
    "$1 lohkoa $2 kansiossa"
+  ],
+  [
+   "its file system was last checked",
+   "sen tiedostojärjestelmä tarkistettiin viimeksi"
+  ],
+  [
+   "last seen",
+   "nähty viimeksi"
+  ],
+  [
+   "(\\d+) days ago",
+   "$1 päivää sitten"
+  ],
+  [
+   "(\\d+) weeks ago",
+   "$1 viikkoa sitten"
+  ],
+  [
+   "(\\d+) months ago",
+   "$1 kuukautta sitten"
+  ],
+  [
+   "(\\d+) years ago",
+   "$1 vuotta sitten"
+  ],
+  [
+   "retired: nothing new goes to it",
+   "poistettu käytöstä: siihen ei kirjoiteta mitään uutta"
+  ],
+  [
+   "(\\d+) objects? exists? only on it: copy (?:it|them) elsewhere before the disk goes",
+   "$1 objektia on vain sillä: kopioi ne muualle ennen kuin levy poistuu"
+  ],
+  [
+   "it returned different bytes than were written to it, twice, on (\\S+): the disk, its cable or dock may be failing",
+   "se palautti kahdesti eri tavut kuin siihen kirjoitettiin ($1): levy, sen kaapeli tai telakka voi olla vikaantumassa"
+  ],
+  [
+   "The file system on (.+) has errors that could not be repaired automatically; nothing was read or written\\. Run `sudo e2fsck -f (\\S+)` by hand or retire the disk\\.",
+   "Levyn $1 tiedostojärjestelmässä on virheitä, joita ei voitu korjata automaattisesti; mitään ei luettu eikä kirjoitettu. Aja `sudo e2fsck -f $2` käsin tai poista levy käytöstä."
   ]
  ]
 }

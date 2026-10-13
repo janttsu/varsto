@@ -661,21 +661,6 @@
   "Checking disk «{s}» for bit rot": "Kontrollerar disken «{s}» för bitröta",
   "Checking the files of folder «{s}» for bit rot": "Kontrollerar filerna i mappen «{s}» för bitröta",
   "Checking the block cache for bit rot": "Kontrollerar blockcachen för bitröta",
-  "This device's ledger was lost or damaged. It is being restored from the storages before anything else is synced.": "Den här enhetens liggare gick förlorad eller skadades. Den återställs från lagringsplatserna innan något annat synkroniseras.",
-  "Restoring this device's ledger from the storages…": "Återställer den här enhetens liggare från lagringsplatserna…",
-  "The storages hold newer ledger entries of this device than it has: it was probably restored from an older copy. It records nothing until it continues from them.": "Lagringsplatserna har nyare poster i den här enhetens liggare än enheten själv: den har troligen återställts från en äldre kopia. Den registrerar ingenting förrän den fortsätter från dem.",
-  "Another copy of this device has written a different ledger history. This device records nothing more: remove it from the vault on another device and pair this computer again as a new device.": "En annan kopia av den här enheten har skrivit en annan liggarhistorik. Den här enheten registrerar inget mer: ta bort den från valvet på en annan enhet och para ihop den här datorn igen som en ny enhet.",
-  "No storage holds the record of where the blocks are any more. It is being rebuilt from the folders' file lists and the stored blocks.": "Ingen lagringsplats har längre uppgifterna om var blocken finns. De byggs upp igen från mapparnas fillistor och de lagrade blocken.",
-  "Restore now": "Återställ nu",
-  "Continue from the storages": "Fortsätt från lagringsplatserna",
-  "Rebuild now": "Bygg upp igen nu",
-  "Rebuilding the ledger": "Bygger upp liggaren igen",
-  "Restoring this device's ledger from the storages": "Återställer den här enhetens liggare från lagringsplatserna",
-  "Fetching the other devices' ledgers again": "Hämtar de andra enheternas liggare igen",
-  "Reading the folders' file lists": "Läser mapparnas fillistor",
-  "Listing the stored blocks": "Listar de lagrade blocken",
-  "Checking the stored blocks": "Kontrollerar de lagrade blocken",
-  "Recording where the blocks are": "Registrerar var blocken finns",
   "By default every block goes to every storage. Tick storages or places to write this folder only there; a place means every storage in it, now and later. Blocks already stored stay where they are until you move them; policies still count every copy.": "Som standard skrivs varje block till alla lagringsplatser. Kryssa i lagringsplatser eller platser för att bara skriva den här mappen dit; en plats betyder alla lagringsplatser i den, nu och senare. Block som redan har lagrats ligger kvar där de är tills du flyttar dem; reglerna räknar ändå varje kopia.",
   "Tick the device (or devices) this transferrer is taken to. It then carries the blocks they still lack and is emptied as they receive them. Tick none to carry what any device lacks.": "Kryssa i enheten (eller enheterna) som den här överföringsdisken tas till. Den bär de block som de fortfarande saknar och töms i takt med att de tar emot dem. Kryssa inte i någon för att bära det som någon enhet saknar.",
   "No other device yet": "Inga andra enheter ännu",
@@ -705,6 +690,46 @@
   "Copying blocks from disk «{s}»": "Kopierar block från disken «{s}»",
   "Writing files fetched from disk «{s}»": "Skriver filer hämtade från disken «{s}»",
   "Unmounting disk «{s}»": "Avmonterar disken «{s}»",
+  "Free space": "Ledigt utrymme",
+  "Used": "Använt",
+  "Reclaimable": "Kan frigöras",
+  "Last checked": "Senast kontrollerad",
+  "Last seen": "Senast sedd",
+  "File system": "Filsystem",
+  "Sort by this column (again: reverse)": "Sortera efter den här kolumnen (igen: omvänt)",
+  "never": "aldrig",
+  "now": "nu",
+  "offline": "frånkopplad",
+  "retired": "pensionerad",
+  "failing": "felar",
+  "clean": "felfri",
+  "corrected": "rättad",
+  "uncorrected": "ej rättad",
+  "failed": "misslyckades",
+  "Suggested next:": "Docka härnäst:",
+  "Copy": "Kopiera",
+  "Copy the command; run it in a terminal with the disk plugged in": "Kopiera kommandot och kör det i en terminal med disken ansluten",
+  "No disk needs docking now.": "Ingen disk behöver dockas nu.",
+  "is attached:": "är ansluten:",
+  "Remind me weekly when a disk is overdue for a check": "Påminn mig varje vecka när en disk är sen med sin kontroll",
+  "weekly disk reminder on": "veckovis diskpåminnelse på",
+  "weekly disk reminder off": "veckovis diskpåminnelse av",
+  "never seen by this device": "aldrig sedd av den här enheten",
+  "This device's ledger was lost or damaged. It is being restored from the storages before anything else is synced.": "Den här enhetens liggare gick förlorad eller skadades. Den återställs från lagringsplatserna innan något annat synkroniseras.",
+  "Restoring this device's ledger from the storages…": "Återställer den här enhetens liggare från lagringsplatserna…",
+  "The storages hold newer ledger entries of this device than it has: it was probably restored from an older copy. It records nothing until it continues from them.": "Lagringsplatserna har nyare poster i den här enhetens liggare än enheten själv: den har troligen återställts från en äldre kopia. Den registrerar ingenting förrän den fortsätter från dem.",
+  "Another copy of this device has written a different ledger history. This device records nothing more: remove it from the vault on another device and pair this computer again as a new device.": "En annan kopia av den här enheten har skrivit en annan liggarhistorik. Den här enheten registrerar inget mer: ta bort den från valvet på en annan enhet och para ihop den här datorn igen som en ny enhet.",
+  "No storage holds the record of where the blocks are any more. It is being rebuilt from the folders' file lists and the stored blocks.": "Ingen lagringsplats har längre uppgifterna om var blocken finns. De byggs upp igen från mapparnas fillistor och de lagrade blocken.",
+  "Restore now": "Återställ nu",
+  "Continue from the storages": "Fortsätt från lagringsplatserna",
+  "Rebuild now": "Bygg upp igen nu",
+  "Rebuilding the ledger": "Bygger upp liggaren igen",
+  "Restoring this device's ledger from the storages": "Återställer den här enhetens liggare från lagringsplatserna",
+  "Fetching the other devices' ledgers again": "Hämtar de andra enheternas liggare igen",
+  "Reading the folders' file lists": "Läser mapparnas fillistor",
+  "Listing the stored blocks": "Listar de lagrade blocken",
+  "Checking the stored blocks": "Kontrollerar de lagrade blocken",
+  "Recording where the blocks are": "Registrerar var blocken finns",
   "The interface starts in your system's theme; the switch keeps your choice.": "Gränssnittet börjar i systemets tema; reglaget kommer ihåg ditt val.",
   "Checking that the restic mirror is complete": "Kontrollerar att restic-speglingen är fullständig",
   "Backing up the mirror with restic": "Säkerhetskopierar speglingen med restic",
@@ -931,6 +956,70 @@
   [
    "^(.+): stopped; nothing more is fetched from the disks$",
    "$1: avbrutet; inget mer hämtas från diskarna"
+  ],
+  [
+   "^(\\d+) % overdue$",
+   "$1 % försenade"
+  ],
+  [
+   "^Measured (.+)$",
+   "Mätt $1"
+  ],
+  [
+   "^(\\d+) pending deletes?$",
+   "$1 väntande borttagningar"
+  ],
+  [
+   "^copied: (.+)$",
+   "kopierat: $1"
+  ],
+  [
+   "^(.+) % of its copies \\((.+)\\) were last checked over (\\d+) days ago \\(oldest (\\S+)\\)$",
+   "$1 % av dess kopior ($2) kontrollerades senast för över $3 dagar sedan (äldsta $4)"
+  ],
+  [
+   "^(.+) % of its copies \\((.+)\\) were last checked over (\\d+) days ago \\(some never checked\\)$",
+   "$1 % av dess kopior ($2) kontrollerades senast för över $3 dagar sedan (vissa aldrig)"
+  ],
+  [
+   "^(.+) % of its copies \\((.+)\\) are due for a check \\(verify-after-days is 0; oldest (\\S+)\\)$",
+   "$1 % av dess kopior ($2) ska kontrolleras (verify-after-days är 0; äldsta $3)"
+  ],
+  [
+   "^(.+) % of its copies \\((.+)\\) are due for a check \\(verify-after-days is 0; some never checked\\)$",
+   "$1 % av dess kopior ($2) ska kontrolleras (verify-after-days är 0; vissa aldrig)"
+  ],
+  [
+   "^(\\d+) objects? \\((.+)\\) exists? on no other disk or storage, (\\d+) of them not checked for over (\\d+) days$",
+   "$1 objekt ($2) finns inte på någon annan disk eller lagring; $3 av dem har inte kontrollerats på över $4 dagar"
+  ],
+  [
+   "^(\\d+) objects? \\((.+)\\) exists? on no other disk or storage$",
+   "$1 objekt ($2) finns inte på någon annan disk eller lagring"
+  ],
+  [
+   "^the fetch plan waits for it \\((\\d+) blocks?, (.+)\\)$",
+   "hämtningsplanen väntar på den ($1 block, $2)"
+  ],
+  [
+   "^a queued repair needs (\\d+) objects? it holds$",
+   "en köad reparation behöver $1 objekt från den"
+  ],
+  [
+   "^it can take all (.+) the pool lacks$",
+   "den rymmer allt poolen saknar ($1)"
+  ],
+  [
+   "^it can take (.+) of the (.+) the pool lacks$",
+   "den rymmer $1 av de $2 som poolen saknar"
+  ],
+  [
+   "^(.+) can be freed$",
+   "$1 kan frigöras"
+  ],
+  [
+   "^its last file system check \\((\\S+)\\) corrected errors$",
+   "dess senaste filsystemskontroll ($1) rättade fel"
   ],
   [
    "^saved the analysis of (.+)$",
@@ -1165,6 +1254,46 @@
   [
    "(\\d+) blocks in (\\d+) folders?",
    "$1 block i $2 mappar"
+  ],
+  [
+   "its file system was last checked",
+   "dess filsystem kontrollerades senast"
+  ],
+  [
+   "last seen",
+   "senast sedd"
+  ],
+  [
+   "(\\d+) days ago",
+   "för $1 dagar sedan"
+  ],
+  [
+   "(\\d+) weeks ago",
+   "för $1 veckor sedan"
+  ],
+  [
+   "(\\d+) months ago",
+   "för $1 månader sedan"
+  ],
+  [
+   "(\\d+) years ago",
+   "för $1 år sedan"
+  ],
+  [
+   "retired: nothing new goes to it",
+   "pensionerad: inget nytt skrivs till den"
+  ],
+  [
+   "(\\d+) objects? exists? only on it: copy (?:it|them) elsewhere before the disk goes",
+   "$1 objekt finns bara på den: kopiera dem någon annanstans innan disken tas bort"
+  ],
+  [
+   "it returned different bytes than were written to it, twice, on (\\S+): the disk, its cable or dock may be failing",
+   "den returnerade två gånger andra byte än som skrevs till den ($1): disken, dess kabel eller docka kan vara på väg att gå sönder"
+  ],
+  [
+   "The file system on (.+) has errors that could not be repaired automatically; nothing was read or written\\. Run `sudo e2fsck -f (\\S+)` by hand or retire the disk\\.",
+   "Filsystemet på $1 har fel som inte kunde repareras automatiskt; inget lästes eller skrevs. Kör `sudo e2fsck -f $2` för hand eller pensionera disken."
   ]
  ]
 }

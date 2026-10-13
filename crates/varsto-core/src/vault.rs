@@ -1254,6 +1254,9 @@ pub struct Config {
         skip_serializing_if = "crate::thumbs::ThumbnailSettings::is_default"
     )]
     pub thumbnails: crate::thumbs::ThumbnailSettings,
+    /// The "next disk to dock" reminder (`crate::disksuggest`).
+    #[serde(default)]
+    pub disk_suggest: crate::disksuggest::SuggestSettings,
 }
 
 /// A backup taken on this device (local, never published).

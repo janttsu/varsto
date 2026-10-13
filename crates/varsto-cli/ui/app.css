@@ -385,6 +385,20 @@ td .pill + .pill { margin-left: 4px; }
 td.policy-placement { min-width: 140px; white-space: normal; }
 td.policy-placement button { margin-top: 4px; }
 .pool-group button { margin-top: 4px; }
+/* Pool card: the next disk to dock, and the sortable disk table. */
+.disk-suggest { margin: 0 0 12px; }
+.disk-suggest .notice { margin: 0 0 8px; }
+.disk-suggest .notice button { margin-top: 8px; }
+.notice.suggest-next { background: var(--accent-soft); border-color: var(--accent); }
+.suggest-cmd { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+.suggest-cmd code { font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 4px 8px; overflow-wrap: anywhere; user-select: all; }
+.suggest-cmd button { margin-top: 0 !important; }
+.disk-table th.sortable { padding: 0; }
+.disk-table .th-sort { all: unset; cursor: pointer; display: block; padding: 10px 8px; font: inherit; color: inherit; text-transform: inherit; letter-spacing: inherit; }
+.disk-table .th-sort:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.disk-table th.num .th-sort { text-align: right; }
+.disk-table th[aria-sort] { color: var(--text); }
+.disk-table td .sub { max-width: 260px; }
 td .policy-text { display: block; font-size: 12px; color: var(--muted); margin-top: 4px; min-width: 160px; white-space: normal; overflow-wrap: anywhere; }
 td .muted { font-size: 12.5px; }
 #files tbody tr { cursor: pointer; }
