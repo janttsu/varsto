@@ -39,6 +39,8 @@ cargo fmt --all --check
 
 The integration tests in `crates/varsto-core/tests/` simulate two devices that are never online together, a concurrent edit, and a device restored from an old backup (which must be fenced). The CLI test in `crates/varsto-cli/tests/` runs the built binary end to end with `--json`.
 
+A test or a throwaway service that runs `varsto service run` sets `VARSTO_NO_PORT_MAPPING=1` (as the CLI tests do), so that it never asks the router of the network it runs in to open a port (spec section 52). Router port mapping is tested against fake PCP, NAT-PMP and UPnP gateways on the loopback interface (`p2p::portmap::tests`); free-space limits with the fake provider `pool::set_fake_space`.
+
 ### Virtual machines (levels 3 and up)
 
 ```bash

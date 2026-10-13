@@ -30,6 +30,7 @@ fn two(files: &[(&str, &[u8])]) -> (Lab, Engine, Engine) {
         cold: false,
         carrier: false,
         place: String::new(),
+        min_free: None,
     };
     let lab = Lab {
         a_dir: root.join("a-docs"),

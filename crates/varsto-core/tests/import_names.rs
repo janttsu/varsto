@@ -30,6 +30,7 @@ fn engine(root: &Path) -> Engine {
         cold: false,
         carrier: false,
         place: String::new(),
+        min_free: None,
     })
     .unwrap();
     e

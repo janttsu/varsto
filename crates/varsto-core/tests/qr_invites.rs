@@ -20,6 +20,7 @@ fn storage(root: &std::path::Path) -> StorageSpec {
         cold: false,
         carrier: false,
         place: String::new(),
+        min_free: None,
     }
 }
 

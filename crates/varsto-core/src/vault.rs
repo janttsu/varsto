@@ -1212,6 +1212,10 @@ pub struct FolderMount {
         skip_serializing_if = "crate::fsmeta::MetaSettings::is_default"
     )]
     pub meta: crate::fsmeta::MetaSettings,
+    /// Free space kept on the disk holding the folder: downloads into it
+    /// stop below it (`freespace`; default 5 %).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_free: Option<crate::freespace::MinFree>,
 }
 
 /// How a folder takes part in syncing on this device (a local setting: the
@@ -1510,6 +1514,10 @@ pub struct P2pConfig {
     /// it was are switched on unless this is set.
     #[serde(default)]
     pub user_disabled: bool,
+    /// Ask the home router to forward the port (PCP, NAT-PMP, UPnP) before
+    /// the other ways through NAT; `varsto p2p port-mapping on|off`.
+    #[serde(default = "yes")]
+    pub port_mapping: bool,
 }
 
 /// The port peer-to-peer listens on unless told otherwise: a fixed one is
@@ -1531,6 +1539,7 @@ impl Default for P2pConfig {
             public_addrs: Vec::new(),
             stun: default_stun(),
             user_disabled: false,
+            port_mapping: true,
         }
     }
 }

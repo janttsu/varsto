@@ -26,6 +26,7 @@ fn dir(name: &str, path: &Path, cold: bool) -> StorageSpec {
         cold,
         carrier: false,
         place: String::new(),
+        min_free: None,
     }
 }
 
@@ -343,6 +344,7 @@ fn transferrers_are_not_repaired() {
                 cold: false,
                 carrier: true,
                 place: String::new(),
+                min_free: None,
             },
         ],
     );

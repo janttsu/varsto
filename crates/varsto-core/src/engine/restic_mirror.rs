@@ -335,6 +335,7 @@ impl Engine {
                 deletion_guard: None,
                 ignore_local: Vec::new(),
                 meta: Default::default(),
+                min_free: None,
             });
             folder_safety::write_marker(target, rec)?;
             report.attached.push(rec.name.clone());
@@ -400,6 +401,7 @@ impl Engine {
                 deletion_guard: None,
                 ignore_local: Vec::new(),
                 meta: Default::default(),
+                min_free: None,
             });
             if let Err(e) = folder_safety::write_marker(&path, &rec) {
                 eprintln!("restic mirror: could not mark {}: {e:#}", path.display());

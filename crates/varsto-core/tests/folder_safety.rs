@@ -79,6 +79,7 @@ impl Lab {
                 cold: false,
                 carrier: false,
                 place: String::new(),
+                min_free: None,
             },
             a_dir: root.join("a-docs"),
             b_dir: root.join("b-docs"),

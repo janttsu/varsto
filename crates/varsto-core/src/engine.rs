@@ -310,6 +310,23 @@ pub struct PullReport {
     /// Metadata that could not be applied: "path: problem".
     #[serde(default)]
     pub metadata_problems: Vec<String>,
+    /// Files left for later because the disk would keep less free space
+    /// than its limit (`freespace`), and why (one line per place).
+    #[serde(default)]
+    pub files_waiting_for_space: u64,
+    #[serde(default)]
+    pub low_space: Vec<String>,
+}
+
+impl PullReport {
+    /// A download refused for lack of space: the file waits for the next
+    /// sync (kept pending by the caller); the reason is listed once.
+    pub(crate) fn waiting_for_space(&mut self, low: &crate::freespace::LowSpace) {
+        self.files_waiting_for_space += 1;
+        if !self.low_space.contains(&low.text) {
+            self.low_space.push(low.text.clone());
+        }
+    }
 }
 
 /// Blocks of a folder by where they are: on a storage (verified by another
@@ -368,6 +385,12 @@ pub struct FolderStatus {
     pub remote_not_applied: u64,
     /// Receive-only: this device's changes not published.
     pub local_changes: u64,
+    /// The free space kept on the folder's disk here, as set ("10%",
+    /// bytes) or `None` for the default; and as text ("5 %").
+    #[serde(default)]
+    pub min_free: Option<String>,
+    #[serde(default)]
+    pub min_free_text: String,
 }
 
 /// See `Engine::plan_storage_removal`.
@@ -701,7 +724,7 @@ fn apply_upload(
             if matches!(
                 pool::pool_error(&e),
                 Some(PoolError::NoDiskAttached { .. } | PoolError::NoRoom { .. })
-            ) =>
+            ) || crate::freespace::low_space(&e).is_some() =>
         {
             if !report.storages_unavailable.contains(&d.storage) {
                 report.storages_unavailable.push(d.storage);
@@ -1982,6 +2005,7 @@ impl Engine {
             deletion_guard: None,
             ignore_local: Vec::new(),
             meta: Default::default(),
+            min_free: None,
         });
         self.config.save(&self.home)?;
         self.pending.push(Event::FolderAdded { folder: id.clone() });
@@ -2037,6 +2061,7 @@ impl Engine {
             deletion_guard: None,
             ignore_local: Vec::new(),
             meta: Default::default(),
+            min_free: None,
         });
         self.config.save(&self.home)?;
         folder_safety::write_marker(path, &rec)?;
@@ -2249,6 +2274,84 @@ impl Engine {
                 (r.clone(), mount)
             })
             .collect()
+    }
+
+    /// The free space a folder's disk keeps here (`folder set --min-free`).
+    pub fn folder_min_free(&self, folder: &FolderId) -> crate::freespace::MinFree {
+        self.config
+            .folders
+            .iter()
+            .find(|m| &m.folder_id == folder)
+            .and_then(|m| m.min_free)
+            .unwrap_or(crate::freespace::DEFAULT)
+    }
+
+    /// Set (or, with `None`, reset to the default) the free space kept on
+    /// the disk holding a folder attached here.
+    pub fn set_folder_min_free(
+        &mut self,
+        name_or_id: &str,
+        min: Option<crate::freespace::MinFree>,
+    ) -> Result<()> {
+        let (rec, _) = self.resolve_folder(name_or_id)?;
+        let m = self
+            .config
+            .folders
+            .iter_mut()
+            .find(|m| m.folder_id == rec.folder_id)
+            .ok_or_else(|| anyhow!("folder {} is not attached on this device", rec.name))?;
+        m.min_free = min;
+        self.config.save(&self.home)?;
+        crate::freespace::forget(&crate::freespace::Place::folder(&rec.name).key);
+        Ok(())
+    }
+
+    /// Set (or reset) the free space kept on a local-directory storage's disk.
+    pub fn set_storage_min_free(
+        &mut self,
+        name: &str,
+        min: Option<crate::freespace::MinFree>,
+    ) -> Result<()> {
+        let spec = self
+            .config
+            .storages
+            .iter_mut()
+            .find(|s| s.name() == name)
+            .ok_or_else(|| anyhow!("no storage named {name}"))?;
+        match spec {
+            StorageSpec::LocalDir { min_free, .. } => *min_free = min,
+            StorageSpec::Pool { .. } => bail!(
+                "{name} is a disk pool: it keeps its own reserve on every disk (set when the pool is added)"
+            ),
+            _ => bail!("{name} is not on a disk of this device; a minimum free space applies to local directories only"),
+        }
+        self.config.save(&self.home)?;
+        crate::freespace::forget(&crate::freespace::Place::storage(name).key);
+        Ok(())
+    }
+
+    /// May `needed` bytes be written at `disk` for `rec`? Within the
+    /// folder's root the folder's limit applies, elsewhere (a restore
+    /// target) the default one.
+    pub(crate) fn space_for(&self, rec: &FolderRecord, disk: &Path, needed: u64) -> Result<()> {
+        use crate::freespace::{check, Place, DEFAULT};
+        let mount = self
+            .config
+            .folders
+            .iter()
+            .find(|m| m.folder_id == rec.folder_id && disk.starts_with(&m.path));
+        match mount {
+            Some(m) => check(
+                &Place::folder(&rec.name),
+                disk,
+                m.min_free.unwrap_or(DEFAULT),
+                needed,
+            ),
+            None => {
+                let dir = disk.parent().unwrap_or(disk);
+                check(&Place::path(dir), disk, DEFAULT, needed)
+            }
+        }
     }
 
     fn mount_is_selective(&self, folder: &FolderId) -> bool {
@@ -3539,8 +3642,16 @@ impl Engine {
                                 match backend.put_pack(&members) {
                                     Ok(flags) => flags.into_iter().map(Ok).collect(),
                                     Err(e) => {
+                                        // A full disk stays that error (the
+                                        // storage is left out, not the push).
+                                        let low = crate::freespace::low_space(&e).cloned();
                                         let msg = format!("{e:#}");
-                                        mine.iter().map(|_| Err(anyhow!("{msg}"))).collect()
+                                        mine.iter()
+                                            .map(|_| match &low {
+                                                Some(l) => Err(anyhow::Error::new(l.clone())),
+                                                None => Err(anyhow!("{msg}")),
+                                            })
+                                            .collect()
                                     }
                                 }
                             };
@@ -4567,6 +4678,11 @@ impl Engine {
                 report.files_updated += 1;
             }
             Err(e) => {
+                if let Some(low) = crate::freespace::low_space(&e) {
+                    report.waiting_for_space(low);
+                    state.pending_remote.insert(remote.path.clone(), remote);
+                    return Ok(());
+                }
                 if let Some(PoolError::NeedsDisk { label, place, .. }) = pool::pool_error(&e) {
                     let d = format!("{label} ({place})");
                     if !report.disks_needed.contains(&d) {
@@ -4657,6 +4773,9 @@ impl Engine {
         storages: &[(StorageSpec, Box<dyn Storage>)],
         report: &mut PullReport,
     ) -> Result<()> {
+        // Nothing new is written where the disk would keep less free space
+        // than its limit; the caller keeps the file for a later sync.
+        self.space_for(rec, disk, file.size)?;
         if let Some(parent) = disk.parent() {
             fs::create_dir_all(parent)?;
             if fs::symlink_metadata(parent).is_ok_and(|m| m.file_type().is_symlink()) {
@@ -5391,6 +5510,7 @@ impl Engine {
             deletion_guard: None,
             ignore_local: Vec::new(),
             meta: Default::default(),
+            min_free: None,
         });
         self.config.save(&self.home)?;
         self.unlocked.insert(
@@ -5723,6 +5843,8 @@ impl Engine {
             nat: crate::p2p::stun::Nat::Unknown,
             relay_via: Vec::new(),
             reachable: !self.config.p2p.public_addrs.is_empty(),
+            mapped_tcp: Vec::new(),
+            mapped_udp: Vec::new(),
         }
     }
 
@@ -6294,6 +6416,14 @@ impl Engine {
                 held_deletions: self.held_summary(&state),
                 remote_not_applied: state.not_applied.len() as u64,
                 local_changes: state.local_changes.len() as u64,
+                min_free: self
+                    .config
+                    .folders
+                    .iter()
+                    .find(|m| m.folder_id == rec.folder_id)
+                    .and_then(|m| m.min_free)
+                    .map(|m| m.setting()),
+                min_free_text: self.folder_min_free(&rec.folder_id).describe(),
             });
         }
         Ok(StatusReport {

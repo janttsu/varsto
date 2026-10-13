@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: PolyForm-Shield-1.0.0
-"""Browser test of the QR scanner (docs/spec/alpha-0-format.md section 43):
+"""Browser test of the QR scanner (docs/spec/alpha-0-format.md section 51):
 Chromium with a fake camera that films QR codes, driving the setup page.
 
     python3 scripts/test/qr-scan-browser.py [path/to/varsto]

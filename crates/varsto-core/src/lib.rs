@@ -21,6 +21,8 @@ pub mod crypto;
 pub mod diskconf;
 pub mod disksuggest;
 pub mod engine;
+pub mod events;
+pub mod freespace;
 pub mod fsmeta;
 pub mod ids;
 pub mod ignore_rules;

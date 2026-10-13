@@ -101,6 +101,7 @@ fn lab(rclone: &str, wrapper_for: Option<&str>) -> Lab {
             cold: false,
             carrier: false,
             place: String::new(),
+            min_free: None,
         })
         .unwrap();
     Lab {

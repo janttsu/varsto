@@ -201,6 +201,28 @@ fn handle_unlocked(fixed: &Fixed, request: Request) -> Result<Option<Request>> {
     if *request.method() != Method::Get {
         return Ok(Some(request));
     }
+    if path == "/api/events" {
+        // A stream of its own thread (`sse`); the browser's EventSource
+        // cannot set headers, so the token may come in the query.
+        let query = request
+            .url()
+            .split_once('?')
+            .map_or(String::new(), |(_, q)| q.to_string());
+        let token_ok = request
+            .headers()
+            .iter()
+            .any(|h| h.field.equiv("X-Varsto-Token") && h.value.as_str() == fixed.token)
+            || query_param(&query, "token").as_deref() == Some(fixed.token.as_str());
+        if !token_ok {
+            request.respond(json_response(
+                401,
+                &json!({"error": "missing or wrong token; reopen the start URL"}),
+            ))?;
+            return Ok(None);
+        }
+        crate::sse::serve(request, &query, fixed.traffic.clone());
+        return Ok(None);
+    }
     match path.as_str() {
         "/" => request.respond(html(INDEX_HTML))?,
         "/app.js" => request.respond(text(APP_JS, "text/javascript; charset=utf-8"))?,
@@ -597,10 +619,15 @@ fn handle(state: &Shared, mut request: Request) -> Result<()> {
         service::request_quit(state);
         return Ok(());
     }
+    let post = method == Method::Post;
     let result = {
         let mut st = state.lock().unwrap();
         api(&mut st, method, &path, &query, &input)
     };
+    // Something was changed through the API: open pages load it again.
+    if post && result.is_ok() && path != "/api/sync" {
+        varsto_core::events::publish("config.changed", json!({"source": "api", "path": path}));
+    }
     match result {
         Ok(v) => Ok(request.respond(json_response(200, &v))?),
         Err(e) => Ok(request.respond(json_response(400, &json!({"error": format!("{e:#}")})))?),
@@ -852,6 +879,19 @@ fn s(v: &Value, key: &str) -> Result<String> {
 }
 
 /// A list of strings (absent: empty).
+/// `min_free`: "5%", "10GB", or empty / "default" for the default.
+fn min_free_input(v: &Value) -> Result<Option<varsto_core::freespace::MinFree>> {
+    let t = v
+        .get("min_free")
+        .and_then(|x| x.as_str())
+        .unwrap_or("")
+        .trim();
+    if t.is_empty() || t.eq_ignore_ascii_case("default") {
+        return Ok(None);
+    }
+    Ok(Some(varsto_core::freespace::MinFree::parse(t)?))
+}
+
 fn str_list(v: &Value, key: &str) -> Vec<String> {
     v.get(key)
         .and_then(|x| x.as_array())
@@ -1022,6 +1062,7 @@ fn storage_from_input(
             cold: false,
             carrier: false,
             place: String::new(),
+            min_free: None,
         },
         None,
     ))
@@ -1405,6 +1446,7 @@ fn api(st: &mut State, method: Method, path: &str, query: &str, input: &Value) -
                     cold: false,
                     carrier: false,
                     place: String::new(),
+                    min_free: None,
                 }
             };
             // The key in hex, or the 24 words of the recovery kit.
@@ -1792,6 +1834,7 @@ fn api_unlocked(
                         cold,
                         carrier,
                         place: opt(input, "place").unwrap_or_default(),
+                        min_free: None,
                     })?;
                     let targets = string_list(input, "carrier_for");
                     if carrier && !targets.is_empty() {
@@ -2067,6 +2110,7 @@ fn api_unlocked(
         }
         (Method::Post, "/api/sync") => {
             let folder = opt(input, "folder");
+            varsto_core::events::publish("sync.started", json!({"reason": "requested", "folder": folder}));
             let reports = engine.sync(folder.as_deref())?;
             service.record_sync(&reports);
             Ok(serde_json::to_value(
@@ -2366,6 +2410,8 @@ fn api_unlocked(
             "relays": service.p2p_relays,
             "paths": service.p2p_paths,
             "cert_sha256": service.p2p_cert_sha256,
+            "portmap": service.p2p_portmap,
+            "portmap_text": service.p2p_portmap.describe(),
         })),
         (Method::Post, "/api/p2p") => {
             let mut c = engine.p2p_config();
@@ -2383,6 +2429,11 @@ fn api_unlocked(
             if let Some(stun) = input.get("stun").and_then(|v| v.as_str()) {
                 // An empty field disables STUN on purpose.
                 c.stun = stun.split(',').map(|a| a.trim().to_string()).filter(|a| !a.is_empty()).collect();
+            }
+            // Router port mapping takes effect at once (the service's loop
+            // reads the setting every half second).
+            if let Some(pm) = input.get("port_mapping").and_then(|v| v.as_bool()) {
+                c.port_mapping = pm;
             }
             let enabled = c.enabled;
             let same_settings = was.1 == c.port && was.2 == c.public_addrs && was.3 == c.stun;
@@ -2736,6 +2787,19 @@ fn api_unlocked(
             }
             Ok(out)
         }
+        (Method::Post, "/api/folder/min-free") => {
+            let m = min_free_input(input)?;
+            engine.set_folder_min_free(&s(input, "folder")?, m)?;
+            // Space may be enough now: try what waits.
+            service.request_sync();
+            Ok(json!({"ok": true, "min_free": m.map(|m| m.setting())}))
+        }
+        (Method::Post, "/api/storage/min-free") => {
+            let m = min_free_input(input)?;
+            engine.set_storage_min_free(&s(input, "name")?, m)?;
+            service.request_sync();
+            Ok(json!({"ok": true, "min_free": m.map(|m| m.setting())}))
+        }
         (Method::Post, "/api/selective") => {
             engine.set_selective(
                 &s(input, "folder")?,
@@ -2841,6 +2905,7 @@ mod tests {
                 cold: false,
                 carrier: false,
                 place: String::new(),
+                min_free: None,
             })
             .unwrap();
         engine

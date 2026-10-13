@@ -23,6 +23,7 @@ mod placing;
 mod restic;
 mod service;
 mod trash;
+mod sse;
 mod tray;
 mod update;
 mod upkeep;
@@ -682,6 +683,11 @@ enum P2pCmd {
         no_stun: bool,
     },
     Disable,
+    /// Ask the home router to forward the peer-to-peer port (PCP, NAT-PMP, UPnP): on (default) or off.
+    PortMapping {
+        #[arg(value_parser = ["on", "off"])]
+        state: String,
+    },
     /// Show settings, NAT guess, public address and the path to every peer.
     Status,
     /// Live traffic per peer: speed, totals and path, from the running service.
@@ -1043,6 +1049,14 @@ enum StorageCmd {
         #[arg(long, default_value_t = 1)]
         copies: u32,
     },
+    /// Change a storage's settings.
+    Set {
+        name: String,
+        /// Free space kept on a local directory's disk: block writes stop below it,
+        /// e.g. 5% or 10GB ("default": 5 %).
+        #[arg(long)]
+        min_free: String,
+    },
     /// List storages with their prices and monthly cost.
     List,
     /// Remove a storage. Blocks that would be left without enough copies
@@ -1309,11 +1323,16 @@ enum FolderCmd {
         folder: String,
         path: String,
     },
-    /// Show or change which file metadata this device syncs for a folder:
-    /// permissions, symbolic links and extended attributes (on by default)
-    /// and ownership (off by default).
+    /// Show or change a folder's settings on this device: which file
+    /// metadata it syncs (permissions, symbolic links and extended
+    /// attributes on by default, ownership off by default) and the free
+    /// space kept on its disk.
     Set {
         folder: String,
+        /// Free space kept on the disk holding the folder: downloads into it stop below it,
+        /// e.g. 5% or 10GB ("default": 5 %).
+        #[arg(long)]
+        min_free: Option<String>,
         #[arg(long, value_name = "on|off", value_parser = clap::builder::BoolishValueParser::new())]
         permissions: Option<bool>,
         #[arg(long, value_name = "on|off", value_parser = clap::builder::BoolishValueParser::new())]
@@ -1422,6 +1441,25 @@ fn ignore_listing(i: &varsto_core::engine::IgnoreInfo, local_only: bool) -> Stri
     }
     out.extend(i.local.iter().map(|l| format!("  {l}")));
     out.join("\n")
+}
+
+/// "default" (or empty) for the default, else a limit such as 5% or 10GB.
+fn min_free_arg(v: &str) -> Result<Option<varsto_core::freespace::MinFree>> {
+    let t = v.trim();
+    if t.is_empty() || t.eq_ignore_ascii_case("default") {
+        return Ok(None);
+    }
+    Ok(Some(varsto_core::freespace::MinFree::parse(t)?))
+}
+
+fn min_free_text(v: Option<varsto_core::freespace::MinFree>) -> String {
+    match v {
+        Some(m) => m.describe(),
+        None => format!(
+            "{} (the default)",
+            varsto_core::freespace::DEFAULT.describe()
+        ),
+    }
 }
 
 /// FOLDER PATH as given, or the folder and path of one path on disk.
@@ -2678,6 +2716,7 @@ fn run(cli: &Cli) -> Result<()> {
                     cold: false,
                     carrier: false,
                     place: String::new(),
+                    min_free: None,
                 },
                 (None, None) => bail_usage("give --storage-path <dir> or --s3-bucket ...")?,
             };
@@ -2720,6 +2759,22 @@ fn run(cli: &Cli) -> Result<()> {
             }
         }
         Cmd::Storage { cmd } => {
+            if let StorageCmd::Set { name, min_free } = cmd {
+                // Through the running service when there is one: its own
+                // copy of the configuration takes the change at once.
+                let m = min_free_arg(min_free)?;
+                if call_service(
+                    &home,
+                    "/api/storage/min-free",
+                    serde_json::json!({"name": name, "min_free": min_free}),
+                )?
+                .is_none()
+                {
+                    open_engine(&home)?.set_storage_min_free(name, m)?;
+                }
+                println!("{name}: {} kept free on its disk", min_free_text(m));
+                return Ok(());
+            }
             let mut engine = open_engine(&home)?;
             match cmd {
                 StorageCmd::AddLocal {
@@ -2736,6 +2791,7 @@ fn run(cli: &Cli) -> Result<()> {
                         cold: *cold,
                         carrier: *carrier,
                         place: place.clone(),
+                        min_free: None,
                     })?;
                     println!("storage {name} added");
                     if !carrier_for.is_empty() {
@@ -2886,6 +2942,7 @@ fn run(cli: &Cli) -> Result<()> {
                     *clear,
                     *measure,
                 )?,
+                StorageCmd::Set { .. } => unreachable!("handled above"),
                 StorageCmd::List => {
                     let estimates = engine.storage_estimates()?;
                     let quotas = engine.quota_statuses()?;
@@ -2913,7 +2970,7 @@ fn run(cli: &Cli) -> Result<()> {
                             .zip(&quotas)
                             .map(|((x, e), q)| {
                                 format!(
-                                    "{}{}{}{}{} | {} stored{} | {}{}",
+                                    "{}{}{}{}{}{} | {} stored{} | {}{}",
                                     x.name(),
                                     if x.is_cold() { " (cold)" } else { "" },
                                     if x.is_carrier() { " (carrier)" } else { "" },
@@ -2926,6 +2983,15 @@ fn run(cli: &Cli) -> Result<()> {
                                         .as_ref()
                                         .map(|d| format!(" ({d})"))
                                         .unwrap_or_default(),
+                                    match x {
+                                        StorageSpec::LocalDir { min_free, .. } => format!(
+                                            " (keeps {} free)",
+                                            min_free
+                                                .unwrap_or(varsto_core::freespace::DEFAULT)
+                                                .describe()
+                                        ),
+                                        _ => String::new(),
+                                    },
                                     fmt_bytes(e.bytes),
                                     match (q.quota_bytes, q.quota_objects) {
                                         (None, None) => String::new(),
@@ -3445,11 +3511,19 @@ fn run(cli: &Cli) -> Result<()> {
                 }
                 FolderCmd::Set {
                     folder,
+                    min_free,
                     permissions,
                     symlinks,
                     xattrs,
                     ownership,
                 } => {
+                    if let Some(min_free) = min_free {
+                        let m = min_free_arg(min_free)?;
+                        engine.set_folder_min_free(folder, m)?;
+                        if !cli.json {
+                            println!("{folder}: {} kept free on its disk here", min_free_text(m));
+                        }
+                    }
                     let mut s = engine.folder_settings(folder)?;
                     let change = permissions.is_some()
                         || symlinks.is_some()
@@ -3666,6 +3740,7 @@ fn run(cli: &Cli) -> Result<()> {
                 }
                 return Ok(());
             }
+            quit_on_signals();
             service::run(service::Options {
                 home,
                 port: *port,
@@ -3674,12 +3749,15 @@ fn run(cli: &Cli) -> Result<()> {
             })?;
         }
         Cmd::Service { cmd } => match cmd {
-            ServiceCmd::Run { port, interval } => service::run(service::Options {
-                home,
-                port: *port,
-                interval_secs: *interval,
-                open_browser: false,
-            })?,
+            ServiceCmd::Run { port, interval } => {
+                quit_on_signals();
+                service::run(service::Options {
+                    home,
+                    port: *port,
+                    interval_secs: *interval,
+                    open_browser: false,
+                })?
+            }
             ServiceCmd::Install { interval } => {
                 service::set_opted_out(&home, false);
                 println!("{}", service::install(&home, *interval)?)
@@ -3875,6 +3953,7 @@ fn run(cli: &Cli) -> Result<()> {
                             cold: false,
                             carrier: false,
                             place: String::new(),
+                            min_free: None,
                         },
                         None,
                     ),
@@ -3985,6 +4064,7 @@ fn run(cli: &Cli) -> Result<()> {
                         cold: false,
                         carrier: false,
                         place: String::new(),
+                        min_free: None,
                     };
                     let tgt = StorageSpec::LocalDir {
                         name: "target".into(),
@@ -3992,6 +4072,7 @@ fn run(cli: &Cli) -> Result<()> {
                         cold: false,
                         carrier: false,
                         place: String::new(),
+                        min_free: None,
                     };
                     let r = varsto_core::replica::Replica::init(&home, name, &token, src, tgt)?;
                     println!(
@@ -4476,10 +4557,15 @@ fn run(cli: &Cli) -> Result<()> {
             // With the background service running, settings go through it:
             // it applies them (on and off at once), and its own copy of the
             // configuration does not overwrite them later.
-            if let (Some((sf, _)), P2pCmd::Enable { .. } | P2pCmd::Disable) =
-                (service::status(&home), cmd)
+            if let (
+                Some((sf, _)),
+                P2pCmd::Enable { .. } | P2pCmd::Disable | P2pCmd::PortMapping { .. },
+            ) = (service::status(&home), cmd)
             {
                 let body = match cmd {
+                    P2pCmd::PortMapping { state } => {
+                        serde_json::json!({"port_mapping": state == "on"})
+                    }
                     P2pCmd::Enable {
                         port,
                         public_addrs,
@@ -4505,7 +4591,18 @@ fn run(cli: &Cli) -> Result<()> {
                 let url = format!("http://127.0.0.1:{}/api/p2p", sf.port);
                 let r: serde_json::Value =
                     serde_json::from_str(&service::http_post(&url, &sf.token, &body.to_string())?)?;
-                println!("{}", r["note"].as_str().unwrap_or("saved"));
+                if let P2pCmd::PortMapping { state } = cmd {
+                    println!(
+                        "router port mapping is {state}{}",
+                        if state == "on" {
+                            " (the service asks the router now)"
+                        } else {
+                            " (the service removed its mappings)"
+                        }
+                    );
+                } else {
+                    println!("{}", r["note"].as_str().unwrap_or("saved"));
+                }
                 return Ok(());
             }
             let mut engine = open_engine(&home)?;
@@ -4529,6 +4626,7 @@ fn run(cli: &Cli) -> Result<()> {
                         public_addrs: public_addrs.clone(),
                         stun,
                         user_disabled: false,
+                        port_mapping: engine.p2p_config().port_mapping,
                     })?;
                     let id = engine.p2p_identity()?;
                     println!(
@@ -4543,6 +4641,14 @@ fn run(cli: &Cli) -> Result<()> {
                     engine.set_p2p_config(c)?;
                     println!(
                         "peer-to-peer is off; the background service stays off it when it starts"
+                    );
+                }
+                P2pCmd::PortMapping { state } => {
+                    let mut c = engine.p2p_config();
+                    c.port_mapping = state == "on";
+                    engine.set_p2p_config(c)?;
+                    println!(
+                        "router port mapping is {state}; the background service applies it when it starts"
                     );
                 }
                 P2pCmd::Status => p2p_status(&engine, &home, cli.json)?,
@@ -5910,6 +6016,20 @@ fn folder_via_service(home: &std::path::Path, cmd: &FolderCmd) -> Result<Option<
             "/api/selective",
             serde_json::json!({"folder": name_or_id, "on": on}),
         ),
+        FolderCmd::Set {
+            folder,
+            min_free: Some(min_free),
+            permissions: None,
+            symlinks: None,
+            xattrs: None,
+            ownership: None,
+        } => {
+            min_free_arg(min_free)?;
+            (
+                "/api/folder/min-free",
+                serde_json::json!({"folder": folder, "min_free": min_free}),
+            )
+        }
         _ => return Ok(None),
     };
     let Some(r) = call_service(home, path, body)? else {
@@ -5945,6 +6065,14 @@ fn folder_via_service(home: &std::path::Path, cmd: &FolderCmd) -> Result<Option<
         FolderCmd::Selective { name_or_id, on } => format!(
             "selective sync {} for {name_or_id}",
             if *on { "on" } else { "off" }
+        ),
+        FolderCmd::Set {
+            folder,
+            min_free: Some(min_free),
+            ..
+        } => format!(
+            "{folder}: {} kept free on its disk here",
+            min_free_text(min_free_arg(min_free)?)
         ),
         _ => String::new(),
     }))
@@ -6315,6 +6443,39 @@ fn traffic_table(r: &varsto_core::p2p::traffic::TrafficReport) -> String {
     out
 }
 
+/// SIGTERM (systemd, launchd) and SIGINT (Ctrl-C) end the service loop the
+/// way the interface's Quit does, so that what it set up outside this
+/// computer (the router port mappings) is removed and the service file goes.
+/// Should a long sync hold the loop, the process exits ten seconds later
+/// regardless, as it did at once before.
+#[cfg(unix)]
+fn quit_on_signals() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    static SIGNALLED: AtomicBool = AtomicBool::new(false);
+    extern "C" fn on_signal(_: libc::c_int) {
+        SIGNALLED.store(true, Ordering::SeqCst);
+    }
+    let handler = on_signal as extern "C" fn(libc::c_int) as libc::sighandler_t;
+    // SAFETY: the handler only stores to an atomic, which is async-signal-safe.
+    unsafe {
+        libc::signal(libc::SIGTERM, handler);
+        libc::signal(libc::SIGINT, handler);
+    }
+    let _ = std::thread::Builder::new()
+        .name("signals".into())
+        .spawn(|| loop {
+            std::thread::sleep(std::time::Duration::from_millis(200));
+            if SIGNALLED.load(Ordering::SeqCst) {
+                service::quit();
+                std::thread::sleep(std::time::Duration::from_secs(10));
+                std::process::exit(0);
+            }
+        });
+}
+
+#[cfg(not(unix))]
+fn quit_on_signals() {}
+
 /// `p2p status`: the running service's view when there is one (its socket
 /// is the one the NAT maps), otherwise the records plus a probe over TCP and
 /// a STUN query from a temporary socket.
@@ -6369,6 +6530,12 @@ fn p2p_status(engine: &Engine, home: &std::path::Path, json: bool) -> Result<()>
                 ),
                 _ => String::new(),
             }
+        );
+        println!(
+            "{}",
+            v["portmap_text"]
+                .as_str()
+                .unwrap_or("router port mapping: not available")
         );
         let paths = v["paths"].as_array().cloned().unwrap_or_default();
         if paths.is_empty() {
@@ -6436,6 +6603,10 @@ fn p2p_status(engine: &Engine, home: &std::path::Path, json: bool) -> Result<()>
         }
     );
     println!("background service not running; probing over TCP from this command");
+    println!(
+        "router port mapping: {} (the background service asks the router when it runs)",
+        if c.port_mapping { "on" } else { "off" }
+    );
     match &stun {
         Some(p) => println!(
             "NAT guess {} ({}, from a temporary socket)",
@@ -6559,6 +6730,7 @@ mod recovery_guide_tests {
                     cold: false,
                     carrier: false,
                     place: String::new(),
+                    min_free: None,
                 },
                 StorageSpec::LocalDir {
                     name: "stick".into(),
@@ -6566,6 +6738,7 @@ mod recovery_guide_tests {
                     cold: false,
                     carrier: true,
                     place: String::new(),
+                    min_free: None,
                 },
                 StorageSpec::S3 {
                     name: "b2".into(),

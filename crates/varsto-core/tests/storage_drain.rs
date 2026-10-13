@@ -28,6 +28,7 @@ fn dir(name: &str, path: &Path, place: &str) -> StorageSpec {
         cold: false,
         carrier: false,
         place: place.into(),
+        min_free: None,
     }
 }
 

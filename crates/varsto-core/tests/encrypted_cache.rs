@@ -106,6 +106,7 @@ fn setup() -> Setup {
         cold: false,
         carrier: false,
         place: String::new(),
+        min_free: None,
     };
     let a_dir = root.join("a-docs");
     let (mut a, key) = Engine::init(&root.join("a-home"), "laptop", PASS).unwrap();

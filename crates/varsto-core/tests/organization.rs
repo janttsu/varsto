@@ -31,6 +31,7 @@ impl Lab {
                 cold: false,
                 carrier: false,
                 place: String::new(),
+                min_free: None,
             },
             root,
             _tmp: tmp,
@@ -275,6 +276,7 @@ fn policy_lets_admins_open_things_up_and_only_admins_write_rosters() {
             cold: false,
             carrier: false,
             place: String::new(),
+            min_free: None,
         })
         .is_err(),
         "storages are still admin-only"
