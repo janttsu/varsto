@@ -262,6 +262,11 @@
           "type": "string",
           "minLength": 1
         },
+        "price_region": {
+          "description": "Code from regions whose prices apply to this endpoint, when it differs from the signing region (for example a provider that signs every endpoint as us-east-1).",
+          "type": "string",
+          "minLength": 1
+        },
         "label": {
           "description": "Human label, such as the city, when it differs from the regions entry.",
           "type": "string",

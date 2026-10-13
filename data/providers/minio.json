@@ -1,0 +1,30 @@
+{
+  "$schema": "schema.json",
+  "schema_version": 1,
+  "id": "minio",
+  "name": "MinIO (self-hosted)",
+  "kind": "self_hosted",
+  "website_url": "https://min.io/",
+  "protocols": [
+    "s3",
+    "rclone"
+  ],
+  "protocols_source": {
+    "source_url": "https://rclone.org/s3/#minio",
+    "last_verified": "2026-10-13"
+  },
+  "s3_endpoints": [
+    {
+      "region": "us-east-1",
+      "label": "Local server",
+      "endpoint": "http://localhost:9000",
+      "path_style": true,
+      "source_url": "https://github.com/minio/minio/blob/master/docs/config/README.md#domain",
+      "last_verified": "2026-10-13",
+      "note": "Replace with your own server address. Path-style: 'By default, MinIO supports path-style requests'; virtual-host style needs MINIO_DOMAIN (config docs). Port 9000 is the default API port in the README quickstart (http://localhost:9000). Without MINIO_SITE_REGION the server accepts any signing region (isValidRegion in cmd/signature-v4-utils.go); us-east-1 is the usual client default. If MINIO_SITE_REGION is set, use that value."
+    }
+  ],
+  "notes": [
+    "The minio/minio GitHub README says the repository is no longer maintained and points to AIStor Free and AIStor Enterprise; the community edition is AGPLv3 and distributed as source only (https://github.com/minio/minio, read 2026-10-13)."
+  ]
+}

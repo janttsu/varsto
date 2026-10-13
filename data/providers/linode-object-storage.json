@@ -1,0 +1,720 @@
+{
+  "$schema": "schema.json",
+  "schema_version": 1,
+  "id": "linode-object-storage",
+  "name": "Akamai Cloud (Linode) Object Storage",
+  "kind": "service",
+  "website_url": "https://techdocs.akamai.com/cloud-computing/docs/object-storage",
+  "signup_url": "https://login.linode.com/signup",
+  "pricing_url": "https://www.akamai.com/cloud/pricing/object-storage",
+  "currency": "USD",
+  "prices_include_tax": null,
+  "tax_note": "The pricing page says: \"We collect taxes for customers who are subject to them.\" It does not say whether listed prices include tax.",
+  "protocols": [
+    "s3",
+    "rclone"
+  ],
+  "protocols_source": {
+    "source_url": "https://rclone.org/s3/#linode",
+    "last_verified": "2026-10-13"
+  },
+  "regions": [
+    {
+      "code": "us-southeast",
+      "city": "Atlanta",
+      "country": "US",
+      "source_url": "https://techdocs.akamai.com/cloud-computing/docs/endpoint-types",
+      "last_verified": "2026-10-13",
+      "note": "Endpoint types: E0 in limited availability (LA)."
+    },
+    {
+      "code": "us-ord",
+      "city": "Chicago",
+      "country": "US",
+      "source_url": "https://techdocs.akamai.com/cloud-computing/docs/endpoint-types",
+      "last_verified": "2026-10-13",
+      "note": "Endpoint types: E1 LA; E3 available."
+    },
+    {
+      "code": "us-lax",
+      "city": "Los Angeles",
+      "country": "US",
+      "source_url": "https://techdocs.akamai.com/cloud-computing/docs/endpoint-types",
+      "last_verified": "2026-10-13",
+      "note": "Endpoint types: E1 LA; E3 available."
+    },
+    {
+      "code": "us-mia",
+      "city": "Miami",
+      "country": "US",
+      "source_url": "https://techdocs.akamai.com/cloud-computing/docs/endpoint-types",
+      "last_verified": "2026-10-13",
+      "note": "Endpoint types: E1 LA."
+    },
+    {
+      "code": "us-east",
+      "city": "Newark",
+      "country": "US",
+      "source_url": "https://techdocs.akamai.com/cloud-computing/docs/endpoint-types",
+      "last_verified": "2026-10-13",
+      "note": "Endpoint types: E0 LA."
+    },
+    {
+      "code": "us-sea",
+      "city": "Seattle",
+      "country": "US",
+      "source_url": "https://techdocs.akamai.com/cloud-computing/docs/endpoint-types",
+      "last_verified": "2026-10-13",
+      "note": "Endpoint types: E1 available; E3 LA."
+    },
+    {
+      "code": "us-iad",
+      "city": "Washington, DC",
+      "country": "US",
+      "source_url": "https://techdocs.akamai.com/cloud-computing/docs/endpoint-types",
+      "last_verified": "2026-10-13",
+      "note": "Endpoint types: E1 LA; table lists two endpoints."
+    },
+    {
+      "code": "us-iad-2",
+      "city": "Washington, DC",
+      "country": "US",
+      "source_url": "https://techdocs.akamai.com/cloud-computing/docs/endpoint-types",
+      "last_verified": "2026-10-13",
+      "note": "Endpoint types: E3 available."
+    },
+    {
+      "code": "id-cgk",
+      "city": "Jakarta",
+      "country": "ID",
+      "source_url": "https://techdocs.akamai.com/cloud-computing/docs/endpoint-types",
+      "last_verified": "2026-10-13",
+      "note": "Endpoint types: E1 available. Has its own network transfer pool and different overage prices."
+    },
+    {
+      "code": "in-maa",
+      "city": "Chennai",
+      "country": "IN",
+      "source_url": "https://techdocs.akamai.com/cloud-computing/docs/endpoint-types",
+      "last_verified": "2026-10-13",
+      "note": "Endpoint types: E1 available."
+    },
+    {
+      "code": "in-bom-2",
+      "city": "Mumbai",
+      "country": "IN",
+      "source_url": "https://techdocs.akamai.com/cloud-computing/docs/endpoint-types",
+      "last_verified": "2026-10-13",
+      "note": "Endpoint types: E3 LA."
+    },
+    {
+      "code": "jp-osa",
+      "city": "Osaka",
+      "country": "JP",
+      "source_url": "https://techdocs.akamai.com/cloud-computing/docs/endpoint-types",
+      "last_verified": "2026-10-13",
+      "note": "Endpoint types: E1 LA."
+    },
+    {
+      "code": "jp-tyo-3",
+      "city": "Tokyo",
+      "country": "JP",
+      "source_url": "https://techdocs.akamai.com/cloud-computing/docs/endpoint-types",
+      "last_verified": "2026-10-13",
+      "note": "Endpoint types: E3 available."
+    },
+    {
+      "code": "ap-south",
+      "city": "Singapore",
+      "country": "SG",
+      "source_url": "https://techdocs.akamai.com/cloud-computing/docs/endpoint-types",
+      "last_verified": "2026-10-13",
+      "note": "Endpoint types: E0 LA."
+    },
+    {
+      "code": "sg-sin-2",
+      "city": "Singapore",
+      "country": "SG",
+      "source_url": "https://techdocs.akamai.com/cloud-computing/docs/endpoint-types",
+      "last_verified": "2026-10-13",
+      "note": "Endpoint types: E3 available."
+    },
+    {
+      "code": "eu-central",
+      "city": "Frankfurt",
+      "country": "DE",
+      "source_url": "https://techdocs.akamai.com/cloud-computing/docs/endpoint-types",
+      "last_verified": "2026-10-13",
+      "note": "Endpoint types: E0 LA."
+    },
+    {
+      "code": "de-fra-2",
+      "city": "Frankfurt",
+      "country": "DE",
+      "source_url": "https://techdocs.akamai.com/cloud-computing/docs/endpoint-types",
+      "last_verified": "2026-10-13",
+      "note": "Endpoint types: E3 available."
+    },
+    {
+      "code": "es-mad",
+      "city": "Madrid",
+      "country": "ES",
+      "source_url": "https://techdocs.akamai.com/cloud-computing/docs/endpoint-types",
+      "last_verified": "2026-10-13",
+      "note": "Endpoint types: E1 LA."
+    },
+    {
+      "code": "fr-par",
+      "city": "Paris",
+      "country": "FR",
+      "source_url": "https://techdocs.akamai.com/cloud-computing/docs/endpoint-types",
+      "last_verified": "2026-10-13",
+      "note": "Endpoint types: E1 available."
+    },
+    {
+      "code": "fr-par-2",
+      "city": "Paris",
+      "country": "FR",
+      "source_url": "https://techdocs.akamai.com/cloud-computing/docs/endpoint-types",
+      "last_verified": "2026-10-13",
+      "note": "Endpoint types: E3 LA."
+    },
+    {
+      "code": "gb-lon",
+      "city": "London",
+      "country": "GB",
+      "source_url": "https://techdocs.akamai.com/cloud-computing/docs/endpoint-types",
+      "last_verified": "2026-10-13",
+      "note": "Endpoint types: E3 available."
+    },
+    {
+      "code": "it-mil",
+      "city": "Milan",
+      "country": "IT",
+      "source_url": "https://techdocs.akamai.com/cloud-computing/docs/endpoint-types",
+      "last_verified": "2026-10-13",
+      "note": "Endpoint types: E1 LA."
+    },
+    {
+      "code": "nl-ams",
+      "city": "Amsterdam",
+      "country": "NL",
+      "source_url": "https://techdocs.akamai.com/cloud-computing/docs/endpoint-types",
+      "last_verified": "2026-10-13",
+      "note": "Endpoint types: E1 LA."
+    },
+    {
+      "code": "se-sto",
+      "city": "Stockholm",
+      "country": "SE",
+      "source_url": "https://techdocs.akamai.com/cloud-computing/docs/endpoint-types",
+      "last_verified": "2026-10-13",
+      "note": "Endpoint types: E1 LA."
+    },
+    {
+      "code": "au-mel",
+      "city": "Melbourne",
+      "country": "AU",
+      "source_url": "https://techdocs.akamai.com/cloud-computing/docs/endpoint-types",
+      "last_verified": "2026-10-13",
+      "note": "Endpoint types: E2 LA."
+    },
+    {
+      "code": "br-gru",
+      "city": "São Paulo",
+      "country": "BR",
+      "source_url": "https://techdocs.akamai.com/cloud-computing/docs/endpoint-types",
+      "last_verified": "2026-10-13",
+      "note": "Endpoint types: E1 available. Has its own network transfer pool and different overage prices."
+    }
+  ],
+  "storage_classes": [
+    {
+      "id": "standard",
+      "name": "Object Storage",
+      "kind": "hot",
+      "applies_to_regions": [
+        "us-southeast",
+        "us-ord",
+        "us-lax",
+        "us-mia",
+        "us-east",
+        "us-sea",
+        "us-iad",
+        "us-iad-2",
+        "in-maa",
+        "in-bom-2",
+        "jp-osa",
+        "jp-tyo-3",
+        "ap-south",
+        "sg-sin-2",
+        "eu-central",
+        "de-fra-2",
+        "es-mad",
+        "fr-par",
+        "fr-par-2",
+        "gb-lon",
+        "it-mil",
+        "nl-ams",
+        "se-sto",
+        "au-mel"
+      ],
+      "pricing_model": "per_gb_month",
+      "storage_price_per_gb_month": [
+        {
+          "from_gb": 0,
+          "up_to_gb": 250,
+          "price": {
+            "value": 0,
+            "source_url": "https://www.akamai.com/cloud/pricing/object-storage",
+            "last_verified": "2026-10-13",
+            "note": "Included in the flat USD 5/month: 'Object Storage costs a flat rate of $5 a month, and includes 250 GB of storage.' The flat fee is charged regardless of usage (see plans)."
+          }
+        },
+        {
+          "from_gb": 250,
+          "up_to_gb": null,
+          "price": {
+            "value": 0.02,
+            "source_url": "https://www.akamai.com/cloud/pricing/object-storage",
+            "last_verified": "2026-10-13",
+            "note": "'The default cost of storage per GB over the first 250 GB is $0.02.' The page adds that overages may vary by data center but lists no other storage rate."
+          }
+        }
+      ],
+      "plans": [
+        {
+          "id": "object-storage-flat",
+          "capacity_gb": {
+            "value": 250,
+            "source_url": "https://www.akamai.com/cloud/pricing/object-storage",
+            "last_verified": "2026-10-13",
+            "note": "Included storage; usage above it is billed at the overage rate, so this is not a hard cap."
+          },
+          "monthly_price": {
+            "value": 5,
+            "source_url": "https://www.akamai.com/cloud/pricing/object-storage",
+            "last_verified": "2026-10-13",
+            "note": "'Object Storage costs a flat rate of $5 a month'; prorated for partial months."
+          }
+        }
+      ],
+      "requests": {
+        "put_per_1000": {
+          "value": 0,
+          "source_url": "https://techdocs.akamai.com/cloud-computing/docs/object-storage-pricing",
+          "last_verified": "2026-10-13",
+          "note": "'Currently, there are no charges for API requests for any Object Storage endpoint types.' Akamai says it is evaluating per-request charges for E3 endpoints, not appearing on invoices earlier than October 1, 2027."
+        },
+        "get_per_1000": {
+          "value": 0,
+          "source_url": "https://techdocs.akamai.com/cloud-computing/docs/object-storage-pricing",
+          "last_verified": "2026-10-13",
+          "note": "'Currently, there are no charges for API requests for any Object Storage endpoint types.' Akamai says it is evaluating per-request charges for E3 endpoints, not appearing on invoices earlier than October 1, 2027."
+        },
+        "list_per_1000": {
+          "value": 0,
+          "source_url": "https://techdocs.akamai.com/cloud-computing/docs/object-storage-pricing",
+          "last_verified": "2026-10-13",
+          "note": "'Currently, there are no charges for API requests for any Object Storage endpoint types.' Akamai says it is evaluating per-request charges for E3 endpoints, not appearing on invoices earlier than October 1, 2027."
+        }
+      },
+      "retrieval": {
+        "price_per_gb": {
+          "value": null,
+          "note": "No retrieval fee is listed; absence of a line item."
+        },
+        "typical_delay": {
+          "value": null,
+          "note": "Not stated in the sources checked."
+        }
+      },
+      "minimum_storage_duration_days": {
+        "value": null,
+        "note": "Not stated on the pricing page or the pricing, limits and endpoint docs."
+      },
+      "minimum_billable_object_size_kb": {
+        "value": null,
+        "note": "Not stated on the pricing page or the pricing, limits and endpoint docs."
+      },
+      "notes": [
+        "Subscription model: a flat USD 5/month includes 250 GB storage and adds 1 TB to the account's monthly network transfer pool; storage above 250 GB is USD 0.02/GB by default.",
+        "Jakarta (id-cgk) and São Paulo (br-gru) are left out of applies_to_regions: the page says overages may vary by data center and lists separate transfer prices for them.",
+        "Endpoint types E0-E3 differ in limits and performance (quotas and limits page); new projects should use E2/E3."
+      ]
+    }
+  ],
+  "default_storage_class": "standard",
+  "egress": {
+    "applies_to_regions": [
+      "us-southeast",
+      "us-ord",
+      "us-lax",
+      "us-mia",
+      "us-east",
+      "us-sea",
+      "us-iad",
+      "us-iad-2",
+      "in-maa",
+      "in-bom-2",
+      "jp-osa",
+      "jp-tyo-3",
+      "ap-south",
+      "sg-sin-2",
+      "eu-central",
+      "de-fra-2",
+      "es-mad",
+      "fr-par",
+      "fr-par-2",
+      "gb-lon",
+      "it-mil",
+      "nl-ams",
+      "se-sto",
+      "au-mel"
+    ],
+    "free_allowance_gb_per_month": {
+      "value": 1000,
+      "source_url": "https://www.akamai.com/cloud/pricing/object-storage",
+      "last_verified": "2026-10-13",
+      "note": "'1 TB of transfer allowance is added to your account's monthly global network transfer pool.' The page does not define TB; recorded as 1000 GB (decimal)."
+    },
+    "free_allowance_scope": "Added to the account-wide global network transfer pool shared with other Akamai Cloud services; prorated by active hours. No allowance is added to the Jakarta and São Paulo pools.",
+    "price_per_gb": [
+      {
+        "from_gb": 0,
+        "up_to_gb": null,
+        "price": {
+          "value": 0.005,
+          "source_url": "https://www.akamai.com/cloud/pricing/object-storage",
+          "last_verified": "2026-10-13",
+          "note": "Egress overage is billed 'at the rate $0.005/GB for all data centers except for Jakarta ($0.015/GB)' and São Paulo ($0.007/GB)."
+        }
+      }
+    ],
+    "notes": [
+      "Jakarta: USD 0.015/GB overage; São Paulo: USD 0.007/GB overage (pricing page FAQ). The region selector on the same page shows USD 0.005/GB for Jakarta, which conflicts with the FAQ.",
+      "All outbound transfer from Object Storage is metered, even to services in the same data center; inbound is free (https://techdocs.akamai.com/cloud-computing/docs/network-transfer-usage-and-costs)."
+    ]
+  },
+  "egress_fair_use": {
+    "value": null,
+    "note": "No fair-use rule for egress is stated on the pricing page or network transfer doc."
+  },
+  "free_tier": {
+    "value": null,
+    "note": "No free tier for Object Storage. The pricing page shows a general Akamai Cloud promotion (USD 100 in credits), which is not modelled."
+  },
+  "object_lock": {
+    "value": true,
+    "source_url": "https://techdocs.akamai.com/cloud-computing/docs/protect-data-with-object-lock",
+    "last_verified": "2026-10-13",
+    "note": "Object Lock (GOVERNANCE and COMPLIANCE) is supported on all endpoint types E0-E3; must be enabled at bucket creation, enables versioning; managed only through the S3 API."
+  },
+  "s3_endpoints": [
+    {
+      "region": "us-east-1",
+      "price_region": "us-southeast",
+      "label": "Atlanta (us-southeast, E0)",
+      "endpoint": "https://us-southeast-1.linodeobjects.com",
+      "path_style": false,
+      "source_url": "https://techdocs.akamai.com/cloud-computing/docs/endpoint-types",
+      "last_verified": "2026-10-13",
+      "note": "Endpoint from the endpoint-types table. Signing region: the AWS CLI guide says to keep the default US region even outside the US and its examples use --region=us-east-1 with any endpoint, so us-east-1 is used here rather than the region id. Virtual-host bucket URLs (https://[bucket].us-southeast-1.linodeobjects.com) are documented on https://techdocs.akamai.com/cloud-computing/docs/access-buckets-and-files-through-urls."
+    },
+    {
+      "region": "us-east-1",
+      "price_region": "us-ord",
+      "label": "Chicago (us-ord, E1)",
+      "endpoint": "https://us-ord-1.linodeobjects.com",
+      "path_style": false,
+      "source_url": "https://techdocs.akamai.com/cloud-computing/docs/endpoint-types",
+      "last_verified": "2026-10-13",
+      "note": "Endpoint from the endpoint-types table. Signing region: the AWS CLI guide says to keep the default US region even outside the US and its examples use --region=us-east-1 with any endpoint, so us-east-1 is used here rather than the region id. Virtual-host bucket URLs (https://[bucket].us-ord-1.linodeobjects.com) are documented on https://techdocs.akamai.com/cloud-computing/docs/access-buckets-and-files-through-urls."
+    },
+    {
+      "region": "us-east-1",
+      "price_region": "us-ord",
+      "label": "Chicago (us-ord, E3)",
+      "endpoint": "https://us-ord-10.linodeobjects.com",
+      "path_style": false,
+      "source_url": "https://techdocs.akamai.com/cloud-computing/docs/endpoint-types",
+      "last_verified": "2026-10-13",
+      "note": "Endpoint from the endpoint-types table. Signing region: the AWS CLI guide says to keep the default US region even outside the US and its examples use --region=us-east-1 with any endpoint, so us-east-1 is used here rather than the region id. Virtual-host bucket URLs (https://[bucket].us-ord-10.linodeobjects.com) are documented on https://techdocs.akamai.com/cloud-computing/docs/access-buckets-and-files-through-urls."
+    },
+    {
+      "region": "us-east-1",
+      "price_region": "us-lax",
+      "label": "Los Angeles (us-lax, E1)",
+      "endpoint": "https://us-lax-1.linodeobjects.com",
+      "path_style": false,
+      "source_url": "https://techdocs.akamai.com/cloud-computing/docs/endpoint-types",
+      "last_verified": "2026-10-13",
+      "note": "Endpoint from the endpoint-types table. Signing region: the AWS CLI guide says to keep the default US region even outside the US and its examples use --region=us-east-1 with any endpoint, so us-east-1 is used here rather than the region id. Virtual-host bucket URLs (https://[bucket].us-lax-1.linodeobjects.com) are documented on https://techdocs.akamai.com/cloud-computing/docs/access-buckets-and-files-through-urls."
+    },
+    {
+      "region": "us-east-1",
+      "price_region": "us-lax",
+      "label": "Los Angeles (us-lax, E3)",
+      "endpoint": "https://us-lax-4.linodeobjects.com",
+      "path_style": false,
+      "source_url": "https://techdocs.akamai.com/cloud-computing/docs/endpoint-types",
+      "last_verified": "2026-10-13",
+      "note": "Endpoint from the endpoint-types table. Signing region: the AWS CLI guide says to keep the default US region even outside the US and its examples use --region=us-east-1 with any endpoint, so us-east-1 is used here rather than the region id. Virtual-host bucket URLs (https://[bucket].us-lax-4.linodeobjects.com) are documented on https://techdocs.akamai.com/cloud-computing/docs/access-buckets-and-files-through-urls."
+    },
+    {
+      "region": "us-east-1",
+      "price_region": "us-mia",
+      "label": "Miami (us-mia, E1)",
+      "endpoint": "https://us-mia-1.linodeobjects.com",
+      "path_style": false,
+      "source_url": "https://techdocs.akamai.com/cloud-computing/docs/endpoint-types",
+      "last_verified": "2026-10-13",
+      "note": "Endpoint from the endpoint-types table. Signing region: the AWS CLI guide says to keep the default US region even outside the US and its examples use --region=us-east-1 with any endpoint, so us-east-1 is used here rather than the region id. Virtual-host bucket URLs (https://[bucket].us-mia-1.linodeobjects.com) are documented on https://techdocs.akamai.com/cloud-computing/docs/access-buckets-and-files-through-urls."
+    },
+    {
+      "region": "us-east-1",
+      "price_region": "us-east",
+      "label": "Newark (us-east, E0)",
+      "endpoint": "https://us-east-1.linodeobjects.com",
+      "path_style": false,
+      "source_url": "https://techdocs.akamai.com/cloud-computing/docs/endpoint-types",
+      "last_verified": "2026-10-13",
+      "note": "Endpoint from the endpoint-types table. Signing region: the AWS CLI guide says to keep the default US region even outside the US and its examples use --region=us-east-1 with any endpoint, so us-east-1 is used here rather than the region id. Virtual-host bucket URLs (https://[bucket].us-east-1.linodeobjects.com) are documented on https://techdocs.akamai.com/cloud-computing/docs/access-buckets-and-files-through-urls."
+    },
+    {
+      "region": "us-east-1",
+      "price_region": "us-sea",
+      "label": "Seattle (us-sea, E1)",
+      "endpoint": "https://us-sea-1.linodeobjects.com",
+      "path_style": false,
+      "source_url": "https://techdocs.akamai.com/cloud-computing/docs/endpoint-types",
+      "last_verified": "2026-10-13",
+      "note": "Endpoint from the endpoint-types table. Signing region: the AWS CLI guide says to keep the default US region even outside the US and its examples use --region=us-east-1 with any endpoint, so us-east-1 is used here rather than the region id. Virtual-host bucket URLs (https://[bucket].us-sea-1.linodeobjects.com) are documented on https://techdocs.akamai.com/cloud-computing/docs/access-buckets-and-files-through-urls."
+    },
+    {
+      "region": "us-east-1",
+      "price_region": "us-sea",
+      "label": "Seattle (us-sea, E3)",
+      "endpoint": "https://us-sea-9.linodeobjects.com",
+      "path_style": false,
+      "source_url": "https://techdocs.akamai.com/cloud-computing/docs/endpoint-types",
+      "last_verified": "2026-10-13",
+      "note": "Endpoint from the endpoint-types table. Signing region: the AWS CLI guide says to keep the default US region even outside the US and its examples use --region=us-east-1 with any endpoint, so us-east-1 is used here rather than the region id. Virtual-host bucket URLs (https://[bucket].us-sea-9.linodeobjects.com) are documented on https://techdocs.akamai.com/cloud-computing/docs/access-buckets-and-files-through-urls."
+    },
+    {
+      "region": "us-east-1",
+      "price_region": "us-iad",
+      "label": "Washington, DC (us-iad, E1)",
+      "endpoint": "https://us-iad-1.linodeobjects.com",
+      "path_style": false,
+      "source_url": "https://techdocs.akamai.com/cloud-computing/docs/endpoint-types",
+      "last_verified": "2026-10-13",
+      "note": "Endpoint from the endpoint-types table. Signing region: the AWS CLI guide says to keep the default US region even outside the US and its examples use --region=us-east-1 with any endpoint, so us-east-1 is used here rather than the region id. Virtual-host bucket URLs (https://[bucket].us-iad-1.linodeobjects.com) are documented on https://techdocs.akamai.com/cloud-computing/docs/access-buckets-and-files-through-urls."
+    },
+    {
+      "region": "us-east-1",
+      "price_region": "us-iad",
+      "label": "Washington, DC (us-iad, E1)",
+      "endpoint": "https://us-iad-10.linodeobjects.com",
+      "path_style": false,
+      "source_url": "https://techdocs.akamai.com/cloud-computing/docs/endpoint-types",
+      "last_verified": "2026-10-13",
+      "note": "Endpoint from the endpoint-types table. Signing region: the AWS CLI guide says to keep the default US region even outside the US and its examples use --region=us-east-1 with any endpoint, so us-east-1 is used here rather than the region id. Virtual-host bucket URLs (https://[bucket].us-iad-10.linodeobjects.com) are documented on https://techdocs.akamai.com/cloud-computing/docs/access-buckets-and-files-through-urls."
+    },
+    {
+      "region": "us-east-1",
+      "price_region": "us-iad-2",
+      "label": "Washington, DC (us-iad-2, E3)",
+      "endpoint": "https://us-iad-18.linodeobjects.com",
+      "path_style": false,
+      "source_url": "https://techdocs.akamai.com/cloud-computing/docs/endpoint-types",
+      "last_verified": "2026-10-13",
+      "note": "Endpoint from the endpoint-types table. Signing region: the AWS CLI guide says to keep the default US region even outside the US and its examples use --region=us-east-1 with any endpoint, so us-east-1 is used here rather than the region id. Virtual-host bucket URLs (https://[bucket].us-iad-18.linodeobjects.com) are documented on https://techdocs.akamai.com/cloud-computing/docs/access-buckets-and-files-through-urls."
+    },
+    {
+      "region": "us-east-1",
+      "price_region": "id-cgk",
+      "label": "Jakarta (id-cgk, E1)",
+      "endpoint": "https://id-cgk-1.linodeobjects.com",
+      "path_style": false,
+      "source_url": "https://techdocs.akamai.com/cloud-computing/docs/endpoint-types",
+      "last_verified": "2026-10-13",
+      "note": "Endpoint from the endpoint-types table. Signing region: the AWS CLI guide says to keep the default US region even outside the US and its examples use --region=us-east-1 with any endpoint, so us-east-1 is used here rather than the region id. Virtual-host bucket URLs (https://[bucket].id-cgk-1.linodeobjects.com) are documented on https://techdocs.akamai.com/cloud-computing/docs/access-buckets-and-files-through-urls."
+    },
+    {
+      "region": "us-east-1",
+      "price_region": "in-maa",
+      "label": "Chennai (in-maa, E1)",
+      "endpoint": "https://in-maa-1.linodeobjects.com",
+      "path_style": false,
+      "source_url": "https://techdocs.akamai.com/cloud-computing/docs/endpoint-types",
+      "last_verified": "2026-10-13",
+      "note": "Endpoint from the endpoint-types table. Signing region: the AWS CLI guide says to keep the default US region even outside the US and its examples use --region=us-east-1 with any endpoint, so us-east-1 is used here rather than the region id. Virtual-host bucket URLs (https://[bucket].in-maa-1.linodeobjects.com) are documented on https://techdocs.akamai.com/cloud-computing/docs/access-buckets-and-files-through-urls."
+    },
+    {
+      "region": "us-east-1",
+      "price_region": "in-bom-2",
+      "label": "Mumbai (in-bom-2, E3)",
+      "endpoint": "https://in-bom-1.linodeobjects.com",
+      "path_style": false,
+      "source_url": "https://techdocs.akamai.com/cloud-computing/docs/endpoint-types",
+      "last_verified": "2026-10-13",
+      "note": "Endpoint from the endpoint-types table. Signing region: the AWS CLI guide says to keep the default US region even outside the US and its examples use --region=us-east-1 with any endpoint, so us-east-1 is used here rather than the region id. Virtual-host bucket URLs (https://[bucket].in-bom-1.linodeobjects.com) are documented on https://techdocs.akamai.com/cloud-computing/docs/access-buckets-and-files-through-urls."
+    },
+    {
+      "region": "us-east-1",
+      "price_region": "jp-osa",
+      "label": "Osaka (jp-osa, E1)",
+      "endpoint": "https://jp-osa-1.linodeobjects.com",
+      "path_style": false,
+      "source_url": "https://techdocs.akamai.com/cloud-computing/docs/endpoint-types",
+      "last_verified": "2026-10-13",
+      "note": "Endpoint from the endpoint-types table. Signing region: the AWS CLI guide says to keep the default US region even outside the US and its examples use --region=us-east-1 with any endpoint, so us-east-1 is used here rather than the region id. Virtual-host bucket URLs (https://[bucket].jp-osa-1.linodeobjects.com) are documented on https://techdocs.akamai.com/cloud-computing/docs/access-buckets-and-files-through-urls."
+    },
+    {
+      "region": "us-east-1",
+      "price_region": "jp-tyo-3",
+      "label": "Tokyo (jp-tyo-3, E3)",
+      "endpoint": "https://jp-tyo-1.linodeobjects.com",
+      "path_style": false,
+      "source_url": "https://techdocs.akamai.com/cloud-computing/docs/endpoint-types",
+      "last_verified": "2026-10-13",
+      "note": "Endpoint from the endpoint-types table. Signing region: the AWS CLI guide says to keep the default US region even outside the US and its examples use --region=us-east-1 with any endpoint, so us-east-1 is used here rather than the region id. Virtual-host bucket URLs (https://[bucket].jp-tyo-1.linodeobjects.com) are documented on https://techdocs.akamai.com/cloud-computing/docs/access-buckets-and-files-through-urls."
+    },
+    {
+      "region": "us-east-1",
+      "price_region": "ap-south",
+      "label": "Singapore (ap-south, E0)",
+      "endpoint": "https://ap-south-1.linodeobjects.com",
+      "path_style": false,
+      "source_url": "https://techdocs.akamai.com/cloud-computing/docs/endpoint-types",
+      "last_verified": "2026-10-13",
+      "note": "Endpoint from the endpoint-types table. Signing region: the AWS CLI guide says to keep the default US region even outside the US and its examples use --region=us-east-1 with any endpoint, so us-east-1 is used here rather than the region id. Virtual-host bucket URLs (https://[bucket].ap-south-1.linodeobjects.com) are documented on https://techdocs.akamai.com/cloud-computing/docs/access-buckets-and-files-through-urls."
+    },
+    {
+      "region": "us-east-1",
+      "price_region": "sg-sin-2",
+      "label": "Singapore (sg-sin-2, E3)",
+      "endpoint": "https://sg-sin-1.linodeobjects.com",
+      "path_style": false,
+      "source_url": "https://techdocs.akamai.com/cloud-computing/docs/endpoint-types",
+      "last_verified": "2026-10-13",
+      "note": "Endpoint from the endpoint-types table. Signing region: the AWS CLI guide says to keep the default US region even outside the US and its examples use --region=us-east-1 with any endpoint, so us-east-1 is used here rather than the region id. Virtual-host bucket URLs (https://[bucket].sg-sin-1.linodeobjects.com) are documented on https://techdocs.akamai.com/cloud-computing/docs/access-buckets-and-files-through-urls."
+    },
+    {
+      "region": "us-east-1",
+      "price_region": "eu-central",
+      "label": "Frankfurt (eu-central, E0)",
+      "endpoint": "https://eu-central-1.linodeobjects.com",
+      "path_style": false,
+      "source_url": "https://techdocs.akamai.com/cloud-computing/docs/endpoint-types",
+      "last_verified": "2026-10-13",
+      "note": "Endpoint from the endpoint-types table. Signing region: the AWS CLI guide says to keep the default US region even outside the US and its examples use --region=us-east-1 with any endpoint, so us-east-1 is used here rather than the region id. Virtual-host bucket URLs (https://[bucket].eu-central-1.linodeobjects.com) are documented on https://techdocs.akamai.com/cloud-computing/docs/access-buckets-and-files-through-urls."
+    },
+    {
+      "region": "us-east-1",
+      "price_region": "de-fra-2",
+      "label": "Frankfurt (de-fra-2, E3)",
+      "endpoint": "https://de-fra-1.linodeobjects.com",
+      "path_style": false,
+      "source_url": "https://techdocs.akamai.com/cloud-computing/docs/endpoint-types",
+      "last_verified": "2026-10-13",
+      "note": "Endpoint from the endpoint-types table. Signing region: the AWS CLI guide says to keep the default US region even outside the US and its examples use --region=us-east-1 with any endpoint, so us-east-1 is used here rather than the region id. Virtual-host bucket URLs (https://[bucket].de-fra-1.linodeobjects.com) are documented on https://techdocs.akamai.com/cloud-computing/docs/access-buckets-and-files-through-urls."
+    },
+    {
+      "region": "us-east-1",
+      "price_region": "es-mad",
+      "label": "Madrid (es-mad, E1)",
+      "endpoint": "https://es-mad-1.linodeobjects.com",
+      "path_style": false,
+      "source_url": "https://techdocs.akamai.com/cloud-computing/docs/endpoint-types",
+      "last_verified": "2026-10-13",
+      "note": "Endpoint from the endpoint-types table. Signing region: the AWS CLI guide says to keep the default US region even outside the US and its examples use --region=us-east-1 with any endpoint, so us-east-1 is used here rather than the region id. Virtual-host bucket URLs (https://[bucket].es-mad-1.linodeobjects.com) are documented on https://techdocs.akamai.com/cloud-computing/docs/access-buckets-and-files-through-urls."
+    },
+    {
+      "region": "us-east-1",
+      "price_region": "fr-par",
+      "label": "Paris (fr-par, E1)",
+      "endpoint": "https://fr-par-1.linodeobjects.com",
+      "path_style": false,
+      "source_url": "https://techdocs.akamai.com/cloud-computing/docs/endpoint-types",
+      "last_verified": "2026-10-13",
+      "note": "Endpoint from the endpoint-types table. Signing region: the AWS CLI guide says to keep the default US region even outside the US and its examples use --region=us-east-1 with any endpoint, so us-east-1 is used here rather than the region id. Virtual-host bucket URLs (https://[bucket].fr-par-1.linodeobjects.com) are documented on https://techdocs.akamai.com/cloud-computing/docs/access-buckets-and-files-through-urls."
+    },
+    {
+      "region": "us-east-1",
+      "price_region": "fr-par-2",
+      "label": "Paris (fr-par-2, E3)",
+      "endpoint": "https://fr-par-13.linodeobjects.com",
+      "path_style": false,
+      "source_url": "https://techdocs.akamai.com/cloud-computing/docs/endpoint-types",
+      "last_verified": "2026-10-13",
+      "note": "Endpoint from the endpoint-types table. Signing region: the AWS CLI guide says to keep the default US region even outside the US and its examples use --region=us-east-1 with any endpoint, so us-east-1 is used here rather than the region id. Virtual-host bucket URLs (https://[bucket].fr-par-13.linodeobjects.com) are documented on https://techdocs.akamai.com/cloud-computing/docs/access-buckets-and-files-through-urls."
+    },
+    {
+      "region": "us-east-1",
+      "price_region": "gb-lon",
+      "label": "London (gb-lon, E3)",
+      "endpoint": "https://gb-lon-1.linodeobjects.com",
+      "path_style": false,
+      "source_url": "https://techdocs.akamai.com/cloud-computing/docs/endpoint-types",
+      "last_verified": "2026-10-13",
+      "note": "Endpoint from the endpoint-types table. Signing region: the AWS CLI guide says to keep the default US region even outside the US and its examples use --region=us-east-1 with any endpoint, so us-east-1 is used here rather than the region id. Virtual-host bucket URLs (https://[bucket].gb-lon-1.linodeobjects.com) are documented on https://techdocs.akamai.com/cloud-computing/docs/access-buckets-and-files-through-urls."
+    },
+    {
+      "region": "us-east-1",
+      "price_region": "it-mil",
+      "label": "Milan (it-mil, E1)",
+      "endpoint": "https://it-mil-1.linodeobjects.com",
+      "path_style": false,
+      "source_url": "https://techdocs.akamai.com/cloud-computing/docs/endpoint-types",
+      "last_verified": "2026-10-13",
+      "note": "Endpoint from the endpoint-types table. Signing region: the AWS CLI guide says to keep the default US region even outside the US and its examples use --region=us-east-1 with any endpoint, so us-east-1 is used here rather than the region id. Virtual-host bucket URLs (https://[bucket].it-mil-1.linodeobjects.com) are documented on https://techdocs.akamai.com/cloud-computing/docs/access-buckets-and-files-through-urls."
+    },
+    {
+      "region": "us-east-1",
+      "price_region": "nl-ams",
+      "label": "Amsterdam (nl-ams, E1)",
+      "endpoint": "https://nl-ams-1.linodeobjects.com",
+      "path_style": false,
+      "source_url": "https://techdocs.akamai.com/cloud-computing/docs/endpoint-types",
+      "last_verified": "2026-10-13",
+      "note": "Endpoint from the endpoint-types table. Signing region: the AWS CLI guide says to keep the default US region even outside the US and its examples use --region=us-east-1 with any endpoint, so us-east-1 is used here rather than the region id. Virtual-host bucket URLs (https://[bucket].nl-ams-1.linodeobjects.com) are documented on https://techdocs.akamai.com/cloud-computing/docs/access-buckets-and-files-through-urls."
+    },
+    {
+      "region": "us-east-1",
+      "price_region": "se-sto",
+      "label": "Stockholm (se-sto, E1)",
+      "endpoint": "https://se-sto-1.linodeobjects.com",
+      "path_style": false,
+      "source_url": "https://techdocs.akamai.com/cloud-computing/docs/endpoint-types",
+      "last_verified": "2026-10-13",
+      "note": "Endpoint from the endpoint-types table. Signing region: the AWS CLI guide says to keep the default US region even outside the US and its examples use --region=us-east-1 with any endpoint, so us-east-1 is used here rather than the region id. Virtual-host bucket URLs (https://[bucket].se-sto-1.linodeobjects.com) are documented on https://techdocs.akamai.com/cloud-computing/docs/access-buckets-and-files-through-urls."
+    },
+    {
+      "region": "us-east-1",
+      "price_region": "au-mel",
+      "label": "Melbourne (au-mel, E2)",
+      "endpoint": "https://au-mel-1.linodeobjects.com",
+      "path_style": false,
+      "source_url": "https://techdocs.akamai.com/cloud-computing/docs/endpoint-types",
+      "last_verified": "2026-10-13",
+      "note": "Endpoint from the endpoint-types table. Signing region: the AWS CLI guide says to keep the default US region even outside the US and its examples use --region=us-east-1 with any endpoint, so us-east-1 is used here rather than the region id. Virtual-host bucket URLs (https://[bucket].au-mel-1.linodeobjects.com) are documented on https://techdocs.akamai.com/cloud-computing/docs/access-buckets-and-files-through-urls."
+    },
+    {
+      "region": "us-east-1",
+      "price_region": "br-gru",
+      "label": "São Paulo (br-gru, E1)",
+      "endpoint": "https://br-gru-1.linodeobjects.com",
+      "path_style": false,
+      "source_url": "https://techdocs.akamai.com/cloud-computing/docs/endpoint-types",
+      "last_verified": "2026-10-13",
+      "note": "Endpoint from the endpoint-types table. Signing region: the AWS CLI guide says to keep the default US region even outside the US and its examples use --region=us-east-1 with any endpoint, so us-east-1 is used here rather than the region id. Virtual-host bucket URLs (https://[bucket].br-gru-1.linodeobjects.com) are documented on https://techdocs.akamai.com/cloud-computing/docs/access-buckets-and-files-through-urls."
+    }
+  ],
+  "notes": [
+    "AWS CLI v2.23.0+ and boto3 1.36.0+ default to data integrity checksums that Object Storage does not support; set request_checksum_calculation=WHEN_REQUIRED or use older versions (https://techdocs.akamai.com/cloud-computing/docs/aws-cli-sdks-support-details).",
+    "Multipart (partNumber) downloads are not supported; use byte-range requests.",
+    "Regions marked LA (limited availability) need a support ticket before use."
+  ]
+}
