@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Alpha.13: backups that nothing can change: Varsto</title>
+<meta name="description" content="Pick a folder on any device and Varsto keeps encrypted, read-only snapshots of it on your external storages, never on your devices, for as many days as you choose (90 by default). Restores go into a directory you name, from the app or the command line.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="canonical" href="https://varsto.net/blog/2026-10-13-alpha-13-backups.html">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Varsto">
+<meta property="og:title" content="Alpha.13: backups that nothing can change: Varsto">
+<meta property="og:description" content="Pick a folder on any device and Varsto keeps encrypted, read-only snapshots of it on your external storages, never on your devices, for as many days as you choose (90 by default). Restores go into a directory you name, from the app or the command line.">
+<meta property="og:url" content="https://varsto.net/blog/2026-10-13-alpha-13-backups.html">
+<meta property="og:image" content="https://varsto.net/assets/img/og-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:locale" content="en_GB">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="alternate" hreflang="en" href="https://varsto.net/blog/2026-10-13-alpha-13-backups.html">
+<link rel="alternate" hreflang="x-default" href="https://varsto.net/blog/2026-10-13-alpha-13-backups.html">
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","headline":"Alpha.13: backups that nothing can change","description":"Pick a folder on any device and Varsto keeps encrypted, read-only snapshots of it on your external storages, never on your devices, for as many days as you choose (90 by default). Restores go into a directory you name, from the app or the command line.","datePublished":"2026-10-13","url":"https://varsto.net/blog/2026-10-13-alpha-13-backups.html","inLanguage":"en","author":{"@type":"Organization","name":"The Varsto Authors"},"image":"https://varsto.net/assets/img/og-card.png"}</script>
+<link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../blog/feed.xml">
+<link rel="stylesheet" href="../assets/css/site.css?v=b3d2d4f387">
+<script src="../assets/js/theme.js?v=0951491269"></script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="alpha" role="note">
+  <div class="wrap"><strong>Alpha software, not for production data.</strong> Bugs can cause data loss, formats may change without migration, and the cryptography has not been independently audited. Keep your own backups and check that you can restore from them.</div>
+</div>
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="../"><img src="../assets/img/logo.svg" alt="" width="28" height="28"><span>Varsto</span></a>
+
+    <nav class="main" aria-label="Main">
+      <a href="../">Project</a>
+      <a href="../features/">Features</a>
+      <a href="../use-cases/">Use cases</a>
+      <a href="../compare/">Compare</a>
+      <a href="../how-it-works/">How it works</a>
+      <a href="../screenshots/">Screenshots</a>
+      <a href="../docs/">Docs</a>
+      <a href="../downloads/">Downloads</a>
+      <a href="../blog/" aria-current="page">Blog</a>
+      <a href="../forum/">Forum</a>
+      <a href="../contribute/">Contribute</a>
+      <a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a>
+      <button class="theme" id="theme-toggle" type="button" aria-label="Change colour theme">Theme: auto</button>
+    </nav>
+  </div>
+</header>
+<main id="main">
+  <div class="wrap">
+<article class="prose"><h1>Alpha.13: backups that nothing can change</h1><p class="note"><time datetime="2026-10-13">2026-10-13</time></p>
+<p>Synchronisation keeps every copy the same, which is exactly what you do not want when a file is deleted by mistake or encrypted by ransomware: the damage reaches every device. Alpha.13 adds backups, which work the other way round.</p>
+<h2 id="how-it-works">How it works</h2>
+<p>You pick a folder on one device and give the backup a name. Varsto takes a snapshot of it: the file list and every block, encrypted like everything else it stores. Snapshots go only to external storages (S3 buckets, rclone remotes, NAS shares, directories and cold storage), never to transferrer disks and never to your other devices. Your other devices see that the backup exists and which snapshots it has, but they do not download its contents.</p>
+<pre><code>varsto backup add accounting ~/Accounting --retention-days 90
+varsto backup list
+varsto backup snapshots accounting
+varsto backup restore accounting 2026-10-01 --to ~/restored</code></pre>
+<p>Snapshots are taken daily by default, weekly or only when you ask (<code>varsto backup take</code>). Blocks that did not change are stored once, however many snapshots use them.</p>
+<h2 id="read-only-and-kept-for-a-set-time">Read-only and kept for a set time</h2>
+<p>A snapshot is never edited after it is taken. Its expiry date is sealed inside it when it is written, so changing the retention later only affects new snapshots. Once a snapshot has expired, the device that made the backup deletes it from the storages. Only blocks that no remaining snapshot needs are deleted, and a day of grace allows for clocks that are a little off. If that device is gone, any other device of the vault does it a little later. Stopping a backup takes no new snapshots but deletes nothing early.</p>
+<h2 id="restoring">Restoring</h2>
+<p>A restore always goes into a directory you name, and that directory must be empty unless you allow overwriting. You can pick the newest snapshot, a numbered one or the newest one on or before a date, and restore everything or only some paths. The app has a Backups page that does the same.</p>
+<h2 id="details-and-limits">Details and limits</h2>
+<p>The format is in section 31 of the <a href="../docs/alpha-0-format.html">specification</a>. In this first version, expiry follows each device's own clock, durability policies do not cover backups yet, and the data-locations view does not show them.</p>
+<p>Older versions do not understand backups: update every device of a vault to alpha.13 before adding one.</p>
+
+</article>
+  </div>
+</main>
+<footer class="site">
+  <div class="wrap">
+    <span>Varsto is a working name. Source: <a href="https://github.com/janttsu/varsto">github.com/janttsu/varsto</a>, under the PolyForm Shield License 1.0.0 (source-available).</span>
+    <span>No cookies, no tracking. The web server keeps a standard access log for at most seven days.</span>
+    <span><a href="../docs/security-policy.html">Security policy</a> · <a href="../docs/licence.html">Licence</a> · <a href="../docs/trademark.html">Trademark</a></span>
+  </div>
+</footer>
+</body>
+</html>

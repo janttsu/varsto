@@ -1,6 +1,6 @@
 # Failure model
 
-> **Design-stage model, written before the code.** Much of it is now implemented as 0.0.1-alpha.12; the per-row notes and [docs/spec/alpha-0-format.md](spec/alpha-0-format.md) record what is built. This document states what the design is meant to tolerate, what it limits, and what it does not cover. Statements such as "designed to" become claims about the product only after the tests named in [TESTING.md](../TESTING.md) show them.
+> **Design-stage model, written before the code.** Much of it is now implemented as 0.0.1-alpha.13; the per-row notes and [docs/spec/alpha-0-format.md](spec/alpha-0-format.md) record what is built. This document states what the design is meant to tolerate, what it limits, and what it does not cover. Statements such as "designed to" become claims about the product only after the tests named in [TESTING.md](../TESTING.md) show them.
 
 Public statements about reliability must match this document. In particular, any marketing message about "no single point of failure" (requirement M-005) has to link here and must not claim more than this document lists.
 
