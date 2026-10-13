@@ -675,6 +675,22 @@
   [
    "^Backup stopped: (.+)$",
    "Säkerhetskopia stoppad: $1"
+  ],
+  [
+   "^Type (.+) to confirm$",
+   "Bekräfta genom att skriva $1"
+  ],
+  [
+   "^Remove storage (.+)\\?$",
+   "Ta bort lagringen $1?"
+  ],
+  [
+   "^(.+) holds (\\d+) blocks? of your files\\. Every block already has enough copies on your other storages\\. Then no device counts \\1 as a copy any more\\. Remove leaves its data in place; you can also delete it\\.$",
+   "Lagringen $1 innehåller $2 block av dina filer. Varje block har redan tillräckligt många kopior i dina andra lagringar. Därefter räknar ingen enhet $1 som en kopia längre. Ta bort lämnar dess data kvar; du kan också radera den."
+  ],
+  [
+   "^(.+) holds (\\d+) blocks? of your files\\. (\\d+) already have enough copies elsewhere; (\\d+) cop(?:y|ies) \\((.+)\\) will first be made on (.+)\\. Then no device counts \\1 as a copy any more\\. Remove leaves its data in place; you can also delete it\\.$",
+   "Lagringen $1 innehåller $2 block av dina filer. $3 av dem har redan tillräckligt många kopior på annat håll; först görs $4 kopior ($5) på $6. Därefter räknar ingen enhet $1 som en kopia längre. Ta bort lämnar dess data kvar; du kan också radera den."
   ]
  ],
  "review": [
@@ -812,7 +828,11 @@
   "any device that lacks the blocks",
   "cold storage",
   "repair from cold storage",
-  "the people removed"
+  "the people removed",
+  "^Type (.+) to confirm$",
+  "^Remove storage (.+)\\?$",
+  "^(.+) holds (\\d+) blocks? of your files\\. Every block already has enough copies on your other storages\\. Then no device counts \\1 as a copy any more\\. Remove leaves its data in place; you can also delete it\\.$",
+  "^(.+) holds (\\d+) blocks? of your files\\. (\\d+) already have enough copies elsewhere; (\\d+) cop(?:y|ies) \\((.+)\\) will first be made on (.+)\\. Then no device counts \\1 as a copy any more\\. Remove leaves its data in place; you can also delete it\\.$"
  ],
  "parts": [
   [
