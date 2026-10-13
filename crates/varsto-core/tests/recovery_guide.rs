@@ -92,7 +92,10 @@ fn guide_covers_every_storage_and_holds_no_secret() {
         "root": "/srv/mirror",
         "repository": "rest:https://bob:hunter2pass@backup.example:8000/vault",
         "password": { "file": home.join("restic-password").display().to_string() },
-        "env_file": home.join("restic.env").display().to_string()
+        "env_file": home.join("restic.env").display().to_string(),
+        "vault_short": "0a1b2c3d",
+        "host": "laptop",
+        "created_utc": 1791849600
     });
     fs::write(&cfg_path, serde_json::to_vec_pretty(&cfg).unwrap()).unwrap();
     fs::write(home.join("restic-password"), RESTIC_PASSWORD).unwrap();
