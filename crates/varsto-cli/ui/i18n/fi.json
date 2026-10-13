@@ -968,7 +968,30 @@
   "Tags": "Tunnisteet",
   "separated by commas": "pilkuilla erotettuina",
   "No files match the filter": "Mikään tiedosto ei vastaa suodatinta",
-  "Analysis stale": "Analyysi vanhentunut"
+  "Analysis stale": "Analyysi vanhentunut",
+  "On a device that already uses Varsto, open Devices and choose Add a device. Type the code it shows, or scan its QR code.": "Avaa laitteella, joka jo käyttää Varstoa, Laitteet ja valitse Lisää laite. Kirjoita sen näyttämä koodi tai skannaa sen QR-koodi.",
+  "Scan QR code": "Skannaa QR-koodi",
+  "Scan QR code…": "Skannaa QR-koodi…",
+  "Or paste the code or link": "Tai liitä koodi tai linkki",
+  "Open a screenshot…": "Avaa kuvakaappaus…",
+  "Use pasted text": "Käytä liitettyä tekstiä",
+  "Paste the recipient's request code or scan its QR code to seal the token to their device, or leave it empty for a plain token that carries the folder key itself.": "Liitä vastaanottajan pyyntökoodi tai skannaa sen QR-koodi sinetöidäksesi tunnisteen hänen laitteelleen, tai jätä se tyhjäksi, jolloin tunniste on tavallinen ja sisältää itse kansioavaimen.",
+  "Anyone holding the token can read and write this folder. Paste the recipient's request code or scan its QR code to seal the token to their device, or leave it empty for a plain token that carries the folder key itself.": "Kuka tahansa tunnisteen haltija voi lukea ja kirjoittaa tätä kansiota. Liitä vastaanottajan pyyntökoodi tai skannaa sen QR-koodi sinetöidäksesi tunnisteen hänen laitteelleen, tai jätä se tyhjäksi, jolloin tunniste on tavallinen ja sisältää itse kansioavaimen.",
+  "QR code": "QR-koodi",
+  "Fingerprint": "Sormenjälki",
+  "Show one code": "Näytä yhtenä koodina",
+  "Camera cannot read it? Show smaller codes": "Eikö kamera lue sitä? Näytä pienempinä koodeina",
+  "Point the camera at the QR code.": "Osoita kameralla QR-koodia.",
+  "No camera is available here. Open a screenshot of the code or paste the code.": "Kameraa ei ole käytettävissä. Avaa kuvakaappaus koodista tai liitä koodi.",
+  "Reading the image…": "Luetaan kuvaa…",
+  "No Varsto QR code was found in the image.": "Kuvasta ei löytynyt Varston QR-koodia.",
+  "This device already uses a vault. A pairing code is for the device you are adding: scan it there.": "Tämä laite käyttää jo holvia. Parinmuodostuskoodi on lisättävää laitetta varten: skannaa se siellä.",
+  "This device already has a vault of its own. Open the sealed token on the device that made the request code.": "Tällä laitteella on jo oma holvi. Avaa sinetöity tunniste laitteella, joka teki pyyntökoodin.",
+  "This is a share request. Open it on the device of the folder's owner.": "Tämä on jakopyyntö. Avaa se kansion omistajan laitteella.",
+  "Choose the folder. Next you compare the six-word fingerprint with them.": "Valitse kansio. Seuraavaksi vertaatte kuuden sanan sormenjälkeä.",
+  "This is not a share request code.": "Tämä ei ole jakopyynnön koodi.",
+  "This is not a sealed share token.": "Tämä ei ole sinetöity jakotunniste.",
+  "This is not a pairing code.": "Tämä ei ole parinmuodostuskoodi."
  },
  "patterns": [
   [
@@ -1286,6 +1309,26 @@
   [
    "^cleared the analysis of (.+)$",
    "tyhjennettiin tiedoston $1 analyysi"
+  ],
+  [
+   "^Part (\\d+) of (\\d+)$",
+   "Osa $1/$2"
+  ],
+  [
+   "^Scanned (\\d+) of (\\d+) parts\\. Keep the camera on the changing code\\.$",
+   "Skannattu $1/$2 osaa. Pidä kamera vaihtuvassa koodissa."
+  ],
+  [
+   "^The camera could not be opened \\((.+)\\)\\. Open a screenshot of the code or paste the code\\.$",
+   "Kameraa ei voitu avata ($1). Avaa kuvakaappaus koodista tai liitä koodi."
+  ],
+  [
+   "^The sealed share token for (.+) is filled in under Accept a shared folder\\. Fill in the rest and choose Accept\\.$",
+   "Kansion $1 sinetöity jakotunniste on täytetty kohtaan Hyväksy jaettu kansio. Täytä loput ja valitse Hyväksy."
+  ],
+  [
+   "^Share a folder with (.+)\\?$",
+   "Jaetaanko kansio käyttäjälle $1?"
   ]
  ],
  "review": [

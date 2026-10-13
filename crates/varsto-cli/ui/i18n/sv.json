@@ -961,7 +961,30 @@
   "Tags": "Taggar",
   "separated by commas": "åtskilda med kommatecken",
   "No files match the filter": "Inga filer matchar filtret",
-  "Analysis stale": "Analysen inaktuell"
+  "Analysis stale": "Analysen inaktuell",
+  "On a device that already uses Varsto, open Devices and choose Add a device. Type the code it shows, or scan its QR code.": "Öppna Enheter på en enhet som redan använder Varsto och välj Lägg till en enhet. Skriv koden den visar, eller skanna dess QR-kod.",
+  "Scan QR code": "Skanna QR-kod",
+  "Scan QR code…": "Skanna QR-kod…",
+  "Or paste the code or link": "Eller klistra in koden eller länken",
+  "Open a screenshot…": "Öppna en skärmbild…",
+  "Use pasted text": "Använd inklistrad text",
+  "Paste the recipient's request code or scan its QR code to seal the token to their device, or leave it empty for a plain token that carries the folder key itself.": "Klistra in mottagarens begäranskod eller skanna dess QR-kod för att försegla token till deras enhet, eller lämna fältet tomt för en oskyddad token som innehåller själva mappnyckeln.",
+  "Anyone holding the token can read and write this folder. Paste the recipient's request code or scan its QR code to seal the token to their device, or leave it empty for a plain token that carries the folder key itself.": "Den som har token kan läsa och skriva i den här mappen. Klistra in mottagarens begäranskod eller skanna dess QR-kod för att försegla token till deras enhet, eller lämna fältet tomt för en oskyddad token som innehåller själva mappnyckeln.",
+  "QR code": "QR-kod",
+  "Fingerprint": "Fingeravtryck",
+  "Show one code": "Visa som en kod",
+  "Camera cannot read it? Show smaller codes": "Kan kameran inte läsa den? Visa mindre koder",
+  "Point the camera at the QR code.": "Rikta kameran mot QR-koden.",
+  "No camera is available here. Open a screenshot of the code or paste the code.": "Ingen kamera är tillgänglig här. Öppna en skärmbild av koden eller klistra in koden.",
+  "Reading the image…": "Läser bilden…",
+  "No Varsto QR code was found in the image.": "Ingen QR-kod från Varsto hittades i bilden.",
+  "This device already uses a vault. A pairing code is for the device you are adding: scan it there.": "Den här enheten använder redan ett valv. En parkopplingskod är till för enheten du lägger till: skanna den där.",
+  "This device already has a vault of its own. Open the sealed token on the device that made the request code.": "Den här enheten har redan ett eget valv. Öppna den förseglade token på enheten som skapade begäranskoden.",
+  "This is a share request. Open it on the device of the folder's owner.": "Det här är en delningsbegäran. Öppna den på mappägarens enhet.",
+  "Choose the folder. Next you compare the six-word fingerprint with them.": "Välj mappen. Sedan jämför ni fingeravtrycket på sex ord.",
+  "This is not a share request code.": "Det här är ingen begäranskod för delning.",
+  "This is not a sealed share token.": "Det här är ingen förseglad token.",
+  "This is not a pairing code.": "Det här är ingen parkopplingskod."
  },
  "patterns": [
   [
@@ -1279,6 +1302,26 @@
   [
    "^cleared the analysis of (.+)$",
    "rensade analysen av $1"
+  ],
+  [
+   "^Part (\\d+) of (\\d+)$",
+   "Del $1 av $2"
+  ],
+  [
+   "^Scanned (\\d+) of (\\d+) parts\\. Keep the camera on the changing code\\.$",
+   "Skannat $1 av $2 delar. Håll kameran mot den växlande koden."
+  ],
+  [
+   "^The camera could not be opened \\((.+)\\)\\. Open a screenshot of the code or paste the code\\.$",
+   "Kameran kunde inte öppnas ($1). Öppna en skärmbild av koden eller klistra in koden."
+  ],
+  [
+   "^The sealed share token for (.+) is filled in under Accept a shared folder\\. Fill in the rest and choose Accept\\.$",
+   "Den förseglade token för $1 är ifylld under Ta emot en delad mapp. Fyll i resten och välj Godkänn."
+  ],
+  [
+   "^Share a folder with (.+)\\?$",
+   "Dela en mapp med $1?"
   ]
  ],
  "review": [

@@ -377,10 +377,10 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
         removalShown = true;
         alertBox("This device was removed from the vault by " + st.removal.by_name + " on " + fmtDate(st.removal.issued_utc) + (st.removal.wipe ? ". As ordered, its keys, sync state and folder contents were deleted." : ". It no longer syncs; reset it under Settings to start over."), "Device removed");
       }
-      if (!st.has_vault) { show("setup"); return; }
+      if (!st.has_vault) { show("setup"); takeLink(); return; }
       if (!st.unlocked) { show("unlock"); return; }
       show("app");
-      return refreshStatus();
+      return refreshStatus().then(takeLink);
     }).catch(function (e) { log("error: " + e.message); });
   }
 
@@ -795,14 +795,20 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   function shareFolder(f) {
     dialog({
       title: (f.shared ? "New token for " : "Share ") + f.name,
-      text: (f.shared ? "" : "Anyone holding the token can read and write this folder. ") + "Paste the recipient's request code to seal the token to their device, or leave it empty for a plain token that carries the folder key itself.",
+      text: (f.shared ? "" : "Anyone holding the token can read and write this folder. ") + "Paste the recipient's request code or scan its QR code to seal the token to their device, or leave it empty for a plain token that carries the folder key itself.",
       fields: [{ name: "to", label: "Recipient's request code (optional)", placeholder: "vsr1…" }],
-      ok: f.shared ? "Create token" : "Share"
+      ok: f.shared ? "Create token" : "Share",
+      extra: "Scan QR code…"
     }).then(function (r) {
       if (!r) { return; }
+      if (r.action === "extra") { return scanQr("request").then(function (info) { if (info) { return sealTo(f, info.text); } }); }
       var code = (r.values.to || "").trim();
       if (!code) { return createToken(f, "", ""); }
-      // Confirm who asked: both sides see the same six words for the code.
+      return sealTo(f, code);
+    }).catch(function (e) { alertBox(e.message); });
+  }
+  // Confirm who asked: both sides see the same six words for the code.
+  function sealTo(f, code) {
       return api("POST", "/api/share/fingerprint", { code: code }).then(function (fp) {
         var who = fp.name || "the requester";
         return dialog({
@@ -811,13 +817,170 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
           code: fp.fingerprint, ok: "The words match", danger: false
         }).then(function (c) { if (c) { return createToken(f, code, fp.fingerprint); } });
       });
-    }).catch(function (e) { alertBox(e.message); });
   }
   function createToken(f, code, fingerprint) {
     return api("POST", "/api/share/create", { folder: f.name, to: code, fingerprint: fingerprint }).then(function (t) {
       $("sharetoken").textContent = (t.sealed ? "Sealed share token for " + t.folder + " (only the requesting device can open it; fingerprint " + t.fingerprint + "): " : "Share token for " + t.folder + " (contains the folder key; send over a secure channel): ") + t.token;
       $("sharetoken").classList.remove("hidden"); nav("shared"); refreshStatus();
+      // A sealed token is safe to show: only the requesting device opens it. A plain one never becomes a QR code.
+      return renderQr($("sharetokenqr"), t.sealed ? t.token : "");
     });
+  }
+
+  // ----- QR invitations (spec section 43) -----
+  // Codes: POST /api/qr gives the SVG of one code or of a sequence of smaller ones (shown in turn).
+  var qrTimers = {};
+  function renderQr(box, text, parts) {
+    if (box.dataset.text === (text || "") && !!parts === (box.dataset.parts === "1")) { return Promise.resolve(); }
+    box.dataset.text = text || ""; box.dataset.parts = parts ? "1" : "";
+    if (qrTimers[box.id]) { clearInterval(qrTimers[box.id]); delete qrTimers[box.id]; }
+    box.innerHTML = ""; box.classList.add("hidden");
+    if (!text) { return Promise.resolve(); }
+    return api("POST", "/api/qr", { text: text, parts: !!parts }).then(function (r) {
+      if (box.dataset.text !== text) { return; }
+      var frames = r.codes.map(function (c) { return "data:image/svg+xml;base64," + btoa(c.svg); });
+      var img = el("img", "qr-img"); img.alt = "QR code"; img.src = frames[0]; box.appendChild(img);
+      if (r.fingerprint) {
+        box.appendChild(el("span", "muted small", "Fingerprint"));
+        var w = el("span", "qr-words", r.fingerprint); w.setAttribute("data-no-i18n", ""); box.appendChild(w);
+      }
+      if (frames.length > 1) {
+        var n = el("span", "muted small", "Part 1 of " + frames.length); box.appendChild(n); var i = 0;
+        qrTimers[box.id] = setInterval(function () {
+          if (!document.body.contains(box) || box.classList.contains("hidden")) { return; }
+          i = (i + 1) % frames.length; img.src = frames[i]; n.textContent = "Part " + (i + 1) + " of " + frames.length;
+        }, 900);
+      }
+      if (r.kind !== "pair") {
+        var t = el("button", "linklike", frames.length > 1 ? "Show one code" : "Camera cannot read it? Show smaller codes"); t.type = "button";
+        t.onclick = function () { renderQr(box, text, !parts).catch(function (e) { alertBox(e.message); }); };
+        box.appendChild(t);
+      }
+      box.classList.remove("hidden");
+    });
+  }
+  // Scanning: the camera through getUserMedia; frames are read by BarcodeDetector where the browser has it,
+  // else by the service (POST /api/qr/scan, nothing kept). Parts of a split code are collected until complete.
+  var scan = null, scanCanvas = null;
+  var NOT_KIND = { request: "This is not a share request code.", token: "This is not a sealed share token.", pair: "This is not a pairing code." };
+  function rawPost(path, body, type) {
+    return fetch(path, { method: "POST", headers: { "X-Varsto-Token": token, "Content-Type": type || "application/octet-stream" }, body: body }).then(function (r) {
+      return r.json().then(function (j) { if (!r.ok) { throw new Error(j.error || ("The Varsto service answered " + r.status)); } return j; });
+    });
+  }
+  function scanQr(want) {
+    return new Promise(function (resolve) {
+      closeScanner(null);
+      scan = { resolve: resolve, want: want || "", texts: [], stream: null, timer: null, busy: false, detector: null };
+      var v = $("scanner-video"), st = $("scanner-status");
+      $("scanner-text").value = ""; st.textContent = "Point the camera at the QR code.";
+      $("scanner").classList.remove("hidden"); document.body.classList.add("modal-open");
+      var md = navigator.mediaDevices;
+      if (!md || !md.getUserMedia) { v.classList.add("hidden"); st.textContent = "No camera is available here. Open a screenshot of the code or paste the code."; return; }
+      v.classList.remove("hidden");
+      var s = scan;
+      md.getUserMedia({ video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false }).then(function (stream) {
+        if (scan !== s) { stream.getTracks().forEach(function (t) { t.stop(); }); return; }
+        s.stream = stream; v.srcObject = stream; v.play().catch(function () {});
+        if (window.BarcodeDetector) { try { s.detector = new window.BarcodeDetector({ formats: ["qr_code"] }); } catch (e) { s.detector = null; } }
+        s.timer = setInterval(scanFrame, 300);
+      }).catch(function (e) { if (scan === s) { v.classList.add("hidden"); st.textContent = "The camera could not be opened (" + e.message + "). Open a screenshot of the code or paste the code."; } });
+    });
+  }
+  function closeScanner(result) {
+    if (!scan) { return; }
+    var s = scan; scan = null;
+    if (s.timer) { clearInterval(s.timer); }
+    if (s.stream) { s.stream.getTracks().forEach(function (t) { t.stop(); }); }
+    var v = $("scanner-video"); v.pause(); v.srcObject = null;
+    $("scanner").classList.add("hidden"); document.body.classList.remove("modal-open");
+    s.resolve(result);
+  }
+  function frameTexts(v) {
+    var k = Math.min(1, 1280 / Math.max(v.videoWidth, v.videoHeight));
+    var w = Math.round(v.videoWidth * k), h = Math.round(v.videoHeight * k);
+    var c = scanCanvas || (scanCanvas = document.createElement("canvas")); c.width = w; c.height = h;
+    var g = c.getContext("2d", { willReadFrequently: true }); g.drawImage(v, 0, 0, w, h);
+    var d = g.getImageData(0, 0, w, h).data, luma = new Uint8Array(w * h);
+    for (var i = 0, j = 0; j < luma.length; i += 4, j++) { luma[j] = (d[i] * 77 + d[i + 1] * 150 + d[i + 2] * 29) >> 8; }
+    return rawPost("/api/qr/scan?w=" + w + "&h=" + h, luma).then(function (r) { return r.texts || []; });
+  }
+  function scanFrame() {
+    var s = scan, v = $("scanner-video");
+    if (!s || s.busy || !v.videoWidth) { return; }
+    s.busy = true;
+    var found = s.detector
+      ? s.detector.detect(v).then(function (codes) { return codes.map(function (c) { return c.rawValue; }); }, function () { s.detector = null; return []; })
+      : frameTexts(v);
+    found.then(function (texts) {
+      texts = texts.filter(function (t) { return /^varsto:\/\//i.test(t); });
+      if (texts.length) { return scanned(texts); }
+    }).catch(function (e) { if (scan === s) { $("scanner-status").textContent = e.message; } }).then(function () { s.busy = false; });
+  }
+  function scanned(texts) {
+    var s = scan; if (!s) { return Promise.resolve(); }
+    texts.forEach(function (t) { if (s.texts.indexOf(t) < 0) { s.texts.push(t); } });
+    s.texts = s.texts.slice(-64);
+    return rawPost("/api/link/parse", JSON.stringify({ texts: s.texts }), "application/json").then(function (r) {
+      if (scan !== s) { return; }
+      if (r.part) { $("scanner-status").textContent = "Scanned " + r.have.length + " of " + r.count + " parts. Keep the camera on the changing code."; return; }
+      if (s.want && r.kind !== s.want) { s.texts = []; $("scanner-status").textContent = NOT_KIND[s.want]; return; }
+      closeScanner(r);
+    }, function (e) { if (scan === s) { s.texts = []; $("scanner-status").textContent = e.message; } });
+  }
+  $("scanner-cancel").onclick = function () { closeScanner(null); };
+  $("scanner-backdrop").onclick = function () { closeScanner(null); };
+  $("scanner-use").onclick = function () { var t = $("scanner-text").value.trim(); if (t) { scanned([t]); } };
+  $("scanner-upload").onclick = function () { $("scanner-file").click(); };
+  $("scanner-file").onchange = function (ev) {
+    var f = ev.target.files && ev.target.files[0]; ev.target.value = ""; if (!f || !scan) { return; }
+    $("scanner-status").textContent = "Reading the image…";
+    rawPost("/api/qr/scan?image=1", f).then(function (r) {
+      var texts = (r.texts || []).filter(function (t) { return /^varsto:\/\//i.test(t); });
+      if (!texts.length) { $("scanner-status").textContent = "No Varsto QR code was found in the image."; return; }
+      return scanned(texts);
+    }).catch(function (e) { $("scanner-status").textContent = e.message; });
+  };
+  document.addEventListener("keydown", function (ev) { if (scan && ev.key === "Escape") { ev.preventDefault(); closeScanner(null); } });
+
+  // varsto:// links opened from outside (a QR code scanned with the system camera, a clicked link):
+  // the service keeps the link (`varsto open-link`), phone shells call varstoOpenLink or pass #link=.
+  var pendingLink = null;
+  try { var hl = /^#link=(.+)$/.exec(location.hash); if (hl) { pendingLink = decodeURIComponent(hl[1]); history.replaceState(null, "", location.pathname + location.search); } } catch (e) { /* no history API */ }
+  window.varstoOpenLink = function (uri) { pendingLink = uri; routeLink(); };
+  function takeLink() {
+    api("GET", "/api/link").then(function (r) { if (r.uri) { pendingLink = r.uri; } routeLink(); }).catch(function () {});
+  }
+  function routeLink() {
+    var view = document.body.dataset.view;
+    if (!pendingLink || !view || view === "unlock") { return; }
+    var uri = pendingLink; pendingLink = null;
+    api("POST", "/api/link/parse", { text: uri }).then(function (info) { return applyLink(info, view); }).catch(function (e) { alertBox(e.message); });
+  }
+  function fillPair(info) {
+    var form = $("pair"); form.querySelector("input[name=code]").value = info.code;
+    if (info.addresses && info.addresses.length) { form.querySelector("input[name=address]").value = info.addresses[0]; }
+    var n = form.querySelector("input[name=name]"); if (n) { n.focus(); }
+  }
+  function applyLink(info, view) {
+    if (info.kind === "pair") {
+      if (view !== "setup") { return alertBox("This device already uses a vault. A pairing code is for the device you are adding: scan it there."); }
+      fillPair(info); log("pairing code filled in from the QR code; give this device a name and a passphrase, then Pair");
+      return;
+    }
+    if (info.kind === "token") {
+      if (view !== "setup") { return alertBox("This device already has a vault of its own. Open the sealed token on the device that made the request code."); }
+      $("acceptshare").querySelector("input[name=token]").value = info.text;
+      return alertBox("The sealed share token for " + info.folder + " is filled in under Accept a shared folder. Fill in the rest and choose Accept.");
+    }
+    var folders = lastStatus && !lastStatus.member ? lastStatus.folders.filter(function (f) { return !f.member; }) : [];
+    if (view !== "app" || !folders.length) { return alertBox("This is a share request. Open it on the device of the folder's owner."); }
+    return dialog({
+      title: "Share a folder with " + (info.name || "the requester") + "?",
+      text: "Choose the folder. Next you compare the six-word fingerprint with them.",
+      fields: [{ name: "folder", label: "Folder", options: folders.map(function (f) { return [f.name, f.name]; }) }],
+      ok: "Continue"
+    }).then(function (r) { if (r) { return sealTo(folderByName(r.values.folder), info.text); } });
   }
   // Who has access to a shared folder, under its row on the Shared page.
   function showMembers(f, box, owner) {
@@ -2405,6 +2568,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   function pairButtons(open) { $("pairstart").classList.toggle("hidden", open); $("pairstop").classList.toggle("hidden", !open); }
   function renderPair(s) {
     $("pairbox").classList.remove("hidden"); pairButtons(s.open); $("paircode").textContent = s.open ? s.code : "";
+    renderQr($("pairqr"), s.open ? s.uri : "").catch(function () {});
     if (s.open) {
       $("pairinfo").textContent = "On the new device choose Pair with your other device and type this code. It works once, for " + Math.max(1, Math.ceil(s.expires_in_secs / 60)) + " more minute(s)." + (s.addresses.length ? " If the new device does not find this one, give it the address " + s.addresses.join(" or ") + "." : "") + (s.failed_attempts ? " Wrong codes so far: " + s.failed_attempts + " of 3." : "");
       return;
@@ -2416,6 +2580,10 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   function pollPair() { api("GET", "/api/pair/status").then(function (s) { if (s.code) { renderPair(s); if (s.open && !pairTimer) { pairTimer = setInterval(pollPair, 1500); } } }).catch(function () {}); }
   if (token) { pollPair(); }
   $("pairstart").onclick = function () { api("POST", "/api/pair/start", {}).then(function (s) { renderPair(s); if (!pairTimer) { pairTimer = setInterval(pollPair, 1500); } }).catch(function (e) { alertBox(e.message); }); };
+  $("pairscan").onclick = function () { scanQr("pair").then(function (info) { if (info) { fillPair(info); } }); };
+  $("sharetokenscan").onclick = function () {
+    scanQr("token").then(function (info) { if (info) { $("acceptshare").querySelector("input[name=token]").value = info.text; log("scanned the sealed share token for " + info.folder); } });
+  };
   $("pairstop").onclick = function () { api("POST", "/api/pair/stop", {}).then(function () { if (pairTimer) { clearInterval(pairTimer); pairTimer = null; } $("pairbox").classList.add("hidden"); pairButtons(false); }).catch(function (e) { alertBox(e.message); }); };
   $("join").onsubmit = function (ev) { ev.preventDefault(); busy(true); api("POST", "/api/join", formData(ev.target)).then(function () { ev.target.reset(); log("joined the vault; attach folders under Files"); nav("files"); return refreshState(); }).catch(function (e) { alertBox(e.message); }).then(function () { busy(false); }); };
   $("replicatoken").onclick = function () { api("GET", "/api/replica/token").then(function (r) { $("replicaout").textContent = "Replica token (give to the device that will hold your encrypted copies without being able to open them): " + r.token; $("replicaout").classList.remove("hidden"); }).catch(function (e) { alertBox(e.message); }); };
@@ -2424,6 +2592,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     api("POST", "/api/share/request", { name: nm ? nm.value.trim() : "" }).then(function (r) {
       $("sharerequestout").textContent = r.request_code + "\n\nFingerprint: " + r.fingerprint + "\nThe owner sees the same six words for this code. Read them to each other over a call or in person before the owner shares.";
       $("sharerequestout").classList.remove("hidden");
+      return renderQr($("sharerequestqr"), r.request_code);
     }).catch(function (e) { alertBox(e.message); });
   };
   // Organization (business use): nothing of it shows for a vault without one.
@@ -3464,7 +3633,8 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     setTimeout(function () { a.focus(); try { a.setSelectionRange(pos, pos); } catch (e) { /* not every type has a selection */ } }, 60);
   }
   document.addEventListener("visibilitychange", function () { if (document.visibilityState === "visible") { refocusNumberField(); } });
-  window.varstoResumed = function () { refocusNumberField(); refreshAllFiles(); if (document.body.dataset.view === "app") { refreshStatus(); } };
+  window.varstoResumed = function () { refocusNumberField(); refreshAllFiles(); if (document.body.dataset.view === "app") { refreshStatus(); } takeLink(); };
+  window.addEventListener("focus", function () { if (document.body.dataset.view && document.body.dataset.view !== "unlock") { takeLink(); } });
   document.addEventListener("visibilitychange", function () { if (document.visibilityState === "visible") { refreshAllFiles(); } trafficWatch(); activityWatch(); });
 
   // Reset: wipes this device's vault configuration after the user typed "reset".
