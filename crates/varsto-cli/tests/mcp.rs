@@ -116,14 +116,26 @@ fn mcp_server_answers_with_granted_access_only() {
     let text = files["result"]["content"][0]["text"].as_str().unwrap();
     assert!(text.contains("notes.md") && text.contains("last_accessed_utc"));
 
+    // Contents are not handed out: the assistant reads the synced file from
+    // its local path with its own tools.
+    let listed: serde_json::Value = serde_json::from_str(text).unwrap();
+    let local = listed
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|f| f["path"] == "notes.md")
+        .and_then(|f| f["local_path"].as_str())
+        .expect("a synced plain file has a local_path")
+        .to_string();
+    assert!(fs::read_to_string(&local).unwrap().contains("cold storage"));
     let read = call(
         "tools/call",
         serde_json::json!({"name": "varsto_read", "arguments": {"folder": "docs", "path": "notes.md"}}),
     );
-    assert!(read["result"]["content"][0]["text"]
-        .as_str()
-        .unwrap()
-        .contains("cold storage"));
+    assert_eq!(
+        read["result"]["isError"], true,
+        "there is no read tool: {read}"
+    );
 
     let moved = call(
         "tools/call",

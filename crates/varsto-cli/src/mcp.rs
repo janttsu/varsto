@@ -19,7 +19,6 @@ use std::path::{Path, PathBuf};
 use varsto_core::Engine;
 
 const PROTOCOL_VERSION: &str = "2025-06-18";
-const MAX_READ: usize = 512 * 1024;
 
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
 pub struct Grants {
@@ -148,7 +147,7 @@ impl Backend {
             Backend::Direct(e) => e
                 .folders()
                 .into_iter()
-                .map(|(r, m)| json!({"id": r.folder_id.to_string(), "name": r.name, "path": m, "strongroom": r.is_strongroom()}))
+                .map(|(r, m)| json!({"id": r.folder_id.to_string(), "name": r.name, "path": m, "strongroom": r.is_strongroom(), "plain": !e.folder_is_encrypted_here(&r.folder_id)}))
                 .collect(),
         };
         // Strongroom folders are never visible to assistants (S-012).
@@ -165,28 +164,6 @@ impl Backend {
                 None,
             ),
             Backend::Direct(e) => Ok(serde_json::to_value(e.list_files(folder)?)?),
-        }
-    }
-    fn read(&mut self, folder: &str, path: &str) -> Result<Vec<u8>> {
-        match self {
-            Backend::Http { token, .. } => {
-                let token = token.clone();
-                let (status, bytes) = self.http(
-                    "GET",
-                    &format!(
-                        "/api/open?folder={}&path={}&token={}",
-                        urlencode(folder),
-                        urlencode(path),
-                        token
-                    ),
-                    None,
-                )?;
-                if status != 200 {
-                    bail!("{}", String::from_utf8_lossy(&bytes));
-                }
-                Ok(bytes)
-            }
-            Backend::Direct(e) => e.read_file(folder, path),
         }
     }
     fn move_file(&mut self, folder: &str, from: &str, to: &str) -> Result<Value> {
@@ -256,12 +233,10 @@ fn tools() -> Value {
     json!([
         {"name": "varsto_status", "description": "Vault, devices, storages and folders of this device, with chunk and copy counts.",
          "inputSchema": {"type": "object", "properties": {}}},
-        {"name": "varsto_folders", "description": "Folders the assistant may see, with the access level granted (ro or rw).",
+        {"name": "varsto_folders", "description": "Folders the assistant may see, with the access level granted (ro or rw) and local_path: the folder's directory on this device when its files are kept there as plain files.",
          "inputSchema": {"type": "object", "properties": {}}},
-        {"name": "varsto_files", "description": "Files of a folder: path, size, state (local, placeholder, missing), modified_utc, last_accessed_utc (Varsto's own record), content hash.",
+        {"name": "varsto_files", "description": "Files of a folder: path, size, state (local, placeholder, missing), modified_utc, last_accessed_utc (Varsto's own record), content hash, and local_path: where the file is on this device's disk when it is synced here as a plain file. Varsto does not hand out file contents: read a file from its local_path with your own file tools. A file without local_path is not on this device (a placeholder, or a folder kept encrypted here).",
          "inputSchema": {"type": "object", "properties": {"folder": {"type": "string"}}, "required": ["folder"]}},
-        {"name": "varsto_read", "description": "Read a file (text, up to 512 KiB; fetched first if it is a placeholder). Counts as an access.",
-         "inputSchema": {"type": "object", "properties": {"folder": {"type": "string"}, "path": {"type": "string"}}, "required": ["folder", "path"]}},
         {"name": "varsto_move", "description": "Move or rename a file inside a folder (needs a read-write grant); the change syncs to the other devices. Use it to reorganise: group by year, project or topic after reading the files. The target name must be free: a move never replaces another file.",
          "inputSchema": {"type": "object", "properties": {"folder": {"type": "string"}, "from": {"type": "string"}, "to": {"type": "string"}}, "required": ["folder", "from", "to"]}},
         {"name": "varsto_mkdir", "description": "Create a directory inside a folder (read-write grant).",
@@ -273,6 +248,18 @@ fn tools() -> Value {
         {"name": "varsto_storage_advice", "description": "Varsto's own placement estimate, exposed for context: files idle for idle_days (default 90) and their monthly cost in every known storage class, cheapest first, with sources. Nothing is moved.",
          "inputSchema": {"type": "object", "properties": {"folder": {"type": "string"}, "idle_days": {"type": "integer", "minimum": 1}}}}
     ])
+}
+
+/// A folder's directory on this device when its files are kept there as
+/// plain files (not "encrypted here", not a Strongroom).
+fn plain_root(f: &Value) -> Option<std::path::PathBuf> {
+    if !f["plain"].as_bool().unwrap_or(false) || f["strongroom"].as_bool().unwrap_or(false) {
+        return None;
+    }
+    f["path"]
+        .as_str()
+        .filter(|p| !p.is_empty())
+        .map(std::path::PathBuf::from)
 }
 
 fn text_result(text: String) -> Value {
@@ -337,6 +324,7 @@ fn call_tool(backend: &mut Backend, grants: &Grants, name: &str, args: &Value) -
                 .map(|mut f| {
                     let n = f["name"].as_str().unwrap_or("").to_string();
                     f["access"] = json!(if can_write(&n) { "rw" } else { "ro" });
+                    f["local_path"] = json!(plain_root(&f));
                     f
                 })
                 .collect();
@@ -345,27 +333,26 @@ fn call_tool(backend: &mut Backend, grants: &Grants, name: &str, args: &Value) -
         "varsto_files" => {
             let folder = arg(args, "folder")?;
             need_read(folder)?;
-            Ok(text_result(serde_json::to_string_pretty(
-                &backend.files(folder)?,
-            )?))
-        }
-        "varsto_read" => {
-            let (folder, path) = (arg(args, "folder")?, arg(args, "path")?);
-            need_read(folder)?;
-            let bytes = backend.read(folder, path)?;
-            let truncated = bytes.len() > MAX_READ;
-            let slice = &bytes[..bytes.len().min(MAX_READ)];
-            match std::str::from_utf8(slice) {
-                Ok(t) => Ok(text_result(if truncated {
-                    format!("{t}\n[truncated at {MAX_READ} bytes]")
-                } else {
-                    t.to_string()
-                })),
-                Err(_) => Ok(text_result(format!(
-                    "binary file, {} bytes; not shown",
-                    bytes.len()
-                ))),
+            let root = backend
+                .folders()?
+                .iter()
+                .find(|f| f["name"].as_str() == Some(folder))
+                .and_then(plain_root);
+            let mut files = backend.files(folder)?;
+            if let Some(list) = files.as_array_mut() {
+                for f in list {
+                    // Only a synced plain file on this disk: the assistant reads
+                    // it itself; Varsto never hands out contents.
+                    let local = root.as_ref().and_then(|r| {
+                        let rel = f["path"].as_str()?;
+                        let p = r.join(rel);
+                        (f["state"].as_str() == Some("local") && p.is_file())
+                            .then(|| p.display().to_string())
+                    });
+                    f["local_path"] = json!(local);
+                }
             }
+            Ok(text_result(serde_json::to_string_pretty(&files)?))
         }
         "varsto_move" => {
             let (folder, from, to) = (arg(args, "folder")?, arg(args, "from")?, arg(args, "to")?);
