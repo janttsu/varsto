@@ -855,3 +855,4 @@ body[data-mobile="1"] .sel-count { font-size: 14px; }
 .act-bar.indeterminate > i { width: 30%; animation: act-slide 1.6s ease-in-out infinite; }
 @keyframes act-slide { from { margin-left: -30%; } to { margin-left: 100%; } }
 @media (prefers-reduced-motion: reduce) { .act-bar.indeterminate > i { animation: none; width: 100%; opacity: 0.4; } }
+.modal-text .strong { font-weight: 600; }

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: PolyForm-Shield-1.0.0
 //! Losing ledger copies and getting them back (`docs/spec/alpha-0-format.md`
-//! section 34): a storage that lost its ledger objects (S1), a device whose
+//! section 36): a storage that lost its ledger objects (S1), a device whose
 //! local `ledger/` directory was deleted or damaged (S2), a device restored
 //! from an old backup and two copies of one identity (S3), the ledger lost
 //! everywhere (S4) and a damaged cached view (S5).

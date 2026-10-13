@@ -88,6 +88,14 @@ pub struct ServiceState {
     pub ledger_checked: Option<Instant>,
     /// The last failed rebuild's message (notified once, retried each sync).
     pub ledger_failed: Option<String>,
+    /// Backups with restic: the scheduled run under way (a child process
+    /// `varsto restic run --scheduled`), when the user was last warned that
+    /// the last good snapshot is too old, and a one-line summary.
+    pub restic_child: Option<std::process::Child>,
+    pub restic_warned_utc: Option<i64>,
+    /// Not before this time: a run that failed before it could record why.
+    pub restic_not_before_utc: i64,
+    pub restic_text: Option<String>,
 }
 
 /// The storages are asked this often whether they hold newer ledger
@@ -132,6 +140,7 @@ impl ServiceState {
             "backup_errors": self.backup_errors,
             "ledger_health": self.ledger_health,
             "ledger_text": self.ledger_health.as_ref().filter(|h| !h.is_ok()).map(|h| h.describe()),
+            "restic_text": self.restic_text,
         })
     }
     /// Store the disk listing; log and notify when a disk appeared or went
@@ -409,6 +418,77 @@ impl ServiceState {
             match engine.backup_upkeep() {
                 Ok(r) => self.record_backup_upkeep(&r),
                 Err(e) => eprintln!("service: backup expiry failed: {e:#}"),
+            }
+        }
+    }
+    /// Backups with restic (called after a sync): notice a scheduled run
+    /// that ended (notify when it failed), warn once a day while the last
+    /// good snapshot is older than the schedule allows, and start a run when
+    /// one is due. The run is a child process that talks to this service's
+    /// API like `varsto restic run` would; the run lock in the device
+    /// directory keeps it from running beside a run started by hand.
+    pub fn restic_if_due(&mut self, engine: &Engine) {
+        use varsto_core::restic::{Hold, ResticState};
+        let home = engine.home().to_path_buf();
+        if let Some(child) = self.restic_child.as_mut() {
+            match child.try_wait() {
+                Ok(None) => return,
+                Ok(Some(status)) => {
+                    self.restic_child = None;
+                    if status.success() {
+                        eprintln!("service: scheduled restic backup done");
+                    } else {
+                        let why = ResticState::load(&home)
+                            .last_run
+                            .and_then(|r| r.message)
+                            .and_then(|m| m.lines().next().map(str::to_string))
+                            .unwrap_or_else(|| format!("exit status {status}; see restic-run.log"));
+                        eprintln!("service: scheduled restic backup failed: {why}");
+                        self.restic_not_before_utc =
+                            varsto_core::util::now_utc() + varsto_core::restic::RETRY_SECS;
+                        notify(
+                            "Varsto restic backup",
+                            &format!("The scheduled backup failed: {why}"),
+                        );
+                    }
+                }
+                Err(_) => self.restic_child = None,
+            }
+        }
+        let Some(cfg) = engine.restic_config() else {
+            self.restic_text = None;
+            return;
+        };
+        let st = ResticState::load(&home);
+        let now = varsto_core::util::now_utc();
+        if st.stale(cfg, now) && self.restic_warned_utc.is_none_or(|t| now - t >= 86_400) {
+            self.restic_warned_utc = Some(now);
+            let msg = "The last good restic snapshot is older than its schedule allows; see `varsto restic status`";
+            eprintln!("service: {msg}");
+            notify("Varsto restic backup", msg);
+        }
+        self.restic_text = Some(match (&st.last_success, st.next_run_utc(cfg)) {
+            (Some(r), Some(n)) => format!(
+                "restic: last snapshot {}, next run {}",
+                varsto_core::util::format_date(r.started_utc),
+                varsto_core::util::format_date(n)
+            ),
+            (Some(r), None) => format!(
+                "restic: last snapshot {} (manual runs)",
+                varsto_core::util::format_date(r.started_utc)
+            ),
+            (None, _) => "restic: no snapshot yet".to_string(),
+        });
+        if st.due(cfg, now)
+            && now >= self.restic_not_before_utc
+            && Hold::current(&home, now).is_none()
+        {
+            match varsto_core::restic::spawn_scheduled(&home) {
+                Ok(c) => {
+                    eprintln!("service: scheduled restic backup started");
+                    self.restic_child = Some(c);
+                }
+                Err(e) => eprintln!("service: could not start the restic backup: {e:#}"),
             }
         }
     }
@@ -1528,6 +1608,7 @@ pub fn run(opts: Options) -> Result<()> {
                         st.service.scrub_if_due(e);
                         st.service.repair_if_due(e);
                         st.service.backups_if_due(e);
+                        st.service.restic_if_due(e);
                         if let Err(err) = e.publish_device_details(st.service.last_sync_utc) {
                             eprintln!("service: device details not published: {err:#}");
                         }

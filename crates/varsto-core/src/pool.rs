@@ -20,6 +20,13 @@
 //! path first, then the platform's mount roots (`/media/*/*`, `/run/media/*/*`
 //! and `/mnt/*` on Linux, `/Volumes/*` on macOS, every drive letter on
 //! Windows) and any extra roots configured on the pool.
+//!
+//! Every object written to a disk is read back from the disk and hashed
+//! before the write counts (`write_checked`), and the pool index remembers
+//! per copy when it was last hashed, so the reattach routine re-reads only
+//! the copies whose check is older than the pool's `verify_after_days`.
+//! Preparing whole devices (partitioning, formatting, mounting) lives in
+//! `blockdev`; this module only sees mounted directories.
 
 use crate::storage::{Storage, StorageSpec};
 use crate::util;
@@ -39,6 +46,10 @@ pub const DISK_INDEX_FILE: &str = "index.json";
 pub const MARKER_FORMAT: u32 = 1;
 pub const DEFAULT_RESERVE_PERCENT: u32 = 5;
 pub const DEFAULT_MIN_RESERVE_BYTES: u64 = 2 * 1024 * 1024 * 1024;
+/// Copies on a disk are re-hashed when their last check is older than this.
+pub const DEFAULT_VERIFY_AFTER_DAYS: u32 = 180;
+/// Leftover temporary files of interrupted writes older than this are removed.
+const STALE_TEMP_SECS: u64 = 3600;
 
 /// One disk of a pool, as kept in the storage specification and the pool index.
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq, Default)]
@@ -123,6 +134,11 @@ struct ObjectEntry {
     /// before disk groups ignore them and know the first copy only.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     extra: Vec<String>,
+    /// Disk id -> when the copy on that disk was last read back and hashed
+    /// (at its write or by a check). A copy missing here was never checked
+    /// by this device.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    checked: BTreeMap<String, i64>,
 }
 
 impl ObjectEntry {
@@ -131,6 +147,7 @@ impl ObjectEntry {
             disk: disk.to_string(),
             size,
             extra: Vec::new(),
+            checked: BTreeMap::new(),
         }
     }
 
@@ -146,6 +163,7 @@ impl ObjectEntry {
     /// Forget the copy on `disk`; false when no copy is left.
     fn remove_holder(&mut self, disk: &str) -> bool {
         self.extra.retain(|d| d != disk);
+        self.checked.remove(disk);
         if self.disk == disk {
             if self.extra.is_empty() {
                 return false;
@@ -186,6 +204,10 @@ pub enum PoolError {
     NoDiskAttached { pool: String },
     #[error("no attached disk of pool {pool} has room for {size} bytes within its reserve")]
     NoRoom { pool: String, size: u64 },
+    /// An object written to the disk read back wrong twice: the disk (or its
+    /// cable or dock) is failing and nothing more should go to it.
+    #[error("disk {label} returned different bytes than were written to it, twice ({key}): the disk, its cable or dock may be failing")]
+    WriteNotVerified { label: String, key: String },
 }
 
 /// The first `PoolError` in an error chain, if any.
@@ -281,6 +303,134 @@ fn os_disk_space(_path: &Path) -> Option<DiskSpace> {
     None
 }
 
+static CORRUPT_WRITES: Mutex<Vec<(PathBuf, u32)>> = Mutex::new(Vec::new());
+
+/// Test hook: damage the next `n` objects written below `mount` after they
+/// reach the disk and before they are read back, as a failing disk would.
+#[doc(hidden)]
+pub fn corrupt_writes_under(mount: &Path, n: u32) {
+    let mount = mount.canonicalize().unwrap_or_else(|_| mount.to_path_buf());
+    let mut v = CORRUPT_WRITES.lock().unwrap();
+    v.retain(|(p, _)| p != &mount);
+    if n > 0 {
+        v.push((mount, n));
+    }
+}
+
+fn take_corruption(path: &Path) -> bool {
+    let mut v = CORRUPT_WRITES.lock().unwrap();
+    if v.is_empty() {
+        return false;
+    }
+    let canon = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    for (p, n) in v.iter_mut() {
+        if *n > 0 && canon.starts_with(p.as_path()) {
+            *n -= 1;
+            return true;
+        }
+    }
+    false
+}
+
+/// The object name a key ends with, when it is one (64 hex digits).
+fn object_name_of(key: &str) -> Option<&str> {
+    let name = key.rsplit('/').next()?;
+    (name.len() == 64 && name.bytes().all(|b| b.is_ascii_hexdigit())).then_some(name)
+}
+
+/// BLAKE3 of a file as the disk returns it, not as the page cache remembers
+/// it. On Linux the file's cached pages are dropped first
+/// (`posix_fadvise(POSIX_FADV_DONTNEED)`) and the file is read with
+/// `O_DIRECT` (aligned buffer), falling back to a plain read where the
+/// filesystem refuses direct reads. Both are best effort: neither reaches
+/// past the drive's own cache, so a drive that acknowledges a write it then
+/// loses is caught by the next periodic check, not here. Elsewhere the file
+/// is read normally.
+pub fn read_back_hash(path: &Path) -> std::io::Result<[u8; 32]> {
+    #[cfg(target_os = "linux")]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        use std::os::unix::io::AsRawFd;
+        if let Ok(f) = fs::File::open(path) {
+            // SAFETY: plain advice call on an open descriptor.
+            unsafe {
+                libc::posix_fadvise(f.as_raw_fd(), 0, 0, libc::POSIX_FADV_DONTNEED);
+            }
+        }
+        if let Ok(f) = fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_DIRECT)
+            .open(path)
+        {
+            if let Ok(h) = hash_direct(f) {
+                return Ok(h);
+            }
+        }
+    }
+    let mut f = fs::File::open(path)?;
+    let mut h = blake3::Hasher::new();
+    std::io::copy(&mut f, &mut h)?;
+    Ok(*h.finalize().as_bytes())
+}
+
+/// Hash a file opened with `O_DIRECT`: reads into a 4 KiB-aligned buffer of
+/// a whole number of blocks; the last read is short at the end of the file.
+#[cfg(target_os = "linux")]
+fn hash_direct(mut f: fs::File) -> std::io::Result<[u8; 32]> {
+    use std::io::Read;
+    const ALIGN: usize = 4096;
+    const LEN: usize = 1 << 20;
+    let mut raw = vec![0u8; LEN + ALIGN];
+    let off = raw.as_ptr().align_offset(ALIGN);
+    let buf = &mut raw[off..off + LEN];
+    let mut h = blake3::Hasher::new();
+    loop {
+        let n = f.read(buf)?;
+        if n == 0 {
+            break;
+        }
+        h.update(&buf[..n]);
+        if n % ALIGN != 0 {
+            // A short, unaligned read is the end of the file.
+            break;
+        }
+    }
+    Ok(*h.finalize().as_bytes())
+}
+
+/// Write an object to a disk and prove it is there: temporary file, fsync,
+/// rename, fsync of the directory (`util::write_atomic`), then read it back
+/// from the disk (`read_back_hash`) and compare with the object name (or,
+/// for a key that is not an object name, the hash of `data`). A mismatch
+/// deletes the file and writes once more; a second mismatch fails with
+/// `PoolError::WriteNotVerified`.
+fn write_checked(path: &Path, key: &str, data: &[u8], label: &str) -> Result<()> {
+    let want = match object_name_of(key) {
+        Some(n) => n.to_ascii_lowercase(),
+        None => hex::encode(crate::crypto::hash(data)),
+    };
+    for _ in 0..2 {
+        util::write_atomic(path, data)?;
+        if take_corruption(path) {
+            let mut b = fs::read(path)?;
+            if let Some(x) = b.first_mut() {
+                *x ^= 0xff;
+            }
+            fs::write(path, b)?;
+        }
+        match read_back_hash(path) {
+            Ok(h) if hex::encode(h) == want => return Ok(()),
+            _ => {
+                let _ = fs::remove_file(path);
+            }
+        }
+    }
+    Err(anyhow::Error::new(PoolError::WriteNotVerified {
+        label: label.to_string(),
+        key: key.to_string(),
+    }))
+}
+
 /// Where removable media appears on this platform: (root, depth). Depth 0
 /// means the root itself is the candidate, 1 its children, 2 its grandchildren.
 pub fn platform_mount_roots() -> Vec<(PathBuf, usize)> {
@@ -373,6 +523,29 @@ pub struct VerifyOutcome {
     pub missing: Vec<String>,
     /// Objects found on the disk that the index did not know; adopted.
     pub adopted: u64,
+    /// Keys whose copy hashed right (for `chunk_verified` events).
+    #[serde(skip)]
+    pub verified_keys: Vec<String>,
+}
+
+/// Result of `tidy_disk` (listings only, nothing read).
+#[derive(Clone, Debug, Default, Serialize)]
+pub struct TidyOutcome {
+    /// Deletions queued while the disk was away, applied now.
+    pub pending_removed: u64,
+    pub pending_bytes: u64,
+    /// Files on the disk that the vault no longer references.
+    pub unneeded_removed: u64,
+    pub unneeded_bytes: u64,
+    /// Temporary files of writes that never finished.
+    pub temp_removed: u64,
+    /// Copies the index placed on the disk that are gone (forgotten).
+    pub missing: Vec<String>,
+    /// Copies at the wrong size (removed and forgotten).
+    pub bad: Vec<String>,
+    /// Files the vault references that the index did not place here; their
+    /// first check is due at once.
+    pub adopted: u64,
 }
 
 struct State {
@@ -381,6 +554,9 @@ struct State {
     attached: Option<BTreeMap<String, PathBuf>>,
     /// Disks whose on-disk index must be rewritten.
     dirty: BTreeSet<String>,
+    /// The disk the last put went to: the next one goes there too while it
+    /// has room, so the blocks of one file stay together on one disk.
+    last_put: Option<String>,
 }
 
 pub struct PoolStorage {
@@ -391,6 +567,7 @@ pub struct PoolStorage {
     identity: PoolIdentity,
     reserve_percent: u32,
     min_reserve_bytes: u64,
+    verify_after_days: u32,
     scan_roots: Vec<PathBuf>,
     index_path: PathBuf,
     state: Mutex<State>,
@@ -408,6 +585,7 @@ impl PoolStorage {
             disks,
             scan_roots,
             copies,
+            verify_after_days,
         } = spec
         else {
             bail!("storage {} is not a disk pool", spec.name());
@@ -426,12 +604,14 @@ impl PoolStorage {
             identity,
             reserve_percent: *reserve_percent,
             min_reserve_bytes: *min_reserve_bytes,
+            verify_after_days: *verify_after_days,
             scan_roots: scan_roots.clone(),
             index_path,
             state: Mutex::new(State {
                 index,
                 attached: None,
                 dirty: BTreeSet::new(),
+                last_put: None,
             }),
         })
     }
@@ -447,6 +627,12 @@ impl PoolStorage {
     /// Copies of every object the disk group rule asks for (1: no rule).
     pub fn copies(&self) -> u32 {
         self.copies
+    }
+
+    /// Copies whose last check is older than this many days are re-hashed
+    /// when their disk is inserted (0: every copy, every time).
+    pub fn verify_after_days(&self) -> u32 {
+        self.verify_after_days
     }
 
     /// A disk's place: its own, or the pool's.
@@ -628,7 +814,10 @@ impl PoolStorage {
             if sp.free < size.saturating_add(self.reserve(sp.total)) {
                 continue;
             }
-            if best.as_ref().is_none_or(|(f, _, _)| sp.free > *f) {
+            if st.last_put.as_deref() == Some(id.as_str()) {
+                // Stay on the disk that took the previous block.
+                best = Some((u64::MAX, id.clone(), mount.clone()));
+            } else if best.as_ref().is_none_or(|(f, _, _)| sp.free > *f) {
                 best = Some((sp.free, id.clone(), mount.clone()));
             }
         }
@@ -653,18 +842,25 @@ impl PoolStorage {
         data: &[u8],
     ) -> Result<()> {
         let path = Self::data_path(mount, key)?;
-        util::write_atomic(&path, data)?;
+        let label = st
+            .index
+            .disks
+            .get(disk_id)
+            .map(|d| d.label.clone())
+            .unwrap_or_default();
+        write_checked(&path, key, data, &label)?;
+        let now = util::now_utc();
         match st.index.objects.get_mut(key) {
             Some(e) => {
                 if !e.held_by(disk_id) {
                     e.extra.push(disk_id.to_string());
                 }
+                e.checked.insert(disk_id.to_string(), now);
             }
             None => {
-                st.index.objects.insert(
-                    key.to_string(),
-                    ObjectEntry::new(disk_id, data.len() as u64),
-                );
+                let mut e = ObjectEntry::new(disk_id, data.len() as u64);
+                e.checked.insert(disk_id.to_string(), now);
+                st.index.objects.insert(key.to_string(), e);
             }
         }
         if let Some(d) = st.index.disks.get_mut(disk_id) {
@@ -672,6 +868,14 @@ impl PoolStorage {
         }
         st.dirty.insert(disk_id.to_string());
         self.save_index(st)
+    }
+
+    /// Bytes that can still go to an attached disk within its reserve.
+    pub fn room(&self, disk_id: &str) -> Option<u64> {
+        let mut st = self.state.lock().unwrap();
+        let attached = self.attached(&mut st);
+        let sp = disk_space(attached.get(disk_id)?)?;
+        Some(sp.free.saturating_sub(self.reserve(sp.total)))
     }
 
     /// Would `size` more bytes fit on the disk within its reserve?
@@ -947,12 +1151,16 @@ impl PoolStorage {
         let Some(mount) = attached.get(disk_id).cloned() else {
             bail!("disk is not attached");
         };
+        self.apply_pending(&mut st, disk_id, &mount)
+    }
+
+    fn apply_pending(&self, st: &mut State, disk_id: &str, mount: &Path) -> Result<(u64, u64)> {
         let Some(pending) = st.index.pending_deletes.remove(disk_id) else {
             return Ok((0, 0));
         };
         let (mut n, mut bytes) = (0u64, 0u64);
         for (key, size) in pending {
-            let path = Self::data_path(&mount, &key)?;
+            let path = Self::data_path(mount, &key)?;
             let _ = fs::remove_file(&path);
             n += 1;
             bytes += size;
@@ -961,8 +1169,252 @@ impl PoolStorage {
             }
         }
         st.dirty.insert(disk_id.to_string());
-        self.save_index(&st)?;
+        self.save_index(st)?;
         Ok((n, bytes))
+    }
+
+    /// First phase of the insert routine, from listings alone (no object is
+    /// read): check the marker, apply the queued deletions, remove leftover
+    /// temporary files of interrupted writes, forget copies the disk lost or
+    /// holds at the wrong size, adopt files the vault still references
+    /// (`referenced(object name)`) and remove the ones nothing needs.
+    pub fn tidy_disk(
+        &self,
+        disk_id: &str,
+        referenced: &dyn Fn(&str) -> bool,
+    ) -> Result<TidyOutcome> {
+        let mut st = self.state.lock().unwrap();
+        let attached = self.attached(&mut st);
+        let Some(mount) = attached.get(disk_id).cloned() else {
+            bail!("disk is not attached");
+        };
+        if !self.marker_matches(&mount, disk_id) {
+            bail!("the marker at {} does not match this disk", mount.display());
+        }
+        let mut out = TidyOutcome::default();
+        (out.pending_removed, out.pending_bytes) = self.apply_pending(&mut st, disk_id, &mount)?;
+        // What the disk holds: key -> size, from the directory listing.
+        let data = mount.join(DATA_DIR);
+        let mut present: BTreeMap<String, u64> = BTreeMap::new();
+        let chunks = data.join("chunks");
+        if chunks.is_dir() {
+            for entry in walkdir::WalkDir::new(&chunks)
+                .into_iter()
+                .filter_map(|e| e.ok())
+                .filter(|e| e.file_type().is_file())
+            {
+                let Ok(md) = entry.metadata() else { continue };
+                let name = entry.file_name().to_string_lossy();
+                if name.starts_with('.') {
+                    // `.<name>.tmp-<pid>-<seq>` of a write that never finished;
+                    // a fresh one may belong to a write running right now.
+                    let old = md
+                        .modified()
+                        .ok()
+                        .and_then(|t| t.elapsed().ok())
+                        .is_some_and(|age| age.as_secs() > STALE_TEMP_SECS);
+                    if name.contains(".tmp-") && old && fs::remove_file(entry.path()).is_ok() {
+                        out.temp_removed += 1;
+                    }
+                    continue;
+                }
+                let Ok(rel) = entry.path().strip_prefix(&data) else {
+                    continue;
+                };
+                let Some(key) = rel.to_str() else { continue };
+                present.insert(key.replace(std::path::MAIN_SEPARATOR, "/"), md.len());
+            }
+        }
+        let held: Vec<(String, u64)> = st
+            .index
+            .objects
+            .iter()
+            .filter(|(_, e)| e.held_by(disk_id))
+            .map(|(k, e)| (k.clone(), e.size))
+            .collect();
+        for (key, size) in held {
+            match present.remove(&key) {
+                Some(s) if s == size => {}
+                found => {
+                    if found.is_some() {
+                        let _ = fs::remove_file(Self::data_path(&mount, &key)?);
+                        out.bad.push(key.clone());
+                    } else {
+                        out.missing.push(key.clone());
+                    }
+                    if let Some(e) = st.index.objects.get_mut(&key) {
+                        if !e.remove_holder(disk_id) {
+                            st.index.objects.remove(&key);
+                        }
+                    }
+                }
+            }
+        }
+        // Files the index does not place on this disk.
+        for (key, size) in present {
+            let wanted = object_name_of(&key).is_some_and(referenced);
+            if wanted {
+                let e = st
+                    .index
+                    .objects
+                    .entry(key)
+                    .or_insert_with(|| ObjectEntry::new(disk_id, size));
+                if !e.held_by(disk_id) {
+                    e.extra.push(disk_id.to_string());
+                }
+                out.adopted += 1;
+            } else if fs::remove_file(Self::data_path(&mount, &key)?).is_ok() {
+                out.unneeded_removed += 1;
+                out.unneeded_bytes += size;
+            }
+        }
+        let used: u64 = st
+            .index
+            .objects
+            .values()
+            .filter(|e| e.held_by(disk_id))
+            .map(|e| e.size)
+            .sum();
+        if let Some(d) = st.index.disks.get_mut(disk_id) {
+            d.used_bytes = used;
+            d.last_seen_utc = util::now_utc();
+        }
+        st.dirty.insert(disk_id.to_string());
+        self.save_index(&st)?;
+        Ok(out)
+    }
+
+    /// Copies on the disk whose last check is older than `cutoff_utc` (or
+    /// that were never checked): (key, size), oldest check first.
+    pub fn stale_on(&self, disk_id: &str, cutoff_utc: i64) -> Vec<(String, u64)> {
+        let st = self.state.lock().unwrap();
+        let mut v: Vec<(i64, String, u64)> = st
+            .index
+            .objects
+            .iter()
+            .filter(|(_, e)| e.held_by(disk_id))
+            .map(|(k, e)| {
+                (
+                    e.checked.get(disk_id).copied().unwrap_or(0),
+                    k.clone(),
+                    e.size,
+                )
+            })
+            .filter(|(t, _, _)| *t < cutoff_utc)
+            .collect();
+        v.sort();
+        v.into_iter().map(|(_, k, s)| (k, s)).collect()
+    }
+
+    /// Re-hash the given copies on an attached disk (read back from the disk,
+    /// `read_back_hash`). A good copy records its check; a bad or missing one
+    /// is removed and forgotten. `progress(objects, bytes)` follows the work.
+    /// Afterwards the disk's `last_verified_utc` is its oldest copy check.
+    pub fn verify_objects(
+        &self,
+        disk_id: &str,
+        keys: &[(String, u64)],
+        progress: &mut dyn FnMut(u64, u64),
+    ) -> Result<VerifyOutcome> {
+        let mount = {
+            let mut st = self.state.lock().unwrap();
+            let attached = self.attached(&mut st);
+            let Some(mount) = attached.get(disk_id).cloned() else {
+                bail!("disk is not attached");
+            };
+            if !self.marker_matches(&mount, disk_id) {
+                bail!("the marker at {} does not match this disk", mount.display());
+            }
+            mount
+        };
+        let mut out = VerifyOutcome::default();
+        let mut good: Vec<String> = Vec::new();
+        let mut gone: Vec<(String, bool)> = Vec::new();
+        // Hash without holding the index: a big disk takes hours. The
+        // caller's task (`activity`) counts the bytes.
+        for (key, size) in keys {
+            crate::activity::advance_current(*size);
+            let path = Self::data_path(&mount, key)?;
+            let ok = match fs::metadata(&path) {
+                Err(_) => {
+                    gone.push((key.clone(), false));
+                    progress(out.objects_checked, out.bytes_checked);
+                    continue;
+                }
+                Ok(md) => {
+                    md.len() == *size
+                        && read_back_hash(&path).is_ok_and(|h| {
+                            object_name_of(key)
+                                .is_none_or(|n| hex::encode(h) == n.to_ascii_lowercase())
+                        })
+                }
+            };
+            if ok {
+                out.objects_checked += 1;
+                out.bytes_checked += size;
+                good.push(key.clone());
+            } else {
+                let _ = fs::remove_file(&path);
+                gone.push((key.clone(), true));
+            }
+            progress(out.objects_checked, out.bytes_checked);
+        }
+        let mut st = self.state.lock().unwrap();
+        let now = util::now_utc();
+        for key in &good {
+            if let Some(e) = st.index.objects.get_mut(key) {
+                if e.held_by(disk_id) {
+                    e.checked.insert(disk_id.to_string(), now);
+                }
+            }
+        }
+        for (key, bad) in gone {
+            if bad {
+                out.bad.push(key.clone());
+            } else {
+                out.missing.push(key.clone());
+            }
+            if let Some(e) = st.index.objects.get_mut(&key) {
+                if !e.remove_holder(disk_id) {
+                    st.index.objects.remove(&key);
+                }
+            }
+        }
+        let mut used = 0u64;
+        let mut oldest = now;
+        for e in st.index.objects.values().filter(|e| e.held_by(disk_id)) {
+            used += e.size;
+            oldest = oldest.min(e.checked.get(disk_id).copied().unwrap_or(0));
+        }
+        if let Some(d) = st.index.disks.get_mut(disk_id) {
+            d.used_bytes = used;
+            d.last_verified_utc = oldest;
+            d.last_seen_utc = now;
+        }
+        out.verified_keys = good;
+        st.dirty.insert(disk_id.to_string());
+        self.save_index(&st)?;
+        Ok(out)
+    }
+
+    /// Make what was written to an attached disk durable: its index, then
+    /// the data directory and the mount itself are fsynced. The disk stays
+    /// attached (`eject` also records it as seen).
+    pub fn sync_disk(&self, disk_id: &str) -> Result<PathBuf> {
+        let mut st = self.state.lock().unwrap();
+        let attached = self.attached(&mut st);
+        let mount = attached
+            .get(disk_id)
+            .cloned()
+            .ok_or_else(|| anyhow!("disk is not attached"))?;
+        self.write_disk_index(&st, disk_id, &mount)?;
+        st.dirty.remove(disk_id);
+        for dir in [mount.join(DATA_DIR), mount.clone()] {
+            if let Ok(d) = fs::File::open(&dir) {
+                let _ = d.sync_all();
+            }
+        }
+        Ok(mount)
     }
 
     /// Verify the marker and every object the index places on the disk:
@@ -1006,13 +1458,18 @@ impl PoolStorage {
             let ok = md.len() == size
                 && (!full || {
                     let name = key.rsplit('/').next().unwrap_or("");
-                    fs::read(&path)
-                        .map(|b| hex::encode(crate::crypto::hash(&b)) == name)
+                    read_back_hash(&path)
+                        .map(|h| hex::encode(h) == name)
                         .unwrap_or(false)
                 });
             if ok {
                 out.objects_checked += 1;
                 out.bytes_checked += size;
+                if full {
+                    if let Some(e) = st.index.objects.get_mut(&key) {
+                        e.checked.insert(disk_id.to_string(), util::now_utc());
+                    }
+                }
             } else {
                 out.bad.push(key.clone());
                 forget(&mut st, &key);
@@ -1046,8 +1503,8 @@ impl PoolStorage {
                 let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
                 if full {
                     let name = key.rsplit('/').next().unwrap_or("");
-                    let good = fs::read(entry.path())
-                        .map(|b| hex::encode(crate::crypto::hash(&b)) == name)
+                    let good = read_back_hash(entry.path())
+                        .map(|h| hex::encode(h) == name)
                         .unwrap_or(false);
                     if !good {
                         out.bad.push(key);
@@ -1055,14 +1512,17 @@ impl PoolStorage {
                         continue;
                     }
                 }
-                match st.index.objects.get_mut(&key) {
-                    // A further copy of an object another disk holds.
-                    Some(e) => e.extra.push(disk_id.to_string()),
-                    None => {
-                        st.index
-                            .objects
-                            .insert(key, ObjectEntry::new(disk_id, size));
-                    }
+                let entry = st
+                    .index
+                    .objects
+                    .entry(key)
+                    .or_insert_with(|| ObjectEntry::new(disk_id, size));
+                // A further copy of an object another disk holds.
+                if !entry.held_by(disk_id) {
+                    entry.extra.push(disk_id.to_string());
+                }
+                if full {
+                    entry.checked.insert(disk_id.to_string(), util::now_utc());
                 }
                 out.adopted += 1;
                 out.objects_checked += 1;
@@ -1140,6 +1600,13 @@ impl PoolStorage {
         for id in disk_ids {
             if let Some(d) = st.index.disks.get_mut(id) {
                 d.last_verified_utc = now;
+            }
+        }
+        for e in st.index.objects.values_mut() {
+            for id in disk_ids {
+                if e.held_by(id) {
+                    e.checked.insert(id.clone(), now);
+                }
             }
         }
         self.save_index(&st)
@@ -1288,6 +1755,7 @@ impl Storage for PoolStorage {
         }
         let (disk_id, mount) = self.choose_disk(&mut st, data.len() as u64)?;
         self.write_object(&mut st, &disk_id, &mount, key, data)?;
+        st.last_put = Some(disk_id.clone());
         // Disk groups: further copies on attached disks in other places.
         let mut taken = BTreeSet::from([self.place_of(&st, &disk_id)]);
         while (taken.len() as u32) < self.copies {
@@ -1450,6 +1918,7 @@ mod tests {
             disks: vec![],
             scan_roots: vec![],
             copies: 1,
+            verify_after_days: DEFAULT_VERIFY_AFTER_DAYS,
         };
         let p = PoolStorage::open(
             &spec,

@@ -97,7 +97,7 @@ const DEFERRED_FILE: &str = "ledger/pending.json";
 
 /// The events waiting for the next batch, and whether the file holding
 /// them could not be read (it is then moved aside and its events are lost:
-/// `docs/spec/alpha-0-format.md` section 34 says which come back).
+/// `docs/spec/alpha-0-format.md` section 36 says which come back).
 pub(super) fn load_deferred(home: &Path) -> (Vec<Event>, bool) {
     let path = home.join(DEFERRED_FILE);
     if !path.exists() {

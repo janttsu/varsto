@@ -46,7 +46,9 @@ mod backups;
 mod block_cache;
 mod data_moves;
 mod devinfo;
+mod disk_fetch;
 mod disk_groups;
+mod disk_insert;
 mod fetch;
 mod ledger_recovery;
 mod ledger_upkeep;
@@ -55,6 +57,7 @@ mod membership;
 mod org_ops;
 mod placement;
 mod repair;
+mod restic_mirror;
 mod scrub;
 mod share_ops;
 mod strongroom_ops;
@@ -68,11 +71,16 @@ pub use backups::{
 };
 pub use block_cache::{BlockWriter, StagedFile, BLOCK_CACHE_DIR, EXPORT_DIR};
 pub use devinfo::DeviceDetails;
+pub use disk_fetch::{
+    DiskFetchSettings, DiskStep, FetchPlan, FetchPlanReport, InsertAnswer, PlanDriver, PlanFile,
+    RemoteOption, StepOutcome,
+};
 pub use disk_groups::DiskGroupStatus;
 pub use ledger_recovery::{
     LedgerDeviceStatus, LedgerHealth, LedgerHolding, LedgerProblem, LedgerRebuildOptions,
     LedgerRebuildReport, LedgerStatus, StorageRebuildReport,
 };
+pub use disk_insert::{DiskInsertReport, DiskProgress, FillOutcome, InsertOptions};
 pub use manifest_upkeep::ManifestPolicy;
 pub use membership::{
     removal_notice, DeviceInfo, DeviceRemoved, EpochRecord, Grant, KemRecord, Removal, Revocation,
@@ -85,6 +93,7 @@ pub use org_ops::{
 pub use repair::{
     Damage, DamageKind, RepairOptions, RepairReport, RepairStatus, RepairedCopy, Unrepairable,
 };
+pub use restic_mirror::{CheckOptions, SetupReport};
 pub use scrub::ScrubOptions;
 pub use share_ops::{ShareMember, ShareMembers, ShareRevokeReport};
 pub use strongroom_ops::{CleanupReport, ConvertReport, StrongroomKeySummary};
@@ -463,6 +472,9 @@ pub struct Engine {
     ledger_policy: ledger_upkeep::LedgerPolicy,
     /// When manifests are listed in full and whether old ones are pruned.
     manifest_policy: manifest_upkeep::ManifestPolicy,
+    /// The token of the restic hold this engine works under (its own run's
+    /// completeness check), which the hold does not stop (`restic_mirror`).
+    hold_exempt: Option<String>,
 }
 
 /// What the peer-to-peer server serves from (see `Engine::set_snapshot_sink`).
@@ -852,6 +864,7 @@ impl Engine {
             cycle: None,
             ledger_policy: Default::default(),
             manifest_policy: Default::default(),
+            hold_exempt: None,
         };
         engine.config.save(home)?;
         if !engine.vault.member {
@@ -1035,6 +1048,7 @@ impl Engine {
             cycle: None,
             ledger_policy: Default::default(),
             manifest_policy: Default::default(),
+            hold_exempt: None,
         };
         let (pending, pending_lost) = ledger_upkeep::load_deferred(home);
         engine.pending = pending;
@@ -1821,7 +1835,7 @@ impl Engine {
 
     /// Switch selective sync on or off for an attached folder.
     pub fn set_selective(&mut self, name_or_id: &str, selective: bool) -> Result<()> {
-        let (rec, _) = self.resolve_folder(name_or_id)?;
+        let (rec, _) = self.resolve_for_write(name_or_id)?;
         for m in self
             .config
             .folders
@@ -1881,7 +1895,7 @@ impl Engine {
     /// storages hold the content. Returns (freed, kept): files not yet stored
     /// elsewhere are kept.
     pub fn free_folder(&mut self, folder: &str) -> Result<(u64, u64)> {
-        let (rec, root) = self.resolve_folder(folder)?;
+        let (rec, root) = self.resolve_for_write(folder)?;
         let state = self.load_state(&rec.folder_id)?;
         if self.mount_is_encrypted(&rec.folder_id) {
             let paths: Vec<String> = state.local_index.keys().cloned().collect();
@@ -1983,6 +1997,14 @@ impl Engine {
         self.unlocked
             .get(folder)
             .is_some_and(|(_, until)| *until > util::now_utc())
+    }
+
+    /// `resolve_folder` for what writes into the folder's directory: refused
+    /// while a restic run holds the folder (`restic_mirror`).
+    fn resolve_for_write(&self, name_or_id: &str) -> Result<(FolderRecord, PathBuf)> {
+        let found = self.resolve_folder(name_or_id)?;
+        self.ensure_not_held(&found.0)?;
+        Ok(found)
     }
 
     fn resolve_folder(&self, name_or_id: &str) -> Result<(FolderRecord, PathBuf)> {
@@ -2600,7 +2622,10 @@ impl Engine {
     pub fn push(&mut self, folder: &str) -> Result<PushReport> {
         self.ensure_active()?;
         self.ensure_ledger_writable()?;
-        let (rec, root) = self.resolve_folder(folder)?;
+        if self.forked_self {
+            bail!("this device's ledger is forked; it must be re-enrolled as a new device");
+        }
+        let (rec, root) = self.resolve_for_write(folder)?;
         let mut state = self.load_state(&rec.folder_id)?;
         let mut report = PushReport {
             folder: rec.name.clone(),
@@ -3198,7 +3223,7 @@ impl Engine {
 
     pub fn pull(&mut self, folder: &str) -> Result<PullReport> {
         self.ensure_active()?;
-        let (rec, root) = self.resolve_folder(folder)?;
+        let (rec, root) = self.resolve_for_write(folder)?;
         let mut state = self.load_state(&rec.folder_id)?;
         let mut report = PullReport {
             folder: rec.name.clone(),
@@ -3629,6 +3654,9 @@ impl Engine {
                 self.peers.clone()
             };
             let stats = self.fetch_stats.clone();
+            // Blocks copied from pool disks for a disk fetch plan are read
+            // from the staging area instead (`disk_fetch`).
+            let staging = self.staging_roots();
             // Every object is one round trip to a peer or a storage. Fetched
             // one after another, a link with any latency idles most of the
             // time, so a window of chunks of the file (`fetch::fetch_in_order`) is in flight at
@@ -3720,13 +3748,60 @@ impl Engine {
                         write_chunk(cref, fetched)?;
                     }
                 }
-                None => fetch_in_order(
+                None if staging.is_empty() => fetch_in_order(
                     peers.as_deref(),
                     &file.chunks,
                     storages,
                     &stats,
                     &mut write_chunk,
                 )?,
+                None => {
+                    // Runs of staged blocks are read from the staging area,
+                    // the runs between them fetched as usual, in order.
+                    let staged = |c: &ChunkRef| disk_fetch::staged_object(&staging, &c.object);
+                    let mut i = 0;
+                    while i < file.chunks.len() {
+                        let here = staged(&file.chunks[i]).is_some();
+                        let mut j = i;
+                        while j < file.chunks.len() && staged(&file.chunks[j]).is_some() == here {
+                            j += 1;
+                        }
+                        if here {
+                            for c in &file.chunks[i..j] {
+                                let Some((path, pool)) = staged(c) else {
+                                    continue;
+                                };
+                                let bytes = fs::read(&path)?;
+                                let fetched =
+                                    if ObjectName::from_bytes(&crypto::hash(&bytes)) == c.object {
+                                        Fetched::Got {
+                                            source: pool,
+                                            bytes,
+                                            from_peer: false,
+                                        }
+                                    } else {
+                                        let _ = fs::remove_file(&path);
+                                        fetch::fetch_object(
+                                            peers.as_deref(),
+                                            &c.object,
+                                            storages,
+                                            &stats,
+                                        )
+                                    };
+                                write_chunk(c, fetched)?;
+                            }
+                        } else {
+                            fetch_in_order(
+                                peers.as_deref(),
+                                &file.chunks[i..j],
+                                storages,
+                                &stats,
+                                &mut write_chunk,
+                            )?;
+                        }
+                        i = j;
+                    }
+                }
             }
             out.sync_all()?;
         }
@@ -3804,7 +3879,7 @@ impl Engine {
     /// are listed and stay placeholders until the next sync. Returns how
     /// many were downloaded.
     fn fill_placeholders(&mut self, folder: &str, unavailable: &mut Vec<String>) -> Result<u64> {
-        let (rec, root) = self.resolve_folder(folder)?;
+        let (rec, root) = self.resolve_for_write(folder)?;
         if self.mount_is_selective(&rec.folder_id) || self.mount_is_encrypted(&rec.folder_id) {
             return Ok(0);
         }
@@ -3830,7 +3905,7 @@ impl Engine {
 
     /// Download a placeholder file of a selective folder and keep it here.
     pub fn fetch_file(&mut self, folder: &str, path: &str) -> Result<PullReport> {
-        let (rec, root) = self.resolve_folder(folder)?;
+        let (rec, root) = self.resolve_for_write(folder)?;
         if self.mount_is_encrypted(&rec.folder_id) {
             return self.fetch_cached(&rec, path);
         }
@@ -3911,7 +3986,7 @@ impl Engine {
     /// unless every chunk is on at least one storage that is not a carrier,
     /// and unless the file on disk is the version that was synced.
     pub fn free_file(&mut self, folder: &str, path: &str) -> Result<()> {
-        let (rec, root) = self.resolve_folder(folder)?;
+        let (rec, root) = self.resolve_for_write(folder)?;
         if self.mount_is_encrypted(&rec.folder_id) {
             // Its cached blocks go, except those other cached files use.
             return match self.free_cached(&rec, &[path.to_string()])?.pop() {
@@ -4607,7 +4682,7 @@ impl Engine {
             let staged = writer.write_sized(reader, size)?;
             return self.commit_staged(folder, path, staged);
         }
-        let (_, root) = self.resolve_folder(folder)?;
+        let (_, root) = self.resolve_for_write(folder)?;
         let disk = root.join(path);
         if placeholder_path(&disk).exists() {
             bail!("{path} is a placeholder here; fetch it before overwriting");
@@ -4656,7 +4731,7 @@ impl Engine {
     /// Create a directory inside a folder. Folder lists name files only; in a
     /// folder kept encrypted here a directory exists once a file is in it.
     pub fn mkdir(&mut self, folder: &str, path: &str) -> Result<()> {
-        let (rec, root) = self.resolve_folder(folder)?;
+        let (rec, root) = self.resolve_for_write(folder)?;
         block_cache::check_rel_path(path)?;
         if self.mount_is_encrypted(&rec.folder_id) {
             return Ok(());
@@ -4703,7 +4778,7 @@ impl Engine {
     /// Rename or move a file inside a folder (both paths relative to the
     /// folder root), then push so other devices see the move.
     pub fn move_file(&mut self, folder: &str, from: &str, to: &str) -> Result<PushReport> {
-        let (_, root) = self.resolve_folder(folder)?;
+        let (_, root) = self.resolve_for_write(folder)?;
         for p in [from, to] {
             if p.is_empty()
                 || Path::new(p).is_absolute()
@@ -4815,13 +4890,18 @@ impl Engine {
         // adopted before it is synced under its old key.
         self.pull_registry()?;
         self.finish_strongroom_conversions();
+        // The restic device keeps every folder: new ones are attached in
+        // its mirror as soon as their record is here.
+        self.restic_auto_attach();
         let names: Vec<String> = match folder {
             Some(f) => vec![f.to_string()],
             None => self
                 .folders()
                 .into_iter()
                 .filter(|(r, m)| {
-                    m.is_some() && (!r.is_strongroom() || self.is_unlocked(&r.folder_id))
+                    m.is_some()
+                        && (!r.is_strongroom() || self.is_unlocked(&r.folder_id))
+                        && !self.is_held(&r.folder_id)
                 })
                 .map(|(r, _)| r.folder_id.to_string())
                 .collect(),
@@ -5480,129 +5560,6 @@ impl Engine {
             }
         }
         bail!("chunk {} is not in {}", chunk.short(), path.display())
-    }
-
-    /// Fill one attached disk with objects of current files that the pool
-    /// holds on no disk (or, under a disk group rule, in too few places),
-    /// largest first, within the disk's reserve. Folders whose placement
-    /// leaves the pool out are skipped. Objects come from the pool's other
-    /// attached disks or the other hot storages, or are re-encrypted from
-    /// local files; no other storage is changed. Returns (objects, bytes)
-    /// written.
-    fn fill_disk(
-        &mut self,
-        spec: &StorageSpec,
-        pool: &PoolStorage,
-        disk_id: &str,
-    ) -> Result<(u64, u64)> {
-        struct Need {
-            folder: FolderId,
-            chunk: ChunkId,
-            epoch: u32,
-            size: u64,
-            files: Vec<PathBuf>,
-        }
-        let have = pool.objects();
-        let view = self.view()?;
-        let mut needed: BTreeMap<ObjectName, Need> = BTreeMap::new();
-        let mut folder_keys: BTreeMap<FolderId, FolderKeys> = BTreeMap::new();
-        for (rec, mount) in self.folders() {
-            let Ok(rec) = self.with_key(&rec) else {
-                continue; // a locked Strongroom is skipped
-            };
-            let targets = self.write_targets(&rec);
-            let state = self.load_state(&rec.folder_id)?;
-            for f in state.files.values().filter(|f| !f.deleted) {
-                for c in &f.chunks {
-                    if !pool.wants_copy(disk_id, &chunk_storage_key(&c.object))
-                        || !targets.wants(spec.name(), view.locate(&rec.folder_id, &c.chunk))
-                    {
-                        continue;
-                    }
-                    let n = needed.entry(c.object.clone()).or_insert_with(|| Need {
-                        folder: rec.folder_id.clone(),
-                        chunk: c.chunk.clone(),
-                        epoch: c.epoch,
-                        size: c.size,
-                        files: Vec::new(),
-                    });
-                    if let Some(m) = &mount {
-                        n.files.push(m.join(&f.path));
-                    }
-                }
-            }
-            folder_keys.insert(rec.folder_id.clone(), self.folder_keys(&rec)?);
-        }
-        let mut order: Vec<ObjectName> = needed.keys().cloned().collect();
-        order.sort_by(|a, b| needed[b].size.cmp(&needed[a].size).then(a.cmp(b)));
-        let sources = self.metadata_storages(false)?;
-        let (mut n, mut bytes) = (0u64, 0u64);
-        activity::set_current_total(order.iter().map(|o| needed[o].size).sum());
-        for object in order {
-            let need = &needed[&object];
-            activity::advance_current(need.size);
-            // Ciphertext is a little larger than the chunk; the exact size is
-            // checked again by the pool when writing.
-            if !pool.has_room(disk_id, need.size + 64) {
-                continue;
-            }
-            let key = chunk_storage_key(&object);
-            // A further copy (disk groups) comes from the disk that has one.
-            let mut ct: Option<Vec<u8>> = pool
-                .get(&key)
-                .ok()
-                .flatten()
-                .filter(|c| ObjectName::from_bytes(&crypto::hash(c)) == object);
-            for (_, backend) in sources.iter().filter(|_| ct.is_none()) {
-                if let Ok(Some(c)) = backend.get(&key) {
-                    if ObjectName::from_bytes(&crypto::hash(&c)) == object {
-                        ct = Some(c);
-                        break;
-                    }
-                }
-            }
-            if ct.is_none() {
-                ct = self.cached_object(&object);
-            }
-            if ct.is_none() {
-                if let Some(fk) = folder_keys.get(&need.folder) {
-                    for path in &need.files {
-                        if let Ok(c) =
-                            self.chunk_ciphertext_from_file(fk, path, &need.chunk, need.epoch)
-                        {
-                            ct = Some(c);
-                            break;
-                        }
-                    }
-                }
-            }
-            let Some(ct) = ct else { continue };
-            let first_copy = !have.contains_key(&key);
-            match pool.add_copy_on_disk(disk_id, &key, &ct) {
-                Ok(true) if !first_copy => {
-                    n += 1;
-                    bytes += ct.len() as u64;
-                }
-                Ok(true) => {
-                    n += 1;
-                    bytes += ct.len() as u64;
-                    self.pending.push(Event::ChunkStored {
-                        folder: need.folder.clone(),
-                        chunk: need.chunk.clone(),
-                        object: object.clone(),
-                        storage: spec.name().to_string(),
-                        size: ct.len() as u64,
-                    });
-                }
-                Ok(false) => {}
-                Err(e) if matches!(pool::pool_error(&e), Some(PoolError::NoRoom { .. })) => {
-                    continue;
-                }
-                Err(e) => return Err(e),
-            }
-        }
-        self.commit_batch()?;
-        Ok((n, bytes))
     }
 
     /// Duplicate files inside one folder (same keyed content hash).

@@ -690,7 +690,33 @@
   "external": "ulkoinen",
   "at home, cold": "kotona, kylmä",
   "external, cold": "ulkoinen, kylmä",
-  "Destination…": "Kohde…"
+  "Destination…": "Kohde…",
+  "Fetch from disks": "Hae levyiltä",
+  "Disk inserted": "Levy on paikallaan",
+  "Copy from the disk": "Kopioi levyltä",
+  "Fetch from the network instead": "Hae sen sijaan verkosta",
+  "Stop": "Lopeta",
+  "done": "valmis",
+  "skipped": "ohitettu",
+  "attached": "liitetty",
+  "some blocks are only on pool disks": "osa lohkoista on vain varaston levyillä",
+  "the remote copies are in cold storage": "etäkopiot ovat kylmäsäilytyksessä",
+  "the disks are cheaper and faster than the network": "levyiltä on halvempaa ja nopeampaa kuin verkosta",
+  "the disks are cheaper than the network": "levyiltä on halvempaa kuin verkosta",
+  "the disks are faster than the network": "levyiltä on nopeampaa kuin verkosta",
+  "The network does not have every block: the disks are needed.": "Verkossa ei ole kaikkia lohkoja: levyjä tarvitaan.",
+  "Preparing disk «{s}»": "Valmistelee levyä «{s}»",
+  "Checking the file system of disk «{s}»": "Tarkistaa levyn «{s}» tiedostojärjestelmää",
+  "Bringing disk «{s}» up to date": "Päivittää levyä «{s}»",
+  "Tidying disk «{s}»": "Siivoaa levyä «{s}»",
+  "Copying blocks from disk «{s}»": "Kopioi lohkoja levyltä «{s}»",
+  "Writing files fetched from disk «{s}»": "Kirjoittaa levyltä «{s}» haettuja tiedostoja",
+  "Unmounting disk «{s}»": "Irrottaa levyä «{s}»",
+  "The interface starts in your system's theme; the switch keeps your choice.": "Käyttöliittymä alkaa järjestelmän teemalla; kytkin muistaa valintasi.",
+  "Checking that the restic mirror is complete": "Tarkistaa, että resticin peilikopio on täydellinen",
+  "Backing up the mirror with restic": "Varmuuskopioi peilikopiota resticillä",
+  "Removing old restic snapshots": "Poistaa vanhoja restic-tilannekuvia",
+  "Checking the restic repository": "Tarkistaa restic-varaston"
  },
  "patterns": [
   [
@@ -856,6 +882,42 @@
   [
    "^(.+), cold$",
    "$1, kylmä"
+  ],
+  [
+   "^Could not reach the Varsto service \\((\\S+) (\\S+)\\): (.+)\\. It may be restarting or busy; try again in a moment\\.$",
+   "Varsto-palveluun ei saatu yhteyttä ($1 $2): $3. Palvelu saattaa olla käynnistymässä uudelleen tai kiireinen; yritä hetken päästä uudelleen."
+  ],
+  [
+   "^The Varsto service answered (\\d+) to (\\S+) (\\S+)$",
+   "Varsto-palvelu vastasi $1 pyyntöön $2 $3"
+  ],
+  [
+   "^The Varsto service sent an unreadable answer to (\\S+) (\\S+)$",
+   "Varsto-palvelu lähetti lukukelvottoman vastauksen pyyntöön $1 $2"
+  ],
+  [
+   "^Insert disk (.+) \\((.*)\\) into the dock, then choose Disk inserted\\.$",
+   "Aseta levy $1 ($2) telakkaan ja valitse sitten Levy on paikallaan."
+  ],
+  [
+   "^Disk (.+) is attached: choose Copy from the disk\\.$",
+   "Levy $1 on liitetty: valitse Kopioi levyltä."
+  ],
+  [
+   "^From the network instead: (.+), about (.+)\\.$",
+   "Verkosta sen sijaan: $1, noin $2."
+  ],
+  [
+   "^Disk (.+) was not found: insert it and try again\\.$",
+   "Levyä $1 ei löytynyt: aseta se paikalleen ja yritä uudelleen."
+  ],
+  [
+   "^Got (\\d+) blocks \\((.+)\\) from (.+): you can now remove it$",
+   "Saatiin $1 lohkoa ($2) levyltä $3: voit nyt irrottaa sen"
+  ],
+  [
+   "^(.+): stopped; nothing more is fetched from the disks$",
+   "$1: lopetettu; levyiltä ei haeta enempää"
   ]
  ],
  "review": [

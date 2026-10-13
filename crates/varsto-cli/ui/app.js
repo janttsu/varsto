@@ -12,8 +12,18 @@
   // how it went (failed, finished or under way); at most 200 rows are kept.
   function log(msg) {
     msg = String(msg);
+    // The same message again (a poll failing while the service restarts):
+    // one line with a count and the latest time.
+    var top = logEl.firstChild;
+    if (top && top.dataset.msg === msg) {
+      var n = (+top.dataset.count || 1) + 1; top.dataset.count = n;
+      var c = top.querySelector(".activity-count"); if (!c) { c = document.createElement("span"); c.className = "activity-count muted"; top.querySelector(".activity-text").appendChild(c); }
+      c.textContent = " (×" + n + ")";
+      var tm = top.querySelector("time"); var d = new Date(); tm.dateTime = d.toISOString(); tm.textContent = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+      return;
+    }
     var kind = /\b(error|failed|refused|could not|cannot|FORKED|corrupt)\b/i.test(msg) ? "bad" : /\b(started|checking|installing|restarting|waiting|shutting down)\b/i.test(msg) ? "run" : "ok";
-    var li = document.createElement("li"); li.className = "activity-item " + kind;
+    var li = document.createElement("li"); li.className = "activity-item " + kind; li.dataset.msg = msg;
     var dot = document.createElement("span"); dot.className = "activity-dot"; dot.setAttribute("aria-hidden", "true");
     var body = document.createElement("div"); body.className = "activity-body";
     var m = /^([^:]{1,40}): (.+)$/.exec(msg);
@@ -68,8 +78,20 @@
     if (loud) { workBar(true); }
     var unfollow = b && /^\/api\/(fetch|paths|sync|view)/.test(path) ? followDownload(b) : null;
     var done = function () { if (unfollow) { unfollow(); } if (b) { markBusy(b, false); } if (loud) { workBar(false); } };
+    // Errors say which request failed: a browser only says "Load failed" or
+    // "Failed to fetch" when the service did not answer at all.
+    var what = method + " " + path.split("?")[0];
     return fetch(path, { method: method, headers: { "X-Varsto-Token": token, "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined })
-      .then(function (r) { return r.json().then(function (j) { if (!r.ok) { throw new Error(j.error || r.statusText); } return j; }); })
+      .then(function (r) {
+        return r.text().then(function (t) {
+          var j = null; try { j = t ? JSON.parse(t) : {}; } catch (x) { j = null; }
+          if (!r.ok) { throw new Error((j && j.error) || ("The Varsto service answered " + r.status + " to " + what)); }
+          if (j === null) { throw new Error("The Varsto service sent an unreadable answer to " + what); }
+          return j;
+        });
+      }, function (e) {
+        throw new Error("Could not reach the Varsto service (" + what + "): " + e.message + ". It may be restarting or busy; try again in a moment.");
+      })
       .then(function (j) { done(); return j; }, function (e) { done(); throw e; });
   }
   // Without a vault (first start, after a reset or a wipe) nothing of the
@@ -283,7 +305,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   function fileStateLabel(f) { return f.state === "placeholder" ? "Not on this device" : f.state === "missing" ? "Unavailable" : f.pinned ? "Local, kept here" : "Local"; }
   function stateSquare(f) { var sq = el("i", "blk state-blk s-" + fileStateKey(f)); sq.title = fileStateLabel(f); return sq; }
 
-  // Theme: follows the OS unless the user picked one (persisted).
+  // Theme: the OS's until the user switches it (then persisted).
   var mq = window.matchMedia ? window.matchMedia("(prefers-color-scheme: dark)") : null;
   function storedTheme() { try { return localStorage.getItem("varsto-theme") || ""; } catch (e) { return ""; } }
   function applyTheme(t) { if (t === "dark" || t === "light") { document.documentElement.dataset.theme = t; } else { delete document.documentElement.dataset.theme; } var dark = t ? t === "dark" : !!(mq && mq.matches); document.querySelector("#themetoggle .theme-label").textContent = dark ? "Light mode" : "Dark mode"; $("themetoggle").setAttribute("aria-pressed", dark ? "true" : "false"); }
@@ -292,7 +314,6 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   function toggleTheme() { var dark = document.documentElement.dataset.theme ? document.documentElement.dataset.theme === "dark" : !!(mq && mq.matches); var next = dark ? "light" : "dark"; try { localStorage.setItem("varsto-theme", next); } catch (e) {} applyTheme(next); }
   $("themetoggle").onclick = toggleTheme;
   $("themetoggle2").onclick = toggleTheme;
-  $("themeauto").onclick = function () { try { localStorage.removeItem("varsto-theme"); } catch (e) {} applyTheme(""); log("theme follows the system"); };
 
   // Navigation between the pages of the app section.
   var titles = { overview: "Overview", files: "Files", shared: "Shared", storages: "Storages", backups: "Backups", policies: "Policies", peers: "Peers", organization: "Organization", settings: "Settings", more: "More" };
@@ -1812,9 +1833,54 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     $("files-free").disabled = f ? f.state !== "local" : !folderWide;
     $("files-free").title = folderWide ? "Remove the encrypted blocks of every downloaded file of this folder from this phone" : "Keep only a placeholder of the selected file here";
   }
+  // Large fetches whose blocks are on pool disks: the service returns a plan
+  // and the dialog walks through it disk by disk ("Disk inserted"), or the
+  // user fetches from the network instead.
+  function fmtSecs(x) { var t = Math.round(x || 0); if (t >= 3600) { return Math.floor(t / 3600) + " h " + Math.floor(t / 60) % 60 + " min"; } if (t >= 60) { return Math.floor(t / 60) + " min"; } return t + " s"; }
+  function planCost(cost, currency) { return cost === null || cost === undefined ? "price unknown" : cost.toFixed(2) + " " + (currency || ""); }
+  function runDiskPlan(folder, path, plan, note) {
+    var k = -1;
+    for (var i = 0; i < plan.steps.length; i++) { if (plan.steps[i].state === "pending") { k = i; break; } }
+    if (k < 0) { planNetwork(folder, path); return; }
+    var s = plan.steps[k], r = plan.remote;
+    dialog({ title: "Fetch from disks", text: " ", ok: s.attached ? "Copy from the disk" : "Disk inserted", extra: r.possible ? "Fetch from the network instead" : "", cancel: "Stop" }).then(function (a) {
+      if (!a) { api("POST", "/api/fetch/plan/cancel", {}).catch(function () {}); log(path + ": stopped; nothing more is fetched from the disks"); return; }
+      if (a.action === "extra") { planNetwork(folder, path); return; }
+      busy(true);
+      api("POST", "/api/fetch/plan/step", { step: k }).then(function (res) {
+        busy(false);
+        if (res.needs_disk) { runDiskPlan(folder, path, plan, "Disk " + s.label + " was not found: insert it and try again."); return; }
+        // The file system check before mounting left errors: nothing was mounted; stop here.
+        if (res.fsck_failed) { log(res.error); $("needsdisk").textContent = res.error; $("needsdisk").classList.remove("hidden"); return; }
+        log(res.outcome.message);
+        if (res.finished) { log("fetched " + path); loadFiles(); return; }
+        runDiskPlan(folder, path, res.plan, res.outcome.message);
+      }).catch(function (e) { busy(false); log("fetch failed: " + e.message); });
+    });
+    // The text: one sentence per element, so each is translated on its own.
+    var tx = $("modal-text"); tx.innerHTML = "";
+    function line(t, cls) { var d = el("div", cls || "", t); tx.appendChild(d); return d; }
+    if (note) { line(note, "notice"); }
+    line(plan.reason);
+    plan.steps.forEach(function (st, i) {
+      var d = line((i + 1) + ". " + st.label + " (" + st.place + "), " + fmtBytes(st.bytes), i === k ? "strong" : "muted");
+      var state = st.state === "done" ? "done" : st.state === "skipped" ? "skipped" : st.attached ? "attached" : "";
+      if (state) { d.appendChild(document.createTextNode(" ")); d.appendChild(el("span", "", state)); }
+    });
+    line(s.attached ? "Disk " + s.label + " is attached: choose Copy from the disk." : "Insert disk " + s.label + " (" + s.place + ") into the dock, then choose Disk inserted.");
+    line(r.possible ? "From the network instead: " + fmtBytes(r.bytes) + ", " + planCost(r.cost, r.currency) + ", about " + fmtSecs(r.secs) + "." : "The network does not have every block: the disks are needed.", "muted");
+  }
+  function planNetwork(folder, path) {
+    busy(true);
+    api("POST", "/api/fetch/plan/network", {}).then(function (res) {
+      (res.files_failed || []).forEach(function (f) { log(f.path + ": " + f.error); });
+      if (res.finished) { log("fetched " + path); }
+    }).catch(function (e) { log("fetch failed: " + e.message); }).then(function () { busy(false); loadFiles(); });
+  }
   function fetchFile(folder, path) {
     busy(true); $("needsdisk").classList.add("hidden");
     api("POST", "/api/fetch", { folder: folder, path: path }).then(function (r) {
+      if (r.plan) { runDiskPlan(folder, path, r.plan, ""); return; }
       if (r.needs_disk) {
         var msg = "This file is on disk " + r.needs_disk.label + " (" + r.needs_disk.place + "). Attach it and try again.";
         $("needsdisk").textContent = msg; $("needsdisk").classList.remove("hidden"); log(path + ": " + msg);
@@ -2267,6 +2333,15 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     "data_move": "Moving the data of folder «{s}»",
     "storage_removal": "Copying blocks off storage «{s}»",
     "storage_removal.delete": "Deleting the data on storage «{s}»",
+    "disk_init": "Preparing disk «{s}»",
+    "disk_fsck": "Checking the file system of disk «{s}»",
+    "disk_insert": "Bringing disk «{s}» up to date",
+    "disk_insert.tidy": "Tidying disk «{s}»",
+    "disk_insert.verify": "Checking the blocks of disk «{s}»",
+    "disk_insert.fill": "Filling disk «{s}»",
+    "disk_fetch": "Copying blocks from disk «{s}»",
+    "disk_fetch.write": "Writing files fetched from disk «{s}»",
+    "disk_unmount": "Unmounting disk «{s}»",
     "scrub": "Checking storage «{s}» for bit rot",
     "scrub.disk": "Checking disk «{s}» for bit rot",
     "scrub.files": "Checking the files of folder «{s}» for bit rot",
@@ -2277,7 +2352,11 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     "ledger_rebuild.manifests": "Reading the folders' file lists",
     "ledger_rebuild.list": "Listing the stored blocks",
     "ledger_rebuild.verify": "Checking the stored blocks",
-    "ledger_rebuild.seal": "Recording where the blocks are"
+    "ledger_rebuild.seal": "Recording where the blocks are",
+    "restic": "Checking that the restic mirror is complete",
+    "restic.backup": "Backing up the mirror with restic",
+    "restic.forget": "Removing old restic snapshots",
+    "restic.repo_check": "Checking the restic repository"
   };
   var actTimer = null, actBusy = false, lastActivity = null;
   function actTr(s) { return window.varstoLang ? window.varstoLang.t(s) : s; }

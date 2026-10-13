@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: PolyForm-Shield-1.0.0
 //! Finding and repairing lost ledger copies (`docs/spec/alpha-0-format.md`
-//! section 34).
+//! section 36).
 //!
 //! Every metadata storage and every device holds the ledger, so most losses
 //! repair themselves: a storage that lost its ledger objects is filled again
