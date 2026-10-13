@@ -85,11 +85,11 @@ pub use disk_fetch::{
 };
 pub use disk_groups::DiskGroupStatus;
 pub use disk_insert::{DiskInsertReport, DiskProgress, FillOutcome, InsertOptions};
+pub use drain::{DrainOptions, DrainPlan, DrainRunLimits, DrainRunReport, DrainStatus};
 pub use imports::{
     CleanupFile, ImportCleanupReport, ImportOptions, ImportReport, ImportStatus, ImportVerify,
     MissingFile,
 };
-pub use drain::{DrainOptions, DrainPlan, DrainRunLimits, DrainRunReport, DrainStatus};
 pub use ledger_recovery::{
     LedgerDeviceStatus, LedgerHealth, LedgerHolding, LedgerProblem, LedgerRebuildOptions,
     LedgerRebuildReport, LedgerStatus, StorageRebuildReport,
