@@ -295,6 +295,7 @@ pub fn xattr_representable(name: &str) -> bool {
 
 /// User and group names by id, looked up once per scan.
 #[derive(Default)]
+#[cfg_attr(not(unix), allow(dead_code))]
 pub struct Names {
     users: HashMap<u32, Option<String>>,
     groups: HashMap<u32, Option<String>>,
