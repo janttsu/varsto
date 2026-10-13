@@ -15,8 +15,10 @@
 pub mod activity;
 pub mod advice;
 pub mod autoverify;
+pub mod blockdev;
 pub mod chunking;
 pub mod crypto;
+pub mod diskconf;
 pub mod engine;
 pub mod ids;
 pub mod kem;

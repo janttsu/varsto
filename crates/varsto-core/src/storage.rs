@@ -144,7 +144,15 @@ pub enum StorageSpec {
         /// in different places (each disk has a place; default 1, one copy).
         #[serde(default = "default_copies", skip_serializing_if = "is_one")]
         copies: u32,
+        /// Copies on a disk whose last check is older than this many days
+        /// are re-hashed when the disk is inserted (default 180).
+        #[serde(default = "default_verify_after_days")]
+        verify_after_days: u32,
     },
+}
+
+fn default_verify_after_days() -> u32 {
+    crate::pool::DEFAULT_VERIFY_AFTER_DAYS
 }
 
 fn default_copies() -> u32 {

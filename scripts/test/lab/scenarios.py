@@ -3,7 +3,7 @@
 """End-to-end scenarios in the lab of lab.py (run `lab.py up`, `lab.py
 services`, `lab.py build` and `lab.py install-bin` first).
 
-    scenarios.py [--only NAME[,NAME]] [--keep]     run and write test-results/lab/results.json
+    scenarios.py [--only NAME[,NAME]] [--binary PATH]     run and write test-results/lab/results.json
 
 Every scenario prints PASS/FAIL with the reason and goes on; the exit code
 is the number of failed scenarios (0: everything passed). The vault lives in
@@ -580,6 +580,220 @@ def s_disks():
     check(not chk.get("corrupt") and not chk.get("missing"), f"disk check: {chk}")
 
 
+# ----- whole drives: disk init, insert, unmount, and fetching from disks ---------------------
+# A vault of its own on the laptop (--home ~/dl-home) with a local "box" storage and a pool
+# "dshelf"; virtual drives of 4 GiB (the pool keeps 2 GiB free on every disk), one at a time as vdd.
+
+DL_VM = "vl-laptop"
+DL = "--home /home/varsto/dl-home"
+
+
+def dl(args, json_out=True, check_rc=True):
+    return v(DL_VM, f"{DL} {args}", json_out=json_out, check_rc=check_rc)
+
+
+def dl_failed(r, words):
+    return isinstance(r, dict) and r.get("_failed") and all(w in (r.get("_err") or "") for w in words)
+
+
+def dl_clean():
+    run(DL_VM, "pkill -f 'dl-home'; sleep 0.3; true", check_rc=False)
+    run(DL_VM, "sudo umount /dev/vdd1 2>/dev/null; true", check_rc=False)
+    lab.virsh("detach-disk", DL_VM, "vdd", "--live", check=False)
+    time.sleep(1)
+    for name in ("vdd", "vde", "vdf", "red", "green"):
+        for f in (lab.DIR / "pool").glob(f"{DL_VM}-{name}.qcow2"):
+            f.unlink()
+    run(DL_VM, "sudo rmdir /mnt/varsto-* 2>/dev/null; rm -rf ~/dl-home ~/dl-box ~/dl-docs /tmp/dl-in /tmp/dl-out; true", check_rc=False)
+
+
+def dl_vault():
+    dl("init --name dl")
+    dl("storage add-local box /home/varsto/dl-box --place cloud", json_out=False)
+    dl("storage add-pool dshelf --place home", json_out=False)
+    gen_data(DL_VM, "/home/varsto/dl-docs", seed=41, big_mb=24, small=60)
+    dl("folder add ddocs /home/varsto/dl-docs", json_out=False)
+    dl("push ddocs")
+
+
+def dl_unmounted(dev):
+    return run(DL_VM, f"findmnt -n -S {dev}", check_rc=False).returncode != 0
+
+
+@scenario("disk-init")
+def s_disk_init():
+    dl_clean()
+    dl_vault()
+    attach_disk(DL_VM, "vdd", size="4G")
+    # Refusals: the system disk, no confirmation without a terminal, a confirmation of another device.
+    r = dl("disk init /dev/vda --pool dshelf --label Sys --confirm /dev/vda", check_rc=False)
+    check(dl_failed(r, ["mounted"]), f"the system disk was not refused: {r}")
+    r = dl("disk init /dev/vdd --pool dshelf --label 'Blue 4GB'", check_rc=False)
+    check(dl_failed(r, ["--confirm"]), f"no refusal without --confirm: {r}")
+    r = dl("disk init /dev/vdd --pool dshelf --label 'Blue 4GB' --confirm /dev/vdb", check_rc=False)
+    check(dl_failed(r, ["does not match"]), f"a wrong --confirm was accepted: {r}")
+    out = dl("disk init /dev/vdd --pool dshelf --label 'Blue 4GB' --confirm /dev/vdd")
+    uuid, mount = out["device"]["partuuid"], out["mount"]
+    CTX["disk_init"] = {"privilege": out["device"]["privilege"], "mount": mount, "method": out["mount_method"],
+                        "objects": out["fill"]["objects"], "bytes": out["fill"]["bytes"]}
+    check(out["fill"]["objects"] > 0 and not out["fill"].get("failed"), f"init filled nothing: {out['fill']}")
+    gpt = run(DL_VM, "sudo sgdisk -p /dev/vdd").stdout
+    check("8300" in gpt and "varsto-Blue 4GB" in gpt, f"partition table: {gpt[-400:]}")
+    info = run(DL_VM, "lsblk -no FSTYPE,PARTUUID,LABEL /dev/vdd1").stdout.split()
+    check(info == ["ext4", uuid, "Blue-4GB"], f"filesystem, PARTUUID, label: {info} (want {uuid})")
+    conf = run(DL_VM, "cat ~/dl-home/disks.conf").stdout
+    check(f"{uuid}\tdshelf\tBlue 4GB\n" in conf, f"disks.conf: {conf}")
+    check(run(DL_VM, f"stat -c %U {shlex.quote(mount)}").stdout.strip() == "varsto", "the filesystem root is not the user's")
+    fs = run(DL_VM, "sudo dumpe2fs -h /dev/vdd1 2>/dev/null").stdout
+    n = {k: int(re.search(rf"^{k}:\s+(\d+)", fs, re.M).group(1)) for k in ("Inode count", "Block count", "Block size", "Reserved block count")}
+    ratio = n["Block count"] * n["Block size"] / n["Inode count"]
+    CTX["disk_init"]["bytes_per_inode"] = round(ratio)
+    check(60_000 < ratio < 70_000 and n["Reserved block count"] == 0, f"mkfs options: {n}")
+    # Every object on the drive hashes to its name (a full check reads them back).
+    chk = dl("disk check 'Blue 4GB' --full")
+    files = int(run(DL_VM, f"find {shlex.quote(mount)}/varsto/chunks -type f ! -name '.*' | wc -l").stdout)
+    check(not chk["bad"] and not chk["missing"] and chk["objects_checked"] == files, f"full check: {chk}, {files} files")
+    um = dl("disk unmount 'Blue 4GB'")
+    CTX["disk_init"]["unmount"] = [s["step"] for s in um["steps"]]
+    check(dl_unmounted("/dev/vdd1"), "still mounted after disk unmount")
+    detach_disk(DL_VM, "vdd")
+    # Away: new files; then half of the copies' last checks are made old.
+    run(DL_VM, "head -c 3000000 /dev/urandom > ~/dl-docs/new-while-away.bin")
+    dl("push ddocs")
+    aged = int(run(DL_VM, """python3 - <<'PY'
+import glob, json
+p = glob.glob('/home/varsto/dl-home/pool-*.json')[0]
+d = json.load(open(p))
+n = 0
+for i, (k, e) in enumerate(sorted(d['objects'].items())):
+    if i % 2 == 0:
+        for disk in e.get('checked', {}):
+            e['checked'][disk] = 1000
+            n += 1
+json.dump(d, open(p, 'w'))
+print(n)
+PY""").stdout.strip())
+    attach_disk(DL_VM, "vdd", size="4G")
+    ins = dl("disk insert")
+    check(len(ins) == 1, f"insert: {ins}")
+    rep = ins[0]["report"]
+    CTX["disk_insert"] = {"mount_method": ins[0]["mount_method"], "verified": rep["verified_objects"], "aged": aged,
+                          "filled": rep["fill"]["objects"], "removed": rep["tidy"]["pending_removed"] + rep["tidy"]["unneeded_removed"]}
+    check(rep["verified_objects"] == aged and not rep["bad"], f"stale verification: {rep['verified_objects']} of {aged} aged, bad {rep['bad']}")
+    check(rep["fill"]["objects"] > 0 and not rep["fill"].get("failed"), f"insert filled nothing: {rep['fill']}")
+    check("varsto disk unmount" in ins[0]["message"], ins[0]["message"])
+    check(ins[0]["fsck"]["verdict"] == "clean", f"the check before mounting: {ins[0]['fsck']}")
+    again = dl("disk insert 'Blue 4GB'")[0]["report"]
+    check(again["verified_objects"] == 0 and again["fill"]["objects"] == 0, f"a second insert did work again: {again}")
+    dl("disk unmount 'Blue 4GB'")
+    check(dl_unmounted("/dev/vdd1"), "still mounted after the second unmount")
+    lst = dl("disk list")
+    row = [d for d in lst if d.get("label") == "Blue 4GB"]
+    check(row and row[0].get("partuuid") == uuid and row[0].get("plugged_in") is True, f"disk list: {row}")
+    check((row[0].get("fsck") or {}).get("verdict") == "clean", f"disk list has no check: {row}")
+    # The forced check before mounting: an error preen fixes (a wrong free-block count)
+    # is corrected and the insert goes on with a warning...
+    run(DL_VM, "sudo debugfs -w -R 'set_bg 0 free_blocks_count 7' /dev/vdd1")
+    ins = dl("disk insert 'Blue 4GB'")[0]
+    CTX["disk_fsck"] = {"fixable": [ins["fsck"]["code"], ins["fsck"]["verdict"]]}
+    check(ins["fsck"]["verdict"] == "corrected", f"a fixable error: {ins['fsck']}")
+    dl("disk unmount 'Blue 4GB'")
+    # ...and one it cannot fix (the data directory's inode cleared) stops it, unmounted.
+    run(DL_VM, "sudo debugfs -w -R 'clri /varsto' /dev/vdd1")
+    r = dl("disk insert 'Blue 4GB'", check_rc=False)
+    CTX["disk_fsck"]["unfixable"] = (r.get("_err") or "")[-300:] if isinstance(r, dict) else str(r)[-300:]
+    check(dl_failed(r, ["could not be repaired automatically"]), f"an unfixable error did not stop the insert: {r}")
+    check(dl_unmounted("/dev/vdd1"), "mounted after a failed check")
+    lst = dl("disk list")
+    row = [d for d in lst if d.get("label") == "Blue 4GB"]
+    check((row[0].get("fsck") or {}).get("verdict") == "uncorrected", f"the failed check is not recorded: {row}")
+    detach_disk(DL_VM, "vdd")
+    for f in (lab.DIR / "pool").glob(f"{DL_VM}-vdd.qcow2"):
+        f.unlink()
+
+
+def dl_attach(image):
+    """Plug virtual drive `image` in as vdd (one drive at a time: the guest names
+    hot-plugged virtio disks in order, whatever the target says)."""
+    img = lab.DIR / "pool" / f"{DL_VM}-{image}.qcow2"
+    if not img.exists():
+        lab.sh(["qemu-img", "create", "-q", "-f", "qcow2", str(img), "4G"])
+    lab.virsh("attach-disk", DL_VM, str(img), "vdd", "--targetbus", "virtio", "--subdriver", "qcow2", "--live")
+    for _ in range(20):
+        if run(DL_VM, "test -b /dev/vdd", check_rc=False).returncode == 0:
+            return
+        time.sleep(0.5)
+    raise Fail(f"{image} did not appear as /dev/vdd")
+
+
+@scenario("disk-fetch-plan")
+def s_disk_fetch_plan():
+    dl_clean()
+    dl_vault()
+    # film.bin: its first 12 MB go to Red, the 8 MB appended later to Green.
+    dl_attach("red")
+    dl("disk init /dev/vdd --pool dshelf --label Red --confirm /dev/vdd")
+    run(DL_VM, "head -c 12000000 /dev/urandom > ~/dl-docs/film.bin")
+    dl("push ddocs")
+    dl("disk unmount Red")
+    detach_disk(DL_VM, "vdd")
+    dl_attach("green")
+    dl("disk init /dev/vdd --pool dshelf --label Green --confirm /dev/vdd")
+    run(DL_VM, "head -c 8000000 /dev/urandom >> ~/dl-docs/film.bin")
+    dl("push ddocs")
+    dl("disk unmount Green")
+    detach_disk(DL_VM, "vdd")
+    want = run(DL_VM, "sha256sum ~/dl-docs/film.bin").stdout.split()[0]
+    dl("storage price box --egress 0.09 --currency EUR", json_out=False)
+    dl("disk fetch-set --threshold-mib 1")
+    plan = dl("fetch-plan ddocs film.bin")
+    CTX["fetch_plan"] = {"recommend": plan["recommend"], "reason": plan["reason"],
+                         "steps": [(s["label"], s["bytes"]) for s in plan["steps"]], "remote_cost": plan["remote"]["cost"]}
+    check(plan["recommend"] == "disks" and sorted(s["label"] for s in plan["steps"]) == ["Green", "Red"], f"plan: {plan}")
+    run(DL_VM, "rm ~/dl-docs/film.bin")
+    # The fetch runs in the background reading Enter from a FIFO; the host plugs in each
+    # drive it asks for, presses Enter, and unplugs the drive when told it can.
+    run(DL_VM, "mkfifo /tmp/dl-in; (setsid sleep 3600 > /tmp/dl-in 2>/dev/null < /dev/null &); "
+               f"(setsid sh -c '{ENV} varsto {DL} folder fetch ddocs film.bin --from-disks always < /tmp/dl-in > /tmp/dl-out 2>&1; "
+               "echo rc=$? >> /tmp/dl-out' > /dev/null 2>&1 < /dev/null &); true")
+
+    def wait_out(pred, what, secs=300):
+        end = time.time() + secs
+        while time.time() < end:
+            out = run(DL_VM, "cat /tmp/dl-out 2>/dev/null; true", check_rc=False).stdout
+            if pred(out):
+                return out
+            if "rc=" in out:
+                raise Fail(f"the fetch ended while waiting for {what}: {out[-800:]}")
+            time.sleep(1)
+        raise Fail(f"timed out waiting for {what}")
+
+    order = []
+    try:
+        for i in range(2):
+            out = wait_out(lambda o: len(re.findall(r'Insert disk "([^"]+)"', o)) > i, f"prompt {i + 1}")
+            label = re.findall(r'Insert disk "([^"]+)"', out)[i]
+            order.append(label)
+            dl_attach(label.lower())
+            for _ in range(20):
+                if run(DL_VM, "test -b /dev/vdd1", check_rc=False).returncode == 0:
+                    break
+                time.sleep(0.5)
+            run(DL_VM, "echo > /tmp/dl-in")
+            wait_out(lambda o: f"from {label}: you can now remove it" in o, f"{label} to be released")
+            check(dl_unmounted("/dev/vdd1"), f"{label} is still mounted after its blocks")
+            detach_disk(DL_VM, "vdd")
+        out = wait_out(lambda o: "rc=" in o, "the end")
+    finally:
+        run(DL_VM, "pkill -f 'sleep 3600'; true", check_rc=False)
+    CTX["fetch_plan"]["order"] = order
+    check("rc=0" in out, f"fetch failed: {out[-800:]}")
+    got = run(DL_VM, "sha256sum ~/dl-docs/film.bin").stdout.split()[0]
+    check(got == want, "the fetched file differs")
+    check(run(DL_VM, "test -e ~/dl-home/disk-fetch", check_rc=False).returncode != 0, "the staging area was left behind")
+    dl_clean()
+
+
 # ----- devices on different versions (alpha.9 and this build) -------------------------------
 
 def v9(vm, args, json_out=True, check_rc=True):
@@ -1064,7 +1278,7 @@ SCENARIOS = [s_reset, s_init, s_pair, s_sync, s_words, s_conflict, s_selective, 
              s_strongroom, s_org, s_remove_user, s_revoke,
              s_p2p_setup, s_p2p_lan, s_p2p_pub, s_p2p_sym, s_p2p_stop, s_share, s_disks, s_mixed,
              s_outage, s_blackhole, s_crash, s_clock, s_clock_behind, s_p2p_upload, s_scale,
-             s_backup, s_activity, s_scrub]
+             s_backup, s_activity, s_disk_init, s_disk_fetch_plan, s_scrub]
 
 
 def main():
@@ -1077,7 +1291,10 @@ def main():
         raise SystemExit("another scenarios.py run is using the lab; wait for it to finish")
     ap = argparse.ArgumentParser()
     ap.add_argument("--only", default="")
+    ap.add_argument("--binary", help="install this varsto binary into the device VMs first (under the lock)")
     a = ap.parse_args()
+    if a.binary:
+        lab.cmd_install_bin(argparse.Namespace(binary=a.binary))
     only = set(filter(None, a.only.split(",")))
     out_dir = pathlib.Path(__file__).resolve().parents[3] / "test-results" / "lab"
     out_dir.mkdir(parents=True, exist_ok=True)

@@ -1235,6 +1235,9 @@ pub struct Config {
     /// Backups this device is the source of: what it backs up and when.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub backups: Vec<BackupSource>,
+    /// When large fetches propose pool disks instead of the network.
+    #[serde(default)]
+    pub disk_fetch: crate::engine::DiskFetchSettings,
 }
 
 /// A backup taken on this device (local, never published).
