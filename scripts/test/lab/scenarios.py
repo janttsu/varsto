@@ -1007,12 +1007,64 @@ def s_activity():
         for vm in ("vl-laptop", "vl-desktop"):
             run(vm, "pkill -x varsto; true", check_rc=False)
 
+@scenario("scrub")
+def s_scrub():
+    """Bit rot on the bucket and on the laptop's disk: `varsto scrub` finds a
+    damaged block the laptop itself wrote (no other device has re-read it)
+    and repairs it, and moves a local file whose content changed under an
+    unchanged size and time aside as .damaged-<date>, putting the synced
+    version back; an edited file with a new time is left alone."""
+    fresh_pair()
+    singles = sorted(p for p in (lab.DIR / "s3" / BUCKET / "chunks").rglob("*") if p.is_file())
+    check(singles, "no single block objects in the bucket")
+    victim = singles[len(singles) // 2]
+    data = bytearray(victim.read_bytes())
+    data[len(data) // 3] ^= 0xFF
+    victim.write_bytes(bytes(data))
+    time.sleep(6)  # rclone serve s3 lists from a 5 s directory cache
+    rot = """
+import os
+p = os.path.expanduser("~/data/docs/dir1/sub1/note-1.txt")
+st = os.stat(p)
+b = bytearray(open(p, "rb").read())
+b[len(b) // 2] ^= 0x01
+open(p, "wb").write(bytes(b))
+os.utime(p, ns=(st.st_atime_ns, st.st_mtime_ns))
+e = os.path.expanduser("~/data/docs/dir2/sub2/note-2.txt")
+open(e, "a").write("an edit\\n")
+"""
+    good = tree_hashes("vl-desktop", "/home/varsto/data/docs")
+    run("vl-laptop", f"python3 - <<'PY'\n{rot}\nPY")
+    r = v("vl-laptop", "scrub --full", check_rc=False)
+    out = r.get("_out", r) if isinstance(r, dict) and "_out" in r else r
+    check(isinstance(out, dict) and "scrub" in out, f"scrub gave no report: {r}")
+    sc = out["scrub"]
+    check(sc["corrupt"], f"the damaged block was not found: {sc}")
+    check(out.get("repair") and out["repair"]["repaired"], f"nothing repaired: {out.get('repair')}")
+    files = sc["damaged_files"]
+    check(len(files) == 1 and files[0]["restored"], f"damaged files: {files}")
+    check(files[0]["path"] == "dir1/sub1/note-1.txt", f"wrong file: {files[0]}")
+    now = tree_hashes("vl-laptop", "/home/varsto/data/docs")
+    check(now.get("./dir1/sub1/note-1.txt") == good.get("./dir1/sub1/note-1.txt"), "the synced version was not restored")
+    aside = "./" + files[0]["moved_to"]
+    check(aside in now, f"no {aside} on the laptop")
+    check(now.get("./dir2/sub2/note-2.txt") != good.get("./dir2/sub2/note-2.txt"), "the edit was undone")
+    check(not any(".damaged-" in k and "note-2" in k for k in now), "the edited file was moved aside")
+    fsck = v("vl-laptop", "fsck --verify")
+    check(not fsck.get("chunks_missing") and not fsck.get("objects_corrupt"), f"fsck after scrub: {fsck}")
+    st = v("vl-laptop", "scrub status")
+    check(st.get("totals", {}).get("files_restored") == 1, f"status: {st}")
+    # The damaged copy and the edit reach the desktop as ordinary files.
+    v("vl-laptop", "sync")
+    v("vl-desktop", "sync")
+    same_tree(tree_hashes("vl-desktop", "/home/varsto/data/docs"), tree_hashes("vl-laptop", "/home/varsto/data/docs"), "after sync")
+
 
 SCENARIOS = [s_reset, s_init, s_pair, s_sync, s_words, s_conflict, s_selective, s_repair, s_policy,
              s_strongroom, s_org, s_remove_user, s_revoke,
              s_p2p_setup, s_p2p_lan, s_p2p_pub, s_p2p_sym, s_p2p_stop, s_share, s_disks, s_mixed,
              s_outage, s_blackhole, s_crash, s_clock, s_clock_behind, s_p2p_upload, s_scale,
-             s_backup, s_activity]
+             s_backup, s_activity, s_scrub]
 
 
 def main():

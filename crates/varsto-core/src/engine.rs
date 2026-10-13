@@ -54,6 +54,7 @@ mod membership;
 mod org_ops;
 mod placement;
 mod repair;
+mod scrub;
 mod share_ops;
 mod strongroom_ops;
 mod verify;
@@ -79,6 +80,7 @@ pub use org_ops::{
 pub use repair::{
     Damage, DamageKind, RepairOptions, RepairReport, RepairStatus, RepairedCopy, Unrepairable,
 };
+pub use scrub::ScrubOptions;
 pub use share_ops::{ShareMember, ShareMembers, ShareRevokeReport};
 pub use strongroom_ops::{CleanupReport, ConvertReport, StrongroomKeySummary};
 pub use where_data::{CopyStats, DataLocations, DeviceShare, FolderShare, StorageShare};

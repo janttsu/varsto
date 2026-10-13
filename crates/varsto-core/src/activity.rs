@@ -55,6 +55,8 @@ pub const VERIFY: &str = "verify";
 pub const FSCK: &str = "fsck";
 pub const DATA_MOVE: &str = "data_move";
 pub const STORAGE_REMOVAL: &str = "storage_removal";
+/// Bit-rot check; steps "storage", "disk", "files" and "cache".
+pub const SCRUB: &str = "scrub";
 
 /// What `done` and `total` count.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -460,6 +462,10 @@ pub fn describe(t: &TaskView) -> String {
         (DATA_MOVE, _) => format!("moving the data of folder «{s}»"),
         (STORAGE_REMOVAL, "delete") => format!("deleting the data on storage «{s}»"),
         (STORAGE_REMOVAL, _) => format!("copying blocks off storage «{s}»"),
+        (SCRUB, "disk") => format!("checking disk «{s}» for bit rot"),
+        (SCRUB, "files") => format!("checking the files of folder «{s}» for bit rot"),
+        (SCRUB, "cache") => "checking the block cache for bit rot".to_string(),
+        (SCRUB, _) => format!("checking storage «{s}» for bit rot"),
         (k, _) if s.is_empty() => k.replace('_', " "),
         (k, _) => format!("{} «{s}»", k.replace('_', " ")),
     };

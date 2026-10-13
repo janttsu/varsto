@@ -1221,6 +1221,9 @@ pub struct Config {
     /// Automatic verification schedule and budget (`crate::autoverify`).
     #[serde(default)]
     pub verify: crate::autoverify::VerifySchedule,
+    /// Bit-rot check (scrub) schedule, budgets and cold storages opted in (`crate::scrub`).
+    #[serde(default)]
+    pub scrub: crate::scrub::ScrubSchedule,
     /// Storage prices set by the user, by storage name (`crate::price`).
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub prices: std::collections::BTreeMap<String, crate::price::StoragePrice>,

@@ -301,6 +301,15 @@ enum Cmd {
         #[command(subcommand)]
         cmd: Option<upkeep::VerifyCmd>,
     },
+    /// Bit-rot check (scrub): re-hash copies on the storages and the synced
+    /// files on this device within the budget; `scrub status`, `scrub set`.
+    #[command(args_conflicts_with_subcommands = true)]
+    Scrub {
+        #[command(subcommand)]
+        cmd: Option<upkeep::ScrubCmd>,
+        #[command(flatten)]
+        run: upkeep::ScrubRunArgs,
+    },
     /// Placement advice: idle files, storage prices, monthly costs, and suggestions to apply.
     Advice {
         /// Files not used for this many days count as idle.
@@ -2166,6 +2175,7 @@ fn run(cli: &Cli) -> Result<()> {
             })?;
         }
         Cmd::Verify { cmd } => upkeep::verify(cli, &home, cmd)?,
+        Cmd::Scrub { cmd, run } => upkeep::scrub(cli, &home, cmd, run)?,
         Cmd::Advice { idle_days, cmd } => upkeep::advice(cli, &home, *idle_days, cmd)?,
         Cmd::Repair {
             dry_run,
@@ -2270,6 +2280,10 @@ fn run(cli: &Cli) -> Result<()> {
                                 .map(|t| format!("\n{t}"))
                                 .unwrap_or_default()
                                 + &v["service"]["repair_text"]
+                                    .as_str()
+                                    .map(|t| format!("\n{t}"))
+                                    .unwrap_or_default()
+                                + &v["service"]["scrub_text"]
                                     .as_str()
                                     .map(|t| format!("\n{t}"))
                                     .unwrap_or_default()
@@ -3466,6 +3480,9 @@ fn service_line(
             parts.push(a.to_string());
         }
         if let Some(a) = v.get("repair_text").and_then(|x| x.as_str()) {
+            parts.push(a.to_string());
+        }
+        if let Some(a) = v.get("scrub_text").and_then(|x| x.as_str()) {
             parts.push(a.to_string());
         }
     }

@@ -1,15 +1,16 @@
 // SPDX-License-Identifier: PolyForm-Shield-1.0.0
-//! `varsto verify`, `varsto repair`, `varsto advice` and `varsto storage
-//! price`: automatic verification and repair, placement suggestions and
-//! storage prices on the command line.
+//! `varsto verify`, `varsto repair`, `varsto scrub`, `varsto advice` and
+//! `varsto storage price`: automatic verification and repair, bit-rot
+//! checks, placement suggestions and storage prices on the command line.
 
 use crate::{fmt_bytes, passphrase, print, Cli};
 use anyhow::{bail, Result};
 use clap::Subcommand;
 use std::path::Path;
 use varsto_core::autoverify::VerifySchedule;
-use varsto_core::engine::{RepairOptions, RepairReport};
+use varsto_core::engine::{RepairOptions, RepairReport, ScrubOptions};
 use varsto_core::price::StoragePrice;
+use varsto_core::scrub::{ScrubReport, ScrubStatus};
 use varsto_core::Engine;
 
 #[derive(Subcommand)]
@@ -38,6 +39,66 @@ pub enum VerifyCmd {
         /// Days after which copies in folders without a verification window are checked again.
         #[arg(long)]
         reverify_days: Option<u32>,
+    },
+}
+
+/// `varsto scrub` without a subcommand: one run now.
+#[derive(clap::Args)]
+pub struct ScrubRunArgs {
+    /// Only this storage (repeat for more).
+    #[arg(long = "storage", value_name = "NAME")]
+    pub storages: Vec<String>,
+    /// The synced files on this device and its block cache (only those,
+    /// unless storages are named too).
+    #[arg(long)]
+    pub local: bool,
+    /// Everything selected, from the start, whatever the schedule and the budgets.
+    #[arg(long)]
+    pub full: bool,
+    /// Also read cold storages in this run (retrieval fees may apply; needs --confirm-cold-read).
+    #[arg(long, requires = "confirm_cold_read")]
+    pub include_cold: bool,
+    /// Confirm that reading cold storage may start retrievals your provider bills.
+    #[arg(long)]
+    pub confirm_cold_read: bool,
+    /// Leave damaged copies in the repair queue for the service instead of repairing them now.
+    #[arg(long)]
+    pub no_repair: bool,
+}
+
+#[derive(Subcommand)]
+pub enum ScrubCmd {
+    /// Show the schedule, the last run, every target's pass and damaged files waiting.
+    Status,
+    /// Change the schedule or the budgets (only the options given change).
+    Set {
+        /// Turn the scheduled bit-rot check on.
+        #[arg(long, conflicts_with = "off")]
+        on: bool,
+        /// Turn the scheduled bit-rot check off.
+        #[arg(long)]
+        off: bool,
+        /// Hours between runs.
+        #[arg(long)]
+        interval_hours: Option<u32>,
+        /// Every copy and file is re-hashed at least once in this many days.
+        #[arg(long)]
+        days: Option<u32>,
+        /// Most MiB read per run from this device's disks (files, block cache, directories, pool disks).
+        #[arg(long)]
+        local_mib: Option<u64>,
+        /// Most MiB downloaded per run from S3 and rclone storages.
+        #[arg(long)]
+        remote_mib: Option<u64>,
+        /// Include this cold storage in scheduled runs (needs --confirm-cold-read).
+        #[arg(long, value_name = "NAME", requires = "confirm_cold_read")]
+        cold: Vec<String>,
+        /// Leave this cold storage out of scheduled runs again.
+        #[arg(long, value_name = "NAME")]
+        no_cold: Vec<String>,
+        /// Confirm that reading cold storage may start retrievals your provider bills.
+        #[arg(long)]
+        confirm_cold_read: bool,
     },
 }
 
@@ -134,6 +195,194 @@ pub fn verify(cli: &Cli, home: &Path, cmd: &Option<VerifyCmd>) -> Result<()> {
             engine.set_verify_schedule(s)?;
             let st = engine.verify_status();
             print(cli, &st, |s| s.describe())?;
+        }
+    }
+    Ok(())
+}
+
+/// What `varsto scrub` did, with the repair of what it found.
+#[derive(serde::Serialize)]
+struct ScrubRun {
+    scrub: ScrubReport,
+    repair: Option<RepairReport>,
+}
+
+/// "120 objects and 40 files checked (1.2 GiB), 1 problem: ...".
+pub fn describe_scrub(r: &ScrubReport) -> String {
+    let mut out = format!(
+        "{} objects, {} files and {} cached blocks checked ({} from storages, {} of files), {} problem{}",
+        r.objects_checked,
+        r.files_checked,
+        r.cache_checked,
+        fmt_bytes(r.object_bytes),
+        fmt_bytes(r.file_bytes),
+        r.problems(),
+        if r.problems() == 1 { "" } else { "s" }
+    );
+    if r.queued_for_repair > 0 {
+        out += &format!(
+            ", {} cop{} queued for repair",
+            r.queued_for_repair,
+            if r.queued_for_repair == 1 { "y" } else { "ies" }
+        );
+    }
+    for t in &r.targets {
+        out += &format!(
+            "\n  {}: {} checked, {} left in this pass{}{}",
+            t.label,
+            t.checked,
+            t.left_in_pass,
+            if t.pass_done { ", pass complete" } else { "" },
+            if t.behind {
+                ", BEHIND: raise the budget or the period"
+            } else {
+                ""
+            }
+        );
+    }
+    for c in &r.corrupt {
+        out += &format!("\n  CORRUPT {c}");
+    }
+    for m in &r.missing {
+        out += &format!("\n  MISSING {m}");
+    }
+    for d in &r.damaged_files {
+        out += &match (&d.moved_to, d.restored) {
+            (Some(to), true) => format!(
+                "\n  DAMAGED FILE {} ({}): moved to {to}, the recorded version restored",
+                d.path, d.folder
+            ),
+            _ => format!(
+                "\n  DAMAGED FILE {} ({}): left in place, not restored: {}",
+                d.path,
+                d.folder,
+                d.reason.clone().unwrap_or_default()
+            ),
+        };
+    }
+    if r.offline > 0 {
+        out += &format!(
+            "\n  {} copies on pool disks that are not attached",
+            r.offline
+        );
+    }
+    for d in &r.disks_away {
+        out += &format!("\n  disk away for long: {d}");
+    }
+    for s in &r.skipped {
+        out += &format!("\n  not read: {s}");
+    }
+    out
+}
+
+fn describe_scrub_status(s: &ScrubStatus) -> String {
+    let mut out = s.describe();
+    for (key, t) in &s.targets {
+        let _ = key;
+        out += &format!(
+            "\n  {}: pass started {}, {} checked in it, last complete pass {}",
+            t.label,
+            if t.pass_started_utc > 0 {
+                varsto_core::util::format_date(t.pass_started_utc)
+            } else {
+                "-".to_string()
+            },
+            t.checked_in_pass,
+            t.last_pass_done_utc
+                .map(varsto_core::util::format_date)
+                .unwrap_or_else(|| "never".to_string())
+        );
+    }
+    for d in &s.unrestored {
+        out += &format!(
+            "\n  DAMAGED FILE {} ({}): waiting for a good copy: {}",
+            d.path,
+            d.folder,
+            d.reason.clone().unwrap_or_default()
+        );
+    }
+    out
+}
+
+pub fn scrub(cli: &Cli, home: &Path, cmd: &Option<ScrubCmd>, run: &ScrubRunArgs) -> Result<()> {
+    let mut engine = Engine::open(home, &passphrase()?)?;
+    match cmd {
+        Some(ScrubCmd::Status) => {
+            print(cli, &engine.scrub_status(), describe_scrub_status)?;
+        }
+        Some(ScrubCmd::Set {
+            on,
+            off,
+            interval_hours,
+            days,
+            local_mib,
+            remote_mib,
+            cold,
+            no_cold,
+            confirm_cold_read,
+        }) => {
+            let mut s = engine.scrub_schedule().clone();
+            if *on {
+                s.enabled = true;
+            }
+            if *off {
+                s.enabled = false;
+            }
+            if let Some(h) = interval_hours {
+                s.interval_hours = *h;
+            }
+            if let Some(d) = days {
+                s.scrub_days = *d;
+            }
+            if let Some(m) = local_mib {
+                s.max_local_bytes = m.saturating_mul(1024 * 1024);
+            }
+            if let Some(m) = remote_mib {
+                s.max_remote_bytes = m.saturating_mul(1024 * 1024);
+            }
+            engine.set_scrub_schedule(s)?;
+            for n in cold {
+                engine.set_scrub_cold(n, true, *confirm_cold_read)?;
+            }
+            for n in no_cold {
+                engine.set_scrub_cold(n, false, false)?;
+            }
+            print(cli, &engine.scrub_status(), describe_scrub_status)?;
+        }
+        None => {
+            let opts = ScrubOptions {
+                storages: run.storages.clone(),
+                local: run.local,
+                full: run.full,
+                include_cold: run.include_cold && run.confirm_cold_read,
+                scheduled: false,
+            };
+            let r = engine.scrub(&opts)?;
+            let repair = if !run.no_repair && r.queued_for_repair > 0 {
+                let mut o = RepairOptions::manual();
+                o.scan = false;
+                Some(engine.repair(&o)?)
+            } else {
+                None
+            };
+            let out = ScrubRun { scrub: r, repair };
+            print(cli, &out, |o| {
+                let mut s = describe_scrub(&o.scrub);
+                if let Some(rep) = &o.repair {
+                    s += "\n";
+                    s += &describe_repair(rep);
+                }
+                s
+            })?;
+            let copies_left = out.scrub.queued_for_repair > 0
+                && out
+                    .repair
+                    .as_ref()
+                    .is_none_or(|rep| !rep.unrepairable.is_empty() || rep.left_for_next_run > 0);
+            let files_left = out.scrub.damaged_files.iter().any(|d| !d.restored);
+            if copies_left || files_left {
+                std::process::exit(1);
+            }
         }
     }
     Ok(())

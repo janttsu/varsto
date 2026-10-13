@@ -654,7 +654,20 @@
   "Not reachable": "Ei tavoitettavissa",
   "Runs an older version that does not tell": "Käyttää vanhempaa versiota, joka ei kerro tätä",
   "Does not share its activity with this device": "Ei jaa toimintaansa tämän laitteen kanssa",
-  "Asking…": "Kysytään…"
+  "Asking…": "Kysytään…",
+  "Bit-rot check": "Bittimädän tarkistus",
+  "Stored data can decay without anyone noticing. The background service re-reads, within a budget, every block on your storages and attached disks, whoever wrote it, and every synced file on this device, so that everything is checked at least once in the period. A damaged block is repaired from another copy. A file on this device that changed without being edited is never overwritten: it is moved aside as name.damaged-date and the synced version is put back. Cold storages are read only when you include them.": "Tallennettu data voi turmeltua kenenkään huomaamatta. Taustapalvelu lukee budjetin rajoissa uudelleen jokaisen lohkon tallennuspaikoissasi ja liitetyillä levyillä, kirjoittipa sen kuka tahansa, sekä jokaisen tämän laitteen synkronoidun tiedoston, niin että kaikki tarkistetaan vähintään kerran jakson aikana. Vioittunut lohko korjataan toisesta kopiosta. Tämän laitteen tiedostoa, joka on muuttunut ilman muokkausta, ei koskaan kirjoiteta yli: se siirretään sivuun nimellä nimi.damaged-päiväys ja synkronoitu versio palautetaan sen tilalle. Kylmätallennusta luetaan vain, jos otat sen mukaan.",
+  "Check now": "Tarkista nyt",
+  "Everything is re-read at least once in this period. A run reads at most this much; remote storages may bill the downloads.": "Kaikki luetaan uudelleen vähintään kerran tämän jakson aikana. Yksi ajo lukee enintään tämän verran; ulkoiset tallennuspaikat voivat laskuttaa latauksista.",
+  "Days to check everything": "Päiviä kaiken tarkistamiseen",
+  "Most MiB per run from this device's disks": "Enintään MiB ajoa kohden tämän laitteen levyiltä",
+  "Most MiB per run from remote storages": "Enintään MiB ajoa kohden ulkoisista tallennuspaikoista",
+  "next run at the next sync": "seuraava ajo seuraavan synkronoinnin yhteydessä",
+  "bit-rot check started": "bittimädän tarkistus käynnistetty",
+  "Checking storage «{s}» for bit rot": "Tarkistaa tallennuspaikan «{s}» bittimädän varalta",
+  "Checking disk «{s}» for bit rot": "Tarkistaa levyn «{s}» bittimädän varalta",
+  "Checking the files of folder «{s}» for bit rot": "Tarkistaa kansion «{s}» tiedostot bittimädän varalta",
+  "Checking the block cache for bit rot": "Tarkistaa lohkovälimuistin bittimädän varalta"
  },
  "patterns": [
   [
@@ -776,6 +789,46 @@
   [
    "^Last heard (\\d+) s ago, not answering now$",
    "Kuultu viimeksi $1 s sitten, ei vastaa nyt"
+  ],
+  [
+   "^On: everything is checked within (\\d+) days, up to (\\d+) MiB from this device's disks and (\\d+) MiB from remote storages per run$",
+   "Käytössä: kaikki tarkistetaan $1 päivän sisällä, ajoa kohden enintään $2 MiB tämän laitteen levyiltä ja $3 MiB ulkoisista tallennuspaikoista"
+  ],
+  [
+   "^cold storages included: (.+)$",
+   "mukana kylmätallennus: $1"
+  ],
+  [
+   "^last run (.+): (\\d+) objects and (\\d+) files checked, (\\d+) problems found$",
+   "viimeisin ajo $1: $2 objektia ja $3 tiedostoa tarkistettu, $4 ongelmaa löytyi"
+  ],
+  [
+   "^(\\d+) problems found and (\\d+) files restored in all$",
+   "yhteensä $1 ongelmaa löytyi ja $2 tiedostoa palautettu"
+  ],
+  [
+   "^next run (.+)$",
+   "seuraava ajo $1"
+  ],
+  [
+   "^last error: (.+)$",
+   "viimeisin virhe: $1"
+  ],
+  [
+   "^(.+): (.+) is damaged on disk and waits for a good copy$",
+   "$1: $2 on vioittunut levyllä ja odottaa ehjää kopiota"
+  ],
+  [
+   "^(.+): (.+) was damaged on disk; moved to (.+) and the synced version restored$",
+   "$1: $2 oli vioittunut levyllä; siirretty nimelle $3 ja synkronoitu versio palautettu"
+  ],
+  [
+   "^bit-rot check: (\\d+) objects and (\\d+) files checked, (\\d+) problems found$",
+   "bittimädän tarkistus: $1 objektia ja $2 tiedostoa tarkistettu, $3 ongelmaa löytyi"
+  ],
+  [
+   "^bit-rot check failed: (.+)$",
+   "bittimädän tarkistus epäonnistui: $1"
   ]
  ],
  "review": [

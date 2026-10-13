@@ -970,7 +970,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
         $("policybanner").textContent = lines.join(" ");
         $("policybanner").classList.toggle("hidden", lines.length === 0);
       }).catch(function () {});
-      loadAdvice(); loadAutoVerify(); loadRepair();
+      loadAdvice(); loadAutoVerify(); loadRepair(); loadScrub();
       updateFilesHead();
       var ul = $("storages"); ul.innerHTML = "";
       s.storages.forEach(function (st) {
@@ -1381,6 +1381,55 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   $("ar-cold").onclick = function () {
     dialog({ title: "Repair from cold storage", text: "Reading a cold storage starts a retrieval, which your provider may bill and which can take hours. Read it to repair the copies that exist only there?", ok: "Read cold storage" }).then(function (r) {
       if (r) { runRepair({ from_cold: true }, "repair from cold storage"); }
+    }).catch(function (e) { log("error: " + e.message); });
+  };
+
+  // Bit-rot check (Policies page): status, damaged files, run now, schedule.
+  var scrubStatus = null;
+  function renderScrub(v) {
+    if (!v) { return; }
+    scrubStatus = v; var s = v.schedule; var parts = []; var r = v.last;
+    parts.push(s.enabled ? "On: everything is checked within " + s.scrub_days + " days, up to " + Math.round(s.max_local_bytes / 1048576) + " MiB from this device's disks and " + Math.round(s.max_remote_bytes / 1048576) + " MiB from remote storages per run" : "Off");
+    if ((s.cold || []).length) { parts.push("cold storages included: " + s.cold.join(", ")); }
+    if (v.last_run_utc && r) {
+      parts.push("last run " + fmtWhen(r.finished_utc || v.last_run_utc) + ": " + (r.objects_checked + r.cache_checked) + " objects and " + r.files_checked + " files checked, " + (r.corrupt.length + r.missing.length + r.damaged_files.length + r.cache_dropped) + " problems found");
+    } else { parts.push("not run yet"); }
+    if (v.totals && v.totals.problems_found) { parts.push(v.totals.problems_found + " problems found and " + v.totals.files_restored + " files restored in all"); }
+    if (v.last_error) { parts.push("last error: " + v.last_error); }
+    if (s.enabled) { parts.push(v.last_run_utc ? "next run " + fmtWhen(v.next_run_utc) : "next run at the next sync"); }
+    var box = $("sc-text"); box.innerHTML = "";
+    parts.forEach(function (p, i) { if (i) { box.appendChild(document.createTextNode(" · ")); } box.appendChild(el("span", "", p)); });
+    var ul = $("sc-files"); ul.innerHTML = "";
+    (v.unrestored || []).forEach(function (d) { ul.appendChild(el("li", "bad", d.folder + ": " + d.path + " is damaged on disk and waits for a good copy")); });
+    ((r && r.damaged_files) || []).filter(function (d) { return d.restored; }).forEach(function (d) { ul.appendChild(el("li", "", d.folder + ": " + d.path + " was damaged on disk; moved to " + d.moved_to + " and the synced version restored")); });
+    $("sc-toggle").textContent = s.enabled ? "Turn off" : "Turn on";
+  }
+  function loadScrub() { api("GET", "/api/scrub").then(renderScrub).catch(function () {}); }
+  $("sc-run").onclick = function () {
+    busy(true); log("bit-rot check started");
+    api("POST", "/api/scrub/run", {}).then(function (r) {
+      var x = r.report;
+      log("bit-rot check: " + (x.objects_checked + x.cache_checked) + " objects and " + x.files_checked + " files checked, " + (x.corrupt.length + x.missing.length + x.damaged_files.length + x.cache_dropped) + " problems found");
+      x.corrupt.forEach(function (c) { log("  CORRUPT " + c); });
+      x.missing.forEach(function (c) { log("  MISSING " + c); });
+      renderScrub(r.status); loadRepair(); busy(false); refreshStatus();
+    }).catch(function (e) { log("bit-rot check failed: " + e.message); busy(false); });
+  };
+  $("sc-toggle").onclick = function () {
+    var on = !(scrubStatus && scrubStatus.schedule.enabled);
+    api("POST", "/api/scrub", { enabled: on }).then(renderScrub).catch(function (e) { log("error: " + e.message); });
+  };
+  $("sc-settings").onclick = function () {
+    var s = (scrubStatus || {}).schedule || {};
+    dialog({ title: "Bit-rot check", text: "Everything is re-read at least once in this period. A run reads at most this much; remote storages may bill the downloads.", fields: [
+      { name: "scrub_days", label: "Days to check everything", type: "number", value: s.scrub_days },
+      { name: "interval_hours", label: "Hours between runs", type: "number", value: s.interval_hours },
+      { name: "local_mib", label: "Most MiB per run from this device's disks", type: "number", value: s.max_local_bytes ? Math.round(s.max_local_bytes / 1048576) : "" },
+      { name: "remote_mib", label: "Most MiB per run from remote storages", type: "number", value: s.max_remote_bytes ? Math.round(s.max_remote_bytes / 1048576) : "" }
+    ], ok: "Save" }).then(function (r) {
+      if (!r) { return; }
+      var n = function (x) { var v = parseInt(x, 10); return isNaN(v) ? undefined : v; };
+      return api("POST", "/api/scrub", { scrub_days: n(r.values.scrub_days), interval_hours: n(r.values.interval_hours), local_mib: n(r.values.local_mib), remote_mib: n(r.values.remote_mib) }).then(renderScrub);
     }).catch(function (e) { log("error: " + e.message); });
   };
 
@@ -2153,7 +2202,11 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     "fsck.verify": "Verifying every block of the vault",
     "data_move": "Moving the data of folder «{s}»",
     "storage_removal": "Copying blocks off storage «{s}»",
-    "storage_removal.delete": "Deleting the data on storage «{s}»"
+    "storage_removal.delete": "Deleting the data on storage «{s}»",
+    "scrub": "Checking storage «{s}» for bit rot",
+    "scrub.disk": "Checking disk «{s}» for bit rot",
+    "scrub.files": "Checking the files of folder «{s}» for bit rot",
+    "scrub.cache": "Checking the block cache for bit rot"
   };
   var actTimer = null, actBusy = false, lastActivity = null;
   function actTr(s) { return window.varstoLang ? window.varstoLang.t(s) : s; }
