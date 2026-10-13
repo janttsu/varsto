@@ -689,7 +689,8 @@
   "Tidying disk «{s}»": "Städar disken «{s}»",
   "Copying blocks from disk «{s}»": "Kopierar block från disken «{s}»",
   "Writing files fetched from disk «{s}»": "Skriver filer hämtade från disken «{s}»",
-  "Unmounting disk «{s}»": "Avmonterar disken «{s}»"
+  "Unmounting disk «{s}»": "Avmonterar disken «{s}»",
+  "The interface starts in your system's theme; the switch keeps your choice.": "Gränssnittet börjar i systemets tema; reglaget kommer ihåg ditt val."
  },
  "patterns": [
   [

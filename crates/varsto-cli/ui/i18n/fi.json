@@ -696,7 +696,8 @@
   "Tidying disk «{s}»": "Siivoaa levyä «{s}»",
   "Copying blocks from disk «{s}»": "Kopioi lohkoja levyltä «{s}»",
   "Writing files fetched from disk «{s}»": "Kirjoittaa levyltä «{s}» haettuja tiedostoja",
-  "Unmounting disk «{s}»": "Irrottaa levyä «{s}»"
+  "Unmounting disk «{s}»": "Irrottaa levyä «{s}»",
+  "The interface starts in your system's theme; the switch keeps your choice.": "Käyttöliittymä alkaa järjestelmän teemalla; kytkin muistaa valintasi."
  },
  "patterns": [
   [

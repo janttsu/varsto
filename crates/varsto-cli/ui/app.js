@@ -305,7 +305,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   function fileStateLabel(f) { return f.state === "placeholder" ? "Not on this device" : f.state === "missing" ? "Unavailable" : f.pinned ? "Local, kept here" : "Local"; }
   function stateSquare(f) { var sq = el("i", "blk state-blk s-" + fileStateKey(f)); sq.title = fileStateLabel(f); return sq; }
 
-  // Theme: follows the OS unless the user picked one (persisted).
+  // Theme: the OS's until the user switches it (then persisted).
   var mq = window.matchMedia ? window.matchMedia("(prefers-color-scheme: dark)") : null;
   function storedTheme() { try { return localStorage.getItem("varsto-theme") || ""; } catch (e) { return ""; } }
   function applyTheme(t) { if (t === "dark" || t === "light") { document.documentElement.dataset.theme = t; } else { delete document.documentElement.dataset.theme; } var dark = t ? t === "dark" : !!(mq && mq.matches); document.querySelector("#themetoggle .theme-label").textContent = dark ? "Light mode" : "Dark mode"; $("themetoggle").setAttribute("aria-pressed", dark ? "true" : "false"); }
@@ -314,7 +314,6 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   function toggleTheme() { var dark = document.documentElement.dataset.theme ? document.documentElement.dataset.theme === "dark" : !!(mq && mq.matches); var next = dark ? "light" : "dark"; try { localStorage.setItem("varsto-theme", next); } catch (e) {} applyTheme(next); }
   $("themetoggle").onclick = toggleTheme;
   $("themetoggle2").onclick = toggleTheme;
-  $("themeauto").onclick = function () { try { localStorage.removeItem("varsto-theme"); } catch (e) {} applyTheme(""); log("theme follows the system"); };
 
   // Navigation between the pages of the app section.
   var titles = { overview: "Overview", files: "Files", shared: "Shared", storages: "Storages", backups: "Backups", policies: "Policies", peers: "Peers", organization: "Organization", settings: "Settings", more: "More" };
