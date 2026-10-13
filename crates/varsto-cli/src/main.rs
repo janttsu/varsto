@@ -13,6 +13,7 @@ mod desktop;
 mod drive_mount;
 mod drives;
 mod filemanager;
+mod history;
 mod icon;
 mod import;
 mod logcmd;
@@ -185,6 +186,10 @@ enum Cmd {
         #[command(subcommand)]
         cmd: trash::TrashCmd,
     },
+    /// Earlier versions of overwritten files: `varsto history <folder>
+    /// <path>` lists them; restore, set and status. Kept on a thinning
+    /// schedule for 90 days by default.
+    History(history::HistoryArgs),
     /// Show vault, devices, storages and folders.
     Status,
     /// How files would be fetched: from pool disks (which ones, in which order) or the network,
@@ -3071,6 +3076,7 @@ fn run(cli: &Cli) -> Result<()> {
         }
         Cmd::Backup { cmd } => backup::run(cli, &home, cmd)?,
         Cmd::Trash { cmd } => trash::run(cli, &home, cmd)?,
+        Cmd::History(args) => history::run(cli, &home, args)?,
         Cmd::Move {
             folder,
             from,

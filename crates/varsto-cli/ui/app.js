@@ -355,7 +355,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     if (page === "backups") { loadBackups(); }
     if (page === "recovery") { loadGuide(); }
     if (page === "import") { loadImports(); }
-    if (page === "trash") { loadTrash(); }
+    if (page === "trash") { loadTrash(); loadHistorySettings(); }
     if (page === "overview" && lastWhere) { renderWhere(lastWhere); }
     trafficWatch();
     activityWatch();
@@ -1865,6 +1865,121 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
       .then(function () { busy(false); loadTrash(); });
   };
 
+  // Version history: the versions of the selected file (Files page details)
+  // and the settings card beside the trash settings.
+  var versionsFor = "";
+  function restoredName(path) {
+    var slash = path.lastIndexOf("/"); var dir = path.slice(0, slash + 1); var name = path.slice(slash + 1);
+    var dot = name.lastIndexOf(".");
+    return dir + (dot > 0 ? name.slice(0, dot) + " (restored)" + name.slice(dot) : name + " (restored)");
+  }
+  function loadVersions(folder, f) {
+    var key = folder + "/" + f.path; versionsFor = key;
+    var box = $("fd-history"); var ul = $("fd-versions"); var note = $("fd-history-note");
+    api("GET", "/api/history?folder=" + enc(folder) + "&path=" + enc(f.path)).then(function (h) {
+      if (versionsFor !== key) { return; }
+      ul.innerHTML = ""; box.classList.remove("hidden");
+      // One sentence at a time, so it is translated as a whole.
+      var msg = h.days === null ? "Version history is off for this folder: no new versions are kept." : h.versions.length ? "" : "No earlier versions";
+      note.textContent = msg; note.classList.toggle("hidden", !msg);
+      h.versions.forEach(function (v) {
+        var li = el("li"); var body = el("div", "li-body");
+        var when = el("div", null, fmtWhen(v.replaced_utc)); when.setAttribute("data-no-i18n", ""); body.appendChild(when);
+        var by = v.author || v.replaced_by;
+        var sub = el("div", "li-sub", fmtBytes(v.size) + " · " + by + (v.new_bytes < v.size ? " · " + actTr("own changes") + " " + fmtBytes(v.new_bytes) : ""));
+        sub.setAttribute("data-no-i18n", ""); body.appendChild(sub);
+        if (v.cold_only) { body.appendChild(pill("grey", "cold")); }
+        li.appendChild(body);
+        var rb = el("button", "secondary", "Restore…"); rb.type = "button"; rb.onclick = function () { restoreVersion(folder, f.path, v, false); }; li.appendChild(rb);
+        var menu = rowMenu(li, "version:" + v.id);
+        var cb = el("button", "secondary", "Restore as a copy…"); cb.type = "button"; cb.onclick = function () { restoreVersion(folder, f.path, v, true); }; menu.appendChild(cb);
+        menu.done();
+        ul.appendChild(li);
+      });
+    }).catch(function (e) { if (versionsFor === key) { box.classList.add("hidden"); } log("versions: " + e.message); });
+  }
+  function restoreVersion(folder, path, v, copy) {
+    var when = fmtWhen(v.replaced_utc);
+    var ask = copy
+      ? dialog({ title: "Restore as a copy?", text: "The version from " + when + " is written as a new file beside the current one. Nothing is overwritten.", fields: [{ name: "as", label: "New name", value: restoredName(path).split("/").pop(), required: true }], ok: "Restore" })
+      : dialog({ title: "Restore this version?", text: "The version from " + when + " becomes the current " + path + ". The current version is kept in the versions, so nothing is lost. The change syncs to your other devices.", ok: "Restore" });
+    ask.then(function (r) {
+      if (!r) { return; }
+      var body = { folder: folder, path: path, version: v.id };
+      if (copy) { body.as = (r.values.as || "").trim(); if (!body.as) { return; } }
+      busy(true);
+      return api("POST", "/api/history/restore-plan", body).then(function (p) {
+        if (!p.cold_storages.length) { return false; }
+        var text = fmtBytes(p.cold_bytes) + " of it is kept only on cold storage " + p.cold_storages.join(", ") + ". Reading it back starts a retrieval, which your provider bills" + (p.read_cost ? " (about " + p.read_cost + ")" : "") + " and which can take hours.";
+        return dialog({ title: "Read from cold storage?", text: text, ok: "Read cold storage", danger: true }).then(function (x) { if (!x) { throw new Error("cancelled"); } return true; });
+      }).then(function (cold) {
+        body.confirm_cold_read = cold;
+        return api("POST", "/api/history/restore", body);
+      }).then(function (x) { log("Restored the version of " + x.path + " to " + x.to); }, function (e) { if (e.message !== "cancelled") { alertBox(e.message); } })
+        .then(function () { busy(false); loadFiles(); });
+    });
+  }
+  var historyFolderDays = {};
+  function loadHistorySettings() {
+    return Promise.all([api("GET", "/api/history/status"), api("GET", "/api/folders")]).then(function (r) {
+      renderHistoryStatus(r[0], r[1]);
+    }).catch(function (e) { log("history: " + e.message); });
+  }
+  function historyModeShown() {
+    var f = $("historysettings"); var picked = !!f.folder.value; var own = f.mode.value === "days";
+    $("historymode-label").classList.toggle("hidden", !picked);
+    $("historyfolderdays-label").classList.toggle("hidden", !picked || !own);
+    f.days.disabled = !f.on.checked;
+  }
+  function renderHistoryStatus(st, folders) {
+    var f = $("historysettings");
+    historyFolderDays = st.folder_days || {};
+    if (document.activeElement !== f.days) { f.days.value = st.days || 90; }
+    f.on.checked = st.days > 0;
+    var sel = $("historyfolder"); var cur = sel.value; sel.innerHTML = "";
+    var none = el("option", null, "No folder"); none.value = ""; sel.appendChild(none);
+    (folders || []).forEach(function (x) { var o = el("option", null, x.name); o.value = x.name; o.setAttribute("data-no-i18n", ""); sel.appendChild(o); });
+    sel.value = cur; if (sel.value !== cur) { sel.value = ""; }
+    var dl = $("historyfacts"); dl.innerHTML = "";
+    function fact(label, value) { dl.appendChild(el("dt", null, label)); var dd = el("dd", null, value); dd.setAttribute("data-no-i18n", ""); dl.appendChild(dd); }
+    fact("Earlier versions", st.versions + " · " + fmtBytes(st.extra_bytes));
+    (st.folders || []).filter(function (x) { return x.versions > 0 || x.days === null; }).forEach(function (x) {
+      fact(x.folder, x.days === null ? actTr("off") : x.versions + " · " + fmtBytes(x.extra_bytes));
+    });
+    var where = Object.keys(st.by_storage || {}).map(function (n) { return n + " " + fmtBytes(st.by_storage[n]); });
+    if (where.length) { fact("Kept on", where.join(", ")); }
+    pickHistoryFolder();
+  }
+  function pickHistoryFolder() {
+    var f = $("historysettings"); var d = historyFolderDays[f.folder.value];
+    f.mode.value = d === undefined ? "vault" : d === 0 ? "off" : "days";
+    f.folderdays.value = d ? d : "";
+    historyModeShown();
+  }
+  $("historyfolder").addEventListener("change", pickHistoryFolder);
+  $("historymode").addEventListener("change", historyModeShown);
+  $("historysettings").on.addEventListener("change", historyModeShown);
+  $("historysettings").onsubmit = function (ev) {
+    ev.preventDefault();
+    var d = formData(ev.target); var days = parseInt(d.days, 10);
+    if (d.on && !(days >= 1 && days <= 3650)) { alertBox("Keep versions from 1 to 3650 days."); return; }
+    var calls = [d.on ? { days: days } : { off: true }];
+    if (d.folder) {
+      if (d.mode === "vault") { calls.push({ folder: d.folder, days: 0 }); }
+      else if (d.mode === "off") { calls.push({ folder: d.folder, off: true }); }
+      else {
+        var fd = parseInt(d.folderdays, 10);
+        if (!(fd >= 1 && fd <= 3650)) { alertBox("Keep versions from 1 to 3650 days."); return; }
+        calls.push({ folder: d.folder, days: fd });
+      }
+    }
+    busy(true);
+    var chain = Promise.resolve();
+    calls.forEach(function (c) { chain = chain.then(function () { return api("POST", "/api/history/set", c); }); });
+    chain.then(function () { log("Version history settings saved"); }, function (e) { alertBox(e.message); })
+      .then(function () { busy(false); loadHistorySettings(); });
+  };
+
   // Automatic verification (Policies page): status line, run now, schedule.
   var autoVerify = null;
   function fmtWhen(t) { return t ? new Date(t * 1000).toLocaleString() : "never"; }
@@ -2429,6 +2544,8 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     var acts = $("fd-actions"); acts.innerHTML = "";
     fileActions(folder, f, true).forEach(function (b) { acts.appendChild(b); });
     showAnalysis(folder, f);
+    $("fd-history").classList.add("hidden");
+    loadVersions(folder, f);
     updateToolbar();
   }
   // The file's analysis (`/api/analysis`): what an assistant or the user
@@ -3131,7 +3248,8 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     "trash_purge.drop": "Deleting files from the trash for good",
     "trash_move": "Moving deleted files of folder «{s}» to the trash storage",
     "drain": "Draining storage «{s}»",
-    "drain.records": "Copying the records off storage «{s}»"
+    "drain.records": "Copying the records off storage «{s}»",
+    "history_restore": "Restoring an earlier version of a file of folder «{s}»"
   };
   var actTimer = null, actBusy = false, lastActivity = null;
   function actTr(s) { return window.varstoLang ? window.varstoLang.t(s) : s; }

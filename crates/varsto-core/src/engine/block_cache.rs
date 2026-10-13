@@ -284,9 +284,14 @@ impl Engine {
         if changed {
             // No plain file here: the metadata stays what the vault has.
             let meta = crate::fsmeta::carry_for_file(previous.and_then(|p| p.meta.as_ref()));
-            let clock = self.tick()?;
+            let was = previous.filter(|p| !p.deleted).cloned();
             let mut version = previous.map(|p| p.version.clone()).unwrap_or_default();
+            let clock = self.tick()?;
             version.insert(me.clone(), clock);
+            if let Some(prev) = was {
+                // The replaced version goes to the history (`history`).
+                self.history_record_replacements(rec, vec![(prev, clock)])?;
+            }
             state.files.insert(
                 path.to_string(),
                 FileState {

@@ -84,6 +84,8 @@ pub const TRASH_MOVE: &str = "trash_move";
 /// Emptying a storage onto the others (`engine::drain`); steps "copy"
 /// (blocks) and "records" (ledger batches, manifests and records).
 pub const DRAIN: &str = "drain";
+/// Restoring a version of a file from the version history (`engine::history`).
+pub const HISTORY_RESTORE: &str = "history_restore";
 
 /// What `done` and `total` count.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

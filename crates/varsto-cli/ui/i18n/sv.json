@@ -690,6 +690,76 @@
   "Copying blocks from disk «{s}»": "Kopierar block från disken «{s}»",
   "Writing files fetched from disk «{s}»": "Skriver filer hämtade från disken «{s}»",
   "Unmounting disk «{s}»": "Avmonterar disken «{s}»",
+  "The interface starts in your system's theme; the switch keeps your choice.": "Gränssnittet börjar i systemets tema; reglaget kommer ihåg ditt val.",
+  "Checking that the restic mirror is complete": "Kontrollerar att restic-speglingen är fullständig",
+  "Backing up the mirror with restic": "Säkerhetskopierar speglingen med restic",
+  "Removing old restic snapshots": "Tar bort gamla restic-ögonblicksbilder",
+  "Checking the restic repository": "Kontrollerar restic-förrådet",
+  "Trash": "Papperskorg",
+  "Files deleted on any of your devices are kept here for the days set below, encrypted on your storages, and can be restored on any device. Restoring never overwrites a file: when its name is taken, it comes back as \"name (restored)\".": "Filer som raderats på någon av dina enheter sparas här i det antal dagar som anges nedan, krypterade på dina lagringsplatser, och kan återställas på vilken enhet som helst. En återställning skriver aldrig över en fil: om namnet är upptaget kommer filen tillbaka som \"namn (restored)\".",
+  "Search the trash": "Sök i papperskorgen",
+  "All folders": "Alla mappar",
+  "Delete permanently…": "Radera permanent…",
+  "Empty trash…": "Töm papperskorgen…",
+  "Select all": "Markera alla",
+  "Select": "Markera",
+  "Deleted": "Raderad",
+  "By": "Av",
+  "The trash is empty": "Papperskorgen är tom",
+  "Files deleted on any of your devices appear here.": "Filer som raderats på någon av dina enheter visas här.",
+  "Trash settings": "Inställningar för papperskorgen",
+  "Keep deleted files (days)": "Spara raderade filer (dagar)",
+  "Trash storage": "Lagringsplats för papperskorgen",
+  "Deleted files move to this storage only, for example a cheap cold storage, and leave your other storages. Restoring from cold storage asks first, because retrieval is billed and can take hours.": "Raderade filer flyttas bara till den här lagringsplatsen, till exempel en billig kall lagring, och lämnar dina andra lagringsplatser. Återställning från kall lagring frågar först, eftersom hämtningen debiteras och kan ta timmar.",
+  "None: deleted files stay where they are": "Ingen: raderade filer stannar där de är",
+  "cold": "kall",
+  "Nothing in the trash matches": "Inget i papperskorgen matchar",
+  "In the trash": "I papperskorgen",
+  "Kept on": "Sparas på",
+  "Folders with their own days": "Mappar med egna dagar",
+  "Copies on this device": "Kopior på den här enheten",
+  "Next expiry": "Nästa utgång",
+  "Last cleanup": "Senaste städning",
+  "never": "aldrig",
+  "Each file goes back where it was. If that name is taken now, it comes back as \"name (restored)\": nothing is overwritten. The restored files sync to your other devices.": "Varje fil kommer tillbaka dit den var. Om namnet är upptaget nu kommer den tillbaka som \"namn (restored)\": inget skrivs över. De återställda filerna synkroniseras till dina andra enheter.",
+  "Into another directory of the folder (optional)": "Till en annan katalog i mappen (valfritt)",
+  "Restored": "Återställda",
+  "empty: the original place": "tomt: den ursprungliga platsen",
+  "Read from cold storage?": "Läsa från kall lagring?",
+  "Delete permanently?": "Radera permanent?",
+  "Delete permanently": "Radera permanent",
+  "Empty the trash?": "Tömma papperskorgen?",
+  "Empty trash": "Töm papperskorgen",
+  "empty": "töm",
+  "Keep deleted files from 1 to 3650 days.": "Spara raderade filer i 1–3650 dagar.",
+  "Trash settings saved": "Inställningarna för papperskorgen sparades",
+  "Restoring files of folder «{s}» from the trash": "Återställer filer i mappen «{s}» från papperskorgen",
+  "Deleting files from the trash for good": "Raderar filer från papperskorgen permanent",
+  "Moving deleted files of folder «{s}» to the trash storage": "Flyttar raderade filer i mappen «{s}» till papperskorgens lagringsplats",
+  "Versions": "Versioner",
+  "Version history": "Versionshistorik",
+  "When a file is overwritten, on any device, its earlier version is kept: every version for an hour, one per hour for a day, one per day for 30 days, then one per week. Unchanged parts are shared between versions, so only the changes take space. Restore a version from the file's details on the Files page.": "När en fil skrivs över, på vilken enhet som helst, sparas den tidigare versionen: varje version i en timme, en per timme i ett dygn, en per dag i 30 dagar och därefter en per vecka. Oförändrade delar delas mellan versionerna, så bara ändringarna tar plats. Återställ en version från filens information på sidan Filer.",
+  "Keep earlier versions": "Spara tidigare versioner",
+  "Keep versions (days)": "Spara versioner (dagar)",
+  "One folder differently": "En mapp annorlunda",
+  "For this folder": "För den här mappen",
+  "Like every folder": "Som alla mappar",
+  "Its own days": "Egna dagar",
+  "Off: keep no new versions": "Av: inga nya versioner sparas",
+  "Days for this folder": "Dagar för den här mappen",
+  "No folder": "Ingen mapp",
+  "Earlier versions": "Tidigare versioner",
+  "off": "av",
+  "own changes": "egna ändringar",
+  "Version history is off for this folder: no new versions are kept.": "Versionshistoriken är av för den här mappen: inga nya versioner sparas.",
+  "No earlier versions": "Inga tidigare versioner",
+  "Restore as a copy…": "Återställ som kopia…",
+  "Restore as a copy?": "Återställa som kopia?",
+  "New name": "Nytt namn",
+  "Restore this version?": "Återställa den här versionen?",
+  "Keep versions from 1 to 3650 days.": "Spara versioner i 1–3650 dagar.",
+  "Version history settings saved": "Inställningarna för versionshistoriken har sparats",
+  "Restoring an earlier version of a file of folder «{s}»": "Återställer en tidigare version av en fil i mappen «{s}»",
   "Import": "Import",
   "Import into Varsto": "Importera till Varsto",
   "Bring files that live elsewhere under Varsto's care. Each source becomes one folder; importing the same source again brings over what changed and never deletes anything in Varsto.": "Låt Varsto ta hand om filer som finns någon annanstans. Varje källa blir en mapp; att importera samma källa igen för över det som ändrats och tar aldrig bort något i Varsto.",
@@ -904,7 +974,6 @@
   "Last seen": "Senast sedd",
   "File system": "Filsystem",
   "Sort by this column (again: reverse)": "Sortera efter den här kolumnen (igen: omvänt)",
-  "never": "aldrig",
   "now": "nu",
   "offline": "frånkopplad",
   "retired": "pensionerad",
@@ -937,11 +1006,6 @@
   "Listing the stored blocks": "Listar de lagrade blocken",
   "Checking the stored blocks": "Kontrollerar de lagrade blocken",
   "Recording where the blocks are": "Registrerar var blocken finns",
-  "The interface starts in your system's theme; the switch keeps your choice.": "Gränssnittet börjar i systemets tema; reglaget kommer ihåg ditt val.",
-  "Checking that the restic mirror is complete": "Kontrollerar att restic-speglingen är fullständig",
-  "Backing up the mirror with restic": "Säkerhetskopierar speglingen med restic",
-  "Removing old restic snapshots": "Tar bort gamla restic-ögonblicksbilder",
-  "Checking the restic repository": "Kontrollerar restic-förrådet",
   "Filter by name, tag or analysis": "Filtrera på namn, tagg eller analys",
   "Filter files": "Filtrera filer",
   "Analysis": "Analys",
@@ -949,7 +1013,6 @@
   "The file changed after it was analysed": "Filen har ändrats efter att den analyserades",
   "No analysis yet. An assistant can record one through MCP, or write one yourself.": "Ingen analys ännu. En assistent kan spara en via MCP, eller så skriver du en själv.",
   "Written on": "Skriven på",
-  "By": "Av",
   "Analysed": "Analyserad",
   "Write analysis": "Skriv analys",
   "Edit analysis": "Redigera analys",
@@ -1080,48 +1143,53 @@
   "Start draining": "Börja tömma",
   "The storage takes new blocks again. Blocks already moved stay where they are now.": "Lagringsplatsen tar emot nya block igen. Block som redan flyttats stannar där de är nu.",
   "Draining storage «{s}»": "Tömmer lagringsplatsen «{s}»",
-  "Copying the records off storage «{s}»": "Kopierar posterna från lagringsplatsen «{s}»",
-  "Trash": "Papperskorg",
-  "Files deleted on any of your devices are kept here for the days set below, encrypted on your storages, and can be restored on any device. Restoring never overwrites a file: when its name is taken, it comes back as \"name (restored)\".": "Filer som raderats på någon av dina enheter sparas här i det antal dagar som anges nedan, krypterade på dina lagringsplatser, och kan återställas på vilken enhet som helst. En återställning skriver aldrig över en fil: om namnet är upptaget kommer filen tillbaka som \"namn (restored)\".",
-  "Search the trash": "Sök i papperskorgen",
-  "All folders": "Alla mappar",
-  "Delete permanently…": "Radera permanent…",
-  "Empty trash…": "Töm papperskorgen…",
-  "Select all": "Markera alla",
-  "Select": "Markera",
-  "Deleted": "Raderad",
-  "The trash is empty": "Papperskorgen är tom",
-  "Files deleted on any of your devices appear here.": "Filer som raderats på någon av dina enheter visas här.",
-  "Trash settings": "Inställningar för papperskorgen",
-  "Keep deleted files (days)": "Spara raderade filer (dagar)",
-  "Trash storage": "Lagringsplats för papperskorgen",
-  "Deleted files move to this storage only, for example a cheap cold storage, and leave your other storages. Restoring from cold storage asks first, because retrieval is billed and can take hours.": "Raderade filer flyttas bara till den här lagringsplatsen, till exempel en billig kall lagring, och lämnar dina andra lagringsplatser. Återställning från kall lagring frågar först, eftersom hämtningen debiteras och kan ta timmar.",
-  "None: deleted files stay where they are": "Ingen: raderade filer stannar där de är",
-  "cold": "kall",
-  "Nothing in the trash matches": "Inget i papperskorgen matchar",
-  "In the trash": "I papperskorgen",
-  "Kept on": "Sparas på",
-  "Folders with their own days": "Mappar med egna dagar",
-  "Copies on this device": "Kopior på den här enheten",
-  "Next expiry": "Nästa utgång",
-  "Last cleanup": "Senaste städning",
-  "Each file goes back where it was. If that name is taken now, it comes back as \"name (restored)\": nothing is overwritten. The restored files sync to your other devices.": "Varje fil kommer tillbaka dit den var. Om namnet är upptaget nu kommer den tillbaka som \"namn (restored)\": inget skrivs över. De återställda filerna synkroniseras till dina andra enheter.",
-  "Into another directory of the folder (optional)": "Till en annan katalog i mappen (valfritt)",
-  "Restored": "Återställda",
-  "empty: the original place": "tomt: den ursprungliga platsen",
-  "Read from cold storage?": "Läsa från kall lagring?",
-  "Delete permanently?": "Radera permanent?",
-  "Delete permanently": "Radera permanent",
-  "Empty the trash?": "Tömma papperskorgen?",
-  "Empty trash": "Töm papperskorgen",
-  "empty": "töm",
-  "Keep deleted files from 1 to 3650 days.": "Spara raderade filer i 1–3650 dagar.",
-  "Trash settings saved": "Inställningarna för papperskorgen sparades",
-  "Restoring files of folder «{s}» from the trash": "Återställer filer i mappen «{s}» från papperskorgen",
-  "Deleting files from the trash for good": "Raderar filer från papperskorgen permanent",
-  "Moving deleted files of folder «{s}» to the trash storage": "Flyttar raderade filer i mappen «{s}» till papperskorgens lagringsplats"
+  "Copying the records off storage «{s}»": "Kopierar posterna från lagringsplatsen «{s}»"
  },
  "patterns": [
+  [
+   "^Restore (\\d+) files\\?$",
+   "Återställa $1 filer?"
+  ],
+  [
+   "^Restore (.+)\\?$",
+   "Återställa $1?"
+  ],
+  [
+   "^(.+) of it is kept only on cold storage (.+)\\. Reading it back starts a retrieval, which your provider bills \\(about (.+)\\) and which can take hours\\.$",
+   "$1 av det finns bara på den kalla lagringen $2. Att läsa tillbaka det startar en hämtning som leverantören debiterar (cirka $3) och som kan ta timmar."
+  ],
+  [
+   "^(.+) of it is kept only on cold storage (.+)\\. Reading it back starts a retrieval, which your provider bills and which can take hours\\.$",
+   "$1 av det finns bara på den kalla lagringen $2. Att läsa tillbaka det startar en hämtning som leverantören debiterar och som kan ta timmar."
+  ],
+  [
+   "^(\\d+) files are deleted for good, from every device and storage\\. They cannot be restored afterwards\\.$",
+   "$1 filer raderas permanent från alla enheter och lagringsplatser. De kan inte återställas efteråt."
+  ],
+  [
+   "^(.+) is deleted for good, from every device and storage\\. It cannot be restored afterwards\\.$",
+   "$1 raderas permanent från alla enheter och lagringsplatser. Den kan inte återställas efteråt."
+  ],
+  [
+   "^Every file in the trash \\((\\d+)\\) is deleted for good, from every device and storage\\. This cannot be undone\\.$",
+   "Varje fil i papperskorgen ($1) raderas permanent från alla enheter och lagringsplatser. Detta kan inte ångras."
+  ],
+  [
+   "^Restored (\\d+) files from the trash$",
+   "Återställde $1 filer från papperskorgen"
+  ],
+  [
+   "^Deleted (\\d+) files permanently$",
+   "Raderade $1 filer permanent"
+  ],
+  [
+   "^Trash emptied: (\\d+) files deleted permanently$",
+   "Papperskorgen tömd: $1 filer raderades permanent"
+  ],
+  [
+   "^(\\d+) blocks wait for the cold storage's minimum storage time before they are deleted$",
+   "$1 block väntar på den kalla lagringens minsta lagringstid innan de raderas"
+  ],
   [
    "^Watching (\\d+) folder\\(s\\) · last sync (.+)$",
    "Bevakar $1 mappar · senaste synkronisering $2"
@@ -1321,6 +1389,18 @@
   [
    "^(.+): stopped; nothing more is fetched from the disks$",
    "$1: avbrutet; inget mer hämtas från diskarna"
+  ],
+  [
+   "^The version from (.+) is written as a new file beside the current one\\. Nothing is overwritten\\.$",
+   "Versionen från $1 skrivs som en ny fil bredvid den nuvarande. Inget skrivs över."
+  ],
+  [
+   "^The version from (.+) becomes the current (.+)\\. The current version is kept in the versions, so nothing is lost\\. The change syncs to your other devices\\.$",
+   "Versionen från $1 blir den nuvarande $2. Den nuvarande versionen sparas bland versionerna, så inget går förlorat. Ändringen synkroniseras till dina andra enheter."
+  ],
+  [
+   "^Restored the version of (.+) to (.+)$",
+   "Återställde versionen av $1 till $2"
   ],
   [
    "^Imported (\\d+) file\\(s\\) \\((.+)\\) into folder (.+)$",
@@ -1581,50 +1661,6 @@
   [
    "^a block of (.+) has no other copy and no other storage can take one: add another storage$",
    "ett block i $1 har ingen annan kopia och ingen annan lagringsplats kan ta emot det: lägg till en lagringsplats"
-  ],
-  [
-   "^Restore (\\d+) files\\?$",
-   "Återställa $1 filer?"
-  ],
-  [
-   "^Restore (.+)\\?$",
-   "Återställa $1?"
-  ],
-  [
-   "^(.+) of it is kept only on cold storage (.+)\\. Reading it back starts a retrieval, which your provider bills \\(about (.+)\\) and which can take hours\\.$",
-   "$1 av det finns bara på den kalla lagringen $2. Att läsa tillbaka det startar en hämtning som leverantören debiterar (cirka $3) och som kan ta timmar."
-  ],
-  [
-   "^(.+) of it is kept only on cold storage (.+)\\. Reading it back starts a retrieval, which your provider bills and which can take hours\\.$",
-   "$1 av det finns bara på den kalla lagringen $2. Att läsa tillbaka det startar en hämtning som leverantören debiterar och som kan ta timmar."
-  ],
-  [
-   "^(\\d+) files are deleted for good, from every device and storage\\. They cannot be restored afterwards\\.$",
-   "$1 filer raderas permanent från alla enheter och lagringsplatser. De kan inte återställas efteråt."
-  ],
-  [
-   "^(.+) is deleted for good, from every device and storage\\. It cannot be restored afterwards\\.$",
-   "$1 raderas permanent från alla enheter och lagringsplatser. Den kan inte återställas efteråt."
-  ],
-  [
-   "^Every file in the trash \\((\\d+)\\) is deleted for good, from every device and storage\\. This cannot be undone\\.$",
-   "Varje fil i papperskorgen ($1) raderas permanent från alla enheter och lagringsplatser. Detta kan inte ångras."
-  ],
-  [
-   "^Restored (\\d+) files from the trash$",
-   "Återställde $1 filer från papperskorgen"
-  ],
-  [
-   "^Deleted (\\d+) files permanently$",
-   "Raderade $1 filer permanent"
-  ],
-  [
-   "^Trash emptied: (\\d+) files deleted permanently$",
-   "Papperskorgen tömd: $1 filer raderades permanent"
-  ],
-  [
-   "^(\\d+) blocks wait for the cold storage's minimum storage time before they are deleted$",
-   "$1 block väntar på den kalla lagringens minsta lagringstid innan de raderas"
   ]
  ],
  "review": [
@@ -1802,45 +1838,6 @@
   "Replace the part in braces in the endpoint with your own value, for example your account id.",
   "plan",
   "(old)",
-  "Folder settings: ignore rules and file metadata",
-  "Folder settings",
-  "Close folder settings",
-  "Ignore rules",
-  "One pattern per line, as in .gitignore: * and ? match within a name, ** any number of folders, a trailing / only folders, a leading / ties the pattern to the folder's top, ! includes again and # starts a comment. Ignored files are not synced from this device and not deleted on others; a file already in the vault that becomes ignored stays in the vault.",
-  "This device keeps the folder encrypted: ignore rules apply on devices with plain files. Edit the shared rules there.",
-  "Shared with every device (.varstoignore)",
-  "Common junk files:",
-  "Only on this device (not synced)",
-  "No patterns of this device's own.",
-  "Pattern, e.g. *.iso",
-  "Test a path",
-  "e.g. photos/raw/img.cr2 (end a folder with /)",
-  "Test",
-  "File metadata",
-  "What this device syncs besides the content. A device that cannot keep a property leaves it as it is in the vault, and never removes it.",
-  "Permissions",
-  "Symbolic links",
-  "Extended attributes",
-  "Ownership (user and group)",
-  "Link to",
-  "Owner",
-  "Add to the shared rules",
-  "all added",
-  "This system cannot keep permissions.",
-  "This system keeps only the read-only flag of permissions.",
-  "This system cannot create symbolic links.",
-  "This system cannot keep extended attributes.",
-  "This system cannot keep ownership.",
-  "What other devices set stays as it is.",
-  "Not ignored: no pattern matches.",
-  "Ignored",
-  "Included",
-  "pattern",
-  "this device's rules",
-  "through the folder",
-  "(absolute: it may point elsewhere on another device)",
-  "Every device respects it and keeps 1 % free; blocks then go to your other storages or wait. Empty: no quota.",
-  "Draining empties the storage onto your other storages in the background, without ever weakening a folder's policy: each block is copied and read back before its copy here is deleted, and blocks that cannot keep their policy elsewhere stay. Nothing new is written here meanwhile; it stays readable. Afterwards the storage holds nothing Varsto needs.",
   "Trash",
   "Files deleted on any of your devices are kept here for the days set below, encrypted on your storages, and can be restored on any device. Restoring never overwrites a file: when its name is taken, it comes back as \"name (restored)\".",
   "Search the trash",
@@ -1892,7 +1889,46 @@
   "^Restored (\\d+) files from the trash$",
   "^Deleted (\\d+) files permanently$",
   "^Trash emptied: (\\d+) files deleted permanently$",
-  "^(\\d+) blocks wait for the cold storage's minimum storage time before they are deleted$"
+  "^(\\d+) blocks wait for the cold storage's minimum storage time before they are deleted$",
+  "Folder settings: ignore rules and file metadata",
+  "Folder settings",
+  "Close folder settings",
+  "Ignore rules",
+  "One pattern per line, as in .gitignore: * and ? match within a name, ** any number of folders, a trailing / only folders, a leading / ties the pattern to the folder's top, ! includes again and # starts a comment. Ignored files are not synced from this device and not deleted on others; a file already in the vault that becomes ignored stays in the vault.",
+  "This device keeps the folder encrypted: ignore rules apply on devices with plain files. Edit the shared rules there.",
+  "Shared with every device (.varstoignore)",
+  "Common junk files:",
+  "Only on this device (not synced)",
+  "No patterns of this device's own.",
+  "Pattern, e.g. *.iso",
+  "Test a path",
+  "e.g. photos/raw/img.cr2 (end a folder with /)",
+  "Test",
+  "File metadata",
+  "What this device syncs besides the content. A device that cannot keep a property leaves it as it is in the vault, and never removes it.",
+  "Permissions",
+  "Symbolic links",
+  "Extended attributes",
+  "Ownership (user and group)",
+  "Link to",
+  "Owner",
+  "Add to the shared rules",
+  "all added",
+  "This system cannot keep permissions.",
+  "This system keeps only the read-only flag of permissions.",
+  "This system cannot create symbolic links.",
+  "This system cannot keep extended attributes.",
+  "This system cannot keep ownership.",
+  "What other devices set stays as it is.",
+  "Not ignored: no pattern matches.",
+  "Ignored",
+  "Included",
+  "pattern",
+  "this device's rules",
+  "through the folder",
+  "(absolute: it may point elsewhere on another device)",
+  "Every device respects it and keeps 1 % free; blocks then go to your other storages or wait. Empty: no quota.",
+  "Draining empties the storage onto your other storages in the background, without ever weakening a folder's policy: each block is copied and read back before its copy here is deleted, and blocks that cannot keep their policy elsewhere stay. Nothing new is written here meanwhile; it stays readable. Afterwards the storage holds nothing Varsto needs."
  ],
  "parts": [
   [
