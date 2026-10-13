@@ -334,19 +334,21 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   $("themetoggle2").onclick = toggleTheme;
 
   // Navigation between the pages of the app section.
-  var titles = { overview: "Overview", files: "Files", shared: "Shared", storages: "Storages", backups: "Backups", import: "Import", trash: "Trash", policies: "Policies", peers: "Peers", organization: "Organization", settings: "Settings", recovery: "Recovery package", more: "More" };
+  var titles = { overview: "Overview", files: "Files", shared: "Shared", storages: "Storages", backups: "Backups", import: "Import", trash: "Trash", policies: "Policies", peers: "Peers", organization: "Organization", settings: "Settings", recovery: "Recovery package", help: "Help", more: "More" };
   var legacyPages = { folders: "files", sharing: "shared" };
   function pageTitle(p) { return titles[p] || "Overview"; }
   var currentPage = (function () { try { var p = sessionStorage.getItem("varsto-page"); p = legacyPages[p] || p; return titles[p] ? p : "overview"; } catch (e) { return "overview"; } })();
   function nav(page) {
     page = legacyPages[page] || page;
     if (!titles[page]) { page = "overview"; }
+    // Without an open vault, Help is the panel above the setup or unlock screen.
+    if (page === "help" && document.body.dataset.view !== "app" && document.body.dataset.view !== "loading") { preHelpOpen(true); $("prehelp").scrollIntoView({ block: "start", behavior: "smooth" }); return; }
     if (page === "more" && !isMobile()) { page = "settings"; }
     if (page !== "policies") { policyReturn = null; } else if (!policyEdited()) { policyReturn = null; policyButtons(); }
     currentPage = page;
     try { sessionStorage.setItem("varsto-page", page); } catch (e) {}
     document.querySelectorAll(".page").forEach(function (d) { d.classList.toggle("hidden", d.dataset.page !== page); });
-    var tab = page === "shared" || page === "backups" || page === "import" || page === "trash" || page === "policies" || page === "peers" || page === "organization" || page === "settings" || page === "recovery" ? "more" : page;
+    var tab = page === "help" || page === "shared" || page === "backups" || page === "import" || page === "trash" || page === "policies" || page === "peers" || page === "organization" || page === "settings" || page === "recovery" ? "more" : page;
     document.querySelectorAll(".sidebar .nav-item[data-nav]").forEach(function (b) { if (b.dataset.nav === page) { b.setAttribute("aria-current", "page"); } else { b.removeAttribute("aria-current"); } });
     document.querySelectorAll(".tabbar .nav-item[data-nav]").forEach(function (b) { if (b.dataset.nav === tab) { b.setAttribute("aria-current", "page"); } else { b.removeAttribute("aria-current"); } });
     if (document.body.dataset.view === "app") { $("pagetitle").textContent = pageTitle(page); }
@@ -354,6 +356,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     if (page === "organization") { loadOrg(); }
     if (page === "backups") { loadBackups(); }
     if (page === "recovery") { loadGuide(); }
+    if (page === "help") { setTimeout(loadHelp, 0); }
     if (page === "import") { loadImports(); }
     if (page === "trash") { loadTrash(); }
     if (page === "overview" && lastWhere) { renderWhere(lastWhere); }
@@ -386,8 +389,8 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
         removalShown = true;
         alertBox("This device was removed from the vault by " + st.removal.by_name + " on " + fmtDate(st.removal.issued_utc) + (st.removal.wipe ? ". As ordered, its keys, sync state and folder contents were deleted." : ". It no longer syncs; reset it under Settings to start over."), "Device removed");
       }
-      if (!st.has_vault) { show("setup"); return; }
-      if (!st.unlocked) { show("unlock"); return; }
+      if (!st.has_vault) { show("setup"); showPreHelp(true); return; }
+      if (!st.unlocked) { show("unlock"); showPreHelp(false); return; }
       show("app");
       if (currentPage === "settings") { loadLogs(); }
       return refreshStatus();
@@ -954,6 +957,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   function refreshStatus(known) {
     return (known && known.folders ? Promise.resolve(known) : api("GET", "/api/status")).then(function (s) {
       lastStatus = s;
+      setTimeout(function () { helpAfterStatus(s); }, 0);
       renderLedger(s.ledger_health);
       $("who").textContent = s.device_name + " · vault " + s.vault_id.slice(0, 8) + " · " + s.ledger_batches + " ledger batches";
       var tb = $("folders").querySelector("tbody"); tb.innerHTML = "";
@@ -3146,6 +3150,239 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     var go = function () { api("GET", "/api/recovery/guide").then(function (g) { (window.varstoLang && window.varstoLang.ready ? window.varstoLang.ready : function (f) { f(); })(function () { renderGuide(g); }); }).catch(function (e) { log("recovery guide: " + e.message); }); };
     go();
   }
+  // Help: where this device stands, where the data is, what needs attention
+  // and what to do next, from GET /api/help (answered without a vault and
+  // while it is locked too). Sentences come as {t, p} like the recovery
+  // guide's and are translated the same way (rgText). The Help page shows it
+  // in the app; the setup and unlock screens show it in a panel above them.
+  var lastHelp = null, helpWanted = null, helpLoading = null, helpAuto = false;
+  var HELP_GUIDE_FOR = { overview: "start", files: "folders", shared: "sharing", storages: "storages", backups: "backups", import: "imports", trash: "trash", policies: "policies", peers: "devices", organization: "devices", settings: "start", recovery: "recovery", more: "start", help: "start" };
+  var HELP_LEVELS = { urgent: ["bad", "Urgent"], important: ["risk", "Next"], suggested: ["accent", "Suggested"], tip: ["grey", "Tip"] };
+  function helpFlash(e) { e.classList.remove("help-flash"); void e.offsetWidth; e.classList.add("help-flash"); setTimeout(function () { e.classList.remove("help-flash"); }, 2400); }
+  function helpReveal(e, focus) {
+    if (!e) { return; }
+    setTimeout(function () {
+      e.scrollIntoView({ block: "center", behavior: "smooth" }); helpFlash(e);
+      if (!focus) { return; }
+      var f = e.matches("button") ? e : e.querySelector("input:not([type=hidden]):not([type=checkbox]), select, textarea, button");
+      if (f) { try { f.focus({ preventScroll: true }); } catch (x) { f.focus(); } }
+    }, 80);
+  }
+  // Carry out a step's action: go to the page and open or show what it names.
+  function helpGo(a) {
+    if (!a) { return; }
+    var view = document.body.dataset.view;
+    if (a.page === "setup" || a.page === "unlock") { helpReveal($(a.target), true); return; }
+    if (view !== "app") { return; }
+    var t = a.target || "";
+    nav(a.page);
+    if (t === "do:sync") { runSync().then(function () { if (currentPage === "help") { loadHelp(); } }); return; }
+    if (t === "kit") { $("rg-kit").click(); return; }
+    if (t === "addfolder" || t === "attachfolder") { showFolderForms(true, true); helpReveal($(t), t === "addfolder"); return; }
+    if (t) { var e = $(t); helpReveal(e, !!e && (e.tagName === "FORM" || e.tagName === "BUTTON")); }
+  }
+  // Decimal sizes, as in the sentences (the engine's human_bytes).
+  function helpBytes(n) { var u = ["B", "kB", "MB", "GB", "TB"], i = 0; while (n >= 1000 && i < u.length - 1) { n /= 1000; i++; } return i ? n.toFixed(1) + " " + u[i] : n + " B"; }
+  function helpFigure(value, label) { var d = el("div", "help-fig"); d.appendChild(actRaw(String(value), "help-fig-value")); d.appendChild(el("span", "help-fig-label", label)); return d; }
+  // A bar of the data by kept copies: none, one, two or more.
+  function helpCopyBar(f) {
+    var wrap = el("div", "help-copies");
+    if (!f.bytes) { return wrap; }
+    var none = f.unkept_bytes, two = f.two_plus_bytes, one = Math.max(0, f.bytes - none - two);
+    var bar = el("div", "help-bar"); bar.setAttribute("role", "img");
+    [[two, "c2", "On two or more storages"], [one, "c1", "On one storage"], [none, "c0", "Only on devices"]].forEach(function (x) {
+      if (!x[0]) { return; }
+      var seg = el("i", "help-seg " + x[1]); seg.style.flexGrow = String(x[0]); seg.title = actTr(x[2]) + ": " + helpBytes(x[0]); bar.appendChild(seg);
+    });
+    wrap.appendChild(bar);
+    var leg = el("div", "help-legend small");
+    [[two, "c2", "On two or more storages"], [one, "c1", "On one storage"], [none, "c0", "Only on devices"]].forEach(function (x) {
+      var it = el("span", "help-legend-item"); it.appendChild(el("i", "help-seg " + x[1])); it.appendChild(el("span", null, x[2])); it.appendChild(document.createTextNode(" ")); it.appendChild(actRaw(helpBytes(x[0]), "help-legend-val")); leg.appendChild(it);
+    });
+    wrap.appendChild(leg);
+    return wrap;
+  }
+  function renderHelpNow(h, box) {
+    box.innerHTML = "";
+    var head = el("p", "help-headline"); head.appendChild(rgText(h.headline)); box.appendChild(head);
+    if (h.phase === "ready") {
+      var f = h.figures, figs = el("div", "help-figures");
+      figs.appendChild(helpFigure(f.devices, "Devices"));
+      figs.appendChild(helpFigure(f.storages, "Storages"));
+      figs.appendChild(helpFigure(f.folders, "Folders"));
+      figs.appendChild(helpFigure(f.files, "Files"));
+      figs.appendChild(helpFigure(helpBytes(f.bytes), "Data"));
+      if (f.disks) { figs.appendChild(helpFigure(f.disks - f.disks_away + " / " + f.disks, "Pool disks attached")); }
+      box.appendChild(figs);
+      box.appendChild(helpCopyBar(f));
+    }
+    var ul = el("ul", "help-summary");
+    h.summary.forEach(function (t) { var li = el("li"); li.appendChild(rgText(t)); ul.appendChild(li); });
+    box.appendChild(ul);
+    if ((h.attention || []).length) {
+      var at = el("ul", "help-attn");
+      h.attention.forEach(function (a) {
+        var li = el("li", "help-attn-" + a.level);
+        li.appendChild(icon(a.level === "info" ? "info" : "warn", "help-attn-icon"));
+        li.appendChild(rgText(a.text)); at.appendChild(li);
+      });
+      box.appendChild(at);
+    }
+    if ((h.folders || []).length || (h.storages || []).length || (h.details || []).length) {
+      var d = el("details", "help-details"); d.appendChild(el("summary", null, "Where your data is, in detail"));
+      function list(title, rows) {
+        if (!rows.length) { return; }
+        d.appendChild(el("h4", "help-sub", title));
+        var u = el("ul", "help-detail-list small"); rows.forEach(function (t) { var li = el("li"); li.appendChild(rgText(t)); u.appendChild(li); }); d.appendChild(u);
+      }
+      list("Folders", (h.folders || []).map(function (x) { return x.line; }));
+      list("Storages", (h.storages || []).map(function (x) { return x.line; }));
+      list("More", h.details || []);
+      box.appendChild(d);
+    }
+  }
+  function helpStepCard(s, n, first) {
+    var li = el("li", "help-step help-lv-" + s.level + (first ? " help-first" : ""));
+    li.dataset.step = s.id;
+    li.appendChild(el("span", "help-num", n ? String(n) : "?"));
+    var body = el("div", "help-step-body");
+    var head = el("div", "help-step-head");
+    head.appendChild(rgText(s.title, "help-step-title"));
+    var lv = HELP_LEVELS[s.level] || HELP_LEVELS.tip; head.appendChild(pill(lv[0], lv[1]));
+    body.appendChild(head);
+    var why = el("p", "help-why"); why.appendChild(rgText(s.why)); body.appendChild(why);
+    if ((s.how || []).length) { var ul = el("ul", "help-how"); s.how.forEach(function (t) { var x = el("li"); x.appendChild(rgText(t)); ul.appendChild(x); }); body.appendChild(ul); }
+    var acts = el("div", "help-actions");
+    if (s.action) {
+      var b = el("button", first ? "" : "secondary"); b.type = "button"; b.textContent = rgPlain(s.action.label); b.setAttribute("data-no-i18n", "");
+      b.dataset.action = s.action.page + (s.action.target ? ":" + s.action.target : "");
+      b.onclick = function () { helpGo(s.action); }; acts.appendChild(b);
+    }
+    var pre = null;
+    if (s.command) {
+      pre = el("pre", "help-cmd hidden", s.command);
+      var cb = el("button", "secondary help-mini", "Show the command"); cb.type = "button";
+      cb.onclick = function () { var hid = pre.classList.toggle("hidden"); cb.textContent = actTr(hid ? "Show the command" : "Hide the command"); };
+      acts.appendChild(cb);
+    }
+    if (s.guide) { var gb = el("button", "linkish help-mini", "Read the guide"); gb.type = "button"; gb.onclick = function () { helpOpenGuide(s.guide, li.closest("#prehelp") ? "prehelp" : "page"); }; acts.appendChild(gb); }
+    if (acts.children.length) { body.appendChild(acts); }
+    if (pre) { body.appendChild(pre); }
+    li.appendChild(body);
+    return li;
+  }
+  // Steps the page adds by itself: a newer version (the interface checks for updates).
+  function helpExtraSteps(h) {
+    var out = [];
+    if (h.phase === "ready" && updateInfo && updateInfo.newer) {
+      out.push({ id: "update", level: "suggested", title: { t: "Install Varsto {latest}", p: { latest: updateInfo.latest } }, why: { t: "A newer version is available (you have {current}).", p: { current: updateInfo.current } }, how: [], action: { page: "overview", target: "update", label: { t: "Show the update" } }, command: "varsto update" });
+    }
+    return out;
+  }
+  function renderHelpSteps(h, ol, tipsOl) {
+    ol.innerHTML = "";
+    var steps = h.steps.concat(helpExtraSteps(h));
+    if (!steps.length) {
+      var ok = el("li", "help-allok"); ok.appendChild(icon("check")); ok.appendChild(el("span", null, "Everything is in order. Nothing needs doing now.")); ol.appendChild(ok);
+    }
+    steps.forEach(function (s, i) { ol.appendChild(helpStepCard(s, i + 1, i === 0)); });
+    if (tipsOl) {
+      tipsOl.innerHTML = "";
+      (h.tips || []).forEach(function (s) { tipsOl.appendChild(helpStepCard(s, 0, false)); });
+    }
+  }
+  // The guides are one template, cloned where they are shown; links to the
+  // feature pages follow the interface's language.
+  function helpGuides(box) {
+    if (box.dataset.filled) { return; }
+    box.dataset.filled = "1";
+    box.appendChild(document.importNode($("tpl-guides").content, true));
+    var lang = window.varstoLang ? window.varstoLang.get() : "en";
+    box.querySelectorAll("a[data-site]").forEach(function (a) { a.href = "https://varsto.net" + (lang === "en" ? "" : "/" + lang) + a.dataset.site; });
+  }
+  function helpOpenGuide(topic, where) {
+    var box = where === "prehelp" ? $("prehelp-guides") : $("help-guides");
+    helpGuides(box);
+    if (where === "prehelp") { $("prehelp-guidebox").open = true; }
+    var d = box.querySelector('[data-guide="' + topic + '"]');
+    if (d) { d.open = true; helpReveal(d.querySelector("summary") || d, false); }
+  }
+  // Places and storage kinds are words of the interface ("home", "cloud",
+  // "directory"): translated, unlike names.
+  function helpLocalize(x) {
+    if (Array.isArray(x)) { x.forEach(helpLocalize); return; }
+    if (!x || typeof x !== "object") { return; }
+    if (typeof x.t === "string" && x.p) {
+      ["kind", "place", "places"].forEach(function (k) { if (typeof x.p[k] === "string") { x.p[k] = x.p[k].split(", ").map(function (w) { return actTr(w); }).join(", "); } });
+      return;
+    }
+    Object.keys(x).forEach(function (k) { helpLocalize(x[k]); });
+  }
+  function renderHelp(h) {
+    helpLocalize(h);
+    lastHelp = h;
+    var inApp = document.body.dataset.view === "app";
+    // Both places: the view may change while the answer is on its way.
+    renderHelpNow(h, $("help-now"));
+    renderHelpSteps(h, $("help-next"), $("help-tips"));
+    $("help-tipsbox").classList.toggle("hidden", !(h.tips || []).length);
+    helpGuides($("help-guides"));
+    renderHelpNow(h, $("prehelp-now"));
+    renderHelpSteps({ steps: h.steps.concat(h.tips || []), phase: h.phase }, $("prehelp-next"), null);
+    helpGuides($("prehelp-guides"));
+    if (helpWanted) { var g = helpWanted; helpWanted = null; helpOpenGuide(g, inApp ? "page" : "prehelp"); }
+    renderHelpBanner(h);
+  }
+  function loadHelp() {
+    if (!token) { return Promise.resolve(); }
+    if (helpLoading) { return helpLoading; }
+    helpLoading = api("GET", "/api/help").then(function (h) {
+      return new Promise(function (res) { (window.varstoLang && window.varstoLang.ready ? window.varstoLang.ready : function (f) { f(); })(function () { renderHelp(h); res(h); }); });
+    }).catch(function (e) { log("help: " + e.message); }).then(function (h) { helpLoading = null; return h; });
+    return helpLoading;
+  }
+  // Overview: the first step that matters, with its button, until all is done.
+  var helpBannerAt = 0;
+  function renderHelpBanner(h) {
+    var s = h && h.phase === "ready" ? h.steps.filter(function (x) { return x.level === "urgent" || x.level === "important"; })[0] : null;
+    var box = $("helpnext");
+    box.classList.toggle("hidden", !s);
+    if (!s) { return; }
+    box.classList.toggle("warn", s.level === "urgent");
+    var t = $("helpnext-title"); t.innerHTML = ""; t.appendChild(rgText(s.title));
+    var b = $("helpnext-go");
+    b.classList.toggle("hidden", !s.action);
+    if (s.action) { b.textContent = rgPlain(s.action.label); b.setAttribute("data-no-i18n", ""); b.onclick = function () { helpGo(s.action); }; }
+  }
+  // After the status changes: refresh the banner (at most every 20 s), and
+  // on a vault without a storage open Help once per session.
+  function helpAfterStatus(s) {
+    if (!s) { return; }
+    var now = Date.now();
+    if (!s.member && !(s.storages || []).length && !helpAuto) {
+      helpAuto = true;
+      var seen = false; try { seen = sessionStorage.getItem("varsto-help-auto") === "1"; sessionStorage.setItem("varsto-help-auto", "1"); } catch (e) {}
+      if (!seen && currentPage !== "help") { nav("help"); return; }
+    }
+    if (now - helpBannerAt > 20000 || currentPage === "help") { helpBannerAt = now; loadHelp(); }
+  }
+  // The setup and unlock screens: the panel above them, open on the setup screen.
+  function showPreHelp(open) {
+    $("prehelp").classList.remove("hidden");
+    preHelpOpen(open);
+    loadHelp();
+  }
+  function preHelpOpen(open) {
+    $("prehelp-body").classList.toggle("hidden", !open);
+    $("prehelp-toggle").textContent = actTr(open ? "Hide help" : "Show help");
+  }
+  $("prehelp-toggle").onclick = function () { preHelpOpen($("prehelp-body").classList.contains("hidden")); };
+  $("help-reload").onclick = function () { loadHelp(); };
+  // The "?" in the page header: the guide for this page.
+  $("pagehelp").onclick = function () {
+    if (document.body.dataset.view === "app") { helpWanted = HELP_GUIDE_FOR[currentPage] || "start"; if (currentPage === "help") { var g = helpWanted; helpWanted = null; helpOpenGuide(g, "page"); } else { nav("help"); } return; }
+    preHelpOpen(true); helpOpenGuide("start", "prehelp");
+  };
   // The checklist as plain text in the page's language, with the ticks.
   function guideText(g) {
     var ticks = rgTicks(), out = [];
