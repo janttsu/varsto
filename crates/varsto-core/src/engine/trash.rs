@@ -1964,7 +1964,8 @@ impl Engine {
                 let mut state = self.load_state(&rec.folder_id)?;
                 let disk = self.place(&root, &mut state, &target, None)?;
                 self.save_state(&rec.folder_id, &state)?;
-                if disk.exists() || placeholder_path(&disk).exists() {
+                // A link counts as there (it is never written through).
+                if fs::symlink_metadata(&disk).is_ok() || placeholder_path(&disk).exists() {
                     let _ = fs::remove_file(&tmp);
                     report
                         .unavailable

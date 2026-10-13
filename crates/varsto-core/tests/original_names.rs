@@ -100,6 +100,15 @@ impl Lab {
             let p = a_dir.join(n);
             fs::create_dir_all(p.parent().unwrap()).unwrap();
             fs::write(&p, format!("content {i} of {n}")).unwrap();
+            // One modification time for all: a pull takes the newest files
+            // first, so equal times keep the order by path the checks
+            // below expect.
+            fs::File::options()
+                .write(true)
+                .open(&p)
+                .unwrap()
+                .set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000))
+                .unwrap();
         }
         let push = a.push("docs").unwrap();
         assert_eq!(push.files_changed, names.len() as u64);

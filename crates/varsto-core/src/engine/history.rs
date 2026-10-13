@@ -572,6 +572,10 @@ impl Engine {
             let disk = self.place(&root, &mut state, &to, None)?;
             self.check_no_link_above(&root, &state, &to)?;
             self.save_state(&rec.folder_id, &state)?;
+            if fs::symlink_metadata(&disk).is_ok_and(|m| m.file_type().is_symlink()) {
+                let _ = fs::remove_file(&tmp);
+                bail!("{to} is a symbolic link here; a version is not written through it");
+            }
             if in_place {
                 // Changed after the sync above: not overwritten.
                 let unchanged = match (fs::metadata(&disk), state.local_index.get(&to)) {
