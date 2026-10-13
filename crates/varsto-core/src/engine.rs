@@ -52,6 +52,7 @@ mod disk_insert;
 mod disk_suggest;
 mod fetch;
 mod ledger_recovery;
+mod guide;
 mod ledger_upkeep;
 mod manifest_upkeep;
 mod membership;
@@ -1845,12 +1846,20 @@ impl Engine {
                 .filter(|((f, _), _)| f == &rec.folder_id)
                 .map(|(_, c)| chunk_storage_key(&c.object))
                 .collect();
-            for (_, backend) in self.open_storages(true)? {
+            let storages = self.open_storages(true)?;
+            let task = activity::start(
+                activity::FOLDER_PURGE,
+                &rec.name,
+                (objects.len() * storages.len()) as u64,
+                activity::Unit::Items,
+            );
+            for (_, backend) in storages {
                 for key in &objects {
                     if backend.exists(key).unwrap_or(false) {
                         backend.delete(key)?;
                         deleted += 1;
                     }
+                    task.advance(1);
                 }
                 for prefix in [
                     format!("manifests/{}/", rec.folder_id),
@@ -3980,6 +3989,15 @@ impl Engine {
         if file.deleted {
             bail!("{path} is deleted");
         }
+        // One file, which can be large: a task of its own (the transfer
+        // feeds it), shown with the file's name.
+        let task = activity::start(
+            activity::DOWNLOAD,
+            &rec.name,
+            file.size,
+            activity::Unit::Bytes,
+        );
+        task.set_phase("file");
         let fk = self.folder_keys(&rec)?;
         let storages = self.open_storages(false)?;
         let mut report = PullReport {

@@ -65,6 +65,7 @@
     <button type="button" class="nav-item" data-nav="policies"><svg class="icon"><use href="#i-policies"/></svg><span>Policies</span></button>
     <button type="button" class="nav-item" data-nav="peers"><svg class="icon"><use href="#i-peers"/></svg><span>Peers</span></button>
     <button type="button" class="nav-item hidden" data-nav="organization" data-org-only="1"><svg class="icon"><use href="#i-org"/></svg><span>Organization</span></button>
+    <button type="button" class="nav-item" data-nav="recovery"><svg class="icon"><use href="#i-key"/></svg><span>Recovery package</span></button>
     <button type="button" class="nav-item" data-nav="settings"><svg class="icon"><use href="#i-settings"/></svg><span>Settings</span></button>
   </nav>
   <div class="sidebar-foot">
@@ -93,6 +94,11 @@
   <div class="alpha"><svg class="icon"><use href="#i-warn"/></svg><span>Alpha software: not for production data. Keep your own backups.</span></div>
 
   <div id="workbar" class="workbar" role="progressbar" aria-label="Working"></div>
+  <!-- This device's long tasks (5 s and more): what, how far, when ready. -->
+  <div id="taskbar" class="taskbar hidden" role="progressbar" aria-label="Progress" aria-valuemin="0" aria-valuemax="100" aria-live="off">
+    <div class="tb-line"><span id="tb-text" class="tb-text"></span><span id="tb-meta" class="tb-meta" data-no-i18n></span></div>
+    <div id="tb-bar" class="tb-bar"><i></i></div>
+  </div>
   <main>
   <section id="setup" class="hidden">
     <div class="hero">
@@ -650,6 +656,11 @@
         <ul id="settingsdevices" class="list compact-list"></ul>
         <p class="muted small">Remove a device you no longer use, or one that was lost or stolen: it stops syncing and cannot read anything written afterwards. Add one with Add a device under Peers.</p>
       </div>
+      <div class="card">
+        <h2 class="card-title"><svg class="icon accent"><use href="#i-key"/></svg>Recovery package</h2>
+        <p class="muted small">If all your devices were lost at once, what would you need to restore every file? The recovery package checklist is made for this vault: the recovery words, storage keys, disks and security keys, and the restore steps.</p>
+        <div class="actions"><button type="button" class="secondary" data-nav="recovery">Open the checklist</button></div>
+      </div>
       <details class="card" id="teamcard">
         <summary class="card-title">Use with a team</summary>
         <p class="muted small">An organization adds administrators who approve devices, remove people with every device of theirs at once, set what members may do, and keep a signed log of it. Nothing changes for a vault without one.</p>
@@ -702,6 +713,34 @@
       </form>
     </div>
 
+    <!-- Recovery package: a personal checklist; the ticks stay in this browser. -->
+    <div class="page hidden" data-page="recovery">
+      <div class="card rg-head-card">
+        <h2 class="card-title"><svg class="icon accent"><use href="#i-key"/></svg>Your recovery package</h2>
+        <div id="rg-intro" class="rg-intro"></div>
+        <p class="muted small no-print">Tick what you have done. The ticks are kept in this browser only; they are not part of the vault.</p>
+        <p id="rg-count" class="rg-count small"></p>
+        <div class="actions no-print">
+          <button id="rg-print" type="button" class="secondary">Print / save as PDF</button>
+          <button id="rg-download" type="button" class="secondary"><svg class="icon"><use href="#i-download"/></svg>Download as text</button>
+          <button id="rg-kit" type="button" class="secondary">Print the recovery kit…</button>
+          <button id="rg-reload" type="button" class="secondary">Refresh</button>
+        </div>
+      </div>
+      <div class="card">
+        <h2 class="card-title">What to keep</h2>
+        <ul id="rg-items" class="rg-items"></ul>
+      </div>
+      <div class="card">
+        <h2 class="card-title">Restoring on a new device</h2>
+        <ol id="rg-steps" class="rg-steps"></ol>
+      </div>
+      <div id="rg-altcard" class="card hidden">
+        <h2 class="card-title">Without Varsto</h2>
+        <div id="rg-alt" class="rg-steps"></div>
+      </div>
+    </div>
+
     <!-- More (mobile) -->
     <div class="page hidden" data-page="more">
       <div class="card more-card">
@@ -710,6 +749,7 @@
         <button type="button" class="more-item" data-nav="policies"><svg class="icon"><use href="#i-policies"/></svg><span>Policies</span><svg class="icon chev"><use href="#i-chevron"/></svg></button>
         <button type="button" class="more-item" data-nav="peers"><svg class="icon"><use href="#i-peers"/></svg><span>Peers</span><svg class="icon chev"><use href="#i-chevron"/></svg></button>
         <button type="button" class="more-item hidden" data-nav="organization" data-org-only="1"><svg class="icon"><use href="#i-org"/></svg><span>Organization</span><svg class="icon chev"><use href="#i-chevron"/></svg></button>
+        <button type="button" class="more-item" data-nav="recovery"><svg class="icon"><use href="#i-key"/></svg><span>Recovery package</span><svg class="icon chev"><use href="#i-chevron"/></svg></button>
         <button type="button" class="more-item" data-nav="settings"><svg class="icon"><use href="#i-settings"/></svg><span>Settings</span><svg class="icon chev"><use href="#i-chevron"/></svg></button>
       </div>
       <p class="muted small more-version">Varsto v<span id="version2"></span> · local interface on this device only.</p>

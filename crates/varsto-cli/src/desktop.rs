@@ -185,6 +185,16 @@ fn handle_unlocked(fixed: &Fixed, request: Request) -> Result<Option<Request>> {
                     401,
                     &json!({"error": "missing or wrong token; reopen the start URL"}),
                 ))?;
+            } else if path == "/api/activity"
+                && query_param(request.url().split_once('?').map_or("", |(_, q)| q), "mine")
+                    .is_some_and(|v| v == "1")
+            {
+                // This device's tasks only (the progress bar at the top of
+                // the interface): the peers are not asked.
+                request.respond(json_response(
+                    200,
+                    &json!({ "me": varsto_core::activity::local_here() }),
+                ))?;
             } else if path == "/api/activity" {
                 // What this device and the others are doing now. Asking
                 // keeps the service asking the peers for the next 15 s.
@@ -1194,6 +1204,15 @@ fn api_unlocked(
             let r = engine.share_revoke(&s(input, "folder")?, &s(input, "member")?)?;
             service.request_sync();
             Ok(serde_json::to_value(r)?)
+        }
+        // The recovery package checklist: structured sentences ({t, p}) the
+        // interface translates, or the English text for "Download as text".
+        (Method::Get, "/api/recovery/guide") => {
+            let guide = engine.recovery_guide();
+            Ok(match query_param(query, "format").as_deref() {
+                Some("text") => json!({ "text": varsto_core::recovery_guide::render_text(&guide) }),
+                _ => serde_json::to_value(guide)?,
+            })
         }
         (Method::Get, "/api/devices") => Ok(json!({
             "devices": engine.devices_list(),
