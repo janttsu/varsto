@@ -1716,6 +1716,8 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
       api("POST", "/api/fetch/plan/step", { step: k }).then(function (res) {
         busy(false);
         if (res.needs_disk) { runDiskPlan(folder, path, plan, "Disk " + s.label + " was not found: insert it and try again."); return; }
+        // The file system check before mounting left errors: nothing was mounted; stop here.
+        if (res.fsck_failed) { log(res.error); $("needsdisk").textContent = res.error; $("needsdisk").classList.remove("hidden"); return; }
         log(res.outcome.message);
         if (res.finished) { log("fetched " + path); loadFiles(); return; }
         runDiskPlan(folder, path, res.plan, res.outcome.message);
