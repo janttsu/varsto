@@ -35,6 +35,7 @@ pub mod rclone;
 pub mod recovery;
 pub mod replica;
 pub mod s3;
+pub mod scrub;
 pub mod share;
 pub mod snapshot;
 pub mod storage;

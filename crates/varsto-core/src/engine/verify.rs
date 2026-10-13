@@ -26,7 +26,7 @@ use crate::storage::Storage;
 use crate::util;
 use anyhow::{bail, Result};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 const STORAGE_ID_KEY: &str = "vault/storage-id.json";
@@ -66,6 +66,34 @@ pub(super) fn storage_identity(backend: &dyn Storage) -> Result<String> {
     match backend.get(STORAGE_ID_KEY)? {
         Some(raw) => Ok(serde_json::from_slice::<StorageIdentity>(&raw)?.storage_id),
         None => Ok(fresh.storage_id),
+    }
+}
+
+/// Which local storage holds a copy that the ledger names after its
+/// writers' storage names (see the module documentation).
+pub(super) struct NameResolver {
+    /// Other devices' storage names -> storage identity.
+    theirs: BTreeMap<DeviceId, BTreeMap<String, String>>,
+    /// Storage identity -> local name.
+    local_by_id: BTreeMap<String, String>,
+    /// Local storages that were opened.
+    readable: BTreeSet<String>,
+}
+
+impl NameResolver {
+    /// The local storage that holds a copy the claimers call `name`: by
+    /// identity when a claimer published its names, else by equal name.
+    pub(super) fn resolve(&self, name: &str, claimers: &BTreeSet<DeviceId>) -> Option<String> {
+        let mut known = false;
+        for d in claimers {
+            if let Some(id) = self.theirs.get(d).and_then(|n| n.get(name)) {
+                known = true;
+                if let Some(local) = self.local_by_id.get(id) {
+                    return Some(local.clone());
+                }
+            }
+        }
+        (!known && self.readable.contains(name)).then(|| name.to_string())
     }
 }
 
@@ -216,6 +244,32 @@ impl Engine {
         out.into_iter().map(|(d, (_, n))| (d, n)).collect()
     }
 
+    /// Storage identities: ours (published when they changed), and the
+    /// other devices' names for them, read from the storages in `readable`.
+    pub(super) fn storage_resolver(
+        &self,
+        readable: &BTreeMap<String, Box<dyn Storage>>,
+    ) -> NameResolver {
+        let mut mine: BTreeMap<String, String> = BTreeMap::new();
+        let mut local_by_id: BTreeMap<String, String> = BTreeMap::new();
+        for spec in &self.config.storages {
+            if spec.is_data_only() {
+                continue; // a pool's identity is derived from its name
+            }
+            if let Some(b) = readable.get(spec.name()) {
+                if let Ok(id) = storage_identity(b.as_ref()) {
+                    mine.insert(spec.name().to_string(), id.clone());
+                    local_by_id.insert(id, spec.name().to_string());
+                }
+            }
+        }
+        NameResolver {
+            theirs: self.exchange_storage_names(&mine, readable),
+            local_by_id,
+            readable: readable.keys().cloned().collect(),
+        }
+    }
+
     fn run_auto_verify(&mut self, now_utc: i64) -> Result<VerifyRunReport> {
         let _ = self.pull_ledger()?;
         let view = self.view()?;
@@ -242,36 +296,7 @@ impl Engine {
                     .push(format!("{} (cannot open: {e:#})", spec.name())),
             }
         }
-        // Storage identities: ours, and the other devices' names for them.
-        let mut mine: BTreeMap<String, String> = BTreeMap::new();
-        let mut local_by_id: BTreeMap<String, String> = BTreeMap::new();
-        for spec in &self.config.storages {
-            if spec.is_data_only() {
-                continue; // a pool's identity is derived from its name
-            }
-            if let Some(b) = readable.get(spec.name()) {
-                if let Ok(id) = storage_identity(b.as_ref()) {
-                    mine.insert(spec.name().to_string(), id.clone());
-                    local_by_id.insert(id, spec.name().to_string());
-                }
-            }
-        }
-        let theirs = self.exchange_storage_names(&mine, &readable);
-        // The local storage that holds a copy the claimers call `name`: by
-        // identity when a claimer published its names, else by equal name.
-        let resolve =
-            |name: &str, claimers: &std::collections::BTreeSet<DeviceId>| -> Option<String> {
-                let mut known = false;
-                for d in claimers {
-                    if let Some(id) = theirs.get(d).and_then(|n| n.get(name)) {
-                        known = true;
-                        if let Some(local) = local_by_id.get(id) {
-                            return Some(local.clone());
-                        }
-                    }
-                }
-                (!known && readable.contains_key(name)).then(|| name.to_string())
-            };
+        let names = self.storage_resolver(&readable);
         // Verification window of every folder this device holds a key record for.
         let windows: BTreeMap<FolderId, Option<u32>> = self
             .keyring
@@ -297,7 +322,7 @@ impl Engine {
                 if loc.claimed_by.is_empty() || loc.claimed_by.contains(&me) {
                     continue;
                 }
-                let Some(local) = resolve(storage, &loc.claimed_by) else {
+                let Some(local) = names.resolve(storage, &loc.claimed_by) else {
                     continue;
                 };
                 let last = if loc.independently_verified(storage) {

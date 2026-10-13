@@ -145,12 +145,12 @@ pub(super) fn open_chunk(
     Ok(plain)
 }
 
-fn cache_path(root: &Path, object: &ObjectName) -> PathBuf {
+pub(super) fn cache_path(root: &Path, object: &ObjectName) -> PathBuf {
     root.join(chunk_storage_key(object))
 }
 
 /// Store an object in the cache (atomically; nothing if it is there already).
-fn put_cached(root: &Path, object: &ObjectName, ct: &[u8]) -> Result<()> {
+pub(super) fn put_cached(root: &Path, object: &ObjectName, ct: &[u8]) -> Result<()> {
     let path = cache_path(root, object);
     if path.is_file() {
         return Ok(());
