@@ -50,6 +50,7 @@ mod disk_fetch;
 mod disk_groups;
 mod disk_insert;
 mod fetch;
+mod history;
 mod ledger_upkeep;
 mod manifest_upkeep;
 mod membership;
@@ -77,6 +78,10 @@ pub use disk_fetch::{
 };
 pub use disk_groups::DiskGroupStatus;
 pub use disk_insert::{DiskInsertReport, DiskProgress, FillOutcome, InsertOptions};
+pub use history::{
+    history_kept, parse_utc, FolderHistory, HistoryItem, HistoryList, HistoryRestoreReport,
+    HistoryStatus, HistoryTarget, DEFAULT_HISTORY_DAYS, MAX_HISTORY_DAYS,
+};
 pub use manifest_upkeep::ManifestPolicy;
 pub use membership::{
     removal_notice, DeviceInfo, DeviceRemoved, EpochRecord, Grant, KemRecord, Removal, Revocation,
@@ -2416,6 +2421,7 @@ impl Engine {
         let mut scanned = 0u64;
         let mut changed = 0u64;
         let mut new_index = BTreeMap::new();
+        let mut replaced: Vec<(FileState, u64)> = Vec::new();
         // A backup takes what it can read; the rest is named in its snapshot.
         let backup = rec.is_backup();
         state.unreadable.clear();
@@ -2540,6 +2546,7 @@ impl Engine {
             }
             let content_hash = hex::encode(hasher.finalize());
             let previous = state.files.get(&path);
+            let was = previous.filter(|p| !p.deleted).cloned();
             if let Some(prev) = previous {
                 if !prev.deleted && prev.content_hash == content_hash {
                     // Touched but identical: keep the version, refresh the index.
@@ -2554,9 +2561,14 @@ impl Engine {
                     continue;
                 }
             }
-            let clock = self.tick()?;
             let mut version = previous.map(|p| p.version.clone()).unwrap_or_default();
+            let clock = self.tick()?;
             version.insert(me.clone(), clock);
+            if let Some(prev) = was {
+                // Replaced: the previous version goes to the history
+                // (`history`), with the clock of the new one.
+                replaced.push((prev, clock));
+            }
             state.files.insert(
                 path.clone(),
                 FileState {
@@ -2612,8 +2624,10 @@ impl Engine {
             changed += 1;
         }
         state.local_index = new_index;
-        // The deleted versions go to the trash (`trash`).
+        // The deleted versions go to the trash (`trash`), the replaced ones
+        // to the history (`history`).
         self.trash_record_deletions(rec, state, trashed)?;
+        self.history_record_replacements(rec, replaced)?;
         Ok((scanned, changed))
     }
 

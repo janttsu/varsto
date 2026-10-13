@@ -281,9 +281,14 @@ impl Engine {
         let changed =
             !matches!(previous, Some(p) if !p.deleted && p.content_hash == staged.content_hash);
         if changed {
-            let clock = self.tick()?;
+            let was = previous.filter(|p| !p.deleted).cloned();
             let mut version = previous.map(|p| p.version.clone()).unwrap_or_default();
+            let clock = self.tick()?;
             version.insert(me.clone(), clock);
+            if let Some(prev) = was {
+                // The replaced version goes to the history (`history`).
+                self.history_record_replacements(rec, vec![(prev, clock)])?;
+            }
             state.files.insert(
                 path.to_string(),
                 FileState {

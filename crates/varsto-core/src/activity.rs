@@ -71,6 +71,8 @@ pub const RESTIC: &str = "restic";
 pub const TRASH_RESTORE: &str = "trash_restore";
 pub const TRASH_PURGE: &str = "trash_purge";
 pub const TRASH_MOVE: &str = "trash_move";
+/// Restoring a version of a file from the version history (`engine::history`).
+pub const HISTORY_RESTORE: &str = "history_restore";
 
 /// What `done` and `total` count.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
