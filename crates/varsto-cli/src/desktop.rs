@@ -555,6 +555,18 @@ fn s(v: &Value, key: &str) -> Result<String> {
         .ok_or_else(|| anyhow!("missing field {key}"))
 }
 
+/// A list of strings (absent: empty).
+fn str_list(v: &Value, key: &str) -> Vec<String> {
+    v.get(key)
+        .and_then(|x| x.as_array())
+        .map(|a| {
+            a.iter()
+                .filter_map(|x| x.as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 fn opt(v: &Value, key: &str) -> Option<String> {
     v.get(key)
         .and_then(|x| x.as_str())
@@ -1610,6 +1622,44 @@ fn api_unlocked(
             &s(input, "from")?,
             &s(input, "to")?,
         )?)?),
+        // File analyses (`engine::notes`): what a file contains, recorded by
+        // an assistant through MCP or by the user.
+        (Method::Get, "/api/analysis") => {
+            let folder = query_param(query, "folder")
+                .ok_or_else(|| anyhow!("folder query parameter required"))?;
+            let path = query_param(query, "path")
+                .ok_or_else(|| anyhow!("path query parameter required"))?;
+            Ok(json!({"analysis": engine.analysis(&folder, &path)?}))
+        }
+        (Method::Get, "/api/analyses") => {
+            let folder = query_param(query, "folder")
+                .ok_or_else(|| anyhow!("folder query parameter required"))?;
+            Ok(serde_json::to_value(engine.analyses(&folder)?)?)
+        }
+        (Method::Post, "/api/analysis") => {
+            let text = input
+                .get("analysis")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow!("missing field analysis"))?;
+            Ok(serde_json::to_value(engine.set_analysis(
+                &s(input, "folder")?,
+                &s(input, "path")?,
+                text,
+                &str_list(input, "tags"),
+                opt(input, "by").as_deref(),
+            )?)?)
+        }
+        (Method::Post, "/api/analysis/clear") => Ok(json!({
+            "cleared": engine.clear_analysis(&s(input, "folder")?, &s(input, "path")?)?
+        })),
+        (Method::Post, "/api/analysis/search") => {
+            let query = input.get("query").and_then(|v| v.as_str()).unwrap_or("");
+            Ok(serde_json::to_value(engine.search_analyses(
+                &s(input, "folder")?,
+                query,
+                &str_list(input, "tags"),
+            )?)?)
+        }
         (Method::Get, "/api/advice") => {
             let idle_days = query_param(query, "idle_days")
                 .and_then(|d| d.parse().ok())

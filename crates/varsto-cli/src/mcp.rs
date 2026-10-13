@@ -3,9 +3,10 @@
 //! assistant can look at, organise and reason about the files in this vault
 //! with exactly the access the user granted.
 //!
-//! Access is per folder: `varsto mcp grant <folder> [--write]` records a
-//! read-only or read-write grant in `mcp-grants.json`; nothing is reachable
-//! without a grant. When the background service is running, calls are routed
+//! Access is per folder: `varsto mcp grant <folder> [--analyse | --write]`
+//! records a grant in `mcp-grants.json`: read-only (`ro`), read and record
+//! file analyses (`an`), or read-write (`rw`, which includes analyses);
+//! nothing is reachable without a grant. When the background service is running, calls are routed
 //! through its local API (one process owns the state); otherwise the vault is
 //! opened directly with `VARSTO_PASSPHRASE`.
 
@@ -22,7 +23,7 @@ const PROTOCOL_VERSION: &str = "2025-06-18";
 
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
 pub struct Grants {
-    /// "ro" or "rw" for every folder, or none.
+    /// "ro", "an" or "rw" for every folder, or none.
     #[serde(default)]
     pub all: Option<String>,
     #[serde(default)]
@@ -54,6 +55,19 @@ impl Grants {
     }
     pub fn can_write(&self, folder: &str) -> bool {
         self.level(folder) == Some("rw")
+    }
+    /// Recording file analyses: an `an` or `rw` grant.
+    pub fn can_analyse(&self, folder: &str) -> bool {
+        matches!(self.level(folder), Some("an") | Some("rw"))
+    }
+}
+
+/// What a grant level allows, in words.
+pub fn level_words(level: &str) -> &'static str {
+    match level {
+        "rw" => "read-write: list, read, record analyses, move, create files",
+        "an" => "analyse: list, read and record file analyses; no moves or new files",
+        _ => "read-only: list and read",
     }
 }
 
@@ -201,6 +215,64 @@ impl Backend {
             Backend::Direct(e) => Ok(serde_json::to_value(e.create_file(folder, path, bytes)?)?),
         }
     }
+    fn analysis(&mut self, folder: &str, path: &str) -> Result<Value> {
+        match self {
+            Backend::Http { .. } => Ok(self.call_json(
+                "GET",
+                &format!(
+                    "/api/analysis?folder={}&path={}",
+                    urlencode(folder),
+                    urlencode(path)
+                ),
+                None,
+            )?["analysis"]
+                .clone()),
+            Backend::Direct(e) => Ok(serde_json::to_value(e.analysis(folder, path)?)?),
+        }
+    }
+    fn set_analysis(
+        &mut self,
+        folder: &str,
+        path: &str,
+        text: &str,
+        tags: &[String],
+        by: Option<&str>,
+    ) -> Result<Value> {
+        match self {
+            Backend::Http { .. } => self.call_json(
+                "POST",
+                "/api/analysis",
+                Some(json!({"folder": folder, "path": path, "analysis": text, "tags": tags, "by": by})),
+            ),
+            Backend::Direct(e) => Ok(serde_json::to_value(
+                e.set_analysis(folder, path, text, tags, by)?,
+            )?),
+        }
+    }
+    fn clear_analysis(&mut self, folder: &str, path: &str) -> Result<bool> {
+        match self {
+            Backend::Http { .. } => Ok(self.call_json(
+                "POST",
+                "/api/analysis/clear",
+                Some(json!({"folder": folder, "path": path})),
+            )?["cleared"]
+                .as_bool()
+                .unwrap_or(false)),
+            Backend::Direct(e) => e.clear_analysis(folder, path),
+        }
+    }
+    fn search(&mut self, folder: &str, query: &str, tags: &[String]) -> Result<Value> {
+        match self {
+            Backend::Http { .. } => self.call_json(
+                "POST",
+                "/api/analysis/search",
+                Some(json!({"folder": folder, "query": query, "tags": tags})),
+            ),
+            Backend::Direct(e) => Ok(serde_json::to_value(
+                e.search_analyses(folder, query, tags)?,
+            )?),
+        }
+    }
     fn sync(&mut self, folder: Option<&str>) -> Result<Value> {
         match self {
             Backend::Http { .. } => {
@@ -216,7 +288,7 @@ impl Backend {
     }
 }
 
-fn urlencode(s: &str) -> String {
+pub(crate) fn urlencode(s: &str) -> String {
     let mut out = String::new();
     for b in s.bytes() {
         match b {
@@ -233,10 +305,18 @@ fn tools() -> Value {
     json!([
         {"name": "varsto_status", "description": "Vault, devices, storages and folders of this device, with chunk and copy counts.",
          "inputSchema": {"type": "object", "properties": {}}},
-        {"name": "varsto_folders", "description": "Folders the assistant may see, with the access level granted (ro or rw) and local_path: the folder's directory on this device when its files are kept there as plain files.",
+        {"name": "varsto_folders", "description": "Folders the assistant may see, with the access level granted (ro: read only; analyse: read and record file analyses; rw: also move and create files) and local_path: the folder's directory on this device when its files are kept there as plain files.",
          "inputSchema": {"type": "object", "properties": {}}},
-        {"name": "varsto_files", "description": "Files of a folder: path, size, state (local, placeholder, missing), modified_utc, last_accessed_utc (Varsto's own record), content hash, and local_path: where the file is on this device's disk when it is synced here as a plain file. Varsto does not hand out file contents: read a file from its local_path with your own file tools. A file without local_path is not on this device (a placeholder, or a folder kept encrypted here).",
-         "inputSchema": {"type": "object", "properties": {"folder": {"type": "string"}}, "required": ["folder"]}},
+        {"name": "varsto_files", "description": "Files of a folder: path, size, state (local, placeholder, missing), modified_utc, last_accessed_utc (Varsto's own record), content hash, and local_path: where the file is on this device's disk when it is synced here as a plain file. Varsto does not hand out file contents: read a file from its local_path with your own file tools. A file without local_path is not on this device (a placeholder, or a folder kept encrypted here). A file that was analysed carries analysis (its first 500 characters; analysis_truncated when longer, varsto_get_analysis has it all), analysis_tags, analysis_utc, analysis_by and analysis_stale (the file changed since: analyse it again). with_analysis: false leaves the analyses out.",
+         "inputSchema": {"type": "object", "properties": {"folder": {"type": "string"}, "with_analysis": {"type": "boolean", "default": true}}, "required": ["folder"]}},
+        {"name": "varsto_set_analysis", "description": "Record what a file contains, after reading it from its local_path: a plain-text analysis (at most 16 KiB; say what the file is, its subject, people, places, dates, amounts, language, anything useful to find or file it later) with up to 32 short tags, and by: your model name. Replaces the file's earlier analysis. Varsto keeps it encrypted, shows it to the user and syncs it to the user's other devices; it follows the file when it is moved or renamed and is marked stale when the file changes. Needs an analyse or read-write grant.",
+         "inputSchema": {"type": "object", "properties": {"folder": {"type": "string"}, "path": {"type": "string"}, "analysis": {"type": "string"}, "tags": {"type": "array", "items": {"type": "string"}}, "by": {"type": "string"}}, "required": ["folder", "path", "analysis"]}},
+        {"name": "varsto_clear_analysis", "description": "Remove the analysis of a file (it was wrong or is no longer useful). Needs an analyse or read-write grant.",
+         "inputSchema": {"type": "object", "properties": {"folder": {"type": "string"}, "path": {"type": "string"}}, "required": ["folder", "path"]}},
+        {"name": "varsto_get_analysis", "description": "The full analysis of one file, with tags, author, by, analysed_utc and stale; null when it has none.",
+         "inputSchema": {"type": "object", "properties": {"folder": {"type": "string"}, "path": {"type": "string"}}, "required": ["folder", "path"]}},
+        {"name": "varsto_search_analyses", "description": "Find files by what they contain without reading them again: every word of query must occur (case-insensitive) in the file's analysis, its tags or its path, and the file must carry every tag in tags. Searches one folder or every granted folder; best matches first, each with folder, path, a snippet of the analysis, tags, stale and local_path. Use it to plan a reorganisation (then varsto_move).",
+         "inputSchema": {"type": "object", "properties": {"query": {"type": "string"}, "folder": {"type": "string"}, "tags": {"type": "array", "items": {"type": "string"}}, "limit": {"type": "integer", "minimum": 1, "maximum": 500, "default": 50}}}},
         {"name": "varsto_move", "description": "Move or rename a file inside a folder (needs a read-write grant); the change syncs to the other devices. Use it to reorganise: group by year, project or topic after reading the files. The target name must be free: a move never replaces another file.",
          "inputSchema": {"type": "object", "properties": {"folder": {"type": "string"}, "from": {"type": "string"}, "to": {"type": "string"}}, "required": ["folder", "from", "to"]}},
         {"name": "varsto_mkdir", "description": "Create a directory inside a folder (read-write grant).",
@@ -260,6 +340,33 @@ fn plain_root(f: &Value) -> Option<std::path::PathBuf> {
         .as_str()
         .filter(|p| !p.is_empty())
         .map(std::path::PathBuf::from)
+}
+
+/// The plain root of a folder by name (see `plain_root`).
+fn folder_root(backend: &mut Backend, folder: &str) -> Result<Option<PathBuf>> {
+    Ok(backend
+        .folders()?
+        .iter()
+        .find(|f| f["name"].as_str() == Some(folder))
+        .and_then(plain_root))
+}
+
+/// Only a synced plain file on this disk has a local path: the assistant
+/// reads it itself; Varsto never hands out contents.
+fn local_path(root: Option<&Path>, path: &Value, state: &Value) -> Option<String> {
+    let p = root?.join(path.as_str()?);
+    (state.as_str() == Some("local") && p.is_file()).then(|| p.display().to_string())
+}
+
+fn str_list(args: &Value, name: &str) -> Vec<String> {
+    args.get(name)
+        .and_then(|v| v.as_array())
+        .map(|a| {
+            a.iter()
+                .filter_map(|x| x.as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 fn text_result(text: String) -> Value {
@@ -290,6 +397,16 @@ fn call_tool(backend: &mut Backend, grants: &Grants, name: &str, args: &Value) -
     };
     let can_write = |folder: &str| -> bool {
         grants.can_write(folder) && (!strongrooms.contains(folder) || grants.explicit(folder))
+    };
+    let can_analyse = |folder: &str| -> bool {
+        grants.can_analyse(folder) && (!strongrooms.contains(folder) || grants.explicit(folder))
+    };
+    let need_analyse = |folder: &str| -> Result<()> {
+        if can_analyse(folder) {
+            Ok(())
+        } else {
+            bail!("folder {folder} does not allow recording analyses: the user must run `varsto mcp grant {folder} --analyse`")
+        }
     };
     let granted_folders = |b: &mut Backend| -> Result<Vec<String>> {
         let names: Vec<String> = b
@@ -323,7 +440,13 @@ fn call_tool(backend: &mut Backend, grants: &Grants, name: &str, args: &Value) -
                 .filter(|f| f["name"].as_str().is_some_and(can_read))
                 .map(|mut f| {
                     let n = f["name"].as_str().unwrap_or("").to_string();
-                    f["access"] = json!(if can_write(&n) { "rw" } else { "ro" });
+                    f["access"] = json!(if can_write(&n) {
+                        "rw"
+                    } else if can_analyse(&n) {
+                        "analyse"
+                    } else {
+                        "ro"
+                    });
                     f["local_path"] = json!(plain_root(&f));
                     f
                 })
@@ -333,23 +456,19 @@ fn call_tool(backend: &mut Backend, grants: &Grants, name: &str, args: &Value) -
         "varsto_files" => {
             let folder = arg(args, "folder")?;
             need_read(folder)?;
-            let root = backend
-                .folders()?
-                .iter()
-                .find(|f| f["name"].as_str() == Some(folder))
-                .and_then(plain_root);
+            let with_analysis = args
+                .get("with_analysis")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(true);
+            let root = folder_root(backend, folder)?;
             let mut files = backend.files(folder)?;
             if let Some(list) = files.as_array_mut() {
                 for f in list {
-                    // Only a synced plain file on this disk: the assistant reads
-                    // it itself; Varsto never hands out contents.
-                    let local = root.as_ref().and_then(|r| {
-                        let rel = f["path"].as_str()?;
-                        let p = r.join(rel);
-                        (f["state"].as_str() == Some("local") && p.is_file())
-                            .then(|| p.display().to_string())
-                    });
+                    let local = local_path(root.as_deref(), &f["path"], &f["state"]);
                     f["local_path"] = json!(local);
+                    if let (false, Some(o)) = (with_analysis, f.as_object_mut()) {
+                        o.retain(|k, _| !k.starts_with("analysis"));
+                    }
                 }
             }
             Ok(text_result(serde_json::to_string_pretty(&files)?))
@@ -361,6 +480,80 @@ fn call_tool(backend: &mut Backend, grants: &Grants, name: &str, args: &Value) -
             }
             Ok(text_result(serde_json::to_string_pretty(
                 &backend.move_file(folder, from, to)?,
+            )?))
+        }
+        "varsto_set_analysis" => {
+            let (folder, path, text) = (
+                arg(args, "folder")?,
+                arg(args, "path")?,
+                arg(args, "analysis")?,
+            );
+            need_analyse(folder)?;
+            let tags = str_list(args, "tags");
+            let by = args.get("by").and_then(|v| v.as_str());
+            Ok(text_result(serde_json::to_string_pretty(
+                &backend.set_analysis(folder, path, text, &tags, by)?,
+            )?))
+        }
+        "varsto_clear_analysis" => {
+            let (folder, path) = (arg(args, "folder")?, arg(args, "path")?);
+            need_analyse(folder)?;
+            let cleared = backend.clear_analysis(folder, path)?;
+            Ok(text_result(if cleared {
+                format!("the analysis of {folder}/{path} was cleared")
+            } else {
+                format!("{folder}/{path} had no analysis")
+            }))
+        }
+        "varsto_get_analysis" => {
+            let (folder, path) = (arg(args, "folder")?, arg(args, "path")?);
+            need_read(folder)?;
+            Ok(text_result(serde_json::to_string_pretty(
+                &backend.analysis(folder, path)?,
+            )?))
+        }
+        "varsto_search_analyses" => {
+            let query = args.get("query").and_then(|v| v.as_str()).unwrap_or("");
+            let tags = str_list(args, "tags");
+            let limit = args
+                .get("limit")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(50)
+                .clamp(1, 500) as usize;
+            let folders = match args.get("folder").and_then(|v| v.as_str()) {
+                Some(f) => {
+                    need_read(f)?;
+                    vec![f.to_string()]
+                }
+                None => granted_folders(backend)?,
+            };
+            let mut hits: Vec<Value> = Vec::new();
+            for f in &folders {
+                let root = folder_root(backend, f)?;
+                for mut h in backend
+                    .search(f, query, &tags)?
+                    .as_array()
+                    .cloned()
+                    .unwrap_or_default()
+                {
+                    let local = local_path(root.as_deref(), &h["path"], &h["state"]);
+                    h["local_path"] = json!(local);
+                    if let Some(o) = h.as_object_mut() {
+                        o.remove("disk");
+                    }
+                    hits.push(h);
+                }
+            }
+            hits.sort_by(|a, b| {
+                b["score"]
+                    .as_u64()
+                    .cmp(&a["score"].as_u64())
+                    .then_with(|| a["path"].as_str().cmp(&b["path"].as_str()))
+            });
+            let total = hits.len();
+            hits.truncate(limit);
+            Ok(text_result(serde_json::to_string_pretty(
+                &json!({"total": total, "hits": hits}),
             )?))
         }
         "varsto_mkdir" => {
@@ -464,7 +657,7 @@ pub fn serve(home: &Path) -> Result<()> {
                 "protocolVersion": PROTOCOL_VERSION,
                 "capabilities": {"tools": {"listChanged": false}},
                 "serverInfo": {"name": "varsto", "version": env!("CARGO_PKG_VERSION")},
-                "instructions": "Varsto keeps the user's files encrypted on their own storage. You see only the folders the user granted (varsto mcp grant), read-only unless the grant says rw. Typical work: read files, analyse and summarise them, propose and carry out a tidier structure with varsto_mkdir and varsto_move, and leave notes or indexes with varsto_write. Files are never deleted or replaced: there is no delete tool, varsto_write only creates new files and varsto_move only moves or renames to a free name. Paths are relative to the folder. last_accessed_utc is Varsto's own record of use on this device."
+                "instructions": "Varsto keeps the user's files encrypted on their own storage. You see only the folders the user granted (varsto mcp grant): read-only, analyse (may also record file analyses) or rw (may also move and create files). Typical work: list files with varsto_files, read the ones without an analysis (or with analysis_stale) from their local_path with your own file tools, record what each contains with varsto_set_analysis (text, tags, by: your model name), and later find files by content with varsto_search_analyses instead of reading them again; propose and carry out a tidier structure with varsto_mkdir and varsto_move (analyses follow the files), and leave notes or indexes with varsto_write. Files are never deleted or replaced: there is no delete tool, varsto_write only creates new files and varsto_move only moves or renames to a free name. Paths are relative to the folder. last_accessed_utc is Varsto's own record of use on this device."
             })),
             "notifications/initialized" | "notifications/cancelled" => continue,
             "ping" => Ok(json!({})),
@@ -505,9 +698,18 @@ pub fn serve(home: &Path) -> Result<()> {
     Ok(())
 }
 
-pub fn grant(home: &Path, folder: &str, write: bool) -> Result<()> {
+/// Grant `folder` (or `all`): read-write with `write`, read and analyse
+/// with `analyse`, read-only otherwise.
+pub fn grant(home: &Path, folder: &str, write: bool, analyse: bool) -> Result<()> {
     let mut g = Grants::load(home)?;
-    let level = if write { "rw" } else { "ro" }.to_string();
+    let level = if write {
+        "rw"
+    } else if analyse {
+        "an"
+    } else {
+        "ro"
+    }
+    .to_string();
     if folder == "all" {
         g.all = Some(level);
     } else {
