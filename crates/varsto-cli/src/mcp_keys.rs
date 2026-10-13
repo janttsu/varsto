@@ -12,10 +12,10 @@
 //! within the key's folders and levels. A key never opens the vault itself:
 //! without the service it is refused.
 
-use crate::mcp::Grants;
 use anyhow::{anyhow, bail, Result};
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 pub const FILE: &str = "mcp-keys.json";
@@ -254,6 +254,48 @@ pub fn allows(scope: &Grants, folder: &str, strongroom: bool, need: Need) -> boo
         Need::Read => scope.can_read(folder),
         Need::Analyse => scope.can_analyse(folder),
         Need::Write => scope.can_write(folder),
+    }
+}
+
+/// Folder grants for assistants (`varsto mcp grant`), `mcp-grants.json`.
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+pub struct Grants {
+    /// "ro", "an" or "rw" for every folder, or none.
+    #[serde(default)]
+    pub all: Option<String>,
+    #[serde(default)]
+    pub folders: BTreeMap<String, String>,
+}
+
+impl Grants {
+    pub const FILE: &'static str = "mcp-grants.json";
+    pub fn load(home: &Path) -> Result<Self> {
+        varsto_core::util::read_json_or_default(&home.join(Self::FILE))
+    }
+    pub fn save(&self, home: &Path) -> Result<()> {
+        std::fs::create_dir_all(home)?;
+        varsto_core::util::write_atomic(&home.join(Self::FILE), &serde_json::to_vec_pretty(self)?)
+    }
+    fn level(&self, folder: &str) -> Option<&str> {
+        self.folders
+            .get(folder)
+            .map(|s| s.as_str())
+            .or(self.all.as_deref())
+    }
+    /// A grant on every folder never covers a Strongroom: those need their
+    /// own line in the grants file.
+    pub fn explicit(&self, folder: &str) -> bool {
+        self.folders.contains_key(folder)
+    }
+    pub fn can_read(&self, folder: &str) -> bool {
+        self.level(folder).is_some()
+    }
+    pub fn can_write(&self, folder: &str) -> bool {
+        self.level(folder) == Some("rw")
+    }
+    /// Recording file analyses: an `an` or `rw` grant.
+    pub fn can_analyse(&self, folder: &str) -> bool {
+        matches!(self.level(folder), Some("an") | Some("rw"))
     }
 }
 

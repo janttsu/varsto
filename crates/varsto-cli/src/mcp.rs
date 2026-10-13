@@ -11,9 +11,7 @@
 //! opened directly with `VARSTO_PASSPHRASE`.
 
 use anyhow::{anyhow, bail, Context, Result};
-use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::collections::BTreeMap;
 use std::io::{BufRead, Read, Write};
 use std::net::TcpStream;
 use std::path::{Path, PathBuf};
@@ -29,46 +27,9 @@ Workflow: 1) varsto_folders, then varsto_files for a folder. 2) Read files from 
 
 Rules: stay inside the granted folders; paths are relative to the folder; nothing is ever deleted or replaced (there is no delete tool, varsto_write creates new files only, varsto_move needs a free target name), so pick unique names; write summaries or indexes as new files with varsto_write; do not copy secrets from files into analyses unless the user wants them findable; analyses are synced encrypted to all of the user's devices. last_accessed_utc is Varsto's own record of use.";
 
-#[derive(Clone, Debug, Serialize, Deserialize, Default)]
-pub struct Grants {
-    /// "ro", "an" or "rw" for every folder, or none.
-    #[serde(default)]
-    pub all: Option<String>,
-    #[serde(default)]
-    pub folders: BTreeMap<String, String>,
-}
-
-impl Grants {
-    pub const FILE: &'static str = "mcp-grants.json";
-    pub fn load(home: &Path) -> Result<Self> {
-        varsto_core::util::read_json_or_default(&home.join(Self::FILE))
-    }
-    pub fn save(&self, home: &Path) -> Result<()> {
-        std::fs::create_dir_all(home)?;
-        varsto_core::util::write_atomic(&home.join(Self::FILE), &serde_json::to_vec_pretty(self)?)
-    }
-    fn level(&self, folder: &str) -> Option<&str> {
-        self.folders
-            .get(folder)
-            .map(|s| s.as_str())
-            .or(self.all.as_deref())
-    }
-    /// A grant on every folder never covers a Strongroom: those need their
-    /// own line in the grants file.
-    pub fn explicit(&self, folder: &str) -> bool {
-        self.folders.contains_key(folder)
-    }
-    pub fn can_read(&self, folder: &str) -> bool {
-        self.level(folder).is_some()
-    }
-    pub fn can_write(&self, folder: &str) -> bool {
-        self.level(folder) == Some("rw")
-    }
-    /// Recording file analyses: an `an` or `rw` grant.
-    pub fn can_analyse(&self, folder: &str) -> bool {
-        matches!(self.level(folder), Some("an") | Some("rw"))
-    }
-}
+/// The grants file lives with the keys (`mcp_keys`), which the phone
+/// library compiles too.
+pub use crate::mcp_keys::Grants;
 
 /// What a grant level allows, in words.
 pub fn level_words(level: &str) -> &'static str {
