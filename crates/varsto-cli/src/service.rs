@@ -413,6 +413,28 @@ impl ServiceState {
             }
         }
     }
+    /// The trash upkeep, once a day (called after a sync): expire entries,
+    /// move trashed blocks to the trash storage, drop what nothing uses.
+    pub fn trash_if_due(&mut self, engine: &mut Engine) {
+        if !engine.trash_upkeep_due(varsto_core::util::now_utc()) {
+            return;
+        }
+        match engine.trash_upkeep() {
+            Ok(r) => self.record_trash_upkeep(&r),
+            Err(e) => eprintln!("service: trash upkeep failed: {e:#}"),
+        }
+    }
+    pub fn record_trash_upkeep(&mut self, r: &varsto_core::engine::TrashUpkeepReport) {
+        if r.expired + r.blocks_dropped + r.blocks_moved + r.local_copies_removed > 0 {
+            eprintln!(
+                "service: trash: {} files expired, {} blocks deleted, {} blocks moved to the trash storage, {} local copies removed",
+                r.expired, r.blocks_dropped, r.blocks_moved, r.local_copies_removed
+            );
+        }
+        for n in &r.notes {
+            eprintln!("service: trash: {n}");
+        }
+    }
     pub fn record_backup_upkeep(&mut self, r: &varsto_core::engine::ExpireReport) {
         self.backup_upkeep_utc = Some(varsto_core::util::now_utc());
         if r.snapshots_expired + r.objects_deleted > 0 || !r.backups_removed.is_empty() {
@@ -1522,6 +1544,7 @@ pub fn run(opts: Options) -> Result<()> {
                         st.service.scrub_if_due(e);
                         st.service.repair_if_due(e);
                         st.service.backups_if_due(e);
+                        st.service.trash_if_due(e);
                         st.service.restic_if_due(e);
                         if let Err(err) = e.publish_device_details(st.service.last_sync_utc) {
                             eprintln!("service: device details not published: {err:#}");

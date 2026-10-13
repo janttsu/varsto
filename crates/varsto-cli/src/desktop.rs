@@ -1374,6 +1374,58 @@ fn api_unlocked(
             service.record_backup_upkeep(&r);
             Ok(serde_json::to_value(r)?)
         }
+        // The trash: files deleted on any device of the vault.
+        (Method::Get, "/api/trash") => {
+            let folder = query_param(query, "folder").filter(|f| !f.is_empty());
+            Ok(serde_json::to_value(engine.trash_list(folder.as_deref())?)?)
+        }
+        (Method::Get, "/api/trash/status") => Ok(serde_json::to_value(engine.trash_status()?)?),
+        (Method::Post, "/api/trash/restore-plan") => {
+            let to = opt(input, "to").filter(|t| !t.trim().is_empty());
+            Ok(serde_json::to_value(engine.trash_restore_plan(
+                &s(input, "folder")?,
+                &string_list(input, "paths"),
+                to.as_deref(),
+            )?)?)
+        }
+        (Method::Post, "/api/trash/restore") => {
+            let to = opt(input, "to").filter(|t| !t.trim().is_empty());
+            let cold = input.get("confirm_cold_read").and_then(|v| v.as_bool()).unwrap_or(false);
+            let r = engine.trash_restore(&s(input, "folder")?, &string_list(input, "paths"), to.as_deref(), cold)?;
+            service.request_sync();
+            Ok(serde_json::to_value(r)?)
+        }
+        (Method::Post, "/api/trash/purge") => {
+            let folder = opt(input, "folder").filter(|f| !f.is_empty());
+            let all = input.get("all").and_then(|v| v.as_bool()).unwrap_or(false);
+            let r = engine.trash_purge(folder.as_deref(), &string_list(input, "paths"), all)?;
+            Ok(serde_json::to_value(r)?)
+        }
+        (Method::Post, "/api/trash/set") => {
+            let days = input
+                .get("days")
+                .and_then(|v| v.as_u64())
+                .map(|d| d.min(u32::MAX as u64) as u32);
+            let folder = opt(input, "folder").filter(|f| !f.is_empty());
+            let storage: Option<Option<String>> = if input.get("no_storage").and_then(|v| v.as_bool()).unwrap_or(false) {
+                Some(None)
+            } else {
+                opt(input, "storage").filter(|n| !n.is_empty()).map(Some)
+            };
+            let moved = matches!(storage, Some(Some(_)));
+            let st = engine.trash_set(days, folder.as_deref(), storage)?;
+            if moved {
+                // What is in the trash now moves to the new trash storage.
+                let r = engine.trash_upkeep()?;
+                service.record_trash_upkeep(&r);
+            }
+            Ok(serde_json::to_value(st)?)
+        }
+        (Method::Post, "/api/trash/upkeep") => {
+            let r = engine.trash_upkeep()?;
+            service.record_trash_upkeep(&r);
+            Ok(serde_json::to_value(r)?)
+        }
         (Method::Post, "/api/sync") => {
             let folder = opt(input, "folder");
             let reports = engine.sync(folder.as_deref())?;
