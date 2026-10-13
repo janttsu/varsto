@@ -1,10 +1,10 @@
 # Website
 
-Static site for the project: **Project** (front page), **Docs** (rendered from the repository), **Downloads**, **Blog** (with RSS) and **Forum** (placeholder until the public alpha). Every page shows the alpha warning. English only.
+Static site for the project: **Project** (front page), **Docs** (rendered from the repository), **Downloads**, **Blog** (with RSS) and **Forum** (GitHub issues and discussions for now; a forum of its own is planned). Every page shows the alpha warning. The pages are in English, Finnish and Swedish (`website/src/i18n/<lang>/pages/`); docs, blog and the generated downloads block are English only.
 
 - No inline scripts or styles, no third-party resources, system fonts: the strict Content Security Policy on the server stays valid.
 - Light and dark themes (follows the system, with a manual toggle).
-- `robots.txt` and `noindex` stay on while the product name is provisional. Remove them deliberately before launch.
+- `RELEASED_VERSION` in `build.py` is the last tagged release; update it when tagging. `{{VERSION}}` follows `Cargo.toml`, so it may be ahead of the release on main.
 
 ## Build
 
@@ -14,7 +14,7 @@ python3 website/build.py          # renders src/pages, src/posts and the reposit
 python3 -m http.server -d website/public 8080   # preview
 ```
 
-`build.py` needs `pandoc`. Sources live in `website/src/`; the rendered pages in `website/public/` are committed, the downloads directory is not.
+`build.py` needs `pandoc`. Sources live in `website/src/`; the rendered pages in `website/public/` are committed, the downloads directory is not. The status counts on the front page (lines of Rust, tests, lab scenarios) are counted from the tree at build time.
 
 ## Deploy
 
@@ -30,5 +30,4 @@ Host and path are never committed. The web server (TLS, headers, access-log rota
 - DNS: keep DNSSEC on; add a CAA record for the certificate authority in use (Let's Encrypt: `0 issue "letsencrypt.org"`).
 - `.well-known/security.txt`: rename the template and fill in the contact once a security contact exists.
 - Re-check the response headers (CSP, HSTS, X-Frame-Options, X-Robots-Tag) after every deploy.
-- Footer: once the repository is public, change "Source will be published ..." to "Source-available under the PolyForm Shield License 1.0.0" in `website/build.py`.
 - Downloads: `SHA256SUMS` is signed (`SHA256SUMS.sig`, minisign format) with the offline release key; sign with `scripts/sign-release.sh` after the last file is added (see RELEASING.md). `deploy.sh` refuses to publish a checksum list whose signature does not verify.

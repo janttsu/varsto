@@ -59,8 +59,17 @@
     <h1>Varsto and Filen</h1>
     <p class="lead">Filen is zero-knowledge encrypted cloud storage from Germany, for privacy-minded individuals and teams. It offers a drive, desktop sync, a network drive with on-demand files, notes and chat, at low prices.</p>
 
+    <h2>Where Varsto differs</h2>
+    <ul>
+      <li>You choose the storage and can change it: a bucket at any provider, a NAS, an rclone remote, your own disks.</li>
+      <li>Copies on your own disks and with several providers at once, each one counted in the ledger.</li>
+      <li>Policies such as "at least one copy outside the house", checked from the ledger with a warning before they break.</li>
+      <li>Strongroom folders that open only with a hardware security key.</li>
+      <li>A source-available core with a written storage format (Filen's clients are open source and its plans inexpensive; see below).</li>
+    </ul>
+
     <h2>How Filen works</h2>
-    <p>You create an account and files are stored on Filen's servers in Germany, encrypted on the client (AES-256 per chunk) before upload. The clients and SDKs are open source under AGPL-3.0. The command-line client can expose your Filen storage locally over WebDAV or S3, but the data still lives at Filen. Free accounts can be deleted after a period of inactivity.</p>
+    <p>You create an account and files are stored on Filen's servers in Germany, encrypted on the client (AES-256 per chunk) before upload. The clients and SDKs are open source under AGPL-3.0. The command-line client can expose your Filen storage locally over WebDAV or S3, but the data still lives at Filen. Check the vendor's current terms for how long a free account stays active.</p>
 
     <h2>Side by side</h2>
     <table class="compare-table">
@@ -83,7 +92,7 @@
       <div class="card"><h3>Filen</h3><p>Choose Filen when you want inexpensive, EU-hosted encrypted cloud storage with open-source clients and are happy with one provider holding your off-site copy.</p></div>
       <div class="card"><h3>Varsto</h3><p>Choose Varsto when the storage itself should be yours to choose and change, when you want copies with several providers and on your own disks, and when you want rules such as "at least one copy outside the house" checked for you.</p></div>
     </div>
-    <p class="note">Varsto is alpha software: do not trust it with data you have no other copy of, and its cryptography has not been independently audited. The other products here are mature. Facts about them were checked from their own documentation in October 2026; prices and plans change often, so see their own pages for current figures. Corrections are welcome on the <a href="../../forum/">forum</a> or on GitHub.</p>
+    <p class="note">Varsto is alpha software: do not trust it with data you have no other copy of, and its cryptography has not been independently audited. The other products here are mature. Facts about them were checked from their own documentation in October 2026; prices and plans change often, so see their own pages for current figures. Corrections are welcome as <a href="https://github.com/janttsu/varsto/issues" rel="noopener">GitHub issues</a>.</p>
 
     <h2>Sources</h2>
     <ul>

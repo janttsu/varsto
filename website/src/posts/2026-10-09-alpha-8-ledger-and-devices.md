@@ -7,7 +7,7 @@ Alpha.8 came out of a long day of using alpha.7 on a Mac, a Linux desktop and a 
 
 ## A ledger that stays small
 
-Every device keeps a signed, encrypted log of facts: which block it stored where, which copy it verified, which file list it published. Until now every entry stayed forever, as its own object on every storage, and every sync listed all of them. Now a sync lists only what is new, the device keeps a cached, encrypted view instead of replaying everything, one sync writes one batch, and each device periodically writes a signed checkpoint. Once all your devices have acknowledged a checkpoint, the batches behind it are deleted, keeping the last few so that a device restored from an old backup is still caught. In a test vault with 20 000 batches, a sync with nothing new went from 668 ms to 28 ms and the ledger on storage from 171 MB to 5 MB. The [How it works](../how-it-works/) page explains the ledger.
+Every device keeps a signed, encrypted log of facts: which block it stored where, which copy it verified, which file list it published. Until now every entry stayed forever, as its own object on every storage, and every sync listed all of them. Now a sync lists only what is new, the device keeps a cached, encrypted view instead of replaying everything, one sync writes one batch, and each device periodically writes a signed checkpoint. Once all your devices have acknowledged a checkpoint, the batches behind it are deleted, keeping the last few so that a device restored from an old backup is still caught. In a test vault with 20 000 batches, a sync with nothing new went from 668 ms to 28 ms (at the time) and the ledger on storage from 171 MB to 5 MB. The [How it works](../how-it-works/) page explains the ledger.
 
 ## Removing a device
 

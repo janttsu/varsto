@@ -59,6 +59,15 @@
     <h1>Varsto ja Resilio Sync</h1>
     <p class="lead">Resilio Sync synkronoi ja jakaa kansioita laitteiden välillä vertaisyhteydellä BitTorrent-tekniikan pohjalta. Ilmainen Sync Home -versio on tarkoitettu yksityishenkilöille; yhtiön pääliiketoimintaa on yritysten tiedostonsiirto. Nasuni osti Resilion maaliskuussa 2026.</p>
 
+    <h2>Missä Varsto eroaa</h2>
+    <ul>
+      <li>Lähdekoodi saatavilla ja tallennusmuoto julkaistu: datasi pysyy palautettavissa ilman toimittajaa.</li>
+      <li>Jälkikvanttinen hybridikryptografia jokaiselle tallennetulle allekirjoitukselle ja jokaiselle sinetöidylle avaimelle (sitä varten suunniteltu; ei auditoitu).</li>
+      <li>Tallennuspaikkasi ovat aina saatavilla oleva kopio, joten jatkuvasti päällä olevaa vertaislaitetta ei tarvita; laitteet vaihtavat lohkoja silti suoraan, kun ne tavoittavat toisensa.</li>
+      <li>Allekirjoitettu kirjanpito laskee ja tarkistaa jokaisen kopion, ja säilytyssäännöt varoittavat ennen kuin sääntö rikkoutuu.</li>
+      <li>Ei toimittajan seuranta- tai välityspalvelimia: laitteet löytävät toisensa tallennuspaikkojesi kautta ja lähiverkossa ja kulkevat jonkin oman laitteesi kautta, kun NATia ei voi puhkaista.</li>
+    </ul>
+
     <h2>Miten Resilio Sync toimii</h2>
     <p>Laitteet yhdistävät suoraan toisiinsa; tiliä ei ole, ja kansiot jaetaan avaimilla tai linkeillä (vain luku tai luku ja kirjoitus). Resilion ylläpitämät seurantapalvelimet ja välittäjät auttavat vertaisia löytämään toisensa. Tiedot ovat vain vertaisilla; Sync Homessa ei ole S3- tai rclone-taustajärjestelmää. Valikoiva synkronointi paikkamerkkitiedostoineen on saatavilla, ja ”salatun kansion” avulla epäluotetulla koneella oleva vertainen voi säilyttää tietoja, joita se ei pysty lukemaan (tällainen vertainen on vain luku -tilassa, eikä siinä ole valikoivaa synkronointia).</p>
 
@@ -83,7 +92,7 @@
       <div class="card"><h3>Resilio Sync</h3><p>Valitse Resilio Sync, kun haluat nopeat BitTorrent-tyyliset siirrot aina päällä olevien koneiden välillä ja helpon jakamisen avaimella tai linkillä, ja suljetun lähdekoodin kaupallinen tuote on sinulle hyväksyttävä.</p></div>
       <div class="card"><h3>Varsto</h3><p>Varston vertaissiirrot perustuvat samaan ajatukseen (salattuja lohkoja usealta vertaiselta yhtä aikaa), mutta Varsto lisää omat tallennuspaikkasi aina saatavilla olevaksi kopioksi, kirjanpidon siitä, missä jokainen kopio on, säilytyssäännöt sekä formaattien avoimen määrittelyn.</p></div>
     </div>
-    <p class="note">Varsto on alfavaiheen ohjelmisto: älä luota sille tietoja, joista sinulla ei ole muuta kopiota. Sen kryptografiaa ei ole myöskään auditoitu riippumattomasti. Muut tässä esitellyt tuotteet ovat kypsiä. Niitä koskevat tiedot tarkistettiin niiden omasta dokumentaatiosta lokakuussa 2026; hinnat ja tilausvaihtoehdot muuttuvat usein, joten katso ajantasaiset tiedot niiden omilta sivuilta. Korjaukset ovat tervetulleita <a href="../../../forum/">foorumilla</a> tai GitHubissa.</p>
+    <p class="note">Varsto on alfavaiheen ohjelmisto: älä luota sille tietoja, joista sinulla ei ole muuta kopiota. Sen kryptografiaa ei ole myöskään auditoitu riippumattomasti. Muut tässä esitellyt tuotteet ovat kypsiä. Niitä koskevat tiedot tarkistettiin niiden omasta dokumentaatiosta lokakuussa 2026; hinnat ja tilausvaihtoehdot muuttuvat usein, joten katso ajantasaiset tiedot niiden omilta sivuilta. Korjaukset ovat tervetulleita <a href="https://github.com/janttsu/varsto/issues" rel="noopener">GitHub-issueina</a>.</p>
 
     <h2>Lähteet</h2>
     <ul>

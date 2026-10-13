@@ -54,7 +54,7 @@
 <main id="main">
   <div class="wrap">
 <article class="prose"><h1>Alpha.9: data where you want it, repair by itself, signed updates, and every platform built in the open</h1><p class="note"><time datetime="2026-10-10">2026-10-10</time></p>
-<p>Alpha.9 is about the long run: deciding where data lives, getting it back to the copies your policy asks for without being told, and trusting the update that brings the next version.</p>
+<p>Alpha.9 (a build that was never tagged by itself; its changes shipped in alpha.10) is about the long run: deciding where data lives, getting it back to the copies your policy asks for without being told, and trusting the update that brings the next version.</p>
 <h2 id="data-where-you-want-it">Data where you want it</h2>
 <p>Each folder can now have a placement: the storages its blocks go to. Data can be moved from one storage to another (a whole folder, or only files idle for a number of days), block by block, each block written and read back on the new storage before the old copy is deleted, and an interrupted move simply continues when run again. A pool of removable disks can ask for copies on disks kept in different places, such as one at home and one at work, and Varsto fills each disk with what its place still lacks.</p>
 <h2 id="repair-by-itself">Repair by itself</h2>
@@ -62,7 +62,7 @@
 <h2 id="signed-updates">Signed updates</h2>
 <p>Every release's checksum list is now signed with the project's release key, which never leaves the maintainer's machine, and the updater refuses a release that is not signed with it. It also compares the checksum with the one attached to the GitHub release, a second channel. <code>varsto verify-release</code> checks a download by hand, and so does <code>minisign</code>. <a href="https://github.com/janttsu/varsto/blob/main/RELEASING.md">RELEASING.md</a> explains the scheme.</p>
 <h2 id="faster-peer-to-peer">Faster peer to peer</h2>
-<p>Downloads keep up to eight blocks in flight, fetch small files ahead across a folder and share one connection per peer; a device that serves blocks no longer starts a full sync of its own every few seconds. The <a href="../docs/./">benchmarks</a> compare Paris, Amsterdam and Warsaw, peer to peer against an S3 bucket.</p>
+<p>Downloads keep up to eight blocks in flight (at the time), fetch small files ahead across a folder and share one connection per peer; a device that serves blocks no longer starts a full sync of its own every few seconds. The <a href="../docs/./">benchmarks</a> compare Paris, Amsterdam and Warsaw, peer to peer against an S3 bucket.</p>
 <h2 id="built-in-the-open">Built in the open</h2>
 <p>Every platform is now built and tested on GitHub's runners on every change: the Linux and Windows packages (the Windows one tested on Windows Server 2025, including the Explorer menu entries), the Android app in the emulator, the macOS disk image and the iOS app on Apple Silicon. The same runs take the <a href="../docs/./">screenshots</a>, so the pictures on this site follow the newest build.</p>
 <h2 id="and-more">And more</h2>

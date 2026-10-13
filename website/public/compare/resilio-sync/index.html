@@ -59,6 +59,15 @@
     <h1>Varsto and Resilio Sync</h1>
     <p class="lead">Resilio Sync syncs and shares folders between devices peer to peer, built on BitTorrent technology. The free Sync Home edition is for individuals; the company's main business is enterprise file transfer. Resilio was acquired by Nasuni in March 2026.</p>
 
+    <h2>Where Varsto differs</h2>
+    <ul>
+      <li>Source-available, with a published storage format: your data stays recoverable without the vendor.</li>
+      <li>Hybrid post-quantum cryptography for every stored signature and every sealed key (designed for; not audited).</li>
+      <li>Your storages are the always-available copy, so no always-on peer is needed; devices still exchange blocks directly when they can reach each other.</li>
+      <li>A signed ledger counts and verifies every copy, and durability policies warn before a rule breaks.</li>
+      <li>No vendor trackers or relays: devices find each other through your storages and on the LAN, and relay through one of your own devices when NAT cannot be punched.</li>
+    </ul>
+
     <h2>How Resilio Sync works</h2>
     <p>Devices connect directly; there is no account, and folders are shared with keys or links (read-only or read-write). Resilio-run trackers and relays help peers find each other. Data lives on the peers only; Sync Home has no S3 or rclone backend. Selective sync with placeholder files is available, and an "encrypted folder" lets a peer on an untrusted machine store data it cannot read (that peer is read-only and has no selective sync).</p>
 
@@ -83,7 +92,7 @@
       <div class="card"><h3>Resilio Sync</h3><p>Choose Resilio Sync when you want fast BitTorrent-style transfer between always-on machines and easy sharing by key or link, and a closed-source vendor product is acceptable.</p></div>
       <div class="card"><h3>Varsto</h3><p>Varsto's peer-to-peer transfer is modelled on the same idea (encrypted blocks from several peers at once), but it adds your own storages as the always-available copy, a record of where every copy is, durability policies and an open specification of the formats.</p></div>
     </div>
-    <p class="note">Varsto is alpha software: do not trust it with data you have no other copy of, and its cryptography has not been independently audited. The other products here are mature. Facts about them were checked from their own documentation in October 2026; prices and plans change often, so see their own pages for current figures. Corrections are welcome on the <a href="../../forum/">forum</a> or on GitHub.</p>
+    <p class="note">Varsto is alpha software: do not trust it with data you have no other copy of, and its cryptography has not been independently audited. The other products here are mature. Facts about them were checked from their own documentation in October 2026; prices and plans change often, so see their own pages for current figures. Corrections are welcome as <a href="https://github.com/janttsu/varsto/issues" rel="noopener">GitHub issues</a>.</p>
 
     <h2>Sources</h2>
     <ul>

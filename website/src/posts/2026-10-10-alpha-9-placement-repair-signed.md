@@ -3,7 +3,7 @@ title: Alpha.9: data where you want it, repair by itself, signed updates, and ev
 date: 2026-10-10
 summary: Folders can be placed on chosen storages and moved between them, lost copies are repaired automatically, updates are signed with an offline key, peer-to-peer downloads fetch many blocks at once, and every package is now built, tested and photographed on GitHub's runners.
 ---
-Alpha.9 is about the long run: deciding where data lives, getting it back to the copies your policy asks for without being told, and trusting the update that brings the next version.
+Alpha.9 (a build that was never tagged by itself; its changes shipped in alpha.10) is about the long run: deciding where data lives, getting it back to the copies your policy asks for without being told, and trusting the update that brings the next version.
 
 ## Data where you want it
 
@@ -19,7 +19,7 @@ Every release's checksum list is now signed with the project's release key, whic
 
 ## Faster peer to peer
 
-Downloads keep up to eight blocks in flight, fetch small files ahead across a folder and share one connection per peer; a device that serves blocks no longer starts a full sync of its own every few seconds. The [benchmarks](../benchmarks/) compare Paris, Amsterdam and Warsaw, peer to peer against an S3 bucket.
+Downloads keep up to eight blocks in flight (at the time), fetch small files ahead across a folder and share one connection per peer; a device that serves blocks no longer starts a full sync of its own every few seconds. The [benchmarks](../benchmarks/) compare Paris, Amsterdam and Warsaw, peer to peer against an S3 bucket.
 
 ## Built in the open
 

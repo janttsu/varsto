@@ -8,6 +8,14 @@ description: Looking for a git-annex alternative with end-to-end encryption on y
     <h1>Varsto and git-annex</h1>
     <p class="lead">git-annex manages large files with git without storing their contents in git. It is a powerful tool for technical users who archive, back up and move data across many drives and remotes, and it is the closest relative of Varsto on this list.</p>
 
+    <h2>Where Varsto differs</h2>
+    <ul>
+      <li>The same location-tracking idea, but encryption of file names and content is always on, on every storage.</li>
+      <li>Continuous background sync, a desktop and phone interface, sharing with other people, and policies that alert before a rule breaks.</li>
+      <li>Backups as read-only snapshots with a retention period on your storages.</li>
+      <li>An import path from git-annex repositories, disk by disk, is built after 0.0.1-alpha.13, not in a release yet. git-annex is the more mature tool and free software; see below.</li>
+    </ul>
+
     <h2>How git-annex works</h2>
     <p>Each repository can live on any machine or disk, and "special remotes" reach S3 and compatible stores, rclone, rsync, plain or removable directories, WebDAV and more. A git branch records which repository holds each file ("git annex whereis"), and numcopies refuses to drop content unless enough verified copies exist elsewhere. Encryption is optional per special remote, using GnuPG; file names in the git repository itself stay visible unless gcrypt is used. It is mainly a command-line tool; there is a simpler assistant, Android works through Termux, and there is no iOS app.</p>
 
@@ -22,7 +30,7 @@ description: Looking for a git-annex alternative with end-to-end encryption on y
       <tr><th scope="row">Knows where every copy is</th><td>Yes: location tracking and numcopies, the inspiration for Varsto's ledger and policies.</td><td>Yes: a signed ledger records which storage and device holds every block; durability policies (by default 1 copy anywhere, 1 external, 1 on your own devices or disks, checked by another device within 30 days) warn when a rule is not met.</td></tr>
       <tr><th scope="row">Removable and offline disks</th><td>Yes: first-class, a disk's contents stay known while it is unplugged.</td><td>Yes: disk pools are filled, checked and recognised when they come back; files on a disk that is away ask for that disk.</td></tr>
       <tr><th scope="row">Backups</th><td>Keeps the number of copies you ask for (numcopies) on remotes, and old versions stay in git history until dropped; no scheduled snapshots or retention period.</td><td>Yes: pick a folder on any device and Varsto keeps encrypted, read-only snapshots of it on your external storages only, never on your devices, for the number of days you choose (90 by default), then deletes the expired ones. Restore any snapshot into a directory you name, from the app or the command line.</td></tr>
-      <tr><th scope="row">Moving from git-annex</th><td>Not applicable.</td><td>Being added after alpha.13, not in a release yet: <code>varsto import git-annex</code> brings a repository into one folder disk by disk, reading each clone with git only (git-annex is never run and nothing on the disks is changed), checking every file against its key's hash, and naming the disk to insert next from the location logs.</td></tr>
+      <tr><th scope="row">Moving from git-annex</th><td>Not applicable.</td><td>Built after 0.0.1-alpha.13, not in a release yet: <code>varsto import git-annex</code> brings a repository into one folder disk by disk, reading each clone with git only (git-annex is never run and nothing on the disks is changed), checking every file against its key's hash, and naming the disk to insert next from the location logs.</td></tr>
       <tr><th scope="row">Licence and price</th><td>Free software (AGPL-3+), free.</td><td>Source-available (PolyForm Shield 1.0.0), free; you pay only your storage provider.</td></tr>
       <tr><th scope="row">Maturity</th><td>Mature, actively released for more than a decade.</td><td>Alpha: not for production data, formats may still change.</td></tr>
       </tbody>
@@ -33,7 +41,7 @@ description: Looking for a git-annex alternative with end-to-end encryption on y
       <div class="card"><h3>git-annex</h3><p>Choose git-annex when you are comfortable with git and the command line, want maximum control and transparency, and value a mature free-software tool over a ready-made app.</p></div>
       <div class="card"><h3>Varsto</h3><p>Varsto aims to give the same guarantees (every copy accounted for, rules for how many copies must exist, removable disks that come and go) to people who do not use git: continuous background sync, a desktop and phone interface, encryption that always covers names and contents, peer-to-peer transfer and sharing with other people.</p></div>
     </div>
-    <p class="note">Varsto is alpha software: do not trust it with data you have no other copy of, and its cryptography has not been independently audited. The other products here are mature. Facts about them were checked from their own documentation in October 2026; prices and plans change often, so see their own pages for current figures. Corrections are welcome on the <a href="{{P}}forum/">forum</a> or on GitHub.</p>
+    <p class="note">Varsto is alpha software: do not trust it with data you have no other copy of, and its cryptography has not been independently audited. The other products here are mature. Facts about them were checked from their own documentation in October 2026; prices and plans change often, so see their own pages for current figures. Corrections are welcome as <a href="https://github.com/janttsu/varsto/issues" rel="noopener">GitHub issues</a>.</p>
 
     <h2>Sources</h2>
     <ul>
@@ -41,5 +49,4 @@ description: Looking for a git-annex alternative with end-to-end encryption on y
       <li><a href="https://git-annex.branchable.com/special_remotes/">Special remotes</a></li>
       <li><a href="https://git-annex.branchable.com/encryption/">Encryption</a></li>
       <li><a href="https://git-annex.branchable.com/git-annex-numcopies/">numcopies</a></li>
-      <li><a href="https://git-annex.branchable.com/git-annex-numcopies/">git-annex numcopies</a></li>
     </ul>
