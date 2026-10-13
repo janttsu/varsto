@@ -84,6 +84,7 @@ height).
 | `varsto.ico` | 16/32/48/256 for Windows |
 | `Varsto.icns` | macOS app icon: the tile at 80.5 % of the canvas with a soft shadow, Apple's layout, all eleven slots |
 | `render.py` | generates all of the above, the website copies and the Android icons |
+| `3d/` | 3D-printable fan items (keychain, coaster, magnet, standee, badges) generated from the same geometry; see `3d/README.md` |
 
 Android: `apps/android/.../mipmap-anydpi-v26/ic_launcher.xml` is an adaptive
 icon with a flat Signal-blue background, the glyph as foreground at 52 dp
