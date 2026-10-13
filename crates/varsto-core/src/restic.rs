@@ -34,8 +34,9 @@ pub const SNAPSHOT_FILE: &str = "VARSTO-SNAPSHOT.txt";
 pub const TAG: &str = "varsto";
 /// Patterns restic leaves out: Varsto's temporary files and directories
 /// (`.varsto-tmp-*`, `.varsto-upload-*`, `.varsto-scrub-*`, ...) and
-/// placeholders, which a complete mirror has none of anyway.
-pub const EXCLUDES: &[&str] = &[".varsto*", "*.varsto-placeholder"];
+/// placeholders, which a complete mirror has none of anyway. The synced
+/// `.varstoignore` files are kept.
+pub const EXCLUDES: &[&str] = &[".varsto-*", "*.varsto-placeholder"];
 /// How long a hold lasts unless renewed (the run renews it every minute).
 pub const HOLD_LEASE_SECS: i64 = 300;
 pub const HOLD_RENEW_SECS: u64 = 60;
@@ -1013,7 +1014,7 @@ mod tests {
         assert!(s.contains("--tag varsto --tag vault:ab12cd34"), "{s}");
         assert!(s.contains("--host nas box"));
         assert!(s.contains("--exclude-caches"));
-        assert!(s.contains("--exclude .varsto*"));
+        assert!(s.contains("--exclude .varsto-*"));
         assert!(s.contains("--exclude *.varsto-placeholder"));
         assert!(s.ends_with("--json"));
         assert!(!s.contains("--dry-run"));

@@ -16,7 +16,9 @@
 use crate::activity;
 use crate::chunking::{Chunker, ChunkerParams};
 use crate::crypto::{self, KeyedHasher, SecretKey};
+use crate::fsmeta;
 use crate::ids::{ChunkId, DeviceId, FolderId, ObjectName, VaultId};
+use crate::ignore_rules::{self, Matcher as IgnoreMatcher};
 use crate::ledger::{
     self, Event, Ingest, KeyDirectory, LedgerStore, LedgerView, SignedBatch, KEY_LEDGER,
     KEY_REPLICA,
@@ -53,6 +55,7 @@ mod disk_suggest;
 mod drain;
 mod fetch;
 mod folder_safety;
+mod folder_rules;
 mod guide;
 mod imports;
 mod ledger_recovery;
@@ -91,6 +94,7 @@ pub use folder_safety::{
     paused_error, ChangeKind, DiscardReport, FolderChanges, FolderPaused, HeldDeletions,
     HeldSummary, PauseKind, RevertReport, FOLDER_MARKER,
 };
+pub use folder_rules::IgnoreInfo;
 pub use imports::{
     CleanupFile, ImportCleanupReport, ImportOptions, ImportReport, ImportStatus, ImportVerify,
     MissingFile,
@@ -132,6 +136,10 @@ struct LocalIndexEntry {
     size: u64,
     mtime: i64,
     content_hash: String,
+    /// The metadata this device last saw on disk (`fsmeta::observe`): a
+    /// property is published only when what is seen changes from this.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    meta_seen: Option<crate::fsmeta::FileMeta>,
 }
 
 /// Per-folder state on this device: `home/state/<folder>.json`.
@@ -190,6 +198,11 @@ struct FolderState {
     /// Receive-only: this device's changes that are not published, by path.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     local_changes: BTreeMap<String, folder_safety::ChangeKind>,
+    /// Remote versions not written here because this device's ignore rules
+    /// cover the path, or symbolic links while links are off here: reported
+    /// once each, and applied once the rule or setting no longer stops them.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    ignored_remote: BTreeMap<String, FileState>,
 }
 
 fn now_secs() -> i64 {
@@ -243,6 +256,13 @@ pub struct PushReport {
     /// other storage wait on this device for the next push.
     #[serde(default)]
     pub storages_full: Vec<String>,
+    /// Entries the folder's ignore rules left out of the scan (directories
+    /// count once).
+    #[serde(default)]
+    pub files_ignored: u64,
+    /// Of the changed files, those whose metadata alone changed (no blocks).
+    #[serde(default)]
+    pub metadata_changed: u64,
 }
 
 #[derive(Clone, Debug, Serialize, Default)]
@@ -271,6 +291,20 @@ pub struct PullReport {
     /// synced; this says why and what to do.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub paused: Option<FolderPaused>,
+    /// Incoming changes not written because this device's ignore rules
+    /// cover the path (each version reported once).
+    #[serde(default)]
+    pub files_ignored: Vec<String>,
+    /// Symbolic links this system would not create: a note
+    /// (`<path>.varsto-link`) stands in their place.
+    #[serde(default)]
+    pub links_as_notes: Vec<String>,
+    /// Incoming links not created because symbolic links are off here.
+    #[serde(default)]
+    pub links_skipped: Vec<String>,
+    /// Metadata that could not be applied: "path: problem".
+    #[serde(default)]
+    pub metadata_problems: Vec<String>,
 }
 
 /// Blocks of a folder by where they are: on a storage (verified by another
@@ -463,7 +497,7 @@ pub struct DiskCheckReport {
     pub group_short: u64,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Default)]
 pub struct FileEntry {
     pub path: String,
     pub size: u64,
@@ -500,6 +534,48 @@ pub struct FileEntry {
     /// The device the analysis was written on.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub analysis_author: Option<String>,
+    /// Permission bits as published (`fsmeta`), and as `rwxr-xr-x`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mode: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mode_text: Option<String>,
+    /// The entry is a symbolic link to this target.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub symlink: Option<String>,
+    /// The link's target is absolute (it may point elsewhere on each device).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub symlink_absolute: bool,
+    /// "user:group" (names, or ids where a name is not known).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub owner: Option<String>,
+    /// Names of the extended attributes.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub xattrs: Vec<String>,
+}
+
+impl FileEntry {
+    /// Fill the metadata fields from a file's state.
+    fn with_meta(mut self, f: &FileState) -> FileEntry {
+        if let Some(m) = &f.meta {
+            self.mode = m.mode;
+            self.mode_text = m.mode_text();
+            self.symlink = m.symlink.clone();
+            self.symlink_absolute = m.symlink.as_deref().is_some_and(fsmeta::target_is_absolute);
+            self.owner = m.owner.as_ref().map(|o| {
+                format!(
+                    "{}:{}",
+                    o.user.clone().unwrap_or_else(|| o.uid.to_string()),
+                    o.group.clone().unwrap_or_else(|| o.gid.to_string())
+                )
+            });
+            self.xattrs = m
+                .xattrs
+                .as_ref()
+                .map(|x| x.keys().cloned().collect())
+                .unwrap_or_default();
+        }
+        self
+    }
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -570,6 +646,10 @@ pub struct Engine {
     local_rules: Option<crate::names::LocalRules>,
     /// Tests: the paths of the files downloaded, in order (`record_downloads`).
     download_log: Option<std::sync::Arc<std::sync::Mutex<Vec<String>>>>,
+    /// Which file metadata this system can represent (`fsmeta::Caps`).
+    meta_caps: crate::fsmeta::Caps,
+    /// Of the last scan: entries ignored, files whose metadata alone changed.
+    scan_extra: (u64, u64),
 }
 
 /// What the peer-to-peer server serves from (see `Engine::set_snapshot_sink`).
@@ -657,6 +737,25 @@ pub(crate) struct PolicyCtx {
 
 /// Suffix of placeholder files in selective folders (plan 6.34, Resilio-style).
 pub const PLACEHOLDER_SUFFIX: &str = ".varsto-placeholder";
+
+/// Whether anything (a file, a directory, a link, even a dangling one) is at `p`.
+fn present(p: &Path) -> bool {
+    fs::symlink_metadata(p).is_ok()
+}
+
+fn mtime_ns_of(md: &fs::Metadata) -> i64 {
+    md.modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_nanos() as i64)
+        .unwrap_or(0)
+}
+
+/// Names Varsto keeps for itself inside folders (`.varsto*`), except the
+/// synced ignore file.
+fn reserved_name(name: &str) -> bool {
+    name.starts_with(".varsto") && name != ignore_rules::IGNORE_FILE
+}
 
 fn placeholder_path(disk: &Path) -> PathBuf {
     let mut s = disk.as_os_str().to_os_string();
@@ -1011,6 +1110,8 @@ impl Engine {
             manifest_policy: Default::default(),
             hold_exempt: None,
             download_log: None,
+            meta_caps: crate::fsmeta::Caps::here(),
+            scan_extra: (0, 0),
         };
         engine.config.save(home)?;
         if !engine.vault.member {
@@ -1227,6 +1328,8 @@ impl Engine {
             manifest_policy: Default::default(),
             hold_exempt: None,
             download_log: None,
+            meta_caps: crate::fsmeta::Caps::here(),
+            scan_extra: (0, 0),
         };
         let (pending, pending_lost) = ledger_upkeep::load_deferred(home);
         engine.pending = pending;
@@ -1872,6 +1975,8 @@ impl Engine {
             encrypted: false,
             mode: Default::default(),
             deletion_guard: None,
+            ignore_local: Vec::new(),
+            meta: Default::default(),
         });
         self.config.save(&self.home)?;
         self.pending.push(Event::FolderAdded { folder: id.clone() });
@@ -1925,6 +2030,8 @@ impl Engine {
             encrypted: false,
             mode: Default::default(),
             deletion_guard: None,
+            ignore_local: Vec::new(),
+            meta: Default::default(),
         });
         self.config.save(&self.home)?;
         folder_safety::write_marker(path, &rec)?;
@@ -2768,8 +2875,13 @@ impl Engine {
             .collect();
         let mut seen = BTreeSet::new();
         let mut placeholders: BTreeSet<String> = BTreeSet::new();
+        // Entries left as they are in the vault: links while links are off
+        // here (or whose target is not text), and notes standing for links.
+        let mut kept: BTreeSet<String> = BTreeSet::new();
         let mut scanned = 0u64;
         let mut changed = 0u64;
+        let mut ignored = 0u64;
+        let mut meta_changed = 0u64;
         let mut new_index = BTreeMap::new();
         let rules = self.local_rules(root);
         // A backup takes what it can read; the rest is named in its snapshot.
@@ -2785,13 +2897,22 @@ impl Engine {
                 state.local_index.remove(p);
             }
         }
-        let walker = walkdir::WalkDir::new(root)
+        let (local_rules, settings) = self
+            .config
+            .folders
+            .iter()
+            .find(|m| m.folder_id == rec.folder_id)
+            .map(|m| (m.ignore_local.clone(), m.meta))
+            .unwrap_or_default();
+        let caps = self.meta_caps;
+        // Ignore rules (`ignore_rules`); a backup has its own selection.
+        let mut ignore = (!backup).then(|| IgnoreMatcher::new(Some(root), &local_rules));
+        let mut names = fsmeta::Names::default();
+        let mut walker = walkdir::WalkDir::new(root)
             .follow_links(false)
             .into_iter()
-            .filter_entry(|e| {
-                !(e.depth() > 0 && e.file_name().to_string_lossy().starts_with(".varsto"))
-            });
-        for entry in walker {
+            .filter_entry(|e| e.depth() == 0 || !reserved_name(&e.file_name().to_string_lossy()));
+        while let Some(entry) = walker.next() {
             let entry = match entry {
                 Ok(e) => e,
                 Err(e) if backup => {
@@ -2807,7 +2928,11 @@ impl Engine {
                 }
                 Err(e) => return Err(e.into()),
             };
-            if !entry.file_type().is_file() {
+            if entry.depth() == 0 {
+                continue;
+            }
+            let ft = entry.file_type();
+            if !(ft.is_file() || ft.is_dir() || ft.is_symlink()) {
                 continue;
             }
             let rel = entry.path().strip_prefix(root)?;
@@ -2815,19 +2940,117 @@ impl Engine {
                 continue;
             };
             // Local names map back to vault paths (`crate::names`).
+            let path = state.local_names.vault_of(rules, &local);
+            if let Some(m) = ignore.as_mut() {
+                if m.walk_ignored(&path, ft.is_dir()) {
+                    ignored += 1;
+                    if ft.is_dir() {
+                        walker.skip_current_dir();
+                    }
+                    continue;
+                }
+            }
+            if ft.is_dir() {
+                continue;
+            }
             if let Some(real) = local.strip_suffix(PLACEHOLDER_SUFFIX) {
                 placeholders.insert(state.local_names.vault_of(rules, real));
                 continue;
             }
             let path = state.local_names.vault_of(rules, &local);
             let md = entry.metadata()?;
-            let size = md.len();
             let mtime = md
                 .modified()
                 .ok()
                 .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
                 .map(|d| d.as_nanos() as i64)
                 .unwrap_or(0);
+            if ft.is_symlink() {
+                // A link is recorded with its target and never followed.
+                let target = if settings.symlinks && caps.symlinks {
+                    fsmeta::read_link(entry.path())
+                } else {
+                    None
+                };
+                let Some(target) = target else {
+                    kept.insert(path);
+                    continue;
+                };
+                scanned += 1;
+                activity::advance_current(1);
+                seen.insert(path.clone());
+                let obs = fsmeta::observe(entry.path(), &md, &caps, &settings, &mut names);
+                let prev = state.files.get(&path).filter(|f| !f.deleted);
+                let seen_meta = state
+                    .local_index
+                    .get(&path)
+                    .and_then(|e| e.meta_seen.as_ref());
+                let mut meta =
+                    fsmeta::combine(&obs, seen_meta, prev.and_then(|p| p.meta.as_ref()), &caps)
+                        .unwrap_or_default();
+                meta.v = fsmeta::META_VERSION;
+                meta.mode = None;
+                meta.xattrs = None;
+                meta.symlink = Some(target.clone());
+                let content_hash = fsmeta::link_hash(&fk.hash, &target);
+                let same = prev.is_some_and(|p| {
+                    p.content_hash == content_hash && p.meta.as_ref() == Some(&meta)
+                });
+                if !same && receive_only {
+                    // Noted, not published (`folder_safety`).
+                    let kind = if prev.is_some() {
+                        folder_safety::ChangeKind::Modified
+                    } else {
+                        folder_safety::ChangeKind::Added
+                    };
+                    state.local_changes.insert(path.clone(), kind);
+                } else if !same {
+                    let clock = self.tick()?;
+                    let mut version = state
+                        .files
+                        .get(&path)
+                        .map(|p| p.version.clone())
+                        .unwrap_or_default();
+                    version.insert(me.clone(), clock);
+                    state.files.insert(
+                        path.clone(),
+                        FileState {
+                            path: path.clone(),
+                            version,
+                            deleted: false,
+                            size: 0,
+                            mtime,
+                            content_hash: content_hash.clone(),
+                            chunks: vec![],
+                            modified_by: me.clone(),
+                            modified_clock: clock,
+                            meta: Some(meta),
+                        },
+                    );
+                    changed += 1;
+                }
+                new_index.insert(
+                    path,
+                    LocalIndexEntry {
+                        size: 0,
+                        mtime,
+                        content_hash,
+                        meta_seen: Some(obs),
+                    },
+                );
+                continue;
+            }
+            if let Some(real) = path.strip_suffix(PLACEHOLDER_SUFFIX) {
+                placeholders.insert(real.to_string());
+                continue;
+            }
+            if let Some(real) = path.strip_suffix(fsmeta::LINK_NOTE_SUFFIX) {
+                if state.files.get(real).is_some_and(|f| f.is_symlink()) {
+                    kept.insert(real.to_string());
+                    continue;
+                }
+            }
+            let size = md.len();
             scanned += 1;
             activity::advance_current(1);
             seen.insert(path.clone());
@@ -2844,11 +3067,24 @@ impl Engine {
             if atime > *recorded {
                 *recorded = atime;
             }
+            let obs = fsmeta::observe(entry.path(), &md, &caps, &settings, &mut names);
+            let seen_meta = state
+                .local_index
+                .get(&path)
+                .and_then(|e| e.meta_seen.clone());
             let unchanged = matches!(state.local_index.get(&path), Some(e) if e.size == size && e.mtime == mtime)
-                && (matches!(state.files.get(&path), Some(f) if !f.deleted)
+                && (matches!(state.files.get(&path), Some(f) if !f.deleted && !f.is_symlink())
                     || (receive_only && state.local_changes.contains_key(&path)));
             if unchanged {
-                new_index.insert(path.clone(), state.local_index[&path].clone());
+                let mut ix = state.local_index[&path].clone();
+                ix.meta_seen = Some(obs.clone());
+                new_index.insert(path.clone(), ix);
+                if !receive_only
+                    && self.metadata_only_change(state, &path, &obs, seen_meta.as_ref(), &caps)?
+                {
+                    changed += 1;
+                    meta_changed += 1;
+                }
                 continue;
             }
             // Changed or new: chunk, hash, (upload).
@@ -2912,7 +3148,7 @@ impl Engine {
             let content_hash = hex::encode(hasher.finalize());
             let previous = state.files.get(&path);
             if let Some(prev) = previous {
-                if !prev.deleted && prev.content_hash == content_hash {
+                if !prev.deleted && !prev.is_symlink() && prev.content_hash == content_hash {
                     // Touched but identical: keep the version, refresh the index.
                     state.local_changes.remove(&path);
                     new_index.insert(
@@ -2921,8 +3157,15 @@ impl Engine {
                             size,
                             mtime,
                             content_hash,
+                            meta_seen: Some(obs.clone()),
                         },
                     );
+                    if !receive_only
+                    && self.metadata_only_change(state, &path, &obs, seen_meta.as_ref(), &caps)?
+                {
+                        changed += 1;
+                        meta_changed += 1;
+                    }
                     continue;
                 }
             }
@@ -2941,10 +3184,19 @@ impl Engine {
                         size,
                         mtime,
                         content_hash,
+                        meta_seen: Some(obs),
                     },
                 );
                 continue;
             }
+            let meta = fsmeta::combine(
+                &obs,
+                seen_meta.as_ref(),
+                previous
+                    .filter(|p| !p.deleted)
+                    .and_then(|p| p.meta.as_ref()),
+                &caps,
+            );
             let clock = self.tick()?;
             let mut version = previous.map(|p| p.version.clone()).unwrap_or_default();
             version.insert(me.clone(), clock);
@@ -2960,6 +3212,7 @@ impl Engine {
                     chunks,
                     modified_by: me.clone(),
                     modified_clock: clock,
+                    meta,
                 },
             );
             new_index.insert(
@@ -2968,17 +3221,29 @@ impl Engine {
                     size,
                     mtime,
                     content_hash,
+                    meta_seen: Some(obs),
                 },
             );
             changed += 1;
         }
-        // Deletions.
+        // Deletions. Paths the ignore rules cover are left as the vault has
+        // them: an ignored file that disappears here is not deleted elsewhere.
         let gone: Vec<String> = state
             .files
             .iter()
-            .filter(|(p, f)| !f.deleted && !seen.contains(*p) && !placeholders.contains(*p))
+            .filter(|(p, f)| {
+                !f.deleted && !seen.contains(*p) && !placeholders.contains(*p) && !kept.contains(*p)
+            })
             .map(|(p, _)| p.clone())
+            .filter(|p| !ignore.as_mut().is_some_and(|m| m.is_ignored(p, false)))
             .collect();
+        self.scan_extra = (ignored, meta_changed);
+        // Index entries of ignored files go; those of kept links stay.
+        for p in &kept {
+            if let Some(e) = state.local_index.get(p) {
+                new_index.insert(p.clone(), e.clone());
+            }
+        }
         if receive_only {
             for path in gone {
                 state
@@ -3017,6 +3282,7 @@ impl Engine {
                     chunks: vec![],
                     modified_by: me.clone(),
                     modified_clock: clock,
+                    meta: None,
                 },
             );
             trashed.push((prev, clock));
@@ -3026,6 +3292,34 @@ impl Engine {
         // The deleted versions go to the trash (`trash`).
         self.trash_record_deletions(rec, state, trashed)?;
         Ok((scanned, changed))
+    }
+
+    /// A file whose content did not change: publish a new version when its
+    /// metadata did (the chunks stay; nothing is uploaded). True if it did.
+    fn metadata_only_change(
+        &mut self,
+        state: &mut FolderState,
+        path: &str,
+        obs: &fsmeta::FileMeta,
+        seen: Option<&fsmeta::FileMeta>,
+        caps: &fsmeta::Caps,
+    ) -> Result<bool> {
+        let Some(prev) = state.files.get(path).filter(|f| !f.deleted) else {
+            return Ok(false);
+        };
+        let meta = fsmeta::combine(obs, seen, prev.meta.as_ref(), caps);
+        if meta == prev.meta {
+            return Ok(false);
+        }
+        let me = self.vault.device_id.clone();
+        let clock = self.tick()?;
+        let mut next = prev.clone();
+        next.version.insert(me.clone(), clock);
+        next.modified_by = me;
+        next.modified_clock = clock;
+        next.meta = meta;
+        state.files.insert(path.to_string(), next);
+        Ok(true)
     }
 
     // ----- push ---------------------------------------------------------------
@@ -3050,6 +3344,7 @@ impl Engine {
         let (scanned, changed) = self.scan(&rec, &root, &mut state)?;
         report.files_scanned = scanned;
         report.files_changed = changed;
+        (report.files_ignored, report.metadata_changed) = self.scan_extra;
         // Unpublished changes (this scan's, or ones a pull's scan recorded
         // before it): publish them first.
         // Only with peers: without them nobody can fetch from this device
@@ -3424,6 +3719,7 @@ impl Engine {
             .values()
             .filter(|f| {
                 !f.deleted
+                    && !f.is_symlink()
                     && (thumbs::is_image(&f.path) || thumbs::is_video(&f.path))
                     && !state.thumbs_done.contains(&f.content_hash)
             })
@@ -3698,12 +3994,19 @@ impl Engine {
 
         // Files whose copies were unreachable last time: a storage or a peer
         // may have them now. Newest first, like every download.
+        // This device's ignore rules: incoming changes to paths they cover
+        // are not written here (`ignore_rules`).
+        let mut ignore = (!self.mount_is_encrypted(&rec.folder_id))
+            .then(|| IgnoreMatcher::new(Some(&root), &self.ignore_local(&rec.folder_id)));
         let mut pending: Vec<FileState> = state.pending_remote.values().cloned().collect();
         pending.sort_by(|a, b| b.mtime.cmp(&a.mtime).then(a.path.cmp(&b.path)));
         for remote in pending {
             if send_only {
                 state.pending_remote.remove(&remote.path);
                 state.not_applied.insert(remote.path.clone(), remote);
+                continue;
+            }
+            if Self::skip_ignored(&mut ignore, &mut state, &remote, &mut report) {
                 continue;
             }
             self.apply_remote(&rec, &fk, &root, &mut state, remote, &storages, &mut report)?;
@@ -3721,6 +4024,9 @@ impl Engine {
                 .collect();
             waiting.sort_by(|a, b| b.mtime.cmp(&a.mtime).then(a.path.cmp(&b.path)));
             for remote in waiting {
+                if Self::skip_ignored(&mut ignore, &mut state, &remote, &mut report) {
+                    continue;
+                }
                 let path = remote.path.clone();
                 self.merge_one(
                     &rec,
@@ -3732,6 +4038,33 @@ impl Engine {
                     &storages,
                     &mut report,
                 )?;
+            }
+        }
+        // Versions held back by a rule or setting that no longer applies.
+        let links_on = self.meta_settings(&rec.folder_id).symlinks && self.meta_caps.symlinks;
+        let released: Vec<FileState> = state
+            .ignored_remote
+            .values()
+            // Send-only: nothing is applied here (`folder_safety`).
+            .filter(|_| !send_only)
+            .filter(|f| links_on || !f.is_symlink())
+            .filter(|f| {
+                !ignore
+                    .as_mut()
+                    .is_some_and(|m| m.is_ignored(&f.path, false))
+            })
+            .cloned()
+            .collect();
+        for remote in released {
+            state.ignored_remote.remove(&remote.path);
+            // Only a version newer than this device's is applied; a local
+            // file made meanwhile stays and the other devices resolve the
+            // conflict when they see it.
+            if matches!(
+                manifest::merge(state.files.get(&remote.path), &remote),
+                Merge::TakeRemote
+            ) {
+                self.apply_remote(&rec, &fk, &root, &mut state, remote, &storages, &mut report)?;
             }
         }
 
@@ -3816,6 +4149,9 @@ impl Engine {
                 if fetch_ahead && i >= ahead_from {
                     ahead_from = self.prefetch_small(&entries, i, &state, &storages);
                 }
+                if Self::skip_ignored(&mut ignore, &mut state, remote, &mut report) {
+                    continue;
+                }
                 self.merge_one(
                     &rec,
                     &fk,
@@ -3880,8 +4216,10 @@ impl Engine {
                         fs::create_dir_all(parent)?;
                     }
                     let local = self.disk_of(root, state, path);
-                    if local_is_loser && local.exists() {
+                    if local_is_loser && present(&local) {
                         fs::rename(&local, &disk)?;
+                    } else if let Some(target) = loser.symlink() {
+                        fsmeta::write_link(&disk, target)?;
                     } else {
                         self.download_to(rec, fk, &disk, &loser, storages, report)?;
                     }
@@ -3892,19 +4230,16 @@ impl Engine {
                     cstate.version = BTreeMap::from([(me.clone(), clock)]);
                     cstate.modified_by = me.clone();
                     cstate.modified_clock = clock;
-                    let md = fs::metadata(&disk)?;
-                    let mtime = md
-                        .modified()
-                        .ok()
-                        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                        .map(|d| d.as_nanos() as i64)
-                        .unwrap_or(0);
+                    let seen =
+                        self.settle_meta(&rec.folder_id, &disk, &cstate, &mut report.metadata_problems);
+                    let md = fs::symlink_metadata(&disk)?;
                     state.local_index.insert(
                         cpath.clone(),
                         LocalIndexEntry {
                             size: md.len(),
-                            mtime,
+                            mtime: mtime_ns_of(&md),
                             content_hash: cstate.content_hash.clone(),
+                            meta_seen: seen,
                         },
                     );
                     state.files.insert(cpath, cstate);
@@ -3918,9 +4253,23 @@ impl Engine {
                         || if encrypted_here {
                             state.local_index.contains_key(path)
                         } else {
-                            self.disk_of(root, state, path).exists()
+                            present(&self.disk_of(root, state, path))
                         });
                 if local_has_winner {
+                    // The content is here; the winner's metadata may differ
+                    // from this device's (a concurrent chmod).
+                    if !encrypted_here && !winner.deleted {
+                        let disk = self.disk_of(root, state, path);
+                        let seen = self.settle_meta(
+                            &rec.folder_id,
+                            &disk,
+                            &winner,
+                            &mut report.metadata_problems,
+                        );
+                        if let Some(ix) = state.local_index.get_mut(path) {
+                            ix.meta_seen = seen;
+                        }
+                    }
                     state.files.insert(path.to_string(), winner);
                 } else {
                     self.apply_remote(rec, fk, root, state, winner, storages, report)?;
@@ -4069,9 +4418,16 @@ impl Engine {
             return self.apply_remote_cached(rec, fk, state, remote, storages, report);
         }
         // Manifests are validated when opened; this is the last line of
-        // defence before a path from another device touches the disk.
+        // defence before a path from another device touches the disk: no
+        // directory above the entry may be a link (the entry itself may be
+        // one: it is replaced or removed, never followed).
         util::check_rel_path(&remote.path)?;
         let rules = self.local_rules(root);
+        self.check_no_link_above(root, state, &remote.path)?;
+        let was_link = state
+            .files
+            .get(&remote.path)
+            .is_some_and(|f| f.is_symlink());
         // Receive-only: a local change of this file goes to the trash
         // before the vault's version replaces it.
         self.drop_local_change(rec, root, state, &remote.path)?;
@@ -4082,7 +4438,10 @@ impl Engine {
                 .into_owned();
             let disk = util::safe_join(root, &local)?;
             let _ = fs::remove_file(placeholder_path(&disk));
-            if disk.exists() {
+            if was_link {
+                let _ = fs::remove_file(fsmeta::note_path(&disk));
+            }
+            if present(&disk) {
                 self.move_to_trash(&rec.folder_id, &disk, &remote.path)?;
                 report.files_deleted += 1;
             }
@@ -4093,8 +4452,57 @@ impl Engine {
             return Ok(());
         }
         let disk = self.place(root, state, &remote.path, Some(&mut report.renamed_locally))?;
+        let settings = self.meta_settings(&rec.folder_id);
+        if let Some(target) = remote.symlink() {
+            if !(settings.symlinks && self.meta_caps.symlinks) {
+                // Links are off here: the vault keeps it, this disk does not.
+                if Self::hold_back(state, &remote) {
+                    report.links_skipped.push(remote.path.clone());
+                }
+                state.pending_remote.remove(&remote.path);
+                return Ok(());
+            }
+            let _ = fs::remove_file(placeholder_path(&disk));
+            match fsmeta::write_link(&disk, target) {
+                Ok(fsmeta::LinkOutcome::Link) => {
+                    let seen = self.settle_meta(
+                        &rec.folder_id,
+                        &disk,
+                        &remote,
+                        &mut report.metadata_problems,
+                    );
+                    let md = fs::symlink_metadata(&disk)?;
+                    state.local_index.insert(
+                        remote.path.clone(),
+                        LocalIndexEntry {
+                            size: 0,
+                            mtime: mtime_ns_of(&md),
+                            content_hash: remote.content_hash.clone(),
+                            meta_seen: seen,
+                        },
+                    );
+                }
+                Ok(fsmeta::LinkOutcome::Note) => {
+                    report.links_as_notes.push(remote.path.clone());
+                    state.local_index.remove(&remote.path);
+                }
+                Err(e) => {
+                    report
+                        .files_unavailable
+                        .push(format!("{}: {e}", remote.path));
+                    return Ok(());
+                }
+            }
+            state.pending_remote.remove(&remote.path);
+            state.files.insert(remote.path.clone(), remote);
+            report.files_updated += 1;
+            return Ok(());
+        }
+        if was_link {
+            let _ = fs::remove_file(fsmeta::note_path(&disk));
+        }
         let selective = self.mount_is_selective(&rec.folder_id);
-        if selective && !state.pinned.contains(&remote.path) && !disk.exists() {
+        if selective && !state.pinned.contains(&remote.path) && !present(&disk) {
             // Selective sync: show the file as a placeholder; fetch on demand.
             Self::write_placeholder(&disk, &remote)?;
             state.local_index.remove(&remote.path);
@@ -4103,21 +4511,38 @@ impl Engine {
             report.files_updated += 1;
             return Ok(());
         }
-        match self.download_to(rec, fk, &disk, &remote, storages, report) {
+        // The content here is the remote content (only the metadata
+        // changed): nothing to download.
+        let same_content_here = state.local_index.get(&remote.path).is_some_and(|ix| {
+            ix.content_hash == remote.content_hash
+                && fs::symlink_metadata(&disk).is_ok_and(|md| {
+                    md.file_type().is_file() && md.len() == ix.size && mtime_ns_of(&md) == ix.mtime
+                })
+        }) && state
+            .files
+            .get(&remote.path)
+            .is_some_and(|f| !f.deleted && !f.is_symlink());
+        let fetched = if same_content_here {
+            Ok(())
+        } else {
+            self.download_to(rec, fk, &disk, &remote, storages, report)
+        };
+        match fetched {
             Ok(()) => {
+                let seen = self.settle_meta(
+                    &rec.folder_id,
+                    &disk,
+                    &remote,
+                    &mut report.metadata_problems,
+                );
                 let md = fs::metadata(&disk)?;
-                let mtime = md
-                    .modified()
-                    .ok()
-                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                    .map(|d| d.as_nanos() as i64)
-                    .unwrap_or(0);
                 state.local_index.insert(
                     remote.path.clone(),
                     LocalIndexEntry {
                         size: md.len(),
-                        mtime,
+                        mtime: mtime_ns_of(&md),
                         content_hash: remote.content_hash.clone(),
+                        meta_seen: seen,
                     },
                 );
                 state.pending_remote.remove(&remote.path);
@@ -4138,6 +4563,70 @@ impl Engine {
             }
         }
         Ok(())
+    }
+
+    /// Write what this device can of `file`'s metadata onto `disk` and
+    /// return what the disk shows afterwards (the index's `meta_seen`).
+    fn settle_meta(
+        &self,
+        folder: &FolderId,
+        disk: &Path,
+        file: &FileState,
+        problems: &mut Vec<String>,
+    ) -> Option<fsmeta::FileMeta> {
+        let settings = self.meta_settings(folder);
+        if let Some(m) = &file.meta {
+            for p in fsmeta::apply(disk, m, &self.meta_caps, &settings) {
+                problems.push(format!("{}: {p}", file.path));
+            }
+        }
+        let md = fs::symlink_metadata(disk).ok()?;
+        Some(fsmeta::observe(
+            disk,
+            &md,
+            &self.meta_caps,
+            &settings,
+            &mut fsmeta::Names::default(),
+        ))
+    }
+
+    /// An incoming version of a path this device's ignore rules cover: not
+    /// written here, reported once per version. True when skipped.
+    fn skip_ignored(
+        ignore: &mut Option<IgnoreMatcher>,
+        state: &mut FolderState,
+        remote: &FileState,
+        report: &mut PullReport,
+    ) -> bool {
+        let Some(m) = ignore.as_mut() else {
+            return false;
+        };
+        if !m.is_ignored(&remote.path, false) {
+            return false;
+        }
+        if Self::hold_back(state, remote) {
+            report.files_ignored.push(remote.path.clone());
+        }
+        state.pending_remote.remove(&remote.path);
+        true
+    }
+
+    /// Keep a remote version that is not written here for later; true when
+    /// it is newer than the one kept (to be reported).
+    fn hold_back(state: &mut FolderState, remote: &FileState) -> bool {
+        let newer = match state.ignored_remote.get(&remote.path) {
+            None => true,
+            Some(kept) => !matches!(
+                manifest::compare(&kept.version, &remote.version),
+                manifest::Order::Equal | manifest::Order::LocalNewer
+            ),
+        };
+        if newer {
+            state
+                .ignored_remote
+                .insert(remote.path.clone(), remote.clone());
+        }
+        newer
     }
 
     /// Download, verify and decrypt every chunk of `file` into `disk`.
@@ -4325,6 +4814,7 @@ impl Engine {
             }
             out.sync_all()?;
         }
+        fsmeta::make_replaceable(disk);
         fs::rename(&tmp, disk)?;
         Ok(())
     }
@@ -4462,22 +4952,24 @@ impl Engine {
             ..Default::default()
         };
         let disk = self.place(&root, &mut state, path, Some(&mut report.renamed_locally))?;
-        self.download_to(&rec, &fk, &disk, &file, &storages, &mut report)?;
+        self.check_no_link_above(&root, &state, path)?;
+        match file.symlink() {
+            Some(target) => {
+                fsmeta::write_link(&disk, target)?;
+            }
+            None => self.download_to(&rec, &fk, &disk, &file, &storages, &mut report)?,
+        }
         state.accessed.insert(path.to_string(), now_secs());
         let _ = fs::remove_file(placeholder_path(&disk));
-        let md = fs::metadata(&disk)?;
-        let mtime = md
-            .modified()
-            .ok()
-            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-            .map(|d| d.as_nanos() as i64)
-            .unwrap_or(0);
+        let seen = self.settle_meta(&rec.folder_id, &disk, &file, &mut report.metadata_problems);
+        let md = fs::symlink_metadata(&disk)?;
         state.local_index.insert(
             path.to_string(),
             LocalIndexEntry {
                 size: md.len(),
-                mtime,
+                mtime: mtime_ns_of(&md),
                 content_hash: file.content_hash.clone(),
+                meta_seen: seen,
             },
         );
         state.pinned.insert(path.to_string());
@@ -4880,6 +5372,8 @@ impl Engine {
             encrypted: false,
             mode: Default::default(),
             deletion_guard: None,
+            ignore_local: Vec::new(),
+            meta: Default::default(),
         });
         self.config.save(&self.home)?;
         self.unlocked.insert(
@@ -5428,6 +5922,9 @@ impl Engine {
         if !state.files.contains_key(path) {
             bail!("unknown file {path} in {folder}");
         }
+        // Never through a link: one may point anywhere.
+        let local = state.local_names.local_rel(self.local_rules(&root), path);
+        fsmeta::check_no_link(&root, &local)?;
         let disk = self.disk_of(&root, &state, path);
         if !disk.exists() {
             self.fetch_file(folder, path)?;
@@ -5516,32 +6013,36 @@ impl Engine {
                 } else {
                     "placeholder"
                 }
-            } else if disk.exists() {
+            } else if present(&disk) || (f.is_symlink() && fsmeta::note_path(&disk).exists()) {
                 "local"
             } else if placeholder_path(&disk).exists() {
                 "placeholder"
             } else {
                 "missing"
             };
-            out.push(FileEntry {
-                path: f.path.clone(),
-                size: f.size,
-                state: state_str.to_string(),
-                pinned: state.pinned.contains(&f.path),
-                content_hash: f.content_hash.clone(),
-                selective,
-                disk: disk.clone(),
-                media: thumbs::is_image(&f.path) || thumbs::is_video(&f.path),
-                modified_utc: f.mtime / 1_000_000_000,
-                last_accessed_utc: accessed.get(&f.path).copied(),
-                analysis: None,
-                analysis_truncated: false,
-                analysis_tags: Vec::new(),
-                analysis_utc: None,
-                analysis_stale: false,
-                analysis_by: None,
-                analysis_author: None,
-            });
+            out.push(
+                FileEntry {
+                    path: f.path.clone(),
+                    size: f.size,
+                    state: state_str.to_string(),
+                    pinned: state.pinned.contains(&f.path),
+                    content_hash: f.content_hash.clone(),
+                    selective,
+                    disk: disk.clone(),
+                    media: thumbs::is_image(&f.path) || thumbs::is_video(&f.path),
+                    modified_utc: f.mtime / 1_000_000_000,
+                    last_accessed_utc: accessed.get(&f.path).copied(),
+                    analysis: None,
+                    analysis_truncated: false,
+                    analysis_tags: Vec::new(),
+                    analysis_utc: None,
+                    analysis_stale: false,
+                    analysis_by: None,
+                    analysis_author: None,
+                    ..Default::default()
+                }
+                .with_meta(f),
+            );
             if let (Some(a), Some(e)) = (analyses.get(&f.path), out.last_mut()) {
                 let shown: String = a.analysis.chars().take(LISTING_CHARS).collect();
                 e.analysis_truncated = shown.len() < a.analysis.len();

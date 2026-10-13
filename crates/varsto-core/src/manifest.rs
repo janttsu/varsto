@@ -5,6 +5,7 @@
 //! deterministic winner and a conflict copy, never silent data loss (F-003).
 
 use crate::crypto::{self, SecretKey};
+use crate::fsmeta::FileMeta;
 use crate::ids::{ChunkId, DeviceId, FolderId, ObjectName, VaultId};
 use anyhow::{bail, Result};
 use serde::{Deserialize, Serialize};
@@ -46,6 +47,29 @@ pub struct FileState {
     pub chunks: Vec<ChunkRef>,
     pub modified_by: DeviceId,
     pub modified_clock: u64,
+    /// Permissions, symbolic link target, extended attributes and ownership
+    /// (`fsmeta`, spec section "File metadata"). Absent: nothing known. A
+    /// change here alone is a new version that reuses the chunks.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub meta: Option<FileMeta>,
+}
+
+impl FileState {
+    /// The target when the entry is a symbolic link.
+    pub fn symlink(&self) -> Option<&str> {
+        self.meta.as_ref().and_then(|m| m.symlink.as_deref())
+    }
+
+    pub fn is_symlink(&self) -> bool {
+        self.symlink().is_some()
+    }
+
+    /// Same content and metadata (what a merge treats as "the same file").
+    pub fn same_as(&self, other: &FileState) -> bool {
+        self.deleted == other.deleted
+            && self.content_hash == other.content_hash
+            && self.meta == other.meta
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -131,6 +155,13 @@ pub fn validate_files(files: &BTreeMap<String, FileState>) -> Result<()> {
         if f.deleted {
             continue;
         }
+        if let Some(m) = &f.meta {
+            m.validate()
+                .map_err(|e| anyhow::anyhow!("manifest entry {key:?}: {e}"))?;
+            if m.symlink.is_some() && (f.size != 0 || !f.chunks.is_empty()) {
+                bail!("manifest entry {key:?} is a link with content");
+            }
+        }
         let mut total: u64 = 0;
         for c in &f.chunks {
             if c.size == 0 || c.size > MAX_CHUNK_SIZE {
@@ -205,7 +236,16 @@ pub fn merge(local: Option<&FileState>, remote: &FileState) -> Merge {
             let same_content =
                 local.deleted == remote.deleted && local.content_hash == remote.content_hash;
             if same_content {
-                let mut w = local.clone();
+                // Only the metadata may differ: the later change wins
+                // (deterministically), and no conflict copy is needed.
+                let local_wins = local.meta == remote.meta
+                    || (local.modified_clock, &local.modified_by)
+                        > (remote.modified_clock, &remote.modified_by);
+                let mut w = if local_wins {
+                    local.clone()
+                } else {
+                    remote.clone()
+                };
                 w.version = merged_version;
                 return Merge::Conflict {
                     winner: w,
@@ -282,6 +322,7 @@ mod tests {
                 .collect(),
             modified_by: DeviceId::from_bytes(&[3; 16]),
             modified_clock: 1,
+            meta: None,
         }
     }
 
@@ -345,6 +386,7 @@ mod tests {
             chunks: vec![],
             modified_by: DeviceId::from_bytes(dev.as_bytes()),
             modified_clock: clock,
+            meta: None,
         }
     }
 
@@ -386,6 +428,34 @@ mod tests {
                 DeviceId::from_bytes(b"A").short()
             )
         );
+    }
+
+    #[test]
+    fn concurrent_metadata_changes_need_no_conflict_copy() {
+        let meta = |mode| {
+            Some(crate::fsmeta::FileMeta {
+                v: 1,
+                mode: Some(mode),
+                ..Default::default()
+            })
+        };
+        let mut a = st("A", 5, "h", &[("A", 5)]);
+        a.meta = meta(0o644);
+        let mut b = st("B", 7, "h", &[("B", 7)]);
+        b.meta = meta(0o755);
+        for (l, r) in [(&a, &b), (&b, &a)] {
+            let Merge::Conflict { winner, loser } = merge(Some(l), r) else {
+                panic!()
+            };
+            assert!(loser.is_none());
+            assert_eq!(
+                winner.meta,
+                meta(0o755),
+                "the later change wins on both sides"
+            );
+            assert_eq!(winner.version.len(), 2);
+        }
+        assert!(!a.same_as(&b));
     }
 
     #[test]

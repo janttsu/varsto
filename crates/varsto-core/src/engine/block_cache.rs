@@ -175,6 +175,7 @@ fn cached_entry(f: &FileState) -> LocalIndexEntry {
         size: f.size,
         mtime: f.mtime,
         content_hash: f.content_hash.clone(),
+        ..Default::default()
     }
 }
 
@@ -281,6 +282,8 @@ impl Engine {
         let changed =
             !matches!(previous, Some(p) if !p.deleted && p.content_hash == staged.content_hash);
         if changed {
+            // No plain file here: the metadata stays what the vault has.
+            let meta = crate::fsmeta::carry_for_file(previous.and_then(|p| p.meta.as_ref()));
             let clock = self.tick()?;
             let mut version = previous.map(|p| p.version.clone()).unwrap_or_default();
             version.insert(me.clone(), clock);
@@ -296,6 +299,7 @@ impl Engine {
                     chunks: staged.chunks,
                     modified_by: me,
                     modified_clock: clock,
+                    meta,
                 },
             );
         }
@@ -691,6 +695,7 @@ impl Engine {
                 chunks: vec![],
                 modified_by: me.clone(),
                 modified_clock: clock,
+                meta: None,
             },
         );
         let clock = self.tick()?;

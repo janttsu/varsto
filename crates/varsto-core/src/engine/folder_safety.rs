@@ -241,18 +241,17 @@ pub(super) fn trash_path(
     util::safe_join(&trash_root, &rules(&trash_root).default_local(&name))
 }
 
-fn index_entry(disk: &Path, content_hash: &str) -> Result<LocalIndexEntry> {
-    let md = fs::metadata(disk)?;
-    let mtime = md
-        .modified()
-        .ok()
-        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-        .map(|d| d.as_nanos() as i64)
-        .unwrap_or(0);
+fn index_entry(
+    disk: &Path,
+    content_hash: &str,
+    meta_seen: Option<crate::fsmeta::FileMeta>,
+) -> Result<LocalIndexEntry> {
+    let md = fs::symlink_metadata(disk)?;
     Ok(LocalIndexEntry {
         size: md.len(),
-        mtime,
+        mtime: mtime_ns_of(&md),
         content_hash: content_hash.to_string(),
+        meta_seen,
     })
 }
 
@@ -557,7 +556,12 @@ impl Engine {
         if let Some(p) = trash.parent() {
             fs::create_dir_all(p)?;
         }
-        fs::rename(disk, &trash).or_else(|_| {
+        let link = fs::symlink_metadata(disk).is_ok_and(|m| m.file_type().is_symlink());
+        fs::rename(disk, &trash).or_else(|e| {
+            if link {
+                // A link is never copied (that would follow it).
+                return fs::remove_file(disk).map_err(|_| e);
+            }
             fs::copy(disk, &trash)
                 .map(|_| ())
                 .and_then(|_| fs::remove_file(disk))
@@ -735,11 +739,21 @@ impl Engine {
                         report.restored += 1;
                         continue;
                     }
-                    match self.download_to(&rec, &fk, &disk, &file, &storages, &mut pull) {
+                    let written = match file.symlink() {
+                        Some(target) => crate::fsmeta::write_link(&disk, target).map(|_| ()),
+                        None => self.download_to(&rec, &fk, &disk, &file, &storages, &mut pull),
+                    };
+                    match written {
                         Ok(()) => {
+                            let seen = self.settle_meta(
+                                &rec.folder_id,
+                                &disk,
+                                &file,
+                                &mut pull.metadata_problems,
+                            );
                             state
                                 .local_index
-                                .insert(file.path.clone(), index_entry(&disk, &file.content_hash)?);
+                                .insert(file.path.clone(), index_entry(&disk, &file.content_hash, seen)?);
                             report.restored += 1;
                         }
                         Err(e) => {
@@ -828,11 +842,17 @@ impl Engine {
                 report.reverted += 1; // added here: gone again
                 continue;
             };
-            match self.download_to(&rec, &fk, &disk, &file, &storages, &mut pull) {
+            let written = match file.symlink() {
+                Some(target) => crate::fsmeta::write_link(&disk, target).map(|_| ()),
+                None => self.download_to(&rec, &fk, &disk, &file, &storages, &mut pull),
+            };
+            match written {
                 Ok(()) => {
+                    let seen =
+                        self.settle_meta(&rec.folder_id, &disk, &file, &mut pull.metadata_problems);
                     state
                         .local_index
-                        .insert(path.clone(), index_entry(&disk, &file.content_hash)?);
+                        .insert(path.clone(), index_entry(&disk, &file.content_hash, seen)?);
                     let _ = fs::remove_file(placeholder_path(&disk));
                     report.reverted += 1;
                 }
