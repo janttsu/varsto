@@ -19,6 +19,7 @@ fsevents = ["notify/macos_fsevent"]
 varsto-core = { path = "../varsto-core" }
 tempfile.workspace = true
 anyhow.workspace = true
+log = { version = "0.4", features = ["std", "kv"] }
 clap.workspace = true
 serde.workspace = true
 serde_json.workspace = true

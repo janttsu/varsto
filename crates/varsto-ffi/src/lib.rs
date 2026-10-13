@@ -6,6 +6,7 @@
 //! int   varsto_start(const char *home_dir, unsigned short port);  // 0 on success
 //! char *varsto_url(void);           // "http://127.0.0.1:PORT/?token=..." or NULL; free with varsto_free
 //! void  varsto_free(char *s);
+//! void  varsto_log(int level, const char *msg);  // 1 error … 5 trace, into the core's log
 //! ```
 //! The service code is shared with the CLI through the `service` module path
 //! included below, so the mobile apps run exactly the same server.
@@ -54,16 +55,31 @@ pub unsafe extern "C" fn varsto_start(home_dir: *const c_char, port: u16) -> i32
         let _ = std::fs::create_dir_all(&root);
         std::env::set_var("VARSTO_FOLDER_ROOT", root);
     }
+    // The core's debug log: <home>/logs/varsto-ffi-<os>.log, phone-sized.
+    let component = if cfg!(target_os = "ios") {
+        "ffi-ios"
+    } else if cfg!(target_os = "android") {
+        "ffi-android"
+    } else {
+        "ffi"
+    };
+    let mut o = varsto_core::logging::Options::new(&home, component);
+    o.rotation = varsto_core::logging::Rotation::MOBILE;
+    let _ = varsto_core::logging::init(o);
+    log::info!(version = env!("CARGO_PKG_VERSION"), port = port; "varsto_start");
     *HOME.lock().unwrap() = Some(home.clone());
     std::thread::Builder::new()
         .name("varsto-service".into())
         .spawn(move || {
-            let _ = service::run(service::Options {
+            if let Err(e) = service::run(service::Options {
                 home,
                 port,
                 interval_secs: 300,
                 open_browser: false,
-            });
+            }) {
+                log::error!("service stopped: {e:#}");
+            }
+            varsto_core::logging::flush();
         })
         .map(|_| 0)
         .unwrap_or(2)
@@ -92,4 +108,26 @@ pub unsafe extern "C" fn varsto_free(s: *mut c_char) {
     if !s.is_null() {
         drop(CString::from_raw(s));
     }
+}
+
+/// Write one line from the app into the core's log (module `app`).
+/// `level`: 1 error, 2 warn, 3 info, 4 debug, 5 trace. Ignored before
+/// `varsto_start`.
+///
+/// # Safety
+/// `msg` must be null or point to a valid NUL-terminated string.
+#[no_mangle]
+pub unsafe extern "C" fn varsto_log(level: std::ffi::c_int, msg: *const c_char) {
+    if msg.is_null() {
+        return;
+    }
+    let text = unsafe { CStr::from_ptr(msg) }.to_string_lossy();
+    let level = match level {
+        1 => log::Level::Error,
+        2 => log::Level::Warn,
+        3 => log::Level::Info,
+        5 => log::Level::Trace,
+        _ => log::Level::Debug,
+    };
+    log::log!(target: "app", level, "{text}");
 }
