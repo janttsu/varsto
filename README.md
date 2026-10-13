@@ -18,7 +18,7 @@ Varsto is an end-to-end encrypted file sync, sharing and backup app that **uses 
 - **No tracker, no account, no vendor cloud.** Devices find each other on the local network, through a rendezvous record in your own storage, and through a rendezvous record in your own storage (a DHT fallback is designed, not built). Designed to avoid single points of failure.
 - **Fast, block-level sync.** Files are split into blocks whose size follows the file; only changed blocks move, and the blocks of small files travel together in packs, so a folder of thousands of notes is a few objects on the storage, not thousands. Peer-to-peer transfer between your own devices, also offline over a LAN, with the cloud brought up to date when you are back online.
 - **Safety nets.** Version history, trash (optionally on cold storage), encrypted off-site backups of any directory (read-only snapshots kept on your storages only, each for the days you choose), durability policies with alerts, peer-to-peer transfer between your devices on the LAN and over the internet, zstd compression before encryption, Strongroom folders that open only with a FIDO2 security key (libfido2 tools), a printable recovery kit (24 words, 2-of-3 shares), geographic location awareness, and provider-independent recovery. What the design tolerates, and what it does not, is listed in [docs/failure-model.md](docs/failure-model.md).
-- **Clients.** Linux, Windows, macOS, Android, iOS; a command line on Linux, macOS and Windows; an MCP server so you can manage and organise files by talking to a local or cloud AI of your choice.
+- **Clients.** Linux, Windows, macOS, Android, iOS; a command line on Linux, macOS and Windows; an MCP server so you can manage and organise files by talking to a local or cloud AI of your choice ([docs/mcp.md](docs/mcp.md)).
 
 None of this is finished. See [docs/architecture](docs/architecture/README.md) for the design principles and [docs/spec](docs/spec/README.md) for the status of the format and protocol specifications.
 
@@ -70,9 +70,12 @@ varsto --home ~/.varsto-laptop p2p traffic --watch   # live speed, totals and pa
 varsto --home ~/.varsto-laptop policy set docs --min-copies 2 --place cloud=2 --place home=1 --verified-within-days 30
 varsto --home ~/.varsto-laptop policy check
 
-# let an AI assistant read, analyse and (with --write) reorganise one folder
-varsto --home ~/.varsto-laptop mcp grant docs
+# let an AI assistant read and analyse one folder (--analyse: it records what each file contains,
+# synced encrypted to your devices; --write: it may also reorganise). See docs/mcp.md
+varsto --home ~/.varsto-laptop mcp grant docs --analyse
 varsto --home ~/.varsto-laptop mcp          # MCP over stdio; point Claude Desktop, Claude Code or any MCP client at this command
+varsto --home ~/.varsto-laptop mcp config --client opencode --create-key --folders docs --analyse   # a scoped key and a ready config
+varsto --home ~/.varsto-laptop search receipt 2026   # find files by their analysis, tags and path
 
 # a lost or stolen device: remove it from another device (new vault keys for everything written
 # afterwards) and order it to wipe itself when it next reaches a storage; then print a new recovery kit
