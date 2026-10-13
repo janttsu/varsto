@@ -49,6 +49,9 @@ pub struct State {
     pub service: ServiceState,
     /// An open pairing offer (this device adding another one).
     pub pair: Option<varsto_core::pair::Offer>,
+    /// A `varsto://` link the system handed to Varsto (`varsto open-link`),
+    /// waiting for the interface to pick it up.
+    pub link: Option<String>,
 }
 
 pub type Shared = Arc<Mutex<State>>;
@@ -471,6 +474,16 @@ fn handle(state: &Shared, mut request: Request) -> Result<()> {
             Err(e) => Ok(request.respond(json_response(400, &json!({"error": format!("{e:#}")})))?),
         };
     }
+    if *request.method() == Method::Post && path == "/api/qr/scan" {
+        // A camera frame (`?w=&h=`, one grey byte a pixel) or an image file
+        // (`?image=1`: a screenshot) as the raw body; returns the texts of
+        // the QR codes in it. Nothing is kept.
+        let result = qr_scan(&mut request, &query);
+        return match result {
+            Ok(v) => Ok(request.respond(json_response(200, &v))?),
+            Err(e) => Ok(request.respond(json_response(400, &json!({"error": format!("{e:#}")})))?),
+        };
+    }
     let mut body = String::new();
     if *request.method() == Method::Post {
         request
@@ -670,6 +683,78 @@ fn pair_join(state: &Shared, input: &Value) -> Result<Value> {
     st.engine = Some(e);
     st.service.request_sync();
     Ok(json!({"ok": true, "from": bundle.from, "storages": notes}))
+}
+
+/// The URIs to show for a link: one code, or parts when asked (a camera
+/// that cannot read the dense code) or when one code cannot hold it.
+fn qr_uris(link: &varsto_core::qr::Link, parts: bool) -> Result<Vec<String>> {
+    use varsto_core::qr;
+    if !parts {
+        let uri = link.to_uri()?;
+        if qr::code_for(&uri).is_ok() {
+            return Ok(vec![uri]);
+        }
+    }
+    link.to_uris(0, qr::PART_CHARS)
+}
+
+/// What the interface shows for a link: its kind, the text form and what
+/// both sides compare (the fingerprint of a request code).
+fn link_info(link: &varsto_core::qr::Link) -> Result<Value> {
+    use varsto_core::qr::Link;
+    let mut v = json!({"kind": link.kind(), "text": link.text(), "uri": link.to_uri()?});
+    match link {
+        Link::ShareRequest(code) => {
+            let r = Engine::share_request_info(code)?;
+            v["fingerprint"] = json!(r.fingerprint);
+            v["name"] = json!(r.name);
+        }
+        Link::ShareToken(t) => {
+            v["folder"] = json!(varsto_core::vault::SealedShareToken::decode(t)?.name);
+        }
+        Link::Pair { code, addresses } => {
+            v["code"] = json!(format!("{}-{}-{}", &code[0..3], &code[3..6], &code[6..9]));
+            v["addresses"] = json!(addresses);
+        }
+    }
+    Ok(v)
+}
+
+/// A pairing offer's status with its `varsto://pair` link.
+fn pair_status(st: varsto_core::pair::OfferStatus) -> Result<Value> {
+    let mut v = serde_json::to_value(&st)?;
+    if st.open {
+        v["uri"] = json!(varsto_core::qr::Link::Pair {
+            code: st.code.clone(),
+            addresses: st.addresses.clone(),
+        }
+        .to_uri()?);
+    }
+    Ok(v)
+}
+
+fn qr_scan(request: &mut Request, query: &str) -> Result<Value> {
+    use varsto_core::qr;
+    let texts = if query_param(query, "image").is_some() {
+        let mut b = Vec::new();
+        request.as_reader().take(32 << 20).read_to_end(&mut b)?;
+        qr::decode_image(&b)?
+    } else {
+        let dim = |k: &str| -> Result<usize> {
+            query_param(query, k)
+                .and_then(|x| x.parse().ok())
+                .filter(|&x: &usize| x > 0 && x <= qr::MAX_IMAGE_SIDE as usize)
+                .ok_or_else(|| anyhow!("{k} must be 1 to {}", qr::MAX_IMAGE_SIDE))
+        };
+        let (w, h) = (dim("w")?, dim("h")?);
+        let mut b = Vec::with_capacity(w * h);
+        request
+            .as_reader()
+            .take((w * h) as u64)
+            .read_to_end(&mut b)?;
+        qr::decode_luma(w, h, &b)?
+    };
+    Ok(json!({"texts": texts}))
 }
 
 fn s(v: &Value, key: &str) -> Result<String> {
@@ -987,11 +1072,75 @@ fn api(st: &mut State, method: Method, path: &str, query: &str, input: &Value) -
             let offer = varsto_core::pair::Offer::start(e.pairing_bundle()?)?;
             let status = offer.status();
             st.pair = Some(offer);
-            Ok(serde_json::to_value(status)?)
+            pair_status(status)
         }
         (Method::Get, "/api/pair/status") => Ok(match &st.pair {
-            Some(o) => serde_json::to_value(o.status())?,
+            Some(o) => pair_status(o.status())?,
             None => json!({"open": false}),
+        }),
+        // QR invitations (section 43): the QR codes of a request code, a
+        // sealed token or a pairing link, and what a scanned text is.
+        (Method::Post, "/api/qr") => {
+            let link = varsto_core::qr::Link::from_text(&s(input, "text")?)?;
+            let parts = input["parts"].as_bool().unwrap_or(false);
+            let uris = qr_uris(&link, parts)?;
+            let codes = uris
+                .iter()
+                .map(|u| varsto_core::qr::to_svg(u))
+                .collect::<Result<Vec<_>>>()?;
+            let mut v = link_info(&link)?;
+            v["codes"] = serde_json::to_value(&codes)?;
+            Ok(v)
+        }
+        (Method::Post, "/api/link/parse") => {
+            // One text, or every part of a split link scanned so far.
+            let texts: Vec<String> = match input["texts"].as_array() {
+                Some(a) => a
+                    .iter()
+                    .filter_map(|t| t.as_str().map(String::from))
+                    .collect(),
+                None => vec![s(input, "text")?],
+            };
+            let mut asm = varsto_core::qr::Assembler::new();
+            let mut last = None;
+            for t in &texts {
+                let t = t.trim();
+                let scanned = if varsto_core::qr::is_link(t) {
+                    varsto_core::qr::parse(t)?
+                } else {
+                    varsto_core::qr::Scanned::Link(varsto_core::qr::Link::from_text(t)?)
+                };
+                match scanned {
+                    varsto_core::qr::Scanned::Link(l) => return link_info(&l),
+                    varsto_core::qr::Scanned::Part(p) => {
+                        last = Some(p.clone());
+                        if let Some(l) = asm.add(p)? {
+                            return link_info(&l);
+                        }
+                    }
+                }
+            }
+            let p = last.ok_or_else(|| anyhow!("nothing scanned"))?;
+            let (have, count) = asm.progress();
+            Ok(json!({"part": p, "have": have, "count": count}))
+        }
+        // A link the system opened Varsto with: kept until the interface takes it.
+        (Method::Post, "/api/link") => {
+            let uri = s(input, "uri")?;
+            match varsto_core::qr::parse(&uri)? {
+                varsto_core::qr::Scanned::Link(_) => {}
+                varsto_core::qr::Scanned::Part(p) => bail!(
+                    "this is part {} of {} of a split code: scan it in Varsto (Scan QR code)",
+                    p.index,
+                    p.count
+                ),
+            }
+            st.link = Some(uri.trim().to_string());
+            Ok(json!({"ok": true}))
+        }
+        (Method::Get, "/api/link") => Ok(match st.link.take() {
+            Some(uri) => json!({"uri": uri}),
+            None => json!({}),
         }),
         (Method::Post, "/api/pair/stop") => {
             if let Some(o) = st.pair.take() {

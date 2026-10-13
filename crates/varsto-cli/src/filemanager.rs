@@ -282,6 +282,9 @@ pub mod linux {
 
     pub const MIME_TYPE: &str = "application/x-varsto-placeholder";
     const MIMEAPPS_LINE: &str = "application/x-varsto-placeholder=varsto-placeholder.desktop";
+    /// `varsto://` links (QR invitations) open Varsto.
+    pub const LINK_MIME: &str = "x-scheme-handler/varsto";
+    const LINK_LINE: &str = "x-scheme-handler/varsto=varsto-link.desktop";
 
     /// A file relative to the XDG data directory.
     pub struct GenFile {
@@ -333,6 +336,13 @@ pub mod linux {
                 executable: false,
             },
             GenFile {
+                path: "applications/varsto-link.desktop",
+                content: format!(
+                    "[Desktop Entry]\nType=Application\nName=Varsto\nComment=Open a Varsto invitation link\nExec={exec} open-link %u\nIcon=varsto\nTerminal=false\nNoDisplay=true\nMimeType={LINK_MIME};\n"
+                ),
+                executable: false,
+            },
+            GenFile {
                 path: "nautilus/scripts/Varsto/Download",
                 content: script("fetch"),
                 executable: true,
@@ -377,9 +387,18 @@ pub mod linux {
     /// every other line. `None`: nothing to change (already set, or the user
     /// chose another application).
     pub fn mimeapps_add(text: &str) -> Option<String> {
+        mimeapps_add_for(text, MIME_TYPE, MIMEAPPS_LINE)
+    }
+
+    /// Like `mimeapps_add` for the `varsto://` scheme handler.
+    pub fn mimeapps_add_link(text: &str) -> Option<String> {
+        mimeapps_add_for(text, LINK_MIME, LINK_LINE)
+    }
+
+    fn mimeapps_add_for(text: &str, mime: &str, line: &str) -> Option<String> {
         if text
             .lines()
-            .any(|l| l.trim_start().starts_with(&format!("{MIME_TYPE}=")))
+            .any(|l| l.trim_start().starts_with(&format!("{mime}=")))
         {
             return None;
         }
@@ -388,13 +407,13 @@ pub mod linux {
             .iter()
             .position(|l| l.trim() == "[Default Applications]")
         {
-            Some(i) => lines.insert(i + 1, MIMEAPPS_LINE.to_string()),
+            Some(i) => lines.insert(i + 1, line.to_string()),
             None => {
                 if lines.last().is_some_and(|l| !l.trim().is_empty()) {
                     lines.push(String::new());
                 }
                 lines.push("[Default Applications]".into());
-                lines.push(MIMEAPPS_LINE.into());
+                lines.push(line.into());
             }
         }
         Some(lines.join("\n") + "\n")
@@ -402,10 +421,19 @@ pub mod linux {
 
     /// `mimeapps.list` without the line `mimeapps_add` wrote.
     pub fn mimeapps_remove(text: &str) -> Option<String> {
-        if !text.lines().any(|l| l.trim() == MIMEAPPS_LINE) {
+        mimeapps_remove_line(text, MIMEAPPS_LINE)
+    }
+
+    /// `mimeapps.list` without the line `mimeapps_add_link` wrote.
+    pub fn mimeapps_remove_link(text: &str) -> Option<String> {
+        mimeapps_remove_line(text, LINK_LINE)
+    }
+
+    fn mimeapps_remove_line(text: &str, line: &str) -> Option<String> {
+        if !text.lines().any(|l| l.trim() == line) {
             return None;
         }
-        let kept: Vec<&str> = text.lines().filter(|l| l.trim() != MIMEAPPS_LINE).collect();
+        let kept: Vec<&str> = text.lines().filter(|l| l.trim() != line).collect();
         Some(kept.join("\n") + "\n")
     }
 
@@ -448,15 +476,18 @@ pub mod linux {
         }
         let list = config.join("mimeapps.list");
         let text = fs::read_to_string(&list).unwrap_or_default();
-        if let Some(new) = mimeapps_add(&text) {
+        let after = mimeapps_add(&text).unwrap_or(text.clone());
+        let after = mimeapps_add_link(&after).unwrap_or(after);
+        if after != text {
             fs::create_dir_all(config)?;
-            write_keep_mode(&list, &new)?;
+            write_keep_mode(&list, &after)?;
         }
         refresh(data);
         Ok(vec![
             "placeholders: double-click downloads and opens the file".into(),
             "file managers: Download / Free up space with Varsto (Nautilus scripts, Dolphin, Nemo)"
                 .into(),
+            "varsto:// invitation links open Varsto".into(),
         ])
     }
 
@@ -468,11 +499,12 @@ pub mod linux {
         // Only when empty: the user may keep own scripts there.
         let _ = fs::remove_dir(data.join("nautilus/scripts/Varsto"));
         let list = config.join("mimeapps.list");
-        if let Some(new) = fs::read_to_string(&list)
-            .ok()
-            .and_then(|t| mimeapps_remove(&t))
-        {
-            write_keep_mode(&list, &new)?;
+        if let Ok(text) = fs::read_to_string(&list) {
+            let after = mimeapps_remove(&text).unwrap_or(text.clone());
+            let after = mimeapps_remove_link(&after).unwrap_or(after);
+            if after != text {
+                write_keep_mode(&list, &after)?;
+            }
         }
         refresh(data);
         Ok(vec![
@@ -489,11 +521,13 @@ pub mod windows {
     use super::*;
 
     /// Keys under HKEY_CURRENT_USER that `uninstall` deletes as a whole.
-    pub const KEYS: [&str; 4] = [
+    pub const KEYS: [&str; 5] = [
         r"Software\Classes\*\shell\Varsto.Fetch",
         r"Software\Classes\*\shell\Varsto.Free",
         r"Software\Classes\.varsto-placeholder",
         r"Software\Classes\Varsto.Placeholder",
+        // varsto:// links (QR invitations).
+        r"Software\Classes\varsto",
     ];
 
     /// One string value: key under HKCU, value name ("" = default), data.
@@ -542,6 +576,13 @@ pub mod windows {
             &format!(r"{}\shell\open\command", KEYS[3]),
             "",
             format!("{base} open-placeholder \"%1\""),
+        ));
+        out.push(v(KEYS[4], "", "URL:Varsto invitation".into()));
+        out.push(v(KEYS[4], "URL Protocol", String::new()));
+        out.push(v(
+            &format!(r"{}\shell\open\command", KEYS[4]),
+            "",
+            format!("{base} open-link \"%1\""),
         ));
         out
     }
@@ -643,6 +684,9 @@ mod tests {
             handler.contains("Exec=/opt/v/varsto --home \"/data/my vault\" open-placeholder %f")
         );
         assert!(handler.contains("MimeType=application/x-varsto-placeholder;"));
+        let link = &get("applications/varsto-link.desktop").content;
+        assert!(link.contains("Exec=/opt/v/varsto --home \"/data/my vault\" open-link %u"));
+        assert!(link.contains("MimeType=x-scheme-handler/varsto;"));
         let dl = get("nautilus/scripts/Varsto/Download");
         assert!(dl.executable);
         assert!(dl.content.starts_with("#!/bin/sh\n"));
@@ -696,6 +740,9 @@ mod tests {
         linux::install(&data, &config, Path::new("/bin/varsto"), Path::new("/h")).unwrap();
         assert!(data.join("kio/servicemenus/varsto.desktop").exists());
         assert!(data.join("nautilus/scripts/Varsto/Free up space").exists());
+        assert!(std::fs::read_to_string(config.join("mimeapps.list"))
+            .unwrap()
+            .contains("x-scheme-handler/varsto=varsto-link.desktop"));
         linux::uninstall(&data, &config).unwrap();
         assert!(!data.join("kio/servicemenus/varsto.desktop").exists());
         assert!(!data.join("nautilus/scripts/Varsto/Download").exists());
@@ -735,6 +782,10 @@ mod tests {
             ""
         )
         .ends_with(r#"open-placeholder "%1""#));
+        assert_eq!(get(r"Software\Classes\varsto", "URL Protocol"), "");
+        assert!(
+            get(r"Software\Classes\varsto\shell\open\command", "").ends_with(r#"open-link "%1""#)
+        );
         // Everything written lies under a key that uninstall deletes.
         for v in &e {
             assert!(
