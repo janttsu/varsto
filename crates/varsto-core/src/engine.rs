@@ -2691,8 +2691,14 @@ impl Engine {
             .filter(|f| !f.deleted && !f.chunks.iter().all(|c| missing_on(c).is_empty()))
             .map(|f| f.size)
             .sum();
-        let _task = (to_upload > 0)
-            .then(|| activity::start(activity::UPLOAD, &rec.name, to_upload, activity::Unit::Bytes));
+        let _task = (to_upload > 0).then(|| {
+            activity::start(
+                activity::UPLOAD,
+                &rec.name,
+                to_upload,
+                activity::Unit::Bytes,
+            )
+        });
         // Reading, chunking and encrypting stay on this thread; the writes go
         // to a few uploader threads, so that many small objects do not each
         // wait for the previous one's round trip to the storage. The queue is

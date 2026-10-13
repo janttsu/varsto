@@ -34,7 +34,11 @@ fn a_device_sees_another_devices_long_task_with_its_progress() {
     let docs = root.join("laptop-docs");
     fs::create_dir_all(&docs).unwrap();
     for i in 0..200u32 {
-        fs::write(docs.join(format!("f{i}.txt")), format!("file {i} ").repeat(50)).unwrap();
+        fs::write(
+            docs.join(format!("f{i}.txt")),
+            format!("file {i} ").repeat(50),
+        )
+        .unwrap();
     }
     laptop.add_folder("docs", &docs).unwrap();
     laptop.push("docs").unwrap();
@@ -98,15 +102,29 @@ fn a_device_sees_another_devices_long_task_with_its_progress() {
         .iter()
         .filter(|(_, _, t)| t.kind == "fsck" && t.phase == "verify")
         .collect();
-    assert!(!verify.is_empty(), "the desktop never saw the fsck: {seen:?}");
+    assert!(
+        !verify.is_empty(),
+        "the desktop never saw the fsck: {seen:?}"
+    );
     let (dev, name, last) = verify.last().unwrap();
-    assert_eq!((dev.as_str(), name.as_str()), (laptop_id.as_str(), "laptop"));
-    assert!(last.total > 150 && last.done > 0 && last.done <= last.total, "{last:?}");
+    assert_eq!(
+        (dev.as_str(), name.as_str()),
+        (laptop_id.as_str(), "laptop")
+    );
+    assert!(
+        last.total > 150 && last.done > 0 && last.done <= last.total,
+        "{last:?}"
+    );
     assert!(last.percent.is_some());
     // The progress moved while the desktop watched, and a rate showed up.
     let first = verify.first().unwrap();
     assert!(last.done > first.2.done, "{verify:?}");
-    assert!(verify.iter().any(|(_, _, t)| t.rate > 0 && t.eta_utc.is_some()), "{verify:?}");
+    assert!(
+        verify
+            .iter()
+            .any(|(_, _, t)| t.rate > 0 && t.eta_utc.is_some()),
+        "{verify:?}"
+    );
     // Nothing is left once the operation is over.
     assert!(activity::tasks().iter().all(|t| t.kind != "fsck"));
 }

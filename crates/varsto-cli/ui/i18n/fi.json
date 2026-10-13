@@ -633,7 +633,28 @@
   "The prices were not verified for this region; it may be priced differently.": "Hintoja ei ole tarkistettu tälle alueelle; sen hinnat voivat poiketa.",
   "Replace the part in braces in the endpoint with your own value, for example your account id.": "Korvaa päätepisteen aaltosulkeissa oleva osa omalla arvollasi, esimerkiksi tilisi tunnisteella.",
   "plan": "paketti",
-  "(old)": "(vanha)"
+  "(old)": "(vanha)",
+  "Now": "Nyt",
+  "Looking for changes in folder «{s}»": "Etsii muutoksia kansiosta «{s}»",
+  "Uploading folder «{s}»": "Lähettää kansiota «{s}»",
+  "Fetching changes to folder «{s}»": "Hakee muutoksia kansioon «{s}»",
+  "Checking disk «{s}»": "Tarkistaa levyä «{s}»",
+  "Checking the blocks of disk «{s}»": "Tarkistaa levyn «{s}» lohkoja",
+  "Filling disk «{s}»": "Täyttää levyä «{s}»",
+  "Taking a snapshot of backup «{s}»": "Ottaa tilannevedosta varmuuskopiosta «{s}»",
+  "Restoring backup «{s}»": "Palauttaa varmuuskopiota «{s}»",
+  "Repairing damaged block copies": "Korjaa vaurioituneita lohkokopioita",
+  "Verifying stored blocks": "Varmentaa tallennettuja lohkoja",
+  "Checking the vault": "Tarkistaa holvia",
+  "Verifying every block of the vault": "Varmentaa holvin kaikki lohkot",
+  "Moving the data of folder «{s}»": "Siirtää kansion «{s}» tietoja",
+  "Copying blocks off storage «{s}»": "Kopioi lohkoja pois tallennustilasta «{s}»",
+  "Deleting the data on storage «{s}»": "Poistaa tallennustilan «{s}» tietoja",
+  "ready about {t}": "valmis noin klo {t}",
+  "Not reachable": "Ei tavoitettavissa",
+  "Runs an older version that does not tell": "Käyttää vanhempaa versiota, joka ei kerro tätä",
+  "Does not share its activity with this device": "Ei jaa toimintaansa tämän laitteen kanssa",
+  "Asking…": "Kysytään…"
  },
  "patterns": [
   [
@@ -751,6 +772,10 @@
   [
    "^Since the service started: (.+) received in (\\d+) blocks, (.+) sent in (\\d+) blocks\\. Speeds are averages over the last (\\d+) seconds\\.$",
    "Palvelun käynnistyksen jälkeen: vastaanotettu $1 ($2 lohkoa), lähetetty $3 ($4 lohkoa). Nopeudet ovat viimeisten $5 sekunnin keskiarvoja."
+  ],
+  [
+   "^Last heard (\\d+) s ago, not answering now$",
+   "Kuultu viimeksi $1 s sitten, ei vastaa nyt"
   ]
  ],
  "review": [

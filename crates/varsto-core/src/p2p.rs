@@ -1712,7 +1712,9 @@ mod tests {
             activity_audience: None,
         };
         let path = "/p2p/activity";
-        let ask = |snap: &Snapshot, dev: &DeviceId| handle(Some(snap), path, &auth_header(&key, dev, path));
+        let ask = |snap: &Snapshot, dev: &DeviceId| {
+            handle(Some(snap), path, &auth_header(&key, dev, path))
+        };
         let (status, body) = ask(&snap, &other_user);
         assert_eq!(status, 200);
         let a: crate::activity::DeviceActivity = serde_json::from_slice(&body).unwrap();
@@ -1722,7 +1724,10 @@ mod tests {
         assert_eq!(handle(Some(&snap), path, "").0, 403);
         let stranger = auth_header(&SecretKey::random(), &same_user, path);
         assert_eq!(handle(Some(&snap), path, &stranger).0, 403);
-        assert_eq!(handle(None, path, &auth_header(&key, &same_user, path)).0, 503);
+        assert_eq!(
+            handle(None, path, &auth_header(&key, &same_user, path)).0,
+            503
+        );
         // An organization: only the devices of the same user.
         snap.activity_audience = Some([same_user.clone()].into_iter().collect());
         assert_eq!(ask(&snap, &same_user).0, 200);

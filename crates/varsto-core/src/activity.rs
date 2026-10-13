@@ -231,7 +231,11 @@ impl Guard {
     }
     /// Name the step running now (`verify`, `fill`, `scan`, `upload`, ...).
     pub fn set_phase(&self, phase: &'static str) {
-        self.task.meta.lock().unwrap_or_else(|e| e.into_inner()).phase = phase;
+        self.task
+            .meta
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .phase = phase;
     }
     /// A new step with its own counts: `done` starts again from zero.
     pub fn step(&self, phase: &'static str, total: u64, unit: Unit) {
@@ -244,11 +248,7 @@ impl Guard {
         self.task.total.store(total, Ordering::Relaxed);
         let now = now_ms();
         self.task.sampled_ms.store(now, Ordering::Relaxed);
-        *self
-            .task
-            .samples
-            .lock()
-            .unwrap_or_else(|e| e.into_inner()) = VecDeque::from([(now, 0)]);
+        *self.task.samples.lock().unwrap_or_else(|e| e.into_inner()) = VecDeque::from([(now, 0)]);
     }
     pub fn id(&self) -> u64 {
         self.task.id
@@ -361,7 +361,11 @@ fn tasks_older_than(quiet: Duration) -> Vec<TaskView> {
         .map(|t| {
             let mut v = t.view(now);
             if matches!(v.kind.as_str(), UPLOAD | DOWNLOAD | RESTORE) {
-                let want = if v.kind == UPLOAD { "upload" } else { "download" };
+                let want = if v.kind == UPLOAD {
+                    "upload"
+                } else {
+                    "download"
+                };
                 v.detail = transfers
                     .iter()
                     .rev()
@@ -374,9 +378,104 @@ fn tasks_older_than(quiet: Duration) -> Vec<TaskView> {
         .collect()
 }
 
-/// The tasks worth showing now (running for at least `QUIET`).
+/// The tasks worth showing now (running for at least `QUIET`): this
+/// process's, and those other processes of this device reported
+/// (`merge_external`).
 pub fn tasks() -> Vec<TaskView> {
-    tasks_older_than(QUIET)
+    let mut out = tasks_older_than(QUIET);
+    let mut ext = EXTERNAL.lock().unwrap_or_else(|e| e.into_inner());
+    ext.retain(|_, (at, _)| at.elapsed() < EXTERNAL_TTL);
+    for (_, list) in ext.values() {
+        out.extend(list.iter().cloned());
+    }
+    out.sort_by_key(|t| t.started_utc);
+    out
+}
+
+/// Tasks of other processes of this device (a command run in a terminal
+/// while the service runs), by process id, with when they were reported.
+/// Forgotten when a process stops reporting for `EXTERNAL_TTL`.
+type External = BTreeMap<u32, (Instant, Vec<TaskView>)>;
+static EXTERNAL: Mutex<External> = Mutex::new(BTreeMap::new());
+const EXTERNAL_TTL: Duration = Duration::from_secs(5);
+/// What one report may carry.
+const EXTERNAL_MAX: usize = 64;
+
+/// The service takes the tasks a command of this device runs: they are
+/// part of this device's activity. An empty list removes the process.
+pub fn merge_external(pid: u32, mut tasks: Vec<TaskView>) {
+    let mut ext = EXTERNAL.lock().unwrap_or_else(|e| e.into_inner());
+    if tasks.is_empty() {
+        ext.remove(&pid);
+        return;
+    }
+    tasks.truncate(EXTERNAL_MAX);
+    for t in &mut tasks {
+        // Unique beside the service's own task numbers.
+        t.id = (u64::from(pid) << 32) | (t.id & 0xffff_ffff);
+    }
+    ext.insert(pid, (Instant::now(), tasks));
+}
+
+/// In a command that is not the service: hand this process's tasks to
+/// `send` every second while there are any (and once more when the last
+/// one ended), so the service shows and tells them as this device's.
+pub fn spawn_reporter<F>(send: F)
+where
+    F: Fn(&[TaskView]) + Send + 'static,
+{
+    let _ = std::thread::Builder::new()
+        .name("activity-report".into())
+        .spawn(move || {
+            let mut had = false;
+            loop {
+                std::thread::sleep(Duration::from_secs(1));
+                let now = tasks_older_than(QUIET);
+                if !now.is_empty() || had {
+                    send(&now);
+                }
+                had = !now.is_empty();
+            }
+        });
+}
+
+/// The English sentence for a task, without its counts: "checking the
+/// blocks of disk «Blue 4TB»". The interface builds its own from the
+/// translated templates of the same kinds and steps.
+pub fn describe(t: &TaskView) -> String {
+    let s = &t.subject;
+    let mut out = match (t.kind.as_str(), t.phase.as_str()) {
+        (SYNC_SCAN, _) => format!("looking for changes in folder «{s}»"),
+        (UPLOAD, _) => format!("uploading folder «{s}»"),
+        (DOWNLOAD, _) => format!("fetching changes to folder «{s}»"),
+        (DISK_CHECK, "fill") | (DISK_FILL, _) => format!("filling disk «{s}»"),
+        (DISK_CHECK, "verify") => format!("checking the blocks of disk «{s}»"),
+        (DISK_CHECK, _) => format!("checking disk «{s}»"),
+        (BACKUP_SNAPSHOT, _) => format!("taking a snapshot of backup «{s}»"),
+        (RESTORE, _) => format!("restoring backup «{s}»"),
+        (REPAIR, _) => "repairing damaged block copies".to_string(),
+        (VERIFY, _) => "verifying stored blocks".to_string(),
+        (FSCK, "verify") => "verifying every block of the vault".to_string(),
+        (FSCK, _) => "checking the vault".to_string(),
+        (DATA_MOVE, _) => format!("moving the data of folder «{s}»"),
+        (STORAGE_REMOVAL, "delete") => format!("deleting the data on storage «{s}»"),
+        (STORAGE_REMOVAL, _) => format!("copying blocks off storage «{s}»"),
+        (k, _) if s.is_empty() => k.replace('_', " "),
+        (k, _) => format!("{} «{s}»", k.replace('_', " ")),
+    };
+    if let Some(d) = &t.detail {
+        out.push_str(&format!(" ({d})"));
+    }
+    out
+}
+
+/// What the items of a task are, for counts: "120 of 400 files".
+pub fn item_noun(kind: &str) -> &'static str {
+    match kind {
+        SYNC_SCAN => "files",
+        REPAIR => "copies",
+        _ => "blocks",
+    }
 }
 
 /// What one device says it is doing.
@@ -609,7 +708,7 @@ impl PeerCache {
     }
 
     /// Ask the peers every half second while watched, until `stop`.
-    pub fn spawn_poller(self: &'static Self, stop: Arc<AtomicBool>) {
+    pub fn spawn_poller(&'static self, stop: Arc<AtomicBool>) {
         let _ = std::thread::Builder::new()
             .name("activity".into())
             .spawn(move || {
@@ -644,7 +743,10 @@ mod tests {
             let g = start(DISK_CHECK, "Blue 4TB", 0, Unit::Bytes);
             id = g.id();
             let v = mine(id).unwrap();
-            assert_eq!((v.kind.as_str(), v.subject.as_str()), ("disk_check", "Blue 4TB"));
+            assert_eq!(
+                (v.kind.as_str(), v.subject.as_str()),
+                ("disk_check", "Blue 4TB")
+            );
             assert_eq!((v.done, v.total, v.percent, v.eta_utc), (0, 0, None, None));
             // Deep code reaches the innermost task of its thread.
             set_current_total(400);
@@ -657,7 +759,10 @@ mod tests {
             advance_bytes(5); // a transfer does not count on an item task
             g.advance(4);
             let v = mine(id).unwrap();
-            assert_eq!((v.phase.as_str(), v.done, v.total, v.unit), ("fill", 4, 10, Unit::Items));
+            assert_eq!(
+                (v.phase.as_str(), v.done, v.total, v.unit),
+                ("fill", 4, 10, Unit::Items)
+            );
         }
         assert!(mine(id).is_none());
         // Nothing left on this thread to count on.
@@ -680,6 +785,34 @@ mod tests {
         // Another thread has its own innermost task (none).
         std::thread::spawn(|| advance_current(7)).join().unwrap();
         assert_eq!(mine(outer.id()).unwrap().done, 2);
+    }
+
+    #[test]
+    fn tasks_of_other_processes_are_merged_and_forgotten() {
+        let t = TaskView {
+            id: 7,
+            kind: DISK_CHECK.into(),
+            phase: "verify".into(),
+            subject: "Blue".into(),
+            detail: None,
+            done: 1,
+            total: 2,
+            unit: Unit::Bytes,
+            percent: Some(50),
+            started_utc: 0,
+            updated_utc: 0,
+            rate: 0,
+            eta_utc: None,
+        };
+        merge_external(4242, vec![t.clone()]);
+        let got: Vec<TaskView> = tasks()
+            .into_iter()
+            .filter(|x| x.subject == "Blue")
+            .collect();
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].id, (4242u64 << 32) | 7);
+        merge_external(4242, Vec::new());
+        assert!(tasks().iter().all(|x| x.subject != "Blue"));
     }
 
     #[test]
@@ -733,7 +866,10 @@ mod tests {
         cache.watch();
         assert_eq!(cache.poll(), 1);
         let r = cache.report();
-        assert_eq!((r[0].name.as_str(), r[0].status.as_str()), ("desk", "unreachable"));
+        assert_eq!(
+            (r[0].name.as_str(), r[0].status.as_str()),
+            ("desk", "unreachable")
+        );
         // Asked again only after `PEER_EVERY`.
         assert_eq!(cache.poll(), 0);
         // A device outside the audience (another user of the organization) is not asked.
