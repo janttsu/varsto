@@ -1748,7 +1748,7 @@ fn api_unlocked(
                 ..Default::default()
             };
             let c = engine.restic_check(&quick);
-            crate::restic::status_value(engine.home(), Some(c))
+            varsto_core::restic::status_value(engine.home(), Some(c))
         }
         (Method::Post, "/api/restic/setup") => {
             let cfg: varsto_core::restic::ResticConfig = serde_json::from_value(

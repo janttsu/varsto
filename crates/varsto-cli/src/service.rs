@@ -404,7 +404,7 @@ impl ServiceState {
             && now >= self.restic_not_before_utc
             && Hold::current(&home, now).is_none()
         {
-            match crate::restic::spawn_scheduled(&home) {
+            match varsto_core::restic::spawn_scheduled(&home) {
                 Ok(c) => {
                     eprintln!("service: scheduled restic backup started");
                     self.restic_child = Some(c);

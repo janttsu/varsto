@@ -15,7 +15,7 @@ use anyhow::{anyhow, bail, Context, Result};
 use clap::{Args, Subcommand};
 use serde::Serialize;
 use serde_json::{json, Value};
-use std::io::{BufRead, IsTerminal, Write};
+use std::io::{BufRead, IsTerminal};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -882,30 +882,6 @@ fn describe_run(r: &RunReport) -> String {
     out.join("\n")
 }
 
-/// What `status` reports (also `GET /api/restic`).
-pub fn status_value(home: &Path, completeness: Option<Result<Completeness>>) -> Result<Value> {
-    let cfg = config(home)?;
-    let st = ResticState::load(home);
-    let now = util::now_utc();
-    let hold = Hold::current(home, now);
-    let (complete, comp, comp_err) = match completeness {
-        Some(Ok(c)) => (Some(c.complete), Some(c), None),
-        Some(Err(e)) => (None, None, Some(format!("{e:#}"))),
-        None => (None, None, None),
-    };
-    Ok(json!({
-        "config": cfg,
-        "state": st,
-        "next_run_utc": st.next_run_utc(&cfg),
-        "stale": st.stale(&cfg, now),
-        "check_due": cfg.check_due(st.last_check.as_ref().map(|c| c.utc), now),
-        "held_now": hold.is_some(),
-        "complete_now": complete,
-        "completeness": comp,
-        "completeness_error": comp_err,
-    }))
-}
-
 fn status(cli: &Cli, home: &Path) -> Result<()> {
     config(home)?;
     let quick = CheckOptions {
@@ -916,7 +892,7 @@ fn status(cli: &Cli, home: &Path) -> Result<()> {
         Ok(mut v) => v.check(&quick),
         Err(e) => Err(e),
     };
-    let v = status_value(home, Some(c))?;
+    let v = restic::status_value(home, Some(c))?;
     print(cli, &v, describe_status)
 }
 
@@ -1058,21 +1034,4 @@ pub fn kit_note(home: &Path) -> Option<String> {
         cfg.host,
         cfg.root.display()
     ))
-}
-
-/// The service's schedule: start `varsto restic run --scheduled` when due.
-pub fn spawn_scheduled(home: &Path) -> Result<std::process::Child> {
-    let exe = std::env::current_exe()?;
-    let log = std::fs::File::create(home.join("restic-run.log"))?;
-    let log2 = log.try_clone()?;
-    let mut c = Command::new(exe);
-    c.arg("--home")
-        .arg(home)
-        .args(["restic", "run", "--scheduled"])
-        .env("VARSTO_NO_INSTALL", "1")
-        .stdin(Stdio::null())
-        .stdout(log)
-        .stderr(log2);
-    let _ = std::io::stdout().flush();
-    Ok(c.spawn()?)
 }

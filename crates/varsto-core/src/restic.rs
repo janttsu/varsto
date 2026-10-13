@@ -931,6 +931,53 @@ impl Drop for RunLock {
     }
 }
 
+/// What `varsto restic status` and `GET /api/restic` report: the
+/// settings, the record of runs, the next run, staleness, whether a hold is
+/// in force, and a completeness check when one was made.
+pub fn status_value(
+    home: &Path,
+    completeness: Option<Result<Completeness>>,
+) -> Result<serde_json::Value> {
+    let cfg = crate::vault::Config::load(home)?.restic.ok_or_else(|| {
+        anyhow::anyhow!("this device is not set up for restic; run `varsto restic setup` first")
+    })?;
+    let st = ResticState::load(home);
+    let now = util::now_utc();
+    let (complete, comp, comp_err) = match completeness {
+        Some(Ok(c)) => (Some(c.complete), Some(c), None),
+        Some(Err(e)) => (None, None, Some(format!("{e:#}"))),
+        None => (None, None, None),
+    };
+    Ok(serde_json::json!({
+        "config": cfg,
+        "state": st,
+        "next_run_utc": st.next_run_utc(&cfg),
+        "stale": st.stale(&cfg, now),
+        "check_due": cfg.check_due(st.last_check.as_ref().map(|c| c.utc), now),
+        "held_now": Hold::current(home, now).is_some(),
+        "complete_now": complete,
+        "completeness": comp,
+        "completeness_error": comp_err,
+    }))
+}
+
+/// Start `varsto restic run --scheduled` (the service's schedule), with
+/// its output in `home/restic-run.log`.
+pub fn spawn_scheduled(home: &Path) -> Result<std::process::Child> {
+    let exe = std::env::current_exe()?;
+    let log = std::fs::File::create(home.join("restic-run.log"))?;
+    let log2 = log.try_clone()?;
+    Ok(std::process::Command::new(exe)
+        .arg("--home")
+        .arg(home)
+        .args(["restic", "run", "--scheduled"])
+        .env("VARSTO_NO_INSTALL", "1")
+        .stdin(std::process::Stdio::null())
+        .stdout(log)
+        .stderr(log2)
+        .spawn()?)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
