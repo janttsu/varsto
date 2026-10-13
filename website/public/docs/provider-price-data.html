@@ -21,7 +21,7 @@
 <link rel="alternate" hreflang="en" href="https://varsto.net/docs/provider-price-data.html">
 <link rel="alternate" hreflang="x-default" href="https://varsto.net/docs/provider-price-data.html">
 <link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../blog/feed.xml">
-<link rel="stylesheet" href="../assets/css/site.css?v=b3d2d4f387">
+<link rel="stylesheet" href="../assets/css/site.css?v=d738b157e3">
 <script src="../assets/js/theme.js?v=0951491269"></script>
 </head>
 <body>
@@ -70,18 +70,107 @@
 </tr>
 <tr>
 <td><code>aws-s3.json</code></td>
-<td>Amazon S3, region eu-central-1 (Frankfurt)</td>
+<td>Amazon S3 (USD); prices for eu-central-1 Frankfurt and S3 Standard in eu-north-1 Stockholm</td>
 </tr>
 <tr>
-<td><code>scaleway-object-storage.json</code></td>
-<td>Scaleway Object Storage, region fr-par (Paris)</td>
+<td><code>backblaze-b2.json</code></td>
+<td>Backblaze B2 (USD)</td>
+</tr>
+<tr>
+<td><code>cleura-object-storage.json</code></td>
+<td>Cleura Public Cloud Object Storage (EUR), Karlskrona, Stockholm, Frankfurt</td>
+</tr>
+<tr>
+<td><code>cloudflare-r2.json</code></td>
+<td>Cloudflare R2 (USD), Standard and Infrequent Access</td>
+</tr>
+<tr>
+<td><code>contabo-object-storage.json</code></td>
+<td>Contabo Object Storage (EUR); prices unknown, see gaps</td>
+</tr>
+<tr>
+<td><code>digitalocean-spaces.json</code></td>
+<td>DigitalOcean Spaces (USD), subscription plus overage, Cold Storage</td>
+</tr>
+<tr>
+<td><code>exoscale-sos.json</code></td>
+<td>Exoscale Simple Object Storage (EUR)</td>
+</tr>
+<tr>
+<td><code>filebase.json</code></td>
+<td>Filebase (USD), Free and Pro plans</td>
+</tr>
+<tr>
+<td><code>google-cloud-storage.json</code></td>
+<td>Google Cloud Storage through its S3-compatible XML API (USD), europe-north1, europe-west1, europe-west4</td>
+</tr>
+<tr>
+<td><code>hetzner-object-storage.json</code></td>
+<td>Hetzner Object Storage (EUR), base price with included storage and egress</td>
 </tr>
 <tr>
 <td><code>hetzner-storage-box.json</code></td>
-<td>Hetzner Storage Box (prices not yet verified, see below)</td>
+<td>Hetzner Storage Box (not S3; prices not yet verified, see below)</td>
+</tr>
+<tr>
+<td><code>idrive-e2.json</code></td>
+<td>IDrive e2 (USD)</td>
+</tr>
+<tr>
+<td><code>impossible-cloud.json</code></td>
+<td>Impossible Cloud (EUR), EU regions</td>
+</tr>
+<tr>
+<td><code>ionos-object-storage.json</code></td>
+<td>IONOS Cloud Object Storage (EUR), EU regions</td>
+</tr>
+<tr>
+<td><code>linode-object-storage.json</code></td>
+<td>Akamai Cloud (Linode) Object Storage (USD), subscription plus overage</td>
+</tr>
+<tr>
+<td><code>minio.json</code></td>
+<td>MinIO, self-hosted: no prices, endpoint hint only</td>
+</tr>
+<tr>
+<td><code>ovhcloud-object-storage.json</code></td>
+<td>OVHcloud Object Storage (EUR), 1-AZ and 3-AZ classes, archive classes</td>
+</tr>
+<tr>
+<td><code>safespring-storage.json</code></td>
+<td>Safespring Storage (EUR), Oslo and Stockholm</td>
+</tr>
+<tr>
+<td><code>scaleway-object-storage.json</code></td>
+<td>Scaleway Object Storage (EUR), Paris, Amsterdam, Warsaw, Milan</td>
+</tr>
+<tr>
+<td><code>stackit-object-storage.json</code></td>
+<td>STACKIT Object Storage (EUR), eu01 and eu02</td>
+</tr>
+<tr>
+<td><code>storj.json</code></td>
+<td>Storj (USD)</td>
+</tr>
+<tr>
+<td><code>synology-c2-object-storage.json</code></td>
+<td>Synology C2 Object Storage (EUR), per-TB plans</td>
+</tr>
+<tr>
+<td><code>tigris.json</code></td>
+<td>Tigris (USD)</td>
+</tr>
+<tr>
+<td><code>upcloud-object-storage.json</code></td>
+<td>UpCloud Managed Object Storage (EUR); storage price unknown, see gaps</td>
+</tr>
+<tr>
+<td><code>wasabi.json</code></td>
+<td>Wasabi (USD)</td>
 </tr>
 </tbody>
 </table>
+<p>The profiles are embedded in the app at build time (<code>crates/varsto-core/src/providers.rs</code>; a test fails when a file here is not embedded or breaks the rules below). The Add storage form lists every profile with S3 endpoints: choosing a provider and region fills in the endpoint, region and URL style, shows the headline prices with their date and source, and a "Compare providers" table lists them side by side (<code>GET /api/providers</code>). A storage whose endpoint matches a profile gets that profile's prices as defaults for its cost estimates.</p>
 <h2 id="rules">Rules</h2>
 <ol type="1">
 <li><strong>No price without a source and a date.</strong> Every numeric value carries <code>source_url</code> (an <code>https://</code> URL of the official page or machine-readable price list) and <code>last_verified</code> (ISO date, <code>YYYY-MM-DD</code>, the day a person or tool actually read the value there). The schema rejects a number without both.</li>
@@ -100,6 +189,10 @@
 <li>Egress: price per GB after the free allowance (<code>free_allowance_gb_per_month</code>), by volume band.</li>
 <li>Retrieval: price per GB for cold classes, with the typical delay as quoted by the provider (<code>typical_delay</code>).</li>
 <li><code>minimum_storage_duration_days</code>, <code>minimum_billable_object_size_kb</code>, <code>per_object_overhead_kb</code>: as published; early deletion is normally billed pro rata for the remaining days.</li>
+<li>Subscriptions: a plan fee that includes the first gigabytes is a <code>plans</code> entry; the included gigabytes are a first band priced <code>0</code> and the overage the next band. The app shows and estimates with the overage band.</li>
+<li>A class priced differently in another region is a separate class with id <code>&lt;class id&gt;-&lt;region&gt;</code> (for example <code>standard-eu-north-1</code>); the app picks it for that region.</li>
+<li>S3 access: <code>s3_endpoints</code> lists, per region, the endpoint URL (placeholders in braces, such as <code>{account_id}</code>, are for the user to fill in), the signing <code>region</code>, <code>price_region</code> when the prices of a different <code>regions</code> code apply (a provider that signs every endpoint as <code>us-east-1</code>), and <code>path_style</code> (<code>true</code>: bucket in the path; <code>false</code>: virtual-hosted style), each with its source.</li>
+<li><code>default_storage_class</code> names the class whose prices are the headline; <code>free_tier</code> and <code>egress_fair_use</code> are text facts (null with a note when none is stated); <code>signup_url</code>, <code>pricing_url</code> and <code>tax_note</code> are for people. <code>kind: "self_hosted"</code> marks software you run yourself: such a profile has endpoint hints and no prices.</li>
 <li>Other fields: <code>protocols</code> (<code>s3</code>, <code>sftp</code>, <code>webdav</code>, <code>rclone</code> and a few more), <code>regions</code> (code, city, ISO country), <code>object_lock</code> (immutability support).</li>
 </ul>
 <h2 id="validating">Validating</h2>
@@ -115,9 +208,18 @@
 <li>In the pull request, list what you could not verify.</li>
 </ol>
 <h2 id="known-gaps">Known gaps</h2>
+<p>Checked 2026-10-13. Each null in a profile says why in its note; the larger gaps:</p>
 <ul>
-<li><code>hetzner-storage-box.json</code>: the monthly plan prices are <code>null</code>. The official product page renders prices with client-side scripts and no official static source could be read. Fill them in from the product page and verify before using this profile in estimates.</li>
+<li><code>hetzner-storage-box.json</code>: the monthly plan prices are <code>null</code>. The official product page renders prices with client-side scripts and no official static source could be read.</li>
+<li><code>upcloud-object-storage.json</code>: the storage price and request fees are <code>null</code>; the pricing page refused automated reading and the price API needs an account. Read them in a browser.</li>
+<li><code>contabo-object-storage.json</code>: the product page now redirects elsewhere and no official price could be found; nearly every price is <code>null</code>. Confirm the product is still sold.</li>
+<li><code>safespring-storage.json</code>: storage prices are listed per TB without saying how large a TB is, so the per-GB values are <code>null</code> (the per-TB figures are in the notes).</li>
+<li><code>hetzner-object-storage.json</code>: storage above the included 1 TB is published only per TB-hour, so it is in the notes, not as a per-GB-month band. <code>exoscale-sos.json</code>: volume tiers 2 and 3 are published only per GiB-hour and are <code>null</code>.</li>
+<li><code>stackit-object-storage.json</code>: request and egress prices are <code>null</code> (no price item found).</li>
+<li>Units: OVHcloud and Exoscale publish per GiB; their values are divided by 1.073741824 to per GB, with the original figure in the note. Backblaze B2, Storj, Wasabi, Impossible Cloud and IONOS publish per TB; each note says which TB the provider uses.</li>
+<li>Addressing style is not documented for Impossible Cloud and Synology C2; <code>path_style: true</code> is a cautious choice there. Backblaze B2 documents only <code>us-east-005</code>; the other regions are templates (<code>eu-central-{nnn}</code>) that the user completes from the bucket details. Storj does not document a signing region (<code>us1</code> is used). Linode signs with <code>us-east-1</code> on every endpoint (<code>price_region</code> maps the prices); Contabo signs with <code>default</code>.</li>
 <li>Request prices for archive classes (LIST in particular), per-request retrieval fees and the cold-class delay for bulk retrievals are modelled only where verified; see the notes in each profile.</li>
+<li>Checked and left out because no official price could be read: Vultr (pages refuse automated reading), Infomaniak (prices rendered by scripts), Elastx, Open Telekom Cloud and Leaseweb.</li>
 </ul>
 
 </article>

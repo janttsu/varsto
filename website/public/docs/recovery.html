@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Recovery package: Varsto</title>
+<meta name="description" content="Varsto documentation: Recovery package">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="canonical" href="https://varsto.net/docs/recovery.html">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Varsto">
+<meta property="og:title" content="Recovery package: Varsto">
+<meta property="og:description" content="Varsto documentation: Recovery package">
+<meta property="og:url" content="https://varsto.net/docs/recovery.html">
+<meta property="og:image" content="https://varsto.net/assets/img/og-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:locale" content="en_GB">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="alternate" hreflang="en" href="https://varsto.net/docs/recovery.html">
+<link rel="alternate" hreflang="x-default" href="https://varsto.net/docs/recovery.html">
+<link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../blog/feed.xml">
+<link rel="stylesheet" href="../assets/css/site.css?v=d738b157e3">
+<script src="../assets/js/theme.js?v=0951491269"></script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="alpha" role="note">
+  <div class="wrap"><strong>Alpha software, not for production data.</strong> Bugs can cause data loss, formats may change without migration, and the cryptography has not been independently audited. Keep your own backups and check that you can restore from them.</div>
+</div>
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="../"><img src="../assets/img/logo.svg" alt="" width="28" height="28"><span>Varsto</span></a>
+
+    <nav class="main" aria-label="Main">
+      <a href="../">Project</a>
+      <a href="../features/">Features</a>
+      <a href="../use-cases/">Use cases</a>
+      <a href="../compare/">Compare</a>
+      <a href="../how-it-works/">How it works</a>
+      <a href="../screenshots/">Screenshots</a>
+      <a href="../docs/" aria-current="page">Docs</a>
+      <a href="../downloads/">Downloads</a>
+      <a href="../blog/">Blog</a>
+      <a href="../forum/">Forum</a>
+      <a href="../contribute/">Contribute</a>
+      <a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a>
+      <button class="theme" id="theme-toggle" type="button" aria-label="Change colour theme">Theme: auto</button>
+    </nav>
+  </div>
+</header>
+<main id="main">
+  <div class="wrap">
+<article class="prose">
+<h1>Recovery package</h1>
+<p class="note">From <code>docs/recovery.md</code> in the repository, rendered 2026-10-13.</p>
+<p>Your devices hold the keys to your vault. If one of them is lost, another one adds a new device with a pairing code and nothing else is needed. This page is about the other case: <strong>every device is lost at once</strong>, in a fire, a burglary or a flood. Then you restore from what you kept somewhere else: the <em>recovery package</em>.</p>
+<p>Varsto makes a checklist of that package for your vault, with the restore steps for a new computer:</p>
+<div class="sourceCode" id="cb1"><pre class="sourceCode sh"><code class="sourceCode bash"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="ex">varsto</span> recovery guide                                   <span class="co"># text in the terminal</span></span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a><span class="ex">varsto</span> recovery guide <span class="at">--format</span> html <span class="at">--output</span> guide.html <span class="co"># a printable page with checkboxes</span></span>
+<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a><span class="ex">varsto</span> recovery guide <span class="at">--format</span> markdown                 <span class="co"># for your own notes</span></span></code></pre></div>
+<p>In the desktop interface the same checklist is under <strong>Recovery package</strong> (in the sidebar, under More on a phone, and linked from Settings). You can tick what you have done; the ticks stay in that browser only. <strong>Print / save as PDF</strong> and <strong>Download as text</strong> give you a copy to keep with the package.</p>
+<p>The guide never contains a secret. It names the secrets (the recovery words, storage keys, passwords) and says where to keep them; the values themselves are never read into it. You can store the guide itself anywhere, but it tells whoever reads it which buckets and disks you use.</p>
+<h2 id="what-goes-into-the-package">What goes into the package</h2>
+<table>
+<thead>
+<tr>
+<th>What</th>
+<th>Why</th>
+<th>Without it</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Recovery kit</strong>: the vault key as 24 words (<code>varsto recovery kit</code>), or three shares of which any two rebuild it (<code>--shares</code>).</td>
+<td>It is the only thing that opens the vault. There is no account, no reset and no copy anywhere else.</td>
+<td>Nobody can read the vault, including the makers of Varsto.</td>
+</tr>
+<tr>
+<td><strong>Storage credentials</strong>: for each S3 bucket the endpoint, bucket and region (in the guide) plus the access key ID and secret key (keep them yourself); the login to the provider account.</td>
+<td>A new device reads your encrypted data from the storages. Varsto keeps the secret key only in the encrypted secret store of each device.</td>
+<td>You need the provider account to make new keys; without it the bucket cannot be reached.</td>
+</tr>
+<tr>
+<td><strong>rclone configuration</strong> (<code>rclone.conf</code>) for rclone remotes, kept like a password.</td>
+<td>rclone, not Varsto, holds the remote's token.</td>
+<td>Set the remote up again from the provider account.</td>
+</tr>
+<tr>
+<td><strong>NAS and network shares</strong>: where they are and how to reach them. A directory on a computer's own disk is lost with it.</td>
+<td>A directory storage is only a recovery source if it survives.</td>
+<td>Data that only that directory held is lost.</td>
+</tr>
+<tr>
+<td><strong>Disk pools</strong>: the disks themselves (by the names on their stickers), kept apart from your computers, the pool's exact name, and on Linux the <code>disks.conf</code> lines the guide prints.</td>
+<td>The disks hold blocks that may be nowhere else. They are recognised by the vault key and the pool's name.</td>
+<td>Files whose blocks were only on those disks cannot be restored.</td>
+</tr>
+<tr>
+<td><strong>Strongroom security keys</strong>: at least two enrolled FIDO2 keys in different places, and their PINs.</td>
+<td>A Strongroom folder's key exists only wrapped for its security keys; the recovery words do not open it.</td>
+<td>The folder cannot be opened by anyone. This is by design.</td>
+</tr>
+<tr>
+<td><strong>Organization root words</strong> (if the vault belongs to an organization), kept apart from the recovery kit.</td>
+<td>They appoint and dismiss administrators.</td>
+<td>Nobody can appoint a new administrator; the data stays readable with the recovery kit.</td>
+</tr>
+<tr>
+<td><strong>restic password</strong> and the repository's credentials (if you keep a restic backup).</td>
+<td>The restic repository can be restored with restic alone, without Varsto.</td>
+<td>restic cannot read the repository.</td>
+</tr>
+</tbody>
+</table>
+<p>Not needed: the passphrase of a device. A new device gets its own.</p>
+<p>Folders that <strong>someone else shares with you</strong> are not in your package: their key came from the person who shared them. On a new device you send them a new request code (<code>varsto share request</code>) and they share the folder again.</p>
+<h2 id="where-to-keep-it">Where to keep it</h2>
+<ul>
+<li>The recovery words on paper or metal, in at least two places away from your devices. Never as a photo, a cloud note or an e-mail.</li>
+<li>Shares, if you use them, each in a different place or with a different person you trust.</li>
+<li>Storage keys and passwords in a password manager you can open from a new computer without your old devices, or on paper with the words.</li>
+<li>Disks of a pool in more than one building if they are meant to survive a fire.</li>
+</ul>
+<p>Test the package once a year: install Varsto on a spare computer or a virtual machine and join with the words, as the guide's restore steps say. Make the guide again whenever you add a storage, a disk or a Strongroom folder, and print a new recovery kit after removing a device (the vault key changes; an old kit still opens what was written before).</p>
+<h2 id="the-restore-in-short">The restore, in short</h2>
+<p>The guide gives the exact commands for your vault. In outline:</p>
+<ol type="1">
+<li>Install Varsto from the download page and check the download with <code>varsto verify-release</code>.</li>
+<li>If you kept shares, rebuild the words: <code>varsto recovery combine "&lt;index&gt;: &lt;words&gt;" "&lt;index&gt;: &lt;words&gt;"</code>.</li>
+<li>Join through a bucket or a directory that holds the vault: <code>varsto join --words "&lt;24 words&gt;" ...</code>.</li>
+<li>Add the other storages under the same names (<code>varsto storage add-s3</code>, <code>add-rclone</code>, <code>add-local</code>, <code>add-pool</code>).</li>
+<li>Connect the pool disks one at a time (<code>varsto disk insert</code> on Linux).</li>
+<li>Attach the folders (<code>varsto folder attach &lt;folder&gt; &lt;directory&gt;</code>), unlock Strongroom folders with a security key, restore backups (<code>varsto backup restore</code>).</li>
+<li>Files whose blocks are only on cold storage need a confirmed read (<code>varsto repair --from-cold</code> or <code>varsto move ... --confirm-cold-read</code>); archive classes need a restore request at the provider first.</li>
+<li>Remove the lost devices (<code>varsto device revoke</code>), print a new recovery kit and make the guide again.</li>
+</ol>
+<p>The limits are those of the <a href="failure-model.html">failure model</a>: if the recovery words and every share are lost, nothing can restore access.</p>
+
+</article>
+  </div>
+</main>
+<footer class="site">
+  <div class="wrap">
+    <span>Varsto is a working name. Source: <a href="https://github.com/janttsu/varsto">github.com/janttsu/varsto</a>, under the PolyForm Shield License 1.0.0 (source-available).</span>
+    <span>No cookies, no tracking. The web server keeps a standard access log for at most seven days.</span>
+    <span><a href="../docs/security-policy.html">Security policy</a> · <a href="../docs/licence.html">Licence</a> · <a href="../docs/trademark.html">Trademark</a></span>
+  </div>
+</footer>
+</body>
+</html>

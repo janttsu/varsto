@@ -3,6 +3,7 @@
   --bg: #fbfbfa; --surface: #ffffff; --text: #16181d; --muted: #566070;
   --border: #e3e5ea; --accent: #2b57d6; --accent-contrast: #ffffff;
   --warn-bg: #fff4d6; --warn-text: #5a3d00; --warn-border: #f0d58a;
+  --win-bg: #e3f6e8; --win-text: #0f5a2a; --win-border: #9fd8b0;
   --series-1: #2a78d6; --series-2: #eb6834;
   --radius: 12px; --maxw: 72rem;
   --font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
@@ -13,6 +14,7 @@
     --bg: #0d0f12; --surface: #14171c; --text: #eceef2; --muted: #9aa3b2;
     --border: #232832; --accent: #8aa9ff; --accent-contrast: #0d0f12;
     --warn-bg: #2a2210; --warn-text: #f6d98a; --warn-border: #5b4a1d;
+    --win-bg: #11301d; --win-text: #9be3b2; --win-border: #2c6b42;
     --series-1: #3987e5; --series-2: #d95926;
     color-scheme: dark;
   }
@@ -21,6 +23,7 @@
   --bg: #0d0f12; --surface: #14171c; --text: #eceef2; --muted: #9aa3b2;
   --border: #232832; --accent: #8aa9ff; --accent-contrast: #0d0f12;
   --warn-bg: #2a2210; --warn-text: #f6d98a; --warn-border: #5b4a1d;
+  --win-bg: #11301d; --win-text: #9be3b2; --win-border: #2c6b42;
   --series-1: #3987e5; --series-2: #d95926;
   color-scheme: dark;
 }
@@ -154,6 +157,9 @@ h3 { font-size:1.15rem; margin:2rem 0 .5rem; }
 .compare-table thead th { text-align: left; }
 .compare-overview { font-size: .88rem; }
 .compare-overview td:nth-child(2) { background: var(--surface); }
+/* Where Varsto does more than the tools it is compared with. */
+.compare-overview td.win { background: var(--win-bg); color: var(--win-text); box-shadow: inset 3px 0 0 var(--win-border); }
+.compare-legend .win-swatch { display: inline-block; width: .9em; height: .9em; vertical-align: -.1em; border-radius: 3px; background: var(--win-bg); box-shadow: inset 0 0 0 1px var(--win-border); }
 a.card { display: block; color: inherit; text-decoration: none; }
 a.card:hover { border-color: var(--accent, currentColor); }
 .compare-table:not(.compare-overview) { display: table; table-layout: fixed; }

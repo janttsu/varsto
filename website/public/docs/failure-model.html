@@ -21,7 +21,7 @@
 <link rel="alternate" hreflang="en" href="https://varsto.net/docs/failure-model.html">
 <link rel="alternate" hreflang="x-default" href="https://varsto.net/docs/failure-model.html">
 <link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../blog/feed.xml">
-<link rel="stylesheet" href="../assets/css/site.css?v=b3d2d4f387">
+<link rel="stylesheet" href="../assets/css/site.css?v=d738b157e3">
 <script src="../assets/js/theme.js?v=0951491269"></script>
 </head>
 <body>
@@ -154,12 +154,60 @@
 <td>F-031, F-003, N-007</td>
 </tr>
 <tr>
+<td>A file is deleted by mistake, on any device</td>
+<td>None while the file is in the trash: its last version and its blocks are kept for the trash days (30 by default, per vault and per folder).</td>
+<td>The deletion syncs to every device like any change; each device that had the file also keeps a local trash copy.</td>
+<td>The vault-wide trash (after 0.0.1-alpha.13) lists deleted files on every device, and restores them from the storages (or the local copy) to their path or to <code>name (restored)</code>, never overwriting; their blocks count as used for data moves, storage removal and fsck until they expire; an optional trash storage (for example a cold one) keeps them off warm storage, and reading them back from cold storage asks first (<a href="alpha-0-format.html">alpha-0-format.md</a> section 43).</td>
+<td>A deletion noticed after the trash days, or one purged from the trash on purpose. An overwritten file: there is no version history yet. Deletions made before the trash existed are only in the local trash copies.</td>
+<td>F-025</td>
+</tr>
+<tr>
 <td>Malicious member of a shared folder</td>
 <td>The member can read what the folder shares and can change or delete files within the permissions given. Anything already downloaded stays with them.</td>
 <td>Their changes sync to other members like any other change.</td>
-<td>Version history and trash allow restoring earlier states; the change history view shows who did what; removing a member moves the folder to a new key (a share epoch) that only the remaining members receive, so new data is not readable by them (alpha-0-format.md section 24).</td>
+<td>The trash keeps deleted files for the trash days, and a member's purges do not take entries out of the owner's trash (alpha-0-format.md section 43); there is no version history for overwritten files yet; the change history view shows who did what; removing a member moves the folder to a new key (a share epoch) that only the remaining members receive, so new data is not readable by them (alpha-0-format.md section 24).</td>
 <td>Content the member already read or copied. Fine-grained permission rules are not specified yet (TBD).</td>
 <td>F-004, F-003, F-025, F-026, F-034, S-001</td>
+</tr>
+<tr>
+<td>A storage loses its ledger objects, or a new storage is added</td>
+<td>None: every metadata storage and every full device holds the ledger.</td>
+<td>None: the next push of every device fills the storage again (its checkpoint and the batches after it).</td>
+<td>Each device lists from the newest own batch it last confirmed on each storage and starts over when that batch is gone (<a href="alpha-0-format.html">alpha-0-format.md</a> sections 22 and 34).</td>
+<td>A storage that is the only one and loses everything while every device lost its ledger too (see the row on losing the ledger everywhere).</td>
+<td>F-017, F-020, N-007</td>
+</tr>
+<tr>
+<td>A device's local ledger directory is deleted or damaged</td>
+<td>None expected; signing on would have reused sequence numbers (a fork) and fenced the device.</td>
+<td>The device signs nothing until it is restored: the service restores it at once; the command line stops and suggests <code>varsto ledger rebuild</code>.</td>
+<td>Detection when the engine opens (missing or unreadable heads, a pushed record above the head, a missing newest batch) and one short listing before every signature; the rebuild takes the device's own batches and checkpoint back from the storages, continues after the newest, and downloads the other devices' batches; unreadable files are set aside, never deleted (section 38).</td>
+<td>Events waiting in an unreadable <code>pending.json</code> (holdings and verifications of single fetches) are lost; a sync records the holdings again.</td>
+<td>F-020, F-031, N-007</td>
+</tr>
+<tr>
+<td>A device is restored from an old backup, or two devices use one identity</td>
+<td>None from the restored copy; a second live copy of one identity can sign a history the other devices reject.</td>
+<td>The restored device is fenced (signs nothing) until it continues from its own later batches; the interface offers that with one button, the command line with <code>varsto ledger rebuild</code>. Two copies that published different batches are refused for good and the device must be paired again.</td>
+<td>Fencing on the first listing that shows this identity's newer batches; adoption only of batches signed by the device's key that chain onto what it holds; the refusal is remembered across restarts (section 38).</td>
+<td>A restored copy cannot be told from a live clone until the clone signs something the copy lacks: the copy may adopt and continue, and the clone is fenced at its next signature.</td>
+<td>S-001, F-031, N-007</td>
+</tr>
+<tr>
+<td>The ledger is lost everywhere (every storage and every device), while keys, folder records, manifests and blocks remain</td>
+<td>Files are not lost: manifests and blocks are intact, and a device can still pull files. Where each block is, who wrote it and who verified it are lost until rebuilt.</td>
+<td>Policies, repair and verification see no copies until the rebuild; the service rebuilds automatically and notifies, the command line suggests <code>varsto ledger rebuild --from-storage</code>.</td>
+<td>The rebuild maps every stored object to its folder and block through the newest manifests and snapshots, verifies objects (all of a small vault, within a budget otherwise), claims them as this device's, and queues damaged ones for repair (section 38).</td>
+<td>Rebuilt claims are self-attested: "verified by another device" comes back only through later automatic verification. Other devices' backup snapshots are listed for restore only after their source device rebuilds. Cold storages are read only when confirmed.</td>
+<td>F-020, F-031, F-032, N-007</td>
+</tr>
+<tr>
+<td>Two file names that differ only in case (or Unicode normalisation) reach a device whose filesystem ignores case (Windows, macOS, exFAT), or a name that filesystem does not allow (<code>12:30.jpg</code> on Windows)</td>
+<td>None: both files are kept. The second one is written under a local name with <code> (2)</code>; a name Windows does not allow is written with look-alike private-use characters.</td>
+<td>Sync is unaffected: the device records its local names and maps them back, so no file looks renamed or deleted; the pull reports the renamed files.</td>
+<td>The per-folder local name map and the Windows mapping (<a href="alpha-0-format.html">alpha-0-format.md</a> section 46).</td>
+<td>On that device the file shows under another name than on the others; which of the two gets the suffix depends on arrival order. A case-sensitive directory inside a case-insensitive folder, or a driver that silently changes names, is not detected.</td>
+<td>F-025</td>
 </tr>
 <tr>
 <td>Software bug during the alpha stage</td>
@@ -168,6 +216,22 @@
 <td>Prominent alpha warnings; version history; ledger invariants checked in deterministic simulation with fault injection; fuzzing and property tests; an index that can be rebuilt from the stored objects; the advice to keep independent backups.</td>
 <td>Bugs that tests do not find. Users who treat alpha software as their only copy.</td>
 <td>N-006, N-007, N-010, S-013, F-020</td>
+</tr>
+<tr>
+<td>A storage reaches its quota (a bucket limit or a plan's size)</td>
+<td>No data loss: Varsto stops writing new blocks there before the quota (1 % kept free) and writes them to the folder's other storages. With no other storage that has room, new blocks stay only on the device that has them until there is room, so a policy can be at risk or violated meanwhile.</td>
+<td>Sync continues; uploads to the full storage wait. The status, the push report, the policy reasons and a notification name the storage ("storage X is at its quota (Y of Z)").</td>
+<td>Vault-wide quotas published to every device; usage counted from the ledger plus an estimate of records, refreshed every sync and measurable on demand; a warning at 90 %.</td>
+<td>Usage is an estimate: devices writing at the same moment can pass the margin, and a provider's own limit is enforced by the provider, not by Varsto.</td>
+<td>F-017, F-020, F-032</td>
+</tr>
+<tr>
+<td>A storage is drained (to switch providers) while the other storages lack room or the right places</td>
+<td>No copy leaves while it is needed: a block is dropped from the storage being drained only after the copies that stay (new ones read back and checked) still meet the folder's policy as far as it was met before, and never when it is the last copy. Blocks that cannot keep their policy elsewhere stay where they are.</td>
+<td>New blocks go to the other storages at once; the drain moves blocks in the background within a daily budget and reports what it waits for ("add another cloud storage or lower the policy", a quota). Records and ledger batches are copied to the other storages before the storage is marked drained.</td>
+<td>Policy check per block before every drop; drops sealed in the ledger before deletion; resumable runs; quotas respected on the receiving storages; cold reads only after confirmation.</td>
+<td>A drain that cannot finish keeps the storage (and its bill). A device that has not synced since the drain started can still write a block there until it does; the drain then moves it.</td>
+<td>F-017, F-018, F-032, F-043</td>
 </tr>
 <tr>
 <td>The maintainer disappears</td>
