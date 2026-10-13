@@ -1269,13 +1269,13 @@ fn steps(h: &mut HelpState, i: &Inputs, storages: &[&StorageIn], offsite_configu
     for p in &i.paused {
         let f = ("folder", p.folder.clone());
         let step = if p.kind == "deletions_held" {
-            StepB::new(&format!("paused:{}", p.folder), "urgent", tx("Decide on the deletions held in {folder}", &[f.clone()]), tx("{count} files were deleted at once, so Varsto paused the folder: nothing is deleted on your other devices until you decide.", &[("count", p.count.to_string())]))
+            StepB::new(&format!("paused:{}", p.folder), "urgent", tx("Decide on the deletions held in {folder}", std::slice::from_ref(&f)), tx("{count} files were deleted at once, so Varsto paused the folder: nothing is deleted on your other devices until you decide.", &[("count", p.count.to_string())]))
                 .how(t0("If you meant it, confirm the deletions. If not, discard them: the files come back from your storages."))
                 .act("overview", Some("foldersafety"), "Show the held deletions")
                 .cmd(format!("varsto folder confirm-deletions {}   (or --discard)", sh(&p.folder)))
                 .guide("folders")
         } else {
-            StepB::new(&format!("paused:{}", p.folder), "urgent", tx("Bring folder {folder} back", &[f.clone()]), t0("Its directory lacks the folder's marker, so Varsto paused it instead of reading an empty directory as deleted files."))
+            StepB::new(&format!("paused:{}", p.folder), "urgent", tx("Bring folder {folder} back", std::slice::from_ref(&f)), t0("Its directory lacks the folder's marker, so Varsto paused it instead of reading an empty directory as deleted files."))
                 .how(t0("Mount the disk that holds the folder, then sync. If the directory is the right one, repair the marker."))
                 .act("overview", Some("foldersafety"), "Show the paused folder")
                 .cmd(format!("varsto folder repair-marker {}", sh(&p.folder)))
