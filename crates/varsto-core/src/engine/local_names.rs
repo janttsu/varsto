@@ -51,6 +51,18 @@ impl Engine {
     }
 
     /// [`Engine::disk_of`] for callers that do not hold the folder state.
+    /// Refuse vault path `path` when a directory above its local name
+    /// inside the folder is a symbolic link (`crate::fsmeta`).
+    pub(super) fn check_no_link_above(
+        &self,
+        root: &Path,
+        state: &FolderState,
+        path: &str,
+    ) -> Result<()> {
+        let local = state.local_names.local_rel(self.local_rules(root), path);
+        crate::fsmeta::check_no_link_above(root, &local)
+    }
+
     pub(super) fn disk_path(&self, folder: &FolderId, root: &Path, path: &str) -> PathBuf {
         match self.load_state(folder) {
             Ok(state) => self.disk_of(root, &state, path),

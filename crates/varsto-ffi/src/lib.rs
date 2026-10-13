@@ -27,6 +27,8 @@ mod filemanager;
 mod mcp_keys;
 #[path = "../../varsto-cli/src/service.rs"]
 mod service;
+#[path = "../../varsto-cli/src/sse.rs"]
+mod sse;
 #[path = "../../varsto-cli/src/update.rs"]
 mod update;
 #[path = "../../varsto-cli/src/view.rs"]

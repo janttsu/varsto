@@ -22,6 +22,12 @@ targets:
         # (Finding them by broadcast also needs Apple's multicast entitlement;
         # until then pairing on iOS uses the address shown under the code.)
         NSLocalNetworkUsageDescription: Varsto pairs with and exchanges encrypted blocks with your own devices on this network.
+        # Scanning QR invitations and pairing codes in the page (getUserMedia in WKWebView).
+        NSCameraUsageDescription: Varsto reads the QR code of a share invitation or a pairing code with the camera. Nothing is recorded.
+        # varsto:// links: a QR code scanned with the Camera app opens Varsto.
+        CFBundleURLTypes:
+          - CFBundleURLName: in.soderlund.varsto.link
+            CFBundleURLSchemes: [varsto]
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
     settings:
       base:

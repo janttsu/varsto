@@ -175,6 +175,7 @@ fn cached_entry(f: &FileState) -> LocalIndexEntry {
         size: f.size,
         mtime: f.mtime,
         content_hash: f.content_hash.clone(),
+        ..Default::default()
     }
 }
 
@@ -227,6 +228,7 @@ impl Engine {
     /// `None` when the folder keeps plain files on this device.
     pub fn block_writer(&self, folder: &str) -> Result<Option<BlockWriter>> {
         let (rec, _) = self.resolve_folder(folder)?;
+        self.ensure_share_writable(&rec)?;
         if !self.mount_is_encrypted(&rec.folder_id) {
             return Ok(None);
         }
@@ -245,6 +247,7 @@ impl Engine {
     ) -> Result<PushReport> {
         check_rel_path(path)?;
         let (rec, _) = self.resolve_folder(folder)?;
+        self.ensure_share_writable(&rec)?;
         if staged.folder != rec.folder_id {
             bail!("the staged file belongs to another folder");
         }
@@ -281,9 +284,16 @@ impl Engine {
         let changed =
             !matches!(previous, Some(p) if !p.deleted && p.content_hash == staged.content_hash);
         if changed {
-            let clock = self.tick()?;
+            // No plain file here: the metadata stays what the vault has.
+            let meta = crate::fsmeta::carry_for_file(previous.and_then(|p| p.meta.as_ref()));
+            let was = previous.filter(|p| !p.deleted).cloned();
             let mut version = previous.map(|p| p.version.clone()).unwrap_or_default();
+            let clock = self.tick()?;
             version.insert(me.clone(), clock);
+            if let Some(prev) = was {
+                // The replaced version goes to the history (`history`).
+                self.history_record_replacements(rec, vec![(prev, clock)])?;
+            }
             state.files.insert(
                 path.to_string(),
                 FileState {
@@ -296,6 +306,7 @@ impl Engine {
                     chunks: staged.chunks,
                     modified_by: me,
                     modified_clock: clock,
+                    meta,
                 },
             );
         }
@@ -459,8 +470,27 @@ impl Engine {
         storages: &[(StorageSpec, Box<dyn Storage>)],
         report: &mut PullReport,
     ) -> Result<()> {
-        let progress = crate::progress::Download::begin(&rec.name, &file.path, file.size);
+        if let Some(log) = &self.download_log {
+            log.lock().unwrap().push(file.path.clone());
+        }
         let root = self.block_cache_root();
+        // The cache is in the device directory; the folder's limit applies
+        // to its disk (the folder's files are kept there).
+        let needed: u64 = file
+            .chunks
+            .iter()
+            .filter(|c| !self.cache_has(&c.object))
+            .map(|c| c.size)
+            .sum();
+        if needed > 0 {
+            crate::freespace::check(
+                &crate::freespace::Place::folder(&rec.name),
+                &root,
+                self.folder_min_free(&rec.folder_id),
+                needed,
+            )?;
+        }
+        let progress = crate::progress::Download::begin(&rec.name, &file.path, file.size);
         for cref in &file.chunks {
             if self.cache_has(&cref.object) {
                 progress.advance(cref.size);
@@ -533,6 +563,11 @@ impl Engine {
                 report.files_updated += 1;
             }
             Err(e) => {
+                if let Some(low) = crate::freespace::low_space(&e) {
+                    report.waiting_for_space(low);
+                    state.pending_remote.insert(path, remote);
+                    return Ok(());
+                }
                 if let Some(PoolError::NeedsDisk { label, place, .. }) = pool::pool_error(&e) {
                     let d = format!("{label} ({place})");
                     if !report.disks_needed.contains(&d) {
@@ -596,7 +631,7 @@ impl Engine {
         report: &mut PullReport,
     ) -> Result<()> {
         let selective = self.mount_is_selective(&rec.folder_id);
-        let wanted: Vec<FileState> = state
+        let mut wanted: Vec<FileState> = state
             .files
             .values()
             .filter(|f| {
@@ -607,12 +642,17 @@ impl Engine {
             })
             .cloned()
             .collect();
+        // Newest first.
+        wanted.sort_by(|a, b| b.mtime.cmp(&a.mtime).then(a.path.cmp(&b.path)));
         for f in wanted {
             match self.cache_file(rec, fk, &f, storages, report) {
                 Ok(()) => {
                     state.local_index.insert(f.path.clone(), cached_entry(&f));
                 }
-                Err(e) => report.files_unavailable.push(format!("{}: {e}", f.path)),
+                Err(e) => match crate::freespace::low_space(&e) {
+                    Some(low) => report.waiting_for_space(low),
+                    None => report.files_unavailable.push(format!("{}: {e}", f.path)),
+                },
             }
         }
         Ok(())
@@ -686,6 +726,7 @@ impl Engine {
                 chunks: vec![],
                 modified_by: me.clone(),
                 modified_clock: clock,
+                meta: None,
             },
         );
         let clock = self.tick()?;

@@ -67,6 +67,7 @@ fn lab() -> Lab {
             cold: false,
             carrier: false,
             place: String::new(),
+            min_free: None,
         },
         a_home: root.join("a-home"),
         b_home: root.join("b-home"),
@@ -294,6 +295,7 @@ fn untrusted_replica_holds_copies_without_keys() {
         cold: false,
         carrier: false,
         place: String::new(),
+        min_free: None,
     };
     let mut r = Replica::init(&b_home, "userB", &token, lab.storage.clone(), target).unwrap();
     let rep = r.run_once().unwrap();
@@ -381,6 +383,7 @@ fn carrier_disk_only_carries_what_is_missing_and_empties_itself() {
         cold: false,
         carrier: true,
         place: String::new(),
+        min_free: None,
     };
     let (mut a, key) = Engine::init(&lab.a_home, "home-pc", PASS).unwrap();
     a.chunker = ChunkerParams::SMALL;

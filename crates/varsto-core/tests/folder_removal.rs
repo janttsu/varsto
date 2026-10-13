@@ -21,6 +21,7 @@ fn folders_are_unique_detachable_and_removable() {
         cold: false,
         carrier: false,
         place: String::new(),
+        min_free: None,
     };
     let (mut a, key) = Engine::init(&t.path().join("a"), "laptop", PASS).unwrap();
     a.add_storage(spec.clone()).unwrap();

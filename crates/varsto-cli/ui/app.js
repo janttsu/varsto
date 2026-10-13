@@ -59,22 +59,26 @@
     if (working === 0) { clearTimeout(barTimer); barTimer = null; $("workbar").classList.remove("on"); }
   }
   // While a pressed button downloads a file, the note under it shows how far.
+  // With the event stream up, its `transfers` events say it; otherwise
+  // /api/progress is asked every 400 ms.
   function followDownload(b) {
     var stop = false;
+    function show(j) {
+      var d = j && j.download;
+      if (stop || !d || !(d.total > 0)) { return; }
+      var note = b.nextElementSibling && b.nextElementSibling.classList.contains("busy-note") ? b.nextElementSibling : null;
+      if (!note) { note = el("span", "busy-note muted small"); b.after(note); }
+      note.textContent = "Downloading " + showName(d.path.split("/").pop()) + ": " + fmtBytes(d.done) + " of " + fmtBytes(d.total) + " (" + d.percent + " %" + (d.bytes_per_sec > 0 ? ", " + fmtBytes(d.bytes_per_sec) + "/s" : "") + ")";
+    }
+    transferFollowers.push(show);
     (function tick() {
       if (stop) { return; }
-      fetch("/api/progress", { headers: { "X-Varsto-Token": token } }).then(function (r) { return r.json(); }).then(function (j) {
-        if (stop) { return; }
-        var d = j.download;
-        if (d && d.total > 0) {
-          var note = b.nextElementSibling && b.nextElementSibling.classList.contains("busy-note") ? b.nextElementSibling : null;
-          if (!note) { note = el("span", "busy-note muted small"); b.after(note); }
-          note.textContent = "Downloading " + showName(d.path.split("/").pop()) + ": " + fmtBytes(d.done) + " of " + fmtBytes(d.total) + " (" + d.percent + " %" + (d.bytes_per_sec > 0 ? ", " + fmtBytes(d.bytes_per_sec) + "/s" : "") + ")";
-        }
-      }).catch(function () {}).then(function () { if (!stop) { setTimeout(tick, 400); } });
+      if (evsOk) { setTimeout(tick, 1000); return; }
+      fetch("/api/progress", { headers: { "X-Varsto-Token": token } }).then(function (r) { return r.json(); }).then(show).catch(function () {}).then(function () { if (!stop) { setTimeout(tick, 400); } });
     })();
-    return function () { stop = true; };
+    return function () { stop = true; transferFollowers = transferFollowers.filter(function (f) { return f !== show; }); };
   }
+  var transferFollowers = [];
   function api(method, path, body) {
     var b = pressed(); var loud = !!b || method !== "GET";
     if (b) { markBusy(b, true); }
@@ -334,19 +338,21 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   $("themetoggle2").onclick = toggleTheme;
 
   // Navigation between the pages of the app section.
-  var titles = { overview: "Overview", files: "Files", shared: "Shared", storages: "Storages", backups: "Backups", import: "Import", trash: "Trash", policies: "Policies", peers: "Peers", organization: "Organization", settings: "Settings", recovery: "Recovery package", more: "More" };
+  var titles = { overview: "Overview", files: "Files", shared: "Shared", storages: "Storages", backups: "Backups", import: "Import", trash: "Trash", policies: "Policies", peers: "Peers", organization: "Organization", settings: "Settings", recovery: "Recovery package", help: "Help", more: "More" };
   var legacyPages = { folders: "files", sharing: "shared" };
   function pageTitle(p) { return titles[p] || "Overview"; }
   var currentPage = (function () { try { var p = sessionStorage.getItem("varsto-page"); p = legacyPages[p] || p; return titles[p] ? p : "overview"; } catch (e) { return "overview"; } })();
   function nav(page) {
     page = legacyPages[page] || page;
     if (!titles[page]) { page = "overview"; }
+    // Without an open vault, Help is the panel above the setup or unlock screen.
+    if (page === "help" && document.body.dataset.view !== "app" && document.body.dataset.view !== "loading") { preHelpOpen(true); $("prehelp").scrollIntoView({ block: "start", behavior: "smooth" }); return; }
     if (page === "more" && !isMobile()) { page = "settings"; }
     if (page !== "policies") { policyReturn = null; } else if (!policyEdited()) { policyReturn = null; policyButtons(); }
     currentPage = page;
     try { sessionStorage.setItem("varsto-page", page); } catch (e) {}
     document.querySelectorAll(".page").forEach(function (d) { d.classList.toggle("hidden", d.dataset.page !== page); });
-    var tab = page === "shared" || page === "backups" || page === "import" || page === "trash" || page === "policies" || page === "peers" || page === "organization" || page === "settings" || page === "recovery" ? "more" : page;
+    var tab = page === "help" || page === "shared" || page === "backups" || page === "import" || page === "trash" || page === "policies" || page === "peers" || page === "organization" || page === "settings" || page === "recovery" ? "more" : page;
     document.querySelectorAll(".sidebar .nav-item[data-nav]").forEach(function (b) { if (b.dataset.nav === page) { b.setAttribute("aria-current", "page"); } else { b.removeAttribute("aria-current"); } });
     document.querySelectorAll(".tabbar .nav-item[data-nav]").forEach(function (b) { if (b.dataset.nav === tab) { b.setAttribute("aria-current", "page"); } else { b.removeAttribute("aria-current"); } });
     if (document.body.dataset.view === "app") { $("pagetitle").textContent = pageTitle(page); }
@@ -354,8 +360,9 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     if (page === "organization") { loadOrg(); }
     if (page === "backups") { loadBackups(); }
     if (page === "recovery") { loadGuide(); }
+    if (page === "help") { setTimeout(loadHelp, 0); }
     if (page === "import") { loadImports(); }
-    if (page === "trash") { loadTrash(); }
+    if (page === "trash") { loadTrash(); loadHistorySettings(); }
     if (page === "overview" && lastWhere) { renderWhere(lastWhere); }
     trafficWatch();
     activityWatch();
@@ -386,11 +393,11 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
         removalShown = true;
         alertBox("This device was removed from the vault by " + st.removal.by_name + " on " + fmtDate(st.removal.issued_utc) + (st.removal.wipe ? ". As ordered, its keys, sync state and folder contents were deleted." : ". It no longer syncs; reset it under Settings to start over."), "Device removed");
       }
-      if (!st.has_vault) { show("setup"); return; }
-      if (!st.unlocked) { show("unlock"); return; }
+      if (!st.has_vault) { show("setup"); showPreHelp(true); takeLink(); return; }
+      if (!st.unlocked) { show("unlock"); showPreHelp(false); return; }
       show("app");
       if (currentPage === "settings") { loadLogs(); }
-      return refreshStatus();
+      return refreshStatus().then(takeLink);
     }).catch(function (e) { log("error: " + e.message); });
   }
 
@@ -805,39 +812,212 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   function shareFolder(f) {
     dialog({
       title: (f.shared ? "New token for " : "Share ") + f.name,
-      text: (f.shared ? "" : "Anyone holding the token can read and write this folder. ") + "Paste the recipient's request code to seal the token to their device, or leave it empty for a plain token that carries the folder key itself.",
-      fields: [{ name: "to", label: "Recipient's request code (optional)", placeholder: "vsr1…" }],
-      ok: f.shared ? "Create token" : "Share"
+      text: (f.shared ? "" : "An editor reads and writes this folder; a viewer only reads it: nothing a viewer changes is accepted by your devices or the editors. ") + "Paste the recipient's request code or scan its QR code to seal the token to their device, or leave it empty for a plain token that carries the folder key itself (editors only).",
+      fields: [
+        { name: "to", label: "Recipient's request code (optional)", placeholder: "vsr1…" },
+        { name: "role", label: "Role", options: [["editor", "Editor: read and write"], ["viewer", "Viewer: read only"]], value: "editor", hint: "A viewer can still copy what it reads; a key cannot prevent that." }
+      ],
+      ok: f.shared ? "Create token" : "Share",
+      extra: "Scan QR code…"
     }).then(function (r) {
       if (!r) { return; }
+      var role = r.values.role || "editor";
+      if (r.action === "extra") { return scanQr("request").then(function (info) { if (info) { return sealTo(f, info.text, role); } }); }
       var code = (r.values.to || "").trim();
-      if (!code) { return createToken(f, "", ""); }
-      // Confirm who asked: both sides see the same six words for the code.
+      if (!code && role === "viewer") { return alertBox("A viewer's token must be sealed to their request code: paste it or scan it. A plain token cannot say what its holder may do."); }
+      if (!code) { return createToken(f, "", "", role); }
+      return sealTo(f, code, role);
+    }).catch(function (e) { alertBox(e.message); });
+  }
+  // Confirm who asked: both sides see the same six words for the code.
+  function sealTo(f, code, role) {
       return api("POST", "/api/share/fingerprint", { code: code }).then(function (fp) {
         var who = fp.name || "the requester";
         return dialog({
           title: "Is this " + who + "'s request?",
           text: "Ask " + who + " to read the fingerprint their device shows for the request code (under Accept a shared folder, or `varsto share request`), over a call or in person, not in the same message as the code. Share only if all six words match: different words mean the code was changed on its way.",
           code: fp.fingerprint, ok: "The words match", danger: false
-        }).then(function (c) { if (c) { return createToken(f, code, fp.fingerprint); } });
+        }).then(function (c) { if (c) { return createToken(f, code, fp.fingerprint, role); } });
       });
-    }).catch(function (e) { alertBox(e.message); });
   }
-  function createToken(f, code, fingerprint) {
-    return api("POST", "/api/share/create", { folder: f.name, to: code, fingerprint: fingerprint }).then(function (t) {
-      $("sharetoken").textContent = (t.sealed ? "Sealed share token for " + t.folder + " (only the requesting device can open it; fingerprint " + t.fingerprint + "): " : "Share token for " + t.folder + " (contains the folder key; send over a secure channel): ") + t.token;
+  function createToken(f, code, fingerprint, role) {
+    return api("POST", "/api/share/create", { folder: f.name, to: code, fingerprint: fingerprint, role: role || "editor" }).then(function (t) {
+      $("sharetoken").textContent = (t.sealed ? (t.role === "viewer" ? "Sealed share token for a viewer of " : "Sealed share token for an editor of ") + t.folder + " (only the requesting device can open it; fingerprint " + t.fingerprint + "): " : "Share token for " + t.folder + " (contains the folder key; send over a secure channel): ") + t.token;
       $("sharetoken").classList.remove("hidden"); nav("shared"); refreshStatus();
+      // A sealed token is safe to show: only the requesting device opens it. A plain one never becomes a QR code.
+      return renderQr($("sharetokenqr"), t.sealed ? t.token : "");
     });
+  }
+
+  // ----- QR invitations (spec section 51) -----
+  // Codes: POST /api/qr gives the SVG of one code or of a sequence of smaller ones (shown in turn).
+  var qrTimers = {};
+  function renderQr(box, text, parts) {
+    if (box.dataset.text === (text || "") && !!parts === (box.dataset.parts === "1")) { return Promise.resolve(); }
+    box.dataset.text = text || ""; box.dataset.parts = parts ? "1" : "";
+    if (qrTimers[box.id]) { clearInterval(qrTimers[box.id]); delete qrTimers[box.id]; }
+    box.innerHTML = ""; box.classList.add("hidden");
+    if (!text) { return Promise.resolve(); }
+    return api("POST", "/api/qr", { text: text, parts: !!parts }).then(function (r) {
+      if (box.dataset.text !== text) { return; }
+      var frames = r.codes.map(function (c) { return "data:image/svg+xml;base64," + btoa(c.svg); });
+      var img = el("img", "qr-img"); img.alt = "QR code"; img.src = frames[0]; box.appendChild(img);
+      if (r.fingerprint) {
+        box.appendChild(el("span", "muted small", "Fingerprint"));
+        var w = el("span", "qr-words", r.fingerprint); w.setAttribute("data-no-i18n", ""); box.appendChild(w);
+      }
+      if (frames.length > 1) {
+        var n = el("span", "muted small", "Part 1 of " + frames.length); box.appendChild(n); var i = 0;
+        qrTimers[box.id] = setInterval(function () {
+          if (!document.body.contains(box) || box.classList.contains("hidden")) { return; }
+          i = (i + 1) % frames.length; img.src = frames[i]; n.textContent = "Part " + (i + 1) + " of " + frames.length;
+        }, 900);
+      }
+      if (r.kind !== "pair") {
+        var t = el("button", "linklike", frames.length > 1 ? "Show one code" : "Camera cannot read it? Show smaller codes"); t.type = "button";
+        t.onclick = function () { renderQr(box, text, !parts).catch(function (e) { alertBox(e.message); }); };
+        box.appendChild(t);
+      }
+      box.classList.remove("hidden");
+    });
+  }
+  // Scanning: the camera through getUserMedia; frames are read by BarcodeDetector where the browser has it,
+  // else by the service (POST /api/qr/scan, nothing kept). Parts of a split code are collected until complete.
+  var scan = null, scanCanvas = null;
+  var NOT_KIND = { request: "This is not a share request code.", token: "This is not a sealed share token.", pair: "This is not a pairing code." };
+  function rawPost(path, body, type) {
+    return fetch(path, { method: "POST", headers: { "X-Varsto-Token": token, "Content-Type": type || "application/octet-stream" }, body: body }).then(function (r) {
+      return r.json().then(function (j) { if (!r.ok) { throw new Error(j.error || ("The Varsto service answered " + r.status)); } return j; });
+    });
+  }
+  function scanQr(want) {
+    return new Promise(function (resolve) {
+      closeScanner(null);
+      scan = { resolve: resolve, want: want || "", texts: [], stream: null, timer: null, busy: false, detector: null };
+      var v = $("scanner-video"), st = $("scanner-status");
+      $("scanner-text").value = ""; st.textContent = "Point the camera at the QR code.";
+      $("scanner").classList.remove("hidden"); document.body.classList.add("modal-open");
+      var md = navigator.mediaDevices;
+      if (!md || !md.getUserMedia) { v.classList.add("hidden"); st.textContent = "No camera is available here. Open a screenshot of the code or paste the code."; return; }
+      v.classList.remove("hidden");
+      var s = scan;
+      md.getUserMedia({ video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false }).then(function (stream) {
+        if (scan !== s) { stream.getTracks().forEach(function (t) { t.stop(); }); return; }
+        s.stream = stream; v.srcObject = stream; v.play().catch(function () {});
+        if (window.BarcodeDetector) { try { s.detector = new window.BarcodeDetector({ formats: ["qr_code"] }); } catch (e) { s.detector = null; } }
+        s.timer = setInterval(scanFrame, 300);
+      }).catch(function (e) { if (scan === s) { v.classList.add("hidden"); st.textContent = "The camera could not be opened (" + e.message + "). Open a screenshot of the code or paste the code."; } });
+    });
+  }
+  function closeScanner(result) {
+    if (!scan) { return; }
+    var s = scan; scan = null;
+    if (s.timer) { clearInterval(s.timer); }
+    if (s.stream) { s.stream.getTracks().forEach(function (t) { t.stop(); }); }
+    var v = $("scanner-video"); v.pause(); v.srcObject = null;
+    $("scanner").classList.add("hidden"); document.body.classList.remove("modal-open");
+    s.resolve(result);
+  }
+  function frameTexts(v) {
+    var k = Math.min(1, 1280 / Math.max(v.videoWidth, v.videoHeight));
+    var w = Math.round(v.videoWidth * k), h = Math.round(v.videoHeight * k);
+    var c = scanCanvas || (scanCanvas = document.createElement("canvas")); c.width = w; c.height = h;
+    var g = c.getContext("2d", { willReadFrequently: true }); g.drawImage(v, 0, 0, w, h);
+    var d = g.getImageData(0, 0, w, h).data, luma = new Uint8Array(w * h);
+    for (var i = 0, j = 0; j < luma.length; i += 4, j++) { luma[j] = (d[i] * 77 + d[i + 1] * 150 + d[i + 2] * 29) >> 8; }
+    return rawPost("/api/qr/scan?w=" + w + "&h=" + h, luma).then(function (r) { return r.texts || []; });
+  }
+  function scanFrame() {
+    var s = scan, v = $("scanner-video");
+    if (!s || s.busy || !v.videoWidth) { return; }
+    s.busy = true;
+    var found = s.detector
+      ? s.detector.detect(v).then(function (codes) { return codes.map(function (c) { return c.rawValue; }); }, function () { s.detector = null; return []; })
+      : frameTexts(v);
+    found.then(function (texts) {
+      texts = texts.filter(function (t) { return /^varsto:\/\//i.test(t); });
+      if (texts.length) { return scanned(texts); }
+    }).catch(function (e) { if (scan === s) { $("scanner-status").textContent = e.message; } }).then(function () { s.busy = false; });
+  }
+  function scanned(texts) {
+    var s = scan; if (!s) { return Promise.resolve(); }
+    texts.forEach(function (t) { if (s.texts.indexOf(t) < 0) { s.texts.push(t); } });
+    s.texts = s.texts.slice(-64);
+    return rawPost("/api/link/parse", JSON.stringify({ texts: s.texts }), "application/json").then(function (r) {
+      if (scan !== s) { return; }
+      if (r.part) { $("scanner-status").textContent = "Scanned " + r.have.length + " of " + r.count + " parts. Keep the camera on the changing code."; return; }
+      if (s.want && r.kind !== s.want) { s.texts = []; $("scanner-status").textContent = NOT_KIND[s.want]; return; }
+      closeScanner(r);
+    }, function (e) { if (scan === s) { s.texts = []; $("scanner-status").textContent = e.message; } });
+  }
+  $("scanner-cancel").onclick = function () { closeScanner(null); };
+  $("scanner-backdrop").onclick = function () { closeScanner(null); };
+  $("scanner-use").onclick = function () { var t = $("scanner-text").value.trim(); if (t) { scanned([t]); } };
+  $("scanner-upload").onclick = function () { $("scanner-file").click(); };
+  $("scanner-file").onchange = function (ev) {
+    var f = ev.target.files && ev.target.files[0]; ev.target.value = ""; if (!f || !scan) { return; }
+    $("scanner-status").textContent = "Reading the image…";
+    rawPost("/api/qr/scan?image=1", f).then(function (r) {
+      var texts = (r.texts || []).filter(function (t) { return /^varsto:\/\//i.test(t); });
+      if (!texts.length) { $("scanner-status").textContent = "No Varsto QR code was found in the image."; return; }
+      return scanned(texts);
+    }).catch(function (e) { $("scanner-status").textContent = e.message; });
+  };
+  document.addEventListener("keydown", function (ev) { if (scan && ev.key === "Escape") { ev.preventDefault(); closeScanner(null); } });
+
+  // varsto:// links opened from outside (a QR code scanned with the system camera, a clicked link):
+  // the service keeps the link (`varsto open-link`), phone shells call varstoOpenLink or pass #link=.
+  var pendingLink = null;
+  try { var hl = /^#link=(.+)$/.exec(location.hash); if (hl) { pendingLink = decodeURIComponent(hl[1]); history.replaceState(null, "", location.pathname + location.search); } } catch (e) { /* no history API */ }
+  window.varstoOpenLink = function (uri) { pendingLink = uri; routeLink(); };
+  function takeLink() {
+    api("GET", "/api/link").then(function (r) { if (r.uri) { pendingLink = r.uri; } routeLink(); }).catch(function () {});
+  }
+  function routeLink() {
+    var view = document.body.dataset.view;
+    if (!pendingLink || !view || view === "unlock") { return; }
+    var uri = pendingLink; pendingLink = null;
+    api("POST", "/api/link/parse", { text: uri }).then(function (info) { return applyLink(info, view); }).catch(function (e) { alertBox(e.message); });
+  }
+  function fillPair(info) {
+    var form = $("pair"); form.querySelector("input[name=code]").value = info.code;
+    if (info.addresses && info.addresses.length) { form.querySelector("input[name=address]").value = info.addresses[0]; }
+    var n = form.querySelector("input[name=name]"); if (n) { n.focus(); }
+  }
+  function applyLink(info, view) {
+    if (info.kind === "pair") {
+      if (view !== "setup") { return alertBox("This device already uses a vault. A pairing code is for the device you are adding: scan it there."); }
+      fillPair(info); log("pairing code filled in from the QR code; give this device a name and a passphrase, then Pair");
+      return;
+    }
+    if (info.kind === "token") {
+      if (view !== "setup") { return alertBox("This device already has a vault of its own. Open the sealed token on the device that made the request code."); }
+      $("acceptshare").querySelector("input[name=token]").value = info.text;
+      return alertBox("The sealed share token for " + info.folder + " is filled in under Accept a shared folder. Fill in the rest and choose Accept.");
+    }
+    var folders = lastStatus && !lastStatus.member ? lastStatus.folders.filter(function (f) { return !f.member; }) : [];
+    if (view !== "app" || !folders.length) { return alertBox("This is a share request. Open it on the device of the folder's owner."); }
+    return dialog({
+      title: "Share a folder with " + (info.name || "the requester") + "?",
+      text: "Choose the folder. Next you compare the six-word fingerprint with them.",
+      fields: [
+        { name: "folder", label: "Folder", options: folders.map(function (f) { return [f.name, f.name]; }) },
+        { name: "role", label: "Role", options: [["editor", "Editor: read and write"], ["viewer", "Viewer: read only"]], value: "editor", hint: "A viewer can still copy what it reads; a key cannot prevent that." }
+      ],
+      ok: "Continue"
+    }).then(function (r) { if (r) { return sealTo(folderByName(r.values.folder), info.text, r.values.role || "editor"); } });
   }
   // Who has access to a shared folder, under its row on the Shared page.
   function showMembers(f, box, owner) {
     api("GET", "/api/share/members?folder=" + encodeURIComponent(f.name)).then(function (l) {
       box.innerHTML = "";
       if (l.access_lost) { box.appendChild(el("li", "notice warn", "This device no longer receives new content of " + f.name + ": the owner removed it, or has not sent it the new key yet.")); }
+      if (l.this_role === "viewer") { box.appendChild(el("li", "notice", "This device may only read " + f.name + ": changes made here are not published. Files you change are moved aside and the shared version comes back.")); }
       l.members.forEach(function (m) {
         var li = el("li"); var body = el("div", "li-body"); var title = el("div", "li-title", m.name);
         var kind = m.kind === "owner-device" ? ["grey", "Owner's device"] : m.kind === "invite" ? (m.status === "pending" ? ["accent", "Token not accepted yet"] : ["grey", "Token revoked"]) : m.status === "removed" ? ["risk", "Removed"] : ["accent", "Member"];
         title.appendChild(pill(kind[0], kind[1]));
+        if (m.kind !== "owner-device" && m.status !== "removed" && m.status !== "revoked") { title.appendChild(m.role === "viewer" ? pill("grey", "Viewer") : pill("ok", "Editor")); }
         if (m.this_device) { title.appendChild(pill("grey", "This device")); }
         body.appendChild(title);
         var sub = [];
@@ -848,7 +1028,16 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
         li.appendChild(body);
         var removable = owner && ((m.kind === "member" && m.status === "active") || (m.kind === "invite" && m.status === "pending"));
         if (removable) {
-          var a = el("div", "li-actions"); var b = el("button", "secondary danger", m.kind === "invite" ? "Revoke…" : "Remove…"); b.type = "button";
+          var a = el("div", "li-actions");
+          if (m.kind === "member") {
+            // The role: only the owner's devices sign a change of it.
+            var rs = el("select"); rs.setAttribute("aria-label", "Role");
+            [["editor", "Editor"], ["viewer", "Viewer"]].forEach(function (o) { var x = el("option", null, o[1]); x.value = o[0]; rs.appendChild(x); });
+            rs.value = m.role === "viewer" ? "viewer" : "editor";
+            rs.onchange = function () { setMemberRole(f, m, rs.value, box); };
+            a.appendChild(rs);
+          }
+          var b = el("button", "secondary danger", m.kind === "invite" ? "Revoke…" : "Remove…"); b.type = "button";
           b.onclick = function () { removeMember(f, m, box); }; a.appendChild(b); li.appendChild(a);
         }
         box.appendChild(li);
@@ -858,6 +1047,21 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
         b.onclick = function () { removeMember(f, { id: "all", name: "everyone", kind: "all" }, box); }; a.appendChild(b); li.appendChild(a); box.appendChild(li);
       }
     }).catch(function (e) { alertBox(e.message); });
+  }
+  function setMemberRole(f, m, role, box) {
+    var viewer = role === "viewer";
+    dialog({
+      title: (viewer ? "Make " + m.name + " a viewer?" : "Let " + m.name + " write?"),
+      text: viewer ? m.name + " keeps reading " + f.name + ", and what it wrote until now stays. What it changes from now on is not accepted by your devices or the editors. It can still copy what it reads: a key cannot prevent that." : m.name + " can change, add and delete files in " + f.name + " again; your devices and the other members accept its changes.",
+      ok: viewer ? "Make viewer" : "Make editor", danger: viewer
+    }).then(function (r) {
+      if (!r) { return showMembers(f, box, true); }
+      busy(true);
+      return api("POST", "/api/share/role", { folder: f.name, member: m.id, role: role }).then(function (rep) {
+        log(f.name + ": " + rep.member + " is now " + (rep.role === "viewer" ? "a viewer" : "an editor"));
+        showMembers(f, box, true);
+      });
+    }).catch(function (e) { alertBox(e.message, "Nothing was changed"); showMembers(f, box, true); }).then(function () { busy(false); });
   }
   function removeMember(f, m, box) {
     var invite = m.kind === "invite";
@@ -949,12 +1153,116 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     };
   }
 
+  // Folder safety: a banner per folder that is paused on this device (its
+  // marker is missing or names another folder; deletions are held) or has
+  // changes waiting in send-only / receive-only mode, with the actions.
+  function folderAction(f, action, extra) {
+    var body = Object.assign({ folder: f.name, action: action }, extra || {});
+    return api("POST", "/api/folder/safety", body);
+  }
+  function safetyButton(label, cls, onclick) { var b = el("button", cls || "secondary", label); b.type = "button"; b.onclick = onclick; return b; }
+  function showFolderChanges(f) {
+    folderAction(f, "pending").then(function (c) {
+      var lines = [];
+      (c.held_paths || []).slice(0, 200).forEach(function (p) { lines.push("deleted  " + p); });
+      (c.local_changes || []).concat(c.remote_not_applied || []).slice(0, 200).forEach(function (x) { lines.push(x.kind + "  " + x.path); });
+      return dialog({ title: f.name, text: lines.length ? "The files waiting for your decision:" : "Nothing waits for a decision.", code: lines.join("\n"), cancel: false });
+    }).catch(function (e) { alertBox(e.message); });
+  }
+  function runFolderAction(f, action, done) {
+    busy(true);
+    return folderAction(f, action).then(function (r) { log(f.name + ": " + done(r)); return refreshStatus(); })
+      .catch(function (e) { alertBox(e.message); }).then(function () { busy(false); });
+  }
+  function renderFolderSafety(s) {
+    var box = $("foldersafety"); if (!box) { return; }
+    box.innerHTML = "";
+    (s.folders || []).forEach(function (f) {
+      if (!f.path) { return; }
+      var p = f.paused, h = f.held_deletions, text = null, buttons = [];
+      if (p && p.kind === "marker-missing") {
+        text = "Folder " + f.name + " is paused: the marker .varsto-folder is missing at " + p.path + ". Is the disk mounted? Nothing is synced until it is back.";
+        buttons.push(safetyButton("The directory is right", null, function () {
+          confirmBox("Write the marker into " + p.path + " and sync this directory as " + f.name + "? Only do this if the directory holds the folder's files: if it is an empty mount point, its files would be read as deleted (the deletion guard would still ask first).", { ok: "Write the marker" }).then(function (yes) { if (yes) { runFolderAction(f, "repair-marker", function () { return "marker written"; }); } });
+        }));
+      } else if (p && p.kind === "marker-other") {
+        text = "Folder " + f.name + " is paused: the directory " + p.path + " holds another folder's marker. Is the right disk mounted? Nothing is synced until it is fixed.";
+        buttons.push(safetyButton("The directory is right", null, function () {
+          confirmBox("Mark " + p.path + " as folder " + f.name + "? Only do this if the directory really holds this folder's files.", { ok: "Write the marker", danger: true }).then(function (yes) { if (yes) { runFolderAction(f, "repair-marker", function () { return "marker written"; }); } });
+        }));
+      } else if (h && h.origin === "local") {
+        text = "Folder " + f.name + " is paused: " + h.files + " of " + h.of_files + " files were deleted at once on this device. Nothing is synced until you decide.";
+        buttons.push(safetyButton("Restore them", null, function () { runFolderAction(f, "discard-deletions", function (r) { return r.restored + " files restored" + (r.unavailable.length ? ", " + r.unavailable.length + " not available now" : ""); }); }));
+        buttons.push(safetyButton("Delete them everywhere", "secondary danger", function () {
+          confirmBox("Delete these " + h.files + " files on every device? Other devices move them to their trash.", { ok: "Delete everywhere", danger: true }).then(function (yes) { if (yes) { runFolderAction(f, "confirm-deletions", function (r) { return r.deleted + " deletions confirmed"; }); } });
+        }));
+      } else if (h) {
+        text = "Folder " + f.name + " is paused: " + (h.device || "another device") + " deleted " + h.files + " of " + h.of_files + " files at once. Nothing is deleted here until you decide.";
+        buttons.push(safetyButton("Keep them and restore them everywhere", null, function () { runFolderAction(f, "discard-deletions", function (r) { return r.restored + " files kept"; }); }));
+        buttons.push(safetyButton("Delete them here too", "secondary danger", function () {
+          confirmBox("Delete these " + h.files + " files on this device too? They go to this device's trash.", { ok: "Delete here", danger: true }).then(function (yes) { if (yes) { runFolderAction(f, "confirm-deletions", function (r) { return r.deleted + " files moved to the trash"; }); } });
+        }));
+      } else if (f.remote_not_applied > 0) {
+        text = "Folder " + f.name + " is send-only on this device: " + f.remote_not_applied + " remote changes are not applied here.";
+        buttons.push(safetyButton("Override: make everyone match this device", null, function () {
+          confirmBox("Publish this device's state of these " + f.remote_not_applied + " files as the newest version? The other devices then match this one.", { ok: "Override", danger: true }).then(function (yes) { if (yes) { runFolderAction(f, "override", function (r) { return r.files + " files now follow this device"; }); } });
+        }));
+      } else if (f.local_changes > 0) {
+        text = "Folder " + f.name + " is receive-only on this device: " + f.local_changes + " local changes are not published.";
+        buttons.push(safetyButton("Revert: restore the vault version", null, function () {
+          confirmBox("Replace the " + f.local_changes + " locally changed files with the vault's versions? The local copies go to this device's trash.", { ok: "Revert" }).then(function (yes) { if (yes) { runFolderAction(f, "revert", function (r) { return r.reverted + " local changes reverted"; }); } });
+        }));
+      }
+      if (!text) { return; }
+      var n = el("div", "notice warn banner-action"); n.dataset.folderSafety = f.name;
+      n.appendChild(el("span", null, text));
+      if (h || f.remote_not_applied > 0 || f.local_changes > 0) { buttons.unshift(safetyButton("Show files", null, function () { showFolderChanges(f); })); }
+      buttons.forEach(function (b) { n.appendChild(b); });
+      box.appendChild(n);
+    });
+  }
+  // Sync settings of a folder on this device: its mode and the deletion guard.
+  var MODE_HINT = {
+    "normal": "This device publishes its changes and applies everyone else's.",
+    "send-only": "This device publishes its changes but never applies other devices' changes to its files (for a camera phone, say). Differences are listed; an override makes everyone match this device.",
+    "receive-only": "This device applies other devices' changes but never publishes its own. Local changes are listed; a revert restores the vault's versions."
+  };
+  function folderSettings(f) {
+    folderAction(f, "pending").then(function (c) {
+      var g = c.deletion_guard || {};
+      return dialog({
+        title: "Sync settings of " + f.name,
+        text: "These settings apply to this device only.",
+        fields: [
+          { name: "mode", label: "Mode on this device", options: [["normal", "Normal (send and receive)"], ["send-only", "Send only"], ["receive-only", "Receive only"]], value: c.mode || "normal", hint: MODE_HINT[c.mode || "normal"] },
+          { name: "guard", label: "Hold mass deletions for confirmation", options: [["on", "Yes"], ["off", "No"]], value: g.enabled === false ? "off" : "on", hint: "Deletions are held when more than the share and more than the files below are deleted at once, or more than the limit." },
+          { name: "percent", label: "Share of the folder's files (%)", type: "number", value: g.percent },
+          { name: "min_files", label: "and more than this many files", type: "number", value: g.min_files },
+          { name: "max_files", label: "or more than this many files (0: no limit)", type: "number", value: g.max_files }
+        ],
+        ok: "Save"
+      }).then(function (r) {
+        if (!r) { return; }
+        var v = r.values;
+        var guard = { enabled: v.guard !== "off", percent: Math.max(0, Math.floor(+v.percent) || 0), min_files: Math.max(0, Math.floor(+v.min_files) || 0), max_files: Math.max(0, Math.floor(+v.max_files) || 0) };
+        var chain = Promise.resolve();
+        if (v.mode !== (c.mode || "normal")) { chain = chain.then(function () { return folderAction(f, "mode", { mode: v.mode }); }).then(function () { log(f.name + ": mode " + v.mode); }); }
+        if (guard.enabled !== (g.enabled !== false) || guard.percent !== g.percent || guard.min_files !== g.min_files || guard.max_files !== g.max_files) {
+          chain = chain.then(function () { return folderAction(f, "deletion-guard", { guard: guard }); }).then(function (x) { log(f.name + ": deletions are held when " + x.text); });
+        }
+        return chain.then(function () { return refreshStatus(); });
+      });
+    }).catch(function (e) { alertBox(e.message); });
+  }
+
   // `known`: a status the last request already returned (no second round trip,
   // which would wait while the service syncs).
   function refreshStatus(known) {
     return (known && known.folders ? Promise.resolve(known) : api("GET", "/api/status")).then(function (s) {
       lastStatus = s;
+      setTimeout(function () { helpAfterStatus(s); }, 0);
       renderLedger(s.ledger_health);
+      renderFolderSafety(s);
       $("who").textContent = s.device_name + " · vault " + s.vault_id.slice(0, 8) + " · " + s.ledger_batches + " ledger batches";
       var tb = $("folders").querySelector("tbody"); tb.innerHTML = "";
       var sel = $("dupefolder"); sel.innerHTML = "";
@@ -972,7 +1280,10 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
         if (f.strongroom) { nameCell.appendChild(document.createTextNode(" ")); nameCell.appendChild(pill(f.strongroom === "locked" ? "grey" : "accent", f.strongroom === "locked" ? "Strongroom locked" : "Strongroom open")); }
         if (f.selective) { nameCell.appendChild(document.createTextNode(" ")); nameCell.appendChild(pill("grey", "selective")); }
         if (f.shared) { nameCell.appendChild(document.createTextNode(" ")); nameCell.appendChild(pill("accent", "shared")); }
+        if (f.read_only) { nameCell.appendChild(document.createTextNode(" ")); nameCell.appendChild(pill("grey", "read only")); }
         if (f.path && f.plain === false) { nameCell.appendChild(document.createTextNode(" ")); nameCell.appendChild(pill("grey", "encrypted here")); }
+        if (f.path && f.mode && f.mode !== "normal") { nameCell.appendChild(document.createTextNode(" ")); nameCell.appendChild(pill("grey", f.mode)); }
+        if (f.path && f.paused) { nameCell.appendChild(document.createTextNode(" ")); nameCell.appendChild(pill("bad", "paused")); }
         var sub = el("span", "sub", f.path || "Not attached on this device"); if (f.path) { sub.title = f.path; } nameCell.appendChild(sub);
         nameCell.appendChild(miniMap(f));
         tr.appendChild(nameCell);
@@ -984,9 +1295,11 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
         var menu = rowMenu(act, "folder:" + f.name);
         if (!s.member) { var sh = document.createElement("button"); sh.className = "secondary"; sh.textContent = f.shared ? "Token" : "Share"; sh.onclick = function () { shareFolder(f); }; menu.appendChild(sh); }
         if (!s.member) { var pb = document.createElement("button"); pb.className = "secondary"; pb.textContent = "Policy"; pb.onclick = function () { openPolicy(f); }; act.appendChild(pb); }
+        if (f.path) { var ssb = document.createElement("button"); ssb.className = "secondary"; ssb.textContent = "Sync settings…"; ssb.title = "Mode on this device and the deletion guard"; ssb.onclick = function () { folderSettings(f); }; menu.appendChild(ssb); }
         if (!s.member) { var rmb = document.createElement("button"); rmb.className = "secondary"; rmb.textContent = "Remove"; rmb.onclick = function () { removeFolder(f); }; menu.appendChild(rmb); }
         if (f.strongroom && f.strongroom !== "locked") { var lk = document.createElement("button"); lk.className = "secondary"; lk.textContent = "Lock"; lk.onclick = function () { api("POST", "/api/strongroom/lock", { folder: f.name }).then(function () { log("locked " + f.name); return refreshStatus(); }).catch(function (e) { alertBox(e.message); }); }; menu.appendChild(lk); }
         if (!s.member && f.path && !f.strongroom && !f.shared) { var cv = document.createElement("button"); cv.className = "secondary"; cv.textContent = "Convert to Strongroom…"; cv.onclick = function () { convertStrongroom(f); }; menu.appendChild(cv); }
+        if (f.path) { var mf = document.createElement("button"); mf.className = "secondary"; mf.textContent = "Free space\u2026"; mf.title = "Free space kept on this folder's disk: " + (f.min_free_text || "5 %"); mf.onclick = function () { editMinFree("folder", f.name, f.min_free); }; menu.appendChild(mf); }
         if (f.strongroom) { var ks = document.createElement("button"); ks.className = "secondary"; ks.textContent = "Security keys…"; ks.title = "Enrolled security keys; add a backup key"; ks.onclick = function () { strongroomKeys(f); }; menu.appendChild(ks); }
         if (f.strongroom === "locked") { var note = document.createElement("span"); note.className = "muted"; note.textContent = "unlock with: varsto strongroom unlock " + f.name; act.appendChild(note); }
         menu.done();
@@ -1014,7 +1327,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
         if (f.shared) {
           shared++;
           var sli = el("li"); var sic = el("span", "li-icon"); sic.appendChild(icon("sharing")); sli.appendChild(sic);
-          var sbody = el("div", "li-body"); var stitle = el("div", "li-title", f.name); stitle.appendChild(pill("accent", "shared")); sbody.appendChild(stitle);
+          var sbody = el("div", "li-body"); var stitle = el("div", "li-title", f.name); stitle.appendChild(pill("accent", "shared")); if (f.read_only) { stitle.appendChild(pill("grey", "read only")); } sbody.appendChild(stitle);
           sbody.appendChild(el("div", "li-sub", f.files + " files · " + fmtBytes(f.bytes) + (f.path ? " · " + f.path : ""))); sli.appendChild(sbody);
           var sa = el("div", "li-actions");
           var smw = el("li", "sub-row hidden"); var sm = el("ul", "list sub-list"); smw.appendChild(sm);
@@ -1091,9 +1404,11 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
         var dest = (s.carrier_for || {})[st.name] || [];
         if (st.cold) { title.appendChild(pill("grey", "cold")); } if (st.carrier) { title.appendChild(pill("grey", dest.length ? "transferrer for " + dest.join(", ") : "transferrer")); }
         if (st.place) { title.appendChild(pill("grey", st.place)); }
+        if (st.kind === "local-dir") { where = (where || "") + " \u00b7 keeps " + (st.min_free ? (/%$/.test(st.min_free) ? st.min_free.replace("%", " %") : fmtBytes(+st.min_free)) : "5 %") + " free"; }
         body.appendChild(title); body.appendChild(el("div", "li-sub", where || "")); li.appendChild(body);
         if (!s.member) {
           var ra = el("div", "li-actions");
+          if (st.kind === "local-dir") { var mb = el("button", "secondary", "Free space\u2026"); mb.type = "button"; mb.title = "Free space kept on this storage's disk"; mb.onclick = function () { editMinFree("storage", st.name, st.min_free); }; ra.appendChild(mb); }
           if (st.carrier) { var cb = el("button", "secondary", "Destination\u2026"); cb.type = "button"; cb.onclick = function () { carrierDestination(st.name, dest); }; ra.appendChild(cb); }
           if (!st.carrier) { var db = el("button", "secondary drain-btn", "Drain\u2026"); db.type = "button"; db.title = "Empty this storage onto the others, without weakening any policy"; db.onclick = function () { drainStorage(st.name); }; ra.appendChild(db); }
           var rb = el("button", "secondary", "Remove"); rb.type = "button"; rb.onclick = function () { removeStorage(st.name); }; ra.appendChild(rb); li.appendChild(ra);
@@ -1111,6 +1426,9 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
       $("members").textContent = mems.length ? "Members with access to shared folders: " + mems.join(", ") : "";
       loadDevices(s);
       var org = s.org || null;
+      // Locked out by the organization's platform policy.
+      $("orgblockbanner").textContent = org && org.blocked ? orgBlockedText(org.blocked) : "";
+      $("orgblockbanner").classList.toggle("hidden", !(org && org.blocked));
       document.querySelectorAll("[data-org-only]").forEach(function (b) { b.classList.toggle("hidden", !org); });
       $("teamcard").classList.toggle("hidden", !!org || !!s.member);
       if (!org && currentPage === "organization") { nav("settings"); }
@@ -1133,6 +1451,8 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
       if (f.selective) { title.appendChild(pill("grey", "selective")); }
       if (f.shared) { title.appendChild(pill("accent", "shared")); }
       if (f.path && f.plain === false) { title.appendChild(pill("grey", "encrypted here")); }
+      if (f.path && f.mode && f.mode !== "normal") { title.appendChild(pill("grey", f.mode)); }
+      if (f.path && f.paused) { title.appendChild(pill("bad", "paused")); }
       if (!f.path) { title.appendChild(pill("grey", "not on this device")); }
       body.appendChild(title);
       body.appendChild(el("span", "fc-sub", f.files + " file" + (f.files === 1 ? "" : "s") + " · " + fmtBytes(f.bytes)));
@@ -1757,6 +2077,121 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
       .then(function () { busy(false); loadTrash(); });
   };
 
+  // Version history: the versions of the selected file (Files page details)
+  // and the settings card beside the trash settings.
+  var versionsFor = "";
+  function restoredName(path) {
+    var slash = path.lastIndexOf("/"); var dir = path.slice(0, slash + 1); var name = path.slice(slash + 1);
+    var dot = name.lastIndexOf(".");
+    return dir + (dot > 0 ? name.slice(0, dot) + " (restored)" + name.slice(dot) : name + " (restored)");
+  }
+  function loadVersions(folder, f) {
+    var key = folder + "/" + f.path; versionsFor = key;
+    var box = $("fd-history"); var ul = $("fd-versions"); var note = $("fd-history-note");
+    api("GET", "/api/history?folder=" + enc(folder) + "&path=" + enc(f.path)).then(function (h) {
+      if (versionsFor !== key) { return; }
+      ul.innerHTML = ""; box.classList.remove("hidden");
+      // One sentence at a time, so it is translated as a whole.
+      var msg = h.days === null ? "Version history is off for this folder: no new versions are kept." : h.versions.length ? "" : "No earlier versions";
+      note.textContent = msg; note.classList.toggle("hidden", !msg);
+      h.versions.forEach(function (v) {
+        var li = el("li"); var body = el("div", "li-body");
+        var when = el("div", null, fmtWhen(v.replaced_utc)); when.setAttribute("data-no-i18n", ""); body.appendChild(when);
+        var by = v.author || v.replaced_by;
+        var sub = el("div", "li-sub", fmtBytes(v.size) + " · " + by + (v.new_bytes < v.size ? " · " + actTr("own changes") + " " + fmtBytes(v.new_bytes) : ""));
+        sub.setAttribute("data-no-i18n", ""); body.appendChild(sub);
+        if (v.cold_only) { body.appendChild(pill("grey", "cold")); }
+        li.appendChild(body);
+        var rb = el("button", "secondary", "Restore…"); rb.type = "button"; rb.onclick = function () { restoreVersion(folder, f.path, v, false); }; li.appendChild(rb);
+        var menu = rowMenu(li, "version:" + v.id);
+        var cb = el("button", "secondary", "Restore as a copy…"); cb.type = "button"; cb.onclick = function () { restoreVersion(folder, f.path, v, true); }; menu.appendChild(cb);
+        menu.done();
+        ul.appendChild(li);
+      });
+    }).catch(function (e) { if (versionsFor === key) { box.classList.add("hidden"); } log("versions: " + e.message); });
+  }
+  function restoreVersion(folder, path, v, copy) {
+    var when = fmtWhen(v.replaced_utc);
+    var ask = copy
+      ? dialog({ title: "Restore as a copy?", text: "The version from " + when + " is written as a new file beside the current one. Nothing is overwritten.", fields: [{ name: "as", label: "New name", value: restoredName(path).split("/").pop(), required: true }], ok: "Restore" })
+      : dialog({ title: "Restore this version?", text: "The version from " + when + " becomes the current " + path + ". The current version is kept in the versions, so nothing is lost. The change syncs to your other devices.", ok: "Restore" });
+    ask.then(function (r) {
+      if (!r) { return; }
+      var body = { folder: folder, path: path, version: v.id };
+      if (copy) { body.as = (r.values.as || "").trim(); if (!body.as) { return; } }
+      busy(true);
+      return api("POST", "/api/history/restore-plan", body).then(function (p) {
+        if (!p.cold_storages.length) { return false; }
+        var text = fmtBytes(p.cold_bytes) + " of it is kept only on cold storage " + p.cold_storages.join(", ") + ". Reading it back starts a retrieval, which your provider bills" + (p.read_cost ? " (about " + p.read_cost + ")" : "") + " and which can take hours.";
+        return dialog({ title: "Read from cold storage?", text: text, ok: "Read cold storage", danger: true }).then(function (x) { if (!x) { throw new Error("cancelled"); } return true; });
+      }).then(function (cold) {
+        body.confirm_cold_read = cold;
+        return api("POST", "/api/history/restore", body);
+      }).then(function (x) { log("Restored the version of " + x.path + " to " + x.to); }, function (e) { if (e.message !== "cancelled") { alertBox(e.message); } })
+        .then(function () { busy(false); loadFiles(); });
+    });
+  }
+  var historyFolderDays = {};
+  function loadHistorySettings() {
+    return Promise.all([api("GET", "/api/history/status"), api("GET", "/api/folders")]).then(function (r) {
+      renderHistoryStatus(r[0], r[1]);
+    }).catch(function (e) { log("history: " + e.message); });
+  }
+  function historyModeShown() {
+    var f = $("historysettings"); var picked = !!f.folder.value; var own = f.mode.value === "days";
+    $("historymode-label").classList.toggle("hidden", !picked);
+    $("historyfolderdays-label").classList.toggle("hidden", !picked || !own);
+    f.days.disabled = !f.on.checked;
+  }
+  function renderHistoryStatus(st, folders) {
+    var f = $("historysettings");
+    historyFolderDays = st.folder_days || {};
+    if (document.activeElement !== f.days) { f.days.value = st.days || 90; }
+    f.on.checked = st.days > 0;
+    var sel = $("historyfolder"); var cur = sel.value; sel.innerHTML = "";
+    var none = el("option", null, "No folder"); none.value = ""; sel.appendChild(none);
+    (folders || []).forEach(function (x) { var o = el("option", null, x.name); o.value = x.name; o.setAttribute("data-no-i18n", ""); sel.appendChild(o); });
+    sel.value = cur; if (sel.value !== cur) { sel.value = ""; }
+    var dl = $("historyfacts"); dl.innerHTML = "";
+    function fact(label, value) { dl.appendChild(el("dt", null, label)); var dd = el("dd", null, value); dd.setAttribute("data-no-i18n", ""); dl.appendChild(dd); }
+    fact("Earlier versions", st.versions + " · " + fmtBytes(st.extra_bytes));
+    (st.folders || []).filter(function (x) { return x.versions > 0 || x.days === null; }).forEach(function (x) {
+      fact(x.folder, x.days === null ? actTr("off") : x.versions + " · " + fmtBytes(x.extra_bytes));
+    });
+    var where = Object.keys(st.by_storage || {}).map(function (n) { return n + " " + fmtBytes(st.by_storage[n]); });
+    if (where.length) { fact("Kept on", where.join(", ")); }
+    pickHistoryFolder();
+  }
+  function pickHistoryFolder() {
+    var f = $("historysettings"); var d = historyFolderDays[f.folder.value];
+    f.mode.value = d === undefined ? "vault" : d === 0 ? "off" : "days";
+    f.folderdays.value = d ? d : "";
+    historyModeShown();
+  }
+  $("historyfolder").addEventListener("change", pickHistoryFolder);
+  $("historymode").addEventListener("change", historyModeShown);
+  $("historysettings").on.addEventListener("change", historyModeShown);
+  $("historysettings").onsubmit = function (ev) {
+    ev.preventDefault();
+    var d = formData(ev.target); var days = parseInt(d.days, 10);
+    if (d.on && !(days >= 1 && days <= 3650)) { alertBox("Keep versions from 1 to 3650 days."); return; }
+    var calls = [d.on ? { days: days } : { off: true }];
+    if (d.folder) {
+      if (d.mode === "vault") { calls.push({ folder: d.folder, days: 0 }); }
+      else if (d.mode === "off") { calls.push({ folder: d.folder, off: true }); }
+      else {
+        var fd = parseInt(d.folderdays, 10);
+        if (!(fd >= 1 && fd <= 3650)) { alertBox("Keep versions from 1 to 3650 days."); return; }
+        calls.push({ folder: d.folder, days: fd });
+      }
+    }
+    busy(true);
+    var chain = Promise.resolve();
+    calls.forEach(function (c) { chain = chain.then(function () { return api("POST", "/api/history/set", c); }); });
+    chain.then(function () { log("Version history settings saved"); }, function (e) { alertBox(e.message); })
+      .then(function () { busy(false); loadHistorySettings(); });
+  };
+
   // Automatic verification (Policies page): status line, run now, schedule.
   var autoVerify = null;
   function fmtWhen(t) { return t ? new Date(t * 1000).toLocaleString() : "never"; }
@@ -2110,10 +2545,38 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     $("svc-dot").dataset.state = state;
     $("pause").textContent = sv.paused ? "Resume" : "Pause";
     $("pause").dataset.paused = sv.paused ? "1" : "0";
+    renderSpace(sv.low_space || []);
+  }
+  // Places short of disk space: one line each (each translated on its own).
+  function renderSpace(list) {
+    var b = $("spacebanner"); if (!b) { return; }
+    b.innerHTML = "";
+    list.forEach(function (l) { var t = l.text || ""; b.appendChild(el("div", null, t.charAt(0).toUpperCase() + t.slice(1) + ".")); });
+    b.classList.toggle("hidden", list.length === 0);
+  }
+  // The free space kept on the disk of a folder (here) or of a directory storage.
+  function editMinFree(kind, name, current) {
+    dialog({
+      title: "Free space to keep",
+      text: kind === "folder" ? "Downloads into this folder stop while its disk would keep less free space than this. Reading and uploading go on, and downloads resume by themselves when there is room again." : "Blocks are not written to this storage while its disk would keep less free space than this. The other storages still get them, and writing resumes by itself when there is room again.",
+      fields: [{ name: "min_free", label: "Keep free", value: current || "5%", hint: "A share of the disk (5%) or an amount (10GB). The default is 5 %." }],
+      ok: "Save", extra: current ? "Default" : null
+    }).then(function (r) {
+      if (!r) { return; }
+      var v = r.action === "extra" ? "" : (r.values.min_free || "").trim();
+      var body = kind === "folder" ? { folder: name, min_free: v } : { name: name, min_free: v };
+      return api("POST", kind === "folder" ? "/api/folder/min-free" : "/api/storage/min-free", body).then(function () {
+        log(name + ": " + (v || "5%") + " kept free");
+        return refreshStatus();
+      });
+    }).catch(function (e) { alertBox(e.message); });
   }
   // The tray and menu bar pause and sync through the same service; follow them.
-  function pollService() { if (!token || document.visibilityState !== "visible") { return; } api("GET", "/api/service").then(renderService).catch(function () {}); }
-  setInterval(pollService, 5000);
+  var lastServicePoll = 0;
+  function pollService() { if (!token || document.visibilityState !== "visible") { return; } lastServicePoll = Date.now(); api("GET", "/api/service").then(renderService).catch(function () {}); }
+  // Every five seconds without the event stream; with it, the events ask
+  // (serviceSoon) and a slow poll once a minute stays as a safety net.
+  setInterval(function () { if (evsOk && Date.now() - lastServicePoll < 60000) { return; } pollService(); }, 5000);
   window.addEventListener("focus", pollService);
   $("pause").onclick = function () { api("POST", "/api/service/pause", { paused: $("pause").dataset.paused !== "1" }).then(renderService).catch(function (e) { log("error: " + e.message); }); };
   // Updates: checked by themselves (at start and every six hours); the
@@ -2153,7 +2616,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   function runSync(folder) {
     busy(true); log("sync " + (folder || "all") + " started");
     return api("POST", "/api/sync", folder ? { folder: folder } : {}).then(function (r) {
-      r.forEach(function (x) { log(x.pull.folder + ": pulled " + x.pull.files_updated + " updated, " + x.pull.files_deleted + " deleted, " + x.pull.conflicts + " conflicts; pushed " + x.push.files_changed + " changed, " + x.push.chunks_uploaded + " chunks" + (x.pull.files_unavailable.length ? "; unavailable: " + x.pull.files_unavailable.join(", ") : "") + (x.pull.forked_devices.length ? "; FORKED: " + x.pull.forked_devices.join(", ") : "") + ((x.pull.renamed_locally || []).length ? "; kept under another name here because the disk ignores case: " + x.pull.renamed_locally.join(", ") : "")); });
+      r.forEach(function (x) { log(x.pull.folder + ": pulled " + x.pull.files_updated + " updated, " + x.pull.files_deleted + " deleted, " + x.pull.conflicts + " conflicts; pushed " + x.push.files_changed + " changed, " + x.push.chunks_uploaded + " chunks" + (x.pull.files_unavailable.length ? "; unavailable: " + x.pull.files_unavailable.join(", ") : "") + (x.pull.forked_devices.length ? "; FORKED: " + x.pull.forked_devices.join(", ") : "") + ((x.pull.renamed_locally || []).length ? "; kept under another name here because the disk ignores case: " + x.pull.renamed_locally.join(", ") : "") + ((x.push.read_only || (x.pull.kept_aside || []).length) ? "; read-only: your changes were not published" + (((x.pull.kept_aside || []).length + (x.push.kept_aside || []).length) ? " (kept aside: " + (x.pull.kept_aside || []).concat(x.push.kept_aside || []).join(", ") + ")" : "") : "") + ((x.pull.writes_refused || []).length ? "; not taken from read-only members: " + x.pull.writes_refused.join(", ") : "")); });
     }).catch(function (e) { log("sync failed: " + e.message); }).then(function () { busy(false); return refreshStatus().then(function () { if (currentPage === "files") { loadFiles(); } }); });
   }
 
@@ -2186,7 +2649,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     $("files-mkdir").disabled = !f;
     updateToolbar();
   }
-  function openFolder(name) { $("filesfolder").value = name; markTree(name); updateFilesHead(); showFolderForms(false); setScreen("folder"); nav("files"); loadFiles(); }
+  function openFolder(name) { if (fsEdit && fsEdit.folder !== name) { closeFolderSettings(); } $("filesfolder").value = name; markTree(name); updateFilesHead(); showFolderForms(false); setScreen("folder"); nav("files"); loadFiles(); }
   function showFolderForms(on, byUser) { $("folderforms").classList.toggle("hidden", !on); if (byUser) { $("folderforms").dataset.user = on ? "1" : "0"; } if (on && byUser) { var inp = $("addfolder").querySelector("input[name=name]"); setTimeout(function () { inp.focus(); }, 50); } }
   $("treeadd").onclick = function () { nav("files"); showFolderForms(true, true); window.scrollTo(0, document.body.scrollHeight); };
   $("filesadd").onclick = function () { var open = $("folderforms").classList.contains("hidden"); showFolderForms(open, true); if (open) { $("folderforms").scrollIntoView({ block: "start", behavior: "smooth" }); } };
@@ -2309,11 +2772,75 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
       if (fs.chunks_verified_elsewhere > 0) { copies.push(fs.chunks_verified_elsewhere + " verified by another device"); }
     }
     $("fd-copies").textContent = copies.join("; ") || "unknown";
+    // File metadata (`fsmeta`): a link's target, permissions, owner, attributes.
+    var meta = [["link", f.symlink || ""],
+      ["mode", f.mode_text ? f.mode_text + " (" + ("000" + f.mode.toString(8)).slice(-4) + ")" : ""],
+      ["owner", f.owner || ""], ["xattrs", (f.xattrs || []).join(", ")]];
+    meta.forEach(function (m) { $("fd-" + m[0]).textContent = m[1]; $("fd-" + m[0]).classList.toggle("hidden", !m[1]); $("fd-" + m[0] + "-dt").classList.toggle("hidden", !m[1]); });
+    if (f.symlink) {
+      var ld = $("fd-link"); ld.textContent = ""; ld.appendChild(el("code", "", f.symlink));
+      if (f.symlink_absolute) { ld.appendChild(document.createTextNode(" ")); ld.appendChild(el("span", "muted", "(absolute: it may point elsewhere on another device)")); }
+    }
     var acts = $("fd-actions"); acts.innerHTML = "";
     fileActions(folder, f, true).forEach(function (b) { acts.appendChild(b); });
     showAnalysis(folder, f);
+    $("fd-history").classList.add("hidden");
+    loadVersions(folder, f);
+    showChanges(folder, f);
     updateToolbar();
   }
+  // Change history (`/api/changes`): who changed what and when, from the
+  // signed manifests. One line per version.
+  var ACTION_LABELS = { created: "Created", modified: "Modified", deleted: "Deleted", restored: "Restored" };
+  function changeItem(c, withPath) {
+    var li = el("li"); var body = el("div", "li-body"); var title = el("div", "li-title");
+    if (c.action === "renamed") {
+      title.appendChild(el("span", null, c.from ? "Renamed from" : "Renamed to"));
+      title.appendChild(document.createTextNode(" "));
+      var other = el("span", null, c.from || c.to || ""); other.setAttribute("data-no-i18n", ""); title.appendChild(other);
+    } else {
+      title.appendChild(el("span", null, ACTION_LABELS[c.action] || c.action));
+    }
+    if (withPath) { title.appendChild(document.createTextNode(" ")); var pth = el("span", "muted", c.path); pth.setAttribute("data-no-i18n", ""); title.appendChild(pth); }
+    if (!c.verified) { var nv = pill("grey", "not verified"); nv.title = "The file list that named this version was not announced in a signed ledger entry this device holds"; title.appendChild(nv); }
+    body.appendChild(title);
+    var who = c.device_name + (c.user ? " (" + c.user + ")" : "");
+    var parts = [c.time_utc ? new Date(c.time_utc * 1000).toLocaleString() : "", who];
+    if (c.action !== "deleted" && !(c.action === "renamed" && c.to)) { parts.push(fmtBytes(c.size)); }
+    if (c.hash) { parts.push(c.hash.slice(0, 8)); }
+    var sub = el("div", "li-sub", parts.filter(Boolean).join(" · ")); sub.setAttribute("data-no-i18n", ""); body.appendChild(sub);
+    li.appendChild(body);
+    return li;
+  }
+  function showChanges(folder, f) {
+    var ul = $("fd-changes-list"); ul.innerHTML = "";
+    api("GET", "/api/changes?folder=" + enc(folder) + "&path=" + enc(f.path) + "&limit=20").then(function (r) {
+      if (selectedFile !== f) { return; }
+      ul.innerHTML = "";
+      r.changes.forEach(function (c) { ul.appendChild(changeItem(c, c.path !== f.path)); });
+      if (!r.changes.length) { ul.appendChild(el("li", "muted small", "No changes recorded yet")); }
+    }).catch(function () {});
+  }
+  function loadRecentChanges() {
+    var folder = $("filesfolder").value; if (!folder) { return; }
+    var v = formData($("rc-form"));
+    var q = "folder=" + enc(folder) + "&limit=200";
+    ["path", "device", "user", "since"].forEach(function (k) { if ((v[k] || "").trim()) { q += "&" + k + "=" + enc(v[k].trim()); } });
+    var ul = $("rc-list");
+    api("GET", "/api/changes?" + q).then(function (r) {
+      ul.innerHTML = "";
+      r.changes.forEach(function (c) { ul.appendChild(changeItem(c, true)); });
+      if (!r.changes.length) { ul.appendChild(el("li", "muted small", "No changes match")); }
+      if (r.truncated) { ul.appendChild(el("li", "muted small", "Older changes are left out; narrow the search.")); }
+    }).catch(function (e) { alertBox(e.message); });
+  }
+  $("files-changes").onclick = function () {
+    var box = $("recentchanges"); var show = box.classList.contains("hidden");
+    box.classList.toggle("hidden", !show);
+    if (show) { loadRecentChanges(); }
+  };
+  $("rc-close").onclick = function () { $("recentchanges").classList.add("hidden"); };
+  $("rc-form").onsubmit = function (ev) { ev.preventDefault(); loadRecentChanges(); };
   // The file's analysis (`/api/analysis`): what an assistant or the user
   // recorded about its contents. A listing has the first 500 characters; the
   // whole text is asked for when there is more.
@@ -2623,8 +3150,108 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
       renderSel();
     }).catch(function (e) { log("error: " + e.message); });
   }
-  $("filesfolder").onchange = function () { multi.sel = {}; multi.on = false; markTree($("filesfolder").value); updateFilesHead(); clearSelection(); setScreen("folder"); loadFiles(); };
+  $("filesfolder").onchange = function () { multi.sel = {}; multi.on = false; markTree($("filesfolder").value); updateFilesHead(); clearSelection(); setScreen("folder"); loadFiles(); if (!$("recentchanges").classList.contains("hidden")) { loadRecentChanges(); } };
   $("selectivetoggle").onchange = function () { api("POST", "/api/selective", { folder: $("filesfolder").value, on: $("selectivetoggle").checked }).then(function () { log("selective sync " + ($("selectivetoggle").checked ? "on" : "off")); return refreshStatus(); }).catch(function (e) { log("error: " + e.message); }); };
+  // ----- Folder settings: ignore rules and file metadata -----
+  // The shared rules are the folder's .varstoignore (synced like any file);
+  // the local ones stay in this device's configuration. Testing a path uses
+  // what is being edited, saved or not.
+  var fsEdit = null;
+  function fsLines(text) { return text.split("\n").map(function (l) { return l.replace(/\s+$/, ""); }); }
+  function fsRenderLocal() {
+    var ul = $("fs-local"); ul.innerHTML = "";
+    fsEdit.local.forEach(function (p, i) {
+      var li = el("li"); li.appendChild(el("span", "", p));
+      var b = el("button", "secondary", "Remove"); b.type = "button";
+      b.onclick = function () { fsEdit.local.splice(i, 1); fsRenderLocal(); };
+      li.appendChild(b); ul.appendChild(li);
+    });
+    $("fs-local-empty").classList.toggle("hidden", fsEdit.local.length > 0);
+  }
+  function fsRenderSuggestions() {
+    var box = $("fs-suggestions"); box.innerHTML = "";
+    var have = fsLines($("fs-synced").value);
+    fsEdit.suggested.filter(function (p) { return have.indexOf(p) < 0; }).forEach(function (p) {
+      var b = el("button", "secondary", p); b.type = "button"; b.title = "Add to the shared rules";
+      b.onclick = function () { var t = $("fs-synced").value; $("fs-synced").value = t + (t && !/\n$/.test(t) ? "\n" : "") + p + "\n"; fsRenderSuggestions(); };
+      box.appendChild(b);
+    });
+    if (!box.childNodes.length) { box.appendChild(el("span", "muted", "all added")); }
+  }
+  function openFolderSettings() {
+    var folder = $("filesfolder").value;
+    if (!folder) { return; }
+    Promise.all([api("GET", "/api/folder/ignore?folder=" + enc(folder)), api("GET", "/api/folder/settings?folder=" + enc(folder))]).then(function (r) {
+      var ig = r[0], st = r[1];
+      fsEdit = { folder: folder, local: ig.local.slice(), suggested: ig.suggested, original: ig.synced, applies: ig.applies_here };
+      $("fs-folder").textContent = folder;
+      $("fs-synced").value = ig.synced;
+      $("fs-synced").disabled = !ig.applies_here;
+      $("fs-encrypted").classList.toggle("hidden", ig.applies_here);
+      $("fs-nested").textContent = ig.nested.length ? "Rules also in subfolders: " + ig.nested.join(", ") : "";
+      $("fs-nested").classList.toggle("hidden", !ig.nested.length);
+      fsRenderLocal(); fsRenderSuggestions();
+      $("fs-test-result").textContent = "";
+      ["permissions", "symlinks", "xattrs", "ownership"].forEach(function (k) { $("fs-" + k).checked = !!st.settings[k]; });
+      var caps = st.caps, cannot = [];
+      if (caps.mode === "None") { cannot.push("This system cannot keep permissions."); } else if (caps.mode === "ReadOnly") { cannot.push("This system keeps only the read-only flag of permissions."); }
+      if (!caps.symlinks) { cannot.push("This system cannot create symbolic links."); }
+      if (!caps.xattrs) { cannot.push("This system cannot keep extended attributes."); }
+      if (!caps.owner) { cannot.push("This system cannot keep ownership."); }
+      if (cannot.length) { cannot.push("What other devices set stays as it is."); }
+      var capsBox = $("fs-caps"); capsBox.innerHTML = "";
+      cannot.forEach(function (c) { capsBox.appendChild(el("span", "", c)); capsBox.appendChild(document.createTextNode(" ")); });
+      $("foldersettings").classList.remove("hidden");
+      $("foldersettings").scrollIntoView({ block: "nearest" });
+    }).catch(function (e) { log("error: " + e.message); });
+  }
+  function closeFolderSettings() { fsEdit = null; $("foldersettings").classList.add("hidden"); }
+  $("files-settings").onclick = function () { if (fsEdit && fsEdit.folder === $("filesfolder").value) { closeFolderSettings(); } else { openFolderSettings(); } };
+  $("fs-close").onclick = closeFolderSettings;
+  $("fs-cancel").onclick = closeFolderSettings;
+  $("fs-synced").oninput = function () { if (fsEdit) { fsRenderSuggestions(); } };
+  function fsAddLocal() {
+    var p = $("fs-local-add").value.replace(/\s+$/, "");
+    if (!p.trim() || !fsEdit) { return; }
+    if (fsEdit.local.indexOf(p) < 0) { fsEdit.local.push(p); }
+    $("fs-local-add").value = ""; fsRenderLocal();
+  }
+  $("fs-local-addbtn").onclick = fsAddLocal;
+  $("fs-local-add").onkeydown = function (ev) { if (ev.key === "Enter") { ev.preventDefault(); fsAddLocal(); } };
+  function fsTest() {
+    var path = $("fs-test").value.trim();
+    if (!path || !fsEdit) { return; }
+    var body = { folder: fsEdit.folder, path: path, local: fsEdit.local };
+    if (fsEdit.applies) { body.synced = $("fs-synced").value; }
+    api("POST", "/api/folder/check-ignore", body).then(function (v) {
+      var out = $("fs-test-result"); out.innerHTML = "";
+      if (!v.pattern) { out.appendChild(el("span", "", "Not ignored: no pattern matches.")); return; }
+      var sep = function () { out.appendChild(document.createTextNode(" · ")); };
+      out.appendChild(el("strong", "", v.ignored ? "Ignored" : "Included")); sep();
+      out.appendChild(el("span", "", "pattern")); out.appendChild(document.createTextNode(" ")); out.appendChild(el("code", "", v.pattern)); sep();
+      if (v.source === "local") { out.appendChild(el("span", "", "this device's rules")); } else { out.appendChild(el("code", "", v.source)); }
+      sep(); out.appendChild(el("span", "", "line " + v.line));
+      if (v.matched_path && v.matched_path !== path.replace(/^\/+|\/+$/g, "")) {
+        sep(); out.appendChild(el("span", "", "through the folder")); out.appendChild(document.createTextNode(" ")); out.appendChild(el("code", "", v.matched_path + "/"));
+      }
+    }).catch(function (e) { $("fs-test-result").textContent = e.message; });
+  }
+  $("fs-testbtn").onclick = fsTest;
+  $("fs-test").onkeydown = function (ev) { if (ev.key === "Enter") { ev.preventDefault(); fsTest(); } };
+  $("fs-save").onclick = function () {
+    if (!fsEdit) { return; }
+    var folder = fsEdit.folder;
+    var body = { folder: folder, local: fsEdit.local };
+    if (fsEdit.applies && $("fs-synced").value !== fsEdit.original) { body.synced = $("fs-synced").value; }
+    var settings = { folder: folder };
+    ["permissions", "symlinks", "xattrs", "ownership"].forEach(function (k) { settings[k] = $("fs-" + k).checked; });
+    api("POST", "/api/folder/ignore", body).then(function () {
+      return api("POST", "/api/folder/settings", settings);
+    }).then(function () {
+      log("folder settings saved for " + folder);
+      closeFolderSettings(); loadFiles();
+    }).catch(function (e) { log("error: " + e.message); });
+  };
   $("dupes").onclick = function () {
     api("GET", "/api/dupes?folder=" + enc($("dupefolder").value)).then(function (g) {
       $("dupeout").textContent = g.length ? g.map(function (x) { return fmtBytes(x.size) + ": " + x.paths.join(", "); }).join("\n") : "no duplicates";
@@ -2664,6 +3291,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   function pairButtons(open) { $("pairstart").classList.toggle("hidden", open); $("pairstop").classList.toggle("hidden", !open); }
   function renderPair(s) {
     $("pairbox").classList.remove("hidden"); pairButtons(s.open); $("paircode").textContent = s.open ? s.code : "";
+    renderQr($("pairqr"), s.open ? s.uri : "").catch(function () {});
     if (s.open) {
       $("pairinfo").textContent = "On the new device choose Pair with your other device and type this code. It works once, for " + Math.max(1, Math.ceil(s.expires_in_secs / 60)) + " more minute(s)." + (s.addresses.length ? " If the new device does not find this one, give it the address " + s.addresses.join(" or ") + "." : "") + (s.failed_attempts ? " Wrong codes so far: " + s.failed_attempts + " of 3." : "");
       return;
@@ -2675,6 +3303,10 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   function pollPair() { api("GET", "/api/pair/status").then(function (s) { if (s.code) { renderPair(s); if (s.open && !pairTimer) { pairTimer = setInterval(pollPair, 1500); } } }).catch(function () {}); }
   if (token) { pollPair(); }
   $("pairstart").onclick = function () { api("POST", "/api/pair/start", {}).then(function (s) { renderPair(s); if (!pairTimer) { pairTimer = setInterval(pollPair, 1500); } }).catch(function (e) { alertBox(e.message); }); };
+  $("pairscan").onclick = function () { scanQr("pair").then(function (info) { if (info) { fillPair(info); } }); };
+  $("sharetokenscan").onclick = function () {
+    scanQr("token").then(function (info) { if (info) { $("acceptshare").querySelector("input[name=token]").value = info.text; log("scanned the sealed share token for " + info.folder); } });
+  };
   $("pairstop").onclick = function () { api("POST", "/api/pair/stop", {}).then(function () { if (pairTimer) { clearInterval(pairTimer); pairTimer = null; } $("pairbox").classList.add("hidden"); pairButtons(false); }).catch(function (e) { alertBox(e.message); }); };
   $("join").onsubmit = function (ev) { ev.preventDefault(); busy(true); api("POST", "/api/join", formData(ev.target)).then(function () { ev.target.reset(); log("joined the vault; attach folders under Files"); nav("files"); return refreshState(); }).catch(function (e) { alertBox(e.message); }).then(function () { busy(false); }); };
   $("replicatoken").onclick = function () { api("GET", "/api/replica/token").then(function (r) { $("replicaout").textContent = "Replica token (give to the device that will hold your encrypted copies without being able to open them): " + r.token; $("replicaout").classList.remove("hidden"); }).catch(function (e) { alertBox(e.message); }); };
@@ -2683,6 +3315,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     api("POST", "/api/share/request", { name: nm ? nm.value.trim() : "" }).then(function (r) {
       $("sharerequestout").textContent = r.request_code + "\n\nFingerprint: " + r.fingerprint + "\nThe owner sees the same six words for this code. Read them to each other over a call or in person before the owner shares.";
       $("sharerequestout").classList.remove("hidden");
+      return renderQr($("sharerequestqr"), r.request_code);
     }).catch(function (e) { alertBox(e.message); });
   };
   // Organization (business use): nothing of it shows for a vault without one.
@@ -2711,13 +3344,17 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     });
   };
   var lastOrg = null;
+  var PLATFORM_NAMES = { linux: "Linux", macos: "macOS", windows: "Windows", android: "Android", ios: "iOS" };
+  // "this organization (Acme) does not allow Windows devices" as a sentence.
+  function orgBlockedText(why) { return why.charAt(0).toUpperCase() + why.slice(1) + ". This device does not sync or open the vault until an administrator allows it."; }
   function orgDevice(d, admin, user) {
     var li = el("li"); var body = el("div", "li-body"); var title = el("div", "li-title", d.name);
     if (d.admin) { title.appendChild(pill("accent", "admin")); }
     if (d.this_device) { title.appendChild(pill("grey", "This device")); }
     if (d.revoked) { title.appendChild(pill("risk", "Removed")); }
+    if (d.refused && !d.revoked) { var lp = pill("risk", "Locked out"); lp.title = "The organization " + d.refused; title.appendChild(lp); }
     body.appendChild(title);
-    body.appendChild(el("div", "li-sub", [deviceSystem(d), d.added_utc ? "added " + fmtDate(d.added_utc) : "", d.device_id.slice(0, 8)].filter(Boolean).join(" · ")));
+    body.appendChild(el("div", "li-sub", [deviceSystem(d) || PLATFORM_NAMES[d.platform] || d.platform || "", d.added_utc ? "added " + fmtDate(d.added_utc) : "", d.device_id.slice(0, 8)].filter(Boolean).join(" · ")));
     li.appendChild(body);
     if (admin && !d.this_device && !d.revoked && user) {
       var a = el("div", "li-actions"); var b = el("button", "secondary danger small", "Remove device…"); b.type = "button";
@@ -2735,6 +3372,8 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
       $("org-me").textContent = "Organization " + o.org_id.slice(0, 8) + " · this device is " + (admin ? "an administrator" : o.this_device_listed ? "a member" : "not in the organization") + (o.this_user ? ", owned by " + o.this_user : "") + " · " + o.users.length + (o.users.length === 1 ? " person" : " people") + ", " + o.admins.length + (o.admins.length === 1 ? " administrator" : " administrators");
       $("org-unlisted-note").classList.toggle("hidden", o.this_device_listed);
       $("org-unlisted-note").textContent = o.this_device_listed ? "" : "This device is not in the organization yet: the other devices ignore what it writes until an administrator adds it (Organization page on their device, or varsto org add-device).";
+      $("org-blocked-note").textContent = o.this_device_blocked ? orgBlockedText(o.this_device_blocked) : "";
+      $("org-blocked-note").classList.toggle("hidden", !o.this_device_blocked);
       var ul = $("org-users"); ul.innerHTML = "";
       o.users.forEach(function (u) {
         var li = el("li"); var body = el("div", "li-body"); var title = el("div", "li-title", u.user); body.appendChild(title);
@@ -2771,6 +3410,9 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
       $("org-admin-card").classList.toggle("hidden", !admin);
       var pf = $("org-policy");
       ["members_may_share", "members_may_add_storages", "members_may_set_policies", "members_may_add_devices"].forEach(function (k) { var i = pf.querySelector("input[name=" + k + "]"); i.checked = !!o.policy[k]; i.disabled = !admin; });
+      var allowed = o.policy.allowed_platforms || [];
+      pf.querySelectorAll("input[data-platform]").forEach(function (i) { i.checked = !allowed.length || allowed.indexOf(i.dataset.platform) >= 0; i.disabled = !admin; });
+      pf.min_app_version.value = o.policy.min_app_version || ""; pf.min_app_version.disabled = !admin;
       $("org-policy-save").classList.toggle("hidden", !admin);
       var lg = $("org-log"); lg.innerHTML = "";
       o.log.slice().reverse().forEach(function (e) {
@@ -2805,7 +3447,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     api("POST", "/api/org/fingerprint", { code: v.code.trim() }).then(function (f) {
       return dialog({
         title: "Approve " + (f.name || f.device_id.slice(0, 8)) + " for " + v.user.trim() + "?",
-        text: "Ask the person to read the six words their device shows. Approve only if they match exactly: different words mean the code was changed on its way.",
+        text: (f.platform ? "The device says it runs " + (PLATFORM_NAMES[f.platform] || f.platform) + ". " : "") + "Ask the person to read the six words their device shows. Approve only if they match exactly: different words mean the code was changed on its way.",
         code: f.fingerprint,
         ok: "The words match, approve"
       }).then(function (r) {
@@ -2824,7 +3466,13 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   $("org-policy").onsubmit = function (ev) {
     ev.preventDefault();
     var v = formData(ev.target);
-    api("POST", "/api/org/policy", v).then(function () { log("organization policy saved"); loadOrg(); }).catch(function (e) { alertBox(e.message); });
+    var boxes = ev.target.querySelectorAll("input[data-platform]"), ticked = [];
+    boxes.forEach(function (i) { delete v[i.name]; if (i.checked) { ticked.push(i.dataset.platform); } });
+    if (!ticked.length) { alertBox("Tick at least one platform."); return; }
+    // Every platform ticked: no restriction.
+    v.allowed_platforms = ticked.length === boxes.length ? [] : ticked;
+    v.min_app_version = (v.min_app_version || "").trim();
+    api("POST", "/api/org/policy", v).then(function () { log("organization policy saved"); loadOrg(); }).catch(function (e) { alertBox(e.message, "Policy not saved"); });
   };
   $("org-admin").onsubmit = function (ev) {
     ev.preventDefault();
@@ -2843,12 +3491,14 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     api("GET", "/api/p2p").then(function (p) {
       var f = $("p2pform");
       f.enabled.checked = !!p.config.enabled; f.port.value = p.config.port || 17893;
+      f.port_mapping.checked = p.config.port_mapping !== false;
       f.public_addrs.value = (p.config.public_addrs || []).join(", ");
       f.stun.value = (p.config.stun || []).join(", ");
       var peers = p.peers || [];
       $("p2pstatus").textContent = (p.listen ? "Listening on " + p.listen + ". " : "Not listening (enable and restart the service). ") + peers.length + " peers known (" + p.lan_peers + " on the LAN), " + p.chunks_from_peers + " blocks received from peers since start.";
       var nat = p.listen ? ("NAT: " + (p.nat || "unknown") + ". " + ((p.public || []).length ? "Public address " + p.public.join(", ") + ". " : "No public address observed. ") + (p.reachable ? "Reachable from the internet; this device relays for the others." : "Not reachable directly" + ((p.relays || []).length ? "; registered with relay " + p.relays.join(", ") + "." : "; no relay yet.")) + (p.cert_sha256 ? " Certificate " + p.cert_sha256.slice(0, 16) + "." : "")) : "";
       $("p2pnat").textContent = nat;
+      $("p2pmap").textContent = p.listen ? portmapText(p.portmap) : "";
       var paths = p.paths || [];
       var tb = $("p2ppaths").querySelector("tbody"); tb.innerHTML = "";
       $("p2ppaths").classList.toggle("hidden", !paths.length);
@@ -2858,6 +3508,16 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
         tb.appendChild(tr);
       });
     }).catch(function () {});
+  }
+  // "Router port opened via UPnP: 203.0.113.5:17893" or "not available".
+  function portmapText(m) {
+    if (!m || !m.state) { return ""; }
+    if (m.state === "off") { return "Router port mapping is off."; }
+    if (m.state === "trying" || m.state === "") { return "Router port: asking the router\u2026"; }
+    if (m.state !== "mapped") { return "Router port: not available."; }
+    var via = { "pcp": "PCP", "nat-pmp": "NAT-PMP", "upnp": "UPnP" }[m.method] || m.method;
+    var addrs = m.tcp && m.udp && m.tcp === m.udp ? m.tcp : [m.tcp ? m.tcp + " (TCP)" : "", m.udp ? m.udp + " (UDP)" : ""].filter(Boolean).join(", ");
+    return (m.existing ? "Router port already open via " : "Router port opened via ") + via + ": " + addrs + ".";
   }
   $("p2pbox").ontoggle = function () { if ($("p2pbox").open) { loadP2p(); } };
   // Live activity (Overview "Now" card, Devices page): /api/activity every two
@@ -2914,7 +3574,8 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     "trash_purge.drop": "Deleting files from the trash for good",
     "trash_move": "Moving deleted files of folder «{s}» to the trash storage",
     "drain": "Draining storage «{s}»",
-    "drain.records": "Copying the records off storage «{s}»"
+    "drain.records": "Copying the records off storage «{s}»",
+    "history_restore": "Restoring an earlier version of a file of folder «{s}»"
   };
   var actTimer = null, actBusy = false, lastActivity = null;
   function actTr(s) { return window.varstoLang ? window.varstoLang.t(s) : s; }
@@ -2989,12 +3650,13 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   }
   function activityWanted() { return (currentPage === "overview" || currentPage === "peers") && document.body.dataset.view === "app" && document.visibilityState !== "hidden"; }
   function activityWatch() {
-    if (!activityWanted()) { if (actTimer) { clearTimeout(actTimer); actTimer = null; } return; }
+    streamUpdate();
+    if (!activityWanted() || evsOk) { if (actTimer) { clearTimeout(actTimer); actTimer = null; } return; }
     if (actTimer || actBusy) { return; }
     actBusy = true;
     api("GET", "/api/activity").then(renderActivity).catch(function () {}).then(function () {
       actBusy = false;
-      if (activityWanted() && !actTimer) { actTimer = setTimeout(function () { actTimer = null; activityWatch(); }, 2000); }
+      if (activityWanted() && !evsOk && !actTimer) { actTimer = setTimeout(function () { actTimer = null; activityWatch(); }, 2000); }
     });
   }
   // Progress at the top of the window: this device's tasks that have run for
@@ -3016,6 +3678,8 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   function taskbarPoll() {
     tbTimer = null;
     if (!taskbarWanted()) { return; }
+    // The event stream brings this device's tasks as they change.
+    if (evsOk) { taskbarSchedule(5000); return; }
     // The Now card asks every two seconds anyway; between its answers only the fast mode asks.
     if (activityWanted() && !taskbarFast()) { taskbarSchedule(); return; }
     tbBusy = true;
@@ -3062,6 +3726,93 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   }
   document.addEventListener("visibilitychange", function () { if (document.visibilityState === "visible") { taskbarSchedule(0); } else if (tbTimer) { clearTimeout(tbTimer); tbTimer = null; } });
   taskbarSchedule(1000);
+
+  // Event stream (GET /api/events, Server-Sent Events): what the service
+  // does arrives as it happens, so the page stops asking every few seconds.
+  // This device's tasks (the bar at the top, the Now card), the transfers,
+  // and, while the Overview or Peers page shows, the other devices'
+  // activity and the traffic come with it; syncs, changes, problems and
+  // notifications make the page load the service's summary once. The
+  // stream is closed while the page is hidden; when it drops, the browser
+  // reconnects (and the page with doubling waits, up to a minute), the
+  // missed events are replayed from the service's ring (Last-Event-ID), and
+  // meanwhile the old polls take over.
+  var evs = null, evsOk = false, evsKey = null, evsLast = 0, evsRetry = 1000, evsTimer = null;
+  var evsMe = { device: "", name: "" }, evsTasks = {}, evsPeers = [], evsSoon = null, evsStatusSoon = null;
+  function streamWanted() { return !!token && document.body.dataset.view === "app" && document.visibilityState !== "hidden" && typeof EventSource !== "undefined"; }
+  function streamClose() {
+    if (evs) { evs.close(); evs = null; }
+    if (evsTimer) { clearTimeout(evsTimer); evsTimer = null; }
+    evsKey = null;
+    if (evsOk) { evsOk = false; activityWatch(); trafficWatch(); taskbarSchedule(0); }
+  }
+  function streamUpdate() {
+    if (!streamWanted()) { if (evs || evsTimer) { streamClose(); } return; }
+    var peers = activityWanted(), traffic = trafficWanted();
+    var key = (peers ? "p" : "") + (traffic ? "t" : "");
+    if ((evs || evsTimer) && key === evsKey) { return; }
+    if (evs) { evs.close(); evs = null; }
+    if (evsTimer) { clearTimeout(evsTimer); evsTimer = null; }
+    evsKey = key;
+    var url = "/api/events?token=" + enc(token) + (peers ? "&peers=1" : "") + (traffic ? "&traffic=1" : "") + (evsLast ? "&last_id=" + evsLast : "");
+    var es = new EventSource(url); evs = es;
+    es.onopen = function () { if (evs !== es) { return; } evsRetry = 1000; };
+    es.onerror = function () {
+      if (evs !== es) { return; }
+      var was = evsOk; evsOk = false;
+      if (was) { activityWatch(); trafficWatch(); taskbarSchedule(0); }
+      // The browser tries again by itself unless the answer was an error.
+      if (es.readyState === 2) {
+        evs = null;
+        evsTimer = setTimeout(function () { evsTimer = null; evsKey = null; streamUpdate(); }, evsRetry);
+        evsRetry = Math.min(evsRetry * 2, 60000);
+      }
+    };
+    function on(kind, fn) {
+      es.addEventListener(kind, function (ev) {
+        if (evs !== es) { return; }
+        if (ev.lastEventId) { evsLast = +ev.lastEventId || evsLast; }
+        var m = null; try { m = JSON.parse(ev.data); } catch (e) { return; }
+        fn(m.data || {}, m);
+      });
+    }
+    on("hello", function (d) {
+      // A smaller number than we had: the service started again.
+      var restarted = evsLast && d.last_id < evsLast;
+      if (!evsLast || restarted) { evsLast = d.last_id; }
+      var a = d.activity || {}; evsMe = { device: a.device || "", name: a.name || "" };
+      evsTasks = {}; (a.tasks || []).forEach(function (t) { evsTasks[t.id] = t; });
+      var first = !evsOk; evsOk = true;
+      if (actTimer) { clearTimeout(actTimer); actTimer = null; }
+      if (trafficTimer) { clearTimeout(trafficTimer); trafficTimer = null; }
+      tasksChanged();
+      if (restarted) { statusSoon(); }
+      if (first) { serviceSoon(); }
+    });
+    on("reset", function () { statusSoon(); serviceSoon(); });
+    on("activity.started", function (t) { evsTasks[t.id] = t; tasksChanged(); });
+    on("activity.progress", function (t) { evsTasks[t.id] = t; tasksChanged(); });
+    on("activity.finished", function (t) { delete evsTasks[t.id]; tasksChanged(); });
+    on("activity.peers", function (d) { evsPeers = d.peers || []; tasksChanged(); });
+    on("traffic", function (d) { if (trafficWanted()) { renderTraffic(d); } });
+    on("transfers", function (d) { transferFollowers.forEach(function (f) { f(d); }); });
+    on("sync.finished", function () { serviceSoon(); });
+    on("sync.started", function () {});
+    ["policy.changed", "ledger.health", "backup", "trash", "files.new", "space.low", "space.ok", "storage.problem", "storage.ok", "folder.paused", "peer.connected", "peer.disconnected"].forEach(function (k) { on(k, function () { serviceSoon(); }); });
+    on("config.changed", function () { serviceSoon(); statusSoon(); });
+    on("notification", function (d) { if (d.title) { log(d.title + ": " + (d.body || "")); } });
+  }
+  // This device's tasks changed: the bar at the top and the Now card.
+  function tasksChanged() {
+    var tasks = Object.keys(evsTasks).map(function (k) { return evsTasks[k]; }).sort(function (a, b) { return a.started_utc - b.started_utc; });
+    var me = { device: evsMe.device, name: evsMe.name, tasks: tasks };
+    taskbarRender(me);
+    if (activityWanted()) { renderActivity({ me: me, peers: evsPeers }); }
+  }
+  // Several events in a row ask once.
+  function serviceSoon() { if (evsSoon) { return; } evsSoon = setTimeout(function () { evsSoon = null; pollService(); }, 300); }
+  function statusSoon() { if (evsStatusSoon) { return; } evsStatusSoon = setTimeout(function () { evsStatusSoon = null; if (busyCount === 0) { refreshStatus().catch(function () {}); } }, 500); }
+  document.addEventListener("visibilitychange", streamUpdate);
 
   // Recovery package: what to keep outside your devices and how to restore,
   // from GET /api/recovery/guide. Every sentence comes as an English
@@ -3146,6 +3897,239 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     var go = function () { api("GET", "/api/recovery/guide").then(function (g) { (window.varstoLang && window.varstoLang.ready ? window.varstoLang.ready : function (f) { f(); })(function () { renderGuide(g); }); }).catch(function (e) { log("recovery guide: " + e.message); }); };
     go();
   }
+  // Help: where this device stands, where the data is, what needs attention
+  // and what to do next, from GET /api/help (answered without a vault and
+  // while it is locked too). Sentences come as {t, p} like the recovery
+  // guide's and are translated the same way (rgText). The Help page shows it
+  // in the app; the setup and unlock screens show it in a panel above them.
+  var lastHelp = null, helpWanted = null, helpLoading = null, helpAuto = false;
+  var HELP_GUIDE_FOR = { overview: "start", files: "folders", shared: "sharing", storages: "storages", backups: "backups", import: "imports", trash: "trash", policies: "policies", peers: "devices", organization: "devices", settings: "start", recovery: "recovery", more: "start", help: "start" };
+  var HELP_LEVELS = { urgent: ["bad", "Urgent"], important: ["risk", "Next"], suggested: ["accent", "Suggested"], tip: ["grey", "Tip"] };
+  function helpFlash(e) { e.classList.remove("help-flash"); void e.offsetWidth; e.classList.add("help-flash"); setTimeout(function () { e.classList.remove("help-flash"); }, 2400); }
+  function helpReveal(e, focus) {
+    if (!e) { return; }
+    setTimeout(function () {
+      e.scrollIntoView({ block: "center", behavior: "smooth" }); helpFlash(e);
+      if (!focus) { return; }
+      var f = e.matches("button") ? e : e.querySelector("input:not([type=hidden]):not([type=checkbox]), select, textarea, button");
+      if (f) { try { f.focus({ preventScroll: true }); } catch (x) { f.focus(); } }
+    }, 80);
+  }
+  // Carry out a step's action: go to the page and open or show what it names.
+  function helpGo(a) {
+    if (!a) { return; }
+    var view = document.body.dataset.view;
+    if (a.page === "setup" || a.page === "unlock") { helpReveal($(a.target), true); return; }
+    if (view !== "app") { return; }
+    var t = a.target || "";
+    nav(a.page);
+    if (t === "do:sync") { runSync().then(function () { if (currentPage === "help") { loadHelp(); } }); return; }
+    if (t === "kit") { $("rg-kit").click(); return; }
+    if (t === "addfolder" || t === "attachfolder") { showFolderForms(true, true); helpReveal($(t), t === "addfolder"); return; }
+    if (t) { var e = $(t); helpReveal(e, !!e && (e.tagName === "FORM" || e.tagName === "BUTTON")); }
+  }
+  // Decimal sizes, as in the sentences (the engine's human_bytes).
+  function helpBytes(n) { var u = ["B", "kB", "MB", "GB", "TB"], i = 0; while (n >= 1000 && i < u.length - 1) { n /= 1000; i++; } return i ? n.toFixed(1) + " " + u[i] : n + " B"; }
+  function helpFigure(value, label) { var d = el("div", "help-fig"); d.appendChild(actRaw(String(value), "help-fig-value")); d.appendChild(el("span", "help-fig-label", label)); return d; }
+  // A bar of the data by kept copies: none, one, two or more.
+  function helpCopyBar(f) {
+    var wrap = el("div", "help-copies");
+    if (!f.bytes) { return wrap; }
+    var none = f.unkept_bytes, two = f.two_plus_bytes, one = Math.max(0, f.bytes - none - two);
+    var bar = el("div", "help-bar"); bar.setAttribute("role", "img");
+    [[two, "c2", "On two or more storages"], [one, "c1", "On one storage"], [none, "c0", "Only on devices"]].forEach(function (x) {
+      if (!x[0]) { return; }
+      var seg = el("i", "help-seg " + x[1]); seg.style.flexGrow = String(x[0]); seg.title = actTr(x[2]) + ": " + helpBytes(x[0]); bar.appendChild(seg);
+    });
+    wrap.appendChild(bar);
+    var leg = el("div", "help-legend small");
+    [[two, "c2", "On two or more storages"], [one, "c1", "On one storage"], [none, "c0", "Only on devices"]].forEach(function (x) {
+      var it = el("span", "help-legend-item"); it.appendChild(el("i", "help-seg " + x[1])); it.appendChild(el("span", null, x[2])); it.appendChild(document.createTextNode(" ")); it.appendChild(actRaw(helpBytes(x[0]), "help-legend-val")); leg.appendChild(it);
+    });
+    wrap.appendChild(leg);
+    return wrap;
+  }
+  function renderHelpNow(h, box) {
+    box.innerHTML = "";
+    var head = el("p", "help-headline"); head.appendChild(rgText(h.headline)); box.appendChild(head);
+    if (h.phase === "ready") {
+      var f = h.figures, figs = el("div", "help-figures");
+      figs.appendChild(helpFigure(f.devices, "Devices"));
+      figs.appendChild(helpFigure(f.storages, "Storages"));
+      figs.appendChild(helpFigure(f.folders, "Folders"));
+      figs.appendChild(helpFigure(f.files, "Files"));
+      figs.appendChild(helpFigure(helpBytes(f.bytes), "Data"));
+      if (f.disks) { figs.appendChild(helpFigure(f.disks - f.disks_away + " / " + f.disks, "Pool disks attached")); }
+      box.appendChild(figs);
+      box.appendChild(helpCopyBar(f));
+    }
+    var ul = el("ul", "help-summary");
+    h.summary.forEach(function (t) { var li = el("li"); li.appendChild(rgText(t)); ul.appendChild(li); });
+    box.appendChild(ul);
+    if ((h.attention || []).length) {
+      var at = el("ul", "help-attn");
+      h.attention.forEach(function (a) {
+        var li = el("li", "help-attn-" + a.level);
+        li.appendChild(icon(a.level === "info" ? "info" : "warn", "help-attn-icon"));
+        li.appendChild(rgText(a.text)); at.appendChild(li);
+      });
+      box.appendChild(at);
+    }
+    if ((h.folders || []).length || (h.storages || []).length || (h.details || []).length) {
+      var d = el("details", "help-details"); d.appendChild(el("summary", null, "Where your data is, in detail"));
+      function list(title, rows) {
+        if (!rows.length) { return; }
+        d.appendChild(el("h4", "help-sub", title));
+        var u = el("ul", "help-detail-list small"); rows.forEach(function (t) { var li = el("li"); li.appendChild(rgText(t)); u.appendChild(li); }); d.appendChild(u);
+      }
+      list("Folders", (h.folders || []).map(function (x) { return x.line; }));
+      list("Storages", (h.storages || []).map(function (x) { return x.line; }));
+      list("More", h.details || []);
+      box.appendChild(d);
+    }
+  }
+  function helpStepCard(s, n, first) {
+    var li = el("li", "help-step help-lv-" + s.level + (first ? " help-first" : ""));
+    li.dataset.step = s.id;
+    li.appendChild(el("span", "help-num", n ? String(n) : "?"));
+    var body = el("div", "help-step-body");
+    var head = el("div", "help-step-head");
+    head.appendChild(rgText(s.title, "help-step-title"));
+    var lv = HELP_LEVELS[s.level] || HELP_LEVELS.tip; head.appendChild(pill(lv[0], lv[1]));
+    body.appendChild(head);
+    var why = el("p", "help-why"); why.appendChild(rgText(s.why)); body.appendChild(why);
+    if ((s.how || []).length) { var ul = el("ul", "help-how"); s.how.forEach(function (t) { var x = el("li"); x.appendChild(rgText(t)); ul.appendChild(x); }); body.appendChild(ul); }
+    var acts = el("div", "help-actions");
+    if (s.action) {
+      var b = el("button", first ? "" : "secondary"); b.type = "button"; b.textContent = rgPlain(s.action.label); b.setAttribute("data-no-i18n", "");
+      b.dataset.action = s.action.page + (s.action.target ? ":" + s.action.target : "");
+      b.onclick = function () { helpGo(s.action); }; acts.appendChild(b);
+    }
+    var pre = null;
+    if (s.command) {
+      pre = el("pre", "help-cmd hidden", s.command);
+      var cb = el("button", "secondary help-mini", "Show the command"); cb.type = "button";
+      cb.onclick = function () { var hid = pre.classList.toggle("hidden"); cb.textContent = actTr(hid ? "Show the command" : "Hide the command"); };
+      acts.appendChild(cb);
+    }
+    if (s.guide) { var gb = el("button", "linkish help-mini", "Read the guide"); gb.type = "button"; gb.onclick = function () { helpOpenGuide(s.guide, li.closest("#prehelp") ? "prehelp" : "page"); }; acts.appendChild(gb); }
+    if (acts.children.length) { body.appendChild(acts); }
+    if (pre) { body.appendChild(pre); }
+    li.appendChild(body);
+    return li;
+  }
+  // Steps the page adds by itself: a newer version (the interface checks for updates).
+  function helpExtraSteps(h) {
+    var out = [];
+    if (h.phase === "ready" && updateInfo && updateInfo.newer) {
+      out.push({ id: "update", level: "suggested", title: { t: "Install Varsto {latest}", p: { latest: updateInfo.latest } }, why: { t: "A newer version is available (you have {current}).", p: { current: updateInfo.current } }, how: [], action: { page: "overview", target: "update", label: { t: "Show the update" } }, command: "varsto update" });
+    }
+    return out;
+  }
+  function renderHelpSteps(h, ol, tipsOl) {
+    ol.innerHTML = "";
+    var steps = h.steps.concat(helpExtraSteps(h));
+    if (!steps.length) {
+      var ok = el("li", "help-allok"); ok.appendChild(icon("check")); ok.appendChild(el("span", null, "Everything is in order. Nothing needs doing now.")); ol.appendChild(ok);
+    }
+    steps.forEach(function (s, i) { ol.appendChild(helpStepCard(s, i + 1, i === 0)); });
+    if (tipsOl) {
+      tipsOl.innerHTML = "";
+      (h.tips || []).forEach(function (s) { tipsOl.appendChild(helpStepCard(s, 0, false)); });
+    }
+  }
+  // The guides are one template, cloned where they are shown; links to the
+  // feature pages follow the interface's language.
+  function helpGuides(box) {
+    if (box.dataset.filled) { return; }
+    box.dataset.filled = "1";
+    box.appendChild(document.importNode($("tpl-guides").content, true));
+    var lang = window.varstoLang ? window.varstoLang.get() : "en";
+    box.querySelectorAll("a[data-site]").forEach(function (a) { a.href = "https://varsto.net" + (lang === "en" ? "" : "/" + lang) + a.dataset.site; });
+  }
+  function helpOpenGuide(topic, where) {
+    var box = where === "prehelp" ? $("prehelp-guides") : $("help-guides");
+    helpGuides(box);
+    if (where === "prehelp") { $("prehelp-guidebox").open = true; }
+    var d = box.querySelector('[data-guide="' + topic + '"]');
+    if (d) { d.open = true; helpReveal(d.querySelector("summary") || d, false); }
+  }
+  // Places and storage kinds are words of the interface ("home", "cloud",
+  // "directory"): translated, unlike names.
+  function helpLocalize(x) {
+    if (Array.isArray(x)) { x.forEach(helpLocalize); return; }
+    if (!x || typeof x !== "object") { return; }
+    if (typeof x.t === "string" && x.p) {
+      ["kind", "place", "places"].forEach(function (k) { if (typeof x.p[k] === "string") { x.p[k] = x.p[k].split(", ").map(function (w) { return actTr(w); }).join(", "); } });
+      return;
+    }
+    Object.keys(x).forEach(function (k) { helpLocalize(x[k]); });
+  }
+  function renderHelp(h) {
+    helpLocalize(h);
+    lastHelp = h;
+    var inApp = document.body.dataset.view === "app";
+    // Both places: the view may change while the answer is on its way.
+    renderHelpNow(h, $("help-now"));
+    renderHelpSteps(h, $("help-next"), $("help-tips"));
+    $("help-tipsbox").classList.toggle("hidden", !(h.tips || []).length);
+    helpGuides($("help-guides"));
+    renderHelpNow(h, $("prehelp-now"));
+    renderHelpSteps({ steps: h.steps.concat(h.tips || []), phase: h.phase }, $("prehelp-next"), null);
+    helpGuides($("prehelp-guides"));
+    if (helpWanted) { var g = helpWanted; helpWanted = null; helpOpenGuide(g, inApp ? "page" : "prehelp"); }
+    renderHelpBanner(h);
+  }
+  function loadHelp() {
+    if (!token) { return Promise.resolve(); }
+    if (helpLoading) { return helpLoading; }
+    helpLoading = api("GET", "/api/help").then(function (h) {
+      return new Promise(function (res) { (window.varstoLang && window.varstoLang.ready ? window.varstoLang.ready : function (f) { f(); })(function () { renderHelp(h); res(h); }); });
+    }).catch(function (e) { log("help: " + e.message); }).then(function (h) { helpLoading = null; return h; });
+    return helpLoading;
+  }
+  // Overview: the first step that matters, with its button, until all is done.
+  var helpBannerAt = 0;
+  function renderHelpBanner(h) {
+    var s = h && h.phase === "ready" ? h.steps.filter(function (x) { return x.level === "urgent" || x.level === "important"; })[0] : null;
+    var box = $("helpnext");
+    box.classList.toggle("hidden", !s);
+    if (!s) { return; }
+    box.classList.toggle("warn", s.level === "urgent");
+    var t = $("helpnext-title"); t.innerHTML = ""; t.appendChild(rgText(s.title));
+    var b = $("helpnext-go");
+    b.classList.toggle("hidden", !s.action);
+    if (s.action) { b.textContent = rgPlain(s.action.label); b.setAttribute("data-no-i18n", ""); b.onclick = function () { helpGo(s.action); }; }
+  }
+  // After the status changes: refresh the banner (at most every 20 s), and
+  // on a vault without a storage open Help once per session.
+  function helpAfterStatus(s) {
+    if (!s) { return; }
+    var now = Date.now();
+    if (!s.member && !(s.storages || []).length && !helpAuto) {
+      helpAuto = true;
+      var seen = false; try { seen = sessionStorage.getItem("varsto-help-auto") === "1"; sessionStorage.setItem("varsto-help-auto", "1"); } catch (e) {}
+      if (!seen && currentPage !== "help") { nav("help"); return; }
+    }
+    if (now - helpBannerAt > 20000 || currentPage === "help") { helpBannerAt = now; loadHelp(); }
+  }
+  // The setup and unlock screens: the panel above them, open on the setup screen.
+  function showPreHelp(open) {
+    $("prehelp").classList.remove("hidden");
+    preHelpOpen(open);
+    loadHelp();
+  }
+  function preHelpOpen(open) {
+    $("prehelp-body").classList.toggle("hidden", !open);
+    $("prehelp-toggle").textContent = actTr(open ? "Hide help" : "Show help");
+  }
+  $("prehelp-toggle").onclick = function () { preHelpOpen($("prehelp-body").classList.contains("hidden")); };
+  $("help-reload").onclick = function () { loadHelp(); };
+  // The "?" in the page header: the guide for this page.
+  $("pagehelp").onclick = function () {
+    if (document.body.dataset.view === "app") { helpWanted = HELP_GUIDE_FOR[currentPage] || "start"; if (currentPage === "help") { var g = helpWanted; helpWanted = null; helpOpenGuide(g, "page"); } else { nav("help"); } return; }
+    preHelpOpen(true); helpOpenGuide("start", "prehelp");
+  };
   // The checklist as plain text in the page's language, with the ticks.
   function guideText(g) {
     var ticks = rgTicks(), out = [];
@@ -3183,16 +4167,27 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   };
   // Traffic view (Peers page): /api/p2p/traffic every second while the page is shown.
   // The service answers it without waiting for a sync, so it stays live during long transfers.
-  var trafficTimer = null, trafficBusy = false, lastTraffic = null;
+  var trafficTimer = null, trafficBusy = false, lastTraffic = null, trafficPrimed = false;
   var SVGNS = "http://www.w3.org/2000/svg";
   function trafficWanted() { return currentPage === "peers" && document.body.dataset.view === "app" && document.visibilityState !== "hidden"; }
   function trafficWatch() {
-    if (!trafficWanted()) { if (trafficTimer) { clearTimeout(trafficTimer); trafficTimer = null; } return; }
+    streamUpdate();
+    if (!trafficWanted() || evsOk) {
+      if (trafficTimer) { clearTimeout(trafficTimer); trafficTimer = null; }
+      if (!trafficWanted()) { trafficPrimed = false; return; }
+      // With the event stream up its `traffic` events keep the view live;
+      // one request fills it at once when the page opens.
+      if (!trafficPrimed && !trafficBusy) {
+        trafficPrimed = true; trafficBusy = true;
+        api("GET", "/api/p2p/traffic").then(renderTraffic).catch(function () {}).then(function () { trafficBusy = false; });
+      }
+      return;
+    }
     if (trafficTimer || trafficBusy) { return; }
     trafficBusy = true;
     api("GET", "/api/p2p/traffic").then(renderTraffic).catch(function () {}).then(function () {
       trafficBusy = false;
-      if (trafficWanted() && !trafficTimer) { trafficTimer = setTimeout(function () { trafficTimer = null; trafficWatch(); }, 1000); }
+      if (trafficWanted() && !evsOk && !trafficTimer) { trafficTimer = setTimeout(function () { trafficTimer = null; trafficWatch(); }, 1000); }
     });
   }
   function fmtRate(n) { return fmtBytes(n) + "/s"; }
@@ -3782,7 +4777,8 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     setTimeout(function () { a.focus(); try { a.setSelectionRange(pos, pos); } catch (e) { /* not every type has a selection */ } }, 60);
   }
   document.addEventListener("visibilitychange", function () { if (document.visibilityState === "visible") { refocusNumberField(); } });
-  window.varstoResumed = function () { refocusNumberField(); refreshAllFiles(); if (document.body.dataset.view === "app") { refreshStatus(); } };
+  window.varstoResumed = function () { refocusNumberField(); refreshAllFiles(); if (document.body.dataset.view === "app") { refreshStatus(); } takeLink(); };
+  window.addEventListener("focus", function () { if (document.body.dataset.view && document.body.dataset.view !== "unlock") { takeLink(); } });
   document.addEventListener("visibilitychange", function () { if (document.visibilityState === "visible") { refreshAllFiles(); } trafficWatch(); activityWatch(); });
 
   // Reset: wipes this device's vault configuration after the user typed "reset".

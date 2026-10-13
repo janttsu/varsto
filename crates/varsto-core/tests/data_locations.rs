@@ -30,6 +30,7 @@ fn dir(root: &std::path::Path, name: &str, place: &str, carrier: bool) -> Storag
         cold: false,
         carrier,
         place: place.into(),
+        min_free: None,
     }
 }
 

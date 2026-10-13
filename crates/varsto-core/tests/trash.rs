@@ -27,6 +27,7 @@ fn dir(name: &str, path: &Path, cold: bool) -> StorageSpec {
         cold,
         carrier: false,
         place: String::new(),
+        min_free: None,
     }
 }
 

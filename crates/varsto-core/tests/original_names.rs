@@ -77,6 +77,7 @@ impl Lab {
                 cold: false,
                 carrier: false,
                 place: String::new(),
+                min_free: None,
             },
             root,
             _tmp: tmp,
@@ -99,6 +100,15 @@ impl Lab {
             let p = a_dir.join(n);
             fs::create_dir_all(p.parent().unwrap()).unwrap();
             fs::write(&p, format!("content {i} of {n}")).unwrap();
+            // One modification time for all: a pull takes the newest files
+            // first, so equal times keep the order by path the checks
+            // below expect.
+            fs::File::options()
+                .write(true)
+                .open(&p)
+                .unwrap()
+                .set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000))
+                .unwrap();
         }
         let push = a.push("docs").unwrap();
         assert_eq!(push.files_changed, names.len() as u64);
@@ -134,9 +144,26 @@ fn sorted(names: &[&str]) -> Vec<String> {
     v
 }
 
+/// Device A of these tests writes names that differ only in case, which a
+/// case-insensitive disk (macOS, Windows) cannot hold side by side; there
+/// the tests have nothing to show and are skipped.
+fn case_sensitive(lab: &Lab) -> bool {
+    let d = lab.dir("case-probe");
+    fs::create_dir_all(&d).unwrap();
+    fs::write(d.join("probe"), b"x").unwrap();
+    let sensitive = !d.join("PROBE").exists();
+    if !sensitive {
+        eprintln!("skipped: the temporary directory ignores case");
+    }
+    sensitive
+}
+
 #[test]
 fn original_names_round_trip_between_linux_devices() {
     let lab = Lab::new();
+    if !case_sensitive(&lab) {
+        return;
+    }
     let (mut a, mut b) = lab.pair(NAMES, Some(LocalRules::POSIX));
     let pull = b.pull("docs").unwrap();
     assert_eq!(pull.files_updated, NAMES.len() as u64);
@@ -177,6 +204,9 @@ const WINDOWS: LocalRules = LocalRules {
 #[test]
 fn windows_names_are_mapped_and_read_back_unchanged() {
     let lab = Lab::new();
+    if !case_sensitive(&lab) {
+        return;
+    }
     let (mut a, mut b) = lab.pair(NAMES, Some(WINDOWS));
     let b_dir = lab.dir("b-docs");
     let pull = b.pull("docs").unwrap();
@@ -260,6 +290,9 @@ fn windows_names_are_mapped_and_read_back_unchanged() {
 #[test]
 fn case_collisions_get_a_local_name_and_lose_nothing() {
     let lab = Lab::new();
+    if !case_sensitive(&lab) {
+        return;
+    }
     let names = ["Photo.JPG", "photo.jpg", "Dir/x.txt", "dir/y.txt"];
     let insensitive = LocalRules {
         windows_names: false,

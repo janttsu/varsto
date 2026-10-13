@@ -53,6 +53,16 @@ cat > "$app/Info.plist" <<PLIST
   <key>NSHighResolutionCapable</key><true/>
   <key>LSApplicationCategoryType</key><string>public.app-category.utilities</string>
   <key>NSAppTransportSecurity</key><dict><key>NSAllowsLocalNetworking</key><true/></dict>
+  <!-- Scanning QR invitations in the window (getUserMedia in the web view). -->
+  <key>NSCameraUsageDescription</key><string>Varsto reads the QR code of a share invitation or a pairing code with the camera. Nothing is recorded.</string>
+  <!-- varsto:// links (QR invitations scanned with a phone or opened from a message) open Varsto. -->
+  <key>CFBundleURLTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleURLName</key><string>in.soderlund.varsto.link</string>
+      <key>CFBundleURLSchemes</key><array><string>varsto</string></array>
+    </dict>
+  </array>
   <!-- Finder: right-click files for these (Services / Quick Actions). -->
   <key>NSServices</key>
   <array>

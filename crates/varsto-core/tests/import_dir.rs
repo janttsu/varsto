@@ -32,6 +32,7 @@ fn storage(root: &Path) -> StorageSpec {
         cold: false,
         carrier: false,
         place: String::new(),
+        min_free: None,
     }
 }
 

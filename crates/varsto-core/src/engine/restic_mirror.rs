@@ -331,7 +331,13 @@ impl Engine {
                 path: canonical(target)?,
                 selective: false,
                 encrypted: false,
+                mode: Default::default(),
+                deletion_guard: None,
+                ignore_local: Vec::new(),
+                meta: Default::default(),
+                min_free: None,
             });
+            folder_safety::write_marker(target, rec)?;
             report.attached.push(rec.name.clone());
         }
         self.config.restic = Some(cfg);
@@ -388,10 +394,18 @@ impl Engine {
             };
             self.config.folders.push(FolderMount {
                 folder_id: rec.folder_id.clone(),
-                path,
+                path: path.clone(),
                 selective: false,
                 encrypted: false,
+                mode: Default::default(),
+                deletion_guard: None,
+                ignore_local: Vec::new(),
+                meta: Default::default(),
+                min_free: None,
             });
+            if let Err(e) = folder_safety::write_marker(&path, &rec) {
+                eprintln!("restic mirror: could not mark {}: {e:#}", path.display());
+            }
             added.push(rec.name.clone());
         }
         if !added.is_empty() {
@@ -551,7 +565,10 @@ impl Engine {
                 .follow_links(false)
                 .into_iter()
                 .filter_entry(|e| {
-                    !(e.depth() > 0 && e.file_name().to_string_lossy().starts_with(".varsto"))
+                    let n = e.file_name().to_string_lossy();
+                    !(e.depth() > 0
+                        && n.starts_with(".varsto")
+                        && n != crate::ignore_rules::IGNORE_FILE)
                 });
             for e in walker.flatten() {
                 if !e.file_type().is_file() {
@@ -598,6 +615,22 @@ impl Engine {
                 digest.push(0);
                 digest.extend_from_slice(f.content_hash.as_bytes());
                 digest.push(b'\n');
+                if let Some(want) = f.symlink() {
+                    // A link is mirrored as a link (restic keeps it as one).
+                    let here = crate::fsmeta::join_entry(
+                        target,
+                        &state.local_names.local_rel(rules, path),
+                    )
+                    .ok()
+                    .and_then(|d| crate::fsmeta::read_link(&d));
+                    if here.as_deref() != Some(want) {
+                        fc.problems.push(problem(
+                            ProblemKind::Missing,
+                            "the symbolic link is missing or points elsewhere",
+                        ));
+                    }
+                    continue;
+                }
                 let Ok(disk) = util::safe_join(target, &state.local_names.local_rel(rules, path))
                 else {
                     fc.problems.push(problem(

@@ -39,6 +39,8 @@ cargo fmt --all --check
 
 The integration tests in `crates/varsto-core/tests/` simulate two devices that are never online together, a concurrent edit, and a device restored from an old backup (which must be fenced). The CLI test in `crates/varsto-cli/tests/` runs the built binary end to end with `--json`.
 
+A test or a throwaway service that runs `varsto service run` sets `VARSTO_NO_PORT_MAPPING=1` (as the CLI tests do), so that it never asks the router of the network it runs in to open a port (spec section 52). Router port mapping is tested against fake PCP, NAT-PMP and UPnP gateways on the loopback interface (`p2p::portmap::tests`); free-space limits with the fake provider `pool::set_fake_space`.
+
 ### Virtual machines (levels 3 and up)
 
 ```bash
@@ -51,6 +53,10 @@ scripts/test/destroy-vm.sh <vm>            # always destroy the VM afterwards
 Every script accepts `--dry-run`, which prints the commands without executing them.
 
 Only the `smoke` suite and the `debian-stable` (x86_64) image exist so far.
+
+### Help page in a browser (`scripts/test/ui-help.py`)
+
+`python3 scripts/test/ui-help.py target/debug/varsto <screenshot dir>` runs a throwaway vault and service in a temporary directory and drives the interface in Chromium (Playwright): the Help page with no vault, with a vault but no storage, with a storage and a folder, and locked, in English, Finnish and Swedish. It checks the first step, that the step buttons lead to the right form or dialog and that the "?" in the page header opens the page's guide, and saves screenshots.
 
 ### VM lab (`scripts/test/lab`)
 

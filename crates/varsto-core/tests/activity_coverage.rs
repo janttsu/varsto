@@ -56,6 +56,7 @@ fn fetching_a_file_and_purging_a_folder_are_tasks() {
         cold: false,
         carrier: false,
         place: String::new(),
+        min_free: None,
     };
     let (mut a, key) = Engine::init(&root.join("a"), "a", PASS).unwrap();
     a.chunker = ChunkerParams::SMALL;

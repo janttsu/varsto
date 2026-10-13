@@ -18,6 +18,7 @@ fn varsto(home: &Path, args: &[&str]) -> Output {
         .args(args)
         .env("VARSTO_PASSPHRASE", "test passphrase")
         .env("VARSTO_NO_INSTALL", "1")
+        .env("VARSTO_NO_PORT_MAPPING", "1")
         .output()
         .expect("run varsto")
 }
@@ -54,11 +55,14 @@ fn snapshot_count(repo: &Path, pw: &Path) -> usize {
 }
 
 /// Relative path -> bytes of every file under `dir`.
+/// The files of a directory; Varsto's own (`.varsto*`, such as the folder
+/// marker) are left out, as restic leaves them out.
 fn tree(dir: &Path) -> BTreeMap<String, Vec<u8>> {
     walkdir::WalkDir::new(dir)
         .into_iter()
         .flatten()
         .filter(|e| e.file_type().is_file())
+        .filter(|e| !e.file_name().to_string_lossy().starts_with(".varsto"))
         .map(|e| {
             (
                 e.path()

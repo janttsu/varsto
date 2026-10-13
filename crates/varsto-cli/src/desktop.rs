@@ -49,6 +49,9 @@ pub struct State {
     pub service: ServiceState,
     /// An open pairing offer (this device adding another one).
     pub pair: Option<varsto_core::pair::Offer>,
+    /// A `varsto://` link the system handed to Varsto (`varsto open-link`),
+    /// waiting for the interface to pick it up.
+    pub link: Option<String>,
 }
 
 pub type Shared = Arc<Mutex<State>>;
@@ -197,6 +200,28 @@ fn handle_unlocked(fixed: &Fixed, request: Request) -> Result<Option<Request>> {
     }
     if *request.method() != Method::Get {
         return Ok(Some(request));
+    }
+    if path == "/api/events" {
+        // A stream of its own thread (`sse`); the browser's EventSource
+        // cannot set headers, so the token may come in the query.
+        let query = request
+            .url()
+            .split_once('?')
+            .map_or(String::new(), |(_, q)| q.to_string());
+        let token_ok = request
+            .headers()
+            .iter()
+            .any(|h| h.field.equiv("X-Varsto-Token") && h.value.as_str() == fixed.token)
+            || query_param(&query, "token").as_deref() == Some(fixed.token.as_str());
+        if !token_ok {
+            request.respond(json_response(
+                401,
+                &json!({"error": "missing or wrong token; reopen the start URL"}),
+            ))?;
+            return Ok(None);
+        }
+        crate::sse::serve(request, &query, fixed.traffic.clone());
+        return Ok(None);
     }
     match path.as_str() {
         "/" => request.respond(html(INDEX_HTML))?,
@@ -557,6 +582,16 @@ fn handle(state: &Shared, mut request: Request) -> Result<()> {
             ))?),
         };
     }
+    if *request.method() == Method::Post && path == "/api/qr/scan" {
+        // A camera frame (`?w=&h=`, one grey byte a pixel) or an image file
+        // (`?image=1`: a screenshot) as the raw body; returns the texts of
+        // the QR codes in it. Nothing is kept.
+        let result = qr_scan(&mut request, &query);
+        return match result {
+            Ok(v) => Ok(request.respond(json_response(200, &v))?),
+            Err(e) => Ok(request.respond(json_response(400, &json!({"error": format!("{e:#}")})))?),
+        };
+    }
     let mut body = String::new();
     if *request.method() == Method::Post {
         request
@@ -584,10 +619,15 @@ fn handle(state: &Shared, mut request: Request) -> Result<()> {
         service::request_quit(state);
         return Ok(());
     }
+    let post = method == Method::Post;
     let result = {
         let mut st = state.lock().unwrap();
         api(&mut st, method, &path, &query, &input)
     };
+    // Something was changed through the API: open pages load it again.
+    if post && result.is_ok() && path != "/api/sync" {
+        varsto_core::events::publish("config.changed", json!({"source": "api", "path": path}));
+    }
     match result {
         Ok(v) => Ok(request.respond(json_response(200, &v))?),
         Err(e) => Ok(request.respond(json_response(400, &json!({"error": format!("{e:#}")})))?),
@@ -758,6 +798,78 @@ fn pair_join(state: &Shared, input: &Value) -> Result<Value> {
     Ok(json!({"ok": true, "from": bundle.from, "storages": notes}))
 }
 
+/// The URIs to show for a link: one code, or parts when asked (a camera
+/// that cannot read the dense code) or when one code cannot hold it.
+fn qr_uris(link: &varsto_core::qr::Link, parts: bool) -> Result<Vec<String>> {
+    use varsto_core::qr;
+    if !parts {
+        let uri = link.to_uri()?;
+        if qr::code_for(&uri).is_ok() {
+            return Ok(vec![uri]);
+        }
+    }
+    link.to_uris(0, qr::PART_CHARS)
+}
+
+/// What the interface shows for a link: its kind, the text form and what
+/// both sides compare (the fingerprint of a request code).
+fn link_info(link: &varsto_core::qr::Link) -> Result<Value> {
+    use varsto_core::qr::Link;
+    let mut v = json!({"kind": link.kind(), "text": link.text(), "uri": link.to_uri()?});
+    match link {
+        Link::ShareRequest(code) => {
+            let r = Engine::share_request_info(code)?;
+            v["fingerprint"] = json!(r.fingerprint);
+            v["name"] = json!(r.name);
+        }
+        Link::ShareToken(t) => {
+            v["folder"] = json!(varsto_core::vault::SealedShareToken::decode(t)?.name);
+        }
+        Link::Pair { code, addresses } => {
+            v["code"] = json!(format!("{}-{}-{}", &code[0..3], &code[3..6], &code[6..9]));
+            v["addresses"] = json!(addresses);
+        }
+    }
+    Ok(v)
+}
+
+/// A pairing offer's status with its `varsto://pair` link.
+fn pair_status(st: varsto_core::pair::OfferStatus) -> Result<Value> {
+    let mut v = serde_json::to_value(&st)?;
+    if st.open {
+        v["uri"] = json!(varsto_core::qr::Link::Pair {
+            code: st.code.clone(),
+            addresses: st.addresses.clone(),
+        }
+        .to_uri()?);
+    }
+    Ok(v)
+}
+
+fn qr_scan(request: &mut Request, query: &str) -> Result<Value> {
+    use varsto_core::qr;
+    let texts = if query_param(query, "image").is_some() {
+        let mut b = Vec::new();
+        request.as_reader().take(32 << 20).read_to_end(&mut b)?;
+        qr::decode_image(&b)?
+    } else {
+        let dim = |k: &str| -> Result<usize> {
+            query_param(query, k)
+                .and_then(|x| x.parse().ok())
+                .filter(|&x: &usize| x > 0 && x <= qr::MAX_IMAGE_SIDE as usize)
+                .ok_or_else(|| anyhow!("{k} must be 1 to {}", qr::MAX_IMAGE_SIDE))
+        };
+        let (w, h) = (dim("w")?, dim("h")?);
+        let mut b = Vec::with_capacity(w * h);
+        request
+            .as_reader()
+            .take((w * h) as u64)
+            .read_to_end(&mut b)?;
+        qr::decode_luma(w, h, &b)?
+    };
+    Ok(json!({"texts": texts}))
+}
+
 fn s(v: &Value, key: &str) -> Result<String> {
     v.get(key)
         .and_then(|x| x.as_str())
@@ -767,6 +879,19 @@ fn s(v: &Value, key: &str) -> Result<String> {
 }
 
 /// A list of strings (absent: empty).
+/// `min_free`: "5%", "10GB", or empty / "default" for the default.
+fn min_free_input(v: &Value) -> Result<Option<varsto_core::freespace::MinFree>> {
+    let t = v
+        .get("min_free")
+        .and_then(|x| x.as_str())
+        .unwrap_or("")
+        .trim();
+    if t.is_empty() || t.eq_ignore_ascii_case("default") {
+        return Ok(None);
+    }
+    Ok(Some(varsto_core::freespace::MinFree::parse(t)?))
+}
+
 fn str_list(v: &Value, key: &str) -> Vec<String> {
     v.get(key)
         .and_then(|x| x.as_array())
@@ -776,6 +901,45 @@ fn str_list(v: &Value, key: &str) -> Vec<String> {
                 .collect()
         })
         .unwrap_or_default()
+}
+
+/// Folder safety (`varsto_core::engine::folder_safety`): the folder marker,
+/// held deletions and the send-only / receive-only modes. `input` names the
+/// folder and the action; the command line calls this directly when no
+/// service runs.
+pub(crate) fn folder_safety_action(engine: &mut Engine, input: &Value) -> Result<Value> {
+    let folder = s(input, "folder")?;
+    let action = s(input, "action")?;
+    Ok(match action.as_str() {
+        "pending" => serde_json::to_value(engine.folder_changes(&folder)?)?,
+        "repair-marker" => {
+            let path = engine.repair_marker(&folder)?;
+            json!({"ok": true, "path": path})
+        }
+        "confirm-deletions" => {
+            json!({"ok": true, "deleted": engine.confirm_deletions(&folder)?})
+        }
+        "discard-deletions" => serde_json::to_value(engine.discard_deletions(&folder)?)?,
+        "mode" => {
+            let mode: varsto_core::vault::FolderMode = s(input, "mode")?.parse()?;
+            engine.set_folder_mode(&folder, mode)?;
+            json!({"ok": true, "mode": mode})
+        }
+        "override" => json!({"ok": true, "files": engine.override_remote(&folder)?}),
+        "revert" => serde_json::to_value(engine.revert_local(&folder)?)?,
+        "deletion-guard" => {
+            let guard = match input.get("guard") {
+                None | Some(Value::Null) => None,
+                Some(g) => Some(serde_json::from_value::<varsto_core::vault::DeletionGuard>(
+                    g.clone(),
+                )?),
+            };
+            engine.set_deletion_guard(&folder, guard)?;
+            let now = engine.folder_changes(&folder)?.deletion_guard;
+            json!({"ok": true, "deletion_guard": now, "text": now.describe()})
+        }
+        other => bail!("unknown folder action {other}"),
+    })
 }
 
 fn opt(v: &Value, key: &str) -> Option<String> {
@@ -898,6 +1062,7 @@ fn storage_from_input(
             cold: false,
             carrier: false,
             place: String::new(),
+            min_free: None,
         },
         None,
     ))
@@ -991,6 +1156,21 @@ fn api(st: &mut State, method: Method, path: &str, query: &str, input: &Value) -
             Ok(json!({"ok": true, "removed": removed}))
         }
         (Method::Get, "/api/service") => Ok(st.service.summary()),
+        // The Help page: where this device stands, where the data is and what
+        // to do next. Works without a vault and while it is locked too.
+        // Sentences come as {t, p} like the recovery guide's; `?format=text`
+        // gives the English text of `varsto help-now`.
+        (Method::Get, "/api/help") => {
+            let observed = help_observed(&st.service);
+            let h = match st.engine.as_mut() {
+                Some(e) => e.help_state(observed)?,
+                None => varsto_core::engine::help_without_vault(&st.home),
+            };
+            Ok(match query_param(query, "format").as_deref() {
+                Some("text") => json!({ "text": varsto_core::help::render_text(&h) }),
+                _ => serde_json::to_value(h)?,
+            })
+        }
         (Method::Get, "/api/logs") => Ok(logs_info(&st.home)),
         (Method::Post, "/api/logs/level") => {
             let level = s(input, "level")?;
@@ -1102,11 +1282,75 @@ fn api(st: &mut State, method: Method, path: &str, query: &str, input: &Value) -
             let offer = varsto_core::pair::Offer::start(e.pairing_bundle()?)?;
             let status = offer.status();
             st.pair = Some(offer);
-            Ok(serde_json::to_value(status)?)
+            pair_status(status)
         }
         (Method::Get, "/api/pair/status") => Ok(match &st.pair {
-            Some(o) => serde_json::to_value(o.status())?,
+            Some(o) => pair_status(o.status())?,
             None => json!({"open": false}),
+        }),
+        // QR invitations (section 51): the QR codes of a request code, a
+        // sealed token or a pairing link, and what a scanned text is.
+        (Method::Post, "/api/qr") => {
+            let link = varsto_core::qr::Link::from_text(&s(input, "text")?)?;
+            let parts = input["parts"].as_bool().unwrap_or(false);
+            let uris = qr_uris(&link, parts)?;
+            let codes = uris
+                .iter()
+                .map(|u| varsto_core::qr::to_svg(u))
+                .collect::<Result<Vec<_>>>()?;
+            let mut v = link_info(&link)?;
+            v["codes"] = serde_json::to_value(&codes)?;
+            Ok(v)
+        }
+        (Method::Post, "/api/link/parse") => {
+            // One text, or every part of a split link scanned so far.
+            let texts: Vec<String> = match input["texts"].as_array() {
+                Some(a) => a
+                    .iter()
+                    .filter_map(|t| t.as_str().map(String::from))
+                    .collect(),
+                None => vec![s(input, "text")?],
+            };
+            let mut asm = varsto_core::qr::Assembler::new();
+            let mut last = None;
+            for t in &texts {
+                let t = t.trim();
+                let scanned = if varsto_core::qr::is_link(t) {
+                    varsto_core::qr::parse(t)?
+                } else {
+                    varsto_core::qr::Scanned::Link(varsto_core::qr::Link::from_text(t)?)
+                };
+                match scanned {
+                    varsto_core::qr::Scanned::Link(l) => return link_info(&l),
+                    varsto_core::qr::Scanned::Part(p) => {
+                        last = Some(p.clone());
+                        if let Some(l) = asm.add(p)? {
+                            return link_info(&l);
+                        }
+                    }
+                }
+            }
+            let p = last.ok_or_else(|| anyhow!("nothing scanned"))?;
+            let (have, count) = asm.progress();
+            Ok(json!({"part": p, "have": have, "count": count}))
+        }
+        // A link the system opened Varsto with: kept until the interface takes it.
+        (Method::Post, "/api/link") => {
+            let uri = s(input, "uri")?;
+            match varsto_core::qr::parse(&uri)? {
+                varsto_core::qr::Scanned::Link(_) => {}
+                varsto_core::qr::Scanned::Part(p) => bail!(
+                    "this is part {} of {} of a split code: scan it in Varsto (Scan QR code)",
+                    p.index,
+                    p.count
+                ),
+            }
+            st.link = Some(uri.trim().to_string());
+            Ok(json!({"ok": true}))
+        }
+        (Method::Get, "/api/link") => Ok(match st.link.take() {
+            Some(uri) => json!({"uri": uri}),
+            None => json!({}),
         }),
         (Method::Post, "/api/pair/stop") => {
             if let Some(o) = st.pair.take() {
@@ -1217,6 +1461,7 @@ fn api(st: &mut State, method: Method, path: &str, query: &str, input: &Value) -
                     cold: false,
                     carrier: false,
                     place: String::new(),
+                    min_free: None,
                 }
             };
             // The key in hex, or the 24 words of the recovery kit.
@@ -1256,6 +1501,28 @@ fn api(st: &mut State, method: Method, path: &str, query: &str, input: &Value) -
                 .ok_or_else(|| anyhow!("vault is locked"))?;
             api_unlocked(engine, service, method2, path, query, input)
         }
+    }
+}
+
+/// What the service already knows, for the Help page.
+pub fn help_observed(sv: &ServiceState) -> varsto_core::engine::HelpObserved {
+    varsto_core::engine::HelpObserved {
+        service: Some(varsto_core::help::ServiceIn {
+            running: sv.running,
+            paused: sv.paused,
+            last_error: sv.last_error.clone(),
+            p2p_listening: sv.p2p_listen.is_some(),
+            p2p_reachable: sv.p2p_reachable,
+            peers: sv.p2p_peers.len(),
+        }),
+        policies: (!sv.policies.is_empty()).then(|| sv.policies.clone()),
+        disks: (!sv.disks.is_empty()).then(|| sv.disks.clone()),
+        disk_suggest: sv.disk_suggest.clone(),
+        repair: sv.repair.clone(),
+        scrub: sv.scrub.clone(),
+        backup_errors: sv.backup_errors.clone(),
+        restic_text: sv.restic_text.clone(),
+        quota_full: sv.quota_full.clone(),
     }
 }
 
@@ -1348,14 +1615,21 @@ fn api_unlocked(
         }
         (Method::Post, "/api/share/create") => {
             let folder = s(input, "folder")?;
+            let role = match opt(input, "role").filter(|r| !r.trim().is_empty()) {
+                Some(r) => varsto_core::share::ShareRole::parse(&r)?,
+                None => varsto_core::share::ShareRole::Editor,
+            };
             match opt(input, "to").filter(|c| !c.trim().is_empty()) {
                 Some(code) => {
                     // The interface sends the words the user confirmed; they
                     // must be the code's.
                     let confirmed = opt(input, "fingerprint").filter(|f| !f.trim().is_empty());
                     let (sealed, req) =
-                        engine.share_create_sealed(&folder, &code, confirmed.as_deref())?;
-                    Ok(json!({"ok": true, "token": sealed.encode(), "folder": sealed.name, "sealed": true, "fingerprint": req.fingerprint, "name": req.name}))
+                        engine.share_create_sealed_as(&folder, &code, confirmed.as_deref(), role)?;
+                    Ok(json!({"ok": true, "token": sealed.encode(), "folder": sealed.name, "sealed": true, "fingerprint": req.fingerprint, "name": req.name, "role": role.as_str()}))
+                }
+                None if !role.is_editor() => {
+                    bail!("a viewer's token must be sealed to their request code: paste it (a plain token cannot say what its holder may do)")
                 }
                 None => {
                     let t = engine.share_create_plain(&folder)?;
@@ -1367,6 +1641,12 @@ fn api_unlocked(
             let folder = query_param(query, "folder")
                 .ok_or_else(|| anyhow!("folder query parameter required"))?;
             Ok(serde_json::to_value(engine.share_members(&folder)?)?)
+        }
+        (Method::Post, "/api/share/role") => {
+            let role = varsto_core::share::ShareRole::parse(&s(input, "role")?)?;
+            let r = engine.share_set_role(&s(input, "folder")?, &s(input, "member")?, role)?;
+            service.request_sync();
+            Ok(serde_json::to_value(r)?)
         }
         (Method::Post, "/api/share/revoke") => {
             // Like removing a device: the caller must confirm explicitly.
@@ -1424,7 +1704,7 @@ fn api_unlocked(
         }
         (Method::Post, "/api/org/fingerprint") => {
             let r = varsto_core::org::OrgRequest::parse(&s(input, "code")?)?;
-            Ok(json!({"fingerprint": r.fingerprint, "name": r.name, "device_id": r.device.to_string()}))
+            Ok(json!({"fingerprint": r.fingerprint, "name": r.name, "device_id": r.device.to_string(), "platform": r.platform}))
         }
         (Method::Post, "/api/org/approve") => {
             let fp = opt(input, "fingerprint").filter(|f| !f.trim().is_empty());
@@ -1604,6 +1884,7 @@ fn api_unlocked(
                         cold,
                         carrier,
                         place: opt(input, "place").unwrap_or_default(),
+                        min_free: None,
                     })?;
                     let targets = string_list(input, "carrier_for");
                     if carrier && !targets.is_empty() {
@@ -1836,6 +2117,42 @@ fn api_unlocked(
             }
             Ok(serde_json::to_value(st)?)
         }
+        // The version history of overwritten files.
+        (Method::Get, "/api/history") => {
+            let folder = query_param(query, "folder").unwrap_or_default();
+            let path = query_param(query, "path").unwrap_or_default();
+            Ok(serde_json::to_value(engine.history_list(&folder, &path)?)?)
+        }
+        (Method::Get, "/api/history/status") => {
+            Ok(serde_json::to_value(engine.history_status()?)?)
+        }
+        (Method::Post, "/api/history/restore-plan") | (Method::Post, "/api/history/restore") => {
+            let plan_only = path.ends_with("-plan");
+            let target = varsto_core::engine::HistoryTarget {
+                to: opt(input, "to").filter(|t| !t.trim().is_empty()),
+                as_name: opt(input, "as").filter(|t| !t.trim().is_empty()),
+            };
+            let (folder, path, version) =
+                (s(input, "folder")?, s(input, "path")?, s(input, "version")?);
+            if plan_only {
+                return Ok(serde_json::to_value(
+                    engine.history_restore_plan(&folder, &path, &version, &target)?,
+                )?);
+            }
+            let cold = input.get("confirm_cold_read").and_then(|v| v.as_bool()).unwrap_or(false);
+            let r = engine.history_restore(&folder, &path, &version, &target, cold)?;
+            service.request_sync();
+            Ok(serde_json::to_value(r)?)
+        }
+        (Method::Post, "/api/history/set") => {
+            let days = input
+                .get("days")
+                .and_then(|v| v.as_u64())
+                .map(|d| d.min(u32::MAX as u64) as u32);
+            let folder = opt(input, "folder").filter(|f| !f.is_empty());
+            let off = input.get("off").and_then(|v| v.as_bool()).unwrap_or(false);
+            Ok(serde_json::to_value(engine.history_set(days, folder.as_deref(), off)?)?)
+        }
         (Method::Post, "/api/trash/upkeep") => {
             let r = engine.trash_upkeep()?;
             service.record_trash_upkeep(&r);
@@ -1843,6 +2160,7 @@ fn api_unlocked(
         }
         (Method::Post, "/api/sync") => {
             let folder = opt(input, "folder");
+            varsto_core::events::publish("sync.started", json!({"reason": "requested", "folder": folder}));
             let reports = engine.sync(folder.as_deref())?;
             service.record_sync(&reports);
             Ok(serde_json::to_value(
@@ -1913,6 +2231,25 @@ fn api_unlocked(
             let r = r?;
             service.request_sync();
             Ok(serde_json::to_value(r)?)
+        }
+        // Change history of a folder or a file (`varsto changes`).
+        (Method::Get, "/api/changes") => {
+            let folder = query_param(query, "folder")
+                .ok_or_else(|| anyhow!("folder query parameter required"))?;
+            let since_utc = query_param(query, "since")
+                .filter(|s| !s.is_empty())
+                .map(|s| varsto_core::changes::parse_since(&s, varsto_core::util::now_utc()))
+                .transpose()?;
+            let q = varsto_core::engine::ChangesQuery {
+                path: query_param(query, "path").filter(|s| !s.is_empty()),
+                device: query_param(query, "device").filter(|s| !s.is_empty()),
+                user: query_param(query, "user").filter(|s| !s.is_empty()),
+                since_utc,
+                limit: query_param(query, "limit")
+                    .and_then(|l| l.parse().ok())
+                    .unwrap_or(200),
+            };
+            Ok(serde_json::to_value(engine.changes(&folder, &q)?)?)
         }
         (Method::Get, "/api/files") => {
             let folder = query_param(query, "folder")
@@ -2142,6 +2479,8 @@ fn api_unlocked(
             "relays": service.p2p_relays,
             "paths": service.p2p_paths,
             "cert_sha256": service.p2p_cert_sha256,
+            "portmap": service.p2p_portmap,
+            "portmap_text": service.p2p_portmap.describe(),
         })),
         (Method::Post, "/api/p2p") => {
             let mut c = engine.p2p_config();
@@ -2159,6 +2498,11 @@ fn api_unlocked(
             if let Some(stun) = input.get("stun").and_then(|v| v.as_str()) {
                 // An empty field disables STUN on purpose.
                 c.stun = stun.split(',').map(|a| a.trim().to_string()).filter(|a| !a.is_empty()).collect();
+            }
+            // Router port mapping takes effect at once (the service's loop
+            // reads the setting every half second).
+            if let Some(pm) = input.get("port_mapping").and_then(|v| v.as_bool()) {
+                c.port_mapping = pm;
             }
             let enabled = c.enabled;
             let same_settings = was.1 == c.port && was.2 == c.public_addrs && was.3 == c.stun;
@@ -2503,6 +2847,28 @@ fn api_unlocked(
                 }
             }
         }
+        (Method::Post, "/api/folder/safety") => {
+            let action = s(input, "action")?;
+            let out = folder_safety_action(engine, input)?;
+            if action != "pending" {
+                service.folders_changed = true;
+                service.request_sync();
+            }
+            Ok(out)
+        }
+        (Method::Post, "/api/folder/min-free") => {
+            let m = min_free_input(input)?;
+            engine.set_folder_min_free(&s(input, "folder")?, m)?;
+            // Space may be enough now: try what waits.
+            service.request_sync();
+            Ok(json!({"ok": true, "min_free": m.map(|m| m.setting())}))
+        }
+        (Method::Post, "/api/storage/min-free") => {
+            let m = min_free_input(input)?;
+            engine.set_storage_min_free(&s(input, "name")?, m)?;
+            service.request_sync();
+            Ok(json!({"ok": true, "min_free": m.map(|m| m.setting())}))
+        }
         (Method::Post, "/api/selective") => {
             engine.set_selective(
                 &s(input, "folder")?,
@@ -2512,6 +2878,62 @@ fn api_unlocked(
             // Turned off: the next sync downloads the placeholders.
             service.request_sync();
             Ok(json!({"ok": true}))
+        }
+        (Method::Get, "/api/folder/ignore") => {
+            let folder = query_param(query, "folder")
+                .ok_or_else(|| anyhow!("folder query parameter required"))?;
+            Ok(serde_json::to_value(engine.folder_ignore(&folder)?)?)
+        }
+        (Method::Post, "/api/folder/ignore") => {
+            // `synced`: the root .varstoignore as text; `local`: this
+            // device's own patterns. Either may be left out.
+            let local = input.get("local").and_then(|v| v.as_array()).map(|a| {
+                a.iter()
+                    .filter_map(|p| p.as_str())
+                    .map(str::trim_end)
+                    .filter(|p| !p.trim().is_empty())
+                    .map(str::to_string)
+                    .collect::<Vec<_>>()
+            });
+            let synced = opt(input, "synced");
+            engine.set_folder_ignore(&s(input, "folder")?, synced.as_deref(), local)?;
+            service.request_sync();
+            Ok(json!({"ok": true}))
+        }
+        (Method::Post, "/api/folder/check-ignore") => {
+            // A preview: the texts being edited stand for the saved rules.
+            let local: Option<Vec<String>> =
+                input.get("local").and_then(|v| v.as_array()).map(|a| {
+                    a.iter()
+                        .filter_map(|p| p.as_str().map(str::to_string))
+                        .collect()
+                });
+            Ok(serde_json::to_value(engine.check_ignore(
+                &s(input, "folder")?,
+                &s(input, "path")?,
+                opt(input, "synced").as_deref(),
+                local.as_deref(),
+            )?)?)
+        }
+        (Method::Get, "/api/folder/settings") => {
+            let folder = query_param(query, "folder")
+                .ok_or_else(|| anyhow!("folder query parameter required"))?;
+            Ok(json!({
+                "settings": engine.folder_settings(&folder)?,
+                "caps": engine.meta_caps(),
+            }))
+        }
+        (Method::Post, "/api/folder/settings") => {
+            let folder = s(input, "folder")?;
+            let mut st = engine.folder_settings(&folder)?;
+            let flag = |k: &str, cur: bool| input.get(k).and_then(|v| v.as_bool()).unwrap_or(cur);
+            st.permissions = flag("permissions", st.permissions);
+            st.symlinks = flag("symlinks", st.symlinks);
+            st.xattrs = flag("xattrs", st.xattrs);
+            st.ownership = flag("ownership", st.ownership);
+            engine.set_folder_settings(&folder, st)?;
+            service.request_sync();
+            Ok(json!({"ok": true, "settings": st}))
         }
         (Method::Get, "/api/dupes") => {
             let folder = query_param(query, "folder")
@@ -2552,6 +2974,7 @@ mod tests {
                 cold: false,
                 carrier: false,
                 place: String::new(),
+                min_free: None,
             })
             .unwrap();
         engine
@@ -2685,6 +3108,138 @@ mod tests {
         assert!(s.attached.is_empty());
         assert!(s.excluded[0].retired);
         pool::set_fake_space(&disk, None);
+    }
+
+    #[test]
+    fn help_api_answers_without_a_vault_locked_and_open() {
+        use varsto_core::storage::StorageSpec;
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().join("home");
+        let mut st = State {
+            home: home.clone(),
+            engine: None,
+            token: "t".into(),
+            bound: "127.0.0.1:0".into(),
+            traffic: Arc::default(),
+            service: ServiceState {
+                running: true,
+                ..Default::default()
+            },
+            pair: None,
+            link: None,
+        };
+        let get = |st: &mut State, query: &str| {
+            api(st, Method::Get, "/api/help", query, &json!({})).unwrap()
+        };
+
+        // No vault: create one or pair, on the setup screen.
+        let h = get(&mut st, "");
+        assert_eq!(h["phase"], "no_vault");
+        assert_eq!(h["steps"][0]["id"], "create_vault");
+        assert_eq!(h["steps"][0]["action"]["page"], "setup");
+        assert_eq!(h["steps"][0]["action"]["target"], "init");
+        assert!(h["steps"][0]["title"]["t"].is_string());
+        let t = get(&mut st, "format=text");
+        assert!(t["text"].as_str().unwrap().contains("WHAT TO DO NEXT"));
+
+        // A vault, locked.
+        let (engine, _) = Engine::init(&home, "laptop", "pass phrase").unwrap();
+        drop(engine);
+        let h = get(&mut st, "");
+        assert_eq!(h["phase"], "locked");
+        assert_eq!(h["steps"][0]["id"], "unlock");
+        assert_eq!(h["headline"]["p"]["device"], "laptop");
+
+        // Open, no storage: add a storage; then a folder.
+        st.engine = Some(Engine::open(&home, "pass phrase").unwrap());
+        let h = get(&mut st, "");
+        assert_eq!(h["phase"], "ready");
+        assert_eq!(h["steps"][0]["id"], "add_storage");
+        assert_eq!(h["steps"][0]["action"]["target"], "addstorage");
+        assert_eq!(h["figures"]["devices"], 1);
+        st.engine
+            .as_mut()
+            .unwrap()
+            .add_storage(StorageSpec::LocalDir {
+                name: "box".into(),
+                path: tmp.path().join("box"),
+                cold: false,
+                carrier: false,
+                place: String::new(),
+                min_free: None,
+            })
+            .unwrap();
+        let h = get(&mut st, "");
+        assert_eq!(h["steps"][0]["id"], "add_folder");
+        assert_eq!(h["storages"][0]["name"], "box");
+        assert_eq!(h["summary"][1]["p"]["names"], "box");
+
+        // Paused in the service: resume first.
+        st.service.paused = true;
+        let h = get(&mut st, "");
+        assert_eq!(h["steps"][0]["id"], "resume");
+        assert!(h["attention"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|a| a["id"] == "service"));
+    }
+
+    /// Every sentence the Help page can show has a Finnish and a Swedish
+    /// translation (the templates are the English string literals of
+    /// `help.rs` given to `t0`/`tx` and the buttons' labels).
+    #[test]
+    fn help_sentences_are_translated() {
+        let src = include_str!("../../varsto-core/src/help.rs");
+        let src = &src[..src.find("pub fn render_text").unwrap()];
+        let mut found = Vec::new();
+        for marker in ["t0(", "tx(", ".act("] {
+            for (at, _) in src.match_indices(marker) {
+                // Not the helpers' own definitions.
+                if src[..at].ends_with("fn ") {
+                    continue;
+                }
+                let rest = &src[at + marker.len()..];
+                // t0/tx with a literal (not a variable): the first literal;
+                // act: the last one in the call (the label).
+                if !rest.trim_start().starts_with('"') {
+                    continue;
+                }
+                let call = if marker == ".act(" {
+                    let end = [rest.find("\")\n"), rest.find("\").")]
+                        .into_iter()
+                        .flatten()
+                        .min()
+                        .unwrap();
+                    &rest[..end + 1]
+                } else {
+                    rest
+                };
+                let mut lits = Vec::new();
+                let mut r = call;
+                while let Some(q) = r.find('"') {
+                    let body = &r[q + 1..];
+                    let end = body.find('"').unwrap();
+                    lits.push(&body[..end]);
+                    r = &body[end + 1..];
+                    if marker != ".act(" {
+                        break;
+                    }
+                }
+                if let Some(l) = lits.last() {
+                    found.push(l.to_string());
+                }
+            }
+        }
+        assert!(found.len() > 150, "{}", found.len());
+        for (lang, dict) in [("fi", I18N_FI), ("sv", I18N_SV)] {
+            let d: Value = serde_json::from_str(dict).unwrap();
+            let missing: Vec<&String> = found
+                .iter()
+                .filter(|t| t.len() > 1 && d["strings"].get(t.as_str()).is_none())
+                .collect();
+            assert!(missing.is_empty(), "{lang} lacks {missing:?}");
+        }
     }
 
     #[test]

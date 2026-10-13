@@ -52,6 +52,8 @@ func tr(_ en: String, _ arg: String = "") -> String {
 final class ServiceHost: ObservableObject {
     @Published var url: URL?
     @Published var error: String?
+    /// A varsto:// link the app was opened with (a QR code scanned with the Camera app).
+    @Published var link: String?
 
     init() { start() }
 
@@ -95,22 +97,50 @@ struct ContentView: View {
     var body: some View {
         Group {
             if let url = host.url {
-                WebView(url: url).ignoresSafeArea(edges: .bottom)
+                WebView(url: url, link: $host.link).ignoresSafeArea(edges: .bottom)
             } else if let e = host.error {
                 VStack(spacing: 12) { Text("Varsto").font(.largeTitle.bold()); Text(e).foregroundColor(.secondary) }
             } else {
                 ProgressView(tr("Starting Varsto…"))
             }
         }
+        .onOpenURL { u in if u.scheme?.lowercased() == "varsto" { host.link = u.absoluteString } }
     }
 }
 
 struct WebView: UIViewRepresentable {
     let url: URL
+    @Binding var link: String?
+
+    final class Coordinator: NSObject, WKUIDelegate, WKNavigationDelegate {
+        var loaded = false
+        var pending: String?
+        /// The page's QR scanner: the camera, for the local interface only (iOS still asks once).
+        func webView(_ webView: WKWebView, requestMediaCapturePermissionFor origin: WKSecurityOrigin,
+                     initiatedByFrame frame: WKFrameInfo, type: WKMediaCaptureType,
+                     decisionHandler: @escaping (WKPermissionDecision) -> Void) {
+            decisionHandler(origin.host == "127.0.0.1" && type == .camera ? .grant : .deny)
+        }
+        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            loaded = true
+            if let l = pending { pending = nil; Self.open(l, in: webView) }
+        }
+        static func open(_ link: String, in view: WKWebView) {
+            guard let data = try? JSONSerialization.data(withJSONObject: [link]),
+                  let arr = String(data: data, encoding: .utf8) else { return }
+            view.evaluateJavaScript("window.varstoOpenLink && window.varstoOpenLink(\(arr)[0])", completionHandler: nil)
+        }
+    }
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
     func makeUIView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
         config.websiteDataStore = .nonPersistent()
+        // The scanner's <video playsinline> plays in the page, not full screen.
+        config.allowsInlineMediaPlayback = true
         let view = WKWebView(frame: .zero, configuration: config)
+        view.uiDelegate = context.coordinator
+        view.navigationDelegate = context.coordinator
         // Not wired yet: the page's `window.VarstoAndroid` bridge (open a file in another app,
         // share it, all-files access) has no iOS counterpart. Its place is a WKScriptMessageHandler
         // here that answers openFile/shareFile with UIDocumentInteractionController and
@@ -118,7 +148,11 @@ struct WebView: UIViewRepresentable {
         view.load(URLRequest(url: url))
         return view
     }
-    func updateUIView(_ uiView: WKWebView, context: Context) {}
+    func updateUIView(_ uiView: WKWebView, context: Context) {
+        guard let l = link else { return }
+        DispatchQueue.main.async { link = nil }
+        if context.coordinator.loaded { Coordinator.open(l, in: uiView) } else { context.coordinator.pending = l }
+    }
 }
 
 /// Video thumbnails: the service has no ffmpeg on a phone, so it lists the

@@ -75,6 +75,8 @@ pub struct ServiceState {
     pub p2p_relays: Vec<String>,
     pub p2p_paths: Vec<varsto_core::p2p::PeerStatus>,
     pub p2p_cert_sha256: String,
+    /// The port the home router forwards to us (PCP, NAT-PMP, UPnP), if any.
+    pub p2p_portmap: varsto_core::p2p::portmap::PortMapStatus,
     /// Automatic verification: schedule, last run and next run.
     pub auto_verify: Option<varsto_core::autoverify::VerifyStatus>,
     /// Automatic repair: queue, last run and copies that could not be repaired.
@@ -107,6 +109,15 @@ pub struct ServiceState {
     pub drain_notified: std::collections::BTreeSet<String>,
     /// Storages at their quota during the last sync, one sentence each.
     pub quota_full: Vec<String>,
+    /// Folders paused on this device (marker missing, deletions held), by
+    /// name, with the reason; notified once when a folder pauses.
+    pub paused_folders: std::collections::BTreeMap<String, String>,
+    /// Places short of disk space (`freespace`): downloads or uploads there
+    /// wait until space is back. Notified once per place.
+    pub low_space: Vec<varsto_core::freespace::LowSpace>,
+    pub low_space_notified: std::collections::BTreeSet<String>,
+    /// Storages a push had to leave out last time (`storage.problem` events).
+    pub storage_problems: std::collections::BTreeSet<String>,
 }
 
 /// The storages are asked this often whether they hold newer ledger
@@ -141,6 +152,8 @@ impl ServiceState {
             "p2p_reachable": self.p2p_reachable,
             "p2p_relays": self.p2p_relays,
             "p2p_paths": self.p2p_paths,
+            "p2p_portmap": self.p2p_portmap,
+            "p2p_portmap_text": self.p2p_portmap.describe(),
             "auto_verify": self.auto_verify,
             "auto_verify_text": self.auto_verify.as_ref().map(|v| v.describe()),
             "repair": self.repair,
@@ -155,6 +168,8 @@ impl ServiceState {
             "restic_text": self.restic_text,
             "drains": self.drains,
             "quota_full": self.quota_full,
+            "paused_folders": self.paused_folders,
+            "low_space": self.low_space,
         })
     }
     /// Rank the pool disks for docking next (`disk suggest`) and, at most
@@ -220,6 +235,12 @@ impl ServiceState {
                 .iter()
                 .find(|p| p.folder == r.folder)
                 .map(|p| p.state);
+            if before != Some(r.state) {
+                varsto_core::events::publish(
+                    "policy.changed",
+                    json!({"folder": r.folder, "state": r.state}),
+                );
+            }
             let worse = match (before, r.state) {
                 (None, PolicyState::Ok) | (None, PolicyState::Unknown) => false,
                 (None, _) => true,
@@ -375,7 +396,18 @@ impl ServiceState {
         if health.automatic && health.state != "repairing" {
             self.ledger_rebuild(engine, &health);
         }
-        self.ledger_health = Some(engine.ledger_health());
+        self.set_ledger_health(engine.ledger_health());
+    }
+
+    /// Keep the ledger's state; a new state is an event.
+    fn set_ledger_health(&mut self, h: varsto_core::engine::LedgerHealth) {
+        if self.ledger_health.as_ref().map(|o| o.state.as_str()) != Some(h.state.as_str()) {
+            varsto_core::events::publish(
+                "ledger.health",
+                json!({"state": h.state, "text": h.describe()}),
+            );
+        }
+        self.ledger_health = Some(h);
     }
 
     /// After a sync: no ledger anywhere while folders hold files (checked
@@ -385,7 +417,7 @@ impl ServiceState {
             let health = engine.ledger_health();
             self.ledger_rebuild(engine, &health);
         }
-        self.ledger_health = Some(engine.ledger_health());
+        self.set_ledger_health(engine.ledger_health());
     }
 
     fn ledger_rebuild(&mut self, engine: &mut Engine, health: &varsto_core::engine::LedgerHealth) {
@@ -473,12 +505,20 @@ impl ServiceState {
                         r.seq, r.files, r.chunks_uploaded
                     );
                     log::info!("{msg}");
+                    varsto_core::events::publish(
+                        "backup",
+                        json!({"name": name, "ok": true, "text": msg}),
+                    );
                     self.backup_last = Some(msg);
                     self.backup_errors.remove(&name);
                 }
                 Err(e) => {
                     let why = format!("{e:#}");
                     log::warn!("backup {name} failed: {why}");
+                    varsto_core::events::publish(
+                        "backup",
+                        json!({"name": name, "ok": false, "text": why}),
+                    );
                     // Once per new reason, not on every retry.
                     if self.backup_errors.get(&name) != Some(&why) {
                         notify("Varsto backup", &format!("{name}: {why}"));
@@ -512,6 +552,10 @@ impl ServiceState {
                 Ok(None) => return,
                 Ok(Some(status)) => {
                     self.restic_child = None;
+                    varsto_core::events::publish(
+                        "backup",
+                        json!({"name": "restic", "ok": status.success()}),
+                    );
                     if status.success() {
                         log::info!("scheduled restic backup done");
                     } else {
@@ -581,10 +625,16 @@ impl ServiceState {
         }
     }
     pub fn record_trash_upkeep(&mut self, r: &varsto_core::engine::TrashUpkeepReport) {
-        if r.expired + r.blocks_dropped + r.blocks_moved + r.local_copies_removed > 0 {
+        if r.expired
+            + r.versions_dropped
+            + r.blocks_dropped
+            + r.blocks_moved
+            + r.local_copies_removed
+            > 0
+        {
             log::info!(
-                "trash: {} files expired, {} blocks deleted, {} blocks moved to the trash storage, {} local copies removed",
-                r.expired, r.blocks_dropped, r.blocks_moved, r.local_copies_removed
+                "trash: {} files expired, {} earlier versions let go, {} blocks deleted, {} blocks moved to the trash storage, {} local copies removed",
+                r.expired, r.versions_dropped, r.blocks_dropped, r.blocks_moved, r.local_copies_removed
             );
         }
         for n in &r.notes {
@@ -605,6 +655,37 @@ impl ServiceState {
     pub fn request_sync(&mut self) {
         self.sync_requested = true;
     }
+    /// Measure the places short of disk space again: tell the user once
+    /// about each new one ("disk of folder X has 3 % free, below the 5 %
+    /// limit; downloads paused"), and when one has room again, say so and
+    /// sync at once, so what waited is fetched.
+    pub fn check_space(&mut self) {
+        for back in varsto_core::freespace::recheck() {
+            let msg = format!(
+                "disk of {} has room again; {} resume",
+                back.place.label, back.place.stops
+            );
+            log::info!("{msg}");
+            varsto_core::events::publish("space.ok", json!({"place": back.place.key, "text": msg}));
+            self.low_space_notified.remove(&back.place.key);
+            self.sync_requested = true;
+        }
+        let short = varsto_core::freespace::short_places();
+        for l in &short {
+            if self.low_space_notified.insert(l.place.key.clone()) {
+                varsto_core::events::publish(
+                    "space.low",
+                    json!({"place": l.place.key, "text": l.text}),
+                );
+                log::warn!("{}", l.text);
+                notify("Varsto disk space", &l.text);
+            }
+        }
+        // A place no longer short without a recheck (a check found room).
+        self.low_space_notified
+            .retain(|k| short.iter().any(|l| &l.place.key == k));
+        self.low_space = short;
+    }
     pub fn record_sync(&mut self, reports: &[(PullReport, PushReport)]) {
         self.last_sync_utc = Some(varsto_core::util::now_utc());
         self.syncs += 1;
@@ -613,21 +694,53 @@ impl ServiceState {
         let mut conflicts = 0;
         let mut uploaded = 0;
         let mut unavailable = 0;
+        let mut waiting = 0;
         let mut forked = false;
         let mut disks: Vec<String> = Vec::new();
         let mut full: Vec<String> = Vec::new();
+        let mut paused = std::collections::BTreeMap::new();
+        let mut left_out: std::collections::BTreeSet<String> = Default::default();
+        // A read-only shared folder: local changes are not published.
+        let mut kept_aside = 0;
         for (pl, ps) in reports {
+            kept_aside += pl.kept_aside.len() + ps.kept_aside.len();
             for f in &ps.storages_full {
                 if !full.contains(f) {
                     full.push(f.clone());
                 }
             }
+            if let Some(p) = &pl.paused {
+                if self.paused_folders.get(&p.folder) != Some(&p.message) {
+                    log::warn!("{}", p.message);
+                    varsto_core::events::publish(
+                        "folder.paused",
+                        json!({"folder": p.folder, "text": p.message}),
+                    );
+                    notify("Varsto folder paused", &p.message);
+                }
+                paused.insert(p.folder.clone(), p.message.clone());
+            }
+            // Counts only: names of files never go into events.
+            if pl.files_updated > 0 {
+                varsto_core::events::publish(
+                    "files.new",
+                    json!({"folder": pl.folder, "count": pl.files_updated}),
+                );
+            }
+            if pl.files_deleted > 0 {
+                varsto_core::events::publish(
+                    "trash",
+                    json!({"folder": pl.folder, "count": pl.files_deleted}),
+                );
+            }
+            left_out.extend(ps.storages_unavailable.iter().cloned());
             self.p2p_chunks += pl.chunks_from_peers;
             updated += pl.files_updated;
             deleted += pl.files_deleted;
             conflicts += pl.conflicts;
             uploaded += ps.chunks_uploaded;
             unavailable += pl.files_unavailable.len();
+            waiting += pl.files_waiting_for_space;
             forked |= !pl.forked_devices.is_empty();
             for d in &pl.disks_needed {
                 if !disks.contains(d) {
@@ -635,7 +748,15 @@ impl ServiceState {
                 }
             }
         }
-        self.last_result = format!("{} folders: {updated} updated, {deleted} deleted, {conflicts} conflicts, {uploaded} chunks uploaded{}{}{}", reports.len(), if unavailable > 0 { format!(", {unavailable} unavailable") } else { String::new() }, if disks.is_empty() { String::new() } else { format!(" (attach disk {})", disks.join(", ")) }, if forked { ", FORKED device" } else { "" });
+        // A sync of one folder says nothing about the others.
+        if reports.len() == 1 {
+            let name = &reports[0].0.folder;
+            self.paused_folders.remove(name);
+            self.paused_folders.extend(paused);
+        } else {
+            self.paused_folders = paused;
+        }
+        self.last_result = format!("{} folders: {updated} updated, {deleted} deleted, {conflicts} conflicts, {uploaded} chunks uploaded{}{}{}{}{}", reports.len(), if unavailable > 0 { format!(", {unavailable} unavailable") } else { String::new() }, if waiting > 0 { format!(", {waiting} waiting for disk space") } else { String::new() }, if disks.is_empty() { String::new() } else { format!(" (attach disk {})", disks.join(", ")) }, if forked { ", FORKED device" } else { "" }, if self.paused_folders.is_empty() { String::new() } else { format!(", {} paused", self.paused_folders.len()) });
         // A storage at its quota: blocks go elsewhere or wait here; say so once.
         for f in full.iter().filter(|f| !self.quota_full.contains(f)) {
             log::info!("{f}");
@@ -645,7 +766,36 @@ impl ServiceState {
             self.last_result += &format!("; {}", full.join("; "));
         }
         self.quota_full = full;
+        if kept_aside > 0 {
+            self.last_result.push_str(&format!(
+                "; read-only: your changes were not published ({kept_aside} file(s) kept aside)"
+            ));
+        }
         self.last_error = None;
+        for s in left_out.difference(&self.storage_problems) {
+            varsto_core::events::publish(
+                "storage.problem",
+                json!({"storage": s, "text": format!("{s} was left out of the last sync (no disk attached, full, or no room)")}),
+            );
+        }
+        for s in self.storage_problems.difference(&left_out) {
+            varsto_core::events::publish("storage.ok", json!({ "storage": s }));
+        }
+        self.storage_problems = left_out;
+        varsto_core::events::publish(
+            "sync.finished",
+            json!({
+                "ok": true,
+                "folders": reports.len(),
+                "updated": updated,
+                "deleted": deleted,
+                "conflicts": conflicts,
+                "uploaded": uploaded,
+                "unavailable": unavailable,
+                "waiting_for_space": waiting,
+                "syncs": self.syncs,
+            }),
+        );
     }
 }
 
@@ -678,6 +828,18 @@ struct P2p {
     republish: Arc<std::sync::atomic::AtomicBool>,
     /// The service's traffic counters (`State::traffic`).
     traffic: Arc<varsto_core::p2p::Traffic>,
+    /// Router port mapping: wanted (the setting), its status, and the
+    /// thread that keeps it (joined on drop, after it removed the mappings).
+    portmap_on: Arc<AtomicBool>,
+    portmap: Arc<Mutex<varsto_core::p2p::portmap::PortMapStatus>>,
+    portmap_thread: Option<std::thread::JoinHandle<()>>,
+}
+
+/// Router port mapping is on in the settings, and not switched off for this
+/// process with `VARSTO_NO_PORT_MAPPING` (tests and throwaway services must
+/// never touch the router of the network they run in).
+fn port_mapping_wanted(cfg: &varsto_core::vault::P2pConfig) -> bool {
+    cfg.port_mapping && std::env::var_os("VARSTO_NO_PORT_MAPPING").is_none()
 }
 
 /// STUN again this often, and at the earliest this soon after the last
@@ -810,6 +972,20 @@ impl P2p {
                 stop.clone(),
             );
         }
+        let portmap_on = Arc::new(AtomicBool::new(port_mapping_wanted(&cfg)));
+        let portmap = Arc::new(Mutex::new(if port_mapping_wanted(&cfg) {
+            varsto_core::p2p::portmap::PortMapStatus::default()
+        } else {
+            varsto_core::p2p::portmap::PortMapStatus::off()
+        }));
+        let portmap_thread = Self::spawn_portmap_thread(
+            listen.port(),
+            portmap_on.clone(),
+            portmap.clone(),
+            quic.clone(),
+            republish.clone(),
+            stop.clone(),
+        );
         {
             let mut st = state.lock().unwrap();
             st.service.p2p_listen = Some(listen);
@@ -832,7 +1008,93 @@ impl P2p {
             last_publish: Mutex::new(None),
             republish,
             traffic,
+            portmap_on,
+            portmap,
+            portmap_thread,
         })
+    }
+
+    /// Keep the peer-to-peer port forwarded on the home router (TCP and
+    /// UDP) while the setting is on: map at start, renew at half the lease,
+    /// map again after a network change, try again every half hour when no
+    /// router offered any of the protocols, and remove the mappings when
+    /// the setting goes off or the service stops. Silent unless
+    /// `VARSTO_P2P_DEBUG` is set: no router support is the common case.
+    fn spawn_portmap_thread(
+        port: u16,
+        on: Arc<AtomicBool>,
+        status: Arc<Mutex<varsto_core::p2p::portmap::PortMapStatus>>,
+        node: Option<Arc<varsto_core::p2p::quic::Node>>,
+        republish: Arc<AtomicBool>,
+        stop: Arc<AtomicBool>,
+    ) -> Option<std::thread::JoinHandle<()>> {
+        use varsto_core::p2p::portmap::{Options, PortMapStatus, PortMapper, Proto};
+        std::thread::Builder::new()
+            .name("p2p-portmap".into())
+            .spawn(move || {
+                let mut mapper: Option<PortMapper> = None;
+                // The local address the mappings point at; another one means
+                // another network, and everything is mapped again.
+                let mut local = varsto_core::p2p::local_ipv4_addrs();
+                let mut next_local_check = Instant::now();
+                while !stop.load(Ordering::Relaxed) && !QUIT.load(Ordering::Relaxed) {
+                    if !on.load(Ordering::Relaxed) {
+                        if let Some(mut m) = mapper.take() {
+                            m.remove_all();
+                            republish.store(true, Ordering::Relaxed);
+                        }
+                        *status.lock().unwrap() = PortMapStatus::off();
+                        Self::pause(&stop, Duration::from_secs(1));
+                        continue;
+                    }
+                    let now = Instant::now();
+                    if now >= next_local_check {
+                        next_local_check = now + Duration::from_secs(60);
+                        let current = varsto_core::p2p::local_ipv4_addrs();
+                        if current != local {
+                            local = current;
+                            if let Some(mut m) = mapper.take() {
+                                m.remove_all();
+                                republish.store(true, Ordering::Relaxed);
+                            }
+                        }
+                    }
+                    let m = mapper.get_or_insert_with(|| PortMapper::new(port, Options::system()));
+                    if m.mappings().is_empty() && m.next_due().is_none_or(|t| now >= t) {
+                        // Ask the routing table again: the gateway may be another.
+                        m.set_options(Options::system());
+                    }
+                    if m.tick(now) {
+                        // Does the mapped UDP address lead back to us? (A
+                        // router may not loop it back; then this stays false.)
+                        let verified = match (&node, m.external(Proto::Udp)) {
+                            (Some(n), Some(a)) => n.probe_self(a),
+                            _ => false,
+                        };
+                        m.set_verified(verified);
+                        republish.store(true, Ordering::Relaxed);
+                    }
+                    *status.lock().unwrap() = m.status();
+                    Self::pause(&stop, Duration::from_secs(1));
+                }
+                if let Some(mut m) = mapper {
+                    m.remove_all();
+                }
+                *status.lock().unwrap() = PortMapStatus::off();
+            })
+            .ok()
+    }
+
+    /// The router port mapping setting changed while running.
+    fn set_port_mapping(&self, on: bool) {
+        self.portmap_on.store(
+            on && std::env::var_os("VARSTO_NO_PORT_MAPPING").is_none(),
+            Ordering::Relaxed,
+        );
+    }
+
+    fn portmap_status(&self) -> varsto_core::p2p::portmap::PortMapStatus {
+        self.portmap.lock().unwrap().clone()
     }
 
     /// Sleep in half-second steps so a stop request is honoured promptly.
@@ -1040,6 +1302,12 @@ impl P2p {
         rec.udp_public = info.probe.public_addrs();
         rec.nat = info.probe.nat;
         rec.reachable |= info.reachable;
+        // The router forwards our port: the most direct way in from outside.
+        let pm = self.portmap_status();
+        rec.mapped_tcp = pm.tcp.into_iter().collect();
+        rec.mapped_udp = pm.udp.into_iter().collect();
+        rec.reachable |= pm.verified;
+        st.service.p2p_portmap = pm;
         if let Some(node) = &self.quic {
             rec.relay_via = node.registered_relays();
         }
@@ -1078,11 +1346,17 @@ impl P2p {
 impl Drop for P2p {
     fn drop(&mut self) {
         self.stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        // Wait for the router mappings to be removed (a few seconds at most:
+        // every request has a short timeout).
+        if let Some(t) = self.portmap_thread.take() {
+            let _ = t.join();
+        }
     }
 }
 
 /// Best-effort desktop notification; silent where no notifier exists.
 pub fn notify(title: &str, body: &str) {
+    varsto_core::events::publish("notification", json!({"title": title, "body": body}));
     #[cfg(target_os = "linux")]
     {
         let _ = std::process::Command::new("notify-send")
@@ -1134,6 +1408,12 @@ fn write_service_file(home: &Path, f: &ServiceFile) -> Result<()> {
 }
 
 pub fn request_quit(_state: &Shared) {
+    QUIT.store(true, Ordering::SeqCst);
+}
+
+/// Stop the service loop (a termination signal): it ends within a second
+/// unless a sync holds it, removing the router port mappings on the way.
+pub fn quit() {
     QUIT.store(true, Ordering::SeqCst);
 }
 
@@ -1465,6 +1745,7 @@ pub fn run(opts: Options) -> Result<()> {
             ..Default::default()
         },
         pair: None,
+        link: None,
     }));
     // The token is not printed: stdout ends up in service.log under the
     // tray and launchd. `varsto desktop` reads it from the service file.
@@ -1493,6 +1774,8 @@ pub fn run(opts: Options) -> Result<()> {
     // Asks the peers what they are doing, only while someone watches.
     let activity_stop = Arc::new(AtomicBool::new(false));
     varsto_core::activity::global().spawn_poller(activity_stop.clone());
+    // Tasks, transfers and peers as events while a page listens.
+    crate::sse::spawn_sampler(state.lock().unwrap().traffic.clone(), activity_stop.clone());
 
     // File watcher: sends a signal on any change under an attached folder.
     let (tx, rx) = mpsc::channel::<()>();
@@ -1524,6 +1807,8 @@ pub fn run(opts: Options) -> Result<()> {
         if Instant::now() >= next_disk_check {
             next_disk_check = Instant::now() + disk_check_every;
             let mut st = state.lock().unwrap();
+            // Space back where downloads waited: sync now.
+            st.service.check_space();
             if let Some(e) = st.engine.as_ref() {
                 // Who this device is in `/api/activity` (also while p2p is off).
                 varsto_core::activity::set_identity(e.device_id(), e.own_device_name());
@@ -1551,6 +1836,9 @@ pub fn run(opts: Options) -> Result<()> {
             log::debug!("local configuration changed on disk; reloading");
             let mut st = state.lock().unwrap();
             let reloaded = st.engine.as_mut().map(|e| e.reload_local());
+            if reloaded.as_ref().is_some_and(|r| r.is_ok()) {
+                varsto_core::events::publish("config.changed", json!({"source": "file"}));
+            }
             match reloaded {
                 Some(Ok(true)) => {
                     st.service.folders_changed = true;
@@ -1593,13 +1881,20 @@ pub fn run(opts: Options) -> Result<()> {
         }
         // Turned off while running: stop serving and fetching from peers.
         if p2p.is_some() {
-            let wanted = {
+            let (wanted, mapping) = {
                 let st = state.lock().unwrap();
                 st.engine
                     .as_ref()
-                    .map(|e| e.p2p_config().enabled)
-                    .unwrap_or(true)
+                    .map(|e| {
+                        let c = e.p2p_config();
+                        (c.enabled, c.port_mapping)
+                    })
+                    .unwrap_or((true, true))
             };
+            if let Some(p) = &p2p {
+                p.set_port_mapping(mapping);
+                state.lock().unwrap().service.p2p_portmap = p.portmap_status();
+            }
             if !wanted {
                 if let Some(p) = p2p.take() {
                     p.stop.store(true, std::sync::atomic::Ordering::SeqCst);
@@ -1610,6 +1905,7 @@ pub fn run(opts: Options) -> Result<()> {
                     e.set_snapshot_sink(None);
                 }
                 st.service.p2p_listen = None;
+                st.service.p2p_portmap = varsto_core::p2p::portmap::PortMapStatus::off();
                 varsto_core::activity::global().set_peers(None, None);
                 log::info!("p2p stopped (turned off)");
             }
@@ -1688,6 +1984,7 @@ pub fn run(opts: Options) -> Result<()> {
                 "interval"
             };
             let started = Instant::now();
+            varsto_core::events::publish("sync.started", json!({ "reason": why }));
             let result = st.engine.as_mut().map(|e| e.sync(None));
             if let Some(Ok(reports)) = &result {
                 {
@@ -1709,6 +2006,7 @@ pub fn run(opts: Options) -> Result<()> {
             if let Some(p) = &p2p {
                 p.refresh_after_sync(&mut st);
             }
+            st.service.check_space();
             match result {
                 Some(Ok(reports)) => {
                     st.service.record_sync(&reports);
@@ -1749,6 +2047,10 @@ pub fn run(opts: Options) -> Result<()> {
                 }
                 Some(Err(e)) => {
                     st.service.last_error = Some(format!("{e:#}"));
+                    varsto_core::events::publish(
+                        "sync.finished",
+                        json!({"ok": false, "error": format!("{e:#}")}),
+                    );
                     log::warn!("sync failed: {e:#}");
                     // A wipe order was carried out: nothing of the vault is left.
                     if e.downcast_ref::<varsto_core::engine::DeviceRemoved>()
@@ -1768,6 +2070,9 @@ pub fn run(opts: Options) -> Result<()> {
         std::thread::sleep(Duration::from_millis(500));
     }
     activity_stop.store(true, Ordering::Relaxed);
+    crate::sse::SHUTDOWN.store(true, Ordering::Relaxed);
+    // Stop peer-to-peer first: the router mappings are removed on the way.
+    drop(p2p);
     let restart = state.lock().unwrap().service.restart_requested;
     let _ = fs::remove_file(service_file(&opts.home));
     server.unblock();

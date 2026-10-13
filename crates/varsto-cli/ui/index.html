@@ -43,9 +43,11 @@
   <symbol id="i-close" viewBox="0 0 20 20"><path d="m5 5 10 10M15 5 5 15"/></symbol>
   <symbol id="i-upload" viewBox="0 0 20 20"><path d="M10 13V3M6 6.5l4-4 4 4"/><path d="M4 16.5h12"/></symbol>
   <symbol id="i-newfolder" viewBox="0 0 20 20"><path d="M3 6.5A1.5 1.5 0 0 1 4.5 5h3.4l1.6 1.6h6A1.5 1.5 0 0 1 17 8.1v6.4a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 3 14.5z"/><path d="M10 9v4M8 11h4"/></symbol>
+  <symbol id="i-qr" viewBox="0 0 20 20"><path d="M3 3h5v5H3zM12 3h5v5h-5zM3 12h5v5H3z"/><path d="M12 12h2v2h-2zM15 15h2v2h-2zM12 16v1M16 12h1"/></symbol>
   <symbol id="i-share" viewBox="0 0 20 20"><path d="M10 12V3.5M6.5 7 10 3.5 13.5 7"/><path d="M5 10v5.5A1.5 1.5 0 0 0 6.5 17h7a1.5 1.5 0 0 0 1.5-1.5V10"/></symbol>
   <symbol id="i-back" viewBox="0 0 20 20"><path d="m12.5 5-5 5 5 5"/></symbol>
   <symbol id="i-trash" viewBox="0 0 20 20"><path d="M4 5.5h12M8 5.5V4h4v1.5"/><path d="M5.5 5.5l.8 10.2A1.5 1.5 0 0 0 7.8 17h4.4a1.5 1.5 0 0 0 1.5-1.3l.8-10.2"/><path d="M8.5 8.5v5.5M11.5 8.5v5.5"/></symbol>
+  <symbol id="i-help" viewBox="0 0 20 20"><circle cx="10" cy="10" r="7.2"/><path d="M7.7 7.9a2.4 2.4 0 0 1 4.6.8c0 1.6-2.3 2-2.3 3.4"/><path d="M10 14.3v.3"/></symbol>
   <symbol id="i-backup" viewBox="0 0 20 20"><rect x="3" y="4" width="14" height="4" rx="1.2"/><path d="M4.5 8v7A1.5 1.5 0 0 0 6 16.5h8a1.5 1.5 0 0 0 1.5-1.5V8"/><path d="M8 11h4"/></symbol>
 </svg>
 
@@ -72,6 +74,7 @@
     <button type="button" class="nav-item" data-nav="settings"><svg class="icon"><use href="#i-settings"/></svg><span>Settings</span></button>
   </nav>
   <div class="sidebar-foot">
+    <button type="button" class="nav-item" data-nav="help"><svg class="icon"><use href="#i-help"/></svg><span>Help</span></button>
     <button type="button" id="themetoggle" class="nav-item" aria-pressed="false"><svg class="icon icon-sun"><use href="#i-sun"/></svg><svg class="icon icon-moon"><use href="#i-moon"/></svg><span class="theme-label">Dark mode</span></button>
     <label class="sidebar-lang muted"><span class="sr-only">Language</span><select class="lang-select" aria-label="Language"></select></label>
     <div class="sidebar-version muted">Local interface · v<span id="version"></span></div>
@@ -92,6 +95,7 @@
       <span id="svc-dot" class="dot" data-state="unknown"></span>
       <span id="who" class="muted"></span>
     </div>
+    <button id="pagehelp" class="secondary pagehelp" type="button" title="Help for this page" aria-label="Help for this page"><svg class="icon"><use href="#i-help"/></svg></button>
     <button id="lock" class="secondary hidden" type="button" title="Lock the vault on this device"><svg class="icon"><use href="#i-lock"/></svg><span class="btn-label">Lock</span></button>
   </header>
   <div class="alpha"><svg class="icon"><use href="#i-warn"/></svg><span>Alpha software: not for production data. Keep your own backups.</span></div>
@@ -103,6 +107,19 @@
     <div id="tb-bar" class="tb-bar"><i></i></div>
   </div>
   <main>
+  <!-- Help before a vault is open (setup and unlock screens), from GET /api/help. -->
+  <div id="prehelp" class="card help-card prehelp hidden">
+    <div class="prehelp-head">
+      <h2 class="card-title"><svg class="icon accent"><use href="#i-help"/></svg>Help</h2>
+      <button type="button" id="prehelp-toggle" class="secondary help-mini">Hide help</button>
+    </div>
+    <div id="prehelp-body">
+      <div id="prehelp-now" class="help-now"></div>
+      <h3 class="help-sub">What to do next</h3>
+      <ol id="prehelp-next" class="help-steps"></ol>
+      <details id="prehelp-guidebox" class="help-guidebox"><summary>Guides</summary><div id="prehelp-guides" class="help-guides"></div></details>
+    </div>
+  </div>
   <section id="setup" class="hidden">
     <div class="hero">
       <h2 class="hero-title">Welcome to Varsto</h2>
@@ -112,7 +129,8 @@
     <div class="cols cols-3">
       <form id="pair" class="card">
         <h3 class="card-title"><svg class="icon accent"><use href="#i-device"/></svg>Pair with your other device</h3>
-        <p class="muted small">On a device that already uses Varsto, open Devices and choose Add a device. Type the code it shows.</p>
+        <p class="muted small">On a device that already uses Varsto, open Devices and choose Add a device. Type the code it shows, or scan its QR code.</p>
+        <div class="row"><button type="button" id="pairscan" class="secondary"><svg class="icon"><use href="#i-qr"/></svg>Scan QR code</button></div>
         <label>Code <input name="code" type="tel" inputmode="numeric" pattern="[0-9 -]*" maxlength="11" autocomplete="one-time-code" placeholder="123-456-789" required></label>
         <label>Name for this device <input name="name" placeholder="phone" required></label>
         <label>Passphrase for this device <input name="passphrase" type="password" minlength="8" required></label>
@@ -163,7 +181,9 @@
         <p class="muted small">Step 1: send the owner a request code from this device (it carries the device name above). Step 2: read its six-word fingerprint to the owner over a call or in person; they see the same words. Step 3: paste the sealed token they send back.</p>
         <div class="row"><button type="button" id="sharerequest" class="secondary">Show my request code</button></div>
         <pre id="sharerequestout" class="hidden"></pre>
-        <label>Share token <input name="token" required></label>
+        <div id="sharerequestqr" class="qr-box hidden"></div>
+        <label>Share token <input name="token" required autocapitalize="none" autocomplete="off" spellcheck="false"></label>
+        <div class="row"><button type="button" id="sharetokenscan" class="secondary"><svg class="icon"><use href="#i-qr"/></svg>Scan QR code</button></div>
         <label>Where the owner's vault is <select name="kind" id="sharekind"><option value="local-dir">A directory both of you can reach</option><option value="s3">An S3-compatible bucket</option></select></label>
         <div data-sharekind="local-dir"><label>Storage both of you can reach <input name="storage_path"></label></div>
         <div data-sharekind="s3" class="hidden">
@@ -198,7 +218,15 @@
     <div class="page" data-page="overview">
       <div id="vaultkey" class="notice warn vaultkey hidden"><span id="vaultkey-text"></span><button type="button" id="vaultkey-done" class="secondary">I have written it down</button></div>
       <div id="ledgerbanner" class="notice warn banner-action hidden"><span id="ledgerbanner-text"></span><button type="button" id="ledgerbanner-btn" class="secondary hidden">Continue from the storages</button></div>
+      <div id="foldersafety"></div>
       <div id="policybanner" class="notice warn hidden"></div>
+      <div id="spacebanner" class="notice warn hidden" role="status"></div>
+      <div id="orgblockbanner" class="notice warn hidden"></div>
+      <div id="helpnext" class="notice helpnext hidden">
+        <svg class="icon"><use href="#i-help"/></svg>
+        <div class="helpnext-text"><span class="helpnext-label">Next step</span> <span id="helpnext-title"></span></div>
+        <div class="helpnext-actions"><button type="button" id="helpnext-go"></button><button type="button" class="secondary" data-nav="help">Open Help</button></div>
+      </div>
       <div class="stats">
         <div class="stat"><span class="stat-label">Folders</span><span class="stat-value" id="stat-folders">–</span></div>
         <div class="stat"><span class="stat-label">Files</span><span class="stat-value" id="stat-files">–</span></div>
@@ -322,12 +350,26 @@
             <button id="files-download" type="button" class="secondary" title="Download the selected file to this device" disabled><svg class="icon"><use href="#i-download"/></svg>Download</button>
             <button id="files-free" type="button" class="secondary" title="Keep only a placeholder of the selected file here" disabled><svg class="icon"><use href="#i-free"/></svg>Free up space</button>
             <button id="files-share" type="button" class="secondary" title="Share this folder with another Varsto user"><svg class="icon"><use href="#i-sharing"/></svg>Share</button>
+            <button id="files-changes" type="button" class="secondary" title="Who changed what in this folder, and when"><svg class="icon"><use href="#i-activity"/></svg>Recent changes</button>
             <input id="files-filter" type="search" class="files-filter" placeholder="Filter by name, tag or analysis" aria-label="Filter files" autocomplete="off">
             <span class="toolbar-spacer"></span>
             <label class="inline muted" id="selectivelabel" title="Files appear as placeholders until you download them"><input id="selectivetoggle" type="checkbox"> selective sync</label>
+            <button id="files-settings" type="button" class="secondary icon-btn" title="Folder settings: ignore rules and file metadata"><svg class="icon"><use href="#i-settings"/></svg><span class="sr-only">Folder settings</span></button>
           </div>
           <input type="file" id="fileinput" multiple class="hidden" aria-hidden="true" tabindex="-1">
           <div id="files-progress" class="status-line progress hidden" role="status"></div>
+          <section id="recentchanges" class="recent-changes hidden" aria-label="Recent changes">
+            <div class="details-head"><span class="card-title">Recent changes</span><button type="button" id="rc-close" class="secondary icon-btn" title="Close recent changes"><svg class="icon"><use href="#i-close"/></svg></button></div>
+            <form id="rc-form" class="rc-form">
+              <input name="path" placeholder="Under directory" aria-label="Under directory" autocomplete="off">
+              <input name="device" placeholder="Device" aria-label="Device" autocomplete="off">
+              <input name="user" placeholder="Person" aria-label="Person" autocomplete="off">
+              <input name="since" placeholder="Since (YYYY-MM-DD or 7d)" aria-label="Since" autocomplete="off">
+              <button type="submit" class="secondary">Show</button>
+            </form>
+            <p class="muted small">From the signed file lists of the devices; this device keeps the newest changes of each file.</p>
+            <ul id="rc-list" class="list compact-list"></ul>
+          </section>
           <div class="table-wrap">
           <table id="files"><thead><tr><th>Name</th><th class="num">Size</th><th>State</th><th>Last used</th><th></th></tr></thead><tbody></tbody></table>
           </div>
@@ -351,6 +393,10 @@
             <dt>Modified</dt><dd id="fd-modified"></dd>
             <dt>Last used here</dt><dd id="fd-used"></dd>
             <dt>Copies</dt><dd id="fd-copies"></dd>
+            <dt class="fd-meta hidden" id="fd-link-dt">Link to</dt><dd class="fd-meta hidden" id="fd-link"></dd>
+            <dt class="fd-meta hidden" id="fd-mode-dt">Permissions</dt><dd class="fd-meta hidden" id="fd-mode" data-no-i18n></dd>
+            <dt class="fd-meta hidden" id="fd-owner-dt">Owner</dt><dd class="fd-meta hidden" id="fd-owner" data-no-i18n></dd>
+            <dt class="fd-meta hidden" id="fd-xattrs-dt">Extended attributes</dt><dd class="fd-meta hidden" id="fd-xattrs" data-no-i18n></dd>
           </dl>
           <section class="fd-analysis" id="fd-analysis" aria-label="Analysis">
             <div class="fd-analysis-head"><span class="field-caption">Analysis</span><span id="fd-analysis-stale" class="pill risk hidden" title="The file changed after it was analysed">Stale</span></div>
@@ -364,9 +410,46 @@
             </dl>
             <div class="actions fd-analysis-actions"><button type="button" class="secondary" id="fd-analysis-edit">Write analysis</button><button type="button" class="secondary" id="fd-analysis-clear">Clear analysis</button></div>
           </section>
+          <section class="fd-changes" id="fd-changes" aria-label="Changes">
+            <div class="fd-analysis-head"><span class="field-caption">Changes</span></div>
+            <ul id="fd-changes-list" class="list compact-list"></ul>
+          </section>
           <div class="actions fd-actions" id="fd-actions"></div>
+          <div id="fd-history" class="fd-history hidden">
+            <div class="fd-history-title">Versions</div>
+            <p id="fd-history-note" class="muted small hidden"></p>
+            <ul id="fd-versions" class="list compact-list"></ul>
+          </div>
         </aside>
       </div>
+
+      <section id="foldersettings" class="card folder-settings hidden" aria-label="Folder settings">
+        <div class="details-head"><h2 class="card-title"><svg class="icon accent"><use href="#i-settings"/></svg><span>Folder settings</span> <span id="fs-folder" class="muted" data-no-i18n></span></h2><button type="button" id="fs-close" class="secondary icon-btn" title="Close folder settings"><svg class="icon"><use href="#i-close"/></svg></button></div>
+        <h3 class="field-caption">Ignore rules</h3>
+        <p class="muted small">One pattern per line, as in .gitignore: * and ? match within a name, ** any number of folders, a trailing / only folders, a leading / ties the pattern to the folder's top, ! includes again and # starts a comment. Ignored files are not synced from this device and not deleted on others; a file already in the vault that becomes ignored stays in the vault.</p>
+        <p id="fs-encrypted" class="notice hidden">This device keeps the folder encrypted: ignore rules apply on devices with plain files. Edit the shared rules there.</p>
+        <label for="fs-synced" class="field-caption">Shared with every device (.varstoignore)</label>
+        <textarea id="fs-synced" class="fs-text" rows="7" spellcheck="false" autocomplete="off" placeholder="*.tmp"></textarea>
+        <div class="fs-suggest small"><span class="muted">Common junk files:</span> <span id="fs-suggestions" class="fs-chips" data-no-i18n></span></div>
+        <p id="fs-nested" class="muted small hidden"></p>
+        <label for="fs-local-add" class="field-caption">Only on this device (not synced)</label>
+        <ul id="fs-local" class="list compact-list"></ul>
+        <p id="fs-local-empty" class="muted small">No patterns of this device's own.</p>
+        <div class="fs-row"><input id="fs-local-add" type="text" placeholder="Pattern, e.g. *.iso" autocomplete="off" spellcheck="false"><button type="button" id="fs-local-addbtn" class="secondary">Add</button></div>
+        <label for="fs-test" class="field-caption">Test a path</label>
+        <div class="fs-row"><input id="fs-test" type="text" placeholder="e.g. photos/raw/img.cr2 (end a folder with /)" autocomplete="off" spellcheck="false"><button type="button" id="fs-testbtn" class="secondary">Test</button></div>
+        <p id="fs-test-result" class="small" role="status"></p>
+        <h3 class="field-caption">File metadata</h3>
+        <p class="muted small">What this device syncs besides the content. A device that cannot keep a property leaves it as it is in the vault, and never removes it.</p>
+        <div class="fs-checks">
+          <label class="inline"><input type="checkbox" id="fs-permissions"> Permissions</label>
+          <label class="inline"><input type="checkbox" id="fs-symlinks"> Symbolic links</label>
+          <label class="inline"><input type="checkbox" id="fs-xattrs"> Extended attributes</label>
+          <label class="inline"><input type="checkbox" id="fs-ownership"> Ownership (user and group)</label>
+        </div>
+        <p id="fs-caps" class="muted small"></p>
+        <div class="actions"><button type="button" id="fs-save">Save</button><button type="button" id="fs-cancel" class="secondary">Cancel</button></div>
+      </section>
 
       <div id="folderforms" class="cols hidden">
         <form id="addfolder" class="card">
@@ -402,6 +485,7 @@
     <!-- Shared -->
     <div class="page hidden" data-page="shared">
       <div id="sharetoken" class="notice warn hidden"></div>
+      <div id="sharetokenqr" class="qr-box card hidden"></div>
       <div class="card">
         <h2 class="card-title"><svg class="icon accent"><use href="#i-sharing"/></svg>Shared folders</h2>
         <ul id="sharedlist" class="list"></ul>
@@ -566,6 +650,8 @@
         </div>
         <p id="imports-empty" class="muted small hidden">Nothing was imported yet.</p>
       </div>
+    </div>
+
     <!-- Trash -->
     <div class="page hidden" data-page="trash">
       <div class="card">
@@ -592,6 +678,17 @@
         <label>Trash storage <select name="storage" id="trashstorage"></select><span class="hint muted">Deleted files move to this storage only, for example a cheap cold storage, and leave your other storages. Restoring from cold storage asks first, because retrieval is billed and can take hours.</span></label>
         <div class="actions"><button type="submit">Save</button></div>
         <p id="trashnotes" class="muted small"></p>
+      </form>
+      <form id="historysettings" class="card narrow">
+        <h3 class="card-title"><svg class="icon accent"><use href="#i-backup"/></svg>Version history</h3>
+        <p class="muted small">When a file is overwritten, on any device, its earlier version is kept: every version for an hour, one per hour for a day, one per day for 30 days, then one per week. Unchanged parts are shared between versions, so only the changes take space. Restore a version from the file's details on the Files page.</p>
+        <dl id="historyfacts" class="fd-list"></dl>
+        <label class="inline"><input name="on" type="checkbox"> Keep earlier versions</label>
+        <label>Keep versions (days) <input name="days" type="number" min="1" max="3650" step="1" inputmode="numeric"></label>
+        <label>One folder differently <select name="folder" id="historyfolder"></select></label>
+        <label id="historymode-label">For this folder <select name="mode" id="historymode"><option value="vault">Like every folder</option><option value="days">Its own days</option><option value="off">Off: keep no new versions</option></select></label>
+        <label id="historyfolderdays-label">Days for this folder <input name="folderdays" type="number" min="1" max="3650" step="1" inputmode="numeric"></label>
+        <div class="actions"><button type="submit">Save</button></div>
       </form>
     </div>
 
@@ -637,6 +734,7 @@
         <div class="actions"><button id="pairstart" type="button">Add a device</button><button id="pairstop" type="button" class="secondary hidden">Cancel</button></div>
         <div id="pairbox" class="hidden">
           <p class="pair-code" id="paircode"></p>
+          <div id="pairqr" class="qr-box hidden"></div>
           <p class="muted small" id="pairinfo"></p>
         </div>
       </div>
@@ -658,9 +756,11 @@
         <p class="muted small">Your devices exchange encrypted blocks directly: on the LAN automatically, across the internet through NAT with hole punching, and when that fails through one of your own reachable devices acting as a relay. Blocks are verified by name; a peer needs the vault key and a known certificate to get anything.</p>
         <div id="p2pstatus" class="status-line"></div>
         <div id="p2pnat" class="muted small"></div>
+        <div id="p2pmap" class="muted small"></div>
         <table id="p2ppaths" class="hidden"><thead><tr><th>Device</th><th>Path</th><th>Address</th></tr></thead><tbody></tbody></table>
         <form id="p2pform" class="form-grid">
           <label class="inline"><input name="enabled" type="checkbox"> Enabled</label>
+          <label class="inline" data-help="PCP, NAT-PMP or UPnP: only the peer-to-peer port, TCP and UDP, with a lease that is renewed and removed when the service stops. Mappings made by hand are left alone."><input name="port_mapping" type="checkbox"> Open the port on the router automatically</label>
           <label>Port <input name="port" value="17893" size="6"></label>
           <label>Public addresses (host:port, comma-separated) <input name="public_addrs" placeholder="203.0.113.5:17893"></label>
           <label>STUN servers (host:port, comma-separated; empty disables) <input name="stun" placeholder="stun.example.net:3478"></label>
@@ -675,6 +775,7 @@
         <h2 class="card-title"><svg class="icon accent"><use href="#i-org"/></svg><span id="org-name"></span></h2>
         <p id="org-me" class="muted small"></p>
         <p id="org-unlisted-note" class="small hidden"></p>
+        <p id="org-blocked-note" class="notice warn hidden"></p>
       </div>
       <div class="cols">
         <div class="card">
@@ -704,6 +805,15 @@
             <label class="inline"><input name="members_may_add_storages" type="checkbox"> Add or remove storages</label>
             <label class="inline"><input name="members_may_set_policies" type="checkbox"> Set policies and placement</label>
             <label class="inline"><input name="members_may_add_devices" type="checkbox"> Add devices and print the recovery kit</label>
+            <div class="field-group" id="org-platforms"><span class="field-caption">Device platforms that may join and open the vault</span>
+              <label class="inline"><input name="platform_linux" type="checkbox" data-platform="linux"> Linux</label>
+              <label class="inline"><input name="platform_macos" type="checkbox" data-platform="macos"> macOS</label>
+              <label class="inline"><input name="platform_windows" type="checkbox" data-platform="windows"> Windows</label>
+              <label class="inline"><input name="platform_android" type="checkbox" data-platform="android"> Android</label>
+              <label class="inline"><input name="platform_ios" type="checkbox" data-platform="ios"> iOS</label>
+              <span class="hint muted">A device of another platform is refused at approval; one already in the organization is locked out (no new keys, the other devices ignore what it writes, its own app does not open the vault) until its platform is allowed again. Devices say which platform they run, so this binds honest apps, not a modified one. It applies to administrators' devices too.</span>
+            </div>
+            <label>Oldest Varsto version allowed <input name="min_app_version" placeholder="any version" autocomplete="off"></label>
             <div class="actions"><button type="submit" id="org-policy-save">Save</button></div>
           </form>
         </div>
@@ -833,9 +943,31 @@
       </div>
     </div>
 
+    <!-- Help: where you are now, what to do next, and short guides. -->
+    <div class="page hidden" data-page="help">
+      <div class="card help-card">
+        <h2 class="card-title"><svg class="icon accent"><use href="#i-info"/></svg>Where you are now</h2>
+        <div id="help-now" class="help-now"></div>
+      </div>
+      <div class="card help-card">
+        <div class="card-head"><h2 class="card-title"><svg class="icon accent"><use href="#i-check"/></svg>What to do next</h2><button type="button" id="help-reload" class="secondary help-mini">Refresh</button></div>
+        <ol id="help-next" class="help-steps"></ol>
+        <div id="help-tipsbox" class="hidden">
+          <h3 class="help-sub">When you have a moment</h3>
+          <ol id="help-tips" class="help-steps help-tips"></ol>
+        </div>
+      </div>
+      <div class="card help-card">
+        <h2 class="card-title"><svg class="icon accent"><use href="#i-help"/></svg>Guides</h2>
+        <p class="muted small">Short guides to each part of Varsto. The website has the details.</p>
+        <div id="help-guides" class="help-guides"></div>
+      </div>
+    </div>
+
     <!-- More (mobile) -->
     <div class="page hidden" data-page="more">
       <div class="card more-card">
+        <button type="button" class="more-item" data-nav="help"><svg class="icon"><use href="#i-help"/></svg><span>Help</span><svg class="icon chev"><use href="#i-chevron"/></svg></button>
         <button type="button" class="more-item" data-nav="shared"><svg class="icon"><use href="#i-sharing"/></svg><span>Shared</span><svg class="icon chev"><use href="#i-chevron"/></svg></button>
         <button type="button" class="more-item" data-nav="backups"><svg class="icon"><use href="#i-backup"/></svg><span>Backups</span><svg class="icon chev"><use href="#i-chevron"/></svg></button>
         <button type="button" class="more-item" data-nav="import"><svg class="icon"><use href="#i-backup"/></svg><span>Import</span><svg class="icon chev"><use href="#i-chevron"/></svg></button>
@@ -872,6 +1004,21 @@
 </div>
 
 <!-- One dialog for every question the page asks: WebViews return null for window.prompt. -->
+<div id="scanner" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="scanner-title">
+  <div class="modal-backdrop" id="scanner-backdrop"></div>
+  <div class="modal-card scanner-card">
+    <h2 id="scanner-title" class="modal-title">Scan QR code</h2>
+    <video id="scanner-video" class="scanner-video" playsinline muted></video>
+    <p id="scanner-status" class="muted small" aria-live="polite"></p>
+    <label class="small">Or paste the code or link <input id="scanner-text" autocapitalize="none" autocomplete="off" spellcheck="false"></label>
+    <input type="file" id="scanner-file" accept="image/*" class="hidden">
+    <div class="modal-actions">
+      <button type="button" id="scanner-upload" class="secondary">Open a screenshot…</button>
+      <button type="button" id="scanner-use" class="secondary">Use pasted text</button>
+      <button type="button" id="scanner-cancel" class="secondary">Cancel</button>
+    </div>
+  </div>
+</div>
 <div id="modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="modal-title">
   <div class="modal-backdrop" id="modal-backdrop"></div>
   <form class="modal-card" id="modalform" novalidate>
@@ -888,5 +1035,74 @@
     </div>
   </form>
 </div>
+<!-- The Help page's guides: cloned into the Help page and the setup help. -->
+<template id="tpl-guides">
+  <details class="guide" data-guide="start">
+    <summary>Getting started</summary>
+    <p>Varsto keeps your folders in sync on your devices and keeps encrypted copies of them on storages you choose. Everything is encrypted on your device before it leaves it.</p>
+    <p>Three steps get you going: create a vault on your first device, add a storage, and add a folder. Then print your recovery words and pair your other devices.</p>
+    <p class="guide-more"><a href="https://varsto.net/docs/quick-start.html" target="_blank" rel="noopener">Quick start on the website</a></p>
+  </details>
+  <details class="guide" data-guide="storages">
+    <summary>Storages</summary>
+    <p>A storage is where Varsto keeps encrypted copies of your files: an S3 bucket at a cloud provider, a folder on a NAS or USB disk, an rclone remote, or a pool of disks you plug in one at a time. A storage only ever sees sealed blocks, never your files or their names.</p>
+    <p>Two storages in different places are much safer than one: for example a disk at home and a bucket in the cloud. A cold storage is written to but read only when you confirm, which suits cheap archive classes. A transferrer is a removable disk that carries files to a device with a slow connection and keeps no copies.</p>
+    <p>A storage can have a quota, and you can empty one onto the others before you give it up (Drain).</p>
+    <p class="guide-more"><a data-site="/features/" href="https://varsto.net/features/" target="_blank" rel="noopener">Storages on the website</a></p>
+  </details>
+  <details class="guide" data-guide="folders">
+    <summary>Folders and files</summary>
+    <p>A folder is a directory on your device that Varsto keeps in sync. Its files stay where they are as ordinary files; Varsto copies them, encrypted, to every storage and to your other devices that sync the folder.</p>
+    <p>On another device, attach the folder to a directory of its own. With selective sync, files show up as placeholders and are downloaded when you open them; Free up space turns a file back into a placeholder.</p>
+    <p>A Strongroom is a folder that opens only with a security key and only for a while.</p>
+  </details>
+  <details class="guide" data-guide="devices">
+    <summary>Devices and pairing</summary>
+    <p>Every device has its own passphrase and gets the vault from a device that already has it. On the device that has the vault, open Peers and choose Add a device; it shows a nine-digit code. On the new device, choose Pair with your other device and type the code.</p>
+    <p>Devices check each other's copies, which is what the default policy asks for. A lost or stolen device can be removed under Peers or Settings: it is cut off at once and the vault gets new keys. Print new recovery words afterwards.</p>
+  </details>
+  <details class="guide" data-guide="p2p">
+    <summary>Peer-to-peer</summary>
+    <p>Your devices send blocks to each other directly when they can, on the same network or over the internet, and fall back to the storages when they cannot. The Peers page shows how each device is reached and how fast data moves.</p>
+  </details>
+  <details class="guide" data-guide="sharing">
+    <summary>Sharing a folder</summary>
+    <p>You can give another person one folder, and nothing else of your vault. They send you a request code from their device, you compare a six-word fingerprint with them over a call or in person, and you send back a sealed token that only their device can open.</p>
+    <p>You can see who has a folder and remove a person from it on the Shared page.</p>
+  </details>
+  <details class="guide" data-guide="backups">
+    <summary>Backups</summary>
+    <p>A backup keeps read-only snapshots of a directory of this device on your storages, for as many days as you choose. Snapshots are never written to your other devices. To get files back, restore a snapshot into a directory you name.</p>
+    <p class="guide-more"><a data-site="/features/#backups" href="https://varsto.net/features/#backups" target="_blank" rel="noopener">Backups on the website</a></p>
+  </details>
+  <details class="guide" data-guide="trash">
+    <summary>Trash</summary>
+    <p>A file deleted on any device goes to the trash first and is kept there for a number of days (30 unless you change it). From the Trash page you can restore it to where it was, or delete it for good.</p>
+  </details>
+  <details class="guide" data-guide="policies">
+    <summary>Policies, checks and repair</summary>
+    <p>A policy says how many copies a folder needs, in which places, and how often another device must check them. Every folder starts with the default: one copy at home, one in the cloud, checked by another device within 30 days. Varsto warns you when a folder falls short and tells you what is missing.</p>
+    <p>Verification reads copies back now and then; the bit-rot check re-hashes copies and files on this device; repair replaces a damaged copy with a good one. All three run by themselves and can be started on the Policies page.</p>
+  </details>
+  <details class="guide" data-guide="disks">
+    <summary>Disk pools</summary>
+    <p>A pool is a set of disks you plug in one at a time, for example old drives kept on a shelf or at a friend's place. Varsto recognises each disk by a marker file, fills it with what the pool still lacks, checks it when it comes back, and tells you which disk to attach when a file is only on a disk that is away.</p>
+    <p>Eject a disk on the Storages page before you unplug it.</p>
+  </details>
+  <details class="guide" data-guide="recovery">
+    <summary>Recovery</summary>
+    <p>The vault key opens everything. The recovery kit prints it as 24 words: keep them on paper, away from your devices. With them and one storage you can restore every file on a new device, even if every device is lost.</p>
+    <p>The Recovery package page lists everything else to keep with the words, such as storage credentials and security keys, and the steps to restore.</p>
+    <p class="guide-more"><a href="https://varsto.net/docs/recovery.html" target="_blank" rel="noopener">Recovery on the website</a></p>
+  </details>
+  <details class="guide" data-guide="imports">
+    <summary>Importing files</summary>
+    <p>Import brings files from elsewhere into a folder: a directory, a cloud drive through rclone, or a git-annex repository. The original is only read, never changed, and names are kept as they were.</p>
+  </details>
+  <details class="guide" data-guide="mcp">
+    <summary>AI assistants (MCP)</summary>
+    <p>Varsto has an MCP server for an AI assistant of your choice, for example one running on your own computer. It sees only the folders you grant, and only at the level you choose: read, analyse or change. Grant access with <code>varsto mcp grant</code> on the command line.</p>
+  </details>
+</template>
 </body>
 </html>

@@ -724,14 +724,20 @@ pub fn join(root: &Path, rel: &str) -> PathBuf {
 /// [`join`] for writing: a local path from the map or the rules (checked
 /// for traversal; on Windows also for the characters Windows would read
 /// as a drive, a stream or a separator), and no symbolic link on the way.
+/// The entry itself may be a link: it is replaced, never followed
+/// (`crate::fsmeta`).
 pub fn checked_join(root: &Path, local: &str) -> Result<PathBuf> {
     check_vault_path(local)?;
     if cfg!(windows) && local.split('/').any(|c| c.chars().any(windows_forbidden)) {
         bail!("local path is not a valid Windows name: {}", display(local));
     }
     let mut p = root.to_path_buf();
-    for c in local.split('/') {
+    let parts: Vec<&str> = local.split('/').collect();
+    for (n, c) in parts.iter().enumerate() {
         p.push(c);
+        if n + 1 == parts.len() {
+            break;
+        }
         if let Ok(md) = std::fs::symlink_metadata(&p) {
             if md.file_type().is_symlink() {
                 bail!(

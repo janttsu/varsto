@@ -16,6 +16,11 @@ impl Engine {
         block_cache::check_rel_path(path)?;
         let state = self.load_state(&rec.folder_id)?;
         let disk = self.disk_of(&root, &state, path);
+        if !self.mount_is_encrypted(&rec.folder_id) {
+            // Never through a link: one may point anywhere.
+            let local = state.local_names.local_rel(self.local_rules(&root), path);
+            crate::fsmeta::check_no_link(&root, &local)?;
+        }
         if !self.mount_is_encrypted(&rec.folder_id) && disk.is_file() {
             return Ok(fs::metadata(&disk)?.len());
         }
@@ -29,9 +34,16 @@ impl Engine {
     /// to the file size), decrypted in memory when the device holds no plain
     /// copy. The result is never written anywhere.
     pub fn view_range(&self, folder: &str, path: &str, start: u64, end: u64) -> Result<Vec<u8>> {
+        self.ensure_active()?;
         let (rec, root) = self.resolve_folder(folder)?;
         block_cache::check_rel_path(path)?;
         let disk = self.disk_path(&rec.folder_id, &root, path);
+        if !self.mount_is_encrypted(&rec.folder_id) {
+            // Never through a link: one may point anywhere.
+            let rel = disk.strip_prefix(&root).unwrap_or(&disk);
+            let rel = rel.to_string_lossy().replace('\\', "/");
+            crate::fsmeta::check_no_link(&root, &rel)?;
+        }
         if !self.mount_is_encrypted(&rec.folder_id) && disk.is_file() {
             use std::io::{Read, Seek, SeekFrom};
             let mut f =

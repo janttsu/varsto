@@ -72,6 +72,7 @@ impl Lab {
             cold: false,
             carrier: false,
             place: "cloud".into(),
+            min_free: None,
         }
     }
     /// A mounted disk with `room` bytes above the pool's reserve (5 GiB of 100).

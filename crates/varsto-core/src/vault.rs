@@ -68,6 +68,16 @@ pub struct ShareToken {
     /// theirs names). Only sealed tokens carry them.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub owners: Vec<DeviceId>,
+    /// What the recipient may do (sealed tokens; a plain token is always an
+    /// editor's).
+    #[serde(default)]
+    pub role: crate::share::ShareRole,
+    /// Invitation id and secret the member derives its join proof from
+    /// (sealed tokens only; see `share::JoinProof`).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub invite: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub join_secret_hex: String,
 }
 
 crate::redacted_debug!(ShareToken { vault_id, folder_id, name ; key_hex, epoch_keys });
@@ -93,6 +103,9 @@ impl ShareToken {
             epoch_keys: BTreeMap::new(),
             fingerprint: String::new(),
             owners: Vec::new(),
+            role: Default::default(),
+            invite: String::new(),
+            join_secret_hex: String::new(),
         })
     }
     /// The plain form, refused when the folder has keys of later epochs
@@ -118,12 +131,19 @@ struct TokenPayload {
     fingerprint: String,
     #[serde(default)]
     owners: Vec<DeviceId>,
+    #[serde(default)]
+    role: crate::share::ShareRole,
+    #[serde(default)]
+    invite: String,
+    #[serde(default)]
+    join_secret_hex: String,
 }
 
 impl Drop for TokenPayload {
     fn drop(&mut self) {
         use zeroize::Zeroize;
         self.key_hex.zeroize();
+        self.join_secret_hex.zeroize();
         for v in self.epoch_keys.values_mut() {
             v.zeroize();
         }
@@ -148,6 +168,8 @@ impl ShareToken {
         let sealed = if self.epoch_keys.is_empty()
             && self.fingerprint.is_empty()
             && self.owners.is_empty()
+            && self.role.is_editor()
+            && self.join_secret_hex.is_empty()
         {
             // Version 1: the folder key alone, readable by older versions.
             crypto::encrypt(&key, &t.aad(), &hex::decode(&self.key_hex)?)?
@@ -158,6 +180,9 @@ impl ShareToken {
                 epoch_keys: self.epoch_keys.clone(),
                 fingerprint: self.fingerprint.clone(),
                 owners: self.owners.clone(),
+                role: self.role,
+                invite: self.invite.clone(),
+                join_secret_hex: self.join_secret_hex.clone(),
             };
             crypto::encrypt(
                 &key,
@@ -237,12 +262,25 @@ impl SealedShareToken {
             self.name
         )
     }
+    /// A sealed token in text form or as a `varsto://share/token` link.
     pub fn is_sealed(s: &str) -> bool {
         let s = s.trim();
+        if crate::qr::is_link(s) {
+            return s[crate::qr::SCHEME.len()..]
+                .to_ascii_lowercase()
+                .starts_with("share/token");
+        }
         s.starts_with(SEALED_SHARE_PREFIX) || s.starts_with(SEALED_SHARE_PREFIX_V2)
     }
+    /// Decode a token, given as text or as a `varsto://share/token` link.
     pub fn decode(s: &str) -> Result<Self> {
         let s = s.trim();
+        if crate::qr::is_link(s) {
+            return match crate::qr::Link::from_text(s)? {
+                crate::qr::Link::ShareToken(t) => Self::decode(&t),
+                other => bail!("this is a {} link, not a share token", other.kind()),
+            };
+        }
         let (version, rest) = if let Some(r) = s.strip_prefix(SEALED_SHARE_PREFIX_V2) {
             (2, r)
         } else {
@@ -285,6 +323,9 @@ impl SealedShareToken {
                 epoch_keys: BTreeMap::new(),
                 fingerprint: String::new(),
                 owners: Vec::new(),
+                role: Default::default(),
+                invite: String::new(),
+                join_secret_hex: String::new(),
             }
         };
         SecretKey::from_hex(&payload.key_hex)?;
@@ -299,6 +340,9 @@ impl SealedShareToken {
             epoch_keys: payload.epoch_keys.clone(),
             fingerprint: payload.fingerprint.clone(),
             owners: payload.owners.clone(),
+            role: payload.role,
+            invite: payload.invite.clone(),
+            join_secret_hex: payload.join_secret_hex.clone(),
         })
     }
 }
@@ -379,7 +423,14 @@ impl ShareRequest {
         Ok(Self::parse(code)?.key)
     }
     /// Key, bound name and fingerprint of a request code.
+    /// Accepts the text form or a `varsto://share/request` link.
     pub fn parse(code: &str) -> Result<RequestCode> {
+        if crate::qr::is_link(code) {
+            return match crate::qr::Link::from_text(code)? {
+                crate::qr::Link::ShareRequest(c) => Self::parse(&c),
+                other => bail!("this is a {} link, not a share request code", other.kind()),
+            };
+        }
         let rest = code
             .trim()
             .strip_prefix(SHARE_REQUEST_PREFIX)
@@ -872,6 +923,19 @@ pub struct FolderRecord {
     /// served to peers, and only its source device writes it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub backup: Option<BackupInfo>,
+    /// On a member device: the invitation it joined through, with the
+    /// secret its join proof is derived from and the role the token gave.
+    /// Local only, never published.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub share_join: Option<ShareJoin>,
+}
+
+/// See `FolderRecord::share_join`.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ShareJoin {
+    pub invite: String,
+    pub secret_hex: String,
+    pub role: crate::share::ShareRole,
 }
 
 crate::redacted_debug!(FolderRecord { folder_id, name, created_by, created_utc, strongroom, removed_utc, backup, placement, policy ; key_hex, epoch_keys });
@@ -970,6 +1034,9 @@ impl FolderRecord {
             epoch_keys: BTreeMap::new(),
             fingerprint: String::new(),
             owners: Vec::new(),
+            role: Default::default(),
+            invite: String::new(),
+            join_secret_hex: String::new(),
         }
     }
 }
@@ -1174,6 +1241,134 @@ pub struct FolderMount {
     /// means plain files as on a desktop.
     #[serde(default)]
     pub encrypted: bool,
+    /// Whether this device publishes its own changes and applies the other
+    /// devices' (local setting; `FolderMode`).
+    #[serde(default, skip_serializing_if = "FolderMode::is_normal")]
+    pub mode: FolderMode,
+    /// When a scan or another device deletes too many files at once (absent:
+    /// `DeletionGuard::default`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deletion_guard: Option<DeletionGuard>,
+    /// Ignore patterns of this device only (not synced), gitignore syntax,
+    /// before the folder's `.varstoignore` files (`crate::ignore_rules`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ignore_local: Vec<String>,
+    /// Which file metadata this device syncs for the folder (`crate::fsmeta`).
+    #[serde(
+        default,
+        skip_serializing_if = "crate::fsmeta::MetaSettings::is_default"
+    )]
+    pub meta: crate::fsmeta::MetaSettings,
+    /// Free space kept on the disk holding the folder: downloads into it
+    /// stop below it (`freespace`; default 5 %).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_free: Option<crate::freespace::MinFree>,
+}
+
+/// How a folder takes part in syncing on this device (a local setting: the
+/// same folder can be send-only on a camera phone and normal elsewhere).
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum FolderMode {
+    /// Publishes its changes and applies everyone else's.
+    #[default]
+    Normal,
+    /// Publishes its changes; never applies other devices' changes to its
+    /// files (it still reads their file lists to know what differs).
+    SendOnly,
+    /// Applies other devices' changes; never publishes its own local changes.
+    ReceiveOnly,
+}
+
+impl FolderMode {
+    pub fn is_normal(&self) -> bool {
+        *self == FolderMode::Normal
+    }
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            FolderMode::Normal => "normal",
+            FolderMode::SendOnly => "send-only",
+            FolderMode::ReceiveOnly => "receive-only",
+        }
+    }
+}
+
+impl std::str::FromStr for FolderMode {
+    type Err = anyhow::Error;
+    fn from_str(s: &str) -> Result<Self> {
+        match s.trim().to_ascii_lowercase().replace('_', "-").as_str() {
+            "normal" | "send-receive" => Ok(FolderMode::Normal),
+            "send-only" | "send" => Ok(FolderMode::SendOnly),
+            "receive-only" | "receive" => Ok(FolderMode::ReceiveOnly),
+            other => bail!("unknown folder mode {other}: use normal, send-only or receive-only"),
+        }
+    }
+}
+
+/// The mass-deletion guard of a folder: a scan that finds more files gone at
+/// once than this, or another device's file list that would delete that
+/// many here, is held until the user confirms it.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct DeletionGuard {
+    /// Off: deletions are never held.
+    #[serde(default = "yes")]
+    pub enabled: bool,
+    /// More than this share of the folder's files (percent; 100 or more:
+    /// no share rule) ...
+    pub percent: u32,
+    /// ... and more than this many files.
+    pub min_files: u64,
+    /// More than this many files whatever the share (0: no such limit).
+    pub max_files: u64,
+}
+
+fn yes() -> bool {
+    true
+}
+
+impl Default for DeletionGuard {
+    fn default() -> Self {
+        DeletionGuard {
+            enabled: true,
+            percent: 50,
+            min_files: 100,
+            max_files: 1000,
+        }
+    }
+}
+
+impl DeletionGuard {
+    /// Whether deleting `deleted` of `total` files at once is held.
+    pub fn trips(&self, deleted: u64, total: u64) -> bool {
+        if !self.enabled || deleted == 0 {
+            return false;
+        }
+        let share = self.percent < 100
+            && deleted.saturating_mul(100) > (self.percent as u64).saturating_mul(total)
+            && deleted > self.min_files;
+        let count = self.max_files > 0 && deleted > self.max_files;
+        share || count
+    }
+
+    pub fn describe(&self) -> String {
+        if !self.enabled {
+            return "off".into();
+        }
+        let mut parts = Vec::new();
+        if self.percent < 100 {
+            parts.push(format!(
+                "more than {} % and more than {} files",
+                self.percent, self.min_files
+            ));
+        }
+        if self.max_files > 0 {
+            parts.push(format!("more than {} files", self.max_files));
+        }
+        if parts.is_empty() {
+            return "off".into();
+        }
+        parts.join(", or ")
+    }
 }
 
 /// Storage credentials: `home/secrets.enc`, encrypted under a key derived
@@ -1294,6 +1489,12 @@ pub struct Config {
     /// filter; absent means debug. `VARSTO_LOG` and `--log-level` win.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub log_level: Option<String>,
+    /// How much change history of files this device keeps (`crate::changes`).
+    #[serde(
+        default,
+        skip_serializing_if = "crate::changes::ChangeLimits::is_default"
+    )]
+    pub changes: crate::changes::ChangeLimits,
 }
 
 /// A backup taken on this device (local, never published).
@@ -1366,6 +1567,10 @@ pub struct P2pConfig {
     /// it was are switched on unless this is set.
     #[serde(default)]
     pub user_disabled: bool,
+    /// Ask the home router to forward the port (PCP, NAT-PMP, UPnP) before
+    /// the other ways through NAT; `varsto p2p port-mapping on|off`.
+    #[serde(default = "yes")]
+    pub port_mapping: bool,
 }
 
 /// The port peer-to-peer listens on unless told otherwise: a fixed one is
@@ -1387,6 +1592,7 @@ impl Default for P2pConfig {
             public_addrs: Vec::new(),
             stun: default_stun(),
             user_disabled: false,
+            port_mapping: true,
         }
     }
 }

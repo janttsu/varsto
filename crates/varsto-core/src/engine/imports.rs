@@ -817,7 +817,9 @@ impl Engine {
                 self.check_source_path(src, opts.remove_source)?;
             }
             if let Some(dest) = &opts.dest {
-                let d = std::path::absolute(dest)?;
+                // Resolved like the source (macOS: /var is /private/var),
+                // through the part of the path that exists already.
+                let d = resolve_existing(&std::path::absolute(dest)?);
                 if d.starts_with(src) || src.starts_with(&d) {
                     bail!(
                         "the destination {} and the source {} overlap",
@@ -1118,6 +1120,12 @@ impl Engine {
             let mut local_entry = None;
             if !selective {
                 if let Some(src) = local_source {
+                    crate::freespace::check(
+                        &crate::freespace::Place::folder(&rec.name),
+                        &root_path,
+                        self.folder_min_free(&rec.folder_id),
+                        template.size,
+                    )?;
                     if let Some(p) = disk.parent() {
                         fs::create_dir_all(p)?;
                     }
@@ -1155,6 +1163,8 @@ impl Engine {
         let group_list: Vec<&Group> = groups.values().collect();
         task.step("read", report.to_read_bytes, activity::Unit::Bytes);
         let fk = self.folder_keys(&rec)?;
+        // File metadata as a scan would record it (`crate::fsmeta`).
+        let meta_settings = self.meta_settings(&rec.folder_id);
         let mut known: HashMap<ChunkId, ChunkRef> = HashMap::new();
         for f in state.files.values().chain(state.pending_remote.values()) {
             for c in &f.chunks {
@@ -1194,6 +1204,7 @@ impl Engine {
         let mut last_publish = std::time::Instant::now();
         let mut since_save = 0u64;
         let tmp_copy = root_path.join(format!(".varsto-import-{}", std::process::id()));
+        let min_free = self.folder_min_free(&rec.folder_id);
         let mut stop_error: Option<anyhow::Error> = None;
         let delivered = {
             let mut sink = |i: usize, d: Delivery| -> Result<Verdict> {
@@ -1224,6 +1235,20 @@ impl Engine {
                         mtime_ns,
                         retry,
                     } => {
+                        // A full local copy is written into the folder: the
+                        // run stops (and carries on later) before its disk
+                        // keeps less than its limit free.
+                        if !selective {
+                            if let Err(low) = crate::freespace::check(
+                                &crate::freespace::Place::folder(&rec.name),
+                                &root_path,
+                                min_free,
+                                g.size.unwrap_or(0),
+                            ) {
+                                stop_error = Some(low);
+                                return Ok(Verdict::Stop);
+                            }
+                        }
                         let copy = (!selective).then_some(tmp_copy.as_path());
                         let outcome =
                             ingest(&mut ctx, reader, g.size, g.check.as_ref(), want_sha, copy);
@@ -1287,8 +1312,15 @@ impl Engine {
                             IngestOutcome::Ok(done) => {
                                 self.pending.extend(done.events.iter().cloned());
                                 let applied = self.apply_ingested(
-                                    &mut state, &root_path, selective, &tmp_copy, &items, &g.paths,
-                                    &done, mtime_ns,
+                                    &mut state,
+                                    &root_path,
+                                    selective,
+                                    &tmp_copy,
+                                    &items,
+                                    &g.paths,
+                                    &done,
+                                    mtime_ns,
+                                    meta_settings,
                                 );
                                 if let Err(e) = applied {
                                     let _ = fs::remove_file(&tmp_copy);
@@ -1402,6 +1434,7 @@ impl Engine {
         paths: &[usize],
         done: &Ingested,
         mtime_ns: Option<i64>,
+        meta_settings: crate::fsmeta::MetaSettings,
     ) -> Result<()> {
         let mut first_disk: Option<PathBuf> = None;
         for &i in paths {
@@ -1435,9 +1468,24 @@ impl Engine {
                 }
             }
             set_mtime(&disk, mtime)?;
-            state
-                .local_index
-                .insert(item.path.clone(), index_entry(&disk, &done.hash)?);
+            let mut entry = index_entry(&disk, &done.hash)?;
+            // The file's metadata, as the next scan sees it: recorded with
+            // the new version, so that scan finds nothing changed.
+            if let Ok(md) = fs::symlink_metadata(&disk) {
+                let caps = self.meta_caps;
+                let obs = crate::fsmeta::observe(
+                    &disk,
+                    &md,
+                    &caps,
+                    &meta_settings,
+                    &mut crate::fsmeta::Names::default(),
+                );
+                if let Some(f) = state.files.get_mut(&item.path).filter(|f| f.meta.is_none()) {
+                    f.meta = crate::fsmeta::combine(&obs, None, None, &caps);
+                }
+                entry.meta_seen = Some(obs);
+            }
+            state.local_index.insert(item.path.clone(), entry);
             first_disk.get_or_insert(disk);
         }
         Ok(())
@@ -1476,6 +1524,7 @@ impl Engine {
             chunks,
             modified_by: me,
             modified_clock: clock,
+            meta: None,
         };
         state.files.insert(path.to_string(), f.clone());
         state.pending_remote.remove(path);
@@ -1658,6 +1707,7 @@ impl Engine {
                 analysis_stale: false,
                 analysis_by: None,
                 analysis_author: None,
+                ..Default::default()
             });
         }
         out.sort_by(|a, b| a.path.cmp(&b.path));
@@ -2041,6 +2091,7 @@ fn index_entry(disk: &Path, hash: &str) -> Result<LocalIndexEntry> {
         size: md.len(),
         mtime: import::dir::mtime_ns(&md),
         content_hash: hash.to_string(),
+        ..Default::default()
     })
 }
 
@@ -2065,4 +2116,23 @@ fn holder_list(
             .then(a.name.cmp(&b.name))
     });
     v
+}
+
+/// `p` with its longest existing ancestor resolved (links, `..`), the rest
+/// appended as given.
+fn resolve_existing(p: &Path) -> PathBuf {
+    let mut base = p.to_path_buf();
+    let mut rest = Vec::new();
+    loop {
+        if let Ok(c) = fs::canonicalize(&base) {
+            return rest.iter().rev().fold(c, |acc: PathBuf, n| acc.join(n));
+        }
+        match (base.file_name().map(|n| n.to_os_string()), base.parent()) {
+            (Some(n), Some(parent)) => {
+                rest.push(n);
+                base = parent.to_path_buf();
+            }
+            _ => return p.to_path_buf(),
+        }
+    }
 }

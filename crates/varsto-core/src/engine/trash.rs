@@ -69,6 +69,9 @@ pub struct TrashEntry {
     pub deleted_by: DeviceId,
     /// Lamport clock of the deletion.
     pub clock: u64,
+    /// The device that wrote this version (shown in the version history).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub author: Option<DeviceId>,
 }
 
 /// An entry taken out of the trash by restoring or purging it.
@@ -89,6 +92,9 @@ struct TrashBody {
     entries: Vec<TrashEntry>,
     #[serde(default)]
     removed: BTreeMap<String, TrashRemoval>,
+    /// Replaced versions (the version history, `history`).
+    #[serde(default)]
+    versions: Vec<TrashEntry>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
@@ -97,6 +103,8 @@ struct RemoteTrash {
     entries: Vec<TrashEntry>,
     #[serde(default)]
     removed: BTreeMap<String, TrashRemoval>,
+    #[serde(default)]
+    versions: Vec<TrashEntry>,
 }
 
 /// `state/trash/<folder>.json`: this device's own entries and removals,
@@ -118,6 +126,15 @@ struct TrashCache {
     /// Entries that left the trash and whose blocks were queued for dropping.
     #[serde(default)]
     queued: BTreeSet<String>,
+    /// This device's replaced versions (`history`); in an entry,
+    /// `deleted_utc` is when the version was replaced, `deleted_by` the
+    /// device that replaced it and `clock` the clock of the new version.
+    #[serde(default)]
+    own_versions: Vec<TrashEntry>,
+    /// Own versions the history let go (thinned or expired): when this
+    /// device first saw it. They stay listed for a while, then are forgotten.
+    #[serde(default)]
+    versions_gone: BTreeMap<String, i64>,
 }
 
 /// Vault-wide trash settings (newest wins).
@@ -138,6 +155,16 @@ pub struct TrashSettings {
     pub updated_utc: i64,
     #[serde(default)]
     pub device: Option<DeviceId>,
+    /// Days replaced versions are kept (`history`); 0 keeps none.
+    #[serde(default = "default_history_days")]
+    pub history_days: u32,
+    /// Folders with their own history days; 0 keeps no new versions.
+    #[serde(default)]
+    pub folder_history: BTreeMap<FolderId, u32>,
+}
+
+fn default_history_days() -> u32 {
+    super::history::DEFAULT_HISTORY_DAYS
 }
 
 impl Default for TrashSettings {
@@ -149,6 +176,8 @@ impl Default for TrashSettings {
             storage_id: None,
             updated_utc: 0,
             device: None,
+            history_days: default_history_days(),
+            folder_history: BTreeMap::new(),
         }
     }
 }
@@ -265,6 +294,8 @@ pub struct TrashPurgeReport {
 #[derive(Clone, Debug, Serialize, Default)]
 pub struct TrashUpkeepReport {
     pub expired: u64,
+    /// Replaced versions the history let go (thinned or past the history days).
+    pub versions_dropped: u64,
     pub blocks_dropped: u64,
     pub bytes_dropped: u64,
     pub blocks_waiting: u64,
@@ -321,7 +352,7 @@ fn settings_aad(vault: &VaultId, device: &DeviceId, written: i64) -> Vec<u8> {
     )
 }
 
-fn entry_id(folder: &FolderId, path: &str, device: &DeviceId, clock: u64) -> String {
+pub(super) fn entry_id(folder: &FolderId, path: &str, device: &DeviceId, clock: u64) -> String {
     let h = crypto::hash(
         &[
             b"varsto-trash-entry".as_slice(),
@@ -340,7 +371,7 @@ fn entry_id(folder: &FolderId, path: &str, device: &DeviceId, clock: u64) -> Str
 /// An entry from another device's record that could have come from an
 /// honest device: its own deletion, a path inside the folder, sizes that
 /// add up.
-fn entry_valid(e: &TrashEntry, folder: &FolderId, writer: &DeviceId) -> bool {
+pub(super) fn entry_valid(e: &TrashEntry, folder: &FolderId, writer: &DeviceId) -> bool {
     if &e.deleted_by != writer || e.id != entry_id(folder, &e.path, writer, e.clock) {
         return false;
     }
@@ -387,14 +418,18 @@ pub fn restored_name(path: &str, n: u32) -> String {
 /// Entries to restore: the entry, its target path, a local copy to use.
 type RestoreWork = Vec<(TrashEntry, String, Option<PathBuf>)>;
 
-/// What is in a folder's trash at some time.
-struct TrashSets {
+/// What is in a folder's trash and version history at some time.
+pub(super) struct TrashSets {
     /// In the trash now (newest deletion first).
-    visible: Vec<TrashEntry>,
+    pub(super) visible: Vec<TrashEntry>,
     /// Expired or purged, still listed in some record: their blocks may go.
-    gone: Vec<TrashEntry>,
+    pub(super) gone: Vec<TrashEntry>,
     /// Restored: their blocks are the restored files' blocks.
-    restored: Vec<TrashEntry>,
+    pub(super) restored: Vec<TrashEntry>,
+    /// Replaced versions the history keeps (newest first).
+    pub(super) versions: Vec<TrashEntry>,
+    /// Replaced versions thinned out or past the history days, still listed.
+    pub(super) versions_gone: Vec<TrashEntry>,
 }
 
 impl Engine {
@@ -521,7 +556,7 @@ impl Engine {
         out
     }
 
-    fn file_content_hash(fk: &FolderKeys, path: &Path) -> Option<String> {
+    pub(super) fn file_content_hash(fk: &FolderKeys, path: &Path) -> Option<String> {
         use std::io::Read;
         let mut f = fs::File::open(path).ok()?;
         let mut h = KeyedHasher::new(&fk.hash);
@@ -566,6 +601,7 @@ impl Engine {
             }
             cache.own.push(TrashEntry {
                 id: entry_id(&rec.folder_id, &prev.path, &me, clock),
+                author: Some(prev.modified_by),
                 path: prev.path,
                 size: prev.size,
                 mtime: prev.mtime,
@@ -583,6 +619,20 @@ impl Engine {
         Ok(())
     }
 
+    /// Add replaced versions this device recorded to its record (`history`).
+    pub(super) fn add_own_versions(
+        &self,
+        folder: &FolderId,
+        versions: Vec<TrashEntry>,
+    ) -> Result<()> {
+        if versions.is_empty() {
+            return Ok(());
+        }
+        let mut cache = self.load_trash_cache(folder);
+        cache.own_versions.extend(versions);
+        self.save_trash_cache(folder, &cache)
+    }
+
     // ----- records on the storages -----------------------------------------------
 
     /// Publish this device's trash record of a folder when it changed,
@@ -592,22 +642,57 @@ impl Engine {
         if rec.is_backup() {
             return Ok(false);
         }
+        let versions_gone: HashSet<String> = if self
+            .load_trash_cache(&rec.folder_id)
+            .own_versions
+            .is_empty()
+        {
+            HashSet::new()
+        } else {
+            self.trash_sets(&rec.folder_id, now)
+                .versions_gone
+                .into_iter()
+                .map(|e| e.id)
+                .collect()
+        };
         let mut cache = self.load_trash_cache(&rec.folder_id);
         let keep = self.trash_days_for(&rec.folder_id) as i64 * DAY + KEEP_LISTED_SECS;
-        let (old, own): (Vec<TrashEntry>, Vec<TrashEntry>) = std::mem::take(&mut cache.own)
+        let (mut old, own): (Vec<TrashEntry>, Vec<TrashEntry>) = std::mem::take(&mut cache.own)
             .into_iter()
             .partition(|e| now >= e.deleted_utc + keep);
         cache.own = own;
         cache.own_removed.retain(|_, r| now < r.deleted_utc + keep);
+        // Versions the history let go stay listed for a while, so every
+        // device sees them go, then are forgotten.
+        for id in &versions_gone {
+            cache.versions_gone.entry(id.clone()).or_insert(now);
+        }
+        let first_gone = std::mem::take(&mut cache.versions_gone);
+        let (forget, versions): (Vec<TrashEntry>, Vec<TrashEntry>) =
+            std::mem::take(&mut cache.own_versions)
+                .into_iter()
+                .partition(|e| {
+                    first_gone.get(&e.id).is_some_and(|t| {
+                        versions_gone.contains(&e.id) && now >= t + KEEP_LISTED_SECS
+                    })
+                });
+        cache.own_versions = versions;
+        let listed: HashSet<&str> = cache.own_versions.iter().map(|e| e.id.as_str()).collect();
+        cache.versions_gone = first_gone
+            .into_iter()
+            .filter(|(id, _)| listed.contains(id.as_str()))
+            .collect();
+        old.extend(forget);
         if !old.is_empty() {
             self.trash_enqueue(&rec.folder_id, &old)?;
         }
-        let json = serde_json::to_vec(&(&cache.own, &cache.own_removed))?;
+        let json = serde_json::to_vec(&(&cache.own, &cache.own_removed, &cache.own_versions))?;
         let hash = hex::encode(crypto::hash(&json));
         if hash == cache.published_hash
             || (cache.published_hash.is_empty()
                 && cache.own.is_empty()
-                && cache.own_removed.is_empty())
+                && cache.own_removed.is_empty()
+                && cache.own_versions.is_empty())
         {
             self.save_trash_cache(&rec.folder_id, &cache)?;
             return Ok(false);
@@ -630,6 +715,7 @@ impl Engine {
             written_utc: written,
             entries: cache.own.clone(),
             removed: cache.own_removed.clone(),
+            versions: cache.own_versions.clone(),
         };
         let packed = zstd::bulk::compress(&serde_json::to_vec(&body)?, 3)?;
         let blob = crypto::encrypt(
@@ -716,12 +802,18 @@ impl Engine {
                 .into_iter()
                 .filter(|e| entry_valid(e, &fk.folder, &dev))
                 .collect();
+            let versions = body
+                .versions
+                .into_iter()
+                .filter(|e| entry_valid(e, &fk.folder, &dev))
+                .collect();
             cache.remote.insert(
                 dev,
                 RemoteTrash {
                     written_utc: t,
                     entries,
                     removed: body.removed,
+                    versions,
                 },
             );
             read += 1;
@@ -822,7 +914,7 @@ impl Engine {
     }
 
     /// What is in a folder's trash at `now`.
-    fn trash_sets(&self, folder: &FolderId, now: i64) -> TrashSets {
+    pub(super) fn trash_sets(&self, folder: &FolderId, now: i64) -> TrashSets {
         let cache = self.load_trash_cache(folder);
         let days = self.trash_days_for(folder) as i64;
         let mut removed: HashMap<String, bool> = cache
@@ -834,9 +926,16 @@ impl Engine {
         for e in &cache.own {
             all.insert(e.id.clone(), e.clone());
         }
+        let mut versions: BTreeMap<String, TrashEntry> = BTreeMap::new();
+        for e in &cache.own_versions {
+            versions.insert(e.id.clone(), e.clone());
+        }
         for (dev, r) in &cache.remote {
             if self.is_revoked(dev) {
                 continue;
+            }
+            for e in &r.versions {
+                versions.entry(e.id.clone()).or_insert_with(|| e.clone());
             }
             // A member of a shared folder (another person) cannot take
             // entries out of the owner's trash: on the owner's devices its
@@ -855,7 +954,32 @@ impl Engine {
             visible: Vec::new(),
             gone: Vec::new(),
             restored: Vec::new(),
+            versions: Vec::new(),
+            versions_gone: Vec::new(),
         };
+        // The history thins each path's versions on its own schedule.
+        let history_days = self.history_keep_days(folder);
+        let mut by_path: BTreeMap<String, Vec<TrashEntry>> = BTreeMap::new();
+        for (_, e) in versions {
+            by_path.entry(e.path.clone()).or_default().push(e);
+        }
+        for (_, list) in by_path {
+            let keys: Vec<(i64, u64, &str)> = list
+                .iter()
+                .map(|e| (e.deleted_utc, e.clock, e.id.as_str()))
+                .collect();
+            let kept = super::history::history_kept(&keys, now, history_days);
+            for (e, k) in list.into_iter().zip(kept) {
+                // Once let go here (its blocks queued), never kept again.
+                if k && !cache.queued.contains(&e.id) {
+                    sets.versions.push(e);
+                } else {
+                    sets.versions_gone.push(e);
+                }
+            }
+        }
+        sets.versions
+            .sort_by(|a, b| (b.deleted_utc, b.clock, &b.id).cmp(&(a.deleted_utc, a.clock, &a.id)));
         for (id, e) in all {
             match removed.get(&id) {
                 Some(true) => sets.restored.push(e),
@@ -869,11 +993,13 @@ impl Engine {
         sets
     }
 
-    /// Blocks of the entries in a folder's trash now (they count as used).
+    /// Blocks of the entries in a folder's trash and of the versions its
+    /// history keeps now (they count as used).
     pub(super) fn trash_chunks(&self, folder: &FolderId) -> Vec<ChunkRef> {
-        self.trash_sets(folder, util::now_utc())
-            .visible
+        let sets = self.trash_sets(folder, util::now_utc());
+        sets.visible
             .into_iter()
+            .chain(sets.versions)
             .flat_map(|e| e.chunks)
             .collect()
     }
@@ -888,7 +1014,8 @@ impl Engine {
             .filter(|f| !f.deleted)
             .flat_map(|f| f.chunks.iter().map(|c| c.chunk.clone()))
             .collect();
-        for e in self.trash_sets(folder, now).visible {
+        let sets = self.trash_sets(folder, now);
+        for e in sets.visible.into_iter().chain(sets.versions) {
             out.extend(e.chunks.into_iter().map(|c| c.chunk));
         }
         out
@@ -1106,7 +1233,9 @@ impl Engine {
             .collect();
         let mut items: Vec<(ChunkRef, bool)> = Vec::new();
         let mut seen: HashSet<ChunkId> = HashSet::new();
-        for e in self.trash_sets(&rec.folder_id, now).visible {
+        // Blocks only the trash or the version history uses.
+        let sets = self.trash_sets(&rec.folder_id, now);
+        for e in sets.visible.into_iter().chain(sets.versions) {
             for c in e.chunks {
                 if live.contains(&c.chunk) || !seen.insert(c.chunk.clone()) {
                     continue;
@@ -1258,7 +1387,7 @@ impl Engine {
 
     // ----- what the user sees and does ----------------------------------------------
 
-    fn trash_folders(&self, folder: Option<&str>) -> Result<Vec<FolderRecord>> {
+    pub(super) fn trash_folders(&self, folder: Option<&str>) -> Result<Vec<FolderRecord>> {
         match folder {
             Some(f) => {
                 let rec = self
@@ -1316,7 +1445,7 @@ impl Engine {
 
     /// Storages holding blocks of an entry, and whether a block can be read
     /// only from cold storage.
-    fn entry_storages(
+    pub(super) fn entry_storages(
         &self,
         view: &LedgerView,
         folder: &FolderId,
@@ -1341,7 +1470,7 @@ impl Engine {
 
     /// A block that no warm storage of this device and no cache holds, but a
     /// cold one does.
-    fn needs_cold_read(&self, r: &crate::ledger::ChunkRecord, c: &ChunkRef) -> bool {
+    pub(super) fn needs_cold_read(&self, r: &crate::ledger::ChunkRecord, c: &ChunkRef) -> bool {
         let spec = |n: &str| self.config.storages.iter().find(|s| s.name() == n);
         let warm = r
             .storages
@@ -1357,6 +1486,12 @@ impl Engine {
     /// Settings, totals and where the trash's blocks are.
     pub fn trash_status(&mut self) -> Result<TrashStatus> {
         self.trash_refresh(true)?;
+        self.trash_status_cached()
+    }
+
+    /// `trash_status` from what this device read last, without asking the
+    /// storages (for the Help page).
+    pub fn trash_status_cached(&self) -> Result<TrashStatus> {
         let now = util::now_utc();
         let settings = self.trash_settings();
         let cache = self.load_settings_cache();
@@ -1436,14 +1571,7 @@ impl Engine {
             bail!("a member device cannot change the owner's trash settings");
         }
         self.org_allows(|p| p.members_may_set_policies, "change the trash settings")?;
-        let storages: OpenStorages = self
-            .metadata_storages(false)?
-            .into_iter()
-            .filter(|(s, _)| !s.is_carrier())
-            .collect();
-        // Start from the newest settings any device published.
-        self.trash_read_settings(&storages, true, util::now_utc())?;
-        let mut s = self.trash_settings();
+        let mut s = self.trash_settings_fresh()?;
         match (folder, days) {
             (Some(f), Some(d)) => {
                 if d > MAX_TRASH_DAYS {
@@ -1507,6 +1635,23 @@ impl Engine {
                 }
             }
         }
+        self.publish_trash_settings(s)?;
+        self.trash_status()
+    }
+
+    /// Start a settings change from the newest settings any device published.
+    pub(super) fn trash_settings_fresh(&mut self) -> Result<TrashSettings> {
+        let storages: OpenStorages = self
+            .metadata_storages(false)?
+            .into_iter()
+            .filter(|(s, _)| !s.is_carrier())
+            .collect();
+        self.trash_read_settings(&storages, true, util::now_utc())?;
+        Ok(self.trash_settings())
+    }
+
+    /// Publish changed trash and history settings so every device keeps the same.
+    pub(super) fn publish_trash_settings(&mut self, mut s: TrashSettings) -> Result<()> {
         let me = self.vault.device_id.clone();
         let now = util::now_utc().max(s.updated_utc + 1);
         s.updated_utc = now;
@@ -1531,8 +1676,7 @@ impl Engine {
         cache.local_storage = self.resolve_trash_storage(&s);
         cache.settings = Some(s);
         cache.read_utc = util::now_utc();
-        self.save_settings_cache(&cache)?;
-        self.trash_status()
+        self.save_settings_cache(&cache)
     }
 
     /// Entries of a folder's trash selected by paths (a file, or every
@@ -1560,7 +1704,7 @@ impl Engine {
     /// Where each selected entry is restored to: its own path when free,
     /// otherwise `name (restored).ext`; with `to`, under that directory of
     /// the folder (keeping the part below the selected path's parent).
-    fn restore_targets(
+    pub(super) fn restore_targets(
         &self,
         rec: &FolderRecord,
         root: &Path,
@@ -1670,38 +1814,56 @@ impl Engine {
             if local.is_some() {
                 plan.from_local_copies += 1;
             } else {
-                for c in &e.chunks {
-                    match view
-                        .locate(&rec.folder_id, &c.chunk)
-                        .filter(|r| r.object == c.object)
-                    {
-                        Some(r) if self.needs_cold_read(r, c) => {
-                            plan.cold_bytes += c.size;
-                            cold.extend(
-                                r.storages
-                                    .keys()
-                                    .filter(|n| {
-                                        self.config
-                                            .storages
-                                            .iter()
-                                            .any(|s| s.name() == n.as_str() && s.is_cold())
-                                    })
-                                    .cloned(),
-                            );
-                        }
-                        Some(r) if !r.storages.is_empty() || !r.devices.is_empty() => {}
-                        _ => {
-                            if self.cached_object(&c.object).is_none()
-                                && !plan.unavailable.contains(&e.path)
-                            {
-                                plan.unavailable.push(e.path.clone());
-                            }
-                        }
-                    }
-                }
+                self.plan_reads(&view, &rec.folder_id, &e, &mut plan, &mut cold);
             }
             out.push((e, target, local));
         }
+        self.plan_finish(&mut plan, cold);
+        Ok((plan, out))
+    }
+
+    /// What reading an entry's blocks takes: cold reads, missing blocks.
+    pub(super) fn plan_reads(
+        &self,
+        view: &LedgerView,
+        folder: &FolderId,
+        e: &TrashEntry,
+        plan: &mut TrashRestorePlan,
+        cold: &mut BTreeSet<String>,
+    ) {
+        for c in &e.chunks {
+            match view
+                .locate(folder, &c.chunk)
+                .filter(|r| r.object == c.object)
+            {
+                Some(r) if self.needs_cold_read(r, c) => {
+                    plan.cold_bytes += c.size;
+                    cold.extend(
+                        r.storages
+                            .keys()
+                            .filter(|n| {
+                                self.config
+                                    .storages
+                                    .iter()
+                                    .any(|s| s.name() == n.as_str() && s.is_cold())
+                            })
+                            .cloned(),
+                    );
+                }
+                Some(r) if !r.storages.is_empty() || !r.devices.is_empty() => {}
+                _ => {
+                    if self.cached_object(&c.object).is_none()
+                        && !plan.unavailable.contains(&e.path)
+                    {
+                        plan.unavailable.push(e.path.clone());
+                    }
+                }
+            }
+        }
+    }
+
+    /// The cold storages to read and what reading them costs.
+    pub(super) fn plan_finish(&self, plan: &mut TrashRestorePlan, cold: BTreeSet<String>) {
         plan.cold_storages = cold.into_iter().collect();
         let mut costs: Vec<String> = Vec::new();
         for n in &plan.cold_storages {
@@ -1712,7 +1874,20 @@ impl Engine {
             }
         }
         plan.read_cost = (!costs.is_empty()).then(|| costs.join(" or "));
-        Ok((plan, out))
+    }
+
+    /// The error a restore that needs an unconfirmed cold read stops with.
+    pub(super) fn cold_read_refusal(plan: &TrashRestorePlan) -> anyhow::Error {
+        let mut msg = format!(
+            "restoring needs a cold read: {} of it is kept only on cold storage {}",
+            util::human_bytes(plan.cold_bytes),
+            plan.cold_storages.join(", ")
+        );
+        if let Some(c) = &plan.read_cost {
+            msg += &format!(" (reading it back costs about {c}; cold storage may also take hours to make it readable)");
+        }
+        msg += "; confirm the cold read to restore it";
+        anyhow!("{msg}")
     }
 
     /// Restore entries of a folder's trash (files, or every entry under a
@@ -1733,16 +1908,7 @@ impl Engine {
         let now = util::now_utc();
         let (plan, work) = self.restore_plan_for(&rec, &root, paths, to, now)?;
         if !plan.cold_storages.is_empty() && !confirm_cold_read {
-            let mut msg = format!(
-                "restoring needs a cold read: {} of it is kept only on cold storage {}",
-                util::human_bytes(plan.cold_bytes),
-                plan.cold_storages.join(", ")
-            );
-            if let Some(c) = &plan.read_cost {
-                msg += &format!(" (reading it back costs about {c}; cold storage may also take hours to make it readable)");
-            }
-            msg += "; confirm the cold read to restore it";
-            bail!("{msg}");
+            return Err(Self::cold_read_refusal(&plan));
         }
         let fk = self.folder_keys(&rec)?;
         let encrypted = self.mount_is_encrypted(&rec.folder_id);
@@ -1804,7 +1970,8 @@ impl Engine {
                 let mut state = self.load_state(&rec.folder_id)?;
                 let disk = self.place(&root, &mut state, &target, None)?;
                 self.save_state(&rec.folder_id, &state)?;
-                if disk.exists() || placeholder_path(&disk).exists() {
+                // A link counts as there (it is never written through).
+                if fs::symlink_metadata(&disk).is_ok() || placeholder_path(&disk).exists() {
                     let _ = fs::remove_file(&tmp);
                     report
                         .unavailable
@@ -1866,7 +2033,7 @@ impl Engine {
 
     /// Fetch, check and decrypt an entry's blocks into `out`. Returns false
     /// (not from a local copy).
-    fn restore_from_blocks(
+    pub(super) fn restore_from_blocks(
         &mut self,
         rec: &FolderRecord,
         fk: &FolderKeys,
@@ -2073,12 +2240,26 @@ impl Engine {
                 self.trash_enqueue(&rec.folder_id, &newly)?;
                 cache.queued.extend(newly.iter().map(|e| e.id.clone()));
             }
+            // Versions the history let go since the last upkeep.
+            let thinned: Vec<TrashEntry> = sets
+                .versions_gone
+                .iter()
+                .filter(|e| !cache.queued.contains(&e.id))
+                .cloned()
+                .collect();
+            report.versions_dropped += thinned.len() as u64;
+            if !thinned.is_empty() {
+                self.trash_enqueue(&rec.folder_id, &thinned)?;
+                cache.queued.extend(thinned.iter().map(|e| e.id.clone()));
+            }
             // Forget queued ids no record lists any more.
             let listed: HashSet<&str> = sets
                 .gone
                 .iter()
                 .chain(sets.visible.iter())
                 .chain(sets.restored.iter())
+                .chain(sets.versions.iter())
+                .chain(sets.versions_gone.iter())
                 .map(|e| e.id.as_str())
                 .collect();
             cache.queued.retain(|id| listed.contains(id.as_str()));
@@ -2194,6 +2375,7 @@ mod tests {
             deleted_utc: 1,
             deleted_by: dev.clone(),
             clock: 7,
+            author: None,
         };
         assert!(entry_valid(&e, &folder, &dev));
         // Only a device's own deletions count.

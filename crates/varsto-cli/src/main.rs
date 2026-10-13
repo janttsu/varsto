@@ -13,6 +13,7 @@ mod desktop;
 mod drive_mount;
 mod drives;
 mod filemanager;
+mod history;
 mod icon;
 mod import;
 mod logcmd;
@@ -21,6 +22,7 @@ mod mcp_keys;
 mod placing;
 mod restic;
 mod service;
+mod sse;
 mod trash;
 mod tray;
 mod update;
@@ -185,8 +187,35 @@ enum Cmd {
         #[command(subcommand)]
         cmd: trash::TrashCmd,
     },
+    /// Earlier versions of overwritten files: `varsto history <folder>
+    /// <path>` lists them; restore, set and status. Kept on a thinning
+    /// schedule for 90 days by default.
+    History(history::HistoryArgs),
     /// Show vault, devices, storages and folders.
     Status,
+    /// Who changed what and when: the versions of one file (renames followed), or the recent
+    /// changes in a folder or under a directory, newest first, from the signed manifests.
+    Changes {
+        folder: String,
+        /// A file, or a directory to show the changes under.
+        path: Option<String>,
+        /// Only changes made on this device (name or id).
+        #[arg(long)]
+        device: Option<String>,
+        /// Only changes by this person (organizations).
+        #[arg(long)]
+        user: Option<String>,
+        /// Only changes since: YYYY-MM-DD[THH:MM] (UTC), seconds since 1970, or an age (7d, 12h).
+        #[arg(long)]
+        since: Option<String>,
+        /// At most this many (0: all).
+        #[arg(long, default_value_t = 100)]
+        limit: usize,
+    },
+    /// Where you are now and what to do next: where your data is, what
+    /// needs attention, and the next steps with the commands to run (the
+    /// interface's Help page as text). Works without a vault too.
+    HelpNow,
     /// How files would be fetched: from pool disks (which ones, in which order) or the network,
     /// with the time and cost of each way. Run `varsto folder fetch` to fetch.
     FetchPlan {
@@ -324,6 +353,10 @@ enum Cmd {
     },
     /// Download a placeholder and open the file (double-click on a .varsto-placeholder).
     OpenPlaceholder { path: PathBuf },
+    /// Open a varsto:// invitation link in the interface (the system calls this when a link or a
+    /// QR code scanned with the phone or computer camera is opened).
+    #[command(hide = true)]
+    OpenLink { uri: String },
     /// Alpha: forget this device's vault configuration (keys, ledger, state, grants) and start over. Files in folders stay.
     Reset {
         #[arg(long)]
@@ -444,13 +477,17 @@ enum DeviceCmd {
 #[derive(Subcommand)]
 enum PairCmd {
     /// On a device that holds the vault: show a code and wait for the new device.
-    Offer,
+    Offer {
+        /// Also show a QR code (a varsto://pair link with the code and the addresses).
+        #[arg(long)]
+        qr: bool,
+    },
     /// On the new device: join the vault of the device showing the code.
     Join {
         /// Name of this device (default: the computer's name).
         #[arg(long, default_value_t = default_device_name())]
         name: String,
-        /// The nine digits shown on the other device.
+        /// The nine digits shown on the other device, or the varsto://pair link of its QR code.
         #[arg(long)]
         code: String,
         /// The other device's address (host:port) when it is not found on the LAN.
@@ -549,8 +586,12 @@ enum OrgCmd {
         yes: bool,
     },
     /// (Administrator) What members may do on their own: share, add-storages, set-policies,
-    /// add-devices. Without arguments, show the policy.
+    /// add-devices; `policy platforms` sets which device platforms may belong. Without
+    /// arguments, show the policy.
+    #[command(args_conflicts_with_subcommands = true)]
     Policy {
+        #[command(subcommand)]
+        cmd: Option<OrgPolicyCmd>,
         #[arg(long, value_delimiter = ',')]
         allow: Vec<String>,
         #[arg(long, value_delimiter = ',')]
@@ -564,6 +605,26 @@ enum OrgCmd {
     /// Who approved, added, removed or changed what, oldest first (signed by the
     /// administrator devices; use --json to export).
     Log,
+}
+
+#[derive(Subcommand)]
+enum OrgPolicyCmd {
+    /// (Administrator) Which device platforms may join and open the vault: linux, macos,
+    /// windows, android, ios. Devices of other platforms are refused at approval, and devices
+    /// already in the organization are locked out (no new keys, the others ignore what they
+    /// write, their own app refuses to open the vault) until they are allowed again. Without
+    /// arguments, show the setting.
+    Platforms {
+        /// Allowed platforms, e.g. linux,macos,windows.
+        #[arg(long, value_delimiter = ',', conflicts_with = "allow_all")]
+        allow: Vec<String>,
+        /// Allow every platform.
+        #[arg(long)]
+        allow_all: bool,
+        /// Oldest Varsto version a device may run (e.g. 0.0.1-alpha.14); `any` removes it.
+        #[arg(long)]
+        min_version: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -669,6 +730,11 @@ enum P2pCmd {
         no_stun: bool,
     },
     Disable,
+    /// Ask the home router to forward the peer-to-peer port (PCP, NAT-PMP, UPnP): on (default) or off.
+    PortMapping {
+        #[arg(value_parser = ["on", "off"])]
+        state: String,
+    },
     /// Show settings, NAT guess, public address and the path to every peer.
     Status,
     /// Live traffic per peer: speed, totals and path, from the running service.
@@ -814,6 +880,22 @@ enum ShareCmd {
         /// Your name, bound to the code (the owner sees it, and it is part of the fingerprint).
         #[arg(long)]
         name: Option<String>,
+        /// Also show the code as a QR code for the owner to scan.
+        #[arg(long)]
+        qr: bool,
+    },
+    /// Show a request code, a sealed token or a varsto:// link as a QR code in the terminal.
+    /// Plain tokens are refused: they carry the folder key.
+    Qr {
+        /// The request code, sealed token (vst1…/vst2…) or varsto:// link.
+        text: String,
+        /// Show it as a sequence of smaller codes, one after another, for cameras that cannot read
+        /// the dense one (the Varsto scanner collects them; Ctrl-C stops).
+        #[arg(long)]
+        parts: bool,
+        /// The terminal has dark text on a light background.
+        #[arg(long)]
+        light: bool,
     },
     /// (Owner) Print a share token for a folder. With --to <request-code> the folder key is
     /// encapsulated to the recipient (hybrid X25519 + ML-KEM-768) and the token is safe to send
@@ -830,10 +912,26 @@ enum ShareCmd {
         /// Seal without asking whether the fingerprint matches (you compared it some other way).
         #[arg(long)]
         yes: bool,
+        /// Also show the sealed token as a QR code for the recipient to scan.
+        #[arg(long)]
+        qr: bool,
+        /// What the recipient may do: editor (read and write) or viewer (read only: nothing it
+        /// changes is accepted by your devices or the editors). A viewer needs --to.
+        #[arg(long, default_value = "editor")]
+        role: String,
     },
-    /// (Owner) Who has access to a shared folder: your devices, members (current and removed)
-    /// and tokens not accepted yet.
+    /// (Owner) Who has access to a shared folder, with each member's role: your devices,
+    /// members (current and removed) and tokens not accepted yet.
     Members { folder: String },
+    /// (Owner) Make a member a viewer (read only) or an editor (read and write). What a viewer
+    /// wrote while it was an editor stays; what it writes from now on is not accepted.
+    Role {
+        folder: String,
+        /// Member name or device id (see `share members`).
+        member: String,
+        /// viewer or editor.
+        role: String,
+    },
     /// (Owner) Remove a member (name or device id) or revoke a token not accepted yet (its id or
     /// fingerprint words), or `all`: the folder gets a new key for everything written from now on.
     Revoke {
@@ -848,8 +946,15 @@ enum ShareCmd {
         /// Name of this device (default: the computer's name).
         #[arg(long, default_value_t = default_device_name())]
         name: String,
-        #[arg(long)]
-        token: String,
+        /// The sealed token, as text or as the varsto://share/token link a QR code holds.
+        #[arg(
+            long = "token",
+            value_name = "TOKEN",
+            required_unless_present = "token_arg"
+        )]
+        token: Option<String>,
+        #[arg(value_name = "TOKEN", conflicts_with = "token")]
+        token_arg: Option<String>,
         /// Storage directory that both users can reach and that holds the owner's vault.
         #[arg(long, required_unless_present = "s3_bucket")]
         storage_path: Option<PathBuf>,
@@ -1003,6 +1108,14 @@ enum StorageCmd {
         /// Disk group rule: keep this many copies of every block on disks in different places.
         #[arg(long, default_value_t = 1)]
         copies: u32,
+    },
+    /// Change a storage's settings.
+    Set {
+        name: String,
+        /// Free space kept on a local directory's disk: block writes stop below it,
+        /// e.g. 5% or 10GB ("default": 5 %).
+        #[arg(long)]
+        min_free: String,
     },
     /// List storages with their prices and monthly cost.
     List,
@@ -1246,6 +1359,49 @@ enum FolderCmd {
     Files {
         folder: String,
     },
+    /// Show or change a folder's ignore rules (gitignore syntax): the
+    /// `.varstoignore` at the folder's root, which every device shares, or
+    /// with --local this device's own patterns, which are not synced.
+    Ignore {
+        folder: String,
+        /// List the rules (what happens without --add or --remove).
+        #[arg(long)]
+        list: bool,
+        /// Add a pattern (repeatable), e.g. --add '*.tmp' --add 'build/'.
+        #[arg(long, allow_hyphen_values = true)]
+        add: Vec<String>,
+        /// Remove a pattern (repeatable).
+        #[arg(long, allow_hyphen_values = true)]
+        remove: Vec<String>,
+        /// This device's own patterns instead of the synced file.
+        #[arg(long)]
+        local: bool,
+    },
+    /// Whether a path of a folder is ignored on this device, and by which
+    /// pattern. A trailing / asks about a directory.
+    CheckIgnore {
+        folder: String,
+        path: String,
+    },
+    /// Show or change a folder's settings on this device: which file
+    /// metadata it syncs (permissions, symbolic links and extended
+    /// attributes on by default, ownership off by default) and the free
+    /// space kept on its disk.
+    Set {
+        folder: String,
+        /// Free space kept on the disk holding the folder: downloads into it stop below it,
+        /// e.g. 5% or 10GB ("default": 5 %).
+        #[arg(long)]
+        min_free: Option<String>,
+        #[arg(long, value_name = "on|off", value_parser = clap::builder::BoolishValueParser::new())]
+        permissions: Option<bool>,
+        #[arg(long, value_name = "on|off", value_parser = clap::builder::BoolishValueParser::new())]
+        symlinks: Option<bool>,
+        #[arg(long, value_name = "on|off", value_parser = clap::builder::BoolishValueParser::new())]
+        xattrs: Option<bool>,
+        #[arg(long, value_name = "on|off", value_parser = clap::builder::BoolishValueParser::new())]
+        ownership: Option<bool>,
+    },
     /// Show or set which storages a folder's blocks are written to (default: every storage).
     Placement {
         folder: String,
@@ -1260,6 +1416,111 @@ enum FolderCmd {
         every: bool,
     },
     List,
+    /// Write the folder's marker (.varsto-folder) into its directory again,
+    /// when the folder is paused because the marker is missing or names
+    /// another folder and the directory is the right one.
+    RepairMarker {
+        name: String,
+    },
+    /// Decide on deletions the mass-deletion guard holds: confirm them
+    /// (published, or applied here when another device made them), or with
+    /// --discard restore the files (from the storages, or by keeping them and
+    /// publishing them again).
+    ConfirmDeletions {
+        name: String,
+        #[arg(long)]
+        discard: bool,
+    },
+    /// Show or set this device's mode for a folder: normal, send-only (publish
+    /// this device's changes, never apply the others') or receive-only (apply
+    /// the others' changes, never publish this device's).
+    Mode {
+        name: String,
+        mode: Option<String>,
+    },
+    /// Send-only: make every device match this one (the remote changes not
+    /// applied here are overridden by this device's state).
+    Override {
+        name: String,
+    },
+    /// Receive-only: replace this device's local changes with the vault's
+    /// versions; changed and added files go to the trash.
+    Revert {
+        name: String,
+    },
+    /// What waits for a decision in a folder: held deletions, local changes
+    /// not published, remote changes not applied. (Who changed which file
+    /// and when: `varsto changes`.)
+    Pending {
+        name: String,
+    },
+    /// Show or set when deletions are held for confirmation (default: more
+    /// than 50 % and more than 100 files, or more than 1000 files).
+    DeletionGuard {
+        name: String,
+        /// Share of the folder's files (100: no share rule).
+        #[arg(long)]
+        percent: Option<u32>,
+        /// ... and more than this many files.
+        #[arg(long)]
+        min_files: Option<u64>,
+        /// More than this many files whatever the share (0: no such limit).
+        #[arg(long)]
+        max_files: Option<u64>,
+        /// Never hold deletions in this folder.
+        #[arg(long, conflicts_with_all = ["percent", "min_files", "max_files", "default"])]
+        off: bool,
+        /// Back to the default.
+        #[arg(long, conflicts_with_all = ["percent", "min_files", "max_files"])]
+        default: bool,
+    },
+}
+
+/// `varsto folder ignore` as text.
+fn ignore_listing(i: &varsto_core::engine::IgnoreInfo, local_only: bool) -> String {
+    let mut out = Vec::new();
+    if !local_only {
+        if !i.applies_here {
+            out.push(
+                "(this device keeps the folder encrypted: ignore rules apply only where it has plain files)"
+                    .to_string(),
+            );
+        }
+        out.push("synced (.varstoignore):".to_string());
+        let lines: Vec<&str> = i.synced.lines().filter(|l| !l.trim().is_empty()).collect();
+        if lines.is_empty() {
+            out.push("  (none)".to_string());
+        }
+        out.extend(lines.iter().map(|l| format!("  {l}")));
+        for n in &i.nested {
+            out.push(format!("also: {n}"));
+        }
+    }
+    out.push("this device only:".to_string());
+    if i.local.is_empty() {
+        out.push("  (none)".to_string());
+    }
+    out.extend(i.local.iter().map(|l| format!("  {l}")));
+    out.join("\n")
+}
+
+/// "default" (or empty) for the default, else a limit such as 5% or 10GB.
+fn min_free_arg(v: &str) -> Result<Option<varsto_core::freespace::MinFree>> {
+    let t = v.trim();
+    if t.is_empty() || t.eq_ignore_ascii_case("default") {
+        return Ok(None);
+    }
+    Ok(Some(varsto_core::freespace::MinFree::parse(t)?))
+}
+
+fn min_free_text(v: Option<varsto_core::freespace::MinFree>) -> String {
+    match v {
+        Some(m) => m.describe(),
+        None => format!(
+            "{} (the default)",
+            varsto_core::freespace::DEFAULT.describe()
+        ),
+    }
 }
 
 /// FOLDER PATH as given, or the folder and path of one path on disk.
@@ -1272,6 +1533,138 @@ fn folder_and_path(
         Some(p) => Ok((first.to_string(), p.clone())),
         None => engine.locate_path(&std::path::absolute(first)?),
     }
+}
+
+/// Print a request code, sealed token or link as a terminal QR code (half
+/// blocks), with what the other side compares: the fingerprint of a request.
+/// With `parts`, cycle through smaller codes until Ctrl-C.
+fn show_qr(text: &str, parts: bool, light: bool) -> Result<()> {
+    use varsto_core::qr::{self, Link};
+    let link = Link::from_text(text)?;
+    let whole = link.to_uri()?;
+    let uris = if parts || qr::code_for(&whole).is_err() {
+        link.to_uris(0, qr::PART_CHARS)?
+    } else {
+        vec![whole.clone()]
+    };
+    let caption = match &link {
+        Link::ShareRequest(code) => {
+            let r = Engine::share_request_info(code)?;
+            format!(
+                "Share request{}. Fingerprint: {}",
+                if r.name.is_empty() {
+                    String::new()
+                } else {
+                    format!(" from {}", r.name)
+                },
+                r.fingerprint
+            )
+        }
+        Link::ShareToken(t) => format!(
+            "Sealed share token for {} (only the requesting device opens it)",
+            varsto_core::vault::SealedShareToken::decode(t)?.name
+        ),
+        Link::Pair { .. } => "Pairing code (works once, for ten minutes)".to_string(),
+    };
+    if uris.len() == 1 {
+        println!("{}", qr::to_terminal(&uris[0], !light)?);
+        println!("{caption}\nLink: {}", uris[0]);
+        return Ok(());
+    }
+    let frames = uris
+        .iter()
+        .map(|u| qr::to_terminal(u, !light))
+        .collect::<Result<Vec<_>>>()?;
+    loop {
+        for (i, f) in frames.iter().enumerate() {
+            // Clear the screen and draw the next part.
+            print!("\x1b[2J\x1b[H{f}\n{caption}\nPart {} of {}: scan with Varsto (Scan QR code); Ctrl-C stops.\n", i + 1, frames.len());
+            std::io::Write::flush(&mut std::io::stdout())?;
+            std::thread::sleep(std::time::Duration::from_millis(900));
+        }
+    }
+}
+
+/// `varsto share qr`: the code in the terminal, or with `--json` the links.
+fn share_qr(json: bool, text: &str, parts: bool, light: bool) -> Result<()> {
+    if !json {
+        return show_qr(text, parts, light);
+    }
+    let link = varsto_core::qr::Link::from_text(text)?;
+    let uris = if parts {
+        link.to_uris(0, varsto_core::qr::PART_CHARS)?
+    } else {
+        vec![link.to_uri()?]
+    };
+    let mut v = serde_json::json!({"kind": link.kind(), "text": link.text(), "uris": uris});
+    if let varsto_core::qr::Link::ShareRequest(c) = &link {
+        v["fingerprint"] = Engine::share_request_info(c)?.fingerprint.into();
+    }
+    println!("{v}");
+    Ok(())
+}
+
+/// `varsto open-link`: hand a `varsto://` link to the interface (the service
+/// keeps it until the page takes it) and open the page; start the service
+/// first when it is not running.
+fn open_link(home: &Path, uri: &str) -> Result<()> {
+    use std::io::IsTerminal;
+    let gui = filemanager::detach_own_console() || !std::io::stderr().is_terminal();
+    let run = || -> Result<()> {
+        match varsto_core::qr::parse(uri)? {
+            varsto_core::qr::Scanned::Link(_) => {}
+            varsto_core::qr::Scanned::Part(p) => bail!(
+                "this is part {} of {} of a split code: scan it in Varsto (Scan QR code)",
+                p.index,
+                p.count
+            ),
+        }
+        if service::status(home).is_none() {
+            std::process::Command::new(std::env::current_exe()?)
+                .arg("--home")
+                .arg(home)
+                .args(["service", "run"])
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn()?;
+            for _ in 0..80 {
+                if service::status(home).is_some() {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(250));
+            }
+        }
+        let (f, _) =
+            service::status(home).ok_or_else(|| anyhow!("the Varsto service did not start"))?;
+        let body = serde_json::json!({ "uri": uri }).to_string();
+        let answer: serde_json::Value = serde_json::from_str(&service::http_post(
+            &format!("http://127.0.0.1:{}/api/link", f.port),
+            &f.token,
+            &body,
+        )?)?;
+        if let Some(e) = answer["error"].as_str() {
+            bail!("{e}");
+        }
+        let page = format!("http://127.0.0.1:{}/?token={}", f.port, f.token);
+        match std::env::var("VARSTO_OPENER")
+            .ok()
+            .filter(|o| !o.is_empty())
+        {
+            Some(opener) => {
+                std::process::Command::new(opener).arg(&page).status()?;
+            }
+            None => desktop::open_in_browser(&page),
+        }
+        Ok(())
+    };
+    let r = run();
+    if let Err(e) = &r {
+        if gui {
+            filemanager::report_failure(home, "Could not open the link", &format!("{e:#}"));
+        }
+    }
+    r
 }
 
 /// This computer's name, for devices joined without `--name`.
@@ -1332,6 +1725,107 @@ fn url_escape(s: &str) -> String {
         .collect()
 }
 
+/// `varsto changes` as lines, newest first.
+fn changes_text(r: &varsto_core::engine::ChangesReport) -> String {
+    let mut out = format!(
+        "{}{}: {} change(s){}",
+        r.folder,
+        r.path
+            .as_ref()
+            .map(|p| format!(" {}{p}", if r.file { "" } else { "under " }))
+            .unwrap_or_default(),
+        r.changes.len(),
+        if r.truncated {
+            " (more with --limit 0)"
+        } else {
+            ""
+        }
+    );
+    for c in &r.changes {
+        let e = &c.event;
+        let what = match (e.action.as_str(), &e.from, &e.to) {
+            ("renamed", Some(f), _) => format!("renamed from {f}"),
+            ("renamed", _, Some(t)) => format!("renamed to {t}"),
+            (a, _, _) => a.to_string(),
+        };
+        let secs = e.time_utc.rem_euclid(86_400);
+        out.push_str(&format!(
+            "\n{} {:02}:{:02}  {}  {}  by {}{}{}{}{}",
+            varsto_core::util::format_date(e.time_utc),
+            secs / 3600,
+            secs % 3600 / 60,
+            e.path,
+            what,
+            c.device_name,
+            c.user
+                .as_ref()
+                .map(|u| format!(" ({u})"))
+                .unwrap_or_default(),
+            if e.action.as_str() == "deleted" || e.to.is_some() || e.hash.is_empty() {
+                String::new()
+            } else {
+                format!(", {} bytes, {}", e.size, e.hash)
+            },
+            if e.verified {
+                ""
+            } else {
+                ", not verified against the ledger"
+            },
+            if e.backfilled {
+                ", time from the file (history started later)"
+            } else {
+                ""
+            }
+        ));
+    }
+    out
+}
+
+/// Where a read-only folder's local changes went.
+fn kept_aside_text(paths: &[String]) -> String {
+    if paths.is_empty() {
+        return String::new();
+    }
+    let shown: Vec<&str> = paths.iter().take(5).map(|p| p.as_str()).collect();
+    format!(
+        " ({} file(s) moved to {}/ in the device directory or put back: {}{})",
+        paths.len(),
+        varsto_core::engine::KEPT_ASIDE_DIR,
+        shown.join(", "),
+        if paths.len() > shown.len() {
+            ", ..."
+        } else {
+            ""
+        }
+    )
+}
+
+/// Read-only members: this device's own refused changes, and changes of
+/// viewers this device did not take.
+fn role_notes(
+    pull: &varsto_core::engine::PullReport,
+    push: Option<&varsto_core::engine::PushReport>,
+) -> String {
+    let mut out = String::new();
+    let mut kept: Vec<String> = pull.kept_aside.clone();
+    if let Some(p) = push {
+        kept.extend(p.kept_aside.iter().cloned());
+    }
+    if push.is_some_and(|p| p.read_only) || !kept.is_empty() {
+        out.push_str(&format!(
+            "; read-only: your changes were not published{}",
+            kept_aside_text(&kept)
+        ));
+    }
+    if !pull.writes_refused.is_empty() {
+        out.push_str(&format!(
+            "; not taken from read-only members: {}",
+            pull.writes_refused.join(", ")
+        ));
+    }
+    out
+}
+
 fn share_members_text(l: &varsto_core::engine::ShareMembers) -> String {
     let mut out = format!("{} ({})", l.folder, &l.folder_id[..8]);
     if l.share_epoch > 0 {
@@ -1339,6 +1833,11 @@ fn share_members_text(l: &varsto_core::engine::ShareMembers) -> String {
     }
     if l.access_lost {
         out.push_str("\nThis device no longer receives new content of this folder: the owner removed it, or has not sent it the new key yet.");
+    }
+    if l.this_role == "viewer" {
+        out.push_str(
+            "\nThis device may only read this folder: changes made here are not published.",
+        );
     }
     for m in &l.members {
         let what = match (m.kind.as_str(), m.status.as_str()) {
@@ -1355,7 +1854,14 @@ fn share_members_text(l: &varsto_core::engine::ShareMembers) -> String {
                     .map(|t| format!(" on {}", varsto_core::util::format_date(t)))
                     .unwrap_or_default()
             ),
-            _ => "member".to_string(),
+            _ => match m.role.as_str() {
+                "viewer" => "member, viewer (read only)".to_string(),
+                _ => "member, editor".to_string(),
+            },
+        };
+        let what = match (m.kind.as_str(), m.status.as_str(), m.role.as_str()) {
+            ("invite", "pending", "viewer") => format!("{what} (viewer)"),
+            _ => what,
         };
         out.push_str(&format!(
             "\n  {:<20} {:<10} {}{}{}",
@@ -2060,9 +2566,14 @@ fn run_org(cli: &Cli, home: &Path, cmd: &OrgCmd) -> Result<()> {
                 None if *yes => None,
                 None => {
                     eprintln!(
-                        "Request from device {} ({})\nfingerprint: {}\nAsk the person to read the fingerprint their device shows (varsto org request).",
+                        "Request from device {} ({}, {})\nfingerprint: {}\nAsk the person to read the fingerprint their device shows (varsto org request).",
                         if info.name.is_empty() { "(no name)" } else { &info.name },
                         info.device.short(),
+                        if info.platform.is_empty() {
+                            "platform not given".to_string()
+                        } else {
+                            varsto_core::org::platform_name(&info.platform)
+                        },
                         info.fingerprint
                     );
                     if !confirm("Do the six words match exactly?")? {
@@ -2139,7 +2650,7 @@ fn run_org(cli: &Cli, home: &Path, cmd: &OrgCmd) -> Result<()> {
                 )
             })?;
         }
-        OrgCmd::Policy { allow, deny } => {
+        OrgCmd::Policy { cmd, allow, deny } => {
             let current: Option<varsto_core::org::OrgPolicy> = if via_service.is_some() {
                 let v = call("GET", "/api/org", serde_json::Value::Null)?;
                 v.get("policy")
@@ -2152,6 +2663,60 @@ fn run_org(cli: &Cli, home: &Path, cmd: &OrgCmd) -> Result<()> {
             let Some(mut p) = current else {
                 bail!("this vault has no organization");
             };
+            if let Some(OrgPolicyCmd::Platforms {
+                allow,
+                allow_all,
+                min_version,
+            }) = cmd
+            {
+                if allow.is_empty() && !*allow_all && min_version.is_none() {
+                    print(cli, &p, policy_text)?;
+                    return Ok(());
+                }
+                if *allow_all {
+                    p.allowed_platforms.clear();
+                } else if !allow.is_empty() {
+                    p.allowed_platforms = allow.iter().map(|a| a.trim().to_string()).collect();
+                }
+                if let Some(v) = min_version {
+                    p.min_app_version = if v.trim().eq_ignore_ascii_case("any") {
+                        String::new()
+                    } else {
+                        v.trim().to_string()
+                    };
+                }
+                if via_service.is_some() {
+                    call("POST", "/api/org/policy", serde_json::to_value(&p)?)?;
+                } else {
+                    open_engine(home)?.org_set_policy(p.clone())?;
+                }
+                // The policy as stored (platforms normalised), and who it locks out.
+                let summary: Option<varsto_core::engine::OrgSummary> = if via_service.is_some() {
+                    serde_json::from_value(call("GET", "/api/org", serde_json::Value::Null)?).ok()
+                } else {
+                    open_engine(home)?.org_summary()
+                };
+                let Some(summary) = summary else {
+                    return Ok(());
+                };
+                print(cli, &summary.policy, |p| {
+                    let mut out = policy_text(p);
+                    let refused: Vec<String> = summary
+                        .users
+                        .iter()
+                        .flat_map(|u| u.devices.iter())
+                        .filter_map(|d| d.refused.as_ref().map(|r| format!("{} ({r})", d.name)))
+                        .collect();
+                    if !refused.is_empty() {
+                        out.push_str(&format!(
+                            "\nlocked out until allowed again: {}",
+                            refused.join(", ")
+                        ));
+                    }
+                    out
+                })?;
+                return Ok(());
+            }
             if allow.is_empty() && deny.is_empty() {
                 print(cli, &p, policy_text)?;
                 return Ok(());
@@ -2223,11 +2788,25 @@ fn run_org(cli: &Cli, home: &Path, cmd: &OrgCmd) -> Result<()> {
 fn policy_text(p: &varsto_core::org::OrgPolicy) -> String {
     let yn = |b: bool| if b { "yes" } else { "no (administrators only)" };
     format!(
-        "members may share folders with other people: {}\nmembers may add or remove storages: {}\nmembers may set policies and placement: {}\nmembers may add devices and print the recovery kit: {}",
+        "members may share folders with other people: {}\nmembers may add or remove storages: {}\nmembers may set policies and placement: {}\nmembers may add devices and print the recovery kit: {}\ndevice platforms allowed: {}\noldest Varsto version allowed: {}",
         yn(p.members_may_share),
         yn(p.members_may_add_storages),
         yn(p.members_may_set_policies),
-        yn(p.members_may_add_devices)
+        yn(p.members_may_add_devices),
+        if p.allowed_platforms.is_empty() {
+            "all".to_string()
+        } else {
+            p.allowed_platforms
+                .iter()
+                .map(|x| varsto_core::org::platform_name(x))
+                .collect::<Vec<_>>()
+                .join(", ")
+        },
+        if p.min_app_version.is_empty() {
+            "any"
+        } else {
+            &p.min_app_version
+        }
     )
 }
 
@@ -2250,6 +2829,9 @@ fn org_status_text(s: &varsto_core::engine::OrgSummary) -> String {
             .map(|u| format!(", user {u}"))
             .unwrap_or_default()
     );
+    if let Some(b) = &s.this_device_blocked {
+        out.push_str(&format!("\nThis device is locked out: {b}. It does not sync or open the vault until an administrator allows it."));
+    }
     out.push_str("\n\nAdministrators:");
     for a in &s.admins {
         out.push_str(&format!(
@@ -2264,12 +2846,21 @@ fn org_status_text(s: &varsto_core::engine::OrgSummary) -> String {
         out.push_str(&format!("\n  {}", u.user));
         for d in &u.devices {
             out.push_str(&format!(
-                "\n    {} ({}){}{}{}",
+                "\n    {} ({}){}{}{}{}{}",
                 d.name,
                 &d.device_id[..8],
+                if d.platform.is_empty() {
+                    String::new()
+                } else {
+                    format!(", {}", varsto_core::org::platform_name(&d.platform))
+                },
                 if d.admin { ", administrator" } else { "" },
                 if d.this_device { ", this device" } else { "" },
-                if d.revoked { ", removed" } else { "" }
+                if d.revoked { ", removed" } else { "" },
+                d.refused
+                    .as_ref()
+                    .map(|r| format!(", LOCKED OUT: the organization {r}"))
+                    .unwrap_or_default()
             ));
         }
     }
@@ -2384,6 +2975,7 @@ fn run(cli: &Cli) -> Result<()> {
                     cold: false,
                     carrier: false,
                     place: String::new(),
+                    min_free: None,
                 },
                 (None, None) => bail_usage("give --storage-path <dir> or --s3-bucket ...")?,
             };
@@ -2426,6 +3018,22 @@ fn run(cli: &Cli) -> Result<()> {
             }
         }
         Cmd::Storage { cmd } => {
+            if let StorageCmd::Set { name, min_free } = cmd {
+                // Through the running service when there is one: its own
+                // copy of the configuration takes the change at once.
+                let m = min_free_arg(min_free)?;
+                if call_service(
+                    &home,
+                    "/api/storage/min-free",
+                    serde_json::json!({"name": name, "min_free": min_free}),
+                )?
+                .is_none()
+                {
+                    open_engine(&home)?.set_storage_min_free(name, m)?;
+                }
+                println!("{name}: {} kept free on its disk", min_free_text(m));
+                return Ok(());
+            }
             let mut engine = open_engine(&home)?;
             match cmd {
                 StorageCmd::AddLocal {
@@ -2442,6 +3050,7 @@ fn run(cli: &Cli) -> Result<()> {
                         cold: *cold,
                         carrier: *carrier,
                         place: place.clone(),
+                        min_free: None,
                     })?;
                     println!("storage {name} added");
                     if !carrier_for.is_empty() {
@@ -2592,6 +3201,7 @@ fn run(cli: &Cli) -> Result<()> {
                     *clear,
                     *measure,
                 )?,
+                StorageCmd::Set { .. } => unreachable!("handled above"),
                 StorageCmd::List => {
                     let estimates = engine.storage_estimates()?;
                     let quotas = engine.quota_statuses()?;
@@ -2619,7 +3229,7 @@ fn run(cli: &Cli) -> Result<()> {
                             .zip(&quotas)
                             .map(|((x, e), q)| {
                                 format!(
-                                    "{}{}{}{}{} | {} stored{} | {}{}",
+                                    "{}{}{}{}{}{} | {} stored{} | {}{}",
                                     x.name(),
                                     if x.is_cold() { " (cold)" } else { "" },
                                     if x.is_carrier() { " (carrier)" } else { "" },
@@ -2632,6 +3242,15 @@ fn run(cli: &Cli) -> Result<()> {
                                         .as_ref()
                                         .map(|d| format!(" ({d})"))
                                         .unwrap_or_default(),
+                                    match x {
+                                        StorageSpec::LocalDir { min_free, .. } => format!(
+                                            " (keeps {} free)",
+                                            min_free
+                                                .unwrap_or(varsto_core::freespace::DEFAULT)
+                                                .describe()
+                                        ),
+                                        _ => String::new(),
+                                    },
                                     fmt_bytes(e.bytes),
                                     match (q.quota_bytes, q.quota_objects) {
                                         (None, None) => String::new(),
@@ -2948,6 +3567,7 @@ fn run(cli: &Cli) -> Result<()> {
         }
         Cmd::Backup { cmd } => backup::run(cli, &home, cmd)?,
         Cmd::Trash { cmd } => trash::run(cli, &home, cmd)?,
+        Cmd::History(args) => history::run(cli, &home, args)?,
         Cmd::Move {
             folder,
             from,
@@ -2973,6 +3593,9 @@ fn run(cli: &Cli) -> Result<()> {
             )?;
         }
         Cmd::Folder { cmd } => {
+            if folder_safety_cmd(cli, &home, cmd)? {
+                return Ok(());
+            }
             // With the background service running, changes to which folders
             // this device syncs go through it: it starts (or stops) watching
             // at once, and its own copy of the configuration stays current.
@@ -3085,10 +3708,16 @@ fn run(cli: &Cli) -> Result<()> {
                         rows.iter()
                             .map(|f| {
                                 format!(
-                                    "{:<12} {:>10} {}{}",
+                                    "{:<12} {:>10} {}{}{}",
                                     f.state,
                                     f.size,
                                     show(&f.path),
+                                    match &f.symlink {
+                                        Some(t) if f.symlink_absolute =>
+                                            format!(" -> {t} (absolute)"),
+                                        Some(t) => format!(" -> {t}"),
+                                        None => String::new(),
+                                    },
                                     if f.pinned { " (pinned)" } else { "" }
                                 )
                             })
@@ -3096,6 +3725,94 @@ fn run(cli: &Cli) -> Result<()> {
                             .join("\n")
                     })?;
                 }
+                FolderCmd::Ignore {
+                    folder,
+                    list,
+                    add,
+                    remove,
+                    local,
+                } => {
+                    for p in add {
+                        let done = engine.ignore_add(folder, p, *local)?;
+                        if !cli.json {
+                            println!("{} {p}", if done { "added" } else { "already there:" });
+                        }
+                    }
+                    for p in remove {
+                        let done = engine.ignore_remove(folder, p, *local)?;
+                        if !cli.json {
+                            println!("{} {p}", if done { "removed" } else { "not there:" });
+                        }
+                    }
+                    if *list || (add.is_empty() && remove.is_empty()) || cli.json {
+                        let info = engine.folder_ignore(folder)?;
+                        print(cli, &info, |i| ignore_listing(i, *local))?;
+                    } else if !*local {
+                        println!("the change reaches the other devices with the next sync");
+                    }
+                }
+                FolderCmd::CheckIgnore { folder, path } => {
+                    let v = engine.check_ignore(folder, path, None, None)?;
+                    print(cli, &v, |v| match (&v.pattern, &v.source) {
+                        (Some(p), Some(s)) => format!(
+                            "{path}: {} by {p:?} ({s}{}){}",
+                            if v.ignored { "ignored" } else { "included" },
+                            v.line.map(|l| format!(", line {l}")).unwrap_or_default(),
+                            match &v.matched_path {
+                                Some(m) if m.as_str() != path.trim_matches('/') => {
+                                    format!(" through {m}/")
+                                }
+                                _ => String::new(),
+                            }
+                        ),
+                        _ => format!("{path}: not ignored (no pattern matches)"),
+                    })?;
+                }
+                FolderCmd::Set {
+                    folder,
+                    min_free,
+                    permissions,
+                    symlinks,
+                    xattrs,
+                    ownership,
+                } => {
+                    if let Some(min_free) = min_free {
+                        let m = min_free_arg(min_free)?;
+                        engine.set_folder_min_free(folder, m)?;
+                        if !cli.json {
+                            println!("{folder}: {} kept free on its disk here", min_free_text(m));
+                        }
+                    }
+                    let mut s = engine.folder_settings(folder)?;
+                    let change = permissions.is_some()
+                        || symlinks.is_some()
+                        || xattrs.is_some()
+                        || ownership.is_some();
+                    s.permissions = permissions.unwrap_or(s.permissions);
+                    s.symlinks = symlinks.unwrap_or(s.symlinks);
+                    s.xattrs = xattrs.unwrap_or(s.xattrs);
+                    s.ownership = ownership.unwrap_or(s.ownership);
+                    if change {
+                        engine.set_folder_settings(folder, s)?;
+                    }
+                    let onoff = |b: bool| if b { "on" } else { "off" };
+                    print(cli, &s, |s| {
+                        format!(
+                            "permissions {}\nsymlinks {}\nxattrs {}\nownership {}",
+                            onoff(s.permissions),
+                            onoff(s.symlinks),
+                            onoff(s.xattrs),
+                            onoff(s.ownership)
+                        )
+                    })?;
+                }
+                FolderCmd::RepairMarker { .. }
+                | FolderCmd::ConfirmDeletions { .. }
+                | FolderCmd::Mode { .. }
+                | FolderCmd::Override { .. }
+                | FolderCmd::Revert { .. }
+                | FolderCmd::Pending { .. }
+                | FolderCmd::DeletionGuard { .. } => unreachable!("handled by folder_safety_cmd"),
                 FolderCmd::List => {
                     let rows: Vec<serde_json::Value> = engine
                         .folders()
@@ -3122,6 +3839,13 @@ fn run(cli: &Cli) -> Result<()> {
             let mut engine = open_engine(&home)?;
             let r = engine.push(folder)?;
             print(cli, &r, |r| {
+                if r.read_only {
+                    return format!(
+                        "{}: read-only: your changes were not published{}",
+                        r.folder,
+                        kept_aside_text(&r.kept_aside)
+                    );
+                }
                 format!(
                     "{}: scanned {}, changed {}, uploaded {} chunks ({} bytes), manifest {:?}",
                     r.folder,
@@ -3137,7 +3861,7 @@ fn run(cli: &Cli) -> Result<()> {
             let mut engine = open_engine(&home)?;
             let r = engine.pull(folder)?;
             print(cli, &r, |r| {
-                format!("{}: {} manifests, {} updated, {} deleted, {} conflicts, {} chunks downloaded; unavailable: {:?}; forked: {:?}{}{}", r.folder, r.manifests_applied, r.files_updated, r.files_deleted, r.conflicts, r.chunks_downloaded, r.files_unavailable, r.forked_devices, if r.disks_needed.is_empty() { String::new() } else { format!("; attach disk {}", r.disks_needed.join(", ")) }, renamed_note(&r.renamed_locally))
+                format!("{}: {} manifests, {} updated, {} deleted, {} conflicts, {} chunks downloaded; unavailable: {:?}; forked: {:?}{}{}{}", r.folder, r.manifests_applied, r.files_updated, r.files_deleted, r.conflicts, r.chunks_downloaded, r.files_unavailable, r.forked_devices, if r.disks_needed.is_empty() { String::new() } else { format!("; attach disk {}", r.disks_needed.join(", ")) }, renamed_note(&r.renamed_locally), role_notes(r, None))
             })?;
         }
         Cmd::Sync { folder } => {
@@ -3145,13 +3869,57 @@ fn run(cli: &Cli) -> Result<()> {
             let r = engine.sync(folder.as_deref())?;
             warn_ledger(&engine.ledger_health());
             print(cli, &r, |r| {
-                r.iter().map(|(pl, ps)| format!("{}: pulled {} updated/{} deleted/{} conflicts, pushed {} changed/{} chunks{}{}{}", pl.folder, pl.files_updated, pl.files_deleted, pl.conflicts, ps.files_changed, ps.chunks_uploaded, if pl.disks_needed.is_empty() { String::new() } else { format!("; attach disk {}", pl.disks_needed.join(", ")) }, if ps.storages_unavailable.is_empty() { String::new() } else { format!("; not written to {}", ps.storages_unavailable.join(", ")) }, renamed_note(&pl.renamed_locally))).collect::<Vec<_>>().join("\n")
+                r.iter().map(|(pl, ps)| if let Some(p) = &pl.paused { format!("{}: PAUSED: {}", pl.folder, p.message) } else { format!("{}: pulled {} updated/{} deleted/{} conflicts, pushed {} changed/{} chunks{}{}{}{}", pl.folder, pl.files_updated, pl.files_deleted, pl.conflicts, ps.files_changed, ps.chunks_uploaded, if pl.disks_needed.is_empty() { String::new() } else { format!("; attach disk {}", pl.disks_needed.join(", ")) }, if ps.storages_unavailable.is_empty() { String::new() } else { format!("; not written to {}", ps.storages_unavailable.join(", ")) }, renamed_note(&pl.renamed_locally), role_notes(pl, Some(ps))) }).collect::<Vec<_>>().join("\n")
             })?;
         }
         Cmd::FetchPlan { folder, paths } => {
             let mut engine = Engine::open(&home, &passphrase()?)?;
             let plan = engine.fetch_plan(folder, paths)?;
             print(cli, &plan, drives::plan_text)?;
+        }
+        Cmd::Changes {
+            folder,
+            path,
+            device,
+            user,
+            since,
+            limit,
+        } => {
+            let since_utc = since
+                .as_deref()
+                .map(|s| varsto_core::changes::parse_since(s, varsto_core::util::now_utc()))
+                .transpose()?;
+            let report: varsto_core::engine::ChangesReport =
+                if let Some((sf, _)) = service::status(&home) {
+                    let mut url = format!(
+                        "http://127.0.0.1:{}/api/changes?folder={}&limit={limit}",
+                        sf.port,
+                        url_escape(folder)
+                    );
+                    for (k, v) in [("path", path), ("device", device), ("user", user)] {
+                        if let Some(v) = v {
+                            url.push_str(&format!("&{k}={}", url_escape(v)));
+                        }
+                    }
+                    if let Some(t) = since_utc {
+                        url.push_str(&format!("&since={t}"));
+                    }
+                    serde_json::from_str(&service::http_get(&url, &sf.token)?)?
+                } else {
+                    let mut engine = open_engine(&home)?;
+                    engine.history_start(folder)?;
+                    engine.changes(
+                        folder,
+                        &varsto_core::engine::ChangesQuery {
+                            path: path.clone(),
+                            device: device.clone(),
+                            user: user.clone(),
+                            since_utc,
+                            limit: *limit,
+                        },
+                    )?
+                };
+            print(cli, &report, changes_text)?;
         }
         Cmd::Status => {
             // The running service answers without a passphrase while it is
@@ -3208,6 +3976,7 @@ fn run(cli: &Cli) -> Result<()> {
                 );
                 for f in &s.folders {
                     out += &format!("folder {} ({}): {} files, {} bytes, {} chunks, {} without storage copy, {} verified elsewhere, at {}\n", f.name, &f.folder_id[..8], f.files, f.bytes, f.chunks, f.chunks_without_storage_copy, f.chunks_verified_elsewhere, f.path.as_ref().map(|p| p.display().to_string()).unwrap_or_else(|| "(not attached)".into()));
+                    out += &folder_safety_lines(&serde_json::to_value(f).unwrap_or_default());
                 }
                 if !s.forked_devices.is_empty() {
                     out += &format!("WARNING forked devices: {:?}\n", s.forked_devices);
@@ -3215,6 +3984,40 @@ fn run(cli: &Cli) -> Result<()> {
                 out += &format!("ledger: {}\n", s.ledger_health.describe());
                 out.trim_end().to_string()
             })?;
+        }
+        Cmd::HelpNow => {
+            // The running service knows more (paused, peers, last error) and
+            // needs no passphrase.
+            let svc = service::status(&home);
+            let from_service = svc.as_ref().and_then(|(f, _)| {
+                let t =
+                    service::http_get(&format!("http://127.0.0.1:{}/api/help", f.port), &f.token)
+                        .ok()?;
+                serde_json::from_str::<varsto_core::help::HelpState>(&t).ok()
+            });
+            let h = match from_service {
+                // A locked service cannot tell; the command line may unlock.
+                Some(h) if h.phase != "locked" => h,
+                _ if !home.join("vault.json").exists() => {
+                    varsto_core::engine::help_without_vault(&home)
+                }
+                _ => match open_engine(&home) {
+                    Ok(mut e) => {
+                        let observed = varsto_core::engine::HelpObserved {
+                            // No service: nothing syncs by itself. A locked
+                            // one is running but cannot say more.
+                            service: svc.is_none().then(varsto_core::help::ServiceIn::default),
+                            ..Default::default()
+                        };
+                        e.help_state(observed)?
+                    }
+                    Err(err) => {
+                        eprintln!("the vault stays locked: {err:#}");
+                        varsto_core::engine::help_without_vault(&home)
+                    }
+                },
+            };
+            print(cli, &h, varsto_core::help::render_text)?;
         }
         Cmd::Verify { cmd } => upkeep::verify(cli, &home, cmd)?,
         Cmd::Scrub { cmd, run } => upkeep::scrub(cli, &home, cmd, run)?,
@@ -3281,6 +4084,7 @@ fn run(cli: &Cli) -> Result<()> {
                 }
                 return Ok(());
             }
+            quit_on_signals();
             service::run(service::Options {
                 home,
                 port: *port,
@@ -3289,12 +4093,15 @@ fn run(cli: &Cli) -> Result<()> {
             })?;
         }
         Cmd::Service { cmd } => match cmd {
-            ServiceCmd::Run { port, interval } => service::run(service::Options {
-                home,
-                port: *port,
-                interval_secs: *interval,
-                open_browser: false,
-            })?,
+            ServiceCmd::Run { port, interval } => {
+                quit_on_signals();
+                service::run(service::Options {
+                    home,
+                    port: *port,
+                    interval_secs: *interval,
+                    open_browser: false,
+                })?
+            }
             ServiceCmd::Install { interval } => {
                 service::set_opted_out(&home, false);
                 println!("{}", service::install(&home, *interval)?)
@@ -3370,10 +4177,13 @@ fn run(cli: &Cli) -> Result<()> {
             tray::run(home, *interval, *open)?
         }
         Cmd::Share { cmd } => match cmd {
-            ShareCmd::Request { name } => {
+            ShareCmd::Request { name, qr } => {
                 let code =
                     varsto_core::vault::ShareRequest::code_for_named(&home, name.as_deref())?;
                 let words = varsto_core::vault::ShareRequest::fingerprint_for(&home)?;
+                if *qr && !cli.json {
+                    show_qr(&code, false, false)?;
+                }
                 if cli.json {
                     println!(
                         "{}",
@@ -3383,12 +4193,19 @@ fn run(cli: &Cli) -> Result<()> {
                     println!("share request code for this device (give it to the folder owner; it contains no secret):\n  {code}\n\nfingerprint: {words}\nThe owner sees the same six words for this code. Read them to each other over a call or in person before the owner shares: different words mean the code was changed on its way.");
                 }
             }
+            ShareCmd::Qr { text, parts, light } => share_qr(cli.json, text, *parts, *light)?,
             ShareCmd::Create {
                 folder,
                 to,
                 fingerprint,
                 yes,
+                qr,
+                role,
             } => {
+                let role = varsto_core::share::ShareRole::parse(role)?;
+                if !role.is_editor() && to.is_none() {
+                    bail_usage::<()>("a viewer's token must be sealed to their request code: give --to <request-code> (a plain token cannot say what its holder may do)")?;
+                }
                 let mut engine = open_engine(&home)?;
                 match to {
                     Some(code) => {
@@ -3408,15 +4225,22 @@ fn run(cli: &Cli) -> Result<()> {
                                 Some(req.fingerprint.clone())
                             }
                         };
-                        let (sealed, req) =
-                            engine.share_create_sealed(folder, code, confirmed.as_deref())?;
+                        let (sealed, req) = engine.share_create_sealed_as(
+                            folder,
+                            code,
+                            confirmed.as_deref(),
+                            role,
+                        )?;
+                        if *qr && !cli.json {
+                            show_qr(&sealed.encode(), false, false)?;
+                        }
                         if cli.json {
                             println!(
                                 "{}",
-                                serde_json::json!({"folder": sealed.name, "token": sealed.encode(), "sealed": true, "fingerprint": req.fingerprint, "name": req.name})
+                                serde_json::json!({"folder": sealed.name, "token": sealed.encode(), "sealed": true, "fingerprint": req.fingerprint, "name": req.name, "role": role.as_str()})
                             );
                         } else {
-                            println!("sealed share token for folder {} (only the device that made the request code can open it; fingerprint {}):\n  {}", sealed.name, req.fingerprint, sealed.encode());
+                            println!("sealed share token for folder {} as {} (only the device that made the request code can open it; fingerprint {}):\n  {}", sealed.name, if role.is_editor() { "an editor (read and write)" } else { "a viewer (read only)" }, req.fingerprint, sealed.encode());
                         }
                     }
                     None => {
@@ -3431,6 +4255,7 @@ fn run(cli: &Cli) -> Result<()> {
             ShareCmd::Accept {
                 name,
                 token,
+                token_arg,
                 storage_path,
                 storage_name,
                 s3_bucket,
@@ -3440,6 +4265,10 @@ fn run(cli: &Cli) -> Result<()> {
                 s3_access_key_id,
                 s3_secret_access_key,
             } => {
+                let token = token
+                    .as_ref()
+                    .or(token_arg.as_ref())
+                    .ok_or_else(|| anyhow!("give the share token"))?;
                 let token = if varsto_core::vault::SealedShareToken::is_sealed(token) {
                     varsto_core::vault::ShareRequest::open_token(&home, token)?
                 } else {
@@ -3477,6 +4306,7 @@ fn run(cli: &Cli) -> Result<()> {
                             cold: false,
                             carrier: false,
                             place: String::new(),
+                            min_free: None,
                         },
                         None,
                     ),
@@ -3513,6 +4343,43 @@ fn run(cli: &Cli) -> Result<()> {
                         engine.share_members(folder)?
                     };
                 print(cli, &list, share_members_text)?;
+            }
+            ShareCmd::Role {
+                folder,
+                member,
+                role,
+            } => {
+                let role = varsto_core::share::ShareRole::parse(role)?;
+                let report: varsto_core::engine::ShareRoleReport = if let Some((sf, _)) =
+                    service::status(&home)
+                {
+                    let url = format!("http://127.0.0.1:{}/api/share/role", sf.port);
+                    let body = serde_json::json!({"folder": folder, "member": member, "role": role.as_str()});
+                    let r = service::http_post(&url, &sf.token, &body.to_string())?;
+                    serde_json::from_str(&r)
+                        .map_err(|_| anyhow!("unexpected answer from the service: {r}"))?
+                } else {
+                    let mut engine = open_engine(&home)?;
+                    engine.share_set_role(folder, member, role)?
+                };
+                print(cli, &report, |r| {
+                    format!(
+                        "{}: {} is now {} (role record {}){}",
+                        r.folder,
+                        r.member,
+                        if r.role == "viewer" {
+                            "a viewer: read only"
+                        } else {
+                            "an editor: read and write"
+                        },
+                        r.seq,
+                        if r.role == "viewer" {
+                            "\nWhat it wrote until now stays; what it writes from now on is not accepted. It can still copy what it reads."
+                        } else {
+                            ""
+                        }
+                    )
+                })?;
             }
             ShareCmd::Revoke {
                 folder,
@@ -3587,6 +4454,7 @@ fn run(cli: &Cli) -> Result<()> {
                         cold: false,
                         carrier: false,
                         place: String::new(),
+                        min_free: None,
                     };
                     let tgt = StorageSpec::LocalDir {
                         name: "target".into(),
@@ -3594,6 +4462,7 @@ fn run(cli: &Cli) -> Result<()> {
                         cold: false,
                         carrier: false,
                         place: String::new(),
+                        min_free: None,
                     };
                     let r = varsto_core::replica::Replica::init(&home, name, &token, src, tgt)?;
                     println!(
@@ -3727,10 +4596,18 @@ fn run(cli: &Cli) -> Result<()> {
         },
         Cmd::Pair { cmd } => {
             match cmd {
-                PairCmd::Offer => {
+                PairCmd::Offer { qr } => {
                     let engine = open_engine(&home)?;
                     let offer = varsto_core::pair::Offer::start(engine.pairing_bundle()?)?;
                     let st = offer.status();
+                    if *qr {
+                        let link = varsto_core::qr::Link::Pair {
+                            code: st.code.clone(),
+                            addresses: st.addresses.clone(),
+                        };
+                        show_qr(&link.to_uri()?, false, false)?;
+                        println!("Scan it with the new device's camera, or in Varsto: Pair with your other device, Scan QR code.");
+                    }
                     println!("Pairing code: {}", st.code);
                     println!("On the new device choose \"Pair with a code\" (or run `varsto pair join`).");
                     if !st.addresses.is_empty() {
@@ -3760,8 +4637,30 @@ fn run(cli: &Cli) -> Result<()> {
                     code,
                     address,
                 } => {
+                    // The link of the other device's QR code carries the code and its addresses.
+                    // The link of the other device's QR code carries the code and
+                    // its addresses: discovery first, then each address.
+                    let (code, mut tries) = match varsto_core::qr::Link::from_text(code) {
+                        Ok(varsto_core::qr::Link::Pair { code, addresses }) => (
+                            code,
+                            std::iter::once(None)
+                                .chain(addresses.into_iter().map(Some))
+                                .collect::<Vec<_>>(),
+                        ),
+                        _ => (code.clone(), vec![None]),
+                    };
+                    if address.is_some() {
+                        tries = vec![address.clone()];
+                    }
                     let pass = passphrase()?;
-                    let bundle = varsto_core::pair::receive(code, name, address.as_deref())?;
+                    let mut result = Err(anyhow!("the other device was not found"));
+                    for a in &tries {
+                        result = varsto_core::pair::receive(&code, name, a.as_deref());
+                        if result.is_ok() {
+                            break;
+                        }
+                    }
+                    let bundle = result?;
                     let (engine, notes) = Engine::join_paired(&home, name, &pass, &bundle)?;
                     println!(
                         "joined vault {} as {} (paired with {})",
@@ -4048,10 +4947,15 @@ fn run(cli: &Cli) -> Result<()> {
             // With the background service running, settings go through it:
             // it applies them (on and off at once), and its own copy of the
             // configuration does not overwrite them later.
-            if let (Some((sf, _)), P2pCmd::Enable { .. } | P2pCmd::Disable) =
-                (service::status(&home), cmd)
+            if let (
+                Some((sf, _)),
+                P2pCmd::Enable { .. } | P2pCmd::Disable | P2pCmd::PortMapping { .. },
+            ) = (service::status(&home), cmd)
             {
                 let body = match cmd {
+                    P2pCmd::PortMapping { state } => {
+                        serde_json::json!({"port_mapping": state == "on"})
+                    }
                     P2pCmd::Enable {
                         port,
                         public_addrs,
@@ -4077,7 +4981,18 @@ fn run(cli: &Cli) -> Result<()> {
                 let url = format!("http://127.0.0.1:{}/api/p2p", sf.port);
                 let r: serde_json::Value =
                     serde_json::from_str(&service::http_post(&url, &sf.token, &body.to_string())?)?;
-                println!("{}", r["note"].as_str().unwrap_or("saved"));
+                if let P2pCmd::PortMapping { state } = cmd {
+                    println!(
+                        "router port mapping is {state}{}",
+                        if state == "on" {
+                            " (the service asks the router now)"
+                        } else {
+                            " (the service removed its mappings)"
+                        }
+                    );
+                } else {
+                    println!("{}", r["note"].as_str().unwrap_or("saved"));
+                }
                 return Ok(());
             }
             let mut engine = open_engine(&home)?;
@@ -4101,6 +5016,7 @@ fn run(cli: &Cli) -> Result<()> {
                         public_addrs: public_addrs.clone(),
                         stun,
                         user_disabled: false,
+                        port_mapping: engine.p2p_config().port_mapping,
                     })?;
                     let id = engine.p2p_identity()?;
                     println!(
@@ -4115,6 +5031,14 @@ fn run(cli: &Cli) -> Result<()> {
                     engine.set_p2p_config(c)?;
                     println!(
                         "peer-to-peer is off; the background service stays off it when it starts"
+                    );
+                }
+                P2pCmd::PortMapping { state } => {
+                    let mut c = engine.p2p_config();
+                    c.port_mapping = state == "on";
+                    engine.set_p2p_config(c)?;
+                    println!(
+                        "router port mapping is {state}; the background service applies it when it starts"
                     );
                 }
                 P2pCmd::Status => p2p_status(&engine, &home, cli.json)?,
@@ -4359,6 +5283,7 @@ fn run(cli: &Cli) -> Result<()> {
                 std::process::exit(1);
             }
         }
+        Cmd::OpenLink { uri } => open_link(&home, uri)?,
         Cmd::OpenPlaceholder { path } => {
             use std::io::IsTerminal;
             let gui = filemanager::detach_own_console() || !std::io::stderr().is_terminal();
@@ -4981,6 +5906,7 @@ fn status_from_value(v: &serde_json::Value) -> String {
             num(f, "chunks_verified_elsewhere"),
             f.get("path").and_then(|p| p.as_str()).unwrap_or("(not attached)")
         );
+        out += &folder_safety_lines(f);
     }
     if let Some(h) = v
         .get("ledger_health")
@@ -5215,6 +6141,240 @@ fn call_service(
 
 /// Folder commands that change what this device syncs, through the running
 /// service. None: no service, or a command the service need not run.
+/// The folder-safety commands (marker, held deletions, modes): through the
+/// background service when it runs, else on this process's engine followed
+/// by a sync of the folder. Returns false for other folder commands.
+fn folder_safety_cmd(cli: &Cli, home: &std::path::Path, cmd: &FolderCmd) -> Result<bool> {
+    let (name, action, extra) = match cmd {
+        FolderCmd::RepairMarker { name } => (name, "repair-marker", serde_json::json!({})),
+        FolderCmd::ConfirmDeletions { name, discard } => (
+            name,
+            if *discard {
+                "discard-deletions"
+            } else {
+                "confirm-deletions"
+            },
+            serde_json::json!({}),
+        ),
+        FolderCmd::Mode { name, mode: None } => (name, "pending", serde_json::json!({})),
+        FolderCmd::Mode {
+            name,
+            mode: Some(m),
+        } => {
+            let mode: varsto_core::vault::FolderMode = m.parse()?;
+            (name, "mode", serde_json::json!({ "mode": mode }))
+        }
+        FolderCmd::Override { name } => (name, "override", serde_json::json!({})),
+        FolderCmd::Revert { name } => (name, "revert", serde_json::json!({})),
+        FolderCmd::Pending { name } => (name, "pending", serde_json::json!({})),
+        FolderCmd::DeletionGuard {
+            name,
+            percent,
+            min_files,
+            max_files,
+            off,
+            default,
+        } => {
+            if percent.is_none() && min_files.is_none() && max_files.is_none() && !off && !default {
+                (name, "pending", serde_json::json!({}))
+            } else if *default {
+                (name, "deletion-guard", serde_json::json!({ "guard": null }))
+            } else {
+                // Unnamed values keep the folder's current ones.
+                let current = match call_service(
+                    home,
+                    "/api/folder/safety",
+                    serde_json::json!({"folder": name, "action": "pending"}),
+                )? {
+                    Some(v) => serde_json::from_value(v["deletion_guard"].clone())?,
+                    None => open_engine(home)?.folder_changes(name)?.deletion_guard,
+                };
+                let mut g: varsto_core::vault::DeletionGuard = current;
+                g.enabled = !*off;
+                if let Some(p) = percent {
+                    g.percent = *p;
+                }
+                if let Some(n) = min_files {
+                    g.min_files = *n;
+                }
+                if let Some(n) = max_files {
+                    g.max_files = *n;
+                }
+                (name, "deletion-guard", serde_json::json!({ "guard": g }))
+            }
+        }
+        _ => return Ok(false),
+    };
+    let mut body = extra;
+    body["folder"] = serde_json::json!(name);
+    body["action"] = serde_json::json!(action);
+    let (out, via_service) = match call_service(home, "/api/folder/safety", body.clone())? {
+        Some(v) => (v, true),
+        None => {
+            let mut engine = open_engine(home)?;
+            let out = desktop::folder_safety_action(&mut engine, &body)?;
+            // What changed is synced now (the service does it by itself).
+            if action != "pending" {
+                if let Ok(r) = engine.sync(Some(name)) {
+                    if let Some(p) = r.first().and_then(|(pl, _)| pl.paused.as_ref()) {
+                        eprintln!("{}", p.message);
+                    }
+                }
+            }
+            (out, false)
+        }
+    };
+    let synced = if via_service {
+        "; the background service syncs it now"
+    } else {
+        ""
+    };
+    print(cli, &out, |v| {
+        let n = |k: &str| v.get(k).and_then(|x| x.as_u64()).unwrap_or(0);
+        let list = |k: &str| -> Vec<String> {
+            v.get(k)
+                .and_then(|x| x.as_array())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|x| x.as_str().map(str::to_string))
+                        .collect()
+                })
+                .unwrap_or_default()
+        };
+        match cmd {
+            FolderCmd::RepairMarker { .. } => format!(
+                "{name}: marker written at {}{synced}",
+                v["path"].as_str().unwrap_or("")
+            ),
+            FolderCmd::ConfirmDeletions { discard: false, .. } => {
+                format!("{name}: {} deletions confirmed{synced}", n("deleted"))
+            }
+            FolderCmd::ConfirmDeletions { discard: true, .. } => {
+                let un = list("unavailable");
+                let mut s = format!("{name}: {} files restored{synced}", n("restored"));
+                if !un.is_empty() {
+                    s += &format!(
+                        "\n{} could not be restored now and stay held:\n  {}",
+                        un.len(),
+                        un.join("\n  ")
+                    );
+                }
+                s
+            }
+            FolderCmd::Mode { mode: Some(_), .. } => {
+                format!("{name}: {}{synced}", v["mode"].as_str().unwrap_or(""))
+            }
+            FolderCmd::Override { .. } => format!(
+                "{name}: {} files now follow this device on every device{synced}",
+                n("files")
+            ),
+            FolderCmd::Revert { .. } => {
+                let un = list("unavailable");
+                let mut s = format!(
+                    "{name}: {} local changes reverted, {} local copies moved to the trash",
+                    n("reverted"),
+                    n("moved_to_trash")
+                );
+                if !un.is_empty() {
+                    s += &format!(
+                        "\n{} could not be fetched now:\n  {}",
+                        un.len(),
+                        un.join("\n  ")
+                    );
+                }
+                s
+            }
+            FolderCmd::DeletionGuard { off, default, .. }
+                if *off || *default || v.get("text").is_some() =>
+            {
+                format!(
+                    "{name}: deletions are held when {}",
+                    v["text"].as_str().unwrap_or("")
+                )
+            }
+            _ => folder_changes_text(v),
+        }
+    })?;
+    Ok(true)
+}
+
+/// `varsto folder pending` (and `mode`, `deletion-guard` without a value).
+fn folder_changes_text(v: &serde_json::Value) -> String {
+    let name = v["folder"].as_str().unwrap_or("");
+    let guard: Option<varsto_core::vault::DeletionGuard> =
+        serde_json::from_value(v["deletion_guard"].clone()).ok();
+    let mut out = format!(
+        "{name}: mode {}; deletions are held when {}\n",
+        v["mode"].as_str().unwrap_or("normal"),
+        guard.map(|g| g.describe()).unwrap_or_default()
+    );
+    if let Some(p) = v["paused"]["message"].as_str() {
+        out += &format!("PAUSED: {p}\n");
+    }
+    let held: Vec<&str> = v["held_paths"]
+        .as_array()
+        .map(|a| a.iter().filter_map(|x| x.as_str()).collect())
+        .unwrap_or_default();
+    if !held.is_empty() {
+        out += &format!("held deletions ({}):\n", held.len());
+        for p in held.iter().take(50) {
+            out += &format!("  {p}\n");
+        }
+        if held.len() > 50 {
+            out += &format!("  ... and {} more\n", held.len() - 50);
+        }
+    }
+    for (key, title) in [
+        ("local_changes", "local changes not published"),
+        ("remote_not_applied", "remote changes not applied here"),
+    ] {
+        let rows: Vec<String> = v[key]
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .map(|c| {
+                        format!(
+                            "  {:<9} {}",
+                            c["kind"].as_str().unwrap_or(""),
+                            c["path"].as_str().unwrap_or("")
+                        )
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        if !rows.is_empty() {
+            out += &format!("{title} ({}):\n{}\n", rows.len(), rows.join("\n"));
+        }
+    }
+    out.trim_end().to_string()
+}
+
+/// Mode, pause and waiting changes of a folder in status (a FolderStatus as JSON).
+fn folder_safety_lines(f: &serde_json::Value) -> String {
+    let name = f["name"].as_str().unwrap_or("");
+    let mut out = String::new();
+    if let Some(m) = f["mode"].as_str().filter(|m| *m != "normal") {
+        out += &format!("  mode: {m}\n");
+    }
+    if let Some(p) = f["paused"]["message"].as_str() {
+        out += &format!("  PAUSED: {p}\n");
+    }
+    let n = |k: &str| f[k].as_u64().unwrap_or(0);
+    if n("remote_not_applied") > 0 {
+        out += &format!(
+            "  {} remote changes not applied here (`varsto folder override {name}` makes every device match this one)\n",
+            n("remote_not_applied")
+        );
+    }
+    if n("local_changes") > 0 {
+        out += &format!(
+            "  {} local changes not published (`varsto folder revert {name}` restores the vault's versions)\n",
+            n("local_changes")
+        );
+    }
+    out
+}
+
 fn folder_via_service(home: &std::path::Path, cmd: &FolderCmd) -> Result<Option<String>> {
     let abs = |p: &std::path::Path| -> Result<String> {
         Ok(std::path::absolute(p)?.display().to_string())
@@ -5246,6 +6406,20 @@ fn folder_via_service(home: &std::path::Path, cmd: &FolderCmd) -> Result<Option<
             "/api/selective",
             serde_json::json!({"folder": name_or_id, "on": on}),
         ),
+        FolderCmd::Set {
+            folder,
+            min_free: Some(min_free),
+            permissions: None,
+            symlinks: None,
+            xattrs: None,
+            ownership: None,
+        } => {
+            min_free_arg(min_free)?;
+            (
+                "/api/folder/min-free",
+                serde_json::json!({"folder": folder, "min_free": min_free}),
+            )
+        }
         _ => return Ok(None),
     };
     let Some(r) = call_service(home, path, body)? else {
@@ -5281,6 +6455,14 @@ fn folder_via_service(home: &std::path::Path, cmd: &FolderCmd) -> Result<Option<
         FolderCmd::Selective { name_or_id, on } => format!(
             "selective sync {} for {name_or_id}",
             if *on { "on" } else { "off" }
+        ),
+        FolderCmd::Set {
+            folder,
+            min_free: Some(min_free),
+            ..
+        } => format!(
+            "{folder}: {} kept free on its disk here",
+            min_free_text(min_free_arg(min_free)?)
         ),
         _ => String::new(),
     }))
@@ -5651,6 +6833,39 @@ fn traffic_table(r: &varsto_core::p2p::traffic::TrafficReport) -> String {
     out
 }
 
+/// SIGTERM (systemd, launchd) and SIGINT (Ctrl-C) end the service loop the
+/// way the interface's Quit does, so that what it set up outside this
+/// computer (the router port mappings) is removed and the service file goes.
+/// Should a long sync hold the loop, the process exits ten seconds later
+/// regardless, as it did at once before.
+#[cfg(unix)]
+fn quit_on_signals() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    static SIGNALLED: AtomicBool = AtomicBool::new(false);
+    extern "C" fn on_signal(_: libc::c_int) {
+        SIGNALLED.store(true, Ordering::SeqCst);
+    }
+    let handler = on_signal as extern "C" fn(libc::c_int) as libc::sighandler_t;
+    // SAFETY: the handler only stores to an atomic, which is async-signal-safe.
+    unsafe {
+        libc::signal(libc::SIGTERM, handler);
+        libc::signal(libc::SIGINT, handler);
+    }
+    let _ = std::thread::Builder::new()
+        .name("signals".into())
+        .spawn(|| loop {
+            std::thread::sleep(std::time::Duration::from_millis(200));
+            if SIGNALLED.load(Ordering::SeqCst) {
+                service::quit();
+                std::thread::sleep(std::time::Duration::from_secs(10));
+                std::process::exit(0);
+            }
+        });
+}
+
+#[cfg(not(unix))]
+fn quit_on_signals() {}
+
 /// `p2p status`: the running service's view when there is one (its socket
 /// is the one the NAT maps), otherwise the records plus a probe over TCP and
 /// a STUN query from a temporary socket.
@@ -5705,6 +6920,12 @@ fn p2p_status(engine: &Engine, home: &std::path::Path, json: bool) -> Result<()>
                 ),
                 _ => String::new(),
             }
+        );
+        println!(
+            "{}",
+            v["portmap_text"]
+                .as_str()
+                .unwrap_or("router port mapping: not available")
         );
         let paths = v["paths"].as_array().cloned().unwrap_or_default();
         if paths.is_empty() {
@@ -5772,6 +6993,10 @@ fn p2p_status(engine: &Engine, home: &std::path::Path, json: bool) -> Result<()>
         }
     );
     println!("background service not running; probing over TCP from this command");
+    println!(
+        "router port mapping: {} (the background service asks the router when it runs)",
+        if c.port_mapping { "on" } else { "off" }
+    );
     match &stun {
         Some(p) => println!(
             "NAT guess {} ({}, from a temporary socket)",
@@ -5895,6 +7120,7 @@ mod recovery_guide_tests {
                     cold: false,
                     carrier: false,
                     place: String::new(),
+                    min_free: None,
                 },
                 StorageSpec::LocalDir {
                     name: "stick".into(),
@@ -5902,6 +7128,7 @@ mod recovery_guide_tests {
                     cold: false,
                     carrier: true,
                     place: String::new(),
+                    min_free: None,
                 },
                 StorageSpec::S3 {
                     name: "b2".into(),

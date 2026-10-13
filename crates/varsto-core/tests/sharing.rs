@@ -37,6 +37,7 @@ impl Lab {
                 cold: false,
                 carrier: false,
                 place: String::new(),
+                min_free: None,
             },
             root,
             _tmp: tmp,
@@ -279,6 +280,9 @@ fn removed_member_reads_nothing_new_and_the_others_read_on() {
         epoch_keys: Default::default(),
         fingerprint: String::new(),
         owners: Vec::new(),
+        role: Default::default(),
+        invite: String::new(),
+        join_secret_hex: String::new(),
     };
     let mut c2 = small(
         Engine::accept_share(

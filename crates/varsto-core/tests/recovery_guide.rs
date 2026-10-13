@@ -33,6 +33,7 @@ fn guide_covers_every_storage_and_holds_no_secret() {
         cold: false,
         carrier: false,
         place: "home".into(),
+        min_free: None,
     })
     .unwrap();
     e.add_storage(StorageSpec::Pool {

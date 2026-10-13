@@ -89,6 +89,10 @@ pub enum StorageSpec {
         /// Where this storage is, for durability policies: "home", "cloud", "offsite", ... (default "home").
         #[serde(default)]
         place: String,
+        /// Free space kept on its disk: block writes stop below it
+        /// (`freespace`; default 5 %).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        min_free: Option<crate::freespace::MinFree>,
     },
     /// An S3-compatible bucket. The secret access key is not stored here
     /// (config.json is plain text) but in the encrypted secret store under
@@ -269,9 +273,15 @@ impl StorageSpec {
     /// Open; `secrets` resolves `secret_ref` for backends that need one.
     pub fn open_with(&self, secrets: SecretLookup) -> Result<Box<dyn Storage>> {
         match self {
-            StorageSpec::LocalDir { name, path, .. } => {
-                Ok(Box::new(LocalDirStorage::new(name.clone(), path.clone())?))
-            }
+            StorageSpec::LocalDir {
+                name,
+                path,
+                min_free,
+                ..
+            } => Ok(Box::new(
+                LocalDirStorage::new(name.clone(), path.clone())?
+                    .with_min_free(min_free.unwrap_or(crate::freespace::DEFAULT)),
+            )),
             StorageSpec::S3 {
                 name,
                 endpoint,
@@ -326,12 +336,26 @@ impl StorageSpec {
 pub struct LocalDirStorage {
     name: String,
     root: PathBuf,
+    /// Block objects are not written when the disk would keep less free.
+    min_free: Option<crate::freespace::MinFree>,
 }
 
 impl LocalDirStorage {
     pub fn new(name: String, root: PathBuf) -> Result<Self> {
         fs::create_dir_all(&root).with_context(|| format!("create {}", root.display()))?;
-        Ok(LocalDirStorage { name, root })
+        Ok(LocalDirStorage {
+            name,
+            root,
+            min_free: None,
+        })
+    }
+
+    /// Keep `min` free on the disk: block objects (`chunks/`, `packs/`)
+    /// are refused with `freespace::LowSpace` below it. Records, ledger
+    /// batches and manifests are small and still written.
+    pub fn with_min_free(mut self, min: crate::freespace::MinFree) -> Self {
+        self.min_free = Some(min);
+        self
     }
 
     fn path_for(&self, key: &str) -> Result<PathBuf> {
@@ -363,6 +387,16 @@ impl Storage for LocalDirStorage {
         let path = self.path_for(key)?;
         if path.exists() {
             return Ok(false);
+        }
+        if let Some(min) = self.min_free {
+            if key.starts_with("chunks/") || key.starts_with(crate::packs::PREFIX) {
+                crate::freespace::check(
+                    &crate::freespace::Place::storage(&self.name),
+                    &self.root,
+                    min,
+                    data.len() as u64,
+                )?;
+            }
         }
         crate::util::write_atomic(&path, data)?;
         Ok(true)
