@@ -282,6 +282,7 @@ impl Engine {
         // Storages this device reads without asking: never a cold storage
         // (F-043) and never a transferrer (pruned on purpose).
         let mut readable: BTreeMap<String, Box<dyn Storage>> = BTreeMap::new();
+        let mut lanes: BTreeMap<String, crate::parverify::LanePlan> = BTreeMap::new();
         for spec in self.config.storages.clone() {
             if spec.is_cold() || spec.is_carrier() {
                 report.storages_skipped.push(spec.name().to_string());
@@ -289,6 +290,7 @@ impl Engine {
             }
             match self.open_spec(&spec) {
                 Ok(b) => {
+                    lanes.insert(spec.name().to_string(), self.storage_lane(&spec));
                     readable.insert(spec.name().to_string(), b);
                 }
                 Err(e) => report
@@ -370,41 +372,68 @@ impl Engine {
             order.len() as u64,
             crate::activity::Unit::Items,
         );
-        for i in order {
-            task.advance(1);
-            let (folder, chunk, object, storage, local) = &items[i];
-            let key = chunk_storage_key(object);
-            let ct = match readable[local].get(&key) {
-                Ok(ct) => ct,
-                Err(e) if matches!(pool::pool_error(&e), Some(PoolError::NeedsDisk { .. })) => {
-                    report.offline += 1;
-                    continue;
+        // One lane per local storage, read ahead in parallel where its
+        // medium allows; the results come back here in the planned order.
+        let lane_names: Vec<String> = lanes.keys().cloned().collect();
+        let plans: Vec<crate::parverify::LanePlan> = lanes.values().copied().collect();
+        let jobs: Vec<crate::parverify::Job<usize>> = order
+            .into_iter()
+            .map(|i| crate::parverify::Job {
+                item: i,
+                lane: lane_names
+                    .iter()
+                    .position(|n| *n == items[i].4)
+                    .unwrap_or(0),
+                size: view.locate(&items[i].0, &items[i].1).map_or(0, |r| r.size),
+            })
+            .collect();
+        let mut failed: Option<anyhow::Error> = None;
+        let (items_ref, readable_ref) = (&items, &readable);
+        crate::parverify::run_ordered(
+            &jobs,
+            &plans,
+            |&i| readable_ref[&items_ref[i].4].get(&chunk_storage_key(&items_ref[i].2)),
+            |_, got| got.map(|ct| ct.map(|ct| (ct.len() as u64, crypto::hash(&ct)))),
+            |_, &i, got| {
+                task.advance(1);
+                let (folder, chunk, object, storage, _) = &items[i];
+                let got = match got {
+                    Ok(got) => got,
+                    Err(e) if matches!(pool::pool_error(&e), Some(PoolError::NeedsDisk { .. })) => {
+                        report.offline += 1;
+                        return true;
+                    }
+                    Err(e) => {
+                        failed = Some(e);
+                        return false;
+                    }
+                };
+                report.blocks_checked += 1;
+                let Some((len, hash)) = got else {
+                    report.missing.push(format!("{storage}:{}", object.short()));
+                    damage.push(damaged(i, DamageKind::Missing));
+                    return true;
+                };
+                report.bytes_downloaded += len;
+                if ObjectName::from_bytes(&hash) == *object {
+                    report.blocks_verified += 1;
+                    self.pending.push(Event::ChunkVerified {
+                        folder: folder.clone(),
+                        chunk: chunk.clone(),
+                        object: object.clone(),
+                        storage: storage.clone(),
+                    });
+                } else {
+                    report.corrupt.push(format!("{storage}:{}", object.short()));
+                    damage.push(damaged(i, DamageKind::Corrupt));
                 }
-                Err(e) => {
-                    // Keep what was checked so far.
-                    self.commit_batch()?;
-                    return Err(e);
-                }
-            };
-            report.blocks_checked += 1;
-            let Some(ct) = ct else {
-                report.missing.push(format!("{storage}:{}", object.short()));
-                damage.push(damaged(i, DamageKind::Missing));
-                continue;
-            };
-            report.bytes_downloaded += ct.len() as u64;
-            if ObjectName::from_bytes(&crypto::hash(&ct)) == *object {
-                report.blocks_verified += 1;
-                self.pending.push(Event::ChunkVerified {
-                    folder: folder.clone(),
-                    chunk: chunk.clone(),
-                    object: object.clone(),
-                    storage: storage.clone(),
-                });
-            } else {
-                report.corrupt.push(format!("{storage}:{}", object.short()));
-                damage.push(damaged(i, DamageKind::Corrupt));
-            }
+                true
+            },
+        );
+        if let Some(e) = failed {
+            // Keep what was checked so far.
+            self.commit_batch()?;
+            return Err(e);
         }
         report.queued_for_repair = damage.len() as u64;
         self.queue_damage(damage)?;

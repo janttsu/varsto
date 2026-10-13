@@ -571,6 +571,8 @@ pub struct PoolStorage {
     scan_roots: Vec<PathBuf>,
     index_path: PathBuf,
     state: Mutex<State>,
+    /// How verification reads a disk (`crate::parverify`); auto: by the medium.
+    verify_parallelism: crate::parverify::Parallelism,
 }
 
 impl PoolStorage {
@@ -613,7 +615,20 @@ impl PoolStorage {
                 dirty: BTreeSet::new(),
                 last_put: None,
             }),
+            verify_parallelism: crate::parverify::Parallelism::Auto,
         })
+    }
+
+    /// How verification reads this pool's disks (the device's setting).
+    pub fn with_verify_parallelism(mut self, p: crate::parverify::Parallelism) -> Self {
+        self.verify_parallelism = p;
+        self
+    }
+
+    /// How verification reads one mounted disk: by its medium (one reader,
+    /// in order, on a spinning disk) unless the setting says otherwise.
+    pub fn disk_lane(&self, mount: &Path) -> crate::parverify::LanePlan {
+        crate::parverify::lane_plan(crate::media::storage_media(mount), self.verify_parallelism)
     }
 
     pub fn identity(&self) -> &PoolIdentity {
@@ -1331,33 +1346,60 @@ impl PoolStorage {
         let mut good: Vec<String> = Vec::new();
         let mut gone: Vec<(String, bool)> = Vec::new();
         // Hash without holding the index: a big disk takes hours. The
-        // caller's task (`activity`) counts the bytes.
-        for (key, size) in keys {
-            crate::activity::advance_current(*size);
-            let path = Self::data_path(&mount, key)?;
-            let ok = match fs::metadata(&path) {
-                Err(_) => {
-                    gone.push((key.clone(), false));
-                    progress(out.objects_checked, out.bytes_checked);
-                    continue;
+        // caller's task (`activity`) counts the bytes. Reads run in parallel
+        // only where the disk's medium allows (`crate::parverify`).
+        let jobs: Vec<crate::parverify::Job<(String, u64)>> = keys
+            .iter()
+            .map(|(k, s)| crate::parverify::Job {
+                item: (k.clone(), *s),
+                lane: 0,
+                size: *s,
+            })
+            .collect();
+        let mut failed: Option<anyhow::Error> = None;
+        crate::parverify::run_ordered(
+            &jobs,
+            &[self.disk_lane(&mount)],
+            |(key, size)| -> Result<Option<bool>> {
+                let path = Self::data_path(&mount, key)?;
+                Ok(match fs::metadata(&path) {
+                    Err(_) => None,
+                    Ok(md) => Some(
+                        md.len() == *size
+                            && read_back_hash(&path).is_ok_and(|h| {
+                                object_name_of(key)
+                                    .is_none_or(|n| hex::encode(h) == n.to_ascii_lowercase())
+                            }),
+                    ),
+                })
+            },
+            |_, r| r,
+            |_, (key, size), r| {
+                crate::activity::advance_current(*size);
+                match r {
+                    Err(e) => {
+                        failed = Some(e);
+                        return false;
+                    }
+                    Ok(None) => gone.push((key.clone(), false)),
+                    Ok(Some(true)) => {
+                        out.objects_checked += 1;
+                        out.bytes_checked += size;
+                        good.push(key.clone());
+                    }
+                    Ok(Some(false)) => {
+                        if let Ok(path) = Self::data_path(&mount, key) {
+                            let _ = fs::remove_file(&path);
+                        }
+                        gone.push((key.clone(), true));
+                    }
                 }
-                Ok(md) => {
-                    md.len() == *size
-                        && read_back_hash(&path).is_ok_and(|h| {
-                            object_name_of(key)
-                                .is_none_or(|n| hex::encode(h) == n.to_ascii_lowercase())
-                        })
-                }
-            };
-            if ok {
-                out.objects_checked += 1;
-                out.bytes_checked += size;
-                good.push(key.clone());
-            } else {
-                let _ = fs::remove_file(&path);
-                gone.push((key.clone(), true));
-            }
-            progress(out.objects_checked, out.bytes_checked);
+                progress(out.objects_checked, out.bytes_checked);
+                true
+            },
+        );
+        if let Some(e) = failed {
+            return Err(e);
         }
         let mut st = self.state.lock().unwrap();
         let now = util::now_utc();
@@ -1447,37 +1489,73 @@ impl PoolStorage {
         };
         // The disk check's task (`activity`) counts the bytes looked at.
         crate::activity::set_current_total(keys.iter().map(|(_, size)| size).sum());
-        for (key, size) in keys {
-            crate::activity::advance_current(size);
-            let path = Self::data_path(&mount, &key)?;
-            let Ok(md) = fs::metadata(&path) else {
-                out.missing.push(key.clone());
-                forget(&mut st, &key);
-                continue;
-            };
-            let ok = md.len() == size
-                && (!full || {
-                    let name = key.rsplit('/').next().unwrap_or("");
-                    read_back_hash(&path)
-                        .map(|h| hex::encode(h) == name)
-                        .unwrap_or(false)
-                });
-            if ok {
-                out.objects_checked += 1;
-                out.bytes_checked += size;
-                if full {
-                    if let Some(e) = st.index.objects.get_mut(&key) {
-                        e.checked.insert(disk_id.to_string(), util::now_utc());
+        let lane = self.disk_lane(&mount);
+        let jobs: Vec<crate::parverify::Job<(String, u64)>> = keys
+            .into_iter()
+            .map(|(k, s)| crate::parverify::Job {
+                item: (k, s),
+                lane: 0,
+                // Without `full` only sizes are looked at: nothing is held.
+                size: if full { s } else { 1 },
+            })
+            .collect();
+        let mut failed: Option<anyhow::Error> = None;
+        crate::parverify::run_ordered(
+            &jobs,
+            &[lane],
+            |(key, size)| -> Result<Option<bool>> {
+                let path = Self::data_path(&mount, key)?;
+                let Ok(md) = fs::metadata(&path) else {
+                    return Ok(None);
+                };
+                Ok(Some(
+                    md.len() == *size
+                        && (!full || {
+                            let name = key.rsplit('/').next().unwrap_or("");
+                            read_back_hash(&path)
+                                .map(|h| hex::encode(h) == name)
+                                .unwrap_or(false)
+                        }),
+                ))
+            },
+            |_, r| r,
+            |_, (key, size), r| {
+                crate::activity::advance_current(*size);
+                match r {
+                    Err(e) => {
+                        failed = Some(e);
+                        return false;
+                    }
+                    Ok(None) => {
+                        out.missing.push(key.clone());
+                        forget(&mut st, key);
+                    }
+                    Ok(Some(true)) => {
+                        out.objects_checked += 1;
+                        out.bytes_checked += size;
+                        if full {
+                            if let Some(e) = st.index.objects.get_mut(key) {
+                                e.checked.insert(disk_id.to_string(), util::now_utc());
+                            }
+                        }
+                    }
+                    Ok(Some(false)) => {
+                        out.bad.push(key.clone());
+                        forget(&mut st, key);
+                        if let Ok(path) = Self::data_path(&mount, key) {
+                            let _ = fs::remove_file(&path);
+                        }
                     }
                 }
-            } else {
-                out.bad.push(key.clone());
-                forget(&mut st, &key);
-                let _ = fs::remove_file(&path);
-            }
+                true
+            },
+        );
+        if let Some(e) = failed {
+            return Err(e);
         }
         // Objects on the disk that the index does not know (written by another device).
         let data = mount.join(DATA_DIR).join("chunks");
+        let mut unknown: Vec<crate::parverify::Job<(String, PathBuf, u64)>> = Vec::new();
         if data.is_dir() {
             for entry in walkdir::WalkDir::new(&data)
                 .into_iter()
@@ -1501,22 +1579,36 @@ impl PoolStorage {
                     continue;
                 }
                 let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
-                if full {
+                unknown.push(crate::parverify::Job {
+                    item: (key, entry.path().to_path_buf(), size),
+                    lane: 0,
+                    size: if full { size.max(1) } else { 1 },
+                });
+            }
+        }
+        crate::parverify::run_ordered(
+            &unknown,
+            &[lane],
+            |(key, path, _)| {
+                !full || {
                     let name = key.rsplit('/').next().unwrap_or("");
-                    let good = read_back_hash(entry.path())
+                    read_back_hash(path)
                         .map(|h| hex::encode(h) == name)
-                        .unwrap_or(false);
-                    if !good {
-                        out.bad.push(key);
-                        let _ = fs::remove_file(entry.path());
-                        continue;
-                    }
+                        .unwrap_or(false)
+                }
+            },
+            |_, good| good,
+            |_, (key, path, size), good| {
+                if !good {
+                    out.bad.push(key.clone());
+                    let _ = fs::remove_file(path);
+                    return true;
                 }
                 let entry = st
                     .index
                     .objects
-                    .entry(key)
-                    .or_insert_with(|| ObjectEntry::new(disk_id, size));
+                    .entry(key.clone())
+                    .or_insert_with(|| ObjectEntry::new(disk_id, *size));
                 // A further copy of an object another disk holds.
                 if !entry.held_by(disk_id) {
                     entry.extra.push(disk_id.to_string());
@@ -1527,8 +1619,9 @@ impl PoolStorage {
                 out.adopted += 1;
                 out.objects_checked += 1;
                 out.bytes_checked += size;
-            }
-        }
+                true
+            },
+        );
         let used: u64 = st
             .index
             .objects
