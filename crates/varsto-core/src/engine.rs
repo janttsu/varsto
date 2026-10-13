@@ -1994,12 +1994,7 @@ impl Engine {
     /// May `needed` bytes be written at `disk` for `rec`? Within the
     /// folder's root the folder's limit applies, elsewhere (a restore
     /// target) the default one.
-    pub(crate) fn space_for(
-        &self,
-        rec: &FolderRecord,
-        disk: &Path,
-        needed: u64,
-    ) -> std::result::Result<(), crate::freespace::LowSpace> {
+    pub(crate) fn space_for(&self, rec: &FolderRecord, disk: &Path, needed: u64) -> Result<()> {
         use crate::freespace::{check, Place, DEFAULT};
         let mount = self
             .config

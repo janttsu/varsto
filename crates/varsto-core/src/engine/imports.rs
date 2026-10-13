@@ -1185,7 +1185,7 @@ impl Engine {
                                 min_free,
                                 g.size.unwrap_or(0),
                             ) {
-                                stop_error = Some(anyhow::Error::new(low));
+                                stop_error = Some(low);
                                 return Ok(Verdict::Stop);
                             }
                         }

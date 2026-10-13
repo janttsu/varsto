@@ -272,7 +272,8 @@ static SHORT: Mutex<BTreeMap<String, (LowSpace, MinFree)>> = Mutex::new(BTreeMap
 /// May `needed` more bytes be written at `path` (in `place`, limit `min`)?
 /// Refused writes are remembered until a check or [`recheck`] finds room
 /// again. A disk whose space cannot be read is never refused.
-pub fn check(place: &Place, path: &Path, min: MinFree, needed: u64) -> Result<(), LowSpace> {
+/// The error is a [`LowSpace`] (see [`low_space`]).
+pub fn check(place: &Place, path: &Path, min: MinFree, needed: u64) -> anyhow::Result<()> {
     let Some(space) = space_at(path) else {
         return Ok(());
     };
@@ -283,7 +284,7 @@ pub fn check(place: &Place, path: &Path, min: MinFree, needed: u64) -> Result<()
             .lock()
             .unwrap()
             .insert(place.key.clone(), (low.clone(), min));
-        return Err(low);
+        return Err(anyhow::Error::new(low));
     }
     // Room again for this place, also for the write refused last.
     let mut short = SHORT.lock().unwrap();
@@ -390,6 +391,7 @@ mod tests {
         );
         // Below the 5 % limit: refused, recorded, and the text says why.
         let e = check(&place, &dir.path().join("a/b.jpg"), DEFAULT, 1000).unwrap_err();
+        let e = low_space(&e).unwrap().clone();
         assert_eq!(
             e.text,
             "disk of folder Photos-test-freespace has 3 % free, below the 5 % limit; downloads paused"
@@ -407,6 +409,7 @@ mod tests {
             }),
         );
         let e = check(&place, dir.path(), DEFAULT, 2_000_000_000).unwrap_err();
+        let e = low_space(&e).unwrap().clone();
         assert!(
             e.text
                 .contains("6 % free; 2.0 GB more would leave less than the 5 % limit"),
@@ -427,6 +430,7 @@ mod tests {
         assert!(short_places().iter().all(|l| l.place != place));
         // A byte limit.
         let e = check(&place, dir.path(), MinFree::Bytes(30_000_000_000), 0).unwrap_err();
+        let e = low_space(&e).unwrap().clone();
         assert!(
             e.text.contains("has 20.0 GB free, below the 30.0 GB limit"),
             "{}",
