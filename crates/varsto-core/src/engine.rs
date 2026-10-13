@@ -53,6 +53,7 @@ mod disk_suggest;
 mod drain;
 mod fetch;
 mod guide;
+mod help;
 mod imports;
 mod ledger_recovery;
 mod ledger_upkeep;
@@ -86,6 +87,7 @@ pub use disk_fetch::{
 pub use disk_groups::DiskGroupStatus;
 pub use disk_insert::{DiskInsertReport, DiskProgress, FillOutcome, InsertOptions};
 pub use drain::{DrainOptions, DrainPlan, DrainRunLimits, DrainRunReport, DrainStatus};
+pub use help::{help_without_vault, HelpObserved};
 pub use imports::{
     CleanupFile, ImportCleanupReport, ImportOptions, ImportReport, ImportStatus, ImportVerify,
     MissingFile,

@@ -991,6 +991,21 @@ fn api(st: &mut State, method: Method, path: &str, query: &str, input: &Value) -
             Ok(json!({"ok": true, "removed": removed}))
         }
         (Method::Get, "/api/service") => Ok(st.service.summary()),
+        // The Help page: where this device stands, where the data is and what
+        // to do next. Works without a vault and while it is locked too.
+        // Sentences come as {t, p} like the recovery guide's; `?format=text`
+        // gives the English text of `varsto help-now`.
+        (Method::Get, "/api/help") => {
+            let observed = help_observed(&st.service);
+            let h = match st.engine.as_mut() {
+                Some(e) => e.help_state(observed)?,
+                None => varsto_core::engine::help_without_vault(&st.home),
+            };
+            Ok(match query_param(query, "format").as_deref() {
+                Some("text") => json!({ "text": varsto_core::help::render_text(&h) }),
+                _ => serde_json::to_value(h)?,
+            })
+        }
         (Method::Get, "/api/logs") => Ok(logs_info(&st.home)),
         (Method::Post, "/api/logs/level") => {
             let level = s(input, "level")?;
@@ -1256,6 +1271,28 @@ fn api(st: &mut State, method: Method, path: &str, query: &str, input: &Value) -
                 .ok_or_else(|| anyhow!("vault is locked"))?;
             api_unlocked(engine, service, method2, path, query, input)
         }
+    }
+}
+
+/// What the service already knows, for the Help page.
+pub fn help_observed(sv: &ServiceState) -> varsto_core::engine::HelpObserved {
+    varsto_core::engine::HelpObserved {
+        service: Some(varsto_core::help::ServiceIn {
+            running: sv.running,
+            paused: sv.paused,
+            last_error: sv.last_error.clone(),
+            p2p_listening: sv.p2p_listen.is_some(),
+            p2p_reachable: sv.p2p_reachable,
+            peers: sv.p2p_peers.len(),
+        }),
+        policies: (!sv.policies.is_empty()).then(|| sv.policies.clone()),
+        disks: (!sv.disks.is_empty()).then(|| sv.disks.clone()),
+        disk_suggest: sv.disk_suggest.clone(),
+        repair: sv.repair.clone(),
+        scrub: sv.scrub.clone(),
+        backup_errors: sv.backup_errors.clone(),
+        restic_text: sv.restic_text.clone(),
+        quota_full: sv.quota_full.clone(),
     }
 }
 
@@ -2685,6 +2722,136 @@ mod tests {
         assert!(s.attached.is_empty());
         assert!(s.excluded[0].retired);
         pool::set_fake_space(&disk, None);
+    }
+
+    #[test]
+    fn help_api_answers_without_a_vault_locked_and_open() {
+        use varsto_core::storage::StorageSpec;
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().join("home");
+        let mut st = State {
+            home: home.clone(),
+            engine: None,
+            token: "t".into(),
+            bound: "127.0.0.1:0".into(),
+            traffic: Arc::default(),
+            service: ServiceState {
+                running: true,
+                ..Default::default()
+            },
+            pair: None,
+        };
+        let get = |st: &mut State, query: &str| {
+            api(st, Method::Get, "/api/help", query, &json!({})).unwrap()
+        };
+
+        // No vault: create one or pair, on the setup screen.
+        let h = get(&mut st, "");
+        assert_eq!(h["phase"], "no_vault");
+        assert_eq!(h["steps"][0]["id"], "create_vault");
+        assert_eq!(h["steps"][0]["action"]["page"], "setup");
+        assert_eq!(h["steps"][0]["action"]["target"], "init");
+        assert!(h["steps"][0]["title"]["t"].is_string());
+        let t = get(&mut st, "format=text");
+        assert!(t["text"].as_str().unwrap().contains("WHAT TO DO NEXT"));
+
+        // A vault, locked.
+        let (engine, _) = Engine::init(&home, "laptop", "pass phrase").unwrap();
+        drop(engine);
+        let h = get(&mut st, "");
+        assert_eq!(h["phase"], "locked");
+        assert_eq!(h["steps"][0]["id"], "unlock");
+        assert_eq!(h["headline"]["p"]["device"], "laptop");
+
+        // Open, no storage: add a storage; then a folder.
+        st.engine = Some(Engine::open(&home, "pass phrase").unwrap());
+        let h = get(&mut st, "");
+        assert_eq!(h["phase"], "ready");
+        assert_eq!(h["steps"][0]["id"], "add_storage");
+        assert_eq!(h["steps"][0]["action"]["target"], "addstorage");
+        assert_eq!(h["figures"]["devices"], 1);
+        st.engine
+            .as_mut()
+            .unwrap()
+            .add_storage(StorageSpec::LocalDir {
+                name: "box".into(),
+                path: tmp.path().join("box"),
+                cold: false,
+                carrier: false,
+                place: String::new(),
+            })
+            .unwrap();
+        let h = get(&mut st, "");
+        assert_eq!(h["steps"][0]["id"], "add_folder");
+        assert_eq!(h["storages"][0]["name"], "box");
+        assert_eq!(h["summary"][1]["p"]["names"], "box");
+
+        // Paused in the service: resume first.
+        st.service.paused = true;
+        let h = get(&mut st, "");
+        assert_eq!(h["steps"][0]["id"], "resume");
+        assert!(h["attention"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|a| a["id"] == "service"));
+    }
+
+    /// Every sentence the Help page can show has a Finnish and a Swedish
+    /// translation (the templates are the English string literals of
+    /// `help.rs` given to `t0`/`tx` and the buttons' labels).
+    #[test]
+    fn help_sentences_are_translated() {
+        let src = include_str!("../../varsto-core/src/help.rs");
+        let src = &src[..src.find("pub fn render_text").unwrap()];
+        let mut found = Vec::new();
+        for marker in ["t0(", "tx(", ".act("] {
+            for (at, _) in src.match_indices(marker) {
+                // Not the helpers' own definitions.
+                if src[..at].ends_with("fn ") {
+                    continue;
+                }
+                let rest = &src[at + marker.len()..];
+                // t0/tx with a literal (not a variable): the first literal;
+                // act: the last one in the call (the label).
+                if !rest.trim_start().starts_with('"') {
+                    continue;
+                }
+                let call = if marker == ".act(" {
+                    let end = [rest.find("\")\n"), rest.find("\").")]
+                        .into_iter()
+                        .flatten()
+                        .min()
+                        .unwrap();
+                    &rest[..end + 1]
+                } else {
+                    rest
+                };
+                let mut lits = Vec::new();
+                let mut r = call;
+                while let Some(q) = r.find('"') {
+                    let body = &r[q + 1..];
+                    let end = body.find('"').unwrap();
+                    lits.push(&body[..end]);
+                    r = &body[end + 1..];
+                    if marker != ".act(" {
+                        break;
+                    }
+                }
+                if let Some(l) = lits.last() {
+                    found.push(l.to_string());
+                }
+            }
+        }
+        assert!(found.len() > 150, "{}", found.len());
+        for (lang, dict) in [("fi", I18N_FI), ("sv", I18N_SV)] {
+            let d: Value = serde_json::from_str(dict).unwrap();
+            let missing: Vec<&String> = found
+                .iter()
+                .filter(|t| t.len() > 1 && d["strings"].get(t.as_str()).is_none())
+                .collect();
+            assert!(missing.is_empty(), "{lang} lacks {missing:?}");
+        }
     }
 
     #[test]
