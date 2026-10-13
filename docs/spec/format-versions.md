@@ -8,12 +8,12 @@ During alpha development, storage formats may change without migration paths. On
 
 | Format version | First release | Releases that read it | Standalone reader tool | Archived tag |
 |---|---|---|---|---|
-| 0 (alpha-0) | 0.0.1-alpha.0 | 0.0.1-alpha.0 to 0.0.1-alpha.3 | none (`varsto pull` and `varsto fsck` of those versions) | see the format version 1 note below |
+| 0 (alpha-0) | 0.0.1-alpha.0 | 0.0.1-alpha.0 to 0.0.1-alpha.3 (no `v0.0.1-alpha.3` tag exists; the last format-0 reader tag is `v0.0.1-alpha.2`) | none (`varsto pull` and `varsto fsck` of those versions) | see the format version 1 note below |
 | 1 (compression, alpha-0-format.md section 16) | 0.0.1-alpha.4 | 0.0.1-alpha.4 and later, including 0.0.1-alpha.13 | none yet (`varsto pull` and `varsto fsck` of the same version) | every tag from `v0.0.1-alpha.4` on |
 
 ## Release rules
 
-1. Tag every alpha release (for example `alpha-2026-10-08`) with the source commit and binaries.
+1. Tag every alpha release (`v0.0.1-alpha.N`) with the source commit and binaries. Tags `v0.0.1-alpha.3` and `v0.0.1-alpha.9` do not exist: those releases were folded into the next tag (`v0.0.1-alpha.4` and `v0.0.1-alpha.10`).
 2. Archive binaries and source on each release.
 3. Before publishing a new storage format version, ensure the previous version has a reader tool (built-in or standalone).
 4. Update this table before publishing each storage format version, with the release number and reader status.
@@ -33,4 +33,4 @@ A new ledger event, `chunk_dropped` (alpha-0-format.md section 23), records that
 
 ## Format version 1 (0.0.1-alpha.4)
 
-Chunk payloads are packed before encryption: one method byte (`0` raw, `1` zstd level 12) followed by the data; compression is used only when it saves at least 5 %. Objects written by format 0 have no method byte and are not readable by format 1 readers; vaults created with format 0 are refused with a clear error. Readers: 0.0.1-alpha.4 and later. Archived tag of the last format-0 reader: `v0.0.1-alpha.3`.
+Chunk payloads are packed before encryption: one method byte (`0` raw, `1` zstd level 12) followed by the data; compression is used only when it saves at least 5 %. Objects written by format 0 have no method byte and are not readable by format 1 readers; vaults created with format 0 are refused with a clear error. Readers: 0.0.1-alpha.4 and later. Archived tag of the last format-0 reader: `v0.0.1-alpha.2` (there is no `v0.0.1-alpha.3` tag).
