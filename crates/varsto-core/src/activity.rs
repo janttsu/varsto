@@ -63,6 +63,9 @@ pub const DISK_FETCH: &str = "disk_fetch";
 pub const DISK_UNMOUNT: &str = "disk_unmount";
 /// Bit-rot check; steps "storage", "disk", "files" and "cache".
 pub const SCRUB: &str = "scrub";
+/// Importing a git-annex repository, a cloud drive or a directory; steps
+/// "list", "read" and "cleanup".
+pub const IMPORT: &str = "import";
 
 /// What `done` and `total` count.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -481,6 +484,9 @@ pub fn describe(t: &TaskView) -> String {
         (SCRUB, "files") => format!("checking the files of folder «{s}» for bit rot"),
         (SCRUB, "cache") => "checking the block cache for bit rot".to_string(),
         (SCRUB, _) => format!("checking storage «{s}» for bit rot"),
+        (IMPORT, "list") => format!("listing the files to import into folder «{s}»"),
+        (IMPORT, "cleanup") => format!("removing safely stored source files of folder «{s}»"),
+        (IMPORT, _) => format!("importing into folder «{s}»"),
         (k, _) if s.is_empty() => k.replace('_', " "),
         (k, _) => format!("{} «{s}»", k.replace('_', " ")),
     };
@@ -493,7 +499,7 @@ pub fn describe(t: &TaskView) -> String {
 /// What the items of a task are, for counts: "120 of 400 files".
 pub fn item_noun(kind: &str) -> &'static str {
     match kind {
-        SYNC_SCAN => "files",
+        SYNC_SCAN | IMPORT => "files",
         REPAIR => "copies",
         _ => "blocks",
     }

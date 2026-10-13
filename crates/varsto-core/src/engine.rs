@@ -50,6 +50,7 @@ mod disk_fetch;
 mod disk_groups;
 mod disk_insert;
 mod fetch;
+mod imports;
 mod ledger_upkeep;
 mod manifest_upkeep;
 mod membership;
@@ -75,6 +76,10 @@ pub use disk_fetch::{
 };
 pub use disk_groups::DiskGroupStatus;
 pub use disk_insert::{DiskInsertReport, DiskProgress, FillOutcome, InsertOptions};
+pub use imports::{
+    CleanupFile, ImportCleanupReport, ImportOptions, ImportReport, ImportStatus, ImportVerify,
+    MissingFile,
+};
 pub use manifest_upkeep::ManifestPolicy;
 pub use membership::{
     removal_notice, DeviceInfo, DeviceRemoved, EpochRecord, Grant, KemRecord, Removal, Revocation,
@@ -531,6 +536,16 @@ struct UploadDone {
     object: ObjectName,
     size: u64,
     outcome: Result<bool>,
+}
+
+/// What a policy evaluation knows about this device's storages
+/// (`Engine::policy_ctx`).
+pub(crate) struct PolicyCtx {
+    places: BTreeMap<String, (String, bool)>,
+    carriers: BTreeSet<String>,
+    unknown: Vec<String>,
+    unreadable_places: BTreeMap<String, Vec<String>>,
+    pools: BTreeMap<String, PoolStorage>,
 }
 
 /// Suffix of placeholder files in selective folders (plan 6.34, Resilio-style).
@@ -4059,6 +4074,39 @@ impl Engine {
 
     pub fn policy_check_at(&self, now_utc: i64) -> Result<Vec<PolicyReport>> {
         let view = self.view()?;
+        let mut ctx = self.policy_ctx();
+        let mut reports = Vec::new();
+        for (rec, _) in self.folders() {
+            let Some(policy) = rec.effective_policy() else {
+                continue;
+            };
+            let state = self.load_state(&rec.folder_id)?;
+            let mut seen = BTreeSet::new();
+            let mut facts = Vec::new();
+            for file in state.files.values().filter(|f| !f.deleted) {
+                for cr in &file.chunks {
+                    if !seen.insert(cr.chunk.clone()) {
+                        continue;
+                    }
+                    facts.push(self.chunk_facts(&mut ctx, &view, &rec.folder_id, &cr.chunk));
+                }
+            }
+            let mut report = crate::policy::evaluate(
+                &rec.name,
+                &policy,
+                &facts,
+                &ctx.unreadable_places,
+                &ctx.unknown,
+                now_utc,
+            );
+            self.disk_group_findings(&rec, &state, &view, &ctx.pools, &mut report);
+            reports.push(report);
+        }
+        Ok(reports)
+    }
+
+    /// What a policy evaluation needs to know about this device's storages.
+    pub(crate) fn policy_ctx(&self) -> PolicyCtx {
         let mut places: BTreeMap<String, (String, bool)> = BTreeMap::new(); // name -> (place, unreadable now)
         let mut carriers: BTreeSet<String> = BTreeSet::new();
         let mut unknown: Vec<String> = Vec::new();
@@ -4092,73 +4140,59 @@ impl Engine {
                 }
             }
         }
-        let mut reports = Vec::new();
-        for (rec, _) in self.folders() {
-            let Some(policy) = rec.effective_policy() else {
-                continue;
-            };
-            let state = self.load_state(&rec.folder_id)?;
-            let mut seen = BTreeSet::new();
-            let mut facts = Vec::new();
-            for file in state.files.values().filter(|f| !f.deleted) {
-                for cr in &file.chunks {
-                    if !seen.insert(cr.chunk.clone()) {
-                        continue;
-                    }
-                    let mut copies = Vec::new();
-                    if let Some(record) = view.locate(&rec.folder_id, &cr.chunk) {
-                        for (name, loc) in &record.storages {
-                            if loc.claimed_by.is_empty() || carriers.contains(name) {
-                                continue;
-                            }
-                            let place = if name.starts_with("replica:") {
-                                "replica".to_string()
-                            } else {
-                                places
-                                    .get(name)
-                                    .map(|(p, _)| p.clone())
-                                    .unwrap_or_else(|| "other".to_string())
-                            };
-                            let verified = loc.independently_verified(name);
-                            let verified_utc = loc.verified_utc;
-                            if let Some(pool) = pools.get(name) {
-                                // One copy per disk that holds the object (disk
-                                // groups keep several), each at its disk's place.
-                                for (copy, at, v, v_utc, readable) in Self::pool_copies(
-                                    name,
-                                    pool,
-                                    &record.object,
-                                    verified,
-                                    verified_utc,
-                                ) {
-                                    if !readable {
-                                        let list = unreadable_places.entry(at.clone()).or_default();
-                                        if !list.contains(&copy) {
-                                            list.push(copy.clone());
-                                        }
-                                    }
-                                    copies.push((copy, at, v, v_utc));
-                                }
-                                continue;
-                            }
-                            copies.push((name.clone(), place, verified, verified_utc));
-                        }
-                    }
-                    facts.push(crate::policy::ChunkFacts { copies });
-                }
-            }
-            let mut report = crate::policy::evaluate(
-                &rec.name,
-                &policy,
-                &facts,
-                &unreadable_places,
-                &unknown,
-                now_utc,
-            );
-            self.disk_group_findings(&rec, &state, &view, &pools, &mut report);
-            reports.push(report);
+        PolicyCtx {
+            places,
+            carriers,
+            unknown,
+            unreadable_places,
+            pools,
         }
-        Ok(reports)
+    }
+
+    /// The copies of one chunk as a policy counts them.
+    pub(crate) fn chunk_facts(
+        &self,
+        ctx: &mut PolicyCtx,
+        view: &LedgerView,
+        folder: &FolderId,
+        chunk: &ChunkId,
+    ) -> crate::policy::ChunkFacts {
+        let mut copies = Vec::new();
+        if let Some(record) = view.locate(folder, chunk) {
+            for (name, loc) in &record.storages {
+                if loc.claimed_by.is_empty() || ctx.carriers.contains(name) {
+                    continue;
+                }
+                let place = if name.starts_with("replica:") {
+                    "replica".to_string()
+                } else {
+                    ctx.places
+                        .get(name)
+                        .map(|(p, _)| p.clone())
+                        .unwrap_or_else(|| "other".to_string())
+                };
+                let verified = loc.independently_verified(name);
+                let verified_utc = loc.verified_utc;
+                if let Some(pool) = ctx.pools.get(name) {
+                    // One copy per disk that holds the object (disk
+                    // groups keep several), each at its disk's place.
+                    for (copy, at, v, v_utc, readable) in
+                        Self::pool_copies(name, pool, &record.object, verified, verified_utc)
+                    {
+                        if !readable {
+                            let list = ctx.unreadable_places.entry(at.clone()).or_default();
+                            if !list.contains(&copy) {
+                                list.push(copy.clone());
+                            }
+                        }
+                        copies.push((copy, at, v, v_utc));
+                    }
+                    continue;
+                }
+                copies.push((name.clone(), place, verified, verified_utc));
+            }
+        }
+        crate::policy::ChunkFacts { copies }
     }
 
     /// The vault key (hex) for the recovery kit. Only an unlocked owner

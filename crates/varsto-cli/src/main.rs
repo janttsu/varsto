@@ -14,6 +14,7 @@ mod drive_mount;
 mod drives;
 mod filemanager;
 mod icon;
+mod import;
 mod mcp;
 mod placing;
 mod service;
@@ -128,6 +129,12 @@ enum Cmd {
     Backup {
         #[command(subcommand)]
         cmd: backup::BackupCmd,
+    },
+    /// Import a git-annex repository, a cloud drive (Dropbox, OneDrive, any
+    /// rclone remote) or a local directory into a folder; status, verify, cleanup.
+    Import {
+        #[command(subcommand)]
+        cmd: import::ImportCmd,
     },
     /// Show vault, devices, storages and folders.
     Status,
@@ -2274,7 +2281,7 @@ fn run(cli: &Cli) -> Result<()> {
                     );
                 }
                 FolderCmd::Files { folder } => {
-                    let rows = engine.list_files(folder)?;
+                    let rows = engine.list_files_with_pending(folder)?;
                     print(cli, &rows, |rows| {
                         rows.iter()
                             .map(|f| {
@@ -2410,6 +2417,7 @@ fn run(cli: &Cli) -> Result<()> {
         }
         Cmd::Verify { cmd } => upkeep::verify(cli, &home, cmd)?,
         Cmd::Scrub { cmd, run } => upkeep::scrub(cli, &home, cmd, run)?,
+        Cmd::Import { cmd } => import::run(cli, &home, cmd)?,
         Cmd::Advice { idle_days, cmd } => upkeep::advice(cli, &home, *idle_days, cmd)?,
         Cmd::Repair {
             dry_run,

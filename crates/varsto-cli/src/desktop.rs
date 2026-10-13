@@ -1423,7 +1423,7 @@ fn api_unlocked(
         (Method::Get, "/api/files") => {
             let folder = query_param(query, "folder")
                 .ok_or_else(|| anyhow!("folder query parameter required"))?;
-            Ok(serde_json::to_value(engine.list_files(&folder)?)?)
+            Ok(serde_json::to_value(engine.list_files_with_pending(&folder)?)?)
         }
         (Method::Post, "/api/fetch") => {
             // A large fetch whose blocks are on pool disks: return the plan
