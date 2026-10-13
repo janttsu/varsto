@@ -55,8 +55,17 @@ pub const VERIFY: &str = "verify";
 pub const FSCK: &str = "fsck";
 pub const DATA_MOVE: &str = "data_move";
 pub const STORAGE_REMOVAL: &str = "storage_removal";
+/// Whole drives of pools (`blockdev`, `disk init|insert|unmount`, fetch plans).
+pub const DISK_INIT: &str = "disk_init";
+pub const DISK_FSCK: &str = "disk_fsck";
+pub const DISK_INSERT: &str = "disk_insert";
+pub const DISK_FETCH: &str = "disk_fetch";
+pub const DISK_UNMOUNT: &str = "disk_unmount";
 /// Bit-rot check; steps "storage", "disk", "files" and "cache".
 pub const SCRUB: &str = "scrub";
+/// A backup with restic (`crate::restic`); steps "check" (the mirror is
+/// complete), "backup", "forget" and "repo_check" (`restic check`).
+pub const RESTIC: &str = "restic";
 
 /// What `done` and `total` count.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -453,6 +462,15 @@ pub fn describe(t: &TaskView) -> String {
         (DISK_CHECK, "fill") | (DISK_FILL, _) => format!("filling disk «{s}»"),
         (DISK_CHECK, "verify") => format!("checking the blocks of disk «{s}»"),
         (DISK_CHECK, _) => format!("checking disk «{s}»"),
+        (DISK_INIT, _) => format!("preparing disk «{s}»"),
+        (DISK_FSCK, _) => format!("checking the file system of disk «{s}»"),
+        (DISK_INSERT, "tidy") => format!("tidying disk «{s}»"),
+        (DISK_INSERT, "verify") => format!("checking the blocks of disk «{s}»"),
+        (DISK_INSERT, "fill") => format!("filling disk «{s}»"),
+        (DISK_INSERT, _) => format!("bringing disk «{s}» up to date"),
+        (DISK_FETCH, "write") => format!("writing files fetched from disk «{s}»"),
+        (DISK_FETCH, _) => format!("copying blocks from disk «{s}»"),
+        (DISK_UNMOUNT, _) => format!("unmounting disk «{s}»"),
         (BACKUP_SNAPSHOT, _) => format!("taking a snapshot of backup «{s}»"),
         (RESTORE, _) => format!("restoring backup «{s}»"),
         (REPAIR, _) => "repairing damaged block copies".to_string(),
@@ -466,6 +484,10 @@ pub fn describe(t: &TaskView) -> String {
         (SCRUB, "files") => format!("checking the files of folder «{s}» for bit rot"),
         (SCRUB, "cache") => "checking the block cache for bit rot".to_string(),
         (SCRUB, _) => format!("checking storage «{s}» for bit rot"),
+        (RESTIC, "backup") => "backing up the mirror with restic".to_string(),
+        (RESTIC, "forget") => "removing old restic snapshots".to_string(),
+        (RESTIC, "repo_check") => "checking the restic repository".to_string(),
+        (RESTIC, _) => "checking that the restic mirror is complete".to_string(),
         (k, _) if s.is_empty() => k.replace('_', " "),
         (k, _) => format!("{} «{s}»", k.replace('_', " ")),
     };

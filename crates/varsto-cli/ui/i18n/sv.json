@@ -669,6 +669,32 @@
   "at home, cold": "hemma, kall",
   "external, cold": "extern, kall",
   "Destination…": "Mål…",
+  "Fetch from disks": "Hämta från diskar",
+  "Disk inserted": "Disken är isatt",
+  "Copy from the disk": "Kopiera från disken",
+  "Fetch from the network instead": "Hämta från nätet i stället",
+  "Stop": "Avbryt",
+  "done": "klar",
+  "skipped": "överhoppad",
+  "attached": "ansluten",
+  "some blocks are only on pool disks": "vissa block finns bara på poolens diskar",
+  "the remote copies are in cold storage": "fjärrkopiorna ligger i kall lagring",
+  "the disks are cheaper and faster than the network": "diskarna är billigare och snabbare än nätet",
+  "the disks are cheaper than the network": "diskarna är billigare än nätet",
+  "the disks are faster than the network": "diskarna är snabbare än nätet",
+  "The network does not have every block: the disks are needed.": "Nätet har inte alla block: diskarna behövs.",
+  "Preparing disk «{s}»": "Förbereder disken «{s}»",
+  "Checking the file system of disk «{s}»": "Kontrollerar filsystemet på disken «{s}»",
+  "Bringing disk «{s}» up to date": "Uppdaterar disken «{s}»",
+  "Tidying disk «{s}»": "Städar disken «{s}»",
+  "Copying blocks from disk «{s}»": "Kopierar block från disken «{s}»",
+  "Writing files fetched from disk «{s}»": "Skriver filer hämtade från disken «{s}»",
+  "Unmounting disk «{s}»": "Avmonterar disken «{s}»",
+  "The interface starts in your system's theme; the switch keeps your choice.": "Gränssnittet börjar i systemets tema; reglaget kommer ihåg ditt val.",
+  "Checking that the restic mirror is complete": "Kontrollerar att restic-speglingen är fullständig",
+  "Backing up the mirror with restic": "Säkerhetskopierar speglingen med restic",
+  "Removing old restic snapshots": "Tar bort gamla restic-ögonblicksbilder",
+  "Checking the restic repository": "Kontrollerar restic-förrådet",
   "Filter by name, tag or analysis": "Filtrera på namn, tagg eller analys",
   "Filter files": "Filtrera filer",
   "Analysis": "Analys",
@@ -854,6 +880,42 @@
   [
    "^(.+), cold$",
    "$1, kall"
+  ],
+  [
+   "^Could not reach the Varsto service \\((\\S+) (\\S+)\\): (.+)\\. It may be restarting or busy; try again in a moment\\.$",
+   "Kunde inte nå Varsto-tjänsten ($1 $2): $3. Den kanske startar om eller är upptagen; försök igen om en stund."
+  ],
+  [
+   "^The Varsto service answered (\\d+) to (\\S+) (\\S+)$",
+   "Varsto-tjänsten svarade $1 på $2 $3"
+  ],
+  [
+   "^The Varsto service sent an unreadable answer to (\\S+) (\\S+)$",
+   "Varsto-tjänsten skickade ett oläsbart svar på $1 $2"
+  ],
+  [
+   "^Insert disk (.+) \\((.*)\\) into the dock, then choose Disk inserted\\.$",
+   "Sätt i disken $1 ($2) i dockan och välj sedan Disken är isatt."
+  ],
+  [
+   "^Disk (.+) is attached: choose Copy from the disk\\.$",
+   "Disken $1 är ansluten: välj Kopiera från disken."
+  ],
+  [
+   "^From the network instead: (.+), about (.+)\\.$",
+   "Från nätet i stället: $1, cirka $2."
+  ],
+  [
+   "^Disk (.+) was not found: insert it and try again\\.$",
+   "Disken $1 hittades inte: sätt i den och försök igen."
+  ],
+  [
+   "^Got (\\d+) blocks \\((.+)\\) from (.+): you can now remove it$",
+   "Hämtade $1 block ($2) från $3: du kan nu ta ut den"
+  ],
+  [
+   "^(.+): stopped; nothing more is fetched from the disks$",
+   "$1: avbrutet; inget mer hämtas från diskarna"
   ],
   [
    "^saved the analysis of (.+)$",

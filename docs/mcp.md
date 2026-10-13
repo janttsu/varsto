@@ -191,7 +191,7 @@ Every word of `query` must occur, ignoring case, in the file's analysis, one of 
 ## Privacy
 
 - File contents never pass through the MCP server. The assistant reads synced plain files from the disk itself; what it does with them is up to the assistant and where it runs (a local model keeps everything on the device; a cloud model sends what it reads to its provider).
-- Analyses are encrypted under the folder's key before they reach a storage (storages see only sizes and times) and are readable on every device of the folder, also by members of a shared folder. On the device they are kept in the device directory like the folder's sync state. See section 34 of [the format specification](spec/alpha-0-format.md).
+- Analyses are encrypted under the folder's key before they reach a storage (storages see only sizes and times) and are readable on every device of the folder, also by members of a shared folder. On the device they are kept in the device directory like the folder's sync state. See section 36 of [the format specification](spec/alpha-0-format.md).
 - Strongroom folders are never visible unless granted by name, and only while unlocked.
 - MCP keys are stored only as hashes; the key itself is shown once.
 

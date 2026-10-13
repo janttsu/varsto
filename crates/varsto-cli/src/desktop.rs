@@ -1340,6 +1340,7 @@ fn api_unlocked(
                         .and_then(|c| c.as_u64().or_else(|| c.as_str()?.trim().parse().ok()))
                         .unwrap_or(1)
                         .clamp(1, 16) as u32,
+                    verify_after_days: varsto_core::pool::DEFAULT_VERIFY_AFTER_DAYS,
                 })?,
                 _ => {
                     let name = s(input, "name")?;
@@ -1552,7 +1553,20 @@ fn api_unlocked(
             Ok(serde_json::to_value(engine.list_files(&folder)?)?)
         }
         (Method::Post, "/api/fetch") => {
-            match engine.fetch_file(&s(input, "folder")?, &s(input, "path")?) {
+            // A large fetch whose blocks are on pool disks: return the plan
+            // for the interface to run disk by disk (`/api/fetch/plan/*`),
+            // unless it asks for the network.
+            let (folder, path) = (s(input, "folder")?, s(input, "path")?);
+            if opt(input, "from").as_deref() != Some("network")
+                && engine.disks().is_ok_and(|d| !d.is_empty())
+            {
+                let plan = engine.fetch_plan(&folder, std::slice::from_ref(&path))?;
+                if plan.recommend == "disks" {
+                    return Ok(json!({ "plan": plan }));
+                }
+                engine.cancel_fetch_plan()?;
+            }
+            match engine.fetch_file(&folder, &path) {
                 Ok(r) => Ok(serde_json::to_value(r)?),
                 // The file is on a pool disk that is away: tell the interface which one.
                 Err(e) => match varsto_core::pool::pool_error(&e) {
@@ -1563,6 +1577,82 @@ fn api_unlocked(
                     _ => Err(e),
                 },
             }
+        }
+        (Method::Get, "/api/fetch/plan") => Ok(json!({ "plan": engine.load_fetch_plan() })),
+        // The disk of step `step` was inserted: mount it, copy its blocks,
+        // write the files that are complete, then sync, unmount and power
+        // it off. A disk that is not there is answered with `needs_disk`.
+        (Method::Post, "/api/fetch/plan/step") => {
+            let k = input.get("step").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+            let mut plan = engine
+                .load_fetch_plan()
+                .ok_or_else(|| anyhow!("no fetch plan is running"))?;
+            let step = plan
+                .steps
+                .get(k)
+                .cloned()
+                .ok_or_else(|| anyhow!("the plan has no step {}", k + 1))?;
+            if !step.attached {
+                if let Err(e) = crate::drive_mount::mount_known(engine.home(), &step.label) {
+                    if let Some(stop) = e.downcast_ref::<varsto_core::blockdev::FsckStopped>() {
+                        return Ok(json!({"fsck_failed": stop.outcome, "error": stop.message}));
+                    }
+                    return Ok(json!({"needs_disk": {"label": step.label, "disk_id": step.disk_id, "place": step.place}, "error": format!("{e:#}")}));
+                }
+            }
+            let (out, mount) = match engine.fetch_plan_step(&mut plan, k) {
+                Ok(r) => r,
+                Err(e) => {
+                    return match varsto_core::pool::pool_error(&e) {
+                        Some(varsto_core::pool::PoolError::NeedsDisk { label, disk_id, place }) => Ok(json!({
+                            "needs_disk": {"label": label, "disk_id": disk_id, "place": place},
+                            "error": e.to_string(),
+                        })),
+                        _ => Err(e),
+                    };
+                }
+            };
+            let unmount = if step.attached {
+                Vec::new()
+            } else {
+                crate::drive_mount::release_mount(&mount)?
+            };
+            let mut files_done = out.files_done.clone();
+            if !plan.steps.iter().any(|s| s.state == "pending") {
+                files_done.extend(engine.fetch_plan_write_ready(&mut plan, true)?);
+            }
+            let finished = plan.files.iter().all(|f| f.done);
+            Ok(json!({"outcome": out, "unmount": unmount, "plan": plan, "finished": finished, "files_done": files_done}))
+        }
+        // Skip a disk (its blocks come from the network), or give up on the
+        // disks altogether and fetch the rest from the network.
+        (Method::Post, "/api/fetch/plan/skip") | (Method::Post, "/api/fetch/plan/network") => {
+            let mut plan = engine
+                .load_fetch_plan()
+                .ok_or_else(|| anyhow!("no fetch plan is running"))?;
+            let all = path.ends_with("/network");
+            for (i, st) in plan.steps.clone().iter().enumerate() {
+                let this = input.get("step").and_then(|v| v.as_u64()) == Some(i as u64);
+                if st.state == "pending" && (all || this) {
+                    engine.fetch_plan_skip(&mut plan, i)?;
+                }
+            }
+            let mut files_done = Vec::new();
+            if !plan.steps.iter().any(|s| s.state == "pending") {
+                files_done = engine.fetch_plan_write_ready(&mut plan, true)?;
+            }
+            let failed: Vec<Value> = plan
+                .files
+                .iter()
+                .filter(|f| f.error.is_some() && !f.done)
+                .map(|f| json!({"path": f.path, "error": f.error}))
+                .collect();
+            let finished = plan.files.iter().all(|f| f.done);
+            Ok(json!({"plan": plan, "finished": finished, "files_done": files_done, "files_failed": failed}))
+        }
+        (Method::Post, "/api/fetch/plan/cancel") => {
+            engine.cancel_fetch_plan()?;
+            Ok(json!({"ok": true}))
         }
         // A decrypted copy for another app (phones: open in / share with), on
         // the user's explicit request; removed when the vault locks.
@@ -1906,6 +1996,43 @@ fn api_unlocked(
                 service.record_policies(reps);
             }
             Ok(json!({"report": r, "status": engine.verify_status()}))
+        }
+        (Method::Get, "/api/restic") => {
+            let quick = varsto_core::engine::CheckOptions {
+                quick: true,
+                ..Default::default()
+            };
+            let c = engine.restic_check(&quick);
+            varsto_core::restic::status_value(engine.home(), Some(c))
+        }
+        (Method::Post, "/api/restic/setup") => {
+            let cfg: varsto_core::restic::ResticConfig = serde_json::from_value(
+                input
+                    .get("config")
+                    .cloned()
+                    .ok_or_else(|| anyhow!("config missing"))?,
+            )?;
+            let names: Option<Vec<String>> =
+                serde_json::from_value(input.get("folders").cloned().unwrap_or(Value::Null))?;
+            let mv = input.get("move").and_then(|v| v.as_bool()).unwrap_or(false);
+            let r = engine.restic_setup(cfg, names.as_deref(), mv)?;
+            service.folders_changed = true;
+            service.request_sync();
+            Ok(serde_json::to_value(r)?)
+        }
+        (Method::Post, "/api/restic/hold") => {
+            // Taken while this request holds the engine: no sync of the
+            // mirror is under way once it answers.
+            let token = opt(input, "token").ok_or_else(|| anyhow!("token missing"))?;
+            let pid = input
+                .get("pid")
+                .and_then(|v| v.as_u64())
+                .ok_or_else(|| anyhow!("pid missing"))? as u32;
+            Ok(json!({"held": engine.restic_hold(&token, pid)?}))
+        }
+        (Method::Post, "/api/restic/check") => {
+            let opts: varsto_core::engine::CheckOptions = serde_json::from_value(input.clone())?;
+            Ok(serde_json::to_value(engine.restic_check(&opts)?)?)
         }
         (Method::Get, "/api/scrub") => Ok(serde_json::to_value(engine.scrub_status())?),
         (Method::Post, "/api/scrub") => {

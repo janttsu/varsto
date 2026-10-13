@@ -15,8 +15,10 @@
 pub mod activity;
 pub mod advice;
 pub mod autoverify;
+pub mod blockdev;
 pub mod chunking;
 pub mod crypto;
+pub mod diskconf;
 pub mod engine;
 pub mod ids;
 pub mod kem;
@@ -36,6 +38,7 @@ pub mod providers;
 pub mod rclone;
 pub mod recovery;
 pub mod replica;
+pub mod restic;
 pub mod s3;
 pub mod scrub;
 pub mod share;

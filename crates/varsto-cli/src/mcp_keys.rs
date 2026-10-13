@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: PolyForm-Shield-1.0.0
-//! Scoped keys for the MCP server (`docs/mcp.md`, spec section 35).
+//! Scoped keys for the MCP server (`docs/mcp.md`, spec section 37).
 //!
 //! `varsto mcp key create` makes a key (`vmk_` and 64 hex characters, 32
 //! random bytes) and prints it once. Only its BLAKE3 hash is kept, in
