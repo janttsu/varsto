@@ -273,7 +273,7 @@ pub fn parse(s: &str) -> Result<Scanned> {
             }
             _ => bail!("malformed part number in the link"),
         };
-        if count < 2 || count > 64 || index == 0 || index > count {
+        if !(2..=64).contains(&count) || index == 0 || index > count {
             bail!("malformed part number in the link");
         }
         if value.is_empty()
