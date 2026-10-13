@@ -41,6 +41,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 mod access_sync;
+mod backups;
 mod block_cache;
 mod data_moves;
 mod devinfo;
@@ -58,6 +59,10 @@ mod verify;
 mod view;
 mod where_data;
 pub use access_sync::AccessExchangeReport;
+pub use backups::{
+    BackupOptions, BackupSummary, ExpireReport, RestoreReport, SnapshotInfo, SnapshotPick,
+    SnapshotReport,
+};
 pub use block_cache::{BlockWriter, StagedFile, BLOCK_CACHE_DIR, EXPORT_DIR};
 pub use devinfo::DeviceDetails;
 pub use disk_groups::DiskGroupStatus;
@@ -122,6 +127,10 @@ struct FolderState {
     /// used it: their index described plain files in the folder directory.
     #[serde(default)]
     block_cache: bool,
+    /// A backup's source: files the last scan could not read (left out of
+    /// the snapshot and named in it).
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    unreadable: BTreeSet<String>,
 }
 
 fn now_secs() -> i64 {
@@ -920,6 +929,7 @@ impl Engine {
             strongroom: None,
             removed_utc: 0,
             epoch_keys: token.epoch_keys.clone(),
+            backup: None,
         };
         engine.keyring.folders.insert(rec.folder_id.clone(), rec);
         // The request key stays as this member's KEM key: grants of later
@@ -1304,21 +1314,36 @@ impl Engine {
             others.iter().map(|s| (s.name(), s.place())).collect();
         let view = self.view()?;
         let mut targets_used = BTreeSet::new();
-        for (rec, _) in self.folders() {
+        // Backups count too: their blocks are on storages only.
+        let records: Vec<FolderRecord> = self
+            .keyring
+            .folders
+            .values()
+            .filter(|r| !r.is_removed())
+            .cloned()
+            .collect();
+        for rec in records {
             let policy = rec.effective_policy().unwrap_or_default();
             let required = policy.min_copies.max(1) as usize;
             // Blocks no file refers to any more need no copies; a folder never
-            // pulled here has no state, so then every block counts.
-            let referenced: HashSet<ChunkId> = self
-                .load_state(&rec.folder_id)
-                .map(|st| {
-                    st.files
-                        .values()
-                        .filter(|f| !f.deleted)
-                        .flat_map(|f| f.chunks.iter().map(|c| c.chunk.clone()))
-                        .collect()
-                })
-                .unwrap_or_default();
+            // pulled here has no state, so then every block counts. A backup:
+            // the blocks of the snapshots this device has seen.
+            let referenced: HashSet<ChunkId> = if rec.is_backup() {
+                self.backup_blocks_known(&rec.folder_id)
+                    .into_iter()
+                    .map(|(c, _)| c)
+                    .collect()
+            } else {
+                self.load_state(&rec.folder_id)
+                    .map(|st| {
+                        st.files
+                            .values()
+                            .filter(|f| !f.deleted)
+                            .flat_map(|f| f.chunks.iter().map(|c| c.chunk.clone()))
+                            .collect()
+                    })
+                    .unwrap_or_default()
+            };
             for ((folder, chunk), cr) in &view.chunks {
                 if folder != &rec.folder_id || !cr.storages.contains_key(name) {
                     continue;
@@ -1509,6 +1534,7 @@ impl Engine {
             strongroom: None,
             removed_utc: 0,
             epoch_keys: BTreeMap::new(),
+            backup: None,
         };
         let id = rec.folder_id.clone();
         self.keyring.folders.insert(id.clone(), rec);
@@ -1538,6 +1564,12 @@ impl Engine {
         path: &Path,
         selective: bool,
     ) -> Result<FolderId> {
+        if let Some(b) = self.keyring.find_backup(name_or_id) {
+            bail!(
+                "{} is a backup: backups are never attached; restore it into a directory instead (varsto backup restore)",
+                b.name
+            );
+        }
         let rec = self
             .keyring
             .find(name_or_id)
@@ -1651,6 +1683,10 @@ impl Engine {
 
     fn forget_folder(&mut self, folder: &FolderId, removed_utc: i64) -> Result<()> {
         self.detach_mount(folder)?;
+        if self.config.backups.iter().any(|b| &b.folder_id == folder) {
+            self.config.backups.retain(|b| &b.folder_id != folder);
+            self.config.save(&self.home)?;
+        }
         if let Some(f) = self.keyring.folders.get_mut(folder) {
             f.removed_utc = removed_utc.max(1);
         }
@@ -1675,6 +1711,12 @@ impl Engine {
             .find(name)
             .cloned()
             .ok_or_else(|| anyhow!("unknown folder {name}"))?;
+        self.remove_record(&rec, purge)
+    }
+
+    /// Publish the removal of a folder or backup, delete its data when
+    /// `purge`, and forget it here.
+    fn remove_record(&mut self, rec: &FolderRecord, purge: bool) -> Result<u64> {
         let removal = vault::FolderRemoval {
             folder_id: rec.folder_id.clone(),
             device: self.vault.device_id.clone(),
@@ -1704,6 +1746,7 @@ impl Engine {
                     format!("manifests/{}/", rec.folder_id),
                     format!("thumbs/{}/", rec.folder_id),
                     format!("vault/access/{}/", rec.folder_id),
+                    crate::snapshot::Snapshot::backup_prefix(&rec.folder_id),
                 ] {
                     for key in backend.list(&prefix)? {
                         backend.delete(&key)?;
@@ -1716,11 +1759,12 @@ impl Engine {
         Ok(deleted)
     }
 
+    /// The vault's folders (backups are listed by `backups`).
     pub fn folders(&self) -> Vec<(FolderRecord, Option<PathBuf>)> {
         self.keyring
             .folders
             .values()
-            .filter(|r| !r.is_removed())
+            .filter(|r| !r.is_removed() && !r.is_backup())
             .map(|r| {
                 let mount = self
                     .config
@@ -2226,6 +2270,9 @@ impl Engine {
                 | Event::ManifestPublished { folder, .. }
                 | Event::ChunkDropped { folder, .. }
                 | Event::FolderAdded { folder } => Some(folder.clone()),
+                Event::SnapshotTaken { backup, .. }
+                | Event::SnapshotExpired { backup, .. }
+                | Event::BackupStopped { backup } => Some(backup.clone()),
                 Event::DeviceEnrolled { .. } | Event::StorageRetired { .. } | Event::Unknown => {
                     None
                 }
@@ -2305,6 +2352,9 @@ impl Engine {
         let mut scanned = 0u64;
         let mut changed = 0u64;
         let mut new_index = BTreeMap::new();
+        // A backup takes what it can read; the rest is named in its snapshot.
+        let backup = rec.is_backup();
+        state.unreadable.clear();
         let walker = walkdir::WalkDir::new(root)
             .follow_links(false)
             .into_iter()
@@ -2312,7 +2362,20 @@ impl Engine {
                 !(e.depth() > 0 && e.file_name().to_string_lossy().starts_with(".varsto"))
             });
         for entry in walker {
-            let entry = entry?;
+            let entry = match entry {
+                Ok(e) => e,
+                Err(e) if backup => {
+                    if let Some(p) = e
+                        .path()
+                        .and_then(|p| p.strip_prefix(root).ok())
+                        .and_then(util::manifest_path)
+                    {
+                        state.unreadable.insert(p);
+                    }
+                    continue;
+                }
+                Err(e) => return Err(e.into()),
+            };
             if !entry.file_type().is_file() {
                 continue;
             }
@@ -2354,12 +2417,27 @@ impl Engine {
                 continue;
             }
             // Changed or new: chunk, hash, (upload).
-            let file = fs::File::open(entry.path())?;
+            let file = match fs::File::open(entry.path()) {
+                Ok(f) => f,
+                Err(_) if backup => {
+                    state.unreadable.insert(path.clone());
+                    continue;
+                }
+                Err(e) => return Err(e.into()),
+            };
             let mut hasher = KeyedHasher::new(&fk.hash);
             let mut chunks = Vec::new();
             let params = self.chunker_for(size);
+            let mut read_failed = false;
             for chunk in Chunker::new(std::io::BufReader::new(file), params)? {
-                let chunk = chunk?;
+                let chunk = match chunk {
+                    Ok(c) => c,
+                    Err(_) if backup => {
+                        read_failed = true;
+                        break;
+                    }
+                    Err(e) => return Err(e.into()),
+                };
                 hasher.update(&chunk);
                 let chunk_id = ChunkId::from_bytes(&crypto::keyed_hash(&fk.hash, &chunk));
                 let (object, epoch) = match known.get(&chunk_id) {
@@ -2374,18 +2452,26 @@ impl Engine {
                         (ObjectName::from_bytes(&crypto::hash(&ct)), fk.epoch)
                     }
                 };
-                self.pending.push(Event::ChunkOnDevice {
-                    folder: rec.folder_id.clone(),
-                    chunk: chunk_id.clone(),
-                    object: object.clone(),
-                    size: chunk.len() as u64,
-                });
+                // A backup's blocks are kept on storages only: no device
+                // offers them (`engine::backups`).
+                if !rec.is_backup() {
+                    self.pending.push(Event::ChunkOnDevice {
+                        folder: rec.folder_id.clone(),
+                        chunk: chunk_id.clone(),
+                        object: object.clone(),
+                        size: chunk.len() as u64,
+                    });
+                }
                 chunks.push(ChunkRef {
                     chunk: chunk_id,
                     object,
                     size: chunk.len() as u64,
                     epoch,
                 });
+            }
+            if read_failed {
+                state.unreadable.insert(path.clone());
+                continue;
             }
             let content_hash = hex::encode(hasher.finalize());
             let previous = state.files.get(&path);
@@ -2536,6 +2622,10 @@ impl Engine {
         let me = self.vault.device_id.clone();
         let carrier_need = self.carrier_destinations(&view, &folder_id);
         let targets = self.write_targets(rec);
+        // A backup goes to its storages only (never a transferrer), and
+        // blocks dropped by an expiry are written again when a new snapshot
+        // uses them.
+        let backup = rec.is_backup();
         let missing_on = |cref: &ChunkRef| -> Vec<String> {
             // The ledger record must be for this very object: after a key
             // change the same chunk id can stand for two objects.
@@ -2553,7 +2643,13 @@ impl Engine {
                         .unwrap_or(false)
                 })
                 // The folder's placement, and blocks moved away stay away.
-                .filter(|(spec, _)| targets.wants(spec.name(), known))
+                .filter(|(spec, _)| {
+                    if backup {
+                        !spec.is_carrier() && targets.wants(spec.name(), None)
+                    } else {
+                        targets.wants(spec.name(), known)
+                    }
+                })
                 // A carrier only takes what no other device has yet (F-048),
                 // or, with destinations, what one of them still lacks.
                 .filter(|(spec, _)| {
@@ -3464,7 +3560,12 @@ impl Engine {
         let progress = crate::progress::Download::begin(&rec.name, &file.path, file.size);
         {
             let mut out = fs::File::create(&tmp)?;
-            let peers = self.peers.clone();
+            // No device holds a backup's blocks: storages only.
+            let peers = if rec.is_backup() {
+                None
+            } else {
+                self.peers.clone()
+            };
             let stats = self.fetch_stats.clone();
             // Every object is one round trip to a peer or a storage. Fetched
             // one after another, a link with any latency idles most of the
@@ -3541,12 +3642,14 @@ impl Engine {
                     object: cref.object.clone(),
                     storage: storage_name,
                 });
-                self.pending.push(Event::ChunkOnDevice {
-                    folder: rec.folder_id.clone(),
-                    chunk: cref.chunk.clone(),
-                    object: cref.object.clone(),
-                    size: cref.size,
-                });
+                if !rec.is_backup() {
+                    self.pending.push(Event::ChunkOnDevice {
+                        folder: rec.folder_id.clone(),
+                        chunk: cref.chunk.clone(),
+                        object: cref.object.clone(),
+                        size: cref.size,
+                    });
+                }
                 Ok(())
             };
             match ahead {
@@ -4018,6 +4121,7 @@ impl Engine {
             strongroom: Some(info),
             removed_utc: 0,
             epoch_keys: BTreeMap::new(),
+            backup: None,
         };
         self.keyring.folders.insert(folder_id.clone(), rec);
         self.keyring.save(
@@ -4897,6 +5001,19 @@ impl Engine {
                 for c in &f.chunks {
                     referenced.insert((rec.folder_id.clone(), c.chunk.clone()), c.object.clone());
                 }
+            }
+        }
+        // Blocks of backup snapshots this device has read or written.
+        let backups: Vec<FolderId> = self
+            .keyring
+            .folders
+            .values()
+            .filter(|r| r.is_backup() && !r.is_removed())
+            .map(|r| r.folder_id.clone())
+            .collect();
+        for b in backups {
+            for (chunk, object) in self.backup_blocks_known(&b) {
+                referenced.insert((b.clone(), chunk), object);
             }
         }
         report.chunks_referenced = referenced.len() as u64;

@@ -896,10 +896,79 @@ def s_p2p_upload():
             run(vm, "pkill -x varsto; true", check_rc=False)
 
 
+# ----- backups: snapshots on the storage only, restored elsewhere, expired by the clock ------
+
+def bucket_snapshots():
+    return sorted((lab.DIR / "s3" / BUCKET / "snapshots").rglob("*.enc"))
+
+
+@scenario("backups")
+def s_backup():
+    """A directory of the laptop is backed up to the bucket only: the desktop
+    lists it but never receives its contents, restores any snapshot byte for
+    byte into a directory it names, and a snapshot whose retention ran out is
+    deleted from the bucket once the laptop's clock has moved three days on,
+    while the newer one stays restorable."""
+    fresh_pair()
+    pics = "/home/varsto/data/pics"
+    gen_data("vl-laptop", pics, seed=11, big_mb=3, small=30)
+    add = v("vl-laptop", f"backup add pics {pics} --retention-days 1 --manual")
+    snap = add.get("snapshot") or {}
+    check(snap.get("seq") == 1 and not snap.get("skipped"), f"first snapshot: {add}")
+    first = tree_hashes("vl-laptop", pics)
+    run("vl-laptop", f"rm {pics}/big.bin && echo second > {pics}/second.txt")
+    v("vl-laptop", "backup set pics --retention-days 30")
+    second = tree_hashes("vl-laptop", pics)
+    s2 = v("vl-laptop", "backup take pics")
+    check(s2.get("seq") == 2, f"second snapshot: {s2}")
+    check(tree_hashes("vl-laptop", pics) == second, "taking a snapshot changed the directory")
+    check(len(bucket_snapshots()) == 2, f"{len(bucket_snapshots())} snapshot objects in the bucket")
+
+    # The desktop knows the backup but holds none of it and cannot attach it.
+    v("vl-desktop", "sync")
+    lst = v("vl-desktop", "backup list")
+    check(len(lst) == 1 and lst[0]["snapshots"] == 2 and not lst[0]["this_device"], f"backup list on the desktop: {lst}")
+    st = v("vl-desktop", "status")
+    check(all(f["name"] != "pics" for f in st["folders"]), "the backup shows up as a folder")
+    bad = v("vl-desktop", "folder attach pics /home/varsto/data/pics-attached", json_out=False, check_rc=False)
+    check(isinstance(bad, dict) and bad.get("_failed"), "a backup could be attached as a folder")
+    check(run("vl-desktop", f"test -e {pics}", check_rc=False).returncode != 0, "backup contents reached the desktop")
+
+    # Restores on the desktop, by number and latest; a non-empty target is refused.
+    v("vl-desktop", "backup restore pics 1 --to /home/varsto/data/restored1")
+    same_tree(first, tree_hashes("vl-desktop", "/home/varsto/data/restored1"), "snapshot 1 restored on the desktop")
+    v("vl-desktop", "backup restore pics latest --to /home/varsto/data/restored2")
+    same_tree(second, tree_hashes("vl-desktop", "/home/varsto/data/restored2"), "snapshot 2 restored on the desktop")
+    busy = v("vl-desktop", "backup restore pics --to /home/varsto/data/restored2", check_rc=False)
+    check(isinstance(busy, dict) and busy.get("_failed"), "a restore into a directory with files went ahead")
+
+    # Three days on, snapshot 1 (kept one day, one day of grace) goes from
+    # the bucket with the blocks only it used; snapshot 2 stays.
+    run("vl-laptop", "sudo timedatectl set-ntp false 2>/dev/null; sudo date -s '+3 days' >/dev/null")
+    try:
+        ex = v("vl-laptop", "backup expire")
+        CTX["backup_expire"] = ex
+        check(ex["snapshots_expired"] == 1 and ex["objects_deleted"] > 0, f"expiry: {ex}")
+        check(len(bucket_snapshots()) == 1, f"{len(bucket_snapshots())} snapshot objects left in the bucket")
+        seqs = [s["seq"] for s in v("vl-laptop", "backup snapshots pics")]
+        check(seqs == [2], f"snapshots after the expiry: {seqs}")
+    finally:
+        fix_clock("vl-laptop")
+    v("vl-desktop", "sync")
+    v("vl-desktop", "backup restore pics latest --to /home/varsto/data/restored3")
+    same_tree(second, tree_hashes("vl-desktop", "/home/varsto/data/restored3"), "snapshot 2 after the expiry")
+    gone = v("vl-desktop", "backup restore pics 1 --to /home/varsto/data/restored4", check_rc=False)
+    check(isinstance(gone, dict) and gone.get("_failed"), "an expired snapshot was restored")
+    fsck = v("vl-desktop", "fsck --verify", check_rc=False)
+    fsck = fsck.get("_out", fsck) if isinstance(fsck, dict) and "_out" in fsck else fsck
+    check(not fsck.get("chunks_missing") and not fsck.get("objects_corrupt"), f"fsck after the expiry: {fsck}")
+
+
 SCENARIOS = [s_reset, s_init, s_pair, s_sync, s_words, s_conflict, s_selective, s_repair, s_policy,
              s_strongroom, s_org, s_remove_user, s_revoke,
              s_p2p_setup, s_p2p_lan, s_p2p_pub, s_p2p_sym, s_p2p_stop, s_share, s_disks, s_mixed,
-             s_outage, s_blackhole, s_crash, s_clock, s_clock_behind, s_p2p_upload, s_scale]
+             s_outage, s_blackhole, s_crash, s_clock, s_clock_behind, s_p2p_upload, s_scale,
+             s_backup]
 
 
 def main():

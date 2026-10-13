@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use varsto_core::storage::StorageSpec;
 use varsto_core::Engine;
 
+mod backup;
 mod desktop;
 mod filemanager;
 mod icon;
@@ -119,6 +120,12 @@ enum Cmd {
         /// Do not ask for confirmation.
         #[arg(long)]
         yes: bool,
+    },
+    /// Backups: read-only snapshots of a directory of this device, kept on
+    /// the storages only, each for a number of days.
+    Backup {
+        #[command(subcommand)]
+        cmd: backup::BackupCmd,
     },
     /// Show vault, devices, storages and folders.
     Status,
@@ -1911,6 +1918,7 @@ fn run(cli: &Cli) -> Result<()> {
                 }
             }
         }
+        Cmd::Backup { cmd } => backup::run(cli, &home, cmd)?,
         Cmd::Move {
             folder,
             from,

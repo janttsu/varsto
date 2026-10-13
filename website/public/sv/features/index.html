@@ -85,6 +85,16 @@
       </div>
     </section>
 
+    <section class="feature" id="backups">
+      <h2>Säkerhetskopior: krypterade kopior på annan plats som ingenting kan ändra</h2>
+      <picture><source type="image/webp" srcset="../../assets/img/features/backups.webp"><img src="../../assets/img/features/backups.png" alt="Datorn skickar en mapp till din lagring, som sparar krypterade skrivskyddade versioner: dagens, gårdagens och en från dag 90 som går ut och raderas." width="640" height="320" loading="lazy"></picture>
+      <div>
+        <p>Välj vilken mapp som helst på vilken enhet som helst, till exempel dina dokument, ett projekt eller en servers datakatalog. Varsto säkerhetskopierar den till din externa lagring: en S3-bucket, ett rclone-fjärrmål, en NAS eller kall lagring. Varje säkerhetskopia är en skrivskyddad version, krypterad precis som allt annat Varsto sparar. Den finns bara i den lagringen, aldrig på dina andra enheter. Versioner tas dagligen, varje vecka eller när du ber om det. Varje version sparas i det antal dagar du väljer, 90 som standard, och raderas från lagringen när den har gått ut. Block som inte har ändrats sparas en gång, hur många versioner som än använder dem.</p>
+        <p>Ingenting ändrar en version efter att den har tagits. En återställning görs alltid till en katalog du anger, från appens sida Säkerhetskopior eller med <code>varsto backup restore</code>. Du kan välja den senaste versionen, en numrerad version eller versionen från ett visst datum.</p>
+        <p class="note">Användningsfall: ett litet kontor säkerhetskopierar varje natt bokföringsmappen på en dator och en delad enhet på en annan till en bucket hos en annan leverantör. Tre månaders historik finns kvar, utpressningsprogram på datorerna kan inte skriva om den, och ingen behöver komma ihåg att koppla in en disk.</p>
+      </div>
+    </section>
+
     <section class="feature">
       <h2>Selektiv synkronisering med platshållare</h2>
       <picture><source type="image/webp" srcset="../../assets/img/features/selective.webp"><img src="../../assets/img/features/selective.png" alt="En telefon med en fillista där stora filer är platshållare och små filer är nedladdade." width="640" height="320" loading="lazy"></picture>

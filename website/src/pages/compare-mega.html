@@ -21,6 +21,7 @@ description: Looking for a MEGA alternative with end-to-end encryption on your o
       <tr><th scope="row">Devices online together</th><td>Not needed: the cloud holds the copy.</td><td>Not needed: devices sync through your storages, and directly peer to peer when they can reach each other.</td></tr>
       <tr><th scope="row">Knows where every copy is</th><td>One provider copy; no tracking across your own media.</td><td>Yes: a signed ledger records which storage and device holds every block; durability policies (by default 1 copy anywhere, 1 external, 1 on your own devices or disks, checked by another device within 30 days) warn when a rule is not met.</td></tr>
       <tr><th scope="row">Removable and offline disks</th><td>No removable-disk workflow.</td><td>Yes: disk pools are filled, checked and recognised when they come back; files on a disk that is away ask for that disk.</td></tr>
+      <tr><th scope="row">Backups</th><td>The desktop app backs folders up one way to MEGA's cloud, where they are read-only; version history depends on the plan.</td><td>Yes: pick a folder on any device and Varsto keeps encrypted, read-only snapshots of it on your external storages only, never on your devices, for the number of days you choose (90 by default), then deletes the expired ones. Restore any snapshot into a directory you name, from the app or the command line.</td></tr>
       <tr><th scope="row">Licence and price</th><td>Free tier and paid plans with transfer quotas; client source published (SDK BSD-licensed, desktop app under MEGA's own licence).</td><td>Source-available (PolyForm Shield 1.0.0), free; you pay only your storage provider.</td></tr>
       <tr><th scope="row">Maturity</th><td>Large, long-running service.</td><td>Alpha: not for production data, formats may still change.</td></tr>
       </tbody>
@@ -38,4 +39,5 @@ description: Looking for a MEGA alternative with end-to-end encryption on your o
       <li><a href="https://mega.io/">MEGA website</a></li>
       <li><a href="https://github.com/meganz/MEGAsync">MEGA desktop app source</a></li>
       <li><a href="https://eprint.iacr.org/2022/959">MEGA: Malleable Encryption Goes Awry (ETH Zurich)</a></li>
+      <li><a href="https://github.com/meganz/MEGAsync">MEGA desktop app source</a></li>
     </ul>

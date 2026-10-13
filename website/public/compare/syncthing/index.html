@@ -72,6 +72,7 @@
       <tr><th scope="row">Devices online together</th><td>Yes: two devices must be online at the same time to exchange changes, unless an always-on device is kept.</td><td>Not needed: devices sync through your storages, and directly peer to peer when they can reach each other.</td></tr>
       <tr><th scope="row">Knows where every copy is</th><td>No tracking of copies or copy counts.</td><td>Yes: a signed ledger records which storage and device holds every block; durability policies (by default 1 copy anywhere, 1 external, 1 on your own devices or disks, checked by another device within 30 days) warn when a rule is not met.</td></tr>
       <tr><th scope="row">Removable and offline disks</th><td>No removable-disk workflow.</td><td>Yes: disk pools are filled, checked and recognised when they come back; files on a disk that is away ask for that disk.</td></tr>
+      <tr><th scope="row">Backups</th><td>Not a backup tool by its own FAQ: edits and deletions reach every device. File versioning keeps replaced files on the receiving devices.</td><td>Yes: pick a folder on any device and Varsto keeps encrypted, read-only snapshots of it on your external storages only, never on your devices, for the number of days you choose (90 by default), then deletes the expired ones. Restore any snapshot into a directory you name, from the app or the command line.</td></tr>
       <tr><th scope="row">Licence and price</th><td>Open source (MPL-2.0), free.</td><td>Source-available (PolyForm Shield 1.0.0), free; you pay only your storage provider.</td></tr>
       <tr><th scope="row">Maturity</th><td>Mature, long-running project (2.x).</td><td>Alpha: not for production data, formats may still change.</td></tr>
       </tbody>
@@ -89,6 +90,7 @@
       <li><a href="https://syncthing.net/">Syncthing website</a></li>
       <li><a href="https://docs.syncthing.net/users/untrusted.html">Untrusted devices</a></li>
       <li><a href="https://docs.syncthing.net/users/versioning.html">File versioning</a></li>
+      <li><a href="https://docs.syncthing.net/users/faq.html">Syncthing FAQ</a></li>
     </ul>
 
   </div>

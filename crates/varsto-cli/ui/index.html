@@ -45,6 +45,7 @@
   <symbol id="i-newfolder" viewBox="0 0 20 20"><path d="M3 6.5A1.5 1.5 0 0 1 4.5 5h3.4l1.6 1.6h6A1.5 1.5 0 0 1 17 8.1v6.4a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 3 14.5z"/><path d="M10 9v4M8 11h4"/></symbol>
   <symbol id="i-share" viewBox="0 0 20 20"><path d="M10 12V3.5M6.5 7 10 3.5 13.5 7"/><path d="M5 10v5.5A1.5 1.5 0 0 0 6.5 17h7a1.5 1.5 0 0 0 1.5-1.5V10"/></symbol>
   <symbol id="i-back" viewBox="0 0 20 20"><path d="m12.5 5-5 5 5 5"/></symbol>
+  <symbol id="i-backup" viewBox="0 0 20 20"><rect x="3" y="4" width="14" height="4" rx="1.2"/><path d="M4.5 8v7A1.5 1.5 0 0 0 6 16.5h8a1.5 1.5 0 0 0 1.5-1.5V8"/><path d="M8 11h4"/></symbol>
 </svg>
 
 <aside class="sidebar">
@@ -60,6 +61,7 @@
     <button type="button" class="nav-item tree-add" id="treeadd"><svg class="icon"><use href="#i-plus"/></svg><span>Add folder</span></button>
     <button type="button" class="nav-item" data-nav="shared"><svg class="icon"><use href="#i-sharing"/></svg><span>Shared</span></button>
     <button type="button" class="nav-item" data-nav="storages"><svg class="icon"><use href="#i-storages"/></svg><span>Storages</span></button>
+    <button type="button" class="nav-item" data-nav="backups"><svg class="icon"><use href="#i-backup"/></svg><span>Backups</span></button>
     <button type="button" class="nav-item" data-nav="policies"><svg class="icon"><use href="#i-policies"/></svg><span>Policies</span></button>
     <button type="button" class="nav-item" data-nav="peers"><svg class="icon"><use href="#i-peers"/></svg><span>Peers</span></button>
     <button type="button" class="nav-item hidden" data-nav="organization" data-org-only="1"><svg class="icon"><use href="#i-org"/></svg><span>Organization</span></button>
@@ -439,6 +441,43 @@
       </form>
     </div>
 
+    <!-- Backups -->
+    <div class="page hidden" data-page="backups">
+      <div class="card">
+        <h2 class="card-title"><svg class="icon accent"><use href="#i-backup"/></svg>Backups</h2>
+        <p class="muted small">A backup keeps read-only snapshots of a directory of this device, encrypted, on your storages only: never on your other devices and never on a transferrer. Each snapshot is kept for the days you choose and then deleted from the storages. To get files back, restore a snapshot into a directory you name.</p>
+        <div class="table-wrap">
+        <table id="backups"><thead><tr><th>Backup</th><th class="num">Snapshots</th><th>Latest snapshot</th><th class="num">Size</th><th>Kept</th><th>Schedule</th><th></th></tr></thead><tbody></tbody></table>
+        </div>
+        <div id="backups-empty" class="empty-state hidden"><div class="empty-icon"><svg class="icon"><use href="#i-backup"/></svg></div><p class="empty-title">No backups yet</p><p class="muted">Add one below: choose a directory of this device and the storages to keep it on.</p></div>
+      </div>
+      <div id="backupsnaps" class="card hidden">
+        <div class="card-head">
+          <h2 class="card-title">Snapshots</h2>
+          <span id="backupsnaps-name" class="muted small" data-no-i18n></span>
+        </div>
+        <div class="table-wrap">
+        <table id="snapshots"><thead><tr><th class="num">Number</th><th>Taken</th><th class="num">Files</th><th class="num">Size</th><th>Expires</th><th></th></tr></thead><tbody></tbody></table>
+        </div>
+        <p class="muted small">Snapshots cannot be changed or deleted: each one goes when its time is up.</p>
+      </div>
+      <form id="addbackup" class="card narrow">
+        <h3 class="card-title"><svg class="icon accent"><use href="#i-plus"/></svg>Add a backup</h3>
+        <label>Name <input name="name" placeholder="Photos backup" required autocomplete="off"></label>
+        <label>Directory <input name="path" placeholder="/Users/me/Pictures" required autocomplete="off"><span class="hint muted">a directory of this device; it is only ever read</span></label>
+        <label>Keep each snapshot (days) <input name="retention_days" type="number" min="1" step="1" value="90" inputmode="numeric" required></label>
+        <label>Schedule <select name="schedule"><option value="daily">Daily</option><option value="weekly">Weekly</option><option value="manual">Only when I ask</option></select></label>
+        <div class="field-group">
+          <span class="field-caption">Storages</span>
+          <div id="backupstorages"></div>
+          <p id="backupstorages-empty" class="muted small hidden">This device has no storage a backup can go to. Add one under Storages first.</p>
+          <span class="hint muted">Transferrers are not offered: a backup stays on storages.</span>
+        </div>
+        <div class="actions"><button type="submit">Add backup</button></div>
+        <p class="muted small">The first snapshot is taken right away. Later ones follow the schedule while Varsto runs in the background.</p>
+      </form>
+    </div>
+
     <!-- Policies -->
     <div class="page hidden" data-page="policies">
       <div class="card">
@@ -627,6 +666,7 @@
     <div class="page hidden" data-page="more">
       <div class="card more-card">
         <button type="button" class="more-item" data-nav="shared"><svg class="icon"><use href="#i-sharing"/></svg><span>Shared</span><svg class="icon chev"><use href="#i-chevron"/></svg></button>
+        <button type="button" class="more-item" data-nav="backups"><svg class="icon"><use href="#i-backup"/></svg><span>Backups</span><svg class="icon chev"><use href="#i-chevron"/></svg></button>
         <button type="button" class="more-item" data-nav="policies"><svg class="icon"><use href="#i-policies"/></svg><span>Policies</span><svg class="icon chev"><use href="#i-chevron"/></svg></button>
         <button type="button" class="more-item" data-nav="peers"><svg class="icon"><use href="#i-peers"/></svg><span>Peers</span><svg class="icon chev"><use href="#i-chevron"/></svg></button>
         <button type="button" class="more-item hidden" data-nav="organization" data-org-only="1"><svg class="icon"><use href="#i-org"/></svg><span>Organization</span><svg class="icon chev"><use href="#i-chevron"/></svg></button>

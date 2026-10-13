@@ -85,6 +85,16 @@
       </div>
     </section>
 
+    <section class="feature" id="backups">
+      <h2>Varmuuskopiot: salatut kopiot toisessa paikassa, joita mikään ei muuta</h2>
+      <picture><source type="image/webp" srcset="../../assets/img/features/backups.webp"><img src="../../assets/img/features/backups.png" alt="Tietokone lähettää kansion tallennuspaikkaan, joka säilyttää salattuja vain luku -versioita: tämän päivän, eilisen ja 90 päivän takaisen, joka vanhenee ja poistetaan." width="640" height="320" loading="lazy"></picture>
+      <div>
+        <p>Valitse mikä tahansa kansio millä tahansa laitteella, esimerkiksi asiakirjasi, projekti tai palvelimen datahakemisto. Varsto varmuuskopioi sen ulkoisiin tallennuspaikkoihisi: S3-bucketiin, rclone-etäkohteeseen, NASiin tai kylmätallennukseen. Jokainen varmuuskopio on vain luku -muotoinen versio, joka on salattu täsmälleen kuten kaikki muukin, mitä Varsto säilyttää. Se on vain näissä tallennuspaikoissa, ei koskaan muilla laitteillasi. Versio otetaan päivittäin, viikoittain tai pyydettäessä. Kutakin säilytetään valitsemasi päivämäärä, oletuksena 90 päivää, ja vanhentunut versio poistetaan tallennuspaikasta. Muuttumattomat lohkot tallennetaan vain kerran, vaikka niitä käyttäisi moni versio.</p>
+        <p>Mikään ei muokkaa versiota sen ottamisen jälkeen. Palautus tehdään aina nimeämääsi hakemistoon sovelluksen Varmuuskopiot-sivulta tai komennolla <code>varsto backup restore</code>. Palautettavaksi voi valita uusimman version, numeroidun version tai tietyn päivän version.</p>
+        <p class="note">Käyttötapaus: pieni toimisto varmuuskopioi joka yö yhden tietokoneen kirjanpitokansion ja toisen koneen jaetun aseman toisen palveluntarjoajan bucketiin. Kolmen kuukauden historia pysyy tallessa, eikä tietokoneiden kiristyshaittaohjelma pysty kirjoittamaan sitä uudelleen. Kenenkään ei tarvitse muistaa kytkeä levyä.</p>
+      </div>
+    </section>
+
     <section class="feature">
       <h2>Valikoiva synkronointi paikkamerkeillä</h2>
       <picture><source type="image/webp" srcset="../../assets/img/features/selective.webp"><img src="../../assets/img/features/selective.png" alt="Puhelin, jonka tiedostoluettelossa suuret tiedostot ovat paikkamerkkejä ja pienet on ladattu." width="640" height="320" loading="lazy"></picture>

@@ -111,31 +111,7 @@ impl Manifest {
     /// a key that is not the entry's path, a chunk larger than any chunker
     /// makes, or a size that is not the sum of its chunks.
     pub fn validate(&self) -> Result<()> {
-        for (key, f) in &self.files {
-            if key != &f.path {
-                bail!("manifest entry {key:?} names another path {:?}", f.path);
-            }
-            crate::util::check_rel_path(&f.path)?;
-            if f.deleted {
-                continue;
-            }
-            let mut total: u64 = 0;
-            for c in &f.chunks {
-                if c.size == 0 || c.size > MAX_CHUNK_SIZE {
-                    bail!("manifest entry {key:?} has a chunk of {} bytes", c.size);
-                }
-                total = total
-                    .checked_add(c.size)
-                    .ok_or_else(|| anyhow::anyhow!("manifest entry {key:?} overflows"))?;
-            }
-            if total != f.size {
-                bail!(
-                    "manifest entry {key:?} says {} bytes but its chunks hold {total}",
-                    f.size
-                );
-            }
-        }
-        Ok(())
+        validate_files(&self.files)
     }
 
     /// Stable hash of the file map, used to detect whether a new manifest is needed.
@@ -143,6 +119,35 @@ impl Manifest {
         let bytes = serde_json::to_vec(files).unwrap_or_default();
         hex::encode(crypto::hash(&bytes))
     }
+}
+
+/// The checks of `Manifest::validate` on any file map (backup snapshots too).
+pub fn validate_files(files: &BTreeMap<String, FileState>) -> Result<()> {
+    for (key, f) in files {
+        if key != &f.path {
+            bail!("manifest entry {key:?} names another path {:?}", f.path);
+        }
+        crate::util::check_rel_path(&f.path)?;
+        if f.deleted {
+            continue;
+        }
+        let mut total: u64 = 0;
+        for c in &f.chunks {
+            if c.size == 0 || c.size > MAX_CHUNK_SIZE {
+                bail!("manifest entry {key:?} has a chunk of {} bytes", c.size);
+            }
+            total = total
+                .checked_add(c.size)
+                .ok_or_else(|| anyhow::anyhow!("manifest entry {key:?} overflows"))?;
+        }
+        if total != f.size {
+            bail!(
+                "manifest entry {key:?} says {} bytes but its chunks hold {total}",
+                f.size
+            );
+        }
+    }
+    Ok(())
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]

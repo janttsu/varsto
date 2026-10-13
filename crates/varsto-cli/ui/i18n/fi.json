@@ -538,7 +538,57 @@
   "Waiting for Wi-Fi": "Odotetaan Wi-Fi-yhteyttä",
   "Waiting for the charger": "Odotetaan laturia",
   "Waiting for the Varsto service": "Odotetaan Varsto-palvelua",
-  "Waiting for Varsto to be unlocked": "Odotetaan Varston lukituksen avaamista"
+  "Waiting for Varsto to be unlocked": "Odotetaan Varston lukituksen avaamista",
+  "Backups": "Varmuuskopiot",
+  "A backup keeps read-only snapshots of a directory of this device, encrypted, on your storages only: never on your other devices and never on a transferrer. Each snapshot is kept for the days you choose and then deleted from the storages. To get files back, restore a snapshot into a directory you name.": "Varmuuskopio säilyttää tämän laitteen kansiosta salattuja versioita, joita ei voi muuttaa, vain tallennuspaikoissasi: ei koskaan muilla laitteillasi eikä siirtolevyllä. Kutakin versiota säilytetään valitsemasi määrä päiviä, minkä jälkeen se poistetaan tallennuspaikoista. Saat tiedostot takaisin palauttamalla version nimeämääsi kansioon.",
+  "Backup": "Varmuuskopio",
+  "Snapshots": "Versiot",
+  "Latest snapshot": "Uusin versio",
+  "Kept": "Säilytetään",
+  "No backups yet": "Ei vielä varmuuskopioita",
+  "Add one below: choose a directory of this device and the storages to keep it on.": "Lisää varmuuskopio alla: valitse tämän laitteen kansio ja tallennuspaikat, joihin se tallennetaan.",
+  "Number": "Numero",
+  "Taken": "Otettu",
+  "Expires": "Vanhenee",
+  "Snapshots cannot be changed or deleted: each one goes when its time is up.": "Versioita ei voi muuttaa eikä poistaa: kukin poistuu, kun sen aika on täynnä.",
+  "Add a backup": "Lisää varmuuskopio",
+  "Photos backup": "Kuvien varmuuskopio",
+  "a directory of this device; it is only ever read": "tämän laitteen kansio; sitä vain luetaan",
+  "Keep each snapshot (days)": "Säilytä kukin versio (päivää)",
+  "Daily": "Päivittäin",
+  "Weekly": "Viikoittain",
+  "Only when I ask": "Vain pyynnöstä",
+  "This device has no storage a backup can go to. Add one under Storages first.": "Tällä laitteella ei ole tallennuspaikkaa, johon varmuuskopion voi tallentaa. Lisää ensin tallennuspaikka kohdassa Tallennuspaikat.",
+  "Transferrers are not offered: a backup stays on storages.": "Siirtolevyjä ei tarjota: varmuuskopio pysyy tallennuspaikoissa.",
+  "Add backup": "Lisää varmuuskopio",
+  "The first snapshot is taken right away. Later ones follow the schedule while Varsto runs in the background.": "Ensimmäinen versio otetaan heti. Seuraavat otetaan aikataulun mukaan, kun Varsto toimii taustalla.",
+  "stopped": "lopetettu",
+  "other device": "toinen laite",
+  "None yet": "Ei vielä",
+  "On the device it backs up": "Laitteella, jota se varmuuskopioi",
+  "Take snapshot now": "Ota versio nyt",
+  "Restore latest…": "Palauta uusin…",
+  "Settings…": "Asetukset…",
+  "Stop…": "Lopeta…",
+  "Restore…": "Palauta…",
+  "No snapshots yet": "Ei vielä versioita",
+  "Restore a snapshot": "Palauta versio",
+  "The files are written into the directory you name, which must be empty. Nothing is changed in the backed-up directory or in the snapshot.": "Tiedostot kirjoitetaan nimeämääsi kansioon, jonka on oltava tyhjä. Varmuuskopioituun kansioon tai versioon ei muuteta mitään.",
+  "Restore into directory": "Palauta kansioon",
+  "Only these files or directories (optional)": "Vain nämä tiedostot tai kansiot (valinnainen)",
+  "Documents, Photos/2026": "Asiakirjat, Kuvat/2026",
+  "paths inside the snapshot, separated by commas": "polut version sisällä pilkuilla erotettuina",
+  "Restore": "Palauta",
+  "The directory is not empty. Restore into it anyway, replacing files that have the same names?": "Kansio ei ole tyhjä. Palautetaanko siihen silti niin, että samannimiset tiedostot korvataan?",
+  "Directory not empty": "Kansio ei ole tyhjä",
+  "Restore anyway": "Palauta silti",
+  "Backup settings": "Varmuuskopion asetukset",
+  "A new retention applies to snapshots taken from now on; those already taken keep theirs.": "Uusi säilytysaika koskee tästä lähtien otettavia versioita; jo otetut säilyttävät omansa.",
+  "Keep each snapshot at least one day.": "Säilytä kutakin versiota vähintään yksi päivä.",
+  "No more snapshots are taken. The snapshots kept are deleted as their time is up, and then the backup goes.": "Uusia versioita ei enää oteta. Säilytetyt versiot poistetaan sitä mukaa kuin niiden aika täyttyy, ja sen jälkeen varmuuskopio poistuu.",
+  "Stop this backup?": "Lopetetaanko tämä varmuuskopio?",
+  "Stop backup": "Lopeta varmuuskopio",
+  "Choose at least one storage.": "Valitse vähintään yksi tallennuspaikka."
  },
  "patterns": [
   [
@@ -592,6 +642,38 @@
   [
    "^(.+) is larger than (\\d+) GiB and was skipped$",
    "$1 on yli $2 GiB ja ohitettiin"
+  ],
+  [
+   "^(\\d+) days$",
+   "$1 päivää"
+  ],
+  [
+   "^every (\\d+) h$",
+   "$1 tunnin välein"
+  ],
+  [
+   "^Snapshot (\\d+) of (.+) taken: (\\d+) files$",
+   "Varmuuskopion $2 versio $1 otettu: $3 tiedostoa"
+  ],
+  [
+   "^(\\d+) files could not be read and were left out: (.+)$",
+   "$1 tiedostoa ei voitu lukea, joten ne jätettiin pois: $2"
+  ],
+  [
+   "^Restored (\\d+) files of snapshot (\\d+) into (.+)$",
+   "Palautettiin version $2 $1 tiedostoa kansioon $3"
+  ],
+  [
+   "^(\\d+) files could not be restored: (.+)$",
+   "$1 tiedostoa ei voitu palauttaa: $2"
+  ],
+  [
+   "^Backup added: (.+)$",
+   "Varmuuskopio lisätty: $1"
+  ],
+  [
+   "^Backup stopped: (.+)$",
+   "Varmuuskopio lopetettu: $1"
   ]
  ],
  "review": [

@@ -2,7 +2,7 @@
 
 Varsto is tested in layers. The goal is that cheaper AI systems and scripts can run most tests from written instructions, while a human covers what cannot be automated (Windows, macOS, Android and iOS on real devices).
 
-> Alpha (0.0.1-alpha.12): the Rust core, the CLI, the background service with tray and web interface, and the Android, macOS and iOS (Simulator) shells exist (`crates/`, `apps/`). CI builds and tests all of them on GitHub-hosted runners; the VM levels below are prepared for what CI does not cover.
+> Alpha (0.0.1-alpha.13): the Rust core, the CLI, the background service with tray and web interface, and the Android, macOS and iOS (Simulator) shells exist (`crates/`, `apps/`). CI builds and tests all of them on GitHub-hosted runners; the VM levels below are prepared for what CI does not cover.
 
 ## Principles
 
@@ -54,7 +54,7 @@ Only the `smoke` suite and the `debian-stable` (x86_64) image exist so far.
 
 ### VM lab (`scripts/test/lab`)
 
-`scripts/test/lab/lab.py up` builds a small internet on one Linux host with libvirt: a WAN in a documentation range with an S3 server (`rclone serve s3`) and STUN, a home network behind a cone NAT router, an office network behind a symmetric NAT router, and a public device. `lab.py build` compiles a static binary in a build VM, `install-bin` puts it on every device, and `scenarios.py` plays 27 scenarios against them: setup and pairing, sync and conflicts, selective sync, repair, policies, Strongrooms, organizations and removal, revocation, peer-to-peer on the LAN, through cone and symmetric NAT and during a slow upload, sharing, disk pools, mixed versions, storage outage, a black-holed network, a crash during a push, clock skew and scale (20 000 files and 1 GiB). `lab.py release` builds the Linux, Windows and Android release packages in the build VM.
+`scripts/test/lab/lab.py up` builds a small internet on one Linux host with libvirt: a WAN in a documentation range with an S3 server (`rclone serve s3`) and STUN, a home network behind a cone NAT router, an office network behind a symmetric NAT router, and a public device. `lab.py build` compiles a static binary in a build VM, `install-bin` puts it on every device, and `scenarios.py` plays 28 scenarios against them: setup and pairing, sync and conflicts, selective sync, repair, policies, Strongrooms, organizations and removal, revocation, peer-to-peer on the LAN, through cone and symmetric NAT and during a slow upload, sharing, disk pools, mixed versions, storage outage, a black-holed network, a crash during a push, clock skew, scale (20 000 files and 1 GiB) and backups (restored on another device, a snapshot expired after the clock moves on). `lab.py release` builds the Linux, Windows and Android release packages in the build VM.
 
 The rest of this section describes the `smoke` suite. The smoke suite checks that the VM boots, accepts SSH, finished cloud-init, has a sane clock and has no route out of the test network.
 
