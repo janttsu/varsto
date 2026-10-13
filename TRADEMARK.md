@@ -22,4 +22,4 @@ Modified versions that you are allowed to distribute under the licence must use 
 
 ## Contact
 
-TODO: add a trademark contact before the first public release.
+Trademark questions: open an issue in the repository (2026-10-13; a direct contact follows).

@@ -6,9 +6,7 @@ Varsto is alpha software and the cryptography has not been independently audited
 
 Please do **not** open a public issue for security problems.
 
-TODO before the first public release: publish a dedicated security contact (and a PGP key or `security.txt`), define response times, and set up coordinated disclosure.
-
-Until then, report privately to the repository owner through the hosting platform's private messaging.
+A dedicated security contact is not available yet (2026-10-13); until then, report privately through GitHub's private vulnerability reporting on the repository.
 
 ## Scope
 

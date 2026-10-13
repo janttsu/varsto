@@ -68,8 +68,11 @@ clients refuse to update.
 The update base URL is one constant, `DEFAULT_SITE` in
 `crates/varsto-cli/src/update.rs`: `https://varsto.net` (downloads under
 `/downloads/`). `VARSTO_UPDATE_URL` overrides it (a mirror or a test server;
-the signature check is the same). The old address, `https://varsto.soderlund.in`,
-keeps serving `/downloads/` for clients built before the move.
+the signature check is the same). `https://varsto.net` serves `/downloads/`; the old host,
+`varsto.soderlund.in`, redirects there.
+
+Tags `v0.0.1-alpha.3` and `v0.0.1-alpha.9` do not exist: those releases were
+folded into the next tag. Do not create them afterwards.
 
 ## Steps
 

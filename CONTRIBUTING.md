@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for your interest. Varsto is pre-alpha and the contribution process is still being defined.
+Thanks for your interest. Varsto is alpha (0.0.1-alpha.13) and the contribution process is still being defined.
 
 ## Rules that already apply
 
