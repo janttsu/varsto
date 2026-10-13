@@ -648,6 +648,27 @@
   "Runs an older version that does not tell": "Kör en äldre version som inte berättar detta",
   "Does not share its activity with this device": "Delar inte sin aktivitet med den här enheten",
   "Asking…": "Frågar…",
+  "Bit-rot check": "Kontroll av bitröta",
+  "Stored data can decay without anyone noticing. The background service re-reads, within a budget, every block on your storages and attached disks, whoever wrote it, and every synced file on this device, so that everything is checked at least once in the period. A damaged block is repaired from another copy. A file on this device that changed without being edited is never overwritten: it is moved aside as name.damaged-date and the synced version is put back. Cold storages are read only when you include them.": "Lagrade data kan förfalla utan att någon märker det. Bakgrundstjänsten läser, inom en budget, om varje block i dina lagringar och anslutna diskar, vem som än skrev det, och varje synkroniserad fil på den här enheten, så att allt kontrolleras minst en gång under perioden. Ett skadat block repareras från en annan kopia. En fil på den här enheten som ändrats utan att redigeras skrivs aldrig över: den flyttas undan som namn.damaged-datum och den synkroniserade versionen läggs tillbaka. Kall lagring läses bara om du tar med den.",
+  "Check now": "Kontrollera nu",
+  "Everything is re-read at least once in this period. A run reads at most this much; remote storages may bill the downloads.": "Allt läses om minst en gång under den här perioden. En körning läser högst så här mycket; externa lagringar kan debitera nedladdningarna.",
+  "Days to check everything": "Dagar för att kontrollera allt",
+  "Most MiB per run from this device's disks": "Högst MiB per körning från den här enhetens diskar",
+  "Most MiB per run from remote storages": "Högst MiB per körning från externa lagringar",
+  "next run at the next sync": "nästa körning vid nästa synkronisering",
+  "bit-rot check started": "kontroll av bitröta startad",
+  "Checking storage «{s}» for bit rot": "Kontrollerar lagringen «{s}» för bitröta",
+  "Checking disk «{s}» for bit rot": "Kontrollerar disken «{s}» för bitröta",
+  "Checking the files of folder «{s}» for bit rot": "Kontrollerar filerna i mappen «{s}» för bitröta",
+  "Checking the block cache for bit rot": "Kontrollerar blockcachen för bitröta",
+  "By default every block goes to every storage. Tick storages or places to write this folder only there; a place means every storage in it, now and later. Blocks already stored stay where they are until you move them; policies still count every copy.": "Som standard skrivs varje block till alla lagringsplatser. Kryssa i lagringsplatser eller platser för att bara skriva den här mappen dit; en plats betyder alla lagringsplatser i den, nu och senare. Block som redan har lagrats ligger kvar där de är tills du flyttar dem; reglerna räknar ändå varje kopia.",
+  "Tick the device (or devices) this transferrer is taken to. It then carries the blocks they still lack and is emptied as they receive them. Tick none to carry what any device lacks.": "Kryssa i enheten (eller enheterna) som den här överföringsdisken tas till. Den bär de block som de fortfarande saknar och töms i takt med att de tar emot dem. Kryssa inte i någon för att bära det som någon enhet saknar.",
+  "No other device yet": "Inga andra enheter ännu",
+  "at home": "hemma",
+  "external": "extern",
+  "at home, cold": "hemma, kall",
+  "external, cold": "extern, kall",
+  "Destination…": "Mål…",
   "Fetch from disks": "Hämta från diskar",
   "Disk inserted": "Disken är isatt",
   "Copy from the disk": "Kopiera från disken",
@@ -790,6 +811,50 @@
   [
    "^Last heard (\\d+) s ago, not answering now$",
    "Hördes senast för $1 s sedan, svarar inte nu"
+  ],
+  [
+   "^On: everything is checked within (\\d+) days, up to (\\d+) MiB from this device's disks and (\\d+) MiB from remote storages per run$",
+   "På: allt kontrolleras inom $1 dagar, högst $2 MiB från den här enhetens diskar och $3 MiB från externa lagringar per körning"
+  ],
+  [
+   "^cold storages included: (.+)$",
+   "kall lagring medtagen: $1"
+  ],
+  [
+   "^last run (.+): (\\d+) objects and (\\d+) files checked, (\\d+) problems found$",
+   "senaste körning $1: $2 objekt och $3 filer kontrollerade, $4 problem hittade"
+  ],
+  [
+   "^(\\d+) problems found and (\\d+) files restored in all$",
+   "totalt $1 problem hittade och $2 filer återställda"
+  ],
+  [
+   "^next run (.+)$",
+   "nästa körning $1"
+  ],
+  [
+   "^last error: (.+)$",
+   "senaste fel: $1"
+  ],
+  [
+   "^(.+): (.+) is damaged on disk and waits for a good copy$",
+   "$1: $2 är skadad på disken och väntar på en hel kopia"
+  ],
+  [
+   "^(.+): (.+) was damaged on disk; moved to (.+) and the synced version restored$",
+   "$1: $2 var skadad på disken; flyttad till $3 och den synkroniserade versionen återställd"
+  ],
+  [
+   "^bit-rot check: (\\d+) objects and (\\d+) files checked, (\\d+) problems found$",
+   "kontroll av bitröta: $1 objekt och $2 filer kontrollerade, $3 problem hittade"
+  ],
+  [
+   "^bit-rot check failed: (.+)$",
+   "kontroll av bitröta misslyckades: $1"
+  ],
+  [
+   "^(.+), cold$",
+   "$1, kall"
   ],
   [
    "^Insert disk (.+) \\((.*)\\) into the dock, then choose Disk inserted\\.$",

@@ -1546,6 +1546,53 @@ impl PoolStorage {
         Ok(out)
     }
 
+    /// The copy of `key` on one attached disk (a scrub reads each disk's
+    /// copy, where `get` reads the first one it finds). None when the disk
+    /// does not have the file.
+    pub fn read_on_disk(&self, disk_id: &str, key: &str) -> Result<Option<Vec<u8>>> {
+        let mount = {
+            let mut st = self.state.lock().unwrap();
+            self.attached(&mut st).get(disk_id).cloned()
+        };
+        let Some(mount) = mount else {
+            bail!("disk is not attached");
+        };
+        let path = Self::data_path(&mount, key)?;
+        match fs::read(&path) {
+            Ok(b) => Ok(Some(b)),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(err) => Err(err).with_context(|| format!("read {}", path.display())),
+        }
+    }
+
+    /// Forget and delete a bad copy of `key` on an attached disk (as
+    /// `verify_disk` does). Returns whether another disk still holds a copy.
+    pub fn drop_bad_copy(&self, disk_id: &str, key: &str) -> Result<bool> {
+        let mut st = self.state.lock().unwrap();
+        let attached = self.attached(&mut st);
+        if let Some(mount) = attached.get(disk_id) {
+            let _ = fs::remove_file(Self::data_path(mount, key)?);
+        }
+        let mut left = false;
+        if let Some(e) = st.index.objects.get_mut(key) {
+            let size = e.size;
+            if e.held_by(disk_id) {
+                left = e.remove_holder(disk_id);
+                if let Some(d) = st.index.disks.get_mut(disk_id) {
+                    d.used_bytes = d.used_bytes.saturating_sub(size);
+                }
+            } else {
+                left = true;
+            }
+            if !left {
+                st.index.objects.remove(key);
+            }
+        }
+        st.dirty.insert(disk_id.to_string());
+        self.save_index(&st)?;
+        Ok(left)
+    }
+
     /// Record that the attached disks were verified now (after `fsck --verify`).
     pub fn mark_verified(&self, disk_ids: &[String]) -> Result<()> {
         let mut st = self.state.lock().unwrap();

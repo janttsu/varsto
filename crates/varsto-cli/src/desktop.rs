@@ -1832,6 +1832,61 @@ fn api_unlocked(
             }
             Ok(json!({"report": r, "status": engine.verify_status()}))
         }
+        (Method::Get, "/api/scrub") => Ok(serde_json::to_value(engine.scrub_status())?),
+        (Method::Post, "/api/scrub") => {
+            let mut sched = engine.scrub_schedule().clone();
+            let num = |k: &str| input.get(k).and_then(|v| v.as_u64());
+            if let Some(v) = input.get("enabled").and_then(|v| v.as_bool()) {
+                sched.enabled = v;
+            }
+            if let Some(v) = num("interval_hours") {
+                sched.interval_hours = v as u32;
+            }
+            if let Some(v) = num("scrub_days") {
+                sched.scrub_days = v as u32;
+            }
+            if let Some(v) = num("local_mib") {
+                sched.max_local_bytes = v.saturating_mul(1024 * 1024);
+            }
+            if let Some(v) = num("remote_mib") {
+                sched.max_remote_bytes = v.saturating_mul(1024 * 1024);
+            }
+            engine.set_scrub_schedule(sched)?;
+            // {"cold": {"deep": true}} with "confirm_cold_read": true.
+            if let Some(cold) = input.get("cold").and_then(|c| c.as_object()) {
+                let confirmed = input
+                    .get("confirm_cold_read")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                for (name, on) in cold {
+                    engine.set_scrub_cold(name, on.as_bool().unwrap_or(false), confirmed)?;
+                }
+            }
+            service.scrub = Some(engine.scrub_status());
+            Ok(serde_json::to_value(engine.scrub_status())?)
+        }
+        (Method::Post, "/api/scrub/run") => {
+            let flag = |k: &str| input.get(k).and_then(|v| v.as_bool()).unwrap_or(false);
+            let opts = varsto_core::engine::ScrubOptions {
+                storages: input
+                    .get("storages")
+                    .and_then(|v| v.as_array())
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(|x| x.as_str().map(str::to_string))
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+                local: flag("local"),
+                full: flag("full"),
+                include_cold: flag("include_cold") && flag("confirm_cold_read"),
+                scheduled: false,
+            };
+            let r = engine.scrub(&opts)?;
+            service.scrub = Some(engine.scrub_status());
+            service.repair_if_due(engine);
+            Ok(json!({"report": r, "status": engine.scrub_status()}))
+        }
         (Method::Post, "/api/paths") => {
             // Finder and other file managers: act on absolute paths, one result each.
             let action = s(input, "action")?;

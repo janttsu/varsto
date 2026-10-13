@@ -131,3 +131,83 @@ fn verify_price_and_advice_commands() {
     let p = ok(&a, &["storage", "price", "box", "--clear"]);
     assert!(p.is_null());
 }
+
+#[test]
+fn scrub_commands() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    let a = root.join("a");
+    let storage = root.join("storage");
+    let deep = root.join("deep");
+    let docs = root.join("docs");
+    ok(&a, &["init", "--name", "laptop"]);
+    ok(
+        &a,
+        &["storage", "add-local", "box", storage.to_str().unwrap()],
+    );
+    ok(
+        &a,
+        &[
+            "storage",
+            "add-local",
+            "deep",
+            deep.to_str().unwrap(),
+            "--cold",
+        ],
+    );
+    ok(&a, &["folder", "add", "docs", docs.to_str().unwrap()]);
+    fs::write(docs.join("a.txt"), b"some text to keep").unwrap();
+    ok(&a, &["sync"]);
+
+    let r = ok(&a, &["scrub", "--full"]);
+    assert!(r["scrub"]["objects_checked"].as_u64().unwrap() > 0, "{r}");
+    assert_eq!(r["scrub"]["files_checked"], 1);
+    assert!(r["repair"].is_null());
+    let skipped = r["scrub"]["skipped"].to_string();
+    assert!(skipped.contains("deep (cold"), "{skipped}");
+
+    let r = ok(&a, &["scrub", "--storage", "box"]);
+    assert_eq!(r["scrub"]["files_checked"], 0);
+
+    // A cold storage only with the confirmation.
+    let refused = Command::new(env!("CARGO_BIN_EXE_varsto"))
+        .arg("--home")
+        .arg(&a)
+        .args(["scrub", "--include-cold"])
+        .env("VARSTO_PASSPHRASE", "test passphrase")
+        .output()
+        .unwrap();
+    assert!(!refused.status.success());
+    let r = ok(
+        &a,
+        &[
+            "scrub",
+            "--storage",
+            "deep",
+            "--include-cold",
+            "--confirm-cold-read",
+        ],
+    );
+    assert!(r["scrub"]["objects_checked"].as_u64().unwrap() > 0, "{r}");
+
+    let st = ok(
+        &a,
+        &[
+            "scrub",
+            "set",
+            "--days",
+            "30",
+            "--local-mib",
+            "100",
+            "--cold",
+            "deep",
+            "--confirm-cold-read",
+        ],
+    );
+    assert_eq!(st["schedule"]["scrub_days"], 30);
+    assert_eq!(st["schedule"]["max_local_bytes"], 100 * 1024 * 1024);
+    assert_eq!(st["schedule"]["cold"][0], "deep");
+    let st = ok(&a, &["scrub", "status"]);
+    assert!(st["last_run_utc"].is_number());
+    assert!(st["targets"]["storage:box"].is_object(), "{st}");
+}

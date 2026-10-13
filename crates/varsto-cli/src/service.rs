@@ -74,6 +74,8 @@ pub struct ServiceState {
     pub auto_verify: Option<varsto_core::autoverify::VerifyStatus>,
     /// Automatic repair: queue, last run and copies that could not be repaired.
     pub repair: Option<varsto_core::engine::RepairStatus>,
+    /// Bit-rot check: schedule, last run, passes and damaged files waiting.
+    pub scrub: Option<varsto_core::scrub::ScrubStatus>,
     /// Backups: when expiry last ran, the last snapshot taken here, and the
     /// backups whose last scheduled snapshot failed (with the reason).
     pub backup_upkeep_utc: Option<i64>,
@@ -112,6 +114,8 @@ impl ServiceState {
             "auto_verify_text": self.auto_verify.as_ref().map(|v| v.describe()),
             "repair": self.repair,
             "repair_text": self.repair.as_ref().map(|r| r.describe()),
+            "scrub": self.scrub,
+            "scrub_text": self.scrub.as_ref().map(|r| r.describe()),
             "backup_upkeep_utc": self.backup_upkeep_utc,
             "backup_last": self.backup_last,
             "backup_errors": self.backup_errors,
@@ -212,6 +216,52 @@ impl ServiceState {
             }
         }
         self.auto_verify = Some(engine.verify_status());
+    }
+    /// Run the bit-rot check when the schedule says it is due (after a sync
+    /// and verification, before repair, which then takes what it queued);
+    /// notify about damaged copies and files.
+    pub fn scrub_if_due(&mut self, engine: &mut Engine) {
+        if engine.scrub_due(varsto_core::util::now_utc()) {
+            match engine.scrub(&varsto_core::engine::ScrubOptions::service()) {
+                Ok(r) => {
+                    eprintln!(
+                        "service: bit-rot check: {} objects, {} files and {} cached blocks checked, {} problems",
+                        r.objects_checked,
+                        r.files_checked,
+                        r.cache_checked,
+                        r.problems()
+                    );
+                    let copies = r.corrupt.len() + r.missing.len();
+                    if copies > 0 {
+                        let msg = format!(
+                            "{copies} stored block cop{} damaged or missing; repairing them from other copies",
+                            if copies == 1 { "y is" } else { "ies are" }
+                        );
+                        eprintln!("service: {msg}");
+                        notify("Varsto bit-rot check", &msg);
+                    }
+                    for d in &r.damaged_files {
+                        let msg = match (&d.moved_to, d.restored) {
+                            (Some(to), true) => format!(
+                                "{} in {} had changed on disk without being edited; it was moved to {to} and the synced version restored",
+                                d.path, d.folder
+                            ),
+                            _ => format!(
+                                "{} in {} has changed on disk without being edited; no good copy could be fetched yet, it is left as it is",
+                                d.path, d.folder
+                            ),
+                        };
+                        eprintln!("service: {msg}");
+                        notify("Varsto bit-rot check", &msg);
+                    }
+                    for d in &r.disks_away {
+                        eprintln!("service: disk not seen for long: {d}");
+                    }
+                }
+                Err(e) => eprintln!("service: bit-rot check failed: {e:#}"),
+            }
+        }
+        self.scrub = Some(engine.scrub_status());
     }
     /// Repair damaged copies that verification or fsck found (called after
     /// a sync and after verification), within the service's budget; notify
@@ -1389,6 +1439,7 @@ pub fn run(opts: Options) -> Result<()> {
                     let st = &mut *st;
                     if let Some(e) = st.engine.as_mut() {
                         st.service.auto_verify_if_due(e);
+                        st.service.scrub_if_due(e);
                         st.service.repair_if_due(e);
                         st.service.backups_if_due(e);
                         if let Err(err) = e.publish_device_details(st.service.last_sync_utc) {

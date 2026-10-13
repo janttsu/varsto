@@ -142,6 +142,20 @@
       var code = $("modal-code"); code.textContent = o.code || ""; code.classList.toggle("hidden", !o.code);
       var fs = $("modal-fields"); fs.innerHTML = "";
       (o.fields || []).forEach(function (f) {
+        // A group of checkboxes; its value is the ticked ones, comma-separated.
+        if (f.checks) {
+          var grp = el("div", "field-group"); grp.appendChild(el("span", "field-caption", f.label));
+          f.checks.forEach(function (c) {
+            var cl = el("label", "inline"); var cb = el("input"); cb.type = "checkbox"; cb.dataset.group = f.name; cb.value = c[0]; cb.checked = !!c[2];
+            cl.appendChild(cb); var tx = el("span", null, c[1]); if (c[3]) { tx.setAttribute("data-no-i18n", ""); } cl.appendChild(tx);
+            if (c[4]) { cl.appendChild(el("span", "muted", c[4])); }
+            grp.appendChild(cl);
+          });
+          if (!f.checks.length && f.empty) { grp.appendChild(el("span", "hint muted", f.empty)); }
+          if (f.hint) { grp.appendChild(el("span", "hint muted", f.hint)); }
+          fs.appendChild(grp);
+          return;
+        }
         if (f.options) {
           var sl = el("label", "", f.label); var sel = el("select"); sel.name = f.name;
           f.options.forEach(function (op) { var x = el("option", null, op[1]); x.value = op[0]; sel.appendChild(x); });
@@ -177,7 +191,14 @@
     return !modalConfirm || (ci && ci.value.trim() === modalConfirm);
   }
   function confirmTyped() { var off = !confirmMatches(); $("modal-ok").disabled = off; $("modal-extra").disabled = off; }
-  function dialogValues() { var v = {}; $("modal-fields").querySelectorAll("input, select").forEach(function (i) { v[i.name] = i.value; }); return v; }
+  function dialogValues() {
+    var v = {};
+    $("modal-fields").querySelectorAll("input, select").forEach(function (i) {
+      if (i.dataset.group) { var g = i.dataset.group; if (!(g in v)) { v[g] = ""; } if (i.checked) { v[g] = v[g] ? v[g] + "," + i.value : i.value; } return; }
+      v[i.name] = i.value;
+    });
+    return v;
+  }
   function closeDialog(action) {
     if (!modalResolve) { return; }
     var r = modalResolve; modalResolve = null;
@@ -439,6 +460,8 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   }
   // Column and field labels for places: the two defaults by what they are.
   function placeLabel(pl) { return pl === "home" ? "Copies on own devices and disks" : pl === "cloud" ? "Copies in external storage (S3 etc.)" : "Copies in place '" + pl + "'"; }
+  // A place as a short tag beside a storage: "at home", "external", or its own name.
+  function placeShort(pl) { return pl === "home" ? "at home" : pl === "cloud" ? "external" : pl; }
   // Places a policy can name: those of the storages, those already in use, and the two defaults.
   function policyPlaces(p) {
     var set = { home: 1, cloud: 1 };
@@ -522,22 +545,26 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     var names = [];
     api("GET", "/api/placement").then(function (p) {
       var cur = null; (p.folders || []).forEach(function (x) { if (x.folder === folder) { cur = x; } });
-      var places = {}; var avail = [];
-      (p.storages || []).filter(function (s) { return !s.carrier; }).forEach(function (s) { places[s.place] = 1; avail.push(s.name + " (" + s.place + (s.cold ? ", cold" : "") + ")"); });
-      names = Object.keys(places);
+      var places = {}; var storages = [];
       var pl = cur && cur.placement;
+      var on = function (list, x) { return !!(pl && list.indexOf(x) >= 0); };
+      (p.storages || []).filter(function (s) { return !s.carrier; }).forEach(function (s) {
+        places[s.place] = 1;
+        storages.push([s.name, s.name, on(pl ? pl.storages : [], s.name), true, placeShort(s.place) + (s.cold ? ", cold" : "")]);
+      });
+      names = Object.keys(places);
       return dialog({
         title: "Where " + folder + " is written",
-        text: "By default every block goes to every storage. Name storages or places (comma-separated) to write this folder only there. Blocks already stored stay where they are until you move them; policies still count every copy." + (cur && cur.warnings.length ? " Note: " + cur.warnings.join(" ") : ""),
+        text: "By default every block goes to every storage. Tick storages or places to write this folder only there; a place means every storage in it, now and later. Blocks already stored stay where they are until you move them; policies still count every copy." + (cur && cur.warnings.length ? " Note: " + cur.warnings.join(" ") : ""),
         fields: [
-          { name: "storages", label: "Storages", value: pl ? pl.storages.join(", ") : "", placeholder: "box, glacier", hint: "Available: " + avail.join(", ") },
-          { name: "places", label: "Places", value: pl ? pl.places.join(", ") : "", placeholder: "cloud", hint: "Places of your storages: " + names.join(", ") }
+          { name: "storages", label: "Storages", checks: storages, empty: "No storage yet" },
+          { name: "places", label: "Places", checks: names.map(function (n) { return [n, placeLabel(n), on(pl ? pl.places : [], n)]; }) }
         ],
         ok: "Save", extra: pl ? "Every storage" : null
       });
     }).then(function (r) {
       if (!r) { return; }
-      var v = r.values; var every = r.action === "extra" || (!v.storages.trim() && !v.places.trim());
+      var v = r.values; var every = r.action === "extra" || (!(v.storages || "").trim() && !(v.places || "").trim());
       return api("POST", "/api/placement", { folder: folder, storages: v.storages, places: v.places, every: every }).then(function (info) {
         log(folder + ": new blocks go to " + info.targets.join(", ") + (info.placement ? " (" + info.description + ")" : ""));
         return refreshStatus();
@@ -561,7 +588,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   // devices lack and is emptied as they receive it.
   function otherDeviceNames() {
     var me = lastStatus ? lastStatus.device_name : "";
-    return Object.keys((lastStatus && lastStatus.devices) || {}).map(function (k) { return lastStatus.devices[k]; }).filter(function (n) { return n !== me; });
+    return Object.keys((lastStatus && lastStatus.devices) || {}).map(function (k) { return lastStatus.devices[k]; }).filter(function (n, i, all) { return n !== me && all.indexOf(n) === i; });
   }
   function fillCarrierFor() {
     var sel = $("carrierfor"); var keep = sel.value; sel.innerHTML = "";
@@ -571,7 +598,9 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   }
   function carrierDestination(name, current) {
     var names = otherDeviceNames();
-    dialog({ title: "Where does " + name + " travel?", text: "Name the device (or devices, comma-separated) this transferrer is taken to. It then carries the blocks they still lack and is emptied as they receive them. Leave empty to carry what any device lacks. Your other devices: " + (names.join(", ") || "none yet") + ".", fields: [{ name: "devices", label: "Destination devices", value: current.join(", "), placeholder: names[0] || "" }], ok: "Save" }).then(function (r) {
+    // Devices named before that are not known any more stay offered, ticked.
+    current.forEach(function (n) { if (names.indexOf(n) < 0) { names.push(n); } });
+    dialog({ title: "Where does " + name + " travel?", text: "Tick the device (or devices) this transferrer is taken to. It then carries the blocks they still lack and is emptied as they receive them. Tick none to carry what any device lacks.", fields: [{ name: "devices", label: "Destination devices", checks: names.map(function (n) { return [n, n, current.indexOf(n) >= 0, true]; }), empty: "No other device yet" }], ok: "Save" }).then(function (r) {
       if (!r) { return; }
       return api("POST", "/api/storage/carrier-for", { name: name, devices: r.values.devices || "" }).then(function (x) { log(x.devices.length ? name + " now carries what " + x.devices.join(", ") + " lacks" : name + " carries what any device lacks"); return refreshStatus(); });
     }).catch(function (e) { alertBox(e.message); });
@@ -970,7 +999,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
         $("policybanner").textContent = lines.join(" ");
         $("policybanner").classList.toggle("hidden", lines.length === 0);
       }).catch(function () {});
-      loadAdvice(); loadAutoVerify(); loadRepair();
+      loadAdvice(); loadAutoVerify(); loadRepair(); loadScrub();
       updateFilesHead();
       var ul = $("storages"); ul.innerHTML = "";
       s.storages.forEach(function (st) {
@@ -1381,6 +1410,55 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   $("ar-cold").onclick = function () {
     dialog({ title: "Repair from cold storage", text: "Reading a cold storage starts a retrieval, which your provider may bill and which can take hours. Read it to repair the copies that exist only there?", ok: "Read cold storage" }).then(function (r) {
       if (r) { runRepair({ from_cold: true }, "repair from cold storage"); }
+    }).catch(function (e) { log("error: " + e.message); });
+  };
+
+  // Bit-rot check (Policies page): status, damaged files, run now, schedule.
+  var scrubStatus = null;
+  function renderScrub(v) {
+    if (!v) { return; }
+    scrubStatus = v; var s = v.schedule; var parts = []; var r = v.last;
+    parts.push(s.enabled ? "On: everything is checked within " + s.scrub_days + " days, up to " + Math.round(s.max_local_bytes / 1048576) + " MiB from this device's disks and " + Math.round(s.max_remote_bytes / 1048576) + " MiB from remote storages per run" : "Off");
+    if ((s.cold || []).length) { parts.push("cold storages included: " + s.cold.join(", ")); }
+    if (v.last_run_utc && r) {
+      parts.push("last run " + fmtWhen(r.finished_utc || v.last_run_utc) + ": " + (r.objects_checked + r.cache_checked) + " objects and " + r.files_checked + " files checked, " + (r.corrupt.length + r.missing.length + r.damaged_files.length + r.cache_dropped) + " problems found");
+    } else { parts.push("not run yet"); }
+    if (v.totals && v.totals.problems_found) { parts.push(v.totals.problems_found + " problems found and " + v.totals.files_restored + " files restored in all"); }
+    if (v.last_error) { parts.push("last error: " + v.last_error); }
+    if (s.enabled) { parts.push(v.last_run_utc ? "next run " + fmtWhen(v.next_run_utc) : "next run at the next sync"); }
+    var box = $("sc-text"); box.innerHTML = "";
+    parts.forEach(function (p, i) { if (i) { box.appendChild(document.createTextNode(" · ")); } box.appendChild(el("span", "", p)); });
+    var ul = $("sc-files"); ul.innerHTML = "";
+    (v.unrestored || []).forEach(function (d) { ul.appendChild(el("li", "bad", d.folder + ": " + d.path + " is damaged on disk and waits for a good copy")); });
+    ((r && r.damaged_files) || []).filter(function (d) { return d.restored; }).forEach(function (d) { ul.appendChild(el("li", "", d.folder + ": " + d.path + " was damaged on disk; moved to " + d.moved_to + " and the synced version restored")); });
+    $("sc-toggle").textContent = s.enabled ? "Turn off" : "Turn on";
+  }
+  function loadScrub() { api("GET", "/api/scrub").then(renderScrub).catch(function () {}); }
+  $("sc-run").onclick = function () {
+    busy(true); log("bit-rot check started");
+    api("POST", "/api/scrub/run", {}).then(function (r) {
+      var x = r.report;
+      log("bit-rot check: " + (x.objects_checked + x.cache_checked) + " objects and " + x.files_checked + " files checked, " + (x.corrupt.length + x.missing.length + x.damaged_files.length + x.cache_dropped) + " problems found");
+      x.corrupt.forEach(function (c) { log("  CORRUPT " + c); });
+      x.missing.forEach(function (c) { log("  MISSING " + c); });
+      renderScrub(r.status); loadRepair(); busy(false); refreshStatus();
+    }).catch(function (e) { log("bit-rot check failed: " + e.message); busy(false); });
+  };
+  $("sc-toggle").onclick = function () {
+    var on = !(scrubStatus && scrubStatus.schedule.enabled);
+    api("POST", "/api/scrub", { enabled: on }).then(renderScrub).catch(function (e) { log("error: " + e.message); });
+  };
+  $("sc-settings").onclick = function () {
+    var s = (scrubStatus || {}).schedule || {};
+    dialog({ title: "Bit-rot check", text: "Everything is re-read at least once in this period. A run reads at most this much; remote storages may bill the downloads.", fields: [
+      { name: "scrub_days", label: "Days to check everything", type: "number", value: s.scrub_days },
+      { name: "interval_hours", label: "Hours between runs", type: "number", value: s.interval_hours },
+      { name: "local_mib", label: "Most MiB per run from this device's disks", type: "number", value: s.max_local_bytes ? Math.round(s.max_local_bytes / 1048576) : "" },
+      { name: "remote_mib", label: "Most MiB per run from remote storages", type: "number", value: s.max_remote_bytes ? Math.round(s.max_remote_bytes / 1048576) : "" }
+    ], ok: "Save" }).then(function (r) {
+      if (!r) { return; }
+      var n = function (x) { var v = parseInt(x, 10); return isNaN(v) ? undefined : v; };
+      return api("POST", "/api/scrub", { scrub_days: n(r.values.scrub_days), interval_hours: n(r.values.interval_hours), local_mib: n(r.values.local_mib), remote_mib: n(r.values.remote_mib) }).then(renderScrub);
     }).catch(function (e) { log("error: " + e.message); });
   };
 
@@ -2207,7 +2285,11 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     "disk_insert.fill": "Filling disk «{s}»",
     "disk_fetch": "Copying blocks from disk «{s}»",
     "disk_fetch.write": "Writing files fetched from disk «{s}»",
-    "disk_unmount": "Unmounting disk «{s}»"
+    "disk_unmount": "Unmounting disk «{s}»",
+    "scrub": "Checking storage «{s}» for bit rot",
+    "scrub.disk": "Checking disk «{s}» for bit rot",
+    "scrub.files": "Checking the files of folder «{s}» for bit rot",
+    "scrub.cache": "Checking the block cache for bit rot"
   };
   var actTimer = null, actBusy = false, lastActivity = null;
   function actTr(s) { return window.varstoLang ? window.varstoLang.t(s) : s; }
