@@ -689,7 +689,49 @@
   "Tidying disk «{s}»": "Städar disken «{s}»",
   "Copying blocks from disk «{s}»": "Kopierar block från disken «{s}»",
   "Writing files fetched from disk «{s}»": "Skriver filer hämtade från disken «{s}»",
-  "Unmounting disk «{s}»": "Avmonterar disken «{s}»"
+  "Unmounting disk «{s}»": "Avmonterar disken «{s}»",
+  "Import": "Import",
+  "Import into Varsto": "Importera till Varsto",
+  "Bring files that live elsewhere under Varsto's care. Each source becomes one folder; importing the same source again brings over what changed and never deletes anything in Varsto.": "Låt Varsto ta hand om filer som finns någon annanstans. Varje källa blir en mapp; att importera samma källa igen för över det som ändrats och tar aldrig bort något i Varsto.",
+  "Source": "Källa",
+  "A folder on this device": "En mapp på den här enheten",
+  "A git-annex repository": "Ett git-annex-arkiv",
+  "Dropbox": "Dropbox",
+  "OneDrive": "OneDrive",
+  "Another cloud drive (rclone)": "En annan molnlagring (rclone)",
+  "This import runs on the command line, where its progress and report are shown:": "Den här importen körs på kommandoraden, där förloppet och rapporten visas:",
+  "Folder to import": "Mapp att importera",
+  "it is only read, unless you choose to remove its files below": "den läses bara, om du inte väljer att ta bort dess filer nedan",
+  "Name in Varsto": "Namn i Varsto",
+  "named after the source": "efter källan",
+  "On this device": "På den här enheten",
+  "Placeholders only: files stay on the storages": "Bara platshållare: filerna stannar på lagringarna",
+  "A full copy in a directory of this device": "En fullständig kopia i en katalog på den här enheten",
+  "Directory for the copy": "Katalog för kopian",
+  "Remove source files once they are safely stored and the policy is met": "Ta bort källfilerna när de är säkert lagrade och policyn är uppfylld",
+  "A file is removed from the source only when it has not changed since it was imported, Varsto still has the same file, every block of it is on a storage that reads it back intact, and the folder's durability policy is met for it (for example, checked by another of your devices). Files that do not qualify yet stay; import again later, or use Remove safe files below. Varsto's own folders and git-annex repositories are never emptied, and nothing outside the source is touched.": "En fil tas bort från källan bara när den inte har ändrats sedan importen, Varsto fortfarande har samma fil, varje block av den finns på en lagring som läser tillbaka det oskadat, och mappens hållbarhetspolicy är uppfylld för den (till exempel kontrollerad av en annan av dina enheter). Filer som inte uppfyller detta stannar tills vidare; importera igen senare, eller använd Ta bort säkra filer nedan. Varstos egna mappar och git-annex-arkiv töms aldrig, och inget utanför källan rörs.",
+  "Last import": "Senaste import",
+  "Remove these files from the source": "Ta bort de här filerna från källan",
+  "Files that stay for now": "Filer som stannar tills vidare",
+  "Imported folders": "Importerade mappar",
+  "Awaiting import": "Väntar på import",
+  "Removed from source": "Borttaget från källan",
+  "Nothing was imported yet.": "Inget har importerats ännu.",
+  "Remove safe files…": "Ta bort säkra filer…",
+  "No source file can be removed yet.": "Ingen källfil kan tas bort ännu.",
+  "Remove source files?": "Ta bort källfilerna?",
+  "Choose the folder to import.": "Välj mappen att importera.",
+  "Choose the directory for the copy.": "Välj katalogen för kopian.",
+  "Run it once for every disk that holds a clone of the repository: each run continues the same folder with what that disk has, and says which disk to insert next. Nothing is changed on the disks.": "Kör det en gång för varje disk som har en klon av arkivet: varje körning fortsätter samma mapp med det disken har och säger vilken disk som ska sättas in härnäst. Ingenting ändras på diskarna.",
+  "The first line signs in to Dropbox in your browser (once). Run the import again to bring changes over.": "Första raden loggar in på Dropbox i din webbläsare (en gång). Kör importen igen för att föra över ändringar.",
+  "The first line signs in to OneDrive in your browser (once). Run the import again to bring changes over.": "Första raden loggar in på OneDrive i din webbläsare (en gång). Kör importen igen för att föra över ändringar.",
+  "Any remote set up in rclone (rclone config) works, Google Drive included.": "Alla fjärrlagringar som konfigurerats i rclone (rclone config) fungerar, även Google Drive.",
+  "not imported yet": "inte importerad ännu",
+  "changed since it was imported": "ändrad sedan importen",
+  "changed or deleted in Varsto since the import": "ändrad eller borttagen i Varsto sedan importen",
+  "not on a storage yet (only on devices or a transferrer)": "inte på en lagring ännu (bara på enheter eller en överföringsdisk)",
+  "no storage copy could be read back intact": "ingen kopia på lagringarna kunde läsas tillbaka oskadad",
+  "its content differs from what was imported": "innehållet skiljer sig från det som importerades"
  },
  "patterns": [
   [
@@ -891,6 +933,50 @@
   [
    "^(.+): stopped; nothing more is fetched from the disks$",
    "$1: avbrutet; inget mer hämtas från diskarna"
+  ],
+  [
+   "^Imported (\\d+) file\\(s\\) \\((.+)\\) into folder (.+)$",
+   "Importerade $1 fil(er) ($2) till mappen $3"
+  ],
+  [
+   "^(\\d+) file\\(s\\) were imported before$",
+   "$1 fil(er) hade importerats tidigare"
+  ],
+  [
+   "^(\\d+) file\\(s\\) could not be read: (.+)$",
+   "$1 fil(er) kunde inte läsas: $2"
+  ],
+  [
+   "^(\\d+) item\\(s\\) not imported \\(links, special files, names Varsto cannot use\\): (.+)$",
+   "$1 objekt importerades inte (länkar, specialfiler, namn som Varsto inte kan använda): $2"
+  ],
+  [
+   "^(\\d+) file\\(s\\) were changed in Varsto and kept as they are$",
+   "$1 fil(er) hade ändrats i Varsto och lämnades som de är"
+  ],
+  [
+   "^(\\d+) file\\(s\\) are gone from the source and kept in Varsto$",
+   "$1 fil(er) har försvunnit från källan och behålls i Varsto"
+  ],
+  [
+   "^(\\d+) file\\(s\\) \\((.+)\\) can be removed from (.+) now\\.$",
+   "$1 fil(er) ($2) kan nu tas bort från $3."
+  ],
+  [
+   "^Remove (\\d+) file\\(s\\) \\((.+)\\) from (.+)\\? Each one is checked once more first\\.$",
+   "Ta bort $1 fil(er) ($2) från $3? Varje fil kontrolleras en gång till först."
+  ],
+  [
+   "^Removed (\\d+) file\\(s\\) \\((.+)\\) from the source$",
+   "Tog bort $1 fil(er) ($2) från källan"
+  ],
+  [
+   "^waiting for the policy \\((.+)\\): (.+)$",
+   "väntar på policyn ($1): $2"
+  ],
+  [
+   "^Imported into (.+)$",
+   "Importerat till $1"
   ]
  ],
  "review": [

@@ -62,6 +62,7 @@
     <button type="button" class="nav-item" data-nav="shared"><svg class="icon"><use href="#i-sharing"/></svg><span>Shared</span></button>
     <button type="button" class="nav-item" data-nav="storages"><svg class="icon"><use href="#i-storages"/></svg><span>Storages</span></button>
     <button type="button" class="nav-item" data-nav="backups"><svg class="icon"><use href="#i-backup"/></svg><span>Backups</span></button>
+    <button type="button" class="nav-item" data-nav="import"><svg class="icon"><use href="#i-backup"/></svg><span>Import</span></button>
     <button type="button" class="nav-item" data-nav="policies"><svg class="icon"><use href="#i-policies"/></svg><span>Policies</span></button>
     <button type="button" class="nav-item" data-nav="peers"><svg class="icon"><use href="#i-peers"/></svg><span>Peers</span></button>
     <button type="button" class="nav-item hidden" data-nav="organization" data-org-only="1"><svg class="icon"><use href="#i-org"/></svg><span>Organization</span></button>
@@ -497,6 +498,54 @@
       </form>
     </div>
 
+    <!-- Import -->
+    <div class="page hidden" data-page="import">
+      <form id="importform" class="card narrow">
+        <h2 class="card-title"><svg class="icon accent"><use href="#i-plus"/></svg>Import into Varsto</h2>
+        <p class="muted small">Bring files that live elsewhere under Varsto's care. Each source becomes one folder; importing the same source again brings over what changed and never deletes anything in Varsto.</p>
+        <label>Source <select name="kind" id="import-kind">
+          <option value="dir">A folder on this device</option>
+          <option value="annex">A git-annex repository</option>
+          <option value="dropbox">Dropbox</option>
+          <option value="onedrive">OneDrive</option>
+          <option value="rclone">Another cloud drive (rclone)</option>
+        </select></label>
+        <div id="import-cli" class="hidden">
+          <p class="muted small">This import runs on the command line, where its progress and report are shown:</p>
+          <pre id="import-cli-cmd" class="log" data-no-i18n></pre>
+          <p id="import-cli-note" class="muted small"></p>
+        </div>
+        <div id="import-dir-fields">
+          <label>Folder to import <input name="source" placeholder="/Volumes/Old drive/Photos" autocomplete="off"><span class="hint muted">it is only read, unless you choose to remove its files below</span></label>
+          <label>Name in Varsto <input name="folder" placeholder="named after the source" autocomplete="off"></label>
+          <label>On this device <select name="where" id="import-where">
+            <option value="selective">Placeholders only: files stay on the storages</option>
+            <option value="full">A full copy in a directory of this device</option>
+          </select></label>
+          <label id="import-dest-label" class="hidden">Directory for the copy <input name="dest" placeholder="/Users/me/Varsto/Photos" autocomplete="off"></label>
+          <label class="inline"><input type="checkbox" name="remove_source" id="import-remove"> Remove source files once they are safely stored and the policy is met</label>
+          <p class="muted small">A file is removed from the source only when it has not changed since it was imported, Varsto still has the same file, every block of it is on a storage that reads it back intact, and the folder's durability policy is met for it (for example, checked by another of your devices). Files that do not qualify yet stay; import again later, or use Remove safe files below. Varsto's own folders and git-annex repositories are never emptied, and nothing outside the source is touched.</p>
+          <div class="actions"><button type="submit" id="import-go">Import</button></div>
+        </div>
+      </form>
+      <div id="import-result" class="card hidden">
+        <h2 class="card-title">Last import</h2>
+        <ul id="import-summary" class="list compact-list"></ul>
+        <div id="import-cleanup" class="hidden">
+          <p id="import-cleanup-text" class="small"></p>
+          <div class="actions"><button type="button" id="import-cleanup-go" class="secondary danger">Remove these files from the source</button></div>
+        </div>
+        <details id="import-waiting-box" class="hidden"><summary class="small">Files that stay for now</summary><ul id="import-waiting" class="list compact-list"></ul></details>
+      </div>
+      <div class="card">
+        <h2 class="card-title">Imported folders</h2>
+        <div class="table-wrap">
+        <table id="imports"><thead><tr><th>Folder</th><th>Source</th><th class="num">Files</th><th class="num">Awaiting import</th><th class="num">Removed from source</th><th></th></tr></thead><tbody></tbody></table>
+        </div>
+        <p id="imports-empty" class="muted small hidden">Nothing was imported yet.</p>
+      </div>
+    </div>
+
     <!-- Policies -->
     <div class="page hidden" data-page="policies">
       <div class="card">
@@ -693,6 +742,7 @@
       <div class="card more-card">
         <button type="button" class="more-item" data-nav="shared"><svg class="icon"><use href="#i-sharing"/></svg><span>Shared</span><svg class="icon chev"><use href="#i-chevron"/></svg></button>
         <button type="button" class="more-item" data-nav="backups"><svg class="icon"><use href="#i-backup"/></svg><span>Backups</span><svg class="icon chev"><use href="#i-chevron"/></svg></button>
+        <button type="button" class="more-item" data-nav="import"><svg class="icon"><use href="#i-backup"/></svg><span>Import</span><svg class="icon chev"><use href="#i-chevron"/></svg></button>
         <button type="button" class="more-item" data-nav="policies"><svg class="icon"><use href="#i-policies"/></svg><span>Policies</span><svg class="icon chev"><use href="#i-chevron"/></svg></button>
         <button type="button" class="more-item" data-nav="peers"><svg class="icon"><use href="#i-peers"/></svg><span>Peers</span><svg class="icon chev"><use href="#i-chevron"/></svg></button>
         <button type="button" class="more-item hidden" data-nav="organization" data-org-only="1"><svg class="icon"><use href="#i-org"/></svg><span>Organization</span><svg class="icon chev"><use href="#i-chevron"/></svg></button>

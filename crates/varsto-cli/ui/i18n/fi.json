@@ -696,7 +696,49 @@
   "Tidying disk «{s}»": "Siivoaa levyä «{s}»",
   "Copying blocks from disk «{s}»": "Kopioi lohkoja levyltä «{s}»",
   "Writing files fetched from disk «{s}»": "Kirjoittaa levyltä «{s}» haettuja tiedostoja",
-  "Unmounting disk «{s}»": "Irrottaa levyä «{s}»"
+  "Unmounting disk «{s}»": "Irrottaa levyä «{s}»",
+  "Import": "Tuonti",
+  "Import into Varsto": "Tuo Varstoon",
+  "Bring files that live elsewhere under Varsto's care. Each source becomes one folder; importing the same source again brings over what changed and never deletes anything in Varsto.": "Tuo muualla olevat tiedostot Varston hoitoon. Jokaisesta lähteestä tulee yksi kansio; saman lähteen tuominen uudelleen tuo muuttuneet tiedostot eikä koskaan poista mitään Varstosta.",
+  "Source": "Lähde",
+  "A folder on this device": "Kansio tällä laitteella",
+  "A git-annex repository": "git-annex-varasto",
+  "Dropbox": "Dropbox",
+  "OneDrive": "OneDrive",
+  "Another cloud drive (rclone)": "Muu pilvitallennus (rclone)",
+  "This import runs on the command line, where its progress and report are shown:": "Tämä tuonti tehdään komentoriviltä, jossa näkyvät sen eteneminen ja raportti:",
+  "Folder to import": "Tuotava kansio",
+  "it is only read, unless you choose to remove its files below": "sitä vain luetaan, ellet valitse alta sen tiedostojen poistamista",
+  "Name in Varsto": "Nimi Varstossa",
+  "named after the source": "lähteen mukaan",
+  "On this device": "Tällä laitteella",
+  "Placeholders only: files stay on the storages": "Vain paikkamerkit: tiedostot jäävät tallennustiloihin",
+  "A full copy in a directory of this device": "Täysi kopio tämän laitteen hakemistoon",
+  "Directory for the copy": "Kopion hakemisto",
+  "Remove source files once they are safely stored and the policy is met": "Poista lähdetiedostot, kun ne on tallennettu turvallisesti ja käytäntö täyttyy",
+  "A file is removed from the source only when it has not changed since it was imported, Varsto still has the same file, every block of it is on a storage that reads it back intact, and the folder's durability policy is met for it (for example, checked by another of your devices). Files that do not qualify yet stay; import again later, or use Remove safe files below. Varsto's own folders and git-annex repositories are never emptied, and nothing outside the source is touched.": "Tiedosto poistetaan lähteestä vain, kun se ei ole muuttunut tuonnin jälkeen, Varstossa on yhä sama tiedosto, sen jokainen lohko on tallennustilassa, josta se luetaan takaisin ehjänä, ja kansion säilyvyyskäytäntö täyttyy sen osalta (esimerkiksi toinen laitteesi on tarkistanut sen). Muut tiedostot jäävät toistaiseksi; tuo myöhemmin uudelleen tai käytä alta Poista turvalliset tiedostot. Varston omia kansioita ja git-annex-varastoja ei koskaan tyhjennetä, eikä mihinkään lähteen ulkopuolella kosketa.",
+  "Last import": "Viimeisin tuonti",
+  "Remove these files from the source": "Poista nämä tiedostot lähteestä",
+  "Files that stay for now": "Toistaiseksi jäävät tiedostot",
+  "Imported folders": "Tuodut kansiot",
+  "Awaiting import": "Odottaa tuontia",
+  "Removed from source": "Poistettu lähteestä",
+  "Nothing was imported yet.": "Mitään ei ole vielä tuotu.",
+  "Remove safe files…": "Poista turvalliset tiedostot…",
+  "No source file can be removed yet.": "Yhtään lähdetiedostoa ei voi vielä poistaa.",
+  "Remove source files?": "Poistetaanko lähdetiedostot?",
+  "Choose the folder to import.": "Valitse tuotava kansio.",
+  "Choose the directory for the copy.": "Valitse kopion hakemisto.",
+  "Run it once for every disk that holds a clone of the repository: each run continues the same folder with what that disk has, and says which disk to insert next. Nothing is changed on the disks.": "Aja se kerran jokaiselle levylle, jolla on klooni varastosta: jokainen ajo jatkaa samaa kansiota levyn sisällöllä ja kertoo, mikä levy liittää seuraavaksi. Levyillä ei muuteta mitään.",
+  "The first line signs in to Dropbox in your browser (once). Run the import again to bring changes over.": "Ensimmäinen rivi kirjautuu Dropboxiin selaimessasi (kerran). Aja tuonti uudelleen tuodaksesi muutokset.",
+  "The first line signs in to OneDrive in your browser (once). Run the import again to bring changes over.": "Ensimmäinen rivi kirjautuu OneDriveen selaimessasi (kerran). Aja tuonti uudelleen tuodaksesi muutokset.",
+  "Any remote set up in rclone (rclone config) works, Google Drive included.": "Mikä tahansa rclonessa (rclone config) määritetty etäkohde käy, myös Google Drive.",
+  "not imported yet": "ei vielä tuotu",
+  "changed since it was imported": "muuttunut tuonnin jälkeen",
+  "changed or deleted in Varsto since the import": "muutettu tai poistettu Varstossa tuonnin jälkeen",
+  "not on a storage yet (only on devices or a transferrer)": "ei vielä tallennustilassa (vain laitteilla tai siirtolevyllä)",
+  "no storage copy could be read back intact": "yhtään tallennustilan kopiota ei voitu lukea takaisin ehjänä",
+  "its content differs from what was imported": "sisältö poikkeaa tuodusta"
  },
  "patterns": [
   [
@@ -898,6 +940,50 @@
   [
    "^(.+): stopped; nothing more is fetched from the disks$",
    "$1: lopetettu; levyiltä ei haeta enempää"
+  ],
+  [
+   "^Imported (\\d+) file\\(s\\) \\((.+)\\) into folder (.+)$",
+   "Tuotiin $1 tiedosto(a) ($2) kansioon $3"
+  ],
+  [
+   "^(\\d+) file\\(s\\) were imported before$",
+   "$1 tiedosto(a) oli tuotu aiemmin"
+  ],
+  [
+   "^(\\d+) file\\(s\\) could not be read: (.+)$",
+   "$1 tiedostoa ei voitu lukea: $2"
+  ],
+  [
+   "^(\\d+) item\\(s\\) not imported \\(links, special files, names Varsto cannot use\\): (.+)$",
+   "$1 kohdetta jäi tuomatta (linkit, erikoistiedostot, nimet joita Varsto ei voi käyttää): $2"
+  ],
+  [
+   "^(\\d+) file\\(s\\) were changed in Varsto and kept as they are$",
+   "$1 tiedostoa oli muutettu Varstossa ja jätettiin ennalleen"
+  ],
+  [
+   "^(\\d+) file\\(s\\) are gone from the source and kept in Varsto$",
+   "$1 tiedostoa on poistunut lähteestä ja säilytetään Varstossa"
+  ],
+  [
+   "^(\\d+) file\\(s\\) \\((.+)\\) can be removed from (.+) now\\.$",
+   "$1 tiedosto(a) ($2) voidaan nyt poistaa lähteestä $3."
+  ],
+  [
+   "^Remove (\\d+) file\\(s\\) \\((.+)\\) from (.+)\\? Each one is checked once more first\\.$",
+   "Poistetaanko $1 tiedosto(a) ($2) lähteestä $3? Jokainen tarkistetaan vielä kerran ensin."
+  ],
+  [
+   "^Removed (\\d+) file\\(s\\) \\((.+)\\) from the source$",
+   "Poistettiin $1 tiedosto(a) ($2) lähteestä"
+  ],
+  [
+   "^waiting for the policy \\((.+)\\): (.+)$",
+   "odottaa käytäntöä ($1): $2"
+  ],
+  [
+   "^Imported into (.+)$",
+   "Tuotiin kansioon $1"
   ]
  ],
  "review": [

@@ -372,20 +372,28 @@ fn describe_report(r: &ImportReport) -> String {
             fmt_bytes(r.to_read_bytes)
         ));
     } else {
-        out.push(format!(
-            "  imported: {} {unit} ({}) in {} file(s){}",
-            r.imported_ids,
-            fmt_bytes(r.imported_bytes),
-            r.imported_files,
-            if r.unverified_ids > 0 {
-                format!(
-                    ", {} without a hash to check (WORM/URL keys or no provider hash)",
-                    r.unverified_ids
-                )
-            } else {
-                String::new()
-            }
-        ));
+        let unverified = if r.unverified_ids > 0 && r.kind != "dir" {
+            format!(
+                ", {} without a hash to check (WORM/URL keys or no provider hash)",
+                r.unverified_ids
+            )
+        } else {
+            String::new()
+        };
+        if r.kind == "git-annex" {
+            out.push(format!(
+                "  imported: {} keys ({}) in {} file(s){unverified}",
+                r.imported_ids,
+                fmt_bytes(r.imported_bytes),
+                r.imported_files
+            ));
+        } else {
+            out.push(format!(
+                "  imported: {} file(s) ({}){unverified}",
+                r.imported_files,
+                fmt_bytes(r.imported_bytes)
+            ));
+        }
         if r.to_read_ids > 0 {
             out.push(format!(
                 "  not read yet: {} {unit} ({}): run the import again to carry on",
@@ -519,16 +527,26 @@ fn describe_status(list: &Vec<ImportStatus>) -> String {
             "files"
         };
         out.push(format!("{} ({} import of {})", s.folder, s.kind, s.source));
-        out.push(format!(
-            "  {} file(s), {} {unit}: {} imported, {} missing ({} of {}), {} file(s) awaiting import",
-            s.files_total,
-            s.ids_total,
-            s.ids_imported,
-            s.ids_missing,
-            fmt_bytes(s.bytes_missing),
-            fmt_bytes(s.bytes_total),
-            s.files_awaiting
-        ));
+        if s.kind == "git-annex" {
+            out.push(format!(
+                "  {} file(s), {} keys: {} imported, {} missing ({} of {}), {} file(s) awaiting import",
+                s.files_total,
+                s.ids_total,
+                s.ids_imported,
+                s.ids_missing,
+                fmt_bytes(s.bytes_missing),
+                fmt_bytes(s.bytes_total),
+                s.files_awaiting
+            ));
+        } else {
+            out.push(format!(
+                "  {} file(s) ({}): {} imported, {} awaiting import",
+                s.files_total,
+                fmt_bytes(s.bytes_total),
+                s.ids_imported,
+                s.files_awaiting
+            ));
+        }
         if s.ids_damaged > 0 || s.damaged_copies > 0 {
             out.push(format!(
                 "  damaged: {} {unit} still without a good copy, {} damaged copies seen",
