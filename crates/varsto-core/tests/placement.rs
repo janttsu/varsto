@@ -417,8 +417,9 @@ fn moving_keeps_the_policy_and_lowers_the_bill() {
     );
     assert_eq!(objects(&lab.p("h1")), blocks - plan.blocks as usize);
     assert_eq!(on_storage(&lab.a, "hot1"), blocks - plan.blocks as usize);
-    // Met, with no margin: one of the two copies is on cold storage.
-    assert_eq!(lab.a.policy_check().unwrap()[0].state, PolicyState::AtRisk);
+    // Met with a margin: one of the two storage copies is on cold storage,
+    // and this device's files are a third copy.
+    assert_eq!(lab.a.policy_check().unwrap()[0].state, PolicyState::Ok);
     // The next push does not put the moved blocks back.
     lab.a.sync(None).unwrap();
     assert_eq!(objects(&lab.p("h1")), blocks - plan.blocks as usize);

@@ -568,8 +568,12 @@ impl Engine {
                 let verdict = crate::policy::evaluate(
                     &rec.name,
                     rules,
+                    // Storage copies only: copies on devices do not let a
+                    // storage copy go (they are plaintext files on user
+                    // machines, not kept storage).
                     &[ChunkFacts {
                         copies: after.clone(),
+                        devices: 0,
                     }],
                     &BTreeMap::new(),
                     &[],

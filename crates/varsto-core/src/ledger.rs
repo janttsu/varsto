@@ -56,6 +56,10 @@ pub enum Event {
         object: ObjectName,
         size: u64,
     },
+    /// This device no longer holds the plaintext of the chunk (the file was
+    /// deleted or freed, or the folder detached here). The newer of this
+    /// device's `ChunkOnDevice` and `ChunkOffDevice` for a chunk wins.
+    ChunkOffDevice { folder: FolderId, chunk: ChunkId },
     /// This device published folder manifest `seq`.
     ManifestPublished {
         folder: FolderId,
@@ -845,6 +849,7 @@ impl LedgerStore {
     }
 
     pub fn finish_owned(&self, mut view: LedgerView) -> LedgerView {
+        view.apply_device_offs();
         view.apply_retirements();
         view.apply_drops();
         view.fold_object_claims();
@@ -899,7 +904,8 @@ pub struct ViewCache {
 impl ViewCache {
     /// 3: chunk records carry drops and claim times (`ChunkDropped`).
     /// 4: backup snapshots and stopped backups.
-    pub const FORMAT: u32 = 4;
+    /// 5: device copies with on/off stamps (`ChunkOffDevice`).
+    pub const FORMAT: u32 = 5;
 
     pub fn new(context: String) -> Self {
         ViewCache {
@@ -913,6 +919,33 @@ impl ViewCache {
 /// Which event set a value last: Lamport time, device, batch sequence and
 /// position in the batch. The largest wins, whatever order batches arrive in.
 pub type Stamp = (u64, DeviceId, u64, u32);
+
+/// Where in its own ledger a device said something about itself: Lamport
+/// time, batch sequence and position in the batch. Only a device records
+/// which chunks it holds, so the device needs no place in the stamp.
+pub type OwnStamp = (u64, u64, u32);
+
+/// One device's newest claims that it holds a chunk (`ChunkOnDevice`) and
+/// that it no longer does (`ChunkOffDevice`). It holds the chunk when the
+/// newest claim is an "on", whatever order the batches arrive in.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Holding {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub on: Option<OwnStamp>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub off: Option<OwnStamp>,
+}
+
+impl Holding {
+    pub fn holds(&self) -> bool {
+        self.on > self.off
+    }
+
+    fn merge(&mut self, other: &Holding) {
+        self.on = self.on.max(other.on);
+        self.off = self.off.max(other.off);
+    }
+}
 
 /// Serialize maps with tuple keys as lists of pairs (JSON keys are strings).
 mod pairs {
@@ -967,7 +1000,11 @@ pub struct ChunkRecord {
     pub object: ObjectName,
     pub size: u64,
     pub storages: BTreeMap<String, Location>,
-    pub devices: BTreeSet<DeviceId>,
+    /// Devices that said they hold the plaintext of the chunk, with their
+    /// newest on and off claims. The finished view keeps only the devices
+    /// that hold it now (`ChunkRecord::holders`).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub on_devices: BTreeMap<DeviceId, Holding>,
     /// Which events set `object` and `size`.
     #[serde(default)]
     pub object_at: Option<Stamp>,
@@ -1019,6 +1056,19 @@ impl ChunkRecord {
     }
     pub fn claimed_storages(&self) -> usize {
         self.storages.len()
+    }
+
+    /// The devices holding the plaintext of the chunk now (revoked devices
+    /// included: callers that count copies leave them out).
+    pub fn holders(&self) -> impl Iterator<Item = &DeviceId> {
+        self.on_devices
+            .iter()
+            .filter(|(_, h)| h.holds())
+            .map(|(d, _)| d)
+    }
+
+    pub fn held_by(&self, device: &DeviceId) -> bool {
+        self.on_devices.get(device).is_some_and(Holding::holds)
     }
 
     /// The chunk was deliberately removed from `storage` and nobody stored
@@ -1167,7 +1217,18 @@ impl LedgerView {
                         .or_default();
                     rec.set_object(object, stamp());
                     rec.set_size(*size, stamp());
-                    rec.devices.insert(batch.device.clone());
+                    let h = rec.on_devices.entry(batch.device.clone()).or_default();
+                    h.on = h.on.max(Some((batch.lamport, batch.seq, i as u32)));
+                }
+                Event::ChunkOffDevice { folder, chunk } => {
+                    // Kept even before the chunk is otherwise known: the "on"
+                    // it overrides may arrive later.
+                    let rec = self
+                        .chunks
+                        .entry((folder.clone(), chunk.clone()))
+                        .or_default();
+                    let h = rec.on_devices.entry(batch.device.clone()).or_default();
+                    h.off = h.off.max(Some((batch.lamport, batch.seq, i as u32)));
                 }
                 Event::ManifestPublished { folder, seq, .. } => {
                     let e = self
@@ -1261,7 +1322,9 @@ impl LedgerView {
                 let d = mine.dropped.entry(name.clone()).or_insert(0);
                 *d = (*d).max(*at);
             }
-            mine.devices.extend(rec.devices.iter().cloned());
+            for (device, h) in &rec.on_devices {
+                mine.on_devices.entry(device.clone()).or_default().merge(h);
+            }
         }
         for (key, seq) in &other.manifests {
             let e = self.manifests.entry(key.clone()).or_insert(0);
@@ -1332,6 +1395,20 @@ impl LedgerView {
                 dropped.get(name).is_none_or(|at| claimed > *at)
             });
         }
+    }
+
+    /// Keep only the devices that hold each chunk now, and drop records that
+    /// off claims alone created (no other event named the chunk). Runs once
+    /// all batches are applied, like retirements.
+    fn apply_device_offs(&mut self) {
+        self.chunks.retain(|_, rec| {
+            let off_only = rec.object_at.is_none()
+                && rec.storages.is_empty()
+                && rec.dropped.is_empty()
+                && rec.on_devices.values().all(|h| h.on.is_none());
+            rec.on_devices.retain(|_, h| h.holds());
+            !off_only
+        });
     }
 
     pub fn locate(&self, folder: &FolderId, chunk: &ChunkId) -> Option<&ChunkRecord> {
@@ -1522,6 +1599,127 @@ mod tests {
         assert!(sealed2.verify(&hybrid.public()).is_err());
     }
 
+    fn device_batch(device: &DeviceId, seq: u64, events: Vec<Event>) -> Batch {
+        Batch {
+            device: device.clone(),
+            seq,
+            prev: None,
+            lamport: seq,
+            created_utc: 0,
+            events,
+            seen: BTreeMap::new(),
+        }
+    }
+
+    /// A device holds a chunk when its newest claim about it is an "on",
+    /// whatever order its batches are applied or merged in.
+    #[test]
+    fn device_holding_is_the_newest_claim_in_any_order() {
+        let dev = DeviceId::from_bytes(&[1; 16]);
+        let folder = FolderId::from_bytes(&[2]);
+        let chunk = ChunkId::from_bytes(&[3, 7]);
+        let on = Event::ChunkOnDevice {
+            folder: folder.clone(),
+            chunk: chunk.clone(),
+            object: ObjectName::from_bytes(&[4, 9]),
+            size: 5,
+        };
+        let off = Event::ChunkOffDevice {
+            folder: folder.clone(),
+            chunk: chunk.clone(),
+        };
+        let batches = [
+            device_batch(&dev, 1, vec![on.clone()]),
+            device_batch(&dev, 2, vec![off.clone()]),
+            device_batch(&dev, 3, vec![on.clone(), off.clone()]),
+            device_batch(&dev, 4, vec![off.clone(), on.clone()]),
+        ];
+        let held = |order: &[usize], split: usize| {
+            // Applied in `order`, the first `split` batches through a
+            // separate view merged in (as a checkpoint is).
+            let (mut view, mut part) = (LedgerView::default(), LedgerView::default());
+            for (n, i) in order.iter().enumerate() {
+                if n < split {
+                    part.apply(&batches[*i]);
+                } else {
+                    view.apply(&batches[*i]);
+                }
+            }
+            view.merge(&part);
+            view.apply_device_offs();
+            view.locate(&folder, &chunk).map(|r| r.held_by(&dev))
+        };
+        let perms = |n: usize| -> Vec<Vec<usize>> {
+            let mut out = vec![vec![]];
+            for _ in 0..n {
+                out = out
+                    .into_iter()
+                    .flat_map(|p| {
+                        (0..n)
+                            .filter(|i| !p.contains(i))
+                            .map(|i| [p.clone(), vec![i]].concat())
+                            .collect::<Vec<_>>()
+                    })
+                    .collect();
+            }
+            out
+        };
+        for split in 0..=4 {
+            for p in perms(4) {
+                assert_eq!(held(&p, split), Some(true), "{p:?} {split}");
+            }
+            for p in perms(3) {
+                assert_eq!(held(&p, split), Some(false), "{p:?} {split}");
+            }
+        }
+        assert_eq!(held(&[0], 0), Some(true));
+        // An off claim alone leaves no record behind.
+        assert_eq!(held(&[1], 0), None);
+        assert_eq!(held(&[1, 0], 1), Some(false));
+    }
+
+    /// Batches a removed device signed after its cut-off do not count, its
+    /// "off" claims included: it still shows as a holder in the view, and
+    /// callers that count copies leave revoked devices out.
+    #[test]
+    fn a_cut_off_device_keeps_its_last_accepted_claims() {
+        let (_d, mut store, key, signer, device) = setup();
+        let folder = FolderId::from_bytes(&[2]);
+        let chunk = ChunkId::from_bytes(&[3, 7]);
+        store
+            .append_own(
+                &device,
+                vec![Event::ChunkOnDevice {
+                    folder: folder.clone(),
+                    chunk: chunk.clone(),
+                    object: ObjectName::from_bytes(&[4, 9]),
+                    size: 5,
+                }],
+                1,
+                &key,
+                &signer,
+            )
+            .unwrap();
+        store
+            .append_own(
+                &device,
+                vec![Event::ChunkOffDevice {
+                    folder: folder.clone(),
+                    chunk: chunk.clone(),
+                }],
+                2,
+                &key,
+                &signer,
+            )
+            .unwrap();
+        let key_for = |id: &str| (id == KEY_LEDGER).then(|| key.clone());
+        let all = store.view_filtered(key_for, |_, _| true).unwrap();
+        assert!(!all.locate(&folder, &chunk).unwrap().held_by(&device));
+        let cut = store.view_filtered(key_for, |_, seq| seq <= 1).unwrap();
+        let rec = cut.locate(&folder, &chunk).unwrap();
+        assert_eq!(rec.holders().collect::<Vec<_>>(), vec![&device]);
+    }
+
     /// Small deterministic generator for the property test.
     struct Rng(u64);
     impl Rng {
@@ -1552,7 +1750,7 @@ mod tests {
             };
         }
         let folder = |rng: &mut Rng| FolderId::from_bytes(&[1 + rng.below(3) as u8]);
-        match rng.below(11) {
+        match rng.below(13) {
             0 => Event::DeviceEnrolled {
                 name: format!("n{}", rng.below(5)),
             },
@@ -1606,11 +1804,15 @@ mod tests {
                     snapshot_hash: format!("h{}", rng.below(3)),
                 },
             },
-            _ => Event::ChunkDropped {
+            9 | 10 => Event::ChunkDropped {
                 folder: folder(rng),
                 chunk: chunk(rng),
                 object: object(rng),
                 storage: storage(rng),
+            },
+            _ => Event::ChunkOffDevice {
+                folder: folder(rng),
+                chunk: chunk(rng),
             },
         }
     }

@@ -331,7 +331,7 @@ fn devices_and_transferrers_never_receive_backup_contents() {
     let view = a.view().unwrap();
     let mine: Vec<_> = view.chunks.iter().filter(|((f, _), _)| f == &id).collect();
     assert!(!mine.is_empty());
-    assert!(mine.iter().all(|(_, r)| r.devices.is_empty()));
+    assert!(mine.iter().all(|(_, r)| r.holders().next().is_none()));
     assert!(mine.iter().all(|(_, r)| !r.storages.contains_key("usb")));
 
     let mut b = Engine::join(
@@ -359,7 +359,7 @@ fn devices_and_transferrers_never_receive_backup_contents() {
         .chunks
         .iter()
         .filter(|((f, _), _)| f == &id)
-        .all(|(_, r)| r.devices.is_empty()));
+        .all(|(_, r)| r.holders().next().is_none()));
     assert_eq!(a.view().unwrap(), a.view_replayed().unwrap());
 }
 
