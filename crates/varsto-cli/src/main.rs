@@ -892,6 +892,21 @@ enum DiskCmd {
         #[arg(long)]
         no_power_off: bool,
     },
+    /// When large fetches propose pool disks: show the settings, or set them.
+    FetchSet {
+        /// Fetches at least this large are worth fetching disks for (default 2048).
+        #[arg(long)]
+        threshold_mib: Option<u64>,
+        /// Time to fetch a disk from the shelf and plug it in (default 120).
+        #[arg(long)]
+        overhead_secs: Option<u64>,
+        /// Download speed from the remote storages (default 100).
+        #[arg(long)]
+        link_mbit: Option<f64>,
+        /// Read speed of a disk in the dock (default 120).
+        #[arg(long)]
+        disk_mb_per_sec: Option<f64>,
+    },
     /// Pool settings: re-hash copies on a disk at insert when their last check is older than N days.
     PoolSet {
         pool: String,
@@ -1889,15 +1904,31 @@ fn run(cli: &Cli) -> Result<()> {
                                 row["partuuid"] = serde_json::json!(d.partuuid);
                                 row["plugged_in"] = serde_json::json!(at.is_some());
                                 row["partition"] = serde_json::json!(at.as_ref().map(|a| &a.0));
+                                row["fsck"] = serde_json::json!(varsto_core::diskconf::checks(
+                                    &home
+                                )
+                                .get(&d.partuuid));
                             }
                         }
                         println!("{}", serde_json::to_string_pretty(&rows)?);
                         return Ok(());
                     }
                     let mut text = String::new();
+                    let checks = varsto_core::diskconf::checks(&home);
                     for (d, at) in &known {
+                        let check = checks
+                            .get(&d.partuuid)
+                            .map(|c| {
+                                format!(
+                                    "; file system checked {}: {:?}",
+                                    varsto_core::util::format_date(c.checked_utc),
+                                    c.verdict
+                                )
+                                .to_lowercase()
+                            })
+                            .unwrap_or_else(|| "; file system not checked yet".into());
                         text.push_str(&format!(
-                            "drive \"{}\" (pool {}, PARTUUID {}): {}\n",
+                            "drive \"{}\" (pool {}, PARTUUID {}{check}): {}\n",
                             d.label,
                             d.pool,
                             d.partuuid,
@@ -2031,6 +2062,36 @@ fn run(cli: &Cli) -> Result<()> {
                     no_power_off,
                 } => {
                     drives::unmount(cli, &home, &mut engine, label, !no_power_off)?;
+                }
+                DiskCmd::FetchSet {
+                    threshold_mib,
+                    overhead_secs,
+                    link_mbit,
+                    disk_mb_per_sec,
+                } => {
+                    let mut st = engine.disk_fetch_settings();
+                    if let Some(v) = threshold_mib {
+                        st.threshold_bytes = v.saturating_mul(1 << 20);
+                    }
+                    if let Some(v) = overhead_secs {
+                        st.overhead_secs = *v;
+                    }
+                    if let Some(v) = link_mbit.filter(|v| *v > 0.0) {
+                        st.link_mbit_per_sec = v;
+                    }
+                    if let Some(v) = disk_mb_per_sec.filter(|v| *v > 0.0) {
+                        st.disk_mb_per_sec = v;
+                    }
+                    engine.set_disk_fetch_settings(st.clone())?;
+                    print(cli, &st, |st| {
+                        format!(
+                            "pool disks are proposed for fetches of {} or more; {} s per disk to fetch it, network {} Mbit/s, disk {} MB/s",
+                            fmt_bytes(st.threshold_bytes),
+                            st.overhead_secs,
+                            st.link_mbit_per_sec,
+                            st.disk_mb_per_sec
+                        )
+                    })?;
                 }
                 DiskCmd::PoolSet {
                     pool,

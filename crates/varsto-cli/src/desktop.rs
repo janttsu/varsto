@@ -1409,6 +1409,9 @@ fn api_unlocked(
                 .ok_or_else(|| anyhow!("the plan has no step {}", k + 1))?;
             if !step.attached {
                 if let Err(e) = crate::drives::mount_known(engine.home(), &step.label) {
+                    if let Some(stop) = e.downcast_ref::<varsto_core::blockdev::FsckStopped>() {
+                        return Ok(json!({"fsck_failed": stop.outcome, "error": stop.message}));
+                    }
                     return Ok(json!({"needs_disk": {"label": step.label, "disk_id": step.disk_id, "place": step.place}, "error": format!("{e:#}")}));
                 }
             }

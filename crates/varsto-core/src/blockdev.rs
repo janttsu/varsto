@@ -412,11 +412,17 @@ pub struct Output {
     pub ok: bool,
     pub stdout: String,
     pub stderr: String,
+    /// Exit code (-1 when killed by a signal).
+    pub code: i32,
 }
 
 /// Runs external commands (a recorded fake in tests).
 pub trait Runner {
     fn run(&mut self, argv: &[String]) -> Result<Output>;
+    /// Run with the terminal as stdout and stderr (progress bars), nothing captured.
+    fn run_live(&mut self, argv: &[String]) -> Result<Output> {
+        self.run(argv)
+    }
     /// Whether a program is on PATH.
     fn has(&self, program: &str) -> bool;
     /// Effective user id (0: root, no privilege helper needed).
@@ -439,11 +445,29 @@ impl Runner for SystemRunner {
             ok: out.status.success(),
             stdout: String::from_utf8_lossy(&out.stdout).into_owned(),
             stderr: String::from_utf8_lossy(&out.stderr).into_owned(),
+            code: out.status.code().unwrap_or(-1),
+        })
+    }
+    fn run_live(&mut self, argv: &[String]) -> Result<Output> {
+        let (prog, args) = argv.split_first().ok_or_else(|| anyhow!("empty command"))?;
+        let status = std::process::Command::new(prog)
+            .args(args)
+            .status()
+            .with_context(|| format!("run {prog}"))?;
+        Ok(Output {
+            ok: status.success(),
+            code: status.code().unwrap_or(-1),
+            ..Default::default()
         })
     }
     fn has(&self, program: &str) -> bool {
-        std::env::var_os("PATH")
-            .is_some_and(|paths| std::env::split_paths(&paths).any(|d| d.join(program).is_file()))
+        // The sbin directories too: Debian leaves them out of a user's PATH,
+        // while sudo and pkexec find the tools there.
+        let mut dirs: Vec<PathBuf> = std::env::var_os("PATH")
+            .map(|p| std::env::split_paths(&p).collect())
+            .unwrap_or_default();
+        dirs.extend(["/usr/local/sbin", "/usr/sbin", "/sbin"].map(PathBuf::from));
+        dirs.iter().any(|d| d.join(program).is_file())
     }
     fn uid(&self) -> u32 {
         #[cfg(unix)]
@@ -693,6 +717,171 @@ pub fn mount_partition(
         bail!("mounting {label} at {dir_s} failed: {}", out.stderr.trim());
     }
     Ok((dir, Method::Sudo))
+}
+
+/// Filesystems a pool disk may have: the ones `e2fsck` checks.
+const EXT_FSTYPES: &[&str] = &["ext4", "ext3", "ext2"];
+
+/// What the forced check before mounting found.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum FsckVerdict {
+    /// Exit code 0.
+    Clean,
+    /// 1 (or 2, "reboot": not relevant for a data disk): errors were corrected.
+    Corrected,
+    /// 4: errors left uncorrected; the disk is not mounted.
+    Uncorrected,
+    /// 8, 16, 32, 128 (or a signal): e2fsck could not do its work.
+    Failed,
+}
+
+impl FsckVerdict {
+    pub fn of(code: i32) -> FsckVerdict {
+        if code == 0 {
+            FsckVerdict::Clean
+        } else if code < 0 || code & (8 | 16 | 32 | 128) != 0 {
+            FsckVerdict::Failed
+        } else if code & 4 != 0 {
+            FsckVerdict::Uncorrected
+        } else {
+            FsckVerdict::Corrected
+        }
+    }
+    /// Whether the disk may be mounted for pool work.
+    pub fn mountable(&self) -> bool {
+        matches!(self, FsckVerdict::Clean | FsckVerdict::Corrected)
+    }
+}
+
+/// One forced check: `e2fsck -f -p` on the unmounted partition.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct FsckOutcome {
+    pub partition: String,
+    pub code: i32,
+    pub verdict: FsckVerdict,
+    /// e2fsck's summary (stdout) when it was captured, and its stderr.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub summary: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub stderr: String,
+    pub checked_utc: i64,
+}
+
+impl FsckOutcome {
+    /// The message for a verdict that stops the mount, or warns.
+    pub fn message(&self, label: &str) -> Option<String> {
+        match self.verdict {
+            FsckVerdict::Clean => None,
+            FsckVerdict::Corrected => Some(format!(
+                "file system errors were found and corrected on {label} ({})",
+                self.partition
+            )),
+            FsckVerdict::Uncorrected => Some(format!(
+                "The file system on {label} has errors that could not be repaired automatically; nothing was read or written. Run `sudo e2fsck -f {}` by hand or retire the disk.",
+                self.partition
+            )),
+            FsckVerdict::Failed => Some(format!(
+                "Checking the file system on {label} ({}) failed (e2fsck exit code {}); nothing was read or written: {}",
+                self.partition,
+                self.code,
+                self.stderr.trim()
+            )),
+        }
+    }
+}
+
+/// Make sure the partition is not mounted (a desktop may have mounted it
+/// on its own): udisks, else `umount` as root.
+fn ensure_unmounted(r: &mut dyn Runner, part: &str, mounts: &[String]) -> Result<()> {
+    let Some(m) = mounts.iter().find(|m| !m.is_empty()) else {
+        return Ok(());
+    };
+    if r.has("udisksctl") {
+        let out = r.run(&argv(&[
+            "udisksctl",
+            "unmount",
+            "--no-user-interaction",
+            "-b",
+            part,
+        ]))?;
+        if out.ok {
+            return Ok(());
+        }
+    }
+    let mut cmd = privilege(r)?;
+    cmd.extend(argv(&["umount", m]));
+    let out = r.run(&cmd)?;
+    if !out.ok {
+        bail!(
+            "{part} is mounted at {m} and could not be unmounted for its file system check: {}",
+            out.stderr.trim()
+        );
+    }
+    Ok(())
+}
+
+/// Before pool work on a disk: refuse anything but ext2/3/4, unmount the
+/// partition if it is mounted, run `e2fsck -f -p` as root (with a progress
+/// bar on a terminal: `live`), and mount it only when the check left it
+/// clean or corrected. Returns the mount, how it was mounted and the check;
+/// a check that leaves errors (or fails) returns `FsckOutcome` inside the
+/// error, as `FsckStopped`, and nothing is mounted.
+pub fn check_and_mount(
+    r: &mut dyn Runner,
+    partuuid: &str,
+    label: &str,
+    live: bool,
+) -> Result<(PathBuf, Method, FsckOutcome)> {
+    let devs = lsblk(r)?;
+    let (part, _) = find_partition(&devs, partuuid)
+        .ok_or_else(|| anyhow!("partition {partuuid} ({label}) is not plugged in"))?;
+    let part_path = part.path.clone();
+    if !EXT_FSTYPES.contains(&part.fstype.as_str()) {
+        bail!(
+            "{label} ({part_path}) has {} file system; pool disks need ext4 (checked with e2fsck before use): prepare the drive with `varsto disk init`",
+            if part.fstype.is_empty() { "no known".to_string() } else { format!("a {}", part.fstype) }
+        );
+    }
+    if !r.has("e2fsck") {
+        bail!("e2fsck is missing: install e2fsprogs; a pool disk is always checked before it is mounted");
+    }
+    ensure_unmounted(r, &part_path, &part.mountpoints)?;
+    let mut cmd = privilege(r)?;
+    cmd.extend(argv(&["e2fsck", "-f", "-p"]));
+    if live {
+        cmd.extend(argv(&["-C", "0"]));
+    }
+    cmd.push(part_path.clone());
+    let out = if live {
+        r.run_live(&cmd)?
+    } else {
+        r.run(&cmd)?
+    };
+    let outcome = FsckOutcome {
+        partition: part_path,
+        code: out.code,
+        verdict: FsckVerdict::of(out.code),
+        summary: out.stdout.trim().to_string(),
+        stderr: out.stderr.trim().to_string(),
+        checked_utc: crate::util::now_utc(),
+    };
+    if !outcome.verdict.mountable() {
+        return Err(anyhow::Error::new(FsckStopped {
+            message: outcome.message(label).unwrap_or_default(),
+            outcome,
+        }));
+    }
+    let (mount, how) = mount_partition(r, partuuid, label)?;
+    Ok((mount, how, outcome))
+}
+
+/// The check before mounting left errors or failed: nothing was mounted.
+#[derive(Debug, thiserror::Error)]
+#[error("{message}")]
+pub struct FsckStopped {
+    pub message: String,
+    pub outcome: FsckOutcome,
 }
 
 /// One step of a safe unmount, as reported.
@@ -982,6 +1171,7 @@ mod tests {
             ok: true,
             stdout: stdout.into(),
             stderr: String::new(),
+            code: 0,
         }
     }
 
@@ -1054,6 +1244,7 @@ mod tests {
                 ok: false,
                 stdout: "step: wipe signatures\n".into(),
                 stderr: "sgdisk: cannot open".into(),
+                code: 1,
             }),
         };
         let e = prepare_drive(&mut fake, "/dev/sdf", "x", (1, 1))
@@ -1079,6 +1270,7 @@ mod tests {
                     ok: false,
                     stdout: String::new(),
                     stderr: "Not authorized".into(),
+                    code: 1,
                 },
                 _ => ok(""),
             }),
@@ -1137,6 +1329,7 @@ mod tests {
                         ok: false,
                         stdout: String::new(),
                         stderr: "target is busy".into(),
+                        code: 1,
                     }
                 }
             }),
@@ -1145,5 +1338,148 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(e.contains("target is busy") && e.contains("fuser"), "{e}");
+    }
+
+    type Checked = (Result<(PathBuf, Method, FsckOutcome)>, Vec<Vec<String>>);
+
+    /// A drive automounted by the desktop at /run/media/me/Blue; e2fsck exits
+    /// with `code`. Returns the result and the commands run.
+    fn fsck_with(code: i32, fstype: &'static str) -> Checked {
+        let mounted = std::rc::Rc::new(std::cell::Cell::new(true));
+        let m2 = mounted.clone();
+        let mut fake = Fake {
+            calls: vec![],
+            programs: vec!["udisksctl", "lsblk", "sudo", "e2fsck"],
+            uid: 1000,
+            answer: Box::new(move |a: &[String]| {
+                match (a[0].as_str(), a.get(1).map(String::as_str)) {
+                    ("lsblk", _) => ok(&format!(
+                        r#"{{"blockdevices":[{{"name":"sdf","path":"/dev/sdf","type":"disk","size":100,"children":[{{"name":"sdf1","path":"/dev/sdf1","type":"part","size":99,"fstype":"{fstype}","partuuid":"abcd-1","mountpoints":[{}]}}]}}]}}"#,
+                        if m2.get() {
+                            "\"/run/media/me/Blue\""
+                        } else {
+                            ""
+                        }
+                    )),
+                    ("udisksctl", Some("unmount")) => {
+                        m2.set(false);
+                        ok("")
+                    }
+                    ("udisksctl", Some("mount")) => {
+                        m2.set(true);
+                        ok("Mounted /dev/sdf1 at /run/media/me/Blue")
+                    }
+                    ("sudo", Some("e2fsck")) => Output {
+                        ok: code == 0,
+                        stdout: "Blue: 11/65536 files (0.0% non-contiguous), 5000/262144 blocks"
+                            .into(),
+                        stderr: if code >= 8 {
+                            "e2fsck: Cannot continue, aborting.".into()
+                        } else {
+                            String::new()
+                        },
+                        code,
+                    },
+                    _ => ok(""),
+                }
+            }),
+        };
+        let r = check_and_mount(&mut fake, "abcd-1", "Blue", false);
+        (r, fake.calls)
+    }
+
+    fn ran(calls: &[Vec<String>], what: &[&str]) -> bool {
+        calls.iter().any(|c| {
+            c.iter()
+                .map(String::as_str)
+                .take(what.len())
+                .eq(what.iter().copied())
+        })
+    }
+
+    #[test]
+    fn a_clean_or_corrected_check_mounts_after_unmounting_the_automount() {
+        for (code, verdict) in [
+            (0, FsckVerdict::Clean),
+            (1, FsckVerdict::Corrected),
+            (2, FsckVerdict::Corrected),
+            (3, FsckVerdict::Corrected),
+        ] {
+            let (r, calls) = fsck_with(code, "ext4");
+            let (mount, how, out) = r.unwrap();
+            assert_eq!(out.verdict, verdict, "exit code {code}");
+            assert_eq!(
+                (mount, how),
+                (PathBuf::from("/run/media/me/Blue"), Method::Udisks)
+            );
+            // Unmounted, checked, mounted: in that order.
+            let unmount = calls
+                .iter()
+                .position(|c| c[0] == "udisksctl" && c[1] == "unmount")
+                .unwrap();
+            let check = calls
+                .iter()
+                .position(|c| c.get(1).is_some_and(|x| x == "e2fsck"))
+                .unwrap();
+            let mount = calls
+                .iter()
+                .position(|c| c[0] == "udisksctl" && c[1] == "mount")
+                .unwrap();
+            assert!(unmount < check && check < mount);
+            assert_eq!(
+                calls[check],
+                argv(&["sudo", "e2fsck", "-f", "-p", "/dev/sdf1"])
+            );
+            assert_eq!(out.message("Blue").is_some(), code != 0);
+            assert!(out.summary.contains("11/65536 files"));
+        }
+        let (r, _) = fsck_with(1, "ext4");
+        let msg = r.unwrap().2.message("Blue").unwrap();
+        assert!(
+            msg.contains("file system errors were found and corrected"),
+            "{msg}"
+        );
+    }
+
+    #[test]
+    fn errors_left_or_a_failed_check_never_mount() {
+        for (code, verdict, words) in [
+            (
+                4,
+                FsckVerdict::Uncorrected,
+                "could not be repaired automatically",
+            ),
+            (5, FsckVerdict::Uncorrected, "sudo e2fsck -f /dev/sdf1"),
+            (8, FsckVerdict::Failed, "Cannot continue"),
+            (12, FsckVerdict::Failed, "exit code 12"),
+            (16, FsckVerdict::Failed, "failed"),
+            (32, FsckVerdict::Failed, "failed"),
+            (128, FsckVerdict::Failed, "failed"),
+        ] {
+            let (r, calls) = fsck_with(code, "ext4");
+            let e = r.unwrap_err();
+            let stopped = e.downcast_ref::<FsckStopped>().expect("typed error");
+            assert_eq!(stopped.outcome.verdict, verdict, "exit code {code}");
+            assert!(e.to_string().contains(words), "{code}: {e}");
+            assert!(e.to_string().contains("nothing was read or written"), "{e}");
+            assert!(
+                !ran(&calls, &["udisksctl", "mount"]) && !ran(&calls, &["sudo", "mount"]),
+                "mounted after code {code}"
+            );
+        }
+        assert_eq!(FsckVerdict::of(-1), FsckVerdict::Failed);
+    }
+
+    #[test]
+    fn only_ext_file_systems_are_checked_and_mounted() {
+        let (r, calls) = fsck_with(0, "ntfs");
+        let e = r.unwrap_err().to_string();
+        assert!(
+            e.contains("a ntfs file system") && e.contains("varsto disk init"),
+            "{e}"
+        );
+        assert!(!ran(&calls, &["sudo", "e2fsck"]) && !ran(&calls, &["udisksctl"]));
+        let (r, _) = fsck_with(0, "ext3");
+        assert!(r.is_ok());
     }
 }

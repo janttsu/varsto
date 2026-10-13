@@ -19,6 +19,8 @@ use anyhow::{bail, Result};
 use std::path::{Path, PathBuf};
 
 pub const FILE: &str = "disks.conf";
+/// The last forced file system check of each partition (JSON, by PARTUUID).
+pub const CHECKS_FILE: &str = "disk-checks.json";
 
 const HEADER: &str = "\
 # Varsto drives on this device: one line per partition, fields separated by tabs:
@@ -189,6 +191,22 @@ impl DiskConf {
             .retain(|l| !matches!(l, Line::Drive(d) if d.partuuid == uuid));
         self.lines.len() != before
     }
+}
+
+/// The last check of every partition that was checked before a mount.
+pub fn checks(home: &Path) -> std::collections::BTreeMap<String, crate::blockdev::FsckOutcome> {
+    util::read_json(&home.join(CHECKS_FILE)).unwrap_or_default()
+}
+
+/// Remember the check of a partition (written atomically).
+pub fn record_check(
+    home: &Path,
+    partuuid: &str,
+    outcome: &crate::blockdev::FsckOutcome,
+) -> Result<()> {
+    let mut all = checks(home);
+    all.insert(partuuid.to_ascii_lowercase(), outcome.clone());
+    util::write_json(&home.join(CHECKS_FILE), &all)
 }
 
 #[cfg(test)]
