@@ -692,6 +692,45 @@ fn str_list(v: &Value, key: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// Folder safety (`varsto_core::engine::folder_safety`): the folder marker,
+/// held deletions and the send-only / receive-only modes. `input` names the
+/// folder and the action; the command line calls this directly when no
+/// service runs.
+pub(crate) fn folder_safety_action(engine: &mut Engine, input: &Value) -> Result<Value> {
+    let folder = s(input, "folder")?;
+    let action = s(input, "action")?;
+    Ok(match action.as_str() {
+        "changes" => serde_json::to_value(engine.folder_changes(&folder)?)?,
+        "repair-marker" => {
+            let path = engine.repair_marker(&folder)?;
+            json!({"ok": true, "path": path})
+        }
+        "confirm-deletions" => {
+            json!({"ok": true, "deleted": engine.confirm_deletions(&folder)?})
+        }
+        "discard-deletions" => serde_json::to_value(engine.discard_deletions(&folder)?)?,
+        "mode" => {
+            let mode: varsto_core::vault::FolderMode = s(input, "mode")?.parse()?;
+            engine.set_folder_mode(&folder, mode)?;
+            json!({"ok": true, "mode": mode})
+        }
+        "override" => json!({"ok": true, "files": engine.override_remote(&folder)?}),
+        "revert" => serde_json::to_value(engine.revert_local(&folder)?)?,
+        "deletion-guard" => {
+            let guard = match input.get("guard") {
+                None | Some(Value::Null) => None,
+                Some(g) => Some(serde_json::from_value::<varsto_core::vault::DeletionGuard>(
+                    g.clone(),
+                )?),
+            };
+            engine.set_deletion_guard(&folder, guard)?;
+            let now = engine.folder_changes(&folder)?.deletion_guard;
+            json!({"ok": true, "deletion_guard": now, "text": now.describe()})
+        }
+        other => bail!("unknown folder action {other}"),
+    })
+}
+
 fn opt(v: &Value, key: &str) -> Option<String> {
     v.get(key)
         .and_then(|x| x.as_str())
@@ -2214,6 +2253,15 @@ fn api_unlocked(
                     Ok(json!({"ok": true, "freed": freed, "kept": kept}))
                 }
             }
+        }
+        (Method::Post, "/api/folder/safety") => {
+            let action = s(input, "action")?;
+            let out = folder_safety_action(engine, input)?;
+            if action != "changes" {
+                service.folders_changed = true;
+                service.request_sync();
+            }
+            Ok(out)
         }
         (Method::Post, "/api/selective") => {
             engine.set_selective(

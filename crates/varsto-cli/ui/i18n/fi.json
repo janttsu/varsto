@@ -968,7 +968,42 @@
   "Tags": "Tunnisteet",
   "separated by commas": "pilkuilla erotettuina",
   "No files match the filter": "Mikään tiedosto ei vastaa suodatinta",
-  "Analysis stale": "Analyysi vanhentunut"
+  "Analysis stale": "Analyysi vanhentunut",
+  "The directory is right": "Hakemisto on oikea",
+  "Write the marker": "Kirjoita tunniste",
+  "Restore them": "Palauta ne",
+  "Delete them everywhere": "Poista ne kaikkialta",
+  "Delete everywhere": "Poista kaikkialta",
+  "Keep them and restore them everywhere": "Säilytä ne ja palauta kaikkialle",
+  "Delete them here too": "Poista ne myös täältä",
+  "Delete here": "Poista täältä",
+  "Override: make everyone match this device": "Ohita: tee kaikista tämän laitteen kaltaisia",
+  "Override": "Ohita",
+  "Revert: restore the vault version": "Palauta: holvin versio takaisin",
+  "Revert": "Palauta",
+  "Show files": "Näytä tiedostot",
+  "The files waiting for your decision:": "Päätöstäsi odottavat tiedostot:",
+  "Nothing waits for a decision.": "Mikään ei odota päätöstä.",
+  "Sync settings…": "Synkronoinnin asetukset…",
+  "Mode on this device and the deletion guard": "Tämän laitteen tila ja poistosuoja",
+  "These settings apply to this device only.": "Nämä asetukset koskevat vain tätä laitetta.",
+  "Mode on this device": "Tila tällä laitteella",
+  "Normal (send and receive)": "Tavallinen (lähetä ja vastaanota)",
+  "Send only": "Vain lähetys",
+  "Receive only": "Vain vastaanotto",
+  "This device publishes its changes and applies everyone else's.": "Tämä laite julkaisee muutoksensa ja ottaa vastaan kaikkien muiden muutokset.",
+  "This device publishes its changes but never applies other devices' changes to its files (for a camera phone, say). Differences are listed; an override makes everyone match this device.": "Tämä laite julkaisee muutoksensa mutta ei koskaan vie muiden laitteiden muutoksia tiedostoihinsa (esimerkiksi kamerapuhelin). Erot luetellaan; ohitus tekee kaikista tämän laitteen kaltaisia.",
+  "This device applies other devices' changes but never publishes its own. Local changes are listed; a revert restores the vault's versions.": "Tämä laite ottaa vastaan muiden laitteiden muutokset mutta ei koskaan julkaise omiaan. Paikalliset muutokset luetellaan; palautus tuo holvin versiot takaisin.",
+  "Hold mass deletions for confirmation": "Pidätä joukkopoistot vahvistettaviksi",
+  "Yes": "Kyllä",
+  "No": "Ei",
+  "Deletions are held when more than the share and more than the files below are deleted at once, or more than the limit.": "Poistot pidätetään, kun kerralla poistetaan enemmän kuin alla oleva osuus ja tiedostomäärä, tai enemmän kuin raja.",
+  "Share of the folder's files (%)": "Osuus kansion tiedostoista (%)",
+  "and more than this many files": "ja enemmän kuin näin monta tiedostoa",
+  "or more than this many files (0: no limit)": "tai enemmän kuin näin monta tiedostoa (0: ei rajaa)",
+  "send-only": "vain lähetys",
+  "receive-only": "vain vastaanotto",
+  "paused": "keskeytetty"
  },
  "patterns": [
   [
@@ -1286,6 +1321,58 @@
   [
    "^cleared the analysis of (.+)$",
    "tyhjennettiin tiedoston $1 analyysi"
+  ],
+  [
+   "^Folder (.+) is paused: the marker \\.varsto-folder is missing at (.+)\\. Is the disk mounted\\? Nothing is synced until it is back\\.$",
+   "Kansio $1 on keskeytetty: tunniste .varsto-folder puuttuu sijainnista $2. Onko levy liitetty? Mitään ei synkronoida, ennen kuin se on takaisin."
+  ],
+  [
+   "^Folder (.+) is paused: the directory (.+) holds another folder's marker\\. Is the right disk mounted\\? Nothing is synced until it is fixed\\.$",
+   "Kansio $1 on keskeytetty: hakemistossa $2 on toisen kansion tunniste. Onko oikea levy liitetty? Mitään ei synkronoida, ennen kuin asia on korjattu."
+  ],
+  [
+   "^Folder (.+) is paused: (\\d+) of (\\d+) files were deleted at once on this device\\. Nothing is synced until you decide\\.$",
+   "Kansio $1 on keskeytetty: tällä laitteella poistettiin kerralla $2 tiedostoa $3:sta. Mitään ei synkronoida, ennen kuin päätät."
+  ],
+  [
+   "^Folder (.+) is paused: (.+) deleted (\\d+) of (\\d+) files at once\\. Nothing is deleted here until you decide\\.$",
+   "Kansio $1 on keskeytetty: $2 poisti kerralla $3 tiedostoa $4:sta. Täältä ei poisteta mitään, ennen kuin päätät."
+  ],
+  [
+   "^Folder (.+) is send-only on this device: (\\d+) remote changes are not applied here\\.$",
+   "Kansio $1 on tällä laitteella vain lähettävä: $2 muiden laitteiden muutosta ei ole viety tänne."
+  ],
+  [
+   "^Folder (.+) is receive-only on this device: (\\d+) local changes are not published\\.$",
+   "Kansio $1 on tällä laitteella vain vastaanottava: $2 paikallista muutosta ei ole julkaistu."
+  ],
+  [
+   "^Write the marker into (.+) and sync this directory as (.+)\\? Only do this if the directory holds the folder's files: if it is an empty mount point, its files would be read as deleted \\(the deletion guard would still ask first\\)\\.$",
+   "Kirjoitetaanko tunniste hakemistoon $1 ja synkronoidaanko se kansiona $2? Tee näin vain, jos hakemistossa ovat kansion tiedostot: jos se on tyhjä liitoskohta, sen tiedostot tulkittaisiin poistetuiksi (poistosuoja kysyisi silti ensin)."
+  ],
+  [
+   "^Mark (.+) as folder (.+)\\? Only do this if the directory really holds this folder's files\\.$",
+   "Merkitäänkö $1 kansioksi $2? Tee näin vain, jos hakemistossa todella ovat tämän kansion tiedostot."
+  ],
+  [
+   "^Delete these (\\d+) files on every device\\? Other devices move them to their trash\\.$",
+   "Poistetaanko nämä $1 tiedostoa kaikilta laitteilta? Muut laitteet siirtävät ne roskakoriinsa."
+  ],
+  [
+   "^Delete these (\\d+) files on this device too\\? They go to this device's trash\\.$",
+   "Poistetaanko nämä $1 tiedostoa myös tältä laitteelta? Ne siirtyvät tämän laitteen roskakoriin."
+  ],
+  [
+   "^Publish this device's state of these (\\d+) files as the newest version\\? The other devices then match this one\\.$",
+   "Julkaistaanko näiden $1 tiedoston tila tältä laitteelta uusimpana versiona? Muut laitteet muuttuvat sitten tämän kaltaisiksi."
+  ],
+  [
+   "^Replace the (\\d+) locally changed files with the vault's versions\\? The local copies go to this device's trash\\.$",
+   "Korvataanko $1 paikallisesti muutettua tiedostoa holvin versioilla? Paikalliset kopiot siirtyvät tämän laitteen roskakoriin."
+  ],
+  [
+   "^Sync settings of (.+)$",
+   "Kansion $1 synkronoinnin asetukset"
   ]
  ],
  "review": [
@@ -1497,6 +1584,10 @@
   [
    "The file system on (.+) has errors that could not be repaired automatically; nothing was read or written\\. Run `sudo e2fsck -f (\\S+)` by hand or retire the disk\\.",
    "Levyn $1 tiedostojärjestelmässä on virheitä, joita ei voitu korjata automaattisesti; mitään ei luettu eikä kirjoitettu. Aja `sudo e2fsck -f $2` käsin tai poista levy käytöstä."
+  ],
+  [
+   ", (\\d+) paused",
+   ", $1 keskeytetty"
   ]
  ]
 }

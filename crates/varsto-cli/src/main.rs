@@ -1202,6 +1202,63 @@ enum FolderCmd {
         every: bool,
     },
     List,
+    /// Write the folder's marker (.varsto-folder) into its directory again,
+    /// when the folder is paused because the marker is missing or names
+    /// another folder and the directory is the right one.
+    RepairMarker {
+        name: String,
+    },
+    /// Decide on deletions the mass-deletion guard holds: confirm them
+    /// (published, or applied here when another device made them), or with
+    /// --discard restore the files (from the storages, or by keeping them and
+    /// publishing them again).
+    ConfirmDeletions {
+        name: String,
+        #[arg(long)]
+        discard: bool,
+    },
+    /// Show or set this device's mode for a folder: normal, send-only (publish
+    /// this device's changes, never apply the others') or receive-only (apply
+    /// the others' changes, never publish this device's).
+    Mode {
+        name: String,
+        mode: Option<String>,
+    },
+    /// Send-only: make every device match this one (the remote changes not
+    /// applied here are overridden by this device's state).
+    Override {
+        name: String,
+    },
+    /// Receive-only: replace this device's local changes with the vault's
+    /// versions; changed and added files go to the trash.
+    Revert {
+        name: String,
+    },
+    /// What waits for a decision in a folder: held deletions, local changes
+    /// not published, remote changes not applied.
+    Changes {
+        name: String,
+    },
+    /// Show or set when deletions are held for confirmation (default: more
+    /// than 50 % and more than 100 files, or more than 1000 files).
+    DeletionGuard {
+        name: String,
+        /// Share of the folder's files (100: no share rule).
+        #[arg(long)]
+        percent: Option<u32>,
+        /// ... and more than this many files.
+        #[arg(long)]
+        min_files: Option<u64>,
+        /// More than this many files whatever the share (0: no such limit).
+        #[arg(long)]
+        max_files: Option<u64>,
+        /// Never hold deletions in this folder.
+        #[arg(long, conflicts_with_all = ["percent", "min_files", "max_files", "default"])]
+        off: bool,
+        /// Back to the default.
+        #[arg(long, conflicts_with_all = ["percent", "min_files", "max_files"])]
+        default: bool,
+    },
 }
 
 /// FOLDER PATH as given, or the folder and path of one path on disk.
@@ -2826,6 +2883,9 @@ fn run(cli: &Cli) -> Result<()> {
             )?;
         }
         Cmd::Folder { cmd } => {
+            if folder_safety_cmd(cli, &home, cmd)? {
+                return Ok(());
+            }
             // With the background service running, changes to which folders
             // this device syncs go through it: it starts (or stops) watching
             // at once, and its own copy of the configuration stays current.
@@ -2949,6 +3009,13 @@ fn run(cli: &Cli) -> Result<()> {
                             .join("\n")
                     })?;
                 }
+                FolderCmd::RepairMarker { .. }
+                | FolderCmd::ConfirmDeletions { .. }
+                | FolderCmd::Mode { .. }
+                | FolderCmd::Override { .. }
+                | FolderCmd::Revert { .. }
+                | FolderCmd::Changes { .. }
+                | FolderCmd::DeletionGuard { .. } => unreachable!("handled by folder_safety_cmd"),
                 FolderCmd::List => {
                     let rows: Vec<serde_json::Value> = engine
                         .folders()
@@ -2998,7 +3065,7 @@ fn run(cli: &Cli) -> Result<()> {
             let r = engine.sync(folder.as_deref())?;
             warn_ledger(&engine.ledger_health());
             print(cli, &r, |r| {
-                r.iter().map(|(pl, ps)| format!("{}: pulled {} updated/{} deleted/{} conflicts, pushed {} changed/{} chunks{}{}", pl.folder, pl.files_updated, pl.files_deleted, pl.conflicts, ps.files_changed, ps.chunks_uploaded, if pl.disks_needed.is_empty() { String::new() } else { format!("; attach disk {}", pl.disks_needed.join(", ")) }, if ps.storages_unavailable.is_empty() { String::new() } else { format!("; not written to {}", ps.storages_unavailable.join(", ")) })).collect::<Vec<_>>().join("\n")
+                r.iter().map(|(pl, ps)| if let Some(p) = &pl.paused { format!("{}: PAUSED: {}", pl.folder, p.message) } else { format!("{}: pulled {} updated/{} deleted/{} conflicts, pushed {} changed/{} chunks{}{}", pl.folder, pl.files_updated, pl.files_deleted, pl.conflicts, ps.files_changed, ps.chunks_uploaded, if pl.disks_needed.is_empty() { String::new() } else { format!("; attach disk {}", pl.disks_needed.join(", ")) }, if ps.storages_unavailable.is_empty() { String::new() } else { format!("; not written to {}", ps.storages_unavailable.join(", ")) }) }).collect::<Vec<_>>().join("\n")
             })?;
         }
         Cmd::FetchPlan { folder, paths } => {
@@ -3061,6 +3128,7 @@ fn run(cli: &Cli) -> Result<()> {
                 );
                 for f in &s.folders {
                     out += &format!("folder {} ({}): {} files, {} bytes, {} chunks, {} without storage copy, {} verified elsewhere, at {}\n", f.name, &f.folder_id[..8], f.files, f.bytes, f.chunks, f.chunks_without_storage_copy, f.chunks_verified_elsewhere, f.path.as_ref().map(|p| p.display().to_string()).unwrap_or_else(|| "(not attached)".into()));
+                    out += &folder_safety_lines(&serde_json::to_value(f).unwrap_or_default());
                 }
                 if !s.forked_devices.is_empty() {
                     out += &format!("WARNING forked devices: {:?}\n", s.forked_devices);
@@ -4747,6 +4815,7 @@ fn status_from_value(v: &serde_json::Value) -> String {
             num(f, "chunks_verified_elsewhere"),
             f.get("path").and_then(|p| p.as_str()).unwrap_or("(not attached)")
         );
+        out += &folder_safety_lines(f);
     }
     if let Some(h) = v
         .get("ledger_health")
@@ -4981,6 +5050,240 @@ fn call_service(
 
 /// Folder commands that change what this device syncs, through the running
 /// service. None: no service, or a command the service need not run.
+/// The folder-safety commands (marker, held deletions, modes): through the
+/// background service when it runs, else on this process's engine followed
+/// by a sync of the folder. Returns false for other folder commands.
+fn folder_safety_cmd(cli: &Cli, home: &std::path::Path, cmd: &FolderCmd) -> Result<bool> {
+    let (name, action, extra) = match cmd {
+        FolderCmd::RepairMarker { name } => (name, "repair-marker", serde_json::json!({})),
+        FolderCmd::ConfirmDeletions { name, discard } => (
+            name,
+            if *discard {
+                "discard-deletions"
+            } else {
+                "confirm-deletions"
+            },
+            serde_json::json!({}),
+        ),
+        FolderCmd::Mode { name, mode: None } => (name, "changes", serde_json::json!({})),
+        FolderCmd::Mode {
+            name,
+            mode: Some(m),
+        } => {
+            let mode: varsto_core::vault::FolderMode = m.parse()?;
+            (name, "mode", serde_json::json!({ "mode": mode }))
+        }
+        FolderCmd::Override { name } => (name, "override", serde_json::json!({})),
+        FolderCmd::Revert { name } => (name, "revert", serde_json::json!({})),
+        FolderCmd::Changes { name } => (name, "changes", serde_json::json!({})),
+        FolderCmd::DeletionGuard {
+            name,
+            percent,
+            min_files,
+            max_files,
+            off,
+            default,
+        } => {
+            if percent.is_none() && min_files.is_none() && max_files.is_none() && !off && !default {
+                (name, "changes", serde_json::json!({}))
+            } else if *default {
+                (name, "deletion-guard", serde_json::json!({ "guard": null }))
+            } else {
+                // Unnamed values keep the folder's current ones.
+                let current = match call_service(
+                    home,
+                    "/api/folder/safety",
+                    serde_json::json!({"folder": name, "action": "changes"}),
+                )? {
+                    Some(v) => serde_json::from_value(v["deletion_guard"].clone())?,
+                    None => open_engine(home)?.folder_changes(name)?.deletion_guard,
+                };
+                let mut g: varsto_core::vault::DeletionGuard = current;
+                g.enabled = !*off;
+                if let Some(p) = percent {
+                    g.percent = *p;
+                }
+                if let Some(n) = min_files {
+                    g.min_files = *n;
+                }
+                if let Some(n) = max_files {
+                    g.max_files = *n;
+                }
+                (name, "deletion-guard", serde_json::json!({ "guard": g }))
+            }
+        }
+        _ => return Ok(false),
+    };
+    let mut body = extra;
+    body["folder"] = serde_json::json!(name);
+    body["action"] = serde_json::json!(action);
+    let (out, via_service) = match call_service(home, "/api/folder/safety", body.clone())? {
+        Some(v) => (v, true),
+        None => {
+            let mut engine = open_engine(home)?;
+            let out = desktop::folder_safety_action(&mut engine, &body)?;
+            // What changed is synced now (the service does it by itself).
+            if action != "changes" {
+                if let Ok(r) = engine.sync(Some(name)) {
+                    if let Some(p) = r.first().and_then(|(pl, _)| pl.paused.as_ref()) {
+                        eprintln!("{}", p.message);
+                    }
+                }
+            }
+            (out, false)
+        }
+    };
+    let synced = if via_service {
+        "; the background service syncs it now"
+    } else {
+        ""
+    };
+    print(cli, &out, |v| {
+        let n = |k: &str| v.get(k).and_then(|x| x.as_u64()).unwrap_or(0);
+        let list = |k: &str| -> Vec<String> {
+            v.get(k)
+                .and_then(|x| x.as_array())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|x| x.as_str().map(str::to_string))
+                        .collect()
+                })
+                .unwrap_or_default()
+        };
+        match cmd {
+            FolderCmd::RepairMarker { .. } => format!(
+                "{name}: marker written at {}{synced}",
+                v["path"].as_str().unwrap_or("")
+            ),
+            FolderCmd::ConfirmDeletions { discard: false, .. } => {
+                format!("{name}: {} deletions confirmed{synced}", n("deleted"))
+            }
+            FolderCmd::ConfirmDeletions { discard: true, .. } => {
+                let un = list("unavailable");
+                let mut s = format!("{name}: {} files restored{synced}", n("restored"));
+                if !un.is_empty() {
+                    s += &format!(
+                        "\n{} could not be restored now and stay held:\n  {}",
+                        un.len(),
+                        un.join("\n  ")
+                    );
+                }
+                s
+            }
+            FolderCmd::Mode { mode: Some(_), .. } => {
+                format!("{name}: {}{synced}", v["mode"].as_str().unwrap_or(""))
+            }
+            FolderCmd::Override { .. } => format!(
+                "{name}: {} files now follow this device on every device{synced}",
+                n("files")
+            ),
+            FolderCmd::Revert { .. } => {
+                let un = list("unavailable");
+                let mut s = format!(
+                    "{name}: {} local changes reverted, {} local copies moved to the trash",
+                    n("reverted"),
+                    n("moved_to_trash")
+                );
+                if !un.is_empty() {
+                    s += &format!(
+                        "\n{} could not be fetched now:\n  {}",
+                        un.len(),
+                        un.join("\n  ")
+                    );
+                }
+                s
+            }
+            FolderCmd::DeletionGuard { off, default, .. }
+                if *off || *default || v.get("text").is_some() =>
+            {
+                format!(
+                    "{name}: deletions are held when {}",
+                    v["text"].as_str().unwrap_or("")
+                )
+            }
+            _ => folder_changes_text(v),
+        }
+    })?;
+    Ok(true)
+}
+
+/// `varsto folder changes` (and `mode`, `deletion-guard` without a value).
+fn folder_changes_text(v: &serde_json::Value) -> String {
+    let name = v["folder"].as_str().unwrap_or("");
+    let guard: Option<varsto_core::vault::DeletionGuard> =
+        serde_json::from_value(v["deletion_guard"].clone()).ok();
+    let mut out = format!(
+        "{name}: mode {}; deletions are held when {}\n",
+        v["mode"].as_str().unwrap_or("normal"),
+        guard.map(|g| g.describe()).unwrap_or_default()
+    );
+    if let Some(p) = v["paused"]["message"].as_str() {
+        out += &format!("PAUSED: {p}\n");
+    }
+    let held: Vec<&str> = v["held_paths"]
+        .as_array()
+        .map(|a| a.iter().filter_map(|x| x.as_str()).collect())
+        .unwrap_or_default();
+    if !held.is_empty() {
+        out += &format!("held deletions ({}):\n", held.len());
+        for p in held.iter().take(50) {
+            out += &format!("  {p}\n");
+        }
+        if held.len() > 50 {
+            out += &format!("  ... and {} more\n", held.len() - 50);
+        }
+    }
+    for (key, title) in [
+        ("local_changes", "local changes not published"),
+        ("remote_not_applied", "remote changes not applied here"),
+    ] {
+        let rows: Vec<String> = v[key]
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .map(|c| {
+                        format!(
+                            "  {:<9} {}",
+                            c["kind"].as_str().unwrap_or(""),
+                            c["path"].as_str().unwrap_or("")
+                        )
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        if !rows.is_empty() {
+            out += &format!("{title} ({}):\n{}\n", rows.len(), rows.join("\n"));
+        }
+    }
+    out.trim_end().to_string()
+}
+
+/// Mode, pause and waiting changes of a folder in status (a FolderStatus as JSON).
+fn folder_safety_lines(f: &serde_json::Value) -> String {
+    let name = f["name"].as_str().unwrap_or("");
+    let mut out = String::new();
+    if let Some(m) = f["mode"].as_str().filter(|m| *m != "normal") {
+        out += &format!("  mode: {m}\n");
+    }
+    if let Some(p) = f["paused"]["message"].as_str() {
+        out += &format!("  PAUSED: {p}\n");
+    }
+    let n = |k: &str| f[k].as_u64().unwrap_or(0);
+    if n("remote_not_applied") > 0 {
+        out += &format!(
+            "  {} remote changes not applied here (`varsto folder override {name}` makes every device match this one)\n",
+            n("remote_not_applied")
+        );
+    }
+    if n("local_changes") > 0 {
+        out += &format!(
+            "  {} local changes not published (`varsto folder revert {name}` restores the vault's versions)\n",
+            n("local_changes")
+        );
+    }
+    out
+}
+
 fn folder_via_service(home: &std::path::Path, cmd: &FolderCmd) -> Result<Option<String>> {
     let abs = |p: &std::path::Path| -> Result<String> {
         Ok(std::path::absolute(p)?.display().to_string())

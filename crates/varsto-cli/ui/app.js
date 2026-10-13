@@ -939,12 +939,115 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     };
   }
 
+  // Folder safety: a banner per folder that is paused on this device (its
+  // marker is missing or names another folder; deletions are held) or has
+  // changes waiting in send-only / receive-only mode, with the actions.
+  function folderAction(f, action, extra) {
+    var body = Object.assign({ folder: f.name, action: action }, extra || {});
+    return api("POST", "/api/folder/safety", body);
+  }
+  function safetyButton(label, cls, onclick) { var b = el("button", cls || "secondary", label); b.type = "button"; b.onclick = onclick; return b; }
+  function showFolderChanges(f) {
+    folderAction(f, "changes").then(function (c) {
+      var lines = [];
+      (c.held_paths || []).slice(0, 200).forEach(function (p) { lines.push("deleted  " + p); });
+      (c.local_changes || []).concat(c.remote_not_applied || []).slice(0, 200).forEach(function (x) { lines.push(x.kind + "  " + x.path); });
+      return dialog({ title: f.name, text: lines.length ? "The files waiting for your decision:" : "Nothing waits for a decision.", code: lines.join("\n"), cancel: false });
+    }).catch(function (e) { alertBox(e.message); });
+  }
+  function runFolderAction(f, action, done) {
+    busy(true);
+    return folderAction(f, action).then(function (r) { log(f.name + ": " + done(r)); return refreshStatus(); })
+      .catch(function (e) { alertBox(e.message); }).then(function () { busy(false); });
+  }
+  function renderFolderSafety(s) {
+    var box = $("foldersafety"); if (!box) { return; }
+    box.innerHTML = "";
+    (s.folders || []).forEach(function (f) {
+      if (!f.path) { return; }
+      var p = f.paused, h = f.held_deletions, text = null, buttons = [];
+      if (p && p.kind === "marker-missing") {
+        text = "Folder " + f.name + " is paused: the marker .varsto-folder is missing at " + p.path + ". Is the disk mounted? Nothing is synced until it is back.";
+        buttons.push(safetyButton("The directory is right", null, function () {
+          confirmBox("Write the marker into " + p.path + " and sync this directory as " + f.name + "? Only do this if the directory holds the folder's files: if it is an empty mount point, its files would be read as deleted (the deletion guard would still ask first).", { ok: "Write the marker" }).then(function (yes) { if (yes) { runFolderAction(f, "repair-marker", function () { return "marker written"; }); } });
+        }));
+      } else if (p && p.kind === "marker-other") {
+        text = "Folder " + f.name + " is paused: the directory " + p.path + " holds another folder's marker. Is the right disk mounted? Nothing is synced until it is fixed.";
+        buttons.push(safetyButton("The directory is right", null, function () {
+          confirmBox("Mark " + p.path + " as folder " + f.name + "? Only do this if the directory really holds this folder's files.", { ok: "Write the marker", danger: true }).then(function (yes) { if (yes) { runFolderAction(f, "repair-marker", function () { return "marker written"; }); } });
+        }));
+      } else if (h && h.origin === "local") {
+        text = "Folder " + f.name + " is paused: " + h.files + " of " + h.of_files + " files were deleted at once on this device. Nothing is synced until you decide.";
+        buttons.push(safetyButton("Restore them", null, function () { runFolderAction(f, "discard-deletions", function (r) { return r.restored + " files restored" + (r.unavailable.length ? ", " + r.unavailable.length + " not available now" : ""); }); }));
+        buttons.push(safetyButton("Delete them everywhere", "secondary danger", function () {
+          confirmBox("Delete these " + h.files + " files on every device? Other devices move them to their trash.", { ok: "Delete everywhere", danger: true }).then(function (yes) { if (yes) { runFolderAction(f, "confirm-deletions", function (r) { return r.deleted + " deletions confirmed"; }); } });
+        }));
+      } else if (h) {
+        text = "Folder " + f.name + " is paused: " + (h.device || "another device") + " deleted " + h.files + " of " + h.of_files + " files at once. Nothing is deleted here until you decide.";
+        buttons.push(safetyButton("Keep them and restore them everywhere", null, function () { runFolderAction(f, "discard-deletions", function (r) { return r.restored + " files kept"; }); }));
+        buttons.push(safetyButton("Delete them here too", "secondary danger", function () {
+          confirmBox("Delete these " + h.files + " files on this device too? They go to this device's trash.", { ok: "Delete here", danger: true }).then(function (yes) { if (yes) { runFolderAction(f, "confirm-deletions", function (r) { return r.deleted + " files moved to the trash"; }); } });
+        }));
+      } else if (f.remote_not_applied > 0) {
+        text = "Folder " + f.name + " is send-only on this device: " + f.remote_not_applied + " remote changes are not applied here.";
+        buttons.push(safetyButton("Override: make everyone match this device", null, function () {
+          confirmBox("Publish this device's state of these " + f.remote_not_applied + " files as the newest version? The other devices then match this one.", { ok: "Override", danger: true }).then(function (yes) { if (yes) { runFolderAction(f, "override", function (r) { return r.files + " files now follow this device"; }); } });
+        }));
+      } else if (f.local_changes > 0) {
+        text = "Folder " + f.name + " is receive-only on this device: " + f.local_changes + " local changes are not published.";
+        buttons.push(safetyButton("Revert: restore the vault version", null, function () {
+          confirmBox("Replace the " + f.local_changes + " locally changed files with the vault's versions? The local copies go to this device's trash.", { ok: "Revert" }).then(function (yes) { if (yes) { runFolderAction(f, "revert", function (r) { return r.reverted + " local changes reverted"; }); } });
+        }));
+      }
+      if (!text) { return; }
+      var n = el("div", "notice warn banner-action"); n.dataset.folderSafety = f.name;
+      n.appendChild(el("span", null, text));
+      if (h || f.remote_not_applied > 0 || f.local_changes > 0) { buttons.unshift(safetyButton("Show files", null, function () { showFolderChanges(f); })); }
+      buttons.forEach(function (b) { n.appendChild(b); });
+      box.appendChild(n);
+    });
+  }
+  // Sync settings of a folder on this device: its mode and the deletion guard.
+  var MODE_HINT = {
+    "normal": "This device publishes its changes and applies everyone else's.",
+    "send-only": "This device publishes its changes but never applies other devices' changes to its files (for a camera phone, say). Differences are listed; an override makes everyone match this device.",
+    "receive-only": "This device applies other devices' changes but never publishes its own. Local changes are listed; a revert restores the vault's versions."
+  };
+  function folderSettings(f) {
+    folderAction(f, "changes").then(function (c) {
+      var g = c.deletion_guard || {};
+      return dialog({
+        title: "Sync settings of " + f.name,
+        text: "These settings apply to this device only.",
+        fields: [
+          { name: "mode", label: "Mode on this device", options: [["normal", "Normal (send and receive)"], ["send-only", "Send only"], ["receive-only", "Receive only"]], value: c.mode || "normal", hint: MODE_HINT[c.mode || "normal"] },
+          { name: "guard", label: "Hold mass deletions for confirmation", options: [["on", "Yes"], ["off", "No"]], value: g.enabled === false ? "off" : "on", hint: "Deletions are held when more than the share and more than the files below are deleted at once, or more than the limit." },
+          { name: "percent", label: "Share of the folder's files (%)", type: "number", value: g.percent },
+          { name: "min_files", label: "and more than this many files", type: "number", value: g.min_files },
+          { name: "max_files", label: "or more than this many files (0: no limit)", type: "number", value: g.max_files }
+        ],
+        ok: "Save"
+      }).then(function (r) {
+        if (!r) { return; }
+        var v = r.values;
+        var guard = { enabled: v.guard !== "off", percent: Math.max(0, Math.floor(+v.percent) || 0), min_files: Math.max(0, Math.floor(+v.min_files) || 0), max_files: Math.max(0, Math.floor(+v.max_files) || 0) };
+        var chain = Promise.resolve();
+        if (v.mode !== (c.mode || "normal")) { chain = chain.then(function () { return folderAction(f, "mode", { mode: v.mode }); }).then(function () { log(f.name + ": mode " + v.mode); }); }
+        if (guard.enabled !== (g.enabled !== false) || guard.percent !== g.percent || guard.min_files !== g.min_files || guard.max_files !== g.max_files) {
+          chain = chain.then(function () { return folderAction(f, "deletion-guard", { guard: guard }); }).then(function (x) { log(f.name + ": deletions are held when " + x.text); });
+        }
+        return chain.then(function () { return refreshStatus(); });
+      });
+    }).catch(function (e) { alertBox(e.message); });
+  }
+
   // `known`: a status the last request already returned (no second round trip,
   // which would wait while the service syncs).
   function refreshStatus(known) {
     return (known && known.folders ? Promise.resolve(known) : api("GET", "/api/status")).then(function (s) {
       lastStatus = s;
       renderLedger(s.ledger_health);
+      renderFolderSafety(s);
       $("who").textContent = s.device_name + " · vault " + s.vault_id.slice(0, 8) + " · " + s.ledger_batches + " ledger batches";
       var tb = $("folders").querySelector("tbody"); tb.innerHTML = "";
       var sel = $("dupefolder"); sel.innerHTML = "";
@@ -963,6 +1066,8 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
         if (f.selective) { nameCell.appendChild(document.createTextNode(" ")); nameCell.appendChild(pill("grey", "selective")); }
         if (f.shared) { nameCell.appendChild(document.createTextNode(" ")); nameCell.appendChild(pill("accent", "shared")); }
         if (f.path && f.plain === false) { nameCell.appendChild(document.createTextNode(" ")); nameCell.appendChild(pill("grey", "encrypted here")); }
+        if (f.path && f.mode && f.mode !== "normal") { nameCell.appendChild(document.createTextNode(" ")); nameCell.appendChild(pill("grey", f.mode)); }
+        if (f.path && f.paused) { nameCell.appendChild(document.createTextNode(" ")); nameCell.appendChild(pill("bad", "paused")); }
         var sub = el("span", "sub", f.path || "Not attached on this device"); if (f.path) { sub.title = f.path; } nameCell.appendChild(sub);
         nameCell.appendChild(miniMap(f));
         tr.appendChild(nameCell);
@@ -974,6 +1079,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
         var menu = rowMenu(act, "folder:" + f.name);
         if (!s.member) { var sh = document.createElement("button"); sh.className = "secondary"; sh.textContent = f.shared ? "Token" : "Share"; sh.onclick = function () { shareFolder(f); }; menu.appendChild(sh); }
         if (!s.member) { var pb = document.createElement("button"); pb.className = "secondary"; pb.textContent = "Policy"; pb.onclick = function () { openPolicy(f); }; act.appendChild(pb); }
+        if (f.path) { var ssb = document.createElement("button"); ssb.className = "secondary"; ssb.textContent = "Sync settings…"; ssb.title = "Mode on this device and the deletion guard"; ssb.onclick = function () { folderSettings(f); }; menu.appendChild(ssb); }
         if (!s.member) { var rmb = document.createElement("button"); rmb.className = "secondary"; rmb.textContent = "Remove"; rmb.onclick = function () { removeFolder(f); }; menu.appendChild(rmb); }
         if (f.strongroom && f.strongroom !== "locked") { var lk = document.createElement("button"); lk.className = "secondary"; lk.textContent = "Lock"; lk.onclick = function () { api("POST", "/api/strongroom/lock", { folder: f.name }).then(function () { log("locked " + f.name); return refreshStatus(); }).catch(function (e) { alertBox(e.message); }); }; menu.appendChild(lk); }
         if (!s.member && f.path && !f.strongroom && !f.shared) { var cv = document.createElement("button"); cv.className = "secondary"; cv.textContent = "Convert to Strongroom…"; cv.onclick = function () { convertStrongroom(f); }; menu.appendChild(cv); }
@@ -1121,6 +1227,8 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
       if (f.selective) { title.appendChild(pill("grey", "selective")); }
       if (f.shared) { title.appendChild(pill("accent", "shared")); }
       if (f.path && f.plain === false) { title.appendChild(pill("grey", "encrypted here")); }
+      if (f.path && f.mode && f.mode !== "normal") { title.appendChild(pill("grey", f.mode)); }
+      if (f.path && f.paused) { title.appendChild(pill("bad", "paused")); }
       if (!f.path) { title.appendChild(pill("grey", "not on this device")); }
       body.appendChild(title);
       body.appendChild(el("span", "fc-sub", f.files + " file" + (f.files === 1 ? "" : "s") + " · " + fmtBytes(f.bytes)));

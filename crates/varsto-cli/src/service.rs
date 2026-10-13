@@ -99,6 +99,9 @@ pub struct ServiceState {
     /// Not before this time: a run that failed before it could record why.
     pub restic_not_before_utc: i64,
     pub restic_text: Option<String>,
+    /// Folders paused on this device (marker missing, deletions held), by
+    /// name, with the reason; notified once when a folder pauses.
+    pub paused_folders: std::collections::BTreeMap<String, String>,
 }
 
 /// The storages are asked this often whether they hold newer ledger
@@ -145,6 +148,7 @@ impl ServiceState {
             "ledger_health": self.ledger_health,
             "ledger_text": self.ledger_health.as_ref().filter(|h| !h.is_ok()).map(|h| h.describe()),
             "restic_text": self.restic_text,
+            "paused_folders": self.paused_folders,
         })
     }
     /// Rank the pool disks for docking next (`disk suggest`) and, at most
@@ -543,7 +547,15 @@ impl ServiceState {
         let mut unavailable = 0;
         let mut forked = false;
         let mut disks: Vec<String> = Vec::new();
+        let mut paused = std::collections::BTreeMap::new();
         for (pl, ps) in reports {
+            if let Some(p) = &pl.paused {
+                if self.paused_folders.get(&p.folder) != Some(&p.message) {
+                    eprintln!("service: {}", p.message);
+                    notify("Varsto folder paused", &p.message);
+                }
+                paused.insert(p.folder.clone(), p.message.clone());
+            }
             self.p2p_chunks += pl.chunks_from_peers;
             updated += pl.files_updated;
             deleted += pl.files_deleted;
@@ -557,7 +569,15 @@ impl ServiceState {
                 }
             }
         }
-        self.last_result = format!("{} folders: {updated} updated, {deleted} deleted, {conflicts} conflicts, {uploaded} chunks uploaded{}{}{}", reports.len(), if unavailable > 0 { format!(", {unavailable} unavailable") } else { String::new() }, if disks.is_empty() { String::new() } else { format!(" (attach disk {})", disks.join(", ")) }, if forked { ", FORKED device" } else { "" });
+        // A sync of one folder says nothing about the others.
+        if reports.len() == 1 {
+            let name = &reports[0].0.folder;
+            self.paused_folders.remove(name);
+            self.paused_folders.extend(paused);
+        } else {
+            self.paused_folders = paused;
+        }
+        self.last_result = format!("{} folders: {updated} updated, {deleted} deleted, {conflicts} conflicts, {uploaded} chunks uploaded{}{}{}{}", reports.len(), if unavailable > 0 { format!(", {unavailable} unavailable") } else { String::new() }, if disks.is_empty() { String::new() } else { format!(" (attach disk {})", disks.join(", ")) }, if forked { ", FORKED device" } else { "" }, if self.paused_folders.is_empty() { String::new() } else { format!(", {} paused", self.paused_folders.len()) });
         self.last_error = None;
     }
 }

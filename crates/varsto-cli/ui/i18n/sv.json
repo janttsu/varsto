@@ -961,7 +961,42 @@
   "Tags": "Taggar",
   "separated by commas": "åtskilda med kommatecken",
   "No files match the filter": "Inga filer matchar filtret",
-  "Analysis stale": "Analysen inaktuell"
+  "Analysis stale": "Analysen inaktuell",
+  "The directory is right": "Katalogen är rätt",
+  "Write the marker": "Skriv markören",
+  "Restore them": "Återställ dem",
+  "Delete them everywhere": "Ta bort dem överallt",
+  "Delete everywhere": "Ta bort överallt",
+  "Keep them and restore them everywhere": "Behåll dem och återställ dem överallt",
+  "Delete them here too": "Ta bort dem här också",
+  "Delete here": "Ta bort här",
+  "Override: make everyone match this device": "Åsidosätt: låt alla matcha den här enheten",
+  "Override": "Åsidosätt",
+  "Revert: restore the vault version": "Återställ: holvets version tillbaka",
+  "Revert": "Återställ",
+  "Show files": "Visa filer",
+  "The files waiting for your decision:": "Filerna som väntar på ditt beslut:",
+  "Nothing waits for a decision.": "Inget väntar på ett beslut.",
+  "Sync settings…": "Synkroniseringsinställningar…",
+  "Mode on this device and the deletion guard": "Läget på den här enheten och borttagningsskyddet",
+  "These settings apply to this device only.": "Inställningarna gäller bara den här enheten.",
+  "Mode on this device": "Läge på den här enheten",
+  "Normal (send and receive)": "Normal (skicka och ta emot)",
+  "Send only": "Endast skicka",
+  "Receive only": "Endast ta emot",
+  "This device publishes its changes and applies everyone else's.": "Den här enheten publicerar sina ändringar och tar emot alla andras.",
+  "This device publishes its changes but never applies other devices' changes to its files (for a camera phone, say). Differences are listed; an override makes everyone match this device.": "Den här enheten publicerar sina ändringar men tillämpar aldrig andra enheters ändringar på sina filer (till exempel en kameratelefon). Skillnaderna listas; en åsidosättning låter alla matcha den här enheten.",
+  "This device applies other devices' changes but never publishes its own. Local changes are listed; a revert restores the vault's versions.": "Den här enheten tar emot andra enheters ändringar men publicerar aldrig sina egna. Lokala ändringar listas; en återställning hämtar holvets versioner tillbaka.",
+  "Hold mass deletions for confirmation": "Håll kvar massborttagningar för bekräftelse",
+  "Yes": "Ja",
+  "No": "Nej",
+  "Deletions are held when more than the share and more than the files below are deleted at once, or more than the limit.": "Borttagningar hålls kvar när mer än andelen och fler än antalet filer nedan tas bort på en gång, eller fler än gränsen.",
+  "Share of the folder's files (%)": "Andel av mappens filer (%)",
+  "and more than this many files": "och fler än så här många filer",
+  "or more than this many files (0: no limit)": "eller fler än så här många filer (0: ingen gräns)",
+  "send-only": "endast skicka",
+  "receive-only": "endast ta emot",
+  "paused": "pausad"
  },
  "patterns": [
   [
@@ -1279,6 +1314,58 @@
   [
    "^cleared the analysis of (.+)$",
    "rensade analysen av $1"
+  ],
+  [
+   "^Folder (.+) is paused: the marker \\.varsto-folder is missing at (.+)\\. Is the disk mounted\\? Nothing is synced until it is back\\.$",
+   "Mappen $1 är pausad: markören .varsto-folder saknas i $2. Är disken monterad? Inget synkroniseras förrän den är tillbaka."
+  ],
+  [
+   "^Folder (.+) is paused: the directory (.+) holds another folder's marker\\. Is the right disk mounted\\? Nothing is synced until it is fixed\\.$",
+   "Mappen $1 är pausad: katalogen $2 har en annan mapps markör. Är rätt disk monterad? Inget synkroniseras förrän det är åtgärdat."
+  ],
+  [
+   "^Folder (.+) is paused: (\\d+) of (\\d+) files were deleted at once on this device\\. Nothing is synced until you decide\\.$",
+   "Mappen $1 är pausad: $2 av $3 filer togs bort på en gång på den här enheten. Inget synkroniseras förrän du bestämmer dig."
+  ],
+  [
+   "^Folder (.+) is paused: (.+) deleted (\\d+) of (\\d+) files at once\\. Nothing is deleted here until you decide\\.$",
+   "Mappen $1 är pausad: $2 tog bort $3 av $4 filer på en gång. Inget tas bort här förrän du bestämmer dig."
+  ],
+  [
+   "^Folder (.+) is send-only on this device: (\\d+) remote changes are not applied here\\.$",
+   "Mappen $1 är endast sändande på den här enheten: $2 ändringar från andra enheter har inte tillämpats här."
+  ],
+  [
+   "^Folder (.+) is receive-only on this device: (\\d+) local changes are not published\\.$",
+   "Mappen $1 är endast mottagande på den här enheten: $2 lokala ändringar har inte publicerats."
+  ],
+  [
+   "^Write the marker into (.+) and sync this directory as (.+)\\? Only do this if the directory holds the folder's files: if it is an empty mount point, its files would be read as deleted \\(the deletion guard would still ask first\\)\\.$",
+   "Skriva markören i $1 och synkronisera katalogen som $2? Gör det bara om katalogen innehåller mappens filer: om den är en tom monteringspunkt skulle filerna läsas som borttagna (borttagningsskyddet frågar ändå först)."
+  ],
+  [
+   "^Mark (.+) as folder (.+)\\? Only do this if the directory really holds this folder's files\\.$",
+   "Markera $1 som mappen $2? Gör det bara om katalogen verkligen innehåller den här mappens filer."
+  ],
+  [
+   "^Delete these (\\d+) files on every device\\? Other devices move them to their trash\\.$",
+   "Ta bort de här $1 filerna på alla enheter? Andra enheter flyttar dem till sin papperskorg."
+  ],
+  [
+   "^Delete these (\\d+) files on this device too\\? They go to this device's trash\\.$",
+   "Ta bort de här $1 filerna på den här enheten också? De hamnar i den här enhetens papperskorg."
+  ],
+  [
+   "^Publish this device's state of these (\\d+) files as the newest version\\? The other devices then match this one\\.$",
+   "Publicera den här enhetens tillstånd för de här $1 filerna som den nyaste versionen? De andra enheterna matchar sedan den här."
+  ],
+  [
+   "^Replace the (\\d+) locally changed files with the vault's versions\\? The local copies go to this device's trash\\.$",
+   "Ersätta de $1 lokalt ändrade filerna med holvets versioner? De lokala kopiorna hamnar i den här enhetens papperskorg."
+  ],
+  [
+   "^Sync settings of (.+)$",
+   "Synkroniseringsinställningar för $1"
   ]
  ],
  "review": [
@@ -1545,6 +1632,10 @@
   [
    "The file system on (.+) has errors that could not be repaired automatically; nothing was read or written\\. Run `sudo e2fsck -f (\\S+)` by hand or retire the disk\\.",
    "Filsystemet på $1 har fel som inte kunde repareras automatiskt; inget lästes eller skrevs. Kör `sudo e2fsck -f $2` för hand eller pensionera disken."
+  ],
+  [
+   ", (\\d+) paused",
+   ", $1 pausade"
   ]
  ]
 }
