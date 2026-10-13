@@ -39,6 +39,8 @@
   // thin bar at the top shows that something runs. Background polls (GET
   // without a press) stay silent.
   var lastPress = null; var working = 0; var barTimer = null;
+  // The progress bar at the top (taskbar*, below the live activity code).
+  var TB_AFTER = 5, tbTimer = null, tbBusy = false, tbOn = false, tbHide = null, tbLastWhat = null;
   document.addEventListener("click", function (ev) { var b = ev.target.closest && ev.target.closest("button"); if (b) { lastPress = { el: b, t: Date.now() }; } }, true);
   document.addEventListener("submit", function (ev) { var b = ev.submitter || (ev.target.querySelector && ev.target.querySelector("button[type=submit], button:not([type])")); if (b) { lastPress = { el: b, t: Date.now() }; } }, true);
   function pressed() { var p = lastPress; if (!p || Date.now() - p.t > 600 || !document.contains(p.el)) { return null; } if (p.el.closest("#modal") || p.el.classList.contains("nav-item") || p.el.classList.contains("tree-item")) { return null; } return p.el; }
@@ -53,6 +55,7 @@
   function workBar(on) {
     working = Math.max(0, working + (on ? 1 : -1));
     if (working > 0 && !barTimer) { barTimer = setTimeout(function () { if (working > 0) { $("workbar").classList.add("on"); } }, 300); }
+    if (on && working === 1 && typeof taskbarSoon === "function") { taskbarSoon(); }
     if (working === 0) { clearTimeout(barTimer); barTimer = null; $("workbar").classList.remove("on"); }
   }
   // While a pressed button downloads a file, the note under it shows how far.
@@ -103,7 +106,7 @@
     document.querySelectorAll("[data-org-only]").forEach(function (b) { b.classList.add("hidden"); });
     lastStatus = null;
   }
-  function show(section) { if (section === "setup") { clearVaultViews(); } ["setup", "unlock", "app"].forEach(function (id) { $(id).classList.toggle("hidden", id !== section); }); $("lock").classList.toggle("hidden", section !== "app"); document.body.dataset.view = section; if (section !== "app") { $("pagetitle").textContent = section === "setup" ? "Welcome" : "Locked"; } else { $("pagetitle").textContent = pageTitle(currentPage); } trafficWatch(); activityWatch(); }
+  function show(section) { if (section === "setup") { clearVaultViews(); } ["setup", "unlock", "app"].forEach(function (id) { $(id).classList.toggle("hidden", id !== section); }); $("lock").classList.toggle("hidden", section !== "app"); document.body.dataset.view = section; if (section !== "app") { $("pagetitle").textContent = section === "setup" ? "Welcome" : "Locked"; } else { $("pagetitle").textContent = pageTitle(currentPage); } trafficWatch(); activityWatch(); taskbarSchedule(section === "app" ? 0 : undefined); }
   function fmtBytes(n) { var u = ["B", "KiB", "MiB", "GiB", "TiB"]; var i = 0; while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; } return n.toFixed(i ? 1 : 0) + " " + u[i]; }
   function fmtDate(t) { return t ? new Date(t * 1000).toLocaleDateString() : ""; }
   function formData(form) { var o = {}; new FormData(form).forEach(function (v, k) { o[k] = v; }); form.querySelectorAll("input[type=checkbox]").forEach(function (c) { o[c.name] = c.checked; }); return o; }
@@ -317,7 +320,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   $("themeauto").onclick = function () { try { localStorage.removeItem("varsto-theme"); } catch (e) {} applyTheme(""); log("theme follows the system"); };
 
   // Navigation between the pages of the app section.
-  var titles = { overview: "Overview", files: "Files", shared: "Shared", storages: "Storages", backups: "Backups", policies: "Policies", peers: "Peers", organization: "Organization", settings: "Settings", more: "More" };
+  var titles = { overview: "Overview", files: "Files", shared: "Shared", storages: "Storages", backups: "Backups", policies: "Policies", peers: "Peers", organization: "Organization", settings: "Settings", recovery: "Recovery package", more: "More" };
   var legacyPages = { folders: "files", sharing: "shared" };
   function pageTitle(p) { return titles[p] || "Overview"; }
   var currentPage = (function () { try { var p = sessionStorage.getItem("varsto-page"); p = legacyPages[p] || p; return titles[p] ? p : "overview"; } catch (e) { return "overview"; } })();
@@ -329,13 +332,14 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     currentPage = page;
     try { sessionStorage.setItem("varsto-page", page); } catch (e) {}
     document.querySelectorAll(".page").forEach(function (d) { d.classList.toggle("hidden", d.dataset.page !== page); });
-    var tab = page === "shared" || page === "backups" || page === "policies" || page === "peers" || page === "organization" || page === "settings" ? "more" : page;
+    var tab = page === "shared" || page === "backups" || page === "policies" || page === "peers" || page === "organization" || page === "settings" || page === "recovery" ? "more" : page;
     document.querySelectorAll(".sidebar .nav-item[data-nav]").forEach(function (b) { if (b.dataset.nav === page) { b.setAttribute("aria-current", "page"); } else { b.removeAttribute("aria-current"); } });
     document.querySelectorAll(".tabbar .nav-item[data-nav]").forEach(function (b) { if (b.dataset.nav === tab) { b.setAttribute("aria-current", "page"); } else { b.removeAttribute("aria-current"); } });
     if (document.body.dataset.view === "app") { $("pagetitle").textContent = pageTitle(page); }
     if (page === "peers") { loadP2p(); }
     if (page === "organization") { loadOrg(); }
     if (page === "backups") { loadBackups(); }
+    if (page === "recovery") { loadGuide(); }
     if (page === "overview" && lastWhere) { renderWhere(lastWhere); }
     trafficWatch();
     activityWatch();
@@ -343,6 +347,8 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     if (page === "settings" && droid && lastStatus) { refreshAllFiles(); }
     window.scrollTo(0, 0);
   }
+  // Buttons inside pages that lead to another page.
+  document.querySelectorAll("button[data-nav]:not(.nav-item):not(.more-item)").forEach(function (b) { b.addEventListener("click", function () { nav(b.dataset.nav); }); });
   document.querySelectorAll(".nav-item[data-nav], .more-item[data-nav]").forEach(function (b) {
     b.onclick = function () {
       // Tapping the Files tab again on a phone returns to the folder list.
@@ -2286,6 +2292,10 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     "sync_scan": "Looking for changes in folder «{s}»",
     "upload": "Uploading folder «{s}»",
     "download": "Fetching changes to folder «{s}»",
+    "download.file": "Fetching a file of folder «{s}»",
+    "download.export": "Decrypting a file of folder «{s}»",
+    "folder_purge": "Deleting the data of folder «{s}»",
+    "strongroom_convert": "Re-encrypting folder «{s}» for the Strongroom",
     "disk_check": "Checking disk «{s}»",
     "disk_check.verify": "Checking the blocks of disk «{s}»",
     "disk_check.fill": "Filling disk «{s}»",
@@ -2356,6 +2366,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   function renderActivity(r) {
     lastActivity = r;
     var me = r.me || { tasks: [] };
+    taskbarRender(me);
     var peers = r.peers || [];
     // Overview: every busy device, this one first; hidden when all are idle.
     var ul = $("nowlist"); ul.innerHTML = "";
@@ -2393,6 +2404,190 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
       if (activityWanted() && !actTimer) { actTimer = setTimeout(function () { actTimer = null; activityWatch(); }, 2000); }
     });
   }
+  // Progress at the top of the window: this device's tasks that have run for
+  // 5 s or more (a snapshot, an upload, a scrub, a restore...), with the
+  // sentence of the Now card, the percentage and the expected finish. Asked
+  // for every second while it shows or a request you started is still
+  // running, every five seconds otherwise (the Now card's two-second poll
+  // feeds it on the Overview and Peers pages); never while the page is
+  // hidden. Only this device: `?mine=1` does not ask the peers.
+  function taskbarWanted() { return document.body.dataset.view === "app" && document.visibilityState !== "hidden" && !!token; }
+  function taskbarFast() { return tbOn || working > 0; }
+  function taskbarSchedule(ms) {
+    if (tbTimer) { clearTimeout(tbTimer); tbTimer = null; }
+    if (!taskbarWanted()) { return; }
+    tbTimer = setTimeout(taskbarPoll, ms !== undefined ? ms : (taskbarFast() ? 1000 : 5000));
+  }
+  // A request you started: look again in a second.
+  function taskbarSoon() { if (!tbBusy && taskbarWanted() && (!tbTimer || !tbOn)) { taskbarSchedule(1000); } }
+  function taskbarPoll() {
+    tbTimer = null;
+    if (!taskbarWanted()) { return; }
+    // The Now card asks every two seconds anyway; between its answers only the fast mode asks.
+    if (activityWanted() && !taskbarFast()) { taskbarSchedule(); return; }
+    tbBusy = true;
+    fetch("/api/activity?mine=1", { headers: { "X-Varsto-Token": token } }).then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (j) { if (j) { taskbarRender(j.me || { tasks: [] }); } }).catch(function () {})
+      .then(function () { tbBusy = false; taskbarSchedule(); });
+  }
+  function taskbarRender(me) {
+    var now = Date.now() / 1000;
+    var long = (me.tasks || []).filter(function (t) { return now - t.started_utc >= TB_AFTER; });
+    long.sort(function (a, b) { return a.started_utc - b.started_utc; });
+    var bar = $("taskbar");
+    if (!long.length) {
+      if (tbOn && !tbHide) {
+        // A brief "done", then away.
+        bar.classList.add("done"); bar.classList.remove("unknown");
+        $("tb-bar").classList.remove("indeterminate"); $("tb-bar").firstChild.style.width = "100%";
+        var txt = $("tb-text"); txt.innerHTML = ""; txt.appendChild(el("span", "tb-done", actTr("Done"))); if (tbLastWhat) { txt.appendChild(document.createTextNode(" · ")); txt.appendChild(tbLastWhat); }
+        $("tb-meta").textContent = "";
+        bar.setAttribute("aria-valuenow", "100"); bar.setAttribute("aria-valuetext", actTr("Done"));
+        tbHide = setTimeout(function () { tbHide = null; tbOn = false; bar.classList.add("hidden"); bar.classList.remove("done"); taskbarSchedule(); }, 1000);
+      }
+      return;
+    }
+    if (tbHide) { clearTimeout(tbHide); tbHide = null; }
+    var t = long[0];
+    var what = actSentence(t);
+    var text = $("tb-text"); text.innerHTML = "";
+    if (long.length > 1) { text.appendChild(el("span", "tb-count", actTr("{n} tasks").replace("{n}", long.length))); text.appendChild(document.createTextNode(" · ")); }
+    text.appendChild(what);
+    tbLastWhat = what.cloneNode(true);
+    var known = t.percent !== null && t.percent !== undefined;
+    var meta = [];
+    if (known) { meta.push(t.percent + " %"); }
+    else if (t.done > 0) { meta.push(actCount(t, t.done)); }
+    if (t.eta_utc) { meta.push(actTr("ready about {t}").replace("{t}", actTime(t.eta_utc))); }
+    $("tb-meta").textContent = meta.join(" · ");
+    var b = $("tb-bar"); b.classList.toggle("indeterminate", !known); b.firstChild.style.width = known ? t.percent + "%" : "";
+    bar.classList.toggle("unknown", !known); bar.classList.remove("done", "hidden");
+    if (known) { bar.setAttribute("aria-valuenow", String(t.percent)); } else { bar.removeAttribute("aria-valuenow"); }
+    bar.setAttribute("aria-valuetext", text.textContent + (meta.length ? " (" + meta.join(", ") + ")" : ""));
+    var startedFast = !tbOn; tbOn = true;
+    if (startedFast && !tbBusy) { taskbarSchedule(); }
+  }
+  document.addEventListener("visibilitychange", function () { if (document.visibilityState === "visible") { taskbarSchedule(0); } else if (tbTimer) { clearTimeout(tbTimer); tbTimer = null; } });
+  taskbarSchedule(1000);
+
+  // Recovery package: what to keep outside your devices and how to restore,
+  // from GET /api/recovery/guide. Every sentence comes as an English
+  // template with named values ({t, p}); the template is translated like any
+  // other interface string and the values (bucket names, paths) go in as they
+  // are. Commands are never translated. The ticks are a personal checklist
+  // kept in this browser (localStorage), not vault state.
+  var lastGuide = null;
+  function rgKey() { return "varsto-recovery-ticks:" + (lastGuide ? lastGuide.vault_id : ""); }
+  function rgTicks() { try { return JSON.parse(localStorage.getItem(rgKey()) || "{}") || {}; } catch (e) { return {}; } }
+  function rgSetTick(id, on) { var t = rgTicks(); if (on) { t[id] = Date.now(); } else { delete t[id]; } try { localStorage.setItem(rgKey(), JSON.stringify(t)); } catch (e) {} }
+  // Text with `code` spans as <code>.
+  function rgCodeText(parent, s) { s.split("`").forEach(function (part, i) { if (!part) { return; } if (i % 2) { var c = el("code", null, part); parent.appendChild(c); } else { parent.appendChild(document.createTextNode(part)); } }); }
+  function rgText(t, cls) {
+    var out = el("span", cls || null); out.setAttribute("data-no-i18n", "");
+    var tpl = actTr(t.t), p = t.p || {}, re = /\{([a-z_]+)\}/g, last = 0, m;
+    while ((m = re.exec(tpl))) {
+      if (m.index > last) { rgCodeText(out, tpl.slice(last, m.index)); }
+      if (Object.prototype.hasOwnProperty.call(p, m[1])) { out.appendChild(actRaw(p[m[1]], "rg-val")); } else { out.appendChild(document.createTextNode(m[0])); }
+      last = re.lastIndex;
+    }
+    if (last < tpl.length) { rgCodeText(out, tpl.slice(last)); }
+    return out;
+  }
+  function rgPlain(t) { var tpl = actTr(t.t), p = t.p || {}; return tpl.replace(/\{([a-z_]+)\}/g, function (all, k) { return Object.prototype.hasOwnProperty.call(p, k) ? p[k] : all; }); }
+  function rgLabelled(label, t) { var li = el("li"); li.appendChild(el("span", "rg-label", label)); li.appendChild(document.createTextNode(" ")); li.appendChild(rgText(t)); return li; }
+  function rgTicked(item, ticks) { return item.status === "done" || (item.status === "check" && !!ticks[item.id]); }
+  function rgCount() {
+    if (!lastGuide) { return; }
+    var ticks = rgTicks(), need = lastGuide.items.filter(function (i) { return i.status !== "info"; });
+    var done = need.filter(function (i) { return rgTicked(i, ticks); }).length;
+    var c = $("rg-count"); c.textContent = actTr("{done} of {all} done").replace("{done}", done).replace("{all}", need.length); c.setAttribute("data-no-i18n", "");
+    c.classList.toggle("rg-all", done === need.length);
+  }
+  function renderGuide(g) {
+    lastGuide = g;
+    var ticks = rgTicks();
+    var intro = $("rg-intro"); intro.innerHTML = "";
+    g.intro.forEach(function (t) { var p = el("p", "small"); p.appendChild(rgText(t)); intro.appendChild(p); });
+    var ul = $("rg-items"); ul.innerHTML = "";
+    g.items.forEach(function (it) {
+      var li = el("li", "rg-item rg-" + it.status);
+      var head = el(it.status === "info" ? "div" : "label", "rg-title");
+      if (it.status !== "info") {
+        var cb = el("input"); cb.type = "checkbox"; cb.checked = rgTicked(it, ticks); cb.dataset.id = it.id;
+        if (it.status === "done") { cb.disabled = true; }
+        cb.onchange = function () { rgSetTick(it.id, cb.checked); li.classList.toggle("rg-ticked", cb.checked); rgCount(); };
+        head.appendChild(cb);
+        li.classList.toggle("rg-ticked", cb.checked);
+      } else { head.appendChild(icon("info", "rg-info-icon")); }
+      head.appendChild(rgText(it.title, "rg-title-text"));
+      if (!it.essential && it.status !== "info") { head.appendChild(el("span", "pill grey", "optional")); }
+      if (it.status === "outdated") { head.appendChild(el("span", "pill bad", "out of date")); }
+      li.appendChild(head);
+      if (it.status_note) { var n = el("div", "rg-status small"); n.appendChild(rgText(it.status_note)); li.appendChild(n); }
+      var d = el("ul", "rg-details small");
+      d.appendChild(rgLabelled(actTr("What:"), it.what));
+      d.appendChild(rgLabelled(actTr("Why:"), it.why));
+      (it.location || []).forEach(function (l) { var x = el("li", "rg-loc"); x.appendChild(rgText(l)); d.appendChild(x); });
+      (it.keep || []).forEach(function (k) { d.appendChild(rgLabelled(actTr("Keep:"), k)); });
+      d.appendChild(rgLabelled(actTr("If missing:"), it.missing));
+      li.appendChild(d);
+      if (it.literal && it.literal.length) { li.appendChild(el("pre", "rg-literal", it.literal.join("\n"))); }
+      ul.appendChild(li);
+    });
+    function steps(list, box, numbered) {
+      box.innerHTML = "";
+      list.forEach(function (s) {
+        var li = el(numbered ? "li" : "div", "rg-step");
+        var h = el("h3", "rg-step-title"); h.appendChild(rgText(s.title)); li.appendChild(h);
+        (s.notes || []).forEach(function (n) { var p = el("p", "small"); p.appendChild(rgText(n)); li.appendChild(p); });
+        if (s.commands && s.commands.length) { var pre = el("pre", "rg-cmd", s.commands.join("\n")); li.appendChild(pre); }
+        box.appendChild(li);
+      });
+    }
+    steps(g.steps, $("rg-steps"), true);
+    steps(g.alternatives || [], $("rg-alt"), false);
+    $("rg-altcard").classList.toggle("hidden", !(g.alternatives || []).length);
+    rgCount();
+  }
+  function loadGuide() {
+    var go = function () { api("GET", "/api/recovery/guide").then(function (g) { (window.varstoLang && window.varstoLang.ready ? window.varstoLang.ready : function (f) { f(); })(function () { renderGuide(g); }); }).catch(function (e) { log("recovery guide: " + e.message); }); };
+    go();
+  }
+  // The checklist as plain text in the page's language, with the ticks.
+  function guideText(g) {
+    var ticks = rgTicks(), out = [];
+    var title = actTr("Varsto recovery package");
+    out.push(title.toUpperCase(), "");
+    g.intro.forEach(function (t) { out.push(rgPlain(t), ""); });
+    out.push(actTr("What to keep").toUpperCase());
+    g.items.forEach(function (it) {
+      var mark = it.status === "info" ? " - " : it.status === "outdated" ? "[!]" : rgTicked(it, ticks) ? "[x]" : "[ ]";
+      out.push("", mark + " " + rgPlain(it.title) + (it.essential || it.status === "info" ? "" : " (" + actTr("optional") + ")"));
+      if (it.status_note) { out.push("    " + rgPlain(it.status_note)); }
+      out.push("    " + actTr("What:") + " " + rgPlain(it.what), "    " + actTr("Why:") + " " + rgPlain(it.why));
+      (it.location || []).forEach(function (l) { out.push("    * " + rgPlain(l)); });
+      (it.keep || []).forEach(function (k) { out.push("    " + actTr("Keep:") + " " + rgPlain(k)); });
+      (it.literal || []).forEach(function (l) { out.push("      " + l); });
+      out.push("    " + actTr("If missing:") + " " + rgPlain(it.missing));
+    });
+    function steps(list, numbered) { list.forEach(function (s, i) { out.push("", (numbered ? (i + 1) + ". " : "- ") + rgPlain(s.title)); (s.notes || []).forEach(function (n) { out.push("   " + rgPlain(n)); }); (s.commands || []).forEach(function (c) { out.push("     $ " + c); }); }); }
+    out.push("", actTr("Restoring on a new device").toUpperCase());
+    steps(g.steps, true);
+    if ((g.alternatives || []).length) { out.push("", actTr("Without Varsto").toUpperCase()); steps(g.alternatives, false); }
+    return out.join("\n") + "\n";
+  }
+  $("rg-print").onclick = function () { window.print(); };
+  $("rg-reload").onclick = loadGuide;
+  $("rg-download").onclick = function () {
+    if (!lastGuide) { return; }
+    var blob = new Blob([guideText(lastGuide)], { type: "text/plain;charset=utf-8" });
+    var a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "varsto-recovery-package.txt";
+    document.body.appendChild(a); a.click(); setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+  };
+  // The kit holds the vault key: it is printed on the command line, which asks for the passphrase.
+  $("rg-kit").onclick = function () {
+    dialog({ title: "Print the recovery kit", text: "The kit is the vault key as 24 words. For safety it is printed on the command line of this computer, which asks for your passphrase: run the command below and print or copy the words by hand. With --shares it also prints three shares, any two of which rebuild the key.", code: "varsto recovery kit\nvarsto recovery kit --shares", ok: "Close", cancel: false }).then(function () { loadGuide(); });
+  };
   // Traffic view (Peers page): /api/p2p/traffic every second while the page is shown.
   // The service answers it without waiting for a sync, so it stays live during long transfers.
   var trafficTimer = null, trafficBusy = false, lastTraffic = null;
