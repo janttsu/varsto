@@ -678,6 +678,15 @@ fn percent_decode(v: &str) -> String {
     String::from_utf8_lossy(&out).to_string()
 }
 
+/// The S3-compatible providers in the built-in price data, for the Add
+/// storage form: endpoints per region and headline prices with their sources.
+fn providers_json(now: i64) -> Value {
+    json!({
+        "providers": varsto_core::providers::s3_providers(now),
+        "stale_after_days": varsto_core::providers::STALE_AFTER_DAYS,
+    })
+}
+
 fn api(st: &mut State, method: Method, path: &str, query: &str, input: &Value) -> Result<Value> {
     let has_vault = st.home.join("vault.json").exists();
     let method2 = method.clone();
@@ -747,6 +756,7 @@ fn api(st: &mut State, method: Method, path: &str, query: &str, input: &Value) -
             Ok(json!({"ok": true}))
         }
         (Method::Get, "/api/ui-language") => Ok(json!({"language": ui_language(&st.home)})),
+        (Method::Get, "/api/providers") => Ok(providers_json(varsto_core::util::now_utc())),
         (Method::Post, "/api/ui-language") => {
             let l = s(input, "language")?;
             if !matches!(l.as_str(), "en" | "fi" | "sv") {
@@ -1709,4 +1719,60 @@ fn api_unlocked(
         _ => Err(anyhow!("unknown API endpoint {path}")),
     }
     .with_context(|| path.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn providers_list_for_the_storage_form() {
+        let now = 1_791_849_600; // 2026-10-13
+        let v = providers_json(now);
+        assert_eq!(v["stale_after_days"], 90);
+        let list = v["providers"].as_array().unwrap();
+        assert!(!list.is_empty());
+        for p in list {
+            for k in [
+                "id",
+                "name",
+                "kind",
+                "currency",
+                "storage_per_gb_month",
+                "egress_per_gb",
+                "egress_free_gb_per_month",
+                "put_per_1000",
+                "get_per_1000",
+                "minimum_storage_days",
+                "minimum_object_kb",
+                "free_tier",
+                "endpoints",
+                "last_verified",
+                "source_url",
+                "stale",
+            ] {
+                assert!(p.get(k).is_some(), "{} lacks {k}", p["id"]);
+            }
+            for e in p["endpoints"].as_array().unwrap() {
+                assert!(e["endpoint"].as_str().unwrap().starts_with("http"));
+                assert!(e["path_style"].is_boolean());
+                assert!(e["region"].is_string());
+            }
+        }
+        let aws = list.iter().find(|p| p["id"] == "aws-s3").unwrap();
+        assert_eq!(aws["storage_per_gb_month"]["value"], 0.0245);
+        assert!(aws["storage_per_gb_month"]["source_url"]
+            .as_str()
+            .unwrap()
+            .starts_with("https://"));
+        assert_eq!(aws["stale"], false);
+        let later = providers_json(now + 365 * 86_400);
+        let aws_later = later["providers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|p| p["id"] == "aws-s3")
+            .unwrap();
+        assert_eq!(aws_later["stale"], true);
+    }
 }
