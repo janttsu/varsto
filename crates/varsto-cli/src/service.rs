@@ -1491,6 +1491,7 @@ pub fn run(opts: Options) -> Result<()> {
             ..Default::default()
         },
         pair: None,
+        link: None,
     }));
     // The token is not printed: stdout ends up in service.log under the
     // tray and launchd. `varsto desktop` reads it from the service file.

@@ -573,6 +573,14 @@ ul.list .minimap { margin-top: 6px; }
 .modal-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 12px; }
 body.modal-open { overflow: hidden; }
 
+/* QR invitations: codes stay black on white in both themes so cameras read them. */
+.qr-box { display: flex; flex-direction: column; align-items: center; gap: 6px; margin: 8px 0 12px; }
+.qr-img { width: min(100%, 360px); height: auto; aspect-ratio: 1; background: #fff; border-radius: var(--radius-sm); image-rendering: pixelated; }
+.qr-box .qr-words { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; text-align: center; }
+.qr-box button.linklike { background: none; border: none; color: var(--accent); padding: 2px 4px; font-size: 12.5px; cursor: pointer; }
+.scanner-card { max-width: 560px; }
+.scanner-video { width: 100%; max-height: 50vh; background: #000; border-radius: var(--radius-sm); object-fit: contain; }
+
 /* In-app viewer (phones, folders kept encrypted here) */
 .viewer { position: fixed; inset: 0; z-index: 40; display: flex; flex-direction: column; background: #0b0f16; color: #e8edf3; }
 .viewer-bar { display: flex; align-items: center; gap: 8px; padding: 8px 12px; flex: none; }

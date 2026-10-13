@@ -329,6 +329,10 @@ enum Cmd {
     },
     /// Download a placeholder and open the file (double-click on a .varsto-placeholder).
     OpenPlaceholder { path: PathBuf },
+    /// Open a varsto:// invitation link in the interface (the system calls this when a link or a
+    /// QR code scanned with the phone or computer camera is opened).
+    #[command(hide = true)]
+    OpenLink { uri: String },
     /// Alpha: forget this device's vault configuration (keys, ledger, state, grants) and start over. Files in folders stay.
     Reset {
         #[arg(long)]
@@ -449,13 +453,17 @@ enum DeviceCmd {
 #[derive(Subcommand)]
 enum PairCmd {
     /// On a device that holds the vault: show a code and wait for the new device.
-    Offer,
+    Offer {
+        /// Also show a QR code (a varsto://pair link with the code and the addresses).
+        #[arg(long)]
+        qr: bool,
+    },
     /// On the new device: join the vault of the device showing the code.
     Join {
         /// Name of this device (default: the computer's name).
         #[arg(long, default_value_t = default_device_name())]
         name: String,
-        /// The nine digits shown on the other device.
+        /// The nine digits shown on the other device, or the varsto://pair link of its QR code.
         #[arg(long)]
         code: String,
         /// The other device's address (host:port) when it is not found on the LAN.
@@ -819,6 +827,22 @@ enum ShareCmd {
         /// Your name, bound to the code (the owner sees it, and it is part of the fingerprint).
         #[arg(long)]
         name: Option<String>,
+        /// Also show the code as a QR code for the owner to scan.
+        #[arg(long)]
+        qr: bool,
+    },
+    /// Show a request code, a sealed token or a varsto:// link as a QR code in the terminal.
+    /// Plain tokens are refused: they carry the folder key.
+    Qr {
+        /// The request code, sealed token (vst1…/vst2…) or varsto:// link.
+        text: String,
+        /// Show it as a sequence of smaller codes, one after another, for cameras that cannot read
+        /// the dense one (the Varsto scanner collects them; Ctrl-C stops).
+        #[arg(long)]
+        parts: bool,
+        /// The terminal has dark text on a light background.
+        #[arg(long)]
+        light: bool,
     },
     /// (Owner) Print a share token for a folder. With --to <request-code> the folder key is
     /// encapsulated to the recipient (hybrid X25519 + ML-KEM-768) and the token is safe to send
@@ -835,6 +859,9 @@ enum ShareCmd {
         /// Seal without asking whether the fingerprint matches (you compared it some other way).
         #[arg(long)]
         yes: bool,
+        /// Also show the sealed token as a QR code for the recipient to scan.
+        #[arg(long)]
+        qr: bool,
     },
     /// (Owner) Who has access to a shared folder: your devices, members (current and removed)
     /// and tokens not accepted yet.
@@ -853,8 +880,15 @@ enum ShareCmd {
         /// Name of this device (default: the computer's name).
         #[arg(long, default_value_t = default_device_name())]
         name: String,
-        #[arg(long)]
-        token: String,
+        /// The sealed token, as text or as the varsto://share/token link a QR code holds.
+        #[arg(
+            long = "token",
+            value_name = "TOKEN",
+            required_unless_present = "token_arg"
+        )]
+        token: Option<String>,
+        #[arg(value_name = "TOKEN", conflicts_with = "token")]
+        token_arg: Option<String>,
         /// Storage directory that both users can reach and that holds the owner's vault.
         #[arg(long, required_unless_present = "s3_bucket")]
         storage_path: Option<PathBuf>,
@@ -1400,6 +1434,138 @@ fn folder_and_path(
         Some(p) => Ok((first.to_string(), p.clone())),
         None => engine.locate_path(&std::path::absolute(first)?),
     }
+}
+
+/// Print a request code, sealed token or link as a terminal QR code (half
+/// blocks), with what the other side compares: the fingerprint of a request.
+/// With `parts`, cycle through smaller codes until Ctrl-C.
+fn show_qr(text: &str, parts: bool, light: bool) -> Result<()> {
+    use varsto_core::qr::{self, Link};
+    let link = Link::from_text(text)?;
+    let whole = link.to_uri()?;
+    let uris = if parts || qr::code_for(&whole).is_err() {
+        link.to_uris(0, qr::PART_CHARS)?
+    } else {
+        vec![whole.clone()]
+    };
+    let caption = match &link {
+        Link::ShareRequest(code) => {
+            let r = Engine::share_request_info(code)?;
+            format!(
+                "Share request{}. Fingerprint: {}",
+                if r.name.is_empty() {
+                    String::new()
+                } else {
+                    format!(" from {}", r.name)
+                },
+                r.fingerprint
+            )
+        }
+        Link::ShareToken(t) => format!(
+            "Sealed share token for {} (only the requesting device opens it)",
+            varsto_core::vault::SealedShareToken::decode(t)?.name
+        ),
+        Link::Pair { .. } => "Pairing code (works once, for ten minutes)".to_string(),
+    };
+    if uris.len() == 1 {
+        println!("{}", qr::to_terminal(&uris[0], !light)?);
+        println!("{caption}\nLink: {}", uris[0]);
+        return Ok(());
+    }
+    let frames = uris
+        .iter()
+        .map(|u| qr::to_terminal(u, !light))
+        .collect::<Result<Vec<_>>>()?;
+    loop {
+        for (i, f) in frames.iter().enumerate() {
+            // Clear the screen and draw the next part.
+            print!("\x1b[2J\x1b[H{f}\n{caption}\nPart {} of {}: scan with Varsto (Scan QR code); Ctrl-C stops.\n", i + 1, frames.len());
+            std::io::Write::flush(&mut std::io::stdout())?;
+            std::thread::sleep(std::time::Duration::from_millis(900));
+        }
+    }
+}
+
+/// `varsto share qr`: the code in the terminal, or with `--json` the links.
+fn share_qr(json: bool, text: &str, parts: bool, light: bool) -> Result<()> {
+    if !json {
+        return show_qr(text, parts, light);
+    }
+    let link = varsto_core::qr::Link::from_text(text)?;
+    let uris = if parts {
+        link.to_uris(0, varsto_core::qr::PART_CHARS)?
+    } else {
+        vec![link.to_uri()?]
+    };
+    let mut v = serde_json::json!({"kind": link.kind(), "text": link.text(), "uris": uris});
+    if let varsto_core::qr::Link::ShareRequest(c) = &link {
+        v["fingerprint"] = Engine::share_request_info(c)?.fingerprint.into();
+    }
+    println!("{v}");
+    Ok(())
+}
+
+/// `varsto open-link`: hand a `varsto://` link to the interface (the service
+/// keeps it until the page takes it) and open the page; start the service
+/// first when it is not running.
+fn open_link(home: &Path, uri: &str) -> Result<()> {
+    use std::io::IsTerminal;
+    let gui = filemanager::detach_own_console() || !std::io::stderr().is_terminal();
+    let run = || -> Result<()> {
+        match varsto_core::qr::parse(uri)? {
+            varsto_core::qr::Scanned::Link(_) => {}
+            varsto_core::qr::Scanned::Part(p) => bail!(
+                "this is part {} of {} of a split code: scan it in Varsto (Scan QR code)",
+                p.index,
+                p.count
+            ),
+        }
+        if service::status(home).is_none() {
+            std::process::Command::new(std::env::current_exe()?)
+                .arg("--home")
+                .arg(home)
+                .args(["service", "run"])
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn()?;
+            for _ in 0..80 {
+                if service::status(home).is_some() {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(250));
+            }
+        }
+        let (f, _) =
+            service::status(home).ok_or_else(|| anyhow!("the Varsto service did not start"))?;
+        let body = serde_json::json!({ "uri": uri }).to_string();
+        let answer: serde_json::Value = serde_json::from_str(&service::http_post(
+            &format!("http://127.0.0.1:{}/api/link", f.port),
+            &f.token,
+            &body,
+        )?)?;
+        if let Some(e) = answer["error"].as_str() {
+            bail!("{e}");
+        }
+        let page = format!("http://127.0.0.1:{}/?token={}", f.port, f.token);
+        match std::env::var("VARSTO_OPENER")
+            .ok()
+            .filter(|o| !o.is_empty())
+        {
+            Some(opener) => {
+                std::process::Command::new(opener).arg(&page).status()?;
+            }
+            None => desktop::open_in_browser(&page),
+        }
+        Ok(())
+    };
+    let r = run();
+    if let Err(e) = &r {
+        if gui {
+            filemanager::report_failure(home, "Could not open the link", &format!("{e:#}"));
+        }
+    }
+    r
 }
 
 /// This computer's name, for devices joined without `--name`.
@@ -3589,10 +3755,13 @@ fn run(cli: &Cli) -> Result<()> {
             tray::run(home, *interval, *open)?
         }
         Cmd::Share { cmd } => match cmd {
-            ShareCmd::Request { name } => {
+            ShareCmd::Request { name, qr } => {
                 let code =
                     varsto_core::vault::ShareRequest::code_for_named(&home, name.as_deref())?;
                 let words = varsto_core::vault::ShareRequest::fingerprint_for(&home)?;
+                if *qr && !cli.json {
+                    show_qr(&code, false, false)?;
+                }
                 if cli.json {
                     println!(
                         "{}",
@@ -3602,11 +3771,13 @@ fn run(cli: &Cli) -> Result<()> {
                     println!("share request code for this device (give it to the folder owner; it contains no secret):\n  {code}\n\nfingerprint: {words}\nThe owner sees the same six words for this code. Read them to each other over a call or in person before the owner shares: different words mean the code was changed on its way.");
                 }
             }
+            ShareCmd::Qr { text, parts, light } => share_qr(cli.json, text, *parts, *light)?,
             ShareCmd::Create {
                 folder,
                 to,
                 fingerprint,
                 yes,
+                qr,
             } => {
                 let mut engine = open_engine(&home)?;
                 match to {
@@ -3629,6 +3800,9 @@ fn run(cli: &Cli) -> Result<()> {
                         };
                         let (sealed, req) =
                             engine.share_create_sealed(folder, code, confirmed.as_deref())?;
+                        if *qr && !cli.json {
+                            show_qr(&sealed.encode(), false, false)?;
+                        }
                         if cli.json {
                             println!(
                                 "{}",
@@ -3650,6 +3824,7 @@ fn run(cli: &Cli) -> Result<()> {
             ShareCmd::Accept {
                 name,
                 token,
+                token_arg,
                 storage_path,
                 storage_name,
                 s3_bucket,
@@ -3659,6 +3834,10 @@ fn run(cli: &Cli) -> Result<()> {
                 s3_access_key_id,
                 s3_secret_access_key,
             } => {
+                let token = token
+                    .as_ref()
+                    .or(token_arg.as_ref())
+                    .ok_or_else(|| anyhow!("give the share token"))?;
                 let token = if varsto_core::vault::SealedShareToken::is_sealed(token) {
                     varsto_core::vault::ShareRequest::open_token(&home, token)?
                 } else {
@@ -3946,10 +4125,18 @@ fn run(cli: &Cli) -> Result<()> {
         },
         Cmd::Pair { cmd } => {
             match cmd {
-                PairCmd::Offer => {
+                PairCmd::Offer { qr } => {
                     let engine = open_engine(&home)?;
                     let offer = varsto_core::pair::Offer::start(engine.pairing_bundle()?)?;
                     let st = offer.status();
+                    if *qr {
+                        let link = varsto_core::qr::Link::Pair {
+                            code: st.code.clone(),
+                            addresses: st.addresses.clone(),
+                        };
+                        show_qr(&link.to_uri()?, false, false)?;
+                        println!("Scan it with the new device's camera, or in Varsto: Pair with your other device, Scan QR code.");
+                    }
                     println!("Pairing code: {}", st.code);
                     println!("On the new device choose \"Pair with a code\" (or run `varsto pair join`).");
                     if !st.addresses.is_empty() {
@@ -3979,8 +4166,30 @@ fn run(cli: &Cli) -> Result<()> {
                     code,
                     address,
                 } => {
+                    // The link of the other device's QR code carries the code and its addresses.
+                    // The link of the other device's QR code carries the code and
+                    // its addresses: discovery first, then each address.
+                    let (code, mut tries) = match varsto_core::qr::Link::from_text(code) {
+                        Ok(varsto_core::qr::Link::Pair { code, addresses }) => (
+                            code,
+                            std::iter::once(None)
+                                .chain(addresses.into_iter().map(Some))
+                                .collect::<Vec<_>>(),
+                        ),
+                        _ => (code.clone(), vec![None]),
+                    };
+                    if address.is_some() {
+                        tries = vec![address.clone()];
+                    }
                     let pass = passphrase()?;
-                    let bundle = varsto_core::pair::receive(code, name, address.as_deref())?;
+                    let mut result = Err(anyhow!("the other device was not found"));
+                    for a in &tries {
+                        result = varsto_core::pair::receive(&code, name, a.as_deref());
+                        if result.is_ok() {
+                            break;
+                        }
+                    }
+                    let bundle = result?;
                     let (engine, notes) = Engine::join_paired(&home, name, &pass, &bundle)?;
                     println!(
                         "joined vault {} as {} (paired with {})",
@@ -4578,6 +4787,7 @@ fn run(cli: &Cli) -> Result<()> {
                 std::process::exit(1);
             }
         }
+        Cmd::OpenLink { uri } => open_link(&home, uri)?,
         Cmd::OpenPlaceholder { path } => {
             use std::io::IsTerminal;
             let gui = filemanager::detach_own_console() || !std::io::stderr().is_terminal();

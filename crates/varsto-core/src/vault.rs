@@ -237,12 +237,25 @@ impl SealedShareToken {
             self.name
         )
     }
+    /// A sealed token in text form or as a `varsto://share/token` link.
     pub fn is_sealed(s: &str) -> bool {
         let s = s.trim();
+        if crate::qr::is_link(s) {
+            return s[crate::qr::SCHEME.len()..]
+                .to_ascii_lowercase()
+                .starts_with("share/token");
+        }
         s.starts_with(SEALED_SHARE_PREFIX) || s.starts_with(SEALED_SHARE_PREFIX_V2)
     }
+    /// Decode a token, given as text or as a `varsto://share/token` link.
     pub fn decode(s: &str) -> Result<Self> {
         let s = s.trim();
+        if crate::qr::is_link(s) {
+            return match crate::qr::Link::from_text(s)? {
+                crate::qr::Link::ShareToken(t) => Self::decode(&t),
+                other => bail!("this is a {} link, not a share token", other.kind()),
+            };
+        }
         let (version, rest) = if let Some(r) = s.strip_prefix(SEALED_SHARE_PREFIX_V2) {
             (2, r)
         } else {
@@ -379,7 +392,14 @@ impl ShareRequest {
         Ok(Self::parse(code)?.key)
     }
     /// Key, bound name and fingerprint of a request code.
+    /// Accepts the text form or a `varsto://share/request` link.
     pub fn parse(code: &str) -> Result<RequestCode> {
+        if crate::qr::is_link(code) {
+            return match crate::qr::Link::from_text(code)? {
+                crate::qr::Link::ShareRequest(c) => Self::parse(&c),
+                other => bail!("this is a {} link, not a share request code", other.kind()),
+            };
+        }
         let rest = code
             .trim()
             .strip_prefix(SHARE_REQUEST_PREFIX)

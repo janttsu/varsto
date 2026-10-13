@@ -697,76 +697,6 @@
   "Copying blocks from disk «{s}»": "Kopioi lohkoja levyltä «{s}»",
   "Writing files fetched from disk «{s}»": "Kirjoittaa levyltä «{s}» haettuja tiedostoja",
   "Unmounting disk «{s}»": "Irrottaa levyä «{s}»",
-  "The interface starts in your system's theme; the switch keeps your choice.": "Käyttöliittymä alkaa järjestelmän teemalla; kytkin muistaa valintasi.",
-  "Checking that the restic mirror is complete": "Tarkistaa, että resticin peilikopio on täydellinen",
-  "Backing up the mirror with restic": "Varmuuskopioi peilikopiota resticillä",
-  "Removing old restic snapshots": "Poistaa vanhoja restic-tilannekuvia",
-  "Checking the restic repository": "Tarkistaa restic-varaston",
-  "Trash": "Roskakori",
-  "Files deleted on any of your devices are kept here for the days set below, encrypted on your storages, and can be restored on any device. Restoring never overwrites a file: when its name is taken, it comes back as \"name (restored)\".": "Millä tahansa laitteellasi poistetut tiedostot säilyvät täällä alla asetetun määrän päiviä salattuina tallennuspaikoissasi, ja ne voi palauttaa millä tahansa laitteella. Palautus ei koskaan korvaa tiedostoa: jos nimi on jo käytössä, tiedosto palaa nimellä \"nimi (restored)\".",
-  "Search the trash": "Hae roskakorista",
-  "All folders": "Kaikki kansiot",
-  "Delete permanently…": "Poista pysyvästi…",
-  "Empty trash…": "Tyhjennä roskakori…",
-  "Select all": "Valitse kaikki",
-  "Select": "Valitse",
-  "Deleted": "Poistettu",
-  "By": "Poistaja",
-  "The trash is empty": "Roskakori on tyhjä",
-  "Files deleted on any of your devices appear here.": "Millä tahansa laitteellasi poistetut tiedostot näkyvät täällä.",
-  "Trash settings": "Roskakorin asetukset",
-  "Keep deleted files (days)": "Säilytä poistetut tiedostot (päivää)",
-  "Trash storage": "Roskakorin tallennuspaikka",
-  "Deleted files move to this storage only, for example a cheap cold storage, and leave your other storages. Restoring from cold storage asks first, because retrieval is billed and can take hours.": "Poistetut tiedostot siirtyvät vain tähän tallennuspaikkaan, esimerkiksi edulliseen kylmätallennukseen, ja poistuvat muista tallennuspaikoistasi. Kylmätallennuksesta palauttaminen kysyy ensin, koska nouto laskutetaan ja voi kestää tunteja.",
-  "None: deleted files stay where they are": "Ei mitään: poistetut tiedostot pysyvät siellä, missä ne ovat",
-  "cold": "kylmä",
-  "Nothing in the trash matches": "Mikään roskakorissa ei vastaa hakua",
-  "In the trash": "Roskakorissa",
-  "Kept on": "Säilytyspaikka",
-  "Folders with their own days": "Kansiot, joilla on omat päivät",
-  "Copies on this device": "Kopiot tällä laitteella",
-  "Next expiry": "Seuraava vanheneminen",
-  "Last cleanup": "Viimeisin siivous",
-  "never": "ei koskaan",
-  "Each file goes back where it was. If that name is taken now, it comes back as \"name (restored)\": nothing is overwritten. The restored files sync to your other devices.": "Jokainen tiedosto palaa paikalleen. Jos nimi on nyt käytössä, tiedosto palaa nimellä \"nimi (restored)\": mitään ei korvata. Palautetut tiedostot synkronoituvat muille laitteillesi.",
-  "Into another directory of the folder (optional)": "Kansion toiseen hakemistoon (valinnainen)",
-  "Restored": "Palautetut",
-  "empty: the original place": "tyhjä: alkuperäinen paikka",
-  "Read from cold storage?": "Luetaanko kylmätallennuksesta?",
-  "Delete permanently?": "Poistetaanko pysyvästi?",
-  "Delete permanently": "Poista pysyvästi",
-  "Empty the trash?": "Tyhjennetäänkö roskakori?",
-  "Empty trash": "Tyhjennä roskakori",
-  "empty": "tyhjennä",
-  "Keep deleted files from 1 to 3650 days.": "Säilytä poistettuja tiedostoja 1–3650 päivää.",
-  "Trash settings saved": "Roskakorin asetukset tallennettu",
-  "Restoring files of folder «{s}» from the trash": "Palauttaa kansion «{s}» tiedostoja roskakorista",
-  "Deleting files from the trash for good": "Poistaa tiedostoja roskakorista pysyvästi",
-  "Moving deleted files of folder «{s}» to the trash storage": "Siirtää kansion «{s}» poistettuja tiedostoja roskakorin tallennuspaikkaan",
-  "Versions": "Versiot",
-  "Version history": "Versiohistoria",
-  "When a file is overwritten, on any device, its earlier version is kept: every version for an hour, one per hour for a day, one per day for 30 days, then one per week. Unchanged parts are shared between versions, so only the changes take space. Restore a version from the file's details on the Files page.": "Kun tiedosto korvataan millä tahansa laitteella, sen aiempi versio säilyy: jokainen versio tunnin ajan, yksi tunnissa vuorokauden ajan, yksi päivässä 30 päivän ajan ja sen jälkeen yksi viikossa. Muuttumattomat osat ovat versioille yhteisiä, joten vain muutokset vievät tilaa. Palauta versio Tiedostot-sivun tiedoston tiedoista.",
-  "Keep earlier versions": "Säilytä aiemmat versiot",
-  "Keep versions (days)": "Säilytä versiot (päivää)",
-  "One folder differently": "Yksi kansio eri tavalla",
-  "For this folder": "Tälle kansiolle",
-  "Like every folder": "Kuten muut kansiot",
-  "Its own days": "Omat päivät",
-  "Off: keep no new versions": "Pois: uusia versioita ei säilytetä",
-  "Days for this folder": "Päiviä tälle kansiolle",
-  "No folder": "Ei kansiota",
-  "Earlier versions": "Aiemmat versiot",
-  "off": "pois",
-  "own changes": "omat muutokset",
-  "Version history is off for this folder: no new versions are kept.": "Versiohistoria on pois tältä kansiolta: uusia versioita ei säilytetä.",
-  "No earlier versions": "Ei aiempia versioita",
-  "Restore as a copy…": "Palauta kopiona…",
-  "Restore as a copy?": "Palautetaanko kopiona?",
-  "New name": "Uusi nimi",
-  "Restore this version?": "Palautetaanko tämä versio?",
-  "Keep versions from 1 to 3650 days.": "Säilytä versioita 1–3650 päivää.",
-  "Version history settings saved": "Versiohistorian asetukset tallennettu",
-  "Restoring an earlier version of a file of folder «{s}»": "Palauttaa kansion «{s}» tiedoston aiempaa versiota",
   "Import": "Tuonti",
   "Import into Varsto": "Tuo Varstoon",
   "Bring files that live elsewhere under Varsto's care. Each source becomes one folder; importing the same source again brings over what changed and never deletes anything in Varsto.": "Tuo muualla olevat tiedostot Varston hoitoon. Jokaisesta lähteestä tulee yksi kansio; saman lähteen tuominen uudelleen tuo muuttuneet tiedostot eikä koskaan poista mitään Varstosta.",
@@ -981,6 +911,7 @@
   "Last seen": "Nähty viimeksi",
   "File system": "Tiedostojärjestelmä",
   "Sort by this column (again: reverse)": "Järjestä tämän sarakkeen mukaan (uudelleen: käänteisesti)",
+  "never": "ei koskaan",
   "now": "nyt",
   "offline": "poissa",
   "retired": "käytöstä poistettu",
@@ -1013,6 +944,11 @@
   "Listing the stored blocks": "Luetteloi tallennettuja lohkoja",
   "Checking the stored blocks": "Tarkistaa tallennettuja lohkoja",
   "Recording where the blocks are": "Kirjaa, missä lohkot ovat",
+  "The interface starts in your system's theme; the switch keeps your choice.": "Käyttöliittymä alkaa järjestelmän teemalla; kytkin muistaa valintasi.",
+  "Checking that the restic mirror is complete": "Tarkistaa, että resticin peilikopio on täydellinen",
+  "Backing up the mirror with restic": "Varmuuskopioi peilikopiota resticillä",
+  "Removing old restic snapshots": "Poistaa vanhoja restic-tilannekuvia",
+  "Checking the restic repository": "Tarkistaa restic-varaston",
   "Filter by name, tag or analysis": "Suodata: nimi, tunniste, analyysi",
   "Filter files": "Suodata tiedostoja",
   "Analysis": "Analyysi",
@@ -1020,6 +956,7 @@
   "The file changed after it was analysed": "Tiedosto on muuttunut analyysin jälkeen",
   "No analysis yet. An assistant can record one through MCP, or write one yourself.": "Ei vielä analyysia. Avustaja voi tallentaa sen MCP:n kautta, tai voit kirjoittaa sen itse.",
   "Written on": "Kirjoitettu laitteella",
+  "By": "Tekijä",
   "Analysed": "Analysoitu",
   "Write analysis": "Kirjoita analyysi",
   "Edit analysis": "Muokkaa analyysia",
@@ -1032,6 +969,92 @@
   "separated by commas": "pilkuilla erotettuina",
   "No files match the filter": "Mikään tiedosto ei vastaa suodatinta",
   "Analysis stale": "Analyysi vanhentunut",
+  "On a device that already uses Varsto, open Devices and choose Add a device. Type the code it shows, or scan its QR code.": "Avaa laitteella, joka jo käyttää Varstoa, Laitteet ja valitse Lisää laite. Kirjoita sen näyttämä koodi tai skannaa sen QR-koodi.",
+  "Scan QR code": "Skannaa QR-koodi",
+  "Scan QR code…": "Skannaa QR-koodi…",
+  "Or paste the code or link": "Tai liitä koodi tai linkki",
+  "Open a screenshot…": "Avaa kuvakaappaus…",
+  "Use pasted text": "Käytä liitettyä tekstiä",
+  "Paste the recipient's request code or scan its QR code to seal the token to their device, or leave it empty for a plain token that carries the folder key itself.": "Liitä vastaanottajan pyyntökoodi tai skannaa sen QR-koodi sinetöidäksesi tunnisteen hänen laitteelleen, tai jätä se tyhjäksi, jolloin tunniste on tavallinen ja sisältää itse kansioavaimen.",
+  "Anyone holding the token can read and write this folder. Paste the recipient's request code or scan its QR code to seal the token to their device, or leave it empty for a plain token that carries the folder key itself.": "Kuka tahansa tunnisteen haltija voi lukea ja kirjoittaa tätä kansiota. Liitä vastaanottajan pyyntökoodi tai skannaa sen QR-koodi sinetöidäksesi tunnisteen hänen laitteelleen, tai jätä se tyhjäksi, jolloin tunniste on tavallinen ja sisältää itse kansioavaimen.",
+  "QR code": "QR-koodi",
+  "Fingerprint": "Sormenjälki",
+  "Show one code": "Näytä yhtenä koodina",
+  "Camera cannot read it? Show smaller codes": "Eikö kamera lue sitä? Näytä pienempinä koodeina",
+  "Point the camera at the QR code.": "Osoita kameralla QR-koodia.",
+  "No camera is available here. Open a screenshot of the code or paste the code.": "Kameraa ei ole käytettävissä. Avaa kuvakaappaus koodista tai liitä koodi.",
+  "Reading the image…": "Luetaan kuvaa…",
+  "No Varsto QR code was found in the image.": "Kuvasta ei löytynyt Varston QR-koodia.",
+  "This device already uses a vault. A pairing code is for the device you are adding: scan it there.": "Tämä laite käyttää jo holvia. Parinmuodostuskoodi on lisättävää laitetta varten: skannaa se siellä.",
+  "This device already has a vault of its own. Open the sealed token on the device that made the request code.": "Tällä laitteella on jo oma holvi. Avaa sinetöity tunniste laitteella, joka teki pyyntökoodin.",
+  "This is a share request. Open it on the device of the folder's owner.": "Tämä on jakopyyntö. Avaa se kansion omistajan laitteella.",
+  "Choose the folder. Next you compare the six-word fingerprint with them.": "Valitse kansio. Seuraavaksi vertaatte kuuden sanan sormenjälkeä.",
+  "This is not a share request code.": "Tämä ei ole jakopyynnön koodi.",
+  "This is not a sealed share token.": "Tämä ei ole sinetöity jakotunniste.",
+  "This is not a pairing code.": "Tämä ei ole parinmuodostuskoodi.",
+  "Trash": "Roskakori",
+  "Files deleted on any of your devices are kept here for the days set below, encrypted on your storages, and can be restored on any device. Restoring never overwrites a file: when its name is taken, it comes back as \"name (restored)\".": "Millä tahansa laitteellasi poistetut tiedostot säilyvät täällä alla asetetun määrän päiviä salattuina tallennuspaikoissasi, ja ne voi palauttaa millä tahansa laitteella. Palautus ei koskaan korvaa tiedostoa: jos nimi on jo käytössä, tiedosto palaa nimellä \"nimi (restored)\".",
+  "Search the trash": "Hae roskakorista",
+  "All folders": "Kaikki kansiot",
+  "Delete permanently…": "Poista pysyvästi…",
+  "Empty trash…": "Tyhjennä roskakori…",
+  "Select all": "Valitse kaikki",
+  "Select": "Valitse",
+  "Deleted": "Poistettu",
+  "The trash is empty": "Roskakori on tyhjä",
+  "Files deleted on any of your devices appear here.": "Millä tahansa laitteellasi poistetut tiedostot näkyvät täällä.",
+  "Trash settings": "Roskakorin asetukset",
+  "Keep deleted files (days)": "Säilytä poistetut tiedostot (päivää)",
+  "Trash storage": "Roskakorin tallennuspaikka",
+  "Deleted files move to this storage only, for example a cheap cold storage, and leave your other storages. Restoring from cold storage asks first, because retrieval is billed and can take hours.": "Poistetut tiedostot siirtyvät vain tähän tallennuspaikkaan, esimerkiksi edulliseen kylmätallennukseen, ja poistuvat muista tallennuspaikoistasi. Kylmätallennuksesta palauttaminen kysyy ensin, koska nouto laskutetaan ja voi kestää tunteja.",
+  "None: deleted files stay where they are": "Ei mitään: poistetut tiedostot pysyvät siellä, missä ne ovat",
+  "cold": "kylmä",
+  "Nothing in the trash matches": "Mikään roskakorissa ei vastaa hakua",
+  "In the trash": "Roskakorissa",
+  "Kept on": "Säilytyspaikka",
+  "Folders with their own days": "Kansiot, joilla on omat päivät",
+  "Copies on this device": "Kopiot tällä laitteella",
+  "Next expiry": "Seuraava vanheneminen",
+  "Last cleanup": "Viimeisin siivous",
+  "Each file goes back where it was. If that name is taken now, it comes back as \"name (restored)\": nothing is overwritten. The restored files sync to your other devices.": "Jokainen tiedosto palaa paikalleen. Jos nimi on nyt käytössä, tiedosto palaa nimellä \"nimi (restored)\": mitään ei korvata. Palautetut tiedostot synkronoituvat muille laitteillesi.",
+  "Into another directory of the folder (optional)": "Kansion toiseen hakemistoon (valinnainen)",
+  "Restored": "Palautetut",
+  "empty: the original place": "tyhjä: alkuperäinen paikka",
+  "Read from cold storage?": "Luetaanko kylmätallennuksesta?",
+  "Delete permanently?": "Poistetaanko pysyvästi?",
+  "Delete permanently": "Poista pysyvästi",
+  "Empty the trash?": "Tyhjennetäänkö roskakori?",
+  "Empty trash": "Tyhjennä roskakori",
+  "empty": "tyhjennä",
+  "Keep deleted files from 1 to 3650 days.": "Säilytä poistettuja tiedostoja 1–3650 päivää.",
+  "Trash settings saved": "Roskakorin asetukset tallennettu",
+  "Restoring files of folder «{s}» from the trash": "Palauttaa kansion «{s}» tiedostoja roskakorista",
+  "Deleting files from the trash for good": "Poistaa tiedostoja roskakorista pysyvästi",
+  "Moving deleted files of folder «{s}» to the trash storage": "Siirtää kansion «{s}» poistettuja tiedostoja roskakorin tallennuspaikkaan",
+  "Versions": "Versiot",
+  "Version history": "Versiohistoria",
+  "When a file is overwritten, on any device, its earlier version is kept: every version for an hour, one per hour for a day, one per day for 30 days, then one per week. Unchanged parts are shared between versions, so only the changes take space. Restore a version from the file's details on the Files page.": "Kun tiedosto korvataan millä tahansa laitteella, sen aiempi versio säilyy: jokainen versio tunnin ajan, yksi tunnissa vuorokauden ajan, yksi päivässä 30 päivän ajan ja sen jälkeen yksi viikossa. Muuttumattomat osat ovat versioille yhteisiä, joten vain muutokset vievät tilaa. Palauta versio Tiedostot-sivun tiedoston tiedoista.",
+  "Keep earlier versions": "Säilytä aiemmat versiot",
+  "Keep versions (days)": "Säilytä versiot (päivää)",
+  "One folder differently": "Yksi kansio eri tavalla",
+  "For this folder": "Tälle kansiolle",
+  "Like every folder": "Kuten muut kansiot",
+  "Its own days": "Omat päivät",
+  "Off: keep no new versions": "Pois: uusia versioita ei säilytetä",
+  "Days for this folder": "Päiviä tälle kansiolle",
+  "No folder": "Ei kansiota",
+  "Earlier versions": "Aiemmat versiot",
+  "off": "pois",
+  "own changes": "omat muutokset",
+  "Version history is off for this folder: no new versions are kept.": "Versiohistoria on pois tältä kansiolta: uusia versioita ei säilytetä.",
+  "No earlier versions": "Ei aiempia versioita",
+  "Restore as a copy…": "Palauta kopiona…",
+  "Restore as a copy?": "Palautetaanko kopiona?",
+  "New name": "Uusi nimi",
+  "Restore this version?": "Palautetaanko tämä versio?",
+  "Keep versions from 1 to 3650 days.": "Säilytä versioita 1–3650 päivää.",
+  "Version history settings saved": "Versiohistorian asetukset tallennettu",
+  "Restoring an earlier version of a file of folder «{s}»": "Palauttaa kansion «{s}» tiedoston aiempaa versiota",
   "Folder settings: ignore rules and file metadata": "Kansion asetukset: ohitussäännöt ja tiedostojen metatiedot",
   "Folder settings": "Kansion asetukset",
   "Close folder settings": "Sulje kansion asetukset",
@@ -1153,50 +1176,6 @@
   "Copying the records off storage «{s}»": "Kopioi tietueet pois tallennuspaikasta «{s}»"
  },
  "patterns": [
-  [
-   "^Restore (\\d+) files\\?$",
-   "Palautetaanko $1 tiedostoa?"
-  ],
-  [
-   "^Restore (.+)\\?$",
-   "Palautetaanko $1?"
-  ],
-  [
-   "^(.+) of it is kept only on cold storage (.+)\\. Reading it back starts a retrieval, which your provider bills \\(about (.+)\\) and which can take hours\\.$",
-   "$1 siitä on vain kylmätallennuksessa $2. Sen lukeminen käynnistää noudon, jonka palveluntarjoaja laskuttaa (noin $3) ja joka voi kestää tunteja."
-  ],
-  [
-   "^(.+) of it is kept only on cold storage (.+)\\. Reading it back starts a retrieval, which your provider bills and which can take hours\\.$",
-   "$1 siitä on vain kylmätallennuksessa $2. Sen lukeminen käynnistää noudon, jonka palveluntarjoaja laskuttaa ja joka voi kestää tunteja."
-  ],
-  [
-   "^(\\d+) files are deleted for good, from every device and storage\\. They cannot be restored afterwards\\.$",
-   "$1 tiedostoa poistetaan pysyvästi kaikilta laitteilta ja tallennuspaikoista. Niitä ei voi palauttaa jälkeenpäin."
-  ],
-  [
-   "^(.+) is deleted for good, from every device and storage\\. It cannot be restored afterwards\\.$",
-   "$1 poistetaan pysyvästi kaikilta laitteilta ja tallennuspaikoista. Sitä ei voi palauttaa jälkeenpäin."
-  ],
-  [
-   "^Every file in the trash \\((\\d+)\\) is deleted for good, from every device and storage\\. This cannot be undone\\.$",
-   "Jokainen roskakorin tiedosto ($1) poistetaan pysyvästi kaikilta laitteilta ja tallennuspaikoista. Tätä ei voi perua."
-  ],
-  [
-   "^Restored (\\d+) files from the trash$",
-   "Palautettiin $1 tiedostoa roskakorista"
-  ],
-  [
-   "^Deleted (\\d+) files permanently$",
-   "Poistettiin $1 tiedostoa pysyvästi"
-  ],
-  [
-   "^Trash emptied: (\\d+) files deleted permanently$",
-   "Roskakori tyhjennetty: $1 tiedostoa poistettiin pysyvästi"
-  ],
-  [
-   "^(\\d+) blocks wait for the cold storage's minimum storage time before they are deleted$",
-   "$1 lohkoa odottaa kylmätallennuksen vähimmäissäilytysajan päättymistä ennen poistoa"
-  ],
   [
    "^Watching (\\d+) folder\\(s\\) · last sync (.+)$",
    "Valvoo $1 kansiota · viimeisin synkronointi $2"
@@ -1398,18 +1377,6 @@
    "$1: lopetettu; levyiltä ei haeta enempää"
   ],
   [
-   "^The version from (.+) is written as a new file beside the current one\\. Nothing is overwritten\\.$",
-   "Versio ajalta $1 kirjoitetaan uutena tiedostona nykyisen viereen. Mitään ei korvata."
-  ],
-  [
-   "^The version from (.+) becomes the current (.+)\\. The current version is kept in the versions, so nothing is lost\\. The change syncs to your other devices\\.$",
-   "Versiosta ajalta $1 tulee nykyinen $2. Nykyinen versio säilyy versioissa, joten mitään ei menetetä. Muutos synkronoituu muille laitteillesi."
-  ],
-  [
-   "^Restored the version of (.+) to (.+)$",
-   "Palautettiin tiedoston $1 versio kohteeseen $2"
-  ],
-  [
    "^Imported (\\d+) file\\(s\\) \\((.+)\\) into folder (.+)$",
    "Tuotiin $1 tiedosto(a) ($2) kansioon $3"
   ],
@@ -1524,6 +1491,82 @@
   [
    "^cleared the analysis of (.+)$",
    "tyhjennettiin tiedoston $1 analyysi"
+  ],
+  [
+   "^Part (\\d+) of (\\d+)$",
+   "Osa $1/$2"
+  ],
+  [
+   "^Scanned (\\d+) of (\\d+) parts\\. Keep the camera on the changing code\\.$",
+   "Skannattu $1/$2 osaa. Pidä kamera vaihtuvassa koodissa."
+  ],
+  [
+   "^The camera could not be opened \\((.+)\\)\\. Open a screenshot of the code or paste the code\\.$",
+   "Kameraa ei voitu avata ($1). Avaa kuvakaappaus koodista tai liitä koodi."
+  ],
+  [
+   "^The sealed share token for (.+) is filled in under Accept a shared folder\\. Fill in the rest and choose Accept\\.$",
+   "Kansion $1 sinetöity jakotunniste on täytetty kohtaan Hyväksy jaettu kansio. Täytä loput ja valitse Hyväksy."
+  ],
+  [
+   "^Share a folder with (.+)\\?$",
+   "Jaetaanko kansio käyttäjälle $1?"
+  ],
+  [
+   "^Restore (\\d+) files\\?$",
+   "Palautetaanko $1 tiedostoa?"
+  ],
+  [
+   "^Restore (.+)\\?$",
+   "Palautetaanko $1?"
+  ],
+  [
+   "^(.+) of it is kept only on cold storage (.+)\\. Reading it back starts a retrieval, which your provider bills \\(about (.+)\\) and which can take hours\\.$",
+   "$1 siitä on vain kylmätallennuksessa $2. Sen lukeminen käynnistää noudon, jonka palveluntarjoaja laskuttaa (noin $3) ja joka voi kestää tunteja."
+  ],
+  [
+   "^(.+) of it is kept only on cold storage (.+)\\. Reading it back starts a retrieval, which your provider bills and which can take hours\\.$",
+   "$1 siitä on vain kylmätallennuksessa $2. Sen lukeminen käynnistää noudon, jonka palveluntarjoaja laskuttaa ja joka voi kestää tunteja."
+  ],
+  [
+   "^(\\d+) files are deleted for good, from every device and storage\\. They cannot be restored afterwards\\.$",
+   "$1 tiedostoa poistetaan pysyvästi kaikilta laitteilta ja tallennuspaikoista. Niitä ei voi palauttaa jälkeenpäin."
+  ],
+  [
+   "^(.+) is deleted for good, from every device and storage\\. It cannot be restored afterwards\\.$",
+   "$1 poistetaan pysyvästi kaikilta laitteilta ja tallennuspaikoista. Sitä ei voi palauttaa jälkeenpäin."
+  ],
+  [
+   "^Every file in the trash \\((\\d+)\\) is deleted for good, from every device and storage\\. This cannot be undone\\.$",
+   "Jokainen roskakorin tiedosto ($1) poistetaan pysyvästi kaikilta laitteilta ja tallennuspaikoista. Tätä ei voi perua."
+  ],
+  [
+   "^Restored (\\d+) files from the trash$",
+   "Palautettiin $1 tiedostoa roskakorista"
+  ],
+  [
+   "^Deleted (\\d+) files permanently$",
+   "Poistettiin $1 tiedostoa pysyvästi"
+  ],
+  [
+   "^Trash emptied: (\\d+) files deleted permanently$",
+   "Roskakori tyhjennetty: $1 tiedostoa poistettiin pysyvästi"
+  ],
+  [
+   "^(\\d+) blocks wait for the cold storage's minimum storage time before they are deleted$",
+   "$1 lohkoa odottaa kylmätallennuksen vähimmäissäilytysajan päättymistä ennen poistoa"
+  ],
+  [
+   "^The version from (.+) is written as a new file beside the current one\\. Nothing is overwritten\\.$",
+   "Versio ajalta $1 kirjoitetaan uutena tiedostona nykyisen viereen. Mitään ei korvata."
+  ],
+  [
+   "^The version from (.+) becomes the current (.+)\\. The current version is kept in the versions, so nothing is lost\\. The change syncs to your other devices\\.$",
+   "Versiosta ajalta $1 tulee nykyinen $2. Nykyinen versio säilyy versioissa, joten mitään ei menetetä. Muutos synkronoituu muille laitteillesi."
+  ],
+  [
+   "^Restored the version of (.+) to (.+)$",
+   "Palautettiin tiedoston $1 versio kohteeseen $2"
   ],
   [
    "^line (\\d+)$",

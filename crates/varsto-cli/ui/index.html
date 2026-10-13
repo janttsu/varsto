@@ -43,6 +43,7 @@
   <symbol id="i-close" viewBox="0 0 20 20"><path d="m5 5 10 10M15 5 5 15"/></symbol>
   <symbol id="i-upload" viewBox="0 0 20 20"><path d="M10 13V3M6 6.5l4-4 4 4"/><path d="M4 16.5h12"/></symbol>
   <symbol id="i-newfolder" viewBox="0 0 20 20"><path d="M3 6.5A1.5 1.5 0 0 1 4.5 5h3.4l1.6 1.6h6A1.5 1.5 0 0 1 17 8.1v6.4a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 3 14.5z"/><path d="M10 9v4M8 11h4"/></symbol>
+  <symbol id="i-qr" viewBox="0 0 20 20"><path d="M3 3h5v5H3zM12 3h5v5h-5zM3 12h5v5H3z"/><path d="M12 12h2v2h-2zM15 15h2v2h-2zM12 16v1M16 12h1"/></symbol>
   <symbol id="i-share" viewBox="0 0 20 20"><path d="M10 12V3.5M6.5 7 10 3.5 13.5 7"/><path d="M5 10v5.5A1.5 1.5 0 0 0 6.5 17h7a1.5 1.5 0 0 0 1.5-1.5V10"/></symbol>
   <symbol id="i-back" viewBox="0 0 20 20"><path d="m12.5 5-5 5 5 5"/></symbol>
   <symbol id="i-trash" viewBox="0 0 20 20"><path d="M4 5.5h12M8 5.5V4h4v1.5"/><path d="M5.5 5.5l.8 10.2A1.5 1.5 0 0 0 7.8 17h4.4a1.5 1.5 0 0 0 1.5-1.3l.8-10.2"/><path d="M8.5 8.5v5.5M11.5 8.5v5.5"/></symbol>
@@ -112,7 +113,8 @@
     <div class="cols cols-3">
       <form id="pair" class="card">
         <h3 class="card-title"><svg class="icon accent"><use href="#i-device"/></svg>Pair with your other device</h3>
-        <p class="muted small">On a device that already uses Varsto, open Devices and choose Add a device. Type the code it shows.</p>
+        <p class="muted small">On a device that already uses Varsto, open Devices and choose Add a device. Type the code it shows, or scan its QR code.</p>
+        <div class="row"><button type="button" id="pairscan" class="secondary"><svg class="icon"><use href="#i-qr"/></svg>Scan QR code</button></div>
         <label>Code <input name="code" type="tel" inputmode="numeric" pattern="[0-9 -]*" maxlength="11" autocomplete="one-time-code" placeholder="123-456-789" required></label>
         <label>Name for this device <input name="name" placeholder="phone" required></label>
         <label>Passphrase for this device <input name="passphrase" type="password" minlength="8" required></label>
@@ -163,7 +165,9 @@
         <p class="muted small">Step 1: send the owner a request code from this device (it carries the device name above). Step 2: read its six-word fingerprint to the owner over a call or in person; they see the same words. Step 3: paste the sealed token they send back.</p>
         <div class="row"><button type="button" id="sharerequest" class="secondary">Show my request code</button></div>
         <pre id="sharerequestout" class="hidden"></pre>
-        <label>Share token <input name="token" required></label>
+        <div id="sharerequestqr" class="qr-box hidden"></div>
+        <label>Share token <input name="token" required autocapitalize="none" autocomplete="off" spellcheck="false"></label>
+        <div class="row"><button type="button" id="sharetokenscan" class="secondary"><svg class="icon"><use href="#i-qr"/></svg>Scan QR code</button></div>
         <label>Where the owner's vault is <select name="kind" id="sharekind"><option value="local-dir">A directory both of you can reach</option><option value="s3">An S3-compatible bucket</option></select></label>
         <div data-sharekind="local-dir"><label>Storage both of you can reach <input name="storage_path"></label></div>
         <div data-sharekind="s3" class="hidden">
@@ -441,6 +445,7 @@
     <!-- Shared -->
     <div class="page hidden" data-page="shared">
       <div id="sharetoken" class="notice warn hidden"></div>
+      <div id="sharetokenqr" class="qr-box card hidden"></div>
       <div class="card">
         <h2 class="card-title"><svg class="icon accent"><use href="#i-sharing"/></svg>Shared folders</h2>
         <ul id="sharedlist" class="list"></ul>
@@ -687,6 +692,7 @@
         <div class="actions"><button id="pairstart" type="button">Add a device</button><button id="pairstop" type="button" class="secondary hidden">Cancel</button></div>
         <div id="pairbox" class="hidden">
           <p class="pair-code" id="paircode"></p>
+          <div id="pairqr" class="qr-box hidden"></div>
           <p class="muted small" id="pairinfo"></p>
         </div>
       </div>
@@ -922,6 +928,21 @@
 </div>
 
 <!-- One dialog for every question the page asks: WebViews return null for window.prompt. -->
+<div id="scanner" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="scanner-title">
+  <div class="modal-backdrop" id="scanner-backdrop"></div>
+  <div class="modal-card scanner-card">
+    <h2 id="scanner-title" class="modal-title">Scan QR code</h2>
+    <video id="scanner-video" class="scanner-video" playsinline muted></video>
+    <p id="scanner-status" class="muted small" aria-live="polite"></p>
+    <label class="small">Or paste the code or link <input id="scanner-text" autocapitalize="none" autocomplete="off" spellcheck="false"></label>
+    <input type="file" id="scanner-file" accept="image/*" class="hidden">
+    <div class="modal-actions">
+      <button type="button" id="scanner-upload" class="secondary">Open a screenshot…</button>
+      <button type="button" id="scanner-use" class="secondary">Use pasted text</button>
+      <button type="button" id="scanner-cancel" class="secondary">Cancel</button>
+    </div>
+  </div>
+</div>
 <div id="modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="modal-title">
   <div class="modal-backdrop" id="modal-backdrop"></div>
   <form class="modal-card" id="modalform" novalidate>

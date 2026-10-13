@@ -309,6 +309,14 @@ final class MainWindow: NSWindowController, WKNavigationDelegate, WKUIDelegate, 
         NSApp.activate(ignoringOtherApps: true)
     }
 
+    // The page's QR scanner asks for the camera: allowed for the local interface only
+    // (macOS still asks the user once, with NSCameraUsageDescription).
+    func webView(_ webView: WKWebView, requestMediaCapturePermissionFor origin: WKSecurityOrigin,
+                 initiatedByFrame frame: WKFrameInfo, type: WKMediaCaptureType,
+                 decisionHandler: @escaping (WKPermissionDecision) -> Void) {
+        decisionHandler(origin.host == "127.0.0.1" && type == .camera ? .grant : .deny)
+    }
+
     // Downloads (Open a file) and external links leave the window.
     func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse,
                  decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
@@ -458,10 +466,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var launchedForFiles = false
 
     /// Double-clicked placeholders: download each file, then open it.
+    /// varsto:// links (QR invitations): handed to the service, which keeps
+    /// the link until the window's page takes it, then the window opens.
     func application(_ application: NSApplication, open urls: [URL]) {
+        let links = urls.filter { $0.scheme?.lowercased() == "varsto" }
+        let files = urls.filter { $0.scheme?.lowercased() != "varsto" }
+        if !links.isEmpty {
+            DispatchQueue.global().async {
+                for link in links {
+                    // Started just now by the link: the service may still be coming up.
+                    for _ in 0..<40 {
+                        if self.client.call("POST", "/api/link", body: ["uri": link.absoluteString]) != nil { break }
+                        Thread.sleep(forTimeInterval: 0.5)
+                    }
+                }
+                DispatchQueue.main.async {
+                    self.openUI()
+                    self.main.web.evaluateJavaScript("window.varstoResumed && window.varstoResumed()", completionHandler: nil)
+                }
+            }
+        }
+        guard !files.isEmpty else { return }
         launchedForFiles = true
-        vlog(.info, "finder", "open \(urls.count) placeholder(s): \(urls.map { $0.lastPathComponent }.joined(separator: ", "))")
-        actOnPaths("fetch", urls.map { $0.path }, openAfter: true)
+        vlog(.info, "finder", "open \(files.count) placeholder(s): \(files.map { $0.lastPathComponent }.joined(separator: ", "))")
+        actOnPaths("fetch", files.map { $0.path }, openAfter: true)
     }
 
     func actOnPaths(_ action: String, _ paths: [String], openAfter: Bool) {

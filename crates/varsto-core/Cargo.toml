@@ -35,6 +35,10 @@ ureq = "3"
 hmac = "0.12"
 zstd = "0.13"
 base64 = "0.22"
+# QR codes for invitations: encode (SVG, terminal) and decode camera frames.
+qrcode = { version = "0.14.1", default-features = false, features = ["svg"] }
+rqrr = { version = "0.11.0", default-features = false }
+data-encoding = "2.6"
 bip39 = "3"
 unicode-normalization = "0.1"
 sharks = "0.5"

@@ -10,6 +10,10 @@
     <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- Scanning QR invitations and pairing codes in the page (getUserMedia in the WebView);
+         asked for only when the user opens the scanner. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
     <!-- "Plain files on this phone" folders live under Internal storage/Varsto so that
          My Files and the gallery see them; the alpha is sideloaded, so all files access
          is asked for only when a user picks that mode. -->
@@ -20,10 +24,17 @@
         android:allowBackup="false"
         android:usesCleartextTraffic="true"
         android:theme="@style/Theme.Varsto">
-        <activity android:name=".MainActivity" android:exported="true" android:configChanges="orientation|screenSize|keyboardHidden">
+        <activity android:name=".MainActivity" android:exported="true" android:launchMode="singleTask" android:configChanges="orientation|screenSize|keyboardHidden">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <!-- varsto:// links: a QR invitation or pairing code scanned with the camera app. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="varsto" />
             </intent-filter>
         </activity>
         <service android:name=".VarstoService" android:exported="false" android:foregroundServiceType="dataSync" />
