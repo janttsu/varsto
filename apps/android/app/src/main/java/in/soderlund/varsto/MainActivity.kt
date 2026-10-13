@@ -16,6 +16,7 @@ import android.webkit.JavascriptInterface
 import android.webkit.JsPromptResult
 import android.webkit.JsResult
 import android.webkit.MimeTypeMap
+import android.webkit.PermissionRequest
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebView
@@ -43,6 +44,17 @@ class MainActivity : AppCompatActivity() {
     private val handler = Handler(Looper.getMainLooper())
     private var attempts = 0
     private var fileChooser: ValueCallback<Array<Uri>>? = null
+    // A varsto:// link the app was opened with, until the page is there to take it.
+    private var pendingLink: String? = null
+    private var pageLoaded = false
+    // The page's QR scanner asked for the camera; answered once Android has.
+    private var cameraRequest: PermissionRequest? = null
+    private val askCamera: ActivityResultLauncher<String> =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            val r = cameraRequest ?: return@registerForActivityResult
+            cameraRequest = null
+            if (granted) r.grant(arrayOf(PermissionRequest.RESOURCE_VIDEO_CAPTURE)) else r.deny()
+        }
     private val pickFiles: ActivityResultLauncher<Intent> =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
             val cb = fileChooser ?: return@registerForActivityResult
@@ -65,7 +77,13 @@ class MainActivity : AppCompatActivity() {
         web.settings.javaScriptEnabled = true
         web.settings.domStorageEnabled = true
         web.settings.allowFileAccess = false
-        web.webViewClient = WebViewClient()
+        web.webViewClient = object : WebViewClient() {
+            override fun onPageFinished(view: WebView?, url: String?) {
+                if (url?.startsWith("http://127.0.0.1") != true) return
+                pageLoaded = true
+                pendingLink?.let { pendingLink = null; openLink(it) }
+            }
+        }
         web.webChromeClient = chromeClient()
         web.addJavascriptInterface(Bridge(), "VarstoAndroid")
         if (applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0) {
@@ -91,7 +109,22 @@ class MainActivity : AppCompatActivity() {
             ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
         }
         ContextCompat.startForegroundService(this, Intent(this, VarstoService::class.java))
+        pendingLink = linkOf(intent)
         load()
+    }
+
+    /** A varsto:// link opened while the app runs: straight to the page. */
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        val link = linkOf(intent) ?: return
+        if (pageLoaded) openLink(link) else pendingLink = link
+    }
+
+    private fun linkOf(intent: Intent?): String? =
+        intent?.data?.takeIf { intent.action == Intent.ACTION_VIEW && it.scheme == "varsto" }?.toString()
+
+    private fun openLink(link: String) {
+        web.evaluateJavascript("window.varstoOpenLink && window.varstoOpenLink(${org.json.JSONObject.quote(link)})", null)
     }
 
     override fun onResume() {
@@ -102,6 +135,22 @@ class MainActivity : AppCompatActivity() {
 
     /** File inputs, and the page's dialogs should it ever use the window ones. */
     private fun chromeClient() = object : WebChromeClient() {
+        /** The QR scanner's getUserMedia: the camera only, for the local page only. */
+        override fun onPermissionRequest(request: PermissionRequest) {
+            handler.post {
+                val local = request.origin?.host == "127.0.0.1"
+                if (!local || !request.resources.contains(PermissionRequest.RESOURCE_VIDEO_CAPTURE)) {
+                    request.deny()
+                } else if (ContextCompat.checkSelfPermission(this@MainActivity, Manifest.permission.CAMERA) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                    request.grant(arrayOf(PermissionRequest.RESOURCE_VIDEO_CAPTURE))
+                } else {
+                    cameraRequest?.deny()
+                    cameraRequest = request
+                    askCamera.launch(Manifest.permission.CAMERA)
+                }
+            }
+        }
+
         override fun onShowFileChooser(view: WebView?, callback: ValueCallback<Array<Uri>>, params: FileChooserParams): Boolean {
             fileChooser?.onReceiveValue(null)
             fileChooser = callback
@@ -253,7 +302,14 @@ class MainActivity : AppCompatActivity() {
             } catch (e: Exception) {
                 false
             }
-            handler.post { if (ok) web.loadUrl(url) else retry() }
+            handler.post {
+                if (ok) {
+                    // A link the app was opened with rides along as #link=; the page takes it.
+                    val link = pendingLink
+                    pendingLink = null
+                    web.loadUrl(if (link == null) url else url + "#link=" + Uri.encode(link))
+                } else retry()
+            }
         }.start()
     }
 
