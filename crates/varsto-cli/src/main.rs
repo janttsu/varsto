@@ -20,6 +20,7 @@ mod mcp_keys;
 mod placing;
 mod restic;
 mod service;
+mod trash;
 mod tray;
 mod update;
 mod upkeep;
@@ -171,6 +172,12 @@ enum Cmd {
     Import {
         #[command(subcommand)]
         cmd: import::ImportCmd,
+    },
+    /// The trash: files deleted on any device, kept for a number of days
+    /// (30 by default) and restorable on every device.
+    Trash {
+        #[command(subcommand)]
+        cmd: trash::TrashCmd,
     },
     /// Show vault, devices, storages and folders.
     Status,
@@ -2801,6 +2808,7 @@ fn run(cli: &Cli) -> Result<()> {
             }
         }
         Cmd::Backup { cmd } => backup::run(cli, &home, cmd)?,
+        Cmd::Trash { cmd } => trash::run(cli, &home, cmd)?,
         Cmd::Move {
             folder,
             from,

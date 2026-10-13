@@ -327,7 +327,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   $("themetoggle2").onclick = toggleTheme;
 
   // Navigation between the pages of the app section.
-  var titles = { overview: "Overview", files: "Files", shared: "Shared", storages: "Storages", backups: "Backups", import: "Import", policies: "Policies", peers: "Peers", organization: "Organization", settings: "Settings", recovery: "Recovery package", more: "More" };
+  var titles = { overview: "Overview", files: "Files", shared: "Shared", storages: "Storages", backups: "Backups", import: "Import", trash: "Trash", policies: "Policies", peers: "Peers", organization: "Organization", settings: "Settings", recovery: "Recovery package", more: "More" };
   var legacyPages = { folders: "files", sharing: "shared" };
   function pageTitle(p) { return titles[p] || "Overview"; }
   var currentPage = (function () { try { var p = sessionStorage.getItem("varsto-page"); p = legacyPages[p] || p; return titles[p] ? p : "overview"; } catch (e) { return "overview"; } })();
@@ -339,7 +339,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     currentPage = page;
     try { sessionStorage.setItem("varsto-page", page); } catch (e) {}
     document.querySelectorAll(".page").forEach(function (d) { d.classList.toggle("hidden", d.dataset.page !== page); });
-    var tab = page === "shared" || page === "backups" || page === "import" || page === "policies" || page === "peers" || page === "organization" || page === "settings" || page === "recovery" ? "more" : page;
+    var tab = page === "shared" || page === "backups" || page === "import" || page === "trash" || page === "policies" || page === "peers" || page === "organization" || page === "settings" || page === "recovery" ? "more" : page;
     document.querySelectorAll(".sidebar .nav-item[data-nav]").forEach(function (b) { if (b.dataset.nav === page) { b.setAttribute("aria-current", "page"); } else { b.removeAttribute("aria-current"); } });
     document.querySelectorAll(".tabbar .nav-item[data-nav]").forEach(function (b) { if (b.dataset.nav === tab) { b.setAttribute("aria-current", "page"); } else { b.removeAttribute("aria-current"); } });
     if (document.body.dataset.view === "app") { $("pagetitle").textContent = pageTitle(page); }
@@ -348,6 +348,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     if (page === "backups") { loadBackups(); }
     if (page === "recovery") { loadGuide(); }
     if (page === "import") { loadImports(); }
+    if (page === "trash") { loadTrash(); }
     if (page === "overview" && lastWhere) { renderWhere(lastWhere); }
     trafficWatch();
     activityWatch();
@@ -1496,6 +1497,164 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
       showCleanupPlan(r.folder, r.cleanup);
       log("Imported into " + r.folder);
     }).catch(function (e) { alertBox(e.message); }).then(function () { busy(false); loadImports(); });
+  };
+
+  // Trash (its own page): files deleted on any device, kept for the trash
+  // days and restorable on every device; the settings below the list.
+  var trashItems = [], trashSelected = {}, trashStorageNow = "", trashStorages = [];
+  function trashKey(i) { return i.folder_id + "/" + i.id; }
+  function loadTrash() {
+    // The storages for the settings: from the last status, or asked now (page opened first).
+    var storages = lastStatus ? Promise.resolve(lastStatus) : api("GET", "/api/status");
+    return Promise.all([api("GET", "/api/trash"), api("GET", "/api/trash/status"), storages]).then(function (r) {
+      trashStorages = (r[2].storages || []).filter(function (x) { return !x.carrier; });
+      trashItems = r[0]; renderTrashFolders(); renderTrash(); renderTrashStatus(r[1]);
+    }).catch(function (e) { log("trash: " + e.message); });
+  }
+  function renderTrashFolders() {
+    var sel = $("trashfolder"); var cur = sel.value; sel.innerHTML = "";
+    var all = el("option", null, "All folders"); all.value = ""; sel.appendChild(all);
+    var names = {}; trashItems.forEach(function (i) { names[i.folder] = true; });
+    Object.keys(names).sort().forEach(function (n) { var o = el("option", null, n); o.value = n; o.setAttribute("data-no-i18n", ""); sel.appendChild(o); });
+    sel.value = names[cur] ? cur : "";
+  }
+  function trashShown() {
+    var q = $("trashsearch").value.trim().toLowerCase(); var f = $("trashfolder").value;
+    return trashItems.filter(function (i) { return (!f || i.folder === f) && (!q || (i.folder + "/" + i.path).toLowerCase().indexOf(q) >= 0); });
+  }
+  function trashPicked() { return trashItems.filter(function (i) { return trashSelected[trashKey(i)]; }); }
+  function trashButtons() {
+    var n = trashPicked().length;
+    $("trashrestore").disabled = n === 0; $("trashpurge").disabled = n === 0;
+    $("trashcount").textContent = n ? n + " selected" : "";
+    var shown = trashShown();
+    $("trashall").checked = shown.length > 0 && shown.every(function (i) { return trashSelected[trashKey(i)]; });
+  }
+  function renderTrash() {
+    var list = trashShown();
+    var tb = $("trashlist").querySelector("tbody"); tb.innerHTML = "";
+    var none = trashItems.length === 0;
+    $("trash-empty").classList.toggle("hidden", !none);
+    $("trashlist").classList.toggle("hidden", none);
+    $("trashtools").classList.toggle("hidden", none);
+    list.forEach(function (i) {
+      var tr = el("tr");
+      // Phone rows show the column names from data-label: in the page's language.
+      function td(text, cls, label) { var d = el("td", cls, text); if (label) { d.dataset.label = actTr(label); } tr.appendChild(d); return d; }
+      var c = el("td"); var cb = el("input"); cb.type = "checkbox"; cb.checked = !!trashSelected[trashKey(i)]; cb.setAttribute("aria-label", "Select");
+      cb.onchange = function () { if (cb.checked) { trashSelected[trashKey(i)] = true; } else { delete trashSelected[trashKey(i)]; } trashButtons(); };
+      c.appendChild(cb); tr.appendChild(c);
+      var p = el("td"); p.dataset.label = actTr("Path"); var nm = el("span", null, i.path); nm.setAttribute("data-no-i18n", ""); p.appendChild(nm);
+      if (i.cold_only) { p.appendChild(document.createTextNode(" ")); p.appendChild(pill("grey", "cold")); }
+      if (i.local_copy) { p.appendChild(document.createTextNode(" ")); p.appendChild(pill("accent", "on this device")); }
+      var sub = el("span", "sub", i.folder); sub.setAttribute("data-no-i18n", ""); p.appendChild(sub);
+      tr.appendChild(p);
+      td(fmtBytes(i.size), "num", "Size");
+      td(fmtWhen(i.deleted_utc), "", "Deleted");
+      td(i.deleted_by, "", "By").setAttribute("data-no-i18n", "");
+      td(fmtDate(i.expires_utc), "", "Expires");
+      var act = el("td"); var rb = el("button", "secondary", "Restore…"); rb.type = "button"; rb.onclick = function () { restoreTrash([i]); }; act.appendChild(rb);
+      var menu = rowMenu(act, "trash:" + trashKey(i));
+      var db = el("button", "secondary", "Delete permanently…"); db.type = "button"; db.onclick = function () { purgeTrash([i]); }; menu.appendChild(db);
+      menu.done();
+      tr.appendChild(act); tb.appendChild(tr);
+    });
+    if (!none && !list.length) { var tr = el("tr"); var d = el("td", "muted", "Nothing in the trash matches"); d.colSpan = 7; tr.appendChild(d); tb.appendChild(tr); }
+    trashButtons();
+  }
+  function renderTrashStatus(st) {
+    var f = $("trashsettings");
+    if (document.activeElement !== f.days) { f.days.value = st.days; }
+    var sel = $("trashstorage"); sel.innerHTML = "";
+    var no = el("option", null, "None: deleted files stay where they are"); no.value = ""; sel.appendChild(no);
+    trashStorages.forEach(function (x) {
+      var o = el("option", null, x.name + (x.cold ? " (" + actTr("cold") + ")" : "")); o.value = x.name; o.setAttribute("data-no-i18n", ""); sel.appendChild(o);
+    });
+    if (st.storage && !sel.querySelector("option[value='" + CSS.escape(st.storage) + "']")) { var o = el("option", null, st.storage); o.value = st.storage; o.setAttribute("data-no-i18n", ""); sel.appendChild(o); }
+    sel.value = st.storage || ""; trashStorageNow = st.storage || "";
+    var dl = $("trashfacts"); dl.innerHTML = "";
+    function fact(label, value) { dl.appendChild(el("dt", null, label)); var dd = el("dd", null, value); dd.setAttribute("data-no-i18n", ""); dl.appendChild(dd); }
+    fact("In the trash", st.entries + " · " + fmtBytes(st.bytes));
+    var where = Object.keys(st.by_storage || {}).map(function (n) { return n + " " + fmtBytes(st.by_storage[n]); });
+    if (where.length) { fact("Kept on", where.join(", ")); }
+    var fd = Object.keys(st.folder_days || {}).map(function (n) { return n + " " + st.folder_days[n]; });
+    if (fd.length) { fact("Folders with their own days", fd.join(", ")); }
+    if (st.local_copies) { fact("Copies on this device", st.local_copies + " · " + fmtBytes(st.local_copy_bytes)); }
+    if (st.next_expiry_utc) { fact("Next expiry", fmtDate(st.next_expiry_utc)); }
+    fact("Last cleanup", fmtWhen(st.last_upkeep_utc));
+    var notes = (st.notes || []).slice(); if (st.drops_waiting) { notes.push(st.drops_waiting + " blocks wait for the cold storage's minimum storage time before they are deleted"); }
+    $("trashnotes").textContent = notes.join(" ");
+  }
+  function trashByFolder(items) { var g = {}; items.forEach(function (i) { (g[i.folder] = g[i.folder] || []).push(i.path); }); return g; }
+  function restoreTrash(items) {
+    if (!items.length) { return; }
+    dialog({
+      title: items.length === 1 ? "Restore " + items[0].path + "?" : "Restore " + items.length + " files?",
+      text: "Each file goes back where it was. If that name is taken now, it comes back as \"name (restored)\": nothing is overwritten. The restored files sync to your other devices.",
+      fields: [{ name: "to", label: "Into another directory of the folder (optional)", placeholder: "Restored", hint: "empty: the original place" }],
+      ok: "Restore"
+    }).then(function (r) {
+      if (!r) { return; }
+      var to = (r.values.to || "").trim(); var groups = trashByFolder(items); var done = 0;
+      busy(true);
+      var chain = Promise.resolve();
+      Object.keys(groups).forEach(function (folder) {
+        chain = chain.then(function () {
+          return api("POST", "/api/trash/restore-plan", { folder: folder, paths: groups[folder], to: to });
+        }).then(function (p) {
+          if (!p.cold_storages.length) { return false; }
+          var text = fmtBytes(p.cold_bytes) + " of it is kept only on cold storage " + p.cold_storages.join(", ") + ". Reading it back starts a retrieval, which your provider bills" + (p.read_cost ? " (about " + p.read_cost + ")" : "") + " and which can take hours.";
+          return dialog({ title: "Read from cold storage?", text: text, ok: "Read cold storage", danger: true }).then(function (x) { if (!x) { throw new Error("cancelled"); } return true; });
+        }).then(function (cold) {
+          return api("POST", "/api/trash/restore", { folder: folder, paths: groups[folder], to: to, confirm_cold_read: cold });
+        }).then(function (x) {
+          done += x.restored.length;
+          if (x.unavailable && x.unavailable.length) { alertBox(x.unavailable.length + " files could not be restored: " + x.unavailable.slice(0, 10).join("; ")); }
+        });
+      });
+      return chain.then(function () { log("Restored " + done + " files from the trash"); }, function (e) { if (e.message !== "cancelled") { alertBox(e.message); } })
+        .then(function () { busy(false); trashSelected = {}; loadTrash(); });
+    });
+  }
+  function purgeTrash(items) {
+    if (!items.length) { return; }
+    var text = items.length === 1 ? items[0].path + " is deleted for good, from every device and storage. It cannot be restored afterwards." : items.length + " files are deleted for good, from every device and storage. They cannot be restored afterwards.";
+    confirmBox(text, { title: "Delete permanently?", ok: "Delete permanently", danger: true }).then(function (yes) {
+      if (!yes) { return; }
+      var groups = trashByFolder(items); var n = 0;
+      busy(true);
+      var chain = Promise.resolve();
+      Object.keys(groups).forEach(function (folder) {
+        chain = chain.then(function () { return api("POST", "/api/trash/purge", { folder: folder, paths: groups[folder] }); }).then(function (x) { n += x.entries; });
+      });
+      return chain.then(function () { log("Deleted " + n + " files permanently"); }, function (e) { alertBox(e.message); })
+        .then(function () { busy(false); trashSelected = {}; loadTrash(); });
+    });
+  }
+  $("trashsearch").addEventListener("input", renderTrash);
+  $("trashfolder").addEventListener("change", renderTrash);
+  $("trashall").onchange = function () { var on = $("trashall").checked; trashShown().forEach(function (i) { if (on) { trashSelected[trashKey(i)] = true; } else { delete trashSelected[trashKey(i)]; } }); renderTrash(); };
+  $("trashrestore").onclick = function () { restoreTrash(trashPicked()); };
+  $("trashpurge").onclick = function () { purgeTrash(trashPicked()); };
+  $("trashempty").onclick = function () {
+    var word = actTr("empty");
+    dialog({ title: "Empty the trash?", text: "Every file in the trash (" + trashItems.length + ") is deleted for good, from every device and storage. This cannot be undone.", ok: "Empty trash", danger: true, confirmText: word }).then(function (r) {
+      if (!r) { return; }
+      busy(true);
+      return api("POST", "/api/trash/purge", { all: true }).then(function (x) { log("Trash emptied: " + x.entries + " files deleted permanently"); }, function (e) { alertBox(e.message); })
+        .then(function () { busy(false); trashSelected = {}; loadTrash(); });
+    });
+  };
+  $("trashsettings").onsubmit = function (ev) {
+    ev.preventDefault();
+    var d = formData(ev.target); var days = parseInt(d.days, 10);
+    if (!(days >= 1 && days <= 3650)) { alertBox("Keep deleted files from 1 to 3650 days."); return; }
+    // The storage is sent only when it changed: setting one moves the trash there.
+    var body = { days: days };
+    if (d.storage !== trashStorageNow) { if (d.storage) { body.storage = d.storage; } else { body.no_storage = true; } }
+    busy(true);
+    api("POST", "/api/trash/set", body).then(function (st) { renderTrashStatus(st); log("Trash settings saved"); }, function (e) { alertBox(e.message); })
+      .then(function () { busy(false); loadTrash(); });
   };
 
   // Automatic verification (Policies page): status line, run now, schedule.
@@ -2649,7 +2808,11 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     "restic": "Checking that the restic mirror is complete",
     "restic.backup": "Backing up the mirror with restic",
     "restic.forget": "Removing old restic snapshots",
-    "restic.repo_check": "Checking the restic repository"
+    "restic.repo_check": "Checking the restic repository",
+    "trash_restore": "Restoring files of folder «{s}» from the trash",
+    "trash_purge": "Deleting files from the trash for good",
+    "trash_purge.drop": "Deleting files from the trash for good",
+    "trash_move": "Moving deleted files of folder «{s}» to the trash storage"
   };
   var actTimer = null, actBusy = false, lastActivity = null;
   function actTr(s) { return window.varstoLang ? window.varstoLang.t(s) : s; }

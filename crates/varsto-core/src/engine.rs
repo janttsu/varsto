@@ -65,6 +65,7 @@ mod restic_mirror;
 mod scrub;
 mod share_ops;
 mod strongroom_ops;
+mod trash;
 mod verify;
 mod view;
 mod where_data;
@@ -109,6 +110,11 @@ pub use restic_mirror::{CheckOptions, SetupReport};
 pub use scrub::ScrubOptions;
 pub use share_ops::{ShareMember, ShareMembers, ShareRevokeReport};
 pub use strongroom_ops::{CleanupReport, ConvertReport, StrongroomKeySummary};
+pub use trash::{
+    restored_name, RestoredFile, TrashItem, TrashPurgeReport, TrashRestorePlan, TrashRestoreReport,
+    TrashSettings, TrashStatus, TrashUpkeepReport, DEFAULT_TRASH_DAYS, MAX_TRASH_DAYS,
+    TRASH_UPKEEP_EVERY_SECS,
+};
 pub use where_data::{CopyStats, DataLocations, DeviceShare, FolderShare, StorageShare};
 
 #[derive(Clone, Debug, Serialize, Deserialize, Default, PartialEq, Eq)]
@@ -1458,13 +1464,30 @@ impl Engine {
                     })
                     .unwrap_or_default()
             };
+            // Blocks of the folder's trash keep one copy (`trash`); the
+            // folder's copy rules are for its current files.
+            let trashed: HashSet<ChunkId> = if rec.is_backup() {
+                HashSet::new()
+            } else {
+                self.trash_chunks(&rec.folder_id)
+                    .into_iter()
+                    .map(|c| c.chunk)
+                    .filter(|c| !referenced.contains(c))
+                    .collect()
+            };
             for ((folder, chunk), cr) in &view.chunks {
                 if folder != &rec.folder_id || !cr.storages.contains_key(name) {
                     continue;
                 }
-                if !referenced.is_empty() && !referenced.contains(chunk) {
+                let trash_only = trashed.contains(chunk);
+                if !referenced.is_empty() && !referenced.contains(chunk) && !trash_only {
                     continue;
                 }
+                let (policy, required) = if trash_only {
+                    (crate::policy::Policy::default(), 1)
+                } else {
+                    (policy.clone(), required)
+                };
                 plan.blocks += 1;
                 let holders: Vec<&String> = cr
                     .storages
@@ -1881,6 +1904,7 @@ impl Engine {
                     format!("thumbs/{}/", rec.folder_id),
                     format!("vault/access/{}/", rec.folder_id),
                     notes::folder_prefix(&rec.folder_id),
+                    trash::record_prefix(&rec.folder_id),
                     crate::snapshot::Snapshot::backup_prefix(&rec.folder_id),
                 ] {
                     for key in backend.list(&prefix)? {
@@ -1891,6 +1915,9 @@ impl Engine {
             }
         }
         self.forget_folder(&rec.folder_id, removal.removed_utc)?;
+        if purge {
+            self.forget_trash(&rec.folder_id);
+        }
         Ok(deleted)
     }
 
@@ -2678,6 +2705,7 @@ impl Engine {
             .filter(|(p, f)| !f.deleted && !seen.contains(*p) && !placeholders.contains(*p))
             .map(|(p, _)| p.clone())
             .collect();
+        let mut trashed: Vec<(FileState, u64)> = Vec::new();
         for path in gone {
             let clock = self.tick()?;
             let prev = state.files.get(&path).cloned().unwrap();
@@ -2697,9 +2725,12 @@ impl Engine {
                     modified_clock: clock,
                 },
             );
+            trashed.push((prev, clock));
             changed += 1;
         }
         state.local_index = new_index;
+        // The deleted versions go to the trash (`trash`).
+        self.trash_record_deletions(rec, state, trashed)?;
         Ok((scanned, changed))
     }
 
@@ -2752,6 +2783,9 @@ impl Engine {
             report.manifest_seq = Some(seq);
         }
         self.ensure_manifest_everywhere(&rec, &state)?;
+        // Deletions found by this scan, restores and purges reach the
+        // other devices' trash.
+        self.trash_publish(&rec, util::now_utc())?;
         report.batch_seq = self.commit_batch()?;
         self.save_state(&rec.folder_id, &state)?;
         Ok(report)
@@ -5021,6 +5055,8 @@ impl Engine {
         // No claims at all while manifests name blocks: the ledger is gone
         // everywhere (checked at most hourly, and only without claims).
         let _ = self.ledger_lost_everywhere(false);
+        // The other devices' trash records, when due (`trash`).
+        let _ = self.trash_refresh(false);
         Ok(out)
     }
 
@@ -5310,7 +5346,8 @@ impl Engine {
                 backend.list("chunks/")?.into_iter().collect(),
             );
         }
-        // Referenced chunks from every attached folder's current files.
+        // Referenced chunks from every attached folder's current files and
+        // its trash.
         let mut referenced: BTreeMap<(FolderId, ChunkId), ObjectName> = BTreeMap::new();
         for (rec, _) in self.folders() {
             let state = self.load_state(&rec.folder_id)?;
@@ -5319,7 +5356,18 @@ impl Engine {
                     referenced.insert((rec.folder_id.clone(), c.chunk.clone()), c.object.clone());
                 }
             }
+            for c in self.trash_chunks(&rec.folder_id) {
+                referenced.insert((rec.folder_id.clone(), c.chunk), c.object);
+            }
         }
+        // Storages not listed (cold ones): a claim there counts as a copy.
+        let unlisted: BTreeSet<&str> = self
+            .config
+            .storages
+            .iter()
+            .filter(|s| s.is_cold())
+            .map(|s| s.name())
+            .collect();
         // Blocks of backup snapshots this device has read or written.
         let backups: Vec<FolderId> = self
             .keyring
@@ -5338,7 +5386,13 @@ impl Engine {
         for ((folder, chunk), object) in &referenced {
             let key = chunk_storage_key(object);
             referenced_objects.insert(key.clone());
-            let present_somewhere = listings.values().any(|l| l.contains(&key));
+            let present_somewhere = listings.values().any(|l| l.contains(&key))
+                || view.locate(folder, chunk).is_some_and(|r| {
+                    r.object == *object
+                        && r.storages
+                            .iter()
+                            .any(|(n, l)| unlisted.contains(n.as_str()) && !l.claimed_by.is_empty())
+                });
             if present_somewhere {
                 report.chunks_with_storage_copy += 1;
             } else {

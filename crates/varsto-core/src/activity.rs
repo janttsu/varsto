@@ -76,6 +76,11 @@ pub const STRONGROOM_CONVERT: &str = "strongroom_convert";
 /// Importing a git-annex repository, a cloud drive or a directory; steps
 /// "list", "read" and "cleanup".
 pub const IMPORT: &str = "import";
+/// The trash (`engine::trash`): restoring entries, deleting them for good,
+/// moving trashed blocks to the trash storage.
+pub const TRASH_RESTORE: &str = "trash_restore";
+pub const TRASH_PURGE: &str = "trash_purge";
+pub const TRASH_MOVE: &str = "trash_move";
 
 /// What `done` and `total` count.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
