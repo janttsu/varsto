@@ -12,8 +12,18 @@
   // how it went (failed, finished or under way); at most 200 rows are kept.
   function log(msg) {
     msg = String(msg);
+    // The same message again (a poll failing while the service restarts):
+    // one line with a count and the latest time.
+    var top = logEl.firstChild;
+    if (top && top.dataset.msg === msg) {
+      var n = (+top.dataset.count || 1) + 1; top.dataset.count = n;
+      var c = top.querySelector(".activity-count"); if (!c) { c = document.createElement("span"); c.className = "activity-count muted"; top.querySelector(".activity-text").appendChild(c); }
+      c.textContent = " (×" + n + ")";
+      var tm = top.querySelector("time"); var d = new Date(); tm.dateTime = d.toISOString(); tm.textContent = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+      return;
+    }
     var kind = /\b(error|failed|refused|could not|cannot|FORKED|corrupt)\b/i.test(msg) ? "bad" : /\b(started|checking|installing|restarting|waiting|shutting down)\b/i.test(msg) ? "run" : "ok";
-    var li = document.createElement("li"); li.className = "activity-item " + kind;
+    var li = document.createElement("li"); li.className = "activity-item " + kind; li.dataset.msg = msg;
     var dot = document.createElement("span"); dot.className = "activity-dot"; dot.setAttribute("aria-hidden", "true");
     var body = document.createElement("div"); body.className = "activity-body";
     var m = /^([^:]{1,40}): (.+)$/.exec(msg);
@@ -68,8 +78,20 @@
     if (loud) { workBar(true); }
     var unfollow = b && /^\/api\/(fetch|paths|sync|view)/.test(path) ? followDownload(b) : null;
     var done = function () { if (unfollow) { unfollow(); } if (b) { markBusy(b, false); } if (loud) { workBar(false); } };
+    // Errors say which request failed: a browser only says "Load failed" or
+    // "Failed to fetch" when the service did not answer at all.
+    var what = method + " " + path.split("?")[0];
     return fetch(path, { method: method, headers: { "X-Varsto-Token": token, "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined })
-      .then(function (r) { return r.json().then(function (j) { if (!r.ok) { throw new Error(j.error || r.statusText); } return j; }); })
+      .then(function (r) {
+        return r.text().then(function (t) {
+          var j = null; try { j = t ? JSON.parse(t) : {}; } catch (x) { j = null; }
+          if (!r.ok) { throw new Error((j && j.error) || ("The Varsto service answered " + r.status + " to " + what)); }
+          if (j === null) { throw new Error("The Varsto service sent an unreadable answer to " + what); }
+          return j;
+        });
+      }, function (e) {
+        throw new Error("Could not reach the Varsto service (" + what + "): " + e.message + ". It may be restarting or busy; try again in a moment.");
+      })
       .then(function (j) { done(); return j; }, function (e) { done(); throw e; });
   }
   // Without a vault (first start, after a reset or a wipe) nothing of the

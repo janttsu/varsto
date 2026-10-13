@@ -834,6 +834,18 @@
   [
    "^(.+), cold$",
    "$1, kall"
+  ],
+  [
+   "^Could not reach the Varsto service \\((\\S+) (\\S+)\\): (.+)\\. It may be restarting or busy; try again in a moment\\.$",
+   "Kunde inte nå Varsto-tjänsten ($1 $2): $3. Den kanske startar om eller är upptagen; försök igen om en stund."
+  ],
+  [
+   "^The Varsto service answered (\\d+) to (\\S+) (\\S+)$",
+   "Varsto-tjänsten svarade $1 på $2 $3"
+  ],
+  [
+   "^The Varsto service sent an unreadable answer to (\\S+) (\\S+)$",
+   "Varsto-tjänsten skickade ett oläsbart svar på $1 $2"
   ]
  ],
  "review": [
