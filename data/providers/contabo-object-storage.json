@@ -1,0 +1,184 @@
+{
+  "$schema": "schema.json",
+  "schema_version": 1,
+  "id": "contabo-object-storage",
+  "name": "Contabo Object Storage",
+  "kind": "service",
+  "website_url": "https://contabo.com/en/",
+  "signup_url": "https://my.contabo.com/",
+  "currency": "EUR",
+  "prices_include_tax": null,
+  "tax_note": "Contabo's site shows prices including or excluding VAT depending on the selected country; no Object Storage prices could be read, so tax treatment is unknown.",
+  "protocols": [
+    "s3",
+    "rclone"
+  ],
+  "protocols_source": {
+    "source_url": "https://contabo.com/blog/kb/103000305592-what-is-the-rclone-tool/",
+    "last_verified": "2026-10-13"
+  },
+  "regions": [
+    {
+      "code": "eu2",
+      "city": null,
+      "country": "EU",
+      "source_url": "https://contabo.com/blog/kb/103000275473-where-can-i-find-s3-connection-setting-for-object-storage/",
+      "last_verified": "2026-10-13",
+      "note": "KB 'S3 connection settings': region 'European Union' with base URL https://eu2.contabostorage.com. City not stated. Country code 'EU' (ISO 3166-1 exceptionally reserved) because the KB names only the European Union."
+    },
+    {
+      "code": "sin1",
+      "city": null,
+      "country": "SG",
+      "source_url": "https://contabo.com/blog/kb/103000275473-where-can-i-find-s3-connection-setting-for-object-storage/",
+      "last_verified": "2026-10-13",
+      "note": "KB 'S3 connection settings': region 'Singapore' with base URL https://sin1.contabostorage.com. City not stated."
+    },
+    {
+      "code": "usc1",
+      "city": null,
+      "country": "US",
+      "source_url": "https://contabo.com/blog/kb/103000275473-where-can-i-find-s3-connection-setting-for-object-storage/",
+      "last_verified": "2026-10-13",
+      "note": "KB 'S3 connection settings': region 'United States' with base URL https://usc1.contabostorage.com. City not stated."
+    }
+  ],
+  "storage_classes": [
+    {
+      "id": "standard",
+      "name": "Object Storage",
+      "kind": "hot",
+      "applies_to_regions": [
+        "eu2",
+        "sin1",
+        "usc1"
+      ],
+      "pricing_model": "fixed_plan",
+      "plans": [
+        {
+          "id": "increment-250gb",
+          "capacity_gb": {
+            "value": 250,
+            "source_url": "https://contabo.com/blog/kb/103000275409-how-do-i-order-object-storage-as-an-existing-user/",
+            "last_verified": "2026-10-13",
+            "note": "KB 'How do I order Object Storage': 'The amount of storage you select must be a multiple of 250 GB'; capacity can be added in 250 GB increments or by Auto-Scaling."
+          },
+          "monthly_price": {
+            "value": null,
+            "note": "Not verified: the official product and price page https://contabo.com/en/object-storage/ now redirects (HTTP 301) to the Storage VPS page, Object Storage is no longer in the site navigation or on https://contabo.com/en/pricing/, and the knowledge base gives no prices. Prices in third-party listings and a Contabo blog comparison marked 'approximate, verify' were not used."
+          }
+        }
+      ],
+      "requests": {
+        "put_per_1000": {
+          "value": null,
+          "note": "No request fees are stated in the knowledge base; the price page is unavailable (see plan note). The KB limits page sets a default of 250 S3 API requests per second."
+        },
+        "get_per_1000": {
+          "value": null,
+          "note": "No request fees are stated in the knowledge base; the price page is unavailable (see plan note). The KB limits page sets a default of 250 S3 API requests per second."
+        },
+        "list_per_1000": {
+          "value": null,
+          "note": "No request fees are stated in the knowledge base; the price page is unavailable (see plan note). The KB limits page sets a default of 250 S3 API requests per second."
+        }
+      },
+      "retrieval": {
+        "price_per_gb": {
+          "value": null,
+          "note": "Not stated; price page unavailable."
+        },
+        "typical_delay": {
+          "value": null,
+          "note": "Not applicable (hot storage); no delay stated."
+        }
+      },
+      "minimum_storage_duration_days": {
+        "value": null,
+        "note": "Not stated in the knowledge base; price page unavailable."
+      },
+      "minimum_billable_object_size_kb": {
+        "value": null,
+        "note": "Not stated in the knowledge base; price page unavailable."
+      },
+      "notes": [
+        "Limits (KB): 5 TB max object size, 3 million objects per customer by default, 250 requests/s, 100 buckets, bandwidth limited to 10 MByte/s (80 Mbit/s) by default and 'regularly adjusted'."
+      ]
+    }
+  ],
+  "default_storage_class": "standard",
+  "egress": {
+    "applies_to_regions": [
+      "eu2",
+      "sin1",
+      "usc1"
+    ],
+    "free_allowance_gb_per_month": {
+      "value": null,
+      "note": "Not verified: the official product and price page https://contabo.com/en/object-storage/ now redirects (HTTP 301) to the Storage VPS page, Object Storage is no longer in the site navigation or on https://contabo.com/en/pricing/, and the knowledge base gives no prices. Prices in third-party listings and a Contabo blog comparison marked 'approximate, verify' were not used."
+    },
+    "price_per_gb": [
+      {
+        "from_gb": 0,
+        "up_to_gb": null,
+        "price": {
+          "value": null,
+          "note": "Not verified: the official product and price page https://contabo.com/en/object-storage/ now redirects (HTTP 301) to the Storage VPS page, Object Storage is no longer in the site navigation or on https://contabo.com/en/pricing/, and the knowledge base gives no prices. Prices in third-party listings and a Contabo blog comparison marked 'approximate, verify' were not used."
+        }
+      }
+    ],
+    "notes": [
+      "Default bandwidth limit 10 MByte/s (80 Mbit/s) per the KB limits article."
+    ]
+  },
+  "egress_fair_use": {
+    "value": null,
+    "note": "No egress or fair-use terms could be read from an official source (price page unavailable)."
+  },
+  "free_tier": {
+    "value": null,
+    "note": "No free tier found in the knowledge base; price page unavailable."
+  },
+  "object_lock": {
+    "value": true,
+    "source_url": "https://contabo.com/blog/kb/103000282887-how-do-i-use-object-locking-on-files-in-my-object-storage/",
+    "last_verified": "2026-10-13",
+    "note": "KB: object locking (retention, e.g. GOVERNANCE mode) is supported; the bucket must be created with object lock enabled."
+  },
+  "s3_endpoints": [
+    {
+      "region": "default",
+      "price_region": "eu2",
+      "label": "European Union",
+      "endpoint": "https://eu2.contabostorage.com",
+      "path_style": true,
+      "source_url": "https://contabo.com/blog/kb/103000283058-which-tools-are-compatible-with-contabo-s-object-storage/",
+      "last_verified": "2026-10-13",
+      "note": "Base URL from the KB 'S3 connection settings' article (https://contabo.com/blog/kb/103000275473-where-can-i-find-s3-connection-setting-for-object-storage/). KB 'Which tools are compatible': 'path style buckets are used' and tools that force virtual bucket host names (FileZillaPro) do not work. The same article says 'you may specify the S3 region default' and the KB AWS CLI examples use --region default; so the signing region is 'default'; price_region is the endpoint host prefix."
+    },
+    {
+      "region": "default",
+      "price_region": "sin1",
+      "label": "Singapore",
+      "endpoint": "https://sin1.contabostorage.com",
+      "path_style": true,
+      "source_url": "https://contabo.com/blog/kb/103000283058-which-tools-are-compatible-with-contabo-s-object-storage/",
+      "last_verified": "2026-10-13",
+      "note": "Base URL from the KB 'S3 connection settings' article (https://contabo.com/blog/kb/103000275473-where-can-i-find-s3-connection-setting-for-object-storage/). KB 'Which tools are compatible': 'path style buckets are used' and tools that force virtual bucket host names (FileZillaPro) do not work. The same article says 'you may specify the S3 region default' and the KB AWS CLI examples use --region default; so the signing region is 'default'; price_region is the endpoint host prefix."
+    },
+    {
+      "region": "default",
+      "price_region": "usc1",
+      "label": "United States",
+      "endpoint": "https://usc1.contabostorage.com",
+      "path_style": true,
+      "source_url": "https://contabo.com/blog/kb/103000283058-which-tools-are-compatible-with-contabo-s-object-storage/",
+      "last_verified": "2026-10-13",
+      "note": "Base URL from the KB 'S3 connection settings' article (https://contabo.com/blog/kb/103000275473-where-can-i-find-s3-connection-setting-for-object-storage/). KB 'Which tools are compatible': 'path style buckets are used' and tools that force virtual bucket host names (FileZillaPro) do not work. The same article says 'you may specify the S3 region default' and the KB AWS CLI examples use --region default; so the signing region is 'default'; price_region is the endpoint host prefix."
+    }
+  ],
+  "notes": [
+    "Status uncertain: as of 2026-10-13 the Object Storage product page redirects to Storage VPS and the product is not in Contabo's site navigation; the knowledge base articles (last updated 2025) still describe ordering via the Customer Control Panel. Check that Object Storage can still be ordered before relying on this profile.",
+    "Based on Ceph; not fully compatible with the AWS S3 API (for example, logging is not supported) per the KB."
+  ]
+}

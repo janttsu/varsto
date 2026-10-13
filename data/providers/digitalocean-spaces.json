@@ -1,0 +1,480 @@
+{
+  "$schema": "schema.json",
+  "schema_version": 1,
+  "id": "digitalocean-spaces",
+  "name": "DigitalOcean Spaces",
+  "kind": "service",
+  "website_url": "https://www.digitalocean.com/products/spaces",
+  "signup_url": "https://cloud.digitalocean.com/registrations/new",
+  "pricing_url": "https://www.digitalocean.com/pricing/spaces-object-storage",
+  "currency": "USD",
+  "prices_include_tax": null,
+  "tax_note": "The pricing page says: \"We're required by law to apply taxes in some countries.\" It does not say whether listed prices include tax.",
+  "protocols": [
+    "s3",
+    "rclone"
+  ],
+  "protocols_source": {
+    "source_url": "https://rclone.org/s3/#digitalocean-spaces",
+    "last_verified": "2026-10-13"
+  },
+  "regions": [
+    {
+      "code": "nyc3",
+      "city": "New York City",
+      "country": "US",
+      "source_url": "https://docs.digitalocean.com/platform/regional-availability/",
+      "last_verified": "2026-10-13",
+      "note": "Spaces Standard Storage is marked available in this datacenter in the availability table (https://docs.digitalocean.com/products/spaces/details/availability/); city from the datacenter list."
+    },
+    {
+      "code": "ams3",
+      "city": "Amsterdam",
+      "country": "NL",
+      "source_url": "https://docs.digitalocean.com/platform/regional-availability/",
+      "last_verified": "2026-10-13",
+      "note": "Spaces Standard Storage is marked available in this datacenter in the availability table (https://docs.digitalocean.com/products/spaces/details/availability/); city from the datacenter list."
+    },
+    {
+      "code": "sfo2",
+      "city": "San Francisco",
+      "country": "US",
+      "source_url": "https://docs.digitalocean.com/platform/regional-availability/",
+      "last_verified": "2026-10-13",
+      "note": "Spaces Standard Storage is marked available in this datacenter in the availability table (https://docs.digitalocean.com/products/spaces/details/availability/); city from the datacenter list."
+    },
+    {
+      "code": "sfo3",
+      "city": "San Francisco",
+      "country": "US",
+      "source_url": "https://docs.digitalocean.com/platform/regional-availability/",
+      "last_verified": "2026-10-13",
+      "note": "Spaces Standard Storage is marked available in this datacenter in the availability table (https://docs.digitalocean.com/products/spaces/details/availability/); city from the datacenter list."
+    },
+    {
+      "code": "sgp1",
+      "city": "Singapore",
+      "country": "SG",
+      "source_url": "https://docs.digitalocean.com/platform/regional-availability/",
+      "last_verified": "2026-10-13",
+      "note": "Spaces Standard Storage is marked available in this datacenter in the availability table (https://docs.digitalocean.com/products/spaces/details/availability/); city from the datacenter list."
+    },
+    {
+      "code": "lon1",
+      "city": "London",
+      "country": "GB",
+      "source_url": "https://docs.digitalocean.com/platform/regional-availability/",
+      "last_verified": "2026-10-13",
+      "note": "Spaces Standard Storage is marked available in this datacenter in the availability table (https://docs.digitalocean.com/products/spaces/details/availability/); city from the datacenter list."
+    },
+    {
+      "code": "fra1",
+      "city": "Frankfurt",
+      "country": "DE",
+      "source_url": "https://docs.digitalocean.com/platform/regional-availability/",
+      "last_verified": "2026-10-13",
+      "note": "Spaces Standard Storage is marked available in this datacenter in the availability table (https://docs.digitalocean.com/products/spaces/details/availability/); city from the datacenter list."
+    },
+    {
+      "code": "tor1",
+      "city": "Toronto",
+      "country": "CA",
+      "source_url": "https://docs.digitalocean.com/platform/regional-availability/",
+      "last_verified": "2026-10-13",
+      "note": "Spaces Standard Storage is marked available in this datacenter in the availability table (https://docs.digitalocean.com/products/spaces/details/availability/); city from the datacenter list."
+    },
+    {
+      "code": "blr1",
+      "city": "Bangalore",
+      "country": "IN",
+      "source_url": "https://docs.digitalocean.com/platform/regional-availability/",
+      "last_verified": "2026-10-13",
+      "note": "Spaces Standard Storage is marked available in this datacenter in the availability table (https://docs.digitalocean.com/products/spaces/details/availability/); city from the datacenter list. Cold Storage is not available here."
+    },
+    {
+      "code": "syd1",
+      "city": "Sydney",
+      "country": "AU",
+      "source_url": "https://docs.digitalocean.com/platform/regional-availability/",
+      "last_verified": "2026-10-13",
+      "note": "Spaces Standard Storage is marked available in this datacenter in the availability table (https://docs.digitalocean.com/products/spaces/details/availability/); city from the datacenter list."
+    },
+    {
+      "code": "atl1",
+      "city": "Atlanta",
+      "country": "US",
+      "source_url": "https://docs.digitalocean.com/platform/regional-availability/",
+      "last_verified": "2026-10-13",
+      "note": "Spaces Standard Storage is marked available in this datacenter in the availability table (https://docs.digitalocean.com/products/spaces/details/availability/); city from the datacenter list."
+    },
+    {
+      "code": "ric1",
+      "city": "Richmond",
+      "country": "US",
+      "source_url": "https://docs.digitalocean.com/platform/regional-availability/",
+      "last_verified": "2026-10-13",
+      "note": "Spaces Standard Storage is marked available in this datacenter in the availability table (https://docs.digitalocean.com/products/spaces/details/availability/); city from the datacenter list."
+    },
+    {
+      "code": "mkc1",
+      "city": "Kansas City",
+      "country": "US",
+      "source_url": "https://docs.digitalocean.com/platform/regional-availability/",
+      "last_verified": "2026-10-13",
+      "note": "Spaces Standard Storage is marked available in this datacenter in the availability table (https://docs.digitalocean.com/products/spaces/details/availability/); city from the datacenter list."
+    }
+  ],
+  "storage_classes": [
+    {
+      "id": "standard",
+      "name": "Spaces Standard Storage",
+      "kind": "hot",
+      "applies_to_regions": [
+        "nyc3",
+        "ams3",
+        "sfo2",
+        "sfo3",
+        "sgp1",
+        "lon1",
+        "fra1",
+        "tor1",
+        "blr1",
+        "syd1",
+        "atl1",
+        "ric1",
+        "mkc1"
+      ],
+      "pricing_model": "per_gb_month",
+      "storage_price_per_gb_month": [
+        {
+          "from_gb": 0,
+          "up_to_gb": 250,
+          "price": {
+            "value": 0,
+            "source_url": "https://docs.digitalocean.com/products/spaces/details/pricing/",
+            "last_verified": "2026-10-13",
+            "note": "Included in the USD 5.00/month Spaces Standard Storage subscription: 'The base subscription includes 250 GiB of storage across all of your buckets.' The subscription fee is charged whenever at least one bucket exists (see plans). Unit is GiB."
+          }
+        },
+        {
+          "from_gb": 250,
+          "up_to_gb": null,
+          "price": {
+            "value": 0.02,
+            "source_url": "https://docs.digitalocean.com/products/spaces/details/pricing/",
+            "last_verified": "2026-10-13",
+            "note": "'Additional storage beyond this allotment costs $0.02 per GiB per month.' Unit is GiB. One price is stated for all regions."
+          }
+        }
+      ],
+      "plans": [
+        {
+          "id": "spaces-subscription",
+          "capacity_gb": {
+            "value": 250,
+            "source_url": "https://docs.digitalocean.com/products/spaces/details/pricing/",
+            "last_verified": "2026-10-13",
+            "note": "Included storage in GiB; more storage is billed at the overage rate, so this is not a hard cap."
+          },
+          "monthly_price": {
+            "value": 5.0,
+            "source_url": "https://docs.digitalocean.com/products/spaces/details/pricing/",
+            "last_verified": "2026-10-13",
+            "note": "'The base price of a Spaces Standard Storage subscription is $5.00 per month.' Billing starts with the first bucket and is prorated hourly after all buckets are destroyed."
+          }
+        }
+      ],
+      "requests": {
+        "put_per_1000": {
+          "value": null,
+          "note": "The Spaces pricing page and docs list no per-request fee; absence of a line item, not an explicit statement that requests are free."
+        },
+        "get_per_1000": {
+          "value": null,
+          "note": "The Spaces pricing page and docs list no per-request fee; absence of a line item, not an explicit statement that requests are free."
+        },
+        "list_per_1000": {
+          "value": null,
+          "note": "The Spaces pricing page and docs list no per-request fee; absence of a line item, not an explicit statement that requests are free."
+        }
+      },
+      "retrieval": {
+        "price_per_gb": {
+          "value": null,
+          "note": "No retrieval fee is listed for Standard Storage; absence of a line item."
+        },
+        "typical_delay": {
+          "value": null,
+          "note": "Not stated in the sources checked."
+        }
+      },
+      "minimum_storage_duration_days": {
+        "value": null,
+        "note": "Not stated for Standard Storage on the pricing or limits page (the 30-day minimum is stated for Cold Storage only)."
+      },
+      "minimum_billable_object_size_kb": {
+        "value": 4,
+        "source_url": "https://docs.digitalocean.com/products/spaces/details/limits/",
+        "last_verified": "2026-10-13",
+        "note": "Limits page: 'The minimum billable object size is 4 KiB, rounded up. Storage includes both data and metadata.' Unit is KiB."
+      },
+      "notes": [
+        "Subscription model: USD 5.00/month includes 250 GiB storage and 1,024 GiB outbound transfer shared by all buckets; storage beyond that is USD 0.02/GiB-month.",
+        "Prices are stated once for all regions; no regional price differences are listed."
+      ]
+    },
+    {
+      "id": "cold",
+      "name": "Spaces Cold Storage",
+      "kind": "cold",
+      "applies_to_regions": [
+        "nyc3",
+        "ams3",
+        "sfo2",
+        "sfo3",
+        "sgp1",
+        "lon1",
+        "fra1",
+        "tor1",
+        "syd1",
+        "atl1",
+        "ric1",
+        "mkc1"
+      ],
+      "pricing_model": "per_gb_month",
+      "storage_price_per_gb_month": [
+        {
+          "from_gb": 0,
+          "up_to_gb": null,
+          "price": {
+            "value": 0.007,
+            "source_url": "https://docs.digitalocean.com/products/spaces/details/pricing/",
+            "last_verified": "2026-10-13",
+            "note": "Cold Storage: 'Storage: $0.007 per GiB per month.' Unit is GiB. Whether the 250 GiB included in the subscription also covers Cold Storage is not stated."
+          }
+        }
+      ],
+      "requests": {
+        "put_per_1000": {
+          "value": null,
+          "note": "The Spaces pricing page and docs list no per-request fee; absence of a line item, not an explicit statement that requests are free."
+        },
+        "get_per_1000": {
+          "value": null,
+          "note": "The Spaces pricing page and docs list no per-request fee; absence of a line item, not an explicit statement that requests are free."
+        },
+        "list_per_1000": {
+          "value": null,
+          "note": "The Spaces pricing page and docs list no per-request fee; absence of a line item, not an explicit statement that requests are free."
+        }
+      },
+      "retrieval": {
+        "price_per_gb": {
+          "value": 0.01,
+          "source_url": "https://docs.digitalocean.com/products/spaces/details/pricing/",
+          "last_verified": "2026-10-13",
+          "note": "'Retrieval: $0.01 per GiB retrieved. Retrieval fees are waived for data retrieved up to your average daily Cold Storage usage for the month.' Each read is billed at least 128 KiB."
+        },
+        "typical_delay": {
+          "value": null,
+          "note": "Not stated in the sources checked."
+        }
+      },
+      "minimum_storage_duration_days": {
+        "value": 30,
+        "source_url": "https://docs.digitalocean.com/products/spaces/details/pricing/",
+        "last_verified": "2026-10-13",
+        "note": "Early deletion or update before the 30-day minimum retention is billed at $0.007 per GiB pro rata for the remaining days; the first 250 GiB of early deletions per month are free."
+      },
+      "minimum_billable_object_size_kb": {
+        "value": 128,
+        "source_url": "https://docs.digitalocean.com/products/spaces/details/pricing/",
+        "last_verified": "2026-10-13",
+        "note": "'Objects smaller than 128 KiB are billed as 128 KiB.' Unit is KiB."
+      },
+      "notes": [
+        "Cold Storage is available in all regions except BLR1 (limits page).",
+        "Cold Storage buckets cannot be created with the DigitalOcean API or CLI (control panel only) and support up to 450 write, 250 read and 25 list requests per second (limits page).",
+        "Overwriting an object is billed as a delete followed by a create."
+      ]
+    }
+  ],
+  "default_storage_class": "standard",
+  "egress": {
+    "applies_to_regions": [
+      "nyc3",
+      "ams3",
+      "sfo2",
+      "sfo3",
+      "sgp1",
+      "lon1",
+      "fra1",
+      "tor1",
+      "blr1",
+      "syd1",
+      "atl1",
+      "ric1",
+      "mkc1"
+    ],
+    "free_allowance_gb_per_month": {
+      "value": 1024,
+      "source_url": "https://docs.digitalocean.com/products/spaces/details/pricing/",
+      "last_verified": "2026-10-13",
+      "note": "'Spaces subscriptions include 1,024 GiB of outbound data transfer (from Spaces buckets to the internet), which is shared between all buckets.' Unit is GiB."
+    },
+    "free_allowance_scope": "Per subscription, shared by all buckets; covers both CDN and origin bandwidth (pricing page).",
+    "price_per_gb": [
+      {
+        "from_gb": 0,
+        "up_to_gb": null,
+        "price": {
+          "value": 0.01,
+          "source_url": "https://docs.digitalocean.com/products/spaces/details/pricing/",
+          "last_verified": "2026-10-13",
+          "note": "'Additional outbound transfer is $0.01 per GiB.' Applies to Standard and Cold Storage."
+        }
+      }
+    ],
+    "notes": [
+      "Outbound transfer from Spaces to Droplets in the same datacenter (and listed nearby datacenters) is free.",
+      "Inbound bandwidth never counts against the allowance.",
+      "Traffic from Droplets using the VPC-local DNS resolver is routed privately and does not count against the allowance."
+    ]
+  },
+  "egress_fair_use": {
+    "value": null,
+    "note": "No fair-use rule for egress is stated on the pricing or limits page."
+  },
+  "free_tier": {
+    "value": null,
+    "note": "No free storage tier is listed. The pricing page mentions free credits for new customers, which are not modelled."
+  },
+  "object_lock": {
+    "value": null,
+    "note": "Not documented as a feature. The Spaces S3 API reference lists x-amz-object-lock-* among headers accepted by PutObject, but documents no PutObjectLockConfiguration, PutObjectRetention or PutObjectLegalHold operation; the limits page does not mention it."
+  },
+  "s3_endpoints": [
+    {
+      "region": "nyc3",
+      "label": "New York City",
+      "endpoint": "https://nyc3.digitaloceanspaces.com",
+      "path_style": false,
+      "source_url": "https://docs.digitalocean.com/reference/api/spaces/",
+      "last_verified": "2026-10-13",
+      "note": "API reference: endpoint is ${REGION}.digitaloceanspaces.com or ${BUCKET}.${REGION}.digitaloceanspaces.com; SigV4 scope uses the region slug. The limits page says buckets support path-style and virtual-host-style requests for API access; examples use virtual-host style."
+    },
+    {
+      "region": "ams3",
+      "label": "Amsterdam",
+      "endpoint": "https://ams3.digitaloceanspaces.com",
+      "path_style": false,
+      "source_url": "https://docs.digitalocean.com/reference/api/spaces/",
+      "last_verified": "2026-10-13",
+      "note": "API reference: endpoint is ${REGION}.digitaloceanspaces.com or ${BUCKET}.${REGION}.digitaloceanspaces.com; SigV4 scope uses the region slug. The limits page says buckets support path-style and virtual-host-style requests for API access; examples use virtual-host style."
+    },
+    {
+      "region": "sfo2",
+      "label": "San Francisco",
+      "endpoint": "https://sfo2.digitaloceanspaces.com",
+      "path_style": false,
+      "source_url": "https://docs.digitalocean.com/reference/api/spaces/",
+      "last_verified": "2026-10-13",
+      "note": "API reference: endpoint is ${REGION}.digitaloceanspaces.com or ${BUCKET}.${REGION}.digitaloceanspaces.com; SigV4 scope uses the region slug. The limits page says buckets support path-style and virtual-host-style requests for API access; examples use virtual-host style."
+    },
+    {
+      "region": "sfo3",
+      "label": "San Francisco",
+      "endpoint": "https://sfo3.digitaloceanspaces.com",
+      "path_style": false,
+      "source_url": "https://docs.digitalocean.com/reference/api/spaces/",
+      "last_verified": "2026-10-13",
+      "note": "API reference: endpoint is ${REGION}.digitaloceanspaces.com or ${BUCKET}.${REGION}.digitaloceanspaces.com; SigV4 scope uses the region slug. The limits page says buckets support path-style and virtual-host-style requests for API access; examples use virtual-host style."
+    },
+    {
+      "region": "sgp1",
+      "label": "Singapore",
+      "endpoint": "https://sgp1.digitaloceanspaces.com",
+      "path_style": false,
+      "source_url": "https://docs.digitalocean.com/reference/api/spaces/",
+      "last_verified": "2026-10-13",
+      "note": "API reference: endpoint is ${REGION}.digitaloceanspaces.com or ${BUCKET}.${REGION}.digitaloceanspaces.com; SigV4 scope uses the region slug. The limits page says buckets support path-style and virtual-host-style requests for API access; examples use virtual-host style."
+    },
+    {
+      "region": "lon1",
+      "label": "London",
+      "endpoint": "https://lon1.digitaloceanspaces.com",
+      "path_style": false,
+      "source_url": "https://docs.digitalocean.com/reference/api/spaces/",
+      "last_verified": "2026-10-13",
+      "note": "API reference: endpoint is ${REGION}.digitaloceanspaces.com or ${BUCKET}.${REGION}.digitaloceanspaces.com; SigV4 scope uses the region slug. The limits page says buckets support path-style and virtual-host-style requests for API access; examples use virtual-host style."
+    },
+    {
+      "region": "fra1",
+      "label": "Frankfurt",
+      "endpoint": "https://fra1.digitaloceanspaces.com",
+      "path_style": false,
+      "source_url": "https://docs.digitalocean.com/reference/api/spaces/",
+      "last_verified": "2026-10-13",
+      "note": "API reference: endpoint is ${REGION}.digitaloceanspaces.com or ${BUCKET}.${REGION}.digitaloceanspaces.com; SigV4 scope uses the region slug. The limits page says buckets support path-style and virtual-host-style requests for API access; examples use virtual-host style."
+    },
+    {
+      "region": "tor1",
+      "label": "Toronto",
+      "endpoint": "https://tor1.digitaloceanspaces.com",
+      "path_style": false,
+      "source_url": "https://docs.digitalocean.com/reference/api/spaces/",
+      "last_verified": "2026-10-13",
+      "note": "API reference: endpoint is ${REGION}.digitaloceanspaces.com or ${BUCKET}.${REGION}.digitaloceanspaces.com; SigV4 scope uses the region slug. The limits page says buckets support path-style and virtual-host-style requests for API access; examples use virtual-host style."
+    },
+    {
+      "region": "blr1",
+      "label": "Bangalore",
+      "endpoint": "https://blr1.digitaloceanspaces.com",
+      "path_style": false,
+      "source_url": "https://docs.digitalocean.com/reference/api/spaces/",
+      "last_verified": "2026-10-13",
+      "note": "API reference: endpoint is ${REGION}.digitaloceanspaces.com or ${BUCKET}.${REGION}.digitaloceanspaces.com; SigV4 scope uses the region slug. The limits page says buckets support path-style and virtual-host-style requests for API access; examples use virtual-host style."
+    },
+    {
+      "region": "syd1",
+      "label": "Sydney",
+      "endpoint": "https://syd1.digitaloceanspaces.com",
+      "path_style": false,
+      "source_url": "https://docs.digitalocean.com/reference/api/spaces/",
+      "last_verified": "2026-10-13",
+      "note": "API reference: endpoint is ${REGION}.digitaloceanspaces.com or ${BUCKET}.${REGION}.digitaloceanspaces.com; SigV4 scope uses the region slug. The limits page says buckets support path-style and virtual-host-style requests for API access; examples use virtual-host style."
+    },
+    {
+      "region": "atl1",
+      "label": "Atlanta",
+      "endpoint": "https://atl1.digitaloceanspaces.com",
+      "path_style": false,
+      "source_url": "https://docs.digitalocean.com/reference/api/spaces/",
+      "last_verified": "2026-10-13",
+      "note": "API reference: endpoint is ${REGION}.digitaloceanspaces.com or ${BUCKET}.${REGION}.digitaloceanspaces.com; SigV4 scope uses the region slug. The limits page says buckets support path-style and virtual-host-style requests for API access; examples use virtual-host style."
+    },
+    {
+      "region": "ric1",
+      "label": "Richmond",
+      "endpoint": "https://ric1.digitaloceanspaces.com",
+      "path_style": false,
+      "source_url": "https://docs.digitalocean.com/reference/api/spaces/",
+      "last_verified": "2026-10-13",
+      "note": "API reference: endpoint is ${REGION}.digitaloceanspaces.com or ${BUCKET}.${REGION}.digitaloceanspaces.com; SigV4 scope uses the region slug. The limits page says buckets support path-style and virtual-host-style requests for API access; examples use virtual-host style."
+    },
+    {
+      "region": "mkc1",
+      "label": "Kansas City",
+      "endpoint": "https://mkc1.digitaloceanspaces.com",
+      "path_style": false,
+      "source_url": "https://docs.digitalocean.com/reference/api/spaces/",
+      "last_verified": "2026-10-13",
+      "note": "API reference: endpoint is ${REGION}.digitaloceanspaces.com or ${BUCKET}.${REGION}.digitaloceanspaces.com; SigV4 scope uses the region slug. The limits page says buckets support path-style and virtual-host-style requests for API access; examples use virtual-host style."
+    }
+  ],
+  "notes": [
+    "Units are GiB as DigitalOcean states them (GiB for storage and transfer).",
+    "Up to 100 buckets and 200 access keys per account (limits page).",
+    "Versioning can be enabled only through the API (limits page)."
+  ]
+}

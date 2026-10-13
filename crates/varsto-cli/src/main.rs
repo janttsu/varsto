@@ -10,6 +10,7 @@ use varsto_core::Engine;
 
 mod backup;
 mod desktop;
+mod drive_mount;
 mod drives;
 mod filemanager;
 mod icon;
@@ -200,6 +201,14 @@ enum Cmd {
     },
     /// Undo `install`; the vault and folders stay.
     Uninstall,
+    /// What this device and the other devices of the vault are doing right
+    /// now (checking a disk, uploading a folder, ...), with progress and the
+    /// estimated finish. Asks the background service, which asks the peers.
+    Activity {
+        /// Refresh every two seconds until interrupted.
+        #[arg(long)]
+        watch: bool,
+    },
     /// Uploads and downloads running now in the background service: each
     /// file with its progress and speed, and the traffic with every peer.
     Transfers {
@@ -3168,6 +3177,7 @@ fn run(cli: &Cli) -> Result<()> {
             }
         }
         Cmd::Transfers { watch } => transfers(&home, *watch, cli.json)?,
+        Cmd::Activity { watch } => activity(&home, *watch, cli.json)?,
         // Counted by the running service; no passphrase needed.
         Cmd::P2p {
             cmd: P2pCmd::Traffic { watch },
@@ -3499,11 +3509,43 @@ fn main() {
         });
     }
     let cli = Cli::parse_from(args);
+    report_activity(&cli);
     if let Err(e) = run(&cli).context("varsto") {
         eprintln!("error: {e:#}");
         std::process::exit(1);
     }
     after_command(&cli);
+}
+
+/// A command that runs a long operation itself (a disk check, a restore,
+/// fsck) while the background service runs: its tasks go to the service
+/// every second, which shows them and tells the other devices
+/// (`varsto activity`). The service's own process needs none of this.
+fn report_activity(cli: &Cli) {
+    if matches!(
+        cli.cmd,
+        Cmd::Service {
+            cmd: ServiceCmd::Run { .. }
+        }
+    ) {
+        return;
+    }
+    let Ok(home) = home(cli) else { return };
+    varsto_core::activity::spawn_reporter(move |tasks| {
+        let Some(sf) = service::read_service_file(&home) else {
+            return;
+        };
+        if sf.pid == std::process::id() {
+            return;
+        }
+        let body = serde_json::json!({ "pid": std::process::id(), "tasks": tasks }).to_string();
+        let _ = service::http_post_within(
+            &format!("http://127.0.0.1:{}/api/activity/report", sf.port),
+            &sf.token,
+            &body,
+            2,
+        );
+    });
 }
 
 /// After a successful command: a background service that is still locked is
@@ -4127,6 +4169,145 @@ fn transfers(home: &std::path::Path, watch: bool, json: bool) -> Result<()> {
         use std::io::Write;
         std::io::stdout().flush()?;
         std::thread::sleep(std::time::Duration::from_secs(1));
+    }
+}
+
+/// One task on one line: "checking the blocks of disk «Blue 4TB» 42%
+/// (12.4 GB of 29.5 GB), 85.0 MB/s, ready in about 12 min".
+fn activity_line(t: &varsto_core::activity::TaskView, now: i64) -> String {
+    use varsto_core::activity::Unit;
+    let mut out = varsto_core::activity::describe(t);
+    let count = |n: u64| match t.unit {
+        Unit::Bytes => fmt_bytes(n),
+        Unit::Items => n.to_string(),
+    };
+    let noun = match t.unit {
+        Unit::Bytes => String::new(),
+        Unit::Items => format!(" {}", varsto_core::activity::item_noun(&t.kind)),
+    };
+    match t.percent {
+        Some(p) => out.push_str(&format!(
+            " {p}% ({} of {}{noun})",
+            count(t.done),
+            count(t.total)
+        )),
+        None if t.done > 0 => out.push_str(&format!(" ({}{noun} so far)", count(t.done))),
+        None => {}
+    }
+    if t.rate > 0 {
+        out.push_str(&match t.unit {
+            Unit::Bytes => format!(", {}/s", fmt_bytes(t.rate)),
+            Unit::Items => format!(", {}{noun}/s", t.rate),
+        });
+    }
+    if let Some(eta) = t.eta_utc {
+        let s = (eta - now).max(0);
+        out.push_str(&match s {
+            0..=59 => ", ready in less than a minute".to_string(),
+            60..=5399 => format!(", ready in about {} min", (s + 30) / 60),
+            _ => format!(", ready in about {:.1} h", s as f64 / 3600.0),
+        });
+    }
+    out
+}
+
+fn activity(home: &std::path::Path, watch: bool, json: bool) -> Result<()> {
+    use varsto_core::activity::{DeviceActivity, PeerActivity};
+    let sf = service::read_service_file(home).ok_or_else(|| {
+        anyhow!("the background service is not running; it is what knows and asks the other devices (start it with `varsto service run` or `varsto install`)")
+    })?;
+    let url = format!("http://127.0.0.1:{}/api/activity", sf.port);
+    let get = || -> Result<serde_json::Value> {
+        let body = service::http_get_within(&url, &sf.token, 5)
+            .context("the background service did not answer; is it running?")?;
+        Ok(serde_json::from_str(&body)?)
+    };
+    // The first question starts the service asking the peers: their
+    // answers are there a moment later.
+    let mut v = get()?;
+    let pending = |v: &serde_json::Value| {
+        v["peers"]
+            .as_array()
+            .is_some_and(|a| a.iter().any(|p| p["status"] == "pending"))
+    };
+    for _ in 0..6 {
+        if !pending(&v) {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        v = get()?;
+    }
+    loop {
+        if json {
+            println!("{v}");
+        } else {
+            if watch {
+                print!("\x1b[H\x1b[2J");
+            }
+            let now = chrono_now();
+            let me: Option<DeviceActivity> = serde_json::from_value(v["me"].clone()).ok();
+            let peers: Vec<PeerActivity> =
+                serde_json::from_value(v["peers"].clone()).unwrap_or_default();
+            let mut out = String::new();
+            let mut show = |name: &str, here: bool, a: Option<&DeviceActivity>, note: &str| {
+                let who = if here {
+                    format!("{name} (this device)")
+                } else {
+                    name.to_string()
+                };
+                match a {
+                    Some(a) if !a.tasks.is_empty() => {
+                        for t in &a.tasks {
+                            out.push_str(&format!("{who}: {}{note}\n", activity_line(t, now)));
+                        }
+                    }
+                    _ if !note.is_empty() => out.push_str(&format!("{who}:{note}\n")),
+                    _ => out.push_str(&format!("{who}: idle\n")),
+                }
+            };
+            if let Some(me) = &me {
+                let name = if me.name.is_empty() {
+                    "this device"
+                } else {
+                    &me.name
+                };
+                show(name, !me.name.is_empty(), Some(me), "");
+            }
+            for p in &peers {
+                let name = if p.name.is_empty() {
+                    p.device.chars().take(8).collect()
+                } else {
+                    p.name.clone()
+                };
+                let note = match p.status.as_str() {
+                    "ok" if p.stale => format!(
+                        " (as of {} s ago; not answering now)",
+                        p.age_secs.unwrap_or(0)
+                    ),
+                    "ok" => String::new(),
+                    "unreachable" if p.activity.is_some() => format!(
+                        " (as of {} s ago; not reachable now)",
+                        p.age_secs.unwrap_or(0)
+                    ),
+                    "unreachable" => " not reachable".into(),
+                    "unsupported" => " runs an older version that does not tell".into(),
+                    "refused" => " does not share its activity with this device".into(),
+                    _ => " asking...".into(),
+                };
+                show(&name, false, p.activity.as_ref(), &note);
+            }
+            if peers.is_empty() {
+                out.push_str("No other device is known to peer-to-peer (it starts with `varsto p2p enable` on each device).\n");
+            }
+            print!("{out}");
+        }
+        if !watch {
+            return Ok(());
+        }
+        use std::io::Write;
+        std::io::stdout().flush()?;
+        std::thread::sleep(std::time::Duration::from_secs(2));
+        v = get()?;
     }
 }
 

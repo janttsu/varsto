@@ -1,0 +1,485 @@
+{
+  "$schema": "schema.json",
+  "schema_version": 1,
+  "id": "idrive-e2",
+  "name": "IDrive e2",
+  "kind": "service",
+  "website_url": "https://www.idrive.com/s3-storage-e2/",
+  "signup_url": "https://console.idrivee2.com/signup",
+  "pricing_url": "https://www.idrive.com/s3-storage-e2/pricing",
+  "currency": "USD",
+  "prices_include_tax": null,
+  "protocols": [
+    "s3",
+    "rclone"
+  ],
+  "protocols_source": {
+    "source_url": "https://www.idrive.com/s3-storage-e2/",
+    "last_verified": "2026-10-13"
+  },
+  "regions": [
+    {
+      "code": "us-west-1",
+      "city": "Oregon",
+      "country": "US",
+      "source_url": "https://www.idrive.com/s3-storage-e2/e2-endpoint-urls",
+      "last_verified": "2026-10-13",
+      "note": "Endpoint URLs page lists location 'Oregon'."
+    },
+    {
+      "code": "us-west-2",
+      "city": "Los Angeles",
+      "country": "US",
+      "source_url": "https://www.idrive.com/s3-storage-e2/e2-endpoint-urls",
+      "last_verified": "2026-10-13",
+      "note": "Endpoint URLs page lists location 'Los Angeles'."
+    },
+    {
+      "code": "us-west-3",
+      "city": "San Jose",
+      "country": "US",
+      "source_url": "https://www.idrive.com/s3-storage-e2/e2-endpoint-urls",
+      "last_verified": "2026-10-13",
+      "note": "Endpoint URLs page lists location 'San Jose'."
+    },
+    {
+      "code": "us-west-4",
+      "city": "Oregon",
+      "country": "US",
+      "source_url": "https://www.idrive.com/s3-storage-e2/e2-endpoint-urls",
+      "last_verified": "2026-10-13",
+      "note": "Endpoint URLs page lists location 'Oregon-2'."
+    },
+    {
+      "code": "us-southwest-1",
+      "city": "Phoenix",
+      "country": "US",
+      "source_url": "https://www.idrive.com/s3-storage-e2/e2-endpoint-urls",
+      "last_verified": "2026-10-13",
+      "note": "Endpoint URLs page lists location 'Phoenix'."
+    },
+    {
+      "code": "us-midwest-1",
+      "city": "Chicago",
+      "country": "US",
+      "source_url": "https://www.idrive.com/s3-storage-e2/e2-endpoint-urls",
+      "last_verified": "2026-10-13",
+      "note": "Endpoint URLs page lists location 'Chicago'."
+    },
+    {
+      "code": "us-central-1",
+      "city": "Dallas",
+      "country": "US",
+      "source_url": "https://www.idrive.com/s3-storage-e2/e2-endpoint-urls",
+      "last_verified": "2026-10-13",
+      "note": "Endpoint URLs page lists location 'Dallas'."
+    },
+    {
+      "code": "us-east-1",
+      "city": "Virginia",
+      "country": "US",
+      "source_url": "https://www.idrive.com/s3-storage-e2/e2-endpoint-urls",
+      "last_verified": "2026-10-13",
+      "note": "Endpoint URLs page lists location 'Virginia'."
+    },
+    {
+      "code": "us-southeast-1",
+      "city": "Miami",
+      "country": "US",
+      "source_url": "https://www.idrive.com/s3-storage-e2/e2-endpoint-urls",
+      "last_verified": "2026-10-13",
+      "note": "Endpoint URLs page lists location 'Miami'."
+    },
+    {
+      "code": "ca-east-1",
+      "city": "Montreal",
+      "country": "CA",
+      "source_url": "https://www.idrive.com/s3-storage-e2/e2-endpoint-urls",
+      "last_verified": "2026-10-13",
+      "note": "Endpoint URLs page lists location 'Montreal'."
+    },
+    {
+      "code": "eu-west-1",
+      "city": null,
+      "country": "IE",
+      "source_url": "https://www.idrive.com/s3-storage-e2/e2-endpoint-urls",
+      "last_verified": "2026-10-13",
+      "note": "Endpoint URLs page lists location 'Ireland' (no city)."
+    },
+    {
+      "code": "eu-west-2",
+      "city": "London",
+      "country": "GB",
+      "source_url": "https://www.idrive.com/s3-storage-e2/e2-endpoint-urls",
+      "last_verified": "2026-10-13",
+      "note": "Endpoint URLs page lists location 'London'."
+    },
+    {
+      "code": "eu-west-3",
+      "city": "London",
+      "country": "GB",
+      "source_url": "https://www.idrive.com/s3-storage-e2/e2-endpoint-urls",
+      "last_verified": "2026-10-13",
+      "note": "Endpoint URLs page lists location 'London-2'."
+    },
+    {
+      "code": "eu-west-4",
+      "city": "Paris",
+      "country": "FR",
+      "source_url": "https://www.idrive.com/s3-storage-e2/e2-endpoint-urls",
+      "last_verified": "2026-10-13",
+      "note": "Endpoint URLs page lists location 'Paris'."
+    },
+    {
+      "code": "eu-central-1",
+      "city": "Frankfurt",
+      "country": "DE",
+      "source_url": "https://www.idrive.com/s3-storage-e2/e2-endpoint-urls",
+      "last_verified": "2026-10-13",
+      "note": "Endpoint URLs page lists location 'Frankfurt-2'."
+    },
+    {
+      "code": "eu-central-2",
+      "city": "Frankfurt",
+      "country": "DE",
+      "source_url": "https://www.idrive.com/s3-storage-e2/e2-endpoint-urls",
+      "last_verified": "2026-10-13",
+      "note": "Endpoint URLs page lists location 'Frankfurt'."
+    },
+    {
+      "code": "eu-south-1",
+      "city": "Milan",
+      "country": "IT",
+      "source_url": "https://www.idrive.com/s3-storage-e2/e2-endpoint-urls",
+      "last_verified": "2026-10-13",
+      "note": "Endpoint URLs page lists location 'Milan'."
+    },
+    {
+      "code": "ap-southeast-1",
+      "city": "Singapore",
+      "country": "SG",
+      "source_url": "https://www.idrive.com/s3-storage-e2/e2-endpoint-urls",
+      "last_verified": "2026-10-13",
+      "note": "Endpoint URLs page lists location 'Singapore'."
+    },
+    {
+      "code": "ap-northeast-1",
+      "city": "Tokyo",
+      "country": "JP",
+      "source_url": "https://www.idrive.com/s3-storage-e2/e2-endpoint-urls",
+      "last_verified": "2026-10-13",
+      "note": "Endpoint URLs page lists location 'Tokyo'."
+    }
+  ],
+  "storage_classes": [
+    {
+      "id": "standard",
+      "name": "IDrive e2 Pay-as-you-go",
+      "kind": "hot",
+      "applies_to_regions": [
+        "us-west-1",
+        "us-west-2",
+        "us-west-3",
+        "us-west-4",
+        "us-southwest-1",
+        "us-midwest-1",
+        "us-central-1",
+        "us-east-1",
+        "us-southeast-1",
+        "ca-east-1",
+        "eu-west-1",
+        "eu-west-2",
+        "eu-west-3",
+        "eu-west-4",
+        "eu-central-1",
+        "eu-central-2",
+        "eu-south-1",
+        "ap-southeast-1",
+        "ap-northeast-1"
+      ],
+      "pricing_model": "per_gb_month",
+      "storage_price_per_gb_month": [
+        {
+          "from_gb": 0,
+          "up_to_gb": null,
+          "price": {
+            "value": 0.006,
+            "source_url": "https://www.idrive.com/s3-storage-e2/pricing",
+            "last_verified": "2026-10-13",
+            "note": "Pricing page: 'Straight-forward and tierless pricing $0.006/GB per month ($6/TB per month)'. One price without regional variation; the page does not mention regions, so it is applied to all listed regions. Minimum charge 1 TB per month (see notes)."
+          }
+        }
+      ],
+      "requests": {
+        "put_per_1000": {
+          "value": 0,
+          "source_url": "https://www.idrive.com/s3-storage-e2/pricing",
+          "last_verified": "2026-10-13",
+          "note": "Pricing page: 'IDrive e2 does not impose any additional charges for your API calls'; FAQ: no additional charges for ingress, egress, data deletion and API requests."
+        },
+        "get_per_1000": {
+          "value": 0,
+          "source_url": "https://www.idrive.com/s3-storage-e2/pricing",
+          "last_verified": "2026-10-13",
+          "note": "Pricing page: 'IDrive e2 does not impose any additional charges for your API calls'; FAQ: no additional charges for ingress, egress, data deletion and API requests."
+        },
+        "list_per_1000": {
+          "value": 0,
+          "source_url": "https://www.idrive.com/s3-storage-e2/pricing",
+          "last_verified": "2026-10-13",
+          "note": "Pricing page: 'IDrive e2 does not impose any additional charges for your API calls'; FAQ: no additional charges for ingress, egress, data deletion and API requests."
+        }
+      },
+      "retrieval": {
+        "price_per_gb": {
+          "value": null,
+          "note": "No retrieval fee line on the pricing page; absence of a line item, not an explicit statement."
+        },
+        "typical_delay": {
+          "value": null,
+          "note": "Not stated in the sources checked."
+        }
+      },
+      "minimum_storage_duration_days": {
+        "value": 0,
+        "source_url": "https://www.idrive.com/s3-storage-e2/pricing",
+        "last_verified": "2026-10-13",
+        "note": "Pricing FAQ: 'IDrive e2 does not impose a minimum storage duration on uploaded objects nor charge users for deleting the objects'."
+      },
+      "minimum_billable_object_size_kb": {
+        "value": null,
+        "note": "Not stated on the pricing page or FAQ checked."
+      },
+      "notes": [
+        "Minimum storage fee: pay-as-you-go accounts are charged for at least 1 TB ($6) per month even when storing less (pricing page FAQ).",
+        "Yearly plans (from $59.50/year for 1 TB, 50% off the first year as a limited-time offer), Veeam/MSP/reseller pricing ($5/TB/month) and multi-year plans are not modelled.",
+        "Yearly-plan overuse beyond the plan size: $0.006/GB/month (pricing page footnote)."
+      ]
+    }
+  ],
+  "default_storage_class": "standard",
+  "egress": {
+    "applies_to_regions": [
+      "us-west-1",
+      "us-west-2",
+      "us-west-3",
+      "us-west-4",
+      "us-southwest-1",
+      "us-midwest-1",
+      "us-central-1",
+      "us-east-1",
+      "us-southeast-1",
+      "ca-east-1",
+      "eu-west-1",
+      "eu-west-2",
+      "eu-west-3",
+      "eu-west-4",
+      "eu-central-1",
+      "eu-central-2",
+      "eu-south-1",
+      "ap-southeast-1",
+      "ap-northeast-1"
+    ],
+    "free_allowance_gb_per_month": {
+      "value": null,
+      "note": "Not a fixed amount: free egress is up to 3x the active storage volume per month, see free_allowance_scope."
+    },
+    "free_allowance_scope": "Free egress policy: monthly downloads up to 3x the active storage volume are free (pricing page).",
+    "price_per_gb": [
+      {
+        "from_gb": 0,
+        "up_to_gb": null,
+        "price": {
+          "value": 0.01,
+          "source_url": "https://www.idrive.com/s3-storage-e2/pricing",
+          "last_verified": "2026-10-13",
+          "note": "Pricing page footnote: 'Free Egress Policy: Charges apply at $0.01/GB/month beyond free limits' (interpreted as per GB transferred above 3x active storage)."
+        }
+      }
+    ],
+    "notes": [
+      "The pricing page also has a blurb 'Free ingress and egress' and an FAQ saying there are no additional charges for egress; the footnote with the $0.01/GB overage is used here.",
+      "Ingress is free (pricing page)."
+    ]
+  },
+  "egress_fair_use": {
+    "value": "Download less than or equal to 3X your active storage volume for free; beyond that, charges apply at $0.01/GB.",
+    "source_url": "https://www.idrive.com/s3-storage-e2/pricing",
+    "last_verified": "2026-10-13"
+  },
+  "free_tier": {
+    "value": "Pay-as-you-go: 'Try with 10 GB Free' (duration and conditions not stated on the pricing page); Veeam/MSP/reseller plan: 'Try with 1TB Free'.",
+    "source_url": "https://www.idrive.com/s3-storage-e2/pricing",
+    "last_verified": "2026-10-13"
+  },
+  "object_lock": {
+    "value": true,
+    "source_url": "https://www.idrive.com/s3-storage-e2/",
+    "last_verified": "2026-10-13",
+    "note": "Product page feature list: 'Object lock: Object locking brings immutability to the objects'; also bucket versioning."
+  },
+  "s3_endpoints": [
+    {
+      "region": "us-west-1",
+      "endpoint": "https://s3.us-west-1.idrivee2.com",
+      "path_style": true,
+      "source_url": "https://www.idrive.com/s3-storage-e2/e2-endpoint-urls",
+      "last_verified": "2026-10-13",
+      "note": "Service URL from the endpoint URLs page (alias https://s3.or-1.idrivee2.com). The developer guide says the endpoint for an enabled region is shown in the dashboard and is 'unique for every user'; use the dashboard value if it differs. No general statement found; IDrive's own ChronoSync guide (https://www.idrive.com/s3-storage-e2/chronosync-guide) says to select 'Use path-style URLs'. Virtual-hosted support was not verified."
+    },
+    {
+      "region": "us-west-2",
+      "endpoint": "https://s3.us-west-2.idrivee2.com",
+      "path_style": true,
+      "source_url": "https://www.idrive.com/s3-storage-e2/e2-endpoint-urls",
+      "last_verified": "2026-10-13",
+      "note": "Service URL from the endpoint URLs page (alias https://s3.la-1.idrivee2.com). The developer guide says the endpoint for an enabled region is shown in the dashboard and is 'unique for every user'; use the dashboard value if it differs. No general statement found; IDrive's own ChronoSync guide (https://www.idrive.com/s3-storage-e2/chronosync-guide) says to select 'Use path-style URLs'. Virtual-hosted support was not verified."
+    },
+    {
+      "region": "us-west-3",
+      "endpoint": "https://s3.us-west-3.idrivee2.com",
+      "path_style": true,
+      "source_url": "https://www.idrive.com/s3-storage-e2/e2-endpoint-urls",
+      "last_verified": "2026-10-13",
+      "note": "Service URL from the endpoint URLs page (alias https://s3.sj-1.idrivee2.com). The developer guide says the endpoint for an enabled region is shown in the dashboard and is 'unique for every user'; use the dashboard value if it differs. No general statement found; IDrive's own ChronoSync guide (https://www.idrive.com/s3-storage-e2/chronosync-guide) says to select 'Use path-style URLs'. Virtual-hosted support was not verified."
+    },
+    {
+      "region": "us-west-4",
+      "label": "Oregon-2",
+      "endpoint": "https://s3.us-west-4.idrivee2.com",
+      "path_style": true,
+      "source_url": "https://www.idrive.com/s3-storage-e2/e2-endpoint-urls",
+      "last_verified": "2026-10-13",
+      "note": "Service URL from the endpoint URLs page (alias https://s3.or-2.idrivee2.com). The developer guide says the endpoint for an enabled region is shown in the dashboard and is 'unique for every user'; use the dashboard value if it differs. No general statement found; IDrive's own ChronoSync guide (https://www.idrive.com/s3-storage-e2/chronosync-guide) says to select 'Use path-style URLs'. Virtual-hosted support was not verified."
+    },
+    {
+      "region": "us-southwest-1",
+      "endpoint": "https://s3.us-southwest-1.idrivee2.com",
+      "path_style": true,
+      "source_url": "https://www.idrive.com/s3-storage-e2/e2-endpoint-urls",
+      "last_verified": "2026-10-13",
+      "note": "Service URL from the endpoint URLs page (alias https://s3.ph-1.idrivee2.com). The developer guide says the endpoint for an enabled region is shown in the dashboard and is 'unique for every user'; use the dashboard value if it differs. No general statement found; IDrive's own ChronoSync guide (https://www.idrive.com/s3-storage-e2/chronosync-guide) says to select 'Use path-style URLs'. Virtual-hosted support was not verified."
+    },
+    {
+      "region": "us-midwest-1",
+      "endpoint": "https://s3.us-midwest-1.idrivee2.com",
+      "path_style": true,
+      "source_url": "https://www.idrive.com/s3-storage-e2/e2-endpoint-urls",
+      "last_verified": "2026-10-13",
+      "note": "Service URL from the endpoint URLs page (alias https://s3.ch-1.idrivee2.com). The developer guide says the endpoint for an enabled region is shown in the dashboard and is 'unique for every user'; use the dashboard value if it differs. No general statement found; IDrive's own ChronoSync guide (https://www.idrive.com/s3-storage-e2/chronosync-guide) says to select 'Use path-style URLs'. Virtual-hosted support was not verified."
+    },
+    {
+      "region": "us-central-1",
+      "endpoint": "https://s3.us-central-1.idrivee2.com",
+      "path_style": true,
+      "source_url": "https://www.idrive.com/s3-storage-e2/e2-endpoint-urls",
+      "last_verified": "2026-10-13",
+      "note": "Service URL from the endpoint URLs page (alias https://s3.da-1.idrivee2.com). The developer guide says the endpoint for an enabled region is shown in the dashboard and is 'unique for every user'; use the dashboard value if it differs. No general statement found; IDrive's own ChronoSync guide (https://www.idrive.com/s3-storage-e2/chronosync-guide) says to select 'Use path-style URLs'. Virtual-hosted support was not verified."
+    },
+    {
+      "region": "us-east-1",
+      "endpoint": "https://s3.us-east-1.idrivee2.com",
+      "path_style": true,
+      "source_url": "https://www.idrive.com/s3-storage-e2/e2-endpoint-urls",
+      "last_verified": "2026-10-13",
+      "note": "Service URL from the endpoint URLs page (alias https://s3.va-1.idrivee2.com). The developer guide says the endpoint for an enabled region is shown in the dashboard and is 'unique for every user'; use the dashboard value if it differs. No general statement found; IDrive's own ChronoSync guide (https://www.idrive.com/s3-storage-e2/chronosync-guide) says to select 'Use path-style URLs'. Virtual-hosted support was not verified."
+    },
+    {
+      "region": "us-southeast-1",
+      "endpoint": "https://s3.us-southeast-1.idrivee2.com",
+      "path_style": true,
+      "source_url": "https://www.idrive.com/s3-storage-e2/e2-endpoint-urls",
+      "last_verified": "2026-10-13",
+      "note": "Service URL from the endpoint URLs page (alias https://s3.mi-1.idrivee2.com). The developer guide says the endpoint for an enabled region is shown in the dashboard and is 'unique for every user'; use the dashboard value if it differs. No general statement found; IDrive's own ChronoSync guide (https://www.idrive.com/s3-storage-e2/chronosync-guide) says to select 'Use path-style URLs'. Virtual-hosted support was not verified."
+    },
+    {
+      "region": "ca-east-1",
+      "endpoint": "https://s3.ca-east-1.idrivee2.com",
+      "path_style": true,
+      "source_url": "https://www.idrive.com/s3-storage-e2/e2-endpoint-urls",
+      "last_verified": "2026-10-13",
+      "note": "Service URL from the endpoint URLs page (alias https://s3.ca-1.idrivee2.com). The developer guide says the endpoint for an enabled region is shown in the dashboard and is 'unique for every user'; use the dashboard value if it differs. No general statement found; IDrive's own ChronoSync guide (https://www.idrive.com/s3-storage-e2/chronosync-guide) says to select 'Use path-style URLs'. Virtual-hosted support was not verified."
+    },
+    {
+      "region": "eu-west-1",
+      "label": "Ireland",
+      "endpoint": "https://s3.eu-west-1.idrivee2.com",
+      "path_style": true,
+      "source_url": "https://www.idrive.com/s3-storage-e2/e2-endpoint-urls",
+      "last_verified": "2026-10-13",
+      "note": "Service URL from the endpoint URLs page (alias https://s3.ir-1.idrivee2.com). The developer guide says the endpoint for an enabled region is shown in the dashboard and is 'unique for every user'; use the dashboard value if it differs. No general statement found; IDrive's own ChronoSync guide (https://www.idrive.com/s3-storage-e2/chronosync-guide) says to select 'Use path-style URLs'. Virtual-hosted support was not verified."
+    },
+    {
+      "region": "eu-west-2",
+      "endpoint": "https://s3.eu-west-2.idrivee2.com",
+      "path_style": true,
+      "source_url": "https://www.idrive.com/s3-storage-e2/e2-endpoint-urls",
+      "last_verified": "2026-10-13",
+      "note": "Service URL from the endpoint URLs page (alias https://s3.uk-1.idrivee2.com). The developer guide says the endpoint for an enabled region is shown in the dashboard and is 'unique for every user'; use the dashboard value if it differs. No general statement found; IDrive's own ChronoSync guide (https://www.idrive.com/s3-storage-e2/chronosync-guide) says to select 'Use path-style URLs'. Virtual-hosted support was not verified."
+    },
+    {
+      "region": "eu-west-3",
+      "label": "London-2",
+      "endpoint": "https://s3.eu-west-3.idrivee2.com",
+      "path_style": true,
+      "source_url": "https://www.idrive.com/s3-storage-e2/e2-endpoint-urls",
+      "last_verified": "2026-10-13",
+      "note": "Service URL from the endpoint URLs page (alias https://s3.uk-2.idrivee2.com). The developer guide says the endpoint for an enabled region is shown in the dashboard and is 'unique for every user'; use the dashboard value if it differs. No general statement found; IDrive's own ChronoSync guide (https://www.idrive.com/s3-storage-e2/chronosync-guide) says to select 'Use path-style URLs'. Virtual-hosted support was not verified."
+    },
+    {
+      "region": "eu-west-4",
+      "endpoint": "https://s3.eu-west-4.idrivee2.com",
+      "path_style": true,
+      "source_url": "https://www.idrive.com/s3-storage-e2/e2-endpoint-urls",
+      "last_verified": "2026-10-13",
+      "note": "Service URL from the endpoint URLs page (alias https://s3.par-1.idrivee2.com). The developer guide says the endpoint for an enabled region is shown in the dashboard and is 'unique for every user'; use the dashboard value if it differs. No general statement found; IDrive's own ChronoSync guide (https://www.idrive.com/s3-storage-e2/chronosync-guide) says to select 'Use path-style URLs'. Virtual-hosted support was not verified."
+    },
+    {
+      "region": "eu-central-1",
+      "label": "Frankfurt-2",
+      "endpoint": "https://s3.eu-central-1.idrivee2.com",
+      "path_style": true,
+      "source_url": "https://www.idrive.com/s3-storage-e2/e2-endpoint-urls",
+      "last_verified": "2026-10-13",
+      "note": "Service URL from the endpoint URLs page (alias https://s3.fra-1.idrivee2.com). The developer guide says the endpoint for an enabled region is shown in the dashboard and is 'unique for every user'; use the dashboard value if it differs. No general statement found; IDrive's own ChronoSync guide (https://www.idrive.com/s3-storage-e2/chronosync-guide) says to select 'Use path-style URLs'. Virtual-hosted support was not verified."
+    },
+    {
+      "region": "eu-central-2",
+      "endpoint": "https://s3.eu-central-2.idrivee2.com",
+      "path_style": true,
+      "source_url": "https://www.idrive.com/s3-storage-e2/e2-endpoint-urls",
+      "last_verified": "2026-10-13",
+      "note": "Service URL from the endpoint URLs page (alias https://s3.fra-2.idrivee2.com). The developer guide says the endpoint for an enabled region is shown in the dashboard and is 'unique for every user'; use the dashboard value if it differs. No general statement found; IDrive's own ChronoSync guide (https://www.idrive.com/s3-storage-e2/chronosync-guide) says to select 'Use path-style URLs'. Virtual-hosted support was not verified."
+    },
+    {
+      "region": "eu-south-1",
+      "endpoint": "https://s3.eu-south-1.idrivee2.com",
+      "path_style": true,
+      "source_url": "https://www.idrive.com/s3-storage-e2/e2-endpoint-urls",
+      "last_verified": "2026-10-13",
+      "note": "Service URL from the endpoint URLs page (alias https://s3.mil-1.idrivee2.com). The developer guide says the endpoint for an enabled region is shown in the dashboard and is 'unique for every user'; use the dashboard value if it differs. No general statement found; IDrive's own ChronoSync guide (https://www.idrive.com/s3-storage-e2/chronosync-guide) says to select 'Use path-style URLs'. Virtual-hosted support was not verified."
+    },
+    {
+      "region": "ap-southeast-1",
+      "endpoint": "https://s3.ap-southeast-1.idrivee2.com",
+      "path_style": true,
+      "source_url": "https://www.idrive.com/s3-storage-e2/e2-endpoint-urls",
+      "last_verified": "2026-10-13",
+      "note": "Service URL from the endpoint URLs page (alias https://s3.sg-1.idrivee2.com). The developer guide says the endpoint for an enabled region is shown in the dashboard and is 'unique for every user'; use the dashboard value if it differs. No general statement found; IDrive's own ChronoSync guide (https://www.idrive.com/s3-storage-e2/chronosync-guide) says to select 'Use path-style URLs'. Virtual-hosted support was not verified."
+    },
+    {
+      "region": "ap-northeast-1",
+      "endpoint": "https://s3.ap-northeast-1.idrivee2.com",
+      "path_style": true,
+      "source_url": "https://www.idrive.com/s3-storage-e2/e2-endpoint-urls",
+      "last_verified": "2026-10-13",
+      "note": "Service URL from the endpoint URLs page (alias https://s3.tyo-1.idrivee2.com). The developer guide says the endpoint for an enabled region is shown in the dashboard and is 'unique for every user'; use the dashboard value if it differs. No general statement found; IDrive's own ChronoSync guide (https://www.idrive.com/s3-storage-e2/chronosync-guide) says to select 'Use path-style URLs'. Virtual-hosted support was not verified."
+    }
+  ],
+  "notes": [
+    "Regions must be enabled per account in the dashboard before creating buckets there (developer guide https://www.idrive.com/s3-storage-e2/developer-guide). The developer guide says 15 regions; the endpoint URLs page lists 19.",
+    "Tax: the pricing page does not state whether prices include tax; no official tax statement could be read today (help center unreachable), so prices_include_tax is null.",
+    "The optional SSD storage tier appears only in commented-out markup on the pricing page and is not modelled.",
+    "Path-style addressing: No general statement found; IDrive's own ChronoSync guide (https://www.idrive.com/s3-storage-e2/chronosync-guide) says to select 'Use path-style URLs'. Virtual-hosted support was not verified."
+  ]
+}

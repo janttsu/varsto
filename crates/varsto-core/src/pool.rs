@@ -1330,8 +1330,10 @@ impl PoolStorage {
         let mut out = VerifyOutcome::default();
         let mut good: Vec<String> = Vec::new();
         let mut gone: Vec<(String, bool)> = Vec::new();
-        // Hash without holding the index: a big disk takes hours.
+        // Hash without holding the index: a big disk takes hours. The
+        // caller's task (`activity`) counts the bytes.
         for (key, size) in keys {
+            crate::activity::advance_current(*size);
             let path = Self::data_path(&mount, key)?;
             let ok = match fs::metadata(&path) {
                 Err(_) => {
@@ -1443,7 +1445,10 @@ impl PoolStorage {
                 }
             }
         };
+        // The disk check's task (`activity`) counts the bytes looked at.
+        crate::activity::set_current_total(keys.iter().map(|(_, size)| size).sum());
         for (key, size) in keys {
+            crate::activity::advance_current(size);
             let path = Self::data_path(&mount, &key)?;
             let Ok(md) = fs::metadata(&path) else {
                 out.missing.push(key.clone());

@@ -210,6 +210,11 @@
         </div>
       </div>
 
+      <div id="nowcard" class="card hidden">
+        <h2 class="card-title"><svg class="icon accent"><use href="#i-sync"/></svg>Now</h2>
+        <ul id="nowlist" class="list activity-list"></ul>
+      </div>
+
       <div id="advice" class="card advice hidden">
         <div class="service-icon"><svg class="icon"><use href="#i-bulb"/></svg></div>
         <div class="service-body">
@@ -418,6 +423,16 @@
         </div>
         <div data-kind="s3" class="hidden">
           <p class="muted small">A bucket at any S3-compatible provider (AWS, Scaleway, Hetzner, Backblaze B2, Cloudflare R2, MinIO and others), with your own keys.</p>
+          <label>Provider <select id="s3provider"><option value="">Other / custom endpoint</option></select><span class="hint muted">fills in the endpoint, region and URL style; you can still change them</span></label>
+          <label id="s3regionrow" class="hidden">Region and endpoint <select id="s3region"></select></label>
+          <div id="s3price" class="price-card hidden"></div>
+          <details id="s3compare" class="small compare">
+            <summary>Compare providers</summary>
+            <p class="muted small">Headline prices of each provider's standard class, from the built-in price data. Prices are in each provider's own currency and are not converted; check the source before you decide.</p>
+            <div class="table-wrap">
+            <table id="s3comparetable"><thead><tr><th>Provider</th><th class="num">Storage /GB-month</th><th class="num">Egress /GB</th><th class="num">Free egress</th><th class="num">PUT /1000</th><th class="num">GET /1000</th><th class="num">Minimum days</th><th>Verified</th></tr></thead><tbody></tbody></table>
+            </div>
+          </details>
           <label>Endpoint <input name="endpoint" placeholder="https://s3.eu-central-1.amazonaws.com"></label>
           <label>Region <input name="region" placeholder="eu-central-1"></label>
           <label>Bucket <input name="bucket"></label>

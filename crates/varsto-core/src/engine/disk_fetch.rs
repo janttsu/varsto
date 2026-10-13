@@ -502,6 +502,13 @@ impl Engine {
             })
         })?;
         let root = self.staging_dir().join(&step.pool);
+        let task = crate::activity::start(
+            crate::activity::DISK_FETCH,
+            &step.label,
+            step.bytes,
+            crate::activity::Unit::Bytes,
+        );
+        task.set_phase("copy");
         let mut out = StepOutcome {
             label: step.label.clone(),
             ..Default::default()
@@ -519,6 +526,7 @@ impl Engine {
                 .filter(|b| hex::encode(crypto::hash(b)) == name);
             match got {
                 Some(b) => {
+                    crate::activity::advance_current(b.len() as u64);
                     util::write_atomic(&dest, &b)?;
                     out.objects += 1;
                     out.bytes += b.len() as u64;
@@ -530,7 +538,13 @@ impl Engine {
         if let Some(s) = plan.steps.get_mut(k) {
             s.state = "done".into();
         }
+        task.step(
+            "write",
+            plan.files.iter().filter(|f| !f.done).map(|f| f.size).sum(),
+            crate::activity::Unit::Bytes,
+        );
         out.files_done = self.fetch_plan_write_ready(plan, false)?;
+        drop(task);
         let mount_now = self.disk_eject(&step.label).unwrap_or(mount);
         out.message = format!(
             "Got {} blocks ({}) from {}: you can now remove it",

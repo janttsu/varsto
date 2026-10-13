@@ -255,10 +255,13 @@ impl Engine {
             ..Default::default()
         };
         progress(&p);
+        // The task of the caller (disk add, check or insert) counts the bytes.
+        crate::activity::set_current_total(p.bytes_total);
         for object in chosen {
             let need = &needed[&object];
             p.objects_done += 1;
             p.bytes_done += estimate(need.size);
+            crate::activity::advance_current(estimate(need.size));
             let key = chunk_storage_key(&object);
             // A further copy (disk groups) comes from the disk that has one.
             let mut ct: Option<Vec<u8>> = pool
@@ -363,6 +366,12 @@ impl Engine {
         let mount = pool
             .mount_of(&disk.id)
             .ok_or_else(|| anyhow!("disk {} is not attached", disk.label))?;
+        let task = crate::activity::start(
+            crate::activity::DISK_INSERT,
+            &disk.label,
+            0,
+            crate::activity::Unit::Items,
+        );
         let ledger_note = self
             .pull_ledger()
             .err()
@@ -376,6 +385,7 @@ impl Engine {
             phase: "tidy",
             ..Default::default()
         });
+        task.step("tidy", 0, crate::activity::Unit::Items);
         let offline = ledger_note.is_some();
         let tidy = pool.tidy_disk(&disk.id, &|name: &str| offline || known.contains(name))?;
         let mut report = DiskInsertReport {
@@ -403,6 +413,7 @@ impl Engine {
                 ..Default::default()
             };
             progress(&p);
+            task.step("verify", p.bytes_total, crate::activity::Unit::Bytes);
             let v = pool.verify_objects(&disk.id, &stale, &mut |n, b| {
                 p.objects_done = n;
                 p.bytes_done = b;
@@ -436,8 +447,10 @@ impl Engine {
             report.missing = v.missing;
         }
         if opts.fill && !disk.retired {
+            task.step("fill", 0, crate::activity::Unit::Bytes);
             report.fill = self.fill_disk_with(&spec, &pool, &disk.id, progress)?;
         }
+        drop(task);
         self.commit_batch()?;
         pool.sync_disk(&disk.id)?;
         let disks = pool.disks();
@@ -510,7 +523,14 @@ impl Engine {
                 crate::util::human_bytes(disk.capacity_bytes)
             )
         });
+        let task = crate::activity::start(
+            crate::activity::DISK_FILL,
+            label,
+            0,
+            crate::activity::Unit::Bytes,
+        );
         let fill = self.fill_disk_with(&spec, &pool, &disk.id, progress)?;
+        drop(task);
         pool.sync_disk(&disk.id)?;
         let disks = pool.disks();
         drop(pool);

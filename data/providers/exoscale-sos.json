@@ -1,0 +1,351 @@
+{
+  "$schema": "schema.json",
+  "schema_version": 1,
+  "id": "exoscale-sos",
+  "name": "Exoscale Simple Object Storage (SOS)",
+  "kind": "service",
+  "website_url": "https://www.exoscale.com/object-storage/",
+  "signup_url": "https://portal.exoscale.com/register",
+  "pricing_url": "https://www.exoscale.com/pricing/#storage",
+  "currency": "EUR",
+  "prices_include_tax": null,
+  "tax_note": "The pricing page and docs checked do not say whether prices include VAT. Accounts are set up in CHF, EUR or USD depending on the customer's legal residence (pricing FAQ).",
+  "protocols": [
+    "s3"
+  ],
+  "protocols_source": {
+    "source_url": "https://community.exoscale.com/product/storage/object-storage/quick-start/",
+    "last_verified": "2026-10-13"
+  },
+  "regions": [
+    {
+      "code": "ch-gva-2",
+      "city": "Geneva",
+      "country": "CH",
+      "source_url": "https://community.exoscale.com/product/storage/object-storage/quick-start/",
+      "last_verified": "2026-10-13",
+      "note": "Quick start lists 'ch-gva-2' among available SOS zones; city from the datacenters page (https://www.exoscale.com/datacenters/)."
+    },
+    {
+      "code": "ch-dk-2",
+      "city": "Zurich",
+      "country": "CH",
+      "source_url": "https://community.exoscale.com/product/storage/object-storage/quick-start/",
+      "last_verified": "2026-10-13",
+      "note": "Quick start lists 'ch-dk-2' among available SOS zones; city from the datacenters page (https://www.exoscale.com/datacenters/)."
+    },
+    {
+      "code": "de-fra-1",
+      "city": "Frankfurt",
+      "country": "DE",
+      "source_url": "https://community.exoscale.com/product/storage/object-storage/quick-start/",
+      "last_verified": "2026-10-13",
+      "note": "Quick start lists 'de-fra-1' among available SOS zones; city from the datacenters page (https://www.exoscale.com/datacenters/)."
+    },
+    {
+      "code": "de-muc-1",
+      "city": "Munich",
+      "country": "DE",
+      "source_url": "https://community.exoscale.com/product/storage/object-storage/quick-start/",
+      "last_verified": "2026-10-13",
+      "note": "Quick start lists 'de-muc-1' among available SOS zones; city from the datacenters page (https://www.exoscale.com/datacenters/)."
+    },
+    {
+      "code": "at-vie-1",
+      "city": "Vienna",
+      "country": "AT",
+      "source_url": "https://community.exoscale.com/product/storage/object-storage/quick-start/",
+      "last_verified": "2026-10-13",
+      "note": "Quick start lists 'at-vie-1' among available SOS zones; city from the datacenters page (https://www.exoscale.com/datacenters/)."
+    },
+    {
+      "code": "at-vie-2",
+      "city": "Vienna",
+      "country": "AT",
+      "source_url": "https://community.exoscale.com/product/storage/object-storage/quick-start/",
+      "last_verified": "2026-10-13",
+      "note": "Quick start lists 'at-vie-2' among available SOS zones; city from the datacenters page (https://www.exoscale.com/datacenters/)."
+    },
+    {
+      "code": "bg-sof-1",
+      "city": "Sofia",
+      "country": "BG",
+      "source_url": "https://community.exoscale.com/product/storage/object-storage/quick-start/",
+      "last_verified": "2026-10-13",
+      "note": "Quick start lists 'bg-sof-1' among available SOS zones; city from the datacenters page (https://www.exoscale.com/datacenters/)."
+    }
+  ],
+  "storage_classes": [
+    {
+      "id": "standard",
+      "name": "Standard",
+      "kind": "hot",
+      "applies_to_regions": [
+        "ch-gva-2",
+        "ch-dk-2",
+        "de-fra-1",
+        "de-muc-1",
+        "at-vie-1",
+        "at-vie-2",
+        "bg-sof-1"
+      ],
+      "pricing_model": "per_gb_month",
+      "storage_price_per_gb_month": [
+        {
+          "from_gb": 0,
+          "up_to_gb": 562949.95,
+          "price": {
+            "value": 0.0184,
+            "source_url": "https://community.exoscale.com/product/storage/object-storage/how-to/archival-storage/",
+            "last_verified": "2026-10-13",
+            "note": "Archival Storage doc price table: Standard 'EUR 0.0184 per GB/month' ('rounded monthly approximations'; billing is per GiB-hour). Exact rate (pricing page / price API sos.storage_volume_tier1): EUR 0.0000275 per GiB-hour for Tier 1 (up to 512 TiB)."
+          }
+        },
+        {
+          "from_gb": 562949.95,
+          "up_to_gb": 1125899.91,
+          "price": {
+            "value": null,
+            "note": "Tier 2 (512 TiB to 1 PiB): only an hourly rate is published, EUR 0.00001875 per GiB-hour (price API https://portal.exoscale.com/api/pricing/sos, storage_volume_tier2, read 2026-10-13); no monthly figure is stated by Exoscale, so none is recorded."
+          }
+        },
+        {
+          "from_gb": 1125899.91,
+          "up_to_gb": null,
+          "price": {
+            "value": null,
+            "note": "Tier 3 (more than 1 PiB): only an hourly rate is published, EUR 0.00001389 per GiB-hour (price API storage_volume_tier3, read 2026-10-13); no monthly figure is stated."
+          }
+        }
+      ],
+      "requests": {
+        "put_per_1000": {
+          "value": null,
+          "note": "The pricing page lists no request fees for Object Storage (only storage volume tiers and networking); absence of a line item, not an explicit statement."
+        },
+        "get_per_1000": {
+          "value": null,
+          "note": "The pricing page lists no request fees for Object Storage (only storage volume tiers and networking); absence of a line item, not an explicit statement."
+        },
+        "list_per_1000": {
+          "value": null,
+          "note": "The pricing page lists no request fees for Object Storage (only storage volume tiers and networking); absence of a line item, not an explicit statement."
+        }
+      },
+      "retrieval": {
+        "price_per_gb": {
+          "value": 0,
+          "source_url": "https://www.exoscale.com/pricing/",
+          "last_verified": "2026-10-13",
+          "note": "Pricing page, Object Storage table: Standard Volume tiers 'Retrieval (EUR): Free'."
+        },
+        "typical_delay": {
+          "value": null,
+          "note": "Not applicable (hot storage); no delay stated."
+        }
+      },
+      "minimum_storage_duration_days": {
+        "value": 0,
+        "source_url": "https://www.exoscale.com/pricing/",
+        "last_verified": "2026-10-13",
+        "note": "Pricing page, Object Storage table: Standard tiers 'Minimum duration: None'."
+      },
+      "minimum_billable_object_size_kb": {
+        "value": 128,
+        "source_url": "https://www.exoscale.com/pricing/",
+        "last_verified": "2026-10-13",
+        "note": "Pricing page footnote [2]: 'A minimum billable size of 128 KiB per object applies' (limits doc: 'Minimum billed size 128kb'). Value is in KiB."
+      },
+      "notes": [
+        "Tiers are cumulative: the first 512 TiB at Tier 1, 512 TiB to 1 PiB at Tier 2, above at Tier 3 (pricing page footnote [1]). Band limits converted from TiB/PiB (binary) to GB.",
+        "The price API returns the same numbers for EUR, CHF and USD; the account currency depends on the customer's legal residence (pricing FAQ)."
+      ]
+    },
+    {
+      "id": "archival",
+      "name": "Archival Storage (on request)",
+      "kind": "archive",
+      "applies_to_regions": [
+        "ch-gva-2",
+        "ch-dk-2",
+        "de-fra-1",
+        "de-muc-1",
+        "at-vie-1",
+        "at-vie-2",
+        "bg-sof-1"
+      ],
+      "pricing_model": "per_gb_month",
+      "storage_price_per_gb_month": [
+        {
+          "from_gb": 0,
+          "up_to_gb": null,
+          "price": {
+            "value": 0.0042,
+            "source_url": "https://community.exoscale.com/product/storage/object-storage/how-to/archival-storage/",
+            "last_verified": "2026-10-13",
+            "note": "Archival Storage doc: 'EUR 0.0042 per GB/month' (rounded monthly approximation; pricing page: EUR 0.00000626 per GiB-hour). Billed as Standard usage with a monthly discount line on the invoice."
+          }
+        }
+      ],
+      "requests": {
+        "put_per_1000": {
+          "value": null,
+          "note": "The pricing page lists no request fees for Object Storage (only storage volume tiers and networking); absence of a line item, not an explicit statement."
+        },
+        "get_per_1000": {
+          "value": null,
+          "note": "The pricing page lists no request fees for Object Storage (only storage volume tiers and networking); absence of a line item, not an explicit statement."
+        },
+        "list_per_1000": {
+          "value": null,
+          "note": "The pricing page lists no request fees for Object Storage (only storage volume tiers and networking); absence of a line item, not an explicit statement."
+        }
+      },
+      "retrieval": {
+        "price_per_gb": {
+          "value": 0,
+          "source_url": "https://www.exoscale.com/pricing/",
+          "last_verified": "2026-10-13",
+          "note": "Pricing page: Archival Storage 'Retrieval: Free'."
+        },
+        "typical_delay": {
+          "value": null,
+          "note": "Not stated; enrolled buckets keep the same S3 endpoints and access (archival doc says nothing changes technically), but no delay figure is given."
+        }
+      },
+      "minimum_storage_duration_days": {
+        "value": 0,
+        "source_url": "https://www.exoscale.com/pricing/",
+        "last_verified": "2026-10-13",
+        "note": "Pricing page: Archival Storage 'Minimum duration: None'."
+      },
+      "minimum_billable_object_size_kb": {
+        "value": 128,
+        "source_url": "https://www.exoscale.com/pricing/",
+        "last_verified": "2026-10-13",
+        "note": "Pricing page footnote [2]: 'A minimum billable size of 128 KiB per object applies' (limits doc: 'Minimum billed size 128kb'). Value is in KiB."
+      },
+      "notes": [
+        "Activated per bucket on request and reviewed against the access pattern. Each enrolled bucket is billed for at least 10 TB (metered as 9,313 GiB), i.e. a floor of EUR 42/month; below about 2.3 TB Standard is cheaper (archival doc).",
+        "No object lock or retention on enrolled buckets.",
+        "Warm (EUR 0.009/GiB retrieval, 30 days) and Cold (EUR 0.027/GiB retrieval, 90 days) classes are announced for early 2027 and are not modelled."
+      ]
+    }
+  ],
+  "default_storage_class": "standard",
+  "egress": {
+    "applies_to_regions": [
+      "ch-gva-2",
+      "ch-dk-2",
+      "de-fra-1",
+      "de-muc-1",
+      "at-vie-1",
+      "at-vie-2",
+      "bg-sof-1"
+    ],
+    "free_allowance_gb_per_month": {
+      "value": null,
+      "note": "No free egress allowance is stated for Object Storage. The pricing page's free outbound traffic tier (1.42 GiB/hour per running instance, about 1 TiB/month) is described for compute instances; whether it covers SOS egress is not stated."
+    },
+    "free_allowance_scope": "Not stated for Object Storage.",
+    "price_per_gb": [
+      {
+        "from_gb": 0,
+        "up_to_gb": null,
+        "price": {
+          "value": 0.01862645,
+          "source_url": "https://portal.exoscale.com/api/pricing/sos",
+          "last_verified": "2026-10-13",
+          "note": "Pricing page 'Networking OUT per GiB', value from the price API (sos.storage_traffic, eur): EUR 0.02 per GiB. Normalised to per GB (1 GiB = 1.073741824 GB)."
+        }
+      }
+    ],
+    "notes": [
+      "Networking IN is free; traffic between zones and between instances, SOS and DBaaS is free (pricing page).",
+      "Archival Storage buckets pay standard egress rates (archival doc)."
+    ]
+  },
+  "egress_fair_use": {
+    "value": null,
+    "note": "No fair-use rule for Object Storage egress is stated; egress is billed per GiB."
+  },
+  "free_tier": {
+    "value": null,
+    "note": "No free tier for Object Storage was found on the pricing page or product page."
+  },
+  "object_lock": {
+    "value": true,
+    "source_url": "https://community.exoscale.com/product/storage/object-storage/how-to/versioning/",
+    "last_verified": "2026-10-13",
+    "note": "Docs: 'Exoscale SOS implements the S3 compatible object lock feature' (legal hold and retention); must be enabled at bucket creation and requires versioning; not available on Archival Storage buckets."
+  },
+  "s3_endpoints": [
+    {
+      "region": "ch-gva-2",
+      "label": "Geneva",
+      "endpoint": "https://sos-ch-gva-2.exo.io",
+      "path_style": false,
+      "source_url": "https://community.exoscale.com/product/storage/object-storage/quick-start/",
+      "last_verified": "2026-10-13",
+      "note": "Quick start: 'Storage API Endpoint: https://sos-{zone}.exo.io'; s3cmd config uses host_bucket = %(bucket)s.sos-{zone}.exo.io (virtual-hosted style). The AWS CLI guide sets region to the zone name."
+    },
+    {
+      "region": "ch-dk-2",
+      "label": "Zurich",
+      "endpoint": "https://sos-ch-dk-2.exo.io",
+      "path_style": false,
+      "source_url": "https://community.exoscale.com/product/storage/object-storage/quick-start/",
+      "last_verified": "2026-10-13",
+      "note": "Quick start: 'Storage API Endpoint: https://sos-{zone}.exo.io'; s3cmd config uses host_bucket = %(bucket)s.sos-{zone}.exo.io (virtual-hosted style). The AWS CLI guide sets region to the zone name."
+    },
+    {
+      "region": "de-fra-1",
+      "label": "Frankfurt",
+      "endpoint": "https://sos-de-fra-1.exo.io",
+      "path_style": false,
+      "source_url": "https://community.exoscale.com/product/storage/object-storage/quick-start/",
+      "last_verified": "2026-10-13",
+      "note": "Quick start: 'Storage API Endpoint: https://sos-{zone}.exo.io'; s3cmd config uses host_bucket = %(bucket)s.sos-{zone}.exo.io (virtual-hosted style). The AWS CLI guide sets region to the zone name."
+    },
+    {
+      "region": "de-muc-1",
+      "label": "Munich",
+      "endpoint": "https://sos-de-muc-1.exo.io",
+      "path_style": false,
+      "source_url": "https://community.exoscale.com/product/storage/object-storage/quick-start/",
+      "last_verified": "2026-10-13",
+      "note": "Quick start: 'Storage API Endpoint: https://sos-{zone}.exo.io'; s3cmd config uses host_bucket = %(bucket)s.sos-{zone}.exo.io (virtual-hosted style). The AWS CLI guide sets region to the zone name."
+    },
+    {
+      "region": "at-vie-1",
+      "label": "Vienna",
+      "endpoint": "https://sos-at-vie-1.exo.io",
+      "path_style": false,
+      "source_url": "https://community.exoscale.com/product/storage/object-storage/quick-start/",
+      "last_verified": "2026-10-13",
+      "note": "Quick start: 'Storage API Endpoint: https://sos-{zone}.exo.io'; s3cmd config uses host_bucket = %(bucket)s.sos-{zone}.exo.io (virtual-hosted style). The AWS CLI guide sets region to the zone name."
+    },
+    {
+      "region": "at-vie-2",
+      "label": "Vienna",
+      "endpoint": "https://sos-at-vie-2.exo.io",
+      "path_style": false,
+      "source_url": "https://community.exoscale.com/product/storage/object-storage/quick-start/",
+      "last_verified": "2026-10-13",
+      "note": "Quick start: 'Storage API Endpoint: https://sos-{zone}.exo.io'; s3cmd config uses host_bucket = %(bucket)s.sos-{zone}.exo.io (virtual-hosted style). The AWS CLI guide sets region to the zone name."
+    },
+    {
+      "region": "bg-sof-1",
+      "label": "Sofia",
+      "endpoint": "https://sos-bg-sof-1.exo.io",
+      "path_style": false,
+      "source_url": "https://community.exoscale.com/product/storage/object-storage/quick-start/",
+      "last_verified": "2026-10-13",
+      "note": "Quick start: 'Storage API Endpoint: https://sos-{zone}.exo.io'; s3cmd config uses host_bucket = %(bucket)s.sos-{zone}.exo.io (virtual-hosted style). The AWS CLI guide sets region to the zone name."
+    }
+  ],
+  "notes": [
+    "The product page says Object Storage is available in 8 European zones and the docs index lists hr-zag-1 (Zagreb) as a zone, but the SOS quick start lists only the seven zones modelled here; hr-zag-1 was not added.",
+    "Storage is billed per GiB-hour; monthly figures are Exoscale's rounded approximations."
+  ]
+}

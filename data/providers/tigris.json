@@ -1,0 +1,457 @@
+{
+  "$schema": "schema.json",
+  "schema_version": 1,
+  "id": "tigris",
+  "name": "Tigris Object Storage",
+  "kind": "service",
+  "website_url": "https://www.tigrisdata.com/",
+  "signup_url": "https://console.storage.dev",
+  "pricing_url": "https://www.tigrisdata.com/pricing/",
+  "currency": "USD",
+  "prices_include_tax": null,
+  "tax_note": "The billing doc says all charges are billed in USD monthly; tax is not mentioned on the pricing page or billing doc.",
+  "protocols": [
+    "s3",
+    "rclone"
+  ],
+  "protocols_source": {
+    "source_url": "https://www.tigrisdata.com/docs/quickstarts/rclone/",
+    "last_verified": "2026-10-13"
+  },
+  "regions": [
+    {
+      "code": "auto",
+      "city": null,
+      "country": "ZZ",
+      "source_url": "https://www.tigrisdata.com/docs/concepts/regions/",
+      "last_verified": "2026-10-13",
+      "note": "Not a physical location: the signing region for the single global endpoint t3.storage.dev. Country ZZ = not applicable. Data placement is chosen per bucket (Global default, single-, dual- or multi-region)."
+    },
+    {
+      "code": "sjc",
+      "city": "San Jose",
+      "country": "US",
+      "source_url": "https://www.tigrisdata.com/docs/concepts/regions/",
+      "last_verified": "2026-10-13",
+      "note": "Bucket location for t3.storage.dev; requests still use region auto."
+    },
+    {
+      "code": "ord",
+      "city": "Chicago",
+      "country": "US",
+      "source_url": "https://www.tigrisdata.com/docs/concepts/regions/",
+      "last_verified": "2026-10-13",
+      "note": "Bucket location for t3.storage.dev; requests still use region auto."
+    },
+    {
+      "code": "iad",
+      "city": "Ashburn",
+      "country": "US",
+      "source_url": "https://www.tigrisdata.com/docs/concepts/regions/",
+      "last_verified": "2026-10-13",
+      "note": "Bucket location for t3.storage.dev; requests still use region auto."
+    },
+    {
+      "code": "ams",
+      "city": "Amsterdam",
+      "country": "NL",
+      "source_url": "https://www.tigrisdata.com/docs/concepts/regions/",
+      "last_verified": "2026-10-13",
+      "note": "Bucket location for t3.storage.dev; requests still use region auto."
+    },
+    {
+      "code": "fra",
+      "city": "Frankfurt",
+      "country": "DE",
+      "source_url": "https://www.tigrisdata.com/docs/concepts/regions/",
+      "last_verified": "2026-10-13",
+      "note": "Bucket location for t3.storage.dev; requests still use region auto."
+    },
+    {
+      "code": "lhr",
+      "city": "London",
+      "country": "GB",
+      "source_url": "https://www.tigrisdata.com/docs/concepts/regions/",
+      "last_verified": "2026-10-13",
+      "note": "Bucket location for t3.storage.dev; requests still use region auto."
+    },
+    {
+      "code": "sin",
+      "city": "Singapore",
+      "country": "SG",
+      "source_url": "https://www.tigrisdata.com/docs/concepts/regions/",
+      "last_verified": "2026-10-13",
+      "note": "Bucket location for t3.storage.dev; requests still use region auto."
+    },
+    {
+      "code": "nrt",
+      "city": "Tokyo",
+      "country": "JP",
+      "source_url": "https://www.tigrisdata.com/docs/concepts/regions/",
+      "last_verified": "2026-10-13",
+      "note": "Bucket location for t3.storage.dev; requests still use region auto."
+    }
+  ],
+  "storage_classes": [
+    {
+      "id": "standard",
+      "name": "Standard",
+      "kind": "hot",
+      "applies_to_regions": [
+        "auto",
+        "sjc",
+        "ord",
+        "iad",
+        "ams",
+        "fra",
+        "lhr",
+        "sin",
+        "nrt"
+      ],
+      "pricing_model": "per_gb_month",
+      "storage_price_per_gb_month": [
+        {
+          "from_gb": 0,
+          "up_to_gb": null,
+          "price": {
+            "value": 0.02,
+            "source_url": "https://www.tigrisdata.com/pricing.md",
+            "last_verified": "2026-10-13",
+            "note": "Standard: USD 0.02/GB/month for Global and Single-region buckets ('Tigris pricing is the same across all geographies'). Tigris measures storage in binary GB (2^30 bytes)."
+          }
+        }
+      ],
+      "requests": {
+        "put_per_1000": {
+          "value": 0.005,
+          "source_url": "https://www.tigrisdata.com/pricing.md",
+          "last_verified": "2026-10-13",
+          "note": "Class A requests (includes PutObject, CopyObject, CreateMultipartUpload) USD 0.005/1000, Global/Single-region. First 10,000 Class A per month free."
+        },
+        "get_per_1000": {
+          "value": 0.0005,
+          "source_url": "https://www.tigrisdata.com/pricing.md",
+          "last_verified": "2026-10-13",
+          "note": "Class B requests (includes GetObject, HeadObject) USD 0.0005/1000, Global/Single-region. First 100,000 Class B per month free."
+        },
+        "list_per_1000": {
+          "value": 0.005,
+          "source_url": "https://www.tigrisdata.com/pricing.md",
+          "last_verified": "2026-10-13",
+          "note": "ListObjects/ListObjectsV2 are Class A: USD 0.005/1000, Global/Single-region."
+        }
+      },
+      "retrieval": {
+        "price_per_gb": {
+          "value": 0,
+          "source_url": "https://www.tigrisdata.com/pricing.md",
+          "last_verified": "2026-10-13",
+          "note": "Data retrieval: Free."
+        },
+        "typical_delay": {
+          "value": null,
+          "note": "Not stated; Standard objects are directly readable."
+        }
+      },
+      "minimum_storage_duration_days": {
+        "value": 0,
+        "source_url": "https://www.tigrisdata.com/pricing.md",
+        "last_verified": "2026-10-13",
+        "note": "Minimum storage retention: N/A for Standard (the FAQ says the minimum charge applies only to Infrequent Access, Archive and Archive Instant Retrieval)."
+      },
+      "minimum_billable_object_size_kb": {
+        "value": null,
+        "note": "Not stated on the pricing page or storage tiers doc."
+      },
+      "notes": [
+        "S3 storage class STANDARD. First 5 GB of Standard storage per month free."
+      ]
+    },
+    {
+      "id": "infrequent-access",
+      "name": "Infrequent Access",
+      "kind": "infrequent",
+      "applies_to_regions": [
+        "auto",
+        "sjc",
+        "ord",
+        "iad",
+        "ams",
+        "fra",
+        "lhr",
+        "sin",
+        "nrt"
+      ],
+      "pricing_model": "per_gb_month",
+      "storage_price_per_gb_month": [
+        {
+          "from_gb": 0,
+          "up_to_gb": null,
+          "price": {
+            "value": 0.01,
+            "source_url": "https://www.tigrisdata.com/pricing.md",
+            "last_verified": "2026-10-13",
+            "note": "Infrequent Access: USD 0.01/GB/month for Global and Single-region buckets ('Tigris pricing is the same across all geographies'). Tigris measures storage in binary GB (2^30 bytes)."
+          }
+        }
+      ],
+      "requests": {
+        "put_per_1000": {
+          "value": 0.005,
+          "source_url": "https://www.tigrisdata.com/pricing.md",
+          "last_verified": "2026-10-13",
+          "note": "Class A requests (includes PutObject, CopyObject, CreateMultipartUpload) USD 0.005/1000, Global/Single-region. First 10,000 Class A per month free."
+        },
+        "get_per_1000": {
+          "value": 0.0005,
+          "source_url": "https://www.tigrisdata.com/pricing.md",
+          "last_verified": "2026-10-13",
+          "note": "Class B requests (includes GetObject, HeadObject) USD 0.0005/1000, Global/Single-region. First 100,000 Class B per month free."
+        },
+        "list_per_1000": {
+          "value": 0.005,
+          "source_url": "https://www.tigrisdata.com/pricing.md",
+          "last_verified": "2026-10-13",
+          "note": "ListObjects/ListObjectsV2 are Class A: USD 0.005/1000, Global/Single-region."
+        }
+      },
+      "retrieval": {
+        "price_per_gb": {
+          "value": 0.01,
+          "source_url": "https://www.tigrisdata.com/pricing.md",
+          "last_verified": "2026-10-13",
+          "note": "Data retrieval USD 0.01/GB."
+        },
+        "typical_delay": {
+          "value": null,
+          "note": "Not stated; the tiers doc describes rapid access."
+        }
+      },
+      "minimum_storage_duration_days": {
+        "value": 30,
+        "source_url": "https://www.tigrisdata.com/pricing.md",
+        "last_verified": "2026-10-13",
+        "note": "Minimum storage retention 30 days; objects deleted, updated or transitioned earlier are still charged 30 days."
+      },
+      "minimum_billable_object_size_kb": {
+        "value": null,
+        "note": "Not stated on the pricing page or storage tiers doc."
+      },
+      "notes": [
+        "S3 storage class STANDARD_IA."
+      ]
+    },
+    {
+      "id": "archive",
+      "name": "Archive",
+      "kind": "archive",
+      "applies_to_regions": [
+        "auto",
+        "sjc",
+        "ord",
+        "iad",
+        "ams",
+        "fra",
+        "lhr",
+        "sin",
+        "nrt"
+      ],
+      "pricing_model": "per_gb_month",
+      "storage_price_per_gb_month": [
+        {
+          "from_gb": 0,
+          "up_to_gb": null,
+          "price": {
+            "value": 0.004,
+            "source_url": "https://www.tigrisdata.com/pricing.md",
+            "last_verified": "2026-10-13",
+            "note": "Archive: USD 0.004/GB/month for Global and Single-region buckets ('Tigris pricing is the same across all geographies'). Tigris measures storage in binary GB (2^30 bytes)."
+          }
+        }
+      ],
+      "requests": {
+        "put_per_1000": {
+          "value": 0.005,
+          "source_url": "https://www.tigrisdata.com/pricing.md",
+          "last_verified": "2026-10-13",
+          "note": "Class A requests (includes PutObject, CopyObject, CreateMultipartUpload) USD 0.005/1000, Global/Single-region. First 10,000 Class A per month free."
+        },
+        "get_per_1000": {
+          "value": 0.0005,
+          "source_url": "https://www.tigrisdata.com/pricing.md",
+          "last_verified": "2026-10-13",
+          "note": "Class B requests (includes GetObject, HeadObject) USD 0.0005/1000, Global/Single-region. First 100,000 Class B per month free."
+        },
+        "list_per_1000": {
+          "value": 0.005,
+          "source_url": "https://www.tigrisdata.com/pricing.md",
+          "last_verified": "2026-10-13",
+          "note": "ListObjects/ListObjectsV2 are Class A: USD 0.005/1000, Global/Single-region."
+        }
+      },
+      "retrieval": {
+        "price_per_gb": {
+          "value": 0,
+          "source_url": "https://www.tigrisdata.com/pricing.md",
+          "last_verified": "2026-10-13",
+          "note": "Data retrieval: Free. A restore moves the data to the Standard tier for the chosen number of days, billed at the Standard storage price meanwhile."
+        },
+        "typical_delay": {
+          "value": "typically around 1 hour (restore required before reading)",
+          "source_url": "https://www.tigrisdata.com/docs/objects/tiers/",
+          "last_verified": "2026-10-13"
+        }
+      },
+      "minimum_storage_duration_days": {
+        "value": 90,
+        "source_url": "https://www.tigrisdata.com/pricing.md",
+        "last_verified": "2026-10-13",
+        "note": "Minimum storage retention 90 days."
+      },
+      "minimum_billable_object_size_kb": {
+        "value": null,
+        "note": "Not stated on the pricing page or storage tiers doc."
+      },
+      "notes": [
+        "S3 storage class GLACIER. GET returns 403 InvalidObjectState until restored."
+      ]
+    },
+    {
+      "id": "archive-instant-retrieval",
+      "name": "Archive Instant Retrieval",
+      "kind": "archive",
+      "applies_to_regions": [
+        "auto",
+        "sjc",
+        "ord",
+        "iad",
+        "ams",
+        "fra",
+        "lhr",
+        "sin",
+        "nrt"
+      ],
+      "pricing_model": "per_gb_month",
+      "storage_price_per_gb_month": [
+        {
+          "from_gb": 0,
+          "up_to_gb": null,
+          "price": {
+            "value": 0.004,
+            "source_url": "https://www.tigrisdata.com/pricing.md",
+            "last_verified": "2026-10-13",
+            "note": "Archive Instant Retrieval: USD 0.004/GB/month for Global and Single-region buckets ('Tigris pricing is the same across all geographies'). Tigris measures storage in binary GB (2^30 bytes)."
+          }
+        }
+      ],
+      "requests": {
+        "put_per_1000": {
+          "value": 0.005,
+          "source_url": "https://www.tigrisdata.com/pricing.md",
+          "last_verified": "2026-10-13",
+          "note": "Class A requests (includes PutObject, CopyObject, CreateMultipartUpload) USD 0.005/1000, Global/Single-region. First 10,000 Class A per month free."
+        },
+        "get_per_1000": {
+          "value": 0.0005,
+          "source_url": "https://www.tigrisdata.com/pricing.md",
+          "last_verified": "2026-10-13",
+          "note": "Class B requests (includes GetObject, HeadObject) USD 0.0005/1000, Global/Single-region. First 100,000 Class B per month free."
+        },
+        "list_per_1000": {
+          "value": 0.005,
+          "source_url": "https://www.tigrisdata.com/pricing.md",
+          "last_verified": "2026-10-13",
+          "note": "ListObjects/ListObjectsV2 are Class A: USD 0.005/1000, Global/Single-region."
+        }
+      },
+      "retrieval": {
+        "price_per_gb": {
+          "value": 0.03,
+          "source_url": "https://www.tigrisdata.com/pricing.md",
+          "last_verified": "2026-10-13",
+          "note": "Data retrieval USD 0.03/GB."
+        },
+        "typical_delay": {
+          "value": "immediately available, no restore step",
+          "source_url": "https://www.tigrisdata.com/docs/objects/tiers/",
+          "last_verified": "2026-10-13"
+        }
+      },
+      "minimum_storage_duration_days": {
+        "value": 90,
+        "source_url": "https://www.tigrisdata.com/pricing.md",
+        "last_verified": "2026-10-13",
+        "note": "Minimum storage retention 90 days."
+      },
+      "minimum_billable_object_size_kb": {
+        "value": null,
+        "note": "Not stated on the pricing page or storage tiers doc."
+      },
+      "notes": [
+        "S3 storage class GLACIER_IR."
+      ]
+    }
+  ],
+  "default_storage_class": "standard",
+  "egress": {
+    "applies_to_regions": [
+      "auto",
+      "sjc",
+      "ord",
+      "iad",
+      "ams",
+      "fra",
+      "lhr",
+      "sin",
+      "nrt"
+    ],
+    "free_allowance_gb_per_month": {
+      "value": null,
+      "note": "No allowance is needed: egress is free for all tiers and location types."
+    },
+    "price_per_gb": [
+      {
+        "from_gb": 0,
+        "up_to_gb": null,
+        "price": {
+          "value": 0,
+          "source_url": "https://www.tigrisdata.com/pricing.md",
+          "last_verified": "2026-10-13",
+          "note": "'Tigris does not charge for regional data transfer, region-to-region data transfer, or data transfer out to the internet (egress).'"
+        }
+      }
+    ],
+    "notes": [
+      "DELETE and CANCEL requests are free; failed requests with the listed error codes are not charged."
+    ]
+  },
+  "egress_fair_use": {
+    "value": null,
+    "note": "No fair-use limit is stated; the pricing page only says to contact help@tigrisdata.com for extraordinary bandwidth requirements."
+  },
+  "free_tier": {
+    "value": "Every month: 5 GB Standard storage, 10,000 Class A requests (PUT, COPY, POST, LIST) and 100,000 Class B requests (GET, SELECT and others); no card needed to start.",
+    "source_url": "https://www.tigrisdata.com/pricing.md",
+    "last_verified": "2026-10-13"
+  },
+  "object_lock": {
+    "value": null,
+    "note": "No Object Lock feature page found. The pricing page classifies PutObjectLockConfiguration, PutObjectRetention and PutObjectLegalHold as Class A requests and the IAM docs list them as actions, but the S3 compatibility matrix (https://www.tigrisdata.com/docs/api/s3/) does not test Object Lock."
+  },
+  "s3_endpoints": [
+    {
+      "region": "auto",
+      "label": "Global",
+      "endpoint": "https://t3.storage.dev",
+      "path_style": false,
+      "source_url": "https://www.tigrisdata.com/docs/sdks/s3/",
+      "last_verified": "2026-10-13",
+      "note": "Single endpoint for all regions; set region to auto (https://www.tigrisdata.com/docs/concepts/regions/). The SDK guide configures boto3 with addressing_style 'virtual'."
+    }
+  ],
+  "notes": [
+    "Prices are for Global (default) and Single-region buckets, which are identical. Multi-region: Standard USD 0.025, Infrequent Access 0.015, Archive and Archive IR 0.006 per GB-month, Class A USD 0.01/1000. Dual-region: storage and Class A billed per underlying region (pricing.md).",
+    "Object notifications cost USD 0.01 per 1000 events.",
+    "The older endpoint fly.storage.tigris.dev is not listed in the current regions doc and is left out."
+  ]
+}

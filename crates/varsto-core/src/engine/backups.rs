@@ -540,6 +540,13 @@ impl Engine {
             bail!("no storage of this device can keep the snapshot: add one first");
         }
         self.pull_ledger()?;
+        // The scan and the upload below list their own tasks.
+        let _task = crate::activity::start(
+            crate::activity::BACKUP_SNAPSHOT,
+            &rec.name,
+            0,
+            crate::activity::Unit::Items,
+        );
 
         // 1. Read the directory and store what the storages lack.
         let mut state = self.load_state(&rec.folder_id)?;
@@ -872,6 +879,13 @@ impl Engine {
             ..Default::default()
         };
         let mut pull = PullReport::default();
+        // Counted by the files' downloads (`progress`).
+        let _task = crate::activity::start(
+            crate::activity::RESTORE,
+            &rec.name,
+            wanted.iter().map(|f| f.size).sum(),
+            crate::activity::Unit::Bytes,
+        );
         for f in &wanted {
             let disk = match util::safe_join(&root, &f.path) {
                 Ok(d) => d,

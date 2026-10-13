@@ -144,41 +144,6 @@ impl Drop for ServicePause {
     }
 }
 
-/// Check the drive's file system (`e2fsck -f -p`, unmounting it first if
-/// the desktop mounted it) and mount it only when the check leaves it clean
-/// or corrected. The result is recorded in disk-checks.json; corrections
-/// and refusals are also shown as desktop notifications.
-pub fn mount_checked(
-    home: &Path,
-    json_out: bool,
-    drive: &Drive,
-) -> Result<(PathBuf, blockdev::Method, blockdev::FsckOutcome)> {
-    let live = !json_out && std::io::stderr().is_terminal();
-    if !json_out {
-        eprintln!("{}: checking its file system (e2fsck -f -p)", drive.label);
-    }
-    match blockdev::check_and_mount(&mut SystemRunner, &drive.partuuid, &drive.label, live) {
-        Ok((mount, how, out)) => {
-            let _ = varsto_core::diskconf::record_check(home, &drive.partuuid, &out);
-            if let Some(m) = out.message(&drive.label) {
-                eprintln!("warning: {m}");
-                crate::service::notify("Varsto disk", &m);
-            }
-            if !json_out && !out.summary.is_empty() {
-                eprintln!("  {}", out.summary);
-            }
-            Ok((mount, how, out))
-        }
-        Err(e) => {
-            if let Some(stop) = e.downcast_ref::<blockdev::FsckStopped>() {
-                let _ = varsto_core::diskconf::record_check(home, &drive.partuuid, &stop.outcome);
-                crate::service::notify("Varsto disk", &stop.message);
-            }
-            Err(e)
-        }
-    }
-}
-
 /// Remember which partition holds a drive, under its sticker name.
 fn remember(home: &Path, partuuid: &str, pool: &str, label: &str) -> Result<()> {
     let mut conf = DiskConf::load(home)?;
@@ -266,7 +231,14 @@ pub fn init(
             _ => "running as root",
         }
     );
+    let task = varsto_core::activity::start(
+        varsto_core::activity::DISK_INIT,
+        label,
+        0,
+        varsto_core::activity::Unit::Items,
+    );
     let prepared = blockdev::prepare_drive(&mut r, &real, label, blockdev::current_owner())?;
+    drop(task);
     for s in &prepared.steps {
         eprintln!("  {s}");
     }
@@ -366,7 +338,7 @@ pub fn insert(
     let _pause = ServicePause::new(home);
     let mut reports = Vec::new();
     for (drive, part, _) in present {
-        let (mount, method, fsck) = mount_checked(home, cli.json, &drive)?;
+        let (mount, method, fsck) = crate::drive_mount::mount_checked(home, cli.json, &drive)?;
         if !cli.json {
             eprintln!(
                 "{}: {part} {}",
@@ -442,6 +414,12 @@ pub fn unmount(
 ) -> Result<()> {
     linux_only("unmount")?;
     let _pause = ServicePause::new(home);
+    let _task = varsto_core::activity::start(
+        varsto_core::activity::DISK_UNMOUNT,
+        label,
+        0,
+        varsto_core::activity::Unit::Items,
+    );
     let mount = engine.disk_eject(label)?;
     let mut steps = vec![blockdev::Step {
         step: format!("write the disk index and sync {}", mount.display()),
@@ -508,39 +486,6 @@ pub fn known_drives(home: &Path) -> Vec<KnownDrive> {
 }
 
 // ----- fetching from pool disks ------------------------------------------------------------
-
-/// Mount the drive of a plan step if disks.conf knows it and it is plugged
-/// in. True when the disk may now be reachable (also when disks.conf does
-/// not know it: the user may have mounted it).
-pub fn mount_known(home: &Path, label: &str) -> Result<bool> {
-    if !cfg!(target_os = "linux") {
-        return Ok(true);
-    }
-    let conf = DiskConf::load(home)?;
-    let Some(drive) = conf.by_label(label) else {
-        return Ok(true);
-    };
-    let devs = blockdev::lsblk(&mut SystemRunner)?;
-    if blockdev::find_partition(&devs, &drive.partuuid).is_none() {
-        return Ok(false);
-    }
-    mount_checked(home, false, drive)?;
-    Ok(true)
-}
-
-/// Unmount and power off the partition mounted at `mount` (Linux; nothing
-/// elsewhere, or when no partition is mounted there).
-pub fn release_mount(mount: &Path) -> Result<Vec<blockdev::Step>> {
-    if !cfg!(target_os = "linux") {
-        return Ok(Vec::new());
-    }
-    let mut r = SystemRunner;
-    let devs = blockdev::lsblk(&mut r)?;
-    if blockdev::partition_at(&devs, mount).is_none() {
-        return Ok(Vec::new());
-    }
-    blockdev::unmount_partition(&mut r, mount, true)
-}
 
 fn duration(secs: f64) -> String {
     let s = secs.round() as u64;
@@ -661,7 +606,7 @@ impl varsto_core::engine::PlanDriver for CliDriver<'_> {
         })
     }
     fn attach(&mut self, step: &varsto_core::engine::DiskStep) -> Result<bool> {
-        match mount_known(self.home, &step.label) {
+        match crate::drive_mount::mount_known(self.home, &step.label) {
             Ok(found) => Ok(found),
             // A file system that failed its check stops the whole run.
             Err(e) if e.downcast_ref::<blockdev::FsckStopped>().is_some() => Err(e),
@@ -672,7 +617,7 @@ impl varsto_core::engine::PlanDriver for CliDriver<'_> {
         }
     }
     fn release(&mut self, step: &varsto_core::engine::DiskStep, mount: &Path) -> Result<()> {
-        for s in release_mount(mount)? {
+        for s in crate::drive_mount::release_mount(mount)? {
             if !self.json {
                 eprintln!(
                     "  {}: {}{}",

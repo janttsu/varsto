@@ -1,0 +1,246 @@
+{
+  "$schema": "schema.json",
+  "schema_version": 1,
+  "id": "upcloud-object-storage",
+  "name": "UpCloud Managed Object Storage",
+  "kind": "service",
+  "website_url": "https://upcloud.com/products/object-storage/",
+  "signup_url": "https://signup.upcloud.com/",
+  "pricing_url": "https://upcloud.com/pricing/",
+  "currency": "EUR",
+  "prices_include_tax": null,
+  "tax_note": "Taxes doc: VAT is charged in the EU according to the customer's country (Finnish VAT for Finnish companies; VAT-registered EU businesses can buy VAT-free); 7% GST for Singapore consumers; others are not charged tax. Whether list prices include VAT could not be read from the pricing page. Source: https://upcloud.com/docs/getting-started/billing/taxes/",
+  "protocols": [
+    "s3"
+  ],
+  "protocols_source": {
+    "source_url": "https://upcloud.com/docs/products/managed-object-storage/s3-standard-compatibility/",
+    "last_verified": "2026-10-13"
+  },
+  "regions": [
+    {
+      "code": "europe-1",
+      "city": "Helsinki",
+      "country": "FI",
+      "source_url": "https://upcloud.com/docs/products/managed-object-storage/availability/",
+      "last_verified": "2026-10-13",
+      "note": "Availability doc: Object Storage region EUROPE-1 is physically located in FI-HEL2. Lowercase code as used in the docs' AWS CLI example (region=europe-1)."
+    },
+    {
+      "code": "europe-2",
+      "city": "Frankfurt",
+      "country": "DE",
+      "source_url": "https://upcloud.com/docs/products/managed-object-storage/availability/",
+      "last_verified": "2026-10-13",
+      "note": "Availability doc: Object Storage region EUROPE-2 is physically located in DE-FRA1. Lowercase code as used in the docs' AWS CLI example (region=europe-1)."
+    },
+    {
+      "code": "europe-3",
+      "city": "Stockholm",
+      "country": "SE",
+      "source_url": "https://upcloud.com/docs/products/managed-object-storage/availability/",
+      "last_verified": "2026-10-13",
+      "note": "Availability doc: Object Storage region EUROPE-3 is physically located in SE-STO1. Lowercase code as used in the docs' AWS CLI example (region=europe-1)."
+    },
+    {
+      "code": "europe-4",
+      "city": "Copenhagen",
+      "country": "DK",
+      "source_url": "https://upcloud.com/docs/products/managed-object-storage/availability/",
+      "last_verified": "2026-10-13",
+      "note": "Availability doc: Object Storage region EUROPE-4 is physically located in DK-CPH1. Lowercase code as used in the docs' AWS CLI example (region=europe-1)."
+    },
+    {
+      "code": "us-1",
+      "city": "Chicago",
+      "country": "US",
+      "source_url": "https://upcloud.com/docs/products/managed-object-storage/availability/",
+      "last_verified": "2026-10-13",
+      "note": "Availability doc: Object Storage region US-1 is physically located in US-CHI1. Lowercase code as used in the docs' AWS CLI example (region=europe-1)."
+    },
+    {
+      "code": "apac-1",
+      "city": "Singapore",
+      "country": "SG",
+      "source_url": "https://upcloud.com/docs/products/managed-object-storage/availability/",
+      "last_verified": "2026-10-13",
+      "note": "Availability doc: Object Storage region APAC-1 is physically located in SG-SIN1. Lowercase code as used in the docs' AWS CLI example (region=europe-1)."
+    }
+  ],
+  "storage_classes": [
+    {
+      "id": "standard",
+      "name": "Managed Object Storage",
+      "kind": "hot",
+      "applies_to_regions": [
+        "europe-1",
+        "europe-2",
+        "europe-3",
+        "europe-4",
+        "us-1",
+        "apac-1"
+      ],
+      "pricing_model": "fixed_plan",
+      "plans": [
+        {
+          "id": "increment-250gb",
+          "capacity_gb": {
+            "value": 250,
+            "source_url": "https://upcloud.com/docs/products/managed-object-storage/billing/",
+            "last_verified": "2026-10-13",
+            "note": "Billing doc: billing is based on storage usage in increments of 250 GB, each increment billed per hour; new instances are deployed with 250 GB (minimum invoicing unit) and scale up automatically by 250 GB."
+          },
+          "monthly_price": {
+            "value": null,
+            "note": "Not verified: the pricing page (https://upcloud.com/pricing/) and product page return HTTP 403 / a bot challenge to non-browser clients, the price API (https://api.upcloud.com/1.3/price) requires authentication, and the billing doc only refers to the pricing pages. The official calculator (calc.upcloud.com) embeds 'managed_object_storage_250GB' price 0.6944 for every location, but its unit (presumably per hour, in an unstated currency unit) is not stated, so no value is recorded."
+          }
+        }
+      ],
+      "requests": {
+        "put_per_1000": {
+          "value": null,
+          "note": "The billing doc says Managed Object Storage 'is billed based on the amount of storage you use' and lists no request fees, but does not state that requests are free; the pricing page could not be read (HTTP 403 / bot challenge)."
+        },
+        "get_per_1000": {
+          "value": null,
+          "note": "The billing doc says Managed Object Storage 'is billed based on the amount of storage you use' and lists no request fees, but does not state that requests are free; the pricing page could not be read (HTTP 403 / bot challenge)."
+        },
+        "list_per_1000": {
+          "value": null,
+          "note": "The billing doc says Managed Object Storage 'is billed based on the amount of storage you use' and lists no request fees, but does not state that requests are free; the pricing page could not be read (HTTP 403 / bot challenge)."
+        }
+      },
+      "retrieval": {
+        "price_per_gb": {
+          "value": null,
+          "note": "No retrieval fee line in the billing doc; single hot class. Absence of a line item, not an explicit statement."
+        },
+        "typical_delay": {
+          "value": null,
+          "note": "Not applicable (hot storage); no delay stated."
+        }
+      },
+      "minimum_storage_duration_days": {
+        "value": null,
+        "note": "Not stated in the billing doc; billing is per hour per 250 GB increment."
+      },
+      "minimum_billable_object_size_kb": {
+        "value": null,
+        "note": "Not stated in the docs checked."
+      },
+      "notes": [
+        "Billed per started 250 GB increment per hour; the instance scales up automatically (billing and scalable-bucket-size docs).",
+        "Prices must be filled in from https://upcloud.com/pricing/ with a browser before this profile is used in estimates."
+      ]
+    }
+  ],
+  "default_storage_class": "standard",
+  "egress": {
+    "applies_to_regions": [
+      "europe-1",
+      "europe-2",
+      "europe-3",
+      "europe-4",
+      "us-1",
+      "apac-1"
+    ],
+    "free_allowance_gb_per_month": {
+      "value": null,
+      "note": "No fixed allowance: the billing doc states zero-cost egress for Managed Object Storage (no per-GB charge at all); see egress_fair_use."
+    },
+    "free_allowance_scope": "Egress is not charged; Fair Transfer Policy may throttle high-bandwidth use.",
+    "price_per_gb": [
+      {
+        "from_gb": 0,
+        "up_to_gb": null,
+        "price": {
+          "value": 0,
+          "source_url": "https://upcloud.com/docs/products/managed-object-storage/billing/",
+          "last_verified": "2026-10-13",
+          "note": "Billing doc 'Zero egress fees': 'All our public cloud services, including Managed Object Storage, now include zero-cost egress transfer. This means that you will not be charged for any outbound network transfer costs'."
+        }
+      }
+    ],
+    "notes": [
+      "Ingress, Utility network and SDN private network transfer are included (network transfer doc)."
+    ]
+  },
+  "egress_fair_use": {
+    "value": "Fair Transfer Policy: the included public egress (Fair Transfer Limit) is calculated from the cloud resources on the account; when it is reached UpCloud sends a warning and may throttle bandwidth to 100 Mbit/s. The doc lists only Cloud Server plans as contributing, not Object Storage.",
+    "source_url": "https://upcloud.com/docs/products/networking/network-transfer/",
+    "last_verified": "2026-10-13",
+    "note": "The object storage billing doc points to the Fair Transfer Policy; how a storage-only account's limit is computed is not stated."
+  },
+  "free_tier": {
+    "value": "Free trial: 7 days from activation for new users, including 1 Managed Object Storage instance of 250 GB.",
+    "source_url": "https://upcloud.com/docs/getting-started/free-trial/",
+    "last_verified": "2026-10-13",
+    "note": "Trial only, not a permanent free tier; requires card verification."
+  },
+  "object_lock": {
+    "value": false,
+    "source_url": "https://upcloud.com/docs/products/managed-object-storage/s3-standard-compatibility/",
+    "last_verified": "2026-10-13",
+    "note": "S3 compatibility doc lists 'Object lock (Coming soon): Bucket Object Lock configuration'; not available as of the check."
+  },
+  "s3_endpoints": [
+    {
+      "region": "europe-1",
+      "label": "Helsinki",
+      "endpoint": "https://{instance_id}.upcloudobjects.com",
+      "path_style": false,
+      "source_url": "https://upcloud.com/docs/guides/connecting-to-an-object-storage-instance-s3cmd/",
+      "last_verified": "2026-10-13",
+      "note": "Endpoints are per Object Storage instance (docs example https://abcd1.upcloudobjects.com; replace with the endpoint shown in the Control Panel). The s3cmd guide configures the DNS-style template %(bucket)s.<s3-endpoint>, i.e. virtual-hosted style. Signing region per the get-started guide example (region=europe-1)."
+    },
+    {
+      "region": "europe-2",
+      "label": "Frankfurt",
+      "endpoint": "https://{instance_id}.upcloudobjects.com",
+      "path_style": false,
+      "source_url": "https://upcloud.com/docs/guides/connecting-to-an-object-storage-instance-s3cmd/",
+      "last_verified": "2026-10-13",
+      "note": "Endpoints are per Object Storage instance (docs example https://abcd1.upcloudobjects.com; replace with the endpoint shown in the Control Panel). The s3cmd guide configures the DNS-style template %(bucket)s.<s3-endpoint>, i.e. virtual-hosted style. Signing region per the get-started guide example (region=europe-1)."
+    },
+    {
+      "region": "europe-3",
+      "label": "Stockholm",
+      "endpoint": "https://{instance_id}.upcloudobjects.com",
+      "path_style": false,
+      "source_url": "https://upcloud.com/docs/guides/connecting-to-an-object-storage-instance-s3cmd/",
+      "last_verified": "2026-10-13",
+      "note": "Endpoints are per Object Storage instance (docs example https://abcd1.upcloudobjects.com; replace with the endpoint shown in the Control Panel). The s3cmd guide configures the DNS-style template %(bucket)s.<s3-endpoint>, i.e. virtual-hosted style. Signing region per the get-started guide example (region=europe-1)."
+    },
+    {
+      "region": "europe-4",
+      "label": "Copenhagen",
+      "endpoint": "https://{instance_id}.upcloudobjects.com",
+      "path_style": false,
+      "source_url": "https://upcloud.com/docs/guides/connecting-to-an-object-storage-instance-s3cmd/",
+      "last_verified": "2026-10-13",
+      "note": "Endpoints are per Object Storage instance (docs example https://abcd1.upcloudobjects.com; replace with the endpoint shown in the Control Panel). The s3cmd guide configures the DNS-style template %(bucket)s.<s3-endpoint>, i.e. virtual-hosted style. Signing region per the get-started guide example (region=europe-1)."
+    },
+    {
+      "region": "us-1",
+      "label": "Chicago",
+      "endpoint": "https://{instance_id}.upcloudobjects.com",
+      "path_style": false,
+      "source_url": "https://upcloud.com/docs/guides/connecting-to-an-object-storage-instance-s3cmd/",
+      "last_verified": "2026-10-13",
+      "note": "Endpoints are per Object Storage instance (docs example https://abcd1.upcloudobjects.com; replace with the endpoint shown in the Control Panel). The s3cmd guide configures the DNS-style template %(bucket)s.<s3-endpoint>, i.e. virtual-hosted style. Signing region per the get-started guide example (region=europe-1)."
+    },
+    {
+      "region": "apac-1",
+      "label": "Singapore",
+      "endpoint": "https://{instance_id}.upcloudobjects.com",
+      "path_style": false,
+      "source_url": "https://upcloud.com/docs/guides/connecting-to-an-object-storage-instance-s3cmd/",
+      "last_verified": "2026-10-13",
+      "note": "Endpoints are per Object Storage instance (docs example https://abcd1.upcloudobjects.com; replace with the endpoint shown in the Control Panel). The s3cmd guide configures the DNS-style template %(bucket)s.<s3-endpoint>, i.e. virtual-hosted style. Signing region per the get-started guide example (region=europe-1)."
+    }
+  ],
+  "notes": [
+    "Single storage class; data is physically hosted in the region's data centre and reachable from other UpCloud locations over SDN private networks (availability doc).",
+    "Endpoint, IAM and STS URLs are shown per instance in the Control Panel (get-started guide)."
+  ]
+}
