@@ -18,6 +18,9 @@
   var ATTRS = ["title", "placeholder", "aria-label", "alt"];
   var original = new WeakMap(); // node -> English text, to translate again after app.js rewrites it
   var busy = false;
+  // Callbacks waiting for the dictionary (app.js code that translates by itself).
+  var loaded = lang === "en", waiting = [];
+  function ready() { loaded = true; var w = waiting; waiting = []; w.forEach(function (f) { try { f(); } catch (e) { /* the caller's own error */ } }); }
 
   function norm(s) { return s.replace(/\s+/g, " ").trim(); }
   function translate(s) {
@@ -103,6 +106,8 @@
   window.varstoLang = {
     get: function () { return lang; },
     t: translate,
+    // Run f once the translations are loaded (at once in English or after a failure).
+    ready: function (f) { if (loaded) { f(); } else { waiting.push(f); } },
     set: function (l) {
       try { localStorage.setItem(KEY, l); } catch (e) { /* not kept */ }
       // Tell the service, so the tray and the menu bar follow (best effort).
@@ -121,6 +126,7 @@
       patterns = (j.patterns || []).map(function (p) { return [new RegExp(p[0]), p[1]]; });
       parts = (j.parts || []).map(function (p) { return [new RegExp(p[0], "g"), p[1]]; });
       start();
-    }).catch(function () { /* English stays */ });
+      ready();
+    }).catch(function () { ready(); /* English stays */ });
   });
 })();

@@ -14,6 +14,7 @@ mod drive_mount;
 mod drives;
 mod filemanager;
 mod icon;
+mod import;
 mod mcp;
 mod mcp_keys;
 mod placing;
@@ -39,6 +40,40 @@ struct Cli {
     json: bool,
     #[command(subcommand)]
     cmd: Cmd,
+}
+
+#[derive(Subcommand)]
+enum LedgerCmd {
+    /// List the ledger batches held on this device.
+    List,
+    /// Heads per device, where each device's batches are held (this device
+    /// and every storage), checkpoints, fork state, and whether a rebuild
+    /// is recommended.
+    Status,
+    /// Restore this device's ledger from the storages: its own batches and
+    /// checkpoints (continuing after the newest), the other devices'
+    /// batches and the view. A device restored from an old backup adopts
+    /// its later history when it is its own; two copies of one device are
+    /// refused.
+    Rebuild {
+        /// Also rebuild the record of where the blocks are from what the
+        /// storages hold (when no ledger is left anywhere): every object the
+        /// folders' newest manifests name is looked up, verified and claimed.
+        #[arg(long)]
+        from_storage: bool,
+        /// Verify every object before claiming it (default: all up to 1 GiB, otherwise up to --verify-budget-mib).
+        #[arg(long, conflicts_with = "no_verify")]
+        verify: bool,
+        /// Claim the objects without reading them.
+        #[arg(long)]
+        no_verify: bool,
+        /// How much to read for verification when the vault is large.
+        #[arg(long, default_value_t = 1024)]
+        verify_budget_mib: u64,
+        /// Also read cold storages (retrievals may be billed).
+        #[arg(long)]
+        confirm_cold_read: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -131,6 +166,12 @@ enum Cmd {
         #[command(subcommand)]
         cmd: backup::BackupCmd,
     },
+    /// Import a git-annex repository, a cloud drive (Dropbox, OneDrive, any
+    /// rclone remote) or a local directory into a folder; status, verify, cleanup.
+    Import {
+        #[command(subcommand)]
+        cmd: import::ImportCmd,
+    },
     /// Show vault, devices, storages and folders.
     Status,
     /// How files would be fetched: from pool disks (which ones, in which order) or the network,
@@ -168,8 +209,11 @@ enum Cmd {
     },
     /// List duplicate files in a folder.
     Dupes { folder: String },
-    /// List ledger batches.
-    Ledger,
+    /// The ledger: list batches (default), show its state, rebuild it.
+    Ledger {
+        #[command(subcommand)]
+        cmd: Option<LedgerCmd>,
+    },
     /// Start the background service and open the desktop interface in your browser (default when run without arguments).
     Desktop {
         /// Port on 127.0.0.1 (0 = pick a free one).
@@ -409,6 +453,23 @@ enum RecoveryCmd {
         #[arg(required = true, num_args = 2..)]
         shares: Vec<String>,
     },
+    /// What to keep outside your devices to restore everything if all of them are lost, and
+    /// the restore steps for a new device. Personal to this vault; holds no secret.
+    Guide {
+        #[arg(long, value_enum, default_value_t = GuideFormat::Text)]
+        format: GuideFormat,
+        /// Write to this file instead of standard output.
+        #[arg(long)]
+        output: Option<PathBuf>,
+    },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
+enum GuideFormat {
+    Text,
+    Markdown,
+    /// A printable page with checkboxes.
+    Html,
 }
 
 #[derive(Subcommand)]
@@ -983,8 +1044,26 @@ enum DiskCmd {
         #[arg(long)]
         copies: Option<u32>,
     },
-    /// Every disk of every pool: attached or away, free space, last verified, pending deletes.
-    List,
+    /// Every disk of every pool: attached or away, free and total space (as last measured),
+    /// what can be freed, the oldest copy check, last seen, the last file system check.
+    List {
+        /// Sort by name, free, used, checked (oldest first), reclaimable or seen (longest ago first).
+        #[arg(long, default_value = "name")]
+        sort: String,
+        /// Reverse the order.
+        #[arg(long)]
+        reverse: bool,
+    },
+    /// Which disk to dock next and why: copies overdue for a check, data only on that disk,
+    /// space to free, what the pool lacks, a repair or fetch waiting, long unseen.
+    Suggest {
+        /// Only the disks of this pool.
+        #[arg(long)]
+        pool: Option<String>,
+        /// Turn the weekly "disk is overdue" reminder of the background service on or off.
+        #[arg(long, value_parser = ["on", "off"])]
+        remind: Option<String>,
+    },
     /// Reattach routine: verify the marker and the objects, apply queued deletions, add new objects.
     Check {
         label: String,
@@ -1246,6 +1325,22 @@ static TYPED: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
 /// unlocks a background service that waits for it.
 static USED: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
 
+/// Open the device directory. When its ledger needs a rebuild (lost or
+/// damaged local files, a fork), say so on stderr: commands that only read
+/// go on, commands that would sign stop with the same advice.
+pub(crate) fn open_engine(home: &Path) -> Result<Engine> {
+    let e = Engine::open(home, &passphrase()?)?;
+    warn_ledger(&e.ledger_health());
+    Ok(e)
+}
+
+/// A one-line warning about the ledger on stderr, unless it is fine.
+fn warn_ledger(h: &varsto_core::engine::LedgerHealth) {
+    if !h.is_ok() {
+        eprintln!("warning: ledger: {}", h.describe());
+    }
+}
+
 fn passphrase() -> Result<String> {
     if let Ok(p) = std::env::var("VARSTO_PASSPHRASE") {
         *USED.lock().unwrap() = Some(p.clone());
@@ -1293,6 +1388,154 @@ fn default_home() -> Result<PathBuf> {
 }
 
 /// Decimal sizes for messages ("3.2 GB", "410 MB").
+/// `varsto disk list` as a table: name (sticker), pool, place, state,
+/// free/total, reclaimable, oldest check, last seen, file system check.
+fn disk_table(disks: &[varsto_core::pool::DiskStatus]) -> String {
+    use varsto_core::disksuggest::ago;
+    let now = varsto_core::util::now_utc();
+    let date = |t: i64| varsto_core::util::format_date(t);
+    let mut rows: Vec<[String; 9]> = vec![[
+        "NAME".into(),
+        "POOL".into(),
+        "PLACE".into(),
+        "STATE".into(),
+        "FREE / TOTAL".into(),
+        "RECLAIMABLE".into(),
+        "OLDEST CHECK".into(),
+        "LAST SEEN".into(),
+        "FSCK".into(),
+    ]];
+    for d in disks {
+        let mut state = vec![if d.attached { "attached" } else { "away" }];
+        if d.retired {
+            state.push("retired");
+        }
+        if d.failing {
+            state.push("failing");
+        }
+        let space = match d.free_bytes {
+            Some(f) => format!("{} / {}", fmt_bytes(f), fmt_bytes(d.capacity_bytes)),
+            None => format!("? / {}", fmt_bytes(d.capacity_bytes)),
+        };
+        let checked = match d.oldest_check_utc {
+            None => "-".to_string(),
+            Some(0) => "never".to_string(),
+            Some(t) => date(t),
+        } + &if d.copies_overdue > 0 {
+            format!(" ({:.0} % due)", d.overdue_share * 100.0)
+        } else {
+            String::new()
+        };
+        let seen = if d.attached {
+            "now".to_string()
+        } else if d.last_seen_utc > 0 {
+            ago(now, d.last_seen_utc)
+        } else {
+            "never".to_string()
+        };
+        let fsck = d
+            .fsck
+            .as_ref()
+            .map(|c| format!("{:?} {}", c.verdict, date(c.checked_utc)).to_lowercase())
+            .unwrap_or_else(|| "-".to_string());
+        rows.push([
+            d.label.clone(),
+            d.pool.clone(),
+            d.place.clone(),
+            state.join(", "),
+            space,
+            fmt_bytes(d.reclaimable_bytes),
+            checked,
+            seen,
+            fsck,
+        ]);
+    }
+    let mut widths = [0usize; 9];
+    for r in &rows {
+        for (i, c) in r.iter().enumerate() {
+            widths[i] = widths[i].max(c.chars().count());
+        }
+    }
+    let mut out = String::new();
+    for r in &rows {
+        let line: Vec<String> = r
+            .iter()
+            .enumerate()
+            .map(|(i, c)| format!("{c}{}", " ".repeat(widths[i] - c.chars().count())))
+            .collect();
+        out.push_str(line.join("  ").trim_end());
+        out.push('\n');
+    }
+    out
+}
+
+/// `varsto disk suggest` as text: the suggestion with its reasons and the
+/// command to run, the other disks, attached ones and the ones left out.
+fn suggest_text(s: &varsto_core::disksuggest::DiskSuggestions) -> String {
+    let mut out = String::new();
+    let reasons = |d: &varsto_core::disksuggest::DiskSuggestion| -> String {
+        if d.reasons.is_empty() {
+            return "  - nothing due\n".to_string();
+        }
+        d.reasons
+            .iter()
+            .map(|r| format!("  - {}\n", r.text))
+            .collect()
+    };
+    match &s.top {
+        Some(t) => {
+            out += &format!(
+                "Suggested next: «{}» (pool {}, {}), score {:.1}\n{}  Run: {}\n",
+                t.label,
+                t.pool,
+                t.place,
+                t.score,
+                reasons(t),
+                t.command
+            );
+        }
+        None => out += "No disk needs docking now.\n",
+    }
+    let rest: Vec<_> = s
+        .ranked
+        .iter()
+        .filter(|d| s.top.as_ref().is_none_or(|t| t.disk_id != d.disk_id))
+        .collect();
+    if !rest.is_empty() {
+        out += "\nOther disks that are away:\n";
+        for d in rest {
+            out += &format!(
+                "«{}» (pool {}, {}), score {:.1}\n{}",
+                d.label,
+                d.pool,
+                d.place,
+                d.score,
+                reasons(d)
+            );
+        }
+    }
+    if !s.attached.is_empty() {
+        out += "\nAttached now (no docking needed; `varsto disk check <label>` checks one):\n";
+        for d in &s.attached {
+            out += &format!(
+                "«{}» (pool {}, {}), score {:.1}\n{}",
+                d.label,
+                d.pool,
+                d.place,
+                d.score,
+                reasons(d)
+            );
+        }
+    }
+    if !s.excluded.is_empty() {
+        out += "\nNot suggested:\n";
+        for d in &s.excluded {
+            out += &format!("«{}» (pool {}): {}\n", d.label, d.pool, d.warning);
+        }
+    }
+    out
+}
+
 fn fmt_bytes(n: u64) -> String {
     const UNITS: [&str; 5] = ["B", "kB", "MB", "GB", "TB"];
     let mut v = n as f64;
@@ -1688,7 +1931,7 @@ fn run_org(cli: &Cli, home: &Path, cmd: &OrgCmd) -> Result<()> {
                     serde_json::json!({"name": name, "user": user}),
                 )?)?
             } else {
-                let mut engine = Engine::open(home, &passphrase()?)?;
+                let mut engine = open_engine(home)?;
                 engine.org_create(name, user)?
             };
             if cli.json {
@@ -1712,7 +1955,7 @@ fn run_org(cli: &Cli, home: &Path, cmd: &OrgCmd) -> Result<()> {
                     Some(serde_json::from_value(v)?)
                 }
             } else {
-                Engine::open(home, &passphrase()?)?.org_summary()
+                open_engine(home)?.org_summary()
             };
             match summary {
                 None => {
@@ -1755,7 +1998,7 @@ fn run_org(cli: &Cli, home: &Path, cmd: &OrgCmd) -> Result<()> {
                     serde_json::json!({"code": code, "user": user, "fingerprint": confirmed}),
                 )?)?
             } else {
-                let mut engine = Engine::open(home, &passphrase()?)?;
+                let mut engine = open_engine(home)?;
                 engine.org_approve(code, user, confirmed.as_deref())?
             };
             if cli.json {
@@ -1775,7 +2018,7 @@ fn run_org(cli: &Cli, home: &Path, cmd: &OrgCmd) -> Result<()> {
                     serde_json::json!({"device": device, "user": user}),
                 )?;
             } else {
-                Engine::open(home, &passphrase()?)?.org_add_device(device, user)?;
+                open_engine(home)?.org_add_device(device, user)?;
             }
             println!("added {device} to the organization for {user}");
         }
@@ -1793,7 +2036,7 @@ fn run_org(cli: &Cli, home: &Path, cmd: &OrgCmd) -> Result<()> {
                     serde_json::json!({"user": user, "wipe": wipe, "confirm": user}),
                 )?)?
             } else {
-                let mut engine = Engine::open(home, &passphrase()?)?;
+                let mut engine = open_engine(home)?;
                 engine.org_remove_user(user, *wipe)?
             };
             print(cli, &report, |r| {
@@ -1824,9 +2067,7 @@ fn run_org(cli: &Cli, home: &Path, cmd: &OrgCmd) -> Result<()> {
                     .map(serde_json::from_value)
                     .transpose()?
             } else {
-                Engine::open(home, &passphrase()?)?
-                    .org_summary()
-                    .map(|s| s.policy)
+                open_engine(home)?.org_summary().map(|s| s.policy)
             };
             let Some(mut p) = current else {
                 bail!("this vault has no organization");
@@ -1849,7 +2090,7 @@ fn run_org(cli: &Cli, home: &Path, cmd: &OrgCmd) -> Result<()> {
             if via_service.is_some() {
                 call("POST", "/api/org/policy", serde_json::to_value(&p)?)?;
             } else {
-                Engine::open(home, &passphrase()?)?.org_set_policy(p.clone())?;
+                open_engine(home)?.org_set_policy(p.clone())?;
             }
             print(cli, &p, policy_text)?;
         }
@@ -1865,7 +2106,7 @@ fn run_org(cli: &Cli, home: &Path, cmd: &OrgCmd) -> Result<()> {
                     serde_json::json!({"action": action, "device": device, "root_words": words}),
                 )?;
             } else {
-                let mut engine = Engine::open(home, &passphrase()?)?;
+                let mut engine = open_engine(home)?;
                 if action == "add" {
                     engine.org_admin_add(device, words)?;
                 } else {
@@ -1883,7 +2124,7 @@ fn run_org(cli: &Cli, home: &Path, cmd: &OrgCmd) -> Result<()> {
                     call("GET", "/api/org/log", serde_json::Value::Null)?["log"].clone(),
                 )?
             } else {
-                Engine::open(home, &passphrase()?)?.org_log_entries()
+                open_engine(home)?.org_log_entries()
             };
             print(cli, &log, |l| {
                 if l.is_empty() {
@@ -2005,6 +2246,7 @@ fn run(cli: &Cli) -> Result<()> {
                 );
                 println!("Vault key (needed to join other devices; shown once, keep it offline):");
                 println!("  {vault_key}");
+                println!("Next: print the recovery kit (`varsto recovery kit`) and, once storages are added, see `varsto recovery guide` for everything to keep in case all your devices are lost.");
             }
         }
         Cmd::Join {
@@ -2103,7 +2345,7 @@ fn run(cli: &Cli) -> Result<()> {
             }
         }
         Cmd::Storage { cmd } => {
-            let mut engine = Engine::open(&home, &passphrase()?)?;
+            let mut engine = open_engine(&home)?;
             match cmd {
                 StorageCmd::AddLocal {
                     name,
@@ -2303,7 +2545,7 @@ fn run(cli: &Cli) -> Result<()> {
             }
         }
         Cmd::Disk { cmd } => {
-            let mut engine = Engine::open(&home, &passphrase()?)?;
+            let mut engine = open_engine(&home)?;
             match cmd {
                 DiskCmd::Place { label, place } => {
                     placing::disk_place(cli, &mut engine, label, place)?;
@@ -2346,44 +2588,34 @@ fn run(cli: &Cli) -> Result<()> {
                             .unwrap_or_default()
                     })?;
                 }
-                DiskCmd::List => {
-                    let disks = engine.disks()?;
+                DiskCmd::List { sort, reverse } => {
+                    let mut disks = engine.disk_report()?;
+                    varsto_core::disksuggest::sort_disks(&mut disks, sort, *reverse)?;
                     // The drives of disks.conf: their partition and whether they are plugged in.
                     let known = drives::known_drives(&home);
-                    let drive_of = |label: &str| known.iter().find(|(d, _)| d.label == label);
+                    let drive_of = |pool: &str, label: &str| {
+                        known
+                            .iter()
+                            .find(|(d, _)| d.pool == pool && d.label == label)
+                    };
                     if cli.json {
                         let mut rows = serde_json::to_value(&disks)?;
                         for row in rows.as_array_mut().into_iter().flatten() {
                             let label = row["label"].as_str().unwrap_or_default().to_string();
-                            if let Some((d, at)) = drive_of(&label) {
+                            let pool = row["pool"].as_str().unwrap_or_default().to_string();
+                            if let Some((d, at)) = drive_of(&pool, &label) {
                                 row["partuuid"] = serde_json::json!(d.partuuid);
                                 row["plugged_in"] = serde_json::json!(at.is_some());
                                 row["partition"] = serde_json::json!(at.as_ref().map(|a| &a.0));
-                                row["fsck"] = serde_json::json!(varsto_core::diskconf::checks(
-                                    &home
-                                )
-                                .get(&d.partuuid));
                             }
                         }
                         println!("{}", serde_json::to_string_pretty(&rows)?);
                         return Ok(());
                     }
                     let mut text = String::new();
-                    let checks = varsto_core::diskconf::checks(&home);
                     for (d, at) in &known {
-                        let check = checks
-                            .get(&d.partuuid)
-                            .map(|c| {
-                                format!(
-                                    "; file system checked {}: {:?}",
-                                    varsto_core::util::format_date(c.checked_utc),
-                                    c.verdict
-                                )
-                                .to_lowercase()
-                            })
-                            .unwrap_or_else(|| "; file system not checked yet".into());
                         text.push_str(&format!(
-                            "drive \"{}\" (pool {}, PARTUUID {}{check}): {}\n",
+                            "drive \"{}\" (pool {}, PARTUUID {}): {}\n",
                             d.label,
                             d.pool,
                             d.partuuid,
@@ -2398,47 +2630,37 @@ fn run(cli: &Cli) -> Result<()> {
                             }
                         ));
                     }
+                    if !text.is_empty() {
+                        text.push('\n');
+                    }
+                    if disks.is_empty() {
+                        text.push_str("no disks; add a pool with `varsto storage add-pool <name>` and a disk with `varsto disk add`\n");
+                    } else {
+                        text.push_str(&disk_table(&disks));
+                    }
                     print!("{text}");
-                    print(cli, &disks, |disks| {
-                        if disks.is_empty() {
-                            return "no disks; add a pool with `varsto storage add-pool <name>` and a disk with `varsto disk add`".to_string();
+                }
+                DiskCmd::Suggest { pool, remind } => {
+                    if let Some(r) = remind {
+                        let mut st = engine.disk_suggest_settings();
+                        st.notify_overdue = r == "on";
+                        engine.set_disk_suggest_settings(st)?;
+                    }
+                    let s = engine.disk_suggestions_for(pool.as_deref())?;
+                    if cli.json {
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(&serde_json::json!({
+                                "suggestions": s,
+                                "settings": engine.disk_suggest_settings(),
+                            }))?
+                        );
+                    } else {
+                        print!("{}", suggest_text(&s));
+                        if let Some(r) = remind {
+                            println!("weekly reminder of overdue disks: {r}");
                         }
-                        disks
-                            .iter()
-                            .map(|d| {
-                                let state = if d.attached {
-                                    format!(
-                                        "attached at {}, {} free",
-                                        d.mount.as_ref().map(|p| p.display().to_string()).unwrap_or_default(),
-                                        d.free_bytes.map(fmt_bytes).unwrap_or_else(|| "? ".into())
-                                    )
-                                } else {
-                                    "offline".to_string()
-                                };
-                                format!(
-                                    "{} (pool {}, {}): {}{}; {} objects, {} used; last verified {}{}",
-                                    d.label,
-                                    d.pool,
-                                    d.place,
-                                    state,
-                                    if d.retired { ", retired" } else { "" },
-                                    d.objects,
-                                    fmt_bytes(d.used_bytes),
-                                    if d.last_verified_utc > 0 {
-                                        varsto_core::util::format_date(d.last_verified_utc)
-                                    } else {
-                                        "never".to_string()
-                                    },
-                                    if d.pending_deletes > 0 {
-                                        format!("; {} pending deletes", d.pending_deletes)
-                                    } else {
-                                        String::new()
-                                    }
-                                )
-                            })
-                            .collect::<Vec<_>>()
-                            .join("\n")
-                    })?;
+                    }
                 }
                 DiskCmd::Check { label, full } => {
                     let r = engine.disk_check(label, *full)?;
@@ -2588,7 +2810,7 @@ fn run(cli: &Cli) -> Result<()> {
             confirm_cold_read,
             yes,
         } => {
-            let mut engine = Engine::open(&home, &passphrase()?)?;
+            let mut engine = open_engine(&home)?;
             placing::move_data(
                 cli,
                 &mut engine,
@@ -2611,7 +2833,7 @@ fn run(cli: &Cli) -> Result<()> {
                 println!("{done}");
                 return Ok(());
             }
-            let mut engine = Engine::open(&home, &passphrase()?)?;
+            let mut engine = open_engine(&home)?;
             match cmd {
                 FolderCmd::Placement {
                     folder,
@@ -2711,7 +2933,7 @@ fn run(cli: &Cli) -> Result<()> {
                     );
                 }
                 FolderCmd::Files { folder } => {
-                    let rows = engine.list_files(folder)?;
+                    let rows = engine.list_files_with_pending(folder)?;
                     print(cli, &rows, |rows| {
                         rows.iter()
                             .map(|f| {
@@ -2750,7 +2972,7 @@ fn run(cli: &Cli) -> Result<()> {
             }
         }
         Cmd::Push { folder } => {
-            let mut engine = Engine::open(&home, &passphrase()?)?;
+            let mut engine = open_engine(&home)?;
             let r = engine.push(folder)?;
             print(cli, &r, |r| {
                 format!(
@@ -2765,15 +2987,16 @@ fn run(cli: &Cli) -> Result<()> {
             })?;
         }
         Cmd::Pull { folder } => {
-            let mut engine = Engine::open(&home, &passphrase()?)?;
+            let mut engine = open_engine(&home)?;
             let r = engine.pull(folder)?;
             print(cli, &r, |r| {
                 format!("{}: {} manifests, {} updated, {} deleted, {} conflicts, {} chunks downloaded; unavailable: {:?}; forked: {:?}{}", r.folder, r.manifests_applied, r.files_updated, r.files_deleted, r.conflicts, r.chunks_downloaded, r.files_unavailable, r.forked_devices, if r.disks_needed.is_empty() { String::new() } else { format!("; attach disk {}", r.disks_needed.join(", ")) })
             })?;
         }
         Cmd::Sync { folder } => {
-            let mut engine = Engine::open(&home, &passphrase()?)?;
+            let mut engine = open_engine(&home)?;
             let r = engine.sync(folder.as_deref())?;
+            warn_ledger(&engine.ledger_health());
             print(cli, &r, |r| {
                 r.iter().map(|(pl, ps)| format!("{}: pulled {} updated/{} deleted/{} conflicts, pushed {} changed/{} chunks{}{}", pl.folder, pl.files_updated, pl.files_deleted, pl.conflicts, ps.files_changed, ps.chunks_uploaded, if pl.disks_needed.is_empty() { String::new() } else { format!("; attach disk {}", pl.disks_needed.join(", ")) }, if ps.storages_unavailable.is_empty() { String::new() } else { format!("; not written to {}", ps.storages_unavailable.join(", ")) })).collect::<Vec<_>>().join("\n")
             })?;
@@ -2812,7 +3035,7 @@ fn run(cli: &Cli) -> Result<()> {
                 }
                 return Ok(());
             }
-            let engine = Engine::open(&home, &passphrase()?)?;
+            let engine = open_engine(&home)?;
             let s = engine.status()?;
             print(cli, &s, |s| {
                 let mut out = format!(
@@ -2842,11 +3065,13 @@ fn run(cli: &Cli) -> Result<()> {
                 if !s.forked_devices.is_empty() {
                     out += &format!("WARNING forked devices: {:?}\n", s.forked_devices);
                 }
+                out += &format!("ledger: {}\n", s.ledger_health.describe());
                 out.trim_end().to_string()
             })?;
         }
         Cmd::Verify { cmd } => upkeep::verify(cli, &home, cmd)?,
         Cmd::Scrub { cmd, run } => upkeep::scrub(cli, &home, cmd, run)?,
+        Cmd::Import { cmd } => import::run(cli, &home, cmd)?,
         Cmd::Advice { idle_days, cmd } => upkeep::advice(cli, &home, *idle_days, cmd)?,
         Cmd::Restic { cmd } => restic::run(cli, &home, cmd)?,
         Cmd::Repair {
@@ -2867,10 +3092,10 @@ fn run(cli: &Cli) -> Result<()> {
             },
         )?,
         Cmd::Fsck { verify, repair } => {
-            let mut engine = Engine::open(&home, &passphrase()?)?;
+            let mut engine = open_engine(&home)?;
             let r = engine.fsck(*verify)?;
             print(cli, &r, |r| {
-                format!("referenced {} | with storage copy {} | verified elsewhere {} | claimed only {} | missing {:?} | claims without object {} | unreferenced objects {} | verified now {} | corrupt {:?} | forked {:?} | cold skipped {:?}{}", r.chunks_referenced, r.chunks_with_storage_copy, r.chunks_verified_elsewhere, r.chunks_claimed_only, r.chunks_missing, r.claims_without_object, r.objects_unreferenced, r.objects_verified_now, r.objects_corrupt, r.forked_devices, r.storages_skipped_cold, if r.disks_offline.is_empty() { String::new() } else { format!(" | offline: {} objects on {}", r.objects_offline, r.disks_offline.join("; ")) })
+                format!("referenced {} | with storage copy {} | verified elsewhere {} | claimed only {} | missing {:?} | claims without object {} | unreferenced objects {} | verified now {} | corrupt {:?} | forked {:?} | cold skipped {:?}{}", r.chunks_referenced, r.chunks_with_storage_copy, r.chunks_verified_elsewhere, r.chunks_claimed_only, r.chunks_missing, r.claims_without_object, r.objects_unreferenced, r.objects_verified_now, r.objects_corrupt, r.forked_devices, r.storages_skipped_cold, if r.disks_offline.is_empty() { String::new() } else { format!(" | offline: {} objects on {}", r.objects_offline, r.disks_offline.join("; ")) }) + &if r.ledger_health.is_ok() { String::new() } else { format!("\nledger: {}", r.ledger_health.describe()) }
             })?;
             let mut repaired_all = false;
             if *repair && r.repairs_queued > 0 {
@@ -2887,7 +3112,7 @@ fn run(cli: &Cli) -> Result<()> {
             }
         }
         Cmd::Dupes { folder } => {
-            let engine = Engine::open(&home, &passphrase()?)?;
+            let engine = open_engine(&home)?;
             let r = engine.dupes(folder)?;
             print(cli, &r, |r| {
                 r.iter()
@@ -3017,7 +3242,7 @@ fn run(cli: &Cli) -> Result<()> {
                 fingerprint,
                 yes,
             } => {
-                let mut engine = Engine::open(&home, &passphrase()?)?;
+                let mut engine = open_engine(&home)?;
                 match to {
                     Some(code) => {
                         let req = Engine::share_request_info(code)?;
@@ -3137,7 +3362,7 @@ fn run(cli: &Cli) -> Result<()> {
                         );
                         serde_json::from_str(&service::http_get(&url, &sf.token)?)?
                     } else {
-                        let engine = Engine::open(&home, &passphrase()?)?;
+                        let engine = open_engine(&home)?;
                         engine.share_members(folder)?
                     };
                 print(cli, &list, share_members_text)?;
@@ -3162,7 +3387,7 @@ fn run(cli: &Cli) -> Result<()> {
                     serde_json::from_str(&r)
                         .map_err(|_| anyhow!("unexpected answer from the service: {r}"))?
                 } else {
-                    let mut engine = Engine::open(&home, &passphrase()?)?;
+                    let mut engine = open_engine(&home)?;
                     engine.share_revoke(folder, member)?
                 };
                 print(cli, &report, |r| {
@@ -3196,7 +3421,7 @@ fn run(cli: &Cli) -> Result<()> {
         Cmd::Replica { cmd } => {
             match cmd {
                 ReplicaCmd::Token => {
-                    let engine = Engine::open(&home, &passphrase()?)?;
+                    let engine = open_engine(&home)?;
                     let t = engine.replica_token()?;
                     print(cli, &t, |t| {
                         format!("replica token (share only with the device that will hold your encrypted copies):\n  {}", t.encode())
@@ -3269,7 +3494,7 @@ fn run(cli: &Cli) -> Result<()> {
         }
         Cmd::Device { cmd } => match cmd {
             DeviceCmd::List => {
-                let engine = Engine::open(&home, &passphrase()?)?;
+                let engine = open_engine(&home)?;
                 let list = engine.devices_list();
                 print(cli, &list, |list| {
                     let mut out = format!("vault key epoch {}\n", engine.key_epoch());
@@ -3334,7 +3559,7 @@ fn run(cli: &Cli) -> Result<()> {
                     serde_json::from_str(&r)
                         .map_err(|_| anyhow!("unexpected answer from the service: {r}"))?
                 } else {
-                    let mut engine = Engine::open(&home, &passphrase()?)?;
+                    let mut engine = open_engine(&home)?;
                     engine.revoke_device(device, *wipe)?
                 };
                 print(cli, &report, |r| {
@@ -3356,7 +3581,7 @@ fn run(cli: &Cli) -> Result<()> {
         Cmd::Pair { cmd } => {
             match cmd {
                 PairCmd::Offer => {
-                    let engine = Engine::open(&home, &passphrase()?)?;
+                    let engine = open_engine(&home)?;
                     let offer = varsto_core::pair::Offer::start(engine.pairing_bundle()?)?;
                     let st = offer.status();
                     println!("Pairing code: {}", st.code);
@@ -3405,7 +3630,7 @@ fn run(cli: &Cli) -> Result<()> {
         }
         Cmd::Recovery { cmd } => match cmd {
             RecoveryCmd::Kit { shares } => {
-                let engine = Engine::open(&home, &passphrase()?)?;
+                let engine = open_engine(&home)?;
                 let key = engine.export_vault_key()?;
                 let sh = if *shares {
                     Some((2u8, varsto_core::recovery::split(&key, 2, 3)?))
@@ -3418,6 +3643,35 @@ fn run(cli: &Cli) -> Result<()> {
                 );
                 if let Some(note) = restic::kit_note(&home) {
                     print!("{note}");
+                }
+                varsto_core::recovery_guide::record_kit_printed(
+                    &home,
+                    engine.key_epoch(),
+                    *shares,
+                )?;
+                println!("\nThe words alone are not the whole recovery package: `varsto recovery guide` lists what else to keep (storage keys, disks, security keys) and how to restore on a new device.");
+            }
+            RecoveryCmd::Guide { format, output } => {
+                let engine = Engine::open(&home, &passphrase()?)?;
+                let guide = engine.recovery_guide();
+                let body = if cli.json {
+                    serde_json::to_string_pretty(&guide)?
+                } else {
+                    match format {
+                        GuideFormat::Text => varsto_core::recovery_guide::render_text(&guide),
+                        GuideFormat::Markdown => {
+                            varsto_core::recovery_guide::render_markdown(&guide)
+                        }
+                        GuideFormat::Html => varsto_core::recovery_guide::render_html(&guide),
+                    }
+                };
+                match output {
+                    Some(path) => {
+                        std::fs::write(path, body.as_bytes())
+                            .with_context(|| format!("write {}", path.display()))?;
+                        eprintln!("wrote the recovery guide to {}", path.display());
+                    }
+                    None => print!("{body}"),
                 }
             }
             RecoveryCmd::Combine { shares } => {
@@ -3438,7 +3692,7 @@ fn run(cli: &Cli) -> Result<()> {
             tags,
         } => run_search(cli, &home, &query.join(" "), folder.as_deref(), tags)?,
         Cmd::Strongroom { cmd } => {
-            let mut engine = Engine::open(&home, &passphrase()?)?;
+            let mut engine = open_engine(&home)?;
             match cmd {
                 StrongroomCmd::Create {
                     name,
@@ -3679,7 +3933,7 @@ fn run(cli: &Cli) -> Result<()> {
                 println!("{}", r["note"].as_str().unwrap_or("saved"));
                 return Ok(());
             }
-            let mut engine = Engine::open(&home, &passphrase()?)?;
+            let mut engine = open_engine(&home)?;
             match cmd {
                 P2pCmd::Enable {
                     port,
@@ -3721,7 +3975,7 @@ fn run(cli: &Cli) -> Result<()> {
             }
         }
         Cmd::Policy { cmd } => {
-            let mut engine = Engine::open(&home, &passphrase()?)?;
+            let mut engine = open_engine(&home)?;
             match cmd {
                 PolicyCmd::Set {
                     folder,
@@ -3979,8 +4233,90 @@ fn run(cli: &Cli) -> Result<()> {
                 }
             }
         }
-        Cmd::Ledger => {
-            let engine = Engine::open(&home, &passphrase()?)?;
+        Cmd::Ledger {
+            cmd: Some(LedgerCmd::Status),
+        } => {
+            let mut engine = open_engine(&home)?;
+            let r = engine.ledger_status(true)?;
+            print(cli, &r, describe_ledger_status)?;
+            if !r.health.is_ok() {
+                std::process::exit(1);
+            }
+        }
+        Cmd::Ledger {
+            cmd:
+                Some(LedgerCmd::Rebuild {
+                    from_storage,
+                    verify,
+                    no_verify,
+                    verify_budget_mib,
+                    confirm_cold_read,
+                }),
+        } => {
+            // A running, unlocked service owns the engine: it rebuilds (its
+            // engine would not know of a rebuild made beside it).
+            if let Some((f, _)) = service::status(&home) {
+                let body = serde_json::json!({
+                    "from_storage": from_storage,
+                    "verify": if *verify { Some(true) } else if *no_verify { Some(false) } else { None },
+                    "verify_budget_mib": verify_budget_mib,
+                    "confirm_cold_read": confirm_cold_read,
+                });
+                let answer = service::http_post_within(
+                    &format!("http://127.0.0.1:{}/api/ledger/rebuild", f.port),
+                    &f.token,
+                    &body.to_string(),
+                    24 * 3600,
+                );
+                match answer {
+                    Ok(t) => {
+                        let r: varsto_core::engine::LedgerRebuildReport = serde_json::from_str(&t)?;
+                        print(cli, &r, describe_rebuild)?;
+                        if !r.health.is_ok() {
+                            std::process::exit(1);
+                        }
+                        return Ok(());
+                    }
+                    // Locked or not answering: the rebuild runs here.
+                    Err(e)
+                        if format!("{e}").contains("vault is locked")
+                            || !format!("{e}").contains("service answered") => {}
+                    // The service refused (a fork, an unreachable storage).
+                    Err(e) => {
+                        let text = format!("{e}");
+                        let msg = text
+                            .split_once(": ")
+                            .and_then(|(_, b)| serde_json::from_str::<serde_json::Value>(b).ok())
+                            .and_then(|v| {
+                                v.get("error").and_then(|x| x.as_str()).map(str::to_string)
+                            })
+                            .unwrap_or(text);
+                        bail!("{msg}");
+                    }
+                }
+            }
+            let mut engine = Engine::open(&home, &passphrase()?)?;
+            let opts = varsto_core::engine::LedgerRebuildOptions {
+                from_storage: *from_storage,
+                verify: if *verify {
+                    Some(true)
+                } else if *no_verify {
+                    Some(false)
+                } else {
+                    None
+                },
+                verify_budget_bytes: verify_budget_mib.saturating_mul(1 << 20),
+                confirm_cold_read: *confirm_cold_read,
+                automatic: false,
+            };
+            let r = engine.ledger_rebuild(&opts)?;
+            print(cli, &r, describe_rebuild)?;
+            if !r.health.is_ok() {
+                std::process::exit(1);
+            }
+        }
+        Cmd::Ledger { cmd: _ } => {
+            let engine = open_engine(&home)?;
             let r = engine.ledger_entries()?;
             print(cli, &r, |r| {
                 r.iter()
@@ -4226,6 +4562,141 @@ fn service_line(
 }
 
 /// The status as the service reports it (same lines as from the engine).
+/// `ledger status` for people.
+fn describe_ledger_status(r: &varsto_core::engine::LedgerStatus) -> String {
+    let mut out = format!("ledger: {}\n", r.health.describe());
+    for n in &r.health.notes {
+        out += &format!("note: {n}\n");
+    }
+    for d in &r.devices {
+        out += &format!(
+            "{} {}{}{}{}: head #{}{}{}\n",
+            &d.device[..8.min(d.device.len())],
+            if d.name.is_empty() { "?" } else { &d.name },
+            if d.this_device { " (this device)" } else { "" },
+            if d.revoked { " (removed)" } else { "" },
+            if d.forked { " FORKED" } else { "" },
+            d.head,
+            d.checkpoint
+                .map(|c| format!(", checkpoint #{c}"))
+                .unwrap_or_default(),
+            if d.dropped > 0 {
+                format!(", batches up to #{} dropped here", d.dropped)
+            } else {
+                String::new()
+            }
+        );
+        for h in &d.held {
+            let range = match (h.first, h.last) {
+                (Some(f), Some(l)) => format!("{} batches #{f}..#{l}", h.batches),
+                _ => "no batches".to_string(),
+            };
+            let cps = if h.checkpoints.is_empty() {
+                String::new()
+            } else {
+                format!(
+                    ", checkpoint {}",
+                    h.checkpoints
+                        .iter()
+                        .map(|c| format!("#{c}"))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            };
+            match &h.error {
+                Some(e) => out += &format!("  {}: not listed ({e})\n", h.place),
+                None => {
+                    out += &format!(
+                        "  {}{}: {range}{cps}\n",
+                        h.place,
+                        if h.cold { " (cold)" } else { "" }
+                    )
+                }
+            }
+        }
+    }
+    out.trim_end().to_string()
+}
+
+/// `ledger rebuild` for people.
+fn describe_rebuild(r: &varsto_core::engine::LedgerRebuildReport) -> String {
+    let mut out = String::new();
+    if !r.local.damaged.is_empty() {
+        out += &format!(
+            "local files set aside (unreadable): {}\n",
+            r.local.damaged.join(", ")
+        );
+    }
+    out += &if r.own_found_on_storages {
+        format!(
+            "this device's ledger: #{} before, #{} now ({} batches adopted from the storages{})\n",
+            r.own_head_before,
+            r.own_head_after,
+            r.adopted_batches,
+            r.adopted_checkpoint
+                .map(|c| format!(", checkpoint #{c}"))
+                .unwrap_or_default()
+        )
+    } else {
+        "nothing of this device's ledger is on any storage\n".to_string()
+    };
+    if !r.discarded_unpublished.is_empty() {
+        out += &format!(
+            "batches never published set aside: {:?}; their {} events are signed again\n",
+            r.discarded_unpublished, r.events_requeued
+        );
+    }
+    out += &format!(
+        "other devices: {} batches and {} checkpoints downloaded again\n",
+        r.batches_pulled, r.checkpoints_pulled
+    );
+    if r.manifests_caught_up > 0 {
+        out += &format!(
+            "{} folders continue after a manifest this device published later\n",
+            r.manifests_caught_up
+        );
+    }
+    if r.reenrolled {
+        out += "this device enrolled again under its name\n";
+    }
+    if let Some(s) = &r.from_storage {
+        out += &format!(
+            "from the storages: {} folders ({} manifests, {} snapshots), {} objects named, {} claims written ({} known already), {} verified ({}), {} not read, {} damaged (queued for repair), {} missing everywhere; listed {}{}\n",
+            s.folders,
+            s.manifests_read,
+            s.snapshots_read,
+            s.objects_mapped,
+            s.claims_written,
+            s.claims_known,
+            s.objects_verified,
+            fmt_bytes(s.bytes_verified),
+            s.objects_unverified,
+            s.objects_corrupt,
+            s.objects_missing,
+            s.storages_listed.join(", "),
+            if s.storages_skipped_cold.is_empty() {
+                String::new()
+            } else {
+                format!(
+                    "; cold not read: {} (add --confirm-cold-read)",
+                    s.storages_skipped_cold.join(", ")
+                )
+            }
+        );
+        if !s.folders_skipped.is_empty() {
+            out += &format!(
+                "folders skipped (locked): {}\n",
+                s.folders_skipped.join(", ")
+            );
+        }
+    }
+    for n in &r.notes {
+        out += &format!("note: {n}\n");
+    }
+    out += &format!("ledger: {}", r.health.describe());
+    out
+}
+
 fn status_from_value(v: &serde_json::Value) -> String {
     let st = |k: &str| v.get(k).and_then(|x| x.as_str()).unwrap_or("").to_string();
     let num = |x: &serde_json::Value, k: &str| x.get(k).and_then(|n| n.as_u64()).unwrap_or(0);
@@ -4276,6 +4747,12 @@ fn status_from_value(v: &serde_json::Value) -> String {
             num(f, "chunks_verified_elsewhere"),
             f.get("path").and_then(|p| p.as_str()).unwrap_or("(not attached)")
         );
+    }
+    if let Some(h) = v
+        .get("ledger_health")
+        .and_then(|h| serde_json::from_value::<varsto_core::engine::LedgerHealth>(h.clone()).ok())
+    {
+        out += &format!("ledger: {}\n", h.describe());
     }
     out.trim_end().to_string()
 }
@@ -5109,4 +5586,253 @@ fn p2p_status(engine: &Engine, home: &std::path::Path, json: bool) -> Result<()>
         );
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod recovery_guide_tests {
+    use super::*;
+    use varsto_core::recovery_guide::{self as rg, Inputs};
+
+    /// Split a shell line the way a POSIX shell would for the quoting the
+    /// guide uses (double quotes with backslash escapes, single quotes).
+    fn shell_words(line: &str) -> Vec<String> {
+        let mut out = Vec::new();
+        let mut cur = String::new();
+        let mut any = false;
+        let mut chars = line.chars();
+        while let Some(c) = chars.next() {
+            match c {
+                '"' => {
+                    any = true;
+                    while let Some(c) = chars.next() {
+                        match c {
+                            '"' => break,
+                            '\\' => cur.extend(chars.next()),
+                            c => cur.push(c),
+                        }
+                    }
+                }
+                '\'' => {
+                    any = true;
+                    for c in chars.by_ref() {
+                        if c == '\'' {
+                            break;
+                        }
+                        cur.push(c);
+                    }
+                }
+                c if c.is_whitespace() => {
+                    if any || !cur.is_empty() {
+                        out.push(std::mem::take(&mut cur));
+                        any = false;
+                    }
+                }
+                c => cur.push(c),
+            }
+        }
+        if any || !cur.is_empty() {
+            out.push(cur);
+        }
+        out
+    }
+
+    fn pool(name: &str, copies: u32) -> StorageSpec {
+        StorageSpec::Pool {
+            name: name.into(),
+            place: "offsite".into(),
+            reserve_percent: 5,
+            min_reserve_bytes: 0,
+            disks: vec![],
+            scan_roots: vec![],
+            copies,
+            verify_after_days: 180,
+        }
+    }
+
+    fn every_kind() -> Inputs {
+        Inputs {
+            vault_id: "v".into(),
+            device: "laptop".into(),
+            other_devices: vec!["desk \"top\"".into()],
+            storages: vec![
+                StorageSpec::LocalDir {
+                    name: "nas".into(),
+                    path: "/mnt/nas/varsto".into(),
+                    cold: false,
+                    carrier: false,
+                    place: String::new(),
+                },
+                StorageSpec::LocalDir {
+                    name: "stick".into(),
+                    path: "/media/u/stick".into(),
+                    cold: false,
+                    carrier: true,
+                    place: String::new(),
+                },
+                StorageSpec::S3 {
+                    name: "b2".into(),
+                    endpoint: "https://s3.example".into(),
+                    region: "eu".into(),
+                    bucket: "bk".into(),
+                    prefix: "p/x".into(),
+                    access_key_id: "AKIA".into(),
+                    secret_ref: String::new(),
+                    path_style: false,
+                    storage_class: Some("DEEP_ARCHIVE".into()),
+                    cold: true,
+                    place: "cloud".into(),
+                },
+                StorageSpec::S3 {
+                    name: "hot bucket".into(),
+                    endpoint: "https://s3.example".into(),
+                    region: "eu".into(),
+                    bucket: "hb".into(),
+                    prefix: String::new(),
+                    access_key_id: "AKIA".into(),
+                    secret_ref: String::new(),
+                    path_style: true,
+                    storage_class: None,
+                    cold: false,
+                    place: String::new(),
+                },
+                StorageSpec::Rclone {
+                    name: "drive".into(),
+                    remote: "gdrive:v".into(),
+                    cold: false,
+                    place: "cloud".into(),
+                },
+                pool("shelf", 2),
+            ],
+            disk_conf: vec![("u1".into(), "shelf".into(), "Blue 4TB".into())],
+            folders: vec![
+                rg::FolderInput {
+                    name: "docs".into(),
+                    path: Some("/home/u/docs".into()),
+                    selective: false,
+                    strongroom: false,
+                },
+                rg::FolderInput {
+                    name: "my $secret".into(),
+                    path: None,
+                    selective: true,
+                    strongroom: true,
+                },
+            ],
+            strongrooms: vec![rg::StrongroomInput {
+                folder: "my $secret".into(),
+                keys: vec!["blue".into()],
+                software: false,
+            }],
+            backups: vec![rg::BackupInput {
+                name: "home".into(),
+                source: "/home/u".into(),
+            }],
+            org: Some(rg::OrgInput {
+                name: "Acme".into(),
+                admins: vec!["laptop".into()],
+            }),
+            restic: Some(rg::ResticInput {
+                repository: "/srv/restic".into(),
+                password: rg::ResticPassword::Command,
+                env_file: None,
+            }),
+            ..Default::default()
+        }
+    }
+
+    /// Every `varsto ...` line of a guide parses with this command line.
+    fn assert_commands_parse(g: &rg::RecoveryGuide) -> usize {
+        let mut n = 0;
+        for step in g.steps.iter().chain(&g.alternatives) {
+            for line in &step.commands {
+                let words = shell_words(line);
+                if words.first().map(String::as_str) != Some("varsto") {
+                    continue;
+                }
+                if let Err(e) = Cli::try_parse_from(&words) {
+                    panic!("`{line}` does not parse: {e}");
+                }
+                n += 1;
+            }
+        }
+        n
+    }
+
+    #[test]
+    fn guide_commands_parse_with_the_cli() {
+        // `storage add-s3` takes the secret from this variable, as the guide says.
+        std::env::set_var("VARSTO_S3_SECRET", "placeholder");
+        let full = rg::build(&every_kind());
+        let n = assert_commands_parse(&full);
+        assert!(n >= 15, "only {n} commands");
+        let joins: Vec<&String> = full
+            .steps
+            .iter()
+            .flat_map(|s| &s.commands)
+            .filter(|c| c.starts_with("varsto join"))
+            .collect();
+        assert_eq!(joins.len(), 1);
+        assert!(
+            joins[0].contains("--s3-bucket \"hb\""),
+            "a hot bucket is joined through: {}",
+            joins[0]
+        );
+        assert!(
+            !full
+                .steps
+                .iter()
+                .flat_map(|s| &s.commands)
+                .any(|c| c.contains("stick")),
+            "a transferrer is no recovery source"
+        );
+        assert!(full
+            .steps
+            .iter()
+            .flat_map(|s| &s.commands)
+            .any(|c| c.contains("strongroom unlock \"my \\$secret\"")));
+
+        // Joining through a directory, and with only an rclone remote.
+        let mut local = every_kind();
+        local
+            .storages
+            .retain(|s| !matches!(s, StorageSpec::S3 { .. }));
+        let g = rg::build(&local);
+        assert_commands_parse(&g);
+        assert!(g
+            .steps
+            .iter()
+            .flat_map(|s| &s.commands)
+            .any(|c| c.starts_with("varsto join")
+                && c.contains("--storage-path \"/mnt/nas/varsto\"")));
+        let mut rclone_only = every_kind();
+        rclone_only
+            .storages
+            .retain(|s| matches!(s, StorageSpec::Rclone { .. }));
+        let g = rg::build(&rclone_only);
+        assert_commands_parse(&g);
+        assert!(g
+            .steps
+            .iter()
+            .flat_map(|s| &s.commands)
+            .any(|c| c.starts_with("rclone mount")));
+        let member = rg::build(&Inputs {
+            member: true,
+            ..every_kind()
+        });
+        assert_commands_parse(&member);
+    }
+
+    #[test]
+    fn recovery_guide_command_parses() {
+        for args in [
+            vec!["varsto", "recovery", "guide"],
+            vec!["varsto", "recovery", "guide", "--format", "markdown"],
+            vec![
+                "varsto", "recovery", "guide", "--format", "html", "--output", "g.html",
+            ],
+        ] {
+            Cli::try_parse_from(args).unwrap();
+        }
+        assert!(Cli::try_parse_from(["varsto", "recovery", "guide", "--format", "pdf"]).is_err());
+    }
 }

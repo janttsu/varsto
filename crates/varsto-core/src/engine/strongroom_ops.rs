@@ -303,11 +303,18 @@ impl Engine {
         };
         let tmp_dir = self.home.join("convert-tmp");
         fs::create_dir_all(&tmp_dir)?;
+        let task = crate::activity::start(
+            crate::activity::STRONGROOM_CONVERT,
+            &rec.name,
+            state.files.values().filter(|f| !f.deleted).count() as u64,
+            crate::activity::Unit::Items,
+        );
         for file in state.files.values() {
             if file.deleted {
                 new_state.files.insert(file.path.clone(), file.clone());
                 continue;
             }
+            task.advance(1);
             let disk = root.join(&file.path);
             let local = fs::metadata(&disk).ok().filter(|md| {
                 state.local_index.get(&file.path).is_some_and(|ix| {

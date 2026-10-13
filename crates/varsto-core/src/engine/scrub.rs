@@ -23,6 +23,7 @@
 //! automatic verification already records the checks that count.
 
 use super::*;
+use crate::parverify::{self, Job, LanePlan};
 use crate::scrub::{
     self, Budget, DamagedFile, Inclusion, Pace, ScrubReport, ScrubSchedule, ScrubState,
     ScrubStatus, TargetReport,
@@ -110,6 +111,29 @@ fn check_file(fk: &FolderKeys, disk: &Path, entry: &LocalIndexEntry) -> FileChec
     }
 }
 
+/// The picked items of a plan as verification jobs on one lane.
+fn picks_to_jobs(picks: &[usize], items: &[(String, u64)]) -> Vec<Job<usize>> {
+    picks
+        .iter()
+        .map(|&i| Job {
+            item: i,
+            lane: 0,
+            size: items[i].1.max(1),
+        })
+        .collect()
+}
+
+/// The recorded entry of a synced file whose index and merged view agree.
+fn synced_entry(state: &FolderState, path: &str) -> Option<LocalIndexEntry> {
+    state.local_index.get(path).and_then(|e| {
+        state
+            .files
+            .get(path)
+            .is_some_and(|f| !f.deleted && f.content_hash == e.content_hash)
+            .then(|| e.clone())
+    })
+}
+
 impl Engine {
     fn scrub_path(&self) -> PathBuf {
         self.home.join(SCRUB_FILE)
@@ -195,9 +219,7 @@ impl Engine {
     /// One run as of `now_utc` (tests look ahead in time).
     pub fn scrub_at(&mut self, opts: &ScrubOptions, now_utc: i64) -> Result<ScrubReport> {
         self.ensure_active()?;
-        if self.forked_self {
-            bail!("this device's ledger is forked; it must be re-enrolled as a new device");
-        }
+        self.ensure_ledger_writable()?;
         for n in &opts.storages {
             if !self.config.storages.iter().any(|s| s.name() == n) {
                 bail!("unknown storage {n}");
@@ -331,6 +353,7 @@ impl Engine {
         let mut readable: BTreeMap<String, Box<dyn Storage>> = BTreeMap::new();
         let mut remote: BTreeSet<String> = BTreeSet::new();
         let mut pools: Vec<StorageSpec> = Vec::new();
+        let mut lanes: BTreeMap<String, LanePlan> = BTreeMap::new();
         for spec in self.config.storages.clone() {
             let name = spec.name().to_string();
             match scrub::inclusion(
@@ -363,6 +386,7 @@ impl Engine {
             }
             match self.open_spec(&spec) {
                 Ok(b) => {
+                    lanes.insert(name.clone(), self.storage_lane(&spec));
                     readable.insert(name, b);
                 }
                 Err(e) => report.skipped.push(format!("{name} (cannot open: {e:#})")),
@@ -452,32 +476,49 @@ impl Engine {
             };
             let mut done = plan.finishes_pass;
             let mut last: Option<&str> = None;
-            for &i in &plan.picks {
-                let key = &items[i].0;
-                let (_, folder, chunk, object) = metas[i];
-                match readable[&name].get(key) {
-                    Ok(None) => {
-                        report.missing.push(format!("{name}:{}", object.short()));
-                        damage.push(damaged(&name, folder, chunk, object, DamageKind::Missing));
-                    }
-                    Ok(Some(ct)) => {
-                        tr.bytes += ct.len() as u64;
-                        if ObjectName::from_bytes(&crypto::hash(&ct)) != *object {
-                            report.corrupt.push(format!("{name}:{}", object.short()));
-                            damage.push(damaged(&name, folder, chunk, object, DamageKind::Corrupt));
+            let backend = readable[&name].as_ref();
+            let jobs = picks_to_jobs(&plan.picks, &items);
+            // Read ahead (in parallel where the medium allows); the results
+            // come back here in key order, as a plain loop would see them.
+            parverify::run_ordered(
+                &jobs,
+                &[lanes[&name]],
+                |&i| backend.get(&items[i].0),
+                |_, got| got.map(|ct| ct.map(|ct| (ct.len() as u64, crypto::hash(&ct)))),
+                |_, &i, got| {
+                    let key = &items[i].0;
+                    let (_, folder, chunk, object) = metas[i];
+                    match got {
+                        Ok(None) => {
+                            report.missing.push(format!("{name}:{}", object.short()));
+                            damage.push(damaged(&name, folder, chunk, object, DamageKind::Missing));
+                        }
+                        Ok(Some((len, hash))) => {
+                            tr.bytes += len;
+                            if ObjectName::from_bytes(&hash) != *object {
+                                report.corrupt.push(format!("{name}:{}", object.short()));
+                                damage.push(damaged(
+                                    &name,
+                                    folder,
+                                    chunk,
+                                    object,
+                                    DamageKind::Corrupt,
+                                ));
+                            }
+                        }
+                        Err(e) => {
+                            // Unreachable now: the pass goes on from here next time.
+                            report.skipped.push(format!("{name} (read failed: {e:#})"));
+                            done = false;
+                            return false;
                         }
                     }
-                    Err(e) => {
-                        // Unreachable now: the pass goes on from here next time.
-                        report.skipped.push(format!("{name} (read failed: {e:#})"));
-                        done = false;
-                        break;
-                    }
-                }
-                tr.checked += 1;
-                task.advance(items[i].1);
-                last = Some(key);
-            }
+                    tr.checked += 1;
+                    task.advance(items[i].1);
+                    last = Some(key);
+                    true
+                },
+            );
             sweep.advance(now, last, tr.checked, done);
             tr.pass_done = done;
             tr.left_in_pass = plan.remaining - tr.checked;
@@ -546,55 +587,80 @@ impl Engine {
                 };
                 let mut done = plan.finishes_pass;
                 let mut last: Option<&str> = None;
-                for &i in &plan.picks {
-                    let key = &items[i].0;
-                    let name = key.rsplit('/').next().unwrap_or("");
-                    let bad = match pool.read_on_disk(&d.disk_id, key) {
-                        Ok(None) => {
-                            report.missing.push(format!(
-                                "{pool_name}/{}:{}",
-                                d.label,
-                                &name[..name.len().min(12)]
-                            ));
-                            true
-                        }
-                        Ok(Some(b)) => {
-                            tr.bytes += b.len() as u64;
-                            let bad = hex::encode(crypto::hash(&b)) != name;
-                            if bad {
-                                report.corrupt.push(format!(
+                let lane = match &d.mount {
+                    Some(m) => pool.disk_lane(m),
+                    None => LanePlan::sequential(crate::media::Media::Unknown),
+                };
+                let jobs = picks_to_jobs(&plan.picks, &items);
+                let mut failed: Option<anyhow::Error> = None;
+                let pool_ref = &pool;
+                parverify::run_ordered(
+                    &jobs,
+                    &[lane],
+                    |&i| pool_ref.read_on_disk(&d.disk_id, &items[i].0),
+                    |_, got| {
+                        got.map(|b| b.map(|b| (b.len() as u64, hex::encode(crypto::hash(&b)))))
+                    },
+                    |_, &i, got| {
+                        let key = &items[i].0;
+                        let name = key.rsplit('/').next().unwrap_or("");
+                        let bad = match got {
+                            Ok(None) => {
+                                report.missing.push(format!(
                                     "{pool_name}/{}:{}",
                                     d.label,
                                     &name[..name.len().min(12)]
                                 ));
+                                true
                             }
-                            bad
+                            Ok(Some((len, hash))) => {
+                                tr.bytes += len;
+                                let bad = hash != name;
+                                if bad {
+                                    report.corrupt.push(format!(
+                                        "{pool_name}/{}:{}",
+                                        d.label,
+                                        &name[..name.len().min(12)]
+                                    ));
+                                }
+                                bad
+                            }
+                            Err(e) => {
+                                report
+                                    .skipped
+                                    .push(format!("disk {} (read failed: {e:#})", d.label));
+                                done = false;
+                                return false;
+                            }
+                        };
+                        tr.checked += 1;
+                        task.advance(items[i].1);
+                        last = Some(key);
+                        if !bad {
+                            return true;
                         }
-                        Err(e) => {
-                            report
-                                .skipped
-                                .push(format!("disk {} (read failed: {e:#})", d.label));
-                            done = false;
-                            break;
+                        // Forget the bad copy; with no copy left on any disk,
+                        // repair writes the object again.
+                        let left = match pool_ref.drop_bad_copy(&d.disk_id, key) {
+                            Ok(l) => l,
+                            Err(e) => {
+                                failed = Some(e);
+                                return false;
+                            }
+                        };
+                        if left {
+                            return true;
                         }
-                    };
-                    tr.checked += 1;
-                    task.advance(items[i].1);
-                    last = Some(key);
-                    if !bad {
-                        continue;
-                    }
-                    // Forget the bad copy; with no copy left on any disk,
-                    // repair writes the object again.
-                    let left = pool.drop_bad_copy(&d.disk_id, key)?;
-                    if left {
-                        continue;
-                    }
-                    if let Ok(o) = ObjectName::from_hex(name) {
-                        if let Some((f, c)) = by_object.get(&o) {
-                            damage.push(damaged(&pool_name, f, c, &o, DamageKind::Missing));
+                        if let Ok(o) = ObjectName::from_hex(name) {
+                            if let Some((f, c)) = by_object.get(&o) {
+                                damage.push(damaged(&pool_name, f, c, &o, DamageKind::Missing));
+                            }
                         }
-                    }
+                        true
+                    },
+                );
+                if let Some(e) = failed {
+                    return Err(e);
                 }
                 sweep.advance(now, last, tr.checked, done);
                 tr.pass_done = done;
@@ -687,79 +753,118 @@ impl Engine {
             };
             let mut last: Option<String> = None;
             let mut changed = false;
-            for (path, planned) in paths {
-                if planned {
-                    last = Some(path.clone());
-                }
-                let entry = match state.local_index.get(&path) {
-                    Some(e)
-                        if state
-                            .files
-                            .get(&path)
-                            .is_some_and(|f| !f.deleted && f.content_hash == e.content_hash) =>
-                    {
-                        e.clone()
+            // Each file is re-hashed ahead on the readers the folder's
+            // medium allows, against the entry it has now; a file whose
+            // entry changed before its turn (restored earlier in this run)
+            // is hashed again here, so the outcome is a plain loop's.
+            let jobs: Vec<Job<(String, bool, Option<LocalIndexEntry>)>> = paths
+                .into_iter()
+                .map(|(path, planned)| {
+                    let entry = synced_entry(&state, &path);
+                    Job {
+                        item: (path, planned, entry),
+                        lane: 0,
+                        // Hashed as a stream: one buffer in memory.
+                        size: 1 << 20,
                     }
-                    _ => {
+                })
+                .collect();
+            let lane = parverify::lane_plan(
+                crate::media::storage_media(&root),
+                self.verify_setting(&format!("folder:{}", rec.name)),
+            );
+            let mut failed: Option<anyhow::Error> = None;
+            let root_ref = &root;
+            let fk_ref = &fk;
+            parverify::run_ordered(
+                &jobs,
+                &[lane],
+                |(path, _, entry)| {
+                    let entry = entry.as_ref()?;
+                    let disk = util::safe_join(root_ref, path).ok()?;
+                    Some(check_file(fk_ref, &disk, entry))
+                },
+                |_, outcome| outcome,
+                |_, (path, planned, ahead), outcome| {
+                    let path = path.clone();
+                    if *planned {
+                        last = Some(path.clone());
+                    }
+                    let Some(entry) = synced_entry(&state, &path) else {
                         if let Some(m) = st.unrestored.get_mut(&fid) {
                             m.remove(&path);
                         }
-                        continue;
+                        return true;
+                    };
+                    let Ok(disk) = util::safe_join(&root, &path) else {
+                        return true;
+                    };
+                    let outcome = match outcome {
+                        Some(o) if ahead.as_ref() == Some(&entry) => o,
+                        _ => check_file(&fk, &disk, &entry),
+                    };
+                    if *planned {
+                        tr.checked += 1;
+                        task.advance(entry.size);
                     }
-                };
-                let Ok(disk) = util::safe_join(&root, &path) else {
-                    continue;
-                };
-                let outcome = check_file(&fk, &disk, &entry);
-                if planned {
-                    tr.checked += 1;
-                    task.advance(entry.size);
-                }
-                match outcome {
-                    FileCheck::Intact(n) => {
-                        tr.bytes += n;
-                        if let Some(m) = st.unrestored.get_mut(&fid) {
-                            m.remove(&path);
-                        }
-                    }
-                    FileCheck::Changed => {
-                        // Edited or replaced: the next scan records it.
-                        if let Some(m) = st.unrestored.get_mut(&fid) {
-                            m.remove(&path);
-                        }
-                    }
-                    FileCheck::Damaged(why) => {
-                        tr.bytes += entry.size;
-                        if storages.is_none() {
-                            *storages = Some(self.open_storages(false)?);
-                        }
-                        let open = storages.as_ref().map(|s| s.as_slice()).unwrap_or(&[]);
-                        let found = st
-                            .unrestored
-                            .get(&fid)
-                            .and_then(|m| m.get(&path))
-                            .map(|d| d.found_utc)
-                            .unwrap_or(now);
-                        let mut d = self.restore_damaged(
-                            &rec, &fk, &root, &mut state, &path, &entry, now, open,
-                        );
-                        d.found_utc = found;
-                        if !d.restored {
-                            d.reason =
-                                Some(format!("{why}; {}", d.reason.clone().unwrap_or_default()));
-                            st.unrestored
-                                .entry(fid.clone())
-                                .or_default()
-                                .insert(path.clone(), d.clone());
-                        } else {
-                            changed = true;
+                    match outcome {
+                        FileCheck::Intact(n) => {
+                            tr.bytes += n;
                             if let Some(m) = st.unrestored.get_mut(&fid) {
                                 m.remove(&path);
                             }
                         }
-                        report.damaged_files.push(d);
+                        FileCheck::Changed => {
+                            // Edited or replaced: the next scan records it.
+                            if let Some(m) = st.unrestored.get_mut(&fid) {
+                                m.remove(&path);
+                            }
+                        }
+                        FileCheck::Damaged(why) => {
+                            tr.bytes += entry.size;
+                            if storages.is_none() {
+                                match self.open_storages(false) {
+                                    Ok(o) => *storages = Some(o),
+                                    Err(e) => {
+                                        failed = Some(e);
+                                        return false;
+                                    }
+                                }
+                            }
+                            let open = storages.as_ref().map(|s| s.as_slice()).unwrap_or(&[]);
+                            let found = st
+                                .unrestored
+                                .get(&fid)
+                                .and_then(|m| m.get(&path))
+                                .map(|d| d.found_utc)
+                                .unwrap_or(now);
+                            let mut d = self.restore_damaged(
+                                &rec, &fk, &root, &mut state, &path, &entry, now, open,
+                            );
+                            d.found_utc = found;
+                            if !d.restored {
+                                d.reason = Some(format!(
+                                    "{why}; {}",
+                                    d.reason.clone().unwrap_or_default()
+                                ));
+                                st.unrestored
+                                    .entry(fid.clone())
+                                    .or_default()
+                                    .insert(path.clone(), d.clone());
+                            } else {
+                                changed = true;
+                                if let Some(m) = st.unrestored.get_mut(&fid) {
+                                    m.remove(&path);
+                                }
+                            }
+                            report.damaged_files.push(d);
+                        }
                     }
-                }
+                    true
+                },
+            );
+            if let Some(e) = failed {
+                return Err(e);
             }
             if changed {
                 self.save_state(&rec.folder_id, &state)?;
@@ -915,28 +1020,49 @@ impl Engine {
         };
         let mut dropped: Vec<ObjectName> = Vec::new();
         let mut last: Option<&str> = None;
-        for &i in &plan.picks {
-            let name = &items[i].0;
-            let Ok(object) = ObjectName::from_hex(name) else {
-                continue;
-            };
-            let path = block_cache::cache_path(&root, &object);
-            let good = match fs::read(&path) {
-                Ok(b) => {
-                    tr.bytes += b.len() as u64;
-                    ObjectName::from_bytes(&crypto::hash(&b)) == object
+        let lane = parverify::lane_plan(
+            crate::media::storage_media(&root),
+            self.verify_setting("block-cache"),
+        );
+        let jobs = picks_to_jobs(&plan.picks, &items);
+        let root_ref = &root;
+        parverify::run_ordered(
+            &jobs,
+            &[lane],
+            |&i| {
+                let object = ObjectName::from_hex(&items[i].0).ok()?;
+                let path = block_cache::cache_path(root_ref, &object);
+                Some((fs::read(&path), object, path))
+            },
+            |_, got| {
+                got.map(|(read, object, path)| {
+                    let (len, good) = match read {
+                        Ok(b) => (
+                            Some(b.len() as u64),
+                            ObjectName::from_bytes(&crypto::hash(&b)) == object,
+                        ),
+                        // Dropped meanwhile.
+                        Err(e) if e.kind() == std::io::ErrorKind::NotFound => (None, true),
+                        Err(_) => (None, false),
+                    };
+                    (len, good, object, path)
+                })
+            },
+            |_, &i, got| {
+                let Some((len, good, object, path)) = got else {
+                    return true;
+                };
+                tr.bytes += len.unwrap_or(0);
+                tr.checked += 1;
+                task.advance(items[i].1);
+                last = Some(&items[i].0);
+                if !good {
+                    let _ = fs::remove_file(&path);
+                    dropped.push(object);
                 }
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => true, // dropped meanwhile
-                Err(_) => false,
-            };
-            tr.checked += 1;
-            task.advance(items[i].1);
-            last = Some(name);
-            if !good {
-                let _ = fs::remove_file(&path);
-                dropped.push(object);
-            }
-        }
+                true
+            },
+        );
         sweep.advance(now, last, tr.checked, plan.finishes_pass);
         tr.pass_done = plan.finishes_pass;
         tr.left_in_pass = plan.remaining - tr.checked;

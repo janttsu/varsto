@@ -1242,6 +1242,21 @@ pub struct Config {
     /// When large fetches propose pool disks instead of the network.
     #[serde(default)]
     pub disk_fetch: crate::engine::DiskFetchSettings,
+    /// How verification reads each place (`crate::parverify`): by storage or
+    /// pool name, `folder:<name>`, `block-cache`, or `*` for every one not
+    /// named; `"auto"` (by the medium, the default), `"sequential"` or a
+    /// number of readers. For when the medium is detected wrongly.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub verify_parallelism: std::collections::BTreeMap<String, crate::parverify::Parallelism>,
+    /// Thumbnail generation (`crate::thumbs`).
+    #[serde(
+        default,
+        skip_serializing_if = "crate::thumbs::ThumbnailSettings::is_default"
+    )]
+    pub thumbnails: crate::thumbs::ThumbnailSettings,
+    /// The "next disk to dock" reminder (`crate::disksuggest`).
+    #[serde(default)]
+    pub disk_suggest: crate::disksuggest::SuggestSettings,
 }
 
 /// A backup taken on this device (local, never published).

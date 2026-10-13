@@ -690,6 +690,253 @@
   "Copying blocks from disk «{s}»": "Kopierar block från disken «{s}»",
   "Writing files fetched from disk «{s}»": "Skriver filer hämtade från disken «{s}»",
   "Unmounting disk «{s}»": "Avmonterar disken «{s}»",
+  "Import": "Import",
+  "Import into Varsto": "Importera till Varsto",
+  "Bring files that live elsewhere under Varsto's care. Each source becomes one folder; importing the same source again brings over what changed and never deletes anything in Varsto.": "Låt Varsto ta hand om filer som finns någon annanstans. Varje källa blir en mapp; att importera samma källa igen för över det som ändrats och tar aldrig bort något i Varsto.",
+  "Source": "Källa",
+  "A folder on this device": "En mapp på den här enheten",
+  "A git-annex repository": "Ett git-annex-arkiv",
+  "Dropbox": "Dropbox",
+  "OneDrive": "OneDrive",
+  "Another cloud drive (rclone)": "En annan molnlagring (rclone)",
+  "This import runs on the command line, where its progress and report are shown:": "Den här importen körs på kommandoraden, där förloppet och rapporten visas:",
+  "Folder to import": "Mapp att importera",
+  "it is only read, unless you choose to remove its files below": "den läses bara, om du inte väljer att ta bort dess filer nedan",
+  "Name in Varsto": "Namn i Varsto",
+  "named after the source": "efter källan",
+  "On this device": "På den här enheten",
+  "Placeholders only: files stay on the storages": "Bara platshållare: filerna stannar på lagringarna",
+  "A full copy in a directory of this device": "En fullständig kopia i en katalog på den här enheten",
+  "Directory for the copy": "Katalog för kopian",
+  "Remove source files once they are safely stored and the policy is met": "Ta bort källfilerna när de är säkert lagrade och policyn är uppfylld",
+  "A file is removed from the source only when it has not changed since it was imported, Varsto still has the same file, every block of it is on a storage that reads it back intact, and the folder's durability policy is met for it (for example, checked by another of your devices). Files that do not qualify yet stay; import again later, or use Remove safe files below. Varsto's own folders and git-annex repositories are never emptied, and nothing outside the source is touched.": "En fil tas bort från källan bara när den inte har ändrats sedan importen, Varsto fortfarande har samma fil, varje block av den finns på en lagring som läser tillbaka det oskadat, och mappens hållbarhetspolicy är uppfylld för den (till exempel kontrollerad av en annan av dina enheter). Filer som inte uppfyller detta stannar tills vidare; importera igen senare, eller använd Ta bort säkra filer nedan. Varstos egna mappar och git-annex-arkiv töms aldrig, och inget utanför källan rörs.",
+  "Last import": "Senaste import",
+  "Remove these files from the source": "Ta bort de här filerna från källan",
+  "Files that stay for now": "Filer som stannar tills vidare",
+  "Imported folders": "Importerade mappar",
+  "Awaiting import": "Väntar på import",
+  "Removed from source": "Borttaget från källan",
+  "Nothing was imported yet.": "Inget har importerats ännu.",
+  "Remove safe files…": "Ta bort säkra filer…",
+  "No source file can be removed yet.": "Ingen källfil kan tas bort ännu.",
+  "Remove source files?": "Ta bort källfilerna?",
+  "Choose the folder to import.": "Välj mappen att importera.",
+  "Choose the directory for the copy.": "Välj katalogen för kopian.",
+  "Run it once for every disk that holds a clone of the repository: each run continues the same folder with what that disk has, and says which disk to insert next. Nothing is changed on the disks.": "Kör det en gång för varje disk som har en klon av arkivet: varje körning fortsätter samma mapp med det disken har och säger vilken disk som ska sättas in härnäst. Ingenting ändras på diskarna.",
+  "The first line signs in to Dropbox in your browser (once). Run the import again to bring changes over.": "Första raden loggar in på Dropbox i din webbläsare (en gång). Kör importen igen för att föra över ändringar.",
+  "The first line signs in to OneDrive in your browser (once). Run the import again to bring changes over.": "Första raden loggar in på OneDrive i din webbläsare (en gång). Kör importen igen för att föra över ändringar.",
+  "Any remote set up in rclone (rclone config) works, Google Drive included.": "Alla fjärrlagringar som konfigurerats i rclone (rclone config) fungerar, även Google Drive.",
+  "not imported yet": "inte importerad ännu",
+  "changed since it was imported": "ändrad sedan importen",
+  "changed or deleted in Varsto since the import": "ändrad eller borttagen i Varsto sedan importen",
+  "not on a storage yet (only on devices or a transferrer)": "inte på en lagring ännu (bara på enheter eller en överföringsdisk)",
+  "no storage copy could be read back intact": "ingen kopia på lagringarna kunde läsas tillbaka oskadad",
+  "its content differs from what was imported": "innehållet skiljer sig från det som importerades",
+  "Holds the encrypted copies of your files, the folder records and the ledger: a new device joins the vault through it and fetches the files from it.": "Innehåller de krypterade kopiorna av dina filer, mappposterna och liggaren: en ny enhet ansluter till valvet genom den och hämtar filerna därifrån.",
+  "Cold storage: Varsto writes to it but reads it only when you confirm, and reading may cost retrieval fees.": "Kall lagring: Varsto skriver dit men läser bara när du bekräftar, och läsning kan kosta hämtningsavgifter.",
+  "Endpoint: {endpoint}": "Slutpunkt: {endpoint}",
+  "Bucket: {bucket}": "Bucket: {bucket}",
+  "Region: {region}": "Region: {region}",
+  "Place: {place}": "Plats: {place}",
+  "Key prefix: {prefix}": "Nyckelprefix: {prefix}",
+  "Storage class: {class}": "Lagringsklass: {class}",
+  "Remote: {remote}": "Fjärrplats: {remote}",
+  "Repository: {repo}": "Repository: {repo}",
+  "The access key ID and the secret access key of bucket {bucket}. Varsto keeps the secret key only in this device's encrypted secret store, so keep both outside your devices: in a password manager you can open from a new computer, or on paper with the recovery kit.": "Åtkomstnyckelns id och den hemliga åtkomstnyckeln för bucket {bucket}. Varsto förvarar den hemliga nyckeln bara i den här enhetens krypterade hemlighetsförråd, så förvara båda utanför dina enheter: i en lösenordshanterare som du kan öppna från en ny dator, eller på papper tillsammans med återställningsorden.",
+  "The login to your account at the provider of {endpoint}, where you can make new keys if these are lost.": "Inloggningen till ditt konto hos leverantören av {endpoint}, där du kan skapa nya nycklar om dessa går förlorade.",
+  "Archive classes (DEEP_ARCHIVE, GLACIER) need a restore request at the provider before the objects can be read: know how to make one there.": "Arkivklasser (DEEP_ARCHIVE, GLACIER) kräver en återställningsbegäran hos leverantören innan objekten kan läsas: ta reda på hur den görs där.",
+  "Bucket «{bucket}» (storage {storage})": "Bucket «{bucket}» (lagringsplats {storage})",
+  "An S3-compatible bucket at {endpoint}.": "En S3-kompatibel bucket på {endpoint}.",
+  "Without the keys and without the account login, this copy of your data cannot be reached from a new device.": "Utan nycklarna och utan inloggningen till kontot kan den här kopian av dina data inte nås från en ny enhet.",
+  "rclone remote «{remote}» (storage {storage})": "rclone-fjärrplats «{remote}» (lagringsplats {storage})",
+  "Its settings and token: section [{section}] of rclone's configuration file (`rclone config file` shows where it is).": "Dess inställningar och token: avsnittet [{section}] i rclones konfigurationsfil (`rclone config file` visar var den finns).",
+  "A storage reached through rclone; the credentials stay in rclone's configuration, not in Varsto.": "En lagringsplats som nås via rclone; inloggningsuppgifterna finns i rclones konfiguration, inte i Varsto.",
+  "A copy of rclone's configuration file (rclone.conf), kept like a password: its token or password opens the remote. If the file is encrypted, also its password.": "En kopia av rclones konfigurationsfil (rclone.conf), förvarad som ett lösenord: dess token eller lösenord öppnar fjärrplatsen. Om filen är krypterad, även dess lösenord.",
+  "Or what you need to set the remote {section} up again: the provider account login and the remote's settings.": "Eller det du behöver för att ställa in fjärrplatsen {section} igen: inloggningen till leverantörskontot och fjärrplatsens inställningar.",
+  "Without rclone's configuration you have to set the remote up again from the provider account; without that account this copy cannot be reached.": "Utan rclones konfiguration måste du ställa in fjärrplatsen igen från leverantörskontot; utan det kontot kan den här kopian inte nås.",
+  "Path on this device: {path}": "Sökväg på den här enheten: {path}",
+  "Transferrer {path} (storage {storage})": "Överföringsdisk {path} (lagringsplats {storage})",
+  "Removable media that carries blocks between your devices.": "Flyttbart medium som för block mellan dina enheter.",
+  "It holds only what other devices still lack and is emptied as they receive it, so it is no recovery source.": "Den innehåller bara det som andra enheter ännu saknar och töms när de tar emot det, så den är ingen källa för återställning.",
+  "Nothing: the other storages hold the data.": "Ingenting: de andra lagringsplatserna har data.",
+  "Directory {path} (storage {storage})": "Katalog {path} (lagringsplats {storage})",
+  "A directory: a disk of this device, a removable disk, a NAS or a network share.": "En katalog: en disk i den här enheten, en flyttbar disk, en NAS eller en nätverksresurs.",
+  "If it is a NAS, a network share or a removable disk: where it is and how to reach it (address, share name, login).": "Om det är en NAS, en nätverksresurs eller en flyttbar disk: var den finns och hur den nås (adress, resursnamn, inloggning).",
+  "If it is on this device's own disk, it is lost with the device and is no recovery source: make sure another storage holds the data.": "Om den finns på den här enhetens egen disk går den förlorad med enheten och är ingen källa för återställning: se till att en annan lagringsplats har data.",
+  "Data that only this directory holds is lost with it.": "Data som bara finns i den här katalogen går förlorade med den.",
+  "Disk «{label}» (retired), kept at: {place}; last seen {seen}": "Disk «{label}» (pensionerad), förvaras: {place}; senast sedd {seen}",
+  "Disk «{label}», kept at: {place}; last seen {seen}": "Disk «{label}», förvaras: {place}; senast sedd {seen}",
+  "No disk has been added yet.": "Inga diskar har lagts till ännu.",
+  "Rule: {copies} copies of every block on disks in different places.": "Regel: {copies} kopior av varje block på diskar på olika platser.",
+  "The disks themselves, with their stickers, in the places above: not all in the same building as your computers.": "Själva diskarna, med sina etiketter, på platserna ovan: inte alla i samma byggnad som dina datorer.",
+  "The pool's name exactly as written: «{pool}». The disks are recognised by the vault key and this name.": "Poolens namn exakt så som det skrivs: «{pool}». Diskarna känns igen med valvnyckeln och det här namnet.",
+  "The lines of disks.conf below (Linux): they let Varsto mount the drives by the names on their stickers.": "Raderna i disks.conf nedan (Linux): med dem monterar Varsto enheterna med namnen på deras etiketter.",
+  "Disk pool «{pool}»": "Diskpool «{pool}»",
+  "Removable disks that hold encrypted blocks of your files (no records or ledger).": "Flyttbara diskar med krypterade block av dina filer (inga poster eller liggare).",
+  "Blocks may be only on these disks: then they are needed to restore those files.": "Vissa block kan finnas bara på de här diskarna: då behövs de för att återställa de filerna.",
+  "Files whose blocks are only on these disks cannot be restored without them.": "Filer vars block bara finns på de här diskarna kan inte återställas utan dem.",
+  "What to keep outside your devices so that every file of vault {vault} can be restored on a new device if all your devices are lost at once (fire, theft, a flood), and how to restore with only that.": "Vad du ska förvara utanför dina enheter så att varje fil i valvet {vault} kan återställas på en ny enhet om alla dina enheter går förlorade på en gång (brand, stöld, översvämning), och hur du återställer med bara det.",
+  "This guide names the secrets and says where to keep them; it never contains them. Made on device {device} on {date}: make it again after you add a storage, a disk or a Strongroom folder.": "Den här guiden namnger hemligheterna och säger var de ska förvaras; den innehåller dem aldrig. Gjord på enheten {device} {date}: gör den igen när du lägger till en lagringsplats, en disk eller en Strongroom-mapp.",
+  "This device belongs to a folder that someone else shares with you; it holds that folder's key only. There is no recovery kit for it: the person who shared it shares it again.": "Den här enheten hör till en mapp som någon annan delar med dig; den har bara den mappens nyckel. Det finns inga återställningsord för den: den som delade den delar den igen.",
+  "Shared folder «{folder}»": "Delad mapp «{folder}»",
+  "A folder of someone else's vault that is shared with you.": "En mapp i någon annans valv som delas med dig.",
+  "Its key came from the person who shared it; nothing you can print opens it.": "Dess nyckel kom från den som delade den; inget du kan skriva ut öppnar den.",
+  "On this device: {path}": "På den här enheten: {path}",
+  "Who shared it with you and how to reach them.": "Vem som delade den med dig och hur du når personen.",
+  "If they cannot share it again, the folder stays out of your reach (their copy is not affected).": "Om personen inte kan dela den igen förblir mappen utom räckhåll för dig (deras kopia påverkas inte).",
+  "Ask for the shared folders again": "Be om de delade mapparna igen",
+  "On the new device, make a request code and send it to the person who shared the folder; they share the folder to it, and you accept what they send.": "Skapa en begärandekod på den nya enheten och skicka den till den som delade mappen; personen delar mappen till den, och du godkänner det som skickas.",
+  "Not needed: the passphrase of this device. A new device gets a passphrase of its own.": "Behövs inte: den här enhetens lösenfras. En ny enhet får en egen lösenfras.",
+  "Printed on this device on {date}.": "Utskriven på den här enheten {date}.",
+  "The kit printed on {date} is out of date: the vault key changed afterwards (a device was removed). It still opens what was written before; print a new one for the rest.": "Orden som skrevs ut {date} är inaktuella: valvnyckeln ändrades efteråt (en enhet togs bort). De öppnar fortfarande det som skrevs innan; skriv ut nya för resten.",
+  "Varsto does not know whether you printed it, for example on another device.": "Varsto vet inte om du har skrivit ut dem, till exempel på en annan enhet.",
+  "Recovery kit: the vault key as 24 words": "Återställningsord: valvnyckeln som 24 ord",
+  "The vault key of vault {vault}, printed with `varsto recovery kit`.": "Valvnyckeln för valvet {vault}, utskriven med `varsto recovery kit`.",
+  "It is the only thing that opens the vault on a new device. Varsto keeps no copy anywhere and cannot reset it.": "Det är det enda som öppnar valvet på en ny enhet. Varsto har ingen kopia någonstans och kan inte återställa den.",
+  "On paper or metal, in at least two places away from your devices; never as a photo or a cloud note.": "På papper eller metall, på minst två platser åtskilda från dina enheter; aldrig som foto eller molnanteckning.",
+  "Or as three shares (`varsto recovery kit --shares`), each in a different place or with a different person: any two rebuild the key, one alone reveals nothing.": "Eller som tre delar (`varsto recovery kit --shares`), var och en på olika platser eller hos olika personer: vilka två som helst återskapar nyckeln, en ensam avslöjar ingenting.",
+  "Without the words, or two of the shares, nobody can read the vault: not you, not the makers of Varsto.": "Utan orden, eller två av delarna, kan ingen läsa valvet: inte du, inte de som gör Varsto.",
+  "The vault has no storage on this device.": "Valvet har ingen lagringsplats på den här enheten.",
+  "Without a storage outside this device nothing can be restored after it is lost.": "Utan en lagringsplats utanför den här enheten kan ingenting återställas när den går förlorad.",
+  "Add a storage outside this device: a bucket, a NAS or a disk kept elsewhere.": "Lägg till en lagringsplats utanför den här enheten: en bucket, en NAS eller en disk som förvaras någon annanstans.",
+  "Everything is lost with this device.": "Allt går förlorat med den här enheten.",
+  "Root words of organization «{org}»": "Rotorden för organisationen «{org}»",
+  "24 words shown once when the organization was created. They are not the recovery kit.": "24 ord som visades en gång när organisationen skapades. De är inte återställningsorden.",
+  "They appoint and dismiss administrators, the devices that approve and remove the others.": "De utser och avsätter administratörer, de enheter som godkänner och tar bort de andra.",
+  "Administrators now: {admins}": "Administratörer nu: {admins}",
+  "Offline, in a different place from the recovery kit.": "Offline, på en annan plats än återställningsorden.",
+  "Nobody can appoint a new administrator. The data stays readable with the recovery kit.": "Ingen kan utse en ny administratör. Data förblir läsbara med återställningsorden.",
+  "Enrolled keys: {count} ({keys})": "Registrerade nycklar: {count} ({keys})",
+  "At least two of the enrolled security keys, kept in different places, and their PINs.": "Minst två av de registrerade säkerhetsnycklarna, förvarade på olika platser, och deras PIN-koder.",
+  "It uses a software key file on this device, which is lost with the device.": "Den använder en programvarunyckelfil på den här enheten, som går förlorad med enheten.",
+  "Only one key is enrolled: add a backup key with `varsto strongroom add-key \"{folder}\"` and keep it elsewhere.": "Bara en nyckel är registrerad: lägg till en reservnyckel med `varsto strongroom add-key \"{folder}\"` och förvara den någon annanstans.",
+  "Security keys of Strongroom folder «{folder}»": "Säkerhetsnycklar för Strongroom-mappen «{folder}»",
+  "The FIDO2 security keys that open this folder with a touch.": "FIDO2-säkerhetsnycklarna som öppnar den här mappen med en beröring.",
+  "The folder's key exists only wrapped for these security keys; the recovery kit does not open it.": "Mappens nyckel finns bara inslagen för de här säkerhetsnycklarna; återställningsorden öppnar den inte.",
+  "Without any of its security keys the folder cannot be opened by anyone, by design.": "Utan någon av dess säkerhetsnycklar kan ingen öppna mappen, och det är avsiktligt.",
+  "Password: in the file {path} on this device": "Lösenord: i filen {path} på den här enheten",
+  "Password: printed by the command set in Varsto's restic settings": "Lösenord: skrivs ut av kommandot i Varstos restic-inställningar",
+  "The repository's password, outside your devices (a password manager you can open from a new computer, or paper).": "Repositoryts lösenord, utanför dina enheter (en lösenordshanterare som du kan öppna från en ny dator, eller papper).",
+  "Credentials of the repository: in the file {path} on this device": "Repositoryts inloggningsuppgifter: i filen {path} på den här enheten",
+  "The credentials of the repository's storage (from that file), kept like passwords.": "Inloggningsuppgifterna för repositoryts lagring (från den filen), förvarade som lösenord.",
+  "restic repository": "restic-repository",
+  "A separate backup of your folders, made by restic from a full copy on one device.": "En separat säkerhetskopia av dina mappar, gjord av restic från en fullständig kopia på en enhet.",
+  "It can be restored with restic alone, without Varsto and without the vault key.": "Den kan återställas med enbart restic, utan Varsto och utan valvnyckeln.",
+  "Without its password the restic repository cannot be read; restic has no way to recover it either.": "Utan lösenordet kan restic-repositoryt inte läsas; restic har inte heller något sätt att återskapa det.",
+  "Your other devices": "Dina andra enheter",
+  "Devices of this vault: {devices}": "Enheter i det här valvet: {devices}",
+  "If any one of them survives, it can add the new device with a pairing code; the words are not needed then.": "Om någon av dem finns kvar kan den lägga till den nya enheten med en parkopplingskod; orden behövs inte då.",
+  "Nothing more: this package is for when none of them is left.": "Inget mer: det här paketet är för när ingen av dem finns kvar.",
+  "Replica «{name}»": "Replik «{name}»",
+  "An untrusted replica keeps an encrypted copy of every object of the vault, without any key to open it.": "En icke betrodd replik har en krypterad kopia av varje objekt i valvet, utan någon nyckel som öppnar det.",
+  "If the storages are gone, its copy directory can be added on the new device as a directory storage.": "Om lagringsplatserna är borta kan dess kopiekatalog läggas till på den nya enheten som en kataloglagringsplats.",
+  "Who runs the replica and where its copy directory is.": "Vem som driver repliken och var dess kopiekatalog finns.",
+  "Nothing, while the storages survive.": "Ingenting, så länge lagringsplatserna finns kvar.",
+  "Install Varsto on the new computer": "Installera Varsto på den nya datorn",
+  "Download Varsto from {site} and unpack it. Check the download against the signed checksums before you trust it:": "Ladda ned Varsto från {site} och packa upp det. Kontrollera nedladdningen mot de signerade kontrollsummorna innan du litar på den:",
+  "Only shares of the kit? Rebuild the words": "Bara delar av orden? Återskapa orden",
+  "With two of the three shares this prints the 24 words.": "Med två av de tre delarna skriver detta ut de 24 orden.",
+  "Join the vault with the recovery words": "Anslut till valvet med återställningsorden",
+  "Through bucket {bucket} (storage {storage}). Varsto reads the secret access key from the variable VARSTO_S3_SECRET; the first line sets it without showing it or keeping it in the shell history (bash, zsh).": "Genom bucket {bucket} (lagringsplats {storage}). Varsto läser den hemliga åtkomstnyckeln från variabeln VARSTO_S3_SECRET; den första raden sätter den utan att visa den eller spara den i skalets historik (bash, zsh).",
+  "Through the directory of storage {storage}: mount the disk, NAS or share first. It was at {path}; give the path it has on the new device.": "Genom katalogen för lagringsplatsen {storage}: montera disken, NAS:en eller resursen först. Den låg på {path}; ange sökvägen den har på den nya enheten.",
+  "Joining needs a directory or a bucket. Mount the rclone remote {remote} as a directory first (`rclone mount`), join through it, then add the remote as a storage and remove the directory storage.": "För att ansluta behövs en katalog eller en bucket. Montera rclone-fjärrplatsen {remote} som en katalog först (`rclone mount`), anslut genom den, lägg sedan till fjärrplatsen som lagringsplats och ta bort kataloglagringsplatsen.",
+  "This vault has no storage a new device can join through yet: add a bucket or a directory outside this device.": "Det här valvet har ännu ingen lagringsplats som en ny enhet kan ansluta genom: lägg till en bucket eller en katalog utanför den här enheten.",
+  "Varsto asks for a passphrase for the new device. The words stay in the shell history: clear it afterwards.": "Varsto frågar efter en lösenfras för den nya enheten. Orden blir kvar i skalets historik: rensa den efteråt.",
+  "Organization «{org}»": "Organisationen «{org}»",
+  "A device that joins with the words reads everything, but the other devices ignore what it writes until an administrator adds it to the organization. If an administrator device survives, add the new device there:": "En enhet som ansluter med orden läser allt, men de andra enheterna ignorerar det den skriver tills en administratör lägger till den i organisationen. Om en administratörsenhet finns kvar, lägg till den nya enheten där:",
+  "If no administrator device is left, the root words can appoint an administrator only among devices already in the organization; the data stays readable with the recovery words.": "Om ingen administratörsenhet finns kvar kan rotorden bara utse en administratör bland enheter som redan finns i organisationen; data förblir läsbara med återställningsorden.",
+  "Add the other storages with the same names": "Lägg till de andra lagringsplatserna med samma namn",
+  "Use the same names: placement rules, policies and disk pools refer to storages by name. Enter the secret keys when asked, or set VARSTO_S3_SECRET as above before each bucket.": "Använd samma namn: placeringsregler, policyer och diskpooler hänvisar till lagringsplatser med namn. Ange de hemliga nycklarna när du blir tillfrågad, eller sätt VARSTO_S3_SECRET som ovan före varje bucket.",
+  "Before the rclone remotes: install rclone and put the saved rclone.conf where `rclone config file` says (or set the remotes up again with `rclone config`); `rclone listremotes` shows them.": "Före rclone-fjärrplatserna: installera rclone och lägg den sparade rclone.conf där `rclone config file` anger (eller ställ in fjärrplatserna igen med `rclone config`); `rclone listremotes` visar dem.",
+  "A directory storage that was on the lost device's own disk is gone: leave it out. For a NAS or a disk, give the path it has on the new device.": "En kataloglagringsplats som låg på den förlorade enhetens egen disk är borta: hoppa över den. För en NAS eller en disk, ange sökvägen den har på den nya enheten.",
+  "Bring the disks of pool {pool} and connect them one at a time: {disks}.": "Hämta diskarna i poolen {pool} och anslut dem en i taget: {disks}.",
+  "Linux: put the disks.conf lines saved with this guide into the file disks.conf of Varsto's device directory; then `varsto disk insert` mounts each disk, checks it and brings it up to date.": "Linux: lägg raderna för disks.conf som sparats med den här guiden i filen disks.conf i Varstos enhetskatalog; sedan monterar `varsto disk insert` varje disk, kontrollerar den och uppdaterar den.",
+  "Elsewhere, mount the disk as usual: Varsto recognises a disk of the pool by its marker when it is attached, and `varsto disk list` shows it.": "På andra system monterar du disken som vanligt: Varsto känner igen en disk i poolen på dess markör när den är ansluten, och `varsto disk list` visar den.",
+  "Disks of pool «{pool}»": "Diskarna i poolen «{pool}»",
+  "Attach the folders": "Anslut mapparna",
+  "Give each folder a directory on the new device. With --selective its files appear as placeholders and are fetched when opened, which is quicker to start with.": "Ge varje mapp en katalog på den nya enheten. Med --selective visas dess filer som platshållare och hämtas när de öppnas, vilket går snabbare i början.",
+  "Folder «{folder}» was at {path} on {device}.": "Mappen «{folder}» låg på {path} på {device}.",
+  "Open the Strongroom folders with a security key": "Öppna Strongroom-mapparna med en säkerhetsnyckel",
+  "Install the libfido2 tools (fido2-cred, fido2-assert), insert one of the folder's security keys and touch it when asked. Without any of its keys the folder stays closed: that is what a Strongroom is for.": "Installera libfido2-verktygen (fido2-cred, fido2-assert), anslut en av mappens säkerhetsnycklar och rör vid den när du blir ombedd. Utan någon av dess nycklar förblir mappen stängd: det är vad en Strongroom är till för.",
+  "Restore the backups": "Återställ säkerhetskopiorna",
+  "Backup «{backup}» was taken from {path}.": "Säkerhetskopian «{backup}» togs från {path}.",
+  "Files that are only on cold storage": "Filer som bara finns på kall lagring",
+  "Syncing never reads cold storage. Files whose blocks are only there show as unavailable until they are copied back; that may cost retrieval fees, and archive classes need a restore request at the provider first.": "Synkronisering läser aldrig kall lagring. Filer vars block bara finns där visas som otillgängliga tills de kopieras tillbaka; det kan kosta hämtningsavgifter, och arkivklasser kräver först en återställningsbegäran hos leverantören.",
+  "Afterwards: remove the lost devices and print a new kit": "Efteråt: ta bort de förlorade enheterna och skriv ut nya återställningsord",
+  "Removing a lost device gives the vault new keys it never sees. Print a new recovery kit after that and keep it where the old one was, and make this guide again.": "När en förlorad enhet tas bort får valvet nya nycklar som den aldrig ser. Skriv ut nya återställningsord efter det och förvara dem där de gamla låg, och gör den här guiden igen.",
+  "If the new device has the same name as a lost one, give the lost one's id from `varsto device list` instead of its name.": "Om den nya enheten har samma namn som en förlorad, ange den förlorades id från `varsto device list` i stället för namnet.",
+  "Restore from the restic repository": "Återställ från restic-repositoryt",
+  "Without Varsto: install restic, then list the snapshots and restore the newest into an empty directory. restic asks for the repository's password.": "Utan Varsto: installera restic, lista sedan ögonblicksbilderna och återställ den nyaste till en tom katalog. restic frågar efter repositoryts lösenord.",
+  "Set the repository's credentials (the variables of the saved credentials file) in the shell first.": "Sätt först repositoryts inloggningsuppgifter (variablerna i den sparade filen) i skalet.",
+  "Recovery package": "Återställningspaket",
+  "Your recovery package": "Ditt återställningspaket",
+  "Tick what you have done. The ticks are kept in this browser only; they are not part of the vault.": "Bocka för det du har gjort. Bockarna sparas bara i den här webbläsaren; de är inte en del av valvet.",
+  "Print / save as PDF": "Skriv ut / spara som PDF",
+  "Download as text": "Ladda ned som text",
+  "Print the recovery kit…": "Skriv ut återställningsorden…",
+  "Refresh": "Uppdatera",
+  "What to keep": "Vad du ska förvara",
+  "Restoring on a new device": "Återställa på en ny enhet",
+  "Without Varsto": "Utan Varsto",
+  "If all your devices were lost at once, what would you need to restore every file? The recovery package checklist is made for this vault: the recovery words, storage keys, disks and security keys, and the restore steps.": "Om alla dina enheter gick förlorade på en gång, vad skulle du behöva för att återställa varje fil? Checklistan för återställningspaketet är gjord för det här valvet: återställningsorden, nycklar till lagringsplatser, diskar och säkerhetsnycklar, och stegen för återställning.",
+  "Open the checklist": "Öppna checklistan",
+  "optional": "valfritt",
+  "out of date": "inaktuell",
+  "What:": "Vad:",
+  "Why:": "Varför:",
+  "Keep:": "Förvara:",
+  "If missing:": "Om det saknas:",
+  "{done} of {all} done": "{done} av {all} klara",
+  "Varsto recovery package": "Varstos återställningspaket",
+  "Print the recovery kit": "Skriv ut återställningsorden",
+  "The kit is the vault key as 24 words. For safety it is printed on the command line of this computer, which asks for your passphrase: run the command below and print or copy the words by hand. With --shares it also prints three shares, any two of which rebuild the key.": "Återställningsorden är valvnyckeln som 24 ord. Av säkerhetsskäl skrivs de ut på kommandoraden på den här datorn, som frågar efter din lösenfras: kör kommandot nedan och skriv ut eller kopiera orden för hand. Med --shares skrivs också tre delar ut, där vilka två som helst återskapar nyckeln.",
+  "Done": "Klart",
+  "{n} tasks": "{n} uppgifter",
+  "Progress": "Förlopp",
+  "Fetching a file of folder «{s}»": "Hämtar en fil i mappen «{s}»",
+  "Decrypting a file of folder «{s}»": "Dekrypterar en fil i mappen «{s}»",
+  "Deleting the data of folder «{s}»": "Raderar data för mappen «{s}»",
+  "Re-encrypting folder «{s}» for the Strongroom": "Krypterar om mappen «{s}» för Strongroom",
+  "Free space": "Ledigt utrymme",
+  "Used": "Använt",
+  "Reclaimable": "Kan frigöras",
+  "Last checked": "Senast kontrollerad",
+  "Last seen": "Senast sedd",
+  "File system": "Filsystem",
+  "Sort by this column (again: reverse)": "Sortera efter den här kolumnen (igen: omvänt)",
+  "never": "aldrig",
+  "now": "nu",
+  "offline": "frånkopplad",
+  "retired": "pensionerad",
+  "failing": "felar",
+  "clean": "felfri",
+  "corrected": "rättad",
+  "uncorrected": "ej rättad",
+  "failed": "misslyckades",
+  "Suggested next:": "Docka härnäst:",
+  "Copy": "Kopiera",
+  "Copy the command; run it in a terminal with the disk plugged in": "Kopiera kommandot och kör det i en terminal med disken ansluten",
+  "No disk needs docking now.": "Ingen disk behöver dockas nu.",
+  "is attached:": "är ansluten:",
+  "Remind me weekly when a disk is overdue for a check": "Påminn mig varje vecka när en disk är sen med sin kontroll",
+  "weekly disk reminder on": "veckovis diskpåminnelse på",
+  "weekly disk reminder off": "veckovis diskpåminnelse av",
+  "never seen by this device": "aldrig sedd av den här enheten",
+  "This device's ledger was lost or damaged. It is being restored from the storages before anything else is synced.": "Den här enhetens liggare gick förlorad eller skadades. Den återställs från lagringsplatserna innan något annat synkroniseras.",
+  "Restoring this device's ledger from the storages…": "Återställer den här enhetens liggare från lagringsplatserna…",
+  "The storages hold newer ledger entries of this device than it has: it was probably restored from an older copy. It records nothing until it continues from them.": "Lagringsplatserna har nyare poster i den här enhetens liggare än enheten själv: den har troligen återställts från en äldre kopia. Den registrerar ingenting förrän den fortsätter från dem.",
+  "Another copy of this device has written a different ledger history. This device records nothing more: remove it from the vault on another device and pair this computer again as a new device.": "En annan kopia av den här enheten har skrivit en annan liggarhistorik. Den här enheten registrerar inget mer: ta bort den från valvet på en annan enhet och para ihop den här datorn igen som en ny enhet.",
+  "No storage holds the record of where the blocks are any more. It is being rebuilt from the folders' file lists and the stored blocks.": "Ingen lagringsplats har längre uppgifterna om var blocken finns. De byggs upp igen från mapparnas fillistor och de lagrade blocken.",
+  "Restore now": "Återställ nu",
+  "Continue from the storages": "Fortsätt från lagringsplatserna",
+  "Rebuild now": "Bygg upp igen nu",
+  "Rebuilding the ledger": "Bygger upp liggaren igen",
+  "Restoring this device's ledger from the storages": "Återställer den här enhetens liggare från lagringsplatserna",
+  "Fetching the other devices' ledgers again": "Hämtar de andra enheternas liggare igen",
+  "Reading the folders' file lists": "Läser mapparnas fillistor",
+  "Listing the stored blocks": "Listar de lagrade blocken",
+  "Checking the stored blocks": "Kontrollerar de lagrade blocken",
+  "Recording where the blocks are": "Registrerar var blocken finns",
   "The interface starts in your system's theme; the switch keeps your choice.": "Gränssnittet börjar i systemets tema; reglaget kommer ihåg ditt val.",
   "Checking that the restic mirror is complete": "Kontrollerar att restic-speglingen är fullständig",
   "Backing up the mirror with restic": "Säkerhetskopierar speglingen med restic",
@@ -916,6 +1163,114 @@
   [
    "^(.+): stopped; nothing more is fetched from the disks$",
    "$1: avbrutet; inget mer hämtas från diskarna"
+  ],
+  [
+   "^Imported (\\d+) file\\(s\\) \\((.+)\\) into folder (.+)$",
+   "Importerade $1 fil(er) ($2) till mappen $3"
+  ],
+  [
+   "^(\\d+) file\\(s\\) were imported before$",
+   "$1 fil(er) hade importerats tidigare"
+  ],
+  [
+   "^(\\d+) file\\(s\\) could not be read: (.+)$",
+   "$1 fil(er) kunde inte läsas: $2"
+  ],
+  [
+   "^(\\d+) item\\(s\\) not imported \\(links, special files, names Varsto cannot use\\): (.+)$",
+   "$1 objekt importerades inte (länkar, specialfiler, namn som Varsto inte kan använda): $2"
+  ],
+  [
+   "^(\\d+) file\\(s\\) were changed in Varsto and kept as they are$",
+   "$1 fil(er) hade ändrats i Varsto och lämnades som de är"
+  ],
+  [
+   "^(\\d+) file\\(s\\) are gone from the source and kept in Varsto$",
+   "$1 fil(er) har försvunnit från källan och behålls i Varsto"
+  ],
+  [
+   "^(\\d+) file\\(s\\) \\((.+)\\) can be removed from (.+) now\\.$",
+   "$1 fil(er) ($2) kan nu tas bort från $3."
+  ],
+  [
+   "^Remove (\\d+) file\\(s\\) \\((.+)\\) from (.+)\\? Each one is checked once more first\\.$",
+   "Ta bort $1 fil(er) ($2) från $3? Varje fil kontrolleras en gång till först."
+  ],
+  [
+   "^Removed (\\d+) file\\(s\\) \\((.+)\\) from the source$",
+   "Tog bort $1 fil(er) ($2) från källan"
+  ],
+  [
+   "^waiting for the policy \\((.+)\\): (.+)$",
+   "väntar på policyn ($1): $2"
+  ],
+  [
+   "^Imported into (.+)$",
+   "Importerat till $1"
+  ],
+  [
+   "^(\\d+) % overdue$",
+   "$1 % försenade"
+  ],
+  [
+   "^Measured (.+)$",
+   "Mätt $1"
+  ],
+  [
+   "^(\\d+) pending deletes?$",
+   "$1 väntande borttagningar"
+  ],
+  [
+   "^copied: (.+)$",
+   "kopierat: $1"
+  ],
+  [
+   "^(.+) % of its copies \\((.+)\\) were last checked over (\\d+) days ago \\(oldest (\\S+)\\)$",
+   "$1 % av dess kopior ($2) kontrollerades senast för över $3 dagar sedan (äldsta $4)"
+  ],
+  [
+   "^(.+) % of its copies \\((.+)\\) were last checked over (\\d+) days ago \\(some never checked\\)$",
+   "$1 % av dess kopior ($2) kontrollerades senast för över $3 dagar sedan (vissa aldrig)"
+  ],
+  [
+   "^(.+) % of its copies \\((.+)\\) are due for a check \\(verify-after-days is 0; oldest (\\S+)\\)$",
+   "$1 % av dess kopior ($2) ska kontrolleras (verify-after-days är 0; äldsta $3)"
+  ],
+  [
+   "^(.+) % of its copies \\((.+)\\) are due for a check \\(verify-after-days is 0; some never checked\\)$",
+   "$1 % av dess kopior ($2) ska kontrolleras (verify-after-days är 0; vissa aldrig)"
+  ],
+  [
+   "^(\\d+) objects? \\((.+)\\) exists? on no other disk or storage, (\\d+) of them not checked for over (\\d+) days$",
+   "$1 objekt ($2) finns inte på någon annan disk eller lagring; $3 av dem har inte kontrollerats på över $4 dagar"
+  ],
+  [
+   "^(\\d+) objects? \\((.+)\\) exists? on no other disk or storage$",
+   "$1 objekt ($2) finns inte på någon annan disk eller lagring"
+  ],
+  [
+   "^the fetch plan waits for it \\((\\d+) blocks?, (.+)\\)$",
+   "hämtningsplanen väntar på den ($1 block, $2)"
+  ],
+  [
+   "^a queued repair needs (\\d+) objects? it holds$",
+   "en köad reparation behöver $1 objekt från den"
+  ],
+  [
+   "^it can take all (.+) the pool lacks$",
+   "den rymmer allt poolen saknar ($1)"
+  ],
+  [
+   "^it can take (.+) of the (.+) the pool lacks$",
+   "den rymmer $1 av de $2 som poolen saknar"
+  ],
+  [
+   "^(.+) can be freed$",
+   "$1 kan frigöras"
+  ],
+  [
+   "^its last file system check \\((\\S+)\\) corrected errors$",
+   "dess senaste filsystemskontroll ($1) rättade fel"
   ],
   [
    "^saved the analysis of (.+)$",
@@ -1150,6 +1505,46 @@
   [
    "(\\d+) blocks in (\\d+) folders?",
    "$1 block i $2 mappar"
+  ],
+  [
+   "its file system was last checked",
+   "dess filsystem kontrollerades senast"
+  ],
+  [
+   "last seen",
+   "senast sedd"
+  ],
+  [
+   "(\\d+) days ago",
+   "för $1 dagar sedan"
+  ],
+  [
+   "(\\d+) weeks ago",
+   "för $1 veckor sedan"
+  ],
+  [
+   "(\\d+) months ago",
+   "för $1 månader sedan"
+  ],
+  [
+   "(\\d+) years ago",
+   "för $1 år sedan"
+  ],
+  [
+   "retired: nothing new goes to it",
+   "pensionerad: inget nytt skrivs till den"
+  ],
+  [
+   "(\\d+) objects? exists? only on it: copy (?:it|them) elsewhere before the disk goes",
+   "$1 objekt finns bara på den: kopiera dem någon annanstans innan disken tas bort"
+  ],
+  [
+   "it returned different bytes than were written to it, twice, on (\\S+): the disk, its cable or dock may be failing",
+   "den returnerade två gånger andra byte än som skrevs till den ($1): disken, dess kabel eller docka kan vara på väg att gå sönder"
+  ],
+  [
+   "The file system on (.+) has errors that could not be repaired automatically; nothing was read or written\\. Run `sudo e2fsck -f (\\S+)` by hand or retire the disk\\.",
+   "Filsystemet på $1 har fel som inte kunde repareras automatiskt; inget lästes eller skrevs. Kör `sudo e2fsck -f $2` för hand eller pensionera disken."
   ]
  ]
 }

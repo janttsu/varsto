@@ -240,6 +240,15 @@ impl Engine {
         self.home.join(REPAIR_FILE)
     }
 
+    /// Object names (hex) of every damaged copy waiting in the repair queue.
+    pub(super) fn repair_queue_objects(&self) -> HashSet<String> {
+        self.load_repair_state()
+            .queue
+            .iter()
+            .map(|d| d.object.as_str().to_ascii_lowercase())
+            .collect()
+    }
+
     fn load_repair_state(&self) -> RepairState {
         util::read_json_or_default(&self.repair_path()).unwrap_or_default()
     }
@@ -291,9 +300,7 @@ impl Engine {
     /// One repair run (see the module documentation).
     pub fn repair(&mut self, opts: &RepairOptions) -> Result<RepairReport> {
         self.ensure_active()?;
-        if self.forked_self {
-            bail!("this device's ledger is forked; it must be re-enrolled as a new device");
-        }
+        self.ensure_ledger_writable()?;
         let result = self.one_batch(|e| e.run_repair(opts));
         if opts.dry_run {
             return result.map(|(r, _)| r);

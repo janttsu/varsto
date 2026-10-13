@@ -49,7 +49,11 @@ mod devinfo;
 mod disk_fetch;
 mod disk_groups;
 mod disk_insert;
+mod disk_suggest;
 mod fetch;
+mod ledger_recovery;
+mod guide;
+mod imports;
 mod ledger_upkeep;
 mod manifest_upkeep;
 mod membership;
@@ -76,7 +80,15 @@ pub use disk_fetch::{
     RemoteOption, StepOutcome,
 };
 pub use disk_groups::DiskGroupStatus;
+pub use ledger_recovery::{
+    LedgerDeviceStatus, LedgerHealth, LedgerHolding, LedgerProblem, LedgerRebuildOptions,
+    LedgerRebuildReport, LedgerStatus, StorageRebuildReport,
+};
 pub use disk_insert::{DiskInsertReport, DiskProgress, FillOutcome, InsertOptions};
+pub use imports::{
+    CleanupFile, ImportCleanupReport, ImportOptions, ImportReport, ImportStatus, ImportVerify,
+    MissingFile,
+};
 pub use manifest_upkeep::ManifestPolicy;
 pub use membership::{
     removal_notice, DeviceInfo, DeviceRemoved, EpochRecord, Grant, KemRecord, Removal, Revocation,
@@ -99,7 +111,7 @@ pub use share_ops::{ShareMember, ShareMembers, ShareRevokeReport};
 pub use strongroom_ops::{CleanupReport, ConvertReport, StrongroomKeySummary};
 pub use where_data::{CopyStats, DataLocations, DeviceShare, FolderShare, StorageShare};
 
-#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+#[derive(Clone, Debug, Serialize, Deserialize, Default, PartialEq, Eq)]
 struct LocalIndexEntry {
     size: u64,
     mtime: i64,
@@ -321,6 +333,8 @@ pub struct StatusReport {
     /// The organization the vault belongs to, if any.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub org: Option<OrgBrief>,
+    /// Whether this device's ledger needs a rebuild (`ledger_recovery`).
+    pub ledger_health: LedgerHealth,
 }
 
 #[derive(Clone, Debug, Serialize, Default)]
@@ -347,6 +361,9 @@ pub struct FsckReport {
     /// Damaged copies on this device's storages put in the repair queue.
     #[serde(default)]
     pub repairs_queued: u64,
+    /// Whether this device's ledger needs a rebuild (`ledger_recovery`).
+    #[serde(default)]
+    pub ledger_health: LedgerHealth,
 }
 
 /// What `disk add` did.
@@ -468,6 +485,8 @@ pub struct Engine {
     devices: DeviceCache,
     pending: Vec<Event>,
     forked_self: bool,
+    /// What is known to be wrong with this device's ledger (`ledger_recovery`).
+    ledger_alarm: ledger_recovery::Alarm,
     /// Vault keys per epoch (they change when a device is revoked).
     epochs: membership::VaultEpochs,
     /// Set once this device has seen its own revocation: it no longer syncs.
@@ -561,6 +580,16 @@ struct UploadDone {
     object: ObjectName,
     size: u64,
     outcome: Result<bool>,
+}
+
+/// What a policy evaluation knows about this device's storages
+/// (`Engine::policy_ctx`).
+pub(crate) struct PolicyCtx {
+    places: BTreeMap<String, (String, bool)>,
+    carriers: BTreeSet<String>,
+    unknown: Vec<String>,
+    unreadable_places: BTreeMap<String, Vec<String>>,
+    pools: BTreeMap<String, PoolStorage>,
 }
 
 /// Suffix of placeholder files in selective folders (plan 6.34, Resilio-style).
@@ -867,6 +896,7 @@ impl Engine {
             devices: DeviceCache::default(),
             pending: Vec::new(),
             forked_self: false,
+            ledger_alarm: Default::default(),
             epochs,
             removal: None,
             org: crate::org::OrgState::load(home),
@@ -1048,8 +1078,9 @@ impl Engine {
             vault,
             keys,
             keyring,
-            pending: ledger_upkeep::load_deferred(home),
+            pending: Vec::new(),
             forked_self: false,
+            ledger_alarm: Default::default(),
             epochs,
             removal,
             org: crate::org::OrgState::load(home),
@@ -1061,6 +1092,13 @@ impl Engine {
             manifest_policy: Default::default(),
             hold_exempt: None,
         };
+        let (pending, pending_lost) = ledger_upkeep::load_deferred(home);
+        engine.pending = pending;
+        engine.ledger_alarm = ledger_recovery::Alarm::at_open(&engine, pending_lost);
+        if engine.ledger_alarm.fork_marked() {
+            // A real fork was found earlier: this identity signs nothing more.
+            engine.forked_self = true;
+        }
         // Command-line runs use the peers other devices advertised, over TCP
         // only; the service adds LAN peers and the QUIC node.
         if engine.config.p2p.enabled {
@@ -1230,7 +1268,41 @@ impl Engine {
     }
 
     fn open_pool(&self, spec: &StorageSpec) -> Result<PoolStorage> {
-        PoolStorage::open(spec, &self.home, self.pool_identity(spec.name()))
+        Ok(
+            PoolStorage::open(spec, &self.home, self.pool_identity(spec.name()))?
+                .with_verify_parallelism(self.verify_setting(spec.name())),
+        )
+    }
+
+    /// The device's verification setting for a storage, pool, `folder:<name>`
+    /// or `block-cache` (`config.json`, `verify_parallelism`; `*` for the rest).
+    pub(crate) fn verify_setting(&self, name: &str) -> crate::parverify::Parallelism {
+        let p = &self.config.verify_parallelism;
+        p.get(name)
+            .or_else(|| p.get("*"))
+            .copied()
+            .unwrap_or_default()
+    }
+
+    /// How verification reads a storage: S3 and rclone are network
+    /// storages; a directory is on whatever medium its path is.
+    pub(crate) fn storage_lane(&self, spec: &StorageSpec) -> crate::parverify::LanePlan {
+        use crate::media::{storage_media, Media};
+        let media = match spec {
+            StorageSpec::S3 { .. } | StorageSpec::Rclone { .. } => Media::Network,
+            StorageSpec::LocalDir { path, .. } => storage_media(path),
+            // The disks attached now (their marker is where they were last
+            // mounted), read as one: `get` takes whichever holds a copy.
+            StorageSpec::Pool { disks, .. } => Media::combined(
+                &disks
+                    .iter()
+                    .filter_map(|d| d.last_mount.as_ref())
+                    .filter(|m| crate::pool::DiskMarker::path(m).is_file())
+                    .map(|m| storage_media(m))
+                    .collect::<Vec<_>>(),
+            ),
+        };
+        crate::parverify::lane_plan(media, self.verify_setting(spec.name()))
     }
 
     /// Keep a storage secret (S3 secret access key) in `secrets.enc`, for a
@@ -1789,12 +1861,20 @@ impl Engine {
                 .filter(|((f, _), _)| f == &rec.folder_id)
                 .map(|(_, c)| chunk_storage_key(&c.object))
                 .collect();
-            for (_, backend) in self.open_storages(true)? {
+            let storages = self.open_storages(true)?;
+            let task = activity::start(
+                activity::FOLDER_PURGE,
+                &rec.name,
+                (objects.len() * storages.len()) as u64,
+                activity::Unit::Items,
+            );
+            for (_, backend) in storages {
                 for key in &objects {
                     if backend.exists(key).unwrap_or(false) {
                         backend.delete(key)?;
                         deleted += 1;
                     }
+                    task.advance(1);
                 }
                 for prefix in [
                     format!("manifests/{}/", rec.folder_id),
@@ -2295,13 +2375,23 @@ impl Engine {
             self.clear_deferred();
             return self.ensure_active().map(|_| None);
         }
-        if self.forked_self {
-            bail!("this device's ledger is forked; it must be re-enrolled as a new device");
+        if let Err(e) = self.ensure_ledger_writable() {
+            // Nothing is signed until the ledger is restored; the events
+            // wait for it in `ledger/pending.json`.
+            let _ = self.defer_events();
+            return Err(e);
         }
         if self.cycle.is_some() {
             // One batch at the end of the action (see `one_batch`).
             self.defer_events()?;
             return Ok(None);
+        }
+        // A storage holding newer batches of this identity than this device
+        // has (a copy restored from an old backup): signing now would sign a
+        // number that exists already. One short listing, usually empty.
+        if let Err(e) = self.check_storage_before_signing() {
+            let _ = self.defer_events();
+            return Err(e);
         }
         let lamport = self.tick()?;
         let events = std::mem::take(&mut self.pending);
@@ -2617,6 +2707,7 @@ impl Engine {
 
     pub fn push(&mut self, folder: &str) -> Result<PushReport> {
         self.ensure_active()?;
+        self.ensure_ledger_writable()?;
         if self.forked_self {
             bail!("this device's ledger is forked; it must be re-enrolled as a new device");
         }
@@ -3028,7 +3119,7 @@ impl Engine {
                 if !disk.exists() {
                     continue;
                 }
-                thumbs::make(&disk, &path)
+                thumbs::make_with(&disk, &path, &self.config.thumbnails)
             };
             let Some(bytes) = made_here else {
                 state.thumbs_done.insert(hash); // cannot make one; do not retry every time
@@ -3913,6 +4004,15 @@ impl Engine {
         if file.deleted {
             bail!("{path} is deleted");
         }
+        // One file, which can be large: a task of its own (the transfer
+        // feeds it), shown with the file's name.
+        let task = activity::start(
+            activity::DOWNLOAD,
+            &rec.name,
+            file.size,
+            activity::Unit::Bytes,
+        );
+        task.set_phase("file");
         let fk = self.folder_keys(&rec)?;
         let storages = self.open_storages(false)?;
         let mut report = PullReport {
@@ -4101,6 +4201,39 @@ impl Engine {
 
     pub fn policy_check_at(&self, now_utc: i64) -> Result<Vec<PolicyReport>> {
         let view = self.view()?;
+        let mut ctx = self.policy_ctx();
+        let mut reports = Vec::new();
+        for (rec, _) in self.folders() {
+            let Some(policy) = rec.effective_policy() else {
+                continue;
+            };
+            let state = self.load_state(&rec.folder_id)?;
+            let mut seen = BTreeSet::new();
+            let mut facts = Vec::new();
+            for file in state.files.values().filter(|f| !f.deleted) {
+                for cr in &file.chunks {
+                    if !seen.insert(cr.chunk.clone()) {
+                        continue;
+                    }
+                    facts.push(self.chunk_facts(&mut ctx, &view, &rec.folder_id, &cr.chunk));
+                }
+            }
+            let mut report = crate::policy::evaluate(
+                &rec.name,
+                &policy,
+                &facts,
+                &ctx.unreadable_places,
+                &ctx.unknown,
+                now_utc,
+            );
+            self.disk_group_findings(&rec, &state, &view, &ctx.pools, &mut report);
+            reports.push(report);
+        }
+        Ok(reports)
+    }
+
+    /// What a policy evaluation needs to know about this device's storages.
+    pub(crate) fn policy_ctx(&self) -> PolicyCtx {
         let mut places: BTreeMap<String, (String, bool)> = BTreeMap::new(); // name -> (place, unreadable now)
         let mut carriers: BTreeSet<String> = BTreeSet::new();
         let mut unknown: Vec<String> = Vec::new();
@@ -4134,73 +4267,59 @@ impl Engine {
                 }
             }
         }
-        let mut reports = Vec::new();
-        for (rec, _) in self.folders() {
-            let Some(policy) = rec.effective_policy() else {
-                continue;
-            };
-            let state = self.load_state(&rec.folder_id)?;
-            let mut seen = BTreeSet::new();
-            let mut facts = Vec::new();
-            for file in state.files.values().filter(|f| !f.deleted) {
-                for cr in &file.chunks {
-                    if !seen.insert(cr.chunk.clone()) {
-                        continue;
-                    }
-                    let mut copies = Vec::new();
-                    if let Some(record) = view.locate(&rec.folder_id, &cr.chunk) {
-                        for (name, loc) in &record.storages {
-                            if loc.claimed_by.is_empty() || carriers.contains(name) {
-                                continue;
-                            }
-                            let place = if name.starts_with("replica:") {
-                                "replica".to_string()
-                            } else {
-                                places
-                                    .get(name)
-                                    .map(|(p, _)| p.clone())
-                                    .unwrap_or_else(|| "other".to_string())
-                            };
-                            let verified = loc.independently_verified(name);
-                            let verified_utc = loc.verified_utc;
-                            if let Some(pool) = pools.get(name) {
-                                // One copy per disk that holds the object (disk
-                                // groups keep several), each at its disk's place.
-                                for (copy, at, v, v_utc, readable) in Self::pool_copies(
-                                    name,
-                                    pool,
-                                    &record.object,
-                                    verified,
-                                    verified_utc,
-                                ) {
-                                    if !readable {
-                                        let list = unreadable_places.entry(at.clone()).or_default();
-                                        if !list.contains(&copy) {
-                                            list.push(copy.clone());
-                                        }
-                                    }
-                                    copies.push((copy, at, v, v_utc));
-                                }
-                                continue;
-                            }
-                            copies.push((name.clone(), place, verified, verified_utc));
-                        }
-                    }
-                    facts.push(crate::policy::ChunkFacts { copies });
-                }
-            }
-            let mut report = crate::policy::evaluate(
-                &rec.name,
-                &policy,
-                &facts,
-                &unreadable_places,
-                &unknown,
-                now_utc,
-            );
-            self.disk_group_findings(&rec, &state, &view, &pools, &mut report);
-            reports.push(report);
+        PolicyCtx {
+            places,
+            carriers,
+            unknown,
+            unreadable_places,
+            pools,
         }
-        Ok(reports)
+    }
+
+    /// The copies of one chunk as a policy counts them.
+    pub(crate) fn chunk_facts(
+        &self,
+        ctx: &mut PolicyCtx,
+        view: &LedgerView,
+        folder: &FolderId,
+        chunk: &ChunkId,
+    ) -> crate::policy::ChunkFacts {
+        let mut copies = Vec::new();
+        if let Some(record) = view.locate(folder, chunk) {
+            for (name, loc) in &record.storages {
+                if loc.claimed_by.is_empty() || ctx.carriers.contains(name) {
+                    continue;
+                }
+                let place = if name.starts_with("replica:") {
+                    "replica".to_string()
+                } else {
+                    ctx.places
+                        .get(name)
+                        .map(|(p, _)| p.clone())
+                        .unwrap_or_else(|| "other".to_string())
+                };
+                let verified = loc.independently_verified(name);
+                let verified_utc = loc.verified_utc;
+                if let Some(pool) = ctx.pools.get(name) {
+                    // One copy per disk that holds the object (disk
+                    // groups keep several), each at its disk's place.
+                    for (copy, at, v, v_utc, readable) in
+                        Self::pool_copies(name, pool, &record.object, verified, verified_utc)
+                    {
+                        if !readable {
+                            let list = ctx.unreadable_places.entry(at.clone()).or_default();
+                            if !list.contains(&copy) {
+                                list.push(copy.clone());
+                            }
+                        }
+                        copies.push((copy, at, v, v_utc));
+                    }
+                    continue;
+                }
+                copies.push((name.clone(), place, verified, verified_utc));
+            }
+        }
+        crate::policy::ChunkFacts { copies }
     }
 
     /// The vault key (hex) for the recovery kit. Only an unlocked owner
@@ -4899,11 +5018,16 @@ impl Engine {
         // File analyses: follow renames, publish and read (`notes`).
         let _ = self.notes_upkeep(false);
         let _ = self.manifest_upkeep();
+        // No claims at all while manifests name blocks: the ledger is gone
+        // everywhere (checked at most hourly, and only without claims).
+        let _ = self.ledger_lost_everywhere(false);
         Ok(out)
     }
 
     fn sync_folders(&mut self, folder: Option<&str>) -> Result<Vec<(PullReport, PushReport)>> {
         self.ensure_active()?;
+        // A lost or damaged local ledger is restored before anything else.
+        self.ensure_ledger_writable()?;
         // A folder another device converted into a Strongroom must be
         // adopted before it is synced under its old key.
         self.pull_registry()?;
@@ -5124,6 +5248,7 @@ impl Engine {
                     None
                 })
                 .collect(),
+            ledger_health: self.ledger_health(),
         })
     }
 
@@ -5138,6 +5263,8 @@ impl Engine {
         repair::merge_damage(&mut damage, found);
         report.repairs_queued = damage.len() as u64;
         self.queue_damage(damage)?;
+        let _ = self.ledger_lost_everywhere(false);
+        report.ledger_health = self.ledger_health();
         Ok(report)
     }
 
@@ -5284,12 +5411,44 @@ impl Engine {
         if verify_content {
             let mut corrupt_pools: BTreeSet<String> = BTreeSet::new();
             task.step("verify", referenced.len() as u64, activity::Unit::Items);
-            for ((folder, chunk), object) in &referenced {
-                task.advance(1);
-                let key = chunk_storage_key(object);
-                for (spec, backend) in &storages {
-                    let ct = match backend.get(&key) {
-                        Ok(ct) => ct,
+            // Every referenced object on every storage, read ahead on each
+            // storage's own readers (parallel where its medium allows); the
+            // results come back here in the order of the plain loop.
+            let refs: Vec<(&(FolderId, ChunkId), &ObjectName)> = referenced.iter().collect();
+            let plans: Vec<crate::parverify::LanePlan> = storages
+                .iter()
+                .map(|(spec, _)| self.storage_lane(spec))
+                .collect();
+            let mut jobs: Vec<crate::parverify::Job<(usize, usize)>> = Vec::new();
+            for (r, ((folder, chunk), _)) in refs.iter().enumerate() {
+                let size = view.locate(folder, chunk).map_or(0, |c| c.size);
+                for s in 0..storages.len() {
+                    jobs.push(crate::parverify::Job {
+                        item: (r, s),
+                        lane: s,
+                        size,
+                    });
+                }
+            }
+            if storages.is_empty() {
+                task.advance(refs.len() as u64);
+            }
+            let mut failed: Option<anyhow::Error> = None;
+            let storages_ref = &storages;
+            let refs_ref = &refs;
+            crate::parverify::run_ordered(
+                &jobs,
+                &plans,
+                |&(r, s)| storages_ref[s].1.get(&chunk_storage_key(refs_ref[r].1)),
+                |_, got| got.map(|ct| ct.map(|ct| crypto::hash(&ct))),
+                |_, &(r, s), got| {
+                    if s == 0 {
+                        task.advance(1);
+                    }
+                    let ((folder, chunk), object) = refs[r];
+                    let spec = &storages[s].0;
+                    let hash = match got {
+                        Ok(h) => h,
                         Err(e)
                             if matches!(
                                 pool::pool_error(&e),
@@ -5297,12 +5456,15 @@ impl Engine {
                             ) =>
                         {
                             report.objects_offline += 1;
-                            continue;
+                            return true;
                         }
-                        Err(e) => return Err(e),
+                        Err(e) => {
+                            failed = Some(e);
+                            return false;
+                        }
                     };
-                    if let Some(ct) = ct {
-                        if ObjectName::from_bytes(&crypto::hash(&ct)) == *object {
+                    if let Some(hash) = hash {
+                        if ObjectName::from_bytes(&hash) == *object {
                             report.objects_verified_now += 1;
                             self.pending.push(Event::ChunkVerified {
                                 folder: folder.clone(),
@@ -5330,7 +5492,11 @@ impl Engine {
                             }
                         }
                     }
-                }
+                    true
+                },
+            );
+            if let Some(e) = failed {
+                return Err(e);
             }
             self.commit_batch()?;
             // The attached disks of every pool were read in full: record the check.
@@ -5401,8 +5567,9 @@ impl Engine {
             .collect()
     }
 
-    /// Every disk of every pool with its attached state (refreshes the
-    /// registry, adopting disks other devices filled).
+    /// Every disk of every pool with its attached state and the bookkeeping
+    /// the pool index has (refreshes the registry, adopting disks other
+    /// devices filled). `disk_report` adds what needs the ledger.
     pub fn disks(&mut self) -> Result<Vec<DiskStatus>> {
         let mut out = Vec::new();
         for spec in self.pool_specs() {
@@ -5412,6 +5579,7 @@ impl Engine {
             drop(pool);
             self.save_pool_disks(spec.name(), disks)?;
         }
+        self.add_fsck_facts(&mut out);
         Ok(out)
     }
 

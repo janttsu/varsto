@@ -697,6 +697,253 @@
   "Copying blocks from disk «{s}»": "Kopioi lohkoja levyltä «{s}»",
   "Writing files fetched from disk «{s}»": "Kirjoittaa levyltä «{s}» haettuja tiedostoja",
   "Unmounting disk «{s}»": "Irrottaa levyä «{s}»",
+  "Import": "Tuonti",
+  "Import into Varsto": "Tuo Varstoon",
+  "Bring files that live elsewhere under Varsto's care. Each source becomes one folder; importing the same source again brings over what changed and never deletes anything in Varsto.": "Tuo muualla olevat tiedostot Varston hoitoon. Jokaisesta lähteestä tulee yksi kansio; saman lähteen tuominen uudelleen tuo muuttuneet tiedostot eikä koskaan poista mitään Varstosta.",
+  "Source": "Lähde",
+  "A folder on this device": "Kansio tällä laitteella",
+  "A git-annex repository": "git-annex-varasto",
+  "Dropbox": "Dropbox",
+  "OneDrive": "OneDrive",
+  "Another cloud drive (rclone)": "Muu pilvitallennus (rclone)",
+  "This import runs on the command line, where its progress and report are shown:": "Tämä tuonti tehdään komentoriviltä, jossa näkyvät sen eteneminen ja raportti:",
+  "Folder to import": "Tuotava kansio",
+  "it is only read, unless you choose to remove its files below": "sitä vain luetaan, ellet valitse alta sen tiedostojen poistamista",
+  "Name in Varsto": "Nimi Varstossa",
+  "named after the source": "lähteen mukaan",
+  "On this device": "Tällä laitteella",
+  "Placeholders only: files stay on the storages": "Vain paikkamerkit: tiedostot jäävät tallennustiloihin",
+  "A full copy in a directory of this device": "Täysi kopio tämän laitteen hakemistoon",
+  "Directory for the copy": "Kopion hakemisto",
+  "Remove source files once they are safely stored and the policy is met": "Poista lähdetiedostot, kun ne on tallennettu turvallisesti ja käytäntö täyttyy",
+  "A file is removed from the source only when it has not changed since it was imported, Varsto still has the same file, every block of it is on a storage that reads it back intact, and the folder's durability policy is met for it (for example, checked by another of your devices). Files that do not qualify yet stay; import again later, or use Remove safe files below. Varsto's own folders and git-annex repositories are never emptied, and nothing outside the source is touched.": "Tiedosto poistetaan lähteestä vain, kun se ei ole muuttunut tuonnin jälkeen, Varstossa on yhä sama tiedosto, sen jokainen lohko on tallennustilassa, josta se luetaan takaisin ehjänä, ja kansion säilyvyyskäytäntö täyttyy sen osalta (esimerkiksi toinen laitteesi on tarkistanut sen). Muut tiedostot jäävät toistaiseksi; tuo myöhemmin uudelleen tai käytä alta Poista turvalliset tiedostot. Varston omia kansioita ja git-annex-varastoja ei koskaan tyhjennetä, eikä mihinkään lähteen ulkopuolella kosketa.",
+  "Last import": "Viimeisin tuonti",
+  "Remove these files from the source": "Poista nämä tiedostot lähteestä",
+  "Files that stay for now": "Toistaiseksi jäävät tiedostot",
+  "Imported folders": "Tuodut kansiot",
+  "Awaiting import": "Odottaa tuontia",
+  "Removed from source": "Poistettu lähteestä",
+  "Nothing was imported yet.": "Mitään ei ole vielä tuotu.",
+  "Remove safe files…": "Poista turvalliset tiedostot…",
+  "No source file can be removed yet.": "Yhtään lähdetiedostoa ei voi vielä poistaa.",
+  "Remove source files?": "Poistetaanko lähdetiedostot?",
+  "Choose the folder to import.": "Valitse tuotava kansio.",
+  "Choose the directory for the copy.": "Valitse kopion hakemisto.",
+  "Run it once for every disk that holds a clone of the repository: each run continues the same folder with what that disk has, and says which disk to insert next. Nothing is changed on the disks.": "Aja se kerran jokaiselle levylle, jolla on klooni varastosta: jokainen ajo jatkaa samaa kansiota levyn sisällöllä ja kertoo, mikä levy liittää seuraavaksi. Levyillä ei muuteta mitään.",
+  "The first line signs in to Dropbox in your browser (once). Run the import again to bring changes over.": "Ensimmäinen rivi kirjautuu Dropboxiin selaimessasi (kerran). Aja tuonti uudelleen tuodaksesi muutokset.",
+  "The first line signs in to OneDrive in your browser (once). Run the import again to bring changes over.": "Ensimmäinen rivi kirjautuu OneDriveen selaimessasi (kerran). Aja tuonti uudelleen tuodaksesi muutokset.",
+  "Any remote set up in rclone (rclone config) works, Google Drive included.": "Mikä tahansa rclonessa (rclone config) määritetty etäkohde käy, myös Google Drive.",
+  "not imported yet": "ei vielä tuotu",
+  "changed since it was imported": "muuttunut tuonnin jälkeen",
+  "changed or deleted in Varsto since the import": "muutettu tai poistettu Varstossa tuonnin jälkeen",
+  "not on a storage yet (only on devices or a transferrer)": "ei vielä tallennustilassa (vain laitteilla tai siirtolevyllä)",
+  "no storage copy could be read back intact": "yhtään tallennustilan kopiota ei voitu lukea takaisin ehjänä",
+  "its content differs from what was imported": "sisältö poikkeaa tuodusta",
+  "Holds the encrypted copies of your files, the folder records and the ledger: a new device joins the vault through it and fetches the files from it.": "Sisältää tiedostojesi salatut kopiot, kansiotietueet ja kirjanpidon: uusi laite liittyy holviin sen kautta ja hakee tiedostot siitä.",
+  "Cold storage: Varsto writes to it but reads it only when you confirm, and reading may cost retrieval fees.": "Kylmätallennus: Varsto kirjoittaa sinne mutta lukee vain vahvistuksestasi, ja lukeminen voi maksaa noutomaksuja.",
+  "Endpoint: {endpoint}": "Päätepiste: {endpoint}",
+  "Bucket: {bucket}": "Säilö: {bucket}",
+  "Region: {region}": "Alue: {region}",
+  "Place: {place}": "Paikka: {place}",
+  "Key prefix: {prefix}": "Avainten etuliite: {prefix}",
+  "Storage class: {class}": "Tallennusluokka: {class}",
+  "Remote: {remote}": "Etäkohde: {remote}",
+  "Repository: {repo}": "Repositorio: {repo}",
+  "The access key ID and the secret access key of bucket {bucket}. Varsto keeps the secret key only in this device's encrypted secret store, so keep both outside your devices: in a password manager you can open from a new computer, or on paper with the recovery kit.": "Säilön {bucket} käyttöavaimen tunnus ja salainen avain. Varsto säilyttää salaisen avaimen vain tämän laitteen salatussa salaisuusvarastossa, joten pidä molemmat laitteidesi ulkopuolella: salasanojen hallinnassa, jonka saat auki uudelta tietokoneelta, tai paperilla palautussanojen kanssa.",
+  "The login to your account at the provider of {endpoint}, where you can make new keys if these are lost.": "Kirjautumistiedot palveluntarjoajan tiliisi ({endpoint}), jossa voit luoda uudet avaimet, jos nämä katoavat.",
+  "Archive classes (DEEP_ARCHIVE, GLACIER) need a restore request at the provider before the objects can be read: know how to make one there.": "Arkistoluokissa (DEEP_ARCHIVE, GLACIER) objektit on ensin palautettava palveluntarjoajan palvelussa ennen kuin niitä voi lukea: selvitä, miten se tehdään.",
+  "Bucket «{bucket}» (storage {storage})": "Säilö «{bucket}» (tallennuspaikka {storage})",
+  "An S3-compatible bucket at {endpoint}.": "S3-yhteensopiva säilö osoitteessa {endpoint}.",
+  "Without the keys and without the account login, this copy of your data cannot be reached from a new device.": "Ilman avaimia ja tilin kirjautumistietoja tähän tietojesi kopioon ei pääse uudelta laitteelta.",
+  "rclone remote «{remote}» (storage {storage})": "rclone-etäkohde «{remote}» (tallennuspaikka {storage})",
+  "Its settings and token: section [{section}] of rclone's configuration file (`rclone config file` shows where it is).": "Sen asetukset ja tunniste: rclonen määritystiedoston osio [{section}] (`rclone config file` näyttää, missä tiedosto on).",
+  "A storage reached through rclone; the credentials stay in rclone's configuration, not in Varsto.": "rclonen kautta käytettävä tallennuspaikka; tunnukset ovat rclonen määrityksissä, eivät Varstossa.",
+  "A copy of rclone's configuration file (rclone.conf), kept like a password: its token or password opens the remote. If the file is encrypted, also its password.": "Kopio rclonen määritystiedostosta (rclone.conf) salasanan tavoin säilytettynä: sen tunniste tai salasana avaa etäkohteen. Jos tiedosto on salattu, myös sen salasana.",
+  "Or what you need to set the remote {section} up again: the provider account login and the remote's settings.": "Tai se, mitä tarvitset etäkohteen {section} määrittämiseen uudelleen: palveluntarjoajan tilin kirjautumistiedot ja etäkohteen asetukset.",
+  "Without rclone's configuration you have to set the remote up again from the provider account; without that account this copy cannot be reached.": "Ilman rclonen määrityksiä etäkohde on määritettävä uudelleen palveluntarjoajan tilin kautta; ilman tiliä tähän kopioon ei pääse.",
+  "Path on this device: {path}": "Polku tällä laitteella: {path}",
+  "Transferrer {path} (storage {storage})": "Siirtolevy {path} (tallennuspaikka {storage})",
+  "Removable media that carries blocks between your devices.": "Irrotettava tallennusväline, joka kuljettaa lohkoja laitteidesi välillä.",
+  "It holds only what other devices still lack and is emptied as they receive it, so it is no recovery source.": "Siinä on vain se, mitä muilta laitteilta vielä puuttuu, ja se tyhjenee niiden saadessa sen, joten siitä ei voi palauttaa.",
+  "Nothing: the other storages hold the data.": "Ei mitään: muut tallennuspaikat säilyttävät datan.",
+  "Directory {path} (storage {storage})": "Hakemisto {path} (tallennuspaikka {storage})",
+  "A directory: a disk of this device, a removable disk, a NAS or a network share.": "Hakemisto: tämän laitteen levy, irrotettava levy, NAS tai verkkojako.",
+  "If it is a NAS, a network share or a removable disk: where it is and how to reach it (address, share name, login).": "Jos se on NAS, verkkojako tai irrotettava levy: missä se on ja miten siihen pääsee (osoite, jaon nimi, kirjautuminen).",
+  "If it is on this device's own disk, it is lost with the device and is no recovery source: make sure another storage holds the data.": "Jos se on tämän laitteen omalla levyllä, se katoaa laitteen mukana eikä siitä voi palauttaa: varmista, että data on myös toisessa tallennuspaikassa.",
+  "Data that only this directory holds is lost with it.": "Data, joka on vain tässä hakemistossa, katoaa sen mukana.",
+  "Disk «{label}» (retired), kept at: {place}; last seen {seen}": "Levy «{label}» (poistettu käytöstä), säilytyspaikka: {place}; nähty viimeksi {seen}",
+  "Disk «{label}», kept at: {place}; last seen {seen}": "Levy «{label}», säilytyspaikka: {place}; nähty viimeksi {seen}",
+  "No disk has been added yet.": "Levyjä ei ole vielä lisätty.",
+  "Rule: {copies} copies of every block on disks in different places.": "Sääntö: jokaisesta lohkosta {copies} kopiota eri paikoissa olevilla levyillä.",
+  "The disks themselves, with their stickers, in the places above: not all in the same building as your computers.": "Itse levyt tarroineen yllä mainituissa paikoissa: eivät kaikki samassa rakennuksessa kuin tietokoneesi.",
+  "The pool's name exactly as written: «{pool}». The disks are recognised by the vault key and this name.": "Levyvaraston nimi täsmälleen näin kirjoitettuna: «{pool}». Levyt tunnistetaan holviavaimen ja tämän nimen avulla.",
+  "The lines of disks.conf below (Linux): they let Varsto mount the drives by the names on their stickers.": "Alla olevat disks.conf-rivit (Linux): niiden avulla Varsto liittää levyt niiden tarroissa olevilla nimillä.",
+  "Disk pool «{pool}»": "Levyvarasto «{pool}»",
+  "Removable disks that hold encrypted blocks of your files (no records or ledger).": "Irrotettavat levyt, joilla on tiedostojesi salattuja lohkoja (ei tietueita eikä kirjanpitoa).",
+  "Blocks may be only on these disks: then they are needed to restore those files.": "Osa lohkoista voi olla vain näillä levyillä: silloin niitä tarvitaan näiden tiedostojen palauttamiseen.",
+  "Files whose blocks are only on these disks cannot be restored without them.": "Tiedostoja, joiden lohkot ovat vain näillä levyillä, ei voi palauttaa ilman niitä.",
+  "What to keep outside your devices so that every file of vault {vault} can be restored on a new device if all your devices are lost at once (fire, theft, a flood), and how to restore with only that.": "Mitä säilyttää laitteidesi ulkopuolella, jotta holvin {vault} jokainen tiedosto voidaan palauttaa uudelle laitteelle, jos kaikki laitteesi menetetään kerralla (tulipalo, varkaus, tulva), ja miten palautetaan pelkästään niiden avulla.",
+  "This guide names the secrets and says where to keep them; it never contains them. Made on device {device} on {date}: make it again after you add a storage, a disk or a Strongroom folder.": "Tämä opas nimeää salaisuudet ja kertoo, missä niitä säilytetään; se ei koskaan sisällä niitä. Tehty laitteella {device} {date}: tee se uudelleen, kun lisäät tallennuspaikan, levyn tai Strongroom-kansion.",
+  "This device belongs to a folder that someone else shares with you; it holds that folder's key only. There is no recovery kit for it: the person who shared it shares it again.": "Tämä laite kuuluu kansioon, jonka joku toinen jakaa kanssasi; siinä on vain tuon kansion avain. Sille ei ole palautussanoja: jakaja jakaa sen uudelleen.",
+  "Shared folder «{folder}»": "Jaettu kansio «{folder}»",
+  "A folder of someone else's vault that is shared with you.": "Toisen henkilön holvin kansio, joka on jaettu kanssasi.",
+  "Its key came from the person who shared it; nothing you can print opens it.": "Sen avain tuli jakajalta; mikään tulostettava ei avaa sitä.",
+  "On this device: {path}": "Tällä laitteella: {path}",
+  "Who shared it with you and how to reach them.": "Kuka sen jakoi kanssasi ja miten hänet tavoittaa.",
+  "If they cannot share it again, the folder stays out of your reach (their copy is not affected).": "Jos hän ei voi jakaa sitä uudelleen, kansio jää ulottumattomiisi (hänen kopioonsa tämä ei vaikuta).",
+  "Ask for the shared folders again": "Pyydä jaetut kansiot uudelleen",
+  "On the new device, make a request code and send it to the person who shared the folder; they share the folder to it, and you accept what they send.": "Luo uudella laitteella pyyntökoodi ja lähetä se kansion jakajalle; hän jakaa kansion sille, ja sinä hyväksyt sen, mitä hän lähettää.",
+  "Not needed: the passphrase of this device. A new device gets a passphrase of its own.": "Ei tarvita: tämän laitteen salalausetta. Uusi laite saa oman salalauseen.",
+  "Printed on this device on {date}.": "Tulostettu tällä laitteella {date}.",
+  "The kit printed on {date} is out of date: the vault key changed afterwards (a device was removed). It still opens what was written before; print a new one for the rest.": "{date} tulostetut sanat ovat vanhentuneet: holviavain vaihtui sen jälkeen (laite poistettiin). Ne avaavat yhä sitä ennen kirjoitetun; tulosta uudet muuta varten.",
+  "Varsto does not know whether you printed it, for example on another device.": "Varsto ei tiedä, oletko tulostanut ne, esimerkiksi toisella laitteella.",
+  "Recovery kit: the vault key as 24 words": "Palautussanat: holviavain 24 sanana",
+  "The vault key of vault {vault}, printed with `varsto recovery kit`.": "Holvin {vault} holviavain, tulostetaan komennolla `varsto recovery kit`.",
+  "It is the only thing that opens the vault on a new device. Varsto keeps no copy anywhere and cannot reset it.": "Se on ainoa asia, joka avaa holvin uudella laitteella. Varsto ei säilytä siitä kopiota missään eikä voi nollata sitä.",
+  "On paper or metal, in at least two places away from your devices; never as a photo or a cloud note.": "Paperilla tai metallissa, vähintään kahdessa paikassa erillään laitteistasi; ei koskaan valokuvana tai pilvimuistiinpanona.",
+  "Or as three shares (`varsto recovery kit --shares`), each in a different place or with a different person: any two rebuild the key, one alone reveals nothing.": "Tai kolmena osana (`varsto recovery kit --shares`), kukin eri paikassa tai eri henkilöllä: mitkä tahansa kaksi muodostavat avaimen, yksi yksin ei paljasta mitään.",
+  "Without the words, or two of the shares, nobody can read the vault: not you, not the makers of Varsto.": "Ilman sanoja tai kahta osaa kukaan ei voi lukea holvia: et sinä eivätkä Varston tekijät.",
+  "The vault has no storage on this device.": "Holvilla ei ole tallennuspaikkaa tällä laitteella.",
+  "Without a storage outside this device nothing can be restored after it is lost.": "Ilman tämän laitteen ulkopuolista tallennuspaikkaa mitään ei voi palauttaa laitteen kadottua.",
+  "Add a storage outside this device: a bucket, a NAS or a disk kept elsewhere.": "Lisää tallennuspaikka tämän laitteen ulkopuolelle: säilö, NAS tai muualla säilytettävä levy.",
+  "Everything is lost with this device.": "Kaikki katoaa tämän laitteen mukana.",
+  "Root words of organization «{org}»": "Organisaation «{org}» juurisanat",
+  "24 words shown once when the organization was created. They are not the recovery kit.": "24 sanaa, jotka näytettiin kerran organisaation luomisen yhteydessä. Ne eivät ole palautussanat.",
+  "They appoint and dismiss administrators, the devices that approve and remove the others.": "Niillä nimitetään ja erotetaan ylläpitäjät, eli laitteet, jotka hyväksyvät ja poistavat muut.",
+  "Administrators now: {admins}": "Ylläpitäjät nyt: {admins}",
+  "Offline, in a different place from the recovery kit.": "Offline-tilassa, eri paikassa kuin palautussanat.",
+  "Nobody can appoint a new administrator. The data stays readable with the recovery kit.": "Kukaan ei voi nimittää uutta ylläpitäjää. Data pysyy luettavana palautussanoilla.",
+  "Enrolled keys: {count} ({keys})": "Rekisteröidyt avaimet: {count} ({keys})",
+  "At least two of the enrolled security keys, kept in different places, and their PINs.": "Vähintään kaksi rekisteröidyistä suojausavaimista eri paikoissa säilytettyinä sekä niiden PIN-koodit.",
+  "It uses a software key file on this device, which is lost with the device.": "Se käyttää tällä laitteella olevaa ohjelmistoavaintiedostoa, joka katoaa laitteen mukana.",
+  "Only one key is enrolled: add a backup key with `varsto strongroom add-key \"{folder}\"` and keep it elsewhere.": "Vain yksi avain on rekisteröity: lisää varasuojausavain komennolla `varsto strongroom add-key \"{folder}\"` ja säilytä sitä muualla.",
+  "Security keys of Strongroom folder «{folder}»": "Strongroom-kansion «{folder}» suojausavaimet",
+  "The FIDO2 security keys that open this folder with a touch.": "FIDO2-suojausavaimet, jotka avaavat tämän kansion kosketuksella.",
+  "The folder's key exists only wrapped for these security keys; the recovery kit does not open it.": "Kansion avain on olemassa vain näille suojausavaimille salattuna; palautussanat eivät avaa sitä.",
+  "Without any of its security keys the folder cannot be opened by anyone, by design.": "Ilman yhtäkään sen suojausavaimista kukaan ei voi avata kansiota; näin se on suunniteltu.",
+  "Password: in the file {path} on this device": "Salasana: tiedostossa {path} tällä laitteella",
+  "Password: printed by the command set in Varsto's restic settings": "Salasana: Varston restic-asetuksiin määritetty komento tulostaa sen",
+  "The repository's password, outside your devices (a password manager you can open from a new computer, or paper).": "Repositorion salasana laitteidesi ulkopuolella (salasanojen hallinta, jonka saat auki uudelta tietokoneelta, tai paperi).",
+  "Credentials of the repository: in the file {path} on this device": "Repositorion tunnukset: tiedostossa {path} tällä laitteella",
+  "The credentials of the repository's storage (from that file), kept like passwords.": "Repositorion tallennuspaikan tunnukset (siitä tiedostosta) salasanojen tavoin säilytettyinä.",
+  "restic repository": "restic-repositorio",
+  "A separate backup of your folders, made by restic from a full copy on one device.": "Kansioidesi erillinen varmuuskopio, jonka restic tekee yhden laitteen täydestä kopiosta.",
+  "It can be restored with restic alone, without Varsto and without the vault key.": "Sen voi palauttaa pelkällä resticillä, ilman Varstoa ja ilman holviavainta.",
+  "Without its password the restic repository cannot be read; restic has no way to recover it either.": "Ilman salasanaa restic-repositoriota ei voi lukea; resticillä ei myöskään ole keinoa palauttaa sitä.",
+  "Your other devices": "Muut laitteesi",
+  "Devices of this vault: {devices}": "Tämän holvin laitteet: {devices}",
+  "If any one of them survives, it can add the new device with a pairing code; the words are not needed then.": "Jos yksikin niistä säilyy, se voi lisätä uuden laitteen parituskoodilla; sanoja ei silloin tarvita.",
+  "Nothing more: this package is for when none of them is left.": "Ei muuta: tämä paketti on sitä varten, ettei yhtäkään niistä ole jäljellä.",
+  "Replica «{name}»": "Replika «{name}»",
+  "An untrusted replica keeps an encrypted copy of every object of the vault, without any key to open it.": "Epäluotettava replika säilyttää salatun kopion holvin jokaisesta objektista ilman avainta, joka avaisi sen.",
+  "If the storages are gone, its copy directory can be added on the new device as a directory storage.": "Jos tallennuspaikat ovat menneet, sen kopiohakemiston voi lisätä uudella laitteella hakemistotallennuspaikaksi.",
+  "Who runs the replica and where its copy directory is.": "Kuka ylläpitää replikaa ja missä sen kopiohakemisto on.",
+  "Nothing, while the storages survive.": "Ei mitään, kun tallennuspaikat säilyvät.",
+  "Install Varsto on the new computer": "Asenna Varsto uudelle tietokoneelle",
+  "Download Varsto from {site} and unpack it. Check the download against the signed checksums before you trust it:": "Lataa Varsto osoitteesta {site} ja pura se. Tarkista lataus allekirjoitettuja tarkistussummia vasten ennen kuin luotat siihen:",
+  "Only shares of the kit? Rebuild the words": "Vain sanojen osat tallessa? Muodosta sanat uudelleen",
+  "With two of the three shares this prints the 24 words.": "Kahdella kolmesta osasta tämä tulostaa 24 sanaa.",
+  "Join the vault with the recovery words": "Liity holviin palautussanoilla",
+  "Through bucket {bucket} (storage {storage}). Varsto reads the secret access key from the variable VARSTO_S3_SECRET; the first line sets it without showing it or keeping it in the shell history (bash, zsh).": "Säilön {bucket} kautta (tallennuspaikka {storage}). Varsto lukee salaisen avaimen muuttujasta VARSTO_S3_SECRET; ensimmäinen rivi asettaa sen näyttämättä sitä ja jättämättä sitä komentohistoriaan (bash, zsh).",
+  "Through the directory of storage {storage}: mount the disk, NAS or share first. It was at {path}; give the path it has on the new device.": "Tallennuspaikan {storage} hakemiston kautta: liitä levy, NAS tai jako ensin. Se oli polussa {path}; anna polku, joka sillä on uudella laitteella.",
+  "Joining needs a directory or a bucket. Mount the rclone remote {remote} as a directory first (`rclone mount`), join through it, then add the remote as a storage and remove the directory storage.": "Liittyminen vaatii hakemiston tai säilön. Liitä rclone-etäkohde {remote} ensin hakemistoksi (`rclone mount`), liity sen kautta, lisää sitten etäkohde tallennuspaikaksi ja poista hakemistotallennuspaikka.",
+  "This vault has no storage a new device can join through yet: add a bucket or a directory outside this device.": "Tällä holvilla ei vielä ole tallennuspaikkaa, jonka kautta uusi laite voisi liittyä: lisää säilö tai hakemisto tämän laitteen ulkopuolelle.",
+  "Varsto asks for a passphrase for the new device. The words stay in the shell history: clear it afterwards.": "Varsto kysyy uudelle laitteelle salalauseen. Sanat jäävät komentohistoriaan: tyhjennä se jälkeenpäin.",
+  "Organization «{org}»": "Organisaatio «{org}»",
+  "A device that joins with the words reads everything, but the other devices ignore what it writes until an administrator adds it to the organization. If an administrator device survives, add the new device there:": "Sanoilla liittyvä laite lukee kaiken, mutta muut laitteet jättävät sen kirjoitukset huomiotta, kunnes ylläpitäjä lisää sen organisaatioon. Jos jokin ylläpitäjälaite säilyy, lisää uusi laite siellä:",
+  "If no administrator device is left, the root words can appoint an administrator only among devices already in the organization; the data stays readable with the recovery words.": "Jos yhtäkään ylläpitäjälaitetta ei ole jäljellä, juurisanoilla voi nimittää ylläpitäjäksi vain laitteen, joka on jo organisaatiossa; data pysyy luettavana palautussanoilla.",
+  "Add the other storages with the same names": "Lisää muut tallennuspaikat samoilla nimillä",
+  "Use the same names: placement rules, policies and disk pools refer to storages by name. Enter the secret keys when asked, or set VARSTO_S3_SECRET as above before each bucket.": "Käytä samoja nimiä: sijoittelusäännöt, käytännöt ja levyvarastot viittaavat tallennuspaikkoihin nimellä. Anna salaiset avaimet kysyttäessä tai aseta VARSTO_S3_SECRET kuten yllä ennen kutakin säilöä.",
+  "Before the rclone remotes: install rclone and put the saved rclone.conf where `rclone config file` says (or set the remotes up again with `rclone config`); `rclone listremotes` shows them.": "Ennen rclone-etäkohteita: asenna rclone ja laita tallessa oleva rclone.conf paikkaan, jonka `rclone config file` kertoo (tai määritä etäkohteet uudelleen komennolla `rclone config`); `rclone listremotes` näyttää ne.",
+  "A directory storage that was on the lost device's own disk is gone: leave it out. For a NAS or a disk, give the path it has on the new device.": "Kadonneen laitteen omalla levyllä ollut hakemistotallennuspaikka on mennyt: jätä se pois. Anna NAS:lle tai levylle polku, joka sillä on uudella laitteella.",
+  "Bring the disks of pool {pool} and connect them one at a time: {disks}.": "Tuo levyvaraston {pool} levyt ja kytke ne yksi kerrallaan: {disks}.",
+  "Linux: put the disks.conf lines saved with this guide into the file disks.conf of Varsto's device directory; then `varsto disk insert` mounts each disk, checks it and brings it up to date.": "Linux: laita tämän oppaan mukana tallennetut disks.conf-rivit Varston laitehakemiston tiedostoon disks.conf; sitten `varsto disk insert` liittää kunkin levyn, tarkistaa sen ja päivittää sen ajan tasalle.",
+  "Elsewhere, mount the disk as usual: Varsto recognises a disk of the pool by its marker when it is attached, and `varsto disk list` shows it.": "Muualla liitä levy tavalliseen tapaan: Varsto tunnistaa levyvaraston levyn sen merkkitiedostosta, kun levy on liitetty, ja `varsto disk list` näyttää sen.",
+  "Disks of pool «{pool}»": "Levyvaraston «{pool}» levyt",
+  "Attach the folders": "Liitä kansiot",
+  "Give each folder a directory on the new device. With --selective its files appear as placeholders and are fetched when opened, which is quicker to start with.": "Anna jokaiselle kansiolle hakemisto uudella laitteella. Valitsimella --selective sen tiedostot näkyvät paikkamerkkeinä ja haetaan avattaessa, mikä on alkuun nopeampaa.",
+  "Folder «{folder}» was at {path} on {device}.": "Kansio «{folder}» oli polussa {path} laitteella {device}.",
+  "Open the Strongroom folders with a security key": "Avaa Strongroom-kansiot suojausavaimella",
+  "Install the libfido2 tools (fido2-cred, fido2-assert), insert one of the folder's security keys and touch it when asked. Without any of its keys the folder stays closed: that is what a Strongroom is for.": "Asenna libfido2-työkalut (fido2-cred, fido2-assert), kytke jokin kansion suojausavaimista ja kosketa sitä pyydettäessä. Ilman yhtäkään sen avaimista kansio pysyy suljettuna: sitä varten Strongroom on.",
+  "Restore the backups": "Palauta varmuuskopiot",
+  "Backup «{backup}» was taken from {path}.": "Varmuuskopio «{backup}» otettiin polusta {path}.",
+  "Files that are only on cold storage": "Tiedostot, jotka ovat vain kylmätallennuksessa",
+  "Syncing never reads cold storage. Files whose blocks are only there show as unavailable until they are copied back; that may cost retrieval fees, and archive classes need a restore request at the provider first.": "Synkronointi ei koskaan lue kylmätallennusta. Tiedostot, joiden lohkot ovat vain siellä, näkyvät saavuttamattomina, kunnes ne kopioidaan takaisin; se voi maksaa noutomaksuja, ja arkistoluokissa tarvitaan ensin palautuspyyntö palveluntarjoajalle.",
+  "Afterwards: remove the lost devices and print a new kit": "Lopuksi: poista kadonneet laitteet ja tulosta uudet palautussanat",
+  "Removing a lost device gives the vault new keys it never sees. Print a new recovery kit after that and keep it where the old one was, and make this guide again.": "Kadonneen laitteen poistaminen antaa holville uudet avaimet, joita se ei koskaan näe. Tulosta sen jälkeen uudet palautussanat ja säilytä ne vanhojen paikalla, ja tee tämä opas uudelleen.",
+  "If the new device has the same name as a lost one, give the lost one's id from `varsto device list` instead of its name.": "Jos uudella laitteella on sama nimi kuin kadonneella, anna kadonneen tunniste komennon `varsto device list` tulosteesta nimen sijaan.",
+  "Restore from the restic repository": "Palauta restic-repositoriosta",
+  "Without Varsto: install restic, then list the snapshots and restore the newest into an empty directory. restic asks for the repository's password.": "Ilman Varstoa: asenna restic, listaa tilannevedokset ja palauta uusin tyhjään hakemistoon. restic kysyy repositorion salasanaa.",
+  "Set the repository's credentials (the variables of the saved credentials file) in the shell first.": "Aseta ensin repositorion tunnukset (tallessa olevan tunnustiedoston muuttujat) komentotulkkiin.",
+  "Recovery package": "Palautuspaketti",
+  "Your recovery package": "Palautuspakettisi",
+  "Tick what you have done. The ticks are kept in this browser only; they are not part of the vault.": "Merkitse tehdyt kohdat. Merkinnät säilyvät vain tässä selaimessa; ne eivät ole osa holvia.",
+  "Print / save as PDF": "Tulosta / tallenna PDF:ksi",
+  "Download as text": "Lataa tekstinä",
+  "Print the recovery kit…": "Tulosta palautussanat…",
+  "Refresh": "Päivitä",
+  "What to keep": "Mitä säilyttää",
+  "Restoring on a new device": "Palauttaminen uudelle laitteelle",
+  "Without Varsto": "Ilman Varstoa",
+  "If all your devices were lost at once, what would you need to restore every file? The recovery package checklist is made for this vault: the recovery words, storage keys, disks and security keys, and the restore steps.": "Jos kaikki laitteesi menetettäisiin kerralla, mitä tarvitsisit jokaisen tiedoston palauttamiseen? Palautuspaketin tarkistuslista on tehty tälle holville: palautussanat, tallennuspaikkojen avaimet, levyt ja suojausavaimet sekä palautuksen vaiheet.",
+  "Open the checklist": "Avaa tarkistuslista",
+  "optional": "valinnainen",
+  "out of date": "vanhentunut",
+  "What:": "Mikä:",
+  "Why:": "Miksi:",
+  "Keep:": "Säilytä:",
+  "If missing:": "Jos puuttuu:",
+  "{done} of {all} done": "{done}/{all} tehty",
+  "Varsto recovery package": "Varston palautuspaketti",
+  "Print the recovery kit": "Tulosta palautussanat",
+  "The kit is the vault key as 24 words. For safety it is printed on the command line of this computer, which asks for your passphrase: run the command below and print or copy the words by hand. With --shares it also prints three shares, any two of which rebuild the key.": "Palautussanat ovat holviavain 24 sanana. Turvallisuuden vuoksi ne tulostetaan tämän tietokoneen komentorivillä, joka kysyy salalauseesi: suorita alla oleva komento ja tulosta tai kopioi sanat käsin. Valitsimella --shares se tulostaa myös kolme osaa, joista mitkä tahansa kaksi muodostavat avaimen.",
+  "Done": "Valmis",
+  "{n} tasks": "{n} tehtävää",
+  "Progress": "Edistyminen",
+  "Fetching a file of folder «{s}»": "Hakee tiedostoa kansiosta «{s}»",
+  "Decrypting a file of folder «{s}»": "Purkaa tiedoston salausta kansiosta «{s}»",
+  "Deleting the data of folder «{s}»": "Poistaa kansion «{s}» dataa",
+  "Re-encrypting folder «{s}» for the Strongroom": "Salaa kansiota «{s}» uudelleen Strongroomia varten",
+  "Free space": "Vapaa tila",
+  "Used": "Käytetty",
+  "Reclaimable": "Vapautettavissa",
+  "Last checked": "Tarkistettu viimeksi",
+  "Last seen": "Nähty viimeksi",
+  "File system": "Tiedostojärjestelmä",
+  "Sort by this column (again: reverse)": "Järjestä tämän sarakkeen mukaan (uudelleen: käänteisesti)",
+  "never": "ei koskaan",
+  "now": "nyt",
+  "offline": "poissa",
+  "retired": "käytöstä poistettu",
+  "failing": "vikaantumassa",
+  "clean": "virheetön",
+  "corrected": "korjattu",
+  "uncorrected": "korjaamatta",
+  "failed": "epäonnistui",
+  "Suggested next:": "Liitä seuraavaksi:",
+  "Copy": "Kopioi",
+  "Copy the command; run it in a terminal with the disk plugged in": "Kopioi komento ja suorita se päätteessä, kun levy on kytketty",
+  "No disk needs docking now.": "Mitään levyä ei tarvitse kytkeä nyt.",
+  "is attached:": "on liitetty:",
+  "Remind me weekly when a disk is overdue for a check": "Muistuta viikoittain, kun levyn tarkistus on myöhässä",
+  "weekly disk reminder on": "viikoittainen levymuistutus päällä",
+  "weekly disk reminder off": "viikoittainen levymuistutus pois",
+  "never seen by this device": "tämä laite ei ole koskaan nähnyt sitä",
+  "This device's ledger was lost or damaged. It is being restored from the storages before anything else is synced.": "Tämän laitteen kirjanpito katosi tai vaurioitui. Se palautetaan tallennuspaikoista ennen kuin mitään muuta synkronoidaan.",
+  "Restoring this device's ledger from the storages…": "Palautetaan tämän laitteen kirjanpitoa tallennuspaikoista…",
+  "The storages hold newer ledger entries of this device than it has: it was probably restored from an older copy. It records nothing until it continues from them.": "Tallennuspaikoissa on tämän laitteen kirjanpidosta uudempia merkintöjä kuin laitteella itsellään: se on luultavasti palautettu vanhemmasta kopiosta. Se ei kirjaa mitään ennen kuin jatkaa niistä.",
+  "Another copy of this device has written a different ledger history. This device records nothing more: remove it from the vault on another device and pair this computer again as a new device.": "Toinen kopio tästä laitteesta on kirjoittanut erilaisen kirjanpitohistorian. Tämä laite ei kirjaa enää mitään: poista se holvista toisella laitteella ja liitä tämä tietokone uudelleen uutena laitteena.",
+  "No storage holds the record of where the blocks are any more. It is being rebuilt from the folders' file lists and the stored blocks.": "Missään tallennuspaikassa ei ole enää tietoa siitä, missä lohkot ovat. Se rakennetaan uudelleen kansioiden tiedostoluetteloista ja tallennetuista lohkoista.",
+  "Restore now": "Palauta nyt",
+  "Continue from the storages": "Jatka tallennuspaikkojen tiedoista",
+  "Rebuild now": "Rakenna uudelleen nyt",
+  "Rebuilding the ledger": "Rakentaa kirjanpitoa uudelleen",
+  "Restoring this device's ledger from the storages": "Palauttaa tämän laitteen kirjanpitoa tallennuspaikoista",
+  "Fetching the other devices' ledgers again": "Hakee muiden laitteiden kirjanpidot uudelleen",
+  "Reading the folders' file lists": "Lukee kansioiden tiedostoluetteloita",
+  "Listing the stored blocks": "Luetteloi tallennettuja lohkoja",
+  "Checking the stored blocks": "Tarkistaa tallennettuja lohkoja",
+  "Recording where the blocks are": "Kirjaa, missä lohkot ovat",
   "The interface starts in your system's theme; the switch keeps your choice.": "Käyttöliittymä alkaa järjestelmän teemalla; kytkin muistaa valintasi.",
   "Checking that the restic mirror is complete": "Tarkistaa, että resticin peilikopio on täydellinen",
   "Backing up the mirror with restic": "Varmuuskopioi peilikopiota resticillä",
@@ -925,6 +1172,114 @@
    "$1: lopetettu; levyiltä ei haeta enempää"
   ],
   [
+   "^Imported (\\d+) file\\(s\\) \\((.+)\\) into folder (.+)$",
+   "Tuotiin $1 tiedosto(a) ($2) kansioon $3"
+  ],
+  [
+   "^(\\d+) file\\(s\\) were imported before$",
+   "$1 tiedosto(a) oli tuotu aiemmin"
+  ],
+  [
+   "^(\\d+) file\\(s\\) could not be read: (.+)$",
+   "$1 tiedostoa ei voitu lukea: $2"
+  ],
+  [
+   "^(\\d+) item\\(s\\) not imported \\(links, special files, names Varsto cannot use\\): (.+)$",
+   "$1 kohdetta jäi tuomatta (linkit, erikoistiedostot, nimet joita Varsto ei voi käyttää): $2"
+  ],
+  [
+   "^(\\d+) file\\(s\\) were changed in Varsto and kept as they are$",
+   "$1 tiedostoa oli muutettu Varstossa ja jätettiin ennalleen"
+  ],
+  [
+   "^(\\d+) file\\(s\\) are gone from the source and kept in Varsto$",
+   "$1 tiedostoa on poistunut lähteestä ja säilytetään Varstossa"
+  ],
+  [
+   "^(\\d+) file\\(s\\) \\((.+)\\) can be removed from (.+) now\\.$",
+   "$1 tiedosto(a) ($2) voidaan nyt poistaa lähteestä $3."
+  ],
+  [
+   "^Remove (\\d+) file\\(s\\) \\((.+)\\) from (.+)\\? Each one is checked once more first\\.$",
+   "Poistetaanko $1 tiedosto(a) ($2) lähteestä $3? Jokainen tarkistetaan vielä kerran ensin."
+  ],
+  [
+   "^Removed (\\d+) file\\(s\\) \\((.+)\\) from the source$",
+   "Poistettiin $1 tiedosto(a) ($2) lähteestä"
+  ],
+  [
+   "^waiting for the policy \\((.+)\\): (.+)$",
+   "odottaa käytäntöä ($1): $2"
+  ],
+  [
+   "^Imported into (.+)$",
+   "Tuotiin kansioon $1"
+  ],
+  [
+   "^(\\d+) % overdue$",
+   "$1 % myöhässä"
+  ],
+  [
+   "^Measured (.+)$",
+   "Mitattu $1"
+  ],
+  [
+   "^(\\d+) pending deletes?$",
+   "$1 odottavaa poistoa"
+  ],
+  [
+   "^copied: (.+)$",
+   "kopioitu: $1"
+  ],
+  [
+   "^(.+) % of its copies \\((.+)\\) were last checked over (\\d+) days ago \\(oldest (\\S+)\\)$",
+   "$1 % sen kopioista ($2) tarkistettiin viimeksi yli $3 päivää sitten (vanhin $4)"
+  ],
+  [
+   "^(.+) % of its copies \\((.+)\\) were last checked over (\\d+) days ago \\(some never checked\\)$",
+   "$1 % sen kopioista ($2) tarkistettiin viimeksi yli $3 päivää sitten (osaa ei ole tarkistettu koskaan)"
+  ],
+  [
+   "^(.+) % of its copies \\((.+)\\) are due for a check \\(verify-after-days is 0; oldest (\\S+)\\)$",
+   "$1 % sen kopioista ($2) on tarkistettava (verify-after-days on 0; vanhin $3)"
+  ],
+  [
+   "^(.+) % of its copies \\((.+)\\) are due for a check \\(verify-after-days is 0; some never checked\\)$",
+   "$1 % sen kopioista ($2) on tarkistettava (verify-after-days on 0; osaa ei ole tarkistettu koskaan)"
+  ],
+  [
+   "^(\\d+) objects? \\((.+)\\) exists? on no other disk or storage, (\\d+) of them not checked for over (\\d+) days$",
+   "$1 objektia ($2) ei ole millään muulla levyllä tai tallennuspaikalla; niistä $3 on tarkistamatta yli $4 päivää"
+  ],
+  [
+   "^(\\d+) objects? \\((.+)\\) exists? on no other disk or storage$",
+   "$1 objektia ($2) ei ole millään muulla levyllä tai tallennuspaikalla"
+  ],
+  [
+   "^the fetch plan waits for it \\((\\d+) blocks?, (.+)\\)$",
+   "noutosuunnitelma odottaa sitä ($1 lohkoa, $2)"
+  ],
+  [
+   "^a queued repair needs (\\d+) objects? it holds$",
+   "jonossa oleva korjaus tarvitsee siltä $1 objektia"
+  ],
+  [
+   "^it can take all (.+) the pool lacks$",
+   "siihen mahtuu kaikki levyvarastosta puuttuva ($1)"
+  ],
+  [
+   "^it can take (.+) of the (.+) the pool lacks$",
+   "siihen mahtuu $1 levyvarastosta puuttuvasta $2:stä"
+  ],
+  [
+   "^(.+) can be freed$",
+   "$1 voidaan vapauttaa"
+  ],
+  [
+   "^its last file system check \\((\\S+)\\) corrected errors$",
+   "sen viimeisin tiedostojärjestelmän tarkistus ($1) korjasi virheitä"
+  ],
+  [
    "^saved the analysis of (.+)$",
    "tallennettiin tiedoston $1 analyysi"
   ],
@@ -1102,6 +1457,46 @@
   [
    "(\\d+) blocks in (\\d+) folders?",
    "$1 lohkoa $2 kansiossa"
+  ],
+  [
+   "its file system was last checked",
+   "sen tiedostojärjestelmä tarkistettiin viimeksi"
+  ],
+  [
+   "last seen",
+   "nähty viimeksi"
+  ],
+  [
+   "(\\d+) days ago",
+   "$1 päivää sitten"
+  ],
+  [
+   "(\\d+) weeks ago",
+   "$1 viikkoa sitten"
+  ],
+  [
+   "(\\d+) months ago",
+   "$1 kuukautta sitten"
+  ],
+  [
+   "(\\d+) years ago",
+   "$1 vuotta sitten"
+  ],
+  [
+   "retired: nothing new goes to it",
+   "poistettu käytöstä: siihen ei kirjoiteta mitään uutta"
+  ],
+  [
+   "(\\d+) objects? exists? only on it: copy (?:it|them) elsewhere before the disk goes",
+   "$1 objektia on vain sillä: kopioi ne muualle ennen kuin levy poistuu"
+  ],
+  [
+   "it returned different bytes than were written to it, twice, on (\\S+): the disk, its cable or dock may be failing",
+   "se palautti kahdesti eri tavut kuin siihen kirjoitettiin ($1): levy, sen kaapeli tai telakka voi olla vikaantumassa"
+  ],
+  [
+   "The file system on (.+) has errors that could not be repaired automatically; nothing was read or written\\. Run `sudo e2fsck -f (\\S+)` by hand or retire the disk\\.",
+   "Levyn $1 tiedostojärjestelmässä on virheitä, joita ei voitu korjata automaattisesti; mitään ei luettu eikä kirjoitettu. Aja `sudo e2fsck -f $2` käsin tai poista levy käytöstä."
   ]
  ]
 }

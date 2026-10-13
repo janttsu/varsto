@@ -1274,6 +1274,80 @@ open(e, "a").write("an edit\\n")
     same_tree(tree_hashes("vl-desktop", "/home/varsto/data/docs"), tree_hashes("vl-laptop", "/home/varsto/data/docs"), "after sync")
 
 
+@scenario("ledger-loss")
+def s_ledger_loss():
+    """S2: the laptop's local ledger directory is deleted. A sync stops and
+    suggests `varsto ledger rebuild`, status says so, the rebuild takes the
+    laptop's own batches back from the bucket and its next batch continues
+    the numbering: the desktop gets the new file and sees no fork. S4: the
+    ledger goes from the bucket and from both devices; the laptop's service
+    restores what it can and rebuilds where the blocks are from the bucket
+    by itself; the desktop rebuilds its own, gets a new file, and fsck
+    --verify is clean on both."""
+    import shutil
+    fresh_pair()
+    home = "~/.local/share/varsto"
+    st = v("vl-laptop", "ledger status")
+    check(st["health"]["state"] == "ok", f"ledger not ok before: {st['health']}")
+    head = next(d for d in st["devices"] if d["this_device"])["head"]
+    CTX["ledger_head_before_loss"] = head
+
+    # S2
+    run("vl-laptop", f"rm -rf {home}/ledger")
+    run("vl-laptop", "echo after-loss > ~/data/docs/after-loss.txt")
+    r = v("vl-laptop", "sync", check_rc=False)
+    check(isinstance(r, dict) and r.get("_failed") and "varsto ledger rebuild" in r.get("_err", ""),
+          f"sync after the loss did not stop with the advice: {r}")
+    s = v("vl-laptop", "status")
+    check(s["ledger_health"]["state"] == "rebuild_needed", f"status: {s['ledger_health']}")
+    rb = v("vl-laptop", "ledger rebuild")
+    check(rb["own_head_after"] == head, f"own head {rb['own_head_after']}, was {head}")
+    check(rb["health"]["state"] == "ok", f"after rebuild: {rb['health']}")
+    v("vl-laptop", "sync")
+    st = v("vl-laptop", "ledger status")
+    now = next(d for d in st["devices"] if d["this_device"])["head"]
+    check(now == head + 1, f"next batch is #{now}, expected #{head + 1}")
+    v("vl-desktop", "sync")
+    got = run("vl-desktop", "cat ~/data/docs/after-loss.txt", check_rc=False).stdout.strip()
+    check(got == "after-loss", "the file written after the loss did not arrive")
+    ds = v("vl-desktop", "status")
+    check(not ds.get("forked_devices"), f"the desktop sees a fork: {ds.get('forked_devices')}")
+
+    # S4
+    shutil.rmtree(lab.DIR / "s3" / BUCKET / "ledger", ignore_errors=True)
+    for vm in ("vl-laptop", "vl-desktop"):
+        run(vm, f"rm -rf {home}/ledger")
+    time.sleep(6)  # rclone serve s3 lists from a 5 s directory cache
+    try:
+        start_service("vl-laptop")
+        deadline = time.time() + 600
+        state = None
+        while time.time() < deadline:
+            s = api("vl-laptop", "GET", "/api/status")
+            state = (s.get("ledger_health") or {}).get("state")
+            folders = s.get("folders") or []
+            if state == "ok" and folders and folders[0].get("chunks_without_storage_copy") == 0:
+                break
+            time.sleep(5)
+        check(state == "ok", f"the service did not rebuild the ledger: {state}")
+        check(folders[0].get("chunks_without_storage_copy") == 0, f"blocks without a recorded copy: {folders[0]}")
+        log = run("vl-laptop", "cat ~/svc.log").stdout
+        check("where the blocks are was rebuilt" in log, "the service did not rebuild the claims: " + log[-600:])
+    finally:
+        run("vl-laptop", "pkill -x varsto; true", check_rc=False)
+    rb = v("vl-desktop", "ledger rebuild")
+    check(rb["reenrolled"], f"desktop rebuild: {rb}")
+    run("vl-laptop", "echo after-rebuild > ~/data/docs/after-rebuild.txt")
+    v("vl-laptop", "sync")
+    v("vl-desktop", "sync")
+    got = run("vl-desktop", "cat ~/data/docs/after-rebuild.txt", check_rc=False).stdout.strip()
+    check(got == "after-rebuild", "the file written after the rebuild did not arrive")
+    same_tree(tree_hashes("vl-desktop", "/home/varsto/data/docs"), tree_hashes("vl-laptop", "/home/varsto/data/docs"), "after the rebuild")
+    for vm in ("vl-laptop", "vl-desktop"):
+        fsck = v(vm, "fsck --verify")
+        check(not fsck.get("chunks_missing") and not fsck.get("objects_corrupt") and not fsck.get("forked_devices"),
+              f"{vm}: fsck after the rebuild: {fsck}")
+        check(fsck.get("ledger_health", {}).get("state") == "ok", f"{vm}: {fsck.get('ledger_health')}")
 
 def ensure_restic(vm):
     """restic on the VM: the image's, Debian's package, or a copy of the
@@ -1347,7 +1421,7 @@ SCENARIOS = [s_reset, s_init, s_pair, s_sync, s_words, s_conflict, s_selective, 
              s_strongroom, s_org, s_remove_user, s_revoke,
              s_p2p_setup, s_p2p_lan, s_p2p_pub, s_p2p_sym, s_p2p_stop, s_share, s_disks, s_mixed,
              s_outage, s_blackhole, s_crash, s_clock, s_clock_behind, s_p2p_upload, s_scale,
-             s_backup, s_activity, s_disk_init, s_disk_fetch_plan, s_scrub, s_restic]
+             s_backup, s_activity, s_disk_init, s_disk_fetch_plan, s_scrub, s_restic, s_ledger_loss]
 
 
 def main():

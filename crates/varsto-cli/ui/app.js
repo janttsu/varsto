@@ -39,6 +39,8 @@
   // thin bar at the top shows that something runs. Background polls (GET
   // without a press) stay silent.
   var lastPress = null; var working = 0; var barTimer = null;
+  // The progress bar at the top (taskbar*, below the live activity code).
+  var TB_AFTER = 5, tbTimer = null, tbBusy = false, tbOn = false, tbHide = null, tbLastWhat = null;
   document.addEventListener("click", function (ev) { var b = ev.target.closest && ev.target.closest("button"); if (b) { lastPress = { el: b, t: Date.now() }; } }, true);
   document.addEventListener("submit", function (ev) { var b = ev.submitter || (ev.target.querySelector && ev.target.querySelector("button[type=submit], button:not([type])")); if (b) { lastPress = { el: b, t: Date.now() }; } }, true);
   function pressed() { var p = lastPress; if (!p || Date.now() - p.t > 600 || !document.contains(p.el)) { return null; } if (p.el.closest("#modal") || p.el.classList.contains("nav-item") || p.el.classList.contains("tree-item")) { return null; } return p.el; }
@@ -53,6 +55,7 @@
   function workBar(on) {
     working = Math.max(0, working + (on ? 1 : -1));
     if (working > 0 && !barTimer) { barTimer = setTimeout(function () { if (working > 0) { $("workbar").classList.add("on"); } }, 300); }
+    if (on && working === 1 && typeof taskbarSoon === "function") { taskbarSoon(); }
     if (working === 0) { clearTimeout(barTimer); barTimer = null; $("workbar").classList.remove("on"); }
   }
   // While a pressed button downloads a file, the note under it shows how far.
@@ -103,7 +106,7 @@
     document.querySelectorAll("[data-org-only]").forEach(function (b) { b.classList.add("hidden"); });
     lastStatus = null;
   }
-  function show(section) { if (section === "setup") { clearVaultViews(); } ["setup", "unlock", "app"].forEach(function (id) { $(id).classList.toggle("hidden", id !== section); }); $("lock").classList.toggle("hidden", section !== "app"); document.body.dataset.view = section; if (section !== "app") { $("pagetitle").textContent = section === "setup" ? "Welcome" : "Locked"; } else { $("pagetitle").textContent = pageTitle(currentPage); } trafficWatch(); activityWatch(); }
+  function show(section) { if (section === "setup") { clearVaultViews(); } ["setup", "unlock", "app"].forEach(function (id) { $(id).classList.toggle("hidden", id !== section); }); $("lock").classList.toggle("hidden", section !== "app"); document.body.dataset.view = section; if (section !== "app") { $("pagetitle").textContent = section === "setup" ? "Welcome" : "Locked"; } else { $("pagetitle").textContent = pageTitle(currentPage); } trafficWatch(); activityWatch(); taskbarSchedule(section === "app" ? 0 : undefined); }
   function fmtBytes(n) { var u = ["B", "KiB", "MiB", "GiB", "TiB"]; var i = 0; while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; } return n.toFixed(i ? 1 : 0) + " " + u[i]; }
   function fmtDate(t) { return t ? new Date(t * 1000).toLocaleDateString() : ""; }
   function formData(form) { var o = {}; new FormData(form).forEach(function (v, k) { o[k] = v; }); form.querySelectorAll("input[type=checkbox]").forEach(function (c) { o[c.name] = c.checked; }); return o; }
@@ -309,8 +312,8 @@ document.addEventListener("click", function (e) {
 });
 
 function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); var t = blockTotal(b); if (t === 0) { return m; } var per = Math.max(1, Math.ceil(t / 40)); drawBlocks(m, b, per); m.title = t + " block" + (t === 1 ? "" : "s") + (per > 1 ? ", 1 square ≈ " + per + " blocks" : ""); return m; }
-  function fileStateKey(f) { return f.state === "placeholder" ? "ph" : f.state === "missing" ? "missing" : f.pinned ? "verified" : "stored"; }
-  function fileStateLabel(f) { return f.state === "placeholder" ? "Not on this device" : f.state === "missing" ? "Unavailable" : f.pinned ? "Local, kept here" : "Local"; }
+  function fileStateKey(f) { return f.state === "awaiting_import" ? "missing" : f.state === "placeholder" ? "ph" : f.state === "missing" ? "missing" : f.pinned ? "verified" : "stored"; }
+  function fileStateLabel(f) { return f.state === "awaiting_import" ? "Awaiting import" : f.state === "placeholder" ? "Not on this device" : f.state === "missing" ? "Unavailable" : f.pinned ? "Local, kept here" : "Local"; }
   function stateSquare(f) { var sq = el("i", "blk state-blk s-" + fileStateKey(f)); sq.title = fileStateLabel(f); return sq; }
 
   // Theme: the OS's until the user switches it (then persisted).
@@ -324,7 +327,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   $("themetoggle2").onclick = toggleTheme;
 
   // Navigation between the pages of the app section.
-  var titles = { overview: "Overview", files: "Files", shared: "Shared", storages: "Storages", backups: "Backups", policies: "Policies", peers: "Peers", organization: "Organization", settings: "Settings", more: "More" };
+  var titles = { overview: "Overview", files: "Files", shared: "Shared", storages: "Storages", backups: "Backups", import: "Import", policies: "Policies", peers: "Peers", organization: "Organization", settings: "Settings", recovery: "Recovery package", more: "More" };
   var legacyPages = { folders: "files", sharing: "shared" };
   function pageTitle(p) { return titles[p] || "Overview"; }
   var currentPage = (function () { try { var p = sessionStorage.getItem("varsto-page"); p = legacyPages[p] || p; return titles[p] ? p : "overview"; } catch (e) { return "overview"; } })();
@@ -336,13 +339,15 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     currentPage = page;
     try { sessionStorage.setItem("varsto-page", page); } catch (e) {}
     document.querySelectorAll(".page").forEach(function (d) { d.classList.toggle("hidden", d.dataset.page !== page); });
-    var tab = page === "shared" || page === "backups" || page === "policies" || page === "peers" || page === "organization" || page === "settings" ? "more" : page;
+    var tab = page === "shared" || page === "backups" || page === "import" || page === "policies" || page === "peers" || page === "organization" || page === "settings" || page === "recovery" ? "more" : page;
     document.querySelectorAll(".sidebar .nav-item[data-nav]").forEach(function (b) { if (b.dataset.nav === page) { b.setAttribute("aria-current", "page"); } else { b.removeAttribute("aria-current"); } });
     document.querySelectorAll(".tabbar .nav-item[data-nav]").forEach(function (b) { if (b.dataset.nav === tab) { b.setAttribute("aria-current", "page"); } else { b.removeAttribute("aria-current"); } });
     if (document.body.dataset.view === "app") { $("pagetitle").textContent = pageTitle(page); }
     if (page === "peers") { loadP2p(); }
     if (page === "organization") { loadOrg(); }
     if (page === "backups") { loadBackups(); }
+    if (page === "recovery") { loadGuide(); }
+    if (page === "import") { loadImports(); }
     if (page === "overview" && lastWhere) { renderWhere(lastWhere); }
     trafficWatch();
     activityWatch();
@@ -350,6 +355,8 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     if (page === "settings" && droid && lastStatus) { refreshAllFiles(); }
     window.scrollTo(0, 0);
   }
+  // Buttons inside pages that lead to another page.
+  document.querySelectorAll("button[data-nav]:not(.nav-item):not(.more-item)").forEach(function (b) { b.addEventListener("click", function () { nav(b.dataset.nav); }); });
   document.querySelectorAll(".nav-item[data-nav], .more-item[data-nav]").forEach(function (b) {
     b.onclick = function () {
       // Tapping the Files tab again on a phone returns to the folder list.
@@ -898,11 +905,46 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   function stateClass(state) { return state === "ok" ? "ok" : state === "at_risk" ? "risk" : state === "violated" ? "bad" : "grey"; }
   function folderByName(name) { if (!lastStatus) { return null; } for (var i = 0; i < lastStatus.folders.length; i++) { if (lastStatus.folders[i].name === name) { return lastStatus.folders[i]; } } return null; }
 
+  // The ledger banner: shown only when something is wrong with this
+  // device's ledger or it is being repaired. The service restores a lost
+  // ledger by itself; a copy restored from an older backup continues from
+  // the storages when the user asks (the button), and only when they hold
+  // this device's own later history.
+  var LEDGER_TEXT = {
+    "rebuild_needed": "This device's ledger was lost or damaged. It is being restored from the storages before anything else is synced.",
+    "repairing": "Restoring this device's ledger from the storages…",
+    "fenced": "The storages hold newer ledger entries of this device than it has: it was probably restored from an older copy. It records nothing until it continues from them.",
+    "forked": "Another copy of this device has written a different ledger history. This device records nothing more: remove it from the vault on another device and pair this computer again as a new device.",
+    "no_ledger": "No storage holds the record of where the blocks are any more. It is being rebuilt from the folders' file lists and the stored blocks."
+  };
+  var LEDGER_BUTTON = { "rebuild_needed": "Restore now", "fenced": "Continue from the storages", "no_ledger": "Rebuild now" };
+  function renderLedger(h) {
+    var b = $("ledgerbanner"); if (!b) { return; }
+    var show = !!(h && h.state && h.state !== "ok");
+    b.classList.toggle("hidden", !show);
+    if (!show) { return; }
+    var text = $("ledgerbanner-text");
+    text.textContent = LEDGER_TEXT[h.state] || (h.problems || []).map(function (p) { return p.detail; }).join("; ");
+    var btn = $("ledgerbanner-btn"); var label = LEDGER_BUTTON[h.state];
+    btn.classList.toggle("hidden", !label);
+    if (!label) { return; }
+    btn.textContent = label; btn.disabled = false;
+    btn.onclick = function () {
+      btn.disabled = true; text.textContent = LEDGER_TEXT.repairing;
+      api("POST", "/api/ledger/rebuild", { from_storage: h.state === "no_ledger" }).then(function (r) {
+        renderLedger(r.health); refreshStatus();
+      }).catch(function (e) {
+        log("error: " + e.message); btn.disabled = false; refreshStatus();
+      });
+    };
+  }
+
   // `known`: a status the last request already returned (no second round trip,
   // which would wait while the service syncs).
   function refreshStatus(known) {
     return (known && known.folders ? Promise.resolve(known) : api("GET", "/api/status")).then(function (s) {
       lastStatus = s;
+      renderLedger(s.ledger_health);
       $("who").textContent = s.device_name + " · vault " + s.vault_id.slice(0, 8) + " · " + s.ledger_batches + " ledger batches";
       var tb = $("folders").querySelector("tbody"); tb.innerHTML = "";
       var sel = $("dupefolder"); sel.innerHTML = "";
@@ -1364,6 +1406,98 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     }).catch(function (e) { alertBox(e.message); }).then(function () { busy(false); loadBackups(); });
   };
 
+  // Import page: a folder of this device here; git-annex and cloud imports
+  // are shown with their command (they run on the command line).
+  var importCli = {
+    annex: ["varsto import git-annex /path/to/repository", "Run it once for every disk that holds a clone of the repository: each run continues the same folder with what that disk has, and says which disk to insert next. Nothing is changed on the disks."],
+    dropbox: ["rclone config create mydropbox dropbox\nvarsto import dropbox mydropbox:", "The first line signs in to Dropbox in your browser (once). Run the import again to bring changes over."],
+    onedrive: ["rclone config create myonedrive onedrive\nvarsto import onedrive myonedrive:", "The first line signs in to OneDrive in your browser (once). Run the import again to bring changes over."],
+    rclone: ["varsto import rclone remote:path", "Any remote set up in rclone (rclone config) works, Google Drive included."]
+  };
+  function importKind() {
+    var k = $("import-kind").value; var cli = importCli[k];
+    $("import-cli").classList.toggle("hidden", !cli);
+    $("import-dir-fields").classList.toggle("hidden", !!cli);
+    if (cli) { $("import-cli-cmd").textContent = cli[0]; $("import-cli-note").textContent = cli[1]; }
+  }
+  $("import-kind").onchange = importKind;
+  $("import-where").onchange = function () { $("import-dest-label").classList.toggle("hidden", $("import-where").value !== "full"); };
+  function loadImports() {
+    return api("GET", "/api/import/status").then(renderImports).catch(function (e) { log("imports: " + e.message); });
+  }
+  function renderImports(list) {
+    var tb = $("imports").querySelector("tbody"); tb.innerHTML = "";
+    $("imports-empty").classList.toggle("hidden", list.length > 0);
+    $("imports").classList.toggle("hidden", list.length === 0);
+    list.forEach(function (s) {
+      var tr = el("tr");
+      var n = el("td"); var nm = el("span", null, s.folder); nm.setAttribute("data-no-i18n", ""); n.appendChild(nm); tr.appendChild(n);
+      var src = el("td"); var sp = el("span", "sub", s.source); sp.setAttribute("data-no-i18n", ""); src.appendChild(sp); tr.appendChild(src);
+      tr.appendChild(el("td", "num", String(s.files_total)));
+      tr.appendChild(el("td", "num", String(s.files_awaiting)));
+      tr.appendChild(el("td", "num", s.removed_files ? s.removed_files + " (" + fmtBytes(s.removed_bytes) + ")" : "0"));
+      var act = el("td");
+      if (s.kind === "dir") {
+        var b = el("button", "secondary", "Remove safe files…"); b.type = "button";
+        b.onclick = function () { cleanupImport(s.folder); };
+        act.appendChild(b);
+      }
+      tr.appendChild(act); tb.appendChild(tr);
+    });
+  }
+  function showWaiting(c) {
+    var box = $("import-waiting"); box.innerHTML = "";
+    $("import-waiting-box").classList.toggle("hidden", !c || !c.waiting_count);
+    if (!c) { return; }
+    c.waiting.forEach(function (w) {
+      var li = el("li"); var p = el("span", null, w.path); p.setAttribute("data-no-i18n", ""); li.appendChild(p);
+      li.appendChild(el("span", "sub", w.reason)); box.appendChild(li);
+    });
+  }
+  function showCleanupPlan(folder, c) {
+    $("import-cleanup").classList.toggle("hidden", !c || !c.eligible);
+    showWaiting(c);
+    if (!c || !c.eligible) { return; }
+    $("import-cleanup-text").textContent = c.eligible + " file(s) (" + fmtBytes(c.eligible_bytes) + ") can be removed from " + c.source + " now.";
+    $("import-cleanup-go").onclick = function () {
+      confirmBox("Remove " + c.eligible + " file(s) (" + fmtBytes(c.eligible_bytes) + ") from " + c.source + "? Each one is checked once more first.", { title: "Remove source files?", ok: "Remove", danger: true }).then(function (yes) {
+        if (!yes) { return; }
+        busy(true);
+        return api("POST", "/api/import/cleanup", { folder: folder, apply: true }).then(function (r) {
+          log("Removed " + r.removed.length + " file(s) (" + fmtBytes(r.removed_bytes) + ") from the source");
+          $("import-cleanup").classList.add("hidden"); showWaiting(r);
+        }).then(function () { busy(false); loadImports(); }, function (e) { busy(false); throw e; });
+      }).catch(function (e) { alertBox(e.message); });
+    };
+  }
+  function cleanupImport(folder) {
+    api("POST", "/api/import/cleanup", { folder: folder, apply: false }).then(function (c) {
+      $("import-result").classList.remove("hidden");
+      $("import-summary").innerHTML = "";
+      if (!c.eligible) { $("import-summary").appendChild(el("li", null, "No source file can be removed yet.")); }
+      showCleanupPlan(folder, c);
+    }).catch(function (e) { alertBox(e.message); });
+  }
+  $("importform").onsubmit = function (ev) {
+    ev.preventDefault();
+    var d = formData(ev.target);
+    if (!d.source) { alertBox("Choose the folder to import."); return; }
+    if (d.where === "full" && !d.dest) { alertBox("Choose the directory for the copy."); return; }
+    busy(true);
+    api("POST", "/api/import/dir", { source: d.source, folder: d.folder, dest: d.where === "full" ? d.dest : "", selective: d.where !== "full", remove_source: !!d.remove_source }).then(function (r) {
+      $("import-result").classList.remove("hidden");
+      var ul = $("import-summary"); ul.innerHTML = "";
+      ul.appendChild(el("li", null, "Imported " + r.imported_files + " file(s) (" + fmtBytes(r.imported_bytes) + ") into folder " + r.folder));
+      if (r.already_ids) { ul.appendChild(el("li", null, r.already_ids + " file(s) were imported before")); }
+      if (r.failed_count) { ul.appendChild(el("li", null, r.failed_count + " file(s) could not be read: " + r.failed.map(function (n) { return n.path; }).join(", "))); }
+      if (r.skipped_count) { ul.appendChild(el("li", null, r.skipped_count + " item(s) not imported (links, special files, names Varsto cannot use): " + r.skipped.map(function (n) { return n.path; }).join(", "))); }
+      if (r.kept_in_varsto_count) { ul.appendChild(el("li", null, r.kept_in_varsto_count + " file(s) were changed in Varsto and kept as they are")); }
+      if (r.gone_at_source) { ul.appendChild(el("li", null, r.gone_at_source + " file(s) are gone from the source and kept in Varsto")); }
+      showCleanupPlan(r.folder, r.cleanup);
+      log("Imported into " + r.folder);
+    }).catch(function (e) { alertBox(e.message); }).then(function () { busy(false); loadImports(); });
+  };
+
   // Automatic verification (Policies page): status line, run now, schedule.
   var autoVerify = null;
   function fmtWhen(t) { return t ? new Date(t * 1000).toLocaleString() : "never"; }
@@ -1516,37 +1650,12 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
         head.appendChild(el("span", "muted small", mine.length + " disk" + (mine.length === 1 ? "" : "s") + ", " + attached + " attached"));
         card.appendChild(head);
         if (!mine.length) { card.appendChild(el("p", "muted small", "No disks yet. Mount a disk and add it below; on the command line: varsto disk add <mount-path> --pool " + p.name + " --label <label>")); }
-        var ul = el("ul", "list");
-        mine.forEach(function (d) {
-          var li = el("li"); var ic = el("span", "li-icon"); ic.appendChild(icon("storages")); li.appendChild(ic);
-          var body = el("div", "li-body"); var t = el("div", "li-title", d.label);
-          t.appendChild(pill(d.attached ? "ok" : "grey", d.attached ? "attached" : "offline")); t.appendChild(pill("grey", d.place)); if (d.retired) { t.appendChild(pill("grey", "retired")); }
-          body.appendChild(t);
-          var parts = [];
-          if (d.attached) { parts.push(d.mount); if (d.free_bytes !== null && d.free_bytes !== undefined) { parts.push(fmtBytes(d.free_bytes) + " free"); } }
-          else if (d.mount) { parts.push("last seen at " + d.mount); }
-          parts.push(d.objects + " block" + (d.objects === 1 ? "" : "s") + ", " + fmtBytes(d.used_bytes) + " used");
-          parts.push("last verified " + (d.last_verified_utc ? fmtDate(d.last_verified_utc) : "never"));
-          if (d.pending_deletes) { parts.push(d.pending_deletes + " pending delete" + (d.pending_deletes === 1 ? "" : "s")); }
-          body.appendChild(el("div", "li-sub", parts.join(" · ")));
-          li.appendChild(body);
-          if (!isMobile()) {
-            var acts = el("div", "li-actions");
-            if (d.attached) {
-              var chk = el("button", "secondary", "Check"); chk.type = "button"; chk.title = "Verify sizes, apply pending deletes, add new blocks"; chk.onclick = function () { diskAction("/api/disk/check", { label: d.label, full: false }, "check"); }; acts.appendChild(chk);
-              var full = el("button", "secondary", "Check fully"); full.type = "button"; full.title = "Re-hash every block on the disk"; full.onclick = function () { diskAction("/api/disk/check", { label: d.label, full: true }, "full check"); }; acts.appendChild(full);
-              var ej = el("button", "secondary", "Eject"); ej.type = "button"; ej.title = "Write the disk index and sync; then unmount it yourself"; ej.onclick = function () { diskAction("/api/disk/eject", { label: d.label }, "eject"); }; acts.appendChild(ej);
-            }
-            var pb = el("button", "secondary", "Place"); pb.type = "button"; pb.title = "Where this disk is kept; disk groups keep copies in different places"; pb.onclick = function () { editDiskPlace(d); }; acts.appendChild(pb);
-            if (!d.retired) { var rt = el("button", "secondary", "Retire"); rt.type = "button"; rt.title = "Nothing new goes to this disk"; rt.onclick = function () { dialog({ title: "Retire disk " + d.label + "?", text: "Nothing new is written to it; what it holds stays readable while attached.", ok: "Retire" }).then(function (yes) { if (yes) { diskAction("/api/disk/retire", { label: d.label }, "retire"); } }); }; acts.appendChild(rt); }
-            li.appendChild(acts);
-          }
-          ul.appendChild(li);
-        });
-        card.appendChild(ul);
+        var sug = el("div", "disk-suggest"); sug.dataset.suggestFor = p.name; card.appendChild(sug);
+        if (mine.length) { card.appendChild(diskTable(mine)); }
         var grp = el("div", "pool-group"); grp.dataset.groupFor = p.name; card.appendChild(grp);
         box.appendChild(card);
       });
+      renderDiskSuggest(pools);
       return api("GET", "/api/disk/groups").then(function (groups) {
         groups.forEach(function (g) {
           var c = document.querySelector('.pool-group[data-group-for="' + (window.CSS && CSS.escape ? CSS.escape(g.pool) : g.pool) + '"]');
@@ -1559,6 +1668,155 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
         });
       });
     }).catch(function (e) { log("disks: " + e.message); });
+  }
+  // The pool's disks as a table; the column clicked sorts it (the choice is
+  // kept in this browser). Natural directions: name A-Z, free/used/
+  // reclaimable most first, last checked and last seen oldest first.
+  var DISK_SORT_KEY = "varsto-disk-sort";
+  function diskSort() {
+    var v = null;
+    try { v = JSON.parse(localStorage.getItem(DISK_SORT_KEY) || "null"); } catch (e) { /* storage blocked */ }
+    return v && v.key ? v : { key: "name", reverse: false };
+  }
+  function setDiskSort(key) {
+    var cur = diskSort();
+    var next = { key: key, reverse: cur.key === key ? !cur.reverse : false };
+    try { localStorage.setItem(DISK_SORT_KEY, JSON.stringify(next)); } catch (e) { /* not kept */ }
+    return next;
+  }
+  function sortDisks(list, sort) {
+    var unknownLast = function (a, b, desc) {
+      if (a === null || a === undefined) { return (b === null || b === undefined) ? 0 : 1; }
+      if (b === null || b === undefined) { return -1; }
+      return desc ? b - a : a - b;
+    };
+    var cmp = {
+      name: function () { return 0; },
+      place: function (a, b) { return (a.place || "").localeCompare(b.place || ""); },
+      free: function (a, b) { return unknownLast(a.free_bytes, b.free_bytes, true); },
+      used: function (a, b) { return b.used_bytes - a.used_bytes; },
+      reclaimable: function (a, b) { return b.reclaimable_bytes - a.reclaimable_bytes; },
+      checked: function (a, b) { return unknownLast(a.oldest_check_utc, b.oldest_check_utc, false); },
+      seen: function (a, b) { return (a.attached ? Infinity : a.last_seen_utc) - (b.attached ? Infinity : b.last_seen_utc) || 0; },
+      fsck: function (a, b) { return unknownLast(a.fsck ? a.fsck.checked_utc : null, b.fsck ? b.fsck.checked_utc : null, false); }
+    }[sort.key] || function () { return 0; };
+    var byName = function (a, b) { return a.label.toLowerCase().localeCompare(b.label.toLowerCase()); };
+    return list.slice().sort(function (a, b) {
+      var o = cmp(a, b); if (sort.reverse) { o = -o; }
+      var n = byName(a, b); if (sort.reverse && sort.key === "name") { n = -n; }
+      return o || n;
+    });
+  }
+  function diskTable(mine) {
+    var wrap = el("div", "table-wrap disk-table");
+    var cols = [["name", "Name"], ["place", "Place"], ["free", "Free space"], ["used", "Used"], ["reclaimable", "Reclaimable"], ["checked", "Last checked"], ["seen", "Last seen"], ["fsck", "File system"]];
+    function draw() {
+      wrap.innerHTML = "";
+      var sort = diskSort();
+      var table = el("table"); var thead = el("thead"); var hr = el("tr");
+      cols.forEach(function (c) {
+        var th = el("th", "sortable" + (c[0] === "free" || c[0] === "used" || c[0] === "reclaimable" ? " num" : ""));
+        var b = el("button", "th-sort", c[1]); b.type = "button"; b.title = "Sort by this column (again: reverse)";
+        if (sort.key === c[0]) { th.setAttribute("aria-sort", sort.reverse ? "descending" : "ascending"); b.appendChild(el("span", "sort-mark", sort.reverse ? " \u25b2" : " \u25bc")); }
+        b.onclick = function () { setDiskSort(c[0]); draw(); };
+        th.appendChild(b); hr.appendChild(th);
+      });
+      if (!isMobile()) { hr.appendChild(el("th", "", "")); }
+      thead.appendChild(hr); table.appendChild(thead);
+      var tb = el("tbody");
+      sortDisks(mine, sort).forEach(function (d) {
+        var tr = el("tr");
+        var name = el("td"); name.appendChild(el("span", "", d.label + " "));
+        name.appendChild(pill(d.attached ? "ok" : "grey", d.attached ? "attached" : "offline"));
+        if (d.retired) { name.appendChild(pill("grey", "retired")); }
+        if (d.failing) { var fp = pill("bad", "failing"); fp.title = d.failing_reason || ""; name.appendChild(fp); }
+        if (d.attached && d.mount) { name.appendChild(el("span", "sub", d.mount)); }
+        tr.appendChild(name);
+        tr.appendChild(el("td", "", d.place));
+        var free = el("td", "num", (d.free_bytes === null || d.free_bytes === undefined ? "?" : fmtBytes(d.free_bytes)) + " / " + fmtBytes(d.capacity_bytes));
+        if (!d.attached && d.space_measured_utc) { free.title = "Measured " + fmtDate(d.space_measured_utc); }
+        tr.appendChild(free);
+        tr.appendChild(el("td", "num", fmtBytes(d.used_bytes)));
+        var rec = el("td", "num", fmtBytes(d.reclaimable_bytes));
+        if (d.pending_deletes) { rec.title = d.pending_deletes + " pending delete" + (d.pending_deletes === 1 ? "" : "s"); }
+        tr.appendChild(rec);
+        var chk = el("td", "", d.oldest_check_utc === null || d.oldest_check_utc === undefined ? "\u2014" : d.oldest_check_utc === 0 ? "never" : fmtDate(d.oldest_check_utc));
+        if (d.copies_overdue) { chk.appendChild(el("span", "sub", Math.round(d.overdue_share * 100) + " % overdue")); }
+        tr.appendChild(chk);
+        tr.appendChild(el("td", "", d.attached ? "now" : d.last_seen_utc ? fmtDate(d.last_seen_utc) : "never"));
+        var fs = el("td", "", d.fsck ? d.fsck.verdict : "\u2014");
+        if (d.fsck) { fs.appendChild(el("span", "sub", fmtDate(d.fsck.checked_utc))); }
+        tr.appendChild(fs);
+        if (!isMobile()) {
+          var acts = el("td");
+          if (d.attached) {
+            var c1 = el("button", "secondary", "Check"); c1.type = "button"; c1.title = "Verify sizes, apply pending deletes, add new blocks"; c1.onclick = function () { diskAction("/api/disk/check", { label: d.label, full: false }, "check"); }; acts.appendChild(c1);
+            var c2 = el("button", "secondary", "Check fully"); c2.type = "button"; c2.title = "Re-hash every block on the disk"; c2.onclick = function () { diskAction("/api/disk/check", { label: d.label, full: true }, "full check"); }; acts.appendChild(c2);
+            var ej = el("button", "secondary", "Eject"); ej.type = "button"; ej.title = "Write the disk index and sync; then unmount it yourself"; ej.onclick = function () { diskAction("/api/disk/eject", { label: d.label }, "eject"); }; acts.appendChild(ej);
+          }
+          var pb = el("button", "secondary", "Place"); pb.type = "button"; pb.title = "Where this disk is kept; disk groups keep copies in different places"; pb.onclick = function () { editDiskPlace(d); }; acts.appendChild(pb);
+          if (!d.retired) { var rt = el("button", "secondary", "Retire"); rt.type = "button"; rt.title = "Nothing new goes to this disk"; rt.onclick = function () { dialog({ title: "Retire disk " + d.label + "?", text: "Nothing new is written to it; what it holds stays readable while attached.", ok: "Retire" }).then(function (yes) { if (yes) { diskAction("/api/disk/retire", { label: d.label }, "retire"); } }); }; acts.appendChild(rt); }
+          tr.appendChild(acts);
+        }
+        tb.appendChild(tr);
+      });
+      table.appendChild(tb); wrap.appendChild(table);
+    }
+    draw();
+    return wrap;
+  }
+  function copyText(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) { return navigator.clipboard.writeText(text); }
+    return new Promise(function (ok, fail) {
+      var t = el("textarea"); t.value = text; document.body.appendChild(t); t.select();
+      try { document.execCommand("copy") ? ok() : fail(new Error("copy refused")); } catch (e) { fail(e); } finally { t.remove(); }
+    });
+  }
+  // One reason after another, each its own text so it can be translated.
+  function reasonSpans(box, reasons) {
+    reasons.forEach(function (r, i) { if (i) { box.appendChild(document.createTextNode("; ")); } box.appendChild(el("span", "", r.text)); });
+  }
+  // "Suggested next" per pool card (the interface cannot mount: it shows
+  // the command), the attached disk to check instead, and disks left out.
+  function renderDiskSuggest(pools) {
+    api("GET", "/api/disk/suggest").then(function (r) {
+      var s = r.suggestions;
+      pools.forEach(function (p, idx) {
+        var box = document.querySelector('.disk-suggest[data-suggest-for="' + (window.CSS && CSS.escape ? CSS.escape(p.name) : p.name) + '"]');
+        if (!box) { return; }
+        box.innerHTML = "";
+        var mine = function (x) { return x.pool === p.name; };
+        var top = s.ranked.filter(mine).filter(function (x) { return x.score >= 5; })[0];
+        var att = s.attached.filter(mine).filter(function (x) { return x.score >= 5; })[0];
+        if (top) {
+          var n = el("div", "notice suggest-next");
+          var line = el("div"); line.appendChild(el("strong", "", "Suggested next:")); line.appendChild(document.createTextNode(" «" + top.label + "» \u2014 "));
+          reasonSpans(line, top.reasons); n.appendChild(line);
+          var cmd = el("div", "suggest-cmd"); cmd.appendChild(el("code", "", top.command));
+          var cb = el("button", "secondary", "Copy"); cb.type = "button"; cb.title = "Copy the command; run it in a terminal with the disk plugged in";
+          cb.onclick = function () { copyText(top.command).then(function () { log("copied: " + top.command); }).catch(function (e) { alertBox(e.message); }); };
+          cmd.appendChild(cb); n.appendChild(cmd);
+          box.appendChild(n);
+        } else {
+          box.appendChild(el("p", "muted small", "No disk needs docking now."));
+        }
+        if (att) {
+          var a = el("div", "notice");
+          var al = el("div"); al.appendChild(document.createTextNode("«" + att.label + "» ")); al.appendChild(el("span", "", "is attached:")); al.appendChild(document.createTextNode(" "));
+          reasonSpans(al, att.reasons); a.appendChild(al);
+          if (!isMobile()) { var cn = el("button", "secondary", "Check now"); cn.type = "button"; cn.onclick = function () { diskAction("/api/disk/check", { label: att.label, full: false }, "check"); }; a.appendChild(cn); }
+          box.appendChild(a);
+        }
+        s.excluded.filter(mine).forEach(function (x) {
+          var w = el("div", "notice warn"); w.appendChild(document.createTextNode("«" + x.label + "»: ")); w.appendChild(el("span", "", x.warning)); box.appendChild(w);
+        });
+        if (idx === 0) {
+          var lab = el("label", "inline muted"); var cbx = el("input"); cbx.type = "checkbox"; cbx.checked = !!r.settings.notify_overdue;
+          cbx.onchange = function () { api("POST", "/api/disk/suggest/settings", { notify_overdue: cbx.checked }).then(function () { log(cbx.checked ? "weekly disk reminder on" : "weekly disk reminder off"); }).catch(function (e) { alertBox(e.message); cbx.checked = !cbx.checked; }); };
+          lab.appendChild(cbx); lab.appendChild(el("span", "", "Remind me weekly when a disk is overdue for a check")); box.appendChild(lab);
+        }
+      });
+    }).catch(function (e) { log("disk suggestion: " + e.message); });
   }
   function editDiskGroup(g) {
     dialog({ title: "Disk group of pool " + g.pool, text: "Keep this many copies of every block on disks kept in different places (1: one copy, no rule). Disks of other places get their copies when attached and checked; policies count each disk copy at its disk's place.", fields: [{ name: "copies", label: "Copies in different places", type: "number", value: g.copies }], ok: "Save" }).then(function (r) {
@@ -2351,6 +2609,10 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     "sync_scan": "Looking for changes in folder «{s}»",
     "upload": "Uploading folder «{s}»",
     "download": "Fetching changes to folder «{s}»",
+    "download.file": "Fetching a file of folder «{s}»",
+    "download.export": "Decrypting a file of folder «{s}»",
+    "folder_purge": "Deleting the data of folder «{s}»",
+    "strongroom_convert": "Re-encrypting folder «{s}» for the Strongroom",
     "disk_check": "Checking disk «{s}»",
     "disk_check.verify": "Checking the blocks of disk «{s}»",
     "disk_check.fill": "Filling disk «{s}»",
@@ -2377,6 +2639,13 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     "scrub.disk": "Checking disk «{s}» for bit rot",
     "scrub.files": "Checking the files of folder «{s}» for bit rot",
     "scrub.cache": "Checking the block cache for bit rot",
+    "ledger_rebuild": "Rebuilding the ledger",
+    "ledger_rebuild.own": "Restoring this device's ledger from the storages",
+    "ledger_rebuild.others": "Fetching the other devices' ledgers again",
+    "ledger_rebuild.manifests": "Reading the folders' file lists",
+    "ledger_rebuild.list": "Listing the stored blocks",
+    "ledger_rebuild.verify": "Checking the stored blocks",
+    "ledger_rebuild.seal": "Recording where the blocks are",
     "restic": "Checking that the restic mirror is complete",
     "restic.backup": "Backing up the mirror with restic",
     "restic.forget": "Removing old restic snapshots",
@@ -2425,6 +2694,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   function renderActivity(r) {
     lastActivity = r;
     var me = r.me || { tasks: [] };
+    taskbarRender(me);
     var peers = r.peers || [];
     // Overview: every busy device, this one first; hidden when all are idle.
     var ul = $("nowlist"); ul.innerHTML = "";
@@ -2462,6 +2732,190 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
       if (activityWanted() && !actTimer) { actTimer = setTimeout(function () { actTimer = null; activityWatch(); }, 2000); }
     });
   }
+  // Progress at the top of the window: this device's tasks that have run for
+  // 5 s or more (a snapshot, an upload, a scrub, a restore...), with the
+  // sentence of the Now card, the percentage and the expected finish. Asked
+  // for every second while it shows or a request you started is still
+  // running, every five seconds otherwise (the Now card's two-second poll
+  // feeds it on the Overview and Peers pages); never while the page is
+  // hidden. Only this device: `?mine=1` does not ask the peers.
+  function taskbarWanted() { return document.body.dataset.view === "app" && document.visibilityState !== "hidden" && !!token; }
+  function taskbarFast() { return tbOn || working > 0; }
+  function taskbarSchedule(ms) {
+    if (tbTimer) { clearTimeout(tbTimer); tbTimer = null; }
+    if (!taskbarWanted()) { return; }
+    tbTimer = setTimeout(taskbarPoll, ms !== undefined ? ms : (taskbarFast() ? 1000 : 5000));
+  }
+  // A request you started: look again in a second.
+  function taskbarSoon() { if (!tbBusy && taskbarWanted() && (!tbTimer || !tbOn)) { taskbarSchedule(1000); } }
+  function taskbarPoll() {
+    tbTimer = null;
+    if (!taskbarWanted()) { return; }
+    // The Now card asks every two seconds anyway; between its answers only the fast mode asks.
+    if (activityWanted() && !taskbarFast()) { taskbarSchedule(); return; }
+    tbBusy = true;
+    fetch("/api/activity?mine=1", { headers: { "X-Varsto-Token": token } }).then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (j) { if (j) { taskbarRender(j.me || { tasks: [] }); } }).catch(function () {})
+      .then(function () { tbBusy = false; taskbarSchedule(); });
+  }
+  function taskbarRender(me) {
+    var now = Date.now() / 1000;
+    var long = (me.tasks || []).filter(function (t) { return now - t.started_utc >= TB_AFTER; });
+    long.sort(function (a, b) { return a.started_utc - b.started_utc; });
+    var bar = $("taskbar");
+    if (!long.length) {
+      if (tbOn && !tbHide) {
+        // A brief "done", then away.
+        bar.classList.add("done"); bar.classList.remove("unknown");
+        $("tb-bar").classList.remove("indeterminate"); $("tb-bar").firstChild.style.width = "100%";
+        var txt = $("tb-text"); txt.innerHTML = ""; txt.appendChild(el("span", "tb-done", actTr("Done"))); if (tbLastWhat) { txt.appendChild(document.createTextNode(" · ")); txt.appendChild(tbLastWhat); }
+        $("tb-meta").textContent = "";
+        bar.setAttribute("aria-valuenow", "100"); bar.setAttribute("aria-valuetext", actTr("Done"));
+        tbHide = setTimeout(function () { tbHide = null; tbOn = false; bar.classList.add("hidden"); bar.classList.remove("done"); taskbarSchedule(); }, 1000);
+      }
+      return;
+    }
+    if (tbHide) { clearTimeout(tbHide); tbHide = null; }
+    var t = long[0];
+    var what = actSentence(t);
+    var text = $("tb-text"); text.innerHTML = "";
+    if (long.length > 1) { text.appendChild(el("span", "tb-count", actTr("{n} tasks").replace("{n}", long.length))); text.appendChild(document.createTextNode(" · ")); }
+    text.appendChild(what);
+    tbLastWhat = what.cloneNode(true);
+    var known = t.percent !== null && t.percent !== undefined;
+    var meta = [];
+    if (known) { meta.push(t.percent + " %"); }
+    else if (t.done > 0) { meta.push(actCount(t, t.done)); }
+    if (t.eta_utc) { meta.push(actTr("ready about {t}").replace("{t}", actTime(t.eta_utc))); }
+    $("tb-meta").textContent = meta.join(" · ");
+    var b = $("tb-bar"); b.classList.toggle("indeterminate", !known); b.firstChild.style.width = known ? t.percent + "%" : "";
+    bar.classList.toggle("unknown", !known); bar.classList.remove("done", "hidden");
+    if (known) { bar.setAttribute("aria-valuenow", String(t.percent)); } else { bar.removeAttribute("aria-valuenow"); }
+    bar.setAttribute("aria-valuetext", text.textContent + (meta.length ? " (" + meta.join(", ") + ")" : ""));
+    var startedFast = !tbOn; tbOn = true;
+    if (startedFast && !tbBusy) { taskbarSchedule(); }
+  }
+  document.addEventListener("visibilitychange", function () { if (document.visibilityState === "visible") { taskbarSchedule(0); } else if (tbTimer) { clearTimeout(tbTimer); tbTimer = null; } });
+  taskbarSchedule(1000);
+
+  // Recovery package: what to keep outside your devices and how to restore,
+  // from GET /api/recovery/guide. Every sentence comes as an English
+  // template with named values ({t, p}); the template is translated like any
+  // other interface string and the values (bucket names, paths) go in as they
+  // are. Commands are never translated. The ticks are a personal checklist
+  // kept in this browser (localStorage), not vault state.
+  var lastGuide = null;
+  function rgKey() { return "varsto-recovery-ticks:" + (lastGuide ? lastGuide.vault_id : ""); }
+  function rgTicks() { try { return JSON.parse(localStorage.getItem(rgKey()) || "{}") || {}; } catch (e) { return {}; } }
+  function rgSetTick(id, on) { var t = rgTicks(); if (on) { t[id] = Date.now(); } else { delete t[id]; } try { localStorage.setItem(rgKey(), JSON.stringify(t)); } catch (e) {} }
+  // Text with `code` spans as <code>.
+  function rgCodeText(parent, s) { s.split("`").forEach(function (part, i) { if (!part) { return; } if (i % 2) { var c = el("code", null, part); parent.appendChild(c); } else { parent.appendChild(document.createTextNode(part)); } }); }
+  function rgText(t, cls) {
+    var out = el("span", cls || null); out.setAttribute("data-no-i18n", "");
+    var tpl = actTr(t.t), p = t.p || {}, re = /\{([a-z_]+)\}/g, last = 0, m;
+    while ((m = re.exec(tpl))) {
+      if (m.index > last) { rgCodeText(out, tpl.slice(last, m.index)); }
+      if (Object.prototype.hasOwnProperty.call(p, m[1])) { out.appendChild(actRaw(p[m[1]], "rg-val")); } else { out.appendChild(document.createTextNode(m[0])); }
+      last = re.lastIndex;
+    }
+    if (last < tpl.length) { rgCodeText(out, tpl.slice(last)); }
+    return out;
+  }
+  function rgPlain(t) { var tpl = actTr(t.t), p = t.p || {}; return tpl.replace(/\{([a-z_]+)\}/g, function (all, k) { return Object.prototype.hasOwnProperty.call(p, k) ? p[k] : all; }); }
+  function rgLabelled(label, t) { var li = el("li"); li.appendChild(el("span", "rg-label", label)); li.appendChild(document.createTextNode(" ")); li.appendChild(rgText(t)); return li; }
+  function rgTicked(item, ticks) { return item.status === "done" || (item.status === "check" && !!ticks[item.id]); }
+  function rgCount() {
+    if (!lastGuide) { return; }
+    var ticks = rgTicks(), need = lastGuide.items.filter(function (i) { return i.status !== "info"; });
+    var done = need.filter(function (i) { return rgTicked(i, ticks); }).length;
+    var c = $("rg-count"); c.textContent = actTr("{done} of {all} done").replace("{done}", done).replace("{all}", need.length); c.setAttribute("data-no-i18n", "");
+    c.classList.toggle("rg-all", done === need.length);
+  }
+  function renderGuide(g) {
+    lastGuide = g;
+    var ticks = rgTicks();
+    var intro = $("rg-intro"); intro.innerHTML = "";
+    g.intro.forEach(function (t) { var p = el("p", "small"); p.appendChild(rgText(t)); intro.appendChild(p); });
+    var ul = $("rg-items"); ul.innerHTML = "";
+    g.items.forEach(function (it) {
+      var li = el("li", "rg-item rg-" + it.status);
+      var head = el(it.status === "info" ? "div" : "label", "rg-title");
+      if (it.status !== "info") {
+        var cb = el("input"); cb.type = "checkbox"; cb.checked = rgTicked(it, ticks); cb.dataset.id = it.id;
+        if (it.status === "done") { cb.disabled = true; }
+        cb.onchange = function () { rgSetTick(it.id, cb.checked); li.classList.toggle("rg-ticked", cb.checked); rgCount(); };
+        head.appendChild(cb);
+        li.classList.toggle("rg-ticked", cb.checked);
+      } else { head.appendChild(icon("info", "rg-info-icon")); }
+      head.appendChild(rgText(it.title, "rg-title-text"));
+      if (!it.essential && it.status !== "info") { head.appendChild(el("span", "pill grey", "optional")); }
+      if (it.status === "outdated") { head.appendChild(el("span", "pill bad", "out of date")); }
+      li.appendChild(head);
+      if (it.status_note) { var n = el("div", "rg-status small"); n.appendChild(rgText(it.status_note)); li.appendChild(n); }
+      var d = el("ul", "rg-details small");
+      d.appendChild(rgLabelled(actTr("What:"), it.what));
+      d.appendChild(rgLabelled(actTr("Why:"), it.why));
+      (it.location || []).forEach(function (l) { var x = el("li", "rg-loc"); x.appendChild(rgText(l)); d.appendChild(x); });
+      (it.keep || []).forEach(function (k) { d.appendChild(rgLabelled(actTr("Keep:"), k)); });
+      d.appendChild(rgLabelled(actTr("If missing:"), it.missing));
+      li.appendChild(d);
+      if (it.literal && it.literal.length) { li.appendChild(el("pre", "rg-literal", it.literal.join("\n"))); }
+      ul.appendChild(li);
+    });
+    function steps(list, box, numbered) {
+      box.innerHTML = "";
+      list.forEach(function (s) {
+        var li = el(numbered ? "li" : "div", "rg-step");
+        var h = el("h3", "rg-step-title"); h.appendChild(rgText(s.title)); li.appendChild(h);
+        (s.notes || []).forEach(function (n) { var p = el("p", "small"); p.appendChild(rgText(n)); li.appendChild(p); });
+        if (s.commands && s.commands.length) { var pre = el("pre", "rg-cmd", s.commands.join("\n")); li.appendChild(pre); }
+        box.appendChild(li);
+      });
+    }
+    steps(g.steps, $("rg-steps"), true);
+    steps(g.alternatives || [], $("rg-alt"), false);
+    $("rg-altcard").classList.toggle("hidden", !(g.alternatives || []).length);
+    rgCount();
+  }
+  function loadGuide() {
+    var go = function () { api("GET", "/api/recovery/guide").then(function (g) { (window.varstoLang && window.varstoLang.ready ? window.varstoLang.ready : function (f) { f(); })(function () { renderGuide(g); }); }).catch(function (e) { log("recovery guide: " + e.message); }); };
+    go();
+  }
+  // The checklist as plain text in the page's language, with the ticks.
+  function guideText(g) {
+    var ticks = rgTicks(), out = [];
+    var title = actTr("Varsto recovery package");
+    out.push(title.toUpperCase(), "");
+    g.intro.forEach(function (t) { out.push(rgPlain(t), ""); });
+    out.push(actTr("What to keep").toUpperCase());
+    g.items.forEach(function (it) {
+      var mark = it.status === "info" ? " - " : it.status === "outdated" ? "[!]" : rgTicked(it, ticks) ? "[x]" : "[ ]";
+      out.push("", mark + " " + rgPlain(it.title) + (it.essential || it.status === "info" ? "" : " (" + actTr("optional") + ")"));
+      if (it.status_note) { out.push("    " + rgPlain(it.status_note)); }
+      out.push("    " + actTr("What:") + " " + rgPlain(it.what), "    " + actTr("Why:") + " " + rgPlain(it.why));
+      (it.location || []).forEach(function (l) { out.push("    * " + rgPlain(l)); });
+      (it.keep || []).forEach(function (k) { out.push("    " + actTr("Keep:") + " " + rgPlain(k)); });
+      (it.literal || []).forEach(function (l) { out.push("      " + l); });
+      out.push("    " + actTr("If missing:") + " " + rgPlain(it.missing));
+    });
+    function steps(list, numbered) { list.forEach(function (s, i) { out.push("", (numbered ? (i + 1) + ". " : "- ") + rgPlain(s.title)); (s.notes || []).forEach(function (n) { out.push("   " + rgPlain(n)); }); (s.commands || []).forEach(function (c) { out.push("     $ " + c); }); }); }
+    out.push("", actTr("Restoring on a new device").toUpperCase());
+    steps(g.steps, true);
+    if ((g.alternatives || []).length) { out.push("", actTr("Without Varsto").toUpperCase()); steps(g.alternatives, false); }
+    return out.join("\n") + "\n";
+  }
+  $("rg-print").onclick = function () { window.print(); };
+  $("rg-reload").onclick = loadGuide;
+  $("rg-download").onclick = function () {
+    if (!lastGuide) { return; }
+    var blob = new Blob([guideText(lastGuide)], { type: "text/plain;charset=utf-8" });
+    var a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "varsto-recovery-package.txt";
+    document.body.appendChild(a); a.click(); setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+  };
+  // The kit holds the vault key: it is printed on the command line, which asks for the passphrase.
+  $("rg-kit").onclick = function () {
+    dialog({ title: "Print the recovery kit", text: "The kit is the vault key as 24 words. For safety it is printed on the command line of this computer, which asks for your passphrase: run the command below and print or copy the words by hand. With --shares it also prints three shares, any two of which rebuild the key.", code: "varsto recovery kit\nvarsto recovery kit --shares", ok: "Close", cancel: false }).then(function () { loadGuide(); });
+  };
   // Traffic view (Peers page): /api/p2p/traffic every second while the page is shown.
   // The service answers it without waiting for a sync, so it stays live during long transfers.
   var trafficTimer = null, trafficBusy = false, lastTraffic = null;

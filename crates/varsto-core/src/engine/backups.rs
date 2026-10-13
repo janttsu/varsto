@@ -516,9 +516,7 @@ impl Engine {
     /// snapshot is written also when nothing changed.
     pub fn take_snapshot(&mut self, backup: &str) -> Result<SnapshotReport> {
         self.ensure_active()?;
-        if self.forked_self {
-            bail!("this device's ledger is forked; it must be re-enrolled as a new device");
-        }
+        self.ensure_ledger_writable()?;
         let rec = self.resolve_backup(backup)?;
         let mut src = self.backup_source(&rec)?;
         if src.stopped || self.view()?.backups_stopped.contains(&rec.folder_id) {

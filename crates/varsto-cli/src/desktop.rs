@@ -185,6 +185,16 @@ fn handle_unlocked(fixed: &Fixed, request: Request) -> Result<Option<Request>> {
                     401,
                     &json!({"error": "missing or wrong token; reopen the start URL"}),
                 ))?;
+            } else if path == "/api/activity"
+                && query_param(request.url().split_once('?').map_or("", |(_, q)| q), "mine")
+                    .is_some_and(|v| v == "1")
+            {
+                // This device's tasks only (the progress bar at the top of
+                // the interface): the peers are not asked.
+                request.respond(json_response(
+                    200,
+                    &json!({ "me": varsto_core::activity::local_here() }),
+                ))?;
             } else if path == "/api/activity" {
                 // What this device and the others are doing now. Asking
                 // keeps the service asking the peers for the next 15 s.
@@ -1195,6 +1205,15 @@ fn api_unlocked(
             service.request_sync();
             Ok(serde_json::to_value(r)?)
         }
+        // The recovery package checklist: structured sentences ({t, p}) the
+        // interface translates, or the English text for "Download as text".
+        (Method::Get, "/api/recovery/guide") => {
+            let guide = engine.recovery_guide();
+            Ok(match query_param(query, "format").as_deref() {
+                Some("text") => json!({ "text": varsto_core::recovery_guide::render_text(&guide) }),
+                _ => serde_json::to_value(guide)?,
+            })
+        }
         (Method::Get, "/api/devices") => Ok(json!({
             "devices": engine.devices_list(),
             "key_epoch": engine.key_epoch(),
@@ -1380,6 +1399,39 @@ fn api_unlocked(
             service.request_sync();
             Ok(json!({"ok": true, "id": id.to_string()}))
         }
+        (Method::Get, "/api/import/status") => {
+            Ok(serde_json::to_value(engine.import_status(None)?)?)
+        }
+        (Method::Post, "/api/import/dir") => {
+            let flag = |k: &str| input.get(k).and_then(|v| v.as_bool()).unwrap_or(false);
+            let source = PathBuf::from(s(input, "source")?);
+            let dest = opt(input, "dest")
+                .filter(|p| !p.trim().is_empty())
+                .map(PathBuf::from);
+            let opts = varsto_core::engine::ImportOptions {
+                folder: opt(input, "folder").filter(|f| !f.trim().is_empty()),
+                selective: dest.is_none() || flag("selective"),
+                dest,
+                dry_run: false,
+                remove_source: flag("remove_source"),
+                no_verify: false,
+                default_parent: Some(folder_root(engine.home())),
+            };
+            let mut src = varsto_core::import::dir::DirSource::open(&source)?;
+            let mut r = engine.import_run(&mut src, &opts)?;
+            if opts.remove_source {
+                r.cleanup = Some(engine.import_cleanup(&r.folder, false)?);
+            }
+            service.folders_changed = true;
+            service.request_sync();
+            Ok(serde_json::to_value(r)?)
+        }
+        (Method::Post, "/api/import/cleanup") => {
+            let apply = input.get("apply").and_then(|v| v.as_bool()).unwrap_or(false);
+            Ok(serde_json::to_value(
+                engine.import_cleanup(&s(input, "folder")?, apply)?,
+            )?)
+        }
         (Method::Post, "/api/folder/detach") => {
             engine.detach_folder(&s(input, "name")?)?;
             service.folders_changed = true;
@@ -1547,10 +1599,37 @@ fn api_unlocked(
             Ok(json!({"report": r, "status": engine.repair_status()}))
         }
         (Method::Get, "/api/ledger") => Ok(serde_json::to_value(engine.ledger_entries()?)?),
+        (Method::Get, "/api/ledger/health") => Ok(serde_json::to_value(engine.ledger_health())?),
+        (Method::Get, "/api/ledger/status") => {
+            let r = engine.ledger_status(true)?;
+            service.ledger_health = Some(r.health.clone());
+            Ok(serde_json::to_value(r)?)
+        }
+        (Method::Post, "/api/ledger/rebuild") => {
+            // The interface's button and `varsto ledger rebuild` while the
+            // service runs: the same safe restore the service runs by itself.
+            let flag = |k: &str| input.get(k).and_then(|v| v.as_bool());
+            let opts = varsto_core::engine::LedgerRebuildOptions {
+                from_storage: flag("from_storage").unwrap_or(false),
+                verify: flag("verify"),
+                verify_budget_bytes: input
+                    .get("verify_budget_mib")
+                    .and_then(|v| v.as_u64())
+                    .map(|m| m.saturating_mul(1 << 20))
+                    .unwrap_or(varsto_core::engine::LedgerRebuildOptions::default().verify_budget_bytes),
+                confirm_cold_read: flag("confirm_cold_read").unwrap_or(false),
+                automatic: false,
+            };
+            let r = engine.ledger_rebuild(&opts);
+            service.ledger_health = Some(engine.ledger_health());
+            let r = r?;
+            service.request_sync();
+            Ok(serde_json::to_value(r)?)
+        }
         (Method::Get, "/api/files") => {
             let folder = query_param(query, "folder")
                 .ok_or_else(|| anyhow!("folder query parameter required"))?;
-            Ok(serde_json::to_value(engine.list_files(&folder)?)?)
+            Ok(serde_json::to_value(engine.list_files_with_pending(&folder)?)?)
         }
         (Method::Post, "/api/fetch") => {
             // A large fetch whose blocks are on pool disks: return the plan
@@ -1660,7 +1739,25 @@ fn api_unlocked(
             let path = engine.export_file(&s(input, "folder")?, &s(input, "path")?)?;
             Ok(json!({"ok": true, "path": path}))
         }
-        (Method::Get, "/api/disks") => Ok(serde_json::to_value(engine.disks()?)?),
+        // Every disk with its bookkeeping (space, reclaimable, check ages, fsck).
+        (Method::Get, "/api/disks") => Ok(serde_json::to_value(engine.disk_report()?)?),
+        // The next disk to dock, ranked with reasons, and the reminder setting.
+        (Method::Get, "/api/disk/suggest") => {
+            let pool = query_param(query, "pool");
+            let s = engine.disk_suggestions_for(pool.as_deref())?;
+            if pool.is_none() {
+                service.disk_suggest = Some(s.clone());
+            }
+            Ok(json!({"suggestions": s, "settings": engine.disk_suggest_settings()}))
+        }
+        (Method::Post, "/api/disk/suggest/settings") => {
+            let mut st = engine.disk_suggest_settings();
+            if let Some(v) = input.get("notify_overdue").and_then(|v| v.as_bool()) {
+                st.notify_overdue = v;
+            }
+            engine.set_disk_suggest_settings(st.clone())?;
+            Ok(json!({"ok": true, "settings": st}))
+        }
         (Method::Post, "/api/disk/add") => {
             let r = engine.disk_add_at(
                 std::path::Path::new(&s(input, "mount")?),
@@ -1669,22 +1766,26 @@ fn api_unlocked(
                 &opt(input, "place").unwrap_or_default(),
             )?;
             service.request_sync();
+            service.suggest_disks(engine);
             Ok(serde_json::to_value(r)?)
         }
         (Method::Post, "/api/disk/check") => {
             let full = input.get("full").and_then(|c| c.as_bool()).unwrap_or(false);
             let r = engine.disk_check(&s(input, "label")?, full)?;
             service.request_sync();
+            service.suggest_disks(engine);
             Ok(serde_json::to_value(r)?)
         }
         (Method::Post, "/api/disk/eject") => {
             let label = s(input, "label")?;
             let mount = engine.disk_eject(&label)?;
+            service.suggest_disks(engine);
             Ok(json!({"ok": true, "label": label, "mount": mount, "safe_to_remove": true, "message": format!("{label}: index written and synced; safe to remove")}))
         }
         (Method::Post, "/api/disk/retire") => {
             let label = s(input, "label")?;
             let only_here = engine.disk_retire(&label)?;
+            service.suggest_disks(engine);
             Ok(json!({"ok": true, "label": label, "retired": true, "objects_only_here": only_here}))
         }
         (Method::Get, "/api/strongroom") => Ok(json!({
@@ -2137,6 +2238,166 @@ fn api_unlocked(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn disk_api_lists_bookkeeping_and_suggests_the_next_disk() {
+        use varsto_core::pool::{self, DiskSpace};
+        use varsto_core::storage::StorageSpec;
+        const GIB: u64 = 1 << 30;
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        let mounts = root.join("mounts");
+        let disk = mounts.join("blue");
+        std::fs::create_dir_all(&disk).unwrap();
+        pool::set_fake_space(
+            &disk,
+            Some(DiskSpace {
+                free: 60 * GIB,
+                total: 100 * GIB,
+            }),
+        );
+        let (mut engine, _) = Engine::init(&root.join("home"), "laptop", "pass phrase").unwrap();
+        engine
+            .add_storage(StorageSpec::LocalDir {
+                name: "box".into(),
+                path: root.join("box"),
+                cold: false,
+                carrier: false,
+                place: String::new(),
+            })
+            .unwrap();
+        engine
+            .add_storage(StorageSpec::Pool {
+                name: "shelf".into(),
+                place: "home".into(),
+                reserve_percent: 5,
+                min_reserve_bytes: 2 * GIB,
+                disks: vec![],
+                scan_roots: vec![mounts.clone()],
+                copies: 1,
+                verify_after_days: 180,
+            })
+            .unwrap();
+        let mut service = ServiceState::default();
+        let call = |engine: &mut Engine,
+                    service: &mut ServiceState,
+                    m: Method,
+                    path: &str,
+                    query: &str,
+                    input: Value| {
+            api_unlocked(engine, service, m, path, query, &input).unwrap()
+        };
+        call(
+            &mut engine,
+            &mut service,
+            Method::Post,
+            "/api/disk/add",
+            "",
+            json!({"mount": disk, "pool": "shelf", "label": "Blue 4TB"}),
+        );
+        // Adding a disk recomputes the suggestions in the service state.
+        let cached = service
+            .disk_suggest
+            .clone()
+            .expect("recomputed after the add");
+        assert_eq!(cached.attached[0].label, "Blue 4TB");
+        assert!(service.summary()["disk_suggest"]["attached"].is_array());
+
+        let disks = call(
+            &mut engine,
+            &mut service,
+            Method::Get,
+            "/api/disks",
+            "",
+            json!({}),
+        );
+        let d = &disks[0];
+        for k in [
+            "free_bytes",
+            "capacity_bytes",
+            "used_bytes",
+            "reserve_bytes",
+            "space_measured_utc",
+            "reclaimable_bytes",
+            "pending_delete_bytes",
+            "oldest_check_utc",
+            "copies_overdue",
+            "overdue_share",
+            "only_copy_objects",
+            "lacking_bytes",
+            "fill_potential_bytes",
+            "repair_objects",
+            "fetch_objects",
+            "fsck",
+            "last_seen_utc",
+            "failing",
+        ] {
+            assert!(d.get(k).is_some(), "/api/disks lacks {k}: {d}");
+        }
+        assert_eq!(d["free_bytes"], json!(60 * GIB));
+        assert_eq!(d["reserve_bytes"], json!(5 * GIB));
+        assert_eq!(d["only_copy_objects"], json!(0));
+
+        let r = call(
+            &mut engine,
+            &mut service,
+            Method::Get,
+            "/api/disk/suggest",
+            "",
+            json!({}),
+        );
+        assert_eq!(r["settings"]["notify_overdue"], json!(true));
+        assert!(
+            r["suggestions"]["top"].is_null(),
+            "an attached disk is not docked: {r}"
+        );
+        assert_eq!(
+            r["suggestions"]["attached"][0]["command"],
+            json!("varsto disk insert \"Blue 4TB\"")
+        );
+        let r = call(
+            &mut engine,
+            &mut service,
+            Method::Get,
+            "/api/disk/suggest",
+            "pool=shelf",
+            json!({}),
+        );
+        assert_eq!(r["suggestions"]["attached"].as_array().unwrap().len(), 1);
+        assert!(api_unlocked(
+            &mut engine,
+            &mut service,
+            Method::Get,
+            "/api/disk/suggest",
+            "pool=none",
+            &json!({})
+        )
+        .is_err());
+        let r = call(
+            &mut engine,
+            &mut service,
+            Method::Post,
+            "/api/disk/suggest/settings",
+            "",
+            json!({"notify_overdue": false}),
+        );
+        assert_eq!(r["settings"]["notify_overdue"], json!(false));
+        assert!(!engine.disk_suggest_settings().notify_overdue);
+
+        // Retired: listed apart with a warning.
+        call(
+            &mut engine,
+            &mut service,
+            Method::Post,
+            "/api/disk/retire",
+            "",
+            json!({"label": "Blue 4TB"}),
+        );
+        let s = service.disk_suggest.clone().unwrap();
+        assert!(s.attached.is_empty());
+        assert!(s.excluded[0].retired);
+        pool::set_fake_space(&disk, None);
+    }
 
     #[test]
     fn providers_list_for_the_storage_form() {
