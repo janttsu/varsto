@@ -91,7 +91,7 @@ description: Vad Varsto gör och vilka användningsfall som ligger bakom varje f
       <picture><source type="image/webp" srcset="{{P}}assets/img/features/mobile.webp"><img src="{{P}}assets/img/features/mobile.png" alt="En telefon och en surfplatta som synkroniserar via lagring; telefonen sparar inget i klartext." width="640" height="320" loading="lazy"></picture>
       <div>
         <p>Android och iOS kör samma krypterade kärna. Filer förblir krypterade på enheten och dekrypteras när du öppnar dem; miniatyrbilder skapas en gång, krypteras och delas med dina andra enheter. Android-alfan är en APK för sidladdning med en kompakt fillista (ett långt tryck markerar filer att ladda ned eller frigöra); iOS-appen byggs och körs i simulatorn vid varje ändring och har ännu inte körts på en riktig enhet.</p>
-        <p class="note">Status: pågår. En mapp som hålls krypterad på telefonen innehåller där bara krypterade block, samma som dina lagringsplatser har; selektiv synkronisering avgör vilka filer som finns på telefonen, som i vilken mapp som helst, och filer som läggs till på telefonen krypteras när de kommer in. Android-appen visar bilder, video (med spolning), ljud och text från sådana mappar i sin egen visare, dekrypterade i minnet och aldrig skrivna till telefonen; PDF:er och andra filer öppnas i en annan app, som får en dekrypterad kopia som Varsto tar bort när den låses eller startas om. Kamerauppladdning skickar nya foton och videor till en mapp i undermappar av formen YYYY/MM, valfritt bara via Wi-Fi eller under laddning. iOS har ännu ingetdera.</p>
+        <p class="note">Status: pågår. En mapp som hålls krypterad på telefonen innehåller där bara krypterade block, samma som dina lagringsplatser har; selektiv synkronisering avgör vilka filer som finns på telefonen, som i vilken mapp som helst, och filer som läggs till på telefonen krypteras när de kommer in. Android-appen visar bilder, video (med spolning), ljud och text från sådana mappar i sin egen visare, dekrypterade i minnet och aldrig skrivna till telefonen; PDF:er och andra filer öppnas i en annan app, som får en dekrypterad kopia som Varsto tar bort när den låses eller startas om. Kamerauppladdning skickar nya foton och videor till en mapp i undermappar av formen YYYY/MM, valfritt bara via Wi-Fi eller under laddning. iOS-appen har båda i egen kod (kamerauppladdning från bildbiblioteket med samma inställningar och en egen visare som även visar HEIC-bilder); liksom resten av iOS-appen har de ännu inte körts på en riktig enhet.</p>
       </div>
     </section>
 
@@ -181,7 +181,6 @@ description: Vad Varsto gör och vilka användningsfall som ligger bakom varje f
       <li>Erasure coding över lagringsplatser.</li>
       <li>Krypterade, maskerade loggar.</li>
       <li>En integration med File Provider / Cloud Files för platshållare.</li>
-      <li>Kamerauppladdning och visare för iOS.</li>
       <li>En andra faktor för registrering av enheter.</li>
     </ul>
     <p class="note">Varje designdokument på sidan <a href="{{P}}docs/">Dokumentation</a> anger vilka delar som finns. Inget har granskats ännu.</p>

@@ -142,7 +142,7 @@
       <picture><source type="image/webp" srcset="../assets/img/features/mobile.webp"><img src="../assets/img/features/mobile.png" alt="A phone and a tablet syncing through storage; the phone stores nothing in clear text." width="640" height="320" loading="lazy"></picture>
       <div>
         <p>Android and iOS run the same encrypted core. Files stay encrypted on the device and are decrypted when you open them; thumbnails are generated once, encrypted and shared with your other devices. The Android alpha is a sideloadable APK with a compact file list (a long press selects files to download or free); the iOS app is built and run in the Simulator on every change and has not run on a real device yet.</p>
-        <p class="note">Status: in progress. A folder kept encrypted on the phone holds only encrypted blocks there, the same ones your storages hold; selective sync decides which files are kept on the phone, as in any folder, and files added on the phone are encrypted as they arrive. The Android app shows pictures, video (with seeking), audio and text from such folders in its own viewer, decrypted in memory and never written to the phone; PDFs and other files open in another app, which receives a decrypted copy that Varsto removes when it locks or restarts. Camera upload sends new photos and videos to a folder in YYYY/MM subfolders, optionally only on Wi-Fi or while charging. iOS has neither yet.</p>
+        <p class="note">Status: in progress. A folder kept encrypted on the phone holds only encrypted blocks there, the same ones your storages hold; selective sync decides which files are kept on the phone, as in any folder, and files added on the phone are encrypted as they arrive. The Android app shows pictures, video (with seeking), audio and text from such folders in its own viewer, decrypted in memory and never written to the phone; PDFs and other files open in another app, which receives a decrypted copy that Varsto removes when it locks or restarts. Camera upload sends new photos and videos to a folder in YYYY/MM subfolders, optionally only on Wi-Fi or while charging. The iOS app has both in its own code (camera upload through the photo library, with the same settings, and a native viewer that also shows HEIC pictures); like the rest of the iOS app it has not run on a real device yet.</p>
       </div>
     </section>
 
@@ -232,7 +232,6 @@
       <li>Erasure coding across storages.</li>
       <li>Encrypted, redacted logs.</li>
       <li>A File Provider / Cloud Files integration for placeholders.</li>
-      <li>iOS camera upload and viewer.</li>
       <li>A second factor for device enrolment.</li>
     </ul>
     <p class="note">Every design document on the <a href="../docs/">Docs</a> page says which parts exist. Nothing has been audited yet.</p>
