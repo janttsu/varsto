@@ -1416,6 +1416,7 @@ fn api_unlocked(
                 remove_source: flag("remove_source"),
                 no_verify: false,
                 default_parent: Some(folder_root(engine.home())),
+                staging: None,
             };
             let mut src = varsto_core::import::dir::DirSource::open(&source)?;
             let mut r = engine.import_run(&mut src, &opts)?;

@@ -4,7 +4,7 @@
 //! folder, one folder per source; see `docs/import-git-annex.md`,
 //! `docs/import-cloud.md` and `docs/import-local.md`.
 
-use crate::{confirm, fmt_bytes, passphrase, print, Cli};
+use crate::{confirm, fmt_bytes, passphrase, print, show, Cli};
 use anyhow::Result;
 use clap::{Args, Subcommand};
 use std::io::IsTerminal;
@@ -116,6 +116,11 @@ pub struct CloudArgs {
     /// Parallel downloads.
     #[arg(long, default_value_t = 4)]
     transfers: u32,
+    /// Where to keep downloads until they are in the folder (default:
+    /// .varsto-import-staging in the folder's directory, on the same disk).
+    /// Each batch needs its size plus 1 GiB free there.
+    #[arg(long, value_name = "DIR")]
+    staging: Option<PathBuf>,
     #[command(flatten)]
     target: Target,
 }
@@ -129,6 +134,7 @@ fn options(home: &Path, t: &Target) -> ImportOptions {
         remove_source: false,
         no_verify: false,
         default_parent: Some(crate::desktop::folder_root(home)),
+        staging: None,
     }
 }
 
@@ -285,17 +291,22 @@ fn cloud_import(
     cloud: &CloudArgs,
     progress_on: bool,
 ) -> Result<()> {
-    let scratch = home.join("state").join("import-downloads");
+    // Downloads are staged on the folder's disk (`ImportOptions::staging`);
+    // this place is only a fallback the import replaces.
+    let fallback = cloud
+        .staging
+        .clone()
+        .unwrap_or_else(|| home.join("state").join("import-downloads"));
     let mut src = RcloneSource::open(
         remote,
         expect,
         cloud.hash_type.as_deref(),
         cloud.transfers,
-        &scratch,
+        &fallback,
     )?;
-    let opts = options(home, &cloud.target);
+    let mut opts = options(home, &cloud.target);
+    opts.staging = cloud.staging.clone();
     let r = run_import(engine, home, &mut src, &opts, progress_on);
-    let _ = std::fs::remove_dir_all(&scratch);
     print(cli, &r?, describe_report)
 }
 
@@ -415,13 +426,13 @@ fn describe_report(r: &ImportReport) -> String {
             r.damaged.len()
         ));
         for d in &r.damaged {
-            out.push(format!("    {} [{}]: {}", d.path, d.id, d.detail));
+            out.push(format!("    {} [{}]: {}", show(&d.path), d.id, d.detail));
         }
     }
     if r.failed_count > 0 {
         out.push(format!("  failed: {}", r.failed_count));
         for n in &r.failed {
-            out.push(format!("    {}: {}", n.path, n.reason));
+            out.push(format!("    {}: {}", show(&n.path), n.reason));
         }
     }
     if r.missing_ids > 0 {
@@ -457,11 +468,17 @@ fn describe_report(r: &ImportReport) -> String {
     if r.skipped_count > 0 {
         out.push(format!("  not imported: {}", r.skipped_count));
         for n in &r.skipped {
-            out.push(format!("    {}: {}", n.path, n.reason));
+            out.push(format!("    {}: {}", show(&n.path), n.reason));
         }
     }
     for n in &r.warnings {
-        out.push(format!("  note: {}: {}", n.path, n.reason));
+        out.push(format!("  note: {}: {}", show(&n.path), n.reason));
+    }
+    if r.mapped_on_windows > 0 {
+        out.push(format!(
+            "  note: {} name(s) are kept as they are but hold characters Windows does not allow (such as : ? * or a name like CON); a Windows device shows them with look-alike characters",
+            r.mapped_on_windows
+        ));
     }
     if r.kept_in_varsto_count > 0 {
         out.push(format!(
@@ -469,7 +486,7 @@ fn describe_report(r: &ImportReport) -> String {
             r.kept_in_varsto_count
         ));
         for n in &r.kept_in_varsto {
-            out.push(format!("    {}: {}", n.path, n.reason));
+            out.push(format!("    {}: {}", show(&n.path), n.reason));
         }
     }
     if r.gone_at_source > 0 {
@@ -478,7 +495,7 @@ fn describe_report(r: &ImportReport) -> String {
             r.gone_at_source
         ));
         for p in &r.gone_examples {
-            out.push(format!("    {p}"));
+            out.push(format!("    {}", show(p)));
         }
     }
     if let Some(c) = &r.cleanup {
@@ -509,7 +526,7 @@ fn describe_cleanup(c: &ImportCleanupReport) -> String {
     if c.waiting_count > 0 {
         out.push(format!("{} file(s) stay for now:", c.waiting_count));
         for w in c.waiting.iter().take(30) {
-            out.push(format!("  {}: {}", w.path, w.reason));
+            out.push(format!("  {}: {}", show(&w.path), w.reason));
         }
     }
     out.join("\n")
@@ -604,7 +621,7 @@ fn describe_missing(list: &[MissingFile]) -> String {
         .map(|m| {
             format!(
                 "{}  {}  {}",
-                m.path,
+                show(&m.path),
                 fmt_bytes(m.size),
                 if m.holders.is_empty() {
                     "(no copy claims it)".to_string()

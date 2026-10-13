@@ -60,6 +60,35 @@ pub struct ImportOptions {
     /// Without `dest`: a folder that is not attached here goes to
     /// `default_parent/<folder name>`.
     pub default_parent: Option<PathBuf>,
+    /// Where a source that downloads (rclone) keeps the files of a batch
+    /// until they are in the folder. Default: `.varsto-import-staging` in
+    /// the folder's directory, so that the downloads land on the same
+    /// filesystem as the folder (and not on the system disk).
+    pub staging: Option<PathBuf>,
+}
+
+/// The staging directory in a folder's directory (hidden from scans like
+/// every `.varsto` name).
+pub const STAGING_DIR: &str = ".varsto-import-staging";
+
+/// Removes a staging directory when the import ends, however it ends.
+struct StagingGuard {
+    dir: PathBuf,
+    /// Created by the import (the default place): removed whole. A
+    /// directory named with `--staging` is emptied of what the source put
+    /// there, and removed only when the import made it.
+    own: bool,
+    existed: bool,
+}
+
+impl Drop for StagingGuard {
+    fn drop(&mut self) {
+        if self.own {
+            let _ = fs::remove_dir_all(&self.dir);
+        } else if !self.existed {
+            let _ = fs::remove_dir(&self.dir);
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Default)]
@@ -103,6 +132,10 @@ pub struct ImportReport {
     pub skipped: Vec<Note>,
     pub skipped_count: u64,
     pub warnings: Vec<Note>,
+    /// Paths imported with their original names that a Windows device
+    /// writes under a mapped local name (`:`, `?`, `CON.txt`, ...: see
+    /// `crate::names`). For information only: nothing is renamed.
+    pub mapped_on_windows: u64,
     /// Paths changed or deleted in Varsto since they were imported: kept.
     pub kept_in_varsto: Vec<Note>,
     pub kept_in_varsto_count: u64,
@@ -855,7 +888,13 @@ impl Engine {
                     let dest = dest_for(opts, &name).ok_or_else(|| {
                         anyhow!("give --dest for the new folder (and --selective for placeholders only)")
                     })?;
-                    if dest.exists() && fs::read_dir(&dest)?.next().is_some() {
+                    // (A staging directory left by an import that was
+                    // stopped does not count.)
+                    if dest.exists()
+                        && fs::read_dir(&dest)?
+                            .flatten()
+                            .any(|e| !e.file_name().to_string_lossy().starts_with(".varsto"))
+                    {
                         bail!(
                             "{} is not empty; the new folder needs an empty directory",
                             dest.display()
@@ -873,6 +912,20 @@ impl Engine {
             }
             rec_root = Some((rec, root));
         }
+        // Downloads are staged on the folder's filesystem (or where
+        // --staging says), and the staging directory goes afterwards.
+        let _staging = match &rec_root {
+            Some((_, root)) => {
+                let (dir, own) = match &opts.staging {
+                    Some(s) => (std::path::absolute(s)?, false),
+                    None => (root.join(STAGING_DIR), true),
+                };
+                source.stage_in(&dir)?;
+                let existed = dir.exists();
+                Some(StagingGuard { dir, own, existed })
+            }
+            None => None,
+        };
         let folder_id = rec_root
             .as_ref()
             .map(|(r, _)| r.folder_id.clone())
@@ -906,6 +959,11 @@ impl Engine {
         report.skipped_count = listing.skipped.len() as u64;
         report.skipped = listing.skipped.iter().take(EXAMPLES).cloned().collect();
         report.warnings = listing.warnings.iter().take(EXAMPLES).cloned().collect();
+        report.mapped_on_windows = listing
+            .items
+            .iter()
+            .filter(|i| crate::names::mapped_on_windows(&i.path))
+            .count() as u64;
         let items: Vec<ListedItem> = listing.items;
         let selective = folder_id
             .as_ref()
@@ -963,11 +1021,8 @@ impl Engine {
                     continue;
                 }
             } else if let Some(r) = &root {
-                let disk = root_join(r, &item.path);
-                if disk
-                    .as_ref()
-                    .is_ok_and(|d| d.exists() || placeholder_path(d).exists())
-                {
+                let disk = self.disk_of(r, &state, &item.path);
+                if disk.exists() || placeholder_path(&disk).exists() {
                     push_example(
                         &mut report.kept_in_varsto,
                         &mut report.kept_in_varsto_count,
@@ -1057,8 +1112,9 @@ impl Engine {
                 continue;
             };
             let mtime = item.mtime_ns.unwrap_or(template.mtime);
-            let local_source = root_join(&root_path, holder).ok().filter(|p| p.is_file());
-            let disk = root_join(&root_path, &item.path)?;
+            let local_source =
+                Some(self.disk_of(&root_path, &state, holder)).filter(|p| p.is_file());
+            let disk = self.place(&root_path, &mut state, &item.path, None)?;
             let mut local_entry = None;
             if !selective {
                 if let Some(src) = local_source {
@@ -1354,7 +1410,8 @@ impl Engine {
                 .mtime_ns
                 .or(mtime_ns)
                 .unwrap_or_else(|| util::now_utc() * 1_000_000_000);
-            let disk = root_join(root, &item.path)?;
+            // The original name, mapped where this filesystem needs it.
+            let disk = self.place(root, state, &item.path, None)?;
             if let Some(p) = disk.parent() {
                 fs::create_dir_all(p)?;
             }
@@ -1578,6 +1635,7 @@ impl Engine {
         };
         let have: HashSet<String> = out.iter().map(|f| f.path.clone()).collect();
         let selective = self.mount_is_selective(&rec.folder_id);
+        let state = self.load_state(&rec.folder_id)?;
         for (p, e) in &b.tree {
             if have.contains(p) || b.imported.contains_key(&e.id) {
                 continue;
@@ -1589,7 +1647,7 @@ impl Engine {
                 pinned: false,
                 content_hash: String::new(),
                 selective,
-                disk: root.join(p),
+                disk: self.disk_of(&root, &state, p),
                 media: thumbs::is_image(p) || thumbs::is_video(p),
                 modified_utc: e.mtime_ns / 1_000_000_000,
                 last_accessed_utc: None,
@@ -1965,11 +2023,6 @@ fn dest_for(opts: &ImportOptions, name: &str) -> Option<PathBuf> {
     opts.dest
         .clone()
         .or_else(|| opts.default_parent.as_ref().map(|p| p.join(name)))
-}
-
-/// `root/rel` for writing (no symbolic links on the way).
-fn root_join(root: &Path, rel: &str) -> Result<PathBuf> {
-    util::safe_join(root, rel)
 }
 
 fn set_mtime(path: &Path, mtime_ns: i64) -> Result<()> {

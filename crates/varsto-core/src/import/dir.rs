@@ -123,6 +123,8 @@ impl ImportSource for DirSource {
                 });
                 continue;
             }
+            // Names are kept as they are (`crate::names`); only what
+            // could leave the folder is refused.
             if let Err(e) = crate::util::check_rel_path(&path) {
                 listing.skipped.push(Note {
                     path,
@@ -144,7 +146,7 @@ impl ImportSource for DirSource {
                 listing.warnings.push(Note {
                     path: path.clone(),
                     reason: format!(
-                        "differs from {other} only by case: both are imported, but they cannot sit side by side on Windows or macOS"
+                        "differs from {other} only by case: both are imported; on Windows and macOS one of them is kept under a local name with \" (2)\""
                     ),
                 });
             }
