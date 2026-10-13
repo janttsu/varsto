@@ -2315,7 +2315,7 @@ pub fn install(home: &Path, interval_secs: u64) -> Result<String> {
     #[allow(unreachable_code)]
     {
         let _ = (home, interval_secs, exe);
-        Err(anyhow!("automatic installation is not implemented on this platform; run `varsto service run` from your login items"))
+        Err(anyhow!("automatic installation is not available on this platform; run `varsto service run` from your login items"))
     }
 }
 
@@ -2344,7 +2344,7 @@ pub fn uninstall() -> Result<String> {
         return Ok(done.join("\n"));
     }
     #[allow(unreachable_code)]
-    Err(anyhow!("not implemented on this platform"))
+    Err(anyhow!("not available on this platform"))
 }
 
 /// Linux: install like an ordinary program, without root. The binary goes to

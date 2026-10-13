@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: PolyForm-Shield-1.0.0
-//! `varsto`: command-line interface (alpha-0). Every command has a `--json`
+//! `varsto`: command-line interface (alpha). Every command has a `--json`
 //! output for scripts (P-004); exit codes: 0 ok, 1 failure, 2 usage.
 
 use anyhow::{anyhow, bail, Context, Result};
@@ -415,7 +415,7 @@ enum Cmd {
         tags: Vec<String>,
     },
     /// MCP server for AI assistants (stdio), with per-folder grants and
-    /// scoped keys. See docs/mcp.md.
+    /// scoped keys. See docs/mcp.md in the repository (https://github.com/janttsu/varsto).
     Mcp {
         /// Talk to the running service with this MCP key (from `varsto mcp
         /// key create`); its scope replaces the grants file.
@@ -679,7 +679,7 @@ enum StrongroomCmd {
         #[arg(long)]
         free: bool,
     },
-    /// Enrol a backup security key (one touch of an enrolled key, then two of the new one).
+    /// Enroll a backup security key (one touch of an enrolled key, then two of the new one).
     AddKey {
         folder: String,
         /// A name for the key, e.g. "safe".
@@ -750,7 +750,7 @@ enum PolicyCmd {
     /// Set a folder's policy (replaces the previous one) and publish it to every device.
     Set {
         folder: String,
-        /// Minimum copies on any non-carrier storage.
+        /// Minimum copies on any storage that is not a transferrer.
         #[arg(long, default_value_t = 0)]
         min_copies: u32,
         /// Minimum copies per place, e.g. --place cloud=2 --place home=1.
@@ -1130,7 +1130,7 @@ enum StorageCmd {
         #[arg(long)]
         delete_data: bool,
     },
-    /// Show or set a storage's prices (defaults come from the built-in price data when recognised).
+    /// Show or set a storage's prices (defaults come from the built-in price data when recognized).
     Price {
         name: String,
         /// Storage price per GB-month.
@@ -3232,7 +3232,7 @@ fn run(cli: &Cli) -> Result<()> {
                                     "{}{}{}{}{}{} | {} stored{} | {}{}",
                                     x.name(),
                                     if x.is_cold() { " (cold)" } else { "" },
-                                    if x.is_carrier() { " (carrier)" } else { "" },
+                                    if x.is_carrier() { " (transferrer)" } else { "" },
                                     if x.is_data_only() {
                                         format!(" ({})", x.describe())
                                     } else {
@@ -4609,7 +4609,7 @@ fn run(cli: &Cli) -> Result<()> {
                         println!("Scan it with the new device's camera, or in Varsto: Pair with your other device, Scan QR code.");
                     }
                     println!("Pairing code: {}", st.code);
-                    println!("On the new device choose \"Pair with a code\" (or run `varsto pair join`).");
+                    println!("On the new device choose \"Pair\" (or run `varsto pair join`).");
                     if !st.addresses.is_empty() {
                         println!(
                             "If it does not find this device, give the address: {}",
@@ -5153,7 +5153,7 @@ fn run(cli: &Cli) -> Result<()> {
                     if *write {
                         "read-write"
                     } else if *analyse {
-                        "read and analyse"
+                        "read and analyze"
                     } else {
                         "read-only"
                     },

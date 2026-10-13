@@ -195,4 +195,4 @@ Every word of `query` must occur, ignoring case, in the file's analysis, one of 
 - Strongroom folders are never visible unless granted by name, and only while unlocked.
 - MCP keys are stored only as hashes; the key itself is shown once.
 
-See also: [the format specification](spec/alpha-0-format.md), sections 13 (last-accessed times and the MCP server), 34 (file analyses) and 35 (MCP keys).
+See also: [the format specification](spec/alpha-0-format.md), sections 13 (last-accessed times and the MCP server), 36 (file analyses) and 37 (MCP keys).

@@ -32,7 +32,7 @@ Recommended default for important data:
 1. Split the recovery key with threshold sharing (for example 2-of-3 or 3-of-5).
 2. Write each share by hand on archival paper, or engrave or stamp it on stainless steel for long-term storage.
 3. Keep the shares in two or three different physical places (home, a trusted person, a workplace or bank). Do not rely on a single safe-deposit box.
-4. Keep daily unlock separate: at least two hardware security keys.
+4. Keep daily unlock separate: at least two hardware security keys. (Status 0.0.1-alpha.13: not a product feature; daily unlock is a passphrase, and security keys open Strongroom folders.)
 5. Test recovery right after creation and then yearly.
 
 Rules for creating and storing the key:
@@ -40,6 +40,6 @@ Rules for creating and storing the key:
 - Do not photograph, screenshot, copy to the clipboard, or store it in cloud services or a normal password manager.
 - Do not print on a networked or cloud printer (printers can cache output). Prefer handwriting.
 - Prefer words over QR codes as the primary medium: they tolerate wear, can be read and written by hand, and do not depend on one application surviving for decades. QR codes may be an optional extra copy.
-- The recovery format is openly specified with test vectors, and a small offline reader tool restores the key without the main application.
+- The recovery format is openly specified with test vectors; a standalone reader tool that restores the key without the main application does not exist yet ([docs/spec/format-versions.md](../spec/format-versions.md)).
 
 Optional layers for advanced users: a memorised passphrase on top of the shares (adds protection, adds loss risk), and tools such as Superbacked-style offline encrypted backups, provided the tool is open source, signed and used on an air-gapped machine.

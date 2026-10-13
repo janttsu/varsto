@@ -1102,7 +1102,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
       var lines = keys.map(function (k) { return k.number + ". " + (k.label || "no label") + " (" + k.method + (k.added_utc ? ", added " + fmtDate(k.added_utc) : "") + "): " + k.name; });
       return dialog({
         title: "Security keys of " + f.name,
-        text: (keys.length === 1 ? "One key opens this Strongroom; if it is lost, so is the folder. Enrol a backup key and keep it somewhere safe." : keys.length + " keys open this Strongroom; any one of them is enough.") + " To add a backup key, run the command with an enrolled key plugged in; it asks you to swap to the new key. " +
+        text: (keys.length === 1 ? "One key opens this Strongroom; if it is lost, so is the folder. Enroll a backup key and keep it somewhere safe." : keys.length + " keys open this Strongroom; any one of them is enough.") + " To add a backup key, run the command with an enrolled key plugged in; it asks you to swap to the new key. " +
           "Removing a key does not change the folder key. After removing a key someone may have kept, or if you suspect the key leaked, re-key the folder: it gets a new key wrapped for every enrolled key (touch each one), everything is re-encrypted and the old copies are deleted.",
         code: lines.join("\n") + "\n\nvarsto strongroom add-key " + shArg(f.name) + " --label safe\nvarsto strongroom rekey " + shArg(f.name),
         ok: "Close", cancel: false, extra: keys.length > 1 ? "Remove a key…" : ""
@@ -2668,7 +2668,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
       ready = (f.state === "local" ? Promise.resolve() : (busy(true), api("POST", "/api/fetch", { folder: folder, path: f.path }).then(function () { log("fetched " + f.path); busy(false); }, function (e) { busy(false); throw e; }))).then(function () { return f.disk; });
     }
     ready.then(function (disk) {
-      if (!droid) { throw new Error("opening files in other apps is not available in this shell yet"); }
+      if (!droid) { throw new Error("opening files in other apps is not available on this platform"); }
       if (share) { droid.shareFile(disk); } else { droid.openFile(disk); }
       setTimeout(loadFiles, 1500);
     }).catch(function (e) { log((share ? "share" : "open") + " failed: " + e.message); alertBox(e.message); });
@@ -3265,7 +3265,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
       // The key is shown once: in a dialog now, and on the overview until the user confirms.
       $("vaultkey-text").textContent = "Vault key (shown once, write it down and keep it offline): " + r.vault_key;
       $("vaultkey").classList.remove("hidden");
-      return dialog({ title: "Your vault key", text: "Write it down and keep it offline: it is the only way to add other devices or recover the data. It is shown once.", code: r.vault_key, ok: "Continue", cancel: false }).then(function () { return refreshState(); });
+      return dialog({ title: "Your vault key", text: "Write it down and keep it offline: it is the only way to recover the data, or to join without another device; devices can also be added by pairing with a code. It is shown once.", code: r.vault_key, ok: "Continue", cancel: false }).then(function () { return refreshState(); });
     }).catch(function (e) { alertBox(e.message); });
   };
   $("vaultkey-done").onclick = function () { $("vaultkey").classList.add("hidden"); $("vaultkey-text").textContent = ""; };
