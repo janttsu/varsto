@@ -697,7 +697,11 @@
   "Copying blocks from disk «{s}»": "Kopioi lohkoja levyltä «{s}»",
   "Writing files fetched from disk «{s}»": "Kirjoittaa levyltä «{s}» haettuja tiedostoja",
   "Unmounting disk «{s}»": "Irrottaa levyä «{s}»",
-  "The interface starts in your system's theme; the switch keeps your choice.": "Käyttöliittymä alkaa järjestelmän teemalla; kytkin muistaa valintasi."
+  "The interface starts in your system's theme; the switch keeps your choice.": "Käyttöliittymä alkaa järjestelmän teemalla; kytkin muistaa valintasi.",
+  "Checking that the restic mirror is complete": "Tarkistaa, että resticin peilikopio on täydellinen",
+  "Backing up the mirror with restic": "Varmuuskopioi peilikopiota resticillä",
+  "Removing old restic snapshots": "Poistaa vanhoja restic-tilannekuvia",
+  "Checking the restic repository": "Tarkistaa restic-varaston"
  },
  "patterns": [
   [

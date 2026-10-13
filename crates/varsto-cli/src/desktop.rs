@@ -1832,6 +1832,43 @@ fn api_unlocked(
             }
             Ok(json!({"report": r, "status": engine.verify_status()}))
         }
+        (Method::Get, "/api/restic") => {
+            let quick = varsto_core::engine::CheckOptions {
+                quick: true,
+                ..Default::default()
+            };
+            let c = engine.restic_check(&quick);
+            varsto_core::restic::status_value(engine.home(), Some(c))
+        }
+        (Method::Post, "/api/restic/setup") => {
+            let cfg: varsto_core::restic::ResticConfig = serde_json::from_value(
+                input
+                    .get("config")
+                    .cloned()
+                    .ok_or_else(|| anyhow!("config missing"))?,
+            )?;
+            let names: Option<Vec<String>> =
+                serde_json::from_value(input.get("folders").cloned().unwrap_or(Value::Null))?;
+            let mv = input.get("move").and_then(|v| v.as_bool()).unwrap_or(false);
+            let r = engine.restic_setup(cfg, names.as_deref(), mv)?;
+            service.folders_changed = true;
+            service.request_sync();
+            Ok(serde_json::to_value(r)?)
+        }
+        (Method::Post, "/api/restic/hold") => {
+            // Taken while this request holds the engine: no sync of the
+            // mirror is under way once it answers.
+            let token = opt(input, "token").ok_or_else(|| anyhow!("token missing"))?;
+            let pid = input
+                .get("pid")
+                .and_then(|v| v.as_u64())
+                .ok_or_else(|| anyhow!("pid missing"))? as u32;
+            Ok(json!({"held": engine.restic_hold(&token, pid)?}))
+        }
+        (Method::Post, "/api/restic/check") => {
+            let opts: varsto_core::engine::CheckOptions = serde_json::from_value(input.clone())?;
+            Ok(serde_json::to_value(engine.restic_check(&opts)?)?)
+        }
         (Method::Get, "/api/scrub") => Ok(serde_json::to_value(engine.scrub_status())?),
         (Method::Post, "/api/scrub") => {
             let mut sched = engine.scrub_schedule().clone();

@@ -16,6 +16,7 @@ mod filemanager;
 mod icon;
 mod mcp;
 mod placing;
+mod restic;
 mod service;
 mod tray;
 mod update;
@@ -318,6 +319,13 @@ enum Cmd {
         cmd: Option<upkeep::ScrubCmd>,
         #[command(flatten)]
         run: upkeep::ScrubRunArgs,
+    },
+    /// Backups of the whole vault with restic: one device keeps every folder
+    /// as a full plaintext copy (the mirror) and backs it up into a restic
+    /// repository outside the vault; restoring needs only restic.
+    Restic {
+        #[command(subcommand)]
+        cmd: restic::ResticCmd,
     },
     /// Placement advice: idle files, storage prices, monthly costs, and suggestions to apply.
     Advice {
@@ -2411,6 +2419,7 @@ fn run(cli: &Cli) -> Result<()> {
         Cmd::Verify { cmd } => upkeep::verify(cli, &home, cmd)?,
         Cmd::Scrub { cmd, run } => upkeep::scrub(cli, &home, cmd, run)?,
         Cmd::Advice { idle_days, cmd } => upkeep::advice(cli, &home, *idle_days, cmd)?,
+        Cmd::Restic { cmd } => restic::run(cli, &home, cmd)?,
         Cmd::Repair {
             dry_run,
             from_cold,
@@ -2978,6 +2987,9 @@ fn run(cli: &Cli) -> Result<()> {
                     "{}",
                     varsto_core::recovery::kit_text(&engine.vault_id().to_string(), &key, sh)?
                 );
+                if let Some(note) = restic::kit_note(&home) {
+                    print!("{note}");
+                }
             }
             RecoveryCmd::Combine { shares } => {
                 let parsed: Vec<varsto_core::recovery::Share> = shares

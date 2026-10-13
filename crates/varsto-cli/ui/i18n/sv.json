@@ -690,7 +690,11 @@
   "Copying blocks from disk «{s}»": "Kopierar block från disken «{s}»",
   "Writing files fetched from disk «{s}»": "Skriver filer hämtade från disken «{s}»",
   "Unmounting disk «{s}»": "Avmonterar disken «{s}»",
-  "The interface starts in your system's theme; the switch keeps your choice.": "Gränssnittet börjar i systemets tema; reglaget kommer ihåg ditt val."
+  "The interface starts in your system's theme; the switch keeps your choice.": "Gränssnittet börjar i systemets tema; reglaget kommer ihåg ditt val.",
+  "Checking that the restic mirror is complete": "Kontrollerar att restic-speglingen är fullständig",
+  "Backing up the mirror with restic": "Säkerhetskopierar speglingen med restic",
+  "Removing old restic snapshots": "Tar bort gamla restic-ögonblicksbilder",
+  "Checking the restic repository": "Kontrollerar restic-förrådet"
  },
  "patterns": [
   [

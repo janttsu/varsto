@@ -2310,7 +2310,11 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     "scrub": "Checking storage «{s}» for bit rot",
     "scrub.disk": "Checking disk «{s}» for bit rot",
     "scrub.files": "Checking the files of folder «{s}» for bit rot",
-    "scrub.cache": "Checking the block cache for bit rot"
+    "scrub.cache": "Checking the block cache for bit rot",
+    "restic": "Checking that the restic mirror is complete",
+    "restic.backup": "Backing up the mirror with restic",
+    "restic.forget": "Removing old restic snapshots",
+    "restic.repo_check": "Checking the restic repository"
   };
   var actTimer = null, actBusy = false, lastActivity = null;
   function actTr(s) { return window.varstoLang ? window.varstoLang.t(s) : s; }
