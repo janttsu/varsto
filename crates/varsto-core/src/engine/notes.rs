@@ -405,10 +405,7 @@ impl Engine {
         let (rec, _) = self.resolve_folder(folder)?;
         let state = self.load_state(&rec.folder_id)?;
         let notes = self.load_notes(&rec.folder_id);
-        Ok(Self::live_analyses(&state, &notes)
-            .into_iter()
-            .map(|(_, a)| a)
-            .collect())
+        Ok(Self::live_analyses(&state, &notes).into_values().collect())
     }
 
     /// Analyses of the folder's live files (analyses of files this device
