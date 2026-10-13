@@ -78,6 +78,25 @@ fn tree(root: &Path) -> BTreeMap<String, Vec<u8>> {
     out
 }
 
+/// A temporary directory that can be removed although git-annex made its
+/// object directories read-only.
+struct Scratch(tempfile::TempDir);
+
+impl Scratch {
+    fn path(&self) -> &Path {
+        self.0.path()
+    }
+}
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        let _ = Command::new("chmod")
+            .args(["-R", "u+w"])
+            .arg(self.0.path())
+            .status();
+    }
+}
+
 struct Fixture {
     disk1: PathBuf,
     disk2: PathBuf,
@@ -227,7 +246,7 @@ fn import_annex_from_two_disks() {
         eprintln!("git-annex not installed; skipped");
         return;
     }
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = Scratch(tempfile::tempdir().unwrap());
     let root = tmp.path();
     let fx = fixture(root);
 
@@ -392,7 +411,7 @@ fn name_clash_with_another_folder_is_refused() {
     if !have_annex() {
         return;
     }
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = Scratch(tempfile::tempdir().unwrap());
     let root = tmp.path();
     let fx = fixture(root);
     let (mut a, _) = Engine::init(&root.join("a-home"), "laptop", PASS).unwrap();
