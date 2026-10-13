@@ -257,7 +257,7 @@ fn via_service(home: &Path, path: &str, body: Value) -> Result<Option<Value>> {
 }
 
 fn open(home: &Path) -> Result<Engine> {
-    Engine::open(home, &crate::passphrase()?)
+    crate::open_engine(home)
 }
 
 pub fn run(cli: &Cli, home: &Path, cmd: &BackupCmd) -> Result<()> {

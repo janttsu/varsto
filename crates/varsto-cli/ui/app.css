@@ -515,6 +515,10 @@ ul.list .minimap { margin-top: 6px; }
 .vaultkey { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .vaultkey span { flex: 1 1 320px; overflow-wrap: anywhere; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12.5px; }
 .vaultkey button { flex: none; }
+.banner-action { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.banner-action span { flex: 1 1 320px; }
+.banner-action button { flex: none; }
+.banner-action.hidden { display: none; }
 
 /* Device mode cards (phones): encrypted on this phone, or plain files */
 .mode-cards { display: none; flex-direction: column; gap: 8px; margin: 0 0 12px; }

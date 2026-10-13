@@ -38,6 +38,40 @@ struct Cli {
 }
 
 #[derive(Subcommand)]
+enum LedgerCmd {
+    /// List the ledger batches held on this device.
+    List,
+    /// Heads per device, where each device's batches are held (this device
+    /// and every storage), checkpoints, fork state, and whether a rebuild
+    /// is recommended.
+    Status,
+    /// Restore this device's ledger from the storages: its own batches and
+    /// checkpoints (continuing after the newest), the other devices'
+    /// batches and the view. A device restored from an old backup adopts
+    /// its later history when it is its own; two copies of one device are
+    /// refused.
+    Rebuild {
+        /// Also rebuild the record of where the blocks are from what the
+        /// storages hold (when no ledger is left anywhere): every object the
+        /// folders' newest manifests name is looked up, verified and claimed.
+        #[arg(long)]
+        from_storage: bool,
+        /// Verify every object before claiming it (default: all up to 1 GiB, otherwise up to --verify-budget-mib).
+        #[arg(long, conflicts_with = "no_verify")]
+        verify: bool,
+        /// Claim the objects without reading them.
+        #[arg(long)]
+        no_verify: bool,
+        /// How much to read for verification when the vault is large.
+        #[arg(long, default_value_t = 1024)]
+        verify_budget_mib: u64,
+        /// Also read cold storages (retrievals may be billed).
+        #[arg(long)]
+        confirm_cold_read: bool,
+    },
+}
+
+#[derive(Subcommand)]
 enum Cmd {
     /// Create a new vault on this device and print the vault key once.
     Init {
@@ -157,8 +191,11 @@ enum Cmd {
     },
     /// List duplicate files in a folder.
     Dupes { folder: String },
-    /// List ledger batches.
-    Ledger,
+    /// The ledger: list batches (default), show its state, rebuild it.
+    Ledger {
+        #[command(subcommand)]
+        cmd: Option<LedgerCmd>,
+    },
     /// Start the background service and open the desktop interface in your browser (default when run without arguments).
     Desktop {
         /// Port on 127.0.0.1 (0 = pick a free one).
@@ -1057,6 +1094,22 @@ static TYPED: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
 /// unlocks a background service that waits for it.
 static USED: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
 
+/// Open the device directory. When its ledger needs a rebuild (lost or
+/// damaged local files, a fork), say so on stderr: commands that only read
+/// go on, commands that would sign stop with the same advice.
+pub(crate) fn open_engine(home: &Path) -> Result<Engine> {
+    let e = Engine::open(home, &passphrase()?)?;
+    warn_ledger(&e.ledger_health());
+    Ok(e)
+}
+
+/// A one-line warning about the ledger on stderr, unless it is fine.
+fn warn_ledger(h: &varsto_core::engine::LedgerHealth) {
+    if !h.is_ok() {
+        eprintln!("warning: ledger: {}", h.describe());
+    }
+}
+
 fn passphrase() -> Result<String> {
     if let Ok(p) = std::env::var("VARSTO_PASSPHRASE") {
         *USED.lock().unwrap() = Some(p.clone());
@@ -1181,7 +1234,7 @@ fn run_org(cli: &Cli, home: &Path, cmd: &OrgCmd) -> Result<()> {
                     serde_json::json!({"name": name, "user": user}),
                 )?)?
             } else {
-                let mut engine = Engine::open(home, &passphrase()?)?;
+                let mut engine = open_engine(home)?;
                 engine.org_create(name, user)?
             };
             if cli.json {
@@ -1205,7 +1258,7 @@ fn run_org(cli: &Cli, home: &Path, cmd: &OrgCmd) -> Result<()> {
                     Some(serde_json::from_value(v)?)
                 }
             } else {
-                Engine::open(home, &passphrase()?)?.org_summary()
+                open_engine(home)?.org_summary()
             };
             match summary {
                 None => {
@@ -1248,7 +1301,7 @@ fn run_org(cli: &Cli, home: &Path, cmd: &OrgCmd) -> Result<()> {
                     serde_json::json!({"code": code, "user": user, "fingerprint": confirmed}),
                 )?)?
             } else {
-                let mut engine = Engine::open(home, &passphrase()?)?;
+                let mut engine = open_engine(home)?;
                 engine.org_approve(code, user, confirmed.as_deref())?
             };
             if cli.json {
@@ -1268,7 +1321,7 @@ fn run_org(cli: &Cli, home: &Path, cmd: &OrgCmd) -> Result<()> {
                     serde_json::json!({"device": device, "user": user}),
                 )?;
             } else {
-                Engine::open(home, &passphrase()?)?.org_add_device(device, user)?;
+                open_engine(home)?.org_add_device(device, user)?;
             }
             println!("added {device} to the organization for {user}");
         }
@@ -1286,7 +1339,7 @@ fn run_org(cli: &Cli, home: &Path, cmd: &OrgCmd) -> Result<()> {
                     serde_json::json!({"user": user, "wipe": wipe, "confirm": user}),
                 )?)?
             } else {
-                let mut engine = Engine::open(home, &passphrase()?)?;
+                let mut engine = open_engine(home)?;
                 engine.org_remove_user(user, *wipe)?
             };
             print(cli, &report, |r| {
@@ -1317,9 +1370,7 @@ fn run_org(cli: &Cli, home: &Path, cmd: &OrgCmd) -> Result<()> {
                     .map(serde_json::from_value)
                     .transpose()?
             } else {
-                Engine::open(home, &passphrase()?)?
-                    .org_summary()
-                    .map(|s| s.policy)
+                open_engine(home)?.org_summary().map(|s| s.policy)
             };
             let Some(mut p) = current else {
                 bail!("this vault has no organization");
@@ -1342,7 +1393,7 @@ fn run_org(cli: &Cli, home: &Path, cmd: &OrgCmd) -> Result<()> {
             if via_service.is_some() {
                 call("POST", "/api/org/policy", serde_json::to_value(&p)?)?;
             } else {
-                Engine::open(home, &passphrase()?)?.org_set_policy(p.clone())?;
+                open_engine(home)?.org_set_policy(p.clone())?;
             }
             print(cli, &p, policy_text)?;
         }
@@ -1358,7 +1409,7 @@ fn run_org(cli: &Cli, home: &Path, cmd: &OrgCmd) -> Result<()> {
                     serde_json::json!({"action": action, "device": device, "root_words": words}),
                 )?;
             } else {
-                let mut engine = Engine::open(home, &passphrase()?)?;
+                let mut engine = open_engine(home)?;
                 if action == "add" {
                     engine.org_admin_add(device, words)?;
                 } else {
@@ -1376,7 +1427,7 @@ fn run_org(cli: &Cli, home: &Path, cmd: &OrgCmd) -> Result<()> {
                     call("GET", "/api/org/log", serde_json::Value::Null)?["log"].clone(),
                 )?
             } else {
-                Engine::open(home, &passphrase()?)?.org_log_entries()
+                open_engine(home)?.org_log_entries()
             };
             print(cli, &log, |l| {
                 if l.is_empty() {
@@ -1596,7 +1647,7 @@ fn run(cli: &Cli) -> Result<()> {
             }
         }
         Cmd::Storage { cmd } => {
-            let mut engine = Engine::open(&home, &passphrase()?)?;
+            let mut engine = open_engine(&home)?;
             match cmd {
                 StorageCmd::AddLocal {
                     name,
@@ -1795,7 +1846,7 @@ fn run(cli: &Cli) -> Result<()> {
             }
         }
         Cmd::Disk { cmd } => {
-            let mut engine = Engine::open(&home, &passphrase()?)?;
+            let mut engine = open_engine(&home)?;
             match cmd {
                 DiskCmd::Place { label, place } => {
                     placing::disk_place(cli, &mut engine, label, place)?;
@@ -1945,7 +1996,7 @@ fn run(cli: &Cli) -> Result<()> {
             confirm_cold_read,
             yes,
         } => {
-            let mut engine = Engine::open(&home, &passphrase()?)?;
+            let mut engine = open_engine(&home)?;
             placing::move_data(
                 cli,
                 &mut engine,
@@ -1968,7 +2019,7 @@ fn run(cli: &Cli) -> Result<()> {
                 println!("{done}");
                 return Ok(());
             }
-            let mut engine = Engine::open(&home, &passphrase()?)?;
+            let mut engine = open_engine(&home)?;
             match cmd {
                 FolderCmd::Placement {
                     folder,
@@ -2084,7 +2135,7 @@ fn run(cli: &Cli) -> Result<()> {
             }
         }
         Cmd::Push { folder } => {
-            let mut engine = Engine::open(&home, &passphrase()?)?;
+            let mut engine = open_engine(&home)?;
             let r = engine.push(folder)?;
             print(cli, &r, |r| {
                 format!(
@@ -2099,15 +2150,16 @@ fn run(cli: &Cli) -> Result<()> {
             })?;
         }
         Cmd::Pull { folder } => {
-            let mut engine = Engine::open(&home, &passphrase()?)?;
+            let mut engine = open_engine(&home)?;
             let r = engine.pull(folder)?;
             print(cli, &r, |r| {
                 format!("{}: {} manifests, {} updated, {} deleted, {} conflicts, {} chunks downloaded; unavailable: {:?}; forked: {:?}{}", r.folder, r.manifests_applied, r.files_updated, r.files_deleted, r.conflicts, r.chunks_downloaded, r.files_unavailable, r.forked_devices, if r.disks_needed.is_empty() { String::new() } else { format!("; attach disk {}", r.disks_needed.join(", ")) })
             })?;
         }
         Cmd::Sync { folder } => {
-            let mut engine = Engine::open(&home, &passphrase()?)?;
+            let mut engine = open_engine(&home)?;
             let r = engine.sync(folder.as_deref())?;
+            warn_ledger(&engine.ledger_health());
             print(cli, &r, |r| {
                 r.iter().map(|(pl, ps)| format!("{}: pulled {} updated/{} deleted/{} conflicts, pushed {} changed/{} chunks{}{}", pl.folder, pl.files_updated, pl.files_deleted, pl.conflicts, ps.files_changed, ps.chunks_uploaded, if pl.disks_needed.is_empty() { String::new() } else { format!("; attach disk {}", pl.disks_needed.join(", ")) }, if ps.storages_unavailable.is_empty() { String::new() } else { format!("; not written to {}", ps.storages_unavailable.join(", ")) })).collect::<Vec<_>>().join("\n")
             })?;
@@ -2141,7 +2193,7 @@ fn run(cli: &Cli) -> Result<()> {
                 }
                 return Ok(());
             }
-            let engine = Engine::open(&home, &passphrase()?)?;
+            let engine = open_engine(&home)?;
             let s = engine.status()?;
             print(cli, &s, |s| {
                 let mut out = format!(
@@ -2171,6 +2223,7 @@ fn run(cli: &Cli) -> Result<()> {
                 if !s.forked_devices.is_empty() {
                     out += &format!("WARNING forked devices: {:?}\n", s.forked_devices);
                 }
+                out += &format!("ledger: {}\n", s.ledger_health.describe());
                 out.trim_end().to_string()
             })?;
         }
@@ -2195,10 +2248,10 @@ fn run(cli: &Cli) -> Result<()> {
             },
         )?,
         Cmd::Fsck { verify, repair } => {
-            let mut engine = Engine::open(&home, &passphrase()?)?;
+            let mut engine = open_engine(&home)?;
             let r = engine.fsck(*verify)?;
             print(cli, &r, |r| {
-                format!("referenced {} | with storage copy {} | verified elsewhere {} | claimed only {} | missing {:?} | claims without object {} | unreferenced objects {} | verified now {} | corrupt {:?} | forked {:?} | cold skipped {:?}{}", r.chunks_referenced, r.chunks_with_storage_copy, r.chunks_verified_elsewhere, r.chunks_claimed_only, r.chunks_missing, r.claims_without_object, r.objects_unreferenced, r.objects_verified_now, r.objects_corrupt, r.forked_devices, r.storages_skipped_cold, if r.disks_offline.is_empty() { String::new() } else { format!(" | offline: {} objects on {}", r.objects_offline, r.disks_offline.join("; ")) })
+                format!("referenced {} | with storage copy {} | verified elsewhere {} | claimed only {} | missing {:?} | claims without object {} | unreferenced objects {} | verified now {} | corrupt {:?} | forked {:?} | cold skipped {:?}{}", r.chunks_referenced, r.chunks_with_storage_copy, r.chunks_verified_elsewhere, r.chunks_claimed_only, r.chunks_missing, r.claims_without_object, r.objects_unreferenced, r.objects_verified_now, r.objects_corrupt, r.forked_devices, r.storages_skipped_cold, if r.disks_offline.is_empty() { String::new() } else { format!(" | offline: {} objects on {}", r.objects_offline, r.disks_offline.join("; ")) }) + &if r.ledger_health.is_ok() { String::new() } else { format!("\nledger: {}", r.ledger_health.describe()) }
             })?;
             let mut repaired_all = false;
             if *repair && r.repairs_queued > 0 {
@@ -2215,7 +2268,7 @@ fn run(cli: &Cli) -> Result<()> {
             }
         }
         Cmd::Dupes { folder } => {
-            let engine = Engine::open(&home, &passphrase()?)?;
+            let engine = open_engine(&home)?;
             let r = engine.dupes(folder)?;
             print(cli, &r, |r| {
                 r.iter()
@@ -2345,7 +2398,7 @@ fn run(cli: &Cli) -> Result<()> {
                 fingerprint,
                 yes,
             } => {
-                let mut engine = Engine::open(&home, &passphrase()?)?;
+                let mut engine = open_engine(&home)?;
                 match to {
                     Some(code) => {
                         let req = Engine::share_request_info(code)?;
@@ -2465,7 +2518,7 @@ fn run(cli: &Cli) -> Result<()> {
                         );
                         serde_json::from_str(&service::http_get(&url, &sf.token)?)?
                     } else {
-                        let engine = Engine::open(&home, &passphrase()?)?;
+                        let engine = open_engine(&home)?;
                         engine.share_members(folder)?
                     };
                 print(cli, &list, share_members_text)?;
@@ -2490,7 +2543,7 @@ fn run(cli: &Cli) -> Result<()> {
                     serde_json::from_str(&r)
                         .map_err(|_| anyhow!("unexpected answer from the service: {r}"))?
                 } else {
-                    let mut engine = Engine::open(&home, &passphrase()?)?;
+                    let mut engine = open_engine(&home)?;
                     engine.share_revoke(folder, member)?
                 };
                 print(cli, &report, |r| {
@@ -2524,7 +2577,7 @@ fn run(cli: &Cli) -> Result<()> {
         Cmd::Replica { cmd } => {
             match cmd {
                 ReplicaCmd::Token => {
-                    let engine = Engine::open(&home, &passphrase()?)?;
+                    let engine = open_engine(&home)?;
                     let t = engine.replica_token()?;
                     print(cli, &t, |t| {
                         format!("replica token (share only with the device that will hold your encrypted copies):\n  {}", t.encode())
@@ -2597,7 +2650,7 @@ fn run(cli: &Cli) -> Result<()> {
         }
         Cmd::Device { cmd } => match cmd {
             DeviceCmd::List => {
-                let engine = Engine::open(&home, &passphrase()?)?;
+                let engine = open_engine(&home)?;
                 let list = engine.devices_list();
                 print(cli, &list, |list| {
                     let mut out = format!("vault key epoch {}\n", engine.key_epoch());
@@ -2662,7 +2715,7 @@ fn run(cli: &Cli) -> Result<()> {
                     serde_json::from_str(&r)
                         .map_err(|_| anyhow!("unexpected answer from the service: {r}"))?
                 } else {
-                    let mut engine = Engine::open(&home, &passphrase()?)?;
+                    let mut engine = open_engine(&home)?;
                     engine.revoke_device(device, *wipe)?
                 };
                 print(cli, &report, |r| {
@@ -2684,7 +2737,7 @@ fn run(cli: &Cli) -> Result<()> {
         Cmd::Pair { cmd } => {
             match cmd {
                 PairCmd::Offer => {
-                    let engine = Engine::open(&home, &passphrase()?)?;
+                    let engine = open_engine(&home)?;
                     let offer = varsto_core::pair::Offer::start(engine.pairing_bundle()?)?;
                     let st = offer.status();
                     println!("Pairing code: {}", st.code);
@@ -2733,7 +2786,7 @@ fn run(cli: &Cli) -> Result<()> {
         }
         Cmd::Recovery { cmd } => match cmd {
             RecoveryCmd::Kit { shares } => {
-                let engine = Engine::open(&home, &passphrase()?)?;
+                let engine = open_engine(&home)?;
                 let key = engine.export_vault_key()?;
                 let sh = if *shares {
                     Some((2u8, varsto_core::recovery::split(&key, 2, 3)?))
@@ -2757,7 +2810,7 @@ fn run(cli: &Cli) -> Result<()> {
         },
         Cmd::Org { cmd } => run_org(cli, &home, cmd)?,
         Cmd::Strongroom { cmd } => {
-            let mut engine = Engine::open(&home, &passphrase()?)?;
+            let mut engine = open_engine(&home)?;
             match cmd {
                 StrongroomCmd::Create {
                     name,
@@ -2998,7 +3051,7 @@ fn run(cli: &Cli) -> Result<()> {
                 println!("{}", r["note"].as_str().unwrap_or("saved"));
                 return Ok(());
             }
-            let mut engine = Engine::open(&home, &passphrase()?)?;
+            let mut engine = open_engine(&home)?;
             match cmd {
                 P2pCmd::Enable {
                     port,
@@ -3040,7 +3093,7 @@ fn run(cli: &Cli) -> Result<()> {
             }
         }
         Cmd::Policy { cmd } => {
-            let mut engine = Engine::open(&home, &passphrase()?)?;
+            let mut engine = open_engine(&home)?;
             match cmd {
                 PolicyCmd::Set {
                     folder,
@@ -3243,8 +3296,90 @@ fn run(cli: &Cli) -> Result<()> {
                 }
             }
         }
-        Cmd::Ledger => {
-            let engine = Engine::open(&home, &passphrase()?)?;
+        Cmd::Ledger {
+            cmd: Some(LedgerCmd::Status),
+        } => {
+            let mut engine = open_engine(&home)?;
+            let r = engine.ledger_status(true)?;
+            print(cli, &r, describe_ledger_status)?;
+            if !r.health.is_ok() {
+                std::process::exit(1);
+            }
+        }
+        Cmd::Ledger {
+            cmd:
+                Some(LedgerCmd::Rebuild {
+                    from_storage,
+                    verify,
+                    no_verify,
+                    verify_budget_mib,
+                    confirm_cold_read,
+                }),
+        } => {
+            // A running, unlocked service owns the engine: it rebuilds (its
+            // engine would not know of a rebuild made beside it).
+            if let Some((f, _)) = service::status(&home) {
+                let body = serde_json::json!({
+                    "from_storage": from_storage,
+                    "verify": if *verify { Some(true) } else if *no_verify { Some(false) } else { None },
+                    "verify_budget_mib": verify_budget_mib,
+                    "confirm_cold_read": confirm_cold_read,
+                });
+                let answer = service::http_post_within(
+                    &format!("http://127.0.0.1:{}/api/ledger/rebuild", f.port),
+                    &f.token,
+                    &body.to_string(),
+                    24 * 3600,
+                );
+                match answer {
+                    Ok(t) => {
+                        let r: varsto_core::engine::LedgerRebuildReport = serde_json::from_str(&t)?;
+                        print(cli, &r, describe_rebuild)?;
+                        if !r.health.is_ok() {
+                            std::process::exit(1);
+                        }
+                        return Ok(());
+                    }
+                    // Locked or not answering: the rebuild runs here.
+                    Err(e)
+                        if format!("{e}").contains("vault is locked")
+                            || !format!("{e}").contains("service answered") => {}
+                    // The service refused (a fork, an unreachable storage).
+                    Err(e) => {
+                        let text = format!("{e}");
+                        let msg = text
+                            .split_once(": ")
+                            .and_then(|(_, b)| serde_json::from_str::<serde_json::Value>(b).ok())
+                            .and_then(|v| {
+                                v.get("error").and_then(|x| x.as_str()).map(str::to_string)
+                            })
+                            .unwrap_or(text);
+                        bail!("{msg}");
+                    }
+                }
+            }
+            let mut engine = Engine::open(&home, &passphrase()?)?;
+            let opts = varsto_core::engine::LedgerRebuildOptions {
+                from_storage: *from_storage,
+                verify: if *verify {
+                    Some(true)
+                } else if *no_verify {
+                    Some(false)
+                } else {
+                    None
+                },
+                verify_budget_bytes: verify_budget_mib.saturating_mul(1 << 20),
+                confirm_cold_read: *confirm_cold_read,
+                automatic: false,
+            };
+            let r = engine.ledger_rebuild(&opts)?;
+            print(cli, &r, describe_rebuild)?;
+            if !r.health.is_ok() {
+                std::process::exit(1);
+            }
+        }
+        Cmd::Ledger { cmd: _ } => {
+            let engine = open_engine(&home)?;
             let r = engine.ledger_entries()?;
             print(cli, &r, |r| {
                 r.iter()
@@ -3490,6 +3625,141 @@ fn service_line(
 }
 
 /// The status as the service reports it (same lines as from the engine).
+/// `ledger status` for people.
+fn describe_ledger_status(r: &varsto_core::engine::LedgerStatus) -> String {
+    let mut out = format!("ledger: {}\n", r.health.describe());
+    for n in &r.health.notes {
+        out += &format!("note: {n}\n");
+    }
+    for d in &r.devices {
+        out += &format!(
+            "{} {}{}{}{}: head #{}{}{}\n",
+            &d.device[..8.min(d.device.len())],
+            if d.name.is_empty() { "?" } else { &d.name },
+            if d.this_device { " (this device)" } else { "" },
+            if d.revoked { " (removed)" } else { "" },
+            if d.forked { " FORKED" } else { "" },
+            d.head,
+            d.checkpoint
+                .map(|c| format!(", checkpoint #{c}"))
+                .unwrap_or_default(),
+            if d.dropped > 0 {
+                format!(", batches up to #{} dropped here", d.dropped)
+            } else {
+                String::new()
+            }
+        );
+        for h in &d.held {
+            let range = match (h.first, h.last) {
+                (Some(f), Some(l)) => format!("{} batches #{f}..#{l}", h.batches),
+                _ => "no batches".to_string(),
+            };
+            let cps = if h.checkpoints.is_empty() {
+                String::new()
+            } else {
+                format!(
+                    ", checkpoint {}",
+                    h.checkpoints
+                        .iter()
+                        .map(|c| format!("#{c}"))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            };
+            match &h.error {
+                Some(e) => out += &format!("  {}: not listed ({e})\n", h.place),
+                None => {
+                    out += &format!(
+                        "  {}{}: {range}{cps}\n",
+                        h.place,
+                        if h.cold { " (cold)" } else { "" }
+                    )
+                }
+            }
+        }
+    }
+    out.trim_end().to_string()
+}
+
+/// `ledger rebuild` for people.
+fn describe_rebuild(r: &varsto_core::engine::LedgerRebuildReport) -> String {
+    let mut out = String::new();
+    if !r.local.damaged.is_empty() {
+        out += &format!(
+            "local files set aside (unreadable): {}\n",
+            r.local.damaged.join(", ")
+        );
+    }
+    out += &if r.own_found_on_storages {
+        format!(
+            "this device's ledger: #{} before, #{} now ({} batches adopted from the storages{})\n",
+            r.own_head_before,
+            r.own_head_after,
+            r.adopted_batches,
+            r.adopted_checkpoint
+                .map(|c| format!(", checkpoint #{c}"))
+                .unwrap_or_default()
+        )
+    } else {
+        "nothing of this device's ledger is on any storage\n".to_string()
+    };
+    if !r.discarded_unpublished.is_empty() {
+        out += &format!(
+            "batches never published set aside: {:?}; their {} events are signed again\n",
+            r.discarded_unpublished, r.events_requeued
+        );
+    }
+    out += &format!(
+        "other devices: {} batches and {} checkpoints downloaded again\n",
+        r.batches_pulled, r.checkpoints_pulled
+    );
+    if r.manifests_caught_up > 0 {
+        out += &format!(
+            "{} folders continue after a manifest this device published later\n",
+            r.manifests_caught_up
+        );
+    }
+    if r.reenrolled {
+        out += "this device enrolled again under its name\n";
+    }
+    if let Some(s) = &r.from_storage {
+        out += &format!(
+            "from the storages: {} folders ({} manifests, {} snapshots), {} objects named, {} claims written ({} known already), {} verified ({}), {} not read, {} damaged (queued for repair), {} missing everywhere; listed {}{}\n",
+            s.folders,
+            s.manifests_read,
+            s.snapshots_read,
+            s.objects_mapped,
+            s.claims_written,
+            s.claims_known,
+            s.objects_verified,
+            fmt_bytes(s.bytes_verified),
+            s.objects_unverified,
+            s.objects_corrupt,
+            s.objects_missing,
+            s.storages_listed.join(", "),
+            if s.storages_skipped_cold.is_empty() {
+                String::new()
+            } else {
+                format!(
+                    "; cold not read: {} (add --confirm-cold-read)",
+                    s.storages_skipped_cold.join(", ")
+                )
+            }
+        );
+        if !s.folders_skipped.is_empty() {
+            out += &format!(
+                "folders skipped (locked): {}\n",
+                s.folders_skipped.join(", ")
+            );
+        }
+    }
+    for n in &r.notes {
+        out += &format!("note: {n}\n");
+    }
+    out += &format!("ledger: {}", r.health.describe());
+    out
+}
+
 fn status_from_value(v: &serde_json::Value) -> String {
     let st = |k: &str| v.get(k).and_then(|x| x.as_str()).unwrap_or("").to_string();
     let num = |x: &serde_json::Value, k: &str| x.get(k).and_then(|n| n.as_u64()).unwrap_or(0);
@@ -3540,6 +3810,12 @@ fn status_from_value(v: &serde_json::Value) -> String {
             num(f, "chunks_verified_elsewhere"),
             f.get("path").and_then(|p| p.as_str()).unwrap_or("(not attached)")
         );
+    }
+    if let Some(h) = v
+        .get("ledger_health")
+        .and_then(|h| serde_json::from_value::<varsto_core::engine::LedgerHealth>(h.clone()).ok())
+    {
+        out += &format!("ledger: {}\n", h.describe());
     }
     out.trim_end().to_string()
 }

@@ -1419,6 +1419,33 @@ fn api_unlocked(
             Ok(json!({"report": r, "status": engine.repair_status()}))
         }
         (Method::Get, "/api/ledger") => Ok(serde_json::to_value(engine.ledger_entries()?)?),
+        (Method::Get, "/api/ledger/health") => Ok(serde_json::to_value(engine.ledger_health())?),
+        (Method::Get, "/api/ledger/status") => {
+            let r = engine.ledger_status(true)?;
+            service.ledger_health = Some(r.health.clone());
+            Ok(serde_json::to_value(r)?)
+        }
+        (Method::Post, "/api/ledger/rebuild") => {
+            // The interface's button and `varsto ledger rebuild` while the
+            // service runs: the same safe restore the service runs by itself.
+            let flag = |k: &str| input.get(k).and_then(|v| v.as_bool());
+            let opts = varsto_core::engine::LedgerRebuildOptions {
+                from_storage: flag("from_storage").unwrap_or(false),
+                verify: flag("verify"),
+                verify_budget_bytes: input
+                    .get("verify_budget_mib")
+                    .and_then(|v| v.as_u64())
+                    .map(|m| m.saturating_mul(1 << 20))
+                    .unwrap_or(varsto_core::engine::LedgerRebuildOptions::default().verify_budget_bytes),
+                confirm_cold_read: flag("confirm_cold_read").unwrap_or(false),
+                automatic: false,
+            };
+            let r = engine.ledger_rebuild(&opts);
+            service.ledger_health = Some(engine.ledger_health());
+            let r = r?;
+            service.request_sync();
+            Ok(serde_json::to_value(r)?)
+        }
         (Method::Get, "/api/files") => {
             let folder = query_param(query, "folder")
                 .ok_or_else(|| anyhow!("folder query parameter required"))?;

@@ -869,11 +869,46 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   function stateClass(state) { return state === "ok" ? "ok" : state === "at_risk" ? "risk" : state === "violated" ? "bad" : "grey"; }
   function folderByName(name) { if (!lastStatus) { return null; } for (var i = 0; i < lastStatus.folders.length; i++) { if (lastStatus.folders[i].name === name) { return lastStatus.folders[i]; } } return null; }
 
+  // The ledger banner: shown only when something is wrong with this
+  // device's ledger or it is being repaired. The service restores a lost
+  // ledger by itself; a copy restored from an older backup continues from
+  // the storages when the user asks (the button), and only when they hold
+  // this device's own later history.
+  var LEDGER_TEXT = {
+    "rebuild_needed": "This device's ledger was lost or damaged. It is being restored from the storages before anything else is synced.",
+    "repairing": "Restoring this device's ledger from the storages…",
+    "fenced": "The storages hold newer ledger entries of this device than it has: it was probably restored from an older copy. It records nothing until it continues from them.",
+    "forked": "Another copy of this device has written a different ledger history. This device records nothing more: remove it from the vault on another device and pair this computer again as a new device.",
+    "no_ledger": "No storage holds the record of where the blocks are any more. It is being rebuilt from the folders' file lists and the stored blocks."
+  };
+  var LEDGER_BUTTON = { "rebuild_needed": "Restore now", "fenced": "Continue from the storages", "no_ledger": "Rebuild now" };
+  function renderLedger(h) {
+    var b = $("ledgerbanner"); if (!b) { return; }
+    var show = !!(h && h.state && h.state !== "ok");
+    b.classList.toggle("hidden", !show);
+    if (!show) { return; }
+    var text = $("ledgerbanner-text");
+    text.textContent = LEDGER_TEXT[h.state] || (h.problems || []).map(function (p) { return p.detail; }).join("; ");
+    var btn = $("ledgerbanner-btn"); var label = LEDGER_BUTTON[h.state];
+    btn.classList.toggle("hidden", !label);
+    if (!label) { return; }
+    btn.textContent = label; btn.disabled = false;
+    btn.onclick = function () {
+      btn.disabled = true; text.textContent = LEDGER_TEXT.repairing;
+      api("POST", "/api/ledger/rebuild", { from_storage: h.state === "no_ledger" }).then(function (r) {
+        renderLedger(r.health); refreshStatus();
+      }).catch(function (e) {
+        log("error: " + e.message); btn.disabled = false; refreshStatus();
+      });
+    };
+  }
+
   // `known`: a status the last request already returned (no second round trip,
   // which would wait while the service syncs).
   function refreshStatus(known) {
     return (known && known.folders ? Promise.resolve(known) : api("GET", "/api/status")).then(function (s) {
       lastStatus = s;
+      renderLedger(s.ledger_health);
       $("who").textContent = s.device_name + " · vault " + s.vault_id.slice(0, 8) + " · " + s.ledger_batches + " ledger batches";
       var tb = $("folders").querySelector("tbody"); tb.innerHTML = "";
       var sel = $("dupefolder"); sel.innerHTML = "";
@@ -2235,7 +2270,14 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     "scrub": "Checking storage «{s}» for bit rot",
     "scrub.disk": "Checking disk «{s}» for bit rot",
     "scrub.files": "Checking the files of folder «{s}» for bit rot",
-    "scrub.cache": "Checking the block cache for bit rot"
+    "scrub.cache": "Checking the block cache for bit rot",
+    "ledger_rebuild": "Rebuilding the ledger",
+    "ledger_rebuild.own": "Restoring this device's ledger from the storages",
+    "ledger_rebuild.others": "Fetching the other devices' ledgers again",
+    "ledger_rebuild.manifests": "Reading the folders' file lists",
+    "ledger_rebuild.list": "Listing the stored blocks",
+    "ledger_rebuild.verify": "Checking the stored blocks",
+    "ledger_rebuild.seal": "Recording where the blocks are"
   };
   var actTimer = null, actBusy = false, lastActivity = null;
   function actTr(s) { return window.varstoLang ? window.varstoLang.t(s) : s; }
