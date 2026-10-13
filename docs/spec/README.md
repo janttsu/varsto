@@ -11,7 +11,7 @@ Status of the documents that will define formats and protocols. Most of what exi
 | Event ledger and bookkeeping | design notes on signing: [ledger-signing-notes.md](ledger-signing-notes.md); alpha-0 mailbox model: [alpha-0-format.md](alpha-0-format.md) section 6 |
 | Peer discovery (LAN, storage rendezvous, DHT, relays) | LAN beacon, storage rendezvous record and relays through the user's own devices implemented: [alpha-0-format.md](alpha-0-format.md) section 15; DHT not started |
 | Peer-to-peer transfer protocol | alpha implemented (HTTP and QUIC, NAT traversal): [alpha-0-format.md](alpha-0-format.md) section 15 |
-| Version, trash and retention model | alpha-0 merge rules and trash: [alpha-0-format.md](alpha-0-format.md) section 7; retention not started |
+| Version, trash and retention model | alpha-0 merge rules: [alpha-0-format.md](alpha-0-format.md) section 7; vault-wide trash with retention and a trash storage: section 36; version history not started |
 | Durability policy language | alpha implemented: [alpha-0-format.md](alpha-0-format.md) section 14 |
 | Removable-disk layout | alpha implemented (disk pool): [alpha-0-format.md](alpha-0-format.md) section 19 |
 | Local control API and MCP surface | alpha implemented: [alpha-0-format.md](alpha-0-format.md) sections 10 and 13 |

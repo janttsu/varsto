@@ -830,7 +830,11 @@ impl Engine {
             if self.is_revoked(dev) {
                 continue;
             }
-            for (id, x) in &r.removed {
+            // A member of a shared folder (another person) cannot take
+            // entries out of the owner's trash: on the owner's devices its
+            // removals do not count (its deletions do).
+            let member = !self.vault.member && self.devices.members.contains_key(dev);
+            for (id, x) in r.removed.iter().filter(|_| !member) {
                 // Purged anywhere counts as purged.
                 let e = removed.entry(id.clone()).or_insert(x.restored);
                 *e = *e && x.restored;
