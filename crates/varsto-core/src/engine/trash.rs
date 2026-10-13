@@ -384,6 +384,9 @@ pub fn restored_name(path: &str, n: u32) -> String {
     format!("{dir}{new_name}")
 }
 
+/// Entries to restore: the entry, its target path, a local copy to use.
+type RestoreWork = Vec<(TrashEntry, String, Option<PathBuf>)>;
+
 /// What is in a folder's trash at some time.
 struct TrashSets {
     /// In the trash now (newest deletion first).
@@ -1624,7 +1627,7 @@ impl Engine {
         paths: &[String],
         to: Option<&str>,
         now: i64,
-    ) -> Result<(TrashRestorePlan, Vec<(TrashEntry, String, Option<PathBuf>)>)> {
+    ) -> Result<(TrashRestorePlan, RestoreWork)> {
         if paths.is_empty() {
             bail!("name the files or directories to restore");
         }
