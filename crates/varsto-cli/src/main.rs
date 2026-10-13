@@ -193,6 +193,25 @@ enum Cmd {
     History(history::HistoryArgs),
     /// Show vault, devices, storages and folders.
     Status,
+    /// Who changed what and when: the versions of one file (renames followed), or the recent
+    /// changes in a folder or under a directory, newest first, from the signed manifests.
+    Changes {
+        folder: String,
+        /// A file, or a directory to show the changes under.
+        path: Option<String>,
+        /// Only changes made on this device (name or id).
+        #[arg(long)]
+        device: Option<String>,
+        /// Only changes by this person (organizations).
+        #[arg(long)]
+        user: Option<String>,
+        /// Only changes since: YYYY-MM-DD[THH:MM] (UTC), seconds since 1970, or an age (7d, 12h).
+        #[arg(long)]
+        since: Option<String>,
+        /// At most this many (0: all).
+        #[arg(long, default_value_t = 100)]
+        limit: usize,
+    },
     /// How files would be fetched: from pool disks (which ones, in which order) or the network,
     /// with the time and cost of each way. Run `varsto folder fetch` to fetch.
     FetchPlan {
@@ -563,8 +582,12 @@ enum OrgCmd {
         yes: bool,
     },
     /// (Administrator) What members may do on their own: share, add-storages, set-policies,
-    /// add-devices. Without arguments, show the policy.
+    /// add-devices; `policy platforms` sets which device platforms may belong. Without
+    /// arguments, show the policy.
+    #[command(args_conflicts_with_subcommands = true)]
     Policy {
+        #[command(subcommand)]
+        cmd: Option<OrgPolicyCmd>,
         #[arg(long, value_delimiter = ',')]
         allow: Vec<String>,
         #[arg(long, value_delimiter = ',')]
@@ -578,6 +601,26 @@ enum OrgCmd {
     /// Who approved, added, removed or changed what, oldest first (signed by the
     /// administrator devices; use --json to export).
     Log,
+}
+
+#[derive(Subcommand)]
+enum OrgPolicyCmd {
+    /// (Administrator) Which device platforms may join and open the vault: linux, macos,
+    /// windows, android, ios. Devices of other platforms are refused at approval, and devices
+    /// already in the organization are locked out (no new keys, the others ignore what they
+    /// write, their own app refuses to open the vault) until they are allowed again. Without
+    /// arguments, show the setting.
+    Platforms {
+        /// Allowed platforms, e.g. linux,macos,windows.
+        #[arg(long, value_delimiter = ',', conflicts_with = "allow_all")]
+        allow: Vec<String>,
+        /// Allow every platform.
+        #[arg(long)]
+        allow_all: bool,
+        /// Oldest Varsto version a device may run (e.g. 0.0.1-alpha.14); `any` removes it.
+        #[arg(long)]
+        min_version: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -868,10 +911,23 @@ enum ShareCmd {
         /// Also show the sealed token as a QR code for the recipient to scan.
         #[arg(long)]
         qr: bool,
+        /// What the recipient may do: editor (read and write) or viewer (read only: nothing it
+        /// changes is accepted by your devices or the editors). A viewer needs --to.
+        #[arg(long, default_value = "editor")]
+        role: String,
     },
-    /// (Owner) Who has access to a shared folder: your devices, members (current and removed)
-    /// and tokens not accepted yet.
+    /// (Owner) Who has access to a shared folder, with each member's role: your devices,
+    /// members (current and removed) and tokens not accepted yet.
     Members { folder: String },
+    /// (Owner) Make a member a viewer (read only) or an editor (read and write). What a viewer
+    /// wrote while it was an editor stays; what it writes from now on is not accepted.
+    Role {
+        folder: String,
+        /// Member name or device id (see `share members`).
+        member: String,
+        /// viewer or editor.
+        role: String,
+    },
     /// (Owner) Remove a member (name or device id) or revoke a token not accepted yet (its id or
     /// fingerprint words), or `all`: the folder gets a new key for everything written from now on.
     Revoke {
@@ -1389,8 +1445,9 @@ enum FolderCmd {
         name: String,
     },
     /// What waits for a decision in a folder: held deletions, local changes
-    /// not published, remote changes not applied.
-    Changes {
+    /// not published, remote changes not applied. (Who changed which file
+    /// and when: `varsto changes`.)
+    Pending {
         name: String,
     },
     /// Show or set when deletions are held for confirmation (default: more
@@ -1664,6 +1721,107 @@ fn url_escape(s: &str) -> String {
         .collect()
 }
 
+/// `varsto changes` as lines, newest first.
+fn changes_text(r: &varsto_core::engine::ChangesReport) -> String {
+    let mut out = format!(
+        "{}{}: {} change(s){}",
+        r.folder,
+        r.path
+            .as_ref()
+            .map(|p| format!(" {}{p}", if r.file { "" } else { "under " }))
+            .unwrap_or_default(),
+        r.changes.len(),
+        if r.truncated {
+            " (more with --limit 0)"
+        } else {
+            ""
+        }
+    );
+    for c in &r.changes {
+        let e = &c.event;
+        let what = match (e.action.as_str(), &e.from, &e.to) {
+            ("renamed", Some(f), _) => format!("renamed from {f}"),
+            ("renamed", _, Some(t)) => format!("renamed to {t}"),
+            (a, _, _) => a.to_string(),
+        };
+        let secs = e.time_utc.rem_euclid(86_400);
+        out.push_str(&format!(
+            "\n{} {:02}:{:02}  {}  {}  by {}{}{}{}{}",
+            varsto_core::util::format_date(e.time_utc),
+            secs / 3600,
+            secs % 3600 / 60,
+            e.path,
+            what,
+            c.device_name,
+            c.user
+                .as_ref()
+                .map(|u| format!(" ({u})"))
+                .unwrap_or_default(),
+            if e.action.as_str() == "deleted" || e.to.is_some() || e.hash.is_empty() {
+                String::new()
+            } else {
+                format!(", {} bytes, {}", e.size, e.hash)
+            },
+            if e.verified {
+                ""
+            } else {
+                ", not verified against the ledger"
+            },
+            if e.backfilled {
+                ", time from the file (history started later)"
+            } else {
+                ""
+            }
+        ));
+    }
+    out
+}
+
+/// Where a read-only folder's local changes went.
+fn kept_aside_text(paths: &[String]) -> String {
+    if paths.is_empty() {
+        return String::new();
+    }
+    let shown: Vec<&str> = paths.iter().take(5).map(|p| p.as_str()).collect();
+    format!(
+        " ({} file(s) moved to {}/ in the device directory or put back: {}{})",
+        paths.len(),
+        varsto_core::engine::KEPT_ASIDE_DIR,
+        shown.join(", "),
+        if paths.len() > shown.len() {
+            ", ..."
+        } else {
+            ""
+        }
+    )
+}
+
+/// Read-only members: this device's own refused changes, and changes of
+/// viewers this device did not take.
+fn role_notes(
+    pull: &varsto_core::engine::PullReport,
+    push: Option<&varsto_core::engine::PushReport>,
+) -> String {
+    let mut out = String::new();
+    let mut kept: Vec<String> = pull.kept_aside.clone();
+    if let Some(p) = push {
+        kept.extend(p.kept_aside.iter().cloned());
+    }
+    if push.is_some_and(|p| p.read_only) || !kept.is_empty() {
+        out.push_str(&format!(
+            "; read-only: your changes were not published{}",
+            kept_aside_text(&kept)
+        ));
+    }
+    if !pull.writes_refused.is_empty() {
+        out.push_str(&format!(
+            "; not taken from read-only members: {}",
+            pull.writes_refused.join(", ")
+        ));
+    }
+    out
+}
+
 fn share_members_text(l: &varsto_core::engine::ShareMembers) -> String {
     let mut out = format!("{} ({})", l.folder, &l.folder_id[..8]);
     if l.share_epoch > 0 {
@@ -1671,6 +1829,11 @@ fn share_members_text(l: &varsto_core::engine::ShareMembers) -> String {
     }
     if l.access_lost {
         out.push_str("\nThis device no longer receives new content of this folder: the owner removed it, or has not sent it the new key yet.");
+    }
+    if l.this_role == "viewer" {
+        out.push_str(
+            "\nThis device may only read this folder: changes made here are not published.",
+        );
     }
     for m in &l.members {
         let what = match (m.kind.as_str(), m.status.as_str()) {
@@ -1687,7 +1850,14 @@ fn share_members_text(l: &varsto_core::engine::ShareMembers) -> String {
                     .map(|t| format!(" on {}", varsto_core::util::format_date(t)))
                     .unwrap_or_default()
             ),
-            _ => "member".to_string(),
+            _ => match m.role.as_str() {
+                "viewer" => "member, viewer (read only)".to_string(),
+                _ => "member, editor".to_string(),
+            },
+        };
+        let what = match (m.kind.as_str(), m.status.as_str(), m.role.as_str()) {
+            ("invite", "pending", "viewer") => format!("{what} (viewer)"),
+            _ => what,
         };
         out.push_str(&format!(
             "\n  {:<20} {:<10} {}{}{}",
@@ -2392,9 +2562,14 @@ fn run_org(cli: &Cli, home: &Path, cmd: &OrgCmd) -> Result<()> {
                 None if *yes => None,
                 None => {
                     eprintln!(
-                        "Request from device {} ({})\nfingerprint: {}\nAsk the person to read the fingerprint their device shows (varsto org request).",
+                        "Request from device {} ({}, {})\nfingerprint: {}\nAsk the person to read the fingerprint their device shows (varsto org request).",
                         if info.name.is_empty() { "(no name)" } else { &info.name },
                         info.device.short(),
+                        if info.platform.is_empty() {
+                            "platform not given".to_string()
+                        } else {
+                            varsto_core::org::platform_name(&info.platform)
+                        },
                         info.fingerprint
                     );
                     if !confirm("Do the six words match exactly?")? {
@@ -2471,7 +2646,7 @@ fn run_org(cli: &Cli, home: &Path, cmd: &OrgCmd) -> Result<()> {
                 )
             })?;
         }
-        OrgCmd::Policy { allow, deny } => {
+        OrgCmd::Policy { cmd, allow, deny } => {
             let current: Option<varsto_core::org::OrgPolicy> = if via_service.is_some() {
                 let v = call("GET", "/api/org", serde_json::Value::Null)?;
                 v.get("policy")
@@ -2484,6 +2659,60 @@ fn run_org(cli: &Cli, home: &Path, cmd: &OrgCmd) -> Result<()> {
             let Some(mut p) = current else {
                 bail!("this vault has no organization");
             };
+            if let Some(OrgPolicyCmd::Platforms {
+                allow,
+                allow_all,
+                min_version,
+            }) = cmd
+            {
+                if allow.is_empty() && !*allow_all && min_version.is_none() {
+                    print(cli, &p, policy_text)?;
+                    return Ok(());
+                }
+                if *allow_all {
+                    p.allowed_platforms.clear();
+                } else if !allow.is_empty() {
+                    p.allowed_platforms = allow.iter().map(|a| a.trim().to_string()).collect();
+                }
+                if let Some(v) = min_version {
+                    p.min_app_version = if v.trim().eq_ignore_ascii_case("any") {
+                        String::new()
+                    } else {
+                        v.trim().to_string()
+                    };
+                }
+                if via_service.is_some() {
+                    call("POST", "/api/org/policy", serde_json::to_value(&p)?)?;
+                } else {
+                    open_engine(home)?.org_set_policy(p.clone())?;
+                }
+                // The policy as stored (platforms normalised), and who it locks out.
+                let summary: Option<varsto_core::engine::OrgSummary> = if via_service.is_some() {
+                    serde_json::from_value(call("GET", "/api/org", serde_json::Value::Null)?).ok()
+                } else {
+                    open_engine(home)?.org_summary()
+                };
+                let Some(summary) = summary else {
+                    return Ok(());
+                };
+                print(cli, &summary.policy, |p| {
+                    let mut out = policy_text(p);
+                    let refused: Vec<String> = summary
+                        .users
+                        .iter()
+                        .flat_map(|u| u.devices.iter())
+                        .filter_map(|d| d.refused.as_ref().map(|r| format!("{} ({r})", d.name)))
+                        .collect();
+                    if !refused.is_empty() {
+                        out.push_str(&format!(
+                            "\nlocked out until allowed again: {}",
+                            refused.join(", ")
+                        ));
+                    }
+                    out
+                })?;
+                return Ok(());
+            }
             if allow.is_empty() && deny.is_empty() {
                 print(cli, &p, policy_text)?;
                 return Ok(());
@@ -2555,11 +2784,25 @@ fn run_org(cli: &Cli, home: &Path, cmd: &OrgCmd) -> Result<()> {
 fn policy_text(p: &varsto_core::org::OrgPolicy) -> String {
     let yn = |b: bool| if b { "yes" } else { "no (administrators only)" };
     format!(
-        "members may share folders with other people: {}\nmembers may add or remove storages: {}\nmembers may set policies and placement: {}\nmembers may add devices and print the recovery kit: {}",
+        "members may share folders with other people: {}\nmembers may add or remove storages: {}\nmembers may set policies and placement: {}\nmembers may add devices and print the recovery kit: {}\ndevice platforms allowed: {}\noldest Varsto version allowed: {}",
         yn(p.members_may_share),
         yn(p.members_may_add_storages),
         yn(p.members_may_set_policies),
-        yn(p.members_may_add_devices)
+        yn(p.members_may_add_devices),
+        if p.allowed_platforms.is_empty() {
+            "all".to_string()
+        } else {
+            p.allowed_platforms
+                .iter()
+                .map(|x| varsto_core::org::platform_name(x))
+                .collect::<Vec<_>>()
+                .join(", ")
+        },
+        if p.min_app_version.is_empty() {
+            "any"
+        } else {
+            &p.min_app_version
+        }
     )
 }
 
@@ -2582,6 +2825,9 @@ fn org_status_text(s: &varsto_core::engine::OrgSummary) -> String {
             .map(|u| format!(", user {u}"))
             .unwrap_or_default()
     );
+    if let Some(b) = &s.this_device_blocked {
+        out.push_str(&format!("\nThis device is locked out: {b}. It does not sync or open the vault until an administrator allows it."));
+    }
     out.push_str("\n\nAdministrators:");
     for a in &s.admins {
         out.push_str(&format!(
@@ -2596,12 +2842,21 @@ fn org_status_text(s: &varsto_core::engine::OrgSummary) -> String {
         out.push_str(&format!("\n  {}", u.user));
         for d in &u.devices {
             out.push_str(&format!(
-                "\n    {} ({}){}{}{}",
+                "\n    {} ({}){}{}{}{}{}",
                 d.name,
                 &d.device_id[..8],
+                if d.platform.is_empty() {
+                    String::new()
+                } else {
+                    format!(", {}", varsto_core::org::platform_name(&d.platform))
+                },
                 if d.admin { ", administrator" } else { "" },
                 if d.this_device { ", this device" } else { "" },
-                if d.revoked { ", removed" } else { "" }
+                if d.revoked { ", removed" } else { "" },
+                d.refused
+                    .as_ref()
+                    .map(|r| format!(", LOCKED OUT: the organization {r}"))
+                    .unwrap_or_default()
             ));
         }
     }
@@ -3552,7 +3807,7 @@ fn run(cli: &Cli) -> Result<()> {
                 | FolderCmd::Mode { .. }
                 | FolderCmd::Override { .. }
                 | FolderCmd::Revert { .. }
-                | FolderCmd::Changes { .. }
+                | FolderCmd::Pending { .. }
                 | FolderCmd::DeletionGuard { .. } => unreachable!("handled by folder_safety_cmd"),
                 FolderCmd::List => {
                     let rows: Vec<serde_json::Value> = engine
@@ -3580,6 +3835,13 @@ fn run(cli: &Cli) -> Result<()> {
             let mut engine = open_engine(&home)?;
             let r = engine.push(folder)?;
             print(cli, &r, |r| {
+                if r.read_only {
+                    return format!(
+                        "{}: read-only: your changes were not published{}",
+                        r.folder,
+                        kept_aside_text(&r.kept_aside)
+                    );
+                }
                 format!(
                     "{}: scanned {}, changed {}, uploaded {} chunks ({} bytes), manifest {:?}",
                     r.folder,
@@ -3595,7 +3857,7 @@ fn run(cli: &Cli) -> Result<()> {
             let mut engine = open_engine(&home)?;
             let r = engine.pull(folder)?;
             print(cli, &r, |r| {
-                format!("{}: {} manifests, {} updated, {} deleted, {} conflicts, {} chunks downloaded; unavailable: {:?}; forked: {:?}{}{}", r.folder, r.manifests_applied, r.files_updated, r.files_deleted, r.conflicts, r.chunks_downloaded, r.files_unavailable, r.forked_devices, if r.disks_needed.is_empty() { String::new() } else { format!("; attach disk {}", r.disks_needed.join(", ")) }, renamed_note(&r.renamed_locally))
+                format!("{}: {} manifests, {} updated, {} deleted, {} conflicts, {} chunks downloaded; unavailable: {:?}; forked: {:?}{}{}{}", r.folder, r.manifests_applied, r.files_updated, r.files_deleted, r.conflicts, r.chunks_downloaded, r.files_unavailable, r.forked_devices, if r.disks_needed.is_empty() { String::new() } else { format!("; attach disk {}", r.disks_needed.join(", ")) }, renamed_note(&r.renamed_locally), role_notes(r, None))
             })?;
         }
         Cmd::Sync { folder } => {
@@ -3603,13 +3865,57 @@ fn run(cli: &Cli) -> Result<()> {
             let r = engine.sync(folder.as_deref())?;
             warn_ledger(&engine.ledger_health());
             print(cli, &r, |r| {
-                r.iter().map(|(pl, ps)| if let Some(p) = &pl.paused { format!("{}: PAUSED: {}", pl.folder, p.message) } else { format!("{}: pulled {} updated/{} deleted/{} conflicts, pushed {} changed/{} chunks{}{}{}", pl.folder, pl.files_updated, pl.files_deleted, pl.conflicts, ps.files_changed, ps.chunks_uploaded, if pl.disks_needed.is_empty() { String::new() } else { format!("; attach disk {}", pl.disks_needed.join(", ")) }, if ps.storages_unavailable.is_empty() { String::new() } else { format!("; not written to {}", ps.storages_unavailable.join(", ")) }, renamed_note(&pl.renamed_locally)) }).collect::<Vec<_>>().join("\n")
+                r.iter().map(|(pl, ps)| if let Some(p) = &pl.paused { format!("{}: PAUSED: {}", pl.folder, p.message) } else { format!("{}: pulled {} updated/{} deleted/{} conflicts, pushed {} changed/{} chunks{}{}{}{}", pl.folder, pl.files_updated, pl.files_deleted, pl.conflicts, ps.files_changed, ps.chunks_uploaded, if pl.disks_needed.is_empty() { String::new() } else { format!("; attach disk {}", pl.disks_needed.join(", ")) }, if ps.storages_unavailable.is_empty() { String::new() } else { format!("; not written to {}", ps.storages_unavailable.join(", ")) }, renamed_note(&pl.renamed_locally), role_notes(pl, Some(ps))) }).collect::<Vec<_>>().join("\n")
             })?;
         }
         Cmd::FetchPlan { folder, paths } => {
             let mut engine = Engine::open(&home, &passphrase()?)?;
             let plan = engine.fetch_plan(folder, paths)?;
             print(cli, &plan, drives::plan_text)?;
+        }
+        Cmd::Changes {
+            folder,
+            path,
+            device,
+            user,
+            since,
+            limit,
+        } => {
+            let since_utc = since
+                .as_deref()
+                .map(|s| varsto_core::changes::parse_since(s, varsto_core::util::now_utc()))
+                .transpose()?;
+            let report: varsto_core::engine::ChangesReport =
+                if let Some((sf, _)) = service::status(&home) {
+                    let mut url = format!(
+                        "http://127.0.0.1:{}/api/changes?folder={}&limit={limit}",
+                        sf.port,
+                        url_escape(folder)
+                    );
+                    for (k, v) in [("path", path), ("device", device), ("user", user)] {
+                        if let Some(v) = v {
+                            url.push_str(&format!("&{k}={}", url_escape(v)));
+                        }
+                    }
+                    if let Some(t) = since_utc {
+                        url.push_str(&format!("&since={t}"));
+                    }
+                    serde_json::from_str(&service::http_get(&url, &sf.token)?)?
+                } else {
+                    let mut engine = open_engine(&home)?;
+                    engine.history_start(folder)?;
+                    engine.changes(
+                        folder,
+                        &varsto_core::engine::ChangesQuery {
+                            path: path.clone(),
+                            device: device.clone(),
+                            user: user.clone(),
+                            since_utc,
+                            limit: *limit,
+                        },
+                    )?
+                };
+            print(cli, &report, changes_text)?;
         }
         Cmd::Status => {
             // The running service answers without a passphrase while it is
@@ -3856,7 +4162,12 @@ fn run(cli: &Cli) -> Result<()> {
                 fingerprint,
                 yes,
                 qr,
+                role,
             } => {
+                let role = varsto_core::share::ShareRole::parse(role)?;
+                if !role.is_editor() && to.is_none() {
+                    bail_usage::<()>("a viewer's token must be sealed to their request code: give --to <request-code> (a plain token cannot say what its holder may do)")?;
+                }
                 let mut engine = open_engine(&home)?;
                 match to {
                     Some(code) => {
@@ -3876,18 +4187,22 @@ fn run(cli: &Cli) -> Result<()> {
                                 Some(req.fingerprint.clone())
                             }
                         };
-                        let (sealed, req) =
-                            engine.share_create_sealed(folder, code, confirmed.as_deref())?;
+                        let (sealed, req) = engine.share_create_sealed_as(
+                            folder,
+                            code,
+                            confirmed.as_deref(),
+                            role,
+                        )?;
                         if *qr && !cli.json {
                             show_qr(&sealed.encode(), false, false)?;
                         }
                         if cli.json {
                             println!(
                                 "{}",
-                                serde_json::json!({"folder": sealed.name, "token": sealed.encode(), "sealed": true, "fingerprint": req.fingerprint, "name": req.name})
+                                serde_json::json!({"folder": sealed.name, "token": sealed.encode(), "sealed": true, "fingerprint": req.fingerprint, "name": req.name, "role": role.as_str()})
                             );
                         } else {
-                            println!("sealed share token for folder {} (only the device that made the request code can open it; fingerprint {}):\n  {}", sealed.name, req.fingerprint, sealed.encode());
+                            println!("sealed share token for folder {} as {} (only the device that made the request code can open it; fingerprint {}):\n  {}", sealed.name, if role.is_editor() { "an editor (read and write)" } else { "a viewer (read only)" }, req.fingerprint, sealed.encode());
                         }
                     }
                     None => {
@@ -3990,6 +4305,43 @@ fn run(cli: &Cli) -> Result<()> {
                         engine.share_members(folder)?
                     };
                 print(cli, &list, share_members_text)?;
+            }
+            ShareCmd::Role {
+                folder,
+                member,
+                role,
+            } => {
+                let role = varsto_core::share::ShareRole::parse(role)?;
+                let report: varsto_core::engine::ShareRoleReport = if let Some((sf, _)) =
+                    service::status(&home)
+                {
+                    let url = format!("http://127.0.0.1:{}/api/share/role", sf.port);
+                    let body = serde_json::json!({"folder": folder, "member": member, "role": role.as_str()});
+                    let r = service::http_post(&url, &sf.token, &body.to_string())?;
+                    serde_json::from_str(&r)
+                        .map_err(|_| anyhow!("unexpected answer from the service: {r}"))?
+                } else {
+                    let mut engine = open_engine(&home)?;
+                    engine.share_set_role(folder, member, role)?
+                };
+                print(cli, &report, |r| {
+                    format!(
+                        "{}: {} is now {} (role record {}){}",
+                        r.folder,
+                        r.member,
+                        if r.role == "viewer" {
+                            "a viewer: read only"
+                        } else {
+                            "an editor: read and write"
+                        },
+                        r.seq,
+                        if r.role == "viewer" {
+                            "\nWhat it wrote until now stays; what it writes from now on is not accepted. It can still copy what it reads."
+                        } else {
+                            ""
+                        }
+                    )
+                })?;
             }
             ShareCmd::Revoke {
                 folder,
@@ -5766,7 +6118,7 @@ fn folder_safety_cmd(cli: &Cli, home: &std::path::Path, cmd: &FolderCmd) -> Resu
             },
             serde_json::json!({}),
         ),
-        FolderCmd::Mode { name, mode: None } => (name, "changes", serde_json::json!({})),
+        FolderCmd::Mode { name, mode: None } => (name, "pending", serde_json::json!({})),
         FolderCmd::Mode {
             name,
             mode: Some(m),
@@ -5776,7 +6128,7 @@ fn folder_safety_cmd(cli: &Cli, home: &std::path::Path, cmd: &FolderCmd) -> Resu
         }
         FolderCmd::Override { name } => (name, "override", serde_json::json!({})),
         FolderCmd::Revert { name } => (name, "revert", serde_json::json!({})),
-        FolderCmd::Changes { name } => (name, "changes", serde_json::json!({})),
+        FolderCmd::Pending { name } => (name, "pending", serde_json::json!({})),
         FolderCmd::DeletionGuard {
             name,
             percent,
@@ -5786,7 +6138,7 @@ fn folder_safety_cmd(cli: &Cli, home: &std::path::Path, cmd: &FolderCmd) -> Resu
             default,
         } => {
             if percent.is_none() && min_files.is_none() && max_files.is_none() && !off && !default {
-                (name, "changes", serde_json::json!({}))
+                (name, "pending", serde_json::json!({}))
             } else if *default {
                 (name, "deletion-guard", serde_json::json!({ "guard": null }))
             } else {
@@ -5794,7 +6146,7 @@ fn folder_safety_cmd(cli: &Cli, home: &std::path::Path, cmd: &FolderCmd) -> Resu
                 let current = match call_service(
                     home,
                     "/api/folder/safety",
-                    serde_json::json!({"folder": name, "action": "changes"}),
+                    serde_json::json!({"folder": name, "action": "pending"}),
                 )? {
                     Some(v) => serde_json::from_value(v["deletion_guard"].clone())?,
                     None => open_engine(home)?.folder_changes(name)?.deletion_guard,
@@ -5824,7 +6176,7 @@ fn folder_safety_cmd(cli: &Cli, home: &std::path::Path, cmd: &FolderCmd) -> Resu
             let mut engine = open_engine(home)?;
             let out = desktop::folder_safety_action(&mut engine, &body)?;
             // What changed is synced now (the service does it by itself).
-            if action != "changes" {
+            if action != "pending" {
                 if let Ok(r) = engine.sync(Some(name)) {
                     if let Some(p) = r.first().and_then(|(pl, _)| pl.paused.as_ref()) {
                         eprintln!("{}", p.message);
@@ -5908,7 +6260,7 @@ fn folder_safety_cmd(cli: &Cli, home: &std::path::Path, cmd: &FolderCmd) -> Resu
     Ok(true)
 }
 
-/// `varsto folder changes` (and `mode`, `deletion-guard` without a value).
+/// `varsto folder pending` (and `mode`, `deletion-guard` without a value).
 fn folder_changes_text(v: &serde_json::Value) -> String {
     let name = v["folder"].as_str().unwrap_or("");
     let guard: Option<varsto_core::vault::DeletionGuard> =

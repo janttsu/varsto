@@ -205,6 +205,7 @@
       <div id="foldersafety"></div>
       <div id="policybanner" class="notice warn hidden"></div>
       <div id="spacebanner" class="notice warn hidden" role="status"></div>
+      <div id="orgblockbanner" class="notice warn hidden"></div>
       <div class="stats">
         <div class="stat"><span class="stat-label">Folders</span><span class="stat-value" id="stat-folders">–</span></div>
         <div class="stat"><span class="stat-label">Files</span><span class="stat-value" id="stat-files">–</span></div>
@@ -328,6 +329,7 @@
             <button id="files-download" type="button" class="secondary" title="Download the selected file to this device" disabled><svg class="icon"><use href="#i-download"/></svg>Download</button>
             <button id="files-free" type="button" class="secondary" title="Keep only a placeholder of the selected file here" disabled><svg class="icon"><use href="#i-free"/></svg>Free up space</button>
             <button id="files-share" type="button" class="secondary" title="Share this folder with another Varsto user"><svg class="icon"><use href="#i-sharing"/></svg>Share</button>
+            <button id="files-changes" type="button" class="secondary" title="Who changed what in this folder, and when"><svg class="icon"><use href="#i-activity"/></svg>Recent changes</button>
             <input id="files-filter" type="search" class="files-filter" placeholder="Filter by name, tag or analysis" aria-label="Filter files" autocomplete="off">
             <span class="toolbar-spacer"></span>
             <label class="inline muted" id="selectivelabel" title="Files appear as placeholders until you download them"><input id="selectivetoggle" type="checkbox"> selective sync</label>
@@ -335,6 +337,18 @@
           </div>
           <input type="file" id="fileinput" multiple class="hidden" aria-hidden="true" tabindex="-1">
           <div id="files-progress" class="status-line progress hidden" role="status"></div>
+          <section id="recentchanges" class="recent-changes hidden" aria-label="Recent changes">
+            <div class="details-head"><span class="card-title">Recent changes</span><button type="button" id="rc-close" class="secondary icon-btn" title="Close recent changes"><svg class="icon"><use href="#i-close"/></svg></button></div>
+            <form id="rc-form" class="rc-form">
+              <input name="path" placeholder="Under directory" aria-label="Under directory" autocomplete="off">
+              <input name="device" placeholder="Device" aria-label="Device" autocomplete="off">
+              <input name="user" placeholder="Person" aria-label="Person" autocomplete="off">
+              <input name="since" placeholder="Since (YYYY-MM-DD or 7d)" aria-label="Since" autocomplete="off">
+              <button type="submit" class="secondary">Show</button>
+            </form>
+            <p class="muted small">From the signed file lists of the devices; this device keeps the newest changes of each file.</p>
+            <ul id="rc-list" class="list compact-list"></ul>
+          </section>
           <div class="table-wrap">
           <table id="files"><thead><tr><th>Name</th><th class="num">Size</th><th>State</th><th>Last used</th><th></th></tr></thead><tbody></tbody></table>
           </div>
@@ -374,6 +388,10 @@
               <dt>Analysed</dt><dd id="fd-analysis-date"></dd>
             </dl>
             <div class="actions fd-analysis-actions"><button type="button" class="secondary" id="fd-analysis-edit">Write analysis</button><button type="button" class="secondary" id="fd-analysis-clear">Clear analysis</button></div>
+          </section>
+          <section class="fd-changes" id="fd-changes" aria-label="Changes">
+            <div class="fd-analysis-head"><span class="field-caption">Changes</span></div>
+            <ul id="fd-changes-list" class="list compact-list"></ul>
           </section>
           <div class="actions fd-actions" id="fd-actions"></div>
           <div id="fd-history" class="fd-history hidden">
@@ -734,6 +752,7 @@
         <h2 class="card-title"><svg class="icon accent"><use href="#i-org"/></svg><span id="org-name"></span></h2>
         <p id="org-me" class="muted small"></p>
         <p id="org-unlisted-note" class="small hidden"></p>
+        <p id="org-blocked-note" class="notice warn hidden"></p>
       </div>
       <div class="cols">
         <div class="card">
@@ -763,6 +782,15 @@
             <label class="inline"><input name="members_may_add_storages" type="checkbox"> Add or remove storages</label>
             <label class="inline"><input name="members_may_set_policies" type="checkbox"> Set policies and placement</label>
             <label class="inline"><input name="members_may_add_devices" type="checkbox"> Add devices and print the recovery kit</label>
+            <div class="field-group" id="org-platforms"><span class="field-caption">Device platforms that may join and open the vault</span>
+              <label class="inline"><input name="platform_linux" type="checkbox" data-platform="linux"> Linux</label>
+              <label class="inline"><input name="platform_macos" type="checkbox" data-platform="macos"> macOS</label>
+              <label class="inline"><input name="platform_windows" type="checkbox" data-platform="windows"> Windows</label>
+              <label class="inline"><input name="platform_android" type="checkbox" data-platform="android"> Android</label>
+              <label class="inline"><input name="platform_ios" type="checkbox" data-platform="ios"> iOS</label>
+              <span class="hint muted">A device of another platform is refused at approval; one already in the organization is locked out (no new keys, the other devices ignore what it writes, its own app does not open the vault) until its platform is allowed again. Devices say which platform they run, so this binds honest apps, not a modified one. It applies to administrators' devices too.</span>
+            </div>
+            <label>Oldest Varsto version allowed <input name="min_app_version" placeholder="any version" autocomplete="off"></label>
             <div class="actions"><button type="submit" id="org-policy-save">Save</button></div>
           </form>
         </div>

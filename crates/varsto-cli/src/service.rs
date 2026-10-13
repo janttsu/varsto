@@ -700,7 +700,10 @@ impl ServiceState {
         let mut full: Vec<String> = Vec::new();
         let mut paused = std::collections::BTreeMap::new();
         let mut left_out: std::collections::BTreeSet<String> = Default::default();
+        // A read-only shared folder: local changes are not published.
+        let mut kept_aside = 0;
         for (pl, ps) in reports {
+            kept_aside += pl.kept_aside.len() + ps.kept_aside.len();
             for f in &ps.storages_full {
                 if !full.contains(f) {
                     full.push(f.clone());
@@ -763,6 +766,11 @@ impl ServiceState {
             self.last_result += &format!("; {}", full.join("; "));
         }
         self.quota_full = full;
+        if kept_aside > 0 {
+            self.last_result.push_str(&format!(
+                "; read-only: your changes were not published ({kept_aside} file(s) kept aside)"
+            ));
+        }
         self.last_error = None;
         for s in left_out.difference(&self.storage_problems) {
             varsto_core::events::publish(

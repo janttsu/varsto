@@ -71,6 +71,15 @@ fn two_devices_through_the_cli() {
     let ledger = ok(&b, &["ledger"]);
     assert!(ledger.as_array().unwrap().len() >= 3);
 
+    // Who changed what: the file's history, from the signed manifests.
+    let changes = ok(&b, &["changes", "docs", "note.txt"]);
+    assert_eq!(changes["file"], true);
+    assert_eq!(changes["changes"][0]["action"], "created");
+    assert_eq!(changes["changes"][0]["device_name"], "laptop");
+    assert_eq!(changes["changes"][0]["verified"], true);
+    let none = ok(&b, &["changes", "docs", "--device", "phone"]);
+    assert_eq!(none["changes"].as_array().unwrap().len(), 0);
+
     // Wrong passphrase is refused.
     let out = Command::new(env!("CARGO_BIN_EXE_varsto"))
         .args(["--home", a.to_str().unwrap(), "status"])

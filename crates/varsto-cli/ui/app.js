@@ -809,32 +809,37 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   function shareFolder(f) {
     dialog({
       title: (f.shared ? "New token for " : "Share ") + f.name,
-      text: (f.shared ? "" : "Anyone holding the token can read and write this folder. ") + "Paste the recipient's request code or scan its QR code to seal the token to their device, or leave it empty for a plain token that carries the folder key itself.",
-      fields: [{ name: "to", label: "Recipient's request code (optional)", placeholder: "vsr1…" }],
+      text: (f.shared ? "" : "An editor reads and writes this folder; a viewer only reads it: nothing a viewer changes is accepted by your devices or the editors. ") + "Paste the recipient's request code or scan its QR code to seal the token to their device, or leave it empty for a plain token that carries the folder key itself (editors only).",
+      fields: [
+        { name: "to", label: "Recipient's request code (optional)", placeholder: "vsr1…" },
+        { name: "role", label: "Role", options: [["editor", "Editor: read and write"], ["viewer", "Viewer: read only"]], value: "editor", hint: "A viewer can still copy what it reads; a key cannot prevent that." }
+      ],
       ok: f.shared ? "Create token" : "Share",
       extra: "Scan QR code…"
     }).then(function (r) {
       if (!r) { return; }
-      if (r.action === "extra") { return scanQr("request").then(function (info) { if (info) { return sealTo(f, info.text); } }); }
+      var role = r.values.role || "editor";
+      if (r.action === "extra") { return scanQr("request").then(function (info) { if (info) { return sealTo(f, info.text, role); } }); }
       var code = (r.values.to || "").trim();
-      if (!code) { return createToken(f, "", ""); }
-      return sealTo(f, code);
+      if (!code && role === "viewer") { return alertBox("A viewer's token must be sealed to their request code: paste it or scan it. A plain token cannot say what its holder may do."); }
+      if (!code) { return createToken(f, "", "", role); }
+      return sealTo(f, code, role);
     }).catch(function (e) { alertBox(e.message); });
   }
   // Confirm who asked: both sides see the same six words for the code.
-  function sealTo(f, code) {
+  function sealTo(f, code, role) {
       return api("POST", "/api/share/fingerprint", { code: code }).then(function (fp) {
         var who = fp.name || "the requester";
         return dialog({
           title: "Is this " + who + "'s request?",
           text: "Ask " + who + " to read the fingerprint their device shows for the request code (under Accept a shared folder, or `varsto share request`), over a call or in person, not in the same message as the code. Share only if all six words match: different words mean the code was changed on its way.",
           code: fp.fingerprint, ok: "The words match", danger: false
-        }).then(function (c) { if (c) { return createToken(f, code, fp.fingerprint); } });
+        }).then(function (c) { if (c) { return createToken(f, code, fp.fingerprint, role); } });
       });
   }
-  function createToken(f, code, fingerprint) {
-    return api("POST", "/api/share/create", { folder: f.name, to: code, fingerprint: fingerprint }).then(function (t) {
-      $("sharetoken").textContent = (t.sealed ? "Sealed share token for " + t.folder + " (only the requesting device can open it; fingerprint " + t.fingerprint + "): " : "Share token for " + t.folder + " (contains the folder key; send over a secure channel): ") + t.token;
+  function createToken(f, code, fingerprint, role) {
+    return api("POST", "/api/share/create", { folder: f.name, to: code, fingerprint: fingerprint, role: role || "editor" }).then(function (t) {
+      $("sharetoken").textContent = (t.sealed ? (t.role === "viewer" ? "Sealed share token for a viewer of " : "Sealed share token for an editor of ") + t.folder + " (only the requesting device can open it; fingerprint " + t.fingerprint + "): " : "Share token for " + t.folder + " (contains the folder key; send over a secure channel): ") + t.token;
       $("sharetoken").classList.remove("hidden"); nav("shared"); refreshStatus();
       // A sealed token is safe to show: only the requesting device opens it. A plain one never becomes a QR code.
       return renderQr($("sharetokenqr"), t.sealed ? t.token : "");
@@ -992,19 +997,24 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     return dialog({
       title: "Share a folder with " + (info.name || "the requester") + "?",
       text: "Choose the folder. Next you compare the six-word fingerprint with them.",
-      fields: [{ name: "folder", label: "Folder", options: folders.map(function (f) { return [f.name, f.name]; }) }],
+      fields: [
+        { name: "folder", label: "Folder", options: folders.map(function (f) { return [f.name, f.name]; }) },
+        { name: "role", label: "Role", options: [["editor", "Editor: read and write"], ["viewer", "Viewer: read only"]], value: "editor", hint: "A viewer can still copy what it reads; a key cannot prevent that." }
+      ],
       ok: "Continue"
-    }).then(function (r) { if (r) { return sealTo(folderByName(r.values.folder), info.text); } });
+    }).then(function (r) { if (r) { return sealTo(folderByName(r.values.folder), info.text, r.values.role || "editor"); } });
   }
   // Who has access to a shared folder, under its row on the Shared page.
   function showMembers(f, box, owner) {
     api("GET", "/api/share/members?folder=" + encodeURIComponent(f.name)).then(function (l) {
       box.innerHTML = "";
       if (l.access_lost) { box.appendChild(el("li", "notice warn", "This device no longer receives new content of " + f.name + ": the owner removed it, or has not sent it the new key yet.")); }
+      if (l.this_role === "viewer") { box.appendChild(el("li", "notice", "This device may only read " + f.name + ": changes made here are not published. Files you change are moved aside and the shared version comes back.")); }
       l.members.forEach(function (m) {
         var li = el("li"); var body = el("div", "li-body"); var title = el("div", "li-title", m.name);
         var kind = m.kind === "owner-device" ? ["grey", "Owner's device"] : m.kind === "invite" ? (m.status === "pending" ? ["accent", "Token not accepted yet"] : ["grey", "Token revoked"]) : m.status === "removed" ? ["risk", "Removed"] : ["accent", "Member"];
         title.appendChild(pill(kind[0], kind[1]));
+        if (m.kind !== "owner-device" && m.status !== "removed" && m.status !== "revoked") { title.appendChild(m.role === "viewer" ? pill("grey", "Viewer") : pill("ok", "Editor")); }
         if (m.this_device) { title.appendChild(pill("grey", "This device")); }
         body.appendChild(title);
         var sub = [];
@@ -1015,7 +1025,16 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
         li.appendChild(body);
         var removable = owner && ((m.kind === "member" && m.status === "active") || (m.kind === "invite" && m.status === "pending"));
         if (removable) {
-          var a = el("div", "li-actions"); var b = el("button", "secondary danger", m.kind === "invite" ? "Revoke…" : "Remove…"); b.type = "button";
+          var a = el("div", "li-actions");
+          if (m.kind === "member") {
+            // The role: only the owner's devices sign a change of it.
+            var rs = el("select"); rs.setAttribute("aria-label", "Role");
+            [["editor", "Editor"], ["viewer", "Viewer"]].forEach(function (o) { var x = el("option", null, o[1]); x.value = o[0]; rs.appendChild(x); });
+            rs.value = m.role === "viewer" ? "viewer" : "editor";
+            rs.onchange = function () { setMemberRole(f, m, rs.value, box); };
+            a.appendChild(rs);
+          }
+          var b = el("button", "secondary danger", m.kind === "invite" ? "Revoke…" : "Remove…"); b.type = "button";
           b.onclick = function () { removeMember(f, m, box); }; a.appendChild(b); li.appendChild(a);
         }
         box.appendChild(li);
@@ -1025,6 +1044,21 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
         b.onclick = function () { removeMember(f, { id: "all", name: "everyone", kind: "all" }, box); }; a.appendChild(b); li.appendChild(a); box.appendChild(li);
       }
     }).catch(function (e) { alertBox(e.message); });
+  }
+  function setMemberRole(f, m, role, box) {
+    var viewer = role === "viewer";
+    dialog({
+      title: (viewer ? "Make " + m.name + " a viewer?" : "Let " + m.name + " write?"),
+      text: viewer ? m.name + " keeps reading " + f.name + ", and what it wrote until now stays. What it changes from now on is not accepted by your devices or the editors. It can still copy what it reads: a key cannot prevent that." : m.name + " can change, add and delete files in " + f.name + " again; your devices and the other members accept its changes.",
+      ok: viewer ? "Make viewer" : "Make editor", danger: viewer
+    }).then(function (r) {
+      if (!r) { return showMembers(f, box, true); }
+      busy(true);
+      return api("POST", "/api/share/role", { folder: f.name, member: m.id, role: role }).then(function (rep) {
+        log(f.name + ": " + rep.member + " is now " + (rep.role === "viewer" ? "a viewer" : "an editor"));
+        showMembers(f, box, true);
+      });
+    }).catch(function (e) { alertBox(e.message, "Nothing was changed"); showMembers(f, box, true); }).then(function () { busy(false); });
   }
   function removeMember(f, m, box) {
     var invite = m.kind === "invite";
@@ -1125,7 +1159,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   }
   function safetyButton(label, cls, onclick) { var b = el("button", cls || "secondary", label); b.type = "button"; b.onclick = onclick; return b; }
   function showFolderChanges(f) {
-    folderAction(f, "changes").then(function (c) {
+    folderAction(f, "pending").then(function (c) {
       var lines = [];
       (c.held_paths || []).slice(0, 200).forEach(function (p) { lines.push("deleted  " + p); });
       (c.local_changes || []).concat(c.remote_not_applied || []).slice(0, 200).forEach(function (x) { lines.push(x.kind + "  " + x.path); });
@@ -1191,7 +1225,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     "receive-only": "This device applies other devices' changes but never publishes its own. Local changes are listed; a revert restores the vault's versions."
   };
   function folderSettings(f) {
-    folderAction(f, "changes").then(function (c) {
+    folderAction(f, "pending").then(function (c) {
       var g = c.deletion_guard || {};
       return dialog({
         title: "Sync settings of " + f.name,
@@ -1242,6 +1276,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
         if (f.strongroom) { nameCell.appendChild(document.createTextNode(" ")); nameCell.appendChild(pill(f.strongroom === "locked" ? "grey" : "accent", f.strongroom === "locked" ? "Strongroom locked" : "Strongroom open")); }
         if (f.selective) { nameCell.appendChild(document.createTextNode(" ")); nameCell.appendChild(pill("grey", "selective")); }
         if (f.shared) { nameCell.appendChild(document.createTextNode(" ")); nameCell.appendChild(pill("accent", "shared")); }
+        if (f.read_only) { nameCell.appendChild(document.createTextNode(" ")); nameCell.appendChild(pill("grey", "read only")); }
         if (f.path && f.plain === false) { nameCell.appendChild(document.createTextNode(" ")); nameCell.appendChild(pill("grey", "encrypted here")); }
         if (f.path && f.mode && f.mode !== "normal") { nameCell.appendChild(document.createTextNode(" ")); nameCell.appendChild(pill("grey", f.mode)); }
         if (f.path && f.paused) { nameCell.appendChild(document.createTextNode(" ")); nameCell.appendChild(pill("bad", "paused")); }
@@ -1288,7 +1323,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
         if (f.shared) {
           shared++;
           var sli = el("li"); var sic = el("span", "li-icon"); sic.appendChild(icon("sharing")); sli.appendChild(sic);
-          var sbody = el("div", "li-body"); var stitle = el("div", "li-title", f.name); stitle.appendChild(pill("accent", "shared")); sbody.appendChild(stitle);
+          var sbody = el("div", "li-body"); var stitle = el("div", "li-title", f.name); stitle.appendChild(pill("accent", "shared")); if (f.read_only) { stitle.appendChild(pill("grey", "read only")); } sbody.appendChild(stitle);
           sbody.appendChild(el("div", "li-sub", f.files + " files · " + fmtBytes(f.bytes) + (f.path ? " · " + f.path : ""))); sli.appendChild(sbody);
           var sa = el("div", "li-actions");
           var smw = el("li", "sub-row hidden"); var sm = el("ul", "list sub-list"); smw.appendChild(sm);
@@ -1387,6 +1422,9 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
       $("members").textContent = mems.length ? "Members with access to shared folders: " + mems.join(", ") : "";
       loadDevices(s);
       var org = s.org || null;
+      // Locked out by the organization's platform policy.
+      $("orgblockbanner").textContent = org && org.blocked ? orgBlockedText(org.blocked) : "";
+      $("orgblockbanner").classList.toggle("hidden", !(org && org.blocked));
       document.querySelectorAll("[data-org-only]").forEach(function (b) { b.classList.toggle("hidden", !org); });
       $("teamcard").classList.toggle("hidden", !!org || !!s.member);
       if (!org && currentPage === "organization") { nav("settings"); }
@@ -2574,7 +2612,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   function runSync(folder) {
     busy(true); log("sync " + (folder || "all") + " started");
     return api("POST", "/api/sync", folder ? { folder: folder } : {}).then(function (r) {
-      r.forEach(function (x) { log(x.pull.folder + ": pulled " + x.pull.files_updated + " updated, " + x.pull.files_deleted + " deleted, " + x.pull.conflicts + " conflicts; pushed " + x.push.files_changed + " changed, " + x.push.chunks_uploaded + " chunks" + (x.pull.files_unavailable.length ? "; unavailable: " + x.pull.files_unavailable.join(", ") : "") + (x.pull.forked_devices.length ? "; FORKED: " + x.pull.forked_devices.join(", ") : "") + ((x.pull.renamed_locally || []).length ? "; kept under another name here because the disk ignores case: " + x.pull.renamed_locally.join(", ") : "")); });
+      r.forEach(function (x) { log(x.pull.folder + ": pulled " + x.pull.files_updated + " updated, " + x.pull.files_deleted + " deleted, " + x.pull.conflicts + " conflicts; pushed " + x.push.files_changed + " changed, " + x.push.chunks_uploaded + " chunks" + (x.pull.files_unavailable.length ? "; unavailable: " + x.pull.files_unavailable.join(", ") : "") + (x.pull.forked_devices.length ? "; FORKED: " + x.pull.forked_devices.join(", ") : "") + ((x.pull.renamed_locally || []).length ? "; kept under another name here because the disk ignores case: " + x.pull.renamed_locally.join(", ") : "") + ((x.push.read_only || (x.pull.kept_aside || []).length) ? "; read-only: your changes were not published" + (((x.pull.kept_aside || []).length + (x.push.kept_aside || []).length) ? " (kept aside: " + (x.pull.kept_aside || []).concat(x.push.kept_aside || []).join(", ") + ")" : "") : "") + ((x.pull.writes_refused || []).length ? "; not taken from read-only members: " + x.pull.writes_refused.join(", ") : "")); });
     }).catch(function (e) { log("sync failed: " + e.message); }).then(function () { busy(false); return refreshStatus().then(function () { if (currentPage === "files") { loadFiles(); } }); });
   }
 
@@ -2744,8 +2782,61 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     showAnalysis(folder, f);
     $("fd-history").classList.add("hidden");
     loadVersions(folder, f);
+    showChanges(folder, f);
     updateToolbar();
   }
+  // Change history (`/api/changes`): who changed what and when, from the
+  // signed manifests. One line per version.
+  var ACTION_LABELS = { created: "Created", modified: "Modified", deleted: "Deleted", restored: "Restored" };
+  function changeItem(c, withPath) {
+    var li = el("li"); var body = el("div", "li-body"); var title = el("div", "li-title");
+    if (c.action === "renamed") {
+      title.appendChild(el("span", null, c.from ? "Renamed from" : "Renamed to"));
+      title.appendChild(document.createTextNode(" "));
+      var other = el("span", null, c.from || c.to || ""); other.setAttribute("data-no-i18n", ""); title.appendChild(other);
+    } else {
+      title.appendChild(el("span", null, ACTION_LABELS[c.action] || c.action));
+    }
+    if (withPath) { title.appendChild(document.createTextNode(" ")); var pth = el("span", "muted", c.path); pth.setAttribute("data-no-i18n", ""); title.appendChild(pth); }
+    if (!c.verified) { var nv = pill("grey", "not verified"); nv.title = "The file list that named this version was not announced in a signed ledger entry this device holds"; title.appendChild(nv); }
+    body.appendChild(title);
+    var who = c.device_name + (c.user ? " (" + c.user + ")" : "");
+    var parts = [c.time_utc ? new Date(c.time_utc * 1000).toLocaleString() : "", who];
+    if (c.action !== "deleted" && !(c.action === "renamed" && c.to)) { parts.push(fmtBytes(c.size)); }
+    if (c.hash) { parts.push(c.hash.slice(0, 8)); }
+    var sub = el("div", "li-sub", parts.filter(Boolean).join(" · ")); sub.setAttribute("data-no-i18n", ""); body.appendChild(sub);
+    li.appendChild(body);
+    return li;
+  }
+  function showChanges(folder, f) {
+    var ul = $("fd-changes-list"); ul.innerHTML = "";
+    api("GET", "/api/changes?folder=" + enc(folder) + "&path=" + enc(f.path) + "&limit=20").then(function (r) {
+      if (selectedFile !== f) { return; }
+      ul.innerHTML = "";
+      r.changes.forEach(function (c) { ul.appendChild(changeItem(c, c.path !== f.path)); });
+      if (!r.changes.length) { ul.appendChild(el("li", "muted small", "No changes recorded yet")); }
+    }).catch(function () {});
+  }
+  function loadRecentChanges() {
+    var folder = $("filesfolder").value; if (!folder) { return; }
+    var v = formData($("rc-form"));
+    var q = "folder=" + enc(folder) + "&limit=200";
+    ["path", "device", "user", "since"].forEach(function (k) { if ((v[k] || "").trim()) { q += "&" + k + "=" + enc(v[k].trim()); } });
+    var ul = $("rc-list");
+    api("GET", "/api/changes?" + q).then(function (r) {
+      ul.innerHTML = "";
+      r.changes.forEach(function (c) { ul.appendChild(changeItem(c, true)); });
+      if (!r.changes.length) { ul.appendChild(el("li", "muted small", "No changes match")); }
+      if (r.truncated) { ul.appendChild(el("li", "muted small", "Older changes are left out; narrow the search.")); }
+    }).catch(function (e) { alertBox(e.message); });
+  }
+  $("files-changes").onclick = function () {
+    var box = $("recentchanges"); var show = box.classList.contains("hidden");
+    box.classList.toggle("hidden", !show);
+    if (show) { loadRecentChanges(); }
+  };
+  $("rc-close").onclick = function () { $("recentchanges").classList.add("hidden"); };
+  $("rc-form").onsubmit = function (ev) { ev.preventDefault(); loadRecentChanges(); };
   // The file's analysis (`/api/analysis`): what an assistant or the user
   // recorded about its contents. A listing has the first 500 characters; the
   // whole text is asked for when there is more.
@@ -3055,7 +3146,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
       renderSel();
     }).catch(function (e) { log("error: " + e.message); });
   }
-  $("filesfolder").onchange = function () { multi.sel = {}; multi.on = false; markTree($("filesfolder").value); updateFilesHead(); clearSelection(); setScreen("folder"); loadFiles(); };
+  $("filesfolder").onchange = function () { multi.sel = {}; multi.on = false; markTree($("filesfolder").value); updateFilesHead(); clearSelection(); setScreen("folder"); loadFiles(); if (!$("recentchanges").classList.contains("hidden")) { loadRecentChanges(); } };
   $("selectivetoggle").onchange = function () { api("POST", "/api/selective", { folder: $("filesfolder").value, on: $("selectivetoggle").checked }).then(function () { log("selective sync " + ($("selectivetoggle").checked ? "on" : "off")); return refreshStatus(); }).catch(function (e) { log("error: " + e.message); }); };
   // ----- Folder settings: ignore rules and file metadata -----
   // The shared rules are the folder's .varstoignore (synced like any file);
@@ -3249,13 +3340,17 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     });
   };
   var lastOrg = null;
+  var PLATFORM_NAMES = { linux: "Linux", macos: "macOS", windows: "Windows", android: "Android", ios: "iOS" };
+  // "this organization (Acme) does not allow Windows devices" as a sentence.
+  function orgBlockedText(why) { return why.charAt(0).toUpperCase() + why.slice(1) + ". This device does not sync or open the vault until an administrator allows it."; }
   function orgDevice(d, admin, user) {
     var li = el("li"); var body = el("div", "li-body"); var title = el("div", "li-title", d.name);
     if (d.admin) { title.appendChild(pill("accent", "admin")); }
     if (d.this_device) { title.appendChild(pill("grey", "This device")); }
     if (d.revoked) { title.appendChild(pill("risk", "Removed")); }
+    if (d.refused && !d.revoked) { var lp = pill("risk", "Locked out"); lp.title = "The organization " + d.refused; title.appendChild(lp); }
     body.appendChild(title);
-    body.appendChild(el("div", "li-sub", [deviceSystem(d), d.added_utc ? "added " + fmtDate(d.added_utc) : "", d.device_id.slice(0, 8)].filter(Boolean).join(" · ")));
+    body.appendChild(el("div", "li-sub", [deviceSystem(d) || PLATFORM_NAMES[d.platform] || d.platform || "", d.added_utc ? "added " + fmtDate(d.added_utc) : "", d.device_id.slice(0, 8)].filter(Boolean).join(" · ")));
     li.appendChild(body);
     if (admin && !d.this_device && !d.revoked && user) {
       var a = el("div", "li-actions"); var b = el("button", "secondary danger small", "Remove device…"); b.type = "button";
@@ -3273,6 +3368,8 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
       $("org-me").textContent = "Organization " + o.org_id.slice(0, 8) + " · this device is " + (admin ? "an administrator" : o.this_device_listed ? "a member" : "not in the organization") + (o.this_user ? ", owned by " + o.this_user : "") + " · " + o.users.length + (o.users.length === 1 ? " person" : " people") + ", " + o.admins.length + (o.admins.length === 1 ? " administrator" : " administrators");
       $("org-unlisted-note").classList.toggle("hidden", o.this_device_listed);
       $("org-unlisted-note").textContent = o.this_device_listed ? "" : "This device is not in the organization yet: the other devices ignore what it writes until an administrator adds it (Organization page on their device, or varsto org add-device).";
+      $("org-blocked-note").textContent = o.this_device_blocked ? orgBlockedText(o.this_device_blocked) : "";
+      $("org-blocked-note").classList.toggle("hidden", !o.this_device_blocked);
       var ul = $("org-users"); ul.innerHTML = "";
       o.users.forEach(function (u) {
         var li = el("li"); var body = el("div", "li-body"); var title = el("div", "li-title", u.user); body.appendChild(title);
@@ -3309,6 +3406,9 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
       $("org-admin-card").classList.toggle("hidden", !admin);
       var pf = $("org-policy");
       ["members_may_share", "members_may_add_storages", "members_may_set_policies", "members_may_add_devices"].forEach(function (k) { var i = pf.querySelector("input[name=" + k + "]"); i.checked = !!o.policy[k]; i.disabled = !admin; });
+      var allowed = o.policy.allowed_platforms || [];
+      pf.querySelectorAll("input[data-platform]").forEach(function (i) { i.checked = !allowed.length || allowed.indexOf(i.dataset.platform) >= 0; i.disabled = !admin; });
+      pf.min_app_version.value = o.policy.min_app_version || ""; pf.min_app_version.disabled = !admin;
       $("org-policy-save").classList.toggle("hidden", !admin);
       var lg = $("org-log"); lg.innerHTML = "";
       o.log.slice().reverse().forEach(function (e) {
@@ -3343,7 +3443,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     api("POST", "/api/org/fingerprint", { code: v.code.trim() }).then(function (f) {
       return dialog({
         title: "Approve " + (f.name || f.device_id.slice(0, 8)) + " for " + v.user.trim() + "?",
-        text: "Ask the person to read the six words their device shows. Approve only if they match exactly: different words mean the code was changed on its way.",
+        text: (f.platform ? "The device says it runs " + (PLATFORM_NAMES[f.platform] || f.platform) + ". " : "") + "Ask the person to read the six words their device shows. Approve only if they match exactly: different words mean the code was changed on its way.",
         code: f.fingerprint,
         ok: "The words match, approve"
       }).then(function (r) {
@@ -3362,7 +3462,13 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   $("org-policy").onsubmit = function (ev) {
     ev.preventDefault();
     var v = formData(ev.target);
-    api("POST", "/api/org/policy", v).then(function () { log("organization policy saved"); loadOrg(); }).catch(function (e) { alertBox(e.message); });
+    var boxes = ev.target.querySelectorAll("input[data-platform]"), ticked = [];
+    boxes.forEach(function (i) { delete v[i.name]; if (i.checked) { ticked.push(i.dataset.platform); } });
+    if (!ticked.length) { alertBox("Tick at least one platform."); return; }
+    // Every platform ticked: no restriction.
+    v.allowed_platforms = ticked.length === boxes.length ? [] : ticked;
+    v.min_app_version = (v.min_app_version || "").trim();
+    api("POST", "/api/org/policy", v).then(function () { log("organization policy saved"); loadOrg(); }).catch(function (e) { alertBox(e.message, "Policy not saved"); });
   };
   $("org-admin").onsubmit = function (ev) {
     ev.preventDefault();

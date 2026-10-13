@@ -68,6 +68,16 @@ pub struct ShareToken {
     /// theirs names). Only sealed tokens carry them.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub owners: Vec<DeviceId>,
+    /// What the recipient may do (sealed tokens; a plain token is always an
+    /// editor's).
+    #[serde(default)]
+    pub role: crate::share::ShareRole,
+    /// Invitation id and secret the member derives its join proof from
+    /// (sealed tokens only; see `share::JoinProof`).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub invite: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub join_secret_hex: String,
 }
 
 crate::redacted_debug!(ShareToken { vault_id, folder_id, name ; key_hex, epoch_keys });
@@ -93,6 +103,9 @@ impl ShareToken {
             epoch_keys: BTreeMap::new(),
             fingerprint: String::new(),
             owners: Vec::new(),
+            role: Default::default(),
+            invite: String::new(),
+            join_secret_hex: String::new(),
         })
     }
     /// The plain form, refused when the folder has keys of later epochs
@@ -118,12 +131,19 @@ struct TokenPayload {
     fingerprint: String,
     #[serde(default)]
     owners: Vec<DeviceId>,
+    #[serde(default)]
+    role: crate::share::ShareRole,
+    #[serde(default)]
+    invite: String,
+    #[serde(default)]
+    join_secret_hex: String,
 }
 
 impl Drop for TokenPayload {
     fn drop(&mut self) {
         use zeroize::Zeroize;
         self.key_hex.zeroize();
+        self.join_secret_hex.zeroize();
         for v in self.epoch_keys.values_mut() {
             v.zeroize();
         }
@@ -148,6 +168,8 @@ impl ShareToken {
         let sealed = if self.epoch_keys.is_empty()
             && self.fingerprint.is_empty()
             && self.owners.is_empty()
+            && self.role.is_editor()
+            && self.join_secret_hex.is_empty()
         {
             // Version 1: the folder key alone, readable by older versions.
             crypto::encrypt(&key, &t.aad(), &hex::decode(&self.key_hex)?)?
@@ -158,6 +180,9 @@ impl ShareToken {
                 epoch_keys: self.epoch_keys.clone(),
                 fingerprint: self.fingerprint.clone(),
                 owners: self.owners.clone(),
+                role: self.role,
+                invite: self.invite.clone(),
+                join_secret_hex: self.join_secret_hex.clone(),
             };
             crypto::encrypt(
                 &key,
@@ -298,6 +323,9 @@ impl SealedShareToken {
                 epoch_keys: BTreeMap::new(),
                 fingerprint: String::new(),
                 owners: Vec::new(),
+                role: Default::default(),
+                invite: String::new(),
+                join_secret_hex: String::new(),
             }
         };
         SecretKey::from_hex(&payload.key_hex)?;
@@ -312,6 +340,9 @@ impl SealedShareToken {
             epoch_keys: payload.epoch_keys.clone(),
             fingerprint: payload.fingerprint.clone(),
             owners: payload.owners.clone(),
+            role: payload.role,
+            invite: payload.invite.clone(),
+            join_secret_hex: payload.join_secret_hex.clone(),
         })
     }
 }
@@ -892,6 +923,19 @@ pub struct FolderRecord {
     /// served to peers, and only its source device writes it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub backup: Option<BackupInfo>,
+    /// On a member device: the invitation it joined through, with the
+    /// secret its join proof is derived from and the role the token gave.
+    /// Local only, never published.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub share_join: Option<ShareJoin>,
+}
+
+/// See `FolderRecord::share_join`.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ShareJoin {
+    pub invite: String,
+    pub secret_hex: String,
+    pub role: crate::share::ShareRole,
 }
 
 crate::redacted_debug!(FolderRecord { folder_id, name, created_by, created_utc, strongroom, removed_utc, backup, placement, policy ; key_hex, epoch_keys });
@@ -990,6 +1034,9 @@ impl FolderRecord {
             epoch_keys: BTreeMap::new(),
             fingerprint: String::new(),
             owners: Vec::new(),
+            role: Default::default(),
+            invite: String::new(),
+            join_secret_hex: String::new(),
         }
     }
 }
@@ -1442,6 +1489,12 @@ pub struct Config {
     /// filter; absent means debug. `VARSTO_LOG` and `--log-level` win.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub log_level: Option<String>,
+    /// How much change history of files this device keeps (`crate::changes`).
+    #[serde(
+        default,
+        skip_serializing_if = "crate::changes::ChangeLimits::is_default"
+    )]
+    pub changes: crate::changes::ChangeLimits,
 }
 
 /// A backup taken on this device (local, never published).

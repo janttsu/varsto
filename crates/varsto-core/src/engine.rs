@@ -46,6 +46,7 @@ use std::path::{Path, PathBuf};
 mod access_sync;
 mod backups;
 mod block_cache;
+mod changes_ops;
 mod data_moves;
 mod devinfo;
 mod disk_fetch;
@@ -72,6 +73,7 @@ mod repair;
 mod restic_mirror;
 mod scrub;
 mod share_ops;
+mod share_roles;
 mod strongroom_ops;
 mod trash;
 mod verify;
@@ -83,6 +85,7 @@ pub use backups::{
     SnapshotReport,
 };
 pub use block_cache::{BlockWriter, StagedFile, BLOCK_CACHE_DIR, EXPORT_DIR};
+pub use changes_ops::{ChangeView, ChangesQuery, ChangesReport};
 pub use devinfo::DeviceDetails;
 pub use disk_fetch::{
     DiskFetchSettings, DiskStep, FetchPlan, FetchPlanReport, InsertAnswer, PlanDriver, PlanFile,
@@ -128,6 +131,7 @@ pub use repair::{
 pub use restic_mirror::{CheckOptions, SetupReport};
 pub use scrub::ScrubOptions;
 pub use share_ops::{ShareMember, ShareMembers, ShareRevokeReport};
+pub use share_roles::{ShareRoleReport, KEPT_ASIDE_DIR};
 pub use strongroom_ops::{CleanupReport, ConvertReport, StrongroomKeySummary};
 pub use trash::{
     restored_name, RestoredFile, TrashItem, TrashPurgeReport, TrashRestorePlan, TrashRestoreReport,
@@ -239,6 +243,10 @@ struct DeviceCache {
     /// System and version each device last published (`devinfo`).
     #[serde(default)]
     details: BTreeMap<DeviceId, devinfo::DeviceDetails>,
+    /// Read-only members of shared folders, with the last ledger batch of
+    /// each that still counts (written while it was an editor; `share_roles`).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    share_viewers: BTreeMap<DeviceId, u64>,
 }
 
 #[derive(Clone, Debug, Serialize, Default)]
@@ -268,6 +276,12 @@ pub struct PushReport {
     /// Of the changed files, those whose metadata alone changed (no blocks).
     #[serde(default)]
     pub metadata_changed: u64,
+    /// This device may only read the folder: nothing was published.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub read_only: bool,
+    /// Read-only folder: local changes moved to `kept-aside/` or undone.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub kept_aside: Vec<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Default)]
@@ -316,6 +330,13 @@ pub struct PullReport {
     pub files_waiting_for_space: u64,
     #[serde(default)]
     pub low_space: Vec<String>,
+    /// Read-only members whose changes to the folder were not taken (names).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub writes_refused: Vec<String>,
+    /// This device may only read the folder: local changes moved to
+    /// `kept-aside/` or undone.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub kept_aside: Vec<String>,
 }
 
 impl PullReport {
@@ -357,6 +378,9 @@ pub struct FolderStatus {
     pub chunks_verified_elsewhere: u64,
     pub published_seq: u64,
     pub shared: bool,
+    /// Shared with this device read-only (a viewer): nothing is published.
+    #[serde(default)]
+    pub read_only: bool,
     pub selective: bool,
     /// Plain files on this device (false: "encrypted on this device", see `FolderMount::encrypted`).
     #[serde(default)]
@@ -678,6 +702,12 @@ pub struct Engine {
     meta_caps: crate::fsmeta::Caps,
     /// Of the last scan: entries ignored, files whose metadata alone changed.
     scan_extra: (u64, u64),
+    /// Tests: behave like a modified client that ignores a read-only role
+    /// (`share_roles`).
+    role_guard_off: bool,
+    /// Tests: the platform and version this device says it runs (`devinfo`).
+    platform_override: Option<String>,
+    version_override: Option<String>,
 }
 
 /// What the peer-to-peer server serves from (see `Engine::set_snapshot_sink`).
@@ -1140,6 +1170,9 @@ impl Engine {
             download_log: None,
             meta_caps: crate::fsmeta::Caps::here(),
             scan_extra: (0, 0),
+            role_guard_off: false,
+            platform_override: None,
+            version_override: None,
         };
         engine.config.save(home)?;
         if !engine.vault.member {
@@ -1254,6 +1287,11 @@ impl Engine {
             removed_utc: 0,
             epoch_keys: token.epoch_keys.clone(),
             backup: None,
+            share_join: (!token.join_secret_hex.is_empty()).then(|| crate::vault::ShareJoin {
+                invite: token.invite.clone(),
+                secret_hex: token.join_secret_hex.clone(),
+                role: token.role,
+            }),
         };
         engine.keyring.folders.insert(rec.folder_id.clone(), rec);
         // The request key stays as this member's KEM key: grants of later
@@ -1358,6 +1396,9 @@ impl Engine {
             download_log: None,
             meta_caps: crate::fsmeta::Caps::here(),
             scan_extra: (0, 0),
+            role_guard_off: false,
+            platform_override: None,
+            version_override: None,
         };
         let (pending, pending_lost) = ledger_upkeep::load_deferred(home);
         engine.pending = pending;
@@ -1986,6 +2027,7 @@ impl Engine {
             removed_utc: 0,
             epoch_keys: BTreeMap::new(),
             backup: None,
+            share_join: None,
         };
         let id = rec.folder_id.clone();
         folder_safety::write_marker(path, &rec)?;
@@ -3461,6 +3503,15 @@ impl Engine {
             folder: rec.name.clone(),
             ..Default::default()
         };
+        if self.share_read_only(&rec) {
+            // A viewer publishes nothing for the folder; local changes are
+            // kept aside and the shared version comes back on the next pull.
+            report.read_only = true;
+            report.kept_aside = self.read_only_guard(&rec, &root, &mut state)?;
+            report.batch_seq = self.commit_batch()?;
+            self.save_state(&rec.folder_id, &state)?;
+            return Ok(report);
+        }
         let (scanned, changed) = self.scan(&rec, &root, &mut state)?;
         report.files_scanned = scanned;
         report.files_changed = changed;
@@ -4057,13 +4108,14 @@ impl Engine {
         }
         let seq = state.published_seq + 1;
         let lamport = self.tick()?;
+        let created_utc = util::now_utc();
         let m = Manifest {
             format_version: crate::FORMAT_VERSION,
             folder: rec.folder_id.clone(),
             device: self.vault.device_id.clone(),
             seq,
             lamport,
-            created_utc: util::now_utc(),
+            created_utc,
             files: state.files.clone(),
         };
         let blob = m.seal(&self.vault.vault_id, &self.folder_keys(rec)?.meta)?;
@@ -4087,6 +4139,8 @@ impl Engine {
         });
         state.published_seq = seq;
         state.published_hash = hash;
+        // This device's own versions enter its change history as published.
+        let _ = self.history_from_own(rec, state, created_utc);
         Ok(Some(seq))
     }
 
@@ -4105,7 +4159,11 @@ impl Engine {
             folder: rec.name.clone(),
             ..Default::default()
         };
-        self.scan(&rec, &root, &mut state)?;
+        if self.share_read_only(&rec) {
+            report.kept_aside = self.read_only_guard(&rec, &root, &mut state)?;
+        } else {
+            self.scan(&rec, &root, &mut state)?;
+        }
         let forks = self.pull_ledger_once()?;
         report.forked_devices = forks.iter().map(|d| d.to_string()).collect();
         if !self.keyring.folders.contains_key(&rec.folder_id) {
@@ -4118,7 +4176,9 @@ impl Engine {
         let _task = activity::start(activity::DOWNLOAD, &rec.name, 0, activity::Unit::Bytes);
         let encrypted_here = self.mount_is_encrypted(&rec.folder_id);
         // Send-only: other devices' changes are noted, never applied here.
-        let send_only = self.mount_mode(&rec.folder_id) == crate::vault::FolderMode::SendOnly;
+        // A read-only shared folder takes every change (`share_roles`).
+        let send_only = self.mount_mode(&rec.folder_id) == crate::vault::FolderMode::SendOnly
+            && !self.share_read_only(&rec);
 
         // Files whose copies were unreachable last time: a storage or a peer
         // may have them now. Newest first, like every download.
@@ -4208,9 +4268,40 @@ impl Engine {
             self.view()?.manifests
         };
         let metas = fk.meta_keys();
+        // Changes made by read-only members (after they stopped being
+        // editors) are not taken, even when another device relays them.
+        let viewer_clocks = self.share_viewer_clocks(&rec);
+        let refused = |f: &FileState| {
+            viewer_clocks
+                .get(&f.modified_by)
+                .is_some_and(|c| f.modified_clock > *c)
+        };
+        // Change history (`changes_ops`): started once from what is held,
+        // then fed by every manifest taken. Never in the way of syncing.
+        let mut hist = self.open_history(&rec.folder_id);
+        let _ = self.history_backfill(&mut hist, &rec, &state, &storages);
         for (dev, (seq, idx)) in newest {
             if !self.share_manifest_source_ok(&rec, &dev) {
                 // A device that is not a participant of the shared folder.
+                continue;
+            }
+            if self.devices.devices.contains_key(&dev)
+                && !self.is_revoked(&dev)
+                && !self.trusted(&dev)
+            {
+                // A device of the vault that is not trusted: not in the
+                // organization's roster, on a platform its policy refuses,
+                // or enrolled with an old key. What it writes is not taken
+                // (its manifest stays unread until it is trusted again).
+                continue;
+            }
+            if !self.share_writer_ok(&rec, &dev) {
+                // A read-only member: what it publishes is not taken. Its
+                // manifest stays unread (`last_seen` does not move), so a
+                // later role as editor takes its newest one.
+                if seq > state.last_seen.get(&dev).copied().unwrap_or(0) {
+                    report.writes_refused.push(self.member_name(&dev));
+                }
                 continue;
             }
             let seq = if self.is_revoked(&dev) {
@@ -4250,13 +4341,16 @@ impl Engine {
             entries.sort_by(|a, b| b.1.mtime.cmp(&a.1.mtime).then(a.0.cmp(b.0)));
             if send_only {
                 for (path, remote) in &entries {
-                    if !matches!(
-                        manifest::merge(state.files.get(*path), remote),
-                        Merge::KeepLocal
-                    ) {
+                    if !refused(remote)
+                        && !matches!(
+                            manifest::merge(state.files.get(*path), remote),
+                            Merge::KeepLocal
+                        )
+                    {
                         state.not_applied.insert((*path).clone(), (*remote).clone());
                     }
                 }
+                let _ = self.history_from_manifest(&mut hist, &m, &blob, &refused);
                 report.manifests_applied += 1;
                 state.last_seen.insert(dev, seq);
                 continue;
@@ -4280,6 +4374,9 @@ impl Engine {
                 if Self::skip_ignored(&mut ignore, &mut state, remote, &mut report) {
                     continue;
                 }
+                if refused(remote) {
+                    continue;
+                }
                 self.merge_one(
                     &rec,
                     &fk,
@@ -4291,11 +4388,13 @@ impl Engine {
                     &mut report,
                 )?;
             }
+            let _ = self.history_from_manifest(&mut hist, &m, &blob, &refused);
             state.last_seen.insert(dev, seq);
             // Whatever was fetched ahead and not used (a file that failed
             // earlier in its batch) is not kept past its manifest.
             self.prefetched.clear();
         }
+        let _ = hist.save();
         if encrypted_here {
             self.cache_wanted(&rec, &fk, &mut state, &storages, &mut report)?;
         }
@@ -4952,6 +5051,9 @@ impl Engine {
         }
         fsmeta::make_replaceable(disk);
         fs::rename(&tmp, disk)?;
+        if self.share_read_only(rec) {
+            share_roles::set_read_only(disk, true);
+        }
         Ok(())
     }
 
@@ -5059,6 +5161,7 @@ impl Engine {
     }
 
     fn fetch_file_inner(&mut self, folder: &str, path: &str) -> Result<PullReport> {
+        self.ensure_active()?;
         let (rec, root) = self.resolve_for_write(folder)?;
         if self.mount_is_encrypted(&rec.folder_id) {
             return self.fetch_cached(&rec, path);
@@ -5492,6 +5595,7 @@ impl Engine {
             removed_utc: 0,
             epoch_keys: BTreeMap::new(),
             backup: None,
+            share_join: None,
         };
         folder_safety::write_marker(path, &rec)?;
         self.keyring.folders.insert(folder_id.clone(), rec);
@@ -5965,6 +6069,7 @@ impl Engine {
         let (rec, root) = self.resolve_for_write(folder)?;
         // The file's local name (mapped where this filesystem needs it) is
         // recorded before the scan of the push finds it.
+        self.ensure_share_writable(&rec)?;
         let mut state = self.load_state(&rec.folder_id)?;
         let disk = self.place(&root, &mut state, path, None)?;
         self.save_state(&rec.folder_id, &state)?;
@@ -6019,6 +6124,7 @@ impl Engine {
 
     fn mkdir_inner(&mut self, folder: &str, path: &str) -> Result<()> {
         let (rec, root) = self.resolve_for_write(folder)?;
+        self.ensure_share_writable(&rec)?;
         block_cache::check_rel_path(path)?;
         if self.mount_is_encrypted(&rec.folder_id) {
             return Ok(());
@@ -6048,6 +6154,7 @@ impl Engine {
     }
 
     fn read_file_inner(&mut self, folder: &str, path: &str) -> Result<Vec<u8>> {
+        self.ensure_active()?;
         let (rec, root) = self.resolve_folder(folder)?;
         if self.mount_is_encrypted(&rec.folder_id) {
             // Decrypted in memory, from the block cache where it can.
@@ -6090,7 +6197,8 @@ impl Engine {
     }
 
     fn move_file_only(&mut self, folder: &str, from: &str, to: &str) -> Result<PushReport> {
-        let (_, root) = self.resolve_for_write(folder)?;
+        let (rec, root) = self.resolve_for_write(folder)?;
+        self.ensure_share_writable(&rec)?;
         for p in [from, to] {
             util::check_rel_path(p)?;
         }
@@ -6210,6 +6318,9 @@ impl Engine {
         for (_, push) in out.iter_mut() {
             push.batch_seq = push.batch_seq.or(seq);
         }
+        // System, version and platform, signed (an organization's platform
+        // policy is checked against them); republished only when changed.
+        let _ = self.refresh_device_details();
         // Checkpoints, acknowledgements and pruning; anything left undone
         // (an unreachable storage) is retried after the next sync.
         let _ = self.ledger_upkeep();
@@ -6227,6 +6338,12 @@ impl Engine {
     }
 
     fn sync_folders(&mut self, folder: Option<&str>) -> Result<Vec<(PullReport, PushReport)>> {
+        if self.org_platform_block().is_some() {
+            // Locked out by the organization's platform policy: read a
+            // policy that allows this device again before giving up.
+            let _ = self.pull_registry();
+            let _ = self.sync_membership();
+        }
         self.ensure_active()?;
         // A lost or damaged local ledger is restored before anything else.
         self.ensure_ledger_writable()?;
@@ -6394,6 +6511,7 @@ impl Engine {
                 chunks_verified_elsewhere: verified,
                 published_seq: state.published_seq,
                 shared: rec.shared,
+                read_only: self.share_read_only(&rec),
                 policy: rec.effective_policy().map(|p| p.describe()),
                 strongroom: rec.strongroom.as_ref().map(|_| {
                     match self.unlocked.get(&rec.folder_id) {

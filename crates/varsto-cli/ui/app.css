@@ -975,3 +975,9 @@ body[data-mobile="1"] .rg-details, body[data-mobile="1"] .rg-status, body[data-m
 .folder-settings .fs-checks { display: flex; flex-wrap: wrap; gap: 8px 20px; }
 .folder-settings #fs-local li { display: flex; align-items: center; gap: 8px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 .folder-settings #fs-local li span { flex: 1; overflow-wrap: anywhere; }
+
+/* Recent changes of a folder (Files page) and a file's changes (details). */
+.recent-changes { border: 1px solid var(--border, rgba(127,127,127,.25)); border-radius: 10px; padding: 10px 12px; margin: 8px 0; }
+.rc-form { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
+.rc-form input { flex: 1 1 140px; min-width: 0; }
+.fd-changes { margin-top: 12px; }

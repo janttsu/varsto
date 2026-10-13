@@ -15,7 +15,7 @@
 
 use super::*;
 use crate::share::{
-    self, InviteRecord, RemovedMember, ShareEpochRecord, ShareGrant, ShareKeyRecord,
+    self, InviteRecord, RemovedMember, ShareEpochRecord, ShareGrant, ShareKeyRecord, ShareRole,
     SHARE_EPOCH_BASE,
 };
 use crate::vault::{RequestCode, SealedShareToken, ShareRequest};
@@ -25,42 +25,45 @@ const BOOK_FILE: &str = "shares.json";
 /// What this device knows about one shared folder's members and epochs
 /// (`state/shares.json`; device ids and names, nothing secret).
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
-struct FolderShareState {
+pub(super) struct FolderShareState {
     /// Newest share epoch adopted (0: none yet).
     #[serde(default)]
-    epoch: u32,
+    pub(super) epoch: u32,
     #[serde(default)]
-    issuer: Option<DeviceId>,
+    pub(super) issuer: Option<DeviceId>,
     #[serde(default)]
-    issued_utc: i64,
+    pub(super) issued_utc: i64,
     /// Devices the newest epoch kept.
     #[serde(default)]
-    participants: BTreeSet<DeviceId>,
+    pub(super) participants: BTreeSet<DeviceId>,
     /// The owner's devices (from the token, then from each epoch record):
     /// on a member, only they can hand out new keys.
     #[serde(default)]
-    owners: BTreeSet<DeviceId>,
+    pub(super) owners: BTreeSet<DeviceId>,
     /// Member devices accepted for this folder.
     #[serde(default)]
-    members: BTreeSet<DeviceId>,
+    pub(super) members: BTreeSet<DeviceId>,
     /// Members removed, with the time and the device that removed them.
     #[serde(default)]
-    removed: BTreeMap<DeviceId, RemovedInfo>,
+    pub(super) removed: BTreeMap<DeviceId, RemovedInfo>,
     #[serde(default)]
-    revoked_invites: BTreeSet<String>,
+    pub(super) revoked_invites: BTreeSet<String>,
     #[serde(default)]
-    kept_invites: BTreeSet<String>,
+    pub(super) kept_invites: BTreeSet<String>,
     /// Recipients known to hold a grant for `epoch` (owner devices only).
     #[serde(default)]
-    granted: BTreeSet<String>,
+    pub(super) granted: BTreeSet<String>,
     /// Member device: a newer epoch exists and no grant for it reached
     /// this device (it was removed, or nobody sealed the key to it yet).
     #[serde(default)]
-    access_lost: bool,
+    pub(super) access_lost: bool,
+    /// The newest verified role record (`share_roles`); none: everyone writes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) roles: Option<crate::share::ShareRoles>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-struct RemovedInfo {
+pub(super) struct RemovedInfo {
     name: String,
     cutoff_seq: u64,
     removed_utc: i64,
@@ -69,9 +72,9 @@ struct RemovedInfo {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
-struct ShareBook {
+pub(super) struct ShareBook {
     #[serde(default)]
-    folders: BTreeMap<FolderId, FolderShareState>,
+    pub(super) folders: BTreeMap<FolderId, FolderShareState>,
 }
 
 /// One entry of a shared folder's access list.
@@ -90,6 +93,10 @@ pub struct ShareMember {
     pub since_utc: i64,
     pub removed_utc: Option<i64>,
     pub removed_by: Option<String>,
+    /// `owner` (the owner's devices), `editor` or `viewer`; for a token,
+    /// the role it gives.
+    #[serde(default)]
+    pub role: String,
 }
 
 /// Who has access to a shared folder.
@@ -102,6 +109,12 @@ pub struct ShareMembers {
     pub members: Vec<ShareMember>,
     /// This member device no longer receives new content of the folder.
     pub access_lost: bool,
+    /// This device's role: `owner`, `editor` or `viewer`.
+    #[serde(default)]
+    pub this_role: String,
+    /// The folder has a role record: members it does not list are viewers.
+    #[serde(default)]
+    pub roles_in_use: bool,
 }
 
 /// What a removal did.
@@ -123,11 +136,11 @@ pub struct ShareRevokeReport {
 impl Engine {
     // ----- local book ---------------------------------------------------------
 
-    fn share_book(&self) -> ShareBook {
+    pub(super) fn share_book(&self) -> ShareBook {
         util::read_json_or_default(&self.home.join("state").join(BOOK_FILE)).unwrap_or_default()
     }
 
-    fn save_share_book(&self, book: &ShareBook) -> Result<()> {
+    pub(super) fn save_share_book(&self, book: &ShareBook) -> Result<()> {
         fs::create_dir_all(self.home.join("state"))?;
         util::write_json(&self.home.join("state").join(BOOK_FILE), book)
     }
@@ -153,7 +166,7 @@ impl Engine {
         }
     }
 
-    fn newest_share_epoch(rec: &FolderRecord) -> u32 {
+    pub(super) fn newest_share_epoch(rec: &FolderRecord) -> u32 {
         rec.epoch_keys
             .keys()
             .copied()
@@ -254,7 +267,7 @@ impl Engine {
     }
 
     /// The owner's current full devices (this one included).
-    fn owner_devices(&self) -> BTreeSet<DeviceId> {
+    pub(super) fn owner_devices(&self) -> BTreeSet<DeviceId> {
         let mut out: BTreeSet<DeviceId> = self
             .devices
             .devices
@@ -281,7 +294,7 @@ impl Engine {
         self.save_share_book(&book)
     }
 
-    fn save_keyring_now(&self) -> Result<()> {
+    pub(super) fn save_keyring_now(&self) -> Result<()> {
         self.keyring.save(
             &self.home,
             &self.keys,
@@ -305,6 +318,14 @@ impl Engine {
     }
 
     fn share_create_plain_inner(&mut self, folder: &str) -> Result<ShareToken> {
+        if let Some(rec) = self.keyring.find(folder) {
+            if self.share_roles(&rec.folder_id).is_some() {
+                bail!(
+                    "{} has read-only members, and a plain token cannot say what its holder may do; ask the recipient for a request code (varsto share request) and seal the token to it",
+                    rec.name
+                );
+            }
+        }
         let t = self.share_prepare(folder)?;
         t.encode_plain()?;
         let mut tag = [0u8; 8];
@@ -317,6 +338,8 @@ impl Engine {
             fingerprint: String::new(),
             issuer: self.vault.device_id.clone(),
             issued_utc: util::now_utc(),
+            role: ShareRole::Editor,
+            join_secret_hex: String::new(),
         })?;
         Ok(t)
     }
@@ -331,8 +354,21 @@ impl Engine {
         code: &str,
         confirmed: Option<&str>,
     ) -> Result<(SealedShareToken, RequestCode)> {
+        self.share_create_sealed_as(folder, code, confirmed, ShareRole::Editor)
+    }
+
+    /// `share_create_sealed` giving the recipient `role`. A viewer reads the
+    /// folder; nothing it publishes is accepted by the owner's devices or
+    /// the editors (`share_roles`).
+    pub fn share_create_sealed_as(
+        &mut self,
+        folder: &str,
+        code: &str,
+        confirmed: Option<&str>,
+        role: ShareRole,
+    ) -> Result<(SealedShareToken, RequestCode)> {
         crate::logged_op_plain!("share create sealed", folder, {
-            self.share_create_sealed_inner(folder, code, confirmed)
+            self.share_create_sealed_inner(folder, code, confirmed, role)
         })
     }
 
@@ -341,6 +377,7 @@ impl Engine {
         folder: &str,
         code: &str,
         confirmed: Option<&str>,
+        role: ShareRole,
     ) -> Result<(SealedShareToken, RequestCode)> {
         let req = ShareRequest::parse(code)?;
         if let Some(c) = confirmed {
@@ -352,17 +389,29 @@ impl Engine {
             }
         }
         let mut t = self.share_prepare(folder)?;
+        let invite = share::invite_id(&req.key);
+        let secret = SecretKey::random();
         t.fingerprint = req.fingerprint.clone();
+        t.role = role;
+        t.invite = invite.clone();
+        t.join_secret_hex = secret.to_hex();
         let sealed = t.seal(&req.key)?;
         self.publish_invite(InviteRecord {
             folder: t.folder_id.clone(),
-            invite: share::invite_id(&req.key),
+            invite,
             request_hex: hex::encode(req.key.to_bytes()),
             name: req.name.clone(),
             fingerprint: req.fingerprint.clone(),
             issuer: self.vault.device_id.clone(),
             issued_utc: util::now_utc(),
+            role,
+            join_secret_hex: secret.to_hex(),
         })?;
+        // The first viewer: from now on a member is a writer only when a
+        // role record says so; the members there are now stay editors.
+        if role == ShareRole::Viewer && self.share_roles(&t.folder_id).is_none() {
+            self.start_share_roles(&t.folder_id)?;
+        }
         Ok((sealed, req))
     }
 
@@ -386,7 +435,7 @@ impl Engine {
         Ok(())
     }
 
-    fn invites(&self, folder: &FolderId) -> Result<BTreeMap<String, InviteRecord>> {
+    pub(super) fn invites(&self, folder: &FolderId) -> Result<BTreeMap<String, InviteRecord>> {
         let mut out = BTreeMap::new();
         if self.vault.member {
             return Ok(out);
@@ -445,6 +494,22 @@ impl Engine {
                         &member_record_key(&f.folder_id, e, &own.device_id),
                         &own.seal(vault_id, &rk)?,
                     )?;
+                }
+            }
+            if let Some(j) = f.share_join.as_ref().filter(|_| self.vault.member) {
+                // Ties this device to the invitation it came through, so the
+                // owner's devices know which role it was given.
+                if let Ok(secret) = SecretKey::from_hex(&j.secret_hex) {
+                    let key = share::JoinProof::storage_key(&f.folder_id, &own.device_id);
+                    if !backend.exists(&key)? {
+                        let proof = share::JoinProof::make(
+                            &secret,
+                            &f.folder_id,
+                            &own.device_id,
+                            &j.invite,
+                        );
+                        backend.put_if_absent(&key, &serde_json::to_vec(&proof)?)?;
+                    }
                 }
             }
             if self.vault.member {
@@ -510,7 +575,16 @@ impl Engine {
                 book_changed |= b;
             }
         }
-        // 3. Owner devices: seal the newest key to members that lack it.
+        // 3. Who may write: the newest role record, then (owner devices)
+        //    new members listed under the role of their invitation.
+        book_changed |= self.pull_share_roles(&storages, &mut book)?;
+        if !self.vault.member {
+            book_changed |= self.pin_share_roles(&storages, &mut book)?;
+        }
+        if book_changed {
+            changed_devices |= self.refresh_share_viewers(&book)?;
+        }
+        // 4. Owner devices: seal the newest key to members that lack it.
         if !self.vault.member {
             let shared: Vec<FolderRecord> = self
                 .keyring
@@ -809,7 +883,10 @@ impl Engine {
     /// The signing key of a device as this device knows it: the vault
     /// registry on the owner's devices, the folder's member records on a
     /// member (where the owner's devices publish theirs too).
-    fn share_issuer_key(&self, issuer: &DeviceId) -> Option<crate::crypto::VerifyingKey> {
+    pub(super) fn share_issuer_key(
+        &self,
+        issuer: &DeviceId,
+    ) -> Option<crate::crypto::VerifyingKey> {
         if issuer == &self.vault.device_id {
             return Some(self.keys.signer.public());
         }
@@ -1007,7 +1084,7 @@ impl Engine {
     }
 
     /// A member's KEM key as it published it, checked against its record.
-    fn member_kem_key(
+    pub(super) fn member_kem_key(
         &self,
         storages: &OpenStorages,
         folder: &FolderId,
@@ -1161,7 +1238,7 @@ impl Engine {
         Ok(report)
     }
 
-    fn member_name(&self, d: &DeviceId) -> String {
+    pub(super) fn member_name(&self, d: &DeviceId) -> String {
         self.devices
             .members
             .get(d)
@@ -1267,6 +1344,7 @@ impl Engine {
                 since_utc: 0,
                 removed_utc: None,
                 removed_by: None,
+                role: "owner".into(),
             });
             for (id, r) in self.devices.devices.iter().filter(|(d, _)| self.trusted(d)) {
                 if id == me {
@@ -1282,6 +1360,7 @@ impl Engine {
                     since_utc: r.enrolled_utc,
                     removed_utc: None,
                     removed_by: None,
+                    role: "owner".into(),
                 });
             }
         }
@@ -1301,6 +1380,7 @@ impl Engine {
                     since_utc: 0,
                     removed_utc: None,
                     removed_by: None,
+                    role: "owner".into(),
                 });
             }
         }
@@ -1346,6 +1426,13 @@ impl Engine {
                     .unwrap_or(0),
                 removed_utc: removed.map(|r| r.removed_utc),
                 removed_by: removed.map(|r| self.device_name(&r.by)),
+                role: if id == me {
+                    self.share_own_role(&rec.folder_id)
+                } else {
+                    Self::role_in(&st, id)
+                }
+                .as_str()
+                .into(),
             });
         }
         for (id, inv) in &invites {
@@ -1371,6 +1458,7 @@ impl Engine {
                 since_utc: inv.issued_utc,
                 removed_utc: None,
                 removed_by: None,
+                role: inv.role.as_str().into(),
             });
         }
         Ok(ShareMembers {
@@ -1379,6 +1467,12 @@ impl Engine {
             share_epoch: Self::newest_share_epoch(&rec),
             members: out,
             access_lost: st.access_lost,
+            this_role: if self.vault.member {
+                self.share_own_role(&rec.folder_id).as_str().into()
+            } else {
+                "owner".into()
+            },
+            roles_in_use: st.roles.is_some(),
         })
     }
 

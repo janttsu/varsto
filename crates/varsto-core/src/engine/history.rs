@@ -496,6 +496,8 @@ impl Engine {
         self.ensure_active()?;
         self.trash_refresh(true)?;
         let (rec, root) = self.resolve_for_write(folder)?;
+        // A read-only member restores nothing into the shared folder.
+        self.ensure_share_writable(&rec)?;
         if self.mount_mode(&rec.folder_id) == crate::vault::FolderMode::ReceiveOnly {
             // A restored file would be a local change this device does not
             // publish (`folder_safety`).

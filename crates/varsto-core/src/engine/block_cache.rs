@@ -228,6 +228,7 @@ impl Engine {
     /// `None` when the folder keeps plain files on this device.
     pub fn block_writer(&self, folder: &str) -> Result<Option<BlockWriter>> {
         let (rec, _) = self.resolve_folder(folder)?;
+        self.ensure_share_writable(&rec)?;
         if !self.mount_is_encrypted(&rec.folder_id) {
             return Ok(None);
         }
@@ -246,6 +247,7 @@ impl Engine {
     ) -> Result<PushReport> {
         check_rel_path(path)?;
         let (rec, _) = self.resolve_folder(folder)?;
+        self.ensure_share_writable(&rec)?;
         if staged.folder != rec.folder_id {
             bail!("the staged file belongs to another folder");
         }

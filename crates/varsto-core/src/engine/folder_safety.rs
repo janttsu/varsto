@@ -615,6 +615,12 @@ impl Engine {
     /// Set the folder's mode on this device.
     pub fn set_folder_mode(&mut self, folder: &str, mode: FolderMode) -> Result<()> {
         let (rec, _) = self.resolve_folder(folder)?;
+        if mode == FolderMode::SendOnly && self.share_read_only(&rec) {
+            bail!(
+                "{} is shared with this device read-only: it publishes nothing, so it cannot be send-only",
+                rec.name
+            );
+        }
         if mode == FolderMode::ReceiveOnly && self.mount_is_encrypted(&rec.folder_id) {
             bail!(
                 "{} keeps its files encrypted on this device: receive-only is for folders with plain files",

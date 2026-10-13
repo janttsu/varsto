@@ -911,7 +911,7 @@ pub(crate) fn folder_safety_action(engine: &mut Engine, input: &Value) -> Result
     let folder = s(input, "folder")?;
     let action = s(input, "action")?;
     Ok(match action.as_str() {
-        "changes" => serde_json::to_value(engine.folder_changes(&folder)?)?,
+        "pending" => serde_json::to_value(engine.folder_changes(&folder)?)?,
         "repair-marker" => {
             let path = engine.repair_marker(&folder)?;
             json!({"ok": true, "path": path})
@@ -1578,14 +1578,21 @@ fn api_unlocked(
         }
         (Method::Post, "/api/share/create") => {
             let folder = s(input, "folder")?;
+            let role = match opt(input, "role").filter(|r| !r.trim().is_empty()) {
+                Some(r) => varsto_core::share::ShareRole::parse(&r)?,
+                None => varsto_core::share::ShareRole::Editor,
+            };
             match opt(input, "to").filter(|c| !c.trim().is_empty()) {
                 Some(code) => {
                     // The interface sends the words the user confirmed; they
                     // must be the code's.
                     let confirmed = opt(input, "fingerprint").filter(|f| !f.trim().is_empty());
                     let (sealed, req) =
-                        engine.share_create_sealed(&folder, &code, confirmed.as_deref())?;
-                    Ok(json!({"ok": true, "token": sealed.encode(), "folder": sealed.name, "sealed": true, "fingerprint": req.fingerprint, "name": req.name}))
+                        engine.share_create_sealed_as(&folder, &code, confirmed.as_deref(), role)?;
+                    Ok(json!({"ok": true, "token": sealed.encode(), "folder": sealed.name, "sealed": true, "fingerprint": req.fingerprint, "name": req.name, "role": role.as_str()}))
+                }
+                None if !role.is_editor() => {
+                    bail!("a viewer's token must be sealed to their request code: paste it (a plain token cannot say what its holder may do)")
                 }
                 None => {
                     let t = engine.share_create_plain(&folder)?;
@@ -1597,6 +1604,12 @@ fn api_unlocked(
             let folder = query_param(query, "folder")
                 .ok_or_else(|| anyhow!("folder query parameter required"))?;
             Ok(serde_json::to_value(engine.share_members(&folder)?)?)
+        }
+        (Method::Post, "/api/share/role") => {
+            let role = varsto_core::share::ShareRole::parse(&s(input, "role")?)?;
+            let r = engine.share_set_role(&s(input, "folder")?, &s(input, "member")?, role)?;
+            service.request_sync();
+            Ok(serde_json::to_value(r)?)
         }
         (Method::Post, "/api/share/revoke") => {
             // Like removing a device: the caller must confirm explicitly.
@@ -1654,7 +1667,7 @@ fn api_unlocked(
         }
         (Method::Post, "/api/org/fingerprint") => {
             let r = varsto_core::org::OrgRequest::parse(&s(input, "code")?)?;
-            Ok(json!({"fingerprint": r.fingerprint, "name": r.name, "device_id": r.device.to_string()}))
+            Ok(json!({"fingerprint": r.fingerprint, "name": r.name, "device_id": r.device.to_string(), "platform": r.platform}))
         }
         (Method::Post, "/api/org/approve") => {
             let fp = opt(input, "fingerprint").filter(|f| !f.trim().is_empty());
@@ -2181,6 +2194,25 @@ fn api_unlocked(
             let r = r?;
             service.request_sync();
             Ok(serde_json::to_value(r)?)
+        }
+        // Change history of a folder or a file (`varsto changes`).
+        (Method::Get, "/api/changes") => {
+            let folder = query_param(query, "folder")
+                .ok_or_else(|| anyhow!("folder query parameter required"))?;
+            let since_utc = query_param(query, "since")
+                .filter(|s| !s.is_empty())
+                .map(|s| varsto_core::changes::parse_since(&s, varsto_core::util::now_utc()))
+                .transpose()?;
+            let q = varsto_core::engine::ChangesQuery {
+                path: query_param(query, "path").filter(|s| !s.is_empty()),
+                device: query_param(query, "device").filter(|s| !s.is_empty()),
+                user: query_param(query, "user").filter(|s| !s.is_empty()),
+                since_utc,
+                limit: query_param(query, "limit")
+                    .and_then(|l| l.parse().ok())
+                    .unwrap_or(200),
+            };
+            Ok(serde_json::to_value(engine.changes(&folder, &q)?)?)
         }
         (Method::Get, "/api/files") => {
             let folder = query_param(query, "folder")
@@ -2781,7 +2813,7 @@ fn api_unlocked(
         (Method::Post, "/api/folder/safety") => {
             let action = s(input, "action")?;
             let out = folder_safety_action(engine, input)?;
-            if action != "changes" {
+            if action != "pending" {
                 service.folders_changed = true;
                 service.request_sync();
             }
