@@ -57,6 +57,9 @@ pub const DATA_MOVE: &str = "data_move";
 pub const STORAGE_REMOVAL: &str = "storage_removal";
 /// Bit-rot check; steps "storage", "disk", "files" and "cache".
 pub const SCRUB: &str = "scrub";
+/// A backup with restic (`crate::restic`); steps "check" (the mirror is
+/// complete), "backup", "forget" and "repo_check" (`restic check`).
+pub const RESTIC: &str = "restic";
 
 /// What `done` and `total` count.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -466,6 +469,10 @@ pub fn describe(t: &TaskView) -> String {
         (SCRUB, "files") => format!("checking the files of folder «{s}» for bit rot"),
         (SCRUB, "cache") => "checking the block cache for bit rot".to_string(),
         (SCRUB, _) => format!("checking storage «{s}» for bit rot"),
+        (RESTIC, "backup") => "backing up the mirror with restic".to_string(),
+        (RESTIC, "forget") => "removing old restic snapshots".to_string(),
+        (RESTIC, "repo_check") => "checking the restic repository".to_string(),
+        (RESTIC, _) => "checking that the restic mirror is complete".to_string(),
         (k, _) if s.is_empty() => k.replace('_', " "),
         (k, _) => format!("{} «{s}»", k.replace('_', " ")),
     };

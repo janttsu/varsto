@@ -1235,6 +1235,10 @@ pub struct Config {
     /// Backups this device is the source of: what it backs up and when.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub backups: Vec<BackupSource>,
+    /// Backups with restic: this device keeps the plaintext mirror
+    /// (`crate::restic`, `engine::restic_mirror`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub restic: Option<crate::restic::ResticConfig>,
 }
 
 /// A backup taken on this device (local, never published).
