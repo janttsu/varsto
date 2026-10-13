@@ -81,7 +81,7 @@
     document.querySelectorAll("[data-org-only]").forEach(function (b) { b.classList.add("hidden"); });
     lastStatus = null;
   }
-  function show(section) { if (section === "setup") { clearVaultViews(); } ["setup", "unlock", "app"].forEach(function (id) { $(id).classList.toggle("hidden", id !== section); }); $("lock").classList.toggle("hidden", section !== "app"); document.body.dataset.view = section; if (section !== "app") { $("pagetitle").textContent = section === "setup" ? "Welcome" : "Locked"; } else { $("pagetitle").textContent = pageTitle(currentPage); } trafficWatch(); }
+  function show(section) { if (section === "setup") { clearVaultViews(); } ["setup", "unlock", "app"].forEach(function (id) { $(id).classList.toggle("hidden", id !== section); }); $("lock").classList.toggle("hidden", section !== "app"); document.body.dataset.view = section; if (section !== "app") { $("pagetitle").textContent = section === "setup" ? "Welcome" : "Locked"; } else { $("pagetitle").textContent = pageTitle(currentPage); } trafficWatch(); activityWatch(); }
   function fmtBytes(n) { var u = ["B", "KiB", "MiB", "GiB", "TiB"]; var i = 0; while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; } return n.toFixed(i ? 1 : 0) + " " + u[i]; }
   function fmtDate(t) { return t ? new Date(t * 1000).toLocaleDateString() : ""; }
   function formData(form) { var o = {}; new FormData(form).forEach(function (v, k) { o[k] = v; }); form.querySelectorAll("input[type=checkbox]").forEach(function (c) { o[c.name] = c.checked; }); return o; }
@@ -295,6 +295,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     if (page === "backups") { loadBackups(); }
     if (page === "overview" && lastWhere) { renderWhere(lastWhere); }
     trafficWatch();
+    activityWatch();
     if (page === "files") { ensureFiles(); }
     if (page === "settings" && droid && lastStatus) { refreshAllFiles(); }
     window.scrollTo(0, 0);
@@ -344,6 +345,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
         body.appendChild(el("div", "li-sub", d.revoked
           ? "Removed by " + d.revoked_by + " on " + fmtDate(d.revoked_utc) + (d.wipe_ordered ? ", wipe ordered" : "") + " · " + d.device_id.slice(0, 8)
           : [deviceSystem(d), "added " + fmtDate(d.enrolled_utc), d.device_id.slice(0, 8)].filter(Boolean).join(" · ")));
+        if (!d.revoked) { var act = el("div", "li-activity"); act.dataset.device = d.device_id; body.appendChild(act); }
         li.appendChild(body);
         if (!d.this_device && !d.revoked) {
           var a = el("div", "li-actions"); var b = el("button", "secondary danger", "Remove device…"); b.type = "button";
@@ -351,6 +353,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
         }
         ul.appendChild(li);
       });
+      if (lastActivity) { renderActivity(lastActivity); }
     }).catch(function (e) { log("error: " + e.message); });
   }
   function ago(t) {
@@ -2130,6 +2133,108 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     }).catch(function () {});
   }
   $("p2pbox").ontoggle = function () { if ($("p2pbox").open) { loadP2p(); } };
+  // Live activity (Overview "Now" card, Devices page): /api/activity every two
+  // seconds while one of them is shown. Asking is what keeps the service
+  // asking the other devices; nobody watching, nothing is asked. A sentence
+  // per task comes from a translated template with the name put in untranslated.
+  var ACT_TEMPLATES = {
+    "sync_scan": "Looking for changes in folder «{s}»",
+    "upload": "Uploading folder «{s}»",
+    "download": "Fetching changes to folder «{s}»",
+    "disk_check": "Checking disk «{s}»",
+    "disk_check.verify": "Checking the blocks of disk «{s}»",
+    "disk_check.fill": "Filling disk «{s}»",
+    "disk_fill": "Filling disk «{s}»",
+    "backup_snapshot": "Taking a snapshot of backup «{s}»",
+    "restore": "Restoring backup «{s}»",
+    "repair": "Repairing damaged block copies",
+    "verify": "Verifying stored blocks",
+    "fsck": "Checking the vault",
+    "fsck.verify": "Verifying every block of the vault",
+    "data_move": "Moving the data of folder «{s}»",
+    "storage_removal": "Copying blocks off storage «{s}»",
+    "storage_removal.delete": "Deleting the data on storage «{s}»"
+  };
+  var actTimer = null, actBusy = false, lastActivity = null;
+  function actTr(s) { return window.varstoLang ? window.varstoLang.t(s) : s; }
+  function actRaw(text, cls) { var x = el("span", cls || null, text); x.setAttribute("data-no-i18n", ""); return x; }
+  // "Checking the blocks of disk «{s}»" in the page's language, the name as data.
+  function actSentence(t) {
+    var tpl = ACT_TEMPLATES[t.kind + "." + t.phase] || ACT_TEMPLATES[t.kind] || (t.kind.replace(/_/g, " ") + (t.subject ? " «{s}»" : ""));
+    var out = el("span", "act-what"); out.setAttribute("data-no-i18n", "");
+    var parts = actTr(tpl).split("{s}");
+    parts.forEach(function (p, i) { if (p) { out.appendChild(document.createTextNode(p)); } if (i < parts.length - 1) { out.appendChild(actRaw(t.subject || "")); } });
+    if (t.detail) { out.appendChild(document.createTextNode(" (")); out.appendChild(actRaw(t.detail)); out.appendChild(document.createTextNode(")")); }
+    return out;
+  }
+  function actTime(t) {
+    var lang = window.varstoLang ? window.varstoLang.get() : undefined;
+    try { return new Date(t * 1000).toLocaleTimeString(lang, { hour: "2-digit", minute: "2-digit" }); } catch (e) { return new Date(t * 1000).toLocaleTimeString(); }
+  }
+  function actCount(t, n) { return t.unit === "bytes" ? fmtBytes(n) : String(n); }
+  // One task: the sentence, its numbers, and a bar (moving when the total is unknown).
+  function actTask(t, who) {
+    var box = el("div", "act");
+    var head = el("div", "act-head");
+    if (who) { head.appendChild(actRaw(who, "act-who")); }
+    head.appendChild(actSentence(t));
+    var meta = [];
+    if (t.percent !== null && t.percent !== undefined) { meta.push(t.percent + " %"); meta.push(actCount(t, t.done) + " / " + actCount(t, t.total)); }
+    else if (t.done > 0) { meta.push(actCount(t, t.done)); }
+    if (t.rate > 0) { meta.push(t.unit === "bytes" ? fmtRate(t.rate) : t.rate + "/s"); }
+    var m = actRaw(meta.join(" · "), "act-meta"); head.appendChild(m);
+    if (t.eta_utc) { var e = el("span", "act-meta"); e.setAttribute("data-no-i18n", ""); e.textContent = actTr("ready about {t}").replace("{t}", actTime(t.eta_utc)); head.appendChild(e); }
+    box.appendChild(head);
+    var bar = el("div", "act-bar" + (t.percent === null || t.percent === undefined ? " indeterminate" : "")); var fill = el("i"); if (t.percent !== null && t.percent !== undefined) { fill.style.width = t.percent + "%"; } bar.appendChild(fill);
+    box.appendChild(bar);
+    return box;
+  }
+  // A peer that cannot tell right now: why, with what it said last when there is something.
+  function actNote(p) {
+    if (p.status === "ok" && !p.stale) { return null; }
+    if (p.status === "ok" || (p.status === "unreachable" && p.activity)) { return "Last heard " + (p.age_secs || 0) + " s ago, not answering now"; }
+    return { unreachable: "Not reachable", unsupported: "Runs an older version that does not tell", refused: "Does not share its activity with this device", pending: "Asking…" }[p.status] || null;
+  }
+  function renderActivity(r) {
+    lastActivity = r;
+    var me = r.me || { tasks: [] };
+    var peers = r.peers || [];
+    // Overview: every busy device, this one first; hidden when all are idle.
+    var ul = $("nowlist"); ul.innerHTML = "";
+    var rows = [];
+    if ((me.tasks || []).length) { rows.push({ who: me.name || actTr("This device"), tasks: me.tasks }); }
+    peers.forEach(function (p) { var ts = (p.activity && p.activity.tasks) || []; if (ts.length && p.status === "ok") { rows.push({ who: p.name || p.device.slice(0, 8), tasks: ts, note: actNote(p) }); } });
+    rows.forEach(function (row) {
+      var li = el("li");
+      row.tasks.forEach(function (t) { li.appendChild(actTask(t, row.who)); });
+      if (row.note) { li.appendChild(el("div", "li-sub", row.note)); }
+      ul.appendChild(li);
+    });
+    $("nowcard").classList.toggle("hidden", !rows.length);
+    // Devices page: under each device, its tasks or why it cannot tell.
+    document.querySelectorAll("#devicelist .li-activity").forEach(function (box) {
+      box.innerHTML = "";
+      var id = box.dataset.device;
+      var tasks = [], note = null;
+      if (me.device === id) { tasks = me.tasks || []; }
+      else {
+        var p = peers.filter(function (x) { return x.device === id; })[0];
+        if (p) { tasks = (p.activity && p.activity.tasks) || []; note = actNote(p); if (p.status !== "ok" && p.status !== "unreachable") { tasks = []; } }
+      }
+      tasks.forEach(function (t) { box.appendChild(actTask(t, null)); });
+      if (note && (tasks.length || note !== "Asking…")) { box.appendChild(el("div", "li-sub muted small", note)); }
+    });
+  }
+  function activityWanted() { return (currentPage === "overview" || currentPage === "peers") && document.body.dataset.view === "app" && document.visibilityState !== "hidden"; }
+  function activityWatch() {
+    if (!activityWanted()) { if (actTimer) { clearTimeout(actTimer); actTimer = null; } return; }
+    if (actTimer || actBusy) { return; }
+    actBusy = true;
+    api("GET", "/api/activity").then(renderActivity).catch(function () {}).then(function () {
+      actBusy = false;
+      if (activityWanted() && !actTimer) { actTimer = setTimeout(function () { actTimer = null; activityWatch(); }, 2000); }
+    });
+  }
   // Traffic view (Peers page): /api/p2p/traffic every second while the page is shown.
   // The service answers it without waiting for a sync, so it stays live during long transfers.
   var trafficTimer = null, trafficBusy = false, lastTraffic = null;
@@ -2679,7 +2784,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   }
   document.addEventListener("visibilitychange", function () { if (document.visibilityState === "visible") { refocusNumberField(); } });
   window.varstoResumed = function () { refocusNumberField(); refreshAllFiles(); if (document.body.dataset.view === "app") { refreshStatus(); } };
-  document.addEventListener("visibilitychange", function () { if (document.visibilityState === "visible") { refreshAllFiles(); } trafficWatch(); });
+  document.addEventListener("visibilitychange", function () { if (document.visibilityState === "visible") { refreshAllFiles(); } trafficWatch(); activityWatch(); });
 
   // Reset: wipes this device's vault configuration after the user typed "reset".
   var resetInput = $("resetform").querySelector("input[name=confirm]");

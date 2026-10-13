@@ -128,10 +128,46 @@ fn handle_unlocked(fixed: &Fixed, request: Request) -> Result<Option<Request>> {
         request.respond(Response::from_string("bad host").with_status_code(400))?;
         return Ok(None);
     }
+    let path = request.url().split('?').next().unwrap_or("").to_string();
+    if *request.method() == Method::Post && path == "/api/activity/report" {
+        // A command of this device reports the tasks it runs (answered
+        // here, without the state: a sync may hold it).
+        let mut request = request;
+        let token_ok = request
+            .headers()
+            .iter()
+            .any(|h| h.field.equiv("X-Varsto-Token") && h.value.as_str() == fixed.token);
+        let mut body = String::new();
+        let read = request
+            .as_reader()
+            .take(256 * 1024)
+            .read_to_string(&mut body);
+        #[derive(serde::Deserialize)]
+        struct Report {
+            pid: u32,
+            tasks: Vec<varsto_core::activity::TaskView>,
+        }
+        let parsed = read
+            .ok()
+            .and_then(|_| serde_json::from_str::<Report>(&body).ok());
+        match (token_ok, parsed) {
+            (false, _) => request.respond(json_response(
+                401,
+                &json!({"error": "missing or wrong token; reopen the start URL"}),
+            ))?,
+            (true, None) => {
+                request.respond(json_response(400, &json!({"error": "bad activity report"})))?
+            }
+            (true, Some(r)) => {
+                varsto_core::activity::merge_external(r.pid, r.tasks);
+                request.respond(json_response(200, &json!({"ok": true})))?;
+            }
+        }
+        return Ok(None);
+    }
     if *request.method() != Method::Get {
         return Ok(Some(request));
     }
-    let path = request.url().split('?').next().unwrap_or("").to_string();
     match path.as_str() {
         "/" => request.respond(html(INDEX_HTML))?,
         "/app.js" => request.respond(text(APP_JS, "text/javascript; charset=utf-8"))?,
@@ -139,7 +175,7 @@ fn handle_unlocked(fixed: &Fixed, request: Request) -> Result<Option<Request>> {
         "/i18n/fi.json" => request.respond(text(I18N_FI, "application/json; charset=utf-8"))?,
         "/i18n/sv.json" => request.respond(text(I18N_SV, "application/json; charset=utf-8"))?,
         "/app.css" => request.respond(text(APP_CSS, "text/css; charset=utf-8"))?,
-        "/api/p2p/traffic" | "/api/progress" => {
+        "/api/p2p/traffic" | "/api/progress" | "/api/activity" => {
             let token_ok = request
                 .headers()
                 .iter()
@@ -148,6 +184,18 @@ fn handle_unlocked(fixed: &Fixed, request: Request) -> Result<Option<Request>> {
                 request.respond(json_response(
                     401,
                     &json!({"error": "missing or wrong token; reopen the start URL"}),
+                ))?;
+            } else if path == "/api/activity" {
+                // What this device and the others are doing now. Asking
+                // keeps the service asking the peers for the next 15 s.
+                let peers = varsto_core::activity::global();
+                peers.watch();
+                request.respond(json_response(
+                    200,
+                    &json!({
+                        "me": varsto_core::activity::local_here(),
+                        "peers": peers.report(),
+                    }),
                 ))?;
             } else if path == "/api/progress" {
                 // The download running now, answered while it holds the engine.

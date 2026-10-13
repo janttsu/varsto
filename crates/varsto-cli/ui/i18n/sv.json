@@ -626,7 +626,28 @@
   "The prices were not verified for this region; it may be priced differently.": "Priserna har inte verifierats för den här regionen; den kan ha andra priser.",
   "Replace the part in braces in the endpoint with your own value, for example your account id.": "Ersätt delen inom klammerparenteser i slutpunkten med ditt eget värde, till exempel ditt konto-id.",
   "plan": "paket",
-  "(old)": "(gammal)"
+  "(old)": "(gammal)",
+  "Now": "Nu",
+  "Looking for changes in folder «{s}»": "Letar efter ändringar i mappen «{s}»",
+  "Uploading folder «{s}»": "Laddar upp mappen «{s}»",
+  "Fetching changes to folder «{s}»": "Hämtar ändringar till mappen «{s}»",
+  "Checking disk «{s}»": "Kontrollerar disken «{s}»",
+  "Checking the blocks of disk «{s}»": "Kontrollerar blocken på disken «{s}»",
+  "Filling disk «{s}»": "Fyller disken «{s}»",
+  "Taking a snapshot of backup «{s}»": "Tar en ögonblicksbild av säkerhetskopian «{s}»",
+  "Restoring backup «{s}»": "Återställer säkerhetskopian «{s}»",
+  "Repairing damaged block copies": "Reparerar skadade blockkopior",
+  "Verifying stored blocks": "Verifierar lagrade block",
+  "Checking the vault": "Kontrollerar valvet",
+  "Verifying every block of the vault": "Verifierar alla block i valvet",
+  "Moving the data of folder «{s}»": "Flyttar data för mappen «{s}»",
+  "Copying blocks off storage «{s}»": "Kopierar block från lagringen «{s}»",
+  "Deleting the data on storage «{s}»": "Raderar data på lagringen «{s}»",
+  "ready about {t}": "klart cirka {t}",
+  "Not reachable": "Inte nåbar",
+  "Runs an older version that does not tell": "Kör en äldre version som inte berättar detta",
+  "Does not share its activity with this device": "Delar inte sin aktivitet med den här enheten",
+  "Asking…": "Frågar…"
  },
  "patterns": [
   [
@@ -744,6 +765,10 @@
   [
    "^Since the service started: (.+) received in (\\d+) blocks, (.+) sent in (\\d+) blocks\\. Speeds are averages over the last (\\d+) seconds\\.$",
    "Sedan tjänsten startade: $1 mottaget i $2 block, $3 skickat i $4 block. Hastigheterna är medelvärden över de senaste $5 sekunderna."
+  ],
+  [
+   "^Last heard (\\d+) s ago, not answering now$",
+   "Hördes senast för $1 s sedan, svarar inte nu"
   ]
  ],
  "review": [

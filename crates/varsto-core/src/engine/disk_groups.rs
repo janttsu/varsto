@@ -209,7 +209,14 @@ impl Engine {
                 crate::util::human_bytes(disk.capacity_bytes)
             )
         });
+        let task = crate::activity::start(
+            crate::activity::DISK_FILL,
+            label,
+            0,
+            crate::activity::Unit::Bytes,
+        );
         let (objects_added, bytes_added) = self.fill_disk(&spec, &pool, &disk.id)?;
+        drop(task);
         pool.flush()?;
         let disks = pool.disks();
         drop(pool);

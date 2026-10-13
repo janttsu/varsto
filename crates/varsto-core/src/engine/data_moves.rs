@@ -799,7 +799,14 @@ impl Engine {
         let fk = self.folder_keys(rec)?;
         let read_from = !from_spec.is_cold() || req.confirm_cold_read;
         let read_to = !to_spec.is_cold() || req.confirm_cold_read;
+        let task = crate::activity::start(
+            crate::activity::DATA_MOVE,
+            &rec.name,
+            items.iter().map(|i| i.size).sum(),
+            crate::activity::Unit::Bytes,
+        );
         for group in items.chunks(MOVE_GROUP) {
+            task.advance(group.iter().map(|i| i.size).sum());
             let mut deletes: Vec<(ObjectName, u64)> = Vec::new();
             let present: Vec<bool> = group
                 .iter()

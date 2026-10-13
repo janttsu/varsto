@@ -70,6 +70,8 @@ impl Transfer {
     }
 
     pub fn advance(&self, bytes: u64) {
+        // The upload, download or restore task of this thread (`activity`).
+        crate::activity::advance_bytes(bytes);
         if let Some(c) = ACTIVE.lock().unwrap().iter_mut().find(|c| c.id == self.id) {
             c.done += bytes;
         }
