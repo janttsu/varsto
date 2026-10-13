@@ -171,6 +171,8 @@ pub struct ChangeLog {
     events_path: PathBuf,
     limits: ChangeLimits,
     pub index: Index,
+    /// The index changed since it was read.
+    dirty: bool,
 }
 
 impl ChangeLog {
@@ -184,6 +186,7 @@ impl ChangeLog {
             events_path,
             limits,
             index,
+            dirty: false,
         }
     }
 
@@ -264,6 +267,7 @@ impl ChangeLog {
             });
         }
         pair_renames(&mut out);
+        self.dirty |= !out.is_empty();
         self.append(&out)?;
         Ok(out)
     }
@@ -330,7 +334,20 @@ impl ChangeLog {
         Ok(())
     }
 
-    pub fn save(&self) -> Result<()> {
+    /// Mark the history as started from what the device held.
+    pub fn set_backfilled(&mut self) {
+        if !self.index.backfilled {
+            self.index.backfilled = true;
+            self.dirty = true;
+        }
+    }
+
+    /// Write the index if it changed.
+    pub fn save(&mut self) -> Result<()> {
+        if !self.dirty {
+            return Ok(());
+        }
+        self.dirty = false;
         if let Some(dir) = self.index_path.parent() {
             fs::create_dir_all(dir)?;
         }

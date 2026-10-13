@@ -209,7 +209,7 @@ impl Engine {
             })
             .collect();
         hist.record(cands)?;
-        hist.index.backfilled = true;
+        hist.set_backfilled();
         Ok(())
     }
 

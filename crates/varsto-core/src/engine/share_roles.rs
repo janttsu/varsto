@@ -84,6 +84,25 @@ impl Engine {
         }
     }
 
+    /// Whether a role record signed by `issuer` counts: one of the owner's
+    /// devices that is not revoked; on the owner's own devices a trusted one
+    /// that the organization (if any) lets share.
+    fn share_role_issuer_ok(&self, st: &FolderShareState, issuer: &DeviceId) -> bool {
+        if self.is_revoked(issuer) || !self.share_owner_device(st, issuer) {
+            return false;
+        }
+        if self.vault.member {
+            return true;
+        }
+        if issuer == &self.vault.device_id {
+            return true;
+        }
+        self.trusted(issuer)
+            && self.org.as_ref().is_none_or(|o| {
+                o.manifest().is_none() || o.is_admin(issuer) || o.policy().members_may_share
+            })
+    }
+
     /// The role of another device in a shared folder: whether this device
     /// takes what it writes there.
     pub fn share_role_of(&self, folder: &FolderId, dev: &DeviceId) -> ShareRole {
@@ -234,7 +253,7 @@ impl Engine {
                 if best.as_ref().is_some_and(|b| b.seq > seq) {
                     break;
                 }
-                if !self.share_owner_device(&st, &issuer) || self.is_revoked(&issuer) {
+                if !self.share_role_issuer_ok(&st, &issuer) {
                     continue;
                 }
                 let Some(pk) = self.share_issuer_key(&issuer) else {
