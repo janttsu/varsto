@@ -51,6 +51,7 @@ mod fetch;
 mod ledger_upkeep;
 mod manifest_upkeep;
 mod membership;
+mod notes;
 mod org_ops;
 mod placement;
 mod repair;
@@ -72,6 +73,10 @@ pub use manifest_upkeep::ManifestPolicy;
 pub use membership::{
     removal_notice, DeviceInfo, DeviceRemoved, EpochRecord, Grant, KemRecord, Removal, Revocation,
     RevokeReport, Revoked, SignedEpoch, SignedRevocation,
+};
+pub use notes::{
+    check_analysis, AnalysisHit, FileAnalysis, NotesExchangeReport, ANALYSIS_MAX_BYTES,
+    LISTING_CHARS, TAGS_MAX, TAG_MAX_CHARS,
 };
 pub use org_ops::{
     LogView, OrgApproved, OrgBrief, OrgCreated, OrgDevice, OrgRemoveReport, OrgSummary, OrgUser,
@@ -391,6 +396,26 @@ pub struct FileEntry {
     pub modified_utc: i64,
     /// Varsto's own last-accessed time on this device, if any.
     pub last_accessed_utc: Option<i64>,
+    /// What the file contains, as recorded by an assistant or the user
+    /// (`notes`): the first `LISTING_CHARS` characters in a listing.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub analysis: Option<String>,
+    /// The analysis is longer than shown (`Engine::analysis` has it all).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub analysis_truncated: bool,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub analysis_tags: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub analysis_utc: Option<i64>,
+    /// The file changed since it was analysed.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub analysis_stale: bool,
+    /// The model or tool that wrote the analysis, as it said.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub analysis_by: Option<String>,
+    /// The device the analysis was written on.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub analysis_author: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -1697,6 +1722,7 @@ impl Engine {
 
     fn forget_folder(&mut self, folder: &FolderId, removed_utc: i64) -> Result<()> {
         self.detach_mount(folder)?;
+        self.forget_notes(folder);
         if self.config.backups.iter().any(|b| &b.folder_id == folder) {
             self.config.backups.retain(|b| &b.folder_id != folder);
             self.config.save(&self.home)?;
@@ -1760,6 +1786,7 @@ impl Engine {
                     format!("manifests/{}/", rec.folder_id),
                     format!("thumbs/{}/", rec.folder_id),
                     format!("vault/access/{}/", rec.folder_id),
+                    notes::folder_prefix(&rec.folder_id),
                     crate::snapshot::Snapshot::backup_prefix(&rec.folder_id),
                 ] {
                     for key in backend.list(&prefix)? {
@@ -4674,6 +4701,14 @@ impl Engine {
     /// Rename or move a file inside a folder (both paths relative to the
     /// folder root), then push so other devices see the move.
     pub fn move_file(&mut self, folder: &str, from: &str, to: &str) -> Result<PushReport> {
+        let report = self.move_file_only(folder, from, to)?;
+        // The file's analysis goes along (`notes`).
+        let rec = self.resolve_folder(folder)?.0;
+        self.notes_follow_move(&rec.folder_id, from, to)?;
+        Ok(report)
+    }
+
+    fn move_file_only(&mut self, folder: &str, from: &str, to: &str) -> Result<PushReport> {
         let (_, root) = self.resolve_folder(folder)?;
         for p in [from, to] {
             if p.is_empty()
@@ -4723,6 +4758,7 @@ impl Engine {
         let encrypted_here = self.mount_is_encrypted(&rec.folder_id);
         // Newest use on any device of the folder (`access_sync`).
         let accessed = self.merged_access(&rec.folder_id, &state);
+        let analyses = self.analyses_for_listing(&rec.folder_id, &state);
         let mut out = Vec::new();
         for f in state.files.values().filter(|f| !f.deleted) {
             let disk = root.join(&f.path);
@@ -4753,7 +4789,24 @@ impl Engine {
                 media: thumbs::is_image(&f.path) || thumbs::is_video(&f.path),
                 modified_utc: f.mtime / 1_000_000_000,
                 last_accessed_utc: accessed.get(&f.path).copied(),
+                analysis: None,
+                analysis_truncated: false,
+                analysis_tags: Vec::new(),
+                analysis_utc: None,
+                analysis_stale: false,
+                analysis_by: None,
+                analysis_author: None,
             });
+            if let (Some(a), Some(e)) = (analyses.get(&f.path), out.last_mut()) {
+                let shown: String = a.analysis.chars().take(LISTING_CHARS).collect();
+                e.analysis_truncated = shown.len() < a.analysis.len();
+                e.analysis = Some(shown);
+                e.analysis_tags = a.tags.clone();
+                e.analysis_utc = Some(a.analysed_utc);
+                e.analysis_stale = a.stale;
+                e.analysis_by = a.by.clone();
+                e.analysis_author = Some(a.author.clone());
+            }
         }
         Ok(out)
     }
@@ -4771,6 +4824,8 @@ impl Engine {
         let _ = self.ledger_upkeep();
         // Last-accessed records of every device, when due (`access_sync`).
         let _ = self.access_upkeep(false);
+        // File analyses: follow renames, publish and read (`notes`).
+        let _ = self.notes_upkeep(false);
         let _ = self.manifest_upkeep();
         Ok(out)
     }
