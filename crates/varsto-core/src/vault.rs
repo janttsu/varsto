@@ -1239,6 +1239,9 @@ pub struct Config {
     /// (`crate::restic`, `engine::restic_mirror`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub restic: Option<crate::restic::ResticConfig>,
+    /// When large fetches propose pool disks instead of the network.
+    #[serde(default)]
+    pub disk_fetch: crate::engine::DiskFetchSettings,
 }
 
 /// A backup taken on this device (local, never published).

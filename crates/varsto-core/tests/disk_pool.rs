@@ -53,6 +53,7 @@ impl Lab {
             disks: vec![],
             scan_roots: vec![self.mounts.clone()],
             copies: 1,
+            verify_after_days: pool::DEFAULT_VERIFY_AFTER_DAYS,
         }
     }
     fn box_spec(&self) -> StorageSpec {
@@ -491,4 +492,202 @@ fn policy_counts_an_offline_disk_at_its_last_verification() {
         reports[0]
     );
     assert!(reports[0].chunks_unverified_in_window > 0);
+}
+
+/// The object's file still hashes to its name.
+fn intact(path: &Path) -> bool {
+    let name = path.file_name().unwrap().to_string_lossy().to_string();
+    hex::encode(varsto_core::crypto::hash(&fs::read(path).unwrap())) == name
+}
+
+fn pool_index_path(home: &Path, mount: &Path) -> PathBuf {
+    let marker = DiskMarker::read(mount).unwrap();
+    home.join(format!("pool-{}.json", marker.pool_id))
+}
+
+#[test]
+fn every_write_is_read_back_and_a_disk_that_lies_twice_is_given_up() {
+    let lab = Lab::new();
+    let home = lab.root.join("a-home");
+    let (mut a, _) = engine(&home, "laptop");
+    a.add_storage(lab.box_spec()).unwrap();
+    a.add_storage(lab.pool_spec("shelf")).unwrap();
+    let docs = lab.root.join("a-docs");
+    fs::create_dir_all(&docs).unwrap();
+    fs::write(docs.join("one.bin"), pseudo_random(150_000, 21)).unwrap();
+    a.add_folder("docs", &docs).unwrap();
+    // No disk yet: the blocks go to the box only.
+    a.push("docs").unwrap();
+
+    // The disk returns wrong bytes for the first block twice: the fill stops
+    // there, says the disk may be failing, and leaves no bad copy behind.
+    let d1 = lab.mount("d1", 50 * GIB, 100 * GIB);
+    pool::corrupt_writes_under(&d1, 2);
+    let (r, fill) = a
+        .disk_add_with(&d1, "shelf", "data-01", "", &mut |_| {})
+        .unwrap();
+    let why = fill.failed.expect("the fill should stop");
+    assert!(why.contains("data-01") && why.contains("failing"), "{why}");
+    assert_eq!(r.objects_added, 0);
+    assert!(objects_under(&d1).is_empty());
+    assert!(a
+        .disk_add(&lab.mount("d9", 50 * GIB, 100 * GIB), "shelf", "data-01")
+        .is_err());
+
+    // One bad read-back is retried; afterwards every copy hashes right.
+    pool::corrupt_writes_under(&d1, 1);
+    let mut phases = Vec::new();
+    let r = a
+        .disk_insert("data-01", Default::default(), &mut |p| {
+            if phases.last() != Some(&p.phase) {
+                phases.push(p.phase);
+            }
+        })
+        .unwrap();
+    assert_eq!(phases, ["tidy", "verify", "fill"]);
+    assert!(r.fill.failed.is_none());
+    assert!(r.fill.objects > 1);
+    let files = objects_under(&d1);
+    assert_eq!(files.len() as u64, r.fill.objects);
+    assert!(files.iter().all(|f| intact(f)));
+    // Written and read back now: nothing is due for a check.
+    let again = a
+        .disk_insert("data-01", Default::default(), &mut |_| {})
+        .unwrap();
+    assert_eq!(again.verified_objects, 0);
+    assert_eq!(again.fill.objects, 0);
+}
+
+#[test]
+fn insert_tidies_from_listings_rehashes_only_stale_copies_and_fills_within_the_reserve() {
+    let lab = Lab::new();
+    let home = lab.root.join("a-home");
+    let (mut a, _) = engine(&home, "laptop");
+    a.add_storage(lab.box_spec()).unwrap();
+    a.add_storage(lab.pool_spec("shelf")).unwrap();
+    let d1 = lab.mount("d1", 50 * GIB, 100 * GIB);
+    a.disk_add(&d1, "shelf", "data-01").unwrap();
+    let docs = lab.root.join("a-docs");
+    fs::create_dir_all(&docs).unwrap();
+    fs::write(docs.join("one.bin"), pseudo_random(200_000, 31)).unwrap();
+    a.add_folder("docs", &docs).unwrap();
+    a.push("docs").unwrap();
+    let mut files = objects_under(&d1);
+    files.sort();
+    assert!(files.len() >= 6);
+
+    // Unneeded: an object nothing references, and a leftover temporary
+    // file of a write that died an hour ago (a fresh one is left alone).
+    let stray_name = hex::encode(varsto_core::crypto::hash(b"stray"));
+    let stray = d1
+        .join(pool::DATA_DIR)
+        .join("chunks")
+        .join(&stray_name[..2])
+        .join(&stray_name);
+    fs::create_dir_all(stray.parent().unwrap()).unwrap();
+    fs::write(&stray, b"stray").unwrap();
+    let dir = files[0].parent().unwrap().to_path_buf();
+    let old_tmp = dir.join(".x.tmp-1-1");
+    let new_tmp = dir.join(".y.tmp-1-2");
+    fs::write(&old_tmp, b"half").unwrap();
+    fs::write(&new_tmp, b"half").unwrap();
+    fs::File::options()
+        .write(true)
+        .open(&old_tmp)
+        .unwrap()
+        .set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(7200))
+        .unwrap();
+
+    // Half of the copies were last checked long ago; one of those and one
+    // fresh copy are damaged on the disk.
+    let idx_path = pool_index_path(&home, &d1);
+    let mut idx: serde_json::Value = serde_json::from_slice(&fs::read(&idx_path).unwrap()).unwrap();
+    let disk_id = DiskMarker::read(&d1).unwrap().disk_id;
+    let key_of = |f: &Path| {
+        f.strip_prefix(d1.join(pool::DATA_DIR))
+            .unwrap()
+            .to_string_lossy()
+            .replace('\\', "/")
+    };
+    let stale: Vec<&PathBuf> = files.iter().step_by(2).collect();
+    for f in &stale {
+        idx["objects"][key_of(f)]["checked"][&disk_id] = serde_json::json!(1_000);
+    }
+    fs::write(&idx_path, serde_json::to_vec(&idx).unwrap()).unwrap();
+    let rotten_stale = stale[0].clone();
+    let rotten_fresh = files[1].clone();
+    for f in [&rotten_stale, &rotten_fresh] {
+        let mut b = fs::read(f).unwrap();
+        b[0] ^= 0xff;
+        fs::write(f, b).unwrap();
+    }
+    // A new file to fill, but the disk has no room above its reserve yet.
+    fs::write(docs.join("two.bin"), pseudo_random(60_000, 32)).unwrap();
+    pool::set_fake_space(
+        &d1,
+        Some(DiskSpace {
+            free: 5 * GIB,
+            total: 100 * GIB,
+        }),
+    );
+    {
+        // The push cannot use the full disk either.
+        let push = a.push("docs").unwrap();
+        assert_eq!(push.storages_unavailable, vec!["shelf".to_string()]);
+    }
+    let r = a
+        .disk_insert("data-01", Default::default(), &mut |_| {})
+        .unwrap();
+    assert_eq!(r.tidy.unneeded_removed, 1);
+    assert_eq!(r.tidy.temp_removed, 1);
+    assert!(!stray.exists() && !old_tmp.exists() && new_tmp.exists());
+    assert_eq!(r.verified_objects as usize, stale.len() - 1);
+    assert_eq!(r.bad, vec![key_of(&rotten_stale)]);
+    assert!(!rotten_stale.exists(), "a bad copy is removed");
+    // Only stale copies were read: the damaged fresh one is still there.
+    assert!(rotten_fresh.exists() && !intact(&rotten_fresh));
+    // No room: nothing written, the bad copy is not replaced yet.
+    assert_eq!(r.fill.objects, 0);
+
+    // With room the next insert re-hashes nothing and fills the lacking
+    // blocks: the bad copy again and the new file.
+    pool::set_fake_space(
+        &d1,
+        Some(DiskSpace {
+            free: 50 * GIB,
+            total: 100 * GIB,
+        }),
+    );
+    let r = a
+        .disk_insert("data-01", Default::default(), &mut |_| {})
+        .unwrap();
+    assert_eq!(r.verified_objects, 0);
+    assert!(r.fill.objects >= 2, "{:?}", r.fill);
+    assert!(rotten_stale.exists() && intact(&rotten_stale));
+    let disks = a.disks().unwrap();
+    assert!(disks[0].last_verified_utc > 1_000);
+
+    // verify_after_days 0: every copy is re-hashed, and the damaged fresh one is found.
+    a.set_pool_verify_after_days("shelf", 0).unwrap();
+    let r = a
+        .disk_insert("data-01", Default::default(), &mut |_| {})
+        .unwrap();
+    assert_eq!(r.bad, vec![key_of(&rotten_fresh)]);
+    assert_eq!(r.fill.objects, 1);
+    assert!(objects_under(&d1)
+        .iter()
+        .filter(|f| f != &&new_tmp)
+        .all(|f| intact(f)));
+    // --no-verify --no-fill: only the tidy phase.
+    let r = a
+        .disk_insert(
+            "data-01",
+            varsto_core::engine::InsertOptions {
+                verify: false,
+                fill: false,
+            },
+            &mut |_| {},
+        )
+        .unwrap();
+    assert_eq!(r.verified_objects + r.fill.objects, 0);
 }

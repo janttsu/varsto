@@ -499,6 +499,7 @@ fn moving_a_whole_folder_changes_its_placement_and_never_drops_the_last_copy() {
         disks: vec![],
         scan_roots: vec![lab.p("mounts")],
         copies: 1,
+        verify_after_days: varsto_core::pool::DEFAULT_VERIFY_AFTER_DAYS,
     };
     lab.a.add_storage(pool_spec).unwrap();
     let r = lab
@@ -666,6 +667,7 @@ fn disk_groups_keep_copies_in_different_places() {
         disks: vec![],
         scan_roots: vec![mounts.clone()],
         copies: 2,
+        verify_after_days: varsto_core::pool::DEFAULT_VERIFY_AFTER_DAYS,
     })
     .unwrap();
     let d1 = mount("d1");

@@ -55,6 +55,12 @@ pub const VERIFY: &str = "verify";
 pub const FSCK: &str = "fsck";
 pub const DATA_MOVE: &str = "data_move";
 pub const STORAGE_REMOVAL: &str = "storage_removal";
+/// Whole drives of pools (`blockdev`, `disk init|insert|unmount`, fetch plans).
+pub const DISK_INIT: &str = "disk_init";
+pub const DISK_FSCK: &str = "disk_fsck";
+pub const DISK_INSERT: &str = "disk_insert";
+pub const DISK_FETCH: &str = "disk_fetch";
+pub const DISK_UNMOUNT: &str = "disk_unmount";
 /// Bit-rot check; steps "storage", "disk", "files" and "cache".
 pub const SCRUB: &str = "scrub";
 /// A backup with restic (`crate::restic`); steps "check" (the mirror is
@@ -456,6 +462,15 @@ pub fn describe(t: &TaskView) -> String {
         (DISK_CHECK, "fill") | (DISK_FILL, _) => format!("filling disk «{s}»"),
         (DISK_CHECK, "verify") => format!("checking the blocks of disk «{s}»"),
         (DISK_CHECK, _) => format!("checking disk «{s}»"),
+        (DISK_INIT, _) => format!("preparing disk «{s}»"),
+        (DISK_FSCK, _) => format!("checking the file system of disk «{s}»"),
+        (DISK_INSERT, "tidy") => format!("tidying disk «{s}»"),
+        (DISK_INSERT, "verify") => format!("checking the blocks of disk «{s}»"),
+        (DISK_INSERT, "fill") => format!("filling disk «{s}»"),
+        (DISK_INSERT, _) => format!("bringing disk «{s}» up to date"),
+        (DISK_FETCH, "write") => format!("writing files fetched from disk «{s}»"),
+        (DISK_FETCH, _) => format!("copying blocks from disk «{s}»"),
+        (DISK_UNMOUNT, _) => format!("unmounting disk «{s}»"),
         (BACKUP_SNAPSHOT, _) => format!("taking a snapshot of backup «{s}»"),
         (RESTORE, _) => format!("restoring backup «{s}»"),
         (REPAIR, _) => "repairing damaged block copies".to_string(),

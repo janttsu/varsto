@@ -10,6 +10,8 @@ use varsto_core::Engine;
 
 mod backup;
 mod desktop;
+mod drive_mount;
+mod drives;
 mod filemanager;
 mod icon;
 mod mcp;
@@ -83,7 +85,7 @@ enum Cmd {
         #[command(subcommand)]
         cmd: StorageCmd,
     },
-    /// Removable disks of a disk pool: add, list, check, eject, retire.
+    /// Removable disks of a disk pool: init, add, insert, unmount, list, check, eject, retire.
     Disk {
         #[command(subcommand)]
         cmd: DiskCmd,
@@ -130,6 +132,13 @@ enum Cmd {
     },
     /// Show vault, devices, storages and folders.
     Status,
+    /// How files would be fetched: from pool disks (which ones, in which order) or the network,
+    /// with the time and cost of each way. Run `varsto folder fetch` to fetch.
+    FetchPlan {
+        folder: String,
+        #[arg(required = true)]
+        paths: Vec<String>,
+    },
     /// Compare the ledger with the storages; --verify downloads and hashes every chunk.
     Fsck {
         #[arg(long)]
@@ -874,6 +883,63 @@ enum DiskCmd {
     },
     /// Write the disk's index and sync it; prints when the disk is safe to remove (does not unmount).
     Eject { label: String },
+    /// Linux: erase a whole drive (e.g. /dev/sdc), make one ext4 partition, record it in
+    /// disks.conf under LABEL (the name on its sticker), mount it, add it to the pool and fill it.
+    Init {
+        /// The whole drive, e.g. /dev/sdc or /dev/disk/by-id/usb-...
+        device: PathBuf,
+        #[arg(long)]
+        pool: String,
+        /// The drive's name, as on its sticker (spaces are fine).
+        #[arg(long)]
+        label: String,
+        /// Where the drive is kept (home, offsite, ...); default the pool's place.
+        #[arg(long, default_value = "")]
+        place: String,
+        /// The device path again, to erase it without being asked (scripts).
+        #[arg(long)]
+        confirm: Option<String>,
+    },
+    /// Linux: mount the known drives that are plugged in (or the named one) and bring them up to
+    /// date: tidy from listings, re-hash old copies, fill, sync; then says to unmount.
+    Insert {
+        label: Option<String>,
+        /// Skip writing new blocks.
+        #[arg(long)]
+        no_fill: bool,
+        /// Skip re-hashing copies older than the pool's verify-after-days.
+        #[arg(long)]
+        no_verify: bool,
+    },
+    /// Linux: write the index, sync, unmount and power off a drive so it can be unplugged.
+    Unmount {
+        label: String,
+        /// Leave the drive powered (only unmount).
+        #[arg(long)]
+        no_power_off: bool,
+    },
+    /// When large fetches propose pool disks: show the settings, or set them.
+    FetchSet {
+        /// Fetches at least this large are worth fetching disks for (default 2048).
+        #[arg(long)]
+        threshold_mib: Option<u64>,
+        /// Time to fetch a disk from the shelf and plug it in (default 120).
+        #[arg(long)]
+        overhead_secs: Option<u64>,
+        /// Download speed from the remote storages (default 100).
+        #[arg(long)]
+        link_mbit: Option<f64>,
+        /// Read speed of a disk in the dock (default 120).
+        #[arg(long)]
+        disk_mb_per_sec: Option<f64>,
+    },
+    /// Pool settings: re-hash copies on a disk at insert when their last check is older than N days.
+    PoolSet {
+        pool: String,
+        /// Days (default 180; 0 re-hashes everything at every insert).
+        #[arg(long)]
+        verify_after_days: u32,
+    },
     /// Nothing new goes to this disk; what it holds stays readable.
     Retire { label: String },
 }
@@ -917,6 +983,10 @@ enum FolderCmd {
     Fetch {
         folder: String,
         path: Option<String>,
+        /// Large fetches whose blocks are on pool disks: propose the disks and ask (default),
+        /// use them without asking, or never.
+        #[arg(long, value_enum, default_value_t = drives::FromDisks::Ask)]
+        from_disks: drives::FromDisks,
     },
     /// Replace a local file with a placeholder (only when stored elsewhere
     /// and synced). Give FOLDER PATH, or only the file's path on disk.
@@ -1698,6 +1768,7 @@ fn run(cli: &Cli) -> Result<()> {
                         disks: vec![],
                         scan_roots: scan_root.clone(),
                         copies: (*copies).max(1),
+                        verify_after_days: varsto_core::pool::DEFAULT_VERIFY_AFTER_DAYS,
                     })?;
                     println!("disk pool {name} added; attach a disk with: varsto disk add <mount-path> --pool {name} --label <label>");
                 }
@@ -1817,7 +1888,16 @@ fn run(cli: &Cli) -> Result<()> {
                     label,
                     place,
                 } => {
-                    let r = engine.disk_add_at(mount_path, pool, label, place)?;
+                    let mut progress = drives::ProgressLine::new(cli.json);
+                    let (r, fill) =
+                        engine.disk_add_with(mount_path, pool, label, place, &mut |p| {
+                            progress.update(p)
+                        })?;
+                    progress.finish();
+                    if let Some(why) = fill.failed {
+                        bail!(why);
+                    }
+                    drives::remember_mount(&home, mount_path, pool, label);
                     print(cli, &r, |r| {
                         format!(
                             "disk {} added to pool {} at {}: {} added ({} objects)",
@@ -1839,6 +1919,57 @@ fn run(cli: &Cli) -> Result<()> {
                 }
                 DiskCmd::List => {
                     let disks = engine.disks()?;
+                    // The drives of disks.conf: their partition and whether they are plugged in.
+                    let known = drives::known_drives(&home);
+                    let drive_of = |label: &str| known.iter().find(|(d, _)| d.label == label);
+                    if cli.json {
+                        let mut rows = serde_json::to_value(&disks)?;
+                        for row in rows.as_array_mut().into_iter().flatten() {
+                            let label = row["label"].as_str().unwrap_or_default().to_string();
+                            if let Some((d, at)) = drive_of(&label) {
+                                row["partuuid"] = serde_json::json!(d.partuuid);
+                                row["plugged_in"] = serde_json::json!(at.is_some());
+                                row["partition"] = serde_json::json!(at.as_ref().map(|a| &a.0));
+                                row["fsck"] = serde_json::json!(varsto_core::diskconf::checks(
+                                    &home
+                                )
+                                .get(&d.partuuid));
+                            }
+                        }
+                        println!("{}", serde_json::to_string_pretty(&rows)?);
+                        return Ok(());
+                    }
+                    let mut text = String::new();
+                    let checks = varsto_core::diskconf::checks(&home);
+                    for (d, at) in &known {
+                        let check = checks
+                            .get(&d.partuuid)
+                            .map(|c| {
+                                format!(
+                                    "; file system checked {}: {:?}",
+                                    varsto_core::util::format_date(c.checked_utc),
+                                    c.verdict
+                                )
+                                .to_lowercase()
+                            })
+                            .unwrap_or_else(|| "; file system not checked yet".into());
+                        text.push_str(&format!(
+                            "drive \"{}\" (pool {}, PARTUUID {}{check}): {}\n",
+                            d.label,
+                            d.pool,
+                            d.partuuid,
+                            match at {
+                                Some((part, Some(m))) =>
+                                    format!("plugged in as {part}, mounted at {}", m.display()),
+                                Some((part, None)) => format!(
+                                    "plugged in as {part}, not mounted (varsto disk insert \"{}\")",
+                                    d.label
+                                ),
+                                None => "not plugged in".to_string(),
+                            }
+                        ));
+                    }
+                    print!("{text}");
                     print(cli, &disks, |disks| {
                         if disks.is_empty() {
                             return "no disks; add a pool with `varsto storage add-pool <name>` and a disk with `varsto disk add`".to_string();
@@ -1927,6 +2058,81 @@ fn run(cli: &Cli) -> Result<()> {
                         );
                     }
                 }
+                DiskCmd::Init {
+                    device,
+                    pool,
+                    label,
+                    place,
+                    confirm,
+                } => {
+                    drives::init(cli, &home, &mut engine, device, pool, label, place, confirm)?;
+                }
+                DiskCmd::Insert {
+                    label,
+                    no_fill,
+                    no_verify,
+                } => {
+                    drives::insert(
+                        cli,
+                        &home,
+                        &mut engine,
+                        label.as_deref(),
+                        varsto_core::engine::InsertOptions {
+                            verify: !no_verify,
+                            fill: !no_fill,
+                        },
+                    )?;
+                }
+                DiskCmd::Unmount {
+                    label,
+                    no_power_off,
+                } => {
+                    drives::unmount(cli, &home, &mut engine, label, !no_power_off)?;
+                }
+                DiskCmd::FetchSet {
+                    threshold_mib,
+                    overhead_secs,
+                    link_mbit,
+                    disk_mb_per_sec,
+                } => {
+                    let mut st = engine.disk_fetch_settings();
+                    if let Some(v) = threshold_mib {
+                        st.threshold_bytes = v.saturating_mul(1 << 20);
+                    }
+                    if let Some(v) = overhead_secs {
+                        st.overhead_secs = *v;
+                    }
+                    if let Some(v) = link_mbit.filter(|v| *v > 0.0) {
+                        st.link_mbit_per_sec = v;
+                    }
+                    if let Some(v) = disk_mb_per_sec.filter(|v| *v > 0.0) {
+                        st.disk_mb_per_sec = v;
+                    }
+                    engine.set_disk_fetch_settings(st.clone())?;
+                    print(cli, &st, |st| {
+                        format!(
+                            "pool disks are proposed for fetches of {} or more; {} s per disk to fetch it, network {} Mbit/s, disk {} MB/s",
+                            fmt_bytes(st.threshold_bytes),
+                            st.overhead_secs,
+                            st.link_mbit_per_sec,
+                            st.disk_mb_per_sec
+                        )
+                    })?;
+                }
+                DiskCmd::PoolSet {
+                    pool,
+                    verify_after_days,
+                } => {
+                    engine.set_pool_verify_after_days(pool, *verify_after_days)?;
+                    if cli.json {
+                        println!(
+                            "{}",
+                            serde_json::json!({"pool": pool, "verify_after_days": verify_after_days})
+                        );
+                    } else {
+                        println!("{pool}: copies on a disk are re-hashed at insert when their last check is older than {verify_after_days} days");
+                    }
+                }
                 DiskCmd::Retire { label } => {
                     let only_here = engine.disk_retire(label)?;
                     if cli.json {
@@ -2006,8 +2212,31 @@ fn run(cli: &Cli) -> Result<()> {
                         name_or_id
                     );
                 }
-                FolderCmd::Fetch { folder, path } => {
+                FolderCmd::Fetch {
+                    folder,
+                    path,
+                    from_disks,
+                } => {
                     let (folder, path) = &folder_and_path(&engine, folder, path)?;
+                    if *from_disks != drives::FromDisks::Never
+                        && engine.disks().is_ok_and(|d| !d.is_empty())
+                    {
+                        // Pool disks may be the better source: plan, and run the plan if chosen.
+                        if drives::fetch_with_plan(
+                            cli,
+                            &home,
+                            &mut engine,
+                            folder,
+                            std::slice::from_ref(path),
+                            *from_disks,
+                        )? {
+                            return Ok(());
+                        }
+                        // Ran but stopped or left a file out: the plan is kept.
+                        if engine.load_fetch_plan().is_some() {
+                            std::process::exit(1);
+                        }
+                    }
                     let r = match engine.fetch_file(folder, path) {
                         Ok(r) => r,
                         Err(e) => {
@@ -2119,6 +2348,11 @@ fn run(cli: &Cli) -> Result<()> {
             print(cli, &r, |r| {
                 r.iter().map(|(pl, ps)| format!("{}: pulled {} updated/{} deleted/{} conflicts, pushed {} changed/{} chunks{}{}", pl.folder, pl.files_updated, pl.files_deleted, pl.conflicts, ps.files_changed, ps.chunks_uploaded, if pl.disks_needed.is_empty() { String::new() } else { format!("; attach disk {}", pl.disks_needed.join(", ")) }, if ps.storages_unavailable.is_empty() { String::new() } else { format!("; not written to {}", ps.storages_unavailable.join(", ")) })).collect::<Vec<_>>().join("\n")
             })?;
+        }
+        Cmd::FetchPlan { folder, paths } => {
+            let mut engine = Engine::open(&home, &passphrase()?)?;
+            let plan = engine.fetch_plan(folder, paths)?;
+            print(cli, &plan, drives::plan_text)?;
         }
         Cmd::Status => {
             // The running service answers without a passphrase while it is
