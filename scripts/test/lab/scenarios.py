@@ -5,6 +5,9 @@ services`, `lab.py build` and `lab.py install-bin` first).
 
     scenarios.py [--only NAME[,NAME]] [--binary PATH]     run and write test-results/lab/results.json
 
+VARSTO_LOG (default debug) is passed to every varsto run on the VMs; after
+each scenario the logs of every device land in test-results/lab/logs/<scenario>/<vm>/.
+
 Every scenario prints PASS/FAIL with the reason and goes on; the exit code
 is the number of failed scenarios (0: everything passed). The vault lives in
 the default home of user `varsto` on each device VM; the first scenario
@@ -12,11 +15,16 @@ resets every device and empties the S3 bucket, so a run starts clean.
 """
 import argparse
 import hashlib
+import io
 import json
+import os
 import pathlib
 import re
 import shlex
+import shutil
+import subprocess
 import sys
+import tarfile
 import time
 import traceback
 
@@ -24,7 +32,13 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import lab  # noqa: E402
 
 PASS_ = "lab-passphrase-1234"
-ENV = f"VARSTO_PASSPHRASE={PASS_} VARSTO_NO_INSTALL=1"
+# Every varsto run on the VMs (CLI calls and the backgrounded `service run`,
+# `pair offer`, ...) starts with ENV, so VARSTO_LOG reaches all of them. The
+# value comes from the host's VARSTO_LOG when set (e.g. "trace").
+LOG_LEVEL = os.environ.get("VARSTO_LOG") or "debug"
+ENV = f"VARSTO_PASSPHRASE={PASS_} VARSTO_NO_INSTALL=1 VARSTO_LOG={shlex.quote(LOG_LEVEL)}"
+REPO = pathlib.Path(__file__).resolve().parents[3]
+LOGS_DIR = REPO / "test-results" / "lab" / "logs"
 BUCKET = "vault1"
 RESULTS = []
 CTX = {}
@@ -95,6 +109,39 @@ for i in range({small}):
 (root / "empty.txt").write_text("")
 """
     run(vm, f"python3 - <<'PY'\n{py}\nPY")
+
+
+# Every home a scenario uses holds its logs under <home>/logs (varsto-<component>.log,
+# rotated varsto-<component>.N.log.zst); the homes are the default
+# ~/.local/share/varsto, ~/share-home and ~/dl-home, and a search under ~ also
+# picks up any other. ~/*.log are the nohup outputs (svc.log, pair.log, ...).
+LOG_FIND = ("cd ~ && { find . -maxdepth 6 -type f \\( -path '*/logs/varsto-*.log*' -o -name service.log \\) "
+            "-not -path './data/*' 2>/dev/null; ls -1 ./*.log 2>/dev/null; true; }")
+
+
+def collect_logs(name, vms=None, timeout=60):
+    """Copy the Varsto logs of every device VM to test-results/lab/logs/<name>/<vm>/
+    (relative to the home of user varsto). Never raises: problems are warnings."""
+    dest = LOGS_DIR / name
+    try:
+        shutil.rmtree(dest, ignore_errors=True)
+        dest.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        print(f"warning: log collection for {name}: {e}", flush=True)
+        return dest
+    for vm in vms or lab.DEVICES:
+        try:
+            cmd = f"{LOG_FIND} | tar cf - --ignore-failed-read -T - 2>/dev/null"
+            r = subprocess.run(lab.ssh_cmd(vm, cmd), capture_output=True, timeout=timeout)
+            if not r.stdout:
+                continue
+            out = dest / vm
+            out.mkdir(parents=True, exist_ok=True)
+            with tarfile.open(fileobj=io.BytesIO(r.stdout), mode="r:") as t:
+                t.extractall(out, filter="data")
+        except Exception as e:  # noqa: BLE001
+            print(f"warning: log collection from {vm} for {name}: {e.__class__.__name__}: {e}", flush=True)
+    return dest
 
 
 def scenario(name):
@@ -1365,7 +1412,7 @@ def main():
     if a.binary:
         lab.cmd_install_bin(argparse.Namespace(binary=a.binary))
     only = set(filter(None, a.only.split(",")))
-    out_dir = pathlib.Path(__file__).resolve().parents[3] / "test-results" / "lab"
+    out_dir = REPO / "test-results" / "lab"
     out_dir.mkdir(parents=True, exist_ok=True)
     failed = 0
     for f in SCENARIOS:
@@ -1382,10 +1429,14 @@ def main():
         except Exception as e:  # noqa: BLE001
             status, why = "ERROR", f"{e.__class__.__name__}: {e}\n{traceback.format_exc()[-800:]}"
         secs = round(time.time() - t0, 1)
+        logs = collect_logs(f.scenario)
         if status != "PASS":
             failed += 1
-        RESULTS.append({"scenario": f.scenario, "status": status, "seconds": secs, "detail": why})
+        RESULTS.append({"scenario": f.scenario, "status": status, "seconds": secs, "detail": why,
+                        "logs": str(logs.relative_to(REPO))})
         print(f"{status:5} {f.scenario:28} {secs:6.1f}s {why[:400]}", flush=True)
+        if status != "PASS":
+            print(f"      logs: {logs}", flush=True)
     (out_dir / "results.json").write_text(json.dumps({"results": RESULTS, "context": {
         k: v for k, v in CTX.items() if k not in ("vault_key", "root_words", "docs")}}, indent=1))
     sys.exit(failed)

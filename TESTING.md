@@ -56,6 +56,13 @@ Only the `smoke` suite and the `debian-stable` (x86_64) image exist so far.
 
 `scripts/test/lab/lab.py up` builds a small internet on one Linux host with libvirt: a WAN in a documentation range with an S3 server (`rclone serve s3`) and STUN, a home network behind a cone NAT router, an office network behind a symmetric NAT router, and a public device. `lab.py build` compiles a static binary in a build VM, `install-bin` puts it on every device, and `scenarios.py` plays 28 scenarios against them: setup and pairing, sync and conflicts, selective sync, repair, policies, Strongrooms, organizations and removal, revocation, peer-to-peer on the LAN, through cone and symmetric NAT and during a slow upload, sharing, disk pools, mixed versions, storage outage, a black-holed network, a crash during a push, clock skew, scale (20 000 files and 1 GiB) and backups (restored on another device, a snapshot expired after the clock moves on). `lab.py release` builds the Linux, Windows and Android release packages in the build VM.
 
+#### Lab logs
+
+- Every `varsto` run in the lab (CLI calls and the background service) gets `VARSTO_LOG=debug`. Set `VARSTO_LOG` on the host when running `scenarios.py` to use another level, e.g. `VARSTO_LOG=trace scenarios.py --only sync`.
+- After each scenario, passed or failed, `scenarios.py` copies the logs of every device VM to `test-results/lab/logs/<scenario>/<vm>/`, with paths relative to the home of user `varsto`: each Varsto home's `logs/` (`varsto-<component>.log` and rotated `varsto-<component>.N.log.zst`, from the default `~/.local/share/varsto` and the extra homes such as `~/share-home` and `~/dl-home`), `service.log` and the `~/*.log` outputs of backgrounded commands. A failed scenario prints this path; `results.json` lists it under `logs`. Running a scenario again replaces its directory. Collection never fails a scenario; problems are printed as warnings.
+- The logs contain file and folder names from the generated test data, device names and storage endpoints, but never keys, passphrases or recovery words.
+- `test-results/` is git-ignored, and CI does not upload these logs as artifacts.
+
 The rest of this section describes the `smoke` suite. The smoke suite checks that the VM boots, accepts SSH, finished cloud-init, has a sane clock and has no route out of the test network.
 
 ### Prerequisites
