@@ -319,7 +319,8 @@ pub fn reasons(d: &DiskStatus, now: i64) -> Vec<SuggestReason> {
 /// Score one disk.
 pub fn suggest(d: &DiskStatus, now: i64) -> DiskSuggestion {
     let reasons = reasons(d, now);
-    let score: f64 = reasons.iter().map(|r| r.points).sum();
+    // `sum` of no f64 is -0.0: start from 0.
+    let score: f64 = reasons.iter().fold(0.0, |s, r| s + r.points);
     let summary = if reasons.is_empty() {
         format!("«{}»: nothing due", d.label)
     } else {
