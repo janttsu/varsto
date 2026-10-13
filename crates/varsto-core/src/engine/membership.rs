@@ -1049,12 +1049,19 @@ impl Engine {
     }
 
     /// Whether a ledger batch counts: a revoked device's batches after its
-    /// cut-off never do.
+    /// cut-off never do, nor do a read-only member's after it stopped being
+    /// an editor (`share_roles`).
     pub(super) fn batch_accepted(&self, device: &DeviceId, seq: u64) -> bool {
         self.devices
             .revoked
             .get(device)
             .is_none_or(|r| seq <= r.cutoff_seq)
+            && (device == &self.vault.device_id
+                || self
+                    .devices
+                    .share_viewers
+                    .get(device)
+                    .is_none_or(|cutoff| seq <= *cutoff))
     }
 
     pub(super) fn device_name(&self, device: &DeviceId) -> String {

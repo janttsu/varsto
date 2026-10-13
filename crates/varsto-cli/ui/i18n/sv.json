@@ -785,7 +785,7 @@
   "Who shared it with you and how to reach them.": "Vem som delade den med dig och hur du når personen.",
   "If they cannot share it again, the folder stays out of your reach (their copy is not affected).": "Om personen inte kan dela den igen förblir mappen utom räckhåll för dig (deras kopia påverkas inte).",
   "Ask for the shared folders again": "Be om de delade mapparna igen",
-  "On the new device, make a request code and send it to the person who shared the folder; they share the folder to it, and you accept what they send.": "Skapa en begärandekod på den nya enheten och skicka den till den som delade mappen; personen delar mappen till den, och du godkänner det som skickas.",
+  "On the new device, make a request code and send it to the person who shared the folder; they share the folder to it, and you accept what they send.": "Skapa en begäranskod på den nya enheten och skicka den till den som delade mappen; personen delar mappen till den, och du godkänner det som skickas.",
   "Not needed: the passphrase of this device. A new device gets a passphrase of its own.": "Behövs inte: den här enhetens lösenfras. En ny enhet får en egen lösenfras.",
   "Printed on this device on {date}.": "Utskriven på den här enheten {date}.",
   "The kit printed on {date} is out of date: the vault key changed afterwards (a device was removed). It still opens what was written before; print a new one for the rest.": "Orden som skrevs ut {date} är inaktuella: valvnyckeln ändrades efteråt (en enhet togs bort). De öppnar fortfarande det som skrevs innan; skriv ut nya för resten.",
@@ -961,7 +961,19 @@
   "Tags": "Taggar",
   "separated by commas": "åtskilda med kommatecken",
   "No files match the filter": "Inga filer matchar filtret",
-  "Analysis stale": "Analysen inaktuell"
+  "Analysis stale": "Analysen inaktuell",
+  "An editor reads and writes this folder; a viewer only reads it: nothing a viewer changes is accepted by your devices or the editors. Paste the recipient's request code to seal the token to their device, or leave it empty for a plain token that carries the folder key itself (editors only).": "En redigerare läser och skriver i den här mappen; en läsare läser bara: dina enheter och redigerarna godtar inget som en läsare ändrar. Klistra in mottagarens begäranskod för att försegla token till deras enhet, eller lämna fältet tomt för en oskyddad token som innehåller själva mappnyckeln (endast för redigerare).",
+  "Paste the recipient's request code to seal the token to their device, or leave it empty for a plain token that carries the folder key itself (editors only).": "Klistra in mottagarens begäranskod för att försegla token till deras enhet, eller lämna fältet tomt för en oskyddad token som innehåller själva mappnyckeln (endast för redigerare).",
+  "Role": "Roll",
+  "Editor: read and write": "Redigerare: läser och skriver",
+  "Viewer: read only": "Läsare: endast läsning",
+  "A viewer can still copy what it reads; a key cannot prevent that.": "En läsare kan ändå kopiera det den läser; en nyckel kan inte hindra det.",
+  "A viewer's token must be sealed to their request code: paste it. A plain token cannot say what its holder may do.": "En läsares token måste förseglas till deras begäranskod: klistra in den. En oskyddad token kan inte ange vad innehavaren får göra.",
+  "Viewer": "Läsare",
+  "Editor": "Redigerare",
+  "read only": "endast läsning",
+  "Make viewer": "Gör till läsare",
+  "Make editor": "Gör till redigerare"
  },
  "patterns": [
   [
@@ -1279,6 +1291,26 @@
   [
    "^cleared the analysis of (.+)$",
    "rensade analysen av $1"
+  ],
+  [
+   "^This device may only read (.+): changes made here are not published\\. Files you change are moved aside and the shared version comes back\\.$",
+   "Den här enheten får bara läsa $1: ändringar som görs här publiceras inte. Filer du ändrar flyttas undan och den delade versionen kommer tillbaka."
+  ],
+  [
+   "^Make (.+) a viewer\\?$",
+   "Göra $1 till läsare?"
+  ],
+  [
+   "^Let (.+) write\\?$",
+   "Får $1 skriva?"
+  ],
+  [
+   "^(.+) keeps reading (.+), and what it wrote until now stays\\. What it changes from now on is not accepted by your devices or the editors\\. It can still copy what it reads: a key cannot prevent that\\.$",
+   "$1 kan fortsätta läsa $2, och det den har skrivit hittills finns kvar. Dina enheter och redigerarna godtar inte det den ändrar från och med nu. Den kan ändå kopiera det den läser: en nyckel kan inte hindra det."
+  ],
+  [
+   "^(.+) can change, add and delete files in (.+) again; your devices and the other members accept its changes\\.$",
+   "$1 kan åter ändra, lägga till och ta bort filer i $2; dina enheter och de andra medlemmarna godtar dess ändringar."
   ]
  ],
  "review": [
@@ -1455,7 +1487,19 @@
   "The prices were not verified for this region; it may be priced differently.",
   "Replace the part in braces in the endpoint with your own value, for example your account id.",
   "plan",
-  "(old)"
+  "(old)",
+  "An editor reads and writes this folder; a viewer only reads it: nothing a viewer changes is accepted by your devices or the editors. Paste the recipient's request code to seal the token to their device, or leave it empty for a plain token that carries the folder key itself (editors only).",
+  "Paste the recipient's request code to seal the token to their device, or leave it empty for a plain token that carries the folder key itself (editors only).",
+  "Role",
+  "Editor: read and write",
+  "Viewer: read only",
+  "A viewer can still copy what it reads; a key cannot prevent that.",
+  "A viewer's token must be sealed to their request code: paste it. A plain token cannot say what its holder may do.",
+  "Viewer",
+  "Editor",
+  "read only",
+  "Make viewer",
+  "Make editor"
  ],
  "parts": [
   [

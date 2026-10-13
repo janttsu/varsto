@@ -111,6 +111,13 @@ pub struct InviteRecord {
     pub fingerprint: String,
     pub issuer: DeviceId,
     pub issued_utc: i64,
+    /// The role the token gives (editor for tokens issued before roles).
+    #[serde(default)]
+    pub role: ShareRole,
+    /// The secret inside the sealed token from which the member derives
+    /// its join proof (hex; empty for a plain token).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub join_secret_hex: String,
 }
 
 impl InviteRecord {
@@ -400,6 +407,231 @@ impl ShareGrant {
                 .map_err(|_| anyhow!("share grant does not open with this device's key"))?,
         );
         SecretKey::from_bytes(&key)
+    }
+}
+
+/// `vault/share-roles/<folder>/<seq, 10 digits>-<issuer>.json`: who of a
+/// shared folder's members may write, signed by one of the owner's devices.
+pub const ROLE_PREFIX: &str = "vault/share-roles/";
+/// `vault/share-join/<folder>/<device>.json`: a member's proof that it opened
+/// the token of one invitation (so the owner knows which role it was given).
+pub const JOIN_PREFIX: &str = "vault/share-join/";
+
+/// What a member of a shared folder may do. The owner's devices always write.
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(rename_all = "lowercase")]
+pub enum ShareRole {
+    /// Reads and writes (every member before roles existed).
+    #[default]
+    Editor,
+    /// Reads only: nothing it publishes for the folder is accepted.
+    Viewer,
+}
+
+impl ShareRole {
+    pub fn parse(s: &str) -> Result<ShareRole> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "editor" | "write" | "read-write" | "rw" => Ok(ShareRole::Editor),
+            "viewer" | "read" | "read-only" | "ro" => Ok(ShareRole::Viewer),
+            other => bail!("unknown role {other}: use viewer or editor"),
+        }
+    }
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ShareRole::Editor => "editor",
+            ShareRole::Viewer => "viewer",
+        }
+    }
+    pub fn is_editor(&self) -> bool {
+        *self == ShareRole::Editor
+    }
+}
+
+/// The role of one member device in a role record.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RoleEntry {
+    pub role: ShareRole,
+    /// The member's name when the entry was written (shown only).
+    #[serde(default)]
+    pub name: String,
+    /// When this role was given.
+    pub since_utc: i64,
+    /// A viewer that was an editor before: its changes up to this Lamport
+    /// clock (as named in file versions) were accepted then and stay so.
+    #[serde(default)]
+    pub editor_until_clock: u64,
+    /// Likewise its ledger batches up to this sequence number.
+    #[serde(default)]
+    pub editor_until_seq: u64,
+}
+
+/// Every member's role in a shared folder: a snapshot, not a delta. The
+/// valid record with the highest sequence number is the truth (ties: the
+/// later `issued_utc`, then the larger issuer id). Once a folder has one,
+/// a member it does not list is a viewer: the owner's devices list a new
+/// member under the role of its invitation once they see its join proof.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ShareRoles {
+    pub folder: FolderId,
+    pub seq: u64,
+    pub issuer: DeviceId,
+    pub issued_utc: i64,
+    /// The newest share epoch when the record was written.
+    #[serde(default)]
+    pub share_epoch: u32,
+    /// By member device id.
+    pub roles: BTreeMap<DeviceId, RoleEntry>,
+}
+
+impl ShareRoles {
+    /// Ordering of two valid records of a folder: larger wins.
+    pub fn rank(&self) -> (u64, i64, DeviceId) {
+        (self.seq, self.issued_utc, self.issuer.clone())
+    }
+}
+
+/// A role record as stored: the body encrypted under a key derived from the
+/// folder key of share epoch `epoch` (0: the folder key), signed by the
+/// issuing owner device over its place and the ciphertext.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SignedShareRoles {
+    pub format_version: u16,
+    pub folder: FolderId,
+    pub seq: u64,
+    pub issuer: DeviceId,
+    pub epoch: u32,
+    pub body_hex: String,
+    pub sig_alg: String,
+    pub sig_hex: String,
+}
+
+impl SignedShareRoles {
+    pub fn storage_key(folder: &FolderId, seq: u64, issuer: &DeviceId) -> String {
+        format!("{ROLE_PREFIX}{folder}/{seq:010}-{issuer}.json")
+    }
+    /// (seq, issuer) of a name under `vault/share-roles/<folder>/`.
+    pub fn parse_name(name: &str) -> Option<(u64, DeviceId)> {
+        let stem = name.strip_suffix(".json")?;
+        let (seq, issuer) = stem.split_once('-')?;
+        Some((seq.parse().ok()?, DeviceId::from_hex(issuer).ok()?))
+    }
+    fn key(epoch_key: &SecretKey, folder: &FolderId) -> SecretKey {
+        epoch_key.derive("share-roles", &[folder.as_str().as_bytes()])
+    }
+    fn aad(vault: &VaultId, folder: &FolderId, seq: u64, issuer: &DeviceId, epoch: u32) -> Vec<u8> {
+        crypto::aad(
+            "share-roles",
+            &[
+                vault.as_str().as_bytes(),
+                folder.as_str().as_bytes(),
+                &seq.to_le_bytes(),
+                issuer.as_str().as_bytes(),
+                &epoch.to_le_bytes(),
+            ],
+        )
+    }
+    fn message(&self, vault: &VaultId) -> Result<Vec<u8>> {
+        let body = hex::decode(&self.body_hex)?;
+        Ok(crypto::aad(
+            "share-roles-signature",
+            &[
+                vault.as_str().as_bytes(),
+                self.folder.as_str().as_bytes(),
+                &self.seq.to_le_bytes(),
+                self.issuer.as_str().as_bytes(),
+                &self.epoch.to_le_bytes(),
+                &crypto::hash(&body),
+            ],
+        ))
+    }
+    pub fn seal(
+        roles: &ShareRoles,
+        vault: &VaultId,
+        epoch: u32,
+        epoch_key: &SecretKey,
+        signer: &SigningKey,
+    ) -> Result<Self> {
+        let body = crypto::encrypt(
+            &Self::key(epoch_key, &roles.folder),
+            &Self::aad(vault, &roles.folder, roles.seq, &roles.issuer, epoch),
+            &serde_json::to_vec(roles)?,
+        )?;
+        let mut s = SignedShareRoles {
+            format_version: crate::FORMAT_VERSION,
+            folder: roles.folder.clone(),
+            seq: roles.seq,
+            issuer: roles.issuer.clone(),
+            epoch,
+            body_hex: hex::encode(body),
+            sig_alg: signer.alg().to_string(),
+            sig_hex: String::new(),
+        };
+        s.sig_hex = hex::encode(signer.sign(&s.message(vault)?));
+        Ok(s)
+    }
+    /// Check the issuer's signature, then open with the folder key of the
+    /// envelope's epoch. The body must agree with the envelope.
+    pub fn open(
+        &self,
+        vault: &VaultId,
+        issuer_key: &VerifyingKey,
+        epoch_key: &SecretKey,
+    ) -> Result<ShareRoles> {
+        issuer_key.verify(
+            &self.sig_alg,
+            &self.message(vault)?,
+            &hex::decode(&self.sig_hex)?,
+        )?;
+        let plain = crypto::decrypt(
+            &Self::key(epoch_key, &self.folder),
+            &Self::aad(vault, &self.folder, self.seq, &self.issuer, self.epoch),
+            &hex::decode(&self.body_hex)?,
+        )?;
+        let r: ShareRoles = serde_json::from_slice(&plain)?;
+        if r.folder != self.folder || r.seq != self.seq || r.issuer != self.issuer {
+            bail!("share role record does not match its envelope");
+        }
+        Ok(r)
+    }
+}
+
+/// A member's proof that it holds the token of invitation `invite`:
+/// `derive(join secret, "share-join-proof", folder, device)`. The join secret
+/// travels only inside the sealed token and in the owner's invitation
+/// record, so nobody else can tie a device to an invitation (and its role).
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct JoinProof {
+    pub folder: FolderId,
+    pub device: DeviceId,
+    pub invite: String,
+    pub proof_hex: String,
+}
+
+impl JoinProof {
+    pub fn storage_key(folder: &FolderId, device: &DeviceId) -> String {
+        format!("{JOIN_PREFIX}{folder}/{device}.json")
+    }
+    pub fn proof(secret: &SecretKey, folder: &FolderId, device: &DeviceId) -> String {
+        secret
+            .derive(
+                "share-join-proof",
+                &[folder.as_str().as_bytes(), device.as_str().as_bytes()],
+            )
+            .to_hex()
+    }
+    pub fn make(secret: &SecretKey, folder: &FolderId, device: &DeviceId, invite: &str) -> Self {
+        JoinProof {
+            folder: folder.clone(),
+            device: device.clone(),
+            invite: invite.to_string(),
+            proof_hex: Self::proof(secret, folder, device),
+        }
+    }
+    pub fn verify(&self, secret: &SecretKey) -> bool {
+        crypto::ct_eq(
+            Self::proof(secret, &self.folder, &self.device).as_bytes(),
+            self.proof_hex.as_bytes(),
+        )
     }
 }
 

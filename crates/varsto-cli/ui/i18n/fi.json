@@ -968,7 +968,19 @@
   "Tags": "Tunnisteet",
   "separated by commas": "pilkuilla erotettuina",
   "No files match the filter": "Mikään tiedosto ei vastaa suodatinta",
-  "Analysis stale": "Analyysi vanhentunut"
+  "Analysis stale": "Analyysi vanhentunut",
+  "An editor reads and writes this folder; a viewer only reads it: nothing a viewer changes is accepted by your devices or the editors. Paste the recipient's request code to seal the token to their device, or leave it empty for a plain token that carries the folder key itself (editors only).": "Muokkaaja lukee ja kirjoittaa tähän kansioon; katselija vain lukee: laitteesi ja muokkaajat eivät hyväksy mitään katselijan muutosta. Liitä vastaanottajan pyyntökoodi sinetöidäksesi tunnisteen hänen laitteelleen, tai jätä se tyhjäksi, jolloin tunniste on tavallinen ja sisältää itse kansioavaimen (vain muokkaajille).",
+  "Paste the recipient's request code to seal the token to their device, or leave it empty for a plain token that carries the folder key itself (editors only).": "Liitä vastaanottajan pyyntökoodi sinetöidäksesi tunnisteen hänen laitteelleen, tai jätä se tyhjäksi, jolloin tunniste on tavallinen ja sisältää itse kansioavaimen (vain muokkaajille).",
+  "Role": "Rooli",
+  "Editor: read and write": "Muokkaaja: lukee ja kirjoittaa",
+  "Viewer: read only": "Katselija: vain luku",
+  "A viewer can still copy what it reads; a key cannot prevent that.": "Katselija voi silti kopioida sen, mitä se lukee; avain ei voi estää sitä.",
+  "A viewer's token must be sealed to their request code: paste it. A plain token cannot say what its holder may do.": "Katselijan tunniste on sinetöitävä hänen pyyntökoodilleen: liitä koodi. Tavallinen tunniste ei voi kertoa, mitä sen haltija saa tehdä.",
+  "Viewer": "Katselija",
+  "Editor": "Muokkaaja",
+  "read only": "vain luku",
+  "Make viewer": "Tee katselijaksi",
+  "Make editor": "Tee muokkaajaksi"
  },
  "patterns": [
   [
@@ -1286,6 +1298,26 @@
   [
    "^cleared the analysis of (.+)$",
    "tyhjennettiin tiedoston $1 analyysi"
+  ],
+  [
+   "^This device may only read (.+): changes made here are not published\\. Files you change are moved aside and the shared version comes back\\.$",
+   "Tämä laite saa vain lukea kansiota $1: täällä tehtyjä muutoksia ei julkaista. Muuttamasi tiedostot siirretään syrjään ja jaettu versio palaa."
+  ],
+  [
+   "^Make (.+) a viewer\\?$",
+   "Tehdäänkö jäsenestä $1 katselija?"
+  ],
+  [
+   "^Let (.+) write\\?$",
+   "Saako $1 kirjoittaa?"
+  ],
+  [
+   "^(.+) keeps reading (.+), and what it wrote until now stays\\. What it changes from now on is not accepted by your devices or the editors\\. It can still copy what it reads: a key cannot prevent that\\.$",
+   "$1 voi yhä lukea kansiota $2, ja se, mitä se on tähän asti kirjoittanut, säilyy. Laitteesi ja muokkaajat eivät hyväksy sen tästä lähtien tekemiä muutoksia. Se voi silti kopioida sen, mitä lukee: avain ei voi estää sitä."
+  ],
+  [
+   "^(.+) can change, add and delete files in (.+) again; your devices and the other members accept its changes\\.$",
+   "$1 voi taas muuttaa, lisätä ja poistaa tiedostoja kansiossa $2; laitteesi ja muut jäsenet hyväksyvät sen muutokset."
   ]
  ],
  "review": [
@@ -1407,7 +1439,19 @@
   "The prices were not verified for this region; it may be priced differently.",
   "Replace the part in braces in the endpoint with your own value, for example your account id.",
   "plan",
-  "(old)"
+  "(old)",
+  "An editor reads and writes this folder; a viewer only reads it: nothing a viewer changes is accepted by your devices or the editors. Paste the recipient's request code to seal the token to their device, or leave it empty for a plain token that carries the folder key itself (editors only).",
+  "Paste the recipient's request code to seal the token to their device, or leave it empty for a plain token that carries the folder key itself (editors only).",
+  "Role",
+  "Editor: read and write",
+  "Viewer: read only",
+  "A viewer can still copy what it reads; a key cannot prevent that.",
+  "A viewer's token must be sealed to their request code: paste it. A plain token cannot say what its holder may do.",
+  "Viewer",
+  "Editor",
+  "read only",
+  "Make viewer",
+  "Make editor"
  ],
  "parts": [
   [

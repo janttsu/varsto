@@ -449,6 +449,11 @@ impl Engine {
             parts.push(d.as_str().as_bytes().to_vec());
             parts.push(r.cutoff_seq.to_le_bytes().to_vec());
         }
+        for (d, cutoff) in &self.devices.share_viewers {
+            parts.push(b"viewer".to_vec());
+            parts.push(d.as_str().as_bytes().to_vec());
+            parts.push(cutoff.to_le_bytes().to_vec());
+        }
         let refs: Vec<&[u8]> = parts.iter().map(|p| p.as_slice()).collect();
         hex::encode(crypto::hash(&crypto::aad("ledger-view-context", &refs)))
     }

@@ -1176,14 +1176,21 @@ fn api_unlocked(
         }
         (Method::Post, "/api/share/create") => {
             let folder = s(input, "folder")?;
+            let role = match opt(input, "role").filter(|r| !r.trim().is_empty()) {
+                Some(r) => varsto_core::share::ShareRole::parse(&r)?,
+                None => varsto_core::share::ShareRole::Editor,
+            };
             match opt(input, "to").filter(|c| !c.trim().is_empty()) {
                 Some(code) => {
                     // The interface sends the words the user confirmed; they
                     // must be the code's.
                     let confirmed = opt(input, "fingerprint").filter(|f| !f.trim().is_empty());
                     let (sealed, req) =
-                        engine.share_create_sealed(&folder, &code, confirmed.as_deref())?;
-                    Ok(json!({"ok": true, "token": sealed.encode(), "folder": sealed.name, "sealed": true, "fingerprint": req.fingerprint, "name": req.name}))
+                        engine.share_create_sealed_as(&folder, &code, confirmed.as_deref(), role)?;
+                    Ok(json!({"ok": true, "token": sealed.encode(), "folder": sealed.name, "sealed": true, "fingerprint": req.fingerprint, "name": req.name, "role": role.as_str()}))
+                }
+                None if !role.is_editor() => {
+                    bail!("a viewer's token must be sealed to their request code: paste it (a plain token cannot say what its holder may do)")
                 }
                 None => {
                     let t = engine.share_create_plain(&folder)?;
@@ -1195,6 +1202,12 @@ fn api_unlocked(
             let folder = query_param(query, "folder")
                 .ok_or_else(|| anyhow!("folder query parameter required"))?;
             Ok(serde_json::to_value(engine.share_members(&folder)?)?)
+        }
+        (Method::Post, "/api/share/role") => {
+            let role = varsto_core::share::ShareRole::parse(&s(input, "role")?)?;
+            let r = engine.share_set_role(&s(input, "folder")?, &s(input, "member")?, role)?;
+            service.request_sync();
+            Ok(serde_json::to_value(r)?)
         }
         (Method::Post, "/api/share/revoke") => {
             // Like removing a device: the caller must confirm explicitly.

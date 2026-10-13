@@ -543,7 +543,10 @@ impl ServiceState {
         let mut unavailable = 0;
         let mut forked = false;
         let mut disks: Vec<String> = Vec::new();
+        // A read-only shared folder: local changes are not published.
+        let mut kept_aside = 0;
         for (pl, ps) in reports {
+            kept_aside += pl.kept_aside.len() + ps.kept_aside.len();
             self.p2p_chunks += pl.chunks_from_peers;
             updated += pl.files_updated;
             deleted += pl.files_deleted;
@@ -558,6 +561,11 @@ impl ServiceState {
             }
         }
         self.last_result = format!("{} folders: {updated} updated, {deleted} deleted, {conflicts} conflicts, {uploaded} chunks uploaded{}{}{}", reports.len(), if unavailable > 0 { format!(", {unavailable} unavailable") } else { String::new() }, if disks.is_empty() { String::new() } else { format!(" (attach disk {})", disks.join(", ")) }, if forked { ", FORKED device" } else { "" });
+        if kept_aside > 0 {
+            self.last_result.push_str(&format!(
+                "; read-only: your changes were not published ({kept_aside} file(s) kept aside)"
+            ));
+        }
         self.last_error = None;
     }
 }

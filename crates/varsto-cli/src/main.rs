@@ -812,10 +812,23 @@ enum ShareCmd {
         /// Seal without asking whether the fingerprint matches (you compared it some other way).
         #[arg(long)]
         yes: bool,
+        /// What the recipient may do: editor (read and write) or viewer (read only: nothing it
+        /// changes is accepted by your devices or the editors). A viewer needs --to.
+        #[arg(long, default_value = "editor")]
+        role: String,
     },
-    /// (Owner) Who has access to a shared folder: your devices, members (current and removed)
-    /// and tokens not accepted yet.
+    /// (Owner) Who has access to a shared folder, with each member's role: your devices,
+    /// members (current and removed) and tokens not accepted yet.
     Members { folder: String },
+    /// (Owner) Make a member a viewer (read only) or an editor (read and write). What a viewer
+    /// wrote while it was an editor stays; what it writes from now on is not accepted.
+    Role {
+        folder: String,
+        /// Member name or device id (see `share members`).
+        member: String,
+        /// viewer or editor.
+        role: String,
+    },
     /// (Owner) Remove a member (name or device id) or revoke a token not accepted yet (its id or
     /// fingerprint words), or `all`: the folder gets a new key for everything written from now on.
     Revoke {
@@ -1274,6 +1287,51 @@ fn url_escape(s: &str) -> String {
         .collect()
 }
 
+/// Where a read-only folder's local changes went.
+fn kept_aside_text(paths: &[String]) -> String {
+    if paths.is_empty() {
+        return String::new();
+    }
+    let shown: Vec<&str> = paths.iter().take(5).map(|p| p.as_str()).collect();
+    format!(
+        " ({} file(s) moved to {}/ in the device directory or put back: {}{})",
+        paths.len(),
+        varsto_core::engine::KEPT_ASIDE_DIR,
+        shown.join(", "),
+        if paths.len() > shown.len() {
+            ", ..."
+        } else {
+            ""
+        }
+    )
+}
+
+/// Read-only members: this device's own refused changes, and changes of
+/// viewers this device did not take.
+fn role_notes(
+    pull: &varsto_core::engine::PullReport,
+    push: Option<&varsto_core::engine::PushReport>,
+) -> String {
+    let mut out = String::new();
+    let mut kept: Vec<String> = pull.kept_aside.clone();
+    if let Some(p) = push {
+        kept.extend(p.kept_aside.iter().cloned());
+    }
+    if push.is_some_and(|p| p.read_only) || !kept.is_empty() {
+        out.push_str(&format!(
+            "; read-only: your changes were not published{}",
+            kept_aside_text(&kept)
+        ));
+    }
+    if !pull.writes_refused.is_empty() {
+        out.push_str(&format!(
+            "; not taken from read-only members: {}",
+            pull.writes_refused.join(", ")
+        ));
+    }
+    out
+}
+
 fn share_members_text(l: &varsto_core::engine::ShareMembers) -> String {
     let mut out = format!("{} ({})", l.folder, &l.folder_id[..8]);
     if l.share_epoch > 0 {
@@ -1281,6 +1339,11 @@ fn share_members_text(l: &varsto_core::engine::ShareMembers) -> String {
     }
     if l.access_lost {
         out.push_str("\nThis device no longer receives new content of this folder: the owner removed it, or has not sent it the new key yet.");
+    }
+    if l.this_role == "viewer" {
+        out.push_str(
+            "\nThis device may only read this folder: changes made here are not published.",
+        );
     }
     for m in &l.members {
         let what = match (m.kind.as_str(), m.status.as_str()) {
@@ -1297,7 +1360,14 @@ fn share_members_text(l: &varsto_core::engine::ShareMembers) -> String {
                     .map(|t| format!(" on {}", varsto_core::util::format_date(t)))
                     .unwrap_or_default()
             ),
-            _ => "member".to_string(),
+            _ => match m.role.as_str() {
+                "viewer" => "member, viewer (read only)".to_string(),
+                _ => "member, editor".to_string(),
+            },
+        };
+        let what = match (m.kind.as_str(), m.status.as_str(), m.role.as_str()) {
+            ("invite", "pending", "viewer") => format!("{what} (viewer)"),
+            _ => what,
         };
         out.push_str(&format!(
             "\n  {:<20} {:<10} {}{}{}",
@@ -2975,6 +3045,13 @@ fn run(cli: &Cli) -> Result<()> {
             let mut engine = open_engine(&home)?;
             let r = engine.push(folder)?;
             print(cli, &r, |r| {
+                if r.read_only {
+                    return format!(
+                        "{}: read-only: your changes were not published{}",
+                        r.folder,
+                        kept_aside_text(&r.kept_aside)
+                    );
+                }
                 format!(
                     "{}: scanned {}, changed {}, uploaded {} chunks ({} bytes), manifest {:?}",
                     r.folder,
@@ -2990,7 +3067,7 @@ fn run(cli: &Cli) -> Result<()> {
             let mut engine = open_engine(&home)?;
             let r = engine.pull(folder)?;
             print(cli, &r, |r| {
-                format!("{}: {} manifests, {} updated, {} deleted, {} conflicts, {} chunks downloaded; unavailable: {:?}; forked: {:?}{}", r.folder, r.manifests_applied, r.files_updated, r.files_deleted, r.conflicts, r.chunks_downloaded, r.files_unavailable, r.forked_devices, if r.disks_needed.is_empty() { String::new() } else { format!("; attach disk {}", r.disks_needed.join(", ")) })
+                format!("{}: {} manifests, {} updated, {} deleted, {} conflicts, {} chunks downloaded; unavailable: {:?}; forked: {:?}{}{}", r.folder, r.manifests_applied, r.files_updated, r.files_deleted, r.conflicts, r.chunks_downloaded, r.files_unavailable, r.forked_devices, if r.disks_needed.is_empty() { String::new() } else { format!("; attach disk {}", r.disks_needed.join(", ")) }, role_notes(r, None))
             })?;
         }
         Cmd::Sync { folder } => {
@@ -2998,7 +3075,7 @@ fn run(cli: &Cli) -> Result<()> {
             let r = engine.sync(folder.as_deref())?;
             warn_ledger(&engine.ledger_health());
             print(cli, &r, |r| {
-                r.iter().map(|(pl, ps)| format!("{}: pulled {} updated/{} deleted/{} conflicts, pushed {} changed/{} chunks{}{}", pl.folder, pl.files_updated, pl.files_deleted, pl.conflicts, ps.files_changed, ps.chunks_uploaded, if pl.disks_needed.is_empty() { String::new() } else { format!("; attach disk {}", pl.disks_needed.join(", ")) }, if ps.storages_unavailable.is_empty() { String::new() } else { format!("; not written to {}", ps.storages_unavailable.join(", ")) })).collect::<Vec<_>>().join("\n")
+                r.iter().map(|(pl, ps)| format!("{}: pulled {} updated/{} deleted/{} conflicts, pushed {} changed/{} chunks{}{}{}", pl.folder, pl.files_updated, pl.files_deleted, pl.conflicts, ps.files_changed, ps.chunks_uploaded, if pl.disks_needed.is_empty() { String::new() } else { format!("; attach disk {}", pl.disks_needed.join(", ")) }, if ps.storages_unavailable.is_empty() { String::new() } else { format!("; not written to {}", ps.storages_unavailable.join(", ")) }, role_notes(pl, Some(ps)))).collect::<Vec<_>>().join("\n")
             })?;
         }
         Cmd::FetchPlan { folder, paths } => {
@@ -3241,7 +3318,12 @@ fn run(cli: &Cli) -> Result<()> {
                 to,
                 fingerprint,
                 yes,
+                role,
             } => {
+                let role = varsto_core::share::ShareRole::parse(role)?;
+                if !role.is_editor() && to.is_none() {
+                    bail_usage::<()>("a viewer's token must be sealed to their request code: give --to <request-code> (a plain token cannot say what its holder may do)")?;
+                }
                 let mut engine = open_engine(&home)?;
                 match to {
                     Some(code) => {
@@ -3261,15 +3343,19 @@ fn run(cli: &Cli) -> Result<()> {
                                 Some(req.fingerprint.clone())
                             }
                         };
-                        let (sealed, req) =
-                            engine.share_create_sealed(folder, code, confirmed.as_deref())?;
+                        let (sealed, req) = engine.share_create_sealed_as(
+                            folder,
+                            code,
+                            confirmed.as_deref(),
+                            role,
+                        )?;
                         if cli.json {
                             println!(
                                 "{}",
-                                serde_json::json!({"folder": sealed.name, "token": sealed.encode(), "sealed": true, "fingerprint": req.fingerprint, "name": req.name})
+                                serde_json::json!({"folder": sealed.name, "token": sealed.encode(), "sealed": true, "fingerprint": req.fingerprint, "name": req.name, "role": role.as_str()})
                             );
                         } else {
-                            println!("sealed share token for folder {} (only the device that made the request code can open it; fingerprint {}):\n  {}", sealed.name, req.fingerprint, sealed.encode());
+                            println!("sealed share token for folder {} as {} (only the device that made the request code can open it; fingerprint {}):\n  {}", sealed.name, if role.is_editor() { "an editor (read and write)" } else { "a viewer (read only)" }, req.fingerprint, sealed.encode());
                         }
                     }
                     None => {
@@ -3366,6 +3452,43 @@ fn run(cli: &Cli) -> Result<()> {
                         engine.share_members(folder)?
                     };
                 print(cli, &list, share_members_text)?;
+            }
+            ShareCmd::Role {
+                folder,
+                member,
+                role,
+            } => {
+                let role = varsto_core::share::ShareRole::parse(role)?;
+                let report: varsto_core::engine::ShareRoleReport = if let Some((sf, _)) =
+                    service::status(&home)
+                {
+                    let url = format!("http://127.0.0.1:{}/api/share/role", sf.port);
+                    let body = serde_json::json!({"folder": folder, "member": member, "role": role.as_str()});
+                    let r = service::http_post(&url, &sf.token, &body.to_string())?;
+                    serde_json::from_str(&r)
+                        .map_err(|_| anyhow!("unexpected answer from the service: {r}"))?
+                } else {
+                    let mut engine = open_engine(&home)?;
+                    engine.share_set_role(folder, member, role)?
+                };
+                print(cli, &report, |r| {
+                    format!(
+                        "{}: {} is now {} (role record {}){}",
+                        r.folder,
+                        r.member,
+                        if r.role == "viewer" {
+                            "a viewer: read only"
+                        } else {
+                            "an editor: read and write"
+                        },
+                        r.seq,
+                        if r.role == "viewer" {
+                            "\nWhat it wrote until now stays; what it writes from now on is not accepted. It can still copy what it reads."
+                        } else {
+                            ""
+                        }
+                    )
+                })?;
             }
             ShareCmd::Revoke {
                 folder,

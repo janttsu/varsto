@@ -248,7 +248,13 @@ impl Engine {
         for (dev, (t, i, key)) in newest {
             let known =
                 self.devices.devices.contains_key(&dev) || self.devices.members.contains_key(&dev);
-            if dev == self.vault.device_id || !known || self.is_revoked(&dev) {
+            // Read-only members of a shared folder: their records are not
+            // taken (`share_roles`).
+            if dev == self.vault.device_id
+                || !known
+                || self.is_revoked(&dev)
+                || !self.share_role_of(&fk.folder, &dev).is_editor()
+            {
                 continue;
             }
             if cache.remote.get(&dev).is_some_and(|r| r.written_utc >= t) {

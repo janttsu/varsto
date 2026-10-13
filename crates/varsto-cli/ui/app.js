@@ -795,13 +795,18 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   function shareFolder(f) {
     dialog({
       title: (f.shared ? "New token for " : "Share ") + f.name,
-      text: (f.shared ? "" : "Anyone holding the token can read and write this folder. ") + "Paste the recipient's request code to seal the token to their device, or leave it empty for a plain token that carries the folder key itself.",
-      fields: [{ name: "to", label: "Recipient's request code (optional)", placeholder: "vsr1…" }],
+      text: (f.shared ? "" : "An editor reads and writes this folder; a viewer only reads it: nothing a viewer changes is accepted by your devices or the editors. ") + "Paste the recipient's request code to seal the token to their device, or leave it empty for a plain token that carries the folder key itself (editors only).",
+      fields: [
+        { name: "to", label: "Recipient's request code (optional)", placeholder: "vsr1…" },
+        { name: "role", label: "Role", options: [["editor", "Editor: read and write"], ["viewer", "Viewer: read only"]], value: "editor", hint: "A viewer can still copy what it reads; a key cannot prevent that." }
+      ],
       ok: f.shared ? "Create token" : "Share"
     }).then(function (r) {
       if (!r) { return; }
       var code = (r.values.to || "").trim();
-      if (!code) { return createToken(f, "", ""); }
+      var role = r.values.role || "editor";
+      if (!code && role === "viewer") { return alertBox("A viewer's token must be sealed to their request code: paste it. A plain token cannot say what its holder may do."); }
+      if (!code) { return createToken(f, "", "", role); }
       // Confirm who asked: both sides see the same six words for the code.
       return api("POST", "/api/share/fingerprint", { code: code }).then(function (fp) {
         var who = fp.name || "the requester";
@@ -809,13 +814,13 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
           title: "Is this " + who + "'s request?",
           text: "Ask " + who + " to read the fingerprint their device shows for the request code (under Accept a shared folder, or `varsto share request`), over a call or in person, not in the same message as the code. Share only if all six words match: different words mean the code was changed on its way.",
           code: fp.fingerprint, ok: "The words match", danger: false
-        }).then(function (c) { if (c) { return createToken(f, code, fp.fingerprint); } });
+        }).then(function (c) { if (c) { return createToken(f, code, fp.fingerprint, role); } });
       });
     }).catch(function (e) { alertBox(e.message); });
   }
-  function createToken(f, code, fingerprint) {
-    return api("POST", "/api/share/create", { folder: f.name, to: code, fingerprint: fingerprint }).then(function (t) {
-      $("sharetoken").textContent = (t.sealed ? "Sealed share token for " + t.folder + " (only the requesting device can open it; fingerprint " + t.fingerprint + "): " : "Share token for " + t.folder + " (contains the folder key; send over a secure channel): ") + t.token;
+  function createToken(f, code, fingerprint, role) {
+    return api("POST", "/api/share/create", { folder: f.name, to: code, fingerprint: fingerprint, role: role || "editor" }).then(function (t) {
+      $("sharetoken").textContent = (t.sealed ? (t.role === "viewer" ? "Sealed share token for a viewer of " : "Sealed share token for an editor of ") + t.folder + " (only the requesting device can open it; fingerprint " + t.fingerprint + "): " : "Share token for " + t.folder + " (contains the folder key; send over a secure channel): ") + t.token;
       $("sharetoken").classList.remove("hidden"); nav("shared"); refreshStatus();
     });
   }
@@ -824,10 +829,12 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     api("GET", "/api/share/members?folder=" + encodeURIComponent(f.name)).then(function (l) {
       box.innerHTML = "";
       if (l.access_lost) { box.appendChild(el("li", "notice warn", "This device no longer receives new content of " + f.name + ": the owner removed it, or has not sent it the new key yet.")); }
+      if (l.this_role === "viewer") { box.appendChild(el("li", "notice", "This device may only read " + f.name + ": changes made here are not published. Files you change are moved aside and the shared version comes back.")); }
       l.members.forEach(function (m) {
         var li = el("li"); var body = el("div", "li-body"); var title = el("div", "li-title", m.name);
         var kind = m.kind === "owner-device" ? ["grey", "Owner's device"] : m.kind === "invite" ? (m.status === "pending" ? ["accent", "Token not accepted yet"] : ["grey", "Token revoked"]) : m.status === "removed" ? ["risk", "Removed"] : ["accent", "Member"];
         title.appendChild(pill(kind[0], kind[1]));
+        if (m.kind !== "owner-device" && m.status !== "removed" && m.status !== "revoked") { title.appendChild(m.role === "viewer" ? pill("grey", "Viewer") : pill("ok", "Editor")); }
         if (m.this_device) { title.appendChild(pill("grey", "This device")); }
         body.appendChild(title);
         var sub = [];
@@ -838,7 +845,16 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
         li.appendChild(body);
         var removable = owner && ((m.kind === "member" && m.status === "active") || (m.kind === "invite" && m.status === "pending"));
         if (removable) {
-          var a = el("div", "li-actions"); var b = el("button", "secondary danger", m.kind === "invite" ? "Revoke…" : "Remove…"); b.type = "button";
+          var a = el("div", "li-actions");
+          if (m.kind === "member") {
+            // The role: only the owner's devices sign a change of it.
+            var rs = el("select"); rs.setAttribute("aria-label", "Role");
+            [["editor", "Editor"], ["viewer", "Viewer"]].forEach(function (o) { var x = el("option", null, o[1]); x.value = o[0]; rs.appendChild(x); });
+            rs.value = m.role === "viewer" ? "viewer" : "editor";
+            rs.onchange = function () { setMemberRole(f, m, rs.value, box); };
+            a.appendChild(rs);
+          }
+          var b = el("button", "secondary danger", m.kind === "invite" ? "Revoke…" : "Remove…"); b.type = "button";
           b.onclick = function () { removeMember(f, m, box); }; a.appendChild(b); li.appendChild(a);
         }
         box.appendChild(li);
@@ -848,6 +864,21 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
         b.onclick = function () { removeMember(f, { id: "all", name: "everyone", kind: "all" }, box); }; a.appendChild(b); li.appendChild(a); box.appendChild(li);
       }
     }).catch(function (e) { alertBox(e.message); });
+  }
+  function setMemberRole(f, m, role, box) {
+    var viewer = role === "viewer";
+    dialog({
+      title: (viewer ? "Make " + m.name + " a viewer?" : "Let " + m.name + " write?"),
+      text: viewer ? m.name + " keeps reading " + f.name + ", and what it wrote until now stays. What it changes from now on is not accepted by your devices or the editors. It can still copy what it reads: a key cannot prevent that." : m.name + " can change, add and delete files in " + f.name + " again; your devices and the other members accept its changes.",
+      ok: viewer ? "Make viewer" : "Make editor", danger: viewer
+    }).then(function (r) {
+      if (!r) { return showMembers(f, box, true); }
+      busy(true);
+      return api("POST", "/api/share/role", { folder: f.name, member: m.id, role: role }).then(function (rep) {
+        log(f.name + ": " + rep.member + " is now " + (rep.role === "viewer" ? "a viewer" : "an editor"));
+        showMembers(f, box, true);
+      });
+    }).catch(function (e) { alertBox(e.message, "Nothing was changed"); showMembers(f, box, true); }).then(function () { busy(false); });
   }
   function removeMember(f, m, box) {
     var invite = m.kind === "invite";
@@ -962,6 +993,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
         if (f.strongroom) { nameCell.appendChild(document.createTextNode(" ")); nameCell.appendChild(pill(f.strongroom === "locked" ? "grey" : "accent", f.strongroom === "locked" ? "Strongroom locked" : "Strongroom open")); }
         if (f.selective) { nameCell.appendChild(document.createTextNode(" ")); nameCell.appendChild(pill("grey", "selective")); }
         if (f.shared) { nameCell.appendChild(document.createTextNode(" ")); nameCell.appendChild(pill("accent", "shared")); }
+        if (f.read_only) { nameCell.appendChild(document.createTextNode(" ")); nameCell.appendChild(pill("grey", "read only")); }
         if (f.path && f.plain === false) { nameCell.appendChild(document.createTextNode(" ")); nameCell.appendChild(pill("grey", "encrypted here")); }
         var sub = el("span", "sub", f.path || "Not attached on this device"); if (f.path) { sub.title = f.path; } nameCell.appendChild(sub);
         nameCell.appendChild(miniMap(f));
@@ -1004,7 +1036,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
         if (f.shared) {
           shared++;
           var sli = el("li"); var sic = el("span", "li-icon"); sic.appendChild(icon("sharing")); sli.appendChild(sic);
-          var sbody = el("div", "li-body"); var stitle = el("div", "li-title", f.name); stitle.appendChild(pill("accent", "shared")); sbody.appendChild(stitle);
+          var sbody = el("div", "li-body"); var stitle = el("div", "li-title", f.name); stitle.appendChild(pill("accent", "shared")); if (f.read_only) { stitle.appendChild(pill("grey", "read only")); } sbody.appendChild(stitle);
           sbody.appendChild(el("div", "li-sub", f.files + " files · " + fmtBytes(f.bytes) + (f.path ? " · " + f.path : ""))); sli.appendChild(sbody);
           var sa = el("div", "li-actions");
           var smw = el("li", "sub-row hidden"); var sm = el("ul", "list sub-list"); smw.appendChild(sm);
@@ -1894,7 +1926,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   function runSync(folder) {
     busy(true); log("sync " + (folder || "all") + " started");
     return api("POST", "/api/sync", folder ? { folder: folder } : {}).then(function (r) {
-      r.forEach(function (x) { log(x.pull.folder + ": pulled " + x.pull.files_updated + " updated, " + x.pull.files_deleted + " deleted, " + x.pull.conflicts + " conflicts; pushed " + x.push.files_changed + " changed, " + x.push.chunks_uploaded + " chunks" + (x.pull.files_unavailable.length ? "; unavailable: " + x.pull.files_unavailable.join(", ") : "") + (x.pull.forked_devices.length ? "; FORKED: " + x.pull.forked_devices.join(", ") : "")); });
+      r.forEach(function (x) { log(x.pull.folder + ": pulled " + x.pull.files_updated + " updated, " + x.pull.files_deleted + " deleted, " + x.pull.conflicts + " conflicts; pushed " + x.push.files_changed + " changed, " + x.push.chunks_uploaded + " chunks" + (x.pull.files_unavailable.length ? "; unavailable: " + x.pull.files_unavailable.join(", ") : "") + (x.pull.forked_devices.length ? "; FORKED: " + x.pull.forked_devices.join(", ") : "") + ((x.push.read_only || (x.pull.kept_aside || []).length) ? "; read-only: your changes were not published" + (((x.pull.kept_aside || []).length + (x.push.kept_aside || []).length) ? " (kept aside: " + (x.pull.kept_aside || []).concat(x.push.kept_aside || []).join(", ") + ")" : "") : "") + ((x.pull.writes_refused || []).length ? "; not taken from read-only members: " + x.pull.writes_refused.join(", ") : "")); });
     }).catch(function (e) { log("sync failed: " + e.message); }).then(function () { busy(false); return refreshStatus().then(function () { if (currentPage === "files") { loadFiles(); } }); });
   }
 
