@@ -1,0 +1,191 @@
+{
+  "varsto-badge": [
+    {
+      "object": "Varsto badge (pin back)",
+      "size_mm": [
+        30.0,
+        30.0,
+        4.0
+      ],
+      "first_layer_mm2": 712.2,
+      "smallest_first_layer_island_mm2": 712.2,
+      "volume_cm3": {
+        "blue": 2.44,
+        "white": 0.14
+      }
+    },
+    {
+      "object": "Varsto badge (magnet)",
+      "size_mm": [
+        30.0,
+        30.0,
+        4.0
+      ],
+      "first_layer_mm2": 767.6,
+      "smallest_first_layer_island_mm2": 767.6,
+      "volume_cm3": {
+        "blue": 2.39,
+        "white": 0.14
+      }
+    }
+  ],
+  "varsto-coaster": [
+    {
+      "object": "Varsto coaster",
+      "size_mm": [
+        95.0,
+        95.0,
+        5.0
+      ],
+      "first_layer_mm2": 8334.1,
+      "smallest_first_layer_island_mm2": 8334.1,
+      "volume_cm3": {
+        "white": 0.71,
+        "black": 0.08,
+        "blue": 35.49
+      }
+    }
+  ],
+  "varsto-coaster-2colour": [
+    {
+      "object": "Varsto coaster",
+      "size_mm": [
+        95.0,
+        95.0,
+        5.0
+      ],
+      "first_layer_mm2": 8334.1,
+      "smallest_first_layer_island_mm2": 8334.1,
+      "volume_cm3": {
+        "white": 0.79,
+        "blue": 35.49
+      }
+    }
+  ],
+  "varsto-keychain": [
+    {
+      "object": "Varsto keychain",
+      "size_mm": [
+        40.0,
+        55.1,
+        4.0
+      ],
+      "first_layer_mm2": 1905.6,
+      "smallest_first_layer_island_mm2": 1905.6,
+      "volume_cm3": {
+        "blue": 4.6,
+        "black": 0.16,
+        "white": 0.25
+      }
+    }
+  ],
+  "varsto-keychain-2colour": [
+    {
+      "object": "Varsto keychain",
+      "size_mm": [
+        40.0,
+        48.0,
+        4.0
+      ],
+      "first_layer_mm2": 1623.0,
+      "smallest_first_layer_island_mm2": 1623.0,
+      "volume_cm3": {
+        "blue": 4.9,
+        "white": 0.25
+      }
+    }
+  ],
+  "varsto-magnet": [
+    {
+      "object": "Varsto fridge magnet",
+      "size_mm": [
+        88.3,
+        36.0,
+        5.2
+      ],
+      "first_layer_mm2": 3101.3,
+      "smallest_first_layer_island_mm2": 3101.3,
+      "volume_cm3": {
+        "blue": 10.84,
+        "black": 0.24,
+        "white": 0.23
+      }
+    }
+  ],
+  "varsto-magnet-2colour": [
+    {
+      "object": "Varsto fridge magnet",
+      "size_mm": [
+        50.0,
+        50.0,
+        4.6
+      ],
+      "first_layer_mm2": 2375.5,
+      "smallest_first_layer_island_mm2": 2375.5,
+      "volume_cm3": {
+        "blue": 8.4,
+        "white": 0.38
+      }
+    }
+  ],
+  "varsto-standee": [
+    {
+      "object": "Varsto standee tile",
+      "size_mm": [
+        60.0,
+        67.0,
+        4.2
+      ],
+      "first_layer_mm2": 3638.1,
+      "smallest_first_layer_island_mm2": 3638.1,
+      "volume_cm3": {
+        "blue": 11.68,
+        "white": 0.55
+      }
+    },
+    {
+      "object": "Varsto standee base",
+      "size_mm": [
+        90.0,
+        42.0,
+        10.8
+      ],
+      "first_layer_mm2": 3723.7,
+      "smallest_first_layer_island_mm2": 3723.7,
+      "volume_cm3": {
+        "blue": 36.43,
+        "black": 0.16
+      }
+    }
+  ],
+  "varsto-standee-2colour": [
+    {
+      "object": "Varsto standee tile",
+      "size_mm": [
+        60.0,
+        67.0,
+        4.2
+      ],
+      "first_layer_mm2": 3638.1,
+      "smallest_first_layer_island_mm2": 3638.1,
+      "volume_cm3": {
+        "blue": 11.68,
+        "white": 0.55
+      }
+    },
+    {
+      "object": "Varsto standee base",
+      "size_mm": [
+        90.0,
+        42.0,
+        10.8
+      ],
+      "first_layer_mm2": 3723.7,
+      "smallest_first_layer_island_mm2": 3723.7,
+      "volume_cm3": {
+        "blue": 36.43,
+        "white": 0.16
+      }
+    }
+  ]
+}
