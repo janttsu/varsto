@@ -617,9 +617,12 @@ impl Engine {
                 digest.push(b'\n');
                 if let Some(want) = f.symlink() {
                     // A link is mirrored as a link (restic keeps it as one).
-                    let here = crate::fsmeta::join_entry(target, &state.local_names.local_rel(rules, path))
-                        .ok()
-                        .and_then(|d| crate::fsmeta::read_link(&d));
+                    let here = crate::fsmeta::join_entry(
+                        target,
+                        &state.local_names.local_rel(rules, path),
+                    )
+                    .ok()
+                    .and_then(|d| crate::fsmeta::read_link(&d));
                     if here.as_deref() != Some(want) {
                         fc.problems.push(problem(
                             ProblemKind::Missing,

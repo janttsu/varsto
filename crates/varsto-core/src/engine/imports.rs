@@ -1310,8 +1310,15 @@ impl Engine {
                             IngestOutcome::Ok(done) => {
                                 self.pending.extend(done.events.iter().cloned());
                                 let applied = self.apply_ingested(
-                                    &mut state, &root_path, selective, &tmp_copy, &items, &g.paths,
-                                    &done, mtime_ns, meta_settings,
+                                    &mut state,
+                                    &root_path,
+                                    selective,
+                                    &tmp_copy,
+                                    &items,
+                                    &g.paths,
+                                    &done,
+                                    mtime_ns,
+                                    meta_settings,
                                 );
                                 if let Err(e) = applied {
                                     let _ = fs::remove_file(&tmp_copy);

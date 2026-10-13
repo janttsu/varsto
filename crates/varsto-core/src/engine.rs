@@ -55,12 +55,12 @@ mod disk_insert;
 mod disk_suggest;
 mod drain;
 mod fetch;
-mod folder_safety;
 mod folder_rules;
+mod folder_safety;
 mod guide;
+mod history;
 mod imports;
 mod ledger_recovery;
-mod history;
 mod ledger_upkeep;
 mod local_names;
 mod manifest_upkeep;
@@ -94,11 +94,15 @@ pub use disk_fetch::{
 pub use disk_groups::DiskGroupStatus;
 pub use disk_insert::{DiskInsertReport, DiskProgress, FillOutcome, InsertOptions};
 pub use drain::{DrainOptions, DrainPlan, DrainRunLimits, DrainRunReport, DrainStatus};
+pub use folder_rules::IgnoreInfo;
 pub use folder_safety::{
     paused_error, ChangeKind, DiscardReport, FolderChanges, FolderPaused, HeldDeletions,
     HeldSummary, PauseKind, RevertReport, FOLDER_MARKER,
 };
-pub use folder_rules::IgnoreInfo;
+pub use history::{
+    history_kept, parse_utc, FolderHistory, HistoryItem, HistoryList, HistoryRestoreReport,
+    HistoryStatus, HistoryTarget, DEFAULT_HISTORY_DAYS, MAX_HISTORY_DAYS,
+};
 pub use imports::{
     CleanupFile, ImportCleanupReport, ImportOptions, ImportReport, ImportStatus, ImportVerify,
     MissingFile,
@@ -106,10 +110,6 @@ pub use imports::{
 pub use ledger_recovery::{
     LedgerDeviceStatus, LedgerHealth, LedgerHolding, LedgerProblem, LedgerRebuildOptions,
     LedgerRebuildReport, LedgerStatus, StorageRebuildReport,
-};
-pub use history::{
-    history_kept, parse_utc, FolderHistory, HistoryItem, HistoryList, HistoryRestoreReport,
-    HistoryStatus, HistoryTarget, DEFAULT_HISTORY_DAYS, MAX_HISTORY_DAYS,
 };
 pub use manifest_upkeep::ManifestPolicy;
 pub use membership::{
@@ -2411,7 +2411,7 @@ impl Engine {
     }
 
     fn set_selective_inner(&mut self, name_or_id: &str, selective: bool) -> Result<()> {
-                let (rec, _) = self.resolve_folder(name_or_id)?;
+        let (rec, _) = self.resolve_folder(name_or_id)?;
         self.ensure_not_held(&rec)?;
         for m in self
             .config
@@ -3313,8 +3313,14 @@ impl Engine {
                         },
                     );
                     if !receive_only
-                    && self.metadata_only_change(state, &path, &obs, seen_meta.as_ref(), &caps)?
-                {
+                        && self.metadata_only_change(
+                            state,
+                            &path,
+                            &obs,
+                            seen_meta.as_ref(),
+                            &caps,
+                        )?
+                    {
                         changed += 1;
                         meta_changed += 1;
                     }
@@ -4438,7 +4444,8 @@ impl Engine {
                         .get(path)
                         .map(|l| l.content_hash == loser.content_hash)
                         .unwrap_or(false);
-                    let disk = self.place(root, state, &cpath, Some(&mut report.renamed_locally))?;
+                    let disk =
+                        self.place(root, state, &cpath, Some(&mut report.renamed_locally))?;
                     if let Some(parent) = disk.parent() {
                         fs::create_dir_all(parent)?;
                     }
@@ -4457,8 +4464,12 @@ impl Engine {
                     cstate.version = BTreeMap::from([(me.clone(), clock)]);
                     cstate.modified_by = me.clone();
                     cstate.modified_clock = clock;
-                    let seen =
-                        self.settle_meta(&rec.folder_id, &disk, &cstate, &mut report.metadata_problems);
+                    let seen = self.settle_meta(
+                        &rec.folder_id,
+                        &disk,
+                        &cstate,
+                        &mut report.metadata_problems,
+                    );
                     let md = fs::symlink_metadata(&disk)?;
                     state.local_index.insert(
                         cpath.clone(),

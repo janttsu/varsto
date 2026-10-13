@@ -321,7 +321,9 @@ impl Engine {
                     return Verdict::Missing;
                 }
                 match self.load_state(&rec.folder_id) {
-                    Ok(state) if looks_like_folder(root, self.local_rules(root), &state) => Verdict::Adopt,
+                    Ok(state) if looks_like_folder(root, self.local_rules(root), &state) => {
+                        Verdict::Adopt
+                    }
                     _ => Verdict::Missing,
                 }
             }
@@ -757,9 +759,10 @@ impl Engine {
                                 &file,
                                 &mut pull.metadata_problems,
                             );
-                            state
-                                .local_index
-                                .insert(file.path.clone(), index_entry(&disk, &file.content_hash, seen)?);
+                            state.local_index.insert(
+                                file.path.clone(),
+                                index_entry(&disk, &file.content_hash, seen)?,
+                            );
                             report.restored += 1;
                         }
                         Err(e) => {
