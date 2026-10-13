@@ -146,6 +146,27 @@ fn organization_through_the_cli() {
     assert_eq!(p["members_may_add_devices"], true);
     assert_eq!(p["members_may_add_storages"], false);
     assert!(fails(&a, &["org", "policy", "--allow", "fly"]).contains("unknown permission"));
+    // Platforms: allowed ones are stored by their ids; unknown ones refused.
+    let p = ok(
+        &a,
+        &[
+            "org",
+            "policy",
+            "platforms",
+            "--allow",
+            "Linux,macos,windows",
+        ],
+    );
+    assert_eq!(
+        p["allowed_platforms"],
+        serde_json::json!(["linux", "macos", "windows"])
+    );
+    assert!(
+        fails(&a, &["org", "policy", "platforms", "--allow", "beos"]).contains("unknown platform")
+    );
+    let p = ok(&a, &["org", "policy", "platforms", "--allow-all"]);
+    assert!(p.get("allowed_platforms").is_none(), "{p}");
+    assert_eq!(p["members_may_share"], true, "the rest of the policy stays");
 
     // Remove carol: needs --yes, then revokes c in one epoch.
     assert!(fails(&a, &["org", "remove-user", "carol"]).contains("--yes"));

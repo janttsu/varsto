@@ -1030,6 +1030,17 @@ impl Engine {
     /// whose record was written under the current key). A device enrolled
     /// with an out-of-date vault key is not trusted.
     pub(super) fn trusted(&self, device: &DeviceId) -> bool {
+        // In an organization, only on the platforms (and versions) its
+        // policy allows: a device locked out that way gets no new keys and
+        // what it writes is not taken, until it is allowed again.
+        self.belongs(device)
+            && (device == &self.vault.device_id || self.org_refuses_device(device).is_none())
+    }
+
+    /// `trusted` without the organization's platform policy: the device is
+    /// a current member of the vault (a key epoch keeps it, an administrator
+    /// can remove it), even while the policy locks it out.
+    pub(super) fn belongs(&self, device: &DeviceId) -> bool {
         if device == &self.vault.device_id {
             return self.removal.is_none();
         }
@@ -1087,7 +1098,18 @@ impl Engine {
         self.removal.as_ref()
     }
 
+    /// Refuse to act on a device that was removed from the vault, or that
+    /// runs a platform its organization does not allow.
     pub(super) fn ensure_active(&self) -> Result<()> {
+        self.ensure_not_removed()?;
+        if let Some(why) = self.org_platform_block() {
+            bail!("{why}: this device does not sync or open the vault until an administrator allows it");
+        }
+        Ok(())
+    }
+
+    /// Refuse to act on a device that was removed from the vault.
+    pub(super) fn ensure_not_removed(&self) -> Result<()> {
         match &self.removal {
             Some(r) => Err(anyhow::Error::new(DeviceRemoved {
                 by_name: r.by_name.clone(),
@@ -1197,7 +1219,7 @@ impl Engine {
         if self.is_revoked(&target) {
             bail!("{wanted} was already removed");
         }
-        if !self.trusted(&target) {
+        if !self.belongs(&target) {
             bail!("{wanted} is not a current device of this vault");
         }
         let report = self.revoke_many(std::slice::from_ref(&target), wipe)?;
@@ -1221,7 +1243,9 @@ impl Engine {
             .devices
             .keys()
             .chain(std::iter::once(&me))
-            .filter(|d| !targets.contains(d) && self.trusted(d))
+            // A device the platform policy locks out stays a member of the
+            // epoch; it is sealed the key once it is allowed again.
+            .filter(|d| !targets.contains(d) && self.belongs(d))
             .cloned()
             .collect::<BTreeSet<_>>()
             .into_iter()
@@ -1373,7 +1397,9 @@ impl Engine {
         if self.vault.member {
             return Ok(());
         }
-        self.ensure_active()?;
+        // Also on a device the platform policy locks out: a new key and a
+        // policy that allows it again must reach it.
+        self.ensure_not_removed()?;
         self.ensure_kem_record()?;
         // Revocations first, so that a roster written by a device removed
         // in the meantime is judged with that knowledge; the organization,

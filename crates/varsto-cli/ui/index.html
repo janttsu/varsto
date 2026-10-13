@@ -197,6 +197,7 @@
       <div id="vaultkey" class="notice warn vaultkey hidden"><span id="vaultkey-text"></span><button type="button" id="vaultkey-done" class="secondary">I have written it down</button></div>
       <div id="ledgerbanner" class="notice warn banner-action hidden"><span id="ledgerbanner-text"></span><button type="button" id="ledgerbanner-btn" class="secondary hidden">Continue from the storages</button></div>
       <div id="policybanner" class="notice warn hidden"></div>
+      <div id="orgblockbanner" class="notice warn hidden"></div>
       <div class="stats">
         <div class="stat"><span class="stat-label">Folders</span><span class="stat-value" id="stat-folders">–</span></div>
         <div class="stat"><span class="stat-label">Files</span><span class="stat-value" id="stat-files">–</span></div>
@@ -646,6 +647,7 @@
         <h2 class="card-title"><svg class="icon accent"><use href="#i-org"/></svg><span id="org-name"></span></h2>
         <p id="org-me" class="muted small"></p>
         <p id="org-unlisted-note" class="small hidden"></p>
+        <p id="org-blocked-note" class="notice warn hidden"></p>
       </div>
       <div class="cols">
         <div class="card">
@@ -675,6 +677,15 @@
             <label class="inline"><input name="members_may_add_storages" type="checkbox"> Add or remove storages</label>
             <label class="inline"><input name="members_may_set_policies" type="checkbox"> Set policies and placement</label>
             <label class="inline"><input name="members_may_add_devices" type="checkbox"> Add devices and print the recovery kit</label>
+            <div class="field-group" id="org-platforms"><span class="field-caption">Device platforms that may join and open the vault</span>
+              <label class="inline"><input name="platform_linux" type="checkbox" data-platform="linux"> Linux</label>
+              <label class="inline"><input name="platform_macos" type="checkbox" data-platform="macos"> macOS</label>
+              <label class="inline"><input name="platform_windows" type="checkbox" data-platform="windows"> Windows</label>
+              <label class="inline"><input name="platform_android" type="checkbox" data-platform="android"> Android</label>
+              <label class="inline"><input name="platform_ios" type="checkbox" data-platform="ios"> iOS</label>
+              <span class="hint muted">A device of another platform is refused at approval; one already in the organization is locked out (no new keys, the other devices ignore what it writes, its own app does not open the vault) until its platform is allowed again. Devices say which platform they run, so this binds honest apps, not a modified one. It applies to administrators' devices too.</span>
+            </div>
+            <label>Oldest Varsto version allowed <input name="min_app_version" placeholder="any version" autocomplete="off"></label>
             <div class="actions"><button type="submit" id="org-policy-save">Save</button></div>
           </form>
         </div>

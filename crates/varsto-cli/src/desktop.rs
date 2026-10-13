@@ -1265,7 +1265,7 @@ fn api_unlocked(
         }
         (Method::Post, "/api/org/fingerprint") => {
             let r = varsto_core::org::OrgRequest::parse(&s(input, "code")?)?;
-            Ok(json!({"fingerprint": r.fingerprint, "name": r.name, "device_id": r.device.to_string()}))
+            Ok(json!({"fingerprint": r.fingerprint, "name": r.name, "device_id": r.device.to_string(), "platform": r.platform}))
         }
         (Method::Post, "/api/org/approve") => {
             let fp = opt(input, "fingerprint").filter(|f| !f.trim().is_empty());

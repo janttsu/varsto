@@ -531,8 +531,12 @@ enum OrgCmd {
         yes: bool,
     },
     /// (Administrator) What members may do on their own: share, add-storages, set-policies,
-    /// add-devices. Without arguments, show the policy.
+    /// add-devices; `policy platforms` sets which device platforms may belong. Without
+    /// arguments, show the policy.
+    #[command(args_conflicts_with_subcommands = true)]
     Policy {
+        #[command(subcommand)]
+        cmd: Option<OrgPolicyCmd>,
         #[arg(long, value_delimiter = ',')]
         allow: Vec<String>,
         #[arg(long, value_delimiter = ',')]
@@ -546,6 +550,26 @@ enum OrgCmd {
     /// Who approved, added, removed or changed what, oldest first (signed by the
     /// administrator devices; use --json to export).
     Log,
+}
+
+#[derive(Subcommand)]
+enum OrgPolicyCmd {
+    /// (Administrator) Which device platforms may join and open the vault: linux, macos,
+    /// windows, android, ios. Devices of other platforms are refused at approval, and devices
+    /// already in the organization are locked out (no new keys, the others ignore what they
+    /// write, their own app refuses to open the vault) until they are allowed again. Without
+    /// arguments, show the setting.
+    Platforms {
+        /// Allowed platforms, e.g. linux,macos,windows.
+        #[arg(long, value_delimiter = ',', conflicts_with = "allow_all")]
+        allow: Vec<String>,
+        /// Allow every platform.
+        #[arg(long)]
+        allow_all: bool,
+        /// Oldest Varsto version a device may run (e.g. 0.0.1-alpha.14); `any` removes it.
+        #[arg(long)]
+        min_version: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -2050,9 +2074,14 @@ fn run_org(cli: &Cli, home: &Path, cmd: &OrgCmd) -> Result<()> {
                 None if *yes => None,
                 None => {
                     eprintln!(
-                        "Request from device {} ({})\nfingerprint: {}\nAsk the person to read the fingerprint their device shows (varsto org request).",
+                        "Request from device {} ({}, {})\nfingerprint: {}\nAsk the person to read the fingerprint their device shows (varsto org request).",
                         if info.name.is_empty() { "(no name)" } else { &info.name },
                         info.device.short(),
+                        if info.platform.is_empty() {
+                            "platform not given".to_string()
+                        } else {
+                            varsto_core::org::platform_name(&info.platform)
+                        },
                         info.fingerprint
                     );
                     if !confirm("Do the six words match exactly?")? {
@@ -2129,7 +2158,7 @@ fn run_org(cli: &Cli, home: &Path, cmd: &OrgCmd) -> Result<()> {
                 )
             })?;
         }
-        OrgCmd::Policy { allow, deny } => {
+        OrgCmd::Policy { cmd, allow, deny } => {
             let current: Option<varsto_core::org::OrgPolicy> = if via_service.is_some() {
                 let v = call("GET", "/api/org", serde_json::Value::Null)?;
                 v.get("policy")
@@ -2142,6 +2171,60 @@ fn run_org(cli: &Cli, home: &Path, cmd: &OrgCmd) -> Result<()> {
             let Some(mut p) = current else {
                 bail!("this vault has no organization");
             };
+            if let Some(OrgPolicyCmd::Platforms {
+                allow,
+                allow_all,
+                min_version,
+            }) = cmd
+            {
+                if allow.is_empty() && !*allow_all && min_version.is_none() {
+                    print(cli, &p, policy_text)?;
+                    return Ok(());
+                }
+                if *allow_all {
+                    p.allowed_platforms.clear();
+                } else if !allow.is_empty() {
+                    p.allowed_platforms = allow.iter().map(|a| a.trim().to_string()).collect();
+                }
+                if let Some(v) = min_version {
+                    p.min_app_version = if v.trim().eq_ignore_ascii_case("any") {
+                        String::new()
+                    } else {
+                        v.trim().to_string()
+                    };
+                }
+                if via_service.is_some() {
+                    call("POST", "/api/org/policy", serde_json::to_value(&p)?)?;
+                } else {
+                    open_engine(home)?.org_set_policy(p.clone())?;
+                }
+                // The policy as stored (platforms normalised), and who it locks out.
+                let summary: Option<varsto_core::engine::OrgSummary> = if via_service.is_some() {
+                    serde_json::from_value(call("GET", "/api/org", serde_json::Value::Null)?).ok()
+                } else {
+                    open_engine(home)?.org_summary()
+                };
+                let Some(summary) = summary else {
+                    return Ok(());
+                };
+                print(cli, &summary.policy, |p| {
+                    let mut out = policy_text(p);
+                    let refused: Vec<String> = summary
+                        .users
+                        .iter()
+                        .flat_map(|u| u.devices.iter())
+                        .filter_map(|d| d.refused.as_ref().map(|r| format!("{} ({r})", d.name)))
+                        .collect();
+                    if !refused.is_empty() {
+                        out.push_str(&format!(
+                            "\nlocked out until allowed again: {}",
+                            refused.join(", ")
+                        ));
+                    }
+                    out
+                })?;
+                return Ok(());
+            }
             if allow.is_empty() && deny.is_empty() {
                 print(cli, &p, policy_text)?;
                 return Ok(());
@@ -2213,11 +2296,25 @@ fn run_org(cli: &Cli, home: &Path, cmd: &OrgCmd) -> Result<()> {
 fn policy_text(p: &varsto_core::org::OrgPolicy) -> String {
     let yn = |b: bool| if b { "yes" } else { "no (administrators only)" };
     format!(
-        "members may share folders with other people: {}\nmembers may add or remove storages: {}\nmembers may set policies and placement: {}\nmembers may add devices and print the recovery kit: {}",
+        "members may share folders with other people: {}\nmembers may add or remove storages: {}\nmembers may set policies and placement: {}\nmembers may add devices and print the recovery kit: {}\ndevice platforms allowed: {}\noldest Varsto version allowed: {}",
         yn(p.members_may_share),
         yn(p.members_may_add_storages),
         yn(p.members_may_set_policies),
-        yn(p.members_may_add_devices)
+        yn(p.members_may_add_devices),
+        if p.allowed_platforms.is_empty() {
+            "all".to_string()
+        } else {
+            p.allowed_platforms
+                .iter()
+                .map(|x| varsto_core::org::platform_name(x))
+                .collect::<Vec<_>>()
+                .join(", ")
+        },
+        if p.min_app_version.is_empty() {
+            "any"
+        } else {
+            &p.min_app_version
+        }
     )
 }
 
@@ -2240,6 +2337,9 @@ fn org_status_text(s: &varsto_core::engine::OrgSummary) -> String {
             .map(|u| format!(", user {u}"))
             .unwrap_or_default()
     );
+    if let Some(b) = &s.this_device_blocked {
+        out.push_str(&format!("\nThis device is locked out: {b}. It does not sync or open the vault until an administrator allows it."));
+    }
     out.push_str("\n\nAdministrators:");
     for a in &s.admins {
         out.push_str(&format!(
@@ -2254,12 +2354,21 @@ fn org_status_text(s: &varsto_core::engine::OrgSummary) -> String {
         out.push_str(&format!("\n  {}", u.user));
         for d in &u.devices {
             out.push_str(&format!(
-                "\n    {} ({}){}{}{}",
+                "\n    {} ({}){}{}{}{}{}",
                 d.name,
                 &d.device_id[..8],
+                if d.platform.is_empty() {
+                    String::new()
+                } else {
+                    format!(", {}", varsto_core::org::platform_name(&d.platform))
+                },
                 if d.admin { ", administrator" } else { "" },
                 if d.this_device { ", this device" } else { "" },
-                if d.revoked { ", removed" } else { "" }
+                if d.revoked { ", removed" } else { "" },
+                d.refused
+                    .as_ref()
+                    .map(|r| format!(", LOCKED OUT: the organization {r}"))
+                    .unwrap_or_default()
             ));
         }
     }

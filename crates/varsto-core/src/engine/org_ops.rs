@@ -26,6 +26,13 @@ pub struct OrgDevice {
     pub added_utc: i64,
     #[serde(default)]
     pub details: Option<super::devinfo::DeviceDetails>,
+    /// The platform the device runs, as it signed it (or as its request
+    /// code said when it was approved); empty when unknown.
+    #[serde(default)]
+    pub platform: String,
+    /// Why the organization's platform policy locks it out, if it does.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub refused: Option<String>,
 }
 
 /// One person with their devices.
@@ -79,6 +86,13 @@ pub struct OrgSummary {
     pub unlisted: Vec<UnlistedDevice>,
     pub policy: OrgPolicy,
     pub log: Vec<LogView>,
+    /// This device runs a platform (or version) the policy does not allow:
+    /// it does not sync or open the vault until the policy changes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub this_device_blocked: Option<String>,
+    /// This device's platform.
+    #[serde(default)]
+    pub this_platform: String,
 }
 
 /// What `org_create` hands back, once.
@@ -119,6 +133,9 @@ pub struct OrgBrief {
     pub admin: bool,
     pub listed: bool,
     pub user: Option<String>,
+    /// The platform policy locks this device out (the message to show).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blocked: Option<String>,
 }
 
 fn names(list: &[String]) -> String {
@@ -179,7 +196,66 @@ impl Engine {
             admin: o.is_admin(me),
             listed: o.lists(me),
             user: o.user_of(me),
+            blocked: self.org_platform_block(),
         })
+    }
+
+    // ----- platforms ----------------------------------------------------------------
+
+    /// The platform and version a device runs as this device knows them:
+    /// its own signed details (`devinfo`), else the platform its request
+    /// code named when it was approved.
+    pub(super) fn org_device_platform(
+        &self,
+        device: &DeviceId,
+    ) -> (Option<String>, Option<String>) {
+        if device == &self.vault.device_id {
+            return (Some(self.this_platform()), Some(self.this_app_version()));
+        }
+        let d = self.devices.details.get(device);
+        let from_details = d.and_then(|d| {
+            let p = if d.platform.is_empty() {
+                org::platform_id(&d.os)
+            } else {
+                org::platform_id(&d.platform)
+            };
+            (!p.is_empty()).then_some(p)
+        });
+        let from_roster = self
+            .org
+            .as_ref()
+            .and_then(|o| o.roster.as_ref())
+            .and_then(|r| r.member(device))
+            .map(|m| m.platform.clone())
+            .filter(|p| !p.is_empty());
+        (
+            from_details.or(from_roster),
+            d.map(|d| d.app_version.clone()).filter(|v| !v.is_empty()),
+        )
+    }
+
+    /// Why the organization's policy locks a device out, if it does: a
+    /// platform it does not allow, or an older version than it requires.
+    /// Never without an organization or a restricting policy.
+    pub(super) fn org_refuses_device(&self, device: &DeviceId) -> Option<String> {
+        let o = self.org.as_ref()?;
+        o.manifest()?;
+        let policy = o.roster.as_ref()?.policy.clone();
+        if !policy.restricts_devices() {
+            return None;
+        }
+        let (platform, version) = self.org_device_platform(device);
+        policy.refuses(platform.as_deref(), version.as_deref())
+    }
+
+    /// This device runs what the organization's signed policy does not
+    /// allow: the message to show. It then neither syncs nor opens the
+    /// folders, and reads only the organization's objects (so that a policy
+    /// that allows it again is seen).
+    pub fn org_platform_block(&self) -> Option<String> {
+        let o = self.org.as_ref()?;
+        let reason = self.org_refuses_device(&self.vault.device_id)?;
+        Some(format!("this organization ({}) {reason}", o.name))
     }
 
     fn save_org(&self) -> Result<()> {
@@ -568,6 +644,7 @@ impl Engine {
                 name: dev_name.clone(),
                 added_utc: now,
                 added_by: me.clone(),
+                platform: String::new(),
             })
             .collect();
         self.publish_roster(roster)?;
@@ -615,6 +692,24 @@ impl Engine {
         if user.is_empty() {
             bail!("give the user the device belongs to");
         }
+        let policy = self.org.as_ref().map(|o| o.policy()).unwrap_or_default();
+        if !policy.allowed_platforms.is_empty() {
+            // The version is not known before the device joins; it is
+            // checked from its signed details afterwards.
+            let platforms_only = OrgPolicy {
+                min_app_version: String::new(),
+                ..policy.clone()
+            };
+            if info.platform.is_empty() {
+                bail!("this request code does not say which platform the device runs (it was made by an older version of Varsto), and the organization allows only {}; update Varsto on the device and make a new request", Self::platform_list(&policy));
+            }
+            if let Some(why) = platforms_only.refuses(Some(&info.platform), None) {
+                bail!(
+                    "not approved: the organization {why} (allowed: {})",
+                    Self::platform_list(&policy)
+                );
+            }
+        }
         if self.is_revoked(&info.device) {
             bail!(
                 "this device was removed from the vault; it needs a new request (reset it first)"
@@ -634,6 +729,7 @@ impl Engine {
                     name: info.name.clone(),
                     added_utc: util::now_utc(),
                     added_by: me.clone(),
+                    platform: info.platform.clone(),
                 });
                 self.publish_roster(roster)?;
                 self.org_log(OrgEvent::DeviceApproved {
@@ -746,6 +842,7 @@ impl Engine {
             name: dev_name.clone(),
             added_utc: util::now_utc(),
             added_by: me,
+            platform: String::new(),
         });
         self.publish_roster(roster)?;
         self.org_log(OrgEvent::DeviceAdded {
@@ -846,15 +943,62 @@ impl Engine {
         })
     }
 
-    /// Admin: change what members may do.
-    pub fn org_set_policy(&mut self, policy: OrgPolicy) -> Result<()> {
-        self.ensure_active()?;
+    /// Admin: change what members may do, and which platforms and
+    /// versions may belong. A policy that would lock out the device setting
+    /// it is refused.
+    pub fn org_set_policy(&mut self, mut policy: OrgPolicy) -> Result<()> {
+        // An administrator on a platform another one refused may still
+        // change the policy (it is an administrator's decision either way).
+        self.ensure_not_removed()?;
         self.sync_org()?;
         self.require_admin()?;
+        let mut platforms: Vec<String> = Vec::new();
+        for p in &policy.allowed_platforms {
+            let id = org::platform_id(p);
+            if id.is_empty() {
+                continue;
+            }
+            if !org::PLATFORMS.contains(&id.as_str()) {
+                bail!("unknown platform {p}: use {}", org::PLATFORMS.join(", "));
+            }
+            if !platforms.contains(&id) {
+                platforms.push(id);
+            }
+        }
+        platforms.sort_by_key(|p| org::PLATFORMS.iter().position(|x| x == p));
+        // Every platform allowed is the same as no list.
+        if platforms.len() == org::PLATFORMS.len() {
+            platforms.clear();
+        }
+        policy.allowed_platforms = platforms;
+        policy.min_app_version = policy.min_app_version.trim().to_string();
+        if !policy.min_app_version.is_empty()
+            && !policy
+                .min_app_version
+                .trim_start_matches('v')
+                .starts_with(|c: char| c.is_ascii_digit())
+        {
+            bail!("the minimum version must look like 0.0.1-alpha.14");
+        }
+        if let Some(why) =
+            policy.refuses(Some(&self.this_platform()), Some(&self.this_app_version()))
+        {
+            bail!("this policy would lock out this device: the organization {why}; allow its platform too");
+        }
         let mut roster = self.current_roster();
         roster.policy = policy.clone();
         self.publish_roster(roster)?;
         self.org_log(OrgEvent::PolicyChanged { policy })
+    }
+
+    /// Tests: what a modified client could do, publish a roster with
+    /// `policy` signed by this device whether or not it is an
+    /// administrator. Every other device must ignore it unless it is one.
+    #[doc(hidden)]
+    pub fn org_publish_roster_unchecked(&mut self, policy: OrgPolicy) -> Result<()> {
+        let mut roster = self.current_roster();
+        roster.policy = policy;
+        self.publish_roster(roster)
     }
 
     /// Root key holder: make a device of the organization an administrator.
@@ -1008,13 +1152,33 @@ impl Engine {
                 if *wipe { " and ordered a wipe" } else { "" }
             ),
             OrgEvent::PolicyChanged { policy } => format!(
-                "{who} changed the policy: members may{} share,{} add storages,{} set policies,{} add devices",
+                "{who} changed the policy: members may{} share,{} add storages,{} set policies,{} add devices; platforms: {}{}",
                 if policy.members_may_share { "" } else { " not" },
                 if policy.members_may_add_storages { "" } else { " not" },
                 if policy.members_may_set_policies { "" } else { " not" },
                 if policy.members_may_add_devices { "" } else { " not" },
+                Self::platform_list(policy),
+                if policy.min_app_version.is_empty() {
+                    String::new()
+                } else {
+                    format!("; Varsto {} or newer", policy.min_app_version)
+                },
             ),
             OrgEvent::Unknown => format!("{who}: an event this version does not know"),
+        }
+    }
+
+    /// The platforms a policy allows, in words.
+    pub(super) fn platform_list(policy: &OrgPolicy) -> String {
+        if policy.allowed_platforms.is_empty() {
+            "all".into()
+        } else {
+            policy
+                .allowed_platforms
+                .iter()
+                .map(|p| org::platform_name(p))
+                .collect::<Vec<_>>()
+                .join(", ")
         }
     }
 
@@ -1049,6 +1213,8 @@ impl Engine {
             revoked: self.is_revoked(id),
             added_utc: added,
             details: self.devices.details.get(id).cloned(),
+            platform: self.org_device_platform(id).0.unwrap_or_default(),
+            refused: self.org_refuses_device(id),
         };
         let roster = o.roster.clone().unwrap_or_else(|| self.current_roster());
         let mut users: BTreeMap<String, Vec<OrgDevice>> = BTreeMap::new();
@@ -1098,6 +1264,8 @@ impl Engine {
             unlisted,
             policy: roster.policy.clone(),
             log: self.org_log_entries(),
+            this_device_blocked: self.org_platform_block(),
+            this_platform: self.this_platform(),
         })
     }
 

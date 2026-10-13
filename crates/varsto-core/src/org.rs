@@ -47,6 +47,8 @@ pub const ROSTER_PREFIX: &str = "org/roster/";
 pub const LOG_PREFIX: &str = "org/log/";
 /// Request code prefix: `vor1.<kem key hex>.<device id>[.<name>]`.
 pub const REQUEST_PREFIX: &str = "vor1.";
+/// Request code with the platform: `vor2.<kem key hex>.<device id>.<platform>[.<name>]`.
+pub const REQUEST_PREFIX_V2: &str = "vor2.";
 /// Approval token prefix: `vot1.<vault id>.<kem ct hex>.<sealed hex>`.
 pub const TOKEN_PREFIX: &str = "vot1.";
 
@@ -287,6 +289,142 @@ pub struct OrgPolicy {
     /// key). Off: only admins hand out the key, through approvals.
     #[serde(default)]
     pub members_may_add_devices: bool,
+    /// Device platforms that may join and open the vault (`linux`, `macos`,
+    /// `windows`, `android`, `ios`). Empty: every platform. It binds
+    /// administrators' devices too.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub allowed_platforms: Vec<String>,
+    /// Oldest Varsto version a device may run (empty: any).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub min_app_version: String,
+}
+
+/// The platforms an organization can allow or refuse.
+pub const PLATFORMS: [&str; 5] = ["linux", "macos", "windows", "android", "ios"];
+
+/// A platform name as the policy writes it: `Linux` -> `linux`,
+/// `macOS` -> `macos`, `iOS` -> `ios`.
+pub fn platform_id(os: &str) -> String {
+    let p = os.trim().to_ascii_lowercase();
+    match p.as_str() {
+        "darwin" | "mac" | "osx" | "mac os" => "macos".into(),
+        "win" | "win32" | "win64" => "windows".into(),
+        "iphone" | "ipados" => "ios".into(),
+        _ => p,
+    }
+}
+
+/// This device's platform. Mobile shells pass theirs in `VARSTO_OS`.
+pub fn this_platform() -> String {
+    match std::env::var("VARSTO_OS") {
+        Ok(os) if !os.trim().is_empty() => platform_id(&os),
+        _ => platform_id(std::env::consts::OS),
+    }
+}
+
+/// Whether version `v` is `min` or newer: `0.0.1-alpha.13` style, the
+/// numbers first, then a release before any of its pre-releases, then the
+/// pre-release parts (numbers as numbers).
+pub fn version_at_least(v: &str, min: &str) -> bool {
+    fn parts(s: &str) -> (Vec<u64>, Option<Vec<String>>) {
+        let s = s.trim().trim_start_matches('v');
+        let (core, pre) = match s.split_once('-') {
+            Some((c, p)) => (c, Some(p.split('.').map(|x| x.to_string()).collect())),
+            None => (s, None),
+        };
+        (
+            core.split('.').map(|n| n.parse().unwrap_or(0)).collect(),
+            pre,
+        )
+    }
+    let (vc, vp) = parts(v);
+    let (mc, mp) = parts(min);
+    let len = vc.len().max(mc.len());
+    for i in 0..len {
+        let (a, b) = (
+            vc.get(i).copied().unwrap_or(0),
+            mc.get(i).copied().unwrap_or(0),
+        );
+        if a != b {
+            return a > b;
+        }
+    }
+    match (vp, mp) {
+        (None, _) => true,
+        (Some(_), None) => false,
+        (Some(a), Some(b)) => {
+            for i in 0..a.len().max(b.len()) {
+                match (a.get(i), b.get(i)) {
+                    (None, _) => return false,
+                    (Some(_), None) => return true,
+                    (Some(x), Some(y)) if x == y => continue,
+                    (Some(x), Some(y)) => {
+                        return match (x.parse::<u64>(), y.parse::<u64>()) {
+                            (Ok(x), Ok(y)) => x > y,
+                            _ => x > y,
+                        }
+                    }
+                }
+            }
+            true
+        }
+    }
+}
+
+impl OrgPolicy {
+    /// Whether a device on `platform` running `version` may belong; `None`
+    /// when allowed, otherwise the reason. An unknown platform or version is
+    /// refused once the policy restricts it.
+    pub fn refuses(&self, platform: Option<&str>, version: Option<&str>) -> Option<String> {
+        if !self.allowed_platforms.is_empty() {
+            match platform.map(platform_id) {
+                Some(p) if self.allowed_platforms.iter().any(|a| platform_id(a) == p) => {}
+                Some(p) if !p.is_empty() => {
+                    return Some(format!("does not allow {} devices", platform_name(&p)))
+                }
+                _ => {
+                    return Some(
+                        "allows only some platforms, and this device has not said which it runs"
+                            .into(),
+                    )
+                }
+            }
+        }
+        if !self.min_app_version.is_empty() {
+            match version {
+                Some(v) if version_at_least(v, &self.min_app_version) => {}
+                Some(v) => {
+                    return Some(format!(
+                        "requires Varsto {} or newer (the device runs {v})",
+                        self.min_app_version
+                    ))
+                }
+                None => {
+                    return Some(format!(
+                        "requires Varsto {} or newer, and this device has not said which version it runs",
+                        self.min_app_version
+                    ))
+                }
+            }
+        }
+        None
+    }
+    /// Whether the policy restricts platforms or versions at all.
+    pub fn restricts_devices(&self) -> bool {
+        !self.allowed_platforms.is_empty() || !self.min_app_version.is_empty()
+    }
+}
+
+/// How a platform is named in messages.
+pub fn platform_name(p: &str) -> String {
+    match p {
+        "linux" => "Linux".into(),
+        "macos" => "macOS".into(),
+        "windows" => "Windows".into(),
+        "android" => "Android".into(),
+        "ios" => "iOS".into(),
+        other => other.to_string(),
+    }
 }
 
 /// One device of the organization.
@@ -299,6 +437,10 @@ pub struct Member {
     pub name: String,
     pub added_utc: i64,
     pub added_by: DeviceId,
+    /// The platform its request code named when it was approved (empty for
+    /// devices added otherwise; their signed device details tell).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub platform: String,
 }
 
 /// A device removed from the organization.
@@ -744,6 +886,9 @@ pub struct OrgRequest {
     pub signer_hex: String,
     #[serde(default)]
     pub name: String,
+    /// The platform the code names (bound to the fingerprint).
+    #[serde(default)]
+    pub platform: String,
 }
 
 /// A parsed request code.
@@ -751,7 +896,19 @@ pub struct RequestInfo {
     pub key: EncapsKey,
     pub device: DeviceId,
     pub name: String,
+    /// The platform the device said it runs (empty in a `vor1` code).
+    pub platform: String,
     pub fingerprint: String,
+}
+
+/// The six words of a request: over the key, the device id, the platform
+/// (`vor2`) and the name.
+fn request_fingerprint(key: &EncapsKey, device: &DeviceId, platform: &str, name: &str) -> String {
+    if platform.is_empty() {
+        crate::share::fingerprint(key, &format!("{device} {name}"))
+    } else {
+        crate::share::fingerprint(key, &format!("{device} {platform} {name}"))
+    }
 }
 
 impl OrgRequest {
@@ -761,6 +918,12 @@ impl OrgRequest {
     /// Load or create the request of `home`; `name` (the device name) is
     /// bound to the code and so to the fingerprint.
     pub fn code_for(home: &Path, name: Option<&str>) -> Result<String> {
+        Self::code_for_platform(home, name, &this_platform())
+    }
+
+    /// `code_for` naming another platform (tests, and shells that know
+    /// better than the build target).
+    pub fn code_for_platform(home: &Path, name: Option<&str>, platform: &str) -> Result<String> {
         std::fs::create_dir_all(home)?;
         let path = Self::path(home);
         let mut r: OrgRequest = if path.exists() {
@@ -771,8 +934,14 @@ impl OrgRequest {
                 kem_secret_hex: hex::encode(DecapsKey::generate().to_bytes()),
                 signer_hex: hex::encode(SigningKey::generate().to_bytes()),
                 name: String::new(),
+                platform: String::new(),
             }
         };
+        let platform = platform_id(platform);
+        if platform.is_empty() || !platform.chars().all(|c| c.is_ascii_alphanumeric()) {
+            bail!("the platform must be one word such as linux, macos, windows, android or ios");
+        }
+        r.platform = platform;
         if let Some(n) = name {
             let n = n.trim();
             if n.contains(['\n', '\r', '.']) {
@@ -803,11 +972,20 @@ impl OrgRequest {
         let dk = DecapsKey::from_bytes(&hex::decode(&self.kem_secret_hex)?)?;
         let signer = SigningKey::from_bytes(&hex::decode(&self.signer_hex)?)?;
         let device = crate::ledger::device_id_for(&signer.public());
-        let mut code = format!(
-            "{REQUEST_PREFIX}{}.{}",
-            hex::encode(dk.public().to_bytes()),
-            device
-        );
+        let mut code = if self.platform.is_empty() {
+            format!(
+                "{REQUEST_PREFIX}{}.{}",
+                hex::encode(dk.public().to_bytes()),
+                device
+            )
+        } else {
+            format!(
+                "{REQUEST_PREFIX_V2}{}.{}.{}",
+                hex::encode(dk.public().to_bytes()),
+                device,
+                self.platform
+            )
+        };
         if !self.name.is_empty() {
             code.push('.');
             code.push_str(&self.name);
@@ -831,22 +1009,40 @@ impl OrgRequest {
     }
     /// Key, device id, bound name and fingerprint of a request code.
     pub fn parse(code: &str) -> Result<RequestInfo> {
-        let rest = code.trim().strip_prefix(REQUEST_PREFIX).ok_or_else(|| {
-            anyhow!("not an organization request code (expected the vor1. prefix)")
-        })?;
-        let mut parts = rest.splitn(3, '.');
+        let code = code.trim();
+        let (v2, rest) = if let Some(r) = code.strip_prefix(REQUEST_PREFIX_V2) {
+            (true, r)
+        } else {
+            (
+                false,
+                code.strip_prefix(REQUEST_PREFIX).ok_or_else(|| {
+                    anyhow!("not an organization request code (expected the vor2. or vor1. prefix)")
+                })?,
+            )
+        };
+        let mut parts = rest.splitn(if v2 { 4 } else { 3 }, '.');
         let key_hex = parts.next().unwrap_or("");
         let dev = parts
             .next()
             .ok_or_else(|| anyhow!("request code has the wrong shape"))?;
+        let platform = if v2 {
+            platform_id(
+                parts
+                    .next()
+                    .ok_or_else(|| anyhow!("request code has the wrong shape"))?,
+            )
+        } else {
+            String::new()
+        };
         let name = parts.next().unwrap_or("").trim().to_string();
         let key = EncapsKey::from_bytes(&hex::decode(key_hex)?)?;
         let device = DeviceId::from_hex(dev)?;
-        let fingerprint = crate::share::fingerprint(&key, &format!("{device} {name}"));
+        let fingerprint = request_fingerprint(&key, &device, &platform, &name);
         Ok(RequestInfo {
             key,
             device,
             name,
+            platform,
             fingerprint,
         })
     }
@@ -955,10 +1151,11 @@ impl SealedApproval {
 /// Open an approval token with the request kept in `home`, checking the
 /// fingerprint the admin confirmed against this device's own.
 pub fn open_approval(home: &Path, token: &str) -> Result<(Approval, SigningKey)> {
-    let (dk, signer, name) = OrgRequest::keys(home)?;
+    let r = OrgRequest::load(home)?;
+    let (dk, signer, _) = OrgRequest::keys(home)?;
     let a = SealedApproval::decode(token)?.open(&dk)?;
     let device = crate::ledger::device_id_for(&signer.public());
-    let mine = crate::share::fingerprint(&dk.public(), &format!("{device} {name}"));
+    let mine = request_fingerprint(&dk.public(), &device, &r.platform, &r.name);
     if !a.fingerprint.is_empty() && !crate::share::fingerprint_matches(&mine, &a.fingerprint) {
         bail!(
             "the administrator confirmed the fingerprint \"{}\" but this device's request has \"{mine}\": the request code was changed on its way; ask for a new approval",

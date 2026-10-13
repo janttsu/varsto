@@ -29,6 +29,7 @@ impl Engine {
     /// to the file size), decrypted in memory when the device holds no plain
     /// copy. The result is never written anywhere.
     pub fn view_range(&self, folder: &str, path: &str, start: u64, end: u64) -> Result<Vec<u8>> {
+        self.ensure_active()?;
         let (rec, root) = self.resolve_folder(folder)?;
         block_cache::check_rel_path(path)?;
         let disk = root.join(path);

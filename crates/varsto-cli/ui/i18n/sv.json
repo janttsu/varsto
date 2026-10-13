@@ -973,7 +973,14 @@
   "Editor": "Redigerare",
   "read only": "endast läsning",
   "Make viewer": "Gör till läsare",
-  "Make editor": "Gör till redigerare"
+  "Make editor": "Gör till redigerare",
+  "Device platforms that may join and open the vault": "Enhetsplattformar som får ansluta till och öppna valvet",
+  "A device of another platform is refused at approval; one already in the organization is locked out (no new keys, the other devices ignore what it writes, its own app does not open the vault) until its platform is allowed again. Devices say which platform they run, so this binds honest apps, not a modified one. It applies to administrators' devices too.": "En enhet på en annan plattform nekas vid godkännandet; en som redan hör till organisationen stängs ute (inga nya nycklar, de andra enheterna bortser från det den skriver, dess egen app öppnar inte valvet) tills plattformen tillåts igen. Enheterna uppger själva vilken plattform de kör, så detta binder ärliga appar, inte en modifierad. Det gäller även administratörernas enheter.",
+  "Oldest Varsto version allowed": "Äldsta tillåtna Varsto-version",
+  "Locked out": "Utestängd",
+  "Tick at least one platform.": "Kryssa i minst en plattform.",
+  "Policy not saved": "Policyn sparades inte",
+  "any version": "vilken version som helst"
  },
  "patterns": [
   [
@@ -1311,6 +1318,22 @@
   [
    "^(.+) can change, add and delete files in (.+) again; your devices and the other members accept its changes\\.$",
    "$1 kan åter ändra, lägga till och ta bort filer i $2; dina enheter och de andra medlemmarna godtar dess ändringar."
+  ],
+  [
+   "^This organization \\((.+)\\) does not allow (.+) devices\\. This device does not sync or open the vault until an administrator allows it\\.$",
+   "Organisationen $1 tillåter inte $2-enheter. Den här enheten synkroniserar inte och öppnar inte valvet förrän en administratör tillåter det."
+  ],
+  [
+   "^This organization \\((.+)\\) requires Varsto (\\S+) or newer \\(the device runs (\\S+)\\)\\. This device does not sync or open the vault until an administrator allows it\\.$",
+   "Organisationen $1 kräver Varsto $2 eller senare (enheten kör $3). Den här enheten synkroniserar inte och öppnar inte valvet förrän en administratör tillåter det."
+  ],
+  [
+   "^This organization \\((.+)\\) allows only some platforms, and this device has not said which it runs\\. This device does not sync or open the vault until an administrator allows it\\.$",
+   "Organisationen $1 tillåter bara vissa plattformar, och den här enheten har inte uppgett sin. Den här enheten synkroniserar inte och öppnar inte valvet förrän en administratör tillåter det."
+  ],
+  [
+   "^The device says it runs (\\S+)\\. Ask the person to read the six words their device shows\\. Approve only if they match exactly: different words mean the code was changed on its way\\.$",
+   "Enheten uppger att den kör $1. Be personen läsa upp de sex ord som deras enhet visar. Godkänn bara om de stämmer exakt: avvikande ord betyder att koden har ändrats på vägen."
   ]
  ],
  "review": [
@@ -1499,7 +1522,14 @@
   "Editor",
   "read only",
   "Make viewer",
-  "Make editor"
+  "Make editor",
+  "Device platforms that may join and open the vault",
+  "A device of another platform is refused at approval; one already in the organization is locked out (no new keys, the other devices ignore what it writes, its own app does not open the vault) until its platform is allowed again. Devices say which platform they run, so this binds honest apps, not a modified one. It applies to administrators' devices too.",
+  "Oldest Varsto version allowed",
+  "Locked out",
+  "Tick at least one platform.",
+  "Policy not saved",
+  "any version"
  ],
  "parts": [
   [

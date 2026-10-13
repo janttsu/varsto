@@ -532,6 +532,9 @@ pub struct Engine {
     /// Tests: behave like a modified client that ignores a read-only role
     /// (`share_roles`).
     role_guard_off: bool,
+    /// Tests: the platform and version this device says it runs (`devinfo`).
+    platform_override: Option<String>,
+    version_override: Option<String>,
 }
 
 /// What the peer-to-peer server serves from (see `Engine::set_snapshot_sink`).
@@ -933,6 +936,8 @@ impl Engine {
             manifest_policy: Default::default(),
             hold_exempt: None,
             role_guard_off: false,
+            platform_override: None,
+            version_override: None,
         };
         engine.config.save(home)?;
         if !engine.vault.member {
@@ -1123,6 +1128,8 @@ impl Engine {
             manifest_policy: Default::default(),
             hold_exempt: None,
             role_guard_off: false,
+            platform_override: None,
+            version_override: None,
         };
         let (pending, pending_lost) = ledger_upkeep::load_deferred(home);
         engine.pending = pending;
@@ -3402,6 +3409,16 @@ impl Engine {
                 // A device that is not a participant of the shared folder.
                 continue;
             }
+            if self.devices.devices.contains_key(&dev)
+                && !self.is_revoked(&dev)
+                && !self.trusted(&dev)
+            {
+                // A device of the vault that is not trusted: not in the
+                // organization's roster, on a platform its policy refuses,
+                // or enrolled with an old key. What it writes is not taken
+                // (its manifest stays unread until it is trusted again).
+                continue;
+            }
             if !self.share_writer_ok(&rec, &dev) {
                 // A read-only member: what it publishes is not taken. Its
                 // manifest stays unread (`last_seen` does not move), so a
@@ -4061,6 +4078,7 @@ impl Engine {
 
     /// Download a placeholder file of a selective folder and keep it here.
     pub fn fetch_file(&mut self, folder: &str, path: &str) -> Result<PullReport> {
+        self.ensure_active()?;
         let (rec, root) = self.resolve_for_write(folder)?;
         if self.mount_is_encrypted(&rec.folder_id) {
             return self.fetch_cached(&rec, path);
@@ -4941,6 +4959,7 @@ impl Engine {
     /// Contents of a file, fetching it first if it is a placeholder. Counts
     /// as an access.
     pub fn read_file(&mut self, folder: &str, path: &str) -> Result<Vec<u8>> {
+        self.ensure_active()?;
         let (rec, root) = self.resolve_folder(folder)?;
         if self.mount_is_encrypted(&rec.folder_id) {
             // Decrypted in memory, from the block cache where it can.
@@ -5084,6 +5103,9 @@ impl Engine {
         for (_, push) in out.iter_mut() {
             push.batch_seq = push.batch_seq.or(seq);
         }
+        // System, version and platform, signed (an organization's platform
+        // policy is checked against them); republished only when changed.
+        let _ = self.refresh_device_details();
         // Checkpoints, acknowledgements and pruning; anything left undone
         // (an unreachable storage) is retried after the next sync.
         let _ = self.ledger_upkeep();
@@ -5099,6 +5121,12 @@ impl Engine {
     }
 
     fn sync_folders(&mut self, folder: Option<&str>) -> Result<Vec<(PullReport, PushReport)>> {
+        if self.org_platform_block().is_some() {
+            // Locked out by the organization's platform policy: read a
+            // policy that allows this device again before giving up.
+            let _ = self.pull_registry();
+            let _ = self.sync_membership();
+        }
         self.ensure_active()?;
         // A lost or damaged local ledger is restored before anything else.
         self.ensure_ledger_writable()?;

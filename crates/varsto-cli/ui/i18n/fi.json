@@ -980,7 +980,14 @@
   "Editor": "Muokkaaja",
   "read only": "vain luku",
   "Make viewer": "Tee katselijaksi",
-  "Make editor": "Tee muokkaajaksi"
+  "Make editor": "Tee muokkaajaksi",
+  "Device platforms that may join and open the vault": "Laitealustat, jotka saavat liittyä holviin ja avata sen",
+  "A device of another platform is refused at approval; one already in the organization is locked out (no new keys, the other devices ignore what it writes, its own app does not open the vault) until its platform is allowed again. Devices say which platform they run, so this binds honest apps, not a modified one. It applies to administrators' devices too.": "Muun alustan laitetta ei hyväksytä; organisaatioon jo kuuluva laite suljetaan ulos (ei uusia avaimia, muut laitteet jättävät sen kirjoitukset huomiotta, sen oma sovellus ei avaa holvia), kunnes sen alusta taas sallitaan. Laitteet kertovat itse, mitä alustaa ne käyttävät, joten tämä sitoo rehellisiä sovelluksia, ei muokattua. Sääntö koskee myös ylläpitäjien laitteita.",
+  "Oldest Varsto version allowed": "Vanhin sallittu Varsto-versio",
+  "Locked out": "Suljettu ulos",
+  "Tick at least one platform.": "Valitse vähintään yksi alusta.",
+  "Policy not saved": "Sääntöä ei tallennettu",
+  "any version": "mikä tahansa versio"
  },
  "patterns": [
   [
@@ -1318,6 +1325,22 @@
   [
    "^(.+) can change, add and delete files in (.+) again; your devices and the other members accept its changes\\.$",
    "$1 voi taas muuttaa, lisätä ja poistaa tiedostoja kansiossa $2; laitteesi ja muut jäsenet hyväksyvät sen muutokset."
+  ],
+  [
+   "^This organization \\((.+)\\) does not allow (.+) devices\\. This device does not sync or open the vault until an administrator allows it\\.$",
+   "Organisaatio $1 ei salli $2-laitteita. Tämä laite ei synkronoi eikä avaa holvia, ennen kuin ylläpitäjä sallii sen."
+  ],
+  [
+   "^This organization \\((.+)\\) requires Varsto (\\S+) or newer \\(the device runs (\\S+)\\)\\. This device does not sync or open the vault until an administrator allows it\\.$",
+   "Organisaatio $1 vaatii Varston version $2 tai uudemman (laitteessa on $3). Tämä laite ei synkronoi eikä avaa holvia, ennen kuin ylläpitäjä sallii sen."
+  ],
+  [
+   "^This organization \\((.+)\\) allows only some platforms, and this device has not said which it runs\\. This device does not sync or open the vault until an administrator allows it\\.$",
+   "Organisaatio $1 sallii vain osan alustoista, eikä tämä laite ole kertonut omaansa. Tämä laite ei synkronoi eikä avaa holvia, ennen kuin ylläpitäjä sallii sen."
+  ],
+  [
+   "^The device says it runs (\\S+)\\. Ask the person to read the six words their device shows\\. Approve only if they match exactly: different words mean the code was changed on its way\\.$",
+   "Laite kertoo käyttävänsä alustaa $1. Pyydä henkilöä lukemaan kuusi sanaa, jotka hänen laitteensa näyttää. Hyväksy vain, jos ne täsmäävät täsmälleen: eri sanat tarkoittavat, että koodia on muutettu matkalla."
   ]
  ],
  "review": [
@@ -1451,7 +1474,14 @@
   "Editor",
   "read only",
   "Make viewer",
-  "Make editor"
+  "Make editor",
+  "Device platforms that may join and open the vault",
+  "A device of another platform is refused at approval; one already in the organization is locked out (no new keys, the other devices ignore what it writes, its own app does not open the vault) until its platform is allowed again. Devices say which platform they run, so this binds honest apps, not a modified one. It applies to administrators' devices too.",
+  "Oldest Varsto version allowed",
+  "Locked out",
+  "Tick at least one platform.",
+  "Policy not saved",
+  "any version"
  ],
  "parts": [
   [

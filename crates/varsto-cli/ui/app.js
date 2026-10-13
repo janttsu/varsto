@@ -1131,6 +1131,9 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
       $("members").textContent = mems.length ? "Members with access to shared folders: " + mems.join(", ") : "";
       loadDevices(s);
       var org = s.org || null;
+      // Locked out by the organization's platform policy.
+      $("orgblockbanner").textContent = org && org.blocked ? orgBlockedText(org.blocked) : "";
+      $("orgblockbanner").classList.toggle("hidden", !(org && org.blocked));
       document.querySelectorAll("[data-org-only]").forEach(function (b) { b.classList.toggle("hidden", !org); });
       $("teamcard").classList.toggle("hidden", !!org || !!s.member);
       if (!org && currentPage === "organization") { nav("settings"); }
@@ -2484,13 +2487,17 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     });
   };
   var lastOrg = null;
+  var PLATFORM_NAMES = { linux: "Linux", macos: "macOS", windows: "Windows", android: "Android", ios: "iOS" };
+  // "this organization (Acme) does not allow Windows devices" as a sentence.
+  function orgBlockedText(why) { return why.charAt(0).toUpperCase() + why.slice(1) + ". This device does not sync or open the vault until an administrator allows it."; }
   function orgDevice(d, admin, user) {
     var li = el("li"); var body = el("div", "li-body"); var title = el("div", "li-title", d.name);
     if (d.admin) { title.appendChild(pill("accent", "admin")); }
     if (d.this_device) { title.appendChild(pill("grey", "This device")); }
     if (d.revoked) { title.appendChild(pill("risk", "Removed")); }
+    if (d.refused && !d.revoked) { var lp = pill("risk", "Locked out"); lp.title = "The organization " + d.refused; title.appendChild(lp); }
     body.appendChild(title);
-    body.appendChild(el("div", "li-sub", [deviceSystem(d), d.added_utc ? "added " + fmtDate(d.added_utc) : "", d.device_id.slice(0, 8)].filter(Boolean).join(" · ")));
+    body.appendChild(el("div", "li-sub", [deviceSystem(d) || PLATFORM_NAMES[d.platform] || d.platform || "", d.added_utc ? "added " + fmtDate(d.added_utc) : "", d.device_id.slice(0, 8)].filter(Boolean).join(" · ")));
     li.appendChild(body);
     if (admin && !d.this_device && !d.revoked && user) {
       var a = el("div", "li-actions"); var b = el("button", "secondary danger small", "Remove device…"); b.type = "button";
@@ -2508,6 +2515,8 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
       $("org-me").textContent = "Organization " + o.org_id.slice(0, 8) + " · this device is " + (admin ? "an administrator" : o.this_device_listed ? "a member" : "not in the organization") + (o.this_user ? ", owned by " + o.this_user : "") + " · " + o.users.length + (o.users.length === 1 ? " person" : " people") + ", " + o.admins.length + (o.admins.length === 1 ? " administrator" : " administrators");
       $("org-unlisted-note").classList.toggle("hidden", o.this_device_listed);
       $("org-unlisted-note").textContent = o.this_device_listed ? "" : "This device is not in the organization yet: the other devices ignore what it writes until an administrator adds it (Organization page on their device, or varsto org add-device).";
+      $("org-blocked-note").textContent = o.this_device_blocked ? orgBlockedText(o.this_device_blocked) : "";
+      $("org-blocked-note").classList.toggle("hidden", !o.this_device_blocked);
       var ul = $("org-users"); ul.innerHTML = "";
       o.users.forEach(function (u) {
         var li = el("li"); var body = el("div", "li-body"); var title = el("div", "li-title", u.user); body.appendChild(title);
@@ -2544,6 +2553,9 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
       $("org-admin-card").classList.toggle("hidden", !admin);
       var pf = $("org-policy");
       ["members_may_share", "members_may_add_storages", "members_may_set_policies", "members_may_add_devices"].forEach(function (k) { var i = pf.querySelector("input[name=" + k + "]"); i.checked = !!o.policy[k]; i.disabled = !admin; });
+      var allowed = o.policy.allowed_platforms || [];
+      pf.querySelectorAll("input[data-platform]").forEach(function (i) { i.checked = !allowed.length || allowed.indexOf(i.dataset.platform) >= 0; i.disabled = !admin; });
+      pf.min_app_version.value = o.policy.min_app_version || ""; pf.min_app_version.disabled = !admin;
       $("org-policy-save").classList.toggle("hidden", !admin);
       var lg = $("org-log"); lg.innerHTML = "";
       o.log.slice().reverse().forEach(function (e) {
@@ -2578,7 +2590,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     api("POST", "/api/org/fingerprint", { code: v.code.trim() }).then(function (f) {
       return dialog({
         title: "Approve " + (f.name || f.device_id.slice(0, 8)) + " for " + v.user.trim() + "?",
-        text: "Ask the person to read the six words their device shows. Approve only if they match exactly: different words mean the code was changed on its way.",
+        text: (f.platform ? "The device says it runs " + (PLATFORM_NAMES[f.platform] || f.platform) + ". " : "") + "Ask the person to read the six words their device shows. Approve only if they match exactly: different words mean the code was changed on its way.",
         code: f.fingerprint,
         ok: "The words match, approve"
       }).then(function (r) {
@@ -2597,7 +2609,13 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   $("org-policy").onsubmit = function (ev) {
     ev.preventDefault();
     var v = formData(ev.target);
-    api("POST", "/api/org/policy", v).then(function () { log("organization policy saved"); loadOrg(); }).catch(function (e) { alertBox(e.message); });
+    var boxes = ev.target.querySelectorAll("input[data-platform]"), ticked = [];
+    boxes.forEach(function (i) { delete v[i.name]; if (i.checked) { ticked.push(i.dataset.platform); } });
+    if (!ticked.length) { alertBox("Tick at least one platform."); return; }
+    // Every platform ticked: no restriction.
+    v.allowed_platforms = ticked.length === boxes.length ? [] : ticked;
+    v.min_app_version = (v.min_app_version || "").trim();
+    api("POST", "/api/org/policy", v).then(function () { log("organization policy saved"); loadOrg(); }).catch(function (e) { alertBox(e.message, "Policy not saved"); });
   };
   $("org-admin").onsubmit = function (ev) {
     ev.preventDefault();
