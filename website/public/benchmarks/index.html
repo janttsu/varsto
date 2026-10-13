@@ -23,7 +23,7 @@
 <link rel="alternate" hreflang="fi" href="https://varsto.net/fi/benchmarks/">
 <link rel="alternate" hreflang="sv" href="https://varsto.net/sv/benchmarks/">
 <link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../blog/feed.xml">
-<link rel="stylesheet" href="../assets/css/site.css?v=d738b157e3">
+<link rel="stylesheet" href="../assets/css/site.css?v=a993e06bd6">
 <script src="../assets/js/theme.js?v=0951491269"></script>
 </head>
 <body>
@@ -118,7 +118,7 @@
       </tbody>
     </table>
     <p>Every path worked the way the design says: direct where a NAT keeps its mapping, a relay through one of the user's own reachable devices where it does not. No vendor server was involved; the devices found each other through records in the bucket and public STUN servers.</p>
-    <figure class="shot"><img class="shot-light" src="../assets/img/benchmarks/home-traffic-light.png" alt="Varsto's Traffic card on the home PC: lines from this device to waw-cone (direct), ams (direct) and waw-sym (via ams), a table with path, address, speeds and totals per device, and at the top right the curve of a download that just finished." width="976" height="553" loading="lazy"><img class="shot-dark" src="../assets/img/benchmarks/home-traffic-dark.png" alt="The same Traffic card in dark mode." width="976" height="553" loading="lazy"><figcaption>The home PC's Traffic card seconds after a 512 MiB download from the cone-NAT device in Warsaw (the curve at the top right): Warsaw and Amsterdam reached directly, the symmetric-NAT device through Amsterdam.</figcaption></figure>
+    <figure class="shot"><img class="shot-light" src="../assets/img/benchmarks/home-traffic-light.png?v=deb42d53b0" alt="Varsto's Traffic card on the home PC: lines from this device to waw-cone (direct), ams (direct) and waw-sym (via ams), a table with path, address, speeds and totals per device, and at the top right the curve of a download that just finished." width="976" height="553" loading="lazy"><img class="shot-dark" src="../assets/img/benchmarks/home-traffic-dark.png?v=5eeaef02bb" alt="The same Traffic card in dark mode." width="976" height="553" loading="lazy"><figcaption>The home PC's Traffic card seconds after a 512 MiB download from the cone-NAT device in Warsaw (the curve at the top right): Warsaw and Amsterdam reached directly, the symmetric-NAT device through Amsterdam.</figcaption></figure>
     <h3>Large files</h3>
     <p>One 512 MiB file of random bytes per transfer, peer to peer only. The first column is version 0.0.1-alpha.9 with the relay fix below; the second adds the download changes of the same day (connections kept open per peer, objects sent without compressing them again, a window that adapts between 8 and 32 blocks).</p>
     <table class="downloads bench-table">

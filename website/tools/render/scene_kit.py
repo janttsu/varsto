@@ -21,7 +21,6 @@ EL_DEG, AZ_DEG = 33.0, 32.0   # camera elevation and azimuth (degrees)
 SOFT_W = 760.0                # overhead softbox power (W)
 KEY_S = 1.35                  # key sun strength (W/m2); fill and rim follow
 WORLD_STRENGTH = 0.2
-FLOOR_C0, FLOOR_C1 = "#f8faff", "#eef2ff"
 CARD_EMISSION = 0.05
 
 HEX = {
@@ -30,7 +29,38 @@ HEX = {
     "white": "#f6f8fc", "paper": "#f0f3f8", "light": "#e9eef7", "grey": "#cbd5e1", "mid": "#94a3b8",
     "slate": "#44546c", "dark": "#2a3648", "metal": "#c9d2df", "screen": "#eef3ff",
     "bg0": "#f8faff", "bg1": "#eef2ff",
+    # Roles that share a colour in the light theme but not in the dark one.
+    "card": "#f6f8fc",    # UI card faces
+    "cloud": "#f6f8fc",   # cloud bodies
+    "rim": "#f6f8fc",     # white rims of badges, seals and icon discs
+    "glyph": "#f6f8fc",   # marks drawn on top (check, cross, keyhole, star): white in both themes
 }
+
+# Dark theme (the site's dark tokens: bg #0d0f12, surface #14171c, text #eceef2,
+# muted #9aa3b2, accent #8aa9ff). Neutral surfaces become slate tones so no white
+# box is left on the dark page; blues, gold, green and red stay as they are.
+DARK = {
+    "white": "#f6f8fc", "paper": "#56627a", "light": "#465166", "grey": "#55617a", "mid": "#7d8aa1",
+    "slate": "#2b3442", "dark": "#4a566c", "metal": "#5d687c", "screen": "#232c3d",
+    "blue100": "#4b5f9f", "redlight": "#7a3a3f",
+    "bg0": "#181c23", "bg1": "#12151b",
+    "card": "#222833", "cloud": "#c3cbd9", "rim": "#2a313c", "glyph": "#f6f8fc",
+}
+# Literal tones used by builders and scenes, mapped for the dark theme.
+DARK_HEX = {
+    "#fdeef0": "#3a2328", "#eef1f7": "#aab3c2", "#e3e8f2": "#9aa3b3", "#c9d6ff": "#4b5f9f",
+    "#b4bfd0": "#4a5466", "#aab6c8": "#4a5466", "#e2e8f0": "#3a4352", "#f7d9db": "#4a2a2e",
+    "#eca3a7": "#a85a60", "#64748b": "#5d6a80", "#f1f4fe": "#1c2230", "#dfe6f6": "#5d687c",
+    "#d3dcef": "#525c6e", "#e6ecf9": "#5d687c", "#eef2ff": "#12151b",
+}
+
+
+def tone(key: str) -> str:
+    """Hex colour of a palette key or literal for the current theme."""
+    h = HEX.get(key, key)
+    if S.theme == "dark":
+        return DARK.get(key) or DARK_HEX.get(h.lower(), h)
+    return h
 
 
 def srgb_to_linear(c: float) -> float:
@@ -52,6 +82,7 @@ class _State:
     texts: list = []
     boxes: dict = {}
     counter = 0
+    theme = "light"
 
 S = _State()
 
@@ -68,13 +99,13 @@ _MATS: dict = {}
 def mat(key: str, rough: float = 0.5, metallic: float = 0.0, sheen: float = 0.3,
         emission: float = 0.0, spec: float = 0.35):
     """Matte, clay-like material from the shared palette (or a #hex)."""
-    name = f"{key}|{rough}|{metallic}|{sheen}|{emission}|{spec}"
+    name = f"{key}|{rough}|{metallic}|{sheen}|{emission}|{spec}|{S.theme}"
     if name in _MATS:
         return _MATS[name]
     m = bpy.data.materials.new(name)
     m.use_nodes = True
     bsdf = m.node_tree.nodes["Principled BSDF"]
-    col = rgba(HEX.get(key, key))
+    col = rgba(tone(key))
     bsdf.inputs["Base Color"].default_value = col
     bsdf.inputs["Roughness"].default_value = rough
     bsdf.inputs["Metallic"].default_value = metallic
@@ -260,10 +291,13 @@ def metaball(elements, m, parent=None, name="meta", res=0.02):
 
 
 # ---------------------------------------------------------------- scene setup
-def new_scene(width_px: int, height_px: int, scale: int = 2, samples: int = 160, gpu: str = "OPTIX"):
-    """Fresh scene with camera, lights and backdrop for a width_px x height_px grid."""
+def new_scene(width_px: int, height_px: int, scale: int = 2, samples: int = 160, gpu: str = "OPTIX",
+              theme: str = "light"):
+    """Fresh scene with camera, lights and backdrop for a width_px x height_px grid.
+    theme: 'light' or 'dark' (palette, backdrop and text colours)."""
     bpy.ops.wm.read_factory_settings(use_empty=True)
     _MATS.clear()
+    S.theme = theme
     S.texts, S.boxes, S.counter = [], {}, 0
     S.W, S.H = width_px, height_px
     scene = bpy.context.scene
@@ -309,8 +343,8 @@ def new_scene(width_px: int, height_px: int, scale: int = 2, samples: int = 160,
     rng.inputs["From Min"].default_value = -half
     rng.inputs["From Max"].default_value = half
     ramp = nt.nodes.new("ShaderNodeValToRGB")
-    ramp.color_ramp.elements[0].color = rgba(FLOOR_C0)
-    ramp.color_ramp.elements[1].color = rgba(FLOOR_C1)
+    ramp.color_ramp.elements[0].color = rgba(tone("bg0"))
+    ramp.color_ramp.elements[1].color = rgba(tone("bg1"))
     nt.links.new(coord.outputs["Object"], dot.inputs[0])
     nt.links.new(dot.outputs["Value"], rng.inputs["Value"])
     nt.links.new(rng.outputs["Result"], ramp.inputs["Fac"])
@@ -329,7 +363,7 @@ def new_scene(width_px: int, height_px: int, scale: int = 2, samples: int = 160,
     scene.world = world
     world.use_nodes = True
     bg = world.node_tree.nodes["Background"]
-    bg.inputs["Color"].default_value = rgba("#eef2ff")
+    bg.inputs["Color"].default_value = rgba(tone("#eef2ff"))
     bg.inputs["Strength"].default_value = WORLD_STRENGTH
 
     # Render settings.
@@ -485,10 +519,10 @@ def _iter_meshes(root):
             yield ob
 
 
-def screen_bbox(root):
-    """Projected bounding box of a root hierarchy in grid pixels (x0, y0, x1, y1)."""
+def _screen_points(root):
+    """Projected points (grid px) of every mesh corner and metaball extent under root."""
     bpy.context.view_layer.update()
-    xs, ys = [], []
+    pts = []
     for ob in _iter_meshes(root):
         mw = ob.matrix_world
         if ob.type == "META":
@@ -499,25 +533,55 @@ def screen_bbox(root):
                     for dy in (-1, 1):
                         for dz in (-1, 1):
                             r = el.radius * 0.68
-                            x, y = project(mw @ (Vector(el.co) + Vector((dx * r, dy * r, dz * r))))
-                            xs.append(x); ys.append(y)
+                            pts.append(project(mw @ (Vector(el.co) + Vector((dx * r, dy * r, dz * r)))))
             continue
         for c in ob.bound_box:
-            x, y = project(mw @ Vector(c))
-            xs.append(x); ys.append(y)
-    if not xs:
-        x, y = project(root.matrix_world.translation)
-        return (x, y, x, y)
+            pts.append(project(mw @ Vector(c)))
+    if not pts:
+        pts.append(project(root.matrix_world.translation))
+    return pts
+
+
+def convex_hull(pts):
+    """Convex hull of 2D points (monotone chain), counter-clockwise, no repeated point."""
+    P = sorted(set((round(x, 3), round(y, 3)) for x, y in pts))
+    if len(P) <= 2:
+        return P
+
+    def cross(o, a, b):
+        return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+    lo, hi = [], []
+    for p in P:
+        while len(lo) >= 2 and cross(lo[-2], lo[-1], p) <= 0:
+            lo.pop()
+        lo.append(p)
+    for p in reversed(P):
+        while len(hi) >= 2 and cross(hi[-2], hi[-1], p) <= 0:
+            hi.pop()
+        hi.append(p)
+    return lo[:-1] + hi[:-1]
+
+
+def screen_bbox(root):
+    """Projected bounding box of a root hierarchy in grid pixels (x0, y0, x1, y1)."""
+    pts = _screen_points(root)
+    xs, ys = [p[0] for p in pts], [p[1] for p in pts]
     return (min(xs), min(ys), max(xs), max(ys))
 
 
-def register_box(name, root, kind="object", parent=None):
+def register_box(name, root, kind="object", parent=None, free=False):
     """Record an element for the overlap check. kind: object (device, cloud, disk, ...),
     card (UI card), ui (piece on a card: icon, badge, pill; parent = the card),
-    badge (padlock / check / cross attached to a corner of parent)."""
+    badge (padlock / check / cross attached to a corner of parent).
+    free=True: the element may overlap other elements by design (it is still kept
+    clear of texts and inside the frame). The silhouette is kept as the convex hull
+    of the projected mesh bounds (tighter than the box for tilted objects)."""
     if name in S.boxes:
         name = f"{name}#{len(S.boxes)}"
-    S.boxes[name] = {"box": screen_bbox(root), "kind": kind, "parent": parent}
+    pts = _screen_points(root)
+    xs, ys = [p[0] for p in pts], [p[1] for p in pts]
+    S.boxes[name] = {"box": (min(xs), min(ys), max(xs), max(ys)), "hull": convex_hull(pts),
+                     "kind": kind, "parent": parent, "free": free}
     root["box_name"] = name
     return S.boxes[name]["box"]
 
@@ -542,12 +606,11 @@ def rule2d(x0, y0, x1, y1, color="#e8edf7", width=1.5):
 
 
 def caption(s):
-    assert len(s) <= 64, f"caption too long ({len(s)}): {s}"
     text(S.W / 2, S.H - 26, s, "caption")
 
 
 def layout():
-    return {"w": S.W, "h": S.H, "texts": S.texts, "boxes": S.boxes}
+    return {"w": S.W, "h": S.H, "theme": S.theme, "texts": S.texts, "boxes": S.boxes}
 
 
 # ================================================================ asset builders
@@ -744,14 +807,14 @@ def usb_stick():
     box(0.18, 0.13, 0.07, mat("metal", rough=0.35, metallic=0.3), bevel=0.008, at=(0.25, 0, 0.015), parent=root)
     for y in (-0.03, 0.03):
         box(0.05, 0.03, 0.03, mat("slate"), bevel=0.003, at=(0.30, y, 0.03), parent=root)
-    cyl(0.02, 0.008, mat("white", emission=0.6), parent=root, at=(-0.26, 0, 0.1))
+    cyl(0.02, 0.008, mat("glyph", emission=0.6), parent=root, at=(-0.26, 0, 0.1))
     return root
 
 
 def cloud(scale=1.0, alpha_tone=None):
     """Smooth cloud (metaball union, flattened bottom), floating a little above the floor."""
     root = empty("cloud")
-    m = mat(alpha_tone or "white", rough=0.55, sheen=0.35)
+    m = mat(alpha_tone or "cloud", rough=0.55, sheen=0.35)
     els = [(-0.36, 0.0, 0.22, 0.30), (-0.05, 0.02, 0.34, 0.40), (0.34, -0.02, 0.24, 0.30),
            (-0.2, -0.05, 0.14, 0.26), (0.12, -0.06, 0.14, 0.28), (0.0, 0.0, -0.55, -0.72)]
     mb = metaball(els, m, parent=root, name="cloud", res=0.025)
@@ -829,8 +892,8 @@ def padlock(scale=1.0, body="blue600"):
     tube((R, 0, 0.27), (R, 0, 0.2), r, m, sh)
     sphere(r, m, at=(-R, 0, 0.27), parent=sh)
     sphere(r, m, at=(R, 0, 0.27), parent=sh)
-    cyl(0.03, 0.012, mat("white"), parent=root, at=(0, -0.082, 0.16), axis="Y")
-    box(0.03, 0.012, 0.06, mat("white"), bevel=0.004, at=(0, -0.082, 0.085), parent=root)
+    cyl(0.03, 0.012, mat("glyph"), parent=root, at=(0, -0.082, 0.16), axis="Y")
+    box(0.03, 0.012, 0.06, mat("glyph"), bevel=0.004, at=(0, -0.082, 0.085), parent=root)
     root.scale = (scale,) * 3
     return root
 
@@ -896,7 +959,7 @@ def plane(scale=1.0):
     return root
 
 
-def card(w, h, r=0.12, tone="white", t=0.02):
+def card(w, h, r=0.12, tone="card", t=0.02):
     """Floating UI card facing the camera: w, h in grid px (use with billboard())."""
     root = empty("card")
     plate(w * PX, h * PX, t, r * PX, mat(tone, rough=0.5, sheen=0.1, emission=CARD_EMISSION), parent=root, z0=-t)
@@ -907,10 +970,10 @@ def badge(kind="ok", r=11.5):
     """Round check (green) or cross (red) badge facing the camera (use with billboard())."""
     root = empty("badge")
     rr = r * PX
-    cyl(rr, 0.012, mat("white"), parent=root, at=(0, 0, -0.012))
+    cyl(rr, 0.012, mat("rim"), parent=root, at=(0, 0, -0.012))
     col = {"ok": "green", "x": "red"}[kind]
     cyl(rr * 0.83, 0.01, mat(col, rough=0.45), parent=root, at=(0, 0, 0.0))
-    w = mat("white")
+    w = mat("glyph")
     tr = 0.012 * r / 11.5
     if kind == "ok":
         capsule((-0.045 * r / 11.5, 0.0, 0.012), (-0.012 * r / 11.5, -0.034 * r / 11.5, 0.012), tr, w, root)
@@ -926,7 +989,7 @@ def seal(r=19):
     """Round seal: white disc, blue face and a thin ring (initials composed later)."""
     root = empty("seal")
     rr = r * PX
-    cyl(rr, 0.012, mat("white"), parent=root, at=(0, 0, -0.012))
+    cyl(rr, 0.012, mat("rim"), parent=root, at=(0, 0, -0.012))
     cyl(rr * 0.79, 0.014, mat("blue600"), parent=root, at=(0, 0, 0))
     ring = torus(rr * 0.58, 0.006, mat("#8aa9ff"), parent=root, at=(0, 0, 0.014))
     return root
@@ -966,10 +1029,10 @@ def folder_icon(scale=1.0):
 
 def camera_icon():
     root = empty("cam")
-    cyl(0.14, 0.012, mat("white"), parent=root, at=(0, 0, -0.012))
+    cyl(0.14, 0.012, mat("rim"), parent=root, at=(0, 0, -0.012))
     plate(0.16, 0.11, 0.02, 0.025, mat("blue600"), parent=root, cy=-0.005)
     plate(0.07, 0.03, 0.02, 0.01, mat("blue900"), parent=root, cy=0.065)
-    cyl(0.03, 0.008, mat("white"), parent=root, at=(0, 0.0, 0.02))
+    cyl(0.03, 0.008, mat("glyph"), parent=root, at=(0, 0.0, 0.02))
     cyl(0.014, 0.006, mat("blue600"), parent=root, at=(0, 0.0, 0.028))
     return root
 
@@ -1004,7 +1067,7 @@ def framed_card(w, h, r=14, frame="blue600", t=0.02, border=3):
     """Floating card with a coloured frame (grid px), facing the camera."""
     root = empty("cardf")
     plate((w + 2 * border) * PX, (h + 2 * border) * PX, t, (r + border) * PX, mat(frame, rough=0.45), parent=root, z0=-t - 0.004)
-    plate(w * PX, h * PX, t, r * PX, mat("white", rough=0.5, sheen=0.1, emission=CARD_EMISSION), parent=root, z0=-t)
+    plate(w * PX, h * PX, t, r * PX, mat("card", rough=0.5, sheen=0.1, emission=CARD_EMISSION), parent=root, z0=-t)
     return root
 
 
@@ -1024,7 +1087,7 @@ def dot(r_px, tone="blue600", emission=0.0):
 def tray_icon():
     root = empty("tray")
     plate(0.16, 0.16, 0.014, 0.04, mat("blue600"), parent=root)
-    cyl(0.03, 0.01, mat("white"), parent=root, at=(0, 0, 0.014))
+    cyl(0.03, 0.01, mat("glyph"), parent=root, at=(0, 0, 0.014))
     return root
 
 
@@ -1038,7 +1101,7 @@ def sparkle():
         a = _m.pi / 4 * i
         r = 0.062 if i % 2 == 0 else 0.018
         pts.append((r * _m.cos(a), r * _m.sin(a)))
-    prism(pts, 0.01, mat("white"), parent=root, z0=0.012)
+    prism(pts, 0.01, mat("glyph"), parent=root, z0=0.012)
     return root
 
 
@@ -1109,6 +1172,12 @@ def link(points, h=0.3, dash=6.0, gap=5.0, r=0.011, tone="blue300", arrows=("end
     if "start" in arrows:
         d = (at(0) - at(0.05)).normalized()
         cone(0.035, head, m, at=at(head), parent=root, direction=d)
+    name = f"link#{len(S.boxes)}"
+    xs, ys = [p[0] for p in poly], [p[1] for p in poly]
+    S.boxes[name] = {"box": (min(xs), min(ys), max(xs), max(ys)), "kind": "link", "parent": None,
+                     "poly": [(round(x, 2), round(y, 2)) for x, y in poly], "r": r / PX,
+                     "heads": [list(poly[-1])] * ("end" in arrows) + [list(poly[0])] * ("start" in arrows), "head_r": 0.035 / PX}
+    root["box_name"] = name
     return root
 
 

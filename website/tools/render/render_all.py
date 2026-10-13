@@ -8,11 +8,14 @@ Options (after the "--"):
     --samples N          Cycles samples for the 640x320 scenes (default 160; hero 192)
     --device AUTO|OPTIX|CUDA|CPU   AUTO picks the GPU when at least 2.5 GB of VRAM is free
     --work DIR           scratch directory for raw renders and layout JSON (default: $TMPDIR/varsto-render)
+    --out DIR            write the composed pictures under DIR instead of website/public/assets/img
+                         (drafts, e.g. with --samples 24)
+    --theme light|dark|both   which variants to render (default both; dark files get a -dark suffix)
     --no-compose         skip compose.py (text layer)
     --layout-only        build the scenes and run the overlap check only (no render)
 
 Outputs go next to the SVGs: website/public/assets/img/{features,usecases,encryption}/*.webp|png
-and website/public/assets/img/hero.webp|png.
+and website/public/assets/img/hero.webp|png, each with a <name>-dark.webp|png twin for the dark theme.
 """
 from __future__ import annotations
 
@@ -33,7 +36,7 @@ import scenes            # noqa: E402
 
 
 def parse_args(argv):
-    opts = {"only": None, "samples": 160, "device": "AUTO", "work": os.path.join(tempfile.gettempdir(), "varsto-render"), "compose": True, "layout_only": False}
+    opts = {"only": None, "samples": 160, "device": "AUTO", "work": os.path.join(tempfile.gettempdir(), "varsto-render"), "compose": True, "layout_only": False, "out": OUT_DIR, "themes": ["light", "dark"]}
     i = 0
     while i < len(argv):
         a = argv[i]
@@ -45,6 +48,10 @@ def parse_args(argv):
             opts["device"] = argv[i + 1].upper(); i += 2
         elif a == "--work":
             opts["work"] = argv[i + 1]; i += 2
+        elif a == "--out":
+            opts["out"] = os.path.abspath(argv[i + 1]); i += 2
+        elif a == "--theme":
+            opts["themes"] = ["light", "dark"] if argv[i + 1] == "both" else [argv[i + 1]]; i += 2
         elif a == "--no-compose":
             opts["compose"] = False; i += 1
         elif a == "--layout-only":
@@ -77,28 +84,32 @@ def main():
     names = opts["only"] or list(scenes.SCENES)
     t_all = time.time()
     report = []
-    for name in names:
+    jobs = [(n, t) for n in names for t in (opts["themes"][:1] if opts["layout_only"] else opts["themes"])]
+    for name, theme in jobs:
         w, h, fn = scenes.SCENES[name]
         t0 = time.time()
         samples = opts["samples"] if name != "hero" else max(opts["samples"], 192)
-        K.new_scene(w, h, scale=2, samples=samples, gpu=device)
+        K.new_scene(w, h, scale=2, samples=samples, gpu=device, theme=theme)
         fn()
-        raw = os.path.join(opts["work"], name.replace("/", "_") + ".png")
-        lay = os.path.join(opts["work"], name.replace("/", "_") + ".json")
+        suffix = "" if theme == "light" else "-" + theme
+        stem = name.replace("/", "_") + suffix
+        raw = os.path.join(opts["work"], stem + ".png")
+        lay = os.path.join(opts["work"], stem + ".json")
         os.makedirs(os.path.dirname(raw), exist_ok=True)
         json.dump(K.layout(), open(lay, "w"), indent=1)
+        label = f"{name + suffix:27s}"
         if opts["layout_only"]:
             r = subprocess.run(["python3", os.path.join(HERE, "compose.py"), "--check", lay], capture_output=True, text=True)
-            line = f"{name:22s} layout check: " + r.stdout.strip().replace("\n", "\n    ")
+            line = f"{label} layout check: " + r.stdout.strip().replace("\n", "\n    ")
             print(line, flush=True)
             report.append(line)
             continue
         K.render(raw)
         dt = time.time() - t0
-        line = f"{name:22s} {w}x{h}@2x {samples} spp {K.S.device:5s} {dt:6.1f} s"
+        line = f"{label} {w}x{h}@2x {samples} spp {K.S.device:5s} {dt:6.1f} s"
         if opts["compose"]:
-            out_base = os.path.join(OUT_DIR, name)
-            r = subprocess.run([sys.executable if False else "python3", os.path.join(HERE, "compose.py"), raw, lay, out_base],
+            out_base = os.path.join(opts["out"], name + suffix)
+            r = subprocess.run(["python3", os.path.join(HERE, "compose.py"), raw, lay, out_base],
                                capture_output=True, text=True)
             if r.stderr.strip():
                 line += "  compose FAILED: " + r.stderr.strip()[-400:]
@@ -107,11 +118,11 @@ def main():
             for ext in ("webp", "png"):
                 p = f"{out_base}.{ext}"
                 if os.path.exists(p):
-                    line += f"\n    {os.path.getsize(p) // 1024:4d} KB  {os.path.relpath(p, ROOT)}"
+                    line += f"\n    {os.path.getsize(p) // 1024:4d} KB  {os.path.relpath(p, ROOT) if p.startswith(ROOT) else p}"
         print(line, flush=True)
         report.append(line)
     total = time.time() - t_all
-    print(f"\nrendered {len(names)} scene(s) in {total:.0f} s on {device}")
+    print(f"\nrendered {len(jobs)} picture(s) in {total:.0f} s on {device}")
     with open(os.path.join(opts["work"], "report.txt"), "w") as f:
         f.write("\n".join(report) + f"\n\ntotal {total:.0f} s on {device}\n")
 

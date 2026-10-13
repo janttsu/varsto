@@ -23,7 +23,7 @@
 <link rel="alternate" hreflang="fi" href="https://varsto.net/fi/benchmarks/">
 <link rel="alternate" hreflang="sv" href="https://varsto.net/sv/benchmarks/">
 <link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../../blog/feed.xml">
-<link rel="stylesheet" href="../../assets/css/site.css?v=d738b157e3">
+<link rel="stylesheet" href="../../assets/css/site.css?v=a993e06bd6">
 <script src="../../assets/js/theme.js?v=0951491269"></script>
 </head>
 <body>
@@ -118,7 +118,7 @@
       </tbody>
     </table>
     <p>Jokainen reitti toimi suunnitellusti: suoraan, kun NAT säilyttää osoitemuunnoksensa, ja välittäjän kautta jonkin käyttäjän oman tavoitettavan laitteen kautta, kun ei säilytä. Mitään valmistajan palvelinta ei tarvittu; laitteet löysivät toisensa bucketissa olevien tietueiden ja julkisten STUN-palvelinten avulla.</p>
-    <figure class="shot"><img class="shot-light" src="../../assets/img/benchmarks/home-traffic-light.png" alt="Varston Liikenne-kortti kotitietokoneella: viivat tästä laitteesta laitteisiin waw-cone (suora), ams (suora) ja waw-sym (ams:n kautta), taulukko, jossa reitti, osoite, nopeudet ja kokonaismäärät laitteittain, ja oikeassa yläkulmassa juuri päättyneen latauksen käyrä." width="976" height="553" loading="lazy"><img class="shot-dark" src="../../assets/img/benchmarks/home-traffic-dark.png" alt="Sama Liikenne-kortti tummassa tilassa." width="976" height="553" loading="lazy"><figcaption>Kotitietokoneen Liikenne-kortti sekunteja sen jälkeen, kun 512 MiB:n lataus Varsovan kartio-NAT-laitteelta päättyi (käyrä oikeassa yläkulmassa): Varsova ja Amsterdam tavoitettiin suoraan, symmetrisen NATin takana oleva laite Amsterdamin kautta.</figcaption></figure>
+    <figure class="shot"><img class="shot-light" src="../../assets/img/benchmarks/home-traffic-light.png?v=deb42d53b0" alt="Varston Liikenne-kortti kotitietokoneella: viivat tästä laitteesta laitteisiin waw-cone (suora), ams (suora) ja waw-sym (ams:n kautta), taulukko, jossa reitti, osoite, nopeudet ja kokonaismäärät laitteittain, ja oikeassa yläkulmassa juuri päättyneen latauksen käyrä." width="976" height="553" loading="lazy"><img class="shot-dark" src="../../assets/img/benchmarks/home-traffic-dark.png?v=5eeaef02bb" alt="Sama Liikenne-kortti tummassa tilassa." width="976" height="553" loading="lazy"><figcaption>Kotitietokoneen Liikenne-kortti sekunteja sen jälkeen, kun 512 MiB:n lataus Varsovan kartio-NAT-laitteelta päättyi (käyrä oikeassa yläkulmassa): Varsova ja Amsterdam tavoitettiin suoraan, symmetrisen NATin takana oleva laite Amsterdamin kautta.</figcaption></figure>
     <h3>Suuret tiedostot</h3>
     <p>Yksi 512 MiB:n satunnaisista tavuista koostuva tiedosto siirtoa kohden, pelkällä vertaisyhteydellä. Ensimmäinen sarake on versio 0.0.1-alpha.9 alla kuvatulla välittäjäkorjauksella; toisessa ovat mukana saman päivän latausmuutokset (yhteydet pidetään auki vertaiskohtaisesti, objektit lähetetään pakkaamatta niitä uudelleen ja ikkuna mukautuu 8 ja 32 lohkon välillä).</p>
     <table class="downloads bench-table">

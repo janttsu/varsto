@@ -23,7 +23,7 @@
 <link rel="alternate" hreflang="fi" href="https://varsto.net/fi/benchmarks/">
 <link rel="alternate" hreflang="sv" href="https://varsto.net/sv/benchmarks/">
 <link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../../blog/feed.xml">
-<link rel="stylesheet" href="../../assets/css/site.css?v=d738b157e3">
+<link rel="stylesheet" href="../../assets/css/site.css?v=a993e06bd6">
 <script src="../../assets/js/theme.js?v=0951491269"></script>
 </head>
 <body>
@@ -118,7 +118,7 @@
       </tbody>
     </table>
     <p>Varje väg fungerade så som designen säger: direkt där en NAT behåller sin mappning, via ett relä genom en av användarens egna nåbara enheter där den inte gör det. Ingen leverantörsserver var inblandad; enheterna hittade varandra genom poster i bucketen och publika STUN-servrar.</p>
-    <figure class="shot"><img class="shot-light" src="../../assets/img/benchmarks/home-traffic-light.png" alt="Varstos trafikkort på hemdatorn: linjer från den här enheten till waw-cone (direkt), ams (direkt) och waw-sym (via ams), en tabell med väg, adress, hastigheter och summor per enhet, och uppe till höger kurvan för en nedladdning som just avslutats." width="976" height="553" loading="lazy"><img class="shot-dark" src="../../assets/img/benchmarks/home-traffic-dark.png" alt="Samma trafikkort i mörkt läge." width="976" height="553" loading="lazy"><figcaption>Hemdatorns trafikkort några sekunder efter en nedladdning på 512 MiB från enheten bakom kon-NAT i Warszawa (kurvan uppe till höger): Warszawa och Amsterdam nås direkt, enheten bakom symmetrisk NAT via Amsterdam.</figcaption></figure>
+    <figure class="shot"><img class="shot-light" src="../../assets/img/benchmarks/home-traffic-light.png?v=deb42d53b0" alt="Varstos trafikkort på hemdatorn: linjer från den här enheten till waw-cone (direkt), ams (direkt) och waw-sym (via ams), en tabell med väg, adress, hastigheter och summor per enhet, och uppe till höger kurvan för en nedladdning som just avslutats." width="976" height="553" loading="lazy"><img class="shot-dark" src="../../assets/img/benchmarks/home-traffic-dark.png?v=5eeaef02bb" alt="Samma trafikkort i mörkt läge." width="976" height="553" loading="lazy"><figcaption>Hemdatorns trafikkort några sekunder efter en nedladdning på 512 MiB från enheten bakom kon-NAT i Warszawa (kurvan uppe till höger): Warszawa och Amsterdam nås direkt, enheten bakom symmetrisk NAT via Amsterdam.</figcaption></figure>
     <h3>Stora filer</h3>
     <p>En fil på 512 MiB med slumpmässiga byte per överföring, enbart peer-to-peer. Första kolumnen är version 0.0.1-alpha.9 med reläåtgärden nedan; den andra lägger till samma dags ändringar i nedladdningen (anslutningar hålls öppna per enhet, objekt skickas utan att komprimeras på nytt, ett fönster som anpassar sig mellan 8 och 32 block).</p>
     <table class="downloads bench-table">
