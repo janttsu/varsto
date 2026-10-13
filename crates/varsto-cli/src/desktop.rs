@@ -460,15 +460,45 @@ fn handle(state: &Shared, mut request: Request) -> Result<()> {
         };
     }
     if *request.method() == Method::Post && path == "/api/logs/bundle" {
+        // `{"save": true}` (the Android shell, which cannot save a download):
+        // write the bundle under `home/exports` and answer with its path, for
+        // the shell to share. Removed with the other exports at the next start.
+        let mut body = String::new();
+        let _ = request.as_reader().take(4096).read_to_string(&mut body);
+        let save = serde_json::from_str::<Value>(&body)
+            .ok()
+            .and_then(|v| v.get("save").and_then(Value::as_bool))
+            .unwrap_or(false);
         let (home, state_json) = {
             let mut st = state.lock().unwrap();
             let v = api(&mut st, Method::Get, "/api/state", "", &json!({})).ok();
             (st.home.clone(), v.map(|v| v.to_string()))
         };
         let extras = bundle_extras(&home, state_json);
+        let name = format!("varsto-logs-{}.tar.zst", log_stamp());
+        if save {
+            let dir = home.join(varsto_core::engine::EXPORT_DIR);
+            let target = dir.join(&name);
+            let written = std::fs::create_dir_all(&dir)
+                .and_then(|_| std::fs::File::create(&target))
+                .and_then(|f| varsto_core::logging::bundle(&home, &extras, f))
+                .and_then(|mut f| std::io::Write::flush(&mut f));
+            return match written {
+                Ok(()) => {
+                    log::info!(path = target.display().to_string(); "log bundle saved for sharing");
+                    Ok(request.respond(json_response(
+                        200,
+                        &json!({"ok": true, "path": target, "note": BUNDLE_REMINDER}),
+                    ))?)
+                }
+                Err(e) => Ok(request.respond(json_response(
+                    500,
+                    &json!({"error": format!("log bundle: {e:#}")}),
+                ))?),
+            };
+        }
         return match varsto_core::logging::bundle(&home, &extras, Vec::new()) {
             Ok(bytes) => {
-                let name = format!("varsto-logs-{}.tar.zst", log_stamp());
                 log::info!(bytes = bytes.len(); "log bundle made for the interface");
                 STATUS.with(|s| s.set(200));
                 Ok(request.respond(
@@ -478,7 +508,10 @@ fn handle(state: &Shared, mut request: Request) -> Result<()> {
                         .with_header(header("Content-Disposition", &attachment(&name))),
                 )?)
             }
-            Err(e) => Ok(request.respond(json_response(500, &json!({"error": format!("log bundle: {e:#}")})))?),
+            Err(e) => Ok(request.respond(json_response(
+                500,
+                &json!({"error": format!("log bundle: {e:#}")}),
+            ))?),
         };
     }
     let mut body = String::new();

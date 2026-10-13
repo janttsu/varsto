@@ -340,6 +340,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     activityWatch();
     if (page === "files") { ensureFiles(); }
     if (page === "settings" && droid && lastStatus) { refreshAllFiles(); }
+    if (page === "settings") { loadLogs(); }
     window.scrollTo(0, 0);
   }
   document.querySelectorAll(".nav-item[data-nav], .more-item[data-nav]").forEach(function (b) {
@@ -365,6 +366,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
       if (!st.has_vault) { show("setup"); return; }
       if (!st.unlocked) { show("unlock"); return; }
       show("app");
+      if (currentPage === "settings") { loadLogs(); }
       return refreshStatus();
     }).catch(function (e) { log("error: " + e.message); });
   }
@@ -2862,6 +2864,59 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   $("addfolder").onsubmit = function (ev) { ev.preventDefault(); var d = cleanPath(formData(ev.target), ev.target); var name = d.name; api("POST", "/api/folder", d).then(function () { ev.target.reset(); log("folder added: " + name + (d.plain === false ? " (encrypted on this phone)" : d.plain ? " (plain files on this phone)" : "")); showFolderForms(false, true); return refreshStatus().then(function () { openFolder(name); }); }).catch(function (e) { alertBox(e.message); }); };
   $("attachfolder").onsubmit = function (ev) { ev.preventDefault(); var d = formData(ev.target); if (!d.name_or_id) { return; } attachFolder(d.name_or_id, d.path); ev.target.reset(); };
   $("addstorage").onsubmit = function (ev) { ev.preventDefault(); api("POST", "/api/storage", formData(ev.target)).then(function (r) { ev.target.reset(); $("storagekind").onchange.call($("storagekind")); log("storage added; copying the vault to it now in the background"); return refreshStatus(r.status); }).catch(function (e) { alertBox(e.message); }); };
+
+  // Logs (Settings card): how much the service writes to its log on this
+  // device, the space it takes, the folder and a bundle to send with a report.
+  var logLevels = ["trace", "debug", "info", "warn", "error"];
+  function renderLogs(l) {
+    var sel = $("log-level");
+    var level = l.level || "debug";
+    var extra = sel.querySelector("option[data-extra]");
+    if (logLevels.indexOf(level) < 0) {
+      // A filter spec (from the config, VARSTO_LOG or --log-level): shown as it is.
+      if (!extra) { extra = el("option"); extra.dataset.extra = "1"; extra.setAttribute("data-no-i18n", ""); sel.appendChild(extra); }
+      extra.value = level; extra.textContent = level;
+    } else if (extra) { extra.remove(); }
+    sel.value = level;
+    var src = $("log-source");
+    var over = l.source === "env" ? "The VARSTO_LOG environment variable overrides this setting." : l.source === "flag" ? "The --log-level option the service was started with overrides this setting." : "";
+    src.textContent = over; src.classList.toggle("hidden", !over);
+    if (l.bytes !== undefined) { $("log-usage").textContent = "Using " + fmtBytes(l.bytes || 0) + " in " + (l.files || 0) + " files"; }
+    $("log-open").classList.toggle("hidden", l.can_open === false);
+  }
+  function loadLogs() {
+    if (document.body.dataset.view !== "app") { return; }
+    api("GET", "/api/logs").then(renderLogs).catch(function (e) { $("log-usage").textContent = e.message; });
+  }
+  $("log-level").onchange = function () {
+    var v = this.value;
+    api("POST", "/api/logs/level", { level: v }).then(function (r) { log("log detail set to " + (r.level || v)); renderLogs(r); loadLogs(); }).catch(function (e) { alertBox(e.message); loadLogs(); });
+  };
+  $("log-open").onclick = function () { api("POST", "/api/logs/open").catch(function (e) { alertBox(e.message); }); };
+  $("log-bundle").onclick = function () {
+    var b = this;
+    if (droid && droid.shareFile) {
+      // The Android shell cannot save a download: the service writes the bundle and the shell shares it.
+      api("POST", "/api/logs/bundle", { save: true }).then(function (r) {
+        log("log bundle saved: " + r.path);
+        return alertBox("The bundle has no keys or passphrases, but it does contain file and folder names, device and storage names. Look through it before you share it.", "Log bundle saved").then(function () { droid.shareFile(r.path); });
+      }).catch(function (e) { alertBox(e.message); });
+      return;
+    }
+    b.disabled = true; workBar(true);
+    fetch("/api/logs/bundle", { method: "POST", headers: { "X-Varsto-Token": token } }).then(function (r) {
+      if (!r.ok) { return r.text().then(function (t) { var j = null; try { j = JSON.parse(t); } catch (x) {} throw new Error((j && j.error) || ("The Varsto service answered " + r.status + " to POST /api/logs/bundle")); }); }
+      var m = (r.headers.get("Content-Disposition") || "").match(/filename="?([^";]+)"?/);
+      var name = m ? m[1] : "varsto-logs.tar.zst";
+      return r.blob().then(function (blob) {
+        var a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+        log("log bundle saved: " + name);
+        return alertBox("The bundle has no keys or passphrases, but it does contain file and folder names, device and storage names. Look through it before you share it.", "Log bundle saved");
+      });
+    }, function (e) {
+      throw new Error("Could not reach the Varsto service (POST /api/logs/bundle): " + e.message + ". It may be restarting or busy; try again in a moment.");
+    }).catch(function (e) { alertBox(e.message); }).then(function () { b.disabled = false; workBar(false); loadLogs(); });
+  };
 
   // Android: all files access for "plain files on this phone" folders (Settings card).
   function refreshAllFiles() {
