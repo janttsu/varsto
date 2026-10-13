@@ -223,17 +223,30 @@ impl Engine {
         };
         // Object -> (size, chunk) of every distinct block.
         let mut blocks: BTreeMap<ObjectName, (u64, ChunkId)> = BTreeMap::new();
+        // The newest file (modification time) that uses each block.
+        let mut newest_of: BTreeMap<ObjectName, i64> = BTreeMap::new();
+        let mut files: Vec<&crate::manifest::FileState> = Vec::new();
         for path in paths {
-            let f = state
-                .files
-                .get(path)
-                .filter(|f| !f.deleted)
-                .ok_or_else(|| anyhow!("unknown file {path}"))?;
+            files.push(
+                state
+                    .files
+                    .get(path)
+                    .filter(|f| !f.deleted)
+                    .ok_or_else(|| anyhow!("unknown file {path}"))?,
+            );
+        }
+        // Files are written newest first.
+        files.sort_by(|a, b| b.mtime.cmp(&a.mtime).then(a.path.cmp(&b.path)));
+        files.dedup_by(|a, b| a.path == b.path);
+        for f in files {
+            let path = &f.path;
             let mut objects = Vec::new();
             for c in &f.chunks {
                 blocks
                     .entry(c.object.clone())
                     .or_insert((c.size + 64, c.chunk.clone()));
+                let n = newest_of.entry(c.object.clone()).or_insert(f.mtime);
+                *n = (*n).max(f.mtime);
                 let k = chunk_storage_key(&c.object);
                 if !objects.contains(&k) {
                     objects.push(k);
@@ -415,13 +428,16 @@ impl Engine {
                 continue;
             }
             covered.extend(new.iter().cloned());
+            // One disk at a time; on it, the newest files' blocks first.
+            let mut objects: Vec<&ObjectName> = new.iter().collect();
+            objects.sort_by_key(|o| (std::cmp::Reverse(newest_of.get(*o).copied()), (*o).clone()));
             plan.steps.push(DiskStep {
                 pool: id.0.clone(),
                 disk_id: id.1.clone(),
                 label,
                 place,
                 attached,
-                objects: new.iter().map(chunk_storage_key).collect(),
+                objects: objects.into_iter().map(chunk_storage_key).collect(),
                 bytes,
                 state: "pending".into(),
             });

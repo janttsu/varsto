@@ -316,7 +316,10 @@ impl Engine {
                 path: canonical(target)?,
                 selective: false,
                 encrypted: false,
+                mode: Default::default(),
+                deletion_guard: None,
             });
+            folder_safety::write_marker(target, rec)?;
             report.attached.push(rec.name.clone());
         }
         self.config.restic = Some(cfg);
@@ -373,10 +376,15 @@ impl Engine {
             };
             self.config.folders.push(FolderMount {
                 folder_id: rec.folder_id.clone(),
-                path,
+                path: path.clone(),
                 selective: false,
                 encrypted: false,
+                mode: Default::default(),
+                deletion_guard: None,
             });
+            if let Err(e) = folder_safety::write_marker(&path, &rec) {
+                eprintln!("restic mirror: could not mark {}: {e:#}", path.display());
+            }
             added.push(rec.name.clone());
         }
         if !added.is_empty() {

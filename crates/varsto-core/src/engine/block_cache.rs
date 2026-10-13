@@ -457,6 +457,9 @@ impl Engine {
         storages: &[(StorageSpec, Box<dyn Storage>)],
         report: &mut PullReport,
     ) -> Result<()> {
+        if let Some(log) = &self.download_log {
+            log.lock().unwrap().push(file.path.clone());
+        }
         let progress = crate::progress::Download::begin(&rec.name, &file.path, file.size);
         let root = self.block_cache_root();
         for cref in &file.chunks {
@@ -594,7 +597,7 @@ impl Engine {
         report: &mut PullReport,
     ) -> Result<()> {
         let selective = self.mount_is_selective(&rec.folder_id);
-        let wanted: Vec<FileState> = state
+        let mut wanted: Vec<FileState> = state
             .files
             .values()
             .filter(|f| {
@@ -605,6 +608,8 @@ impl Engine {
             })
             .cloned()
             .collect();
+        // Newest first.
+        wanted.sort_by(|a, b| b.mtime.cmp(&a.mtime).then(a.path.cmp(&b.path)));
         for f in wanted {
             match self.cache_file(rec, fk, &f, storages, report) {
                 Ok(()) => {

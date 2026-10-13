@@ -429,6 +429,7 @@ impl Engine {
         {
             m.folder_id = new_id.clone();
             m.selective = true;
+            folder_safety::rekey_marker(&m.path, &old_id, new_id);
         }
         self.config.save(&self.home)?;
         // File analyses stay with the files (content hashes are per key).
@@ -839,6 +840,7 @@ impl Engine {
             {
                 m.folder_id = c.new_folder.clone();
                 m.selective = true;
+                folder_safety::rekey_marker(&m.path, &old.folder_id, &c.new_folder);
             }
             self.config.save(&self.home)?;
             let _ = fs::remove_file(self.state_path(&old.folder_id));

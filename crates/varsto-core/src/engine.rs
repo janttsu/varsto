@@ -51,9 +51,10 @@ mod disk_groups;
 mod disk_insert;
 mod disk_suggest;
 mod fetch;
-mod ledger_recovery;
+mod folder_safety;
 mod guide;
 mod imports;
+mod ledger_recovery;
 mod ledger_upkeep;
 mod manifest_upkeep;
 mod membership;
@@ -80,14 +81,18 @@ pub use disk_fetch::{
     RemoteOption, StepOutcome,
 };
 pub use disk_groups::DiskGroupStatus;
-pub use ledger_recovery::{
-    LedgerDeviceStatus, LedgerHealth, LedgerHolding, LedgerProblem, LedgerRebuildOptions,
-    LedgerRebuildReport, LedgerStatus, StorageRebuildReport,
-};
 pub use disk_insert::{DiskInsertReport, DiskProgress, FillOutcome, InsertOptions};
+pub use folder_safety::{
+    paused_error, ChangeKind, DiscardReport, FolderChanges, FolderPaused, HeldDeletions,
+    HeldSummary, PauseKind, RevertReport, FOLDER_MARKER,
+};
 pub use imports::{
     CleanupFile, ImportCleanupReport, ImportOptions, ImportReport, ImportStatus, ImportVerify,
     MissingFile,
+};
+pub use ledger_recovery::{
+    LedgerDeviceStatus, LedgerHealth, LedgerHolding, LedgerProblem, LedgerRebuildOptions,
+    LedgerRebuildReport, LedgerStatus, StorageRebuildReport,
 };
 pub use manifest_upkeep::ManifestPolicy;
 pub use membership::{
@@ -160,6 +165,16 @@ struct FolderState {
     /// the snapshot and named in it).
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     unreadable: BTreeSet<String>,
+    /// Deletions the mass-deletion guard holds until the user decides
+    /// (`folder_safety`); the folder is paused meanwhile.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    held: Option<folder_safety::HeldDeletions>,
+    /// Send-only: other devices' newer states not applied here, by path.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    not_applied: BTreeMap<String, FileState>,
+    /// Receive-only: this device's changes that are not published, by path.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    local_changes: BTreeMap<String, folder_safety::ChangeKind>,
 }
 
 fn now_secs() -> i64 {
@@ -227,6 +242,10 @@ pub struct PullReport {
     /// Pool disks that must be attached for unavailable files: "label (place)".
     #[serde(default)]
     pub disks_needed: Vec<String>,
+    /// The folder is paused on this device (`folder_safety`): nothing was
+    /// synced; this says why and what to do.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub paused: Option<FolderPaused>,
 }
 
 /// Blocks of a folder by where they are: on a storage (verified by another
@@ -271,6 +290,20 @@ pub struct FolderStatus {
     /// Strongroom state: "locked" or "unlocked until <utc>".
     #[serde(default)]
     pub strongroom: Option<String>,
+    /// This device's sync mode for the folder.
+    pub mode: crate::vault::FolderMode,
+    /// The mass-deletion guard, in words.
+    pub deletion_guard: String,
+    /// Why the folder is paused on this device, if it is.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub paused: Option<FolderPaused>,
+    /// Deletions held until the user decides.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub held_deletions: Option<HeldSummary>,
+    /// Send-only: other devices' changes not applied here.
+    pub remote_not_applied: u64,
+    /// Receive-only: this device's changes not published.
+    pub local_changes: u64,
 }
 
 /// See `Engine::plan_storage_removal`.
@@ -507,6 +540,8 @@ pub struct Engine {
     /// The token of the restic hold this engine works under (its own run's
     /// completeness check), which the hold does not stop (`restic_mirror`).
     hold_exempt: Option<String>,
+    /// Tests: the paths of the files downloaded, in order (`record_downloads`).
+    download_log: Option<std::sync::Arc<std::sync::Mutex<Vec<String>>>>,
 }
 
 /// What the peer-to-peer server serves from (see `Engine::set_snapshot_sink`).
@@ -907,6 +942,7 @@ impl Engine {
             ledger_policy: Default::default(),
             manifest_policy: Default::default(),
             hold_exempt: None,
+            download_log: None,
         };
         engine.config.save(home)?;
         if !engine.vault.member {
@@ -1091,6 +1127,7 @@ impl Engine {
             ledger_policy: Default::default(),
             manifest_policy: Default::default(),
             hold_exempt: None,
+            download_log: None,
         };
         let (pending, pending_lost) = ledger_upkeep::load_deferred(home);
         engine.pending = pending;
@@ -1662,6 +1699,7 @@ impl Engine {
             backup: None,
         };
         let id = rec.folder_id.clone();
+        folder_safety::write_marker(path, &rec)?;
         self.keyring.folders.insert(id.clone(), rec);
         self.keyring.save(
             &self.home,
@@ -1674,6 +1712,8 @@ impl Engine {
             path: canonical(path)?,
             selective: false,
             encrypted: false,
+            mode: Default::default(),
+            deletion_guard: None,
         });
         self.config.save(&self.home)?;
         self.pending.push(Event::FolderAdded { folder: id.clone() });
@@ -1714,8 +1754,11 @@ impl Engine {
             path: canonical(path)?,
             selective,
             encrypted: false,
+            mode: Default::default(),
+            deletion_guard: None,
         });
         self.config.save(&self.home)?;
+        folder_safety::write_marker(path, &rec)?;
         Ok(rec.folder_id)
     }
 
@@ -1803,6 +1846,7 @@ impl Engine {
             self.config.save(&self.home)?;
         }
         let _ = fs::remove_file(self.state_path(folder));
+        self.forget_marker_flag(folder);
         Ok(())
     }
 
@@ -1921,7 +1965,8 @@ impl Engine {
 
     /// Switch selective sync on or off for an attached folder.
     pub fn set_selective(&mut self, name_or_id: &str, selective: bool) -> Result<()> {
-        let (rec, _) = self.resolve_for_write(name_or_id)?;
+        let (rec, _) = self.resolve_folder(name_or_id)?;
+        self.ensure_not_held(&rec)?;
         for m in self
             .config
             .folders
@@ -1974,7 +2019,15 @@ impl Engine {
         {
             m.encrypted = encrypted;
         }
-        self.config.save(&self.home)
+        self.config.save(&self.home)?;
+        // Only folders with plain files carry a marker (`folder_safety`).
+        let (_, root) = self.resolve_folder(name_or_id)?;
+        if encrypted {
+            let _ = fs::remove_file(root.join(FOLDER_MARKER));
+        } else if root.is_dir() {
+            folder_safety::write_marker(&root, &rec)?;
+        }
+        Ok(())
     }
 
     /// Replace every local copy in a folder with a placeholder where the
@@ -2087,9 +2140,11 @@ impl Engine {
 
     /// `resolve_folder` for what writes into the folder's directory: refused
     /// while a restic run holds the folder (`restic_mirror`).
+    /// The folder's directory must also carry its marker (`folder_safety`).
     fn resolve_for_write(&self, name_or_id: &str) -> Result<(FolderRecord, PathBuf)> {
         let found = self.resolve_folder(name_or_id)?;
         self.ensure_not_held(&found.0)?;
+        self.ensure_marker(&found.0, &found.1)?;
         Ok(found)
     }
 
@@ -2509,6 +2564,16 @@ impl Engine {
         // A backup takes what it can read; the rest is named in its snapshot.
         let backup = rec.is_backup();
         state.unreadable.clear();
+        // Receive-only: local changes are noted, never made versions.
+        let receive_only =
+            !backup && self.mount_mode(&rec.folder_id) == crate::vault::FolderMode::ReceiveOnly;
+        if !receive_only && !state.local_changes.is_empty() {
+            // No longer receive-only: the changes are scanned again as
+            // ordinary changes and published.
+            for p in std::mem::take(&mut state.local_changes).keys() {
+                state.local_index.remove(p);
+            }
+        }
         let walker = walkdir::WalkDir::new(root)
             .follow_links(false)
             .into_iter()
@@ -2566,7 +2631,8 @@ impl Engine {
                 *recorded = atime;
             }
             let unchanged = matches!(state.local_index.get(&path), Some(e) if e.size == size && e.mtime == mtime)
-                && matches!(state.files.get(&path), Some(f) if !f.deleted);
+                && (matches!(state.files.get(&path), Some(f) if !f.deleted)
+                    || (receive_only && state.local_changes.contains_key(&path)));
             if unchanged {
                 new_index.insert(path.clone(), state.local_index[&path].clone());
                 continue;
@@ -2583,6 +2649,7 @@ impl Engine {
             let mut hasher = KeyedHasher::new(&fk.hash);
             let mut chunks = Vec::new();
             let params = self.chunker_for(size);
+            let events_before = self.pending.len();
             let mut read_failed = false;
             for chunk in Chunker::new(std::io::BufReader::new(file), params)? {
                 let chunk = match chunk {
@@ -2633,6 +2700,7 @@ impl Engine {
             if let Some(prev) = previous {
                 if !prev.deleted && prev.content_hash == content_hash {
                     // Touched but identical: keep the version, refresh the index.
+                    state.local_changes.remove(&path);
                     new_index.insert(
                         path.clone(),
                         LocalIndexEntry {
@@ -2643,6 +2711,25 @@ impl Engine {
                     );
                     continue;
                 }
+            }
+            if receive_only {
+                // Noted, not published: the blocks are not offered either.
+                let kind = if previous.is_some_and(|p| !p.deleted) {
+                    folder_safety::ChangeKind::Modified
+                } else {
+                    folder_safety::ChangeKind::Added
+                };
+                state.local_changes.insert(path.clone(), kind);
+                self.pending.truncate(events_before);
+                new_index.insert(
+                    path,
+                    LocalIndexEntry {
+                        size,
+                        mtime,
+                        content_hash,
+                    },
+                );
+                continue;
             }
             let clock = self.tick()?;
             let mut version = previous.map(|p| p.version.clone()).unwrap_or_default();
@@ -2678,6 +2765,25 @@ impl Engine {
             .filter(|(p, f)| !f.deleted && !seen.contains(*p) && !placeholders.contains(*p))
             .map(|(p, _)| p.clone())
             .collect();
+        if receive_only {
+            for path in gone {
+                state
+                    .local_changes
+                    .insert(path, folder_safety::ChangeKind::Deleted);
+            }
+            // Files added here and removed again are no change any more.
+            state
+                .local_changes
+                .retain(|p, k| *k != folder_safety::ChangeKind::Added || seen.contains(p));
+            state.local_index = new_index;
+            return Ok((scanned, changed));
+        }
+        // Too many files gone at once: held until the user decides.
+        if let Some(pause) = self.hold_local_deletions(rec, root, state, &gone) {
+            state.local_index = new_index;
+            self.save_state(&rec.folder_id, state)?;
+            return Err(pause.into());
+        }
         for path in gone {
             let clock = self.tick()?;
             let prev = state.files.get(&path).cloned().unwrap();
@@ -2713,6 +2819,7 @@ impl Engine {
         }
         let (rec, root) = self.resolve_for_write(folder)?;
         let mut state = self.load_state(&rec.folder_id)?;
+        self.check_held(&rec, &root, &mut state)?;
         let mut report = PushReport {
             folder: rec.name.clone(),
             ..Default::default()
@@ -3311,6 +3418,7 @@ impl Engine {
         self.ensure_active()?;
         let (rec, root) = self.resolve_for_write(folder)?;
         let mut state = self.load_state(&rec.folder_id)?;
+        self.check_held(&rec, &root, &mut state)?;
         let mut report = PullReport {
             folder: rec.name.clone(),
             ..Default::default()
@@ -3323,16 +3431,50 @@ impl Engine {
             return Ok(report);
         }
         let fk = self.folder_keys(&rec)?;
-        let me = self.vault.device_id.clone();
         let storages = self.open_storages(false)?;
         // Counted by the files' downloads (`progress`); the total is not known.
         let _task = activity::start(activity::DOWNLOAD, &rec.name, 0, activity::Unit::Bytes);
+        let encrypted_here = self.mount_is_encrypted(&rec.folder_id);
+        // Send-only: other devices' changes are noted, never applied here.
+        let send_only = self.mount_mode(&rec.folder_id) == crate::vault::FolderMode::SendOnly;
 
         // Files whose copies were unreachable last time: a storage or a peer
-        // may have them now.
-        let pending: Vec<FileState> = state.pending_remote.values().cloned().collect();
+        // may have them now. Newest first, like every download.
+        let mut pending: Vec<FileState> = state.pending_remote.values().cloned().collect();
+        pending.sort_by(|a, b| b.mtime.cmp(&a.mtime).then(a.path.cmp(&b.path)));
         for remote in pending {
+            if send_only {
+                state.pending_remote.remove(&remote.path);
+                state.not_applied.insert(remote.path.clone(), remote);
+                continue;
+            }
             self.apply_remote(&rec, &fk, &root, &mut state, remote, &storages, &mut report)?;
+        }
+        if send_only {
+            // Caught up by this device's own changes (or an override).
+            let files = &state.files;
+            state
+                .not_applied
+                .retain(|p, r| !matches!(manifest::merge(files.get(p), r), Merge::KeepLocal));
+        } else if !state.not_applied.is_empty() {
+            // No longer send-only: what was not applied is applied now.
+            let mut waiting: Vec<FileState> = std::mem::take(&mut state.not_applied)
+                .into_values()
+                .collect();
+            waiting.sort_by(|a, b| b.mtime.cmp(&a.mtime).then(a.path.cmp(&b.path)));
+            for remote in waiting {
+                let path = remote.path.clone();
+                self.merge_one(
+                    &rec,
+                    &fk,
+                    &root,
+                    &mut state,
+                    &path,
+                    &remote,
+                    &storages,
+                    &mut report,
+                )?;
+            }
         }
 
         // Newest manifest per other device, across storages: only what the
@@ -3347,7 +3489,6 @@ impl Engine {
             self.view()?.manifests
         };
         let metas = fk.meta_keys();
-        let encrypted_here = self.mount_is_encrypted(&rec.folder_id);
         for (dev, (seq, idx)) in newest {
             if !self.share_manifest_source_ok(&rec, &dev) {
                 // A device that is not a participant of the shared folder.
@@ -3384,106 +3525,49 @@ impl Engine {
                 );
             };
             self.observe_clock(m.lamport)?;
+            // The newest files first (by their modification time), so that
+            // what was just made arrives first on a large pull.
+            let mut entries: Vec<(&String, &FileState)> = m.files.iter().collect();
+            entries.sort_by(|a, b| b.1.mtime.cmp(&a.1.mtime).then(a.0.cmp(b.0)));
+            if send_only {
+                for (path, remote) in &entries {
+                    if !matches!(
+                        manifest::merge(state.files.get(*path), remote),
+                        Merge::KeepLocal
+                    ) {
+                        state.not_applied.insert((*path).clone(), (*remote).clone());
+                    }
+                }
+                report.manifests_applied += 1;
+                state.last_seen.insert(dev, seq);
+                continue;
+            }
+            // Too many deletions at once: held (this manifest stays unread
+            // until the user decides, so nothing of it is lost).
+            if let Some(pause) = self.hold_remote_deletions(&rec, &root, &mut state, &dev, &entries)
+            {
+                self.prefetched.clear();
+                self.commit_batch()?;
+                self.save_state(&rec.folder_id, &state)?;
+                return Err(pause.into());
+            }
             report.manifests_applied += 1;
             let fetch_ahead = !encrypted_here && !self.mount_is_selective(&rec.folder_id);
             let mut ahead_from = 0;
-            for (i, (path, remote)) in m.files.iter().enumerate() {
+            for (i, (path, remote)) in entries.iter().enumerate() {
                 if fetch_ahead && i >= ahead_from {
-                    ahead_from = self.prefetch_small(&m, i, &state, &storages);
+                    ahead_from = self.prefetch_small(&entries, i, &state, &storages);
                 }
-                match manifest::merge(state.files.get(path), remote) {
-                    Merge::KeepLocal => {}
-                    Merge::TakeRemote => {
-                        self.apply_remote(
-                            &rec,
-                            &fk,
-                            &root,
-                            &mut state,
-                            remote.clone(),
-                            &storages,
-                            &mut report,
-                        )?;
-                    }
-                    Merge::Conflict { winner, loser } => {
-                        report.conflicts += 1;
-                        if let (true, Some(loser)) = (encrypted_here, &loser) {
-                            self.conflict_copy_cached(
-                                &rec,
-                                &fk,
-                                &mut state,
-                                path,
-                                loser,
-                                &storages,
-                                &mut report,
-                            )?;
-                        } else if let Some(loser) = loser {
-                            let cpath = manifest::conflict_path(path, &loser);
-                            let local_is_loser = state
-                                .files
-                                .get(path)
-                                .map(|l| l.content_hash == loser.content_hash)
-                                .unwrap_or(false);
-                            let disk = root.join(&cpath);
-                            if let Some(parent) = disk.parent() {
-                                fs::create_dir_all(parent)?;
-                            }
-                            if local_is_loser && root.join(path).exists() {
-                                fs::rename(root.join(path), &disk)?;
-                            } else {
-                                self.download_to(&rec, &fk, &disk, &loser, &storages, &mut report)?;
-                            }
-                            // The conflict copy is a new local file: it gets its own version.
-                            let clock = self.tick()?;
-                            let mut cstate = loser.clone();
-                            cstate.path = cpath.clone();
-                            cstate.version = BTreeMap::from([(me.clone(), clock)]);
-                            cstate.modified_by = me.clone();
-                            cstate.modified_clock = clock;
-                            let md = fs::metadata(&disk)?;
-                            let mtime = md
-                                .modified()
-                                .ok()
-                                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                                .map(|d| d.as_nanos() as i64)
-                                .unwrap_or(0);
-                            state.local_index.insert(
-                                cpath.clone(),
-                                LocalIndexEntry {
-                                    size: md.len(),
-                                    mtime,
-                                    content_hash: cstate.content_hash.clone(),
-                                },
-                            );
-                            state.files.insert(cpath, cstate);
-                        }
-                        let local_has_winner = state
-                            .files
-                            .get(path)
-                            .map(|l| {
-                                l.content_hash == winner.content_hash && l.deleted == winner.deleted
-                            })
-                            .unwrap_or(false)
-                            && (winner.deleted
-                                || if encrypted_here {
-                                    state.local_index.contains_key(path)
-                                } else {
-                                    root.join(path).exists()
-                                });
-                        if local_has_winner {
-                            state.files.insert(path.clone(), winner);
-                        } else {
-                            self.apply_remote(
-                                &rec,
-                                &fk,
-                                &root,
-                                &mut state,
-                                winner,
-                                &storages,
-                                &mut report,
-                            )?;
-                        }
-                    }
-                }
+                self.merge_one(
+                    &rec,
+                    &fk,
+                    &root,
+                    &mut state,
+                    path,
+                    remote,
+                    &storages,
+                    &mut report,
+                )?;
             }
             state.last_seen.insert(dev, seq);
             // Whatever was fetched ahead and not used (a file that failed
@@ -3497,6 +3581,94 @@ impl Engine {
         self.save_state(&rec.folder_id, &state)?;
         self.prune_carriers(&rec)?;
         Ok(report)
+    }
+
+    /// Combine one remote state of `path` with this device's (`manifest::merge`).
+    #[allow(clippy::too_many_arguments)]
+    fn merge_one(
+        &mut self,
+        rec: &FolderRecord,
+        fk: &FolderKeys,
+        root: &Path,
+        state: &mut FolderState,
+        path: &str,
+        remote: &FileState,
+        storages: &[(StorageSpec, Box<dyn Storage>)],
+        report: &mut PullReport,
+    ) -> Result<()> {
+        let me = self.vault.device_id.clone();
+        let encrypted_here = self.mount_is_encrypted(&rec.folder_id);
+        match manifest::merge(state.files.get(path), remote) {
+            Merge::KeepLocal => {}
+            Merge::TakeRemote => {
+                self.apply_remote(rec, fk, root, state, remote.clone(), storages, report)?;
+            }
+            Merge::Conflict { winner, loser } => {
+                report.conflicts += 1;
+                // Receive-only: a local change of the file is not one of
+                // the versions; it goes to the trash.
+                self.drop_local_change(rec, root, state, path)?;
+                if let (true, Some(loser)) = (encrypted_here, &loser) {
+                    self.conflict_copy_cached(rec, fk, state, path, loser, storages, report)?;
+                } else if let Some(loser) = loser {
+                    let cpath = manifest::conflict_path(path, &loser);
+                    let local_is_loser = state
+                        .files
+                        .get(path)
+                        .map(|l| l.content_hash == loser.content_hash)
+                        .unwrap_or(false);
+                    let disk = root.join(&cpath);
+                    if let Some(parent) = disk.parent() {
+                        fs::create_dir_all(parent)?;
+                    }
+                    if local_is_loser && root.join(path).exists() {
+                        fs::rename(root.join(path), &disk)?;
+                    } else {
+                        self.download_to(rec, fk, &disk, &loser, storages, report)?;
+                    }
+                    // The conflict copy is a new local file: it gets its own version.
+                    let clock = self.tick()?;
+                    let mut cstate = loser.clone();
+                    cstate.path = cpath.clone();
+                    cstate.version = BTreeMap::from([(me.clone(), clock)]);
+                    cstate.modified_by = me.clone();
+                    cstate.modified_clock = clock;
+                    let md = fs::metadata(&disk)?;
+                    let mtime = md
+                        .modified()
+                        .ok()
+                        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                        .map(|d| d.as_nanos() as i64)
+                        .unwrap_or(0);
+                    state.local_index.insert(
+                        cpath.clone(),
+                        LocalIndexEntry {
+                            size: md.len(),
+                            mtime,
+                            content_hash: cstate.content_hash.clone(),
+                        },
+                    );
+                    state.files.insert(cpath, cstate);
+                }
+                let local_has_winner = state
+                    .files
+                    .get(path)
+                    .map(|l| l.content_hash == winner.content_hash && l.deleted == winner.deleted)
+                    .unwrap_or(false)
+                    && (winner.deleted
+                        || if encrypted_here {
+                            state.local_index.contains_key(path)
+                        } else {
+                            root.join(path).exists()
+                        });
+                if local_has_winner {
+                    state.files.insert(path.to_string(), winner);
+                } else {
+                    self.apply_remote(rec, fk, root, state, winner, storages, report)?;
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Remove from carrier storages the objects that another device already
@@ -3640,21 +3812,13 @@ impl Engine {
         // Manifests are validated when opened; this is the last line of
         // defence before a path from another device touches the disk.
         let disk = util::safe_join(root, &remote.path)?;
+        // Receive-only: a local change of this file goes to the trash
+        // before the vault's version replaces it.
+        self.drop_local_change(rec, root, state, &remote.path)?;
         if remote.deleted {
             let _ = fs::remove_file(placeholder_path(&disk));
             if disk.exists() {
-                let trash = util::safe_join(
-                    &self.home.join("trash").join(rec.folder_id.as_str()),
-                    &format!("{}.{}", remote.path, util::now_utc()),
-                )?;
-                if let Some(p) = trash.parent() {
-                    fs::create_dir_all(p)?;
-                }
-                fs::rename(&disk, &trash).or_else(|_| {
-                    fs::copy(&disk, &trash)
-                        .map(|_| ())
-                        .and_then(|_| fs::remove_file(&disk))
-                })?;
+                self.move_to_trash(&rec.folder_id, &disk, &remote.path)?;
                 report.files_deleted += 1;
             }
             state.local_index.remove(&remote.path);
@@ -3730,6 +3894,9 @@ impl Engine {
             }
         }
         let tmp = disk.with_file_name(format!(".varsto-tmp-{}", std::process::id()));
+        if let Some(log) = &self.download_log {
+            log.lock().unwrap().push(file.path.clone());
+        }
         let progress = crate::progress::Download::begin(&rec.name, &file.path, file.size);
         {
             let mut out = fs::File::create(&tmp)?;
@@ -3902,7 +4069,7 @@ impl Engine {
     /// looked at.
     fn prefetch_small(
         &mut self,
-        m: &Manifest,
+        entries: &[(&String, &FileState)],
         from: usize,
         state: &FolderState,
         storages: &[(StorageSpec, Box<dyn Storage>)],
@@ -3910,7 +4077,7 @@ impl Engine {
         let mut wanted: Vec<ChunkRef> = Vec::new();
         let mut seen: HashSet<ObjectName> = HashSet::new();
         let mut next = from;
-        for (path, remote) in m.files.iter().skip(from) {
+        for (path, remote) in entries.iter().skip(from) {
             if wanted.len() >= PREFETCH_OBJECTS || next >= from + PREFETCH_FILES {
                 break;
             }
@@ -3920,7 +4087,7 @@ impl Engine {
             if remote.deleted
                 || remote.chunks.len() != 1
                 || !matches!(
-                    manifest::merge(state.files.get(path), remote),
+                    manifest::merge(state.files.get(*path), remote),
                     Merge::TakeRemote
                 )
             {
@@ -3970,15 +4137,17 @@ impl Engine {
             return Ok(0);
         }
         let state = self.load_state(&rec.folder_id)?;
-        let wanted: Vec<String> = state
+        let mut wanted: Vec<&FileState> = state
             .files
             .values()
             .filter(|f| {
                 let disk = root.join(&f.path);
                 !f.deleted && !disk.exists() && placeholder_path(&disk).exists()
             })
-            .map(|f| f.path.clone())
             .collect();
+        // Newest first.
+        wanted.sort_by(|a, b| b.mtime.cmp(&a.mtime).then(a.path.cmp(&b.path)));
+        let wanted: Vec<String> = wanted.into_iter().map(|f| f.path.clone()).collect();
         let mut done = 0;
         for path in wanted {
             match self.fetch_file(folder, &path) {
@@ -4374,6 +4543,7 @@ impl Engine {
             epoch_keys: BTreeMap::new(),
             backup: None,
         };
+        folder_safety::write_marker(path, &rec)?;
         self.keyring.folders.insert(folder_id.clone(), rec);
         self.keyring.save(
             &self.home,
@@ -4386,6 +4556,8 @@ impl Engine {
             path: canonical(path)?,
             selective: true,
             encrypted: false,
+            mode: Default::default(),
+            deletion_guard: None,
         });
         self.config.save(&self.home)?;
         self.unlocked.insert(
@@ -4558,6 +4730,12 @@ impl Engine {
     }
 
     /// Peers to try before storages (None disables).
+    /// Tests: record the path of every file downloaded, in order.
+    #[doc(hidden)]
+    pub fn record_downloads(&mut self, log: std::sync::Arc<std::sync::Mutex<Vec<String>>>) {
+        self.download_log = Some(log);
+    }
+
     pub fn set_peers(&mut self, peers: Option<std::sync::Arc<crate::p2p::Peers>>) {
         self.peers = peers;
     }
@@ -5055,14 +5233,35 @@ impl Engine {
             self.pull_ledger()?;
         }
         for name in names {
-            let mut pull = self.pull(&name)?;
+            // A paused folder (`folder_safety`) is reported and skipped; the
+            // other folders sync as usual.
+            let paused =
+                |e: anyhow::Error, mut pull: PullReport| -> Result<(PullReport, PushReport)> {
+                    let p = folder_safety::paused_error(&e).ok_or(e)?;
+                    pull.folder = p.folder.clone();
+                    let push = PushReport {
+                        folder: p.folder.clone(),
+                        ..Default::default()
+                    };
+                    pull.paused = Some(p);
+                    Ok((pull, push))
+                };
+            let mut pull = match self.pull(&name) {
+                Ok(p) => p,
+                Err(e) => {
+                    out.push(paused(e, PullReport::default())?);
+                    continue;
+                }
+            };
             if self.keyring.find(&name).is_none() {
                 continue; // converted while pulling
             }
             // Selective sync turned off: the placeholders become files.
             pull.files_updated += self.fill_placeholders(&name, &mut pull.files_unavailable)?;
-            let push = self.push(&name)?;
-            out.push((pull, push));
+            match self.push(&name) {
+                Ok(push) => out.push((pull, push)),
+                Err(e) => out.push(paused(e, pull)?),
+            }
         }
         if self.block_cache_root().is_dir() {
             // Blocks no cached file needs any more (a newer version arrived,
@@ -5163,7 +5362,7 @@ impl Engine {
             folders.push(FolderStatus {
                 folder_id: rec.folder_id.to_string(),
                 name: rec.name.clone(),
-                path: mount,
+                path: mount.clone(),
                 files,
                 bytes,
                 chunks: chunks.len() as u64,
@@ -5185,6 +5384,14 @@ impl Engine {
                 placeholders: placeholders_here,
                 pinned: state.pinned.len() as u64,
                 blocks,
+                mode: self.mount_mode(&rec.folder_id),
+                deletion_guard: self.deletion_guard(&rec.folder_id).describe(),
+                paused: mount
+                    .as_ref()
+                    .and_then(|root| self.pause_of(&rec, root, &state)),
+                held_deletions: self.held_summary(&state),
+                remote_not_applied: state.not_applied.len() as u64,
+                local_changes: state.local_changes.len() as u64,
             });
         }
         Ok(StatusReport {
