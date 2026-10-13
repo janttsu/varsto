@@ -3,14 +3,21 @@
 //! plaintext, encrypted under the folder metadata key and stored next to the
 //! data, so every device of the folder can show previews without downloading
 //! or decrypting the file itself. Images are decoded in-process; videos use
-//! `ffmpeg` when it is installed. Thumbnails are derived data and follow the
-//! same rule as content: never stored in clear text outside the process.
+//! `ffmpeg` when it is installed, with hardware decoding (`-hwaccel auto`)
+//! unless it is turned off (`thumbnails.hwaccel` in `config.json`): when a
+//! hardware-decoded attempt fails where software decoding then works, the
+//! process remembers it and decodes later videos in software straight away.
+//! Thumbnails are derived data and follow the same rule as content: never
+//! stored in clear text outside the process.
 
 use crate::crypto::{self, SecretKey};
 use crate::ids::{FolderId, VaultId};
 use anyhow::Result;
+use serde::{Deserialize, Serialize};
+use std::ffi::OsString;
 use std::io::Cursor;
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 pub const MAX_SIDE: u32 = 256;
 
@@ -50,8 +57,55 @@ fn aad(vault: &VaultId, folder: &FolderId, content_hash: &str) -> Vec<u8> {
     )
 }
 
+/// Whether ffmpeg may decode videos on the GPU or another media engine.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HwAccel {
+    /// `-hwaccel auto`, falling back to software decoding.
+    #[default]
+    Auto,
+    /// Software decoding only.
+    Off,
+}
+
+/// Thumbnail settings of this device (`config.json`, `thumbnails`).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ThumbnailSettings {
+    #[serde(default)]
+    pub hwaccel: HwAccel,
+}
+
+impl ThumbnailSettings {
+    pub fn is_default(&self) -> bool {
+        *self == ThumbnailSettings::default()
+    }
+}
+
+/// Hardware decoding failed in this process where software decoding then
+/// worked: later videos go straight to software.
+static HW_FAILED: AtomicBool = AtomicBool::new(false);
+
+/// Runs ffmpeg with the given arguments and returns its standard output
+/// (None when it fails or takes too long). Tests put a fake in its place.
+trait FrameTool {
+    fn run(&self, args: &[OsString]) -> Option<Vec<u8>>;
+}
+
+struct Ffmpeg(std::path::PathBuf);
+
+impl FrameTool for Ffmpeg {
+    fn run(&self, args: &[OsString]) -> Option<Vec<u8>> {
+        run_limited(std::process::Command::new(&self.0).args(args))
+    }
+}
+
 /// JPEG thumbnail bytes for an image or video file, if one can be made.
 pub fn make(path: &Path, name: &str) -> Option<Vec<u8>> {
+    make_with(path, name, &ThumbnailSettings::default())
+}
+
+/// `make` with this device's settings.
+pub fn make_with(path: &Path, name: &str, settings: &ThumbnailSettings) -> Option<Vec<u8>> {
     if is_image(name) {
         let reader = image::ImageReader::open(path)
             .ok()?
@@ -60,9 +114,8 @@ pub fn make(path: &Path, name: &str) -> Option<Vec<u8>> {
         return encode(decode_limited(reader)?);
     }
     if is_video(name) {
-        // A frame one second in; short clips have none there, so then the first.
-        for at in ["1", "0"] {
-            if let Some(f) = ffmpeg_frame(path, at) {
+        if let Some(tool) = ffmpeg() {
+            if let Some(f) = video_frame(&Ffmpeg(tool), path, settings.hwaccel, &HW_FAILED) {
                 return Some(f);
             }
         }
@@ -141,24 +194,78 @@ fn run_limited(cmd: &mut std::process::Command) -> Option<Vec<u8>> {
     (ok && out.len() <= MAX_THUMB_BYTES).then_some(out)
 }
 
-fn ffmpeg_frame(path: &Path, at: &str) -> Option<Vec<u8>> {
-    let frame = run_limited(
-        std::process::Command::new(ffmpeg()?)
-            .args(["-v", "error", "-y", "-ss", at, "-i"])
-            .arg(path)
-            .args([
-                "-frames:v",
-                "1",
-                "-vf",
-                &format!("scale='min({MAX_SIDE},iw)':-2"),
-                "-f",
-                "image2pipe",
-                "-vcodec",
-                "mjpeg",
-                "-",
-            ]),
-    )?;
-    (!frame.is_empty()).then_some(frame)
+/// A frame one second in; short clips have none there, so then the first.
+fn video_frame(
+    tool: &dyn FrameTool,
+    path: &Path,
+    hw: HwAccel,
+    hw_failed: &AtomicBool,
+) -> Option<Vec<u8>> {
+    ["1", "0"]
+        .into_iter()
+        .find_map(|at| frame_at(tool, path, at, hw, hw_failed))
+}
+
+/// One frame at `at` seconds: hardware decoding first (unless off or known
+/// to fail here), then once in software. Hardware decoding is remembered as
+/// failed only when software then succeeds: a file with no frame there, or
+/// one ffmpeg cannot read at all, says nothing about the hardware.
+fn frame_at(
+    tool: &dyn FrameTool,
+    path: &Path,
+    at: &str,
+    hw: HwAccel,
+    hw_failed: &AtomicBool,
+) -> Option<Vec<u8>> {
+    let try_hw = hw == HwAccel::Auto && !hw_failed.load(Ordering::Relaxed);
+    if try_hw {
+        if let Some(f) = tool
+            .run(&ffmpeg_args(path, at, true))
+            .filter(|f| !f.is_empty())
+        {
+            return Some(f);
+        }
+    }
+    let f = tool
+        .run(&ffmpeg_args(path, at, false))
+        .filter(|f| !f.is_empty())?;
+    if try_hw {
+        hw_failed.store(true, Ordering::Relaxed);
+    }
+    Some(f)
+}
+
+/// ffmpeg arguments for one JPEG frame: the seek before the input (fast:
+/// it jumps to the nearest key frame instead of decoding up to it), no
+/// audio, scaled down to MAX_SIDE. With `-hwaccel auto` and no output
+/// format, decoded frames come back to system memory, where the scale
+/// filter and the JPEG encoder run.
+fn ffmpeg_args(path: &Path, at: &str, hw: bool) -> Vec<OsString> {
+    let mut a: Vec<OsString> = ["-v", "error", "-nostdin", "-y"]
+        .into_iter()
+        .map(OsString::from)
+        .collect();
+    if hw {
+        a.extend(["-hwaccel", "auto"].map(OsString::from));
+    }
+    a.extend(["-ss", at, "-i"].map(OsString::from));
+    a.push(path.as_os_str().to_owned());
+    a.extend(
+        [
+            "-an",
+            "-frames:v",
+            "1",
+            "-vf",
+            &format!("scale='min({MAX_SIDE},iw)':-2"),
+            "-f",
+            "image2pipe",
+            "-vcodec",
+            "mjpeg",
+            "-",
+        ]
+        .map(OsString::from),
+    );
+    a
 }
 
 /// macOS without ffmpeg: Quick Look makes a picture of any video the system
@@ -254,6 +361,152 @@ pub fn open(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    /// A fake ffmpeg: answers by whether hardware decoding was asked for and
+    /// the seek position, and records every call.
+    struct Fake {
+        hw_works: bool,
+        has_frame_at_1: bool,
+        calls: Mutex<Vec<(bool, String)>>,
+    }
+
+    impl FrameTool for Fake {
+        fn run(&self, args: &[OsString]) -> Option<Vec<u8>> {
+            let hw = args.iter().any(|a| a == "-hwaccel");
+            let ss = args.iter().position(|a| a == "-ss").unwrap();
+            let i = args.iter().position(|a| a == "-i").unwrap();
+            assert!(ss < i, "the seek comes before the input");
+            let at = args[ss + 1].to_string_lossy().into_owned();
+            self.calls.lock().unwrap().push((hw, at.clone()));
+            if hw && !self.hw_works {
+                return None;
+            }
+            (at == "0" || self.has_frame_at_1).then(|| b"jpeg".to_vec())
+        }
+    }
+
+    fn fake(hw_works: bool, has_frame_at_1: bool) -> Fake {
+        Fake {
+            hw_works,
+            has_frame_at_1,
+            calls: Mutex::new(Vec::new()),
+        }
+    }
+
+    #[test]
+    fn hardware_decoding_is_tried_first() {
+        let f = fake(true, true);
+        let failed = AtomicBool::new(false);
+        let p = Path::new("/videos/a.mp4");
+        assert_eq!(video_frame(&f, p, HwAccel::Auto, &failed).unwrap(), b"jpeg");
+        assert_eq!(*f.calls.lock().unwrap(), vec![(true, "1".to_string())]);
+        assert!(!failed.load(Ordering::Relaxed));
+        // Off: software only.
+        let f = fake(true, true);
+        video_frame(&f, p, HwAccel::Off, &failed).unwrap();
+        assert_eq!(*f.calls.lock().unwrap(), vec![(false, "1".to_string())]);
+    }
+
+    #[test]
+    fn a_hardware_failure_falls_back_and_is_remembered() {
+        let f = fake(false, true);
+        let failed = AtomicBool::new(false);
+        let p = Path::new("/videos/a.mp4");
+        assert!(video_frame(&f, p, HwAccel::Auto, &failed).is_some());
+        assert_eq!(
+            *f.calls.lock().unwrap(),
+            vec![(true, "1".to_string()), (false, "1".to_string())]
+        );
+        assert!(failed.load(Ordering::Relaxed));
+        // The next video goes straight to software.
+        f.calls.lock().unwrap().clear();
+        assert!(video_frame(&f, p, HwAccel::Auto, &failed).is_some());
+        assert_eq!(*f.calls.lock().unwrap(), vec![(false, "1".to_string())]);
+    }
+
+    #[test]
+    fn a_short_clip_does_not_count_against_the_hardware() {
+        // No frame at one second, in hardware or software: the first frame
+        // is taken in hardware, and hardware decoding stays on.
+        let f = fake(true, false);
+        let failed = AtomicBool::new(false);
+        let p = Path::new("/videos/short.mp4");
+        assert!(video_frame(&f, p, HwAccel::Auto, &failed).is_some());
+        assert_eq!(
+            *f.calls.lock().unwrap(),
+            vec![
+                (true, "1".to_string()),
+                (false, "1".to_string()),
+                (true, "0".to_string())
+            ]
+        );
+        assert!(!failed.load(Ordering::Relaxed));
+        // Nothing decodes at all: no frame, nothing remembered.
+        struct Broken;
+        impl FrameTool for Broken {
+            fn run(&self, _: &[OsString]) -> Option<Vec<u8>> {
+                Some(Vec::new())
+            }
+        }
+        assert!(video_frame(&Broken, p, HwAccel::Auto, &failed).is_none());
+        assert!(!failed.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn settings_parse() {
+        let s: ThumbnailSettings = serde_json::from_str("{}").unwrap();
+        assert!(s.is_default());
+        let s: ThumbnailSettings = serde_json::from_str(r#"{"hwaccel":"off"}"#).unwrap();
+        assert_eq!(s.hwaccel, HwAccel::Off);
+        assert!(serde_json::from_str::<ThumbnailSettings>(r#"{"hwaccel":"cuda"}"#).is_err());
+    }
+
+    /// With a real ffmpeg: a two-second test video thumbnailed with hardware
+    /// decoding (falling back where there is none) and in software.
+    #[test]
+    #[ignore]
+    fn real_ffmpeg_both_ways() {
+        let Some(tool) = ffmpeg() else {
+            eprintln!("no ffmpeg here");
+            return;
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let video = dir.path().join("test.mp4");
+        let ok = std::process::Command::new(&tool)
+            .args([
+                "-v",
+                "error",
+                "-nostdin",
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc=duration=2:size=640x360:rate=25",
+                "-pix_fmt",
+                "yuv420p",
+            ])
+            .arg(&video)
+            .status()
+            .unwrap()
+            .success();
+        assert!(ok);
+        for hw in [HwAccel::Auto, HwAccel::Off] {
+            let failed = AtomicBool::new(false);
+            let t = std::time::Instant::now();
+            let f = video_frame(&Ffmpeg(tool.clone()), &video, hw, &failed).expect("frame");
+            let img = image::load_from_memory(&f).unwrap();
+            assert!(img.width() <= MAX_SIDE && img.height() <= MAX_SIDE);
+            eprintln!(
+                "{hw:?}: {}x{} in {:?}, hardware decoding failed: {}",
+                img.width(),
+                img.height(),
+                t.elapsed(),
+                failed.load(Ordering::Relaxed)
+            );
+        }
+        let t = make_with(&video, "test.mp4", &ThumbnailSettings::default()).unwrap();
+        assert!(normalize(&t).is_some());
+    }
 
     #[test]
     fn image_thumbnail_roundtrip() {

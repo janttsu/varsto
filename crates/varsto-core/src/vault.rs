@@ -1244,6 +1244,12 @@ pub struct Config {
     /// number of readers. For when the medium is detected wrongly.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub verify_parallelism: std::collections::BTreeMap<String, crate::parverify::Parallelism>,
+    /// Thumbnail generation (`crate::thumbs`).
+    #[serde(
+        default,
+        skip_serializing_if = "crate::thumbs::ThumbnailSettings::is_default"
+    )]
+    pub thumbnails: crate::thumbs::ThumbnailSettings,
 }
 
 /// A backup taken on this device (local, never published).

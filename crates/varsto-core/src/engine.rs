@@ -3020,7 +3020,7 @@ impl Engine {
                 if !disk.exists() {
                     continue;
                 }
-                thumbs::make(&disk, &path)
+                thumbs::make_with(&disk, &path, &self.config.thumbnails)
             };
             let Some(bytes) = made_here else {
                 state.thumbs_done.insert(hash); // cannot make one; do not retry every time
