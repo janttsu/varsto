@@ -7,9 +7,31 @@ import WebKit
 
 @main
 struct VarstoApp: App {
+    @Environment(\.scenePhase) private var scenePhase
     var body: some Scene {
         WindowGroup { ContentView() }
+            .onChange(of: scenePhase) { phase in
+                switch phase {
+                case .active: vlog(VLOG_INFO, "scene active")
+                case .inactive: vlog(VLOG_INFO, "scene inactive")
+                case .background: vlog(VLOG_INFO, "scene background")
+                @unknown default: vlog(VLOG_INFO, "scene phase changed")
+                }
+            }
     }
+}
+
+// The app's log lines go through the core logger (varsto_log) into
+// <home>/logs/varsto-ffi-ios.log. Never logged: the service URL (it carries
+// the session token), the token itself, passphrases, file contents.
+let VLOG_ERROR: Int32 = 1
+let VLOG_WARN: Int32 = 2
+let VLOG_INFO: Int32 = 3
+let VLOG_DEBUG: Int32 = 4
+let VLOG_TRACE: Int32 = 5
+
+func vlog(_ level: Int32, _ msg: String) {
+    msg.withCString { varsto_log(level, $0) }
 }
 
 /// `en` in the interface language picked in the web UI (`<home>/ui-language`:
@@ -45,17 +67,24 @@ final class ServiceHost: ObservableObject {
         setenv("VARSTO_OS_VERSION", UIDevice.current.systemVersion, 1)
         setenv("VARSTO_DEVICE_MODEL", UIDevice.current.model, 1)
         let rc = home.path.withCString { varsto_start($0, 0) }
+        // The core logger starts inside varsto_start: earlier lines would be dropped.
+        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
+        vlog(VLOG_INFO, "iOS app \(version) on iOS \(UIDevice.current.systemVersion) (\(UIDevice.current.model)), home \(home.path)")
+        vlog(rc == 0 ? VLOG_INFO : VLOG_ERROR, "varsto_start returned \(rc)")
         if rc != 0 { error = tr("service failed to start ({})", "\(rc)"); return }
         DispatchQueue.global().async {
-            for _ in 0..<50 {
+            for attempt in 0..<50 {
                 if let c = varsto_url() {
                     let s = String(cString: c); varsto_free(c)
+                    // Not the URL itself: it carries the session token.
+                    vlog(VLOG_INFO, "service URL ready after \(attempt) retries")
                     DispatchQueue.main.async { self.url = URL(string: s) }
-                    if let u = URL(string: s) { VideoThumbs.shared.start(serviceURL: u) }
+                    if let u = URL(string: s) { VideoThumbs.shared.start(serviceURL: u) } else { vlog(VLOG_ERROR, "service URL did not parse") }
                     return
                 }
                 usleep(100_000)
             }
+            vlog(VLOG_ERROR, "service did not report its URL within 5 s")
             DispatchQueue.main.async { self.error = tr("service did not start") }
         }
     }
@@ -124,9 +153,17 @@ final class VideoThumbs {
         }
         var out: [String: Any]?
         let done = DispatchSemaphore(value: 0)
-        URLSession.shared.dataTask(with: req) { data, resp, _ in
-            if let data = data, (resp as? HTTPURLResponse)?.statusCode == 200 {
+        URLSession.shared.dataTask(with: req) { data, resp, err in
+            let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
+            if let data = data, status == 200 {
                 out = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            }
+            // Method and path only: never the base URL's token or a body.
+            if status != 200 {
+                let why = (err as NSError?).map { " (\($0.domain) \($0.code))" } ?? ""
+                vlog(VLOG_DEBUG, "thumbnails: \(method) \(path) -> \(status)\(why)")
+            } else {
+                vlog(VLOG_TRACE, "thumbnails: \(method) \(path) -> 200")
             }
             done.signal()
         }.resume()
@@ -136,6 +173,7 @@ final class VideoThumbs {
 
     private func round() {
         guard let list = call("GET", "/api/thumbnails/wanted", nil)?["videos"] as? [[String: Any]] else { return }
+        if !list.isEmpty { vlog(VLOG_DEBUG, "thumbnails: \(list.count) video(s) wanted") }
         for v in list {
             guard let file = v["file"] as? String, let folder = v["folder"] as? String,
                   let path = v["path"] as? String else { continue }
@@ -146,8 +184,12 @@ final class VideoThumbs {
             for t in [1.0, 0.0] {
                 if let i = try? gen.copyCGImage(at: CMTime(seconds: t, preferredTimescale: 600), actualTime: nil) { image = i; break }
             }
-            guard let cg = image, let jpeg = UIImage(cgImage: cg).jpegData(compressionQuality: 0.8) else { continue }
-            _ = call("POST", "/api/thumbnail", ["folder": folder, "path": path, "jpeg": jpeg.base64EncodedString()])
+            guard let cg = image, let jpeg = UIImage(cgImage: cg).jpegData(compressionQuality: 0.8) else {
+                vlog(VLOG_WARN, "thumbnails: no frame from \(file)")
+                continue
+            }
+            let r = call("POST", "/api/thumbnail", ["folder": folder, "path": path, "jpeg": jpeg.base64EncodedString()])
+            vlog(VLOG_DEBUG, "thumbnails: \(folder)/\(path) \(r == nil ? "failed" : "stored")")
         }
     }
 }
