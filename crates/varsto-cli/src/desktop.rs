@@ -949,6 +949,14 @@ fn api(st: &mut State, method: Method, path: &str, query: &str, input: &Value) -
     }
 }
 
+/// The interface asks for long work to run in the background service.
+fn background(input: &Value) -> bool {
+    input
+        .get("background")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+}
+
 fn api_unlocked(
     engine: &mut Engine,
     service: &mut ServiceState,
@@ -1255,15 +1263,25 @@ fn api_unlocked(
                 placement,
             };
             let id = engine.add_backup(&name, &path, opts)?;
-            let snapshot = if input.get("initial").and_then(|v| v.as_bool()).unwrap_or(true) {
-                Some(engine.take_snapshot(id.as_str())?)
-            } else {
-                None
-            };
+            let initial = input.get("initial").and_then(|v| v.as_bool()).unwrap_or(true);
+            // `background`: the interface does not wait for a first snapshot
+            // of a large directory; the service takes it on its next run.
+            if initial && background(input) {
+                engine.request_snapshot(id.as_str())?;
+                service.request_sync();
+                return Ok(json!({"ok": true, "id": id.to_string(), "snapshot": null, "queued": true}));
+            }
+            let snapshot = if initial { Some(engine.take_snapshot(id.as_str())?) } else { None };
             Ok(json!({"ok": true, "id": id.to_string(), "snapshot": snapshot}))
         }
         (Method::Post, "/api/backup/take") => {
-            Ok(serde_json::to_value(engine.take_snapshot(&s(input, "backup")?)?)?)
+            let backup = s(input, "backup")?;
+            if background(input) {
+                engine.request_snapshot(&backup)?;
+                service.request_sync();
+                return Ok(json!({"ok": true, "backup": backup, "queued": true}));
+            }
+            Ok(serde_json::to_value(engine.take_snapshot(&backup)?)?)
         }
         (Method::Post, "/api/backup/restore") => {
             let pick = varsto_core::engine::SnapshotPick::parse(

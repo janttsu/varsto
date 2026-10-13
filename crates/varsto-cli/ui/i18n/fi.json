@@ -596,7 +596,9 @@
   "A bucket at any S3-compatible provider (AWS, Scaleway, Hetzner, Backblaze B2, Cloudflare R2, MinIO and others), with your own keys.": "Säilö millä tahansa S3-yhteensopivalla palveluntarjoajalla (AWS, Scaleway, Hetzner, Backblaze B2, Cloudflare R2, MinIO ja muut), omilla avaimillasi.",
   "Any remote you have set up in rclone, for example Google Drive, OneDrive, SFTP or WebDAV.": "Mikä tahansa rclonessa määrittämäsi etäkohde, esimerkiksi Google Drive, OneDrive, SFTP tai WebDAV.",
   "Folder path": "Kansion polku",
-  "Add a folder, an S3 bucket, an rclone remote or a pool of swappable disks below.": "Lisää alla kansio, S3-säilö, rclone-etäkohde tai vaihdettavien levyjen varasto."
+  "Add a folder, an S3 bucket, an rclone remote or a pool of swappable disks below.": "Lisää alla kansio, S3-säilö, rclone-etäkohde tai vaihdettavien levyjen varasto.",
+  "Taking a snapshot…": "Versiota otetaan…",
+  "Loading…": "Ladataan…"
  },
  "patterns": [
   [
@@ -698,6 +700,22 @@
   [
    "^(.+) holds (\\d+) blocks? of your files\\. (\\d+) already have enough copies elsewhere; (\\d+) cop(?:y|ies) \\((.+)\\) will first be made on (.+)\\. Then no device counts \\1 as a copy any more\\. Remove leaves its data in place; you can also delete it\\.$",
    "Tallennuspaikassa $1 on $2 lohkoa tiedostoistasi. Lohkoista $3 on jo tarpeeksi kopioita muualla; ensin tehdään $4 kopiota ($5) kohteisiin $6. Sen jälkeen mikään laite ei enää laske tallennuspaikkaa $1 kopioksi. Poista jättää sen datan paikalleen; voit myös poistaa datan."
+  ],
+  [
+   "^Backup added: (.+); its first snapshot is being taken in the background$",
+   "Varmuuskopio lisätty: $1; sen ensimmäinen versio otetaan taustalla"
+  ],
+  [
+   "^Snapshot of (.+) requested; it is taken in the background$",
+   "Versio varmuuskopiosta $1 pyydetty; se otetaan taustalla"
+  ],
+  [
+   "^Since the service started: (.+) received in (\\d+) blocks, (.+) sent in (\\d+) blocks, (.+) relayed for other devices\\. Speeds are averages over the last (\\d+) seconds\\.$",
+   "Palvelun käynnistyksen jälkeen: vastaanotettu $1 ($2 lohkoa), lähetetty $3 ($4 lohkoa), välitetty muille laitteille $5. Nopeudet ovat viimeisten $6 sekunnin keskiarvoja."
+  ],
+  [
+   "^Since the service started: (.+) received in (\\d+) blocks, (.+) sent in (\\d+) blocks\\. Speeds are averages over the last (\\d+) seconds\\.$",
+   "Palvelun käynnistyksen jälkeen: vastaanotettu $1 ($2 lohkoa), lähetetty $3 ($4 lohkoa). Nopeudet ovat viimeisten $5 sekunnin keskiarvoja."
   ]
  ],
  "review": [
