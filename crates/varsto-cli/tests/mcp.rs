@@ -406,3 +406,206 @@ fn an_analyse_grant_records_analyses_but_moves_nothing() {
     );
     assert_eq!(none.trim(), "null");
 }
+
+/// `varsto` with HOME and the XDG directories in the test directory, so a
+/// running service touches nothing of the user's.
+fn isolated(root: &std::path::Path, home: &std::path::Path) -> Command {
+    let mut c = Command::new(env!("CARGO_BIN_EXE_varsto"));
+    c.arg("--home")
+        .arg(home)
+        .env("VARSTO_PASSPHRASE", PASS)
+        .env("VARSTO_NO_INSTALL", "1")
+        .env("HOME", root)
+        .env("XDG_DATA_HOME", root.join("xdg-data"))
+        .env("XDG_CONFIG_HOME", root.join("xdg-config"))
+        .env("DBUS_SESSION_BUS_ADDRESS", "disabled:")
+        .env_remove("VARSTO_MCP_KEY")
+        .env_remove("DISPLAY")
+        .env_remove("WAYLAND_DISPLAY");
+    c
+}
+
+/// One request to the local service with an MCP key: (status, body).
+fn with_key(port: u16, key: &str, method: &str, path: &str, body: &str) -> (u16, String) {
+    use std::io::Read;
+    let mut s = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+    write!(
+        s,
+        "{method} {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nX-Varsto-Mcp-Key: {key}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    )
+    .unwrap();
+    let mut raw = String::new();
+    s.read_to_string(&mut raw).unwrap();
+    let (head, body) = raw.split_once("\r\n\r\n").unwrap();
+    let status = head.split_whitespace().nth(1).unwrap().parse().unwrap();
+    (status, body.to_string())
+}
+
+struct Kill(std::process::Child);
+
+impl Drop for Kill {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
+#[test]
+fn a_scoped_key_reaches_only_its_folders_through_the_service() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    let (home, docs) = vault_with_docs(root);
+    let run = |args: &[&str]| -> String {
+        let out = isolated(root, &home).args(args).output().unwrap();
+        assert!(
+            out.status.success(),
+            "varsto {args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8_lossy(&out.stdout).to_string()
+    };
+    // No grants yet: a key needs folders.
+    let out = isolated(root, &home)
+        .args(["mcp", "key", "create"])
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+    let created: serde_json::Value = serde_json::from_str(&run(&[
+        "--json",
+        "mcp",
+        "key",
+        "create",
+        "--name",
+        "llm",
+        "--folders",
+        "docs",
+        "--analyse",
+    ]))
+    .unwrap();
+    let key = created["key"].as_str().unwrap().to_string();
+    assert!(key.starts_with("vmk_"));
+    let listed = run(&["mcp", "key", "list"]);
+    assert!(
+        listed.contains("llm (") && listed.contains("docs: an") && listed.contains("never used"),
+        "{listed}"
+    );
+    assert!(!listed.contains(&key));
+    assert!(!fs::read_to_string(home.join("mcp-keys.json"))
+        .unwrap()
+        .contains(&key));
+    let config = run(&["mcp", "config", "--client", "opencode"]);
+    assert!(
+        config.contains("\"VARSTO_MCP_KEY\"") && config.contains("\"mcp\""),
+        "{config}"
+    );
+
+    // Without the service a key opens nothing.
+    let mut c = Client::start(&home, &[("VARSTO_MCP_KEY", key.as_str())], false);
+    let (err, text) = c.tool("varsto_folders", serde_json::json!({}));
+    assert!(err && text.contains("service is not running"), "{text}");
+    drop(c);
+
+    let _service = Kill(
+        isolated(root, &home)
+            .args(["service", "run", "--port", "0", "--interval", "3600"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap(),
+    );
+    let t0 = std::time::Instant::now();
+    let port = loop {
+        let out = isolated(root, &home)
+            .args(["--json", "service", "status"])
+            .output()
+            .unwrap();
+        if out.status.success() {
+            if let Ok(v) = serde_json::from_slice::<serde_json::Value>(&out.stdout) {
+                if let Some(p) = v["port"].as_u64() {
+                    break p as u16;
+                }
+            }
+        }
+        assert!(
+            t0.elapsed() < std::time::Duration::from_secs(30),
+            "the service did not come up"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(200));
+    };
+
+    // The service enforces the scope.
+    let (st, body) = with_key(port, &key, "GET", "/api/files?folder=docs", "");
+    assert_eq!(st, 200, "{body}");
+    assert!(body.contains("receipt.txt"));
+    let (st, _) = with_key(port, &key, "GET", "/api/files?folder=other", "");
+    assert_eq!(st, 403);
+    let (st, body) = with_key(port, &key, "GET", "/api/folders", "");
+    assert_eq!(st, 200);
+    assert!(
+        body.contains("\"docs\"") && !body.contains("\"other\""),
+        "{body}"
+    );
+    let (st, _) = with_key(port, &key, "GET", "/api/devices", "");
+    assert_eq!(st, 403, "not an MCP route");
+    let (st, _) = with_key(port, &key, "POST", "/api/storage", "{}");
+    assert_eq!(st, 403);
+    let (st, _) = with_key(
+        port,
+        &key,
+        "POST",
+        "/api/move",
+        r#"{"folder":"docs","from":"trip.txt","to":"t.txt"}"#,
+    );
+    assert_eq!(st, 403, "an analyse key moves nothing");
+    let (st, _) = with_key(port, "vmk_0000", "GET", "/api/folders", "");
+    assert_eq!(st, 401);
+
+    // MCP end to end with the key and no passphrase.
+    let mut c = Client::start(&home, &[("VARSTO_MCP_KEY", key.as_str())], false);
+    let (err, folders) = c.tool("varsto_folders", serde_json::json!({}));
+    assert!(!err, "{folders}");
+    assert!(
+        folders.contains("\"docs\"")
+            && !folders.contains("\"other\"")
+            && folders.contains("\"analyse\""),
+        "{folders}"
+    );
+    let (err, text) = c.tool(
+        "varsto_set_analysis",
+        serde_json::json!({"folder": "docs", "path": "receipt.txt", "analysis": "Screws receipt", "tags": ["receipt"], "by": "test"}),
+    );
+    assert!(!err, "{text}");
+    let (_, found) = c.tool(
+        "varsto_search_analyses",
+        serde_json::json!({"query": "screws"}),
+    );
+    assert!(
+        found.contains("receipt.txt") && found.contains("local_path"),
+        "{found}"
+    );
+    let (err, _) = c.tool(
+        "varsto_move",
+        serde_json::json!({"folder": "docs", "from": "trip.txt", "to": "t.txt"}),
+    );
+    assert!(err);
+    let (err, _) = c.tool("varsto_files", serde_json::json!({"folder": "other"}));
+    assert!(err);
+    assert!(docs.join("trip.txt").exists());
+    drop(c);
+    assert!(run(&["mcp", "key", "list"]).contains("last used"));
+
+    // Expired, then revoked: 401.
+    let raw = fs::read_to_string(home.join("mcp-keys.json")).unwrap();
+    let mut v: serde_json::Value = serde_json::from_str(&raw).unwrap();
+    v["keys"][0]["expires_utc"] = serde_json::json!(1);
+    fs::write(home.join("mcp-keys.json"), v.to_string()).unwrap();
+    let (st, body) = with_key(port, &key, "GET", "/api/folders", "");
+    assert_eq!(st, 401);
+    assert!(body.contains("expired"), "{body}");
+    v["keys"][0]["expires_utc"] = serde_json::Value::Null;
+    fs::write(home.join("mcp-keys.json"), v.to_string()).unwrap();
+    assert_eq!(with_key(port, &key, "GET", "/api/folders", "").0, 200);
+    run(&["mcp", "key", "revoke", "llm"]);
+    assert_eq!(with_key(port, &key, "GET", "/api/folders", "").0, 401);
+}

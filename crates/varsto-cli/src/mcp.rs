@@ -21,6 +21,14 @@ use varsto_core::Engine;
 
 const PROTOCOL_VERSION: &str = "2025-06-18";
 
+/// Sent to the client in `initialize`, for the model: the short form of
+/// `docs/mcp.md`.
+const INSTRUCTIONS: &str = "Varsto keeps the user's files encrypted on their own storage and syncs them between their devices. You see only the folders the user granted: ro (read), analyse (also record file analyses) or rw (also move, rename and create files); varsto_folders shows each level.
+
+Workflow: 1) varsto_folders, then varsto_files for a folder. 2) Read files from their local_path with your own file tools; Varsto never hands out contents. A file without local_path is not on this device as a plain file (a placeholder or an encrypted folder): skip it and tell the user, who can download it in Varsto. 3) Record what each file contains with varsto_set_analysis: plain text (at most 16 KiB) saying what the file is, its subject, people, places, dates, amounts and language, up to 32 short tags, and by: your model name. Skip files whose analysis is present and not analysis_stale. 4) Later find files with varsto_search_analyses (words and tags) instead of reading them again. 5) Reorganise only when asked: varsto_mkdir, then varsto_move (analyses follow the files); explain the plan first.
+
+Rules: stay inside the granted folders; paths are relative to the folder; nothing is ever deleted or replaced (there is no delete tool, varsto_write creates new files only, varsto_move needs a free target name), so pick unique names; write summaries or indexes as new files with varsto_write; do not copy secrets from files into analyses unless the user wants them findable; analyses are synced encrypted to all of the user's devices. last_accessed_utc is Varsto's own record of use.";
+
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
 pub struct Grants {
     /// "ro", "an" or "rw" for every folder, or none.
@@ -73,16 +81,38 @@ pub fn level_words(level: &str) -> &'static str {
 
 /// Where the data comes from.
 enum Backend {
-    Http { port: u16, token: String },
+    /// The running service, with its session token, or with a scoped MCP
+    /// key (`mcp_keys`) that the service checks on every call.
+    Http {
+        port: u16,
+        token: String,
+        key: Option<String>,
+    },
     Direct(Box<Engine>),
 }
 
 impl Backend {
-    fn open(home: &Path) -> Result<Backend> {
+    fn open(home: &Path, key: Option<&str>) -> Result<Backend> {
+        if let Some(key) = key {
+            // A key never opens the vault: only the service takes it.
+            let not_running = || {
+                anyhow!("the Varsto service is not running: an MCP key works only through it. Start Varsto (the app, or varsto service run), or run the MCP server without a key and with VARSTO_PASSPHRASE")
+            };
+            let sf = crate::service::read_service_file(home).ok_or_else(not_running)?;
+            let b = Backend::Http {
+                port: sf.port,
+                token: String::new(),
+                key: Some(key.to_string()),
+            };
+            b.http("GET", "/api/mcp/scope", None)
+                .map_err(|_| not_running())?;
+            return Ok(b);
+        }
         if let Some((sf, _)) = crate::service::status(home) {
             return Ok(Backend::Http {
                 port: sf.port,
                 token: sf.token,
+                key: None,
             });
         }
         let pass = std::env::var("VARSTO_PASSPHRASE").map_err(|_| {
@@ -92,14 +122,18 @@ impl Backend {
     }
 
     fn http(&self, method: &str, path: &str, body: Option<&Value>) -> Result<(u16, Vec<u8>)> {
-        let Backend::Http { port, token } = self else {
+        let Backend::Http { port, token, key } = self else {
             unreachable!()
         };
         let mut stream = TcpStream::connect(("127.0.0.1", *port))
             .with_context(|| format!("connect to the service on port {port}"))?;
         let payload = body.map(|b| b.to_string()).unwrap_or_default();
         let req = format!(
-            "{method} {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nX-Varsto-Token: {token}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{payload}",
+            "{method} {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n{}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{payload}",
+            match key {
+                Some(k) => format!("{}: {k}", crate::mcp_keys::HEADER),
+                None => format!("X-Varsto-Token: {token}"),
+            },
             payload.len()
         );
         stream.write_all(req.as_bytes())?;
@@ -627,8 +661,13 @@ fn call_tool(backend: &mut Backend, grants: &Grants, name: &str, args: &Value) -
 }
 
 /// Serve MCP over stdin/stdout until EOF.
-pub fn serve(home: &Path) -> Result<()> {
-    let grants = Grants::load(home)?;
+pub fn serve(home: &Path, key: Option<&str>) -> Result<()> {
+    // With a key, its scope (from the service) replaces the grants file.
+    let mut grants = if key.is_some() {
+        Grants::default()
+    } else {
+        Grants::load(home)?
+    };
     let mut backend: Option<Backend> = None;
     let stdin = std::io::stdin();
     let mut out = std::io::stdout().lock();
@@ -657,7 +696,7 @@ pub fn serve(home: &Path) -> Result<()> {
                 "protocolVersion": PROTOCOL_VERSION,
                 "capabilities": {"tools": {"listChanged": false}},
                 "serverInfo": {"name": "varsto", "version": env!("CARGO_PKG_VERSION")},
-                "instructions": "Varsto keeps the user's files encrypted on their own storage. You see only the folders the user granted (varsto mcp grant): read-only, analyse (may also record file analyses) or rw (may also move and create files). Typical work: list files with varsto_files, read the ones without an analysis (or with analysis_stale) from their local_path with your own file tools, record what each contains with varsto_set_analysis (text, tags, by: your model name), and later find files by content with varsto_search_analyses instead of reading them again; propose and carry out a tidier structure with varsto_mkdir and varsto_move (analyses follow the files), and leave notes or indexes with varsto_write. Files are never deleted or replaced: there is no delete tool, varsto_write only creates new files and varsto_move only moves or renames to a free name. Paths are relative to the folder. last_accessed_utc is Varsto's own record of use on this device."
+                "instructions": INSTRUCTIONS
             })),
             "notifications/initialized" | "notifications/cancelled" => continue,
             "ping" => Ok(json!({})),
@@ -667,8 +706,25 @@ pub fn serve(home: &Path) -> Result<()> {
                 let args = params.get("arguments").cloned().unwrap_or(json!({}));
                 let b = match &mut backend {
                     Some(b) => Ok(b),
-                    None => match Backend::open(home) {
-                        Ok(b) => {
+                    None => match Backend::open(home, key) {
+                        Ok(mut b) => {
+                            if key.is_some() {
+                                match b
+                                    .call_json("GET", "/api/mcp/scope", None)
+                                    .and_then(|v| Ok(serde_json::from_value(v["scope"].clone())?))
+                                {
+                                    Ok(g) => grants = g,
+                                    Err(e) => {
+                                        writeln!(
+                                            out,
+                                            "{}",
+                                            json!({"jsonrpc": "2.0", "id": id, "result": error_result(e.to_string())})
+                                        )?;
+                                        out.flush()?;
+                                        continue;
+                                    }
+                                }
+                            }
                             backend = Some(b);
                             Ok(backend.as_mut().unwrap())
                         }
@@ -731,4 +787,68 @@ pub fn revoke(home: &Path, folder: &str) -> Result<()> {
 
 pub fn grants_path(home: &Path) -> PathBuf {
     home.join(Grants::FILE)
+}
+
+/// A configuration for an MCP client that starts this binary's MCP server
+/// over stdio: `secret` is the MCP key (a placeholder when none), `home`
+/// the device directory when it is not the default one.
+pub fn client_config(client: &str, secret: Option<&str>, home: Option<&Path>) -> Result<String> {
+    let exe = std::env::current_exe()
+        .and_then(|p| p.canonicalize())
+        .context("the path of the varsto binary")?
+        .display()
+        .to_string();
+    let key = secret.unwrap_or("vmk_... (varsto mcp key create)");
+    let mut env = serde_json::Map::new();
+    env.insert("VARSTO_MCP_KEY".into(), json!(key));
+    if let Some(h) = home {
+        env.insert("VARSTO_HOME".into(), json!(h.display().to_string()));
+    }
+    let env = Value::Object(env);
+    let pretty = |v: Value| serde_json::to_string_pretty(&v).unwrap_or_default();
+    Ok(match client {
+        "claude" | "claude-desktop" | "claude-code" => {
+            let mut add = String::from("claude mcp add varsto");
+            for (k, v) in env.as_object().into_iter().flatten() {
+                add.push_str(&format!(" --env {k}={}", v.as_str().unwrap_or("")));
+            }
+            add.push_str(&format!(" -- {exe} mcp"));
+            format!(
+                "Claude Desktop (claude_desktop_config.json) and Claude Code (.mcp.json):\n{}\n\nOr for Claude Code from a terminal:\n{add}",
+                pretty(json!({"mcpServers": {"varsto": {"command": exe, "args": ["mcp"], "env": env}}}))
+            )
+        }
+        "opencode" => format!(
+            "OpenCode (opencode.json):\n{}",
+            pretty(
+                json!({"$schema": "https://opencode.ai/config.json", "mcp": {"varsto": {"type": "local", "command": [exe, "mcp"], "enabled": true, "environment": env}}})
+            )
+        ),
+        "crush" => format!(
+            "Crush (crush.json):\n{}",
+            pretty(
+                json!({"$schema": "https://charm.land/crush.json", "mcp": {"varsto": {"type": "stdio", "command": exe, "args": ["mcp"], "env": env}}})
+            )
+        ),
+        "qwen" | "qwen-code" => format!(
+            "Qwen Code (~/.qwen/settings.json):\n{}",
+            pretty(
+                json!({"mcpServers": {"varsto": {"command": exe, "args": ["mcp"], "env": env}}})
+            )
+        ),
+        "generic" => {
+            let vars: Vec<String> = env
+                .as_object()
+                .into_iter()
+                .flatten()
+                .map(|(k, v)| format!("{k}={}", v.as_str().unwrap_or("")))
+                .collect();
+            format!(
+                "Any MCP client that starts a stdio server:\n  command: {exe}\n  args: [\"mcp\"]\n  env: {}\n\nFrom a shell:\n  {} {exe} mcp",
+                vars.join(", "),
+                vars.join(" ")
+            )
+        }
+        other => bail!("unknown client {other}: claude, opencode, crush, qwen or generic"),
+    })
 }
