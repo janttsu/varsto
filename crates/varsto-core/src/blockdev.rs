@@ -215,7 +215,9 @@ impl SystemFacts {
 #[cfg(unix)]
 fn device_number(p: &Path) -> Option<String> {
     use std::os::unix::fs::MetadataExt;
-    let dev = std::fs::metadata(p).ok()?.dev();
+    // `dev_t` is 64 bits on Linux and 32 on macOS and iOS.
+    #[allow(clippy::unnecessary_cast)]
+    let dev = std::fs::metadata(p).ok()?.dev() as libc::dev_t;
     // SAFETY: pure arithmetic on a device number (a safe fn on some targets).
     #[allow(unused_unsafe)]
     let (maj, min) = unsafe { (libc::major(dev), libc::minor(dev)) };
