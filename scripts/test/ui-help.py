@@ -189,7 +189,9 @@ try:
         env = dict(ENV)
         env.pop("VARSTO_PASSPHRASE")
         log = open(os.path.join(work, "service.log"), "a")
-        os.remove(os.path.join(home, "service.json"))
+        # A service that stops cleanly removes its file itself.
+        if os.path.exists(os.path.join(home, "service.json")):
+            os.remove(os.path.join(home, "service.json"))
         service = subprocess.Popen([BIN, "--home", home, "service", "run", "--port", "0", "--interval", "3600"],
                                    env=env, stdout=log, stderr=log)
         for _ in range(60):
