@@ -193,7 +193,7 @@ pub fn reasons(d: &DiskStatus, now: i64) -> Vec<SuggestReason> {
         let oldest_text = if oldest > 0 {
             format!("oldest {}", util::format_date(oldest))
         } else {
-            "some never".to_string()
+            "some never checked".to_string()
         };
         let text = if days == 0 {
             format!("{pct} % of its copies ({size}) are due for a check (verify-after-days is 0; {oldest_text})")
@@ -213,9 +213,10 @@ pub fn reasons(d: &DiskStatus, now: i64) -> Vec<SuggestReason> {
                     0.0
                 };
             let mut text = format!(
-                "{} ({}) exist on no other disk or storage",
+                "{} ({}) {} on no other disk or storage",
                 plural(only, "object", "objects"),
-                util::human_bytes(bytes)
+                util::human_bytes(bytes),
+                if only == 1 { "exists" } else { "exist" }
             );
             if overdue > 0 {
                 text += &format!(", {overdue} of them not checked for over {days} days");
@@ -368,10 +369,13 @@ pub fn rank(disks: &[DiskStatus], now: i64) -> DiskSuggestions {
                 why.push("retired: nothing new goes to it".to_string());
             }
             if let Some(n) = d.only_copy_objects.filter(|n| *n > 0) {
-                why.push(format!(
-                    "{} exist only on it: copy them elsewhere before the disk goes",
-                    plural(n, "object", "objects")
-                ));
+                why.push(if n == 1 {
+                    "1 object exists only on it: copy it elsewhere before the disk goes".to_string()
+                } else {
+                    format!(
+                        "{n} objects exist only on it: copy them elsewhere before the disk goes"
+                    )
+                });
             }
             out.excluded.push(DiskWarning {
                 pool: d.pool.clone(),

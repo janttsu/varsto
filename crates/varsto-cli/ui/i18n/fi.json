@@ -696,7 +696,32 @@
   "Tidying disk «{s}»": "Siivoaa levyä «{s}»",
   "Copying blocks from disk «{s}»": "Kopioi lohkoja levyltä «{s}»",
   "Writing files fetched from disk «{s}»": "Kirjoittaa levyltä «{s}» haettuja tiedostoja",
-  "Unmounting disk «{s}»": "Irrottaa levyä «{s}»"
+  "Unmounting disk «{s}»": "Irrottaa levyä «{s}»",
+  "Free space": "Vapaa tila",
+  "Used": "Käytetty",
+  "Reclaimable": "Vapautettavissa",
+  "Last checked": "Tarkistettu viimeksi",
+  "Last seen": "Nähty viimeksi",
+  "File system": "Tiedostojärjestelmä",
+  "Sort by this column (again: reverse)": "Järjestä tämän sarakkeen mukaan (uudelleen: käänteisesti)",
+  "never": "ei koskaan",
+  "now": "nyt",
+  "offline": "poissa",
+  "retired": "käytöstä poistettu",
+  "failing": "vikaantumassa",
+  "clean": "virheetön",
+  "corrected": "korjattu",
+  "uncorrected": "korjaamatta",
+  "failed": "epäonnistui",
+  "Suggested next:": "Liitä seuraavaksi:",
+  "Copy": "Kopioi",
+  "Copy the command; run it in a terminal with the disk plugged in": "Kopioi komento ja suorita se päätteessä, kun levy on kytketty",
+  "No disk needs docking now.": "Mitään levyä ei tarvitse kytkeä nyt.",
+  "is attached:": "on liitetty:",
+  "Remind me weekly when a disk is overdue for a check": "Muistuta viikoittain, kun levyn tarkistus on myöhässä",
+  "weekly disk reminder on": "viikoittainen levymuistutus päällä",
+  "weekly disk reminder off": "viikoittainen levymuistutus pois",
+  "never seen by this device": "tämä laite ei ole koskaan nähnyt sitä"
  },
  "patterns": [
   [
@@ -898,6 +923,70 @@
   [
    "^(.+): stopped; nothing more is fetched from the disks$",
    "$1: lopetettu; levyiltä ei haeta enempää"
+  ],
+  [
+   "^(\\d+) % overdue$",
+   "$1 % myöhässä"
+  ],
+  [
+   "^Measured (.+)$",
+   "Mitattu $1"
+  ],
+  [
+   "^(\\d+) pending deletes?$",
+   "$1 odottavaa poistoa"
+  ],
+  [
+   "^copied: (.+)$",
+   "kopioitu: $1"
+  ],
+  [
+   "^(.+) % of its copies \\((.+)\\) were last checked over (\\d+) days ago \\(oldest (\\S+)\\)$",
+   "$1 % sen kopioista ($2) tarkistettiin viimeksi yli $3 päivää sitten (vanhin $4)"
+  ],
+  [
+   "^(.+) % of its copies \\((.+)\\) were last checked over (\\d+) days ago \\(some never checked\\)$",
+   "$1 % sen kopioista ($2) tarkistettiin viimeksi yli $3 päivää sitten (osaa ei ole tarkistettu koskaan)"
+  ],
+  [
+   "^(.+) % of its copies \\((.+)\\) are due for a check \\(verify-after-days is 0; oldest (\\S+)\\)$",
+   "$1 % sen kopioista ($2) on tarkistettava (verify-after-days on 0; vanhin $3)"
+  ],
+  [
+   "^(.+) % of its copies \\((.+)\\) are due for a check \\(verify-after-days is 0; some never checked\\)$",
+   "$1 % sen kopioista ($2) on tarkistettava (verify-after-days on 0; osaa ei ole tarkistettu koskaan)"
+  ],
+  [
+   "^(\\d+) objects? \\((.+)\\) exists? on no other disk or storage, (\\d+) of them not checked for over (\\d+) days$",
+   "$1 objektia ($2) ei ole millään muulla levyllä tai tallennuspaikalla; niistä $3 on tarkistamatta yli $4 päivää"
+  ],
+  [
+   "^(\\d+) objects? \\((.+)\\) exists? on no other disk or storage$",
+   "$1 objektia ($2) ei ole millään muulla levyllä tai tallennuspaikalla"
+  ],
+  [
+   "^the fetch plan waits for it \\((\\d+) blocks?, (.+)\\)$",
+   "noutosuunnitelma odottaa sitä ($1 lohkoa, $2)"
+  ],
+  [
+   "^a queued repair needs (\\d+) objects? it holds$",
+   "jonossa oleva korjaus tarvitsee siltä $1 objektia"
+  ],
+  [
+   "^it can take all (.+) the pool lacks$",
+   "siihen mahtuu kaikki levyvarastosta puuttuva ($1)"
+  ],
+  [
+   "^it can take (.+) of the (.+) the pool lacks$",
+   "siihen mahtuu $1 levyvarastosta puuttuvasta $2:stä"
+  ],
+  [
+   "^(.+) can be freed$",
+   "$1 voidaan vapauttaa"
+  ],
+  [
+   "^its last file system check \\((\\S+)\\) corrected errors$",
+   "sen viimeisin tiedostojärjestelmän tarkistus ($1) korjasi virheitä"
   ]
  ],
  "review": [
@@ -1069,6 +1158,46 @@
   [
    "(\\d+) blocks in (\\d+) folders?",
    "$1 lohkoa $2 kansiossa"
+  ],
+  [
+   "its file system was last checked",
+   "sen tiedostojärjestelmä tarkistettiin viimeksi"
+  ],
+  [
+   "last seen",
+   "nähty viimeksi"
+  ],
+  [
+   "(\\d+) days ago",
+   "$1 päivää sitten"
+  ],
+  [
+   "(\\d+) weeks ago",
+   "$1 viikkoa sitten"
+  ],
+  [
+   "(\\d+) months ago",
+   "$1 kuukautta sitten"
+  ],
+  [
+   "(\\d+) years ago",
+   "$1 vuotta sitten"
+  ],
+  [
+   "retired: nothing new goes to it",
+   "poistettu käytöstä: siihen ei kirjoiteta mitään uutta"
+  ],
+  [
+   "(\\d+) objects? exists? only on it: copy (?:it|them) elsewhere before the disk goes",
+   "$1 objektia on vain sillä: kopioi ne muualle ennen kuin levy poistuu"
+  ],
+  [
+   "it returned different bytes than were written to it, twice, on (\\S+): the disk, its cable or dock may be failing",
+   "se palautti kahdesti eri tavut kuin siihen kirjoitettiin ($1): levy, sen kaapeli tai telakka voi olla vikaantumassa"
+  ],
+  [
+   "The file system on (.+) has errors that could not be repaired automatically; nothing was read or written\\. Run `sudo e2fsck -f (\\S+)` by hand or retire the disk\\.",
+   "Levyn $1 tiedostojärjestelmässä on virheitä, joita ei voitu korjata automaattisesti; mitään ei luettu eikä kirjoitettu. Aja `sudo e2fsck -f $2` käsin tai poista levy käytöstä."
   ]
  ]
 }

@@ -689,7 +689,32 @@
   "Tidying disk «{s}»": "Städar disken «{s}»",
   "Copying blocks from disk «{s}»": "Kopierar block från disken «{s}»",
   "Writing files fetched from disk «{s}»": "Skriver filer hämtade från disken «{s}»",
-  "Unmounting disk «{s}»": "Avmonterar disken «{s}»"
+  "Unmounting disk «{s}»": "Avmonterar disken «{s}»",
+  "Free space": "Ledigt utrymme",
+  "Used": "Använt",
+  "Reclaimable": "Kan frigöras",
+  "Last checked": "Senast kontrollerad",
+  "Last seen": "Senast sedd",
+  "File system": "Filsystem",
+  "Sort by this column (again: reverse)": "Sortera efter den här kolumnen (igen: omvänt)",
+  "never": "aldrig",
+  "now": "nu",
+  "offline": "frånkopplad",
+  "retired": "pensionerad",
+  "failing": "felar",
+  "clean": "felfri",
+  "corrected": "rättad",
+  "uncorrected": "ej rättad",
+  "failed": "misslyckades",
+  "Suggested next:": "Docka härnäst:",
+  "Copy": "Kopiera",
+  "Copy the command; run it in a terminal with the disk plugged in": "Kopiera kommandot och kör det i en terminal med disken ansluten",
+  "No disk needs docking now.": "Ingen disk behöver dockas nu.",
+  "is attached:": "är ansluten:",
+  "Remind me weekly when a disk is overdue for a check": "Påminn mig varje vecka när en disk är sen med sin kontroll",
+  "weekly disk reminder on": "veckovis diskpåminnelse på",
+  "weekly disk reminder off": "veckovis diskpåminnelse av",
+  "never seen by this device": "aldrig sedd av den här enheten"
  },
  "patterns": [
   [
@@ -891,6 +916,70 @@
   [
    "^(.+): stopped; nothing more is fetched from the disks$",
    "$1: avbrutet; inget mer hämtas från diskarna"
+  ],
+  [
+   "^(\\d+) % overdue$",
+   "$1 % försenade"
+  ],
+  [
+   "^Measured (.+)$",
+   "Mätt $1"
+  ],
+  [
+   "^(\\d+) pending deletes?$",
+   "$1 väntande borttagningar"
+  ],
+  [
+   "^copied: (.+)$",
+   "kopierat: $1"
+  ],
+  [
+   "^(.+) % of its copies \\((.+)\\) were last checked over (\\d+) days ago \\(oldest (\\S+)\\)$",
+   "$1 % av dess kopior ($2) kontrollerades senast för över $3 dagar sedan (äldsta $4)"
+  ],
+  [
+   "^(.+) % of its copies \\((.+)\\) were last checked over (\\d+) days ago \\(some never checked\\)$",
+   "$1 % av dess kopior ($2) kontrollerades senast för över $3 dagar sedan (vissa aldrig)"
+  ],
+  [
+   "^(.+) % of its copies \\((.+)\\) are due for a check \\(verify-after-days is 0; oldest (\\S+)\\)$",
+   "$1 % av dess kopior ($2) ska kontrolleras (verify-after-days är 0; äldsta $3)"
+  ],
+  [
+   "^(.+) % of its copies \\((.+)\\) are due for a check \\(verify-after-days is 0; some never checked\\)$",
+   "$1 % av dess kopior ($2) ska kontrolleras (verify-after-days är 0; vissa aldrig)"
+  ],
+  [
+   "^(\\d+) objects? \\((.+)\\) exists? on no other disk or storage, (\\d+) of them not checked for over (\\d+) days$",
+   "$1 objekt ($2) finns inte på någon annan disk eller lagring; $3 av dem har inte kontrollerats på över $4 dagar"
+  ],
+  [
+   "^(\\d+) objects? \\((.+)\\) exists? on no other disk or storage$",
+   "$1 objekt ($2) finns inte på någon annan disk eller lagring"
+  ],
+  [
+   "^the fetch plan waits for it \\((\\d+) blocks?, (.+)\\)$",
+   "hämtningsplanen väntar på den ($1 block, $2)"
+  ],
+  [
+   "^a queued repair needs (\\d+) objects? it holds$",
+   "en köad reparation behöver $1 objekt från den"
+  ],
+  [
+   "^it can take all (.+) the pool lacks$",
+   "den rymmer allt poolen saknar ($1)"
+  ],
+  [
+   "^it can take (.+) of the (.+) the pool lacks$",
+   "den rymmer $1 av de $2 som poolen saknar"
+  ],
+  [
+   "^(.+) can be freed$",
+   "$1 kan frigöras"
+  ],
+  [
+   "^its last file system check \\((\\S+)\\) corrected errors$",
+   "dess senaste filsystemskontroll ($1) rättade fel"
   ]
  ],
  "review": [
@@ -1117,6 +1206,46 @@
   [
    "(\\d+) blocks in (\\d+) folders?",
    "$1 block i $2 mappar"
+  ],
+  [
+   "its file system was last checked",
+   "dess filsystem kontrollerades senast"
+  ],
+  [
+   "last seen",
+   "senast sedd"
+  ],
+  [
+   "(\\d+) days ago",
+   "för $1 dagar sedan"
+  ],
+  [
+   "(\\d+) weeks ago",
+   "för $1 veckor sedan"
+  ],
+  [
+   "(\\d+) months ago",
+   "för $1 månader sedan"
+  ],
+  [
+   "(\\d+) years ago",
+   "för $1 år sedan"
+  ],
+  [
+   "retired: nothing new goes to it",
+   "pensionerad: inget nytt skrivs till den"
+  ],
+  [
+   "(\\d+) objects? exists? only on it: copy (?:it|them) elsewhere before the disk goes",
+   "$1 objekt finns bara på den: kopiera dem någon annanstans innan disken tas bort"
+  ],
+  [
+   "it returned different bytes than were written to it, twice, on (\\S+): the disk, its cable or dock may be failing",
+   "den returnerade två gånger andra byte än som skrevs till den ($1): disken, dess kabel eller docka kan vara på väg att gå sönder"
+  ],
+  [
+   "The file system on (.+) has errors that could not be repaired automatically; nothing was read or written\\. Run `sudo e2fsck -f (\\S+)` by hand or retire the disk\\.",
+   "Filsystemet på $1 har fel som inte kunde repareras automatiskt; inget lästes eller skrevs. Kör `sudo e2fsck -f $2` för hand eller pensionera disken."
   ]
  ]
 }

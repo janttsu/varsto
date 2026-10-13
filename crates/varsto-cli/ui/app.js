@@ -1509,37 +1509,12 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
         head.appendChild(el("span", "muted small", mine.length + " disk" + (mine.length === 1 ? "" : "s") + ", " + attached + " attached"));
         card.appendChild(head);
         if (!mine.length) { card.appendChild(el("p", "muted small", "No disks yet. Mount a disk and add it below; on the command line: varsto disk add <mount-path> --pool " + p.name + " --label <label>")); }
-        var ul = el("ul", "list");
-        mine.forEach(function (d) {
-          var li = el("li"); var ic = el("span", "li-icon"); ic.appendChild(icon("storages")); li.appendChild(ic);
-          var body = el("div", "li-body"); var t = el("div", "li-title", d.label);
-          t.appendChild(pill(d.attached ? "ok" : "grey", d.attached ? "attached" : "offline")); t.appendChild(pill("grey", d.place)); if (d.retired) { t.appendChild(pill("grey", "retired")); }
-          body.appendChild(t);
-          var parts = [];
-          if (d.attached) { parts.push(d.mount); if (d.free_bytes !== null && d.free_bytes !== undefined) { parts.push(fmtBytes(d.free_bytes) + " free"); } }
-          else if (d.mount) { parts.push("last seen at " + d.mount); }
-          parts.push(d.objects + " block" + (d.objects === 1 ? "" : "s") + ", " + fmtBytes(d.used_bytes) + " used");
-          parts.push("last verified " + (d.last_verified_utc ? fmtDate(d.last_verified_utc) : "never"));
-          if (d.pending_deletes) { parts.push(d.pending_deletes + " pending delete" + (d.pending_deletes === 1 ? "" : "s")); }
-          body.appendChild(el("div", "li-sub", parts.join(" · ")));
-          li.appendChild(body);
-          if (!isMobile()) {
-            var acts = el("div", "li-actions");
-            if (d.attached) {
-              var chk = el("button", "secondary", "Check"); chk.type = "button"; chk.title = "Verify sizes, apply pending deletes, add new blocks"; chk.onclick = function () { diskAction("/api/disk/check", { label: d.label, full: false }, "check"); }; acts.appendChild(chk);
-              var full = el("button", "secondary", "Check fully"); full.type = "button"; full.title = "Re-hash every block on the disk"; full.onclick = function () { diskAction("/api/disk/check", { label: d.label, full: true }, "full check"); }; acts.appendChild(full);
-              var ej = el("button", "secondary", "Eject"); ej.type = "button"; ej.title = "Write the disk index and sync; then unmount it yourself"; ej.onclick = function () { diskAction("/api/disk/eject", { label: d.label }, "eject"); }; acts.appendChild(ej);
-            }
-            var pb = el("button", "secondary", "Place"); pb.type = "button"; pb.title = "Where this disk is kept; disk groups keep copies in different places"; pb.onclick = function () { editDiskPlace(d); }; acts.appendChild(pb);
-            if (!d.retired) { var rt = el("button", "secondary", "Retire"); rt.type = "button"; rt.title = "Nothing new goes to this disk"; rt.onclick = function () { dialog({ title: "Retire disk " + d.label + "?", text: "Nothing new is written to it; what it holds stays readable while attached.", ok: "Retire" }).then(function (yes) { if (yes) { diskAction("/api/disk/retire", { label: d.label }, "retire"); } }); }; acts.appendChild(rt); }
-            li.appendChild(acts);
-          }
-          ul.appendChild(li);
-        });
-        card.appendChild(ul);
+        var sug = el("div", "disk-suggest"); sug.dataset.suggestFor = p.name; card.appendChild(sug);
+        if (mine.length) { card.appendChild(diskTable(mine)); }
         var grp = el("div", "pool-group"); grp.dataset.groupFor = p.name; card.appendChild(grp);
         box.appendChild(card);
       });
+      renderDiskSuggest(pools);
       return api("GET", "/api/disk/groups").then(function (groups) {
         groups.forEach(function (g) {
           var c = document.querySelector('.pool-group[data-group-for="' + (window.CSS && CSS.escape ? CSS.escape(g.pool) : g.pool) + '"]');
@@ -1552,6 +1527,155 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
         });
       });
     }).catch(function (e) { log("disks: " + e.message); });
+  }
+  // The pool's disks as a table; the column clicked sorts it (the choice is
+  // kept in this browser). Natural directions: name A-Z, free/used/
+  // reclaimable most first, last checked and last seen oldest first.
+  var DISK_SORT_KEY = "varsto-disk-sort";
+  function diskSort() {
+    var v = null;
+    try { v = JSON.parse(localStorage.getItem(DISK_SORT_KEY) || "null"); } catch (e) { /* storage blocked */ }
+    return v && v.key ? v : { key: "name", reverse: false };
+  }
+  function setDiskSort(key) {
+    var cur = diskSort();
+    var next = { key: key, reverse: cur.key === key ? !cur.reverse : false };
+    try { localStorage.setItem(DISK_SORT_KEY, JSON.stringify(next)); } catch (e) { /* not kept */ }
+    return next;
+  }
+  function sortDisks(list, sort) {
+    var unknownLast = function (a, b, desc) {
+      if (a === null || a === undefined) { return (b === null || b === undefined) ? 0 : 1; }
+      if (b === null || b === undefined) { return -1; }
+      return desc ? b - a : a - b;
+    };
+    var cmp = {
+      name: function () { return 0; },
+      place: function (a, b) { return (a.place || "").localeCompare(b.place || ""); },
+      free: function (a, b) { return unknownLast(a.free_bytes, b.free_bytes, true); },
+      used: function (a, b) { return b.used_bytes - a.used_bytes; },
+      reclaimable: function (a, b) { return b.reclaimable_bytes - a.reclaimable_bytes; },
+      checked: function (a, b) { return unknownLast(a.oldest_check_utc, b.oldest_check_utc, false); },
+      seen: function (a, b) { return (a.attached ? Infinity : a.last_seen_utc) - (b.attached ? Infinity : b.last_seen_utc) || 0; },
+      fsck: function (a, b) { return unknownLast(a.fsck ? a.fsck.checked_utc : null, b.fsck ? b.fsck.checked_utc : null, false); }
+    }[sort.key] || function () { return 0; };
+    var byName = function (a, b) { return a.label.toLowerCase().localeCompare(b.label.toLowerCase()); };
+    return list.slice().sort(function (a, b) {
+      var o = cmp(a, b); if (sort.reverse) { o = -o; }
+      var n = byName(a, b); if (sort.reverse && sort.key === "name") { n = -n; }
+      return o || n;
+    });
+  }
+  function diskTable(mine) {
+    var wrap = el("div", "table-wrap disk-table");
+    var cols = [["name", "Name"], ["place", "Place"], ["free", "Free space"], ["used", "Used"], ["reclaimable", "Reclaimable"], ["checked", "Last checked"], ["seen", "Last seen"], ["fsck", "File system"]];
+    function draw() {
+      wrap.innerHTML = "";
+      var sort = diskSort();
+      var table = el("table"); var thead = el("thead"); var hr = el("tr");
+      cols.forEach(function (c) {
+        var th = el("th", "sortable" + (c[0] === "free" || c[0] === "used" || c[0] === "reclaimable" ? " num" : ""));
+        var b = el("button", "th-sort", c[1]); b.type = "button"; b.title = "Sort by this column (again: reverse)";
+        if (sort.key === c[0]) { th.setAttribute("aria-sort", sort.reverse ? "descending" : "ascending"); b.appendChild(el("span", "sort-mark", sort.reverse ? " \u25b2" : " \u25bc")); }
+        b.onclick = function () { setDiskSort(c[0]); draw(); };
+        th.appendChild(b); hr.appendChild(th);
+      });
+      if (!isMobile()) { hr.appendChild(el("th", "", "")); }
+      thead.appendChild(hr); table.appendChild(thead);
+      var tb = el("tbody");
+      sortDisks(mine, sort).forEach(function (d) {
+        var tr = el("tr");
+        var name = el("td"); name.appendChild(el("span", "", d.label + " "));
+        name.appendChild(pill(d.attached ? "ok" : "grey", d.attached ? "attached" : "offline"));
+        if (d.retired) { name.appendChild(pill("grey", "retired")); }
+        if (d.failing) { var fp = pill("bad", "failing"); fp.title = d.failing_reason || ""; name.appendChild(fp); }
+        if (d.attached && d.mount) { name.appendChild(el("span", "sub", d.mount)); }
+        tr.appendChild(name);
+        tr.appendChild(el("td", "", d.place));
+        var free = el("td", "num", (d.free_bytes === null || d.free_bytes === undefined ? "?" : fmtBytes(d.free_bytes)) + " / " + fmtBytes(d.capacity_bytes));
+        if (!d.attached && d.space_measured_utc) { free.title = "Measured " + fmtDate(d.space_measured_utc); }
+        tr.appendChild(free);
+        tr.appendChild(el("td", "num", fmtBytes(d.used_bytes)));
+        var rec = el("td", "num", fmtBytes(d.reclaimable_bytes));
+        if (d.pending_deletes) { rec.title = d.pending_deletes + " pending delete" + (d.pending_deletes === 1 ? "" : "s"); }
+        tr.appendChild(rec);
+        var chk = el("td", "", d.oldest_check_utc === null || d.oldest_check_utc === undefined ? "\u2014" : d.oldest_check_utc === 0 ? "never" : fmtDate(d.oldest_check_utc));
+        if (d.copies_overdue) { chk.appendChild(el("span", "sub", Math.round(d.overdue_share * 100) + " % overdue")); }
+        tr.appendChild(chk);
+        tr.appendChild(el("td", "", d.attached ? "now" : d.last_seen_utc ? fmtDate(d.last_seen_utc) : "never"));
+        var fs = el("td", "", d.fsck ? d.fsck.verdict : "\u2014");
+        if (d.fsck) { fs.appendChild(el("span", "sub", fmtDate(d.fsck.checked_utc))); }
+        tr.appendChild(fs);
+        if (!isMobile()) {
+          var acts = el("td");
+          if (d.attached) {
+            var c1 = el("button", "secondary", "Check"); c1.type = "button"; c1.title = "Verify sizes, apply pending deletes, add new blocks"; c1.onclick = function () { diskAction("/api/disk/check", { label: d.label, full: false }, "check"); }; acts.appendChild(c1);
+            var c2 = el("button", "secondary", "Check fully"); c2.type = "button"; c2.title = "Re-hash every block on the disk"; c2.onclick = function () { diskAction("/api/disk/check", { label: d.label, full: true }, "full check"); }; acts.appendChild(c2);
+            var ej = el("button", "secondary", "Eject"); ej.type = "button"; ej.title = "Write the disk index and sync; then unmount it yourself"; ej.onclick = function () { diskAction("/api/disk/eject", { label: d.label }, "eject"); }; acts.appendChild(ej);
+          }
+          var pb = el("button", "secondary", "Place"); pb.type = "button"; pb.title = "Where this disk is kept; disk groups keep copies in different places"; pb.onclick = function () { editDiskPlace(d); }; acts.appendChild(pb);
+          if (!d.retired) { var rt = el("button", "secondary", "Retire"); rt.type = "button"; rt.title = "Nothing new goes to this disk"; rt.onclick = function () { dialog({ title: "Retire disk " + d.label + "?", text: "Nothing new is written to it; what it holds stays readable while attached.", ok: "Retire" }).then(function (yes) { if (yes) { diskAction("/api/disk/retire", { label: d.label }, "retire"); } }); }; acts.appendChild(rt); }
+          tr.appendChild(acts);
+        }
+        tb.appendChild(tr);
+      });
+      table.appendChild(tb); wrap.appendChild(table);
+    }
+    draw();
+    return wrap;
+  }
+  function copyText(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) { return navigator.clipboard.writeText(text); }
+    return new Promise(function (ok, fail) {
+      var t = el("textarea"); t.value = text; document.body.appendChild(t); t.select();
+      try { document.execCommand("copy") ? ok() : fail(new Error("copy refused")); } catch (e) { fail(e); } finally { t.remove(); }
+    });
+  }
+  // One reason after another, each its own text so it can be translated.
+  function reasonSpans(box, reasons) {
+    reasons.forEach(function (r, i) { if (i) { box.appendChild(document.createTextNode("; ")); } box.appendChild(el("span", "", r.text)); });
+  }
+  // "Suggested next" per pool card (the interface cannot mount: it shows
+  // the command), the attached disk to check instead, and disks left out.
+  function renderDiskSuggest(pools) {
+    api("GET", "/api/disk/suggest").then(function (r) {
+      var s = r.suggestions;
+      pools.forEach(function (p, idx) {
+        var box = document.querySelector('.disk-suggest[data-suggest-for="' + (window.CSS && CSS.escape ? CSS.escape(p.name) : p.name) + '"]');
+        if (!box) { return; }
+        box.innerHTML = "";
+        var mine = function (x) { return x.pool === p.name; };
+        var top = s.ranked.filter(mine).filter(function (x) { return x.score >= 5; })[0];
+        var att = s.attached.filter(mine).filter(function (x) { return x.score >= 5; })[0];
+        if (top) {
+          var n = el("div", "notice suggest-next");
+          var line = el("div"); line.appendChild(el("strong", "", "Suggested next:")); line.appendChild(document.createTextNode(" «" + top.label + "» \u2014 "));
+          reasonSpans(line, top.reasons); n.appendChild(line);
+          var cmd = el("div", "suggest-cmd"); cmd.appendChild(el("code", "", top.command));
+          var cb = el("button", "secondary", "Copy"); cb.type = "button"; cb.title = "Copy the command; run it in a terminal with the disk plugged in";
+          cb.onclick = function () { copyText(top.command).then(function () { log("copied: " + top.command); }).catch(function (e) { alertBox(e.message); }); };
+          cmd.appendChild(cb); n.appendChild(cmd);
+          box.appendChild(n);
+        } else {
+          box.appendChild(el("p", "muted small", "No disk needs docking now."));
+        }
+        if (att) {
+          var a = el("div", "notice");
+          var al = el("div"); al.appendChild(document.createTextNode("«" + att.label + "» ")); al.appendChild(el("span", "", "is attached:")); al.appendChild(document.createTextNode(" "));
+          reasonSpans(al, att.reasons); a.appendChild(al);
+          if (!isMobile()) { var cn = el("button", "secondary", "Check now"); cn.type = "button"; cn.onclick = function () { diskAction("/api/disk/check", { label: att.label, full: false }, "check"); }; a.appendChild(cn); }
+          box.appendChild(a);
+        }
+        s.excluded.filter(mine).forEach(function (x) {
+          var w = el("div", "notice warn"); w.appendChild(document.createTextNode("«" + x.label + "»: ")); w.appendChild(el("span", "", x.warning)); box.appendChild(w);
+        });
+        if (idx === 0) {
+          var lab = el("label", "inline muted"); var cbx = el("input"); cbx.type = "checkbox"; cbx.checked = !!r.settings.notify_overdue;
+          cbx.onchange = function () { api("POST", "/api/disk/suggest/settings", { notify_overdue: cbx.checked }).then(function () { log(cbx.checked ? "weekly disk reminder on" : "weekly disk reminder off"); }).catch(function (e) { alertBox(e.message); cbx.checked = !cbx.checked; }); };
+          lab.appendChild(cbx); lab.appendChild(el("span", "", "Remind me weekly when a disk is overdue for a check")); box.appendChild(lab);
+        }
+      });
+    }).catch(function (e) { log("disk suggestion: " + e.message); });
   }
   function editDiskGroup(g) {
     dialog({ title: "Disk group of pool " + g.pool, text: "Keep this many copies of every block on disks kept in different places (1: one copy, no rule). Disks of other places get their copies when attached and checked; policies count each disk copy at its disk's place.", fields: [{ name: "copies", label: "Copies in different places", type: "number", value: g.copies }], ok: "Save" }).then(function (r) {
