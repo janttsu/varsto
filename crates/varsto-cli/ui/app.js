@@ -1596,9 +1596,52 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     $("files-free").disabled = f ? f.state !== "local" : !folderWide;
     $("files-free").title = folderWide ? "Remove the encrypted blocks of every downloaded file of this folder from this phone" : "Keep only a placeholder of the selected file here";
   }
+  // Large fetches whose blocks are on pool disks: the service returns a plan
+  // and the dialog walks through it disk by disk ("Disk inserted"), or the
+  // user fetches from the network instead.
+  function fmtSecs(x) { var t = Math.round(x || 0); if (t >= 3600) { return Math.floor(t / 3600) + " h " + Math.floor(t / 60) % 60 + " min"; } if (t >= 60) { return Math.floor(t / 60) + " min"; } return t + " s"; }
+  function planCost(cost, currency) { return cost === null || cost === undefined ? "price unknown" : cost.toFixed(2) + " " + (currency || ""); }
+  function runDiskPlan(folder, path, plan, note) {
+    var k = -1;
+    for (var i = 0; i < plan.steps.length; i++) { if (plan.steps[i].state === "pending") { k = i; break; } }
+    if (k < 0) { planNetwork(folder, path); return; }
+    var s = plan.steps[k], r = plan.remote;
+    dialog({ title: "Fetch from disks", text: " ", ok: s.attached ? "Copy from the disk" : "Disk inserted", extra: r.possible ? "Fetch from the network instead" : "", cancel: "Stop" }).then(function (a) {
+      if (!a) { api("POST", "/api/fetch/plan/cancel", {}).catch(function () {}); log(path + ": stopped; nothing more is fetched from the disks"); return; }
+      if (a.action === "extra") { planNetwork(folder, path); return; }
+      busy(true);
+      api("POST", "/api/fetch/plan/step", { step: k }).then(function (res) {
+        busy(false);
+        if (res.needs_disk) { runDiskPlan(folder, path, plan, "Disk " + s.label + " was not found: insert it and try again."); return; }
+        log(res.outcome.message);
+        if (res.finished) { log("fetched " + path); loadFiles(); return; }
+        runDiskPlan(folder, path, res.plan, res.outcome.message);
+      }).catch(function (e) { busy(false); log("fetch failed: " + e.message); });
+    });
+    // The text: one sentence per element, so each is translated on its own.
+    var tx = $("modal-text"); tx.innerHTML = "";
+    function line(t, cls) { var d = el("div", cls || "", t); tx.appendChild(d); return d; }
+    if (note) { line(note, "notice"); }
+    line(plan.reason);
+    plan.steps.forEach(function (st, i) {
+      var d = line((i + 1) + ". " + st.label + " (" + st.place + "), " + fmtBytes(st.bytes), i === k ? "strong" : "muted");
+      var state = st.state === "done" ? "done" : st.state === "skipped" ? "skipped" : st.attached ? "attached" : "";
+      if (state) { d.appendChild(document.createTextNode(" ")); d.appendChild(el("span", "", state)); }
+    });
+    line(s.attached ? "Disk " + s.label + " is attached: choose Copy from the disk." : "Insert disk " + s.label + " (" + s.place + ") into the dock, then choose Disk inserted.");
+    line(r.possible ? "From the network instead: " + fmtBytes(r.bytes) + ", " + planCost(r.cost, r.currency) + ", about " + fmtSecs(r.secs) + "." : "The network does not have every block: the disks are needed.", "muted");
+  }
+  function planNetwork(folder, path) {
+    busy(true);
+    api("POST", "/api/fetch/plan/network", {}).then(function (res) {
+      (res.files_failed || []).forEach(function (f) { log(f.path + ": " + f.error); });
+      if (res.finished) { log("fetched " + path); }
+    }).catch(function (e) { log("fetch failed: " + e.message); }).then(function () { busy(false); loadFiles(); });
+  }
   function fetchFile(folder, path) {
     busy(true); $("needsdisk").classList.add("hidden");
     api("POST", "/api/fetch", { folder: folder, path: path }).then(function (r) {
+      if (r.plan) { runDiskPlan(folder, path, r.plan, ""); return; }
       if (r.needs_disk) {
         var msg = "This file is on disk " + r.needs_disk.label + " (" + r.needs_disk.place + "). Attach it and try again.";
         $("needsdisk").textContent = msg; $("needsdisk").classList.remove("hidden"); log(path + ": " + msg);

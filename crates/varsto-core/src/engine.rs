@@ -45,6 +45,7 @@ mod backups;
 mod block_cache;
 mod data_moves;
 mod devinfo;
+mod disk_fetch;
 mod disk_groups;
 mod disk_insert;
 mod fetch;
@@ -66,6 +67,10 @@ pub use backups::{
 };
 pub use block_cache::{BlockWriter, StagedFile, BLOCK_CACHE_DIR, EXPORT_DIR};
 pub use devinfo::DeviceDetails;
+pub use disk_fetch::{
+    DiskFetchSettings, DiskStep, FetchPlan, FetchPlanReport, InsertAnswer, PlanDriver, PlanFile,
+    RemoteOption, StepOutcome,
+};
 pub use disk_groups::DiskGroupStatus;
 pub use disk_insert::{DiskInsertReport, DiskProgress, FillOutcome, InsertOptions};
 pub use manifest_upkeep::ManifestPolicy;
@@ -3569,6 +3574,9 @@ impl Engine {
                 self.peers.clone()
             };
             let stats = self.fetch_stats.clone();
+            // Blocks copied from pool disks for a disk fetch plan are read
+            // from the staging area instead (`disk_fetch`).
+            let staging = self.staging_roots();
             // Every object is one round trip to a peer or a storage. Fetched
             // one after another, a link with any latency idles most of the
             // time, so a window of chunks of the file (`fetch::fetch_in_order`) is in flight at
@@ -3660,13 +3668,60 @@ impl Engine {
                         write_chunk(cref, fetched)?;
                     }
                 }
-                None => fetch_in_order(
+                None if staging.is_empty() => fetch_in_order(
                     peers.as_deref(),
                     &file.chunks,
                     storages,
                     &stats,
                     &mut write_chunk,
                 )?,
+                None => {
+                    // Runs of staged blocks are read from the staging area,
+                    // the runs between them fetched as usual, in order.
+                    let staged = |c: &ChunkRef| disk_fetch::staged_object(&staging, &c.object);
+                    let mut i = 0;
+                    while i < file.chunks.len() {
+                        let here = staged(&file.chunks[i]).is_some();
+                        let mut j = i;
+                        while j < file.chunks.len() && staged(&file.chunks[j]).is_some() == here {
+                            j += 1;
+                        }
+                        if here {
+                            for c in &file.chunks[i..j] {
+                                let Some((path, pool)) = staged(c) else {
+                                    continue;
+                                };
+                                let bytes = fs::read(&path)?;
+                                let fetched =
+                                    if ObjectName::from_bytes(&crypto::hash(&bytes)) == c.object {
+                                        Fetched::Got {
+                                            source: pool,
+                                            bytes,
+                                            from_peer: false,
+                                        }
+                                    } else {
+                                        let _ = fs::remove_file(&path);
+                                        fetch::fetch_object(
+                                            peers.as_deref(),
+                                            &c.object,
+                                            storages,
+                                            &stats,
+                                        )
+                                    };
+                                write_chunk(c, fetched)?;
+                            }
+                        } else {
+                            fetch_in_order(
+                                peers.as_deref(),
+                                &file.chunks[i..j],
+                                storages,
+                                &stats,
+                                &mut write_chunk,
+                            )?;
+                        }
+                        i = j;
+                    }
+                }
             }
             out.sync_all()?;
         }

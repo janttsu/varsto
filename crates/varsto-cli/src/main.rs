@@ -130,6 +130,13 @@ enum Cmd {
     },
     /// Show vault, devices, storages and folders.
     Status,
+    /// How files would be fetched: from pool disks (which ones, in which order) or the network,
+    /// with the time and cost of each way. Run `varsto folder fetch` to fetch.
+    FetchPlan {
+        folder: String,
+        #[arg(required = true)]
+        paths: Vec<String>,
+    },
     /// Compare the ledger with the storages; --verify downloads and hashes every chunk.
     Fsck {
         #[arg(long)]
@@ -935,6 +942,10 @@ enum FolderCmd {
     Fetch {
         folder: String,
         path: Option<String>,
+        /// Large fetches whose blocks are on pool disks: propose the disks and ask (default),
+        /// use them without asking, or never.
+        #[arg(long, value_enum, default_value_t = drives::FromDisks::Ask)]
+        from_disks: drives::FromDisks,
     },
     /// Replace a local file with a placeholder (only when stored elsewhere
     /// and synced). Give FOLDER PATH, or only the file's path on disk.
@@ -2114,8 +2125,31 @@ fn run(cli: &Cli) -> Result<()> {
                         name_or_id
                     );
                 }
-                FolderCmd::Fetch { folder, path } => {
+                FolderCmd::Fetch {
+                    folder,
+                    path,
+                    from_disks,
+                } => {
                     let (folder, path) = &folder_and_path(&engine, folder, path)?;
+                    if *from_disks != drives::FromDisks::Never
+                        && engine.disks().is_ok_and(|d| !d.is_empty())
+                    {
+                        // Pool disks may be the better source: plan, and run the plan if chosen.
+                        if drives::fetch_with_plan(
+                            cli,
+                            &home,
+                            &mut engine,
+                            folder,
+                            std::slice::from_ref(path),
+                            *from_disks,
+                        )? {
+                            return Ok(());
+                        }
+                        // Ran but stopped or left a file out: the plan is kept.
+                        if engine.load_fetch_plan().is_some() {
+                            std::process::exit(1);
+                        }
+                    }
                     let r = match engine.fetch_file(folder, path) {
                         Ok(r) => r,
                         Err(e) => {
@@ -2227,6 +2261,11 @@ fn run(cli: &Cli) -> Result<()> {
             print(cli, &r, |r| {
                 r.iter().map(|(pl, ps)| format!("{}: pulled {} updated/{} deleted/{} conflicts, pushed {} changed/{} chunks{}{}", pl.folder, pl.files_updated, pl.files_deleted, pl.conflicts, ps.files_changed, ps.chunks_uploaded, if pl.disks_needed.is_empty() { String::new() } else { format!("; attach disk {}", pl.disks_needed.join(", ")) }, if ps.storages_unavailable.is_empty() { String::new() } else { format!("; not written to {}", ps.storages_unavailable.join(", ")) })).collect::<Vec<_>>().join("\n")
             })?;
+        }
+        Cmd::FetchPlan { folder, paths } => {
+            let mut engine = Engine::open(&home, &passphrase()?)?;
+            let plan = engine.fetch_plan(folder, paths)?;
+            print(cli, &plan, drives::plan_text)?;
         }
         Cmd::Status => {
             // The running service answers without a passphrase while it is

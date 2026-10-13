@@ -598,7 +598,21 @@
   "Folder path": "Kansion polku",
   "Add a folder, an S3 bucket, an rclone remote or a pool of swappable disks below.": "Lisää alla kansio, S3-säilö, rclone-etäkohde tai vaihdettavien levyjen varasto.",
   "Taking a snapshot…": "Versiota otetaan…",
-  "Loading…": "Ladataan…"
+  "Loading…": "Ladataan…",
+  "Fetch from disks": "Hae levyiltä",
+  "Disk inserted": "Levy on paikallaan",
+  "Copy from the disk": "Kopioi levyltä",
+  "Fetch from the network instead": "Hae sen sijaan verkosta",
+  "Stop": "Lopeta",
+  "done": "valmis",
+  "skipped": "ohitettu",
+  "attached": "liitetty",
+  "some blocks are only on pool disks": "osa lohkoista on vain varaston levyillä",
+  "the remote copies are in cold storage": "etäkopiot ovat kylmäsäilytyksessä",
+  "the disks are cheaper and faster than the network": "levyiltä on halvempaa ja nopeampaa kuin verkosta",
+  "the disks are cheaper than the network": "levyiltä on halvempaa kuin verkosta",
+  "the disks are faster than the network": "levyiltä on nopeampaa kuin verkosta",
+  "The network does not have every block: the disks are needed.": "Verkossa ei ole kaikkia lohkoja: levyjä tarvitaan."
  },
  "patterns": [
   [
@@ -716,6 +730,30 @@
   [
    "^Since the service started: (.+) received in (\\d+) blocks, (.+) sent in (\\d+) blocks\\. Speeds are averages over the last (\\d+) seconds\\.$",
    "Palvelun käynnistyksen jälkeen: vastaanotettu $1 ($2 lohkoa), lähetetty $3 ($4 lohkoa). Nopeudet ovat viimeisten $5 sekunnin keskiarvoja."
+  ],
+  [
+   "^Insert disk (.+) \\((.*)\\) into the dock, then choose Disk inserted\\.$",
+   "Aseta levy $1 ($2) telakkaan ja valitse sitten Levy on paikallaan."
+  ],
+  [
+   "^Disk (.+) is attached: choose Copy from the disk\\.$",
+   "Levy $1 on liitetty: valitse Kopioi levyltä."
+  ],
+  [
+   "^From the network instead: (.+), about (.+)\\.$",
+   "Verkosta sen sijaan: $1, noin $2."
+  ],
+  [
+   "^Disk (.+) was not found: insert it and try again\\.$",
+   "Levyä $1 ei löytynyt: aseta se paikalleen ja yritä uudelleen."
+  ],
+  [
+   "^Got (\\d+) blocks \\((.+)\\) from (.+): you can now remove it$",
+   "Saatiin $1 lohkoa ($2) levyltä $3: voit nyt irrottaa sen"
+  ],
+  [
+   "^(.+): stopped; nothing more is fetched from the disks$",
+   "$1: lopetettu; levyiltä ei haeta enempää"
   ]
  ],
  "review": [

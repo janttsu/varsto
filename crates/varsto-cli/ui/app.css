@@ -830,3 +830,4 @@ body[data-mobile="1"] .sel-count { font-size: 14px; }
 [data-help] { cursor: help; }
 .sidebar-lang { display: block; padding: 4px 12px; }
 .sidebar-lang select { width: 100%; font-size: 13px; }
+.modal-text .strong { font-weight: 600; }

@@ -471,3 +471,271 @@ pub fn known_drives(home: &Path) -> Vec<KnownDrive> {
         })
         .collect()
 }
+
+// ----- fetching from pool disks ------------------------------------------------------------
+
+/// Mount the drive of a plan step if disks.conf knows it and it is plugged
+/// in. True when the disk may now be reachable (also when disks.conf does
+/// not know it: the user may have mounted it).
+pub fn mount_known(home: &Path, label: &str) -> Result<bool> {
+    if !cfg!(target_os = "linux") {
+        return Ok(true);
+    }
+    let conf = DiskConf::load(home)?;
+    let Some(drive) = conf.by_label(label) else {
+        return Ok(true);
+    };
+    let mut r = SystemRunner;
+    let devs = blockdev::lsblk(&mut r)?;
+    if blockdev::find_partition(&devs, &drive.partuuid).is_none() {
+        return Ok(false);
+    }
+    blockdev::mount_partition(&mut r, &drive.partuuid, label)?;
+    Ok(true)
+}
+
+/// Unmount and power off the partition mounted at `mount` (Linux; nothing
+/// elsewhere, or when no partition is mounted there).
+pub fn release_mount(mount: &Path) -> Result<Vec<blockdev::Step>> {
+    if !cfg!(target_os = "linux") {
+        return Ok(Vec::new());
+    }
+    let mut r = SystemRunner;
+    let devs = blockdev::lsblk(&mut r)?;
+    if blockdev::partition_at(&devs, mount).is_none() {
+        return Ok(Vec::new());
+    }
+    blockdev::unmount_partition(&mut r, mount, true)
+}
+
+fn duration(secs: f64) -> String {
+    let s = secs.round() as u64;
+    if s >= 3600 {
+        format!("{} h {} min", s / 3600, s / 60 % 60)
+    } else if s >= 60 {
+        format!("{} min {} s", s / 60, s % 60)
+    } else {
+        format!("{s} s")
+    }
+}
+
+fn money(cost: Option<f64>, currency: &str) -> String {
+    match cost {
+        Some(c) => format!(
+            "{c:.2} {}",
+            if currency.is_empty() {
+                "(currency unknown)"
+            } else {
+                currency
+            }
+        ),
+        None => "price unknown".into(),
+    }
+}
+
+/// The plan as text.
+pub fn plan_text(plan: &varsto_core::engine::FetchPlan) -> String {
+    let mut out = format!(
+        "{} file{}, {}: fetch from {} ({})\n",
+        plan.files.len(),
+        if plan.files.len() == 1 { "" } else { "s" },
+        fmt_bytes(plan.total_bytes),
+        if plan.recommend == "disks" {
+            "disks"
+        } else {
+            "the network"
+        },
+        plan.reason
+    );
+    for (i, s) in plan.steps.iter().enumerate() {
+        out.push_str(&format!(
+            "  {}. \"{}\" ({}): {}{}{}\n",
+            i + 1,
+            s.label,
+            s.place,
+            fmt_bytes(s.bytes),
+            if s.attached { ", attached now" } else { "" },
+            if s.state != "pending" {
+                format!(", {}", s.state)
+            } else {
+                String::new()
+            }
+        ));
+    }
+    if !plan.steps.is_empty() {
+        out.push_str(&format!(
+            "  with the disks: about {}{}\n",
+            duration(plan.disks_secs),
+            if plan.remote_part_bytes > 0 {
+                format!(
+                    ", plus {} from the network ({})",
+                    fmt_bytes(plan.remote_part_bytes),
+                    money(plan.remote_part_cost, &plan.remote.currency)
+                )
+            } else {
+                String::new()
+            }
+        ));
+    }
+    let r = &plan.remote;
+    if r.possible {
+        out.push_str(&format!(
+            "  from the network instead: {} from {}, {}, about {}{}\n",
+            fmt_bytes(r.bytes),
+            r.storages.join(", "),
+            money(r.cost, &r.currency),
+            duration(r.secs),
+            if r.cold {
+                " (cold storage: retrieval fees and delays)"
+            } else {
+                ""
+            }
+        ));
+    } else {
+        out.push_str("  the network does not have every block: the disks are needed\n");
+    }
+    out
+}
+
+/// Runs a plan on the terminal: asks for each disk, mounts, unmounts.
+struct CliDriver<'a> {
+    home: &'a Path,
+    json: bool,
+}
+
+impl varsto_core::engine::PlanDriver for CliDriver<'_> {
+    fn ask(
+        &mut self,
+        plan: &varsto_core::engine::FetchPlan,
+        k: usize,
+    ) -> Result<varsto_core::engine::InsertAnswer> {
+        use varsto_core::engine::InsertAnswer;
+        let s = &plan.steps[k];
+        eprint!(
+            "Insert disk \"{}\" ({}) into the dock and press Enter (s = skip, use the network; q = stop): ",
+            s.label, s.place
+        );
+        std::io::stderr().flush()?;
+        let mut line = String::new();
+        if std::io::stdin().read_line(&mut line)? == 0 {
+            return Ok(InsertAnswer::Stop);
+        }
+        Ok(match line.trim() {
+            "s" | "S" => InsertAnswer::Skip,
+            "q" | "Q" => InsertAnswer::Stop,
+            _ => InsertAnswer::Inserted,
+        })
+    }
+    fn attach(&mut self, step: &varsto_core::engine::DiskStep) -> Result<bool> {
+        match mount_known(self.home, &step.label) {
+            Ok(found) => Ok(found),
+            Err(e) => {
+                eprintln!("{}: {e:#}", step.label);
+                Ok(false)
+            }
+        }
+    }
+    fn release(&mut self, step: &varsto_core::engine::DiskStep, mount: &Path) -> Result<()> {
+        for s in release_mount(mount)? {
+            if !self.json {
+                eprintln!(
+                    "  {}: {}{}",
+                    step.label,
+                    s.step,
+                    if s.note.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" ({})", s.note)
+                    }
+                );
+            }
+        }
+        Ok(())
+    }
+    fn say(&mut self, message: &str) {
+        if !self.json {
+            println!("{message}");
+        }
+    }
+}
+
+/// How `varsto folder fetch` uses pool disks.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
+pub enum FromDisks {
+    /// Propose the disks when the plan recommends them and ask.
+    Ask,
+    /// Use the disks whenever they hold blocks, without asking first.
+    Always,
+    /// Never: the network only (as before).
+    Never,
+}
+
+/// Fetch files, from pool disks when the plan says so (and the user agrees).
+/// Returns false when the fetch did not complete.
+pub fn fetch_with_plan(
+    cli: &Cli,
+    home: &Path,
+    engine: &mut Engine,
+    folder: &str,
+    paths: &[String],
+    mode: FromDisks,
+) -> Result<bool> {
+    let mut plan = engine.fetch_plan(folder, paths)?;
+    let use_disks = match mode {
+        FromDisks::Never => false,
+        FromDisks::Always => !plan.steps.is_empty(),
+        FromDisks::Ask => {
+            plan.recommend == "disks"
+                && {
+                    if !cli.json {
+                        print!("{}", plan_text(&plan));
+                    }
+                    if !std::io::stdin().is_terminal() {
+                        if !plan.remote.possible {
+                            bail!("these blocks are on pool disks only: run on a terminal, or with --from-disks always");
+                        }
+                        false
+                    } else {
+                        crate::confirm(if plan.remote.possible {
+                            "Fetch from the disks (no = from the network)?"
+                        } else {
+                            "Fetch from the disks?"
+                        })?
+                    }
+                }
+        }
+    };
+    if !use_disks {
+        engine.cancel_fetch_plan()?;
+        return Ok(false);
+    }
+    if mode == FromDisks::Always && !cli.json {
+        print!("{}", plan_text(&plan));
+    }
+    let _pause = ServicePause::new(home);
+    let mut driver = CliDriver {
+        home,
+        json: cli.json,
+    };
+    let r = engine.run_fetch_plan(&mut plan, &mut driver)?;
+    if cli.json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&json!({"plan": plan, "report": r}))?
+        );
+    } else {
+        for (p, why) in &r.files_failed {
+            println!("{p}: not fetched: {why}");
+        }
+        if r.stopped {
+            println!("stopped; the plan is kept: run the same fetch again to go on");
+        } else if r.files_failed.is_empty() {
+            println!(
+                "fetched {} file{}",
+                r.files_done.len(),
+                if r.files_done.len() == 1 { "" } else { "s" }
+            );
+        }
+    }
+    Ok(!r.stopped && r.files_failed.is_empty())
+}
