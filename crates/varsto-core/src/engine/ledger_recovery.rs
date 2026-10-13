@@ -349,6 +349,16 @@ pub struct LedgerStatus {
     pub devices: Vec<LedgerDeviceStatus>,
 }
 
+/// The copies of one own batch on the storages.
+enum Fetched {
+    None,
+    One(SignedBatch),
+    /// Two storages hold different batches under this number.
+    Disagree,
+}
+
+const TWO_HISTORIES: &str = "the storages hold two different ledger histories of this device";
+
 /// Own batches and checkpoints on each storage.
 struct OwnListing {
     batches: BTreeMap<u64, Vec<usize>>,
@@ -676,10 +686,13 @@ impl Engine {
         holders: &[usize],
         seq: u64,
         cold_ok: bool,
-    ) -> Result<Option<SignedBatch>> {
+    ) -> Result<Fetched> {
         let me = &self.vault.device_id;
         let pk = self.keys.signer.public();
         let mut cold_only = false;
+        let mut found: Option<SignedBatch> = None;
+        // Every copy is read: storages that hold different batches of this
+        // device under one number mean two histories were published.
         for &i in holders {
             let (spec, backend) = &storages[i];
             if spec.is_cold() && !cold_ok {
@@ -692,14 +705,22 @@ impl Engine {
             let Ok(b) = serde_json::from_slice::<SignedBatch>(&blob) else {
                 continue;
             };
-            if &b.device == me && b.seq == seq && b.verify(&pk).is_ok() {
-                return Ok(Some(b));
+            if &b.device != me || b.seq != seq || b.verify(&pk).is_err() {
+                continue;
+            }
+            match &found {
+                Some(f) if f.hash != b.hash => return Ok(Fetched::Disagree),
+                Some(_) => {}
+                None => found = Some(b),
             }
         }
-        if cold_only {
-            bail!("batch {seq} of this device is held only on cold storage: run `{REBUILD_COMMAND} --confirm-cold-read` to read it there");
+        match found {
+            Some(b) => Ok(Fetched::One(b)),
+            None if cold_only => bail!(
+                "batch {seq} of this device is held only on cold storage: run `{REBUILD_COMMAND} --confirm-cold-read` to read it there"
+            ),
+            None => Ok(Fetched::None),
         }
-        Ok(None)
     }
 
     fn fetch_own_checkpoint(
@@ -774,13 +795,19 @@ impl Engine {
                 // as its predecessor, it is part of the published history
                 // (a storage lost it): that is the agreement point.
                 let continues = match listing.batches.get(&(seq + 1)) {
-                    Some(h) => self
-                        .fetch_own_batch(&storages, h, seq + 1, cold_ok)?
-                        .and_then(|next| {
-                            let key = self.key_for_id(&next.key_id)?;
-                            next.open(&key).ok()
-                        })
-                        .is_some_and(|next| next.prev.as_deref() == Some(local.hash.as_str())),
+                    Some(h) => match self.fetch_own_batch(&storages, h, seq + 1, cold_ok)? {
+                        Fetched::One(next) => self
+                            .key_for_id(&next.key_id)
+                            .and_then(|key| next.open(&key).ok())
+                            .is_some_and(|n| n.prev.as_deref() == Some(local.hash.as_str())),
+                        Fetched::Disagree => {
+                            return self.refuse_fork(format!(
+                                "{TWO_HISTORIES} (batch #{} differs between them)",
+                                seq + 1
+                            ))
+                        }
+                        Fetched::None => false,
+                    },
                     None => false,
                 };
                 if continues {
@@ -790,13 +817,18 @@ impl Engine {
                 continue;
             }
             match self.fetch_own_batch(&storages, &holders(seq), seq, cold_ok)? {
-                Some(remote) if remote.hash == local.hash => {
+                Fetched::One(remote) if remote.hash == local.hash => {
                     break;
                 }
-                Some(_) => diverged.push(seq),
+                Fetched::One(_) => diverged.push(seq),
+                Fetched::Disagree => {
+                    return self.refuse_fork(format!(
+                        "{TWO_HISTORIES} (batch #{seq} differs between them)"
+                    ))
+                }
                 // Listed but not readable as this device's batch (a damaged
                 // copy): it decides nothing, compare the next one down.
-                None => {}
+                Fetched::None => {}
             }
         }
         // Batches here that no storage holds, above the agreement point, or
@@ -828,7 +860,7 @@ impl Engine {
                         if let Ok(b) = serde_json::from_slice::<SignedBatch>(&blob) {
                             if b.hash == local.hash {
                                 return self.refuse_fork(format!(
-                                    "the storages hold two different ledger histories of this device (batch #{seq} differs between them)"
+                                    "{TWO_HISTORIES} (batch #{seq} differs between them)"
                                 ));
                             }
                         }
@@ -906,8 +938,14 @@ impl Engine {
             if seq > now.seq + 1 && !now.base.as_ref().is_some_and(|b| b.seq + 1 >= seq) {
                 gap = true;
             }
-            let Some(signed) = self.fetch_own_batch(&storages, h, seq, cold_ok)? else {
-                continue;
+            let signed = match self.fetch_own_batch(&storages, h, seq, cold_ok)? {
+                Fetched::One(b) => b,
+                Fetched::None => continue,
+                Fetched::Disagree => {
+                    return self.refuse_fork(format!(
+                        "{TWO_HISTORIES} (batch #{seq} differs between them)"
+                    ))
+                }
             };
             let key = self.key_for_id(&signed.key_id);
             match self.ledger.ingest_with(signed, &pk, key.as_ref())? {

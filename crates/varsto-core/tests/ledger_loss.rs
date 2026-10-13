@@ -393,7 +393,7 @@ fn s3_restored_device_adopts_its_later_history() {
 }
 
 /// Point the storage named `name` in a device's config at `path`, and
-/// add the other storages given.
+/// add the other storages given before it (so they are read first).
 fn set_storages(home: &Path, name: &str, path: &Path, extra: &[(&str, &Path)]) {
     let p = home.join("config.json");
     let mut cfg: serde_json::Value = serde_json::from_slice(&fs::read(&p).unwrap()).unwrap();
@@ -409,7 +409,7 @@ fn set_storages(home: &Path, name: &str, path: &Path, extra: &[(&str, &Path)]) {
         let mut s = template.clone().unwrap();
         s["name"] = serde_json::json!(n);
         s["path"] = serde_json::json!(p);
-        list.push(s);
+        list.insert(0, s);
     }
     fs::write(&p, serde_json::to_vec_pretty(&cfg).unwrap()).unwrap();
 }
