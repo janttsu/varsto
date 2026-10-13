@@ -1593,6 +1593,13 @@ impl Engine {
                 media: thumbs::is_image(p) || thumbs::is_video(p),
                 modified_utc: e.mtime_ns / 1_000_000_000,
                 last_accessed_utc: None,
+                analysis: None,
+                analysis_truncated: false,
+                analysis_tags: Vec::new(),
+                analysis_utc: None,
+                analysis_stale: false,
+                analysis_by: None,
+                analysis_author: None,
             });
         }
         out.sort_by(|a, b| a.path.cmp(&b.path));
