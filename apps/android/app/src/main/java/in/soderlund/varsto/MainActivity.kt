@@ -55,12 +55,15 @@ class MainActivity : AppCompatActivity() {
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
             val granted = CameraUpload.hasPermission(this)
             val canAsk = CameraUpload.permissions().any { p -> ActivityCompat.shouldShowRequestPermissionRationale(this, p) }
+            AppLog.i("activity", "media access: granted=$granted canAskAgain=$canAsk")
             web.evaluateJavascript("window.varstoMediaAccess && window.varstoMediaAccess($granted, ${!granted && !canAsk})", null)
             if (granted) pokeCameraUpload()
         }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        AppLog.init(this)
+        AppLog.i("activity", "onCreate (restored=${savedInstanceState != null})")
         web = WebView(this)
         web.settings.javaScriptEnabled = true
         web.settings.domStorageEnabled = true
@@ -96,6 +99,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        AppLog.d("activity", "onResume")
         // Back from the all-files-access settings screen: let the page re-check.
         if (::web.isInitialized) web.evaluateJavascript("window.varstoResumed && window.varstoResumed()", null)
     }
@@ -114,6 +118,7 @@ class MainActivity : AppCompatActivity() {
                 pickFiles.launch(Intent.createChooser(intent, str(R.string.choose_files)))
                 true
             } catch (e: Exception) {
+                AppLog.w("activity", "file chooser could not open", e)
                 fileChooser = null
                 false
             }
@@ -147,6 +152,7 @@ class MainActivity : AppCompatActivity() {
     private fun urisOf(resultCode: Int, data: Intent?): Array<Uri>? {
         if (resultCode != Activity.RESULT_OK || data == null) return null
         val clip = data.clipData
+        AppLog.d("activity", "file chooser returned ${clip?.itemCount ?: if (data.data != null) 1 else 0} item(s)")
         if (clip != null && clip.itemCount > 0) return Array(clip.itemCount) { clip.getItemAt(it).uri }
         return data.data?.let { arrayOf(it) }
     }
@@ -160,11 +166,13 @@ class MainActivity : AppCompatActivity() {
         @JavascriptInterface
         fun requestAllFilesAccess() {
             if (Build.VERSION.SDK_INT < 30) return
+            AppLog.i("activity", "asking for all files access")
             handler.post {
                 val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, Uri.parse("package:$packageName"))
                 try {
                     startActivity(intent)
                 } catch (e: Exception) {
+                    AppLog.d("activity", "app-specific all files access screen missing, opening the general one", e)
                     startActivity(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
                 }
             }
@@ -176,6 +184,7 @@ class MainActivity : AppCompatActivity() {
 
         @JavascriptInterface
         fun setCameraUpload(json: String) {
+            AppLog.i("activity", "camera upload settings changed: $json")
             CameraUpload.Settings.save(this@MainActivity, org.json.JSONObject(json))
             pokeCameraUpload()
         }
@@ -185,6 +194,7 @@ class MainActivity : AppCompatActivity() {
 
         @JavascriptInterface
         fun requestMediaAccess() {
+            AppLog.i("activity", "asking for media access")
             handler.post { askMedia.launch(CameraUpload.permissions()) }
         }
 
@@ -206,9 +216,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun handOff(path: String, share: Boolean) {
+        AppLog.i("activity", "${if (share) "share" else "open"} $path")
         handler.post {
             val file = File(path)
             if (!file.isFile) {
+                AppLog.w("activity", "hand-off: $path is not a file")
                 AlertDialog.Builder(this).setMessage(str(R.string.file_missing, file.name))
                     .setPositiveButton(android.R.string.ok, null).show()
                 return@post
@@ -216,6 +228,7 @@ class MainActivity : AppCompatActivity() {
             val uri = try {
                 FileProvider.getUriForFile(this, "$packageName.files", file)
             } catch (e: IllegalArgumentException) {
+                AppLog.w("activity", "hand-off: $path is outside the shared roots", e)
                 AlertDialog.Builder(this).setMessage(str(R.string.file_not_shareable, path))
                     .setPositiveButton(android.R.string.ok, null).show()
                 return@post
@@ -235,7 +248,13 @@ class MainActivity : AppCompatActivity() {
     /** Load the interface once the service answers with the token in its state file.
      *  The file may still describe a previous run, so the token is checked first. */
     private fun load() {
-        val url = VarstoService.serviceUrl(filesDir)
+        // Never logged: the URL carries the session token.
+        val url = try {
+            VarstoService.serviceUrl(filesDir)
+        } catch (e: Exception) {
+            AppLog.d("activity", "service.json not readable yet", e)
+            null
+        }
         if (url == null) {
             retry()
             return
@@ -249,10 +268,13 @@ class MainActivity : AppCompatActivity() {
                 c.setRequestProperty("X-Varsto-Token", token)
                 val code = c.responseCode
                 c.disconnect()
+                if (code != 200) AppLog.d("activity", "GET /api/state -> $code (attempt $attempts)")
                 code == 200
             } catch (e: Exception) {
+                AppLog.d("activity", "GET /api/state failed (attempt $attempts)", e)
                 false
             }
+            if (ok) AppLog.i("activity", "service answered after $attempts attempt(s): loading the interface")
             handler.post { if (ok) web.loadUrl(url) else retry() }
         }.start()
     }
@@ -261,12 +283,14 @@ class MainActivity : AppCompatActivity() {
         if (attempts++ < 100) {
             handler.postDelayed({ load() }, 250)
         } else {
+            AppLog.e("activity", "service did not answer after $attempts attempts")
             web.loadDataWithBaseURL(null, "<h2>${str(R.string.service_did_not_start)}</h2>", "text/html", "utf-8", null)
         }
     }
 
     @Deprecated("Deprecated in Java")
     override fun onBackPressed() {
+        AppLog.d("activity", if (web.canGoBack()) "back: previous page" else "back: leaving")
         if (web.canGoBack()) web.goBack() else super.onBackPressed()
     }
 }

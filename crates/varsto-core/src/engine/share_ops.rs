@@ -299,6 +299,12 @@ impl Engine {
     /// Owner: a plain token (the folder key is inside it). Recorded as an
     /// invitation so it can be revoked before it is accepted.
     pub fn share_create_plain(&mut self, folder: &str) -> Result<ShareToken> {
+        crate::logged_op_plain!("share create plain", folder, {
+            self.share_create_plain_inner(folder)
+        })
+    }
+
+    fn share_create_plain_inner(&mut self, folder: &str) -> Result<ShareToken> {
         let t = self.share_prepare(folder)?;
         t.encode_plain()?;
         let mut tag = [0u8; 8];
@@ -320,6 +326,17 @@ impl Engine {
     /// match the code's. The token carries the fingerprint, and the
     /// recipient's device checks it against its own request.
     pub fn share_create_sealed(
+        &mut self,
+        folder: &str,
+        code: &str,
+        confirmed: Option<&str>,
+    ) -> Result<(SealedShareToken, RequestCode)> {
+        crate::logged_op_plain!("share create sealed", folder, {
+            self.share_create_sealed_inner(folder, code, confirmed)
+        })
+    }
+
+    fn share_create_sealed_inner(
         &mut self,
         folder: &str,
         code: &str,
@@ -1158,6 +1175,12 @@ impl Engine {
     /// members that stay receive it; what the removed member already held
     /// stays readable to it.
     pub fn share_revoke(&mut self, folder: &str, who: &str) -> Result<ShareRevokeReport> {
+        crate::logged_op!("share revoke", format!("{folder} {who}"), {
+            self.share_revoke_inner(folder, who)
+        })
+    }
+
+    fn share_revoke_inner(&mut self, folder: &str, who: &str) -> Result<ShareRevokeReport> {
         if self.vault.member {
             bail!("only the owner's devices can remove members of a shared folder");
         }

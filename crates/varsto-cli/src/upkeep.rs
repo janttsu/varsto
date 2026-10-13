@@ -1,14 +1,18 @@
 // SPDX-License-Identifier: PolyForm-Shield-1.0.0
 //! `varsto verify`, `varsto repair`, `varsto scrub`, `varsto advice` and
-//! `varsto storage price`: automatic verification and repair, bit-rot
-//! checks, placement suggestions and storage prices on the command line.
+//! `varsto storage price|quota|drain`: automatic verification and repair,
+//! bit-rot checks, placement suggestions, storage prices, quotas and
+//! draining on the command line.
 
 use crate::{fmt_bytes, print, Cli};
 use anyhow::{bail, Result};
 use clap::Subcommand;
 use std::path::Path;
 use varsto_core::autoverify::VerifySchedule;
-use varsto_core::engine::{RepairOptions, RepairReport, ScrubOptions};
+use varsto_core::engine::{
+    DrainOptions, DrainRunLimits, DrainStatus, QuotaStatus, RepairOptions, RepairReport,
+    ScrubOptions,
+};
 use varsto_core::price::StoragePrice;
 use varsto_core::scrub::{ScrubReport, ScrubStatus};
 use varsto_core::Engine;
@@ -631,4 +635,182 @@ pub fn price(cli: &Cli, engine: &mut Engine, a: PriceArgs) -> Result<()> {
         ),
     }
     })
+}
+
+pub struct DrainArgs<'a> {
+    pub name: &'a str,
+    pub stop: bool,
+    pub plan: bool,
+    pub remove_when_empty: bool,
+    pub budget_gb_per_day: Option<f64>,
+    pub confirm_cold_read: bool,
+    pub background: bool,
+}
+
+fn drain_status_lines(list: &[DrainStatus]) -> String {
+    if list.is_empty() {
+        return "no storage is being drained".to_string();
+    }
+    list.iter()
+        .map(|d| {
+            let mut line = d.summary.clone();
+            if let Some(eta) = d.eta_utc {
+                line += &format!("; finishes about {}", crate::backup::fmt_utc(eta));
+            }
+            if let Some(b) = d.budget_bytes_per_day {
+                line += &format!(
+                    "; budget {} a day ({} used today)",
+                    fmt_bytes(b),
+                    fmt_bytes(d.bytes_today)
+                );
+            }
+            if d.remove_when_empty {
+                line += "; removed when empty";
+            }
+            if let Some(e) = &d.last_error {
+                line += &format!("; last run failed: {e}");
+            }
+            line
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// `varsto storage drain`: plan, start (and run now), stop, or show progress.
+pub fn drain(cli: &Cli, engine: &mut Engine, a: DrainArgs) -> Result<()> {
+    if a.name == "status" && !engine.storages().iter().any(|s| s.name() == "status") {
+        let list = engine.drain_statuses()?;
+        return print(cli, &list, |l| drain_status_lines(l));
+    }
+    if a.stop {
+        engine.drain_stop(a.name)?;
+        return print(
+            cli,
+            &serde_json::json!({"storage": a.name, "stopped": true}),
+            |_| {
+                format!("{}: draining stopped; it takes new blocks again (blocks already moved stay where they are)", a.name)
+            },
+        );
+    }
+    if a.budget_gb_per_day
+        .is_some_and(|g| !g.is_finite() || g <= 0.0)
+    {
+        bail!("the daily budget must be more than zero GB");
+    }
+    // Options not given keep what an ongoing drain has.
+    let current = engine.storage_settings(a.name).drain;
+    let opts = DrainOptions {
+        remove_when_empty: a.remove_when_empty
+            || current.as_ref().is_some_and(|d| d.remove_when_empty),
+        budget_bytes_per_day: a
+            .budget_gb_per_day
+            .map(|g| (g * 1e9) as u64)
+            .or(current.as_ref().and_then(|d| d.budget_bytes_per_day)),
+        confirm_cold_read: a.confirm_cold_read
+            || current.as_ref().is_some_and(|d| d.confirm_cold_read),
+    };
+    if a.plan {
+        let p = engine.drain_plan(a.name, &opts)?;
+        return print(cli, &p, |p| {
+            let mut out = p.summary.clone();
+            for n in &p.notes {
+                out += &format!("\nnote: {n}");
+            }
+            out
+        });
+    }
+    let plan = engine.drain_start(a.name, &opts)?;
+    if !cli.json {
+        println!("{}", plan.summary);
+        for n in &plan.notes {
+            println!("note: {n}");
+        }
+    }
+    let run = if a.background {
+        None
+    } else {
+        Some(engine.drain_run(a.name, &DrainRunLimits::default())?)
+    };
+    let status = engine.drain_statuses()?;
+    let mine: Vec<&DrainStatus> = status.iter().filter(|d| d.storage == a.name).collect();
+    if cli.json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "plan": plan,
+                "run": run,
+                "status": mine,
+            }))?
+        );
+        return Ok(());
+    }
+    match &run {
+        Some(r) => println!("{}", r.summary),
+        None => println!(
+            "{}: the background service drains it after its next sync (varsto storage drain status)",
+            a.name
+        ),
+    }
+    if let Some(r) = &run {
+        if !r.removed && !r.drained {
+            println!(
+                "{}",
+                drain_status_lines(&mine.into_iter().cloned().collect::<Vec<_>>())
+            );
+        }
+    }
+    Ok(())
+}
+
+/// `varsto storage quota`: show, set or clear a storage's quota.
+pub fn quota(
+    cli: &Cli,
+    engine: &mut Engine,
+    name: &str,
+    bytes: Option<&str>,
+    objects: Option<u64>,
+    clear: bool,
+    measure: bool,
+) -> Result<()> {
+    let mut status = if clear {
+        engine.set_storage_quota(name, Some(None), Some(None))?
+    } else if bytes.is_some() || objects.is_some() {
+        let b = bytes
+            .map(varsto_core::storage_settings::parse_size)
+            .transpose()?;
+        engine.set_storage_quota(name, b.map(Some), objects.map(Some))?
+    } else {
+        engine.quota_status(name)?
+    };
+    if measure {
+        status = engine.measure_storage(name)?;
+    }
+    print(cli, &status, quota_line)
+}
+
+fn quota_line(q: &QuotaStatus) -> String {
+    let used = format!(
+        "{} in {} objects{}",
+        fmt_bytes(q.used_bytes),
+        q.used_objects,
+        match q.measured_utc {
+            Some(t) => format!(", records measured {}", crate::backup::fmt_utc(t)),
+            None => ", records estimated".to_string(),
+        }
+    );
+    let mut out = match (q.quota_bytes, q.quota_objects) {
+        (None, None) => format!("{}: no quota; {used}", q.storage),
+        (b, o) => format!(
+            "{}: quota {}{}; {used} ({} %)",
+            q.storage,
+            b.map(fmt_bytes).unwrap_or_default(),
+            o.map(|o| format!("{}{o} objects", if b.is_some() { ", " } else { "" }))
+                .unwrap_or_default(),
+            q.percent.unwrap_or(0)
+        ),
+    };
+    if let Some(m) = &q.message {
+        out += &format!("\n{m}");
+    }
+    out
 }

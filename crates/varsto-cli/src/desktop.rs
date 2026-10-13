@@ -86,16 +86,23 @@ pub fn serve_arc(server: Arc<Server>, state: Shared) {
         .name("http-api".into())
         .spawn(move || {
             for request in rx {
-                if let Err(e) = handle(&state, request) {
-                    eprintln!("request failed: {e:#}");
+                let (method, url) = (request.method().to_string(), loggable_url(request.url()));
+                let t = varsto_core::logging::Timer::start();
+                STATUS.with(|s| s.set(0));
+                let result = handle(&state, request);
+                let status = STATUS.with(|s| s.get());
+                match result {
+                    Ok(()) => log::debug!(method = method, path = url, status = status, ms = t.ms(); "api request"),
+                    Err(e) => log::warn!(method = method, path = url, ms = t.ms(); "api request failed: {e:#}"),
                 }
             }
         });
     if worker.is_err() {
-        eprintln!("cannot start the API worker thread");
+        log::error!("cannot start the API worker thread");
         return;
     }
     for request in server.incoming_requests() {
+        log::trace!(method = request.method().to_string(), path = loggable_url(request.url()); "api request received");
         match handle_unlocked(&fixed, request) {
             Ok(None) => {}
             Ok(Some(request)) => {
@@ -103,7 +110,30 @@ pub fn serve_arc(server: Arc<Server>, state: Shared) {
                     break;
                 }
             }
-            Err(e) => eprintln!("request failed: {e:#}"),
+            Err(e) => log::warn!("request failed: {e:#}"),
+        }
+    }
+}
+
+thread_local! {
+    /// Status of the last JSON answer on this thread, for the request log.
+    static STATUS: std::cell::Cell<u16> = const { std::cell::Cell::new(0) };
+}
+
+/// A request URL for the log: the path and query without the session token.
+fn loggable_url(url: &str) -> String {
+    match url.split_once('?') {
+        None => url.to_string(),
+        Some((path, query)) => {
+            let kept: Vec<&str> = query
+                .split('&')
+                .filter(|kv| !kv.starts_with("token="))
+                .collect();
+            if kept.is_empty() {
+                path.to_string()
+            } else {
+                format!("{path}?{}", kept.join("&"))
+            }
         }
     }
 }
@@ -291,6 +321,7 @@ fn text(body: &str, content_type: &str) -> Response<std::io::Cursor<Vec<u8>>> {
 }
 
 fn json_response(status: u16, value: &Value) -> Response<std::io::Cursor<Vec<u8>>> {
+    STATUS.with(|s| s.set(status));
     Response::from_string(value.to_string())
         .with_status_code(status)
         .with_header(header("Content-Type", "application/json"))
@@ -469,6 +500,61 @@ fn handle(state: &Shared, mut request: Request) -> Result<()> {
         return match result {
             Ok(v) => Ok(request.respond(json_response(200, &v))?),
             Err(e) => Ok(request.respond(json_response(400, &json!({"error": format!("{e:#}")})))?),
+        };
+    }
+    if *request.method() == Method::Post && path == "/api/logs/bundle" {
+        // `{"save": true}` (the Android shell, which cannot save a download):
+        // write the bundle under `home/exports` and answer with its path, for
+        // the shell to share. Removed with the other exports at the next start.
+        let mut body = String::new();
+        let _ = request.as_reader().take(4096).read_to_string(&mut body);
+        let save = serde_json::from_str::<Value>(&body)
+            .ok()
+            .and_then(|v| v.get("save").and_then(Value::as_bool))
+            .unwrap_or(false);
+        let (home, state_json) = {
+            let mut st = state.lock().unwrap();
+            let v = api(&mut st, Method::Get, "/api/state", "", &json!({})).ok();
+            (st.home.clone(), v.map(|v| v.to_string()))
+        };
+        let extras = bundle_extras(&home, state_json);
+        let name = format!("varsto-logs-{}.tar.zst", log_stamp());
+        if save {
+            let dir = home.join(varsto_core::engine::EXPORT_DIR);
+            let target = dir.join(&name);
+            let written = std::fs::create_dir_all(&dir)
+                .and_then(|_| std::fs::File::create(&target))
+                .and_then(|f| varsto_core::logging::bundle(&home, &extras, f))
+                .and_then(|mut f| std::io::Write::flush(&mut f));
+            return match written {
+                Ok(()) => {
+                    log::info!(path = target.display().to_string(); "log bundle saved for sharing");
+                    Ok(request.respond(json_response(
+                        200,
+                        &json!({"ok": true, "path": target, "note": BUNDLE_REMINDER}),
+                    ))?)
+                }
+                Err(e) => Ok(request.respond(json_response(
+                    500,
+                    &json!({"error": format!("log bundle: {e:#}")}),
+                ))?),
+            };
+        }
+        return match varsto_core::logging::bundle(&home, &extras, Vec::new()) {
+            Ok(bytes) => {
+                log::info!(bytes = bytes.len(); "log bundle made for the interface");
+                STATUS.with(|s| s.set(200));
+                Ok(request.respond(
+                    Response::from_data(bytes)
+                        .with_header(header("Content-Type", "application/zstd"))
+                        .with_header(header("Cache-Control", "no-store"))
+                        .with_header(header("Content-Disposition", &attachment(&name))),
+                )?)
+            }
+            Err(e) => Ok(request.respond(json_response(
+                500,
+                &json!({"error": format!("log bundle: {e:#}")}),
+            ))?),
         };
     }
     let mut body = String::new();
@@ -905,6 +991,35 @@ fn api(st: &mut State, method: Method, path: &str, query: &str, input: &Value) -
             Ok(json!({"ok": true, "removed": removed}))
         }
         (Method::Get, "/api/service") => Ok(st.service.summary()),
+        (Method::Get, "/api/logs") => Ok(logs_info(&st.home)),
+        (Method::Post, "/api/logs/level") => {
+            let level = s(input, "level")?;
+            varsto_core::logging::Filter::parse(&level).map_err(|e| anyhow!(e))?;
+            let mut cfg = varsto_core::vault::Config::load(&st.home)?;
+            cfg.log_level = Some(level.clone());
+            cfg.save(&st.home)?;
+            // VARSTO_LOG and --log-level still win in this process.
+            if !matches!(
+                varsto_core::logging::level().map(|l| l.1),
+                Some(varsto_core::logging::Source::Env | varsto_core::logging::Source::Flag)
+            ) {
+                varsto_core::logging::set_level(&level, varsto_core::logging::Source::Config)
+                    .map_err(|e| anyhow!(e))?;
+            }
+            log::info!(level = level; "log level set in the interface");
+            let mut v = logs_info(&st.home);
+            v["ok"] = json!(true);
+            Ok(v)
+        }
+        (Method::Post, "/api/logs/open") => {
+            if mobile() {
+                bail!("the log folder cannot be opened on a phone; save a log bundle instead");
+            }
+            let dir = varsto_core::logging::dir(&st.home);
+            varsto_core::logging::files::ensure_dir(&dir)?;
+            crate::filemanager::open_with_desktop(&dir)?;
+            Ok(json!({"ok": true}))
+        }
         (Method::Get, "/api/update/check") => Ok(serde_json::to_value(crate::update::check()?)?),
         (Method::Post, "/api/update") => {
             let c = crate::update::check()?;
@@ -1145,6 +1260,63 @@ fn api(st: &mut State, method: Method, path: &str, query: &str, input: &Value) -
 }
 
 /// The interface asks for long work to run in the background service.
+/// `20261013-133038` (UTC).
+pub fn log_stamp() -> String {
+    varsto_core::logging::rfc3339_millis(std::time::SystemTime::now())[..19]
+        .replace(['-', ':'], "")
+        .replace('T', "-")
+}
+
+/// Non-log files that go into a bundle: versions, the service's view of
+/// things (when it runs) and the local configuration (no secrets in it).
+pub fn bundle_extras(home: &std::path::Path, state: Option<String>) -> Vec<(String, Vec<u8>)> {
+    let mut extras = Vec::new();
+    let (level, source) = varsto_core::logging::level()
+        .map(|(l, s)| (l, s.as_str()))
+        .unwrap_or_else(|| (varsto_core::logging::DEFAULT_LEVEL.to_string(), "default"));
+    let about = serde_json::json!({
+        "version": env!("CARGO_PKG_VERSION"),
+        "os": std::env::consts::OS,
+        "arch": std::env::consts::ARCH,
+        "family": std::env::consts::FAMILY,
+        "log_level": level,
+        "log_level_source": source,
+        "created_utc": varsto_core::util::now_utc(),
+    });
+    extras.push((
+        "about.json".to_string(),
+        serde_json::to_vec_pretty(&about).unwrap_or_default(),
+    ));
+    if let Some(s) = state {
+        extras.push(("status.json".to_string(), s.into_bytes()));
+    }
+    if let Ok(c) = std::fs::read(home.join("config.json")) {
+        extras.push(("config.json".to_string(), c));
+    }
+    extras
+}
+
+pub const BUNDLE_REMINDER: &str = "The bundle holds no keys, passphrases or file contents, but it does contain file and folder names, device and storage names. Look through it before you share it.";
+
+/// The interface's view of the log: where, how detailed, how big.
+fn logs_info(home: &std::path::Path) -> Value {
+    let (bytes, files) = varsto_core::logging::usage(home);
+    let (level, source) = varsto_core::logging::level()
+        .map(|(l, s)| (l, s.as_str()))
+        .unwrap_or_else(|| {
+            let (l, s) = varsto_core::logging::resolve_level(None, Some(home));
+            (l, s.as_str())
+        });
+    json!({
+        "dir": varsto_core::logging::dir(home).display().to_string(),
+        "level": level,
+        "source": source,
+        "bytes": bytes,
+        "files": files,
+        "can_open": !mobile(),
+    })
+}
+
 fn background(input: &Value) -> bool {
     input
         .get("background")
@@ -1303,6 +1475,69 @@ fn api_unlocked(
             service.request_sync();
             Ok(serde_json::to_value(r)?)
         }
+        (Method::Get, "/api/storage/quotas") => Ok(serde_json::to_value(engine.quota_statuses()?)?),
+        (Method::Post, "/api/storage/quota") => {
+            let name = s(input, "name")?;
+            let clear = input.get("clear").and_then(|v| v.as_bool()).unwrap_or(false);
+            let status = if clear {
+                engine.set_storage_quota(&name, Some(None), Some(None))?
+            } else {
+                // Empty fields clear that figure; sizes as text ("1TB") or bytes.
+                let bytes = match input.get("bytes") {
+                    Some(Value::Number(n)) => Some(n.as_u64()),
+                    Some(Value::String(t)) if t.trim().is_empty() => Some(None),
+                    Some(Value::String(t)) => Some(Some(varsto_core::storage_settings::parse_size(t)?)),
+                    _ => None,
+                };
+                let objects = match input.get("objects") {
+                    Some(Value::Number(n)) => Some(n.as_u64()),
+                    Some(Value::String(t)) if t.trim().is_empty() => Some(None),
+                    Some(Value::String(t)) => Some(Some(t.trim().parse::<u64>().map_err(|_| anyhow!("not a number of objects: {t}"))?)),
+                    _ => None,
+                };
+                engine.set_storage_quota(&name, bytes, objects)?
+            };
+            service.request_sync();
+            Ok(serde_json::to_value(status)?)
+        }
+        (Method::Get, "/api/storage/drains") => Ok(serde_json::to_value(engine.drain_statuses()?)?),
+        (Method::Get, "/api/storage/drain-plan") => {
+            let name = query_param(query, "name").unwrap_or_default();
+            let opts = varsto_core::engine::DrainOptions {
+                remove_when_empty: false,
+                budget_bytes_per_day: query_param(query, "budget_gb_per_day")
+                    .and_then(|v| v.trim().parse::<f64>().ok())
+                    .filter(|g| g.is_finite() && *g > 0.0)
+                    .map(|g| (g * 1e9) as u64),
+                confirm_cold_read: query_param(query, "confirm_cold_read").as_deref() == Some("true"),
+            };
+            Ok(serde_json::to_value(engine.drain_plan(&name, &opts)?)?)
+        }
+        (Method::Post, "/api/storage/drain") => {
+            let name = s(input, "name")?;
+            if input.get("stop").and_then(|v| v.as_bool()).unwrap_or(false) {
+                engine.drain_stop(&name)?;
+                service.request_sync();
+                return Ok(json!({"ok": true, "stopped": true}));
+            }
+            let flag = |k: &str| input.get(k).and_then(|v| v.as_bool()).unwrap_or(false);
+            let budget = input
+                .get("budget_gb_per_day")
+                .and_then(|v| v.as_f64().or_else(|| v.as_str().and_then(|t| t.trim().parse().ok())))
+                .filter(|g| g.is_finite() && *g > 0.0)
+                .map(|g| (g * 1e9) as u64);
+            let plan = engine.drain_start(
+                &name,
+                &varsto_core::engine::DrainOptions {
+                    remove_when_empty: flag("remove_when_empty"),
+                    budget_bytes_per_day: budget,
+                    confirm_cold_read: flag("confirm_cold_read"),
+                },
+            )?;
+            // The service moves the blocks after its next sync.
+            service.request_sync();
+            Ok(serde_json::to_value(plan)?)
+        }
         (Method::Post, "/api/storage/carrier-for") => {
             let names = engine.set_carrier_for(&s(input, "name")?, &string_list(input, "devices"))?;
             Ok(json!({"ok": true, "devices": names}))
@@ -1416,6 +1651,7 @@ fn api_unlocked(
                 remove_source: flag("remove_source"),
                 no_verify: false,
                 default_parent: Some(folder_root(engine.home())),
+                staging: None,
             };
             let mut src = varsto_core::import::dir::DirSource::open(&source)?;
             let mut r = engine.import_run(&mut src, &opts)?;
@@ -1551,6 +1787,58 @@ fn api_unlocked(
         (Method::Post, "/api/backup/expire") => {
             let r = engine.backup_upkeep()?;
             service.record_backup_upkeep(&r);
+            Ok(serde_json::to_value(r)?)
+        }
+        // The trash: files deleted on any device of the vault.
+        (Method::Get, "/api/trash") => {
+            let folder = query_param(query, "folder").filter(|f| !f.is_empty());
+            Ok(serde_json::to_value(engine.trash_list(folder.as_deref())?)?)
+        }
+        (Method::Get, "/api/trash/status") => Ok(serde_json::to_value(engine.trash_status()?)?),
+        (Method::Post, "/api/trash/restore-plan") => {
+            let to = opt(input, "to").filter(|t| !t.trim().is_empty());
+            Ok(serde_json::to_value(engine.trash_restore_plan(
+                &s(input, "folder")?,
+                &string_list(input, "paths"),
+                to.as_deref(),
+            )?)?)
+        }
+        (Method::Post, "/api/trash/restore") => {
+            let to = opt(input, "to").filter(|t| !t.trim().is_empty());
+            let cold = input.get("confirm_cold_read").and_then(|v| v.as_bool()).unwrap_or(false);
+            let r = engine.trash_restore(&s(input, "folder")?, &string_list(input, "paths"), to.as_deref(), cold)?;
+            service.request_sync();
+            Ok(serde_json::to_value(r)?)
+        }
+        (Method::Post, "/api/trash/purge") => {
+            let folder = opt(input, "folder").filter(|f| !f.is_empty());
+            let all = input.get("all").and_then(|v| v.as_bool()).unwrap_or(false);
+            let r = engine.trash_purge(folder.as_deref(), &string_list(input, "paths"), all)?;
+            Ok(serde_json::to_value(r)?)
+        }
+        (Method::Post, "/api/trash/set") => {
+            let days = input
+                .get("days")
+                .and_then(|v| v.as_u64())
+                .map(|d| d.min(u32::MAX as u64) as u32);
+            let folder = opt(input, "folder").filter(|f| !f.is_empty());
+            let storage: Option<Option<String>> = if input.get("no_storage").and_then(|v| v.as_bool()).unwrap_or(false) {
+                Some(None)
+            } else {
+                opt(input, "storage").filter(|n| !n.is_empty()).map(Some)
+            };
+            let moved = matches!(storage, Some(Some(_)));
+            let st = engine.trash_set(days, folder.as_deref(), storage)?;
+            if moved {
+                // What is in the trash now moves to the new trash storage.
+                let r = engine.trash_upkeep()?;
+                service.record_trash_upkeep(&r);
+            }
+            Ok(serde_json::to_value(st)?)
+        }
+        (Method::Post, "/api/trash/upkeep") => {
+            let r = engine.trash_upkeep()?;
+            service.record_trash_upkeep(&r);
             Ok(serde_json::to_value(r)?)
         }
         (Method::Post, "/api/sync") => {

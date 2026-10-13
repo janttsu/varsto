@@ -344,6 +344,8 @@ impl Engine {
                 if path.ends_with(PLACEHOLDER_SUFFIX) {
                     placeholders.push(entry.path().to_path_buf());
                 } else {
+                    // A plain file put here: stored under its vault name.
+                    let path = state.local_names.vault_of(self.local_rules(root), &path);
                     found.push((path, entry.path().to_path_buf()));
                 }
             }
@@ -776,7 +778,9 @@ impl Engine {
             .join(format!("{:016x}", rand::random::<u64>()));
         fs::create_dir_all(&dir)?;
         let name = path.rsplit('/').next().unwrap_or("file");
-        let out = dir.join(name);
+        // Named for this filesystem (`crate::names`): `12:30.jpg` is
+        // written with the Windows mapping on Windows.
+        let out = dir.join(self.local_rules(&dir).default_local(name).as_ref());
         let task = crate::activity::start(
             crate::activity::DOWNLOAD,
             &rec.name,

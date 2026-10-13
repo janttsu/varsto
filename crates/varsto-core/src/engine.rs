@@ -50,21 +50,25 @@ mod disk_fetch;
 mod disk_groups;
 mod disk_insert;
 mod disk_suggest;
+mod drain;
 mod fetch;
-mod ledger_recovery;
 mod guide;
 mod imports;
+mod ledger_recovery;
 mod ledger_upkeep;
+mod local_names;
 mod manifest_upkeep;
 mod membership;
 mod notes;
 mod org_ops;
 mod placement;
+mod quotas;
 mod repair;
 mod restic_mirror;
 mod scrub;
 mod share_ops;
 mod strongroom_ops;
+mod trash;
 mod verify;
 mod view;
 mod where_data;
@@ -80,14 +84,15 @@ pub use disk_fetch::{
     RemoteOption, StepOutcome,
 };
 pub use disk_groups::DiskGroupStatus;
-pub use ledger_recovery::{
-    LedgerDeviceStatus, LedgerHealth, LedgerHolding, LedgerProblem, LedgerRebuildOptions,
-    LedgerRebuildReport, LedgerStatus, StorageRebuildReport,
-};
 pub use disk_insert::{DiskInsertReport, DiskProgress, FillOutcome, InsertOptions};
+pub use drain::{DrainOptions, DrainPlan, DrainRunLimits, DrainRunReport, DrainStatus};
 pub use imports::{
     CleanupFile, ImportCleanupReport, ImportOptions, ImportReport, ImportStatus, ImportVerify,
     MissingFile,
+};
+pub use ledger_recovery::{
+    LedgerDeviceStatus, LedgerHealth, LedgerHolding, LedgerProblem, LedgerRebuildOptions,
+    LedgerRebuildReport, LedgerStatus, StorageRebuildReport,
 };
 pub use manifest_upkeep::ManifestPolicy;
 pub use membership::{
@@ -102,6 +107,7 @@ pub use org_ops::{
     LogView, OrgApproved, OrgBrief, OrgCreated, OrgDevice, OrgRemoveReport, OrgSummary, OrgUser,
     UnlistedDevice,
 };
+pub use quotas::QuotaStatus;
 pub use repair::{
     Damage, DamageKind, RepairOptions, RepairReport, RepairStatus, RepairedCopy, Unrepairable,
 };
@@ -109,6 +115,11 @@ pub use restic_mirror::{CheckOptions, SetupReport};
 pub use scrub::ScrubOptions;
 pub use share_ops::{ShareMember, ShareMembers, ShareRevokeReport};
 pub use strongroom_ops::{CleanupReport, ConvertReport, StrongroomKeySummary};
+pub use trash::{
+    restored_name, RestoredFile, TrashItem, TrashPurgeReport, TrashRestorePlan, TrashRestoreReport,
+    TrashSettings, TrashStatus, TrashUpkeepReport, DEFAULT_TRASH_DAYS, MAX_TRASH_DAYS,
+    TRASH_UPKEEP_EVERY_SECS,
+};
 pub use where_data::{CopyStats, DataLocations, DeviceShare, FolderShare, StorageShare};
 
 #[derive(Clone, Debug, Serialize, Deserialize, Default, PartialEq, Eq)]
@@ -160,6 +171,10 @@ struct FolderState {
     /// the snapshot and named in it).
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     unreadable: BTreeSet<String>,
+    /// Vault paths written under another local name on this device (the
+    /// Windows mapping, a case collision): see `crate::names`.
+    #[serde(default, skip_serializing_if = "crate::names::LocalNames::is_empty")]
+    local_names: crate::names::LocalNames,
 }
 
 fn now_secs() -> i64 {
@@ -208,6 +223,11 @@ pub struct PushReport {
     /// attached or no room); the next push tries them again.
     #[serde(default)]
     pub storages_unavailable: Vec<String>,
+    /// Storages skipped because they are at their quota, one sentence
+    /// each ("storage X is at its quota (Y of Z)"); blocks that had no
+    /// other storage wait on this device for the next push.
+    #[serde(default)]
+    pub storages_full: Vec<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Default)]
@@ -227,6 +247,11 @@ pub struct PullReport {
     /// Pool disks that must be attached for unavailable files: "label (place)".
     #[serde(default)]
     pub disks_needed: Vec<String>,
+    /// Files written under another local name because this device's
+    /// filesystem already has a file whose name differs only in case:
+    /// "vault path -> local path".
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub renamed_locally: Vec<String>,
 }
 
 /// Blocks of a folder by where they are: on a storage (verified by another
@@ -507,6 +532,9 @@ pub struct Engine {
     /// The token of the restic hold this engine works under (its own run's
     /// completeness check), which the hold does not stop (`restic_mirror`).
     hold_exempt: Option<String>,
+    /// The filesystem rules to assume for every folder instead of probing
+    /// them (tests simulate Windows or a case-insensitive disk with it).
+    local_rules: Option<crate::names::LocalRules>,
 }
 
 /// What the peer-to-peer server serves from (see `Engine::set_snapshot_sink`).
@@ -626,6 +654,12 @@ impl Engine {
     /// vault key (hex) that other devices need to join. The vault key is shown
     /// once and never stored in clear text.
     pub fn init(home: &Path, device_name: &str, passphrase: &str) -> Result<(Engine, String)> {
+        crate::logged_op_plain!("init", device_name, {
+            Self::init_inner(home, device_name, passphrase)
+        })
+    }
+
+    fn init_inner(home: &Path, device_name: &str, passphrase: &str) -> Result<(Engine, String)> {
         ensure_no_vault(home)?;
         fs::create_dir_all(home)?;
         let keys = Keys {
@@ -642,6 +676,7 @@ impl Engine {
             member: false,
         };
         let vault_key_hex = keys.master.to_hex();
+        crate::logging::register_key(keys.master.as_bytes());
         let epochs = membership::VaultEpochs::genesis(&keys.master);
         Self::write_new(home, vault, keys, passphrase, epochs).map(|e| (e, vault_key_hex))
     }
@@ -667,6 +702,27 @@ impl Engine {
         storage: StorageSpec,
         secret: Option<String>,
     ) -> Result<Engine> {
+        crate::logged_op_plain!("join with secret", device_name, {
+            Self::join_with_secret_inner(
+                home,
+                device_name,
+                passphrase,
+                vault_key_hex,
+                storage,
+                secret,
+            )
+        })
+    }
+
+    fn join_with_secret_inner(
+        home: &Path,
+        device_name: &str,
+        passphrase: &str,
+        vault_key_hex: &str,
+        storage: StorageSpec,
+        secret: Option<String>,
+    ) -> Result<Engine> {
+        crate::logging::register_secret(vault_key_hex);
         Self::join_with_signer(
             home,
             device_name,
@@ -737,6 +793,17 @@ impl Engine {
     /// of its storages that this device can reach, then add the other
     /// reachable ones. Returns the engine and one note per storage.
     pub fn join_paired(
+        home: &Path,
+        device_name: &str,
+        passphrase: &str,
+        bundle: &crate::pair::Bundle,
+    ) -> Result<(Engine, Vec<String>)> {
+        crate::logged_op_plain!("join paired", device_name, {
+            Self::join_paired_inner(home, device_name, passphrase, bundle)
+        })
+    }
+
+    fn join_paired_inner(
         home: &Path,
         device_name: &str,
         passphrase: &str,
@@ -884,6 +951,7 @@ impl Engine {
             snapshot_sink: None,
             pack_caches: Default::default(),
             prefetched: HashMap::new(),
+            local_rules: None,
             fetch_stats: Default::default(),
             unlocked: BTreeMap::new(),
             home: home.to_path_buf(),
@@ -947,6 +1015,26 @@ impl Engine {
     /// bucket both users can reach); the secret goes into this device's
     /// encrypted secret store.
     pub fn accept_share_with_secret(
+        home: &Path,
+        device_name: &str,
+        passphrase: &str,
+        token: &ShareToken,
+        storage: StorageSpec,
+        secret: Option<String>,
+    ) -> Result<Engine> {
+        crate::logged_op_plain!("accept share with secret", device_name, {
+            Self::accept_share_with_secret_inner(
+                home,
+                device_name,
+                passphrase,
+                token,
+                storage,
+                secret,
+            )
+        })
+    }
+
+    fn accept_share_with_secret_inner(
         home: &Path,
         device_name: &str,
         passphrase: &str,
@@ -1026,6 +1114,10 @@ impl Engine {
     /// key (and the keys of later epochs); seal it to the recipient's request
     /// code with `ShareToken::seal` (see `share_ops::share_create_for`).
     pub fn share_create(&mut self, folder: &str) -> Result<ShareToken> {
+        crate::logged_op_plain!("share create", folder, { self.share_create_inner(folder) })
+    }
+
+    fn share_create_inner(&mut self, folder: &str) -> Result<ShareToken> {
         self.share_prepare(folder)
     }
 
@@ -1051,6 +1143,12 @@ impl Engine {
 
     /// Unlock an existing device directory.
     pub fn open(home: &Path, passphrase: &str) -> Result<Engine> {
+        crate::logged_op_plain!("open", home.display(), {
+            Self::open_inner(home, passphrase)
+        })
+    }
+
+    fn open_inner(home: &Path, passphrase: &str) -> Result<Engine> {
         let vault: LocalVault = util::read_json(&home.join("vault.json"))
             .with_context(|| format!("no vault in {}", home.display()))?;
         if vault.format_version != crate::FORMAT_VERSION {
@@ -1068,6 +1166,7 @@ impl Engine {
             snapshot_sink: None,
             pack_caches: Default::default(),
             prefetched: HashMap::new(),
+            local_rules: None,
             fetch_stats: Default::default(),
             unlocked: BTreeMap::new(),
             config: Config::load(home)?,
@@ -1214,6 +1313,12 @@ impl Engine {
     }
 
     fn open_spec(&self, spec: &StorageSpec) -> Result<Box<dyn Storage>> {
+        let kind = match spec {
+            StorageSpec::LocalDir { .. } => "local",
+            StorageSpec::S3 { .. } => "s3",
+            StorageSpec::Rclone { .. } => "rclone",
+            StorageSpec::Pool { .. } => "pool",
+        };
         let backend: Box<dyn Storage> = if let StorageSpec::Pool { .. } = spec {
             Box::new(self.open_pool(spec)?)
         } else {
@@ -1229,6 +1334,7 @@ impl Engine {
                 packing,
             ))
         };
+        let backend: Box<dyn Storage> = Box::new(crate::storage::LoggedStorage::new(backend, kind));
         Ok(match &self.storage_calls {
             Some(calls) => Box::new(crate::storage::CountingStorage::new(backend, calls.clone())),
             None => backend,
@@ -1327,6 +1433,16 @@ impl Engine {
         spec: StorageSpec,
         secret: Option<String>,
     ) -> Result<()> {
+        crate::logged_op_plain!("add storage with secret", spec.name().to_string(), {
+            self.add_storage_with_secret_inner(spec, secret)
+        })
+    }
+
+    fn add_storage_with_secret_inner(
+        &mut self,
+        spec: StorageSpec,
+        secret: Option<String>,
+    ) -> Result<()> {
         self.org_allows(|p| p.members_may_add_storages, "add storages")?;
         self.add_storage_internal(spec, secret)
     }
@@ -1412,11 +1528,14 @@ impl Engine {
         // Copies count on this device's other storages that are not
         // transferrers, and on replicas; claims on storages this device does
         // not know are not counted.
+        // Storages being drained are leaving too: they neither count nor
+        // receive copies.
+        let closed = self.closed_storages();
         let others: Vec<&StorageSpec> = self
             .config
             .storages
             .iter()
-            .filter(|s| s.name() != name && !s.is_carrier())
+            .filter(|s| s.name() != name && !s.is_carrier() && !closed.contains(s.name()))
             .collect();
         if others.is_empty() {
             plan.blocked = Some(format!(
@@ -1427,6 +1546,7 @@ impl Engine {
         let place_of: HashMap<&str, String> =
             others.iter().map(|s| (s.name(), s.place())).collect();
         let view = self.view()?;
+        let gate = self.quota_gate(&view);
         let mut targets_used = BTreeSet::new();
         // Backups count too: their blocks are on storages only.
         let records: Vec<FolderRecord> = self
@@ -1458,13 +1578,30 @@ impl Engine {
                     })
                     .unwrap_or_default()
             };
+            // Blocks of the folder's trash keep one copy (`trash`); the
+            // folder's copy rules are for its current files.
+            let trashed: HashSet<ChunkId> = if rec.is_backup() {
+                HashSet::new()
+            } else {
+                self.trash_chunks(&rec.folder_id)
+                    .into_iter()
+                    .map(|c| c.chunk)
+                    .filter(|c| !referenced.contains(c))
+                    .collect()
+            };
             for ((folder, chunk), cr) in &view.chunks {
                 if folder != &rec.folder_id || !cr.storages.contains_key(name) {
                     continue;
                 }
-                if !referenced.is_empty() && !referenced.contains(chunk) {
+                let trash_only = trashed.contains(chunk);
+                if !referenced.is_empty() && !referenced.contains(chunk) && !trash_only {
                     continue;
                 }
+                let (policy, required) = if trash_only {
+                    (crate::policy::Policy::default(), 1)
+                } else {
+                    (policy.clone(), required)
+                };
                 plan.blocks += 1;
                 let holders: Vec<&String> = cr
                     .storages
@@ -1476,7 +1613,9 @@ impl Engine {
                     .collect();
                 let mut targets: Vec<&str> = Vec::new();
                 let free = |targets: &Vec<&str>, s: &&StorageSpec| {
-                    !holders.iter().any(|h| h.as_str() == s.name()) && !targets.contains(&s.name())
+                    !holders.iter().any(|h| h.as_str() == s.name())
+                        && !targets.contains(&s.name())
+                        && gate.fits(s.name(), cr.size)
                 };
                 for (place, min) in &policy.min_per_place {
                     let have = holders
@@ -1522,6 +1661,7 @@ impl Engine {
                     plan.blocks_ok += 1;
                 }
                 for t in targets {
+                    gate.take(t, cr.size);
                     targets_used.insert(t.to_string());
                     plan.bytes_to_copy += cr.size;
                     plan.copies.push(PlannedCopy {
@@ -1542,6 +1682,16 @@ impl Engine {
     /// and drop it from this device. With `delete_data` everything Varsto
     /// wrote there is deleted afterwards.
     pub fn remove_storage(
+        &mut self,
+        name: &str,
+        delete_data: bool,
+    ) -> Result<StorageRemovalReport> {
+        crate::logged_op_plain!("remove storage", name, {
+            self.remove_storage_inner(name, delete_data)
+        })
+    }
+
+    fn remove_storage_inner(
         &mut self,
         name: &str,
         delete_data: bool,
@@ -1612,7 +1762,9 @@ impl Engine {
             self.commit_batch()?;
         }
         self.config.storages.retain(|s| s.name() != name);
+        self.config.storage_settings.remove(name);
         self.config.save(&self.home)?;
+        self.forget_drain_state(name);
         self.publish_registry()?;
         Ok(report)
     }
@@ -1631,15 +1783,21 @@ impl Engine {
     /// Storages that carry records, ledger batches, manifests and thumbnails:
     /// everything except data-only disk pools.
     fn metadata_storages(&self, include_cold: bool) -> Result<OpenStorages> {
+        // A drained storage holds nothing Varsto needs any more (`drain`).
+        let drained = self.drained_storages();
         Ok(self
             .open_storages(include_cold)?
             .into_iter()
-            .filter(|(s, _)| !s.is_data_only())
+            .filter(|(s, _)| !s.is_data_only() && !drained.contains(s.name()))
             .collect())
     }
 
     /// Create a folder in the vault and mount it at `path` on this device.
     pub fn add_folder(&mut self, name: &str, path: &Path) -> Result<FolderId> {
+        crate::logged_op_plain!("add folder", name, { self.add_folder_inner(name, path) })
+    }
+
+    fn add_folder_inner(&mut self, name: &str, path: &Path) -> Result<FolderId> {
         if self.vault.member {
             bail!("this device is a member of a shared folder only; it cannot create folders in the owner's vault");
         }
@@ -1684,6 +1842,17 @@ impl Engine {
 
     /// Mount a folder that another device created (known from its record).
     pub fn attach_folder(
+        &mut self,
+        name_or_id: &str,
+        path: &Path,
+        selective: bool,
+    ) -> Result<FolderId> {
+        crate::logged_op_plain!("attach folder", name_or_id, {
+            self.attach_folder_inner(name_or_id, path, selective)
+        })
+    }
+
+    fn attach_folder_inner(
         &mut self,
         name_or_id: &str,
         path: &Path,
@@ -1792,6 +1961,10 @@ impl Engine {
     /// the sync state goes, so attaching it again later starts clean instead
     /// of reading missing files as deletions.
     pub fn detach_folder(&mut self, name: &str) -> Result<()> {
+        crate::logged_op_plain!("detach folder", name, { self.detach_folder_inner(name) })
+    }
+
+    fn detach_folder_inner(&mut self, name: &str) -> Result<()> {
         let (rec, _) = self.resolve_folder(name)?;
         self.detach_mount(&rec.folder_id)
     }
@@ -1829,6 +2002,12 @@ impl Engine {
     /// With `purge` its encrypted data (blocks, manifests, thumbnails) is
     /// deleted from this device's storages. Returns the objects deleted.
     pub fn remove_folder(&mut self, name: &str, purge: bool) -> Result<u64> {
+        crate::logged_op!("remove folder", name, {
+            self.remove_folder_inner(name, purge)
+        })
+    }
+
+    fn remove_folder_inner(&mut self, name: &str, purge: bool) -> Result<u64> {
         if self.vault.member {
             bail!("a member device cannot remove the owner's folders");
         }
@@ -1881,6 +2060,7 @@ impl Engine {
                     format!("thumbs/{}/", rec.folder_id),
                     format!("vault/access/{}/", rec.folder_id),
                     notes::folder_prefix(&rec.folder_id),
+                    trash::record_prefix(&rec.folder_id),
                     crate::snapshot::Snapshot::backup_prefix(&rec.folder_id),
                 ] {
                     for key in backend.list(&prefix)? {
@@ -1891,6 +2071,9 @@ impl Engine {
             }
         }
         self.forget_folder(&rec.folder_id, removal.removed_utc)?;
+        if purge {
+            self.forget_trash(&rec.folder_id);
+        }
         Ok(deleted)
     }
 
@@ -1921,6 +2104,12 @@ impl Engine {
 
     /// Switch selective sync on or off for an attached folder.
     pub fn set_selective(&mut self, name_or_id: &str, selective: bool) -> Result<()> {
+        crate::logged_op_plain!("set selective", name_or_id, {
+            self.set_selective_inner(name_or_id, selective)
+        })
+    }
+
+    fn set_selective_inner(&mut self, name_or_id: &str, selective: bool) -> Result<()> {
         let (rec, _) = self.resolve_for_write(name_or_id)?;
         for m in self
             .config
@@ -1952,6 +2141,12 @@ impl Engine {
     /// on the next sync. Switching back is refused once the folder has
     /// files: detach it and attach it again with plain files instead.
     pub fn set_encrypted_here(&mut self, name_or_id: &str, encrypted: bool) -> Result<()> {
+        crate::logged_op_plain!("set encrypted here", name_or_id, {
+            self.set_encrypted_here_inner(name_or_id, encrypted)
+        })
+    }
+
+    fn set_encrypted_here_inner(&mut self, name_or_id: &str, encrypted: bool) -> Result<()> {
         let (rec, _) = self.resolve_folder(name_or_id)?;
         if !encrypted
             && self.mount_is_encrypted(&rec.folder_id)
@@ -1981,6 +2176,10 @@ impl Engine {
     /// storages hold the content. Returns (freed, kept): files not yet stored
     /// elsewhere are kept.
     pub fn free_folder(&mut self, folder: &str) -> Result<(u64, u64)> {
+        crate::logged_op!("free folder", folder, { self.free_folder_inner(folder) })
+    }
+
+    fn free_folder_inner(&mut self, folder: &str) -> Result<(u64, u64)> {
         let (rec, root) = self.resolve_for_write(folder)?;
         let state = self.load_state(&rec.folder_id)?;
         if self.mount_is_encrypted(&rec.folder_id) {
@@ -1991,7 +2190,7 @@ impl Engine {
         let paths: Vec<String> = state
             .files
             .values()
-            .filter(|f| !f.deleted && root.join(&f.path).exists())
+            .filter(|f| !f.deleted && self.disk_of(&root, &state, &f.path).exists())
             .map(|f| f.path.clone())
             .collect();
         let (mut freed, mut kept) = (0u64, 0u64);
@@ -2029,7 +2228,11 @@ impl Engine {
                 .cloned()
                 .collect();
             for f in files {
-                let disk = m.path.join(&f.path);
+                let disk = state.local_names.disk(
+                    &m.path,
+                    crate::names::LocalRules::detect(&m.path),
+                    &f.path,
+                );
                 let Ok(md) = fs::metadata(&disk) else {
                     continue;
                 };
@@ -2345,6 +2548,8 @@ impl Engine {
         changed_folders |= folders;
         // Placement records: newest per folder wins, as for policies.
         changed_folders |= self.pull_placement_records()?;
+        // Quotas and drains of the storages (`quotas`): newest per storage wins.
+        self.pull_storage_settings()?;
         // Strongroom conversions and key lists (S-012).
         self.pull_strongroom_records()?;
         changed_devices |= self.pull_device_details().unwrap_or(false);
@@ -2395,6 +2600,7 @@ impl Engine {
         }
         let lamport = self.tick()?;
         let events = std::mem::take(&mut self.pending);
+        let n_events = events.len();
         if !self.vault.member {
             let (key_id, ledger_key) = self.ledger_key_now();
             let signed = self.ledger.append_own_seen(
@@ -2406,9 +2612,12 @@ impl Engine {
                 &key_id,
                 &self.keys.signer,
             )?;
+            log::debug!(seq = signed.seq, events = n_events, lamport = lamport, key_id = key_id.as_str(); "ledger batch sealed");
             // The events are in a local batch now.
             self.clear_deferred();
+            let t = crate::logging::Timer::start();
             self.push_own_batches()?;
+            log::debug!(seq = signed.seq, ms = t.ms(); "ledger batches pushed");
             return Ok(Some(signed.seq));
         }
         // A member has no vault ledger key: seal one batch per shared folder
@@ -2453,6 +2662,7 @@ impl Engine {
                 &key_id,
                 &self.keys.signer,
             )?;
+            log::debug!(seq = signed.seq, folder:% = fid, lamport = lamport; "ledger batch sealed for a shared folder");
             last = Some(signed.seq);
         }
         self.clear_deferred();
@@ -2506,6 +2716,7 @@ impl Engine {
         let mut scanned = 0u64;
         let mut changed = 0u64;
         let mut new_index = BTreeMap::new();
+        let rules = self.local_rules(root);
         // A backup takes what it can read; the rest is named in its snapshot.
         let backup = rec.is_backup();
         state.unreadable.clear();
@@ -2524,6 +2735,7 @@ impl Engine {
                         .and_then(|p| p.strip_prefix(root).ok())
                         .and_then(util::manifest_path)
                     {
+                        let p = state.local_names.vault_of(rules, &p);
                         state.unreadable.insert(p);
                     }
                     continue;
@@ -2534,13 +2746,15 @@ impl Engine {
                 continue;
             }
             let rel = entry.path().strip_prefix(root)?;
-            let Some(path) = util::manifest_path(rel) else {
+            let Some(local) = util::manifest_path(rel) else {
                 continue;
             };
-            if let Some(real) = path.strip_suffix(PLACEHOLDER_SUFFIX) {
-                placeholders.insert(real.to_string());
+            // Local names map back to vault paths (`crate::names`).
+            if let Some(real) = local.strip_suffix(PLACEHOLDER_SUFFIX) {
+                placeholders.insert(state.local_names.vault_of(rules, real));
                 continue;
             }
+            let path = state.local_names.vault_of(rules, &local);
             let md = entry.metadata()?;
             let size = md.len();
             let mtime = md
@@ -2678,7 +2892,9 @@ impl Engine {
             .filter(|(p, f)| !f.deleted && !seen.contains(*p) && !placeholders.contains(*p))
             .map(|(p, _)| p.clone())
             .collect();
+        let mut trashed: Vec<(FileState, u64)> = Vec::new();
         for path in gone {
+            state.local_names.forget(rules, &path);
             let clock = self.tick()?;
             let prev = state.files.get(&path).cloned().unwrap();
             let mut version = prev.version.clone();
@@ -2697,15 +2913,22 @@ impl Engine {
                     modified_clock: clock,
                 },
             );
+            trashed.push((prev, clock));
             changed += 1;
         }
         state.local_index = new_index;
+        // The deleted versions go to the trash (`trash`).
+        self.trash_record_deletions(rec, state, trashed)?;
         Ok((scanned, changed))
     }
 
     // ----- push ---------------------------------------------------------------
 
     pub fn push(&mut self, folder: &str) -> Result<PushReport> {
+        crate::logged_op!("push", folder, { self.push_inner(folder) })
+    }
+
+    fn push_inner(&mut self, folder: &str) -> Result<PushReport> {
         self.ensure_active()?;
         self.ensure_ledger_writable()?;
         if self.forked_self {
@@ -2742,9 +2965,7 @@ impl Engine {
             self.save_state(&rec.folder_id, &state)?;
             self.refresh_snapshot();
             self.notify_peers_changed();
-            if std::env::var_os("VARSTO_P2P_DEBUG").is_some() {
-                eprintln!("push {}: file list published before the upload", rec.name);
-            }
+            log::debug!("push {}: file list published before the upload", rec.name);
         }
         self.upload_missing(&rec, &root, &state, &mut report)?;
         report.thumbnails = self.make_thumbnails(&rec, &root, &mut state)?;
@@ -2752,6 +2973,9 @@ impl Engine {
             report.manifest_seq = Some(seq);
         }
         self.ensure_manifest_everywhere(&rec, &state)?;
+        // Deletions found by this scan, restores and purges reach the
+        // other devices' trash.
+        self.trash_publish(&rec, util::now_utc())?;
         report.batch_seq = self.commit_batch()?;
         self.save_state(&rec.folder_id, &state)?;
         Ok(report)
@@ -2778,6 +3002,9 @@ impl Engine {
         let me = self.vault.device_id.clone();
         let carrier_need = self.carrier_destinations(&view, &folder_id);
         let targets = self.write_targets(rec);
+        // Storages with a quota take what fits; the rest goes to the other
+        // storages, or waits here for the next push.
+        let gate = self.quota_gate(&view);
         // A backup goes to its storages only (never a transferrer), and
         // blocks dropped by an expiry are written again when a new snapshot
         // uses them.
@@ -2976,6 +3203,13 @@ impl Engine {
                         let Some(ct) = self.cached_object(&expected.object) else {
                             continue;
                         };
+                        let targets: Vec<String> = targets
+                            .into_iter()
+                            .filter(|t| gate.take(t, ct.len() as u64))
+                            .collect();
+                        if targets.is_empty() {
+                            continue;
+                        }
                         let job = UploadJob {
                             targets,
                             chunk: expected.chunk.clone(),
@@ -2988,7 +3222,7 @@ impl Engine {
                     }
                     continue;
                 }
-                let disk = root.join(&file.path);
+                let disk = self.disk_of(root, state, &file.path);
                 let Ok(handle) = fs::File::open(&disk) else {
                     continue;
                 };
@@ -3021,6 +3255,13 @@ impl Engine {
                         &crate::pack::pack(&chunk),
                     )?;
                     let object = ObjectName::from_bytes(&crypto::hash(&ct));
+                    let targets: Vec<String> = targets
+                        .into_iter()
+                        .filter(|t| gate.take(t, ct.len() as u64))
+                        .collect();
+                    if targets.is_empty() {
+                        continue;
+                    }
                     let job = UploadJob {
                         targets,
                         chunk: chunk_id,
@@ -3040,6 +3281,11 @@ impl Engine {
             }
             Ok(())
         })?;
+        for msg in gate.refusals() {
+            if !report.storages_full.contains(&msg) {
+                report.storages_full.push(msg);
+            }
+        }
         if let Some(e) = first_error {
             return Err(e);
         }
@@ -3115,7 +3361,7 @@ impl Engine {
                 }
                 self.thumbnail_from_cache(&fk, state, &path)
             } else {
-                let disk = root.join(&path);
+                let disk = self.disk_of(root, state, &path);
                 if !disk.exists() {
                     continue;
                 }
@@ -3154,7 +3400,7 @@ impl Engine {
                     && !f.content_hash.is_empty()
                     && !state.thumbs_done.contains(&f.content_hash)
             }) {
-                let disk = root.join(&f.path);
+                let disk = self.disk_of(&root, &state, &f.path);
                 if disk.is_file() {
                     out.push((rec.name.clone(), f.path.clone(), disk));
                     if out.len() >= limit {
@@ -3294,6 +3540,14 @@ impl Engine {
         for (_, backend) in self.metadata_storages(true)? {
             backend.put_if_absent(&key, &blob)?;
         }
+        log::debug!(
+            folder = rec.name.as_str(),
+            seq = seq,
+            files = state.files.values().filter(|f| !f.deleted).count(),
+            deleted = state.files.values().filter(|f| f.deleted).count(),
+            bytes = blob.len();
+            "manifest published"
+        );
         self.pending.push(Event::ManifestPublished {
             folder: rec.folder_id.clone(),
             seq,
@@ -3308,6 +3562,10 @@ impl Engine {
     // ----- pull ---------------------------------------------------------------
 
     pub fn pull(&mut self, folder: &str) -> Result<PullReport> {
+        crate::logged_op!("pull", folder, { self.pull_inner(folder) })
+    }
+
+    fn pull_inner(&mut self, folder: &str) -> Result<PullReport> {
         self.ensure_active()?;
         let (rec, root) = self.resolve_for_write(folder)?;
         let mut state = self.load_state(&rec.folder_id)?;
@@ -3423,12 +3681,18 @@ impl Engine {
                                 .get(path)
                                 .map(|l| l.content_hash == loser.content_hash)
                                 .unwrap_or(false);
-                            let disk = root.join(&cpath);
+                            let disk = self.place(
+                                &root,
+                                &mut state,
+                                &cpath,
+                                Some(&mut report.renamed_locally),
+                            )?;
                             if let Some(parent) = disk.parent() {
                                 fs::create_dir_all(parent)?;
                             }
-                            if local_is_loser && root.join(path).exists() {
-                                fs::rename(root.join(path), &disk)?;
+                            let local = self.disk_of(&root, &state, path);
+                            if local_is_loser && local.exists() {
+                                fs::rename(&local, &disk)?;
                             } else {
                                 self.download_to(&rec, &fk, &disk, &loser, &storages, &mut report)?;
                             }
@@ -3467,7 +3731,7 @@ impl Engine {
                                 || if encrypted_here {
                                     state.local_index.contains_key(path)
                                 } else {
-                                    root.join(path).exists()
+                                    self.disk_of(&root, &state, path).exists()
                                 });
                         if local_has_winner {
                             state.files.insert(path.clone(), winner);
@@ -3639,13 +3903,22 @@ impl Engine {
         }
         // Manifests are validated when opened; this is the last line of
         // defence before a path from another device touches the disk.
-        let disk = util::safe_join(root, &remote.path)?;
+        util::check_rel_path(&remote.path)?;
+        let rules = self.local_rules(root);
         if remote.deleted {
+            let local = state
+                .local_names
+                .local_rel(rules, &remote.path)
+                .into_owned();
+            let disk = util::safe_join(root, &local)?;
             let _ = fs::remove_file(placeholder_path(&disk));
             if disk.exists() {
+                // The trash is in Varsto's home, named like the file.
+                let trash_root = self.home.join("trash").join(rec.folder_id.as_str());
+                let trash_name = format!("{}.{}", remote.path, util::now_utc());
                 let trash = util::safe_join(
-                    &self.home.join("trash").join(rec.folder_id.as_str()),
-                    &format!("{}.{}", remote.path, util::now_utc()),
+                    &trash_root,
+                    &self.local_rules(&trash_root).default_local(&trash_name),
                 )?;
                 if let Some(p) = trash.parent() {
                     fs::create_dir_all(p)?;
@@ -3657,11 +3930,13 @@ impl Engine {
                 })?;
                 report.files_deleted += 1;
             }
+            state.local_names.forget(rules, &remote.path);
             state.local_index.remove(&remote.path);
             state.pending_remote.remove(&remote.path);
             state.files.insert(remote.path.clone(), remote);
             return Ok(());
         }
+        let disk = self.place(root, state, &remote.path, Some(&mut report.renamed_locally))?;
         let selective = self.mount_is_selective(&rec.folder_id);
         if selective && !state.pinned.contains(&remote.path) && !disk.exists() {
             // Selective sync: show the file as a placeholder; fetch on demand.
@@ -3974,7 +4249,7 @@ impl Engine {
             .files
             .values()
             .filter(|f| {
-                let disk = root.join(&f.path);
+                let disk = self.disk_of(&root, &state, &f.path);
                 !f.deleted && !disk.exists() && placeholder_path(&disk).exists()
             })
             .map(|f| f.path.clone())
@@ -3991,6 +4266,12 @@ impl Engine {
 
     /// Download a placeholder file of a selective folder and keep it here.
     pub fn fetch_file(&mut self, folder: &str, path: &str) -> Result<PullReport> {
+        crate::logged_op!("fetch file", format!("{folder}/{path}"), {
+            self.fetch_file_inner(folder, path)
+        })
+    }
+
+    fn fetch_file_inner(&mut self, folder: &str, path: &str) -> Result<PullReport> {
         let (rec, root) = self.resolve_for_write(folder)?;
         if self.mount_is_encrypted(&rec.folder_id) {
             return self.fetch_cached(&rec, path);
@@ -4019,7 +4300,7 @@ impl Engine {
             folder: rec.name.clone(),
             ..Default::default()
         };
-        let disk = root.join(path);
+        let disk = self.place(&root, &mut state, path, Some(&mut report.renamed_locally))?;
         self.download_to(&rec, &fk, &disk, &file, &storages, &mut report)?;
         state.accessed.insert(path.to_string(), now_secs());
         let _ = fs::remove_file(placeholder_path(&disk));
@@ -4071,7 +4352,15 @@ impl Engine {
                 if rel.is_empty() {
                     bail!("{} is the folder itself", abs.display());
                 }
-                return Ok((rec.folder_id.to_string(), rel.join("/")));
+                // The local name maps back to the vault path.
+                let local = rel.join("/");
+                let path = match self.load_state(&rec.folder_id) {
+                    Ok(state) => state
+                        .local_names
+                        .vault_of_local(self.local_rules(&root), &local),
+                    Err(_) => local,
+                };
+                return Ok((rec.folder_id.to_string(), path));
             }
         }
         bail!("{} is not in a Varsto folder on this device", abs.display())
@@ -4081,6 +4370,12 @@ impl Engine {
     /// unless every chunk is on at least one storage that is not a carrier,
     /// and unless the file on disk is the version that was synced.
     pub fn free_file(&mut self, folder: &str, path: &str) -> Result<()> {
+        crate::logged_op_plain!("free file", format!("{folder}/{path}"), {
+            self.free_file_inner(folder, path)
+        })
+    }
+
+    fn free_file_inner(&mut self, folder: &str, path: &str) -> Result<()> {
         let (rec, root) = self.resolve_for_write(folder)?;
         if self.mount_is_encrypted(&rec.folder_id) {
             // Its cached blocks go, except those other cached files use.
@@ -4116,7 +4411,7 @@ impl Engine {
                 bail!("{path} is not fully stored elsewhere yet; sync first");
             }
         }
-        let disk = root.join(path);
+        let disk = self.disk_of(&root, &state, path);
         if disk.exists() {
             // Only the synced version may go: a file changed since the last
             // sync (or never indexed here) holds the only copy of its changes.
@@ -4150,6 +4445,12 @@ impl Engine {
     /// Set (or clear) the durability policy of a folder and publish it so
     /// every device evaluates the same rule.
     pub fn set_policy(&mut self, folder: &str, policy: Option<Policy>) -> Result<()> {
+        crate::logged_op_plain!("set policy", folder, {
+            self.set_policy_inner(folder, policy)
+        })
+    }
+
+    fn set_policy_inner(&mut self, folder: &str, policy: Option<Policy>) -> Result<()> {
         if self.vault.member {
             bail!("a member device cannot set policies on the owner's folders");
         }
@@ -4200,6 +4501,12 @@ impl Engine {
     }
 
     pub fn policy_check_at(&self, now_utc: i64) -> Result<Vec<PolicyReport>> {
+        crate::logged_op!("policy check at", "", {
+            self.policy_check_at_inner(now_utc)
+        })
+    }
+
+    fn policy_check_at_inner(&self, now_utc: i64) -> Result<Vec<PolicyReport>> {
         let view = self.view()?;
         let mut ctx = self.policy_ctx();
         let mut reports = Vec::new();
@@ -4228,6 +4535,16 @@ impl Engine {
             );
             self.disk_group_findings(&rec, &state, &view, &ctx.pools, &mut report);
             reports.push(report);
+        }
+        // Why a policy may not be met: a storage at its quota or leaving.
+        let notes = self.storage_notes(&view);
+        for r in reports.iter_mut().filter(|r| {
+            matches!(
+                r.state,
+                crate::policy::PolicyState::AtRisk | crate::policy::PolicyState::Violated
+            )
+        }) {
+            r.reasons.extend(notes.iter().cloned());
         }
         Ok(reports)
     }
@@ -4350,6 +4667,19 @@ impl Engine {
         key: &dyn crate::strongroom::SecurityKey,
         unlock_minutes: u64,
     ) -> Result<FolderId> {
+        crate::logged_op_plain!("create strongroom", name, {
+            self.create_strongroom_inner(name, path, method, key, unlock_minutes)
+        })
+    }
+
+    fn create_strongroom_inner(
+        &mut self,
+        name: &str,
+        path: &Path,
+        method: crate::strongroom::Method,
+        key: &dyn crate::strongroom::SecurityKey,
+        unlock_minutes: u64,
+    ) -> Result<FolderId> {
         if self.vault.member {
             bail!("a member device cannot create folders in the owner's vault");
         }
@@ -4432,6 +4762,17 @@ impl Engine {
         key_hex: &str,
         minutes: u64,
     ) -> Result<()> {
+        crate::logged_op_plain!("unlock strongroom with key", folder, {
+            self.unlock_strongroom_with_key_inner(folder, key_hex, minutes)
+        })
+    }
+
+    fn unlock_strongroom_with_key_inner(
+        &mut self,
+        folder: &str,
+        key_hex: &str,
+        minutes: u64,
+    ) -> Result<()> {
         let rec = self
             .keyring
             .find(folder)
@@ -4451,6 +4792,12 @@ impl Engine {
     }
 
     pub fn lock_strongroom(&mut self, folder: &str) -> Result<()> {
+        crate::logged_op_plain!("lock strongroom", folder, {
+            self.lock_strongroom_inner(folder)
+        })
+    }
+
+    fn lock_strongroom_inner(&mut self, folder: &str) -> Result<()> {
         let rec = self
             .keyring
             .find(folder)
@@ -4509,6 +4856,10 @@ impl Engine {
     /// open. Keys stay as they are; nothing is written. True when what this
     /// device syncs (folders, where they are, storages) is now different.
     pub fn reload_local(&mut self) -> Result<bool> {
+        crate::logged_op!("reload local", "", { self.reload_local_inner() })
+    }
+
+    fn reload_local_inner(&mut self) -> Result<bool> {
         let signature = |e: &Engine| -> String {
             let folders: Vec<_> = e
                 .folders()
@@ -4585,7 +4936,7 @@ impl Engine {
             let state = self.load_state(&rec.folder_id)?;
             let plain_here = !self.mount_is_encrypted(&rec.folder_id);
             for f in state.files.values().filter(|f| plain_here && !f.deleted) {
-                let disk = root.join(&f.path);
+                let disk = self.disk_of(&root, &state, &f.path);
                 if !disk.is_file() {
                     continue;
                 }
@@ -4791,13 +5142,29 @@ impl Engine {
         reader: impl std::io::Read,
         size: Option<u64>,
     ) -> Result<PushReport> {
+        crate::logged_op_plain!("write from reader sized", format!("{folder}/{path}"), {
+            self.write_from_reader_sized_inner(folder, path, reader, size)
+        })
+    }
+
+    fn write_from_reader_sized_inner(
+        &mut self,
+        folder: &str,
+        path: &str,
+        reader: impl std::io::Read,
+        size: Option<u64>,
+    ) -> Result<PushReport> {
         block_cache::check_rel_path(path)?;
         if let Some(writer) = self.block_writer(folder)? {
             let staged = writer.write_sized(reader, size)?;
             return self.commit_staged(folder, path, staged);
         }
-        let (_, root) = self.resolve_for_write(folder)?;
-        let disk = root.join(path);
+        let (rec, root) = self.resolve_for_write(folder)?;
+        // The file's local name (mapped where this filesystem needs it) is
+        // recorded before the scan of the push finds it.
+        let mut state = self.load_state(&rec.folder_id)?;
+        let disk = self.place(&root, &mut state, path, None)?;
+        self.save_state(&rec.folder_id, &state)?;
         if placeholder_path(&disk).exists() {
             bail!("{path} is a placeholder here; fetch it before overwriting");
         }
@@ -4830,12 +5197,9 @@ impl Engine {
     /// A path no file of the folder uses, on this device or any other.
     fn ensure_path_free(&self, folder: &str, path: &str) -> Result<()> {
         let (rec, root) = self.resolve_folder(folder)?;
-        let disk = root.join(path);
-        let known = self
-            .load_state(&rec.folder_id)?
-            .files
-            .get(path)
-            .is_some_and(|f| !f.deleted);
+        let state = self.load_state(&rec.folder_id)?;
+        let disk = self.disk_of(&root, &state, path);
+        let known = state.files.get(path).is_some_and(|f| !f.deleted);
         if known || disk.exists() || placeholder_path(&disk).exists() {
             bail!("{path} already exists; files are never replaced, choose another name");
         }
@@ -4845,12 +5209,19 @@ impl Engine {
     /// Create a directory inside a folder. Folder lists name files only; in a
     /// folder kept encrypted here a directory exists once a file is in it.
     pub fn mkdir(&mut self, folder: &str, path: &str) -> Result<()> {
+        crate::logged_op_plain!("mkdir", format!("{folder}/{path}"), {
+            self.mkdir_inner(folder, path)
+        })
+    }
+
+    fn mkdir_inner(&mut self, folder: &str, path: &str) -> Result<()> {
         let (rec, root) = self.resolve_for_write(folder)?;
         block_cache::check_rel_path(path)?;
         if self.mount_is_encrypted(&rec.folder_id) {
             return Ok(());
         }
-        fs::create_dir_all(root.join(path))?;
+        let local = self.local_rules(&root).default_local(path).into_owned();
+        fs::create_dir_all(util::safe_join(&root, &local)?)?;
         Ok(())
     }
 
@@ -4868,6 +5239,12 @@ impl Engine {
     /// Contents of a file, fetching it first if it is a placeholder. Counts
     /// as an access.
     pub fn read_file(&mut self, folder: &str, path: &str) -> Result<Vec<u8>> {
+        crate::logged_op_plain!("read file", format!("{folder}/{path}"), {
+            self.read_file_inner(folder, path)
+        })
+    }
+
+    fn read_file_inner(&mut self, folder: &str, path: &str) -> Result<Vec<u8>> {
         let (rec, root) = self.resolve_folder(folder)?;
         if self.mount_is_encrypted(&rec.folder_id) {
             // Decrypted in memory, from the block cache where it can.
@@ -4877,10 +5254,11 @@ impl Engine {
             return Ok(bytes);
         }
         block_cache::check_rel_path(path)?;
-        if !self.load_state(&rec.folder_id)?.files.contains_key(path) {
+        let state = self.load_state(&rec.folder_id)?;
+        if !state.files.contains_key(path) {
             bail!("unknown file {path} in {folder}");
         }
-        let disk = root.join(path);
+        let disk = self.disk_of(&root, &state, path);
         if !disk.exists() {
             self.fetch_file(folder, path)?;
         }
@@ -4892,6 +5270,12 @@ impl Engine {
     /// Rename or move a file inside a folder (both paths relative to the
     /// folder root), then push so other devices see the move.
     pub fn move_file(&mut self, folder: &str, from: &str, to: &str) -> Result<PushReport> {
+        crate::logged_op!("move file", format!("{folder}/{from} -> {to}"), {
+            self.move_file_inner(folder, from, to)
+        })
+    }
+
+    fn move_file_inner(&mut self, folder: &str, from: &str, to: &str) -> Result<PushReport> {
         let report = self.move_file_only(folder, from, to)?;
         // The file's analysis goes along (`notes`).
         let rec = self.resolve_folder(folder)?.0;
@@ -4902,12 +5286,7 @@ impl Engine {
     fn move_file_only(&mut self, folder: &str, from: &str, to: &str) -> Result<PushReport> {
         let (_, root) = self.resolve_for_write(folder)?;
         for p in [from, to] {
-            if p.is_empty()
-                || Path::new(p).is_absolute()
-                || p.split('/').any(|c| c == ".." || c.is_empty())
-            {
-                bail!("path must be relative to the folder and must not contain '..': {p}");
-            }
+            util::check_rel_path(p)?;
         }
         // Moving never replaces a file, also not one only another device has.
         self.ensure_path_free(folder, to)?;
@@ -4915,8 +5294,13 @@ impl Engine {
         if self.mount_is_encrypted(&rec.folder_id) {
             return self.move_cached(&rec, folder, from, to);
         }
-        let src = root.join(from);
-        let dst = root.join(to);
+        // Where the file is, and where its new name goes on this disk; the
+        // new local name is recorded before the push's scan finds it.
+        let mut state = self.load_state(&rec.folder_id)?;
+        let src = self.disk_of(&root, &state, from);
+        // (The old name's record goes when the push's scan finds it gone.)
+        let dst = self.place(&root, &mut state, to, None)?;
+        self.save_state(&rec.folder_id, &state)?;
         if !src.exists() {
             // A placeholder can be moved as well.
             let ph = placeholder_path(&src);
@@ -4952,7 +5336,7 @@ impl Engine {
         let analyses = self.analyses_for_listing(&rec.folder_id, &state);
         let mut out = Vec::new();
         for f in state.files.values().filter(|f| !f.deleted) {
-            let disk = root.join(&f.path);
+            let disk = self.disk_of(&root, &state, &f.path);
             let state_str = if encrypted_here {
                 // Blocks in the cache, or not (yet) on this device.
                 if state.local_index.contains_key(&f.path) {
@@ -5004,6 +5388,12 @@ impl Engine {
 
     /// pull then push, for every attached folder (or one).
     pub fn sync(&mut self, folder: Option<&str>) -> Result<Vec<(PullReport, PushReport)>> {
+        crate::logged_op!("sync", folder.unwrap_or("all folders"), {
+            self.sync_inner(folder)
+        })
+    }
+
+    fn sync_inner(&mut self, folder: Option<&str>) -> Result<Vec<(PullReport, PushReport)>> {
         // Every folder's pull and push record into one ledger batch, and the
         // ledger is pulled once.
         let (mut out, seq) = self.one_batch_seq(|e| e.sync_folders(folder))?;
@@ -5021,6 +5411,8 @@ impl Engine {
         // No claims at all while manifests name blocks: the ledger is gone
         // everywhere (checked at most hourly, and only without claims).
         let _ = self.ledger_lost_everywhere(false);
+        // The other devices' trash records, when due (`trash`).
+        let _ = self.trash_refresh(false);
         Ok(out)
     }
 
@@ -5154,7 +5546,7 @@ impl Engine {
                                 && if encrypted_here {
                                     !state.local_index.contains_key(&f.path)
                                 } else {
-                                    placeholder_path(&m.join(&f.path)).exists()
+                                    placeholder_path(&self.disk_of(m, &state, &f.path)).exists()
                                 }
                         })
                         .count() as u64
@@ -5258,6 +5650,12 @@ impl Engine {
     /// download and hash every referenced object). What is missing or
     /// corrupt is queued for automatic repair (`engine::repair`).
     pub fn fsck(&mut self, verify_content: bool) -> Result<FsckReport> {
+        crate::logged_op!("fsck", if verify_content { "with content" } else { "" }, {
+            self.fsck_inner(verify_content)
+        })
+    }
+
+    fn fsck_inner(&mut self, verify_content: bool) -> Result<FsckReport> {
         let (mut report, found) = self.fsck_scan(verify_content)?;
         let mut damage = Vec::new();
         repair::merge_damage(&mut damage, found);
@@ -5310,7 +5708,8 @@ impl Engine {
                 backend.list("chunks/")?.into_iter().collect(),
             );
         }
-        // Referenced chunks from every attached folder's current files.
+        // Referenced chunks from every attached folder's current files and
+        // its trash.
         let mut referenced: BTreeMap<(FolderId, ChunkId), ObjectName> = BTreeMap::new();
         for (rec, _) in self.folders() {
             let state = self.load_state(&rec.folder_id)?;
@@ -5319,7 +5718,18 @@ impl Engine {
                     referenced.insert((rec.folder_id.clone(), c.chunk.clone()), c.object.clone());
                 }
             }
+            for c in self.trash_chunks(&rec.folder_id) {
+                referenced.insert((rec.folder_id.clone(), c.chunk), c.object);
+            }
         }
+        // Storages not listed (cold ones): a claim there counts as a copy.
+        let unlisted: BTreeSet<&str> = self
+            .config
+            .storages
+            .iter()
+            .filter(|s| s.is_cold())
+            .map(|s| s.name())
+            .collect();
         // Blocks of backup snapshots this device has read or written.
         let backups: Vec<FolderId> = self
             .keyring
@@ -5338,7 +5748,13 @@ impl Engine {
         for ((folder, chunk), object) in &referenced {
             let key = chunk_storage_key(object);
             referenced_objects.insert(key.clone());
-            let present_somewhere = listings.values().any(|l| l.contains(&key));
+            let present_somewhere = listings.values().any(|l| l.contains(&key))
+                || view.locate(folder, chunk).is_some_and(|r| {
+                    r.object == *object
+                        && r.storages
+                            .iter()
+                            .any(|(n, l)| unlisted.contains(n.as_str()) && !l.claimed_by.is_empty())
+                });
             if present_somewhere {
                 report.chunks_with_storage_copy += 1;
             } else {
@@ -5612,6 +6028,10 @@ impl Engine {
     /// Reattach routine: verify the marker and the objects (sizes; hashes with
     /// `full`), apply queued deletions, then fill the disk with new objects.
     pub fn disk_check(&mut self, label: &str, full: bool) -> Result<DiskCheckReport> {
+        crate::logged_op!("disk check", label, { self.disk_check_inner(label, full) })
+    }
+
+    fn disk_check_inner(&mut self, label: &str, full: bool) -> Result<DiskCheckReport> {
         let (spec, pool, disk) = self.find_disk(label)?;
         let mount = pool
             .mount_of(&disk.id)
@@ -5679,6 +6099,10 @@ impl Engine {
     /// Write the disk's index and sync it; the disk is then safe to remove
     /// (the program never unmounts). Returns the mount path.
     pub fn disk_eject(&mut self, label: &str) -> Result<PathBuf> {
+        crate::logged_op!("disk eject", label, { self.disk_eject_inner(label) })
+    }
+
+    fn disk_eject_inner(&mut self, label: &str) -> Result<PathBuf> {
         let (spec, pool, disk) = self.find_disk(label)?;
         let mount = pool
             .eject(&disk.id)
@@ -5692,6 +6116,10 @@ impl Engine {
     /// Mark a disk retired: nothing new is written to it. Returns the number
     /// of objects that exist on this disk and on no other storage.
     pub fn disk_retire(&mut self, label: &str) -> Result<u64> {
+        crate::logged_op!("disk retire", label, { self.disk_retire_inner(label) })
+    }
+
+    fn disk_retire_inner(&mut self, label: &str) -> Result<u64> {
         let (spec, pool, disk) = self.find_disk(label)?;
         pool.set_retired(&disk.id, true)?;
         let view = self.view()?;

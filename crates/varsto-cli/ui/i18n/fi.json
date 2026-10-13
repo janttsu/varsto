@@ -697,6 +697,99 @@
   "Copying blocks from disk «{s}»": "Kopioi lohkoja levyltä «{s}»",
   "Writing files fetched from disk «{s}»": "Kirjoittaa levyltä «{s}» haettuja tiedostoja",
   "Unmounting disk «{s}»": "Irrottaa levyä «{s}»",
+  "The interface starts in your system's theme; the switch keeps your choice.": "Käyttöliittymä alkaa järjestelmän teemalla; kytkin muistaa valintasi.",
+  "Checking that the restic mirror is complete": "Tarkistaa, että resticin peilikopio on täydellinen",
+  "Backing up the mirror with restic": "Varmuuskopioi peilikopiota resticillä",
+  "Removing old restic snapshots": "Poistaa vanhoja restic-tilannekuvia",
+  "Checking the restic repository": "Tarkistaa restic-varaston",
+  "Logs": "Lokit",
+  "Varsto keeps a detailed log on this device for finding problems. It never contains keys, passphrases or file contents and is never uploaded.": "Varsto pitää tällä laitteella yksityiskohtaista lokia ongelmien selvittämistä varten. Se ei koskaan sisällä avaimia, salalauseita tai tiedostojen sisältöä, eikä sitä lähetetä minnekään.",
+  "Detail": "Tarkkuus",
+  "Everything (trace)": "Kaikki (trace)",
+  "Detailed (debug, default)": "Yksityiskohtainen (debug, oletus)",
+  "Normal (info)": "Tavallinen (info)",
+  "Warnings": "Varoitukset",
+  "Errors only": "Vain virheet",
+  "Open log folder": "Avaa lokikansio",
+  "Save log bundle": "Tallenna lokipaketti",
+  "The VARSTO_LOG environment variable overrides this setting.": "Ympäristömuuttuja VARSTO_LOG ohittaa tämän asetuksen.",
+  "The --log-level option the service was started with overrides this setting.": "Palvelun käynnistyksessä annettu --log-level-valitsin ohittaa tämän asetuksen.",
+  "The bundle has no keys or passphrases, but it does contain file and folder names, device and storage names. Look through it before you share it.": "Paketissa ei ole avaimia eikä salalauseita, mutta siinä on tiedostojen ja kansioiden nimiä sekä laitteiden ja tallennuspaikkojen nimiä. Katso se läpi ennen kuin jaat sen.",
+  "Log bundle saved": "Lokipaketti tallennettu",
+  "Drain…": "Tyhjennä…",
+  "Empty this storage onto the others, without weakening any policy": "Siirrä tämän tallennuspaikan sisältö muihin heikentämättä yhtään sääntöä",
+  "Price and quota": "Hinta ja kiintiö",
+  "Quota (most data Varsto keeps here)": "Kiintiö (enintään näin paljon dataa tänne)",
+  "Every device respects it and keeps 1 % free; blocks then go to your other storages or wait. Empty: no quota.": "Jokainen laite noudattaa sitä ja jättää 1 % vapaaksi; lohkot menevät silloin muihin tallennuspaikkoihin tai odottavat. Tyhjä: ei kiintiötä.",
+  "Most objects (optional)": "Enintään objekteja (valinnainen)",
+  "Prices are used for the monthly cost and the placement suggestions. Empty means unknown, not free.": "Hintoja käytetään kuukausikustannukseen ja sijoitteluehdotuksiin. Tyhjä tarkoittaa tuntematonta, ei ilmaista.",
+  "Quota": "Kiintiö",
+  "Drained: it holds nothing Varsto needs.": "Tyhjennetty: siinä ei ole mitään, mitä Varsto tarvitsee.",
+  "Drained so far": "Tyhjennetty tähän mennessä",
+  "removed when empty": "poistetaan tyhjänä",
+  "drained": "tyhjennetty",
+  "draining": "tyhjennetään",
+  "drain waiting": "tyhjennys odottaa",
+  "Stop draining": "Lopeta tyhjennys",
+  "Use again": "Ota taas käyttöön",
+  "Draining empties the storage onto your other storages in the background, without ever weakening a folder's policy: each block is copied and read back before its copy here is deleted, and blocks that cannot keep their policy elsewhere stay. Nothing new is written here meanwhile; it stays readable. Afterwards the storage holds nothing Varsto needs.": "Tyhjennys siirtää tallennuspaikan sisällön taustalla muihin tallennuspaikkoihisi heikentämättä koskaan kansion sääntöä: jokainen lohko kopioidaan ja luetaan takaisin ennen kuin sen kopio täältä poistetaan, ja lohkot, joiden sääntö ei toteudu muualla, jäävät. Tänne ei sillä välin kirjoiteta mitään uutta; se pysyy luettavana. Lopuksi tallennuspaikassa ei ole mitään, mitä Varsto tarvitsee.",
+  "Blocks on this storage": "Lohkoja tässä tallennuspaikassa",
+  "Only deleted (enough copies elsewhere)": "Vain poistetaan (riittävästi kopioita muualla)",
+  "Copied first, read back before deleting": "Kopioidaan ensin ja luetaan takaisin ennen poistoa",
+  "Read from this storage": "Luetaan tästä tallennuspaikasta",
+  "Minimum storage duration still billed": "Vähimmäissäilytysajasta laskutetaan vielä",
+  "Note": "Huomio",
+  "Every folder's policy holds without it.": "Jokaisen kansion sääntö pysyy voimassa ilman sitä.",
+  "Most GB copied per day (empty: no limit)": "Enintään kopioitavia gigatavuja päivässä (tyhjä: ei rajaa)",
+  "Limits egress costs; blocks that only need deleting do not count.": "Rajoittaa siirtokuluja; pelkästään poistettavia lohkoja ei lasketa.",
+  "Options": "Valinnat",
+  "Remove the storage when it is empty": "Poista tallennuspaikka, kun se on tyhjä",
+  "Read from this cold storage (retrieval fees and restore delays apply)": "Lue tästä kylmästä tallennuspaikasta (noutomaksuja ja palautusviiveitä)",
+  "Start draining": "Aloita tyhjennys",
+  "The storage takes new blocks again. Blocks already moved stay where they are now.": "Tallennuspaikka ottaa taas vastaan uusia lohkoja. Jo siirretyt lohkot pysyvät nykyisillä paikoillaan.",
+  "Draining storage «{s}»": "Tyhjentää tallennuspaikkaa «{s}»",
+  "Copying the records off storage «{s}»": "Kopioi tietueet pois tallennuspaikasta «{s}»",
+  "Trash": "Roskakori",
+  "Files deleted on any of your devices are kept here for the days set below, encrypted on your storages, and can be restored on any device. Restoring never overwrites a file: when its name is taken, it comes back as \"name (restored)\".": "Millä tahansa laitteellasi poistetut tiedostot säilyvät täällä alla asetetun määrän päiviä salattuina tallennuspaikoissasi, ja ne voi palauttaa millä tahansa laitteella. Palautus ei koskaan korvaa tiedostoa: jos nimi on jo käytössä, tiedosto palaa nimellä \"nimi (restored)\".",
+  "Search the trash": "Hae roskakorista",
+  "All folders": "Kaikki kansiot",
+  "Delete permanently…": "Poista pysyvästi…",
+  "Empty trash…": "Tyhjennä roskakori…",
+  "Select all": "Valitse kaikki",
+  "Select": "Valitse",
+  "Deleted": "Poistettu",
+  "By": "Poistaja",
+  "The trash is empty": "Roskakori on tyhjä",
+  "Files deleted on any of your devices appear here.": "Millä tahansa laitteellasi poistetut tiedostot näkyvät täällä.",
+  "Trash settings": "Roskakorin asetukset",
+  "Keep deleted files (days)": "Säilytä poistetut tiedostot (päivää)",
+  "Trash storage": "Roskakorin tallennuspaikka",
+  "Deleted files move to this storage only, for example a cheap cold storage, and leave your other storages. Restoring from cold storage asks first, because retrieval is billed and can take hours.": "Poistetut tiedostot siirtyvät vain tähän tallennuspaikkaan, esimerkiksi edulliseen kylmätallennukseen, ja poistuvat muista tallennuspaikoistasi. Kylmätallennuksesta palauttaminen kysyy ensin, koska nouto laskutetaan ja voi kestää tunteja.",
+  "None: deleted files stay where they are": "Ei mitään: poistetut tiedostot pysyvät siellä, missä ne ovat",
+  "cold": "kylmä",
+  "Nothing in the trash matches": "Mikään roskakorissa ei vastaa hakua",
+  "In the trash": "Roskakorissa",
+  "Kept on": "Säilytyspaikka",
+  "Folders with their own days": "Kansiot, joilla on omat päivät",
+  "Copies on this device": "Kopiot tällä laitteella",
+  "Next expiry": "Seuraava vanheneminen",
+  "Last cleanup": "Viimeisin siivous",
+  "never": "ei koskaan",
+  "Each file goes back where it was. If that name is taken now, it comes back as \"name (restored)\": nothing is overwritten. The restored files sync to your other devices.": "Jokainen tiedosto palaa paikalleen. Jos nimi on nyt käytössä, tiedosto palaa nimellä \"nimi (restored)\": mitään ei korvata. Palautetut tiedostot synkronoituvat muille laitteillesi.",
+  "Into another directory of the folder (optional)": "Kansion toiseen hakemistoon (valinnainen)",
+  "Restored": "Palautetut",
+  "empty: the original place": "tyhjä: alkuperäinen paikka",
+  "Read from cold storage?": "Luetaanko kylmätallennuksesta?",
+  "Delete permanently?": "Poistetaanko pysyvästi?",
+  "Delete permanently": "Poista pysyvästi",
+  "Empty the trash?": "Tyhjennetäänkö roskakori?",
+  "Empty trash": "Tyhjennä roskakori",
+  "empty": "tyhjennä",
+  "Keep deleted files from 1 to 3650 days.": "Säilytä poistettuja tiedostoja 1–3650 päivää.",
+  "Trash settings saved": "Roskakorin asetukset tallennettu",
+  "Restoring files of folder «{s}» from the trash": "Palauttaa kansion «{s}» tiedostoja roskakorista",
+  "Deleting files from the trash for good": "Poistaa tiedostoja roskakorista pysyvästi",
+  "Moving deleted files of folder «{s}» to the trash storage": "Siirtää kansion «{s}» poistettuja tiedostoja roskakorin tallennuspaikkaan",
   "Import": "Tuonti",
   "Import into Varsto": "Tuo Varstoon",
   "Bring files that live elsewhere under Varsto's care. Each source becomes one folder; importing the same source again brings over what changed and never deletes anything in Varsto.": "Tuo muualla olevat tiedostot Varston hoitoon. Jokaisesta lähteestä tulee yksi kansio; saman lähteen tuominen uudelleen tuo muuttuneet tiedostot eikä koskaan poista mitään Varstosta.",
@@ -911,7 +1004,6 @@
   "Last seen": "Nähty viimeksi",
   "File system": "Tiedostojärjestelmä",
   "Sort by this column (again: reverse)": "Järjestä tämän sarakkeen mukaan (uudelleen: käänteisesti)",
-  "never": "ei koskaan",
   "now": "nyt",
   "offline": "poissa",
   "retired": "käytöstä poistettu",
@@ -944,11 +1036,6 @@
   "Listing the stored blocks": "Luetteloi tallennettuja lohkoja",
   "Checking the stored blocks": "Tarkistaa tallennettuja lohkoja",
   "Recording where the blocks are": "Kirjaa, missä lohkot ovat",
-  "The interface starts in your system's theme; the switch keeps your choice.": "Käyttöliittymä alkaa järjestelmän teemalla; kytkin muistaa valintasi.",
-  "Checking that the restic mirror is complete": "Tarkistaa, että resticin peilikopio on täydellinen",
-  "Backing up the mirror with restic": "Varmuuskopioi peilikopiota resticillä",
-  "Removing old restic snapshots": "Poistaa vanhoja restic-tilannekuvia",
-  "Checking the restic repository": "Tarkistaa restic-varaston",
   "Filter by name, tag or analysis": "Suodata: nimi, tunniste, analyysi",
   "Filter files": "Suodata tiedostoja",
   "Analysis": "Analyysi",
@@ -956,7 +1043,6 @@
   "The file changed after it was analysed": "Tiedosto on muuttunut analyysin jälkeen",
   "No analysis yet. An assistant can record one through MCP, or write one yourself.": "Ei vielä analyysia. Avustaja voi tallentaa sen MCP:n kautta, tai voit kirjoittaa sen itse.",
   "Written on": "Kirjoitettu laitteella",
-  "By": "Tekijä",
   "Analysed": "Analysoitu",
   "Write analysis": "Kirjoita analyysi",
   "Edit analysis": "Muokkaa analyysia",
@@ -1170,6 +1256,130 @@
   [
    "^(.+): stopped; nothing more is fetched from the disks$",
    "$1: lopetettu; levyiltä ei haeta enempää"
+  ],
+  [
+   "^Using (.+) in (\\d+) files$",
+   "Käytössä $1, $2 tiedostoa"
+  ],
+  [
+   "^log detail set to (.+)$",
+   "lokin tarkkuudeksi asetettu $1"
+  ],
+  [
+   "^log bundle saved: (.+)$",
+   "lokipaketti tallennettu: $1"
+  ],
+  [
+   "^Prices and quota of (.+)$",
+   "Tallennuspaikan $1 hinnat ja kiintiö"
+  ],
+  [
+   "^Prices are used for the monthly cost and the placement suggestions\\. Empty means unknown, not free\\. Now: (.+)\\.$",
+   "Hintoja käytetään kuukausikustannukseen ja sijoitteluehdotuksiin. Tyhjä tarkoittaa tuntematonta, ei ilmaista. Nyt: $1."
+  ],
+  [
+   "^Drain storage (.+)\\?$",
+   "Tyhjennetäänkö tallennuspaikka $1?"
+  ],
+  [
+   "^Stop draining (.+)\\?$",
+   "Lopetetaanko tallennuspaikan $1 tyhjennys?"
+  ],
+  [
+   "^Use (.+) again\\?$",
+   "Otetaanko $1 taas käyttöön?"
+  ],
+  [
+   "^draining (.+) started; the service moves its blocks after the next sync$",
+   "tallennuspaikan $1 tyhjennys aloitettu; palvelu siirtää sen lohkot seuraavan synkronoinnin jälkeen"
+  ],
+  [
+   "^draining (.+) stopped$",
+   "tallennuspaikan $1 tyhjennys lopetettu"
+  ],
+  [
+   "^quota of (.+) saved$",
+   "tallennuspaikan $1 kiintiö tallennettu"
+  ],
+  [
+   "^storage (.+) is at its quota \\((.+) of (.+)\\): new blocks cannot go there$",
+   "tallennuspaikka $1 on kiintiössään ($2 / $3): uusia lohkoja ei voi viedä sinne"
+  ],
+  [
+   "^storage (.+) is at its quota \\((.+) of (.+)\\)$",
+   "tallennuspaikka $1 on kiintiössään ($2 / $3)"
+  ],
+  [
+   "^storage (.+) is nearly full: (.+) of (.+) \\((\\d+) %\\)$",
+   "tallennuspaikka $1 on lähes täynnä: $2 / $3 ($4 %)"
+  ],
+  [
+   "^storage (.+) is being drained: it takes no new blocks$",
+   "tallennuspaikkaa $1 tyhjennetään: se ei ota vastaan uusia lohkoja"
+  ],
+  [
+   "^folder (.+) needs (\\d+) cop(?:y|ies) (.+) and no other storage there can take (?:it|them): add another (.+) storage or lower the policy(.*)$",
+   "kansio $1 tarvitsee $2 kopio(ta) ($3), eikä mikään muu sellainen tallennuspaikka voi ottaa niitä: lisää toinen $4-tallennuspaikka tai kevennä sääntöä$5"
+  ],
+  [
+   "^folder (.+) needs (\\d+) copies and no other storage can take another one: add another storage or lower the policy(.*)$",
+   "kansio $1 tarvitsee $2 kopiota, eikä mikään muu tallennuspaikka voi ottaa lisää: lisää tallennuspaikka tai kevennä sääntöä$3"
+  ],
+  [
+   "^the only copy to read is on cold storage (.+): confirm the cold read \\(retrieval fees and restore delays apply\\)$",
+   "ainoa luettava kopio on kylmässä tallennuspaikassa $1: vahvista kylmäluku (noutomaksuja ja palautusviiveitä)"
+  ],
+  [
+   "^(.+) is the only storage that holds the vault's records and ledger: add another storage \\(not a disk pool\\) first$",
+   "$1 on ainoa tallennuspaikka, jossa on holvin tietueet ja kirjanpito: lisää ensin toinen tallennuspaikka (ei levyvarasto)"
+  ],
+  [
+   "^a block of (.+) has no other copy and no other storage can take one: add another storage$",
+   "kansion $1 lohkolla ei ole muuta kopiota, eikä mikään muu tallennuspaikka voi ottaa sitä: lisää tallennuspaikka"
+  ],
+  [
+   "^Restore (\\d+) files\\?$",
+   "Palautetaanko $1 tiedostoa?"
+  ],
+  [
+   "^Restore (.+)\\?$",
+   "Palautetaanko $1?"
+  ],
+  [
+   "^(.+) of it is kept only on cold storage (.+)\\. Reading it back starts a retrieval, which your provider bills \\(about (.+)\\) and which can take hours\\.$",
+   "$1 siitä on vain kylmätallennuksessa $2. Sen lukeminen käynnistää noudon, jonka palveluntarjoaja laskuttaa (noin $3) ja joka voi kestää tunteja."
+  ],
+  [
+   "^(.+) of it is kept only on cold storage (.+)\\. Reading it back starts a retrieval, which your provider bills and which can take hours\\.$",
+   "$1 siitä on vain kylmätallennuksessa $2. Sen lukeminen käynnistää noudon, jonka palveluntarjoaja laskuttaa ja joka voi kestää tunteja."
+  ],
+  [
+   "^(\\d+) files are deleted for good, from every device and storage\\. They cannot be restored afterwards\\.$",
+   "$1 tiedostoa poistetaan pysyvästi kaikilta laitteilta ja tallennuspaikoista. Niitä ei voi palauttaa jälkeenpäin."
+  ],
+  [
+   "^(.+) is deleted for good, from every device and storage\\. It cannot be restored afterwards\\.$",
+   "$1 poistetaan pysyvästi kaikilta laitteilta ja tallennuspaikoista. Sitä ei voi palauttaa jälkeenpäin."
+  ],
+  [
+   "^Every file in the trash \\((\\d+)\\) is deleted for good, from every device and storage\\. This cannot be undone\\.$",
+   "Jokainen roskakorin tiedosto ($1) poistetaan pysyvästi kaikilta laitteilta ja tallennuspaikoista. Tätä ei voi perua."
+  ],
+  [
+   "^Restored (\\d+) files from the trash$",
+   "Palautettiin $1 tiedostoa roskakorista"
+  ],
+  [
+   "^Deleted (\\d+) files permanently$",
+   "Poistettiin $1 tiedostoa pysyvästi"
+  ],
+  [
+   "^Trash emptied: (\\d+) files deleted permanently$",
+   "Roskakori tyhjennetty: $1 tiedostoa poistettiin pysyvästi"
+  ],
+  [
+   "^(\\d+) blocks wait for the cold storage's minimum storage time before they are deleted$",
+   "$1 lohkoa odottaa kylmätallennuksen vähimmäissäilytysajan päättymistä ennen poistoa"
   ],
   [
    "^Imported (\\d+) file\\(s\\) \\((.+)\\) into folder (.+)$",
@@ -1407,7 +1617,61 @@
   "The prices were not verified for this region; it may be priced differently.",
   "Replace the part in braces in the endpoint with your own value, for example your account id.",
   "plan",
-  "(old)"
+  "(old)",
+  "Every device respects it and keeps 1 % free; blocks then go to your other storages or wait. Empty: no quota.",
+  "Draining empties the storage onto your other storages in the background, without ever weakening a folder's policy: each block is copied and read back before its copy here is deleted, and blocks that cannot keep their policy elsewhere stay. Nothing new is written here meanwhile; it stays readable. Afterwards the storage holds nothing Varsto needs.",
+  "Trash",
+  "Files deleted on any of your devices are kept here for the days set below, encrypted on your storages, and can be restored on any device. Restoring never overwrites a file: when its name is taken, it comes back as \"name (restored)\".",
+  "Search the trash",
+  "All folders",
+  "Delete permanently…",
+  "Empty trash…",
+  "Select all",
+  "Select",
+  "Deleted",
+  "By",
+  "The trash is empty",
+  "Files deleted on any of your devices appear here.",
+  "Trash settings",
+  "Keep deleted files (days)",
+  "Trash storage",
+  "Deleted files move to this storage only, for example a cheap cold storage, and leave your other storages. Restoring from cold storage asks first, because retrieval is billed and can take hours.",
+  "None: deleted files stay where they are",
+  "cold",
+  "Nothing in the trash matches",
+  "In the trash",
+  "Kept on",
+  "Folders with their own days",
+  "Copies on this device",
+  "Next expiry",
+  "Last cleanup",
+  "never",
+  "Each file goes back where it was. If that name is taken now, it comes back as \"name (restored)\": nothing is overwritten. The restored files sync to your other devices.",
+  "Into another directory of the folder (optional)",
+  "Restored",
+  "empty: the original place",
+  "Read from cold storage?",
+  "Delete permanently?",
+  "Delete permanently",
+  "Empty the trash?",
+  "Empty trash",
+  "empty",
+  "Keep deleted files from 1 to 3650 days.",
+  "Trash settings saved",
+  "Restoring files of folder «{s}» from the trash",
+  "Deleting files from the trash for good",
+  "Moving deleted files of folder «{s}» to the trash storage",
+  "^Restore (\\d+) files\\?$",
+  "^Restore (.+)\\?$",
+  "^(.+) of it is kept only on cold storage (.+)\\. Reading it back starts a retrieval, which your provider bills \\(about (.+)\\) and which can take hours\\.$",
+  "^(.+) of it is kept only on cold storage (.+)\\. Reading it back starts a retrieval, which your provider bills and which can take hours\\.$",
+  "^(\\d+) files are deleted for good, from every device and storage\\. They cannot be restored afterwards\\.$",
+  "^(.+) is deleted for good, from every device and storage\\. It cannot be restored afterwards\\.$",
+  "^Every file in the trash \\((\\d+)\\) is deleted for good, from every device and storage\\. This cannot be undone\\.$",
+  "^Restored (\\d+) files from the trash$",
+  "^Deleted (\\d+) files permanently$",
+  "^Trash emptied: (\\d+) files deleted permanently$",
+  "^(\\d+) blocks wait for the cold storage's minimum storage time before they are deleted$"
  ],
  "parts": [
   [
@@ -1459,6 +1723,14 @@
    "$1 lohkoa $2 kansiossa"
   ],
   [
+   "storage (\\S+) is being drained: it takes no new blocks",
+   "tallennuspaikkaa $1 tyhjennetään: se ei ota vastaan uusia lohkoja"
+  ],
+  [
+   "storage (\\S+) is at its quota \\(([^)]+) of ([^)]+)\\): new blocks cannot go there",
+   "tallennuspaikka $1 on kiintiössään ($2 / $3): uusia lohkoja ei voi viedä sinne"
+  ],
+  [
    "its file system was last checked",
    "sen tiedostojärjestelmä tarkistettiin viimeksi"
   ],
@@ -1497,6 +1769,10 @@
   [
    "The file system on (.+) has errors that could not be repaired automatically; nothing was read or written\\. Run `sudo e2fsck -f (\\S+)` by hand or retire the disk\\.",
    "Levyn $1 tiedostojärjestelmässä on virheitä, joita ei voitu korjata automaattisesti; mitään ei luettu eikä kirjoitettu. Aja `sudo e2fsck -f $2` käsin tai poista levy käytöstä."
+  ],
+  [
+   "kept under another name here because the disk ignores case:",
+   "pidetään täällä toisella nimellä, koska levy ei erota isoja ja pieniä kirjaimia:"
   ]
  ]
 }

@@ -228,6 +228,10 @@ impl Engine {
     /// this device's own, locally for everyone's). Cold storages are left
     /// as they are.
     pub fn ledger_upkeep(&mut self) -> Result<()> {
+        crate::logged_op_plain!("ledger upkeep", "", { self.ledger_upkeep_inner() })
+    }
+
+    fn ledger_upkeep_inner(&mut self) -> Result<()> {
         if self.vault.member
             || self.forked_self
             || self.removal.is_some()
@@ -594,6 +598,9 @@ impl Engine {
                 // device is read in full, as it always was.
                 let after = if head.forked { 0 } else { head.seq };
                 let objects = remote_objects(backend.as_ref(), dev, after)?;
+                if !objects.is_empty() {
+                    log::debug!(device:% = dev, storage = backend.name(), after = after, objects = objects.len(); "ledger: new objects of a device");
+                }
                 let pk = &dir[dev];
                 if dev == &me {
                     if checkpoints_of(&objects)

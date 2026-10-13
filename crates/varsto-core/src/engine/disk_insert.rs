@@ -154,7 +154,7 @@ impl Engine {
                         copies: record.map(|r| r.storages.len()).unwrap_or(0),
                     });
                     if let Some(m) = &mount {
-                        n.files.push(m.join(&f.path));
+                        n.files.push(self.disk_of(m, &state, &f.path));
                     }
                     if !objs.contains(&c.object) {
                         objs.push(c.object.clone());
@@ -362,6 +362,17 @@ impl Engine {
         opts: InsertOptions,
         progress: &mut dyn FnMut(&DiskProgress),
     ) -> Result<DiskInsertReport> {
+        crate::logged_op!("disk insert", label, {
+            self.disk_insert_inner(label, opts, progress)
+        })
+    }
+
+    fn disk_insert_inner(
+        &mut self,
+        label: &str,
+        opts: InsertOptions,
+        progress: &mut dyn FnMut(&DiskProgress),
+    ) -> Result<DiskInsertReport> {
         let (spec, pool, disk) = self.find_disk(label)?;
         let mount = pool
             .mount_of(&disk.id)
@@ -497,6 +508,19 @@ impl Engine {
 
     /// Like `disk_add_at`, with progress for the fill.
     pub fn disk_add_with(
+        &mut self,
+        mount: &Path,
+        pool_name: &str,
+        label: &str,
+        place: &str,
+        progress: &mut dyn FnMut(&DiskProgress),
+    ) -> Result<(DiskAddReport, FillOutcome)> {
+        crate::logged_op_plain!("disk add with", label, {
+            self.disk_add_with_inner(mount, pool_name, label, place, progress)
+        })
+    }
+
+    fn disk_add_with_inner(
         &mut self,
         mount: &Path,
         pool_name: &str,

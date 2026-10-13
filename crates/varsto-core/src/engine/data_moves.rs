@@ -33,6 +33,11 @@ pub(super) struct WriteTargets {
     /// `None`: every storage (no placement, or none of its storages here).
     names: Option<BTreeSet<String>>,
     carriers: BTreeSet<String>,
+    /// The vault's trash storage here (`trash`): it takes trashed blocks
+    /// only, unless the folder's placement names it.
+    trash: Option<String>,
+    /// Storages being drained or drained: they take nothing new.
+    closed: BTreeSet<String>,
 }
 
 impl WriteTargets {
@@ -40,32 +45,43 @@ impl WriteTargets {
     /// storage `name`. Transferrers follow their own rules. A block that was
     /// moved away from a storage is not put back while another copy exists.
     pub(super) fn wants(&self, name: &str, record: Option<&ChunkRecord>) -> bool {
+        if self.closed.contains(name) {
+            return false;
+        }
         if self.carriers.contains(name) {
             return true;
         }
         if self.names.as_ref().is_some_and(|n| !n.contains(name)) {
             return false;
         }
+        let trash = self.trash.as_deref();
+        if trash == Some(name) && self.names.is_none() {
+            return false;
+        }
+        // A copy on the trash storage does not keep a current file's block
+        // off the folder's storages (a file restored or created again).
         match record {
-            Some(r) if r.dropped_from(name) => !r
-                .storages
-                .iter()
-                .any(|(n, l)| n != name && !l.claimed_by.is_empty() && !self.carriers.contains(n)),
+            Some(r) if r.dropped_from(name) => !r.storages.iter().any(|(n, l)| {
+                n != name
+                    && Some(n.as_str()) != trash
+                    && !l.claimed_by.is_empty()
+                    && !self.carriers.contains(n)
+            }),
             _ => true,
         }
     }
 }
 
 /// One block to move.
-struct MoveItem {
-    chunk: ChunkId,
-    object: ObjectName,
-    epoch: u32,
-    size: u64,
+pub(super) struct MoveItem {
+    pub(super) chunk: ChunkId,
+    pub(super) object: ObjectName,
+    pub(super) epoch: u32,
+    pub(super) size: u64,
     /// Already claimed on the new storage.
-    on_to: bool,
+    pub(super) on_to: bool,
     /// Files of this folder on this device that contain the block.
-    files: Vec<PathBuf>,
+    pub(super) files: Vec<PathBuf>,
 }
 
 /// A move worked out from the ledger, before anything is changed.
@@ -104,13 +120,33 @@ impl Engine {
             .filter(|s| s.is_carrier())
             .map(|s| s.name().to_string())
             .collect();
+        let closed = self.closed_storages();
+        // A placement that names only storages being drained falls back to
+        // every storage, so the folder's new blocks still go somewhere.
         let names = rec
             .placement
             .as_ref()
             .filter(|p| !p.is_everywhere())
-            .map(|p| self.placement_names(p))
+            .map(|p| {
+                let mut n = self.placement_names(p);
+                n.retain(|s| !closed.contains(s));
+                n
+            })
             .filter(|n| !n.is_empty());
-        WriteTargets { names, carriers }
+        if log::log_enabled!(log::Level::Trace) {
+            log::trace!(
+                folder = rec.name.as_str(),
+                storages:? = names,
+                carriers:? = carriers;
+                "placement: write targets (none = every storage)"
+            );
+        }
+        WriteTargets {
+            names,
+            carriers,
+            trash: self.trash_storage_here(),
+            closed,
+        }
     }
 
     /// Local names of the storages a placement takes (transferrers aside).
@@ -151,7 +187,7 @@ impl Engine {
                 self.config
                     .storages
                     .iter()
-                    .filter(|s| !s.is_carrier())
+                    .filter(|s| !s.is_carrier() && !targets.closed.contains(s.name()))
                     .map(|s| s.name().to_string())
                     .collect()
             }
@@ -174,6 +210,16 @@ impl Engine {
     /// every device writes the folder the same way. Blocks already stored
     /// stay where they are; `move_data` moves them.
     pub fn set_placement(
+        &mut self,
+        folder: &str,
+        placement: Option<Placement>,
+    ) -> Result<PlacementInfo> {
+        crate::logged_op!("set placement", folder, {
+            self.set_placement_inner(folder, placement)
+        })
+    }
+
+    fn set_placement_inner(
         &mut self,
         folder: &str,
         placement: Option<Placement>,
@@ -358,6 +404,10 @@ impl Engine {
     /// costs. Moving a whole folder also changes its placement, so new
     /// blocks go to the new storage.
     pub fn move_data(&mut self, req: &MoveRequest) -> Result<MoveReport> {
+        crate::logged_op!("move data", "", { self.move_data_inner(req) })
+    }
+
+    fn move_data_inner(&mut self, req: &MoveRequest) -> Result<MoveReport> {
         self.ensure_active()?;
         if self.vault.member {
             bail!("a member device cannot move the owner's data");
@@ -425,6 +475,13 @@ impl Engine {
         if from.is_carrier() || to.is_carrier() {
             bail!("transferrers carry blocks between devices; data is not moved to or from them");
         }
+        if self.storage_settings(to.name()).closed() {
+            bail!(
+                "{} is being drained (or is drained): it takes no new blocks; stop the drain first (varsto storage drain {} --stop)",
+                to.name(),
+                to.name()
+            );
+        }
         let state = self.load_state(&rec.folder_id)?;
         let root = self
             .config
@@ -457,7 +514,7 @@ impl Engine {
             files += 1;
             let local = match &root {
                 Some(r) if !encrypted_here && state.local_index.contains_key(&f.path) => {
-                    Some(r.join(&f.path))
+                    Some(self.disk_of(r, &state, &f.path))
                 }
                 _ => None,
             };
@@ -466,6 +523,14 @@ impl Engine {
                     .entry(c.chunk.clone())
                     .or_insert_with(|| (c.clone(), Vec::new()));
                 e.1.extend(local.clone());
+            }
+        }
+        // Moving a whole folder takes the blocks of its trash along.
+        if idle.is_none() {
+            for c in self.trash_chunks(&rec.folder_id) {
+                moving
+                    .entry(c.chunk.clone())
+                    .or_insert_with(|| (c, Vec::new()));
             }
         }
         moving.retain(|c, _| !staying.contains(c));
@@ -797,6 +862,7 @@ impl Engine {
         let fk = self.folder_keys(rec)?;
         let read_from = !from_spec.is_cold() || req.confirm_cold_read;
         let read_to = !to_spec.is_cold() || req.confirm_cold_read;
+        let gate = self.quota_gate(&self.view()?);
         let task = crate::activity::start(
             crate::activity::DATA_MOVE,
             &rec.name,
@@ -833,6 +899,10 @@ impl Engine {
                         );
                         continue;
                     };
+                    if !gate.take(to_spec.name(), ct.len() as u64) {
+                        keep(&mut report, &item.object, gate.message(to_spec.name()));
+                        continue;
+                    }
                     match to.put_if_absent(&key, &ct) {
                         Ok(_) => {
                             report.blocks_copied += 1;
@@ -931,7 +1001,7 @@ impl Engine {
 
     /// Objects some ledger record still counts as a copy on `storage` (an
     /// object shared with another record must stay).
-    fn objects_claimed_on(&self, storage: &str) -> Result<HashSet<ObjectName>> {
+    pub(super) fn objects_claimed_on(&self, storage: &str) -> Result<HashSet<ObjectName>> {
         let view = self.view()?;
         Ok(view
             .chunks
@@ -949,7 +1019,7 @@ impl Engine {
     /// (chunking and encryption are deterministic), each file read once.
     /// Reading for a move does not count as using a file: its access time
     /// is put back, so idle files stay idle.
-    fn local_ciphertexts<'a>(
+    pub(super) fn local_ciphertexts<'a>(
         &self,
         fk: &FolderKeys,
         items: impl Iterator<Item = &'a MoveItem>,
@@ -1009,7 +1079,7 @@ impl Engine {
     /// local file: from the block cache, another readable storage, or the
     /// old storage itself (only when it may be read). Checked against its
     /// name.
-    fn move_source(
+    pub(super) fn move_source(
         &self,
         item: &MoveItem,
         others: &OpenStorages,

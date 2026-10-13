@@ -50,7 +50,7 @@ pub struct LocalVault {
 
 /// Token the owner gives to another Varsto user to share one folder (F-047):
 /// `<vault-id>.<folder-id>.<folder-key-hex>.<name>`.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct ShareToken {
     pub vault_id: VaultId,
     pub folder_id: FolderId,
@@ -69,6 +69,8 @@ pub struct ShareToken {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub owners: Vec<DeviceId>,
 }
+
+crate::redacted_debug!(ShareToken { vault_id, folder_id, name ; key_hex, epoch_keys });
 
 impl ShareToken {
     pub fn encode(&self) -> String {
@@ -174,7 +176,7 @@ impl ShareToken {
 /// version 2 (`vst2.`, same fields) seals a JSON payload instead of the bare
 /// key: the folder key, the keys of later epochs and the fingerprint the
 /// owner confirmed.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct SealedShareToken {
     #[serde(default = "one")]
     pub version: u8,
@@ -185,6 +187,8 @@ pub struct SealedShareToken {
     pub kem_ct_hex: String,
     pub sealed_key_hex: String,
 }
+
+crate::redacted_debug!(SealedShareToken { version, vault_id, folder_id, name, kem_alg ; kem_ct_hex, sealed_key_hex });
 
 fn one() -> u8 {
     1
@@ -706,6 +710,8 @@ pub struct Keys {
     pub signer: SigningKey,
 }
 
+crate::redacted_opaque!(Keys);
+
 impl Keys {
     pub fn ledger_key(&self) -> SecretKey {
         self.master.derive("ledger", &[])
@@ -769,6 +775,11 @@ impl Keys {
         let plain =
             Zeroizing::new(opened.context("unlock failed: wrong passphrase or damaged key file")?);
         let material: KeyMaterial = serde_json::from_slice(&plain)?;
+        // Cut from the log should a hex form ever reach it (by hash only).
+        if let Ok(raw) = hex::decode(&material.master_hex) {
+            crate::logging::register_key(&raw);
+        }
+        log::debug!("device keys unlocked");
         Ok(Keys {
             master: SecretKey::from_hex(&material.master_hex)?,
             signer: SigningKey::from_bytes(&hex::decode(&material.signing_hex)?)?,
@@ -820,7 +831,7 @@ impl DeviceRecord {
 
 /// Encrypted folder record published to `vault/folders/<device>/<folder>.enc`
 /// by the device that created the folder (single writer per device).
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct FolderRecord {
     pub folder_id: FolderId,
     pub name: String,
@@ -862,6 +873,8 @@ pub struct FolderRecord {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub backup: Option<BackupInfo>,
 }
+
+crate::redacted_debug!(FolderRecord { folder_id, name, created_by, created_utc, strongroom, removed_utc, backup, placement, policy ; key_hex, epoch_keys });
 
 /// What a backup's folder record says about it (published with the record).
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -983,8 +996,11 @@ pub struct FolderKeys {
     later: BTreeMap<u32, SecretKey>,
 }
 
+crate::redacted_opaque!(FolderKeys);
+
 impl FolderKeys {
     pub fn from_folder_key(folder: &FolderId, base: SecretKey) -> Result<Self> {
+        crate::logging::register_key(base.as_bytes());
         let scope: &[&[u8]] = &[folder.as_str().as_bytes()];
         Ok(FolderKeys {
             folder: folder.clone(),
@@ -1163,9 +1179,17 @@ pub struct FolderMount {
 /// Storage credentials: `home/secrets.enc`, encrypted under a key derived
 /// from this device's master key, so they are only readable when the vault is
 /// unlocked. Keyed by secret reference (by default the storage name).
-#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+#[derive(Clone, Serialize, Deserialize, Default)]
 pub struct SecretStore {
     pub secrets: BTreeMap<String, String>,
+}
+
+impl std::fmt::Debug for SecretStore {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_map()
+            .entries(self.secrets.keys().map(|k| (k, crate::logging::Redacted)))
+            .finish()
+    }
 }
 
 impl SecretStore {
@@ -1190,7 +1214,11 @@ impl SecretStore {
             &std::fs::read(&p)?,
         )
         .context("open secrets.enc")?;
-        Ok(serde_json::from_slice(&plain)?)
+        let store: SecretStore = serde_json::from_slice(&plain)?;
+        for v in store.secrets.values() {
+            crate::logging::register_secret(v);
+        }
+        Ok(store)
     }
     pub fn save(&self, home: &Path, keys: &Keys, vault: &VaultId, device: &DeviceId) -> Result<()> {
         let blob = crypto::encrypt(
@@ -1257,6 +1285,15 @@ pub struct Config {
     /// The "next disk to dock" reminder (`crate::disksuggest`).
     #[serde(default)]
     pub disk_suggest: crate::disksuggest::SuggestSettings,
+    /// Quotas and drains of the storages, by storage name: this device's
+    /// copy of the vault-wide settings (`crate::storage_settings`).
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub storage_settings:
+        std::collections::BTreeMap<String, crate::storage_settings::SettingsEntry>,
+    /// Detail of the local debug log (`crate::logging`): a level or a
+    /// filter; absent means debug. `VARSTO_LOG` and `--log-level` win.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub log_level: Option<String>,
 }
 
 /// A backup taken on this device (local, never published).

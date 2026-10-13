@@ -21,3 +21,10 @@ Status: built and launched in the iOS Simulator on GitHub's Apple Silicon
 runners on every change (screenshots included); not yet run on a real iPhone
 or iPad. Video thumbnails are made natively (AVAssetImageGenerator). The app
 store listing, background modes and File Provider integration are future work.
+
+Logs (debug level, on by default): the core and the app shell write
+`Application Support/Varsto/logs/varsto-ffi-ios.log` inside the app container
+(the shell's lines, module `app`, go through `varsto_log` in the FFI: start,
+`varsto_start` result, scene phase changes, thumbnail errors). Lines logged
+before `varsto_start` are dropped. The service URL, the session token,
+passphrases and file contents are never logged.

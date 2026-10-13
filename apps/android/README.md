@@ -38,3 +38,12 @@ selecting files to download or free.
 
 Play Store packaging, SAF folder access and the battery-friendly scheduling
 of plan 6.30/6.36 are future work.
+
+Logs (debug level, on by default) are in the app's private `files/vault/logs/`:
+`varsto-service.log` from the Rust service and `varsto-app.log` from the shell
+(`AppLog.kt`: service process start, exit code and restarts, activity events,
+camera upload scans and uploads by file name, errors that used to be
+swallowed). Both rotate at 10 MiB, keeping four old files. The service's
+console output still goes to `files/vault/service.log`. The service URL, the
+session token, passphrases and file contents are never logged. On a debug
+build: `adb shell run-as in.soderlund.varsto cat files/vault/logs/varsto-app.log`.

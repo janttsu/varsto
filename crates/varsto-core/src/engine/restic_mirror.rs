@@ -39,7 +39,7 @@ pub struct SetupReport {
 }
 
 /// How `restic_check` runs.
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Default, Serialize, Deserialize)]
 pub struct CheckOptions {
     /// The hold this check works under (a run's own): the check may fetch
     /// and restore files in held folders.
@@ -56,6 +56,8 @@ pub struct CheckOptions {
     pub quick: bool,
 }
 
+crate::redacted_debug!(CheckOptions { rehash_all ; token });
+
 fn mtime_ns(md: &fs::Metadata) -> i64 {
     md.modified()
         .ok()
@@ -68,6 +70,8 @@ fn mtime_ns(md: &fs::Metadata) -> i64 {
 struct ToHash {
     folder: usize,
     path: String,
+    /// Where the file is on disk (its local name, `crate::names`).
+    disk: PathBuf,
     size: u64,
     mtime: i64,
     want: String,
@@ -146,6 +150,17 @@ impl Engine {
     /// `move_attached`, which moves its directory into the mirror (same
     /// file system only) and keeps what this device knows of it.
     pub fn restic_setup(
+        &mut self,
+        cfg: ResticConfig,
+        names: Option<&[String]>,
+        move_attached: bool,
+    ) -> Result<SetupReport> {
+        crate::logged_op!("restic setup", cfg.root.display().to_string(), {
+            self.restic_setup_inner(cfg, names, move_attached)
+        })
+    }
+
+    fn restic_setup_inner(
         &mut self,
         mut cfg: ResticConfig,
         names: Option<&[String]>,
@@ -434,6 +449,10 @@ impl Engine {
 
     /// Check that the mirror is complete (see the module documentation).
     pub fn restic_check(&mut self, opts: &CheckOptions) -> Result<Completeness> {
+        crate::logged_op!("restic check", "", { self.restic_check_inner(opts) })
+    }
+
+    fn restic_check_inner(&mut self, opts: &CheckOptions) -> Result<Completeness> {
         let Some(cfg) = self.config.restic.clone() else {
             bail!("this device is not set up for restic (varsto restic setup)");
         };
@@ -524,7 +543,8 @@ impl Engine {
                 .iter()
                 .map(|(d, s)| (d.short().to_string(), *s))
                 .collect();
-            // What is on disk: files and placeholders.
+            // What is on disk: files and placeholders, by vault path.
+            let rules = self.local_rules(target);
             let mut on_disk: BTreeSet<String> = BTreeSet::new();
             let mut placeholders: BTreeSet<String> = BTreeSet::new();
             let walker = walkdir::WalkDir::new(target)
@@ -545,10 +565,10 @@ impl Engine {
                 };
                 match p.strip_suffix(PLACEHOLDER_SUFFIX) {
                     Some(real) => {
-                        placeholders.insert(real.to_string());
+                        placeholders.insert(state.local_names.vault_of_local(rules, real));
                     }
                     None => {
-                        on_disk.insert(p);
+                        on_disk.insert(state.local_names.vault_of_local(rules, &p));
                     }
                 }
             }
@@ -578,7 +598,8 @@ impl Engine {
                 digest.push(0);
                 digest.extend_from_slice(f.content_hash.as_bytes());
                 digest.push(b'\n');
-                let Ok(disk) = util::safe_join(target, path) else {
+                let Ok(disk) = util::safe_join(target, &state.local_names.local_rel(rules, path))
+                else {
                     fc.problems.push(problem(
                         ProblemKind::Unreadable,
                         "the path is not usable here",
@@ -652,6 +673,7 @@ impl Engine {
                 to_hash.push(ToHash {
                     folder: c.folders.len(),
                     path: path.to_string(),
+                    disk: disk.clone(),
                     size,
                     mtime,
                     want: f.content_hash.clone(),
@@ -681,7 +703,7 @@ impl Engine {
                 continue;
             };
             let fc = &mut c.folders[t.folder];
-            let disk = fc.path.join(&t.path);
+            let disk = t.disk.clone();
             let mut hasher = KeyedHasher::new(&fk.hash);
             let read = (|| -> std::io::Result<()> {
                 let mut f = fs::File::open(&disk)?;
@@ -792,7 +814,11 @@ impl Engine {
                 ..Default::default()
             };
             for p in fixable {
-                let Ok(disk) = util::safe_join(&root, &p.path) else {
+                let local = state
+                    .local_names
+                    .local_rel(self.local_rules(&root), &p.path)
+                    .into_owned();
+                let Ok(disk) = util::safe_join(&root, &local) else {
                     continue;
                 };
                 match p.kind {

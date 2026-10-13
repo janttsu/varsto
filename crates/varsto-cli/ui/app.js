@@ -69,7 +69,7 @@
         if (d && d.total > 0) {
           var note = b.nextElementSibling && b.nextElementSibling.classList.contains("busy-note") ? b.nextElementSibling : null;
           if (!note) { note = el("span", "busy-note muted small"); b.after(note); }
-          note.textContent = "Downloading " + d.path.split("/").pop() + ": " + fmtBytes(d.done) + " of " + fmtBytes(d.total) + " (" + d.percent + " %" + (d.bytes_per_sec > 0 ? ", " + fmtBytes(d.bytes_per_sec) + "/s" : "") + ")";
+          note.textContent = "Downloading " + showName(d.path.split("/").pop()) + ": " + fmtBytes(d.done) + " of " + fmtBytes(d.total) + " (" + d.percent + " %" + (d.bytes_per_sec > 0 ? ", " + fmtBytes(d.bytes_per_sec) + "/s" : "") + ")";
         }
       }).catch(function () {}).then(function () { if (!stop) { setTimeout(tick, 400); } });
     })();
@@ -130,6 +130,9 @@
   document.addEventListener("click", function (e) { var t = e.target.closest && e.target.closest("[data-help]"); if (t) { showHelp(t); } else { hideHelp(); } });
   window.addEventListener("scroll", hideHelp, true);
   function el(tag, cls, text) { var e = document.createElement(tag); if (cls) { e.className = cls; } if (text !== undefined) { e.textContent = text; } return e; }
+  // A file name as it is (":" and backslash included), with control characters and
+  // direction overrides shown as \u{..} so that a name cannot pass for another.
+  function showName(s) { return String(s).replace(/[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/g, function (c) { return "\\u{" + c.charCodeAt(0).toString(16) + "}"; }); }
   function pill(cls, text) { return el("span", "pill " + cls, text); }
   function icon(name, cls) { var s = document.createElementNS("http://www.w3.org/2000/svg", "svg"); s.setAttribute("class", "icon" + (cls ? " " + cls : "")); var u = document.createElementNS("http://www.w3.org/2000/svg", "use"); u.setAttribute("href", "#i-" + name); s.appendChild(u); return s; }
   function enc(s) { return encodeURIComponent(s); }
@@ -165,6 +168,10 @@
       $("modal-title").textContent = o.title || "Varsto";
       var tx = $("modal-text"); tx.textContent = o.text || ""; tx.classList.toggle("hidden", !o.text);
       var code = $("modal-code"); code.textContent = o.code || ""; code.classList.toggle("hidden", !o.code);
+      // facts: [label, value] pairs; the label is translated, the value shown as given.
+      var facts = $("modal-facts"); facts.innerHTML = "";
+      (o.facts || []).forEach(function (f) { facts.appendChild(el("dt", null, f[0])); var dd = el("dd", null, f[1]); dd.setAttribute("data-no-i18n", ""); facts.appendChild(dd); });
+      facts.classList.toggle("hidden", !(o.facts || []).length);
       var fs = $("modal-fields"); fs.innerHTML = "";
       (o.fields || []).forEach(function (f) {
         // A group of checkboxes; its value is the ticked ones, comma-separated.
@@ -327,7 +334,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   $("themetoggle2").onclick = toggleTheme;
 
   // Navigation between the pages of the app section.
-  var titles = { overview: "Overview", files: "Files", shared: "Shared", storages: "Storages", backups: "Backups", import: "Import", policies: "Policies", peers: "Peers", organization: "Organization", settings: "Settings", recovery: "Recovery package", more: "More" };
+  var titles = { overview: "Overview", files: "Files", shared: "Shared", storages: "Storages", backups: "Backups", import: "Import", trash: "Trash", policies: "Policies", peers: "Peers", organization: "Organization", settings: "Settings", recovery: "Recovery package", more: "More" };
   var legacyPages = { folders: "files", sharing: "shared" };
   function pageTitle(p) { return titles[p] || "Overview"; }
   var currentPage = (function () { try { var p = sessionStorage.getItem("varsto-page"); p = legacyPages[p] || p; return titles[p] ? p : "overview"; } catch (e) { return "overview"; } })();
@@ -339,7 +346,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     currentPage = page;
     try { sessionStorage.setItem("varsto-page", page); } catch (e) {}
     document.querySelectorAll(".page").forEach(function (d) { d.classList.toggle("hidden", d.dataset.page !== page); });
-    var tab = page === "shared" || page === "backups" || page === "import" || page === "policies" || page === "peers" || page === "organization" || page === "settings" || page === "recovery" ? "more" : page;
+    var tab = page === "shared" || page === "backups" || page === "import" || page === "trash" || page === "policies" || page === "peers" || page === "organization" || page === "settings" || page === "recovery" ? "more" : page;
     document.querySelectorAll(".sidebar .nav-item[data-nav]").forEach(function (b) { if (b.dataset.nav === page) { b.setAttribute("aria-current", "page"); } else { b.removeAttribute("aria-current"); } });
     document.querySelectorAll(".tabbar .nav-item[data-nav]").forEach(function (b) { if (b.dataset.nav === tab) { b.setAttribute("aria-current", "page"); } else { b.removeAttribute("aria-current"); } });
     if (document.body.dataset.view === "app") { $("pagetitle").textContent = pageTitle(page); }
@@ -348,11 +355,13 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     if (page === "backups") { loadBackups(); }
     if (page === "recovery") { loadGuide(); }
     if (page === "import") { loadImports(); }
+    if (page === "trash") { loadTrash(); }
     if (page === "overview" && lastWhere) { renderWhere(lastWhere); }
     trafficWatch();
     activityWatch();
     if (page === "files") { ensureFiles(); }
     if (page === "settings" && droid && lastStatus) { refreshAllFiles(); }
+    if (page === "settings") { loadLogs(); }
     window.scrollTo(0, 0);
   }
   // Buttons inside pages that lead to another page.
@@ -380,6 +389,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
       if (!st.has_vault) { show("setup"); return; }
       if (!st.unlocked) { show("unlock"); return; }
       show("app");
+      if (currentPage === "settings") { loadLogs(); }
       return refreshStatus();
     }).catch(function (e) { log("error: " + e.message); });
   }
@@ -1085,12 +1095,14 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
         if (!s.member) {
           var ra = el("div", "li-actions");
           if (st.carrier) { var cb = el("button", "secondary", "Destination\u2026"); cb.type = "button"; cb.onclick = function () { carrierDestination(st.name, dest); }; ra.appendChild(cb); }
+          if (!st.carrier) { var db = el("button", "secondary drain-btn", "Drain\u2026"); db.type = "button"; db.title = "Empty this storage onto the others, without weakening any policy"; db.onclick = function () { drainStorage(st.name); }; ra.appendChild(db); }
           var rb = el("button", "secondary", "Remove"); rb.type = "button"; rb.onclick = function () { removeStorage(st.name); }; ra.appendChild(rb); li.appendChild(ra);
         }
         ul.appendChild(li);
       });
       $("storages-empty").classList.toggle("hidden", s.storages.length > 0);
       loadStorageCosts();
+      loadStorageUsage();
       renderPools(s.storages);
       var names = Object.keys(s.devices).map(function (k) { return s.devices[k] + " (" + k.slice(0, 8) + ")"; });
       var reps = Object.keys(s.replicas || {}).map(function (k) { return s.replicas[k]; });
@@ -1225,24 +1237,113 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
         var li = null; $("storages").querySelectorAll("li").forEach(function (x) { if (x.dataset.storage === e.name) { li = x; } });
         if (!li || li.querySelector(".li-price")) { return; }
         li.querySelector(".li-body").appendChild(el("div", "li-sub li-price", (e.price ? priceText(e.price) : "No price set") + " · " + fmtBytes(e.bytes) + " stored" + (e.monthly_cost != null ? " · " + approx(e.monthly_cost, e.currency) + " a month" : "")));
-        var acts = el("div", "li-actions"); var pb = el("button", "secondary", "Price"); pb.type = "button"; pb.onclick = function () { editPrice(e); }; acts.appendChild(pb); li.appendChild(acts);
+        var acts = el("div", "li-actions"); var pb = el("button", "secondary", "Price and quota"); pb.type = "button"; pb.onclick = function () { editPrice(e); }; acts.appendChild(pb); li.appendChild(acts);
       });
     }).catch(function () {});
   }
   function editPrice(e) {
     var p = e.price || {};
     var v = function (x) { return x == null ? "" : String(x); };
-    dialog({ title: "Prices of " + e.name, text: "Used for the monthly cost and the placement suggestions. Empty means unknown, not free." + (p.source ? " Now: " + p.source + "." : ""), fields: [
+    var q = storageQuotas[e.name] || {};
+    var pool = e.kind === "pool" || e.carrier;
+    var fields = [
       { name: "gb_month", label: "Storage per GB-month", value: v(p.storage_per_gb_month), placeholder: "0.006" },
       { name: "egress", label: "Egress per GB", value: v(p.egress_per_gb), placeholder: "0.01" },
       { name: "retrieval", label: "Retrieval per GB (cold classes)", value: v(p.retrieval_per_gb) },
       { name: "min_days", label: "Minimum storage days (cold classes)", value: v(p.minimum_storage_days) },
       { name: "currency", label: "Currency", value: p.currency || "", placeholder: "EUR" }
-    ], ok: "Save", extra: "Clear my prices" }).then(function (r) {
+    ];
+    if (!pool) {
+      fields.push({ name: "quota", label: "Quota (most data Varsto keeps here)", value: q.quota_bytes != null ? String(q.quota_bytes / 1e9) + "GB" : "", placeholder: "1TB", hint: "Every device respects it and keeps 1 % free; blocks then go to your other storages or wait. Empty: no quota." });
+      fields.push({ name: "quota_objects", label: "Most objects (optional)", type: "number", value: v(q.quota_objects) });
+    }
+    dialog({ title: "Prices and quota of " + e.name, text: "Prices are used for the monthly cost and the placement suggestions. Empty means unknown, not free." + (p.source ? " Now: " + p.source + "." : ""), fields: fields, ok: "Save", extra: "Clear my prices" }).then(function (r) {
       if (!r) { return; }
       var body = r.action === "extra" ? { name: e.name, clear: true } : { name: e.name, gb_month: r.values.gb_month, egress: r.values.egress, retrieval: r.values.retrieval, min_days: r.values.min_days, currency: r.values.currency };
-      return api("POST", "/api/storage/price", body).then(function () { log("prices of " + e.name + " saved"); refreshStatus(); });
-    }).catch(function (err) { log("error: " + err.message); });
+      return api("POST", "/api/storage/price", body).then(function () {
+        log("prices of " + e.name + " saved");
+        if (pool || r.action === "extra") { return null; }
+        var oldQ = q.quota_bytes != null ? String(q.quota_bytes / 1e9) + "GB" : "";
+        if ((r.values.quota || "").trim() === oldQ && (r.values.quota_objects || "") === v(q.quota_objects)) { return null; }
+        return api("POST", "/api/storage/quota", { name: e.name, bytes: (r.values.quota || "").trim(), objects: (r.values.quota_objects || "").trim() }).then(function () { log("quota of " + e.name + " saved"); });
+      }).then(function () { refreshStatus(); });
+    }).catch(function (err) { alertBox(err.message); });
+  }
+
+  // Quotas and drains on the storage rows: use against the quota, and a
+  // drain's progress with its Stop button (/api/storage/quotas, /drains).
+  var storageQuotas = {};
+  function usageBar(percent, cls) { var b = el("div", "usage-bar" + (cls ? " " + cls : "")); var f = el("span"); f.style.width = Math.max(0, Math.min(100, percent || 0)) + "%"; b.appendChild(f); return b; }
+  function rawSpan(text, cls) { var x = el("span", cls || null, text); x.setAttribute("data-no-i18n", ""); return x; }
+  function loadStorageUsage() {
+    Promise.all([api("GET", "/api/storage/quotas"), api("GET", "/api/storage/drains")]).then(function (r) {
+      var drains = r[1]; storageQuotas = {};
+      r[0].forEach(function (q) { storageQuotas[q.storage] = q; });
+      $("storages").querySelectorAll("li").forEach(function (li) {
+        var name = li.dataset.storage; var body = li.querySelector(".li-body"); if (!body) { return; }
+        body.querySelectorAll(".li-usage").forEach(function (x) { x.remove(); });
+        var q = storageQuotas[name];
+        if (q && q.state !== "none") {
+          var u = el("div", "li-sub li-usage");
+          u.appendChild(usageBar(q.percent, q.state === "full" ? "bad" : q.state === "warning" ? "risk" : ""));
+          u.appendChild(el("span", null, "Quota"));
+          u.appendChild(rawSpan(fmtBytes(q.used_bytes) + " / " + (q.quota_bytes != null ? fmtBytes(q.quota_bytes) : q.used_objects + " / " + q.quota_objects) + " (" + (q.percent || 0) + " %)"));
+          if (q.message) { u.appendChild(rawSpan(actTr(q.message), "usage-note " + (q.state === "full" ? "bad" : "risk"))); }
+          body.appendChild(u);
+        }
+        var d = drains.filter(function (x) { return x.storage === name; })[0];
+        var btn = li.querySelector("button.drain-btn");
+        if (!d) { return; }
+        var title = li.querySelector(".li-title");
+        if (title && !title.querySelector(".drain-pill")) { var dp = pill(d.phase === "drained" ? "grey" : d.phase === "blocked" ? "bad" : "risk", d.phase === "drained" ? "drained" : d.phase === "blocked" ? "drain waiting" : "draining"); dp.classList.add("drain-pill"); title.appendChild(dp); }
+        var w = el("div", "li-sub li-usage");
+        w.appendChild(usageBar(d.percent, d.phase === "blocked" ? "risk" : ""));
+        if (d.phase === "drained") { w.appendChild(el("span", null, "Drained: it holds nothing Varsto needs.")); } else {
+          w.appendChild(el("span", null, "Drained so far"));
+          w.appendChild(rawSpan(d.percent + " % · " + fmtBytes(d.bytes_left) + (d.eta_utc ? " · \u2248 " + new Date(d.eta_utc * 1000).toLocaleString() : "")));
+          if (d.remove_when_empty) { w.appendChild(el("span", "muted", "removed when empty")); }
+        }
+        (d.phase === "drained" ? [] : d.blocked).forEach(function (b) { w.appendChild(rawSpan(actTr(b), "usage-note risk")); });
+        if (d.last_error) { w.appendChild(rawSpan(d.last_error, "usage-note bad")); }
+        body.appendChild(w);
+        if (btn) { btn.textContent = d.phase === "drained" ? "Use again" : "Stop draining"; btn.title = ""; btn.onclick = function () { stopDrain(name, d.phase === "drained"); }; }
+      });
+    }).catch(function () {});
+  }
+  // Draining: show what it takes (bytes to move and where, egress, time at
+  // the budget, whether every policy holds), then start it in the service.
+  function drainStorage(name) {
+    busy(true);
+    api("GET", "/api/storage/drain-plan?name=" + enc(name)).then(function (p) {
+      busy(false);
+      if (p.records_blocked) { alertBox(actTr(p.records_blocked)); return null; }
+      var money = function (c) { return Object.keys(c || {}).map(function (k) { return c[k].toFixed(2) + " " + k; }).join(" + "); };
+      var facts = [
+        ["Blocks on this storage", p.blocks + " · " + fmtBytes(p.bytes)],
+        ["Only deleted (enough copies elsewhere)", String(p.blocks_drop_only)],
+        ["Copied first, read back before deleting", p.blocks_to_copy + " · " + fmtBytes(p.bytes_to_copy) + (Object.keys(p.targets).length ? " \u2192 " + Object.keys(p.targets).map(function (t) { return t + " " + fmtBytes(p.targets[t]); }).join(", ") : "")],
+        ["Read from this storage", fmtBytes(p.bytes_read_here) + (money(p.egress_cost) ? " · \u2248 " + money(p.egress_cost) : "")]
+      ];
+      if (money(p.early_deletion_cost)) { facts.push(["Minimum storage duration still billed", "\u2248 " + money(p.early_deletion_cost)]); }
+      facts.push(["Policies", p.policy === "ok" ? actTr("Every folder's policy holds without it.") : p.blocks_blocked + " \u00d7 " + p.blocked.map(actTr).join("; ")]);
+      (p.notes || []).forEach(function (n) { facts.push(["Note", actTr(n)]); });
+      var checks = [["remove", "Remove the storage when it is empty", false]];
+      if (p.cold) { checks.push(["cold", "Read from this cold storage (retrieval fees and restore delays apply)", false]); }
+      return dialog({ title: "Drain storage " + name + "?", text: "Draining empties the storage onto your other storages in the background, without ever weakening a folder's policy: each block is copied and read back before its copy here is deleted, and blocks that cannot keep their policy elsewhere stay. Nothing new is written here meanwhile; it stays readable. Afterwards the storage holds nothing Varsto needs.", facts: facts, fields: [
+        { name: "budget", label: "Most GB copied per day (empty: no limit)", type: "number", value: "", hint: "Limits egress costs; blocks that only need deleting do not count." },
+        { name: "opts", label: "Options", checks: checks }
+      ], ok: "Start draining" }).then(function (r) {
+        if (!r) { return null; }
+        var o = (r.values.opts || "").split(",");
+        return api("POST", "/api/storage/drain", { name: name, budget_gb_per_day: r.values.budget, remove_when_empty: o.indexOf("remove") >= 0, confirm_cold_read: o.indexOf("cold") >= 0 }).then(function () { log("draining " + name + " started; the service moves its blocks after the next sync"); });
+      });
+    }).catch(function (e) { alertBox(e.message); }).then(function () { busy(false); return refreshStatus(); });
+  }
+  function stopDrain(name, drained) {
+    dialog({ title: drained ? "Use " + name + " again?" : "Stop draining " + name + "?", text: "The storage takes new blocks again. Blocks already moved stay where they are now.", ok: drained ? "Use again" : "Stop draining" }).then(function (r) {
+      if (!r) { return null; }
+      return api("POST", "/api/storage/drain", { name: name, stop: true }).then(function () { log("draining " + name + " stopped"); });
+    }).catch(function (e) { alertBox(e.message); }).then(function () { return refreshStatus(); });
   }
 
   // Backups (their own page): read-only snapshots of a directory of this
@@ -1450,7 +1551,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     $("import-waiting-box").classList.toggle("hidden", !c || !c.waiting_count);
     if (!c) { return; }
     c.waiting.forEach(function (w) {
-      var li = el("li"); var p = el("span", null, w.path); p.setAttribute("data-no-i18n", ""); li.appendChild(p);
+      var li = el("li"); var p = el("span", null, showName(w.path)); p.setAttribute("data-no-i18n", ""); li.appendChild(p);
       li.appendChild(el("span", "sub", w.reason)); box.appendChild(li);
     });
   }
@@ -1496,6 +1597,164 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
       showCleanupPlan(r.folder, r.cleanup);
       log("Imported into " + r.folder);
     }).catch(function (e) { alertBox(e.message); }).then(function () { busy(false); loadImports(); });
+  };
+
+  // Trash (its own page): files deleted on any device, kept for the trash
+  // days and restorable on every device; the settings below the list.
+  var trashItems = [], trashSelected = {}, trashStorageNow = "", trashStorages = [];
+  function trashKey(i) { return i.folder_id + "/" + i.id; }
+  function loadTrash() {
+    // The storages for the settings: from the last status, or asked now (page opened first).
+    var storages = lastStatus ? Promise.resolve(lastStatus) : api("GET", "/api/status");
+    return Promise.all([api("GET", "/api/trash"), api("GET", "/api/trash/status"), storages]).then(function (r) {
+      trashStorages = (r[2].storages || []).filter(function (x) { return !x.carrier; });
+      trashItems = r[0]; renderTrashFolders(); renderTrash(); renderTrashStatus(r[1]);
+    }).catch(function (e) { log("trash: " + e.message); });
+  }
+  function renderTrashFolders() {
+    var sel = $("trashfolder"); var cur = sel.value; sel.innerHTML = "";
+    var all = el("option", null, "All folders"); all.value = ""; sel.appendChild(all);
+    var names = {}; trashItems.forEach(function (i) { names[i.folder] = true; });
+    Object.keys(names).sort().forEach(function (n) { var o = el("option", null, n); o.value = n; o.setAttribute("data-no-i18n", ""); sel.appendChild(o); });
+    sel.value = names[cur] ? cur : "";
+  }
+  function trashShown() {
+    var q = $("trashsearch").value.trim().toLowerCase(); var f = $("trashfolder").value;
+    return trashItems.filter(function (i) { return (!f || i.folder === f) && (!q || (i.folder + "/" + i.path).toLowerCase().indexOf(q) >= 0); });
+  }
+  function trashPicked() { return trashItems.filter(function (i) { return trashSelected[trashKey(i)]; }); }
+  function trashButtons() {
+    var n = trashPicked().length;
+    $("trashrestore").disabled = n === 0; $("trashpurge").disabled = n === 0;
+    $("trashcount").textContent = n ? n + " selected" : "";
+    var shown = trashShown();
+    $("trashall").checked = shown.length > 0 && shown.every(function (i) { return trashSelected[trashKey(i)]; });
+  }
+  function renderTrash() {
+    var list = trashShown();
+    var tb = $("trashlist").querySelector("tbody"); tb.innerHTML = "";
+    var none = trashItems.length === 0;
+    $("trash-empty").classList.toggle("hidden", !none);
+    $("trashlist").classList.toggle("hidden", none);
+    $("trashtools").classList.toggle("hidden", none);
+    list.forEach(function (i) {
+      var tr = el("tr");
+      // Phone rows show the column names from data-label: in the page's language.
+      function td(text, cls, label) { var d = el("td", cls, text); if (label) { d.dataset.label = actTr(label); } tr.appendChild(d); return d; }
+      var c = el("td"); var cb = el("input"); cb.type = "checkbox"; cb.checked = !!trashSelected[trashKey(i)]; cb.setAttribute("aria-label", "Select");
+      cb.onchange = function () { if (cb.checked) { trashSelected[trashKey(i)] = true; } else { delete trashSelected[trashKey(i)]; } trashButtons(); };
+      c.appendChild(cb); tr.appendChild(c);
+      var p = el("td"); p.dataset.label = actTr("Path"); var nm = el("span", null, i.path); nm.setAttribute("data-no-i18n", ""); p.appendChild(nm);
+      if (i.cold_only) { p.appendChild(document.createTextNode(" ")); p.appendChild(pill("grey", "cold")); }
+      if (i.local_copy) { p.appendChild(document.createTextNode(" ")); p.appendChild(pill("accent", "on this device")); }
+      var sub = el("span", "sub", i.folder); sub.setAttribute("data-no-i18n", ""); p.appendChild(sub);
+      tr.appendChild(p);
+      td(fmtBytes(i.size), "num", "Size");
+      td(fmtWhen(i.deleted_utc), "", "Deleted");
+      td(i.deleted_by, "", "By").setAttribute("data-no-i18n", "");
+      td(fmtDate(i.expires_utc), "", "Expires");
+      var act = el("td"); var rb = el("button", "secondary", "Restore…"); rb.type = "button"; rb.onclick = function () { restoreTrash([i]); }; act.appendChild(rb);
+      var menu = rowMenu(act, "trash:" + trashKey(i));
+      var db = el("button", "secondary", "Delete permanently…"); db.type = "button"; db.onclick = function () { purgeTrash([i]); }; menu.appendChild(db);
+      menu.done();
+      tr.appendChild(act); tb.appendChild(tr);
+    });
+    if (!none && !list.length) { var tr = el("tr"); var d = el("td", "muted", "Nothing in the trash matches"); d.colSpan = 7; tr.appendChild(d); tb.appendChild(tr); }
+    trashButtons();
+  }
+  function renderTrashStatus(st) {
+    var f = $("trashsettings");
+    if (document.activeElement !== f.days) { f.days.value = st.days; }
+    var sel = $("trashstorage"); sel.innerHTML = "";
+    var no = el("option", null, "None: deleted files stay where they are"); no.value = ""; sel.appendChild(no);
+    trashStorages.forEach(function (x) {
+      var o = el("option", null, x.name + (x.cold ? " (" + actTr("cold") + ")" : "")); o.value = x.name; o.setAttribute("data-no-i18n", ""); sel.appendChild(o);
+    });
+    if (st.storage && !sel.querySelector("option[value='" + CSS.escape(st.storage) + "']")) { var o = el("option", null, st.storage); o.value = st.storage; o.setAttribute("data-no-i18n", ""); sel.appendChild(o); }
+    sel.value = st.storage || ""; trashStorageNow = st.storage || "";
+    var dl = $("trashfacts"); dl.innerHTML = "";
+    function fact(label, value) { dl.appendChild(el("dt", null, label)); var dd = el("dd", null, value); dd.setAttribute("data-no-i18n", ""); dl.appendChild(dd); }
+    fact("In the trash", st.entries + " · " + fmtBytes(st.bytes));
+    var where = Object.keys(st.by_storage || {}).map(function (n) { return n + " " + fmtBytes(st.by_storage[n]); });
+    if (where.length) { fact("Kept on", where.join(", ")); }
+    var fd = Object.keys(st.folder_days || {}).map(function (n) { return n + " " + st.folder_days[n]; });
+    if (fd.length) { fact("Folders with their own days", fd.join(", ")); }
+    if (st.local_copies) { fact("Copies on this device", st.local_copies + " · " + fmtBytes(st.local_copy_bytes)); }
+    if (st.next_expiry_utc) { fact("Next expiry", fmtDate(st.next_expiry_utc)); }
+    fact("Last cleanup", fmtWhen(st.last_upkeep_utc));
+    var notes = (st.notes || []).slice(); if (st.drops_waiting) { notes.push(st.drops_waiting + " blocks wait for the cold storage's minimum storage time before they are deleted"); }
+    $("trashnotes").textContent = notes.join(" ");
+  }
+  function trashByFolder(items) { var g = {}; items.forEach(function (i) { (g[i.folder] = g[i.folder] || []).push(i.path); }); return g; }
+  function restoreTrash(items) {
+    if (!items.length) { return; }
+    dialog({
+      title: items.length === 1 ? "Restore " + items[0].path + "?" : "Restore " + items.length + " files?",
+      text: "Each file goes back where it was. If that name is taken now, it comes back as \"name (restored)\": nothing is overwritten. The restored files sync to your other devices.",
+      fields: [{ name: "to", label: "Into another directory of the folder (optional)", placeholder: "Restored", hint: "empty: the original place" }],
+      ok: "Restore"
+    }).then(function (r) {
+      if (!r) { return; }
+      var to = (r.values.to || "").trim(); var groups = trashByFolder(items); var done = 0;
+      busy(true);
+      var chain = Promise.resolve();
+      Object.keys(groups).forEach(function (folder) {
+        chain = chain.then(function () {
+          return api("POST", "/api/trash/restore-plan", { folder: folder, paths: groups[folder], to: to });
+        }).then(function (p) {
+          if (!p.cold_storages.length) { return false; }
+          var text = fmtBytes(p.cold_bytes) + " of it is kept only on cold storage " + p.cold_storages.join(", ") + ". Reading it back starts a retrieval, which your provider bills" + (p.read_cost ? " (about " + p.read_cost + ")" : "") + " and which can take hours.";
+          return dialog({ title: "Read from cold storage?", text: text, ok: "Read cold storage", danger: true }).then(function (x) { if (!x) { throw new Error("cancelled"); } return true; });
+        }).then(function (cold) {
+          return api("POST", "/api/trash/restore", { folder: folder, paths: groups[folder], to: to, confirm_cold_read: cold });
+        }).then(function (x) {
+          done += x.restored.length;
+          if (x.unavailable && x.unavailable.length) { alertBox(x.unavailable.length + " files could not be restored: " + x.unavailable.slice(0, 10).join("; ")); }
+        });
+      });
+      return chain.then(function () { log("Restored " + done + " files from the trash"); }, function (e) { if (e.message !== "cancelled") { alertBox(e.message); } })
+        .then(function () { busy(false); trashSelected = {}; loadTrash(); });
+    });
+  }
+  function purgeTrash(items) {
+    if (!items.length) { return; }
+    var text = items.length === 1 ? items[0].path + " is deleted for good, from every device and storage. It cannot be restored afterwards." : items.length + " files are deleted for good, from every device and storage. They cannot be restored afterwards.";
+    confirmBox(text, { title: "Delete permanently?", ok: "Delete permanently", danger: true }).then(function (yes) {
+      if (!yes) { return; }
+      var groups = trashByFolder(items); var n = 0;
+      busy(true);
+      var chain = Promise.resolve();
+      Object.keys(groups).forEach(function (folder) {
+        chain = chain.then(function () { return api("POST", "/api/trash/purge", { folder: folder, paths: groups[folder] }); }).then(function (x) { n += x.entries; });
+      });
+      return chain.then(function () { log("Deleted " + n + " files permanently"); }, function (e) { alertBox(e.message); })
+        .then(function () { busy(false); trashSelected = {}; loadTrash(); });
+    });
+  }
+  $("trashsearch").addEventListener("input", renderTrash);
+  $("trashfolder").addEventListener("change", renderTrash);
+  $("trashall").onchange = function () { var on = $("trashall").checked; trashShown().forEach(function (i) { if (on) { trashSelected[trashKey(i)] = true; } else { delete trashSelected[trashKey(i)]; } }); renderTrash(); };
+  $("trashrestore").onclick = function () { restoreTrash(trashPicked()); };
+  $("trashpurge").onclick = function () { purgeTrash(trashPicked()); };
+  $("trashempty").onclick = function () {
+    var word = actTr("empty");
+    dialog({ title: "Empty the trash?", text: "Every file in the trash (" + trashItems.length + ") is deleted for good, from every device and storage. This cannot be undone.", ok: "Empty trash", danger: true, confirmText: word }).then(function (r) {
+      if (!r) { return; }
+      busy(true);
+      return api("POST", "/api/trash/purge", { all: true }).then(function (x) { log("Trash emptied: " + x.entries + " files deleted permanently"); }, function (e) { alertBox(e.message); })
+        .then(function () { busy(false); trashSelected = {}; loadTrash(); });
+    });
+  };
+  $("trashsettings").onsubmit = function (ev) {
+    ev.preventDefault();
+    var d = formData(ev.target); var days = parseInt(d.days, 10);
+    if (!(days >= 1 && days <= 3650)) { alertBox("Keep deleted files from 1 to 3650 days."); return; }
+    // The storage is sent only when it changed: setting one moves the trash there.
+    var body = { days: days };
+    if (d.storage !== trashStorageNow) { if (d.storage) { body.storage = d.storage; } else { body.no_storage = true; } }
+    busy(true);
+    api("POST", "/api/trash/set", body).then(function (st) { renderTrashStatus(st); log("Trash settings saved"); }, function (e) { alertBox(e.message); })
+      .then(function () { busy(false); loadTrash(); });
   };
 
   // Automatic verification (Policies page): status line, run now, schedule.
@@ -1894,7 +2153,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   function runSync(folder) {
     busy(true); log("sync " + (folder || "all") + " started");
     return api("POST", "/api/sync", folder ? { folder: folder } : {}).then(function (r) {
-      r.forEach(function (x) { log(x.pull.folder + ": pulled " + x.pull.files_updated + " updated, " + x.pull.files_deleted + " deleted, " + x.pull.conflicts + " conflicts; pushed " + x.push.files_changed + " changed, " + x.push.chunks_uploaded + " chunks" + (x.pull.files_unavailable.length ? "; unavailable: " + x.pull.files_unavailable.join(", ") : "") + (x.pull.forked_devices.length ? "; FORKED: " + x.pull.forked_devices.join(", ") : "")); });
+      r.forEach(function (x) { log(x.pull.folder + ": pulled " + x.pull.files_updated + " updated, " + x.pull.files_deleted + " deleted, " + x.pull.conflicts + " conflicts; pushed " + x.push.files_changed + " changed, " + x.push.chunks_uploaded + " chunks" + (x.pull.files_unavailable.length ? "; unavailable: " + x.pull.files_unavailable.join(", ") : "") + (x.pull.forked_devices.length ? "; FORKED: " + x.pull.forked_devices.join(", ") : "") + ((x.pull.renamed_locally || []).length ? "; kept under another name here because the disk ignores case: " + x.pull.renamed_locally.join(", ") : "")); });
     }).catch(function (e) { log("sync failed: " + e.message); }).then(function () { busy(false); return refreshStatus().then(function () { if (currentPage === "files") { loadFiles(); } }); });
   }
 
@@ -1977,7 +2236,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   function showViewerItem() {
     var f = viewer.list[viewer.i]; var kind = viewKind(f.path); var url = viewUrl(viewer.folder, f.path);
     clearStage(); var st = $("viewer-stage");
-    $("viewer-name").textContent = f.path.split("/").pop(); $("viewer-name").title = f.path;
+    $("viewer-name").textContent = showName(f.path.split("/").pop()); $("viewer-name").title = showName(f.path);
     $("viewer-prev").disabled = viewer.i <= 0; $("viewer-next").disabled = viewer.i >= viewer.list.length - 1;
     var fail = function () { clearStage(); st.appendChild(viewerMsg("This file cannot be shown here. Use Open in another app.")); };
     if (kind === "image") { var im = document.createElement("img"); im.alt = f.path; im.onerror = fail; im.src = url; st.appendChild(im); }
@@ -2036,7 +2295,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     var d = $("filedetails"); d.classList.remove("hidden"); document.querySelector(".files-layout").classList.add("with-details");
     var pv = $("fd-preview"); pv.innerHTML = "";
     if (f.media) { var im = document.createElement("img"); im.alt = ""; im.src = "/api/thumb?folder=" + enc(folder) + "&path=" + enc(f.path) + "&token=" + enc(token); im.onerror = function () { im.remove(); pv.appendChild(icon("image")); }; pv.appendChild(im); } else { pv.appendChild(icon("files")); }
-    $("fd-name").textContent = f.path;
+    $("fd-name").textContent = showName(f.path);
     var st = $("fd-state"); st.innerHTML = ""; st.appendChild(stateSquare(f)); st.appendChild(document.createTextNode(fileStateLabel(f)));
     $("fd-size").textContent = fmtBytes(f.size);
     $("fd-modified").textContent = fmtDate(f.modified_utc) || "unknown";
@@ -2327,8 +2586,8 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
           row.appendChild(media);
           var slash = f.path.lastIndexOf("/");
           var body = el("div", "mrow-body");
-          body.appendChild(el("div", "mrow-name", slash >= 0 ? f.path.slice(slash + 1) : f.path));
-          body.appendChild(el("div", "mrow-sub", [slash >= 0 ? f.path.slice(0, slash) : null, fmtBytes(f.size), fileStateLabel(f)].filter(Boolean).join(" · ")));
+          body.appendChild(el("div", "mrow-name", showName(slash >= 0 ? f.path.slice(slash + 1) : f.path)));
+          body.appendChild(el("div", "mrow-sub", [slash >= 0 ? showName(f.path.slice(0, slash)) : null, fmtBytes(f.size), fileStateLabel(f)].filter(Boolean).join(" · ")));
           row.appendChild(body);
           row.appendChild(stateSquare(f));
           cell.appendChild(row); tr.appendChild(cell); tb.appendChild(tr);
@@ -2347,7 +2606,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
         wrap.appendChild(stateSquare(f));
         if (f.media) { var im = document.createElement("img"); im.className = "thumb"; im.alt = ""; im.loading = "lazy"; im.src = "/api/thumb?folder=" + enc(folder) + "&path=" + enc(f.path) + "&token=" + enc(token); im.onerror = function () { var fi = el("span", "file-icon"); fi.appendChild(icon("image")); im.replaceWith(fi); }; wrap.appendChild(im); }
         else { var fi = el("span", "file-icon"); fi.appendChild(icon("files")); wrap.appendChild(fi); }
-        wrap.appendChild(document.createTextNode(f.path));
+        var fname = el("span", null, showName(f.path)); fname.setAttribute("data-no-i18n", ""); wrap.appendChild(fname);
         if (f.analysis) { var ap = pill(f.analysis_stale ? "risk" : "accent", f.analysis_stale ? "Analysis stale" : "Analysed"); ap.title = f.analysis.slice(0, 200); ap.classList.add("analysis-pill"); wrap.appendChild(ap); }
         nameCell.appendChild(wrap); tr.appendChild(nameCell);
         td(fmtBytes(f.size), "num");
@@ -2649,7 +2908,13 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     "restic": "Checking that the restic mirror is complete",
     "restic.backup": "Backing up the mirror with restic",
     "restic.forget": "Removing old restic snapshots",
-    "restic.repo_check": "Checking the restic repository"
+    "restic.repo_check": "Checking the restic repository",
+    "trash_restore": "Restoring files of folder «{s}» from the trash",
+    "trash_purge": "Deleting files from the trash for good",
+    "trash_purge.drop": "Deleting files from the trash for good",
+    "trash_move": "Moving deleted files of folder «{s}» to the trash storage",
+    "drain": "Draining storage «{s}»",
+    "drain.records": "Copying the records off storage «{s}»"
   };
   var actTimer = null, actBusy = false, lastActivity = null;
   function actTr(s) { return window.varstoLang ? window.varstoLang.t(s) : s; }
@@ -3382,6 +3647,59 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   $("addfolder").onsubmit = function (ev) { ev.preventDefault(); var d = cleanPath(formData(ev.target), ev.target); var name = d.name; api("POST", "/api/folder", d).then(function () { ev.target.reset(); log("folder added: " + name + (d.plain === false ? " (encrypted on this phone)" : d.plain ? " (plain files on this phone)" : "")); showFolderForms(false, true); return refreshStatus().then(function () { openFolder(name); }); }).catch(function (e) { alertBox(e.message); }); };
   $("attachfolder").onsubmit = function (ev) { ev.preventDefault(); var d = formData(ev.target); if (!d.name_or_id) { return; } attachFolder(d.name_or_id, d.path); ev.target.reset(); };
   $("addstorage").onsubmit = function (ev) { ev.preventDefault(); api("POST", "/api/storage", formData(ev.target)).then(function (r) { ev.target.reset(); $("storagekind").onchange.call($("storagekind")); log("storage added; copying the vault to it now in the background"); return refreshStatus(r.status); }).catch(function (e) { alertBox(e.message); }); };
+
+  // Logs (Settings card): how much the service writes to its log on this
+  // device, the space it takes, the folder and a bundle to send with a report.
+  var logLevels = ["trace", "debug", "info", "warn", "error"];
+  function renderLogs(l) {
+    var sel = $("log-level");
+    var level = l.level || "debug";
+    var extra = sel.querySelector("option[data-extra]");
+    if (logLevels.indexOf(level) < 0) {
+      // A filter spec (from the config, VARSTO_LOG or --log-level): shown as it is.
+      if (!extra) { extra = el("option"); extra.dataset.extra = "1"; extra.setAttribute("data-no-i18n", ""); sel.appendChild(extra); }
+      extra.value = level; extra.textContent = level;
+    } else if (extra) { extra.remove(); }
+    sel.value = level;
+    var src = $("log-source");
+    var over = l.source === "env" ? "The VARSTO_LOG environment variable overrides this setting." : l.source === "flag" ? "The --log-level option the service was started with overrides this setting." : "";
+    src.textContent = over; src.classList.toggle("hidden", !over);
+    if (l.bytes !== undefined) { $("log-usage").textContent = "Using " + fmtBytes(l.bytes || 0) + " in " + (l.files || 0) + " files"; }
+    $("log-open").classList.toggle("hidden", l.can_open === false);
+  }
+  function loadLogs() {
+    if (document.body.dataset.view !== "app") { return; }
+    api("GET", "/api/logs").then(renderLogs).catch(function (e) { $("log-usage").textContent = e.message; });
+  }
+  $("log-level").onchange = function () {
+    var v = this.value;
+    api("POST", "/api/logs/level", { level: v }).then(function (r) { log("log detail set to " + (r.level || v)); renderLogs(r); loadLogs(); }).catch(function (e) { alertBox(e.message); loadLogs(); });
+  };
+  $("log-open").onclick = function () { api("POST", "/api/logs/open").catch(function (e) { alertBox(e.message); }); };
+  $("log-bundle").onclick = function () {
+    var b = this;
+    if (droid && droid.shareFile) {
+      // The Android shell cannot save a download: the service writes the bundle and the shell shares it.
+      api("POST", "/api/logs/bundle", { save: true }).then(function (r) {
+        log("log bundle saved: " + r.path);
+        return alertBox("The bundle has no keys or passphrases, but it does contain file and folder names, device and storage names. Look through it before you share it.", "Log bundle saved").then(function () { droid.shareFile(r.path); });
+      }).catch(function (e) { alertBox(e.message); });
+      return;
+    }
+    b.disabled = true; workBar(true);
+    fetch("/api/logs/bundle", { method: "POST", headers: { "X-Varsto-Token": token } }).then(function (r) {
+      if (!r.ok) { return r.text().then(function (t) { var j = null; try { j = JSON.parse(t); } catch (x) {} throw new Error((j && j.error) || ("The Varsto service answered " + r.status + " to POST /api/logs/bundle")); }); }
+      var m = (r.headers.get("Content-Disposition") || "").match(/filename="?([^";]+)"?/);
+      var name = m ? m[1] : "varsto-logs.tar.zst";
+      return r.blob().then(function (blob) {
+        var a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+        log("log bundle saved: " + name);
+        return alertBox("The bundle has no keys or passphrases, but it does contain file and folder names, device and storage names. Look through it before you share it.", "Log bundle saved");
+      });
+    }, function (e) {
+      throw new Error("Could not reach the Varsto service (POST /api/logs/bundle): " + e.message + ". It may be restarting or busy; try again in a moment.");
+    }).catch(function (e) { alertBox(e.message); }).then(function () { b.disabled = false; workBar(false); loadLogs(); });
+  };
 
   // Android: all files access for "plain files on this phone" folders (Settings card).
   function refreshAllFiles() {

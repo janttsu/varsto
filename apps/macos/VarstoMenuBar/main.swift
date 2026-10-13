@@ -120,6 +120,100 @@ let translations: [String: (fi: String, sv: String)] = [
          "Lägg till Varsto bland inloggningsobjekten i Systeminställningar i stället."),
 ]
 
+// ----- Debug log -------------------------------------------------------------
+// The app's own log, on by default: <home>/logs/varsto-app.log, in the same
+// line format as the Rust core logger, rotated at 10 MiB (four old files kept).
+// Never logged: the passphrase, the session token or the interface URL that
+// carries it, keychain values, file contents. File names and paths are fine.
+
+enum LogLevel: Int {
+    case error = 1, warn, info, debug, trace
+    var label: String { ["ERROR", "WARN ", "INFO ", "DEBUG", "TRACE"][rawValue - 1] }
+}
+
+final class AppLog {
+    static let shared = AppLog()
+    /// Lines above this level are dropped (trace: routine status polling).
+    var maxLevel: LogLevel = .debug
+    private let queue = DispatchQueue(label: "in.soderlund.varsto.applog")
+    private var dir: URL?
+    private var handle: FileHandle?
+    private var size: UInt64 = 0
+    private let maxSize: UInt64 = 10 * 1024 * 1024
+    private let keep = 4
+    private let pid = ProcessInfo.processInfo.processIdentifier
+    private let stamp: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = TimeZone(identifier: "UTC")
+        f.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'"
+        return f
+    }()
+
+    func open(home: URL) {
+        queue.sync {
+            let d = home.appendingPathComponent("logs")
+            let fm = FileManager.default
+            try? fm.createDirectory(at: d, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+            try? fm.setAttributes([.posixPermissions: 0o700], ofItemAtPath: d.path)
+            dir = d
+            openFile()
+        }
+    }
+
+    private func path(_ n: Int) -> String {
+        dir!.appendingPathComponent(n == 0 ? "varsto-app.log" : "varsto-app.\(n).log").path
+    }
+
+    private func openFile() {
+        guard dir != nil else { return }
+        let p = path(0)
+        let fm = FileManager.default
+        if !fm.fileExists(atPath: p) {
+            fm.createFile(atPath: p, contents: nil, attributes: [.posixPermissions: 0o600])
+        } else {
+            try? fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: p)
+        }
+        handle = FileHandle(forWritingAtPath: p)
+        size = (try? handle?.seekToEnd()) ?? 0
+    }
+
+    private func rotate() {
+        try? handle?.close()
+        handle = nil
+        let fm = FileManager.default
+        try? fm.removeItem(atPath: path(keep))
+        for n in stride(from: keep - 1, through: 0, by: -1) where fm.fileExists(atPath: path(n)) {
+            try? fm.moveItem(atPath: path(n), toPath: path(n + 1))
+        }
+        openFile()
+    }
+
+    func write(_ level: LogLevel, _ module: String, _ msg: String) {
+        if level.rawValue > maxLevel.rawValue { return }
+        let now = Date()
+        var tid: UInt64 = 0
+        pthread_threadid_np(nil, &tid)
+        let thread = Thread.isMainThread ? "main" : "\(tid)"
+        var text = msg.replacingOccurrences(of: "\n", with: " ")
+        // A last guard: a session token that slipped into a message is masked.
+        if text.contains("token=") {
+            text = text.replacingOccurrences(of: "token=[^&\\s]*", with: "token=<redacted>", options: .regularExpression)
+        }
+        let clean = text
+        queue.async {
+            guard let h = self.handle else { return }
+            let line = "\(self.stamp.string(from: now)) \(level.label) app[\(self.pid)/\(thread)] \(module): \(clean)\n"
+            let data = Data(line.utf8)
+            if (try? h.write(contentsOf: data)) != nil { self.size += UInt64(data.count) }
+            if self.size > self.maxSize { self.rotate() }
+        }
+    }
+}
+
+/// One line to the app log; `module` names the part of the app.
+func vlog(_ level: LogLevel, _ module: String, _ msg: String) { AppLog.shared.write(level, module, msg) }
+
 final class ServiceClient {
     let home: URL
     init(home: URL) { self.home = home }
@@ -136,7 +230,10 @@ final class ServiceClient {
     }
 
     func call(_ method: String, _ path: String, body: [String: Any]? = nil) -> [String: Any]? {
-        guard let i = info(), let url = URL(string: "http://127.0.0.1:\(i.port)\(path)") else { return nil }
+        guard let i = info(), let url = URL(string: "http://127.0.0.1:\(i.port)\(path)") else {
+            vlog(.trace, "api", method + " skipped: no service.json")
+            return nil
+        }
         var req = URLRequest(url: url)
         req.httpMethod = method
         req.timeoutInterval = 600
@@ -145,11 +242,28 @@ final class ServiceClient {
         if let body = body { req.httpBody = try? JSONSerialization.data(withJSONObject: body) }
         let sem = DispatchSemaphore(value: 0)
         var result: [String: Any]?
-        URLSession.shared.dataTask(with: req) { data, _, _ in
+        var status = 0
+        var failure = ""
+        let started = Date()
+        URLSession.shared.dataTask(with: req) { data, resp, err in
+            status = (resp as? HTTPURLResponse)?.statusCode ?? 0
+            if let e = err as NSError? { failure = "\(e.domain) \(e.code)" }
             if let d = data { result = (try? JSONSerialization.jsonObject(with: d)) as? [String: Any] }
             sem.signal()
         }.resume()
-        _ = sem.wait(timeout: .now() + 605)
+        let timedOut = sem.wait(timeout: .now() + 605) == .timedOut
+        // Method, path (never a query) and outcome; bodies may hold the passphrase.
+        let bare = path.split(separator: "?", maxSplits: 1).first.map { String($0) } ?? path
+        let ms = Int(Date().timeIntervalSince(started) * 1000)
+        let apiErr = (result?["error"] as? String).map { " error: \($0)" } ?? ""
+        let polling = method == "GET" && (bare == "/api/state" || bare == "/api/service")
+        let bad = timedOut || status == 0 || status >= 400
+        var level: LogLevel = bad ? .warn : .debug
+        if polling { level = bad ? .debug : .trace }
+        var outcome = "\(status)"
+        if status == 0 { outcome = "no answer " + failure }
+        if timedOut { outcome = "timed out" }
+        vlog(level, "api", "\(method) \(bare) -> \(outcome) in \(ms) ms\(apiErr)")
         return result
     }
 
@@ -282,6 +396,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         binary = Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/varsto")
         client = ServiceClient(home: home)
         uiLang = readUILang(home)
+        AppLog.shared.open(home: home)
+        let osv = ProcessInfo.processInfo.operatingSystemVersion
+        vlog(.info, "app", "Varsto \(startedVersion ?? "?") starting (macOS \(osv.majorVersion).\(osv.minorVersion).\(osv.patchVersion)), home \(home.path), binary \(binary.path), language \(uiLang)")
 
         buildMainMenu()
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
@@ -343,11 +460,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Double-clicked placeholders: download each file, then open it.
     func application(_ application: NSApplication, open urls: [URL]) {
         launchedForFiles = true
+        vlog(.info, "finder", "open \(urls.count) placeholder(s): \(urls.map { $0.lastPathComponent }.joined(separator: ", "))")
         actOnPaths("fetch", urls.map { $0.path }, openAfter: true)
     }
 
     func actOnPaths(_ action: String, _ paths: [String], openAfter: Bool) {
         guard !paths.isEmpty else { return }
+        vlog(.info, "finder", "\(action) \(paths.count) path(s): \(paths.joined(separator: ", "))")
         DispatchQueue.global().async {
             var r: [String: Any]?
             // Started just now by Finder: the service may still be coming up.
@@ -362,6 +481,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func report(_ action: String, _ paths: [String], _ r: [String: Any]?, _ openAfter: Bool) {
         let title = action == "fetch" ? tr("Could not download") : tr("Could not free up space")
+        if r == nil { vlog(.error, "finder", "\(action): the service did not answer") }
+        if let e = r?["error"] as? String { vlog(.warn, "finder", "\(action) failed: \(e)") }
         guard let r = r else { alert(title, tr("The Varsto service did not answer. Open Varsto and try again.")); return }
         if let e = r["error"] as? String {
             if e.contains("locked") {
@@ -382,6 +503,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     NSWorkspace.shared.open(URL(fileURLWithPath: real))
                 }
             } else {
+                vlog(.warn, "finder", "\(action) \(p): \(x["error"] as? String ?? "failed")")
                 failed.append("\((p as NSString).lastPathComponent): \(x["error"] as? String ?? tr("failed"))")
             }
         }
@@ -453,10 +575,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 i.arguments = ["--home", home.path, "service", "install", "--interval", "300"]
                 i.standardOutput = FileHandle.nullDevice
                 i.standardError = FileHandle.nullDevice
-                if (try? i.run()) != nil {
+                vlog(.info, "service", "launch agent: \(binary.path) \(i.arguments!.joined(separator: " "))")
+                do {
+                    try i.run()
                     i.waitUntilExit()
+                    vlog(i.terminationStatus == 0 ? .info : .warn, "service", "service install exited with status \(i.terminationStatus)")
                     if i.terminationStatus == 0 { return }
+                } catch {
+                    vlog(.error, "service", "service install could not start: \(error.localizedDescription)")
                 }
+            } else {
+                vlog(.info, "service", "service-off present: no launch agent")
             }
         }
         let p = Process()
@@ -467,10 +596,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         p.standardOutput = FileHandle(forWritingAtPath: logPath)
         p.standardError = p.standardOutput
         p.terminationHandler = { [weak self] proc in
+            let how = proc.terminationReason == .uncaughtSignal ? "signal" : "status"
+            vlog(proc.terminationStatus == 0 || proc.terminationStatus == 75 ? .info : .warn, "service",
+                 "service run (pid \(proc.processIdentifier)) exited with \(how) \(proc.terminationStatus); restarting")
             // 75 = restart after a self-update; anything else: restart after a pause.
             DispatchQueue.main.asyncAfter(deadline: .now() + (proc.terminationStatus == 75 ? 0.5 : 3)) { self?.ensureService() }
         }
-        try? p.run()
+        vlog(.info, "service", "starting in-app service: \(binary.path) \(p.arguments!.joined(separator: " "))")
+        do {
+            try p.run()
+            vlog(.info, "service", "service run started, pid \(p.processIdentifier)")
+        } catch {
+            vlog(.error, "service", "service run could not start: \(error.localizedDescription)")
+        }
         process = p
     }
 
@@ -486,6 +624,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
               let v = d["CFBundleShortVersionString"] as? String,
               let started = startedVersion, v != started else { return }
         relaunching = true
+        vlog(.info, "app", "bundle changed from \(started) to \(v): relaunching")
         let open = Process()
         open.executableURL = URL(fileURLWithPath: "/usr/bin/open")
         open.arguments = ["-n", Bundle.main.bundleURL.path]
@@ -510,10 +649,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// The last logged service state, so only changes are logged.
+    var loggedState = ""
+    func logState(_ s: String) {
+        if s != loggedState { loggedState = s; vlog(.info, "status", s) }
+    }
+
     func apply(state: [String: Any]?) {
         // A language picked in the window applies to the menus right away.
         let lang = readUILang(home)
-        if lang != uiLang { uiLang = lang; buildMainMenu(); retitle() }
+        if lang != uiLang { vlog(.debug, "app", "interface language \(uiLang) -> \(lang)"); uiLang = lang; buildMainMenu(); retitle() }
+        if let st = state {
+            let sv = st["service"] as? [String: Any] ?? [:]
+            var s = sv["paused"] as? Bool == true ? "paused" : "running"
+            if let err = sv["last_error"] as? String, !err.isEmpty { s = "problem: " + err }
+            if let worst = sv["policy_worst"] as? String, worst != "ok" { s += ", policy " + worst }
+            if st["unlocked"] as? Bool != true { s = "locked" }
+            if st["has_vault"] as? Bool != true { s = "no vault" }
+            logState(s)
+        } else {
+            logState("service not answering")
+        }
         guard let state = state else { statusMenuItem.title = tr("Service starting…"); return }
         if main.window?.isVisible == true, main.loadedURL.isEmpty { main.show(url: client.uiURL()) }
         if state["has_vault"] as? Bool != true {
@@ -561,19 +717,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         alert.addButton(withTitle: tr("Unlock"))
         alert.addButton(withTitle: tr("Later"))
         NSApp.activate(ignoringOtherApps: true)
+        vlog(.info, "unlock", "asking for the passphrase")
         if alert.runModal() == .alertFirstButtonReturn {
             let pass = field.stringValue
             if let r = client.call("POST", "/api/unlock", body: ["passphrase": pass]), r["ok"] as? Bool == true {
+                vlog(.info, "unlock", "unlocked")
                 if remember.state == .on {
+                    // The arguments hold the passphrase: never logged.
                     let sec = Process()
                     sec.executableURL = URL(fileURLWithPath: "/usr/bin/security")
                     sec.arguments = ["add-generic-password", "-U", "-s", "varsto", "-a", home.path, "-w", pass]
-                    try? sec.run(); sec.waitUntilExit()
+                    do {
+                        try sec.run(); sec.waitUntilExit()
+                        vlog(sec.terminationStatus == 0 ? .info : .warn, "unlock", "storing the passphrase in the login keychain: status \(sec.terminationStatus)")
+                    } catch {
+                        vlog(.error, "unlock", "security tool could not start: \(error.localizedDescription)")
+                    }
                 }
                 main.web.reload()
             } else {
+                vlog(.warn, "unlock", "unlock failed")
                 let e = NSAlert(); e.messageText = tr("Unlock failed"); e.informativeText = tr("Wrong passphrase?"); e.runModal()
             }
+        } else {
+            vlog(.info, "unlock", "postponed")
         }
     }
 
@@ -581,12 +748,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc func syncNow() { DispatchQueue.global().async { _ = self.client.call("POST", "/api/sync", body: [:]); DispatchQueue.main.async { self.refresh() } } }
     @objc func togglePause() {
         let paused = pauseItem.state != .on
+        vlog(.info, "app", paused ? "pause syncing" : "resume syncing")
         _ = client.call("POST", "/api/service/pause", body: ["paused": paused])
         refresh()
     }
     func autoCheckUpdates() {
         DispatchQueue.global().async {
             let c = self.client.call("GET", "/api/update/check")
+            vlog(.debug, "update", "automatic check: current \(c?["current"] as? String ?? "?"), latest \(c?["latest"] as? String ?? "?"), newer \(c?["newer"] as? Bool ?? false)")
             DispatchQueue.main.async {
                 guard let c = c, c["newer"] as? Bool == true, let latest = c["latest"] as? String else {
                     self.updateItem.isHidden = true
@@ -627,8 +796,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     a.addButton(withTitle: tr("Update now"))
                     a.addButton(withTitle: tr("Later"))
                     if a.runModal() == .alertFirstButtonReturn {
+                        vlog(.info, "update", "installing \(latest) over \(current)")
                         DispatchQueue.global().async {
                             let r = self.client.call("POST", "/api/update", body: [:])
+                            let outcome = r == nil ? "no answer" : (r?["error"] as? String) ?? "ok"
+                            vlog(outcome == "ok" ? .info : .error, "update", "update to \(latest): " + outcome)
                             DispatchQueue.main.async {
                                 let done = NSAlert()
                                 if let r = r, r["ok"] as? Bool == true || r["error"] == nil {
@@ -677,8 +849,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if let dest = try? fm.destinationOfSymbolicLink(atPath: target), dest == binary.path { return }
             guard fm.isWritableFile(atPath: dir) else { continue }
             try? fm.removeItem(atPath: target)
-            if (try? fm.createSymbolicLink(atPath: target, withDestinationPath: binary.path)) != nil { return }
+            if (try? fm.createSymbolicLink(atPath: target, withDestinationPath: binary.path)) != nil {
+                vlog(.info, "cli", "linked \(target) -> \(binary.path)")
+                return
+            }
+            vlog(.warn, "cli", "could not link \(target)")
         }
+        vlog(.debug, "cli", "no writable directory for the command-line link")
     }
 
     @objc func installCli() {
@@ -688,6 +865,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         var error: NSDictionary?
         NSAppleScript(source: script)?.executeAndReturnError(&error)
         let a = NSAlert()
+        if let error = error {
+            vlog(.warn, "cli", "administrator install of \(target) failed: \(error)")
+        } else {
+            vlog(.info, "cli", "installed \(target) with administrator privileges")
+        }
         if let error = error {
             a.messageText = tr("Could not install the command-line tool")
             a.informativeText = tr("Run this in Terminal instead:") + "\nln -sf '\(binary.path)' \(target)\n\n\(error)"
@@ -702,6 +884,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             do {
                 if SMAppService.mainApp.status == .enabled { try SMAppService.mainApp.unregister() } else { try SMAppService.mainApp.register() }
             } catch {
+                vlog(.error, "app", "login item: \(error.localizedDescription)")
                 let e = NSAlert(); e.messageText = tr("Could not change the login item"); e.informativeText = "\(error)"; e.runModal()
             }
             refresh()
@@ -712,6 +895,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc func quit() { NSApp.terminate(nil) }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        vlog(.info, "app", "quitting\(process?.isRunning == true ? ", stopping the in-app service" : "")")
         timer?.invalidate()
         fastTimer?.invalidate()
         updateTimer?.invalidate()

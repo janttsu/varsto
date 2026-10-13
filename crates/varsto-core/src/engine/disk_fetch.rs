@@ -213,6 +213,12 @@ impl Engine {
     /// Make a plan for fetching `paths` of `folder` (and keep it as the
     /// current plan).
     pub fn fetch_plan(&mut self, folder: &str, paths: &[String]) -> Result<FetchPlan> {
+        crate::logged_op_plain!("fetch plan", folder, {
+            self.fetch_plan_inner(folder, paths)
+        })
+    }
+
+    fn fetch_plan_inner(&mut self, folder: &str, paths: &[String]) -> Result<FetchPlan> {
         let settings = self.config.disk_fetch.clone();
         let (rec, _) = self.resolve_folder(folder)?;
         let state = self.load_state(&rec.folder_id)?;
@@ -617,6 +623,16 @@ impl Engine {
     /// blocks, write the files that are complete, sync, unmount and say it
     /// can be removed; then write what is left from the remote storages.
     pub fn run_fetch_plan(
+        &mut self,
+        plan: &mut FetchPlan,
+        driver: &mut dyn PlanDriver,
+    ) -> Result<FetchPlanReport> {
+        crate::logged_op!("run fetch plan", "", {
+            self.run_fetch_plan_inner(plan, driver)
+        })
+    }
+
+    fn run_fetch_plan_inner(
         &mut self,
         plan: &mut FetchPlan,
         driver: &mut dyn PlanDriver,

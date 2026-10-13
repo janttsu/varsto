@@ -76,7 +76,9 @@ class CameraUpload(private val context: Context, private val progress: (String?)
             context.getSystemService(ConnectivityManager::class.java).registerDefaultNetworkCallback(network)
         } catch (e: Exception) {
             // Without network callbacks the timer still retries.
+            AppLog.w("camera", "no network callback", e)
         }
+        AppLog.i("camera", "camera upload watching MediaStore")
         worker.post(periodic)
     }
 
@@ -84,8 +86,9 @@ class CameraUpload(private val context: Context, private val progress: (String?)
         if (!started) return
         started = false
         context.contentResolver.unregisterContentObserver(observer)
-        try { context.unregisterReceiver(power) } catch (e: Exception) {}
-        try { context.getSystemService(ConnectivityManager::class.java).unregisterNetworkCallback(network) } catch (e: Exception) {}
+        AppLog.i("camera", "camera upload stopped")
+        try { context.unregisterReceiver(power) } catch (e: Exception) { AppLog.d("camera", "unregister power receiver", e) }
+        try { context.getSystemService(ConnectivityManager::class.java).unregisterNetworkCallback(network) } catch (e: Exception) { AppLog.d("camera", "unregister network callback", e) }
         worker.removeCallbacksAndMessages(null)
         thread.quitSafely()
     }
@@ -100,6 +103,7 @@ class CameraUpload(private val context: Context, private val progress: (String?)
         try {
             scan()
         } catch (e: Exception) {
+            AppLog.e("camera", "scan failed", e)
             setStatus("error", e.message ?: e.toString())
         } finally {
             progress(null)
@@ -108,11 +112,12 @@ class CameraUpload(private val context: Context, private val progress: (String?)
 
     private fun scan() {
         val s = Settings.load(context)
-        if (!s.enabled || s.folder.isEmpty()) return
+        if (!s.enabled || s.folder.isEmpty()) return AppLog.t("camera", "scan: camera upload off")
         if (!hasPermission(context)) return setStatus("waiting", "Allow access to photos and videos")
         if (s.wifiOnly && !onWifi()) return setStatus("waiting", "Waiting for Wi-Fi")
         if (s.chargingOnly && !charging()) return setStatus("waiting", "Waiting for the charger")
         val items = newItems(s)
+        AppLog.d("camera", "scan: ${items.size} new item(s) for folder ${s.folder}")
         if (items.isEmpty()) return setStatus("idle", null)
         val api = Api.connect(context) ?: return setStatus("waiting", "Waiting for the Varsto service")
         val state = JSONObject(api.get("/api/state"))
@@ -142,6 +147,7 @@ class CameraUpload(private val context: Context, private val progress: (String?)
             if (s.chargingOnly && !charging()) return setStatus("waiting", "Waiting for the charger")
             progress(VarstoService.localized(context).getString(R.string.camera_uploading, n + 1, items.size, s.folder))
             if (item.size > MAX_UPLOAD) {
+                AppLog.w("camera", "skipped ${item.name}: ${item.size} bytes is over the upload limit")
                 remember(item.key)
                 skipped = "${item.name} is larger than ${MAX_UPLOAD shr 30} GiB and was skipped"
                 continue
@@ -149,6 +155,7 @@ class CameraUpload(private val context: Context, private val progress: (String?)
             var path = item.dir + "/" + item.name
             if (existing[path] == item.size) {
                 // Already there (uploaded before the list of done items was lost).
+                AppLog.d("camera", "$path already in ${s.folder}")
                 remember(item.key)
                 continue
             }
@@ -160,7 +167,12 @@ class CameraUpload(private val context: Context, private val progress: (String?)
                 path = "${item.dir}/$base ($k)$ext"
                 k++
             }
-            val stream = context.contentResolver.openInputStream(item.uri) ?: continue
+            val stream = context.contentResolver.openInputStream(item.uri)
+            if (stream == null) {
+                AppLog.w("camera", "could not open ${item.name} (${item.uri})")
+                continue
+            }
+            AppLog.i("camera", "uploading ${item.name} (${item.size} bytes) to ${s.folder}/$path")
             stream.use { api.upload(s.folder, path, it, item.size) }
             existing[path] = item.size
             remember(item.key)
@@ -171,7 +183,9 @@ class CameraUpload(private val context: Context, private val progress: (String?)
                     try {
                         api.post("/api/thumbnail", JSONObject().put("folder", s.folder).put("path", path)
                             .put("jpeg", VideoThumbs.base64(jpeg)).toString())
-                    } catch (e: Exception) {}
+                    } catch (e: Exception) {
+                        AppLog.w("camera", "thumbnail for $path not stored", e)
+                    }
                 }
             }
             if (encrypted) {
@@ -180,10 +194,13 @@ class CameraUpload(private val context: Context, private val progress: (String?)
                 // is still in the gallery.
                 try {
                     api.post("/api/free", JSONObject().put("folder", s.folder).put("path", path).toString())
-                } catch (e: Exception) {}
+                } catch (e: Exception) {
+                    AppLog.d("camera", "free $path refused", e)
+                }
             }
         }
         Settings.recordUploads(context, uploaded)
+        AppLog.i("camera", "scan done: $uploaded uploaded of ${items.size}")
         if (skipped != null) setStatus("error", skipped) else setStatus("idle", null)
     }
 
@@ -250,7 +267,10 @@ class CameraUpload(private val context: Context, private val progress: (String?)
         doneFile.appendText(key + "\n")
     }
 
-    private fun setStatus(state: String, message: String?) = Settings.status(context, state, message)
+    private fun setStatus(state: String, message: String?) {
+        AppLog.d("camera", "status $state${if (message.isNullOrEmpty()) "" else ": $message"}")
+        Settings.status(context, state, message)
+    }
 
     private fun onWifi(): Boolean {
         val cm = context.getSystemService(ConnectivityManager::class.java)

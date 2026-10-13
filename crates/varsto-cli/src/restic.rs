@@ -248,6 +248,8 @@ fn config(home: &Path) -> Result<ResticConfig> {
 // ----- running restic ------------------------------------------------------------------
 
 fn restic_command(cfg: &ResticConfig, args: &[String]) -> Result<Command> {
+    // The password reaches restic through its environment, never the arguments.
+    log::debug!(binary = cfg.binary.as_str(), repository = cfg.repository.as_str(); "restic {}", args.join(" "));
     let mut c = Command::new(&cfg.binary);
     c.args(args);
     for k in restic::REMOVED_ENV {
@@ -264,10 +266,19 @@ fn restic_output(
     cfg: &ResticConfig,
     args: &[String],
 ) -> Result<(bool, Option<i32>, String, String)> {
+    let t = varsto_core::logging::Timer::start();
     let out = restic_command(cfg, args)?
         .stdin(Stdio::null())
         .output()
         .with_context(|| format!("run {} (is restic installed?)", cfg.binary))?;
+    log::debug!(
+        code = out.status.code().unwrap_or(-1),
+        ms = t.ms(),
+        stdout = out.stdout.len(),
+        stderr = tail(&String::from_utf8_lossy(&out.stderr), 3);
+        "restic {} finished",
+        args.first().map(String::as_str).unwrap_or("")
+    );
     Ok((
         out.status.success(),
         out.status.code(),

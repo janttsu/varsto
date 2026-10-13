@@ -168,6 +168,12 @@ impl Engine {
 
     /// Exchange access records now, whatever the schedule says.
     pub fn exchange_access_records(&mut self) -> Result<AccessExchangeReport> {
+        crate::logged_op!("exchange access records", "", {
+            self.exchange_access_records_inner()
+        })
+    }
+
+    fn exchange_access_records_inner(&mut self) -> Result<AccessExchangeReport> {
         self.access_upkeep(true)
     }
 

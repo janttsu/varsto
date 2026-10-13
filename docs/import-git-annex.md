@@ -104,8 +104,11 @@ carries on: what was imported is not read again.
 - Keys with a hash (`SHA256E`, `SHA256`, `SHA512`, `SHA1`, `MD5`,
   `BLAKE2B*`, `BLAKE2S256` and their `E` variants) are verified. `WORM` and
   `URL` keys carry no hash and are imported as read (the report counts them).
-- Symbolic links that are not annexed files, submodules, and names Varsto
-  cannot use (with `:` or `\`, Windows reserved names) are reported and not
-  imported.
+- Symbolic links that are not annexed files and submodules are reported and
+  not imported.
+- File names are kept as they are, `12:30.jpg` included. A Windows computer
+  shows names with characters Windows does not allow (`:`, `?`, `*`, a name
+  like `CON`) with look-alike characters; the report counts them. Only names
+  that are not UTF-8 or start with `.varsto` are left out.
 - git-annex metadata (tags and fields) is not imported yet.
 - Special remotes are not read: only what is on the disk at hand counts.

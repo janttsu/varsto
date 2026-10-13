@@ -23,7 +23,20 @@ class VarstoService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
+    override fun onCreate() {
+        super.onCreate()
+        AppLog.init(this)
+        AppLog.i("service", "VarstoService created (app ${appVersion()}, Android ${Build.VERSION.RELEASE}, API ${Build.VERSION.SDK_INT})")
+    }
+
+    private fun appVersion(): String = try {
+        packageManager.getPackageInfo(packageName, 0).versionName ?: "?"
+    } catch (e: Exception) {
+        "?"
+    }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        AppLog.d("service", "onStartCommand action=${intent?.action ?: "none"} startId=$startId")
         startForeground(1, notification(null))
         ensureRunning()
         // Camera upload lives as long as this service; the interface pokes it after a settings change.
@@ -60,11 +73,22 @@ class VarstoService : Service() {
         pb.environment()["VARSTO_DEVICE_MODEL"] = "${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}"
         pb.redirectErrorStream(true)
         pb.redirectOutput(File(home, "service.log"))
-        process = pb.start()
+        AppLog.i("service", "starting ${pb.command().joinToString(" ")}")
+        val started = System.currentTimeMillis()
+        process = try {
+            pb.start()
+        } catch (e: Exception) {
+            AppLog.e("service", "could not start the service binary", e)
+            throw e
+        }
         Thread {
             val rc = process?.waitFor() ?: -1
+            val secs = (System.currentTimeMillis() - started) / 1000
             // 75 = restart after a self-update; otherwise wait a little before restarting.
-            Thread.sleep(if (rc == 75) 500 else 3000)
+            val delay = if (rc == 75) 500L else 3000L
+            AppLog.log(if (rc == 0 || rc == 75) AppLog.INFO else AppLog.WARN, "service",
+                "service process exited with code $rc after $secs s; restarting in $delay ms", null)
+            Thread.sleep(delay)
             ensureRunning()
         }.start()
     }
@@ -86,6 +110,7 @@ class VarstoService : Service() {
     }
 
     override fun onDestroy() {
+        AppLog.i("service", "VarstoService destroyed: stopping the service process")
         camera?.stop()
         videoThumbs.stop()
         process?.destroy()

@@ -347,10 +347,16 @@ fn folder_root(backend: &mut Backend, folder: &str) -> Result<Option<PathBuf>> {
 }
 
 /// Only a synced plain file on this disk has a local path: the assistant
-/// reads it itself; Varsto never hands out contents.
-fn local_path(root: Option<&Path>, path: &Value, state: &Value) -> Option<String> {
-    let p = root?.join(path.as_str()?);
-    (state.as_str() == Some("local") && p.is_file()).then(|| p.display().to_string())
+/// reads it itself; Varsto never hands out contents. The entry's `disk` is
+/// where the engine keeps it (a name Windows does not allow, such as
+/// `12:30.jpg`, is written there with look-alike characters).
+fn local_path(root: Option<&Path>, entry: &Value) -> Option<String> {
+    let root = root?;
+    let p = match entry["disk"].as_str() {
+        Some(d) => PathBuf::from(d),
+        None => root.join(entry["path"].as_str()?),
+    };
+    (entry["state"].as_str() == Some("local") && p.is_file()).then(|| p.display().to_string())
 }
 
 fn str_list(args: &Value, name: &str) -> Vec<String> {
@@ -459,7 +465,7 @@ fn call_tool(backend: &mut Backend, grants: &Grants, name: &str, args: &Value) -
             let mut files = backend.files(folder)?;
             if let Some(list) = files.as_array_mut() {
                 for f in list {
-                    let local = local_path(root.as_deref(), &f["path"], &f["state"]);
+                    let local = local_path(root.as_deref(), f);
                     f["local_path"] = json!(local);
                     if let (false, Some(o)) = (with_analysis, f.as_object_mut()) {
                         o.retain(|k, _| !k.starts_with("analysis"));
@@ -531,7 +537,7 @@ fn call_tool(backend: &mut Backend, grants: &Grants, name: &str, args: &Value) -
                     .cloned()
                     .unwrap_or_default()
                 {
-                    let local = local_path(root.as_deref(), &h["path"], &h["state"]);
+                    let local = local_path(root.as_deref(), &h);
                     h["local_path"] = json!(local);
                     if let Some(o) = h.as_object_mut() {
                         o.remove("disk");
@@ -652,6 +658,7 @@ pub fn serve(home: &Path, key: Option<&str>) -> Result<()> {
         let id = msg.get("id").cloned();
         let method = msg["method"].as_str().unwrap_or("").to_string();
         let params = msg.get("params").cloned().unwrap_or(Value::Null);
+        log::trace!(method = method.as_str(); "mcp message");
         let result: Result<Value> = match method.as_str() {
             "initialize" => Ok(json!({
                 "protocolVersion": PROTOCOL_VERSION,
@@ -692,11 +699,29 @@ pub fn serve(home: &Path, key: Option<&str>) -> Result<()> {
                         Err(e) => Err(e),
                     },
                 };
-                match b {
-                    Ok(b) => Ok(call_tool(b, &grants, &name, &args)
-                        .unwrap_or_else(|e| error_result(e.to_string()))),
-                    Err(e) => Ok(error_result(e.to_string())),
+                // Which file, never what is in it.
+                let what: Vec<String> = ["folder", "path", "from", "to"]
+                    .iter()
+                    .filter_map(|k| {
+                        args.get(*k)
+                            .and_then(|v| v.as_str())
+                            .map(|v| format!("{k}={v}"))
+                    })
+                    .collect();
+                let t = varsto_core::logging::Timer::start();
+                let r = match b {
+                    Ok(b) => call_tool(b, &grants, &name, &args),
+                    Err(e) => Err(e),
+                };
+                match &r {
+                    Ok(_) => {
+                        log::debug!(tool = name.as_str(), ms = t.ms(); "mcp tool call {}", what.join(" "))
+                    }
+                    Err(e) => {
+                        log::debug!(tool = name.as_str(), ms = t.ms(); "mcp tool call {} failed: {e:#}", what.join(" "))
+                    }
                 }
+                Ok(r.unwrap_or_else(|e| error_result(e.to_string())))
             }
             _ => Err(anyhow!("method not found: {method}")),
         };

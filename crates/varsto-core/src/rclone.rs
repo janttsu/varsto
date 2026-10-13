@@ -67,6 +67,7 @@ impl RcloneStorage {
             })
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+        let t = crate::logging::Timer::start();
         let mut child = cmd
             .spawn()
             .with_context(|| format!("spawn {}", self.binary))?;
@@ -85,6 +86,30 @@ impl RcloneStorage {
         } else {
             String::from_utf8_lossy(&out.stderr).to_string()
         };
+        let op = args
+            .iter()
+            .find(|a| !a.starts_with('-'))
+            .copied()
+            .unwrap_or("");
+        let target = tail.first().copied().unwrap_or("");
+        let level = if out.status.success() || code == 3 || code == 4 {
+            log::Level::Trace
+        } else {
+            log::Level::Debug
+        };
+        log::log!(
+            level,
+            storage = self.name.as_str(),
+            backend = "rclone",
+            op = op,
+            target = target,
+            sent = stdin.map(|d| d.len()).unwrap_or(0),
+            got = out.stdout.len(),
+            code = code,
+            ms = t.ms();
+            "rclone call{}",
+            if out.status.success() { String::new() } else { format!(": {}", stderr.trim().replace(NOT_FOUND_MARK, "")) }
+        );
         Ok((out.status.success(), out.stdout, stderr))
     }
 }

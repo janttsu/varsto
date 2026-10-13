@@ -15,11 +15,13 @@ mod drives;
 mod filemanager;
 mod icon;
 mod import;
+mod logcmd;
 mod mcp;
 mod mcp_keys;
 mod placing;
 mod restic;
 mod service;
+mod trash;
 mod tray;
 mod update;
 mod upkeep;
@@ -38,6 +40,11 @@ struct Cli {
     /// Machine-readable output.
     #[arg(long, global = true)]
     json: bool,
+    /// Detail of the local debug log: error, warn, info, debug (default) or
+    /// trace, or a filter such as `debug,varsto_core::p2p=trace`. Overrides
+    /// VARSTO_LOG and `log_level` in config.json.
+    #[arg(long, global = true, value_name = "LEVEL")]
+    log_level: Option<String>,
     #[command(subcommand)]
     cmd: Cmd,
 }
@@ -172,6 +179,12 @@ enum Cmd {
         #[command(subcommand)]
         cmd: import::ImportCmd,
     },
+    /// The trash: files deleted on any device, kept for a number of days
+    /// (30 by default) and restorable on every device.
+    Trash {
+        #[command(subcommand)]
+        cmd: trash::TrashCmd,
+    },
     /// Show vault, devices, storages and folders.
     Status,
     /// How files would be fetched: from pool disks (which ones, in which order) or the network,
@@ -213,6 +226,11 @@ enum Cmd {
     Ledger {
         #[command(subcommand)]
         cmd: Option<LedgerCmd>,
+    },
+    /// The local debug log: where it is, follow it, pack it for a bug report.
+    Log {
+        #[command(subcommand)]
+        cmd: logcmd::LogCmd,
     },
     /// Start the background service and open the desktop interface in your browser (default when run without arguments).
     Desktop {
@@ -1021,6 +1039,46 @@ enum StorageCmd {
         #[arg(long)]
         clear: bool,
     },
+    /// Empty a storage onto the others without weakening any folder's
+    /// policy (to switch providers); `storage drain status` shows progress.
+    Drain {
+        /// The storage, or `status` for every drain.
+        name: String,
+        /// Stop draining: the storage takes new blocks again.
+        #[arg(long, conflicts_with_all = ["plan", "remove_when_empty"])]
+        stop: bool,
+        /// Show what draining takes, change nothing.
+        #[arg(long)]
+        plan: bool,
+        /// Remove the storage from this device once it is empty.
+        #[arg(long)]
+        remove_when_empty: bool,
+        /// Copy at most this many GB (decimal) to other storages per day (egress costs).
+        #[arg(long)]
+        budget_gb_per_day: Option<f64>,
+        /// Allow reading from this cold storage (retrieval fees, restore delays).
+        #[arg(long)]
+        confirm_cold_read: bool,
+        /// Leave the work to the background service instead of running now.
+        #[arg(long)]
+        background: bool,
+    },
+    /// Show or set a storage's quota, which every device respects.
+    Quota {
+        name: String,
+        /// Most bytes Varsto keeps there: 500GB, 1TB, 2TiB, ...
+        #[arg(long, conflicts_with = "clear")]
+        bytes: Option<String>,
+        /// Most objects Varsto keeps there.
+        #[arg(long, conflicts_with = "clear")]
+        objects: Option<u64>,
+        /// Remove the quota.
+        #[arg(long)]
+        clear: bool,
+        /// List the storage to count its objects and measure its records.
+        #[arg(long)]
+        measure: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1343,6 +1401,7 @@ fn warn_ledger(h: &varsto_core::engine::LedgerHealth) {
 
 fn passphrase() -> Result<String> {
     if let Ok(p) = std::env::var("VARSTO_PASSPHRASE") {
+        varsto_core::logging::register_secret(&p);
         *USED.lock().unwrap() = Some(p.clone());
         return Ok(p);
     }
@@ -1353,6 +1412,7 @@ fn passphrase() -> Result<String> {
         if p.is_empty() {
             bail_usage::<()>("empty passphrase")?;
         }
+        varsto_core::logging::register_secret(&p);
         *TYPED.lock().unwrap() = Some(p.clone());
         *USED.lock().unwrap() = Some(p.clone());
         return Ok(p);
@@ -1534,6 +1594,26 @@ fn suggest_text(s: &varsto_core::disksuggest::DiskSuggestions) -> String {
         }
     }
     out
+}
+
+/// A file name for the terminal: as it is, `:` and `\` included, with
+/// control characters and direction overrides shown as `\u{..}` escapes so
+/// that a name cannot move the cursor or recolour the terminal.
+pub(crate) fn show(name: &str) -> std::borrow::Cow<'_, str> {
+    varsto_core::names::display(name)
+}
+
+/// The files a case-insensitive disk made this device keep under another
+/// local name ("vault path -> local path"), for the pull and sync lines.
+fn renamed_note(renamed: &[String]) -> String {
+    if renamed.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "; kept under another name here because the disk ignores case: {}",
+            renamed.join(", ")
+        )
+    }
 }
 
 fn fmt_bytes(n: u64) -> String {
@@ -2231,6 +2311,7 @@ fn org_status_text(s: &varsto_core::engine::OrgSummary) -> String {
 fn run(cli: &Cli) -> Result<()> {
     let home = home(cli)?;
     match &cli.cmd {
+        Cmd::Log { cmd } => logcmd::run(&home, cmd, cli.json)?,
         Cmd::Init { name } => {
             let (engine, vault_key) = Engine::init(&home, name, &passphrase()?)?;
             if cli.json {
@@ -2475,19 +2556,58 @@ fn run(cli: &Cli) -> Result<()> {
                         }
                     );
                 }
+                StorageCmd::Drain {
+                    name,
+                    stop,
+                    plan,
+                    remove_when_empty,
+                    budget_gb_per_day,
+                    confirm_cold_read,
+                    background,
+                } => upkeep::drain(
+                    cli,
+                    &mut engine,
+                    upkeep::DrainArgs {
+                        name,
+                        stop: *stop,
+                        plan: *plan,
+                        remove_when_empty: *remove_when_empty,
+                        budget_gb_per_day: *budget_gb_per_day,
+                        confirm_cold_read: *confirm_cold_read,
+                        background: *background,
+                    },
+                )?,
+                StorageCmd::Quota {
+                    name,
+                    bytes,
+                    objects,
+                    clear,
+                    measure,
+                } => upkeep::quota(
+                    cli,
+                    &mut engine,
+                    name,
+                    bytes.as_deref(),
+                    *objects,
+                    *clear,
+                    *measure,
+                )?,
                 StorageCmd::List => {
                     let estimates = engine.storage_estimates()?;
+                    let quotas = engine.quota_statuses()?;
                     // The specs, each with its price, stored bytes and monthly cost.
                     let listed: Vec<serde_json::Value> = engine
                         .storages()
                         .iter()
                         .zip(&estimates)
-                        .map(|(spec, e)| {
+                        .zip(&quotas)
+                        .map(|((spec, e), q)| {
                             let mut v = serde_json::to_value(spec).unwrap_or_default();
                             v["price"] = serde_json::to_value(&e.price).unwrap_or_default();
                             v["bytes"] = e.bytes.into();
                             v["monthly_cost"] =
                                 serde_json::to_value(e.monthly_cost).unwrap_or_default();
+                            v["quota"] = serde_json::to_value(q).unwrap_or_default();
                             v
                         })
                         .collect();
@@ -2496,9 +2616,10 @@ fn run(cli: &Cli) -> Result<()> {
                             .storages()
                             .iter()
                             .zip(&estimates)
-                            .map(|(x, e)| {
+                            .zip(&quotas)
+                            .map(|((x, e), q)| {
                                 format!(
-                                    "{}{}{}{} | {} stored | {}{}",
+                                    "{}{}{}{}{} | {} stored{} | {}{}",
                                     x.name(),
                                     if x.is_cold() { " (cold)" } else { "" },
                                     if x.is_carrier() { " (carrier)" } else { "" },
@@ -2507,7 +2628,32 @@ fn run(cli: &Cli) -> Result<()> {
                                     } else {
                                         String::new()
                                     },
+                                    q.drain
+                                        .as_ref()
+                                        .map(|d| format!(" ({d})"))
+                                        .unwrap_or_default(),
                                     fmt_bytes(e.bytes),
+                                    match (q.quota_bytes, q.quota_objects) {
+                                        (None, None) => String::new(),
+                                        (Some(b), _) => format!(
+                                            ", quota {} ({} used, {} %{})",
+                                            fmt_bytes(b),
+                                            fmt_bytes(q.used_bytes),
+                                            q.percent.unwrap_or(0),
+                                            if q.state == "full" {
+                                                ", FULL"
+                                            } else if q.state == "warning" {
+                                                ", nearly full"
+                                            } else {
+                                                ""
+                                            }
+                                        ),
+                                        (None, Some(o)) => format!(
+                                            ", quota {o} objects ({} used{})",
+                                            q.used_objects,
+                                            if q.state == "full" { ", FULL" } else { "" }
+                                        ),
+                                    },
                                     e.price
                                         .as_ref()
                                         .map(|p| p.describe())
@@ -2801,6 +2947,7 @@ fn run(cli: &Cli) -> Result<()> {
             }
         }
         Cmd::Backup { cmd } => backup::run(cli, &home, cmd)?,
+        Cmd::Trash { cmd } => trash::run(cli, &home, cmd)?,
         Cmd::Move {
             folder,
             from,
@@ -2941,7 +3088,7 @@ fn run(cli: &Cli) -> Result<()> {
                                     "{:<12} {:>10} {}{}",
                                     f.state,
                                     f.size,
-                                    f.path,
+                                    show(&f.path),
                                     if f.pinned { " (pinned)" } else { "" }
                                 )
                             })
@@ -2990,7 +3137,7 @@ fn run(cli: &Cli) -> Result<()> {
             let mut engine = open_engine(&home)?;
             let r = engine.pull(folder)?;
             print(cli, &r, |r| {
-                format!("{}: {} manifests, {} updated, {} deleted, {} conflicts, {} chunks downloaded; unavailable: {:?}; forked: {:?}{}", r.folder, r.manifests_applied, r.files_updated, r.files_deleted, r.conflicts, r.chunks_downloaded, r.files_unavailable, r.forked_devices, if r.disks_needed.is_empty() { String::new() } else { format!("; attach disk {}", r.disks_needed.join(", ")) })
+                format!("{}: {} manifests, {} updated, {} deleted, {} conflicts, {} chunks downloaded; unavailable: {:?}; forked: {:?}{}{}", r.folder, r.manifests_applied, r.files_updated, r.files_deleted, r.conflicts, r.chunks_downloaded, r.files_unavailable, r.forked_devices, if r.disks_needed.is_empty() { String::new() } else { format!("; attach disk {}", r.disks_needed.join(", ")) }, renamed_note(&r.renamed_locally))
             })?;
         }
         Cmd::Sync { folder } => {
@@ -2998,7 +3145,7 @@ fn run(cli: &Cli) -> Result<()> {
             let r = engine.sync(folder.as_deref())?;
             warn_ledger(&engine.ledger_health());
             print(cli, &r, |r| {
-                r.iter().map(|(pl, ps)| format!("{}: pulled {} updated/{} deleted/{} conflicts, pushed {} changed/{} chunks{}{}", pl.folder, pl.files_updated, pl.files_deleted, pl.conflicts, ps.files_changed, ps.chunks_uploaded, if pl.disks_needed.is_empty() { String::new() } else { format!("; attach disk {}", pl.disks_needed.join(", ")) }, if ps.storages_unavailable.is_empty() { String::new() } else { format!("; not written to {}", ps.storages_unavailable.join(", ")) })).collect::<Vec<_>>().join("\n")
+                r.iter().map(|(pl, ps)| format!("{}: pulled {} updated/{} deleted/{} conflicts, pushed {} changed/{} chunks{}{}{}", pl.folder, pl.files_updated, pl.files_deleted, pl.conflicts, ps.files_changed, ps.chunks_uploaded, if pl.disks_needed.is_empty() { String::new() } else { format!("; attach disk {}", pl.disks_needed.join(", ")) }, if ps.storages_unavailable.is_empty() { String::new() } else { format!("; not written to {}", ps.storages_unavailable.join(", ")) }, renamed_note(&pl.renamed_locally))).collect::<Vec<_>>().join("\n")
             })?;
         }
         Cmd::FetchPlan { folder, paths } => {
@@ -4361,12 +4508,99 @@ fn main() {
         });
     }
     let cli = Cli::parse_from(args);
+    init_logging(&cli);
     report_activity(&cli);
+    let timer = varsto_core::logging::Timer::start();
     if let Err(e) = run(&cli).context("varsto") {
+        log::error!(ms = timer.ms(); "command failed: {e:#}");
+        varsto_core::logging::flush();
         eprintln!("error: {e:#}");
         std::process::exit(1);
     }
+    log::debug!(ms = timer.ms(); "command done");
     after_command(&cli);
+    varsto_core::logging::flush();
+}
+
+/// Start this process's debug log (`<home>/logs/varsto-<component>.log`)
+/// and record what runs: the version and the arguments, with the values of
+/// secret options left out.
+fn init_logging(cli: &Cli) {
+    let Ok(home) = home(cli) else { return };
+    let service_run = matches!(
+        cli.cmd,
+        Cmd::Service {
+            cmd: ServiceCmd::Run { .. }
+        }
+    );
+    let desktop = matches!(cli.cmd, Cmd::Desktop { .. });
+    let component = logcmd::component_for(
+        service_run,
+        desktop,
+        matches!(cli.cmd, Cmd::Tray { .. }),
+        matches!(cli.cmd, Cmd::Mcp { .. }),
+    );
+    // The service keeps writing notable events to stderr too (service.log).
+    if let Err(e) = logcmd::init(
+        &home,
+        component,
+        cli.log_level.as_deref(),
+        service_run || desktop,
+    ) {
+        eprintln!("error: {e:#}");
+        std::process::exit(2);
+    }
+    log::info!(
+        version = env!("CARGO_PKG_VERSION"),
+        os = std::env::consts::OS,
+        arch = std::env::consts::ARCH,
+        home = home.display().to_string();
+        "start: {}",
+        loggable_args(std::env::args().skip(1))
+    );
+}
+
+/// The command line with the values of secret options replaced.
+fn loggable_args(args: impl Iterator<Item = String>) -> String {
+    let secret = |a: &str| {
+        let a = a.trim_start_matches('-').to_ascii_lowercase();
+        [
+            "key",
+            "secret",
+            "words",
+            "passphrase",
+            "password",
+            "token",
+            "pin",
+            "code",
+            "kit",
+        ]
+        .iter()
+        .any(|w| a.contains(w))
+            && !a.ends_with("key-id")
+            && !a.ends_with("key-file")
+    };
+    let mut out: Vec<String> = Vec::new();
+    let mut hide_next = false;
+    for a in args {
+        if hide_next {
+            out.push(varsto_core::logging::REDACTED.to_string());
+            hide_next = false;
+            continue;
+        }
+        if a.starts_with("--") {
+            if let Some((name, _)) = a.split_once('=') {
+                if secret(name) {
+                    out.push(format!("{name}={}", varsto_core::logging::REDACTED));
+                    continue;
+                }
+            } else if secret(&a) {
+                hide_next = true;
+            }
+        }
+        out.push(a);
+    }
+    out.join(" ")
 }
 
 /// A command that runs a long operation itself (a disk check, a restore,

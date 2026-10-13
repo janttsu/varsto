@@ -45,6 +45,7 @@
   <symbol id="i-newfolder" viewBox="0 0 20 20"><path d="M3 6.5A1.5 1.5 0 0 1 4.5 5h3.4l1.6 1.6h6A1.5 1.5 0 0 1 17 8.1v6.4a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 3 14.5z"/><path d="M10 9v4M8 11h4"/></symbol>
   <symbol id="i-share" viewBox="0 0 20 20"><path d="M10 12V3.5M6.5 7 10 3.5 13.5 7"/><path d="M5 10v5.5A1.5 1.5 0 0 0 6.5 17h7a1.5 1.5 0 0 0 1.5-1.5V10"/></symbol>
   <symbol id="i-back" viewBox="0 0 20 20"><path d="m12.5 5-5 5 5 5"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 20 20"><path d="M4 5.5h12M8 5.5V4h4v1.5"/><path d="M5.5 5.5l.8 10.2A1.5 1.5 0 0 0 7.8 17h4.4a1.5 1.5 0 0 0 1.5-1.3l.8-10.2"/><path d="M8.5 8.5v5.5M11.5 8.5v5.5"/></symbol>
   <symbol id="i-backup" viewBox="0 0 20 20"><rect x="3" y="4" width="14" height="4" rx="1.2"/><path d="M4.5 8v7A1.5 1.5 0 0 0 6 16.5h8a1.5 1.5 0 0 0 1.5-1.5V8"/><path d="M8 11h4"/></symbol>
 </svg>
 
@@ -63,6 +64,7 @@
     <button type="button" class="nav-item" data-nav="storages"><svg class="icon"><use href="#i-storages"/></svg><span>Storages</span></button>
     <button type="button" class="nav-item" data-nav="backups"><svg class="icon"><use href="#i-backup"/></svg><span>Backups</span></button>
     <button type="button" class="nav-item" data-nav="import"><svg class="icon"><use href="#i-backup"/></svg><span>Import</span></button>
+    <button type="button" class="nav-item" data-nav="trash"><svg class="icon"><use href="#i-trash"/></svg><span>Trash</span></button>
     <button type="button" class="nav-item" data-nav="policies"><svg class="icon"><use href="#i-policies"/></svg><span>Policies</span></button>
     <button type="button" class="nav-item" data-nav="peers"><svg class="icon"><use href="#i-peers"/></svg><span>Peers</span></button>
     <button type="button" class="nav-item hidden" data-nav="organization" data-org-only="1"><svg class="icon"><use href="#i-org"/></svg><span>Organization</span></button>
@@ -564,6 +566,33 @@
         </div>
         <p id="imports-empty" class="muted small hidden">Nothing was imported yet.</p>
       </div>
+    <!-- Trash -->
+    <div class="page hidden" data-page="trash">
+      <div class="card">
+        <h2 class="card-title"><svg class="icon accent"><use href="#i-trash"/></svg>Trash</h2>
+        <p class="muted small">Files deleted on any of your devices are kept here for the days set below, encrypted on your storages, and can be restored on any device. Restoring never overwrites a file: when its name is taken, it comes back as "name (restored)".</p>
+        <div id="trashtools" class="toolbar">
+          <input id="trashsearch" type="search" placeholder="Search the trash" autocomplete="off" aria-label="Search the trash">
+          <select id="trashfolder" aria-label="Folder"></select>
+          <span class="toolbar-spacer"></span>
+          <span id="trashcount" class="muted small"></span>
+          <button id="trashrestore" type="button" disabled>Restore…</button>
+          <button id="trashpurge" type="button" class="secondary" disabled>Delete permanently…</button>
+          <button id="trashempty" type="button" class="secondary">Empty trash…</button>
+        </div>
+        <div class="table-wrap">
+        <table id="trashlist"><thead><tr><th><input id="trashall" type="checkbox" aria-label="Select all"></th><th>Path</th><th class="num">Size</th><th>Deleted</th><th>By</th><th>Expires</th><th></th></tr></thead><tbody></tbody></table>
+        </div>
+        <div id="trash-empty" class="empty-state hidden"><div class="empty-icon"><svg class="icon"><use href="#i-trash"/></svg></div><p class="empty-title">The trash is empty</p><p class="muted">Files deleted on any of your devices appear here.</p></div>
+      </div>
+      <form id="trashsettings" class="card narrow">
+        <h3 class="card-title"><svg class="icon accent"><use href="#i-settings"/></svg>Trash settings</h3>
+        <dl id="trashfacts" class="fd-list"></dl>
+        <label>Keep deleted files (days) <input name="days" type="number" min="1" max="3650" step="1" inputmode="numeric" required></label>
+        <label>Trash storage <select name="storage" id="trashstorage"></select><span class="hint muted">Deleted files move to this storage only, for example a cheap cold storage, and leave your other storages. Restoring from cold storage asks first, because retrieval is billed and can take hours.</span></label>
+        <div class="actions"><button type="submit">Save</button></div>
+        <p id="trashnotes" class="muted small"></p>
+      </form>
     </div>
 
     <!-- Policies -->
@@ -745,6 +774,20 @@
           <div class="actions"><button id="quit" type="button" class="secondary danger"><svg class="icon"><use href="#i-power"/></svg>Quit Varsto</button></div>
         </div>
       </div>
+      <div class="card" id="logscard">
+        <h2 class="card-title">Logs</h2>
+        <p class="muted small">Varsto keeps a detailed log on this device for finding problems. It never contains keys, passphrases or file contents and is never uploaded.</p>
+        <label>Detail <select id="log-level">
+          <option value="trace">Everything (trace)</option>
+          <option value="debug">Detailed (debug, default)</option>
+          <option value="info">Normal (info)</option>
+          <option value="warn">Warnings</option>
+          <option value="error">Errors only</option>
+        </select></label>
+        <p id="log-source" class="muted small hidden"></p>
+        <p id="log-usage" class="muted small"></p>
+        <div class="actions"><button id="log-open" type="button" class="secondary hidden">Open log folder</button><button id="log-bundle" type="button" class="secondary">Save log bundle</button></div>
+      </div>
       <details class="card">
         <summary class="card-title">Duplicate files</summary>
         <div class="row"><select id="dupefolder"></select><button id="dupes" type="button" class="secondary">Find duplicates</button></div>
@@ -796,6 +839,7 @@
         <button type="button" class="more-item" data-nav="shared"><svg class="icon"><use href="#i-sharing"/></svg><span>Shared</span><svg class="icon chev"><use href="#i-chevron"/></svg></button>
         <button type="button" class="more-item" data-nav="backups"><svg class="icon"><use href="#i-backup"/></svg><span>Backups</span><svg class="icon chev"><use href="#i-chevron"/></svg></button>
         <button type="button" class="more-item" data-nav="import"><svg class="icon"><use href="#i-backup"/></svg><span>Import</span><svg class="icon chev"><use href="#i-chevron"/></svg></button>
+        <button type="button" class="more-item" data-nav="trash"><svg class="icon"><use href="#i-trash"/></svg><span>Trash</span><svg class="icon chev"><use href="#i-chevron"/></svg></button>
         <button type="button" class="more-item" data-nav="policies"><svg class="icon"><use href="#i-policies"/></svg><span>Policies</span><svg class="icon chev"><use href="#i-chevron"/></svg></button>
         <button type="button" class="more-item" data-nav="peers"><svg class="icon"><use href="#i-peers"/></svg><span>Peers</span><svg class="icon chev"><use href="#i-chevron"/></svg></button>
         <button type="button" class="more-item hidden" data-nav="organization" data-org-only="1"><svg class="icon"><use href="#i-org"/></svg><span>Organization</span><svg class="icon chev"><use href="#i-chevron"/></svg></button>
@@ -834,6 +878,7 @@
     <h2 id="modal-title" class="modal-title"></h2>
     <p id="modal-text" class="modal-text"></p>
     <pre id="modal-code" class="modal-code hidden"></pre>
+    <dl id="modal-facts" class="modal-facts hidden"></dl>
     <div id="modal-fields" class="modal-fields"></div>
     <div class="modal-actions">
       <button type="button" id="modal-extra" class="secondary hidden"></button>

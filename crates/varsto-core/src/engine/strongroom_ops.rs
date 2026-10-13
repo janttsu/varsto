@@ -140,6 +140,19 @@ impl Engine {
         info: StrongroomInfo,
         unlock_minutes: u64,
     ) -> Result<ConvertReport> {
+        crate::logged_op_plain!("convert to strongroom with", folder, {
+            self.convert_to_strongroom_with_inner(folder, new_id, folder_key, info, unlock_minutes)
+        })
+    }
+
+    fn convert_to_strongroom_with_inner(
+        &mut self,
+        folder: &str,
+        new_id: &FolderId,
+        folder_key: &SecretKey,
+        info: StrongroomInfo,
+        unlock_minutes: u64,
+    ) -> Result<ConvertReport> {
         self.convert_into(folder, new_id, folder_key, info, unlock_minutes, false)
     }
 
@@ -151,6 +164,19 @@ impl Engine {
     /// unlocked here under its current key. Run it again with the same new
     /// key to resume (`strongroom_conversion` names it).
     pub fn rekey_strongroom_with(
+        &mut self,
+        folder: &str,
+        new_id: &FolderId,
+        folder_key: &SecretKey,
+        info: StrongroomInfo,
+        unlock_minutes: u64,
+    ) -> Result<ConvertReport> {
+        crate::logged_op_plain!("rekey strongroom with", folder, {
+            self.rekey_strongroom_with_inner(folder, new_id, folder_key, info, unlock_minutes)
+        })
+    }
+
+    fn rekey_strongroom_with_inner(
         &mut self,
         folder: &str,
         new_id: &FolderId,
@@ -315,7 +341,7 @@ impl Engine {
                 continue;
             }
             task.advance(1);
-            let disk = root.join(&file.path);
+            let disk = self.disk_of(&root, &state, &file.path);
             let local = fs::metadata(&disk).ok().filter(|md| {
                 state.local_index.get(&file.path).is_some_and(|ix| {
                     ix.size == md.len()
@@ -816,7 +842,7 @@ impl Engine {
             let included = state.published_seq <= c.covered.get(&me).copied().unwrap_or(0);
             if included {
                 for f in state.files.values().filter(|f| !f.deleted) {
-                    let disk = root.join(&f.path);
+                    let disk = self.disk_of(&root, &state, &f.path);
                     let Ok(md) = fs::metadata(&disk) else {
                         continue;
                     };
@@ -913,6 +939,18 @@ impl Engine {
         key: &dyn SecurityKey,
         label: &str,
     ) -> Result<usize> {
+        crate::logged_op_plain!("add strongroom key", folder, {
+            self.add_strongroom_key_inner(folder, method, key, label)
+        })
+    }
+
+    fn add_strongroom_key_inner(
+        &mut self,
+        folder: &str,
+        method: strongroom::Method,
+        key: &dyn SecurityKey,
+        label: &str,
+    ) -> Result<usize> {
         let (rec, _) = self.strongroom_record(folder)?;
         let unlocked = self
             .with_key(&rec)
@@ -945,6 +983,12 @@ impl Engine {
     /// storages, but it does not change the folder key: a removed key, used
     /// with an older copy of the records, still opens the folder.
     pub fn remove_strongroom_key(&mut self, folder: &str, which: &str) -> Result<EnrolledKey> {
+        crate::logged_op_plain!("remove strongroom key", folder, {
+            self.remove_strongroom_key_inner(folder, which)
+        })
+    }
+
+    fn remove_strongroom_key_inner(&mut self, folder: &str, which: &str) -> Result<EnrolledKey> {
         let (rec, info) = self.strongroom_record(folder)?;
         let mut keys = info.keys();
         if keys.len() < 2 {

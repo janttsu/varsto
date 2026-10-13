@@ -46,6 +46,8 @@ pub const NONCE_LEN: usize = 24;
 #[derive(Clone, Zeroize, ZeroizeOnDrop)]
 pub struct SecretKey(pub [u8; 32]);
 
+crate::redacted_opaque!(SecretKey);
+
 impl SecretKey {
     pub fn random() -> Self {
         let mut b = [0u8; 32];
@@ -273,6 +275,8 @@ pub struct SigningKey {
     ed: ed25519_dalek::SigningKey,
     pq: Option<ml_dsa::SigningKey<ml_dsa::MlDsa65>>,
 }
+
+crate::redacted_opaque!(SigningKey);
 
 impl SigningKey {
     pub fn generate() -> Self {
