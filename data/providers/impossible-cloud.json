@@ -1,0 +1,245 @@
+{
+  "$schema": "schema.json",
+  "schema_version": 1,
+  "id": "impossible-cloud",
+  "name": "Impossible Cloud Storage",
+  "kind": "service",
+  "website_url": "https://www.impossiblecloud.com/",
+  "signup_url": "https://www.impossiblecloud.com/free-trial",
+  "pricing_url": "https://www.impossiblecloud.com/pricing",
+  "currency": "EUR",
+  "prices_include_tax": null,
+  "tax_note": "The EU pricing page shows EUR prices and does not say whether VAT is included.",
+  "protocols": [
+    "s3",
+    "rclone"
+  ],
+  "protocols_source": {
+    "source_url": "https://rclone.org/s3/#impossible-cloud",
+    "last_verified": "2026-10-13"
+  },
+  "regions": [
+    {
+      "code": "eu-central-2",
+      "city": "Frankfurt",
+      "country": "DE",
+      "source_url": "https://docs.impossiblecloud.com/impossible-cloud-help/impossible-cloud-storage-guide/storage-console-urls-and-api-endpoints",
+      "last_verified": "2026-10-13"
+    },
+    {
+      "code": "eu-west-1",
+      "city": "Amsterdam",
+      "country": "NL",
+      "source_url": "https://docs.impossiblecloud.com/impossible-cloud-help/impossible-cloud-storage-guide/storage-console-urls-and-api-endpoints",
+      "last_verified": "2026-10-13"
+    },
+    {
+      "code": "eu-west-2",
+      "city": "London",
+      "country": "GB",
+      "source_url": "https://docs.impossiblecloud.com/impossible-cloud-help/impossible-cloud-storage-guide/storage-console-urls-and-api-endpoints",
+      "last_verified": "2026-10-13"
+    },
+    {
+      "code": "eu-west-3",
+      "city": "Paris",
+      "country": "FR",
+      "source_url": "https://docs.impossiblecloud.com/impossible-cloud-help/impossible-cloud-storage-guide/storage-console-urls-and-api-endpoints",
+      "last_verified": "2026-10-13"
+    },
+    {
+      "code": "eu-north-1",
+      "city": "Copenhagen",
+      "country": "DK",
+      "source_url": "https://docs.impossiblecloud.com/impossible-cloud-help/impossible-cloud-storage-guide/storage-console-urls-and-api-endpoints",
+      "last_verified": "2026-10-13"
+    },
+    {
+      "code": "us-east-1",
+      "city": "New York",
+      "country": "US",
+      "source_url": "https://docs.impossiblecloud.com/impossible-cloud-help/impossible-cloud-storage-guide/storage-console-urls-and-api-endpoints",
+      "last_verified": "2026-10-13",
+      "note": "Listed as US region; the US pricing page (https://www.impossiblecloud.com/en-us/pricing) shows USD 7.99/TB, so EUR prices here are not applied to it."
+    }
+  ],
+  "storage_classes": [
+    {
+      "id": "standard",
+      "name": "Pay-as-you-go",
+      "kind": "hot",
+      "applies_to_regions": [
+        "eu-central-2",
+        "eu-west-1",
+        "eu-west-2",
+        "eu-west-3",
+        "eu-north-1"
+      ],
+      "pricing_model": "per_gb_month",
+      "storage_price_per_gb_month": [
+        {
+          "from_gb": 0,
+          "up_to_gb": null,
+          "price": {
+            "value": 0.00799,
+            "source_url": "https://docs.impossiblecloud.com/impossible-cloud-help/impossible-cloud-storage-guide/billing/storage-calculation",
+            "last_verified": "2026-10-13",
+            "note": "Pricing page: EUR 7.99 per TB/month (pay-as-you-go). The storage calculation doc says 1 TB = 1,000 GB and 'EUR 7.99 per terabyte ... is equivalent to EUR 0.00799 per gigabyte.' The page states one price without regional distinction; applied to the EU regions."
+          }
+        }
+      ],
+      "requests": {
+        "put_per_1000": {
+          "value": 0,
+          "source_url": "https://www.impossiblecloud.com/pricing",
+          "last_verified": "2026-10-13",
+          "note": "Pricing page: 'Free egress and API calls'; FAQ: 'we do not charge for API calls or operational requests.'"
+        },
+        "get_per_1000": {
+          "value": 0,
+          "source_url": "https://www.impossiblecloud.com/pricing",
+          "last_verified": "2026-10-13",
+          "note": "Pricing page: 'Free egress and API calls'; FAQ: 'we do not charge for API calls or operational requests.'"
+        },
+        "list_per_1000": {
+          "value": 0,
+          "source_url": "https://www.impossiblecloud.com/pricing",
+          "last_verified": "2026-10-13",
+          "note": "Pricing page: 'Free egress and API calls'; FAQ: 'we do not charge for API calls or operational requests.'"
+        }
+      },
+      "retrieval": {
+        "price_per_gb": {
+          "value": null,
+          "note": "No retrieval fee line; the pricing page describes the storage as always hot with free egress and API calls."
+        },
+        "typical_delay": {
+          "value": null,
+          "note": "Not stated; the FAQ describes an always-hot storage model."
+        }
+      },
+      "minimum_storage_duration_days": {
+        "value": 0,
+        "source_url": "https://www.impossiblecloud.com/pricing",
+        "last_verified": "2026-10-13",
+        "note": "'No minimum file size or storage duration fees'; FAQ: 'There is no minimum retention period.'"
+      },
+      "minimum_billable_object_size_kb": {
+        "value": 0,
+        "source_url": "https://www.impossiblecloud.com/pricing",
+        "last_verified": "2026-10-13",
+        "note": "'No minimum file size or storage duration fees.'"
+      },
+      "notes": [
+        "Reserved capacity plans (partners only, 1/3/5-year commitment from 25 TB) have a discounted price that is not published.",
+        "No monthly minimum or commitment for pay-as-you-go (FAQ)."
+      ]
+    }
+  ],
+  "default_storage_class": "standard",
+  "egress": {
+    "applies_to_regions": [
+      "eu-central-2",
+      "eu-west-1",
+      "eu-west-2",
+      "eu-west-3",
+      "eu-north-1"
+    ],
+    "free_allowance_gb_per_month": {
+      "value": null,
+      "note": "No numeric allowance: egress is free, limited by the fair-use policy (monthly egress up to the active stored volume)."
+    },
+    "price_per_gb": [
+      {
+        "from_gb": 0,
+        "up_to_gb": null,
+        "price": {
+          "value": 0,
+          "source_url": "https://www.impossiblecloud.com/pricing",
+          "last_verified": "2026-10-13",
+          "note": "Pricing page: 'Free egress and API calls', '0€ Egress fees'. Subject to the fair-use policy."
+        }
+      }
+    ],
+    "notes": [
+      "Workloads that regularly need more egress than stored data should contact Impossible Cloud for a custom arrangement (fair-use policy)."
+    ]
+  },
+  "egress_fair_use": {
+    "value": "Monthly egress should not exceed the active storage volume (for example 100 TB stored allows up to 100 TB egress per month); excessive requests or transfers that disrupt others are prohibited.",
+    "source_url": "https://docs.impossiblecloud.com/impossible-cloud-help/impossible-cloud-storage-guide/billing/fair-use-policy",
+    "last_verified": "2026-10-13",
+    "note": "The pricing page FAQ calls this a 'general rule'."
+  },
+  "free_tier": {
+    "value": null,
+    "note": "No permanent free tier. A 30-day free trial is offered; data is removed when the trial ends. Not modelled."
+  },
+  "object_lock": {
+    "value": true,
+    "source_url": "https://docs.impossiblecloud.com/impossible-cloud-help/impossible-cloud-storage-guide/buckets-and-objects/versioning-and-object-lock",
+    "last_verified": "2026-10-13",
+    "note": "Object lock with compliance and governance retention modes and legal hold; requires versioning."
+  },
+  "s3_endpoints": [
+    {
+      "region": "eu-central-2",
+      "label": "Frankfurt",
+      "endpoint": "https://eu-central-2.storage.impossibleapi.net",
+      "path_style": true,
+      "source_url": "https://docs.impossiblecloud.com/impossible-cloud-help/impossible-cloud-storage-guide/storage-console-urls-and-api-endpoints",
+      "last_verified": "2026-10-13",
+      "note": "Addressing style is not documented (endpoint list and AWS CLI guide only pass the regional endpoint); path-style is set as the conservative choice, unverified."
+    },
+    {
+      "region": "eu-west-1",
+      "label": "Amsterdam",
+      "endpoint": "https://eu-west-1.storage.impossibleapi.net",
+      "path_style": true,
+      "source_url": "https://docs.impossiblecloud.com/impossible-cloud-help/impossible-cloud-storage-guide/storage-console-urls-and-api-endpoints",
+      "last_verified": "2026-10-13",
+      "note": "Addressing style is not documented (endpoint list and AWS CLI guide only pass the regional endpoint); path-style is set as the conservative choice, unverified."
+    },
+    {
+      "region": "eu-west-2",
+      "label": "London",
+      "endpoint": "https://eu-west-2.storage.impossibleapi.net",
+      "path_style": true,
+      "source_url": "https://docs.impossiblecloud.com/impossible-cloud-help/impossible-cloud-storage-guide/storage-console-urls-and-api-endpoints",
+      "last_verified": "2026-10-13",
+      "note": "Addressing style is not documented (endpoint list and AWS CLI guide only pass the regional endpoint); path-style is set as the conservative choice, unverified."
+    },
+    {
+      "region": "eu-west-3",
+      "label": "Paris",
+      "endpoint": "https://eu-west-3.storage.impossibleapi.net",
+      "path_style": true,
+      "source_url": "https://docs.impossiblecloud.com/impossible-cloud-help/impossible-cloud-storage-guide/storage-console-urls-and-api-endpoints",
+      "last_verified": "2026-10-13",
+      "note": "Addressing style is not documented (endpoint list and AWS CLI guide only pass the regional endpoint); path-style is set as the conservative choice, unverified."
+    },
+    {
+      "region": "eu-north-1",
+      "label": "Copenhagen",
+      "endpoint": "https://eu-north-1.storage.impossibleapi.net",
+      "path_style": true,
+      "source_url": "https://docs.impossiblecloud.com/impossible-cloud-help/impossible-cloud-storage-guide/storage-console-urls-and-api-endpoints",
+      "last_verified": "2026-10-13",
+      "note": "Addressing style is not documented (endpoint list and AWS CLI guide only pass the regional endpoint); path-style is set as the conservative choice, unverified."
+    },
+    {
+      "region": "us-east-1",
+      "label": "New York",
+      "endpoint": "https://us-east-1.storage.impossibleapi.net",
+      "path_style": true,
+      "source_url": "https://docs.impossiblecloud.com/impossible-cloud-help/impossible-cloud-storage-guide/storage-console-urls-and-api-endpoints",
+      "last_verified": "2026-10-13",
+      "note": "Addressing style is not documented (endpoint list and AWS CLI guide only pass the regional endpoint); path-style is set as the conservative choice, unverified."
+    }
+  ],
+  "notes": [
+    "Region eu-east-1 (Poznań, Poland) is listed as deprecated and left out.",
+    "Maximum 100 buckets per account; object size 0 B to 50 TiB (limitations page).",
+    "The US pricing page lists USD 7.99 per TB/month; this profile is EUR only."
+  ]
+}

@@ -241,6 +241,14 @@ section#app > .notice { margin-bottom: 16px; }
   overflow-wrap: anywhere;
 }
 .notice.warn { background: var(--warn-bg); color: var(--warn-text); border-color: var(--warn-border); }
+.price-card { border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 14px; margin: 0 0 12px; font-size: 13px; background: var(--surface); }
+.price-card .price-head { font-weight: 600; margin: 0 0 6px; }
+.price-card dl { display: grid; grid-template-columns: max-content 1fr; gap: 3px 12px; margin: 0 0 6px; }
+.price-card dt { color: var(--muted); }
+.price-card dd { margin: 0; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.price-card .notice { margin: 6px 0 0; padding: 6px 10px; }
+details.compare { margin: 0 0 12px; }
+details.compare > summary { cursor: pointer; font-weight: 500; color: var(--text-2); }
 details.card > summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 8px; }
 details.card > summary::-webkit-details-marker { display: none; }
 details.card > summary::before { content: ""; width: 7px; height: 7px; border-right: 1.6px solid var(--muted); border-bottom: 1.6px solid var(--muted); transform: rotate(-45deg); margin: 0 6px 0 2px; transition: transform .15s; }
@@ -830,3 +838,16 @@ body[data-mobile="1"] .sel-count { font-size: 14px; }
 [data-help] { cursor: help; }
 .sidebar-lang { display: block; padding: 4px 12px; }
 .sidebar-lang select { width: 100%; font-size: 13px; }
+
+/* Live activity of this and the other devices (Overview "Now", Devices). */
+.activity-list li { display: block; }
+.act { margin-top: 6px; }
+.act + .act { margin-top: 8px; }
+.act-head { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; }
+.act-who { font-weight: 600; }
+.act-meta { color: var(--text-2); font-size: 0.9em; }
+.act-bar { height: 6px; margin-top: 4px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 3px; overflow: hidden; }
+.act-bar > i { display: block; height: 100%; width: 0; background: var(--accent); transition: width 0.4s; }
+.act-bar.indeterminate > i { width: 30%; animation: act-slide 1.6s ease-in-out infinite; }
+@keyframes act-slide { from { margin-left: -30%; } to { margin-left: 100%; } }
+@media (prefers-reduced-motion: reduce) { .act-bar.indeterminate > i { animation: none; width: 100%; opacity: 0.4; } }

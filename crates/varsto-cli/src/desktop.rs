@@ -128,10 +128,46 @@ fn handle_unlocked(fixed: &Fixed, request: Request) -> Result<Option<Request>> {
         request.respond(Response::from_string("bad host").with_status_code(400))?;
         return Ok(None);
     }
+    let path = request.url().split('?').next().unwrap_or("").to_string();
+    if *request.method() == Method::Post && path == "/api/activity/report" {
+        // A command of this device reports the tasks it runs (answered
+        // here, without the state: a sync may hold it).
+        let mut request = request;
+        let token_ok = request
+            .headers()
+            .iter()
+            .any(|h| h.field.equiv("X-Varsto-Token") && h.value.as_str() == fixed.token);
+        let mut body = String::new();
+        let read = request
+            .as_reader()
+            .take(256 * 1024)
+            .read_to_string(&mut body);
+        #[derive(serde::Deserialize)]
+        struct Report {
+            pid: u32,
+            tasks: Vec<varsto_core::activity::TaskView>,
+        }
+        let parsed = read
+            .ok()
+            .and_then(|_| serde_json::from_str::<Report>(&body).ok());
+        match (token_ok, parsed) {
+            (false, _) => request.respond(json_response(
+                401,
+                &json!({"error": "missing or wrong token; reopen the start URL"}),
+            ))?,
+            (true, None) => {
+                request.respond(json_response(400, &json!({"error": "bad activity report"})))?
+            }
+            (true, Some(r)) => {
+                varsto_core::activity::merge_external(r.pid, r.tasks);
+                request.respond(json_response(200, &json!({"ok": true})))?;
+            }
+        }
+        return Ok(None);
+    }
     if *request.method() != Method::Get {
         return Ok(Some(request));
     }
-    let path = request.url().split('?').next().unwrap_or("").to_string();
     match path.as_str() {
         "/" => request.respond(html(INDEX_HTML))?,
         "/app.js" => request.respond(text(APP_JS, "text/javascript; charset=utf-8"))?,
@@ -139,7 +175,7 @@ fn handle_unlocked(fixed: &Fixed, request: Request) -> Result<Option<Request>> {
         "/i18n/fi.json" => request.respond(text(I18N_FI, "application/json; charset=utf-8"))?,
         "/i18n/sv.json" => request.respond(text(I18N_SV, "application/json; charset=utf-8"))?,
         "/app.css" => request.respond(text(APP_CSS, "text/css; charset=utf-8"))?,
-        "/api/p2p/traffic" | "/api/progress" => {
+        "/api/p2p/traffic" | "/api/progress" | "/api/activity" => {
             let token_ok = request
                 .headers()
                 .iter()
@@ -148,6 +184,18 @@ fn handle_unlocked(fixed: &Fixed, request: Request) -> Result<Option<Request>> {
                 request.respond(json_response(
                     401,
                     &json!({"error": "missing or wrong token; reopen the start URL"}),
+                ))?;
+            } else if path == "/api/activity" {
+                // What this device and the others are doing now. Asking
+                // keeps the service asking the peers for the next 15 s.
+                let peers = varsto_core::activity::global();
+                peers.watch();
+                request.respond(json_response(
+                    200,
+                    &json!({
+                        "me": varsto_core::activity::local_here(),
+                        "peers": peers.report(),
+                    }),
                 ))?;
             } else if path == "/api/progress" {
                 // The download running now, answered while it holds the engine.
@@ -678,6 +726,15 @@ fn percent_decode(v: &str) -> String {
     String::from_utf8_lossy(&out).to_string()
 }
 
+/// The S3-compatible providers in the built-in price data, for the Add
+/// storage form: endpoints per region and headline prices with their sources.
+fn providers_json(now: i64) -> Value {
+    json!({
+        "providers": varsto_core::providers::s3_providers(now),
+        "stale_after_days": varsto_core::providers::STALE_AFTER_DAYS,
+    })
+}
+
 fn api(st: &mut State, method: Method, path: &str, query: &str, input: &Value) -> Result<Value> {
     let has_vault = st.home.join("vault.json").exists();
     let method2 = method.clone();
@@ -747,6 +804,7 @@ fn api(st: &mut State, method: Method, path: &str, query: &str, input: &Value) -
             Ok(json!({"ok": true}))
         }
         (Method::Get, "/api/ui-language") => Ok(json!({"language": ui_language(&st.home)})),
+        (Method::Get, "/api/providers") => Ok(providers_json(varsto_core::util::now_utc())),
         (Method::Post, "/api/ui-language") => {
             let l = s(input, "language")?;
             if !matches!(l.as_str(), "en" | "fi" | "sv") {
@@ -947,6 +1005,14 @@ fn api(st: &mut State, method: Method, path: &str, query: &str, input: &Value) -
             api_unlocked(engine, service, method2, path, query, input)
         }
     }
+}
+
+/// The interface asks for long work to run in the background service.
+fn background(input: &Value) -> bool {
+    input
+        .get("background")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
 }
 
 fn api_unlocked(
@@ -1255,15 +1321,25 @@ fn api_unlocked(
                 placement,
             };
             let id = engine.add_backup(&name, &path, opts)?;
-            let snapshot = if input.get("initial").and_then(|v| v.as_bool()).unwrap_or(true) {
-                Some(engine.take_snapshot(id.as_str())?)
-            } else {
-                None
-            };
+            let initial = input.get("initial").and_then(|v| v.as_bool()).unwrap_or(true);
+            // `background`: the interface does not wait for a first snapshot
+            // of a large directory; the service takes it on its next run.
+            if initial && background(input) {
+                engine.request_snapshot(id.as_str())?;
+                service.request_sync();
+                return Ok(json!({"ok": true, "id": id.to_string(), "snapshot": null, "queued": true}));
+            }
+            let snapshot = if initial { Some(engine.take_snapshot(id.as_str())?) } else { None };
             Ok(json!({"ok": true, "id": id.to_string(), "snapshot": snapshot}))
         }
         (Method::Post, "/api/backup/take") => {
-            Ok(serde_json::to_value(engine.take_snapshot(&s(input, "backup")?)?)?)
+            let backup = s(input, "backup")?;
+            if background(input) {
+                engine.request_snapshot(&backup)?;
+                service.request_sync();
+                return Ok(json!({"ok": true, "backup": backup, "queued": true}));
+            }
+            Ok(serde_json::to_value(engine.take_snapshot(&backup)?)?)
         }
         (Method::Post, "/api/backup/restore") => {
             let pick = varsto_core::engine::SnapshotPick::parse(
@@ -1764,4 +1840,60 @@ fn api_unlocked(
         _ => Err(anyhow!("unknown API endpoint {path}")),
     }
     .with_context(|| path.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn providers_list_for_the_storage_form() {
+        let now = 1_791_849_600; // 2026-10-13
+        let v = providers_json(now);
+        assert_eq!(v["stale_after_days"], 90);
+        let list = v["providers"].as_array().unwrap();
+        assert!(!list.is_empty());
+        for p in list {
+            for k in [
+                "id",
+                "name",
+                "kind",
+                "currency",
+                "storage_per_gb_month",
+                "egress_per_gb",
+                "egress_free_gb_per_month",
+                "put_per_1000",
+                "get_per_1000",
+                "minimum_storage_days",
+                "minimum_object_kb",
+                "free_tier",
+                "endpoints",
+                "last_verified",
+                "source_url",
+                "stale",
+            ] {
+                assert!(p.get(k).is_some(), "{} lacks {k}", p["id"]);
+            }
+            for e in p["endpoints"].as_array().unwrap() {
+                assert!(e["endpoint"].as_str().unwrap().starts_with("http"));
+                assert!(e["path_style"].is_boolean());
+                assert!(e["region"].is_string());
+            }
+        }
+        let aws = list.iter().find(|p| p["id"] == "aws-s3").unwrap();
+        assert_eq!(aws["storage_per_gb_month"]["value"], 0.0245);
+        assert!(aws["storage_per_gb_month"]["source_url"]
+            .as_str()
+            .unwrap()
+            .starts_with("https://"));
+        assert_eq!(aws["stale"], false);
+        let later = providers_json(now + 365 * 86_400);
+        let aws_later = later["providers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|p| p["id"] == "aws-s3")
+            .unwrap();
+        assert_eq!(aws_later["stale"], true);
+    }
 }

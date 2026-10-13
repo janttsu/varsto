@@ -4,25 +4,23 @@
   "title": "Varsto storage provider profile",
   "description": "Price and capability data for one storage provider. Every numeric value must carry a source_url and a last_verified date; a value that could not be verified is null and must carry a note.",
   "type": "object",
-  "required": [
-    "schema_version",
-    "id",
-    "name",
-    "website_url",
-    "currency",
-    "protocols",
-    "regions",
-    "storage_classes",
-    "egress",
-    "object_lock"
-  ],
+  "required": ["schema_version", "id", "name", "website_url", "protocols"],
   "additionalProperties": false,
   "properties": {
     "$schema": { "type": "string" },
     "schema_version": { "const": 1 },
     "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
     "name": { "type": "string", "minLength": 1 },
+    "kind": {
+      "description": "service (default): a hosted service with prices. self_hosted: software you run yourself (no prices); only endpoint hints are given.",
+      "enum": ["service", "self_hosted"]
+    },
     "website_url": { "$ref": "#/$defs/https_url" },
+    "signup_url": { "description": "Where a new account is created.", "$ref": "#/$defs/https_url" },
+    "pricing_url": {
+      "description": "The provider's main pricing page, for people to read.",
+      "$ref": "#/$defs/https_url"
+    },
     "currency": {
       "description": "ISO 4217 code of every price in this file.",
       "type": "string",
@@ -42,22 +40,38 @@
       }
     },
     "protocols_source": { "$ref": "#/$defs/source" },
-    "regions": {
-      "type": "array",
-      "minItems": 1,
-      "items": { "$ref": "#/$defs/region" }
-    },
-    "storage_classes": {
-      "type": "array",
-      "minItems": 1,
-      "items": { "$ref": "#/$defs/storage_class" }
-    },
+    "regions": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/region" } },
+    "storage_classes": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/storage_class" } },
     "egress": { "$ref": "#/$defs/egress" },
     "object_lock": {
       "description": "Whether the provider supports immutability (WORM) for objects. null if not documented.",
       "allOf": [{ "$ref": "#/$defs/verified_boolean" }]
     },
-    "notes": { "type": "array", "items": { "type": "string" } }
+    "notes": { "type": "array", "items": { "type": "string" } },
+    "tax_note": {
+      "description": "How tax is applied, as the source states it (for example 'prices exclude VAT').",
+      "type": "string",
+      "minLength": 1
+    },
+    "default_storage_class": {
+      "description": "Storage class id (from storage_classes) whose prices are shown as the headline; the first class when absent.",
+      "type": "string",
+      "minLength": 1
+    },
+    "free_tier": {
+      "description": "Free tier or free allowance for storage or requests, as the provider describes it. null with a note if none was found.",
+      "allOf": [{ "$ref": "#/$defs/verified_text" }]
+    },
+    "egress_fair_use": {
+      "description": "Fair-use rules that limit 'free' egress (for example egress up to the stored volume). null with a note if none is stated.",
+      "allOf": [{ "$ref": "#/$defs/verified_text" }]
+    },
+    "s3_endpoints": {
+      "description": "S3 API endpoints per region, for filling in the Add storage form. An endpoint may contain placeholders in braces, such as {account_id}, that the user replaces.",
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/s3_endpoint" }
+    }
   },
   "$defs": {
     "https_url": { "type": "string", "pattern": "^https://[^\\s]+$" },
@@ -140,11 +154,7 @@
         "price": { "$ref": "#/$defs/verified_number" }
       }
     },
-    "tiers": {
-      "type": "array",
-      "minItems": 1,
-      "items": { "$ref": "#/$defs/price_tier" }
-    },
+    "tiers": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/price_tier" } },
     "plan": {
       "description": "A fixed-size plan with a flat monthly price (for example a storage box).",
       "type": "object",
@@ -241,6 +251,47 @@
         },
         "notes": { "type": "array", "items": { "type": "string" } }
       }
+    },
+    "s3_endpoint": {
+      "type": "object",
+      "required": ["region", "endpoint", "path_style", "source_url", "last_verified"],
+      "additionalProperties": false,
+      "properties": {
+        "region": {
+          "description": "Region code to send in requests (SigV4 signing region), usually a code from regions.",
+          "type": "string",
+          "minLength": 1
+        },
+        "price_region": {
+          "description": "Code from regions whose prices apply to this endpoint, when it differs from the signing region (for example a provider that signs every endpoint as us-east-1).",
+          "type": "string",
+          "minLength": 1
+        },
+        "label": {
+          "description": "Human label, such as the city, when it differs from the regions entry.",
+          "type": "string",
+          "minLength": 1
+        },
+        "endpoint": {
+          "description": "Endpoint URL; may contain {placeholders}.",
+          "type": "string",
+          "pattern": "^https?://[^\\s]+$"
+        },
+        "path_style": {
+          "description": "true: use path-style requests (bucket in the path). false: use virtual-hosted-style requests (bucket in the host name). Set according to what the provider documents or requires.",
+          "type": "boolean"
+        },
+        "source_url": { "$ref": "#/$defs/https_url" },
+        "last_verified": { "$ref": "#/$defs/iso_date" },
+        "note": { "type": "string", "minLength": 1 }
+      }
     }
-  }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "kind": { "const": "self_hosted" } }, "required": ["kind"] },
+      "then": { "required": ["s3_endpoints"] },
+      "else": { "required": ["currency", "regions", "storage_classes", "egress", "object_lock"] }
+    }
+  ]
 }

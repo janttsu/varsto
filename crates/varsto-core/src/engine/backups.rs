@@ -126,6 +126,8 @@ pub struct BackupSummary {
     pub storages: Vec<String>,
     /// When the next scheduled snapshot is due (source device only).
     pub next_due_utc: Option<i64>,
+    /// A snapshot was asked for and the service has not taken it yet.
+    pub snapshot_requested: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -277,6 +279,7 @@ impl Engine {
             last_taken_utc: 0,
             last_seq: 0,
             stopped: false,
+            take_now: false,
         });
         self.config.save(&self.home)?;
         self.pending.push(Event::FolderAdded { folder: id.clone() });
@@ -396,6 +399,7 @@ impl Engine {
                     BackupSchedule::EveryHours(_) if l.last_taken_utc == 0 => Some(now),
                     BackupSchedule::EveryHours(h) => Some(l.last_taken_utc + h as i64 * 3600),
                 }),
+                snapshot_requested: local.is_some_and(|l| l.take_now && !stopped),
             });
         }
         out.sort_by_key(|b| b.name.to_lowercase());
@@ -427,9 +431,12 @@ impl Engine {
             .backups
             .iter()
             .filter(|b| !b.stopped && !stopped.contains(&b.folder_id))
-            .filter(|b| match b.schedule {
-                BackupSchedule::Manual => false,
-                BackupSchedule::EveryHours(h) => now >= b.last_taken_utc + h as i64 * 3600,
+            .filter(|b| {
+                b.take_now
+                    || match b.schedule {
+                        BackupSchedule::Manual => false,
+                        BackupSchedule::EveryHours(h) => now >= b.last_taken_utc + h as i64 * 3600,
+                    }
             })
             .filter_map(|b| {
                 self.keyring
@@ -465,6 +472,19 @@ impl Engine {
             }
             src.schedule = s;
         }
+        self.save_backup_source(src)
+    }
+
+    /// Ask for a snapshot of a backup of this device without waiting for
+    /// it: the background service takes it on its next run, so a request
+    /// from the interface returns at once even for a large directory.
+    pub fn request_snapshot(&mut self, backup: &str) -> Result<()> {
+        let rec = self.resolve_backup(backup)?;
+        let mut src = self.backup_source(&rec)?;
+        if src.stopped {
+            bail!("backup {} is stopped: it takes no more snapshots", rec.name);
+        }
+        src.take_now = true;
         self.save_backup_source(src)
     }
 
@@ -520,6 +540,13 @@ impl Engine {
             bail!("no storage of this device can keep the snapshot: add one first");
         }
         self.pull_ledger()?;
+        // The scan and the upload below list their own tasks.
+        let _task = crate::activity::start(
+            crate::activity::BACKUP_SNAPSHOT,
+            &rec.name,
+            0,
+            crate::activity::Unit::Items,
+        );
 
         // 1. Read the directory and store what the storages lack.
         let mut state = self.load_state(&rec.folder_id)?;
@@ -597,6 +624,7 @@ impl Engine {
         self.save_state(&rec.folder_id, &state)?;
         src.last_taken_utc = now;
         src.last_seq = seq;
+        src.take_now = false;
         self.save_backup_source(src.clone())?;
         let mut cache = self.load_backup_cache(&rec.folder_id);
         cache.snapshots.insert(snap_key(&me, seq), blocks_of(&snap));
@@ -851,6 +879,13 @@ impl Engine {
             ..Default::default()
         };
         let mut pull = PullReport::default();
+        // Counted by the files' downloads (`progress`).
+        let _task = crate::activity::start(
+            crate::activity::RESTORE,
+            &rec.name,
+            wanted.iter().map(|f| f.size).sum(),
+            crate::activity::Unit::Bytes,
+        );
         for f in &wanted {
             let disk = match util::safe_join(&root, &f.path) {
                 Ok(d) => d,

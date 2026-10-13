@@ -429,6 +429,7 @@ impl P2p {
                 return None;
             }
             st.traffic.set_me(e.device_id(), e.own_device_name());
+            varsto_core::activity::set_identity(e.device_id(), e.own_device_name());
             let identity = match e.p2p_identity() {
                 Ok(id) => Some(id),
                 Err(err) => {
@@ -742,6 +743,8 @@ impl P2p {
         if let Some(prev) = slot.as_ref() {
             p.inherit(prev);
         }
+        // The same table answers who is doing what (`/api/activity`).
+        varsto_core::activity::global().set_peers(Some(p.clone()), e.activity_audience());
         *slot = Some(p.clone());
         drop(slot);
         e.set_peers(Some(p));
@@ -1216,6 +1219,9 @@ pub fn run(opts: Options) -> Result<()> {
     // the user unlocks; a failed start is retried every 30 seconds.
     let mut p2p = P2p::start(&state);
     let mut p2p_retry_at = Instant::now();
+    // Asks the peers what they are doing, only while someone watches.
+    let activity_stop = Arc::new(AtomicBool::new(false));
+    varsto_core::activity::global().spawn_poller(activity_stop.clone());
 
     // File watcher: sends a signal on any change under an attached folder.
     let (tx, rx) = mpsc::channel::<()>();
@@ -1247,6 +1253,10 @@ pub fn run(opts: Options) -> Result<()> {
         if Instant::now() >= next_disk_check {
             next_disk_check = Instant::now() + disk_check_every;
             let mut st = state.lock().unwrap();
+            if let Some(e) = st.engine.as_ref() {
+                // Who this device is in `/api/activity` (also while p2p is off).
+                varsto_core::activity::set_identity(e.device_id(), e.own_device_name());
+            }
             let listed = st.engine.as_mut().map(|e| e.disks());
             match listed {
                 Some(Ok(disks)) => st.service.record_disks(disks),
@@ -1320,6 +1330,7 @@ pub fn run(opts: Options) -> Result<()> {
                     e.set_snapshot_sink(None);
                 }
                 st.service.p2p_listen = None;
+                varsto_core::activity::global().set_peers(None, None);
                 eprintln!("service: p2p stopped (turned off)");
             }
         }
@@ -1462,6 +1473,7 @@ pub fn run(opts: Options) -> Result<()> {
         }
         std::thread::sleep(Duration::from_millis(500));
     }
+    activity_stop.store(true, Ordering::Relaxed);
     let restart = state.lock().unwrap().service.restart_requested;
     let _ = fs::remove_file(service_file(&opts.home));
     server.unblock();
@@ -1525,6 +1537,11 @@ pub fn http_post(url: &str, token: &str, body: &str) -> Result<String> {
 
 pub fn http_call(method: &str, url: &str, token: &str, body: Option<&str>) -> Result<String> {
     http_call_within(method, url, token, body, Duration::from_secs(600))
+}
+
+/// POST that gives up after `secs`.
+pub fn http_post_within(url: &str, token: &str, body: &str, secs: u64) -> Result<String> {
+    http_call_within("POST", url, token, Some(body), Duration::from_secs(secs))
 }
 
 /// GET that gives up after `secs` (for answers that wait while a sync holds the engine).

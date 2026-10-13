@@ -993,7 +993,10 @@ impl PoolStorage {
                 }
             }
         };
+        // The disk check's task (`activity`) counts the bytes looked at.
+        crate::activity::set_current_total(keys.iter().map(|(_, size)| size).sum());
         for (key, size) in keys {
+            crate::activity::advance_current(size);
             let path = Self::data_path(&mount, &key)?;
             let Ok(md) = fs::metadata(&path) else {
                 out.missing.push(key.clone());

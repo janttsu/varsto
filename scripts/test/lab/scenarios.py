@@ -964,6 +964,49 @@ def s_backup():
     check(not fsck.get("chunks_missing") and not fsck.get("objects_corrupt"), f"fsck after the expiry: {fsck}")
 
 
+# ----- live activity: what the other device is doing, over peer to peer ----------------------
+
+@scenario("activity")
+def s_activity():
+    """The laptop verifies every block in the bucket from its command line
+    (slowed down to about 300 ms a block by the test hook) while both
+    services run; the desktop's `varsto activity` shows the laptop's fsck
+    with its progress, rate and finish time, fetched over peer to peer.
+    Nobody watching on the laptop, the laptop asks nobody."""
+    fresh_pair()
+    for vm in ("vl-laptop", "vl-desktop"):
+        start_service(vm)
+    try:
+        time.sleep(20)  # LAN discovery, then a sync that puts the peer in the table
+        idle = v("vl-desktop", "activity")
+        check(idle.get("me", {}).get("name") == "desktop", f"desktop activity: {idle}")
+        run("vl-laptop", f"{ENV} VARSTO_ACTIVITY_TEST_DELAY_MS=300 nohup varsto fsck --verify > ~/fsck.log 2>&1 < /dev/null &")
+        seen = None
+        t0 = time.time()
+        while time.time() - t0 < 60 and not seen:
+            a = v("vl-desktop", "activity")
+            for p in a.get("peers") or []:
+                acts = (p.get("activity") or {}).get("tasks") or []
+                hit = [t for t in acts if t.get("kind") == "fsck" and t.get("phase") == "verify" and t.get("done", 0) > 0]
+                if p.get("name") == "laptop" and p.get("status") == "ok" and hit:
+                    seen = hit[0]
+            if not seen:
+                time.sleep(1)
+        CTX["activity_seen"] = seen
+        print("      desktop saw:", seen, flush=True)
+        check(seen, f"the desktop never saw the laptop's fsck: {a}")
+        check(seen.get("total", 0) > 0 and seen.get("percent") is not None, f"no progress: {seen}")
+        time.sleep(3)
+        later = v("vl-desktop", "activity")
+        text = v("vl-desktop", "activity", json_out=False)
+        print("      " + text.replace("\n", "\n      "), flush=True)
+        check("laptop" in text, f"text view: {text}")
+        lap = [p for p in later.get("peers") or [] if p.get("name") == "laptop"]
+        check(lap and lap[0].get("status") == "ok", f"laptop not answering: {later}")
+    finally:
+        for vm in ("vl-laptop", "vl-desktop"):
+            run(vm, "pkill -x varsto; true", check_rc=False)
+
 @scenario("scrub")
 def s_scrub():
     """Bit rot on the bucket and on the laptop's disk: `varsto scrub` finds a
@@ -1021,7 +1064,7 @@ SCENARIOS = [s_reset, s_init, s_pair, s_sync, s_words, s_conflict, s_selective, 
              s_strongroom, s_org, s_remove_user, s_revoke,
              s_p2p_setup, s_p2p_lan, s_p2p_pub, s_p2p_sym, s_p2p_stop, s_share, s_disks, s_mixed,
              s_outage, s_blackhole, s_crash, s_clock, s_clock_behind, s_p2p_upload, s_scale,
-             s_backup, s_scrub]
+             s_backup, s_activity, s_scrub]
 
 
 def main():

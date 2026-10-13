@@ -1,0 +1,821 @@
+{
+  "$schema": "schema.json",
+  "schema_version": 1,
+  "id": "ovhcloud-object-storage",
+  "name": "OVHcloud Object Storage",
+  "kind": "service",
+  "website_url": "https://www.ovhcloud.com/en-ie/public-cloud/object-storage/",
+  "signup_url": "https://www.ovh.com/auth/?onsuccess=https%3A//manager.eu.ovhcloud.com&ovhSubsidiary=IE",
+  "pricing_url": "https://www.ovhcloud.com/en-ie/public-cloud/prices/#object-storage",
+  "currency": "EUR",
+  "prices_include_tax": false,
+  "tax_note": "Prices page columns are labelled 'excl. VAT'.",
+  "protocols": [
+    "s3",
+    "rclone"
+  ],
+  "protocols_source": {
+    "source_url": "https://docs.ovhcloud.com/en/guides/storage-and-backup/object-storage/s3-rclone",
+    "last_verified": "2026-10-13"
+  },
+  "regions": [
+    {
+      "code": "gra",
+      "city": "Gravelines",
+      "country": "FR",
+      "source_url": "https://docs.ovhcloud.com/en/guides/storage-and-backup/object-storage/s3-location",
+      "last_verified": "2026-10-13",
+      "note": "Endpoints guide: Gravelines, region 'gra', 1-AZ region."
+    },
+    {
+      "code": "rbx",
+      "city": "Roubaix",
+      "country": "FR",
+      "source_url": "https://docs.ovhcloud.com/en/guides/storage-and-backup/object-storage/s3-location",
+      "last_verified": "2026-10-13",
+      "note": "Endpoints guide: Roubaix, region 'rbx', 1-AZ region."
+    },
+    {
+      "code": "sbg",
+      "city": "Strasbourg",
+      "country": "FR",
+      "source_url": "https://docs.ovhcloud.com/en/guides/storage-and-backup/object-storage/s3-location",
+      "last_verified": "2026-10-13",
+      "note": "Endpoints guide: Strasbourg, region 'sbg', 1-AZ region."
+    },
+    {
+      "code": "eu-west-par",
+      "city": "Paris",
+      "country": "FR",
+      "source_url": "https://docs.ovhcloud.com/en/guides/storage-and-backup/object-storage/s3-location",
+      "last_verified": "2026-10-13",
+      "note": "Endpoints guide: Paris, region 'eu-west-par', 3-AZ region."
+    },
+    {
+      "code": "eu-south-mil",
+      "city": "Milan",
+      "country": "IT",
+      "source_url": "https://docs.ovhcloud.com/en/guides/storage-and-backup/object-storage/s3-location",
+      "last_verified": "2026-10-13",
+      "note": "Endpoints guide: Milan, region 'eu-south-mil', 3-AZ region."
+    },
+    {
+      "code": "de",
+      "city": "Frankfurt",
+      "country": "DE",
+      "source_url": "https://docs.ovhcloud.com/en/guides/storage-and-backup/object-storage/s3-location",
+      "last_verified": "2026-10-13",
+      "note": "Endpoints guide: Frankfurt, region 'de', 1-AZ region."
+    },
+    {
+      "code": "uk",
+      "city": "London",
+      "country": "GB",
+      "source_url": "https://docs.ovhcloud.com/en/guides/storage-and-backup/object-storage/s3-location",
+      "last_verified": "2026-10-13",
+      "note": "Endpoints guide: London, region 'uk', 1-AZ region."
+    },
+    {
+      "code": "waw",
+      "city": "Warsaw",
+      "country": "PL",
+      "source_url": "https://docs.ovhcloud.com/en/guides/storage-and-backup/object-storage/s3-location",
+      "last_verified": "2026-10-13",
+      "note": "Endpoints guide: Warsaw, region 'waw', 1-AZ region."
+    },
+    {
+      "code": "bhs",
+      "city": "Beauharnois",
+      "country": "CA",
+      "source_url": "https://docs.ovhcloud.com/en/guides/storage-and-backup/object-storage/s3-location",
+      "last_verified": "2026-10-13",
+      "note": "Endpoints guide: Beauharnois, region 'bhs', 1-AZ region."
+    },
+    {
+      "code": "ca-east-tor",
+      "city": "Toronto",
+      "country": "CA",
+      "source_url": "https://docs.ovhcloud.com/en/guides/storage-and-backup/object-storage/s3-location",
+      "last_verified": "2026-10-13",
+      "note": "Endpoints guide: Toronto, region 'ca-east-tor', 1-AZ region."
+    },
+    {
+      "code": "sgp",
+      "city": "Singapore",
+      "country": "SG",
+      "source_url": "https://docs.ovhcloud.com/en/guides/storage-and-backup/object-storage/s3-location",
+      "last_verified": "2026-10-13",
+      "note": "Endpoints guide: Singapore, region 'sgp', 1-AZ region."
+    },
+    {
+      "code": "ap-southeast-syd",
+      "city": "Sydney",
+      "country": "AU",
+      "source_url": "https://docs.ovhcloud.com/en/guides/storage-and-backup/object-storage/s3-location",
+      "last_verified": "2026-10-13",
+      "note": "Endpoints guide: Sydney, region 'ap-southeast-syd', 1-AZ region."
+    },
+    {
+      "code": "ap-south-mum",
+      "city": "Mumbai",
+      "country": "IN",
+      "source_url": "https://docs.ovhcloud.com/en/guides/storage-and-backup/object-storage/s3-location",
+      "last_verified": "2026-10-13",
+      "note": "Endpoints guide: Mumbai, region 'ap-south-mum', 1-AZ region."
+    }
+  ],
+  "storage_classes": [
+    {
+      "id": "standard",
+      "name": "Standard (1-AZ)",
+      "kind": "hot",
+      "applies_to_regions": [
+        "gra",
+        "rbx",
+        "sbg",
+        "de",
+        "uk",
+        "waw",
+        "bhs",
+        "ca-east-tor",
+        "sgp",
+        "ap-southeast-syd",
+        "ap-south-mum"
+      ],
+      "pricing_model": "per_gb_month",
+      "storage_price_per_gb_month": [
+        {
+          "from_gb": 0,
+          "up_to_gb": null,
+          "price": {
+            "value": 0.00660829,
+            "source_url": "https://www.ovhcloud.com/en-ie/public-cloud/prices/",
+            "last_verified": "2026-10-13",
+            "note": "Public Cloud prices, Object Storage - One Zone, Standard: ~EUR 0.0070956 excl. VAT per GiB/month (provider's approximate monthly figure, 730 h). Normalised to per GB (1 GiB = 1.073741824 GB)."
+          }
+        }
+      ],
+      "requests": {
+        "put_per_1000": {
+          "value": 0,
+          "source_url": "https://www.ovhcloud.com/en-ie/public-cloud/prices/",
+          "last_verified": "2026-10-13",
+          "note": "Prices page, Object Storage - One Zone, Standard: 'API Requests: Free'."
+        },
+        "get_per_1000": {
+          "value": 0,
+          "source_url": "https://www.ovhcloud.com/en-ie/public-cloud/prices/",
+          "last_verified": "2026-10-13",
+          "note": "Prices page, Object Storage - One Zone, Standard: 'API Requests: Free'."
+        },
+        "list_per_1000": {
+          "value": 0,
+          "source_url": "https://www.ovhcloud.com/en-ie/public-cloud/prices/",
+          "last_verified": "2026-10-13",
+          "note": "Prices page, Object Storage - One Zone, Standard: 'API Requests: Free'."
+        }
+      },
+      "retrieval": {
+        "price_per_gb": {
+          "value": 0,
+          "source_url": "https://www.ovhcloud.com/en-ie/public-cloud/prices/",
+          "last_verified": "2026-10-13",
+          "note": "Prices page, One Zone, Standard: 'Data retrieval: Free'."
+        },
+        "typical_delay": {
+          "value": null,
+          "note": "Not applicable (immediately accessible class); no delay stated."
+        }
+      },
+      "minimum_storage_duration_days": {
+        "value": 0,
+        "source_url": "https://www.ovhcloud.com/en-ie/public-cloud/prices/",
+        "last_verified": "2026-10-13",
+        "note": "Prices page, One Zone, Standard: 'Minimum storage billed: N/A'; the footnote says a minimum duration applies only to cold storage classes."
+      },
+      "minimum_billable_object_size_kb": {
+        "value": null,
+        "note": "Not stated on the prices page, FAQ or technical limitations page checked."
+      },
+      "notes": [
+        "One Zone (1-AZ) price table; the FAQ 1-AZ billing example uses the same hourly rate (0.00000972 EUR per GB-hour). The prices page shows one table per deployment mode with no per-region variation, so it is applied to every 1-AZ region listed in the endpoints guide."
+      ]
+    },
+    {
+      "id": "high-performance",
+      "name": "High Performance (1-AZ)",
+      "kind": "hot",
+      "applies_to_regions": [
+        "gra",
+        "rbx",
+        "sbg",
+        "de",
+        "uk",
+        "waw",
+        "bhs",
+        "ca-east-tor",
+        "sgp",
+        "ap-southeast-syd",
+        "ap-south-mum"
+      ],
+      "pricing_model": "per_gb_month",
+      "storage_price_per_gb_month": [
+        {
+          "from_gb": 0,
+          "up_to_gb": null,
+          "price": {
+            "value": 0.01699664,
+            "source_url": "https://www.ovhcloud.com/en-ie/public-cloud/prices/",
+            "last_verified": "2026-10-13",
+            "note": "Public Cloud prices, Object Storage - One Zone, High Performance: ~EUR 0.01825 excl. VAT per GiB/month (provider's approximate monthly figure, 730 h). Normalised to per GB (1 GiB = 1.073741824 GB)."
+          }
+        }
+      ],
+      "requests": {
+        "put_per_1000": {
+          "value": 0,
+          "source_url": "https://www.ovhcloud.com/en-ie/public-cloud/prices/",
+          "last_verified": "2026-10-13",
+          "note": "Prices page, Object Storage - One Zone, High Performance: 'API Requests: Free'."
+        },
+        "get_per_1000": {
+          "value": 0,
+          "source_url": "https://www.ovhcloud.com/en-ie/public-cloud/prices/",
+          "last_verified": "2026-10-13",
+          "note": "Prices page, Object Storage - One Zone, High Performance: 'API Requests: Free'."
+        },
+        "list_per_1000": {
+          "value": 0,
+          "source_url": "https://www.ovhcloud.com/en-ie/public-cloud/prices/",
+          "last_verified": "2026-10-13",
+          "note": "Prices page, Object Storage - One Zone, High Performance: 'API Requests: Free'."
+        }
+      },
+      "retrieval": {
+        "price_per_gb": {
+          "value": 0,
+          "source_url": "https://www.ovhcloud.com/en-ie/public-cloud/prices/",
+          "last_verified": "2026-10-13",
+          "note": "Prices page, One Zone, High Performance: 'Data retrieval: Free'."
+        },
+        "typical_delay": {
+          "value": null,
+          "note": "Not applicable (immediately accessible class); no delay stated."
+        }
+      },
+      "minimum_storage_duration_days": {
+        "value": 0,
+        "source_url": "https://www.ovhcloud.com/en-ie/public-cloud/prices/",
+        "last_verified": "2026-10-13",
+        "note": "Prices page, One Zone, High Performance: 'Minimum storage billed: N/A'; the footnote says a minimum duration applies only to cold storage classes."
+      },
+      "minimum_billable_object_size_kb": {
+        "value": null,
+        "note": "Not stated on the prices page, FAQ or technical limitations page checked."
+      },
+      "notes": [
+        "Written with storage class EXPRESS_ONEZONE on the io endpoint (endpoints guide)."
+      ]
+    },
+    {
+      "id": "infrequent-access",
+      "name": "Infrequent Access (1-AZ)",
+      "kind": "infrequent",
+      "applies_to_regions": [
+        "gra",
+        "rbx",
+        "sbg",
+        "de",
+        "uk",
+        "waw",
+        "bhs",
+        "ca-east-tor",
+        "sgp",
+        "ap-southeast-syd",
+        "ap-south-mum"
+      ],
+      "pricing_model": "per_gb_month",
+      "storage_price_per_gb_month": [
+        {
+          "from_gb": 0,
+          "up_to_gb": null,
+          "price": {
+            "value": 0.00372566,
+            "source_url": "https://www.ovhcloud.com/en-ie/public-cloud/prices/",
+            "last_verified": "2026-10-13",
+            "note": "Public Cloud prices, Object Storage - One Zone, Infrequent Access: ~EUR 0.0040004 excl. VAT per GiB/month (provider's approximate monthly figure, 730 h). Normalised to per GB (1 GiB = 1.073741824 GB)."
+          }
+        }
+      ],
+      "requests": {
+        "put_per_1000": {
+          "value": 0,
+          "source_url": "https://www.ovhcloud.com/en-ie/public-cloud/prices/",
+          "last_verified": "2026-10-13",
+          "note": "Prices page, Object Storage - One Zone, Infrequent Access: 'API Requests: Free'."
+        },
+        "get_per_1000": {
+          "value": 0,
+          "source_url": "https://www.ovhcloud.com/en-ie/public-cloud/prices/",
+          "last_verified": "2026-10-13",
+          "note": "Prices page, Object Storage - One Zone, Infrequent Access: 'API Requests: Free'."
+        },
+        "list_per_1000": {
+          "value": 0,
+          "source_url": "https://www.ovhcloud.com/en-ie/public-cloud/prices/",
+          "last_verified": "2026-10-13",
+          "note": "Prices page, Object Storage - One Zone, Infrequent Access: 'API Requests: Free'."
+        }
+      },
+      "retrieval": {
+        "price_per_gb": {
+          "value": 0.00372529,
+          "source_url": "https://www.ovhcloud.com/en-ie/public-cloud/prices/",
+          "last_verified": "2026-10-13",
+          "note": "Prices page, One Zone, Infrequent Access: data retrieval EUR 0.004 excl. VAT per GiB, normalised to per GB."
+        },
+        "typical_delay": {
+          "value": null,
+          "note": "Not applicable (immediately accessible class); no delay stated."
+        }
+      },
+      "minimum_storage_duration_days": {
+        "value": 30,
+        "source_url": "https://www.ovhcloud.com/en-ie/public-cloud/prices/",
+        "last_verified": "2026-10-13",
+        "note": "Prices page footnote: minimum storage duration 720 hours (30 days); early deletion is charged as (minimum hours - hours stored) x hourly price."
+      },
+      "minimum_billable_object_size_kb": {
+        "value": null,
+        "note": "Not stated on the prices page, FAQ or technical limitations page checked."
+      },
+      "notes": [
+        "Written with STANDARD_IA or ONEZONE_IA (and GLACIER classes in 1-AZ regions) on the io endpoint."
+      ]
+    },
+    {
+      "id": "standard-3az",
+      "name": "Standard (3-AZ)",
+      "kind": "hot",
+      "applies_to_regions": [
+        "eu-west-par",
+        "eu-south-mil"
+      ],
+      "pricing_model": "per_gb_month",
+      "storage_price_per_gb_month": [
+        {
+          "from_gb": 0,
+          "up_to_gb": 54975.58,
+          "price": {
+            "value": 0.01303302,
+            "source_url": "https://www.ovhcloud.com/en-ie/public-cloud/prices/",
+            "last_verified": "2026-10-13",
+            "note": "Public Cloud prices, Object Storage - Multi Zone, Standard, first 50 TiB: ~EUR 0.0139941 excl. VAT per GiB/month (provider's approximate monthly figure, 730 h). Normalised to per GB (1 GiB = 1.073741824 GB)."
+          }
+        },
+        {
+          "from_gb": 54975.58,
+          "up_to_gb": 549755.81,
+          "price": {
+            "value": 0.0116393,
+            "source_url": "https://www.ovhcloud.com/en-ie/public-cloud/prices/",
+            "last_verified": "2026-10-13",
+            "note": "Public Cloud prices, Object Storage - Multi Zone, Standard, next 450 TiB: ~EUR 0.0124976 excl. VAT per GiB/month (provider's approximate monthly figure, 730 h). Normalised to per GB (1 GiB = 1.073741824 GB)."
+          }
+        },
+        {
+          "from_gb": 549755.81,
+          "up_to_gb": null,
+          "price": {
+            "value": 0.01023877,
+            "source_url": "https://www.ovhcloud.com/en-ie/public-cloud/prices/",
+            "last_verified": "2026-10-13",
+            "note": "Public Cloud prices, Object Storage - Multi Zone, Standard, over 500 TiB: ~EUR 0.0109938 excl. VAT per GiB/month (provider's approximate monthly figure, 730 h). Normalised to per GB (1 GiB = 1.073741824 GB)."
+          }
+        }
+      ],
+      "requests": {
+        "put_per_1000": {
+          "value": 0,
+          "source_url": "https://www.ovhcloud.com/en-ie/public-cloud/prices/",
+          "last_verified": "2026-10-13",
+          "note": "Prices page, Object Storage - Multi Zone, Standard: 'API Requests: Free'."
+        },
+        "get_per_1000": {
+          "value": 0,
+          "source_url": "https://www.ovhcloud.com/en-ie/public-cloud/prices/",
+          "last_verified": "2026-10-13",
+          "note": "Prices page, Object Storage - Multi Zone, Standard: 'API Requests: Free'."
+        },
+        "list_per_1000": {
+          "value": 0,
+          "source_url": "https://www.ovhcloud.com/en-ie/public-cloud/prices/",
+          "last_verified": "2026-10-13",
+          "note": "Prices page, Object Storage - Multi Zone, Standard: 'API Requests: Free'."
+        }
+      },
+      "retrieval": {
+        "price_per_gb": {
+          "value": 0,
+          "source_url": "https://www.ovhcloud.com/en-ie/public-cloud/prices/",
+          "last_verified": "2026-10-13",
+          "note": "Prices page, Multi Zone, Standard: 'Data retrieval: Free'."
+        },
+        "typical_delay": {
+          "value": null,
+          "note": "Not applicable (immediately accessible class); no delay stated."
+        }
+      },
+      "minimum_storage_duration_days": {
+        "value": 0,
+        "source_url": "https://www.ovhcloud.com/en-ie/public-cloud/prices/",
+        "last_verified": "2026-10-13",
+        "note": "Prices page, Multi Zone, Standard: 'Minimum storage billed: N/A'; the footnote says a minimum duration applies only to cold storage classes."
+      },
+      "minimum_billable_object_size_kb": {
+        "value": null,
+        "note": "Not stated on the prices page, FAQ or technical limitations page checked."
+      },
+      "notes": [
+        "Multi Zone = 3-AZ regions: the FAQ describes the 3-AZ 'staircase pricing' with the same hourly rates (0.00001917 then 0.00001712 EUR per GB-hour). Band limits 50 TiB and 500 TiB (1 TiB = 1024 GiB) converted to GB."
+      ]
+    },
+    {
+      "id": "infrequent-access-3az",
+      "name": "Infrequent Access (3-AZ)",
+      "kind": "infrequent",
+      "applies_to_regions": [
+        "eu-west-par",
+        "eu-south-mil"
+      ],
+      "pricing_model": "per_gb_month",
+      "storage_price_per_gb_month": [
+        {
+          "from_gb": 0,
+          "up_to_gb": null,
+          "price": {
+            "value": 0.00884505,
+            "source_url": "https://www.ovhcloud.com/en-ie/public-cloud/prices/",
+            "last_verified": "2026-10-13",
+            "note": "Public Cloud prices, Object Storage - Multi Zone, Infrequent Access: ~EUR 0.0094973 excl. VAT per GiB/month (provider's approximate monthly figure, 730 h). Normalised to per GB (1 GiB = 1.073741824 GB)."
+          }
+        }
+      ],
+      "requests": {
+        "put_per_1000": {
+          "value": 0,
+          "source_url": "https://www.ovhcloud.com/en-ie/public-cloud/prices/",
+          "last_verified": "2026-10-13",
+          "note": "Prices page, Object Storage - Multi Zone, Infrequent Access: 'API Requests: Free'."
+        },
+        "get_per_1000": {
+          "value": 0,
+          "source_url": "https://www.ovhcloud.com/en-ie/public-cloud/prices/",
+          "last_verified": "2026-10-13",
+          "note": "Prices page, Object Storage - Multi Zone, Infrequent Access: 'API Requests: Free'."
+        },
+        "list_per_1000": {
+          "value": 0,
+          "source_url": "https://www.ovhcloud.com/en-ie/public-cloud/prices/",
+          "last_verified": "2026-10-13",
+          "note": "Prices page, Object Storage - Multi Zone, Infrequent Access: 'API Requests: Free'."
+        }
+      },
+      "retrieval": {
+        "price_per_gb": {
+          "value": 0.00372529,
+          "source_url": "https://www.ovhcloud.com/en-ie/public-cloud/prices/",
+          "last_verified": "2026-10-13",
+          "note": "Prices page, Multi Zone, Infrequent Access: data retrieval EUR 0.004 excl. VAT per GiB, normalised to per GB."
+        },
+        "typical_delay": {
+          "value": null,
+          "note": "Not applicable (immediately accessible class); no delay stated."
+        }
+      },
+      "minimum_storage_duration_days": {
+        "value": 30,
+        "source_url": "https://www.ovhcloud.com/en-ie/public-cloud/prices/",
+        "last_verified": "2026-10-13",
+        "note": "Prices page footnote: minimum storage duration 720 hours (30 days); early deletion is charged as (minimum hours - hours stored) x hourly price."
+      },
+      "minimum_billable_object_size_kb": {
+        "value": null,
+        "note": "Not stated on the prices page, FAQ or technical limitations page checked."
+      }
+    },
+    {
+      "id": "active-archive",
+      "name": "Active Archive (3-AZ)",
+      "kind": "cold",
+      "applies_to_regions": [
+        "eu-west-par",
+        "eu-south-mil"
+      ],
+      "pricing_model": "per_gb_month",
+      "storage_price_per_gb_month": [
+        {
+          "from_gb": 0,
+          "up_to_gb": null,
+          "price": {
+            "value": 0.00419477,
+            "source_url": "https://www.ovhcloud.com/en-ie/public-cloud/prices/",
+            "last_verified": "2026-10-13",
+            "note": "Public Cloud prices, Object Storage - Multi Zone, Active Archive: ~EUR 0.0045041 excl. VAT per GiB/month (provider's approximate monthly figure, 730 h). Normalised to per GB (1 GiB = 1.073741824 GB)."
+          }
+        }
+      ],
+      "requests": {
+        "put_per_1000": {
+          "value": 0,
+          "source_url": "https://www.ovhcloud.com/en-ie/public-cloud/prices/",
+          "last_verified": "2026-10-13",
+          "note": "Prices page, Object Storage - Multi Zone, Active Archive: 'API Requests: Free'."
+        },
+        "get_per_1000": {
+          "value": 0,
+          "source_url": "https://www.ovhcloud.com/en-ie/public-cloud/prices/",
+          "last_verified": "2026-10-13",
+          "note": "Prices page, Object Storage - Multi Zone, Active Archive: 'API Requests: Free'."
+        },
+        "list_per_1000": {
+          "value": 0,
+          "source_url": "https://www.ovhcloud.com/en-ie/public-cloud/prices/",
+          "last_verified": "2026-10-13",
+          "note": "Prices page, Object Storage - Multi Zone, Active Archive: 'API Requests: Free'."
+        }
+      },
+      "retrieval": {
+        "price_per_gb": {
+          "value": 0.01676381,
+          "source_url": "https://www.ovhcloud.com/en-ie/public-cloud/prices/",
+          "last_verified": "2026-10-13",
+          "note": "Prices page, Multi Zone, Active Archive: data retrieval EUR 0.018 excl. VAT per GiB, normalised to per GB."
+        },
+        "typical_delay": {
+          "value": "immediately (milliseconds)",
+          "source_url": "https://docs.ovhcloud.com/en/guides/storage-and-backup/object-storage/s3-faq",
+          "last_verified": "2026-10-13",
+          "note": "FAQ: data 'must be available immediately (in milliseconds)'."
+        }
+      },
+      "minimum_storage_duration_days": {
+        "value": 90,
+        "source_url": "https://www.ovhcloud.com/en-ie/public-cloud/prices/",
+        "last_verified": "2026-10-13",
+        "note": "Prices page footnote: minimum storage duration 2,160 hours (90 days); early deletion is charged as (minimum hours - hours stored) x hourly price."
+      },
+      "minimum_billable_object_size_kb": {
+        "value": null,
+        "note": "Not stated on the prices page, FAQ or technical limitations page checked."
+      },
+      "notes": [
+        "Available in eu-west-par and eu-south-mil (endpoints guide); written with GLACIER_IR or GLACIER in 3-AZ regions."
+      ]
+    },
+    {
+      "id": "cold-archive",
+      "name": "Cold Archive (3-AZ)",
+      "kind": "archive",
+      "applies_to_regions": [
+        "eu-west-par"
+      ],
+      "pricing_model": "per_gb_month",
+      "storage_price_per_gb_month": [
+        {
+          "from_gb": 0,
+          "up_to_gb": null,
+          "price": {
+            "value": 0.00155009,
+            "source_url": "https://www.ovhcloud.com/en-ie/public-cloud/prices/",
+            "last_verified": "2026-10-13",
+            "note": "Public Cloud prices, Object Storage - Multi Zone, Cold Archive: ~EUR 0.0016644 excl. VAT per GiB/month (provider's approximate monthly figure, 730 h). Normalised to per GB (1 GiB = 1.073741824 GB)."
+          }
+        }
+      ],
+      "requests": {
+        "put_per_1000": {
+          "value": 0,
+          "source_url": "https://www.ovhcloud.com/en-ie/public-cloud/prices/",
+          "last_verified": "2026-10-13",
+          "note": "Prices page, Object Storage - Multi Zone, Cold Archive: 'API Requests: Free'."
+        },
+        "get_per_1000": {
+          "value": 0,
+          "source_url": "https://www.ovhcloud.com/en-ie/public-cloud/prices/",
+          "last_verified": "2026-10-13",
+          "note": "Prices page, Object Storage - Multi Zone, Cold Archive: 'API Requests: Free'."
+        },
+        "list_per_1000": {
+          "value": 0,
+          "source_url": "https://www.ovhcloud.com/en-ie/public-cloud/prices/",
+          "last_verified": "2026-10-13",
+          "note": "Prices page, Object Storage - Multi Zone, Cold Archive: 'API Requests: Free'."
+        }
+      },
+      "retrieval": {
+        "price_per_gb": {
+          "value": 0.0083819,
+          "source_url": "https://www.ovhcloud.com/en-ie/public-cloud/prices/",
+          "last_verified": "2026-10-13",
+          "note": "Prices page, Multi Zone, Cold Archive: data retrieval EUR 0.009 excl. VAT per GiB, normalised to per GB."
+        },
+        "typical_delay": {
+          "value": "up to 48 hours",
+          "source_url": "https://docs.ovhcloud.com/en/guides/storage-and-backup/object-storage/cold-archive-faq",
+          "last_verified": "2026-10-13",
+          "note": "Cold Archive FAQ: restore 'can last up to 48 hours'; SLA 48 h, often shorter. The FAQ text largely describes the bucket-level v1 service; the per-object v2 class may differ."
+        }
+      },
+      "minimum_storage_duration_days": {
+        "value": 180,
+        "source_url": "https://www.ovhcloud.com/en-ie/public-cloud/prices/",
+        "last_verified": "2026-10-13",
+        "note": "Prices page footnote: minimum storage duration 4,320 hours (180 days); early deletion is charged as (minimum hours - hours stored) x hourly price."
+      },
+      "minimum_billable_object_size_kb": {
+        "value": null,
+        "note": "Not stated on the prices page, FAQ or technical limitations page checked."
+      },
+      "notes": [
+        "Only in Paris eu-west-par (endpoints guide). Written with DEEP_ARCHIVE. Restored objects are stored in the Standard class and billed for the restore period (prices page). Object Lock is not available for Cold Archive (FAQ)."
+      ]
+    }
+  ],
+  "default_storage_class": "standard",
+  "egress": {
+    "applies_to_regions": [
+      "gra",
+      "rbx",
+      "sbg",
+      "eu-west-par",
+      "eu-south-mil",
+      "de",
+      "uk",
+      "waw",
+      "bhs",
+      "ca-east-tor",
+      "sgp",
+      "ap-southeast-syd",
+      "ap-south-mum"
+    ],
+    "free_allowance_gb_per_month": {
+      "value": null,
+      "note": "No allowance needed: outgoing external traffic is listed as free for every Object Storage class (see price_per_gb)."
+    },
+    "free_allowance_scope": "Egress to the internet is free; no allowance.",
+    "price_per_gb": [
+      {
+        "from_gb": 0,
+        "up_to_gb": null,
+        "price": {
+          "value": 0,
+          "source_url": "https://www.ovhcloud.com/en-ie/public-cloud/prices/",
+          "last_verified": "2026-10-13",
+          "note": "Prices page, Object Storage - One Zone and Multi Zone tables: 'Ingoing / Outgoing external traffic: Free' for every class."
+        }
+      }
+    ],
+    "notes": [
+      "Internal traffic (to and from OVHcloud servers) is also free. The FAQ says traffic or public bandwidth limitations may exist per service or region, and bandwidth is shared with a maximum of 1 Gbps per connection."
+    ]
+  },
+  "egress_fair_use": {
+    "value": null,
+    "note": "No fair-use volume limit is stated on the prices page or FAQ; the FAQ only says 'Some traffic/public bandwidth limitations may exist for a given OVHcloud service and/or a given region'."
+  },
+  "free_tier": {
+    "value": null,
+    "note": "No permanent free tier found. The product page mentions a 'Public Cloud Free Trial' voucher for a first Public Cloud project; its amount and terms were not verified."
+  },
+  "object_lock": {
+    "value": true,
+    "source_url": "https://docs.ovhcloud.com/en/guides/storage-and-backup/object-storage/s3-managing-object-lock",
+    "last_verified": "2026-10-13",
+    "note": "Guide 'Managing object immutability with Object Lock (WORM)'; FAQ: not available for the Cold Archive class."
+  },
+  "s3_endpoints": [
+    {
+      "region": "gra",
+      "label": "Gravelines",
+      "endpoint": "https://s3.gra.io.cloud.ovh.net",
+      "path_style": false,
+      "source_url": "https://docs.ovhcloud.com/en/guides/storage-and-backup/object-storage/s3-location",
+      "last_verified": "2026-10-13",
+      "note": "Endpoints guide: unique 'io' endpoint https://s3.<region>.io.cloud.ovh.net for all classes; bucket endpoint https://<bucket_name>.s3.<region>.io.cloud.ovh.net is described as virtual-host style. Legacy 'perf' endpoint (default class High Performance) is kept only for backward compatibility."
+    },
+    {
+      "region": "rbx",
+      "label": "Roubaix",
+      "endpoint": "https://s3.rbx.io.cloud.ovh.net",
+      "path_style": false,
+      "source_url": "https://docs.ovhcloud.com/en/guides/storage-and-backup/object-storage/s3-location",
+      "last_verified": "2026-10-13",
+      "note": "Endpoints guide: unique 'io' endpoint https://s3.<region>.io.cloud.ovh.net for all classes; bucket endpoint https://<bucket_name>.s3.<region>.io.cloud.ovh.net is described as virtual-host style. Legacy 'perf' endpoint (default class High Performance) is kept only for backward compatibility."
+    },
+    {
+      "region": "sbg",
+      "label": "Strasbourg",
+      "endpoint": "https://s3.sbg.io.cloud.ovh.net",
+      "path_style": false,
+      "source_url": "https://docs.ovhcloud.com/en/guides/storage-and-backup/object-storage/s3-location",
+      "last_verified": "2026-10-13",
+      "note": "Endpoints guide: unique 'io' endpoint https://s3.<region>.io.cloud.ovh.net for all classes; bucket endpoint https://<bucket_name>.s3.<region>.io.cloud.ovh.net is described as virtual-host style. Legacy 'perf' endpoint (default class High Performance) is kept only for backward compatibility."
+    },
+    {
+      "region": "eu-west-par",
+      "label": "Paris",
+      "endpoint": "https://s3.eu-west-par.io.cloud.ovh.net",
+      "path_style": false,
+      "source_url": "https://docs.ovhcloud.com/en/guides/storage-and-backup/object-storage/s3-location",
+      "last_verified": "2026-10-13",
+      "note": "Endpoints guide: unique 'io' endpoint https://s3.<region>.io.cloud.ovh.net for all classes; bucket endpoint https://<bucket_name>.s3.<region>.io.cloud.ovh.net is described as virtual-host style. Legacy 'perf' endpoint (default class High Performance) is kept only for backward compatibility."
+    },
+    {
+      "region": "eu-south-mil",
+      "label": "Milan",
+      "endpoint": "https://s3.eu-south-mil.io.cloud.ovh.net",
+      "path_style": false,
+      "source_url": "https://docs.ovhcloud.com/en/guides/storage-and-backup/object-storage/s3-location",
+      "last_verified": "2026-10-13",
+      "note": "Endpoints guide: unique 'io' endpoint https://s3.<region>.io.cloud.ovh.net for all classes; bucket endpoint https://<bucket_name>.s3.<region>.io.cloud.ovh.net is described as virtual-host style. Legacy 'perf' endpoint (default class High Performance) is kept only for backward compatibility."
+    },
+    {
+      "region": "de",
+      "label": "Frankfurt",
+      "endpoint": "https://s3.de.io.cloud.ovh.net",
+      "path_style": false,
+      "source_url": "https://docs.ovhcloud.com/en/guides/storage-and-backup/object-storage/s3-location",
+      "last_verified": "2026-10-13",
+      "note": "Endpoints guide: unique 'io' endpoint https://s3.<region>.io.cloud.ovh.net for all classes; bucket endpoint https://<bucket_name>.s3.<region>.io.cloud.ovh.net is described as virtual-host style. Legacy 'perf' endpoint (default class High Performance) is kept only for backward compatibility."
+    },
+    {
+      "region": "uk",
+      "label": "London",
+      "endpoint": "https://s3.uk.io.cloud.ovh.net",
+      "path_style": false,
+      "source_url": "https://docs.ovhcloud.com/en/guides/storage-and-backup/object-storage/s3-location",
+      "last_verified": "2026-10-13",
+      "note": "Endpoints guide: unique 'io' endpoint https://s3.<region>.io.cloud.ovh.net for all classes; bucket endpoint https://<bucket_name>.s3.<region>.io.cloud.ovh.net is described as virtual-host style. Legacy 'perf' endpoint (default class High Performance) is kept only for backward compatibility."
+    },
+    {
+      "region": "waw",
+      "label": "Warsaw",
+      "endpoint": "https://s3.waw.io.cloud.ovh.net",
+      "path_style": false,
+      "source_url": "https://docs.ovhcloud.com/en/guides/storage-and-backup/object-storage/s3-location",
+      "last_verified": "2026-10-13",
+      "note": "Endpoints guide: unique 'io' endpoint https://s3.<region>.io.cloud.ovh.net for all classes; bucket endpoint https://<bucket_name>.s3.<region>.io.cloud.ovh.net is described as virtual-host style. Legacy 'perf' endpoint (default class High Performance) is kept only for backward compatibility."
+    },
+    {
+      "region": "bhs",
+      "label": "Beauharnois",
+      "endpoint": "https://s3.bhs.io.cloud.ovh.net",
+      "path_style": false,
+      "source_url": "https://docs.ovhcloud.com/en/guides/storage-and-backup/object-storage/s3-location",
+      "last_verified": "2026-10-13",
+      "note": "Endpoints guide: unique 'io' endpoint https://s3.<region>.io.cloud.ovh.net for all classes; bucket endpoint https://<bucket_name>.s3.<region>.io.cloud.ovh.net is described as virtual-host style. Legacy 'perf' endpoint (default class High Performance) is kept only for backward compatibility."
+    },
+    {
+      "region": "ca-east-tor",
+      "label": "Toronto",
+      "endpoint": "https://s3.ca-east-tor.io.cloud.ovh.net",
+      "path_style": false,
+      "source_url": "https://docs.ovhcloud.com/en/guides/storage-and-backup/object-storage/s3-location",
+      "last_verified": "2026-10-13",
+      "note": "Endpoints guide: unique 'io' endpoint https://s3.<region>.io.cloud.ovh.net for all classes; bucket endpoint https://<bucket_name>.s3.<region>.io.cloud.ovh.net is described as virtual-host style. Legacy 'perf' endpoint (default class High Performance) is kept only for backward compatibility."
+    },
+    {
+      "region": "sgp",
+      "label": "Singapore",
+      "endpoint": "https://s3.sgp.io.cloud.ovh.net",
+      "path_style": false,
+      "source_url": "https://docs.ovhcloud.com/en/guides/storage-and-backup/object-storage/s3-location",
+      "last_verified": "2026-10-13",
+      "note": "Endpoints guide: unique 'io' endpoint https://s3.<region>.io.cloud.ovh.net for all classes; bucket endpoint https://<bucket_name>.s3.<region>.io.cloud.ovh.net is described as virtual-host style. Legacy 'perf' endpoint (default class High Performance) is kept only for backward compatibility."
+    },
+    {
+      "region": "ap-southeast-syd",
+      "label": "Sydney",
+      "endpoint": "https://s3.ap-southeast-syd.io.cloud.ovh.net",
+      "path_style": false,
+      "source_url": "https://docs.ovhcloud.com/en/guides/storage-and-backup/object-storage/s3-location",
+      "last_verified": "2026-10-13",
+      "note": "Endpoints guide: unique 'io' endpoint https://s3.<region>.io.cloud.ovh.net for all classes; bucket endpoint https://<bucket_name>.s3.<region>.io.cloud.ovh.net is described as virtual-host style. Legacy 'perf' endpoint (default class High Performance) is kept only for backward compatibility."
+    },
+    {
+      "region": "ap-south-mum",
+      "label": "Mumbai",
+      "endpoint": "https://s3.ap-south-mum.io.cloud.ovh.net",
+      "path_style": false,
+      "source_url": "https://docs.ovhcloud.com/en/guides/storage-and-backup/object-storage/s3-location",
+      "last_verified": "2026-10-13",
+      "note": "Endpoints guide: unique 'io' endpoint https://s3.<region>.io.cloud.ovh.net for all classes; bucket endpoint https://<bucket_name>.s3.<region>.io.cloud.ovh.net is described as virtual-host style. Legacy 'perf' endpoint (default class High Performance) is kept only for backward compatibility."
+    }
+  ],
+  "notes": [
+    "All prices are normalised from per GiB to per GB (divide by 1.073741824); each note quotes the original per-GiB figure from the prices page.",
+    "Billing granularity is 1 GiB per hour; monthly figures on the prices page are approximate (730 h).",
+    "Local Zone and legacy Swift offers are not modelled."
+  ]
+}

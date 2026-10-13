@@ -1,0 +1,165 @@
+{
+  "$schema": "schema.json",
+  "schema_version": 1,
+  "id": "synology-c2-object-storage",
+  "name": "Synology C2 Object Storage",
+  "kind": "service",
+  "website_url": "https://c2.synology.com/en-global/object-storage/overview",
+  "signup_url": "https://login.c2.synology.com/sso/login?service_key=onestorage&action=register",
+  "pricing_url": "https://c2.synology.com/en-global/pricing/onestorage",
+  "currency": "EUR",
+  "prices_include_tax": false,
+  "tax_note": "Pricing page: 'VAT rates are calculated based on your billing address at checkout.' The pricing API returns a separate tax rate (25.5 for country fi), so listed prices exclude VAT.",
+  "protocols": [
+    "s3"
+  ],
+  "protocols_source": {
+    "source_url": "https://kb.synology.com/en-global/C2/tutorial/C2_Object_Storage_Compatible_API",
+    "last_verified": "2026-10-13"
+  },
+  "regions": [
+    {
+      "code": "eu-001",
+      "city": "Frankfurt",
+      "country": "DE",
+      "source_url": "https://c2.synology.com/en-global/pricing/onestorage",
+      "last_verified": "2026-10-13",
+      "note": "Pricing page data-center label 'Europe - Frankfurt' (EUR prices); the overview FAQ says data centers are in Seattle, USA and Frankfurt, Germany. The code eu-001 is the endpoint subdomain used in the KB example; the actual endpoint is per bucket and shown in the portal."
+    }
+  ],
+  "storage_classes": [
+    {
+      "id": "onestorage",
+      "name": "C2 OneStorage (C2 Object Storage)",
+      "kind": "hot",
+      "applies_to_regions": [
+        "eu-001"
+      ],
+      "pricing_model": "fixed_plan",
+      "plans": [
+        {
+          "id": "1tb-monthly",
+          "capacity_gb": {
+            "value": null,
+            "note": "Sold in units of 1 TB (1 to 200 TB per plan, more via sales); the sources do not define 1 TB in GB, so no GB figure is given."
+          },
+          "monthly_price": {
+            "value": 7.99,
+            "source_url": "https://c2.synology.com/api/pricing/onestorage?country=fi",
+            "last_verified": "2026-10-13",
+            "note": "C2 pricing API used by the official pricing page (data_center 'eu', currency 'eur', price_unit 'tb'): 'month': 7.99 per TB, monthly billing. Annual billing is 79.99 per TB per year ('year': 79.99). qty_min 1, qty_max 200."
+          }
+        },
+        {
+          "id": "300gb-annual",
+          "capacity_gb": {
+            "value": 300,
+            "source_url": "https://c2.synology.com/api/pricing/onestorage?country=fi",
+            "last_verified": "2026-10-13",
+            "note": "C2 pricing API used by the official pricing page (data_center 'eu', currency 'eur', price_unit 'tb'): price_unit 'gb' with qty 300 (fixed)."
+          },
+          "monthly_price": {
+            "value": null,
+            "note": "Annual billing only: 29.99 per year ('gb': 'year': 29.99, available_in ['year']); no monthly price is offered."
+          }
+        }
+      ],
+      "requests": {
+        "put_per_1000": {
+          "value": 0,
+          "source_url": "https://c2.synology.com/en-global/object-storage/overview",
+          "last_verified": "2026-10-13",
+          "note": "Overview page: 'No hidden fees No API request or data deletion fees'; the pricing page also lists 'No charge for egress or API requests' for C2 Object Storage."
+        },
+        "get_per_1000": {
+          "value": 0,
+          "source_url": "https://c2.synology.com/en-global/object-storage/overview",
+          "last_verified": "2026-10-13",
+          "note": "Overview page: 'No hidden fees No API request or data deletion fees'; the pricing page also lists 'No charge for egress or API requests' for C2 Object Storage."
+        },
+        "list_per_1000": {
+          "value": 0,
+          "source_url": "https://c2.synology.com/en-global/object-storage/overview",
+          "last_verified": "2026-10-13",
+          "note": "Overview page: 'No hidden fees No API request or data deletion fees'; the pricing page also lists 'No charge for egress or API requests' for C2 Object Storage."
+        }
+      },
+      "retrieval": {
+        "price_per_gb": {
+          "value": null,
+          "note": "No separate retrieval fee; downloads are covered under egress ('Free data retrieval' on the overview page)."
+        },
+        "typical_delay": {
+          "value": null,
+          "note": "Single online class; no restore step is documented."
+        }
+      },
+      "minimum_storage_duration_days": {
+        "value": 0,
+        "source_url": "https://c2.synology.com/en-global/object-storage/overview",
+        "last_verified": "2026-10-13",
+        "note": "Overview FAQ: 'C2 Object Storage does not have a minimum storage duration policy. We do not charge data deletion penalties.'"
+      },
+      "minimum_billable_object_size_kb": {
+        "value": null,
+        "note": "Not stated on the overview, pricing page or KB articles checked."
+      },
+      "notes": [
+        "C2 OneStorage is one capacity plan shared by C2 Storage for Hyper Backup, Hybrid Share, C2 Object Storage and Surveillance365 (pricing page)."
+      ]
+    }
+  ],
+  "default_storage_class": "onestorage",
+  "egress": {
+    "applies_to_regions": [
+      "eu-001"
+    ],
+    "free_allowance_gb_per_month": {
+      "value": null,
+      "note": "Equal to the stored volume rather than a fixed figure: 'Retrieve all the data you have stored for free every month' (overview page). The pricing page separately says 'No charge for egress or API requests'."
+    },
+    "price_per_gb": [
+      {
+        "from_gb": 0,
+        "up_to_gb": null,
+        "price": {
+          "value": null,
+          "note": "No price for downloads beyond the stored volume is published on the official pages checked."
+        }
+      }
+    ]
+  },
+  "egress_fair_use": {
+    "value": "Retrieve all the data you have stored for free every month.",
+    "source_url": "https://c2.synology.com/en-global/object-storage/overview",
+    "last_verified": "2026-10-13",
+    "note": "Overview page, 'Free data retrieval'. Read as: monthly free downloads up to the stored volume; the overage rate is not published."
+  },
+  "free_tier": {
+    "value": "30-day free trial with a Synology account.",
+    "source_url": "https://c2.synology.com/en-global/pricing/onestorage",
+    "last_verified": "2026-10-13",
+    "note": "Pricing page: 'Unlock a 30-day free trial with your Synology account'. Trial capacity is not stated."
+  },
+  "object_lock": {
+    "value": true,
+    "source_url": "https://c2.synology.com/en-global/object-storage/overview",
+    "last_verified": "2026-10-13",
+    "note": "Overview page: 'Object Lock: ensuring data immutability and compliance'. The KB API article lists 'Enable object lock: Currently unsupported' via the S3 API (enable it in the web portal) and supports COMPLIANCE retention through PutObjectRetention."
+  },
+  "s3_endpoints": [
+    {
+      "region": "eu-001",
+      "label": "Frankfurt",
+      "endpoint": "https://eu-001.s3.synologyc2.net",
+      "path_style": true,
+      "source_url": "https://kb.synology.com/en-global/C2/tutorial/C2_Object_Storage_API",
+      "last_verified": "2026-10-13",
+      "note": "Example endpoint from the AWS CLI guide, which says to set the region to 'the left-most subdomain of the endpoint'. Each bucket has its own endpoint, copied from the portal's Buckets page (KB compatibility article); the Veeam guide uses region us-east-1 instead. Addressing style is not documented; path style is chosen as the conservative default."
+    }
+  ],
+  "notes": [
+    "Prices are read from the pricing API that the official C2 OneStorage pricing page loads (https://c2.synology.com/api/pricing/onestorage?country=fi); the page itself renders them client-side.",
+    "Buckets and access keys can only be created, edited or deleted in the web portal; CreateBucket and versioning changes are unsupported via the S3 API (KB articles). Only Signature Version 4 is supported."
+  ]
+}

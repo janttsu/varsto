@@ -178,18 +178,31 @@ pub fn builtin_for(spec: &StorageSpec) -> Option<StoragePrice> {
     else {
         return None;
     };
-    let (profile, class_id) = recognise(endpoint, storage_class.as_deref())?;
-    let doc = crate::advice::provider_profiles()
-        .into_iter()
-        .find(|d| d["id"].as_str() == Some(profile))?;
-    let class = doc["storage_classes"]
-        .as_array()?
-        .iter()
-        .find(|c| c["id"].as_str() == Some(class_id))?;
-    if !region_applies(class, region) {
+    let (doc, class_id, endpoint_region) = match recognise(endpoint, storage_class.as_deref()) {
+        Some((profile, class_id)) => (
+            crate::providers::profiles()
+                .into_iter()
+                .find(|d| d["id"].as_str() == Some(profile))?,
+            class_id.to_string(),
+            None,
+        ),
+        None => {
+            let (doc, entry_region) = crate::providers::profile_for_endpoint(endpoint)?;
+            let class_id = crate::providers::class_for(&doc, storage_class.as_deref())?;
+            (doc, class_id, Some(entry_region))
+        }
+    };
+    // The class itself, or its variant for this region; only regions the
+    // data was verified for are priced. The storage's own region comes first;
+    // else the region of the endpoint it uses (some providers sign every
+    // endpoint with one region name, or number their clusters).
+    let (region, class) = std::iter::once(region.as_str())
+        .chain(endpoint_region.as_deref())
+        .find_map(|r| Some((r, crate::providers::class_in_region(&doc, &class_id, r)?)))?;
+    let first = crate::providers::headline_band(class);
+    if first.is_null() {
         return None;
     }
-    let first = class["storage_price_per_gb_month"].as_array()?.first()?;
     let egress = if region_applies(&doc["egress"], region) {
         doc["egress"]["price_per_gb"]
             .as_array()
@@ -291,11 +304,34 @@ mod tests {
         .unwrap();
         assert_eq!(scw.currency, "EUR");
         assert!(scw.retrieval_per_gb.is_some());
+        // A region priced in a regional variant of the class.
+        let sto = builtin_for(&s3(
+            "https://s3.eu-north-1.amazonaws.com",
+            "eu-north-1",
+            None,
+        ))
+        .unwrap();
+        assert!(sto.storage_per_gb_month.is_some());
+        assert!(sto.source.contains("eu-north-1"), "{}", sto.source);
         // A region the data was not verified for, and an unknown endpoint: no defaults.
         assert!(
             builtin_for(&s3("https://s3.us-west-2.amazonaws.com", "us-west-2", None)).is_none()
         );
         assert!(builtin_for(&s3("https://minio.example", "us-east-1", None)).is_none());
+        // Every provider in the data set whose endpoint has no placeholder
+        // gets the prices of its default class where they were verified.
+        for p in crate::providers::s3_providers(crate::util::now_utc()) {
+            for e in p
+                .endpoints
+                .iter()
+                .filter(|e| e.prices_verified && !e.has_placeholder)
+            {
+                let got = builtin_for(&s3(&e.endpoint, &e.region, None));
+                if p.storage_per_gb_month["value"].is_number() && p.plan.is_none() {
+                    assert!(got.is_some(), "{} {}", p.id, e.endpoint);
+                }
+            }
+        }
     }
 
     #[test]

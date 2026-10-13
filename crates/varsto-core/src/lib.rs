@@ -12,6 +12,7 @@
 //! key encapsulation, XChaCha20-Poly1305) has not been reviewed independently.
 //! Do not use it as the only copy of anything.
 
+pub mod activity;
 pub mod advice;
 pub mod autoverify;
 pub mod chunking;
@@ -31,6 +32,7 @@ pub mod policy;
 pub mod pool;
 pub mod price;
 pub mod progress;
+pub mod providers;
 pub mod rclone;
 pub mod recovery;
 pub mod replica;

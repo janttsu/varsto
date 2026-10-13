@@ -364,7 +364,14 @@ impl Engine {
                 reason: None,
             }
         };
+        let task = crate::activity::start(
+            crate::activity::VERIFY,
+            "",
+            order.len() as u64,
+            crate::activity::Unit::Items,
+        );
         for i in order {
+            task.advance(1);
             let (folder, chunk, object, storage, local) = &items[i];
             let key = chunk_storage_key(object);
             let ct = match readable[local].get(&key) {

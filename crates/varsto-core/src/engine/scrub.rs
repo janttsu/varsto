@@ -437,6 +437,13 @@ impl Engine {
             let sweep = st.sweeps.entry(target.clone()).or_default();
             sweep.label = format!("storage {name}");
             let plan = scrub::plan(&items, sweep, now, &schedule, pace, budget);
+            let task = crate::activity::start(
+                crate::activity::SCRUB,
+                &name,
+                plan.picks.iter().map(|&i| items[i].1).sum(),
+                crate::activity::Unit::Bytes,
+            );
+            task.set_phase("storage");
             let mut tr = TargetReport {
                 target,
                 label: sweep.label.clone(),
@@ -468,6 +475,7 @@ impl Engine {
                     }
                 }
                 tr.checked += 1;
+                task.advance(items[i].1);
                 last = Some(key);
             }
             sweep.advance(now, last, tr.checked, done);
@@ -523,6 +531,13 @@ impl Engine {
                 let sweep = st.sweeps.entry(target.clone()).or_default();
                 sweep.label = format!("disk {} of pool {pool_name}", d.label);
                 let plan = scrub::plan(&items, sweep, now, &schedule, pace, local_budget);
+                let task = crate::activity::start(
+                    crate::activity::SCRUB,
+                    &d.label,
+                    plan.picks.iter().map(|&i| items[i].1).sum(),
+                    crate::activity::Unit::Bytes,
+                );
+                task.set_phase("disk");
                 let mut tr = TargetReport {
                     target,
                     label: sweep.label.clone(),
@@ -564,6 +579,7 @@ impl Engine {
                         }
                     };
                     tr.checked += 1;
+                    task.advance(items[i].1);
                     last = Some(key);
                     if !bad {
                         continue;
@@ -640,6 +656,13 @@ impl Engine {
             let sweep = st.sweeps.entry(target.clone()).or_default();
             sweep.label = format!("folder {}", rec.name);
             let plan = scrub::plan(&items, sweep, now, &schedule, pace, budget);
+            let task = crate::activity::start(
+                crate::activity::SCRUB,
+                &rec.name,
+                plan.picks.iter().map(|&i| items[i].1).sum(),
+                crate::activity::Unit::Bytes,
+            );
+            task.set_phase("files");
             // Damaged files still waiting for their recorded version first.
             let waiting: Vec<String> = st
                 .unrestored
@@ -684,6 +707,7 @@ impl Engine {
                 let outcome = check_file(&fk, &disk, &entry);
                 if planned {
                     tr.checked += 1;
+                    task.advance(entry.size);
                 }
                 match outcome {
                     FileCheck::Intact(n) => {
@@ -870,6 +894,13 @@ impl Engine {
         let sweep = st.sweeps.entry(target.clone()).or_default();
         sweep.label = "block cache".to_string();
         let plan = scrub::plan(&items, sweep, now, &schedule, pace, budget);
+        let task = crate::activity::start(
+            crate::activity::SCRUB,
+            "",
+            plan.picks.iter().map(|&i| items[i].1).sum(),
+            crate::activity::Unit::Bytes,
+        );
+        task.set_phase("cache");
         let mut tr = TargetReport {
             target,
             label: sweep.label.clone(),
@@ -893,6 +924,7 @@ impl Engine {
                 Err(_) => false,
             };
             tr.checked += 1;
+            task.advance(items[i].1);
             last = Some(name);
             if !good {
                 let _ = fs::remove_file(&path);

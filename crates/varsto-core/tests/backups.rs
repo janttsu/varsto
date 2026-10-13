@@ -581,6 +581,14 @@ fn schedules_and_settings() {
     a.set_backup("bk", None, Some(BackupSchedule::Manual))
         .unwrap();
     assert!(a.backups_due(s.taken_utc + 10 * DAY).is_empty());
+    // A requested snapshot is due whatever the schedule, shows as requested,
+    // and taking it clears the request.
+    a.request_snapshot("bk").unwrap();
+    assert_eq!(a.backups_due(s.taken_utc + 3600), vec!["bk".to_string()]);
+    assert!(a.backups().unwrap()[0].snapshot_requested);
+    a.take_snapshot("bk").unwrap();
+    assert!(a.backups_due(s.taken_utc + 10 * DAY).is_empty());
+    assert!(!a.backups().unwrap()[0].snapshot_requested);
     assert!(a.set_backup("bk", Some(0), None).is_err());
     // A backup needs a storage that is not a transferrer.
     let (mut lone, _) = Engine::init(&lab.p("lone"), "lone", PASS).unwrap();

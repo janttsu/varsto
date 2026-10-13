@@ -1,0 +1,185 @@
+{
+  "$schema": "schema.json",
+  "schema_version": 1,
+  "id": "cleura-object-storage",
+  "name": "Cleura Public Cloud Object Storage",
+  "kind": "service",
+  "website_url": "https://cleura.com/public-cloud/",
+  "signup_url": "https://cleura.cloud/register",
+  "pricing_url": "https://cleura.com/cloud-pricing/",
+  "currency": "EUR",
+  "prices_include_tax": false,
+  "tax_note": "Pricing page, Public Cloud section: 'All prices exclude VAT.'",
+  "protocols": [
+    "s3",
+    "rclone"
+  ],
+  "protocols_source": {
+    "source_url": "https://docs.cleura.cloud/kna1/howto/object-storage/s3/credentials/",
+    "last_verified": "2026-10-13"
+  },
+  "regions": [
+    {
+      "code": "kna1",
+      "city": "Karlskrona",
+      "country": "SE",
+      "source_url": "https://cleura.com/wp-json/custom-api/v1/pricing-list/EUR",
+      "last_verified": "2026-10-13",
+      "note": "Pricing API zone 'Kna1', 'Karlskrona / Sweden'."
+    },
+    {
+      "code": "sto2",
+      "city": "Stockholm",
+      "country": "SE",
+      "source_url": "https://cleura.com/wp-json/custom-api/v1/pricing-list/EUR",
+      "last_verified": "2026-10-13",
+      "note": "Pricing API zone 'Sto2', 'Stockholm / Sweden'."
+    },
+    {
+      "code": "fra1",
+      "city": "Frankfurt",
+      "country": "DE",
+      "source_url": "https://cleura.com/wp-json/custom-api/v1/pricing-list/EUR",
+      "last_verified": "2026-10-13",
+      "note": "Pricing API zone 'Fra1', 'Frankfurt / Germany'."
+    }
+  ],
+  "storage_classes": [
+    {
+      "id": "standard",
+      "name": "Object Storage (Public Cloud)",
+      "kind": "hot",
+      "applies_to_regions": [
+        "kna1",
+        "sto2",
+        "fra1"
+      ],
+      "pricing_model": "per_gb_month",
+      "storage_price_per_gb_month": [
+        {
+          "from_gb": 0,
+          "up_to_gb": null,
+          "price": {
+            "value": 0.02,
+            "source_url": "https://cleura.com/wp-json/custom-api/v1/pricing-list/EUR",
+            "last_verified": "2026-10-13",
+            "note": "Pricing page (https://cleura.com/cloud-pricing/), Cleura Public Cloud, Cloud storage, 'Object Storage Swift GB': Cost/mo €0.02, Cost/h €0.00003, filled from the official pricing API (prices.object_storage est_per_month 0.02, per_hour 3e-05; same in zones Kna1, Sto2 and Fra1). The monthly figure is the page's rounded estimate; resources are 'calculated by the hour and billed per month'."
+          }
+        }
+      ],
+      "requests": {
+        "put_per_1000": {
+          "value": null,
+          "note": "The Public Cloud price list has no request line for Object Storage; absence of a fee line, not an explicit statement that requests are free."
+        },
+        "get_per_1000": {
+          "value": null,
+          "note": "The Public Cloud price list has no request line for Object Storage; absence of a fee line, not an explicit statement that requests are free."
+        },
+        "list_per_1000": {
+          "value": null,
+          "note": "The Public Cloud price list has no request line for Object Storage; absence of a fee line, not an explicit statement that requests are free."
+        }
+      },
+      "retrieval": {
+        "price_per_gb": {
+          "value": null,
+          "note": "No retrieval fee line; single online class."
+        },
+        "typical_delay": {
+          "value": null,
+          "note": "Single online class; no restore step is documented."
+        }
+      },
+      "minimum_storage_duration_days": {
+        "value": null,
+        "note": "Not stated on the pricing page or docs checked."
+      },
+      "minimum_billable_object_size_kb": {
+        "value": null,
+        "note": "Not stated on the pricing page or docs checked."
+      },
+      "notes": [
+        "The same objects are reachable through the S3 and OpenStack Swift APIs (Ceph radosgw); the price list names the line 'Object Storage Swift'."
+      ]
+    }
+  ],
+  "default_storage_class": "standard",
+  "egress": {
+    "applies_to_regions": [
+      "kna1",
+      "sto2",
+      "fra1"
+    ],
+    "free_allowance_gb_per_month": {
+      "value": null,
+      "note": "No free egress allowance is listed for Public Cloud."
+    },
+    "price_per_gb": [
+      {
+        "from_gb": 0,
+        "up_to_gb": null,
+        "price": {
+          "value": 0.02875,
+          "source_url": "https://cleura.com/wp-json/custom-api/v1/pricing-list/EUR",
+          "last_verified": "2026-10-13",
+          "note": "Pricing page, Public Cloud, Cloud networking, 'Data transfer Egress GB', Cost/GB column, filled from the pricing API field prices.data_transfer.per_hour = 0.02875 (same in all three zones; the API field name says per_hour but the page shows it as the per-GB cost)."
+        }
+      }
+    ],
+    "notes": [
+      "Ingress is listed as €0."
+    ]
+  },
+  "egress_fair_use": {
+    "value": null,
+    "note": "No fair-use rule is stated on the pricing page."
+  },
+  "free_tier": {
+    "value": "€50 free trial voucher for new users.",
+    "source_url": "https://cleura.com/cloud-pricing/",
+    "last_verified": "2026-10-13",
+    "note": "The pricing page's sign-up form offers 'a €50 free trial voucher'; terms are not stated there."
+  },
+  "object_lock": {
+    "value": true,
+    "source_url": "https://docs.cleura.cloud/kna1/howto/object-storage/s3/object-lock/",
+    "last_verified": "2026-10-13",
+    "note": "S3 object lock must be enabled at bucket creation; only COMPLIANCE retention mode is supported, not GOVERNANCE (https://docs.cleura.cloud/kna1/reference/limitations/object-storage/)."
+  },
+  "s3_endpoints": [
+    {
+      "region": "kna1",
+      "label": "Karlskrona",
+      "endpoint": "https://s3-kna1.citycloud.com",
+      "path_style": true,
+      "source_url": "https://docs.cleura.cloud/kna1/howto/object-storage/s3/credentials/",
+      "last_verified": "2026-10-13",
+      "note": "Path style: the s3cmd setup sets the 'DNS-style bucket+hostname:port template' to the endpoint itself, and the rclone example uses provider Ceph. The docs tell s3cmd users to leave the default region unchanged and the Terraform example uses region us-east-1; credentials are scoped to one region and project."
+    },
+    {
+      "region": "sto2",
+      "label": "Stockholm",
+      "endpoint": "https://s3-sto2.citycloud.com",
+      "path_style": true,
+      "source_url": "https://docs.cleura.cloud/sto2/howto/object-storage/s3/credentials/",
+      "last_verified": "2026-10-13",
+      "note": "Path style: the s3cmd setup sets the 'DNS-style bucket+hostname:port template' to the endpoint itself, and the rclone example uses provider Ceph. The docs tell s3cmd users to leave the default region unchanged and the Terraform example uses region us-east-1; credentials are scoped to one region and project."
+    },
+    {
+      "region": "fra1",
+      "label": "Frankfurt",
+      "endpoint": "https://s3-fra1.citycloud.com",
+      "path_style": true,
+      "source_url": "https://docs.cleura.cloud/fra1/howto/object-storage/s3/credentials/",
+      "last_verified": "2026-10-13",
+      "note": "Path style: the s3cmd setup sets the 'DNS-style bucket+hostname:port template' to the endpoint itself, and the rclone example uses provider Ceph. The docs tell s3cmd users to leave the default region unchanged and the Terraform example uses region us-east-1; credentials are scoped to one region and project."
+    }
+  ],
+  "notes": [
+    "Prices are Cleura Public Cloud list prices from the pricing page, whose figures are loaded from the official pricing API (https://cleura.com/wp-json/custom-api/v1/pricing-list/EUR).",
+    "Cleura Compliant Cloud is priced separately: the page script multiplies marked Compliant prices by 1.5 (object storage included) and lists Compliant egress as €0. Not modelled.",
+    "A volume discount table exists (https://cleura.com/wp-json/custom-api/v1/volume-discount/EUR, 4 % to 25 %); its basis is not explained on the page, so it is not modelled.",
+    "AWS SDKs from early 2025 need AWS_REQUEST_CHECKSUM_CALCULATION=WHEN_REQUIRED (limitations page)."
+  ]
+}
