@@ -21,7 +21,7 @@
 <link rel="alternate" hreflang="en" href="https://varsto.net/docs/testing.html">
 <link rel="alternate" hreflang="x-default" href="https://varsto.net/docs/testing.html">
 <link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../blog/feed.xml">
-<link rel="stylesheet" href="../assets/css/site.css?v=b3d2d4f387">
+<link rel="stylesheet" href="../assets/css/site.css?v=d738b157e3">
 <script src="../assets/js/theme.js?v=0951491269"></script>
 </head>
 <body>
@@ -95,7 +95,14 @@
 <p>Every script accepts <code>--dry-run</code>, which prints the commands without executing them.</p>
 <p>Only the <code>smoke</code> suite and the <code>debian-stable</code> (x86_64) image exist so far.</p>
 <h3 id="vm-lab-scriptstestlab">VM lab (<code>scripts/test/lab</code>)</h3>
-<p><code>scripts/test/lab/lab.py up</code> builds a small internet on one Linux host with libvirt: a WAN in a documentation range with an S3 server (<code>rclone serve s3</code>) and STUN, a home network behind a cone NAT router, an office network behind a symmetric NAT router, and a public device. <code>lab.py build</code> compiles a static binary in a build VM, <code>install-bin</code> puts it on every device, and <code>scenarios.py</code> plays 28 scenarios against them: setup and pairing, sync and conflicts, selective sync, repair, policies, Strongrooms, organizations and removal, revocation, peer-to-peer on the LAN, through cone and symmetric NAT and during a slow upload, sharing, disk pools, mixed versions, storage outage, a black-holed network, a crash during a push, clock skew, scale (20 000 files and 1 GiB) and backups (restored on another device, a snapshot expired after the clock moves on). <code>lab.py release</code> builds the Linux, Windows and Android release packages in the build VM.</p>
+<p><code>scripts/test/lab/lab.py up</code> builds a small internet on one Linux host with libvirt: a WAN in a documentation range with an S3 server (<code>rclone serve s3</code>) and STUN, a home network behind a cone NAT router, an office network behind a symmetric NAT router, and a public device. <code>lab.py build</code> compiles a static binary in a build VM, <code>install-bin</code> puts it on every device, and <code>scenarios.py</code> plays 32 scenarios against them: setup and pairing, sync and conflicts, selective sync, repair, policies, Strongrooms, organizations and removal, revocation, peer-to-peer on the LAN, through cone and symmetric NAT and during a slow upload, sharing, disk pools, mixed versions, storage outage, a black-holed network, a crash during a push, clock skew, scale (20 000 files and 1 GiB) and backups (restored on another device, a snapshot expired after the clock moves on), live activity, the bit-rot check, and ledger loss (a device whose ledger directory was deleted restored from the bucket; the ledger lost from the bucket and both devices rebuilt by the service). <code>lab.py release</code> builds the Linux, Windows and Android release packages in the build VM.</p>
+<h4 id="lab-logs">Lab logs</h4>
+<ul>
+<li>Every <code>varsto</code> run in the lab (CLI calls and the background service) gets <code>VARSTO_LOG=debug</code>. Set <code>VARSTO_LOG</code> on the host when running <code>scenarios.py</code> to use another level, e.g. <code>VARSTO_LOG=trace scenarios.py --only sync</code>.</li>
+<li>After each scenario, passed or failed, <code>scenarios.py</code> copies the logs of every device VM to <code>test-results/lab/logs/&lt;scenario&gt;/&lt;vm&gt;/</code>, with paths relative to the home of user <code>varsto</code>: each Varsto home's <code>logs/</code> (<code>varsto-&lt;component&gt;.log</code> and rotated <code>varsto-&lt;component&gt;.N.log.zst</code>, from the default <code>~/.local/share/varsto</code> and the extra homes such as <code>~/share-home</code> and <code>~/dl-home</code>), <code>service.log</code> and the <code>~/*.log</code> outputs of backgrounded commands. A failed scenario prints this path; <code>results.json</code> lists it under <code>logs</code>. Running a scenario again replaces its directory. Collection never fails a scenario; problems are printed as warnings.</li>
+<li>The logs contain file and folder names from the generated test data, device names and storage endpoints, but never keys, passphrases or recovery words.</li>
+<li><code>test-results/</code> is git-ignored, and CI does not upload these logs as artifacts.</li>
+</ul>
 <p>The rest of this section describes the <code>smoke</code> suite. The smoke suite checks that the VM boots, accepts SSH, finished cloud-init, has a sane clock and has no route out of the test network.</p>
 <h3 id="prerequisites">Prerequisites</h3>
 <ul>
