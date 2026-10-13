@@ -59,6 +59,7 @@ mod folder_rules;
 mod folder_safety;
 mod guide;
 mod history;
+mod help;
 mod imports;
 mod ledger_recovery;
 mod ledger_upkeep;
@@ -103,6 +104,7 @@ pub use history::{
     history_kept, parse_utc, FolderHistory, HistoryItem, HistoryList, HistoryRestoreReport,
     HistoryStatus, HistoryTarget, DEFAULT_HISTORY_DAYS, MAX_HISTORY_DAYS,
 };
+pub use help::{help_without_vault, HelpObserved};
 pub use imports::{
     CleanupFile, ImportCleanupReport, ImportOptions, ImportReport, ImportStatus, ImportVerify,
     MissingFile,

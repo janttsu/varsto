@@ -212,6 +212,10 @@ enum Cmd {
         #[arg(long, default_value_t = 100)]
         limit: usize,
     },
+    /// Where you are now and what to do next: where your data is, what
+    /// needs attention, and the next steps with the commands to run (the
+    /// interface's Help page as text). Works without a vault too.
+    HelpNow,
     /// How files would be fetched: from pool disks (which ones, in which order) or the network,
     /// with the time and cost of each way. Run `varsto folder fetch` to fetch.
     FetchPlan {
@@ -3980,6 +3984,40 @@ fn run(cli: &Cli) -> Result<()> {
                 out += &format!("ledger: {}\n", s.ledger_health.describe());
                 out.trim_end().to_string()
             })?;
+        }
+        Cmd::HelpNow => {
+            // The running service knows more (paused, peers, last error) and
+            // needs no passphrase.
+            let svc = service::status(&home);
+            let from_service = svc.as_ref().and_then(|(f, _)| {
+                let t =
+                    service::http_get(&format!("http://127.0.0.1:{}/api/help", f.port), &f.token)
+                        .ok()?;
+                serde_json::from_str::<varsto_core::help::HelpState>(&t).ok()
+            });
+            let h = match from_service {
+                // A locked service cannot tell; the command line may unlock.
+                Some(h) if h.phase != "locked" => h,
+                _ if !home.join("vault.json").exists() => {
+                    varsto_core::engine::help_without_vault(&home)
+                }
+                _ => match open_engine(&home) {
+                    Ok(mut e) => {
+                        let observed = varsto_core::engine::HelpObserved {
+                            // No service: nothing syncs by itself. A locked
+                            // one is running but cannot say more.
+                            service: svc.is_none().then(varsto_core::help::ServiceIn::default),
+                            ..Default::default()
+                        };
+                        e.help_state(observed)?
+                    }
+                    Err(err) => {
+                        eprintln!("the vault stays locked: {err:#}");
+                        varsto_core::engine::help_without_vault(&home)
+                    }
+                },
+            };
+            print(cli, &h, varsto_core::help::render_text)?;
         }
         Cmd::Verify { cmd } => upkeep::verify(cli, &home, cmd)?,
         Cmd::Scrub { cmd, run } => upkeep::scrub(cli, &home, cmd, run)?,

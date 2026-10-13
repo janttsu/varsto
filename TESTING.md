@@ -54,6 +54,10 @@ Every script accepts `--dry-run`, which prints the commands without executing th
 
 Only the `smoke` suite and the `debian-stable` (x86_64) image exist so far.
 
+### Help page in a browser (`scripts/test/ui-help.py`)
+
+`python3 scripts/test/ui-help.py target/debug/varsto <screenshot dir>` runs a throwaway vault and service in a temporary directory and drives the interface in Chromium (Playwright): the Help page with no vault, with a vault but no storage, with a storage and a folder, and locked, in English, Finnish and Swedish. It checks the first step, that the step buttons lead to the right form or dialog and that the "?" in the page header opens the page's guide, and saves screenshots.
+
 ### VM lab (`scripts/test/lab`)
 
 `scripts/test/lab/lab.py up` builds a small internet on one Linux host with libvirt: a WAN in a documentation range with an S3 server (`rclone serve s3`) and STUN, a home network behind a cone NAT router, an office network behind a symmetric NAT router, and a public device. `lab.py build` compiles a static binary in a build VM, `install-bin` puts it on every device, and `scenarios.py` plays 32 scenarios against them: setup and pairing, sync and conflicts, selective sync, repair, policies, Strongrooms, organizations and removal, revocation, peer-to-peer on the LAN, through cone and symmetric NAT and during a slow upload, sharing, disk pools, mixed versions, storage outage, a black-holed network, a crash during a push, clock skew, scale (20 000 files and 1 GiB) and backups (restored on another device, a snapshot expired after the clock moves on), live activity, the bit-rot check, and ledger loss (a device whose ledger directory was deleted restored from the bucket; the ledger lost from the bucket and both devices rebuilt by the service). `lab.py release` builds the Linux, Windows and Android release packages in the build VM.

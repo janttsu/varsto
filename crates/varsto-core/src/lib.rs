@@ -25,6 +25,7 @@ pub mod engine;
 pub mod events;
 pub mod freespace;
 pub mod fsmeta;
+pub mod help;
 pub mod ids;
 pub mod ignore_rules;
 pub mod import;

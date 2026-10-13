@@ -47,6 +47,7 @@
   <symbol id="i-share" viewBox="0 0 20 20"><path d="M10 12V3.5M6.5 7 10 3.5 13.5 7"/><path d="M5 10v5.5A1.5 1.5 0 0 0 6.5 17h7a1.5 1.5 0 0 0 1.5-1.5V10"/></symbol>
   <symbol id="i-back" viewBox="0 0 20 20"><path d="m12.5 5-5 5 5 5"/></symbol>
   <symbol id="i-trash" viewBox="0 0 20 20"><path d="M4 5.5h12M8 5.5V4h4v1.5"/><path d="M5.5 5.5l.8 10.2A1.5 1.5 0 0 0 7.8 17h4.4a1.5 1.5 0 0 0 1.5-1.3l.8-10.2"/><path d="M8.5 8.5v5.5M11.5 8.5v5.5"/></symbol>
+  <symbol id="i-help" viewBox="0 0 20 20"><circle cx="10" cy="10" r="7.2"/><path d="M7.7 7.9a2.4 2.4 0 0 1 4.6.8c0 1.6-2.3 2-2.3 3.4"/><path d="M10 14.3v.3"/></symbol>
   <symbol id="i-backup" viewBox="0 0 20 20"><rect x="3" y="4" width="14" height="4" rx="1.2"/><path d="M4.5 8v7A1.5 1.5 0 0 0 6 16.5h8a1.5 1.5 0 0 0 1.5-1.5V8"/><path d="M8 11h4"/></symbol>
 </svg>
 
@@ -73,6 +74,7 @@
     <button type="button" class="nav-item" data-nav="settings"><svg class="icon"><use href="#i-settings"/></svg><span>Settings</span></button>
   </nav>
   <div class="sidebar-foot">
+    <button type="button" class="nav-item" data-nav="help"><svg class="icon"><use href="#i-help"/></svg><span>Help</span></button>
     <button type="button" id="themetoggle" class="nav-item" aria-pressed="false"><svg class="icon icon-sun"><use href="#i-sun"/></svg><svg class="icon icon-moon"><use href="#i-moon"/></svg><span class="theme-label">Dark mode</span></button>
     <label class="sidebar-lang muted"><span class="sr-only">Language</span><select class="lang-select" aria-label="Language"></select></label>
     <div class="sidebar-version muted">Local interface · v<span id="version"></span></div>
@@ -93,6 +95,7 @@
       <span id="svc-dot" class="dot" data-state="unknown"></span>
       <span id="who" class="muted"></span>
     </div>
+    <button id="pagehelp" class="secondary pagehelp" type="button" title="Help for this page" aria-label="Help for this page"><svg class="icon"><use href="#i-help"/></svg></button>
     <button id="lock" class="secondary hidden" type="button" title="Lock the vault on this device"><svg class="icon"><use href="#i-lock"/></svg><span class="btn-label">Lock</span></button>
   </header>
   <div class="alpha"><svg class="icon"><use href="#i-warn"/></svg><span>Alpha software: not for production data. Keep your own backups.</span></div>
@@ -104,6 +107,19 @@
     <div id="tb-bar" class="tb-bar"><i></i></div>
   </div>
   <main>
+  <!-- Help before a vault is open (setup and unlock screens), from GET /api/help. -->
+  <div id="prehelp" class="card help-card prehelp hidden">
+    <div class="prehelp-head">
+      <h2 class="card-title"><svg class="icon accent"><use href="#i-help"/></svg>Help</h2>
+      <button type="button" id="prehelp-toggle" class="secondary help-mini">Hide help</button>
+    </div>
+    <div id="prehelp-body">
+      <div id="prehelp-now" class="help-now"></div>
+      <h3 class="help-sub">What to do next</h3>
+      <ol id="prehelp-next" class="help-steps"></ol>
+      <details id="prehelp-guidebox" class="help-guidebox"><summary>Guides</summary><div id="prehelp-guides" class="help-guides"></div></details>
+    </div>
+  </div>
   <section id="setup" class="hidden">
     <div class="hero">
       <h2 class="hero-title">Welcome to Varsto</h2>
@@ -206,6 +222,11 @@
       <div id="policybanner" class="notice warn hidden"></div>
       <div id="spacebanner" class="notice warn hidden" role="status"></div>
       <div id="orgblockbanner" class="notice warn hidden"></div>
+      <div id="helpnext" class="notice helpnext hidden">
+        <svg class="icon"><use href="#i-help"/></svg>
+        <div class="helpnext-text"><span class="helpnext-label">Next step</span> <span id="helpnext-title"></span></div>
+        <div class="helpnext-actions"><button type="button" id="helpnext-go"></button><button type="button" class="secondary" data-nav="help">Open Help</button></div>
+      </div>
       <div class="stats">
         <div class="stat"><span class="stat-label">Folders</span><span class="stat-value" id="stat-folders">–</span></div>
         <div class="stat"><span class="stat-label">Files</span><span class="stat-value" id="stat-files">–</span></div>
@@ -629,6 +650,8 @@
         </div>
         <p id="imports-empty" class="muted small hidden">Nothing was imported yet.</p>
       </div>
+    </div>
+
     <!-- Trash -->
     <div class="page hidden" data-page="trash">
       <div class="card">
@@ -920,9 +943,31 @@
       </div>
     </div>
 
+    <!-- Help: where you are now, what to do next, and short guides. -->
+    <div class="page hidden" data-page="help">
+      <div class="card help-card">
+        <h2 class="card-title"><svg class="icon accent"><use href="#i-info"/></svg>Where you are now</h2>
+        <div id="help-now" class="help-now"></div>
+      </div>
+      <div class="card help-card">
+        <div class="card-head"><h2 class="card-title"><svg class="icon accent"><use href="#i-check"/></svg>What to do next</h2><button type="button" id="help-reload" class="secondary help-mini">Refresh</button></div>
+        <ol id="help-next" class="help-steps"></ol>
+        <div id="help-tipsbox" class="hidden">
+          <h3 class="help-sub">When you have a moment</h3>
+          <ol id="help-tips" class="help-steps help-tips"></ol>
+        </div>
+      </div>
+      <div class="card help-card">
+        <h2 class="card-title"><svg class="icon accent"><use href="#i-help"/></svg>Guides</h2>
+        <p class="muted small">Short guides to each part of Varsto. The website has the details.</p>
+        <div id="help-guides" class="help-guides"></div>
+      </div>
+    </div>
+
     <!-- More (mobile) -->
     <div class="page hidden" data-page="more">
       <div class="card more-card">
+        <button type="button" class="more-item" data-nav="help"><svg class="icon"><use href="#i-help"/></svg><span>Help</span><svg class="icon chev"><use href="#i-chevron"/></svg></button>
         <button type="button" class="more-item" data-nav="shared"><svg class="icon"><use href="#i-sharing"/></svg><span>Shared</span><svg class="icon chev"><use href="#i-chevron"/></svg></button>
         <button type="button" class="more-item" data-nav="backups"><svg class="icon"><use href="#i-backup"/></svg><span>Backups</span><svg class="icon chev"><use href="#i-chevron"/></svg></button>
         <button type="button" class="more-item" data-nav="import"><svg class="icon"><use href="#i-backup"/></svg><span>Import</span><svg class="icon chev"><use href="#i-chevron"/></svg></button>
@@ -990,5 +1035,74 @@
     </div>
   </form>
 </div>
+<!-- The Help page's guides: cloned into the Help page and the setup help. -->
+<template id="tpl-guides">
+  <details class="guide" data-guide="start">
+    <summary>Getting started</summary>
+    <p>Varsto keeps your folders in sync on your devices and keeps encrypted copies of them on storages you choose. Everything is encrypted on your device before it leaves it.</p>
+    <p>Three steps get you going: create a vault on your first device, add a storage, and add a folder. Then print your recovery words and pair your other devices.</p>
+    <p class="guide-more"><a href="https://varsto.net/docs/quick-start.html" target="_blank" rel="noopener">Quick start on the website</a></p>
+  </details>
+  <details class="guide" data-guide="storages">
+    <summary>Storages</summary>
+    <p>A storage is where Varsto keeps encrypted copies of your files: an S3 bucket at a cloud provider, a folder on a NAS or USB disk, an rclone remote, or a pool of disks you plug in one at a time. A storage only ever sees sealed blocks, never your files or their names.</p>
+    <p>Two storages in different places are much safer than one: for example a disk at home and a bucket in the cloud. A cold storage is written to but read only when you confirm, which suits cheap archive classes. A transferrer is a removable disk that carries files to a device with a slow connection and keeps no copies.</p>
+    <p>A storage can have a quota, and you can empty one onto the others before you give it up (Drain).</p>
+    <p class="guide-more"><a data-site="/features/" href="https://varsto.net/features/" target="_blank" rel="noopener">Storages on the website</a></p>
+  </details>
+  <details class="guide" data-guide="folders">
+    <summary>Folders and files</summary>
+    <p>A folder is a directory on your device that Varsto keeps in sync. Its files stay where they are as ordinary files; Varsto copies them, encrypted, to every storage and to your other devices that sync the folder.</p>
+    <p>On another device, attach the folder to a directory of its own. With selective sync, files show up as placeholders and are downloaded when you open them; Free up space turns a file back into a placeholder.</p>
+    <p>A Strongroom is a folder that opens only with a security key and only for a while.</p>
+  </details>
+  <details class="guide" data-guide="devices">
+    <summary>Devices and pairing</summary>
+    <p>Every device has its own passphrase and gets the vault from a device that already has it. On the device that has the vault, open Peers and choose Add a device; it shows a nine-digit code. On the new device, choose Pair with your other device and type the code.</p>
+    <p>Devices check each other's copies, which is what the default policy asks for. A lost or stolen device can be removed under Peers or Settings: it is cut off at once and the vault gets new keys. Print new recovery words afterwards.</p>
+  </details>
+  <details class="guide" data-guide="p2p">
+    <summary>Peer-to-peer</summary>
+    <p>Your devices send blocks to each other directly when they can, on the same network or over the internet, and fall back to the storages when they cannot. The Peers page shows how each device is reached and how fast data moves.</p>
+  </details>
+  <details class="guide" data-guide="sharing">
+    <summary>Sharing a folder</summary>
+    <p>You can give another person one folder, and nothing else of your vault. They send you a request code from their device, you compare a six-word fingerprint with them over a call or in person, and you send back a sealed token that only their device can open.</p>
+    <p>You can see who has a folder and remove a person from it on the Shared page.</p>
+  </details>
+  <details class="guide" data-guide="backups">
+    <summary>Backups</summary>
+    <p>A backup keeps read-only snapshots of a directory of this device on your storages, for as many days as you choose. Snapshots are never written to your other devices. To get files back, restore a snapshot into a directory you name.</p>
+    <p class="guide-more"><a data-site="/features/#backups" href="https://varsto.net/features/#backups" target="_blank" rel="noopener">Backups on the website</a></p>
+  </details>
+  <details class="guide" data-guide="trash">
+    <summary>Trash</summary>
+    <p>A file deleted on any device goes to the trash first and is kept there for a number of days (30 unless you change it). From the Trash page you can restore it to where it was, or delete it for good.</p>
+  </details>
+  <details class="guide" data-guide="policies">
+    <summary>Policies, checks and repair</summary>
+    <p>A policy says how many copies a folder needs, in which places, and how often another device must check them. Every folder starts with the default: one copy at home, one in the cloud, checked by another device within 30 days. Varsto warns you when a folder falls short and tells you what is missing.</p>
+    <p>Verification reads copies back now and then; the bit-rot check re-hashes copies and files on this device; repair replaces a damaged copy with a good one. All three run by themselves and can be started on the Policies page.</p>
+  </details>
+  <details class="guide" data-guide="disks">
+    <summary>Disk pools</summary>
+    <p>A pool is a set of disks you plug in one at a time, for example old drives kept on a shelf or at a friend's place. Varsto recognises each disk by a marker file, fills it with what the pool still lacks, checks it when it comes back, and tells you which disk to attach when a file is only on a disk that is away.</p>
+    <p>Eject a disk on the Storages page before you unplug it.</p>
+  </details>
+  <details class="guide" data-guide="recovery">
+    <summary>Recovery</summary>
+    <p>The vault key opens everything. The recovery kit prints it as 24 words: keep them on paper, away from your devices. With them and one storage you can restore every file on a new device, even if every device is lost.</p>
+    <p>The Recovery package page lists everything else to keep with the words, such as storage credentials and security keys, and the steps to restore.</p>
+    <p class="guide-more"><a href="https://varsto.net/docs/recovery.html" target="_blank" rel="noopener">Recovery on the website</a></p>
+  </details>
+  <details class="guide" data-guide="imports">
+    <summary>Importing files</summary>
+    <p>Import brings files from elsewhere into a folder: a directory, a cloud drive through rclone, or a git-annex repository. The original is only read, never changed, and names are kept as they were.</p>
+  </details>
+  <details class="guide" data-guide="mcp">
+    <summary>AI assistants (MCP)</summary>
+    <p>Varsto has an MCP server for an AI assistant of your choice, for example one running on your own computer. It sees only the folders you grant, and only at the level you choose: read, analyse or change. Grant access with <code>varsto mcp grant</code> on the command line.</p>
+  </details>
+</template>
 </body>
 </html>

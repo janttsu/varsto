@@ -1486,6 +1486,12 @@ impl Engine {
     /// Settings, totals and where the trash's blocks are.
     pub fn trash_status(&mut self) -> Result<TrashStatus> {
         self.trash_refresh(true)?;
+        self.trash_status_cached()
+    }
+
+    /// `trash_status` from what this device read last, without asking the
+    /// storages (for the Help page).
+    pub fn trash_status_cached(&self) -> Result<TrashStatus> {
         let now = util::now_utc();
         let settings = self.trash_settings();
         let cache = self.load_settings_cache();

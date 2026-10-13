@@ -30,7 +30,7 @@ use std::path::Path;
 pub const DOWNLOAD_SITE: &str = "https://varsto.net";
 
 /// One sentence: an English template and the values of its placeholders.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Text {
     pub t: String,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -1236,7 +1236,7 @@ fn step_text(t: &mut String, num: &str, s: &Step) {
 }
 
 /// Word-wrapped lines, the first with `prefix`, the rest indented as deep.
-fn wrap(text: &str, width: usize, prefix: &str) -> String {
+pub(crate) fn wrap(text: &str, width: usize, prefix: &str) -> String {
     let indent = " ".repeat(prefix.chars().count());
     let mut out = String::new();
     let mut line = prefix.to_string();
