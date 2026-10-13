@@ -316,6 +316,7 @@ impl Engine {
                 path: canonical(target)?,
                 selective: false,
                 encrypted: false,
+                min_free: None,
             });
             report.attached.push(rec.name.clone());
         }
@@ -376,6 +377,7 @@ impl Engine {
                 path,
                 selective: false,
                 encrypted: false,
+                min_free: None,
             });
             added.push(rec.name.clone());
         }

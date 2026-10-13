@@ -495,6 +495,7 @@ mod tests {
                     cold: false,
                     carrier: false,
                     place: String::new(),
+                    min_free: None,
                 },
                 secret: Some("s3cret".into()),
             }],

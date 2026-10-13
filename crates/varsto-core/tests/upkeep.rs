@@ -39,6 +39,7 @@ fn dir_storage(name: &str, path: &std::path::Path, cold: bool) -> StorageSpec {
         cold,
         carrier: false,
         place: String::new(),
+        min_free: None,
     }
 }
 

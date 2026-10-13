@@ -457,8 +457,24 @@ impl Engine {
         storages: &[(StorageSpec, Box<dyn Storage>)],
         report: &mut PullReport,
     ) -> Result<()> {
-        let progress = crate::progress::Download::begin(&rec.name, &file.path, file.size);
         let root = self.block_cache_root();
+        // The cache is in the device directory; the folder's limit applies
+        // to its disk (the folder's files are kept there).
+        let needed: u64 = file
+            .chunks
+            .iter()
+            .filter(|c| !self.cache_has(&c.object))
+            .map(|c| c.size)
+            .sum();
+        if needed > 0 {
+            crate::freespace::check(
+                &crate::freespace::Place::folder(&rec.name),
+                &root,
+                self.folder_min_free(&rec.folder_id),
+                needed,
+            )?;
+        }
+        let progress = crate::progress::Download::begin(&rec.name, &file.path, file.size);
         for cref in &file.chunks {
             if self.cache_has(&cref.object) {
                 progress.advance(cref.size);
@@ -531,6 +547,11 @@ impl Engine {
                 report.files_updated += 1;
             }
             Err(e) => {
+                if let Some(low) = crate::freespace::low_space(&e) {
+                    report.waiting_for_space(low);
+                    state.pending_remote.insert(path, remote);
+                    return Ok(());
+                }
                 if let Some(PoolError::NeedsDisk { label, place, .. }) = pool::pool_error(&e) {
                     let d = format!("{label} ({place})");
                     if !report.disks_needed.contains(&d) {
@@ -610,7 +631,10 @@ impl Engine {
                 Ok(()) => {
                     state.local_index.insert(f.path.clone(), cached_entry(&f));
                 }
-                Err(e) => report.files_unavailable.push(format!("{}: {e}", f.path)),
+                Err(e) => match crate::freespace::low_space(&e) {
+                    Some(low) => report.waiting_for_space(low),
+                    None => report.files_unavailable.push(format!("{}: {e}", f.path)),
+                },
             }
         }
         Ok(())

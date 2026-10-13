@@ -527,6 +527,14 @@ impl Engine {
             match got {
                 Some(b) => {
                     crate::activity::advance_current(b.len() as u64);
+                    // Staged in the device directory: stop before its disk
+                    // runs short (`freespace`); the step can be run again.
+                    crate::freespace::check(
+                        &crate::freespace::Place::device(),
+                        &root,
+                        crate::freespace::DEFAULT,
+                        b.len() as u64,
+                    )?;
                     util::write_atomic(&dest, &b)?;
                     out.objects += 1;
                     out.bytes += b.len() as u64;

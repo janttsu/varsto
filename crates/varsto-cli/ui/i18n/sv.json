@@ -966,7 +966,15 @@
   "PCP, NAT-PMP or UPnP: only the peer-to-peer port, TCP and UDP, with a lease that is renewed and removed when the service stops. Mappings made by hand are left alone.": "PCP, NAT-PMP eller UPnP: bara peer-to-peer-porten, TCP och UDP, med en lånetid som förnyas och tas bort när tjänsten stannar. Vidarebefordringar som gjorts för hand lämnas orörda.",
   "Router port mapping is off.": "Portmappning i routern är avstängd.",
   "Router port: asking the router…": "Routerport: frågar routern…",
-  "Router port: not available.": "Routerport: inte tillgänglig."
+  "Router port: not available.": "Routerport: inte tillgänglig.",
+  "Free space…": "Ledigt utrymme…",
+  "Free space to keep": "Ledigt utrymme att behålla",
+  "Downloads into this folder stop while its disk would keep less free space than this. Reading and uploading go on, and downloads resume by themselves when there is room again.": "Nedladdningar till den här mappen stannar medan dess disk skulle få mindre ledigt utrymme än så här. Läsning och uppladdning fortsätter, och nedladdningarna återupptas av sig själva när det finns plats igen.",
+  "Blocks are not written to this storage while its disk would keep less free space than this. The other storages still get them, and writing resumes by itself when there is room again.": "Block skrivs inte till den här lagringsplatsen medan dess disk skulle få mindre ledigt utrymme än så här. De andra lagringsplatserna får dem ändå, och skrivningen återupptas av sig själv när det finns plats igen.",
+  "Keep free": "Håll ledigt",
+  "A share of the disk (5%) or an amount (10GB). The default is 5 %.": "En andel av disken (5%) eller en mängd (10GB). Standard är 5 %.",
+  "Default": "Standard",
+  "Free space kept on this storage's disk": "Ledigt utrymme som hålls på lagringsplatsens disk"
  },
  "patterns": [
   [
@@ -1292,6 +1300,42 @@
   [
    "^Router port already open via ([^:]+): (.+)\\.$",
    "Routerport redan öppen via $1: $2."
+  ],
+  [
+   "^Free space kept on this folder's disk: (.+)$",
+   "Ledigt utrymme som hålls på mappens disk: $1"
+  ],
+  [
+   "^Disk of folder (.+) has (.+) free, below the (.+) limit; downloads paused\\.$",
+   "Disken för mappen $1 har $2 ledigt, under gränsen $3; nedladdningar pausade."
+  ],
+  [
+   "^Disk of folder (.+) has (.+) free; (.+) more would leave less than the (.+) limit; downloads paused\\.$",
+   "Disken för mappen $1 har $2 ledigt; $3 till skulle lämna mindre än gränsen $4; nedladdningar pausade."
+  ],
+  [
+   "^Disk of storage (.+) has (.+) free, below the (.+) limit; uploads paused\\.$",
+   "Disken för lagringsplatsen $1 har $2 ledigt, under gränsen $3; uppladdningar pausade."
+  ],
+  [
+   "^Disk of storage (.+) has (.+) free; (.+) more would leave less than the (.+) limit; uploads paused\\.$",
+   "Disken för lagringsplatsen $1 har $2 ledigt; $3 till skulle lämna mindre än gränsen $4; uppladdningar pausade."
+  ],
+  [
+   "^Disk of the device directory has (.+) free, below the (.+) limit; downloads paused\\.$",
+   "Disken för enhetskatalogen har $1 ledigt, under gränsen $2; nedladdningar pausade."
+  ],
+  [
+   "^Disk of the device directory has (.+) free; (.+) more would leave less than the (.+) limit; downloads paused\\.$",
+   "Disken för enhetskatalogen har $1 ledigt; $2 till skulle lämna mindre än gränsen $3; nedladdningar pausade."
+  ],
+  [
+   "^Disk of (.+) has (.+) free, below the (.+) limit; writes paused\\.$",
+   "Disken för $1 har $2 ledigt, under gränsen $3; skrivningar pausade."
+  ],
+  [
+   "^Disk of (.+) has (.+) free; (.+) more would leave less than the (.+) limit; writes paused\\.$",
+   "Disken för $1 har $2 ledigt; $3 till skulle lämna mindre än gränsen $4; skrivningar pausade."
   ]
  ],
  "review": [
@@ -1558,6 +1602,14 @@
   [
    "The file system on (.+) has errors that could not be repaired automatically; nothing was read or written\\. Run `sudo e2fsck -f (\\S+)` by hand or retire the disk\\.",
    "Filsystemet på $1 har fel som inte kunde repareras automatiskt; inget lästes eller skrevs. Kör `sudo e2fsck -f $2` för hand eller pensionera disken."
+  ],
+  [
+   ", (\\d+) waiting for disk space",
+   ", $1 väntar på diskutrymme"
+  ],
+  [
+   " · keeps ([^·]+?) free$",
+   " · håller $1 ledigt"
   ]
  ]
 }

@@ -37,6 +37,7 @@ impl Lab {
                 cold: false,
                 carrier: false,
                 place: String::new(),
+                min_free: None,
             },
             root,
             _tmp: tmp,

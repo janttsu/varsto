@@ -27,6 +27,7 @@ fn a_device_sees_another_devices_long_task_with_its_progress() {
         cold: false,
         carrier: false,
         place: String::new(),
+        min_free: None,
     };
     let (mut laptop, key) = Engine::init(&root.join("laptop-home"), "laptop", PASS).unwrap();
     laptop.chunker = ChunkerParams::SMALL;

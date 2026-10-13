@@ -67,6 +67,7 @@ fn two_devices() -> (Lab, Engine, Engine) {
         cold: false,
         carrier: false,
         place: String::new(),
+        min_free: None,
     };
     let (mut a, key) = Engine::init(&root.join("a"), "laptop", PASS).unwrap();
     a.chunker = ChunkerParams::SMALL;

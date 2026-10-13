@@ -977,6 +977,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
         if (!s.member) { var rmb = document.createElement("button"); rmb.className = "secondary"; rmb.textContent = "Remove"; rmb.onclick = function () { removeFolder(f); }; menu.appendChild(rmb); }
         if (f.strongroom && f.strongroom !== "locked") { var lk = document.createElement("button"); lk.className = "secondary"; lk.textContent = "Lock"; lk.onclick = function () { api("POST", "/api/strongroom/lock", { folder: f.name }).then(function () { log("locked " + f.name); return refreshStatus(); }).catch(function (e) { alertBox(e.message); }); }; menu.appendChild(lk); }
         if (!s.member && f.path && !f.strongroom && !f.shared) { var cv = document.createElement("button"); cv.className = "secondary"; cv.textContent = "Convert to Strongroom…"; cv.onclick = function () { convertStrongroom(f); }; menu.appendChild(cv); }
+        if (f.path) { var mf = document.createElement("button"); mf.className = "secondary"; mf.textContent = "Free space\u2026"; mf.title = "Free space kept on this folder's disk: " + (f.min_free_text || "5 %"); mf.onclick = function () { editMinFree("folder", f.name, f.min_free); }; menu.appendChild(mf); }
         if (f.strongroom) { var ks = document.createElement("button"); ks.className = "secondary"; ks.textContent = "Security keys…"; ks.title = "Enrolled security keys; add a backup key"; ks.onclick = function () { strongroomKeys(f); }; menu.appendChild(ks); }
         if (f.strongroom === "locked") { var note = document.createElement("span"); note.className = "muted"; note.textContent = "unlock with: varsto strongroom unlock " + f.name; act.appendChild(note); }
         menu.done();
@@ -1081,9 +1082,11 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
         var dest = (s.carrier_for || {})[st.name] || [];
         if (st.cold) { title.appendChild(pill("grey", "cold")); } if (st.carrier) { title.appendChild(pill("grey", dest.length ? "transferrer for " + dest.join(", ") : "transferrer")); }
         if (st.place) { title.appendChild(pill("grey", st.place)); }
+        if (st.kind === "local-dir") { where = (where || "") + " \u00b7 keeps " + (st.min_free ? (/%$/.test(st.min_free) ? st.min_free.replace("%", " %") : fmtBytes(+st.min_free)) : "5 %") + " free"; }
         body.appendChild(title); body.appendChild(el("div", "li-sub", where || "")); li.appendChild(body);
         if (!s.member) {
           var ra = el("div", "li-actions");
+          if (st.kind === "local-dir") { var mb = el("button", "secondary", "Free space\u2026"); mb.type = "button"; mb.title = "Free space kept on this storage's disk"; mb.onclick = function () { editMinFree("storage", st.name, st.min_free); }; ra.appendChild(mb); }
           if (st.carrier) { var cb = el("button", "secondary", "Destination\u2026"); cb.type = "button"; cb.onclick = function () { carrierDestination(st.name, dest); }; ra.appendChild(cb); }
           var rb = el("button", "secondary", "Remove"); rb.type = "button"; rb.onclick = function () { removeStorage(st.name); }; ra.appendChild(rb); li.appendChild(ra);
         }

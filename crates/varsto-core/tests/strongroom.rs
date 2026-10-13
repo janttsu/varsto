@@ -35,6 +35,7 @@ fn lab() -> Lab {
             cold: false,
             carrier: false,
             place: String::new(),
+            min_free: None,
         },
         a_home: root.join("a-home"),
         b_home: root.join("b-home"),

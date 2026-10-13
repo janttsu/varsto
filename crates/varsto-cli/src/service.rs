@@ -101,6 +101,10 @@ pub struct ServiceState {
     /// Not before this time: a run that failed before it could record why.
     pub restic_not_before_utc: i64,
     pub restic_text: Option<String>,
+    /// Places short of disk space (`freespace`): downloads or uploads there
+    /// wait until space is back. Notified once per place.
+    pub low_space: Vec<varsto_core::freespace::LowSpace>,
+    pub low_space_notified: std::collections::BTreeSet<String>,
 }
 
 /// The storages are asked this often whether they hold newer ledger
@@ -149,6 +153,7 @@ impl ServiceState {
             "ledger_health": self.ledger_health,
             "ledger_text": self.ledger_health.as_ref().filter(|h| !h.is_ok()).map(|h| h.describe()),
             "restic_text": self.restic_text,
+            "low_space": self.low_space,
         })
     }
     /// Rank the pool disks for docking next (`disk suggest`) and, at most
@@ -537,6 +542,32 @@ impl ServiceState {
     pub fn request_sync(&mut self) {
         self.sync_requested = true;
     }
+    /// Measure the places short of disk space again: tell the user once
+    /// about each new one ("disk of folder X has 3 % free, below the 5 %
+    /// limit; downloads paused"), and when one has room again, say so and
+    /// sync at once, so what waited is fetched.
+    pub fn check_space(&mut self) {
+        for back in varsto_core::freespace::recheck() {
+            let msg = format!(
+                "disk of {} has room again; {} resume",
+                back.place.label, back.place.stops
+            );
+            eprintln!("service: {msg}");
+            self.low_space_notified.remove(&back.place.key);
+            self.sync_requested = true;
+        }
+        let short = varsto_core::freespace::short_places();
+        for l in &short {
+            if self.low_space_notified.insert(l.place.key.clone()) {
+                eprintln!("service: {}", l.text);
+                notify("Varsto disk space", &l.text);
+            }
+        }
+        // A place no longer short without a recheck (a check found room).
+        self.low_space_notified
+            .retain(|k| short.iter().any(|l| &l.place.key == k));
+        self.low_space = short;
+    }
     pub fn record_sync(&mut self, reports: &[(PullReport, PushReport)]) {
         self.last_sync_utc = Some(varsto_core::util::now_utc());
         self.syncs += 1;
@@ -545,6 +576,7 @@ impl ServiceState {
         let mut conflicts = 0;
         let mut uploaded = 0;
         let mut unavailable = 0;
+        let mut waiting = 0;
         let mut forked = false;
         let mut disks: Vec<String> = Vec::new();
         for (pl, ps) in reports {
@@ -554,6 +586,7 @@ impl ServiceState {
             conflicts += pl.conflicts;
             uploaded += ps.chunks_uploaded;
             unavailable += pl.files_unavailable.len();
+            waiting += pl.files_waiting_for_space;
             forked |= !pl.forked_devices.is_empty();
             for d in &pl.disks_needed {
                 if !disks.contains(d) {
@@ -561,7 +594,7 @@ impl ServiceState {
                 }
             }
         }
-        self.last_result = format!("{} folders: {updated} updated, {deleted} deleted, {conflicts} conflicts, {uploaded} chunks uploaded{}{}{}", reports.len(), if unavailable > 0 { format!(", {unavailable} unavailable") } else { String::new() }, if disks.is_empty() { String::new() } else { format!(" (attach disk {})", disks.join(", ")) }, if forked { ", FORKED device" } else { "" });
+        self.last_result = format!("{} folders: {updated} updated, {deleted} deleted, {conflicts} conflicts, {uploaded} chunks uploaded{}{}{}{}", reports.len(), if unavailable > 0 { format!(", {unavailable} unavailable") } else { String::new() }, if waiting > 0 { format!(", {waiting} waiting for disk space") } else { String::new() }, if disks.is_empty() { String::new() } else { format!(" (attach disk {})", disks.join(", ")) }, if forked { ", FORKED device" } else { "" });
         self.last_error = None;
     }
 }
@@ -1572,6 +1605,8 @@ pub fn run(opts: Options) -> Result<()> {
         if Instant::now() >= next_disk_check {
             next_disk_check = Instant::now() + disk_check_every;
             let mut st = state.lock().unwrap();
+            // Space back where downloads waited: sync now.
+            st.service.check_space();
             if let Some(e) = st.engine.as_ref() {
                 // Who this device is in `/api/activity` (also while p2p is off).
                 varsto_core::activity::set_identity(e.device_id(), e.own_device_name());
@@ -1763,6 +1798,7 @@ pub fn run(opts: Options) -> Result<()> {
             if let Some(p) = &p2p {
                 p.refresh_after_sync(&mut st);
             }
+            st.service.check_space();
             match result {
                 Some(Ok(reports)) => {
                     st.service.record_sync(&reports);

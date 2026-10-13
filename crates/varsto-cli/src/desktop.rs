@@ -681,6 +681,19 @@ fn s(v: &Value, key: &str) -> Result<String> {
 }
 
 /// A list of strings (absent: empty).
+/// `min_free`: "5%", "10GB", or empty / "default" for the default.
+fn min_free_input(v: &Value) -> Result<Option<varsto_core::freespace::MinFree>> {
+    let t = v
+        .get("min_free")
+        .and_then(|x| x.as_str())
+        .unwrap_or("")
+        .trim();
+    if t.is_empty() || t.eq_ignore_ascii_case("default") {
+        return Ok(None);
+    }
+    Ok(Some(varsto_core::freespace::MinFree::parse(t)?))
+}
+
 fn str_list(v: &Value, key: &str) -> Vec<String> {
     v.get(key)
         .and_then(|x| x.as_array())
@@ -812,6 +825,7 @@ fn storage_from_input(
             cold: false,
             carrier: false,
             place: String::new(),
+            min_free: None,
         },
         None,
     ))
@@ -1102,6 +1116,7 @@ fn api(st: &mut State, method: Method, path: &str, query: &str, input: &Value) -
                     cold: false,
                     carrier: false,
                     place: String::new(),
+                    min_free: None,
                 }
             };
             // The key in hex, or the 24 words of the recovery kit.
@@ -1369,6 +1384,7 @@ fn api_unlocked(
                         cold,
                         carrier,
                         place: opt(input, "place").unwrap_or_default(),
+                        min_free: None,
                     })?;
                     let targets = string_list(input, "carrier_for");
                     if carrier && !targets.is_empty() {
@@ -2222,6 +2238,19 @@ fn api_unlocked(
                 }
             }
         }
+        (Method::Post, "/api/folder/min-free") => {
+            let m = min_free_input(input)?;
+            engine.set_folder_min_free(&s(input, "folder")?, m)?;
+            // Space may be enough now: try what waits.
+            service.request_sync();
+            Ok(json!({"ok": true, "min_free": m.map(|m| m.setting())}))
+        }
+        (Method::Post, "/api/storage/min-free") => {
+            let m = min_free_input(input)?;
+            engine.set_storage_min_free(&s(input, "name")?, m)?;
+            service.request_sync();
+            Ok(json!({"ok": true, "min_free": m.map(|m| m.setting())}))
+        }
         (Method::Post, "/api/selective") => {
             engine.set_selective(
                 &s(input, "folder")?,
@@ -2271,6 +2300,7 @@ mod tests {
                 cold: false,
                 carrier: false,
                 place: String::new(),
+                min_free: None,
             })
             .unwrap();
         engine

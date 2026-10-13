@@ -1158,6 +1158,10 @@ pub struct FolderMount {
     /// means plain files as on a desktop.
     #[serde(default)]
     pub encrypted: bool,
+    /// Free space kept on the disk holding the folder: downloads into it
+    /// stop below it (`freespace`; default 5 %).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_free: Option<crate::freespace::MinFree>,
 }
 
 /// Storage credentials: `home/secrets.enc`, encrypted under a key derived

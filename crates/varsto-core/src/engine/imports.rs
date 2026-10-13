@@ -1062,6 +1062,12 @@ impl Engine {
             let mut local_entry = None;
             if !selective {
                 if let Some(src) = local_source {
+                    crate::freespace::check(
+                        &crate::freespace::Place::folder(&rec.name),
+                        &root_path,
+                        self.folder_min_free(&rec.folder_id),
+                        template.size,
+                    )?;
                     if let Some(p) = disk.parent() {
                         fs::create_dir_all(p)?;
                     }
@@ -1138,6 +1144,7 @@ impl Engine {
         let mut last_publish = std::time::Instant::now();
         let mut since_save = 0u64;
         let tmp_copy = root_path.join(format!(".varsto-import-{}", std::process::id()));
+        let min_free = self.folder_min_free(&rec.folder_id);
         let mut stop_error: Option<anyhow::Error> = None;
         let delivered = {
             let mut sink = |i: usize, d: Delivery| -> Result<Verdict> {
@@ -1168,6 +1175,20 @@ impl Engine {
                         mtime_ns,
                         retry,
                     } => {
+                        // A full local copy is written into the folder: the
+                        // run stops (and carries on later) before its disk
+                        // keeps less than its limit free.
+                        if !selective {
+                            if let Err(low) = crate::freespace::check(
+                                &crate::freespace::Place::folder(&rec.name),
+                                &root_path,
+                                min_free,
+                                g.size.unwrap_or(0),
+                            ) {
+                                stop_error = Some(anyhow::Error::new(low));
+                                return Ok(Verdict::Stop);
+                            }
+                        }
                         let copy = (!selective).then_some(tmp_copy.as_path());
                         let outcome =
                             ingest(&mut ctx, reader, g.size, g.check.as_ref(), want_sha, copy);

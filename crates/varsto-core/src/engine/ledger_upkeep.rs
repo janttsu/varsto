@@ -733,6 +733,7 @@ pub(super) mod tests {
             cold: false,
             carrier: false,
             place: String::new(),
+            min_free: None,
         };
         (tmp, Lab { root, storage })
     }

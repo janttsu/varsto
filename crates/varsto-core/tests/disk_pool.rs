@@ -63,6 +63,7 @@ impl Lab {
             cold: false,
             carrier: false,
             place: String::new(),
+            min_free: None,
         }
     }
     /// A mounted disk directory with a simulated size.

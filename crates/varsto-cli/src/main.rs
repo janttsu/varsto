@@ -991,6 +991,14 @@ enum StorageCmd {
         #[arg(long, default_value_t = 1)]
         copies: u32,
     },
+    /// Change a storage's settings.
+    Set {
+        name: String,
+        /// Free space kept on a local directory's disk: block writes stop below it,
+        /// e.g. 5% or 10GB ("default": 5 %).
+        #[arg(long)]
+        min_free: String,
+    },
     /// List storages with their prices and monthly cost.
     List,
     /// Remove a storage. Blocks that would be left without enough copies
@@ -1206,7 +1214,34 @@ enum FolderCmd {
         #[arg(long, conflicts_with_all = ["storage", "place"])]
         every: bool,
     },
+    /// Change a folder's settings on this device.
+    Set {
+        folder: String,
+        /// Free space kept on the disk holding the folder: downloads into it stop below it,
+        /// e.g. 5% or 10GB ("default": 5 %).
+        #[arg(long)]
+        min_free: String,
+    },
     List,
+}
+
+/// "default" (or empty) for the default, else a limit such as 5% or 10GB.
+fn min_free_arg(v: &str) -> Result<Option<varsto_core::freespace::MinFree>> {
+    let t = v.trim();
+    if t.is_empty() || t.eq_ignore_ascii_case("default") {
+        return Ok(None);
+    }
+    Ok(Some(varsto_core::freespace::MinFree::parse(t)?))
+}
+
+fn min_free_text(v: Option<varsto_core::freespace::MinFree>) -> String {
+    match v {
+        Some(m) => m.describe(),
+        None => format!(
+            "{} (the default)",
+            varsto_core::freespace::DEFAULT.describe()
+        ),
+    }
 }
 
 /// FOLDER PATH as given, or the folder and path of one path on disk.
@@ -2308,6 +2343,7 @@ fn run(cli: &Cli) -> Result<()> {
                     cold: false,
                     carrier: false,
                     place: String::new(),
+                    min_free: None,
                 },
                 (None, None) => bail_usage("give --storage-path <dir> or --s3-bucket ...")?,
             };
@@ -2350,6 +2386,22 @@ fn run(cli: &Cli) -> Result<()> {
             }
         }
         Cmd::Storage { cmd } => {
+            if let StorageCmd::Set { name, min_free } = cmd {
+                // Through the running service when there is one: its own
+                // copy of the configuration takes the change at once.
+                let m = min_free_arg(min_free)?;
+                if call_service(
+                    &home,
+                    "/api/storage/min-free",
+                    serde_json::json!({"name": name, "min_free": min_free}),
+                )?
+                .is_none()
+                {
+                    open_engine(&home)?.set_storage_min_free(name, m)?;
+                }
+                println!("{name}: {} kept free on its disk", min_free_text(m));
+                return Ok(());
+            }
             let mut engine = open_engine(&home)?;
             match cmd {
                 StorageCmd::AddLocal {
@@ -2366,6 +2418,7 @@ fn run(cli: &Cli) -> Result<()> {
                         cold: *cold,
                         carrier: *carrier,
                         place: place.clone(),
+                        min_free: None,
                     })?;
                     println!("storage {name} added");
                     if !carrier_for.is_empty() {
@@ -2480,6 +2533,7 @@ fn run(cli: &Cli) -> Result<()> {
                         }
                     );
                 }
+                StorageCmd::Set { .. } => unreachable!("handled above"),
                 StorageCmd::List => {
                     let estimates = engine.storage_estimates()?;
                     // The specs, each with its price, stored bytes and monthly cost.
@@ -2503,7 +2557,7 @@ fn run(cli: &Cli) -> Result<()> {
                             .zip(&estimates)
                             .map(|(x, e)| {
                                 format!(
-                                    "{}{}{}{} | {} stored | {}{}",
+                                    "{}{}{}{}{} | {} stored | {}{}",
                                     x.name(),
                                     if x.is_cold() { " (cold)" } else { "" },
                                     if x.is_carrier() { " (carrier)" } else { "" },
@@ -2511,6 +2565,15 @@ fn run(cli: &Cli) -> Result<()> {
                                         format!(" ({})", x.describe())
                                     } else {
                                         String::new()
+                                    },
+                                    match x {
+                                        StorageSpec::LocalDir { min_free, .. } => format!(
+                                            " (keeps {} free)",
+                                            min_free
+                                                .unwrap_or(varsto_core::freespace::DEFAULT)
+                                                .describe()
+                                        ),
+                                        _ => String::new(),
                                     },
                                     fmt_bytes(e.bytes),
                                     e.price
@@ -2859,6 +2922,11 @@ fn run(cli: &Cli) -> Result<()> {
                 } => {
                     let id = engine.attach_folder(name_or_id, path, *selective)?;
                     println!("folder {} attached at {}", id.short(), path.display());
+                }
+                FolderCmd::Set { folder, min_free } => {
+                    let m = min_free_arg(min_free)?;
+                    engine.set_folder_min_free(folder, m)?;
+                    println!("{folder}: {} kept free on its disk here", min_free_text(m));
                 }
                 FolderCmd::Selective { name_or_id, on } => {
                     engine.set_selective(name_or_id, *on)?;
@@ -3339,6 +3407,7 @@ fn run(cli: &Cli) -> Result<()> {
                             cold: false,
                             carrier: false,
                             place: String::new(),
+                            min_free: None,
                         },
                         None,
                     ),
@@ -3449,6 +3518,7 @@ fn run(cli: &Cli) -> Result<()> {
                         cold: false,
                         carrier: false,
                         place: String::new(),
+                        min_free: None,
                     };
                     let tgt = StorageSpec::LocalDir {
                         name: "target".into(),
@@ -3456,6 +3526,7 @@ fn run(cli: &Cli) -> Result<()> {
                         cold: false,
                         carrier: false,
                         place: String::new(),
+                        min_free: None,
                     };
                     let r = varsto_core::replica::Replica::init(&home, name, &token, src, tgt)?;
                     println!(
@@ -5046,6 +5117,13 @@ fn folder_via_service(home: &std::path::Path, cmd: &FolderCmd) -> Result<Option<
             "/api/selective",
             serde_json::json!({"folder": name_or_id, "on": on}),
         ),
+        FolderCmd::Set { folder, min_free } => {
+            min_free_arg(min_free)?;
+            (
+                "/api/folder/min-free",
+                serde_json::json!({"folder": folder, "min_free": min_free}),
+            )
+        }
         _ => return Ok(None),
     };
     let Some(r) = call_service(home, path, body)? else {
@@ -5081,6 +5159,10 @@ fn folder_via_service(home: &std::path::Path, cmd: &FolderCmd) -> Result<Option<
         FolderCmd::Selective { name_or_id, on } => format!(
             "selective sync {} for {name_or_id}",
             if *on { "on" } else { "off" }
+        ),
+        FolderCmd::Set { folder, min_free } => format!(
+            "{folder}: {} kept free on its disk here",
+            min_free_text(min_free_arg(min_free)?)
         ),
         _ => String::new(),
     }))
@@ -5738,6 +5820,7 @@ mod recovery_guide_tests {
                     cold: false,
                     carrier: false,
                     place: String::new(),
+                    min_free: None,
                 },
                 StorageSpec::LocalDir {
                     name: "stick".into(),
@@ -5745,6 +5828,7 @@ mod recovery_guide_tests {
                     cold: false,
                     carrier: true,
                     place: String::new(),
+                    min_free: None,
                 },
                 StorageSpec::S3 {
                     name: "b2".into(),

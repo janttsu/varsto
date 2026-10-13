@@ -54,6 +54,7 @@ fn view_decrypts_ranges_in_memory_only() {
         cold: false,
         carrier: false,
         place: String::new(),
+        min_free: None,
     };
     let (a_dir, b_home, b_dir) = (
         root.join("a-docs"),

@@ -973,7 +973,15 @@
   "PCP, NAT-PMP or UPnP: only the peer-to-peer port, TCP and UDP, with a lease that is renewed and removed when the service stops. Mappings made by hand are left alone.": "PCP, NAT-PMP tai UPnP: vain vertaisyhteyksien portti, TCP ja UDP, vuokra-ajalla, joka uusitaan ja joka poistetaan, kun palvelu pysähtyy. Käsin tehtyihin uudelleenohjauksiin ei kosketa.",
   "Router port mapping is off.": "Reitittimen porttiohjaus on pois päältä.",
   "Router port: asking the router…": "Reitittimen portti: kysytään reitittimeltä…",
-  "Router port: not available.": "Reitittimen portti: ei saatavilla."
+  "Router port: not available.": "Reitittimen portti: ei saatavilla.",
+  "Free space…": "Vapaa tila…",
+  "Free space to keep": "Vapaana pidettävä tila",
+  "Downloads into this folder stop while its disk would keep less free space than this. Reading and uploading go on, and downloads resume by themselves when there is room again.": "Lataukset tähän kansioon pysähtyvät, kun sen levylle jäisi vähemmän vapaata tilaa kuin tämä. Lukeminen ja lähettäminen jatkuvat, ja lataukset jatkuvat itsestään, kun tilaa taas on.",
+  "Blocks are not written to this storage while its disk would keep less free space than this. The other storages still get them, and writing resumes by itself when there is room again.": "Lohkoja ei kirjoiteta tähän tallennuspaikkaan, kun sen levylle jäisi vähemmän vapaata tilaa kuin tämä. Muut tallennuspaikat saavat ne silti, ja kirjoittaminen jatkuu itsestään, kun tilaa taas on.",
+  "Keep free": "Pidä vapaana",
+  "A share of the disk (5%) or an amount (10GB). The default is 5 %.": "Osuus levystä (5%) tai määrä (10GB). Oletus on 5 %.",
+  "Default": "Oletus",
+  "Free space kept on this storage's disk": "Tallennuspaikan levyllä vapaana pidettävä tila"
  },
  "patterns": [
   [
@@ -1299,6 +1307,42 @@
   [
    "^Router port already open via ([^:]+): (.+)\\.$",
    "Reitittimen portti oli jo auki ($1): $2."
+  ],
+  [
+   "^Free space kept on this folder's disk: (.+)$",
+   "Kansion levyllä vapaana pidettävä tila: $1"
+  ],
+  [
+   "^Disk of folder (.+) has (.+) free, below the (.+) limit; downloads paused\\.$",
+   "Kansion $1 levyllä on $2 vapaana, alle rajan $3; lataukset odottavat."
+  ],
+  [
+   "^Disk of folder (.+) has (.+) free; (.+) more would leave less than the (.+) limit; downloads paused\\.$",
+   "Kansion $1 levyllä on $2 vapaana; vielä $3 jättäisi alle rajan $4; lataukset odottavat."
+  ],
+  [
+   "^Disk of storage (.+) has (.+) free, below the (.+) limit; uploads paused\\.$",
+   "Tallennuspaikan $1 levyllä on $2 vapaana, alle rajan $3; lähetykset odottavat."
+  ],
+  [
+   "^Disk of storage (.+) has (.+) free; (.+) more would leave less than the (.+) limit; uploads paused\\.$",
+   "Tallennuspaikan $1 levyllä on $2 vapaana; vielä $3 jättäisi alle rajan $4; lähetykset odottavat."
+  ],
+  [
+   "^Disk of the device directory has (.+) free, below the (.+) limit; downloads paused\\.$",
+   "Laitehakemiston levyllä on $1 vapaana, alle rajan $2; lataukset odottavat."
+  ],
+  [
+   "^Disk of the device directory has (.+) free; (.+) more would leave less than the (.+) limit; downloads paused\\.$",
+   "Laitehakemiston levyllä on $1 vapaana; vielä $2 jättäisi alle rajan $3; lataukset odottavat."
+  ],
+  [
+   "^Disk of (.+) has (.+) free, below the (.+) limit; writes paused\\.$",
+   "Levyllä $1 on $2 vapaana, alle rajan $3; kirjoitukset odottavat."
+  ],
+  [
+   "^Disk of (.+) has (.+) free; (.+) more would leave less than the (.+) limit; writes paused\\.$",
+   "Levyllä $1 on $2 vapaana; vielä $3 jättäisi alle rajan $4; kirjoitukset odottavat."
   ]
  ],
  "review": [
@@ -1510,6 +1554,14 @@
   [
    "The file system on (.+) has errors that could not be repaired automatically; nothing was read or written\\. Run `sudo e2fsck -f (\\S+)` by hand or retire the disk\\.",
    "Levyn $1 tiedostojärjestelmässä on virheitä, joita ei voitu korjata automaattisesti; mitään ei luettu eikä kirjoitettu. Aja `sudo e2fsck -f $2` käsin tai poista levy käytöstä."
+  ],
+  [
+   ", (\\d+) waiting for disk space",
+   ", $1 odottaa levytilaa"
+  ],
+  [
+   " · keeps ([^·]+?) free$",
+   " · pitää $1 vapaana"
   ]
  ]
 }

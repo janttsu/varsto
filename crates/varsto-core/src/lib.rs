@@ -21,6 +21,7 @@ pub mod crypto;
 pub mod diskconf;
 pub mod disksuggest;
 pub mod engine;
+pub mod freespace;
 pub mod ids;
 pub mod import;
 pub mod kem;
