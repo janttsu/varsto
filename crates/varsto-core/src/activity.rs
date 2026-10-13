@@ -81,6 +81,9 @@ pub const IMPORT: &str = "import";
 pub const TRASH_RESTORE: &str = "trash_restore";
 pub const TRASH_PURGE: &str = "trash_purge";
 pub const TRASH_MOVE: &str = "trash_move";
+/// Emptying a storage onto the others (`engine::drain`); steps "copy"
+/// (blocks) and "records" (ledger batches, manifests and records).
+pub const DRAIN: &str = "drain";
 
 /// What `done` and `total` count.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -501,6 +504,8 @@ pub fn describe(t: &TaskView) -> String {
         (SCRUB, "files") => format!("checking the files of folder «{s}» for bit rot"),
         (SCRUB, "cache") => "checking the block cache for bit rot".to_string(),
         (SCRUB, _) => format!("checking storage «{s}» for bit rot"),
+        (DRAIN, "records") => format!("copying the records off storage «{s}»"),
+        (DRAIN, _) => format!("draining storage «{s}»"),
         (RESTIC, "backup") => "backing up the mirror with restic".to_string(),
         (RESTIC, "forget") => "removing old restic snapshots".to_string(),
         (RESTIC, "repo_check") => "checking the restic repository".to_string(),

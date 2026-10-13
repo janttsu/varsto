@@ -939,3 +939,16 @@ body[data-mobile="1"] .rg-details, body[data-mobile="1"] .rg-status, body[data-m
   .rg-step { break-inside: avoid; }
   .rg-literal, .rg-cmd { background: #fff; border-color: #999; }
 }
+/* Storage quotas and drains: a bar on the storage row, facts in the drain dialog. */
+.li-usage { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
+.usage-bar { flex: 0 0 140px; height: 8px; border-radius: 4px; background: var(--grey-bg); overflow: hidden; }
+.usage-bar > span { display: block; height: 100%; background: var(--accent); }
+.usage-bar.risk > span { background: var(--risk-text); }
+.usage-bar.bad > span { background: var(--bad-text); }
+.usage-note { flex: 1 1 100%; font-size: 12.5px; }
+.usage-note.risk { color: var(--risk-text); }
+.usage-note.bad { color: var(--bad-text); }
+.modal-facts { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; margin: 0 0 12px; font-size: 13px; }
+.modal-facts dt { color: var(--muted); }
+.modal-facts dd { margin: 0; overflow-wrap: anywhere; }
+@media (max-width: 520px) { .modal-facts { grid-template-columns: 1fr; } .modal-facts dd { margin-bottom: 6px; } .usage-bar { flex-basis: 100px; } }

@@ -95,6 +95,50 @@ impl NameResolver {
         }
         (!known && self.readable.contains(name)).then(|| name.to_string())
     }
+
+    /// Other devices' storage names that match a storage here by
+    /// identity: device -> (their name -> local name).
+    pub(super) fn aliases(&self) -> BTreeMap<DeviceId, BTreeMap<String, String>> {
+        self.theirs
+            .iter()
+            .map(|(d, names)| {
+                (
+                    d.clone(),
+                    names
+                        .iter()
+                        .filter_map(|(n, id)| {
+                            self.local_by_id.get(id).map(|l| (n.clone(), l.clone()))
+                        })
+                        .collect::<BTreeMap<_, _>>(),
+                )
+            })
+            .filter(|(_, m)| !m.is_empty())
+            .collect()
+    }
+
+    /// Like `resolve`, with every configured storage (`configured`) as a
+    /// candidate for an equal name, readable now or not; replicas are
+    /// their own storages.
+    pub(super) fn resolve_any(
+        &self,
+        name: &str,
+        claimers: &BTreeSet<DeviceId>,
+        configured: &BTreeSet<String>,
+    ) -> Option<String> {
+        if name.starts_with("replica:") {
+            return Some(name.to_string());
+        }
+        let mut known = false;
+        for d in claimers {
+            if let Some(id) = self.theirs.get(d).and_then(|n| n.get(name)) {
+                known = true;
+                if let Some(local) = self.local_by_id.get(id) {
+                    return Some(local.clone());
+                }
+            }
+        }
+        (!known && configured.contains(name)).then(|| name.to_string())
+    }
 }
 
 impl Engine {
@@ -200,6 +244,7 @@ impl Engine {
                 }
             }
             let mut mine_published = false;
+            let mut mine_newest = 0i64;
             for (dev, k) in newest {
                 let Ok(dev) = DeviceId::from_hex(dev) else {
                     continue;
@@ -218,6 +263,7 @@ impl Engine {
                 let Some(rec) = rec else { continue };
                 if &dev == me {
                     mine_published = rec.names == *mine;
+                    mine_newest = rec.updated_utc;
                     continue;
                 }
                 if out.get(&dev).is_none_or(|(t, _)| *t < rec.updated_utc) {
@@ -225,9 +271,10 @@ impl Engine {
                 }
             }
             if !mine_published && !self.vault.member && !mine.is_empty() {
+                // Newer than the list it replaces, even within the same second.
                 let rec = StorageNames {
                     device: me.clone(),
-                    updated_utc: util::now_utc(),
+                    updated_utc: util::now_utc().max(mine_newest + 1),
                     names: mine.clone(),
                 };
                 let sealed = serde_json::to_vec(&rec)

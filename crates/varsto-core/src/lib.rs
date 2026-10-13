@@ -49,6 +49,7 @@ pub mod scrub;
 pub mod share;
 pub mod snapshot;
 pub mod storage;
+pub mod storage_settings;
 pub mod strongroom;
 pub mod thumbs;
 pub mod util;

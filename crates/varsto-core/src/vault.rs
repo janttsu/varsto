@@ -1257,6 +1257,11 @@ pub struct Config {
     /// The "next disk to dock" reminder (`crate::disksuggest`).
     #[serde(default)]
     pub disk_suggest: crate::disksuggest::SuggestSettings,
+    /// Quotas and drains of the storages, by storage name: this device's
+    /// copy of the vault-wide settings (`crate::storage_settings`).
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub storage_settings:
+        std::collections::BTreeMap<String, crate::storage_settings::SettingsEntry>,
 }
 
 /// A backup taken on this device (local, never published).

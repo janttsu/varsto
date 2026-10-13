@@ -1067,6 +1067,10 @@ impl Engine {
         let Some(ts_name) = self.trash_storage_here() else {
             return Ok(());
         };
+        // A trash storage being drained takes nothing new (`drain`).
+        if self.closed_storages().contains(&ts_name) {
+            return Ok(());
+        }
         if self.vault.member || !self.state_path(&rec.folder_id).exists() {
             return Ok(());
         }
@@ -1140,6 +1144,9 @@ impl Engine {
             items.iter().map(|(c, _)| c.size).sum(),
             activity::Unit::Bytes,
         );
+        // A trash storage with a quota takes what fits; the rest stays where
+        // it is (`quotas`).
+        let gate = self.quota_gate(&view);
         let mut failed = 0u64;
         for group in items.chunks(MOVE_GROUP) {
             task.advance(group.iter().map(|(c, _)| c.size).sum());
@@ -1148,6 +1155,9 @@ impl Engine {
                 let key = chunk_storage_key(&c.object);
                 let good = |ct: &Vec<u8>| ObjectName::from_bytes(&crypto::hash(ct)) == c.object;
                 if !on_ts {
+                    if !gate.take(&ts_name, c.size) {
+                        continue;
+                    }
                     let ct = self.cached_object(&c.object).or_else(|| {
                         match fetch::fetch_object(
                             self.peers.as_deref(),
@@ -1229,6 +1239,7 @@ impl Engine {
                 rec.name
             ));
         }
+        report.notes.extend(gate.refusals());
         if ts_spec.is_cold() {
             if let Some(d) = self.minimum_secs(&ts_name) {
                 report.notes.push(format!(

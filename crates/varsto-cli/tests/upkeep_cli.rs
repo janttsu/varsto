@@ -211,3 +211,94 @@ fn scrub_commands() {
     assert!(st["last_run_utc"].is_number());
     assert!(st["targets"]["storage:box"].is_object(), "{st}");
 }
+
+#[test]
+fn quota_and_drain_commands() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    let a = root.join("a");
+    let (old, new) = (root.join("old"), root.join("new"));
+    let docs = root.join("docs");
+    ok(&a, &["init", "--name", "laptop"]);
+    ok(
+        &a,
+        &[
+            "storage",
+            "add-local",
+            "old",
+            old.to_str().unwrap(),
+            "--place",
+            "cloud",
+        ],
+    );
+    ok(&a, &["folder", "add", "docs", docs.to_str().unwrap()]);
+    fs::write(docs.join("a.bin"), vec![7u8; 300_000]).unwrap();
+    fs::write(docs.join("b.txt"), b"bee").unwrap();
+    ok(&a, &["sync"]);
+
+    // A quota: set in decimal units, shown in the list, measured, cleared.
+    let q = ok(&a, &["storage", "quota", "old", "--bytes", "2GB"]);
+    assert_eq!(q["quota_bytes"], 2_000_000_000u64);
+    assert_eq!(q["state"], "ok");
+    let list = ok(&a, &["storage", "list"]);
+    assert_eq!(list[0]["quota"]["quota_bytes"], 2_000_000_000u64);
+    let m = ok(&a, &["storage", "quota", "old", "--measure"]);
+    assert!(m["measured_utc"].as_i64().is_some());
+    assert!(m["used_objects"].as_u64().unwrap() > 0);
+    let q = ok(&a, &["storage", "quota", "old", "--clear"]);
+    assert!(q.get("quota_bytes").is_none());
+    let bad = Command::new(env!("CARGO_BIN_EXE_varsto"))
+        .arg("--home")
+        .arg(&a)
+        .args(["storage", "quota", "old", "--bytes", "lots"])
+        .env("VARSTO_PASSPHRASE", "test passphrase")
+        .output()
+        .unwrap();
+    assert!(!bad.status.success());
+
+    // Draining the only storage is refused; with another one it plans,
+    // runs and removes the storage when empty.
+    let alone = Command::new(env!("CARGO_BIN_EXE_varsto"))
+        .arg("--home")
+        .arg(&a)
+        .args(["storage", "drain", "old"])
+        .env("VARSTO_PASSPHRASE", "test passphrase")
+        .output()
+        .unwrap();
+    assert!(!alone.status.success());
+    assert!(String::from_utf8_lossy(&alone.stderr).contains("only storage"));
+    ok(
+        &a,
+        &[
+            "storage",
+            "add-local",
+            "new",
+            new.to_str().unwrap(),
+            "--place",
+            "cloud",
+        ],
+    );
+    let plan = ok(&a, &["storage", "drain", "old", "--plan"]);
+    assert_eq!(plan["policy"], "ok");
+    assert!(plan["blocks_to_copy"].as_u64().unwrap() > 0);
+    assert_eq!(
+        ok(&a, &["storage", "drain", "status"]),
+        serde_json::json!([])
+    );
+    let r = ok(
+        &a,
+        &[
+            "storage",
+            "drain",
+            "old",
+            "--remove-when-empty",
+            "--budget-gb-per-day",
+            "5",
+        ],
+    );
+    assert_eq!(r["run"]["drained"], true, "{r}");
+    assert_eq!(r["run"]["removed"], true);
+    let list = ok(&a, &["storage", "list"]);
+    assert_eq!(list.as_array().unwrap().len(), 1);
+    assert_eq!(list[0]["name"], "new");
+}
