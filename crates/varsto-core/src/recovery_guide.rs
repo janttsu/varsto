@@ -466,7 +466,7 @@ fn storage_item(spec: &StorageSpec, inputs: &Inputs) -> Item {
                 .collect();
             let mut keep = vec![
                 tx("The disks themselves, with their stickers, in the places above: not all in the same building as your computers.", &[]),
-                tx("The pool's name exactly as written: «{pool}». The disks are recognised by the vault key and this name.", &[("pool", pool)]),
+                tx("The pool's name exactly as written: «{pool}». The disks are recognized by the vault key and this name.", &[("pool", pool)]),
             ];
             if !literal.is_empty() {
                 keep.push(tx("The lines of disks.conf below (Linux): they let Varsto mount the drives by the names on their stickers.", &[]));
@@ -982,7 +982,7 @@ pub fn build(inputs: &Inputs) -> RecoveryGuide {
                 commands.push("varsto disk insert".into());
             }
             notes.push(tx(
-                "Elsewhere, mount the disk as usual: Varsto recognises a disk of the pool by its marker when it is attached, and `varsto disk list` shows it.",
+                "Elsewhere, mount the disk as usual: Varsto recognizes a disk of the pool by its marker when it is attached, and `varsto disk list` shows it.",
                 &[],
             ));
             commands.push("varsto disk list".into());

@@ -511,7 +511,7 @@ fn no_vault(h: &mut HelpState) {
         .how(t0("Give this device a name and a passphrase. The passphrase opens the vault on this device only."))
         .how(t0("Varsto then shows the vault key once. Write it down and keep it offline: it is the only way to recover your files if every device is lost."))
         .how(t0("Next you add a storage and a folder; this page tells you how."))
-        .act("setup", Some("init"), "Create a vault")
+        .act("setup", Some("init"), "Create vault")
         .cmd("varsto init --name <this device's name>")
         .guide("start")
         .0,
@@ -526,7 +526,7 @@ fn no_vault(h: &mut HelpState) {
         .how(t0("On the other device, open Peers and choose Add a device. It shows a nine-digit code."))
         .how(t0("Type the code here, with a name and a passphrase for this device."))
         .how(t0("No other device at hand? Join with the vault key (the 24 recovery words) and a storage that holds the vault."))
-        .act("setup", Some("pair"), "Pair with a code")
+        .act("setup", Some("pair"), "Pair")
         .cmd("varsto pair join --code <the nine digits>")
         .guide("devices")
         .0,
@@ -631,7 +631,12 @@ fn situation(h: &mut HelpState, i: &Inputs, storages: &[&StorageIn], fg: &Figure
         )
     } else {
         tx(
-            "Your files are kept in {storages} storage(s) and on {devices} device(s).",
+            match (storages.len() == 1, fg.devices == 1) {
+                (true, true) => "Your files are kept in 1 storage and on 1 device.",
+                (true, false) => "Your files are kept in 1 storage and on {devices} devices.",
+                (false, true) => "Your files are kept in {storages} storages and on 1 device.",
+                (false, false) => "Your files are kept in {storages} storages and on {devices} devices.",
+            },
             &[
                 ("storages", storages.len().to_string()),
                 ("devices", fg.devices.to_string()),
@@ -850,7 +855,11 @@ fn situation(h: &mut HelpState, i: &Inputs, storages: &[&StorageIn], fg: &Figure
     }
     if i.trash_entries > 0 {
         d.push(tx(
-            "Trash: {count} deleted files ({size}), each kept {days} days.",
+            if i.trash_entries == 1 {
+                "Trash: 1 deleted file ({size}), kept {days} days."
+            } else {
+                "Trash: {count} deleted files ({size}), each kept {days} days."
+            },
             &[
                 ("count", i.trash_entries.to_string()),
                 ("size", human_bytes(i.trash_bytes)),
@@ -961,7 +970,11 @@ fn attention(h: &mut HelpState, i: &Inputs, storages: &[&StorageIn]) {
             "repair",
             "bad",
             tx(
-                "{count} damaged copies could not be repaired yet.",
+                if i.repair_losses == 1 {
+                    "1 damaged copy could not be repaired yet."
+                } else {
+                    "{count} damaged copies could not be repaired yet."
+                },
                 &[("count", i.repair_losses.to_string())],
             ),
         );
@@ -971,7 +984,11 @@ fn attention(h: &mut HelpState, i: &Inputs, storages: &[&StorageIn]) {
             "repair",
             "warn",
             tx(
-                "{count} damaged copies are waiting for repair.",
+                if i.repair_queued == 1 {
+                    "1 damaged copy is waiting for repair."
+                } else {
+                    "{count} damaged copies are waiting for repair."
+                },
                 &[("count", i.repair_queued.to_string())],
             ),
         );
@@ -1219,7 +1236,11 @@ fn attention(h: &mut HelpState, i: &Inputs, storages: &[&StorageIn]) {
                 "org_pending",
                 "warn",
                 tx(
-                    "{count} devices wait for your approval in {org}.",
+                    if o.pending == 1 {
+                        "1 device waits for your approval in {org}."
+                    } else {
+                        "{count} devices wait for your approval in {org}."
+                    },
                     &[("count", o.pending.to_string()), ("org", o.name.clone())],
                 ),
             );
@@ -1296,7 +1317,7 @@ fn steps(h: &mut HelpState, i: &Inputs, storages: &[&StorageIn], offsite_configu
         if sv.running && sv.paused {
             out.push(
                 StepB::new("resume", "urgent", t0("Resume syncing"), t0("Syncing is paused: changes on this device are not copied to your storages."))
-                    .how(t0("Choose Resume on the Overview page, or in the menu of the tray icon."))
+                    .how(t0("Choose Resume on the Overview page, or untick Pause syncing in the tray menu."))
                     .act("overview", Some("pause"), "Show the Resume button")
                     .0,
             );
@@ -1312,7 +1333,7 @@ fn steps(h: &mut HelpState, i: &Inputs, storages: &[&StorageIn], offsite_configu
     if storages.is_empty() && !i.member {
         out.push(
             StepB::new("add_storage", "urgent", t0("Add a storage"), t0("Your files have no copy outside this device yet. If this device breaks or is lost, they are gone."))
-                .how(t0("A storage is a place where Varsto keeps encrypted copies: an S3 bucket at a cloud provider, a folder on a NAS or USB disk, an rclone remote, or a pool of disks you swap in and out."))
+                .how(t0("A storage is a place where Varsto keeps encrypted copies: an S3 bucket at a cloud provider, a folder on a NAS or USB disk, an rclone remote, or a pool of removable disks you plug in one at a time."))
                 .how(t0("Everything is encrypted on this device first; the storage sees only sealed blocks."))
                 .how(t0("Best: one storage at home and one elsewhere, for example a USB disk and a cloud bucket."))
                 .act("storages", Some("addstorage"), "Add a storage")
@@ -1524,7 +1545,11 @@ fn steps(h: &mut HelpState, i: &Inputs, storages: &[&StorageIn], offsite_configu
                     "important",
                     t0("Approve the devices that wait"),
                     tx(
-                        "{count} devices wait for an administrator to add them.",
+                        if o.pending == 1 {
+                            "1 device waits for an administrator to add it."
+                        } else {
+                            "{count} devices wait for an administrator to add them."
+                        },
                         &[("count", o.pending.to_string())],
                     ),
                 )

@@ -278,7 +278,7 @@
           <h2 class="card-title">Data map</h2>
           <span id="datamap-total" class="muted small"></span>
         </div>
-        <div id="datamap" class="blocks" aria-label="One square per block of encrypted data: the colour says where it is kept, a filled square is also on this device"></div>
+        <div id="datamap" class="blocks" aria-label="One square per block of encrypted data: the color says where it is kept, a filled square is also on this device"></div>
         <div class="legend">
           <span class="legend-item"><i class="blk s-verified"></i>On a storage, verified by another device <b id="leg-verified">0</b></span>
           <span class="legend-item"><i class="blk s-stored"></i>On a storage, not yet verified elsewhere <b id="leg-stored">0</b></span>
@@ -506,7 +506,7 @@
         <h2 class="card-title">Storages</h2>
         <p class="muted small">Encrypted objects are written to every storage. Varsto never sends a key anywhere; a storage sees only sealed blocks.</p>
         <ul id="storages" class="list"></ul>
-        <div id="storages-empty" class="empty-state hidden"><div class="empty-icon"><svg class="icon"><use href="#i-storages"/></svg></div><p class="empty-title">No storage yet</p><p class="muted">Add a folder, an S3 bucket, an rclone remote or a pool of swappable disks below.</p></div>
+        <div id="storages-empty" class="empty-state hidden"><div class="empty-icon"><svg class="icon"><use href="#i-storages"/></svg></div><p class="empty-title">No storage yet</p><p class="muted">Add a folder, an S3 bucket, an rclone remote or a pool of removable disks below.</p></div>
       </div>
       <div id="pools"></div>
       <form id="adddisk" class="card narrow desktop-only hidden">
@@ -520,7 +520,7 @@
       </form>
       <form id="addstorage" class="card narrow">
         <h3 class="card-title"><svg class="icon accent"><use href="#i-plus"/></svg>Add a storage</h3>
-        <label>Type <select name="kind" id="storagekind"><option value="local-dir">One folder (a disk, USB disk or network share)</option><option value="s3">S3-compatible bucket</option><option value="rclone">rclone remote</option><option value="pool">Pool of swappable disks (plugged in one at a time)</option></select></label>
+        <label>Type <select name="kind" id="storagekind"><option value="local-dir">One folder (a disk, USB disk or network share)</option><option value="s3">S3-compatible bucket</option><option value="rclone">rclone remote</option><option value="pool">Pool of removable disks (plugged in one at a time)</option></select></label>
         <label>Name <input name="name" placeholder="box" required></label>
         <div data-kind="local-dir">
           <p class="muted small">One fixed path: an internal disk, a USB disk that usually stays attached, or a mounted network share. Varsto reads and writes it at that path; while it is not there, the storage is simply unavailable. For several disks you swap in and out, choose a pool instead.</p>
@@ -556,7 +556,7 @@
           <p class="muted small">Uses your rclone and its configuration; Varsto never sees the remote's credentials.</p>
         </div>
         <div data-kind="pool" class="hidden">
-          <p class="muted small">Several disks you plug in one at a time, for example old drives kept on a shelf. Varsto recognises each disk by a marker file, not by its path, fills it with what the pool still lacks, checks it when it comes back, and tells you which disk to attach for a file that is on a disk that is away.</p>
+          <p class="muted small">Several disks you plug in one at a time, for example old drives kept on a shelf. Varsto recognizes each disk by a marker file, not by its path, fills it with what the pool still lacks, checks it when it comes back, and tells you which disk to attach for a file that is on a disk that is away.</p>
           <label>Place (where the disks are kept) <input name="place" placeholder="shelf"></label>
           <label>Keep free on every disk (%) <input name="reserve_percent" value="5" size="4"></label>
           <label>Copies on disks in different places <input name="copies" value="1" size="3" inputmode="numeric"></label>
@@ -1045,7 +1045,7 @@
   </details>
   <details class="guide" data-guide="storages">
     <summary>Storages</summary>
-    <p>A storage is where Varsto keeps encrypted copies of your files: an S3 bucket at a cloud provider, a folder on a NAS or USB disk, an rclone remote, or a pool of disks you plug in one at a time. A storage only ever sees sealed blocks, never your files or their names.</p>
+    <p>A storage is where Varsto keeps encrypted copies of your files: an S3 bucket at a cloud provider, a folder on a NAS or USB disk, an rclone remote, or a pool of removable disks you plug in one at a time. A storage only ever sees sealed blocks, never your files or their names.</p>
     <p>Two storages in different places are much safer than one: for example a disk at home and a bucket in the cloud. A cold storage is written to but read only when you confirm, which suits cheap archive classes. A transferrer is a removable disk that carries files to a device with a slow connection and keeps no copies.</p>
     <p>A storage can have a quota, and you can empty one onto the others before you give it up (Drain).</p>
     <p class="guide-more"><a data-site="/features/" href="https://varsto.net/features/" target="_blank" rel="noopener">Storages on the website</a></p>
@@ -1086,7 +1086,7 @@
   </details>
   <details class="guide" data-guide="disks">
     <summary>Disk pools</summary>
-    <p>A pool is a set of disks you plug in one at a time, for example old drives kept on a shelf or at a friend's place. Varsto recognises each disk by a marker file, fills it with what the pool still lacks, checks it when it comes back, and tells you which disk to attach when a file is only on a disk that is away.</p>
+    <p>A pool of removable disks is a set of disks you plug in one at a time, for example old drives kept on a shelf or at a friend's place. Varsto recognizes each disk by a marker file, fills it with what the pool still lacks, checks it when it comes back, and tells you which disk to attach when a file is only on a disk that is away.</p>
     <p>Eject a disk on the Storages page before you unplug it.</p>
   </details>
   <details class="guide" data-guide="recovery">
@@ -1101,7 +1101,7 @@
   </details>
   <details class="guide" data-guide="mcp">
     <summary>AI assistants (MCP)</summary>
-    <p>Varsto has an MCP server for an AI assistant of your choice, for example one running on your own computer. It sees only the folders you grant, and only at the level you choose: read, analyse or change. Grant access with <code>varsto mcp grant</code> on the command line.</p>
+    <p>Varsto has an MCP server for an AI assistant of your choice, for example one running on your own computer. It sees only the folders you grant, and only at the level you choose: read, analyze or change. Grant access with <code>varsto mcp grant</code> on the command line.</p>
   </details>
 </template>
 </body>
