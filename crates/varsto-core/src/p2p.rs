@@ -169,6 +169,10 @@ pub struct Snapshot {
     pub local_roots: Vec<PathBuf>,
     /// Revoked devices: refused even if they still hold a valid token.
     pub revoked: std::collections::BTreeSet<DeviceId>,
+    /// Devices told what this one is doing (`/p2p/activity`): in an
+    /// organization the devices of the same user; `None` for every device
+    /// of the vault.
+    pub activity_audience: Option<std::collections::BTreeSet<DeviceId>>,
 }
 
 impl Snapshot {
@@ -562,7 +566,7 @@ fn serve_connection(
 }
 
 /// Answer one peer request, whatever transport carried it: `(status, body)`.
-/// Paths: `/p2p/info` and `/p2p/object/<name>`. No snapshot means the
+/// Paths: `/p2p/info`, `/p2p/object/<name>`, `/p2p/changed` and `/p2p/activity`. No snapshot means the
 /// service is locked.
 pub fn handle(snap: Option<&Snapshot>, path: &str, auth: &str) -> (u16, Vec<u8>) {
     let (status, body, _) = handle_from(snap, path, auth);
@@ -583,6 +587,19 @@ pub fn handle_from(
         Some(dev) if !snap.revoked.contains(&dev) => dev,
         _ => return (403, b"forbidden".to_vec(), None),
     };
+    if path == "/p2p/activity" {
+        // What this device is doing now; in an organization only for the
+        // devices of the same user.
+        if snap
+            .activity_audience
+            .as_ref()
+            .is_some_and(|a| !a.contains(&dev))
+        {
+            return (403, b"not shared with this device".to_vec(), Some(dev));
+        }
+        let body = serde_json::to_vec(&crate::activity::local(&snap.device_id)).unwrap_or_default();
+        return (200, body, Some(dev));
+    }
     let (status, body) = answer(snap, path);
     (status, body, Some(dev))
 }
@@ -1446,6 +1463,15 @@ impl Peers {
         }
     }
 
+    /// One request to one peer, over the route that worked last: `None`
+    /// when the device is not in the table, rests after a failure, or no
+    /// route reached it. For small requests (`/p2p/activity`).
+    pub fn ask(&self, device: &DeviceId, path: &str) -> Option<(u16, Vec<u8>)> {
+        let p = self.ordered().into_iter().find(|p| &p.device == device)?;
+        let auth = auth_header(&self.key, &self.me, path);
+        self.fetch(&p, path, &auth).map(|(s, b, _)| (s, b))
+    }
+
     /// Which peers answer right now, and over which path.
     pub fn probe(&self) -> Vec<PeerStatus> {
         let path = "/p2p/info";
@@ -1654,6 +1680,7 @@ mod tests {
             pieces: BTreeMap::new(),
             local_roots: Vec::new(),
             revoked: [gone.clone()].into_iter().collect(),
+            activity_audience: None,
         };
         let ask = |dev: &DeviceId| {
             handle(
@@ -1667,6 +1694,41 @@ mod tests {
         assert_eq!(ask(&gone), 403);
         let stale = auth_header(&SecretKey::random(), &good, "/p2p/info");
         assert_eq!(handle(Some(&snap), "/p2p/info", &stale).0, 403);
+    }
+
+    #[test]
+    fn activity_is_told_to_authenticated_devices_of_the_audience_only() {
+        let key = SecretKey::random();
+        let me = DeviceId::random();
+        let (same_user, other_user) = (DeviceId::random(), DeviceId::random());
+        let mut snap = Snapshot {
+            vault_id: crate::ids::VaultId::random(),
+            device_id: me.clone(),
+            peer_key: key.clone(),
+            folder_keys: BTreeMap::new(),
+            pieces: BTreeMap::new(),
+            local_roots: Vec::new(),
+            revoked: Default::default(),
+            activity_audience: None,
+        };
+        let path = "/p2p/activity";
+        let ask = |snap: &Snapshot, dev: &DeviceId| handle(Some(snap), path, &auth_header(&key, dev, path));
+        let (status, body) = ask(&snap, &other_user);
+        assert_eq!(status, 200);
+        let a: crate::activity::DeviceActivity = serde_json::from_slice(&body).unwrap();
+        assert_eq!(a.device, me.to_string());
+        assert!(a.state == "idle" || a.state == "busy");
+        // No token, or a token of another vault: nothing.
+        assert_eq!(handle(Some(&snap), path, "").0, 403);
+        let stranger = auth_header(&SecretKey::random(), &same_user, path);
+        assert_eq!(handle(Some(&snap), path, &stranger).0, 403);
+        assert_eq!(handle(None, path, &auth_header(&key, &same_user, path)).0, 503);
+        // An organization: only the devices of the same user.
+        snap.activity_audience = Some([same_user.clone()].into_iter().collect());
+        assert_eq!(ask(&snap, &same_user).0, 200);
+        let (status, body) = ask(&snap, &other_user);
+        assert_eq!(status, 403);
+        assert!(!String::from_utf8_lossy(&body).contains("idle"));
     }
 
     #[test]

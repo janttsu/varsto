@@ -420,7 +420,14 @@ impl Engine {
         let mut unreachable: BTreeSet<String> = BTreeSet::new();
         let mut keep: Vec<Damage> = Vec::new();
         let (mut blocks, mut bytes) = (0u64, 0u64);
+        let task = crate::activity::start(
+            crate::activity::REPAIR,
+            "",
+            queue.len() as u64,
+            crate::activity::Unit::Items,
+        );
         for mut d in queue {
+            task.advance(1);
             if !opts.retry_all && d.retry_utc > now {
                 report.left_for_next_run += 1;
                 keep.push(d);

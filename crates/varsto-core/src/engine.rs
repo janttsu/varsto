@@ -13,6 +13,7 @@
 //! Cold storages (F-043) are written but never read without an explicit
 //! confirmation; alpha-0 simply never reads them.
 
+use crate::activity;
 use crate::chunking::{Chunker, ChunkerParams};
 use crate::crypto::{self, KeyedHasher, SecretKey};
 use crate::ids::{ChunkId, DeviceId, FolderId, ObjectName, VaultId};
@@ -1446,7 +1447,15 @@ impl Engine {
                 format!("{name} must be reachable to copy its blocks elsewhere first")
             })?;
             let mut targets: HashMap<String, Box<dyn Storage>> = HashMap::new();
+            let task = activity::start(
+                activity::STORAGE_REMOVAL,
+                name,
+                plan.copies.len() as u64,
+                activity::Unit::Items,
+            );
+            task.set_phase("copy");
             for c in &plan.copies {
+                task.advance(1);
                 let key = chunk_storage_key(&c.object);
                 let bytes = source
                     .get(&key)?
@@ -1475,7 +1484,10 @@ impl Engine {
             });
             self.commit_batch()?;
             if delete_data {
-                for key in source.list("")? {
+                let keys = source.list("")?;
+                task.step("delete", keys.len() as u64, activity::Unit::Items);
+                for key in keys {
+                    task.advance(1);
                     source.delete(&key)?;
                     report.objects_deleted += 1;
                 }
@@ -2333,6 +2345,7 @@ impl Engine {
         root: &Path,
         state: &mut FolderState,
     ) -> Result<(u64, u64)> {
+        let _task = activity::start(activity::SYNC_SCAN, &rec.name, 0, activity::Unit::Items);
         if self.mount_is_encrypted(&rec.folder_id) {
             return self.scan_cached(rec, root, state);
         }
@@ -2396,6 +2409,7 @@ impl Engine {
                 .map(|d| d.as_nanos() as i64)
                 .unwrap_or(0);
             scanned += 1;
+            activity::advance_current(1);
             seen.insert(path.clone());
             // Last-accessed: the newest of what Varsto recorded, the file's
             // access time (when the filesystem keeps one) and its mtime.
@@ -2670,6 +2684,15 @@ impl Engine {
                 .collect()
         };
         let encrypted_here = self.mount_is_encrypted(&folder_id);
+        // Counted by the files' transfers (`progress`) on this thread.
+        let to_upload: u64 = state
+            .files
+            .values()
+            .filter(|f| !f.deleted && !f.chunks.iter().all(|c| missing_on(c).is_empty()))
+            .map(|f| f.size)
+            .sum();
+        let _task = (to_upload > 0)
+            .then(|| activity::start(activity::UPLOAD, &rec.name, to_upload, activity::Unit::Bytes));
         // Reading, chunking and encrypting stay on this thread; the writes go
         // to a few uploader threads, so that many small objects do not each
         // wait for the previous one's round trip to the storage. The queue is
@@ -3154,6 +3177,8 @@ impl Engine {
         let fk = self.folder_keys(&rec)?;
         let me = self.vault.device_id.clone();
         let storages = self.open_storages(false)?;
+        // Counted by the files' downloads (`progress`); the total is not known.
+        let _task = activity::start(activity::DOWNLOAD, &rec.name, 0, activity::Unit::Bytes);
 
         // Files whose copies were unreachable last time: a storage or a peer
         // may have them now.
@@ -4384,7 +4409,30 @@ impl Engine {
                 .chain(self.devices.devices.keys().filter(|d| !self.trusted(d)))
                 .cloned()
                 .collect(),
+            activity_audience: self.activity_audience(),
         })
+    }
+
+    /// The devices this one tells what it is doing (`/p2p/activity`) and
+    /// asks the same of: in an organization, the devices the roster gives to
+    /// the same user, as for the other details of one's own devices; `None`
+    /// (every device of the vault) otherwise.
+    pub fn activity_audience(&self) -> Option<BTreeSet<DeviceId>> {
+        let org = self.org.as_ref()?;
+        let roster = org.roster.as_ref()?;
+        let me = &self.vault.device_id;
+        let Some(user) = org.user_of(me) else {
+            // Not in the roster (yet): nobody.
+            return Some(BTreeSet::new());
+        };
+        Some(
+            roster
+                .members
+                .iter()
+                .filter(|m| m.user == user && &m.device != me)
+                .map(|m| m.device.clone())
+                .collect(),
+        )
     }
 
     /// The device's QUIC certificate, created on first use (`p2p enable`).
@@ -4956,6 +5004,8 @@ impl Engine {
     /// `fsck` without touching the repair queue: the report and every
     /// damaged copy on a storage of this device that repair could rewrite.
     fn fsck_scan(&mut self, verify_content: bool) -> Result<(FsckReport, Vec<Damage>)> {
+        let task = activity::start(activity::FSCK, "", 0, activity::Unit::Items);
+        task.set_phase("scan");
         let _ = self.pull_ledger()?;
         let view = self.view()?;
         let mut report = FsckReport {
@@ -5093,7 +5143,9 @@ impl Engine {
         }
         if verify_content {
             let mut corrupt_pools: BTreeSet<String> = BTreeSet::new();
+            task.step("verify", referenced.len() as u64, activity::Unit::Items);
             for ((folder, chunk), object) in &referenced {
+                task.advance(1);
                 let key = chunk_storage_key(object);
                 for (spec, backend) in &storages {
                     let ct = match backend.get(&key) {
@@ -5256,7 +5308,9 @@ impl Engine {
         let mount = pool
             .mount_of(&disk.id)
             .ok_or_else(|| anyhow!("disk {} is not attached", disk.label))?;
+        let task = activity::start(activity::DISK_CHECK, &disk.label, 0, activity::Unit::Bytes);
         let (objects_removed, bytes_removed) = pool.apply_pending_deletes(&disk.id)?;
+        task.set_phase("verify");
         let verified = pool.verify_disk(&disk.id, full)?;
         if full {
             // Every object on the disk was re-hashed: that is a verification
@@ -5286,8 +5340,10 @@ impl Engine {
         let (objects_added, bytes_added) = if disk.retired {
             (0, 0)
         } else {
+            task.step("fill", 0, activity::Unit::Bytes);
             self.fill_disk(&spec, &pool, &disk.id)?
         };
+        drop(task);
         self.commit_batch()?;
         pool.flush()?;
         let disks = pool.disks();
@@ -5436,8 +5492,10 @@ impl Engine {
         order.sort_by(|a, b| needed[b].size.cmp(&needed[a].size).then(a.cmp(b)));
         let sources = self.metadata_storages(false)?;
         let (mut n, mut bytes) = (0u64, 0u64);
+        activity::set_current_total(order.iter().map(|o| needed[o].size).sum());
         for object in order {
             let need = &needed[&object];
+            activity::advance_current(need.size);
             // Ciphertext is a little larger than the chunk; the exact size is
             // checked again by the pool when writing.
             if !pool.has_room(disk_id, need.size + 64) {

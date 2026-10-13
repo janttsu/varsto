@@ -12,6 +12,7 @@
 //! key encapsulation, XChaCha20-Poly1305) has not been reviewed independently.
 //! Do not use it as the only copy of anything.
 
+pub mod activity;
 pub mod advice;
 pub mod autoverify;
 pub mod chunking;
