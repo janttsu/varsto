@@ -312,8 +312,8 @@ document.addEventListener("click", function (e) {
 });
 
 function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); var t = blockTotal(b); if (t === 0) { return m; } var per = Math.max(1, Math.ceil(t / 40)); drawBlocks(m, b, per); m.title = t + " block" + (t === 1 ? "" : "s") + (per > 1 ? ", 1 square ≈ " + per + " blocks" : ""); return m; }
-  function fileStateKey(f) { return f.state === "placeholder" ? "ph" : f.state === "missing" ? "missing" : f.pinned ? "verified" : "stored"; }
-  function fileStateLabel(f) { return f.state === "placeholder" ? "Not on this device" : f.state === "missing" ? "Unavailable" : f.pinned ? "Local, kept here" : "Local"; }
+  function fileStateKey(f) { return f.state === "awaiting_import" ? "missing" : f.state === "placeholder" ? "ph" : f.state === "missing" ? "missing" : f.pinned ? "verified" : "stored"; }
+  function fileStateLabel(f) { return f.state === "awaiting_import" ? "Awaiting import" : f.state === "placeholder" ? "Not on this device" : f.state === "missing" ? "Unavailable" : f.pinned ? "Local, kept here" : "Local"; }
   function stateSquare(f) { var sq = el("i", "blk state-blk s-" + fileStateKey(f)); sq.title = fileStateLabel(f); return sq; }
 
   // Theme: the OS's until the user switches it (then persisted).
@@ -327,7 +327,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   $("themetoggle2").onclick = toggleTheme;
 
   // Navigation between the pages of the app section.
-  var titles = { overview: "Overview", files: "Files", shared: "Shared", storages: "Storages", backups: "Backups", policies: "Policies", peers: "Peers", organization: "Organization", settings: "Settings", recovery: "Recovery package", more: "More" };
+  var titles = { overview: "Overview", files: "Files", shared: "Shared", storages: "Storages", backups: "Backups", import: "Import", policies: "Policies", peers: "Peers", organization: "Organization", settings: "Settings", recovery: "Recovery package", more: "More" };
   var legacyPages = { folders: "files", sharing: "shared" };
   function pageTitle(p) { return titles[p] || "Overview"; }
   var currentPage = (function () { try { var p = sessionStorage.getItem("varsto-page"); p = legacyPages[p] || p; return titles[p] ? p : "overview"; } catch (e) { return "overview"; } })();
@@ -339,7 +339,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     currentPage = page;
     try { sessionStorage.setItem("varsto-page", page); } catch (e) {}
     document.querySelectorAll(".page").forEach(function (d) { d.classList.toggle("hidden", d.dataset.page !== page); });
-    var tab = page === "shared" || page === "backups" || page === "policies" || page === "peers" || page === "organization" || page === "settings" || page === "recovery" ? "more" : page;
+    var tab = page === "shared" || page === "backups" || page === "import" || page === "policies" || page === "peers" || page === "organization" || page === "settings" || page === "recovery" ? "more" : page;
     document.querySelectorAll(".sidebar .nav-item[data-nav]").forEach(function (b) { if (b.dataset.nav === page) { b.setAttribute("aria-current", "page"); } else { b.removeAttribute("aria-current"); } });
     document.querySelectorAll(".tabbar .nav-item[data-nav]").forEach(function (b) { if (b.dataset.nav === tab) { b.setAttribute("aria-current", "page"); } else { b.removeAttribute("aria-current"); } });
     if (document.body.dataset.view === "app") { $("pagetitle").textContent = pageTitle(page); }
@@ -347,6 +347,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     if (page === "organization") { loadOrg(); }
     if (page === "backups") { loadBackups(); }
     if (page === "recovery") { loadGuide(); }
+    if (page === "import") { loadImports(); }
     if (page === "overview" && lastWhere) { renderWhere(lastWhere); }
     trafficWatch();
     activityWatch();
@@ -1403,6 +1404,98 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
       log(r.queued ? "Backup added: " + d.name + "; its first snapshot is being taken in the background" : "Backup added: " + d.name);
       if (r.snapshot && r.snapshot.skipped && r.snapshot.skipped.length) { alertBox(r.snapshot.skipped.length + " files could not be read and were left out: " + r.snapshot.skipped.slice(0, 10).join(", ")); }
     }).catch(function (e) { alertBox(e.message); }).then(function () { busy(false); loadBackups(); });
+  };
+
+  // Import page: a folder of this device here; git-annex and cloud imports
+  // are shown with their command (they run on the command line).
+  var importCli = {
+    annex: ["varsto import git-annex /path/to/repository", "Run it once for every disk that holds a clone of the repository: each run continues the same folder with what that disk has, and says which disk to insert next. Nothing is changed on the disks."],
+    dropbox: ["rclone config create mydropbox dropbox\nvarsto import dropbox mydropbox:", "The first line signs in to Dropbox in your browser (once). Run the import again to bring changes over."],
+    onedrive: ["rclone config create myonedrive onedrive\nvarsto import onedrive myonedrive:", "The first line signs in to OneDrive in your browser (once). Run the import again to bring changes over."],
+    rclone: ["varsto import rclone remote:path", "Any remote set up in rclone (rclone config) works, Google Drive included."]
+  };
+  function importKind() {
+    var k = $("import-kind").value; var cli = importCli[k];
+    $("import-cli").classList.toggle("hidden", !cli);
+    $("import-dir-fields").classList.toggle("hidden", !!cli);
+    if (cli) { $("import-cli-cmd").textContent = cli[0]; $("import-cli-note").textContent = cli[1]; }
+  }
+  $("import-kind").onchange = importKind;
+  $("import-where").onchange = function () { $("import-dest-label").classList.toggle("hidden", $("import-where").value !== "full"); };
+  function loadImports() {
+    return api("GET", "/api/import/status").then(renderImports).catch(function (e) { log("imports: " + e.message); });
+  }
+  function renderImports(list) {
+    var tb = $("imports").querySelector("tbody"); tb.innerHTML = "";
+    $("imports-empty").classList.toggle("hidden", list.length > 0);
+    $("imports").classList.toggle("hidden", list.length === 0);
+    list.forEach(function (s) {
+      var tr = el("tr");
+      var n = el("td"); var nm = el("span", null, s.folder); nm.setAttribute("data-no-i18n", ""); n.appendChild(nm); tr.appendChild(n);
+      var src = el("td"); var sp = el("span", "sub", s.source); sp.setAttribute("data-no-i18n", ""); src.appendChild(sp); tr.appendChild(src);
+      tr.appendChild(el("td", "num", String(s.files_total)));
+      tr.appendChild(el("td", "num", String(s.files_awaiting)));
+      tr.appendChild(el("td", "num", s.removed_files ? s.removed_files + " (" + fmtBytes(s.removed_bytes) + ")" : "0"));
+      var act = el("td");
+      if (s.kind === "dir") {
+        var b = el("button", "secondary", "Remove safe files…"); b.type = "button";
+        b.onclick = function () { cleanupImport(s.folder); };
+        act.appendChild(b);
+      }
+      tr.appendChild(act); tb.appendChild(tr);
+    });
+  }
+  function showWaiting(c) {
+    var box = $("import-waiting"); box.innerHTML = "";
+    $("import-waiting-box").classList.toggle("hidden", !c || !c.waiting_count);
+    if (!c) { return; }
+    c.waiting.forEach(function (w) {
+      var li = el("li"); var p = el("span", null, w.path); p.setAttribute("data-no-i18n", ""); li.appendChild(p);
+      li.appendChild(el("span", "sub", w.reason)); box.appendChild(li);
+    });
+  }
+  function showCleanupPlan(folder, c) {
+    $("import-cleanup").classList.toggle("hidden", !c || !c.eligible);
+    showWaiting(c);
+    if (!c || !c.eligible) { return; }
+    $("import-cleanup-text").textContent = c.eligible + " file(s) (" + fmtBytes(c.eligible_bytes) + ") can be removed from " + c.source + " now.";
+    $("import-cleanup-go").onclick = function () {
+      confirmBox("Remove " + c.eligible + " file(s) (" + fmtBytes(c.eligible_bytes) + ") from " + c.source + "? Each one is checked once more first.", { title: "Remove source files?", ok: "Remove", danger: true }).then(function (yes) {
+        if (!yes) { return; }
+        busy(true);
+        return api("POST", "/api/import/cleanup", { folder: folder, apply: true }).then(function (r) {
+          log("Removed " + r.removed.length + " file(s) (" + fmtBytes(r.removed_bytes) + ") from the source");
+          $("import-cleanup").classList.add("hidden"); showWaiting(r);
+        }).then(function () { busy(false); loadImports(); }, function (e) { busy(false); throw e; });
+      }).catch(function (e) { alertBox(e.message); });
+    };
+  }
+  function cleanupImport(folder) {
+    api("POST", "/api/import/cleanup", { folder: folder, apply: false }).then(function (c) {
+      $("import-result").classList.remove("hidden");
+      $("import-summary").innerHTML = "";
+      if (!c.eligible) { $("import-summary").appendChild(el("li", null, "No source file can be removed yet.")); }
+      showCleanupPlan(folder, c);
+    }).catch(function (e) { alertBox(e.message); });
+  }
+  $("importform").onsubmit = function (ev) {
+    ev.preventDefault();
+    var d = formData(ev.target);
+    if (!d.source) { alertBox("Choose the folder to import."); return; }
+    if (d.where === "full" && !d.dest) { alertBox("Choose the directory for the copy."); return; }
+    busy(true);
+    api("POST", "/api/import/dir", { source: d.source, folder: d.folder, dest: d.where === "full" ? d.dest : "", selective: d.where !== "full", remove_source: !!d.remove_source }).then(function (r) {
+      $("import-result").classList.remove("hidden");
+      var ul = $("import-summary"); ul.innerHTML = "";
+      ul.appendChild(el("li", null, "Imported " + r.imported_files + " file(s) (" + fmtBytes(r.imported_bytes) + ") into folder " + r.folder));
+      if (r.already_ids) { ul.appendChild(el("li", null, r.already_ids + " file(s) were imported before")); }
+      if (r.failed_count) { ul.appendChild(el("li", null, r.failed_count + " file(s) could not be read: " + r.failed.map(function (n) { return n.path; }).join(", "))); }
+      if (r.skipped_count) { ul.appendChild(el("li", null, r.skipped_count + " item(s) not imported (links, special files, names Varsto cannot use): " + r.skipped.map(function (n) { return n.path; }).join(", "))); }
+      if (r.kept_in_varsto_count) { ul.appendChild(el("li", null, r.kept_in_varsto_count + " file(s) were changed in Varsto and kept as they are")); }
+      if (r.gone_at_source) { ul.appendChild(el("li", null, r.gone_at_source + " file(s) are gone from the source and kept in Varsto")); }
+      showCleanupPlan(r.folder, r.cleanup);
+      log("Imported into " + r.folder);
+    }).catch(function (e) { alertBox(e.message); }).then(function () { busy(false); loadImports(); });
   };
 
   // Automatic verification (Policies page): status line, run now, schedule.

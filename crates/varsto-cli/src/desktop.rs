@@ -1399,6 +1399,39 @@ fn api_unlocked(
             service.request_sync();
             Ok(json!({"ok": true, "id": id.to_string()}))
         }
+        (Method::Get, "/api/import/status") => {
+            Ok(serde_json::to_value(engine.import_status(None)?)?)
+        }
+        (Method::Post, "/api/import/dir") => {
+            let flag = |k: &str| input.get(k).and_then(|v| v.as_bool()).unwrap_or(false);
+            let source = PathBuf::from(s(input, "source")?);
+            let dest = opt(input, "dest")
+                .filter(|p| !p.trim().is_empty())
+                .map(PathBuf::from);
+            let opts = varsto_core::engine::ImportOptions {
+                folder: opt(input, "folder").filter(|f| !f.trim().is_empty()),
+                selective: dest.is_none() || flag("selective"),
+                dest,
+                dry_run: false,
+                remove_source: flag("remove_source"),
+                no_verify: false,
+                default_parent: Some(folder_root(engine.home())),
+            };
+            let mut src = varsto_core::import::dir::DirSource::open(&source)?;
+            let mut r = engine.import_run(&mut src, &opts)?;
+            if opts.remove_source {
+                r.cleanup = Some(engine.import_cleanup(&r.folder, false)?);
+            }
+            service.folders_changed = true;
+            service.request_sync();
+            Ok(serde_json::to_value(r)?)
+        }
+        (Method::Post, "/api/import/cleanup") => {
+            let apply = input.get("apply").and_then(|v| v.as_bool()).unwrap_or(false);
+            Ok(serde_json::to_value(
+                engine.import_cleanup(&s(input, "folder")?, apply)?,
+            )?)
+        }
         (Method::Post, "/api/folder/detach") => {
             engine.detach_folder(&s(input, "name")?)?;
             service.folders_changed = true;
@@ -1596,7 +1629,7 @@ fn api_unlocked(
         (Method::Get, "/api/files") => {
             let folder = query_param(query, "folder")
                 .ok_or_else(|| anyhow!("folder query parameter required"))?;
-            Ok(serde_json::to_value(engine.list_files(&folder)?)?)
+            Ok(serde_json::to_value(engine.list_files_with_pending(&folder)?)?)
         }
         (Method::Post, "/api/fetch") => {
             // A large fetch whose blocks are on pool disks: return the plan

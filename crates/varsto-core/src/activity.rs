@@ -73,6 +73,9 @@ pub const RESTIC: &str = "restic";
 pub const FOLDER_PURGE: &str = "folder_purge";
 /// Re-encrypting a folder into a Strongroom, or under a new Strongroom key.
 pub const STRONGROOM_CONVERT: &str = "strongroom_convert";
+/// Importing a git-annex repository, a cloud drive or a directory; steps
+/// "list", "read" and "cleanup".
+pub const IMPORT: &str = "import";
 
 /// What `done` and `total` count.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -499,6 +502,9 @@ pub fn describe(t: &TaskView) -> String {
         (RESTIC, _) => "checking that the restic mirror is complete".to_string(),
         (FOLDER_PURGE, _) => format!("deleting the data of folder «{s}»"),
         (STRONGROOM_CONVERT, _) => format!("re-encrypting folder «{s}» for the Strongroom"),
+        (IMPORT, "list") => format!("listing the files to import into folder «{s}»"),
+        (IMPORT, "cleanup") => format!("removing safely stored source files of folder «{s}»"),
+        (IMPORT, _) => format!("importing into folder «{s}»"),
         (k, _) if s.is_empty() => k.replace('_', " "),
         (k, _) => format!("{} «{s}»", k.replace('_', " ")),
     };
@@ -511,7 +517,7 @@ pub fn describe(t: &TaskView) -> String {
 /// What the items of a task are, for counts: "120 of 400 files".
 pub fn item_noun(kind: &str) -> &'static str {
     match kind {
-        SYNC_SCAN => "files",
+        SYNC_SCAN | IMPORT => "files",
         REPAIR => "copies",
         STRONGROOM_CONVERT => "files",
         FOLDER_PURGE => "objects",

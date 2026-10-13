@@ -22,6 +22,7 @@ pub mod diskconf;
 pub mod disksuggest;
 pub mod engine;
 pub mod ids;
+pub mod import;
 pub mod kem;
 pub mod ledger;
 pub mod manifest;
