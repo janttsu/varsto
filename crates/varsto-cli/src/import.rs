@@ -246,7 +246,7 @@ pub fn run(cli: &Cli, home: &Path, cmd: &ImportCmd) -> Result<()> {
         ImportCmd::Status { folder, missing } => {
             if *missing {
                 let list = engine.import_missing(folder.as_deref().unwrap_or_default())?;
-                print(cli, &list, describe_missing)?;
+                print(cli, &list, |l| describe_missing(l))?;
             } else {
                 let list = engine.import_status(folder.as_deref())?;
                 print(cli, &list, describe_status)?;
@@ -596,7 +596,7 @@ fn describe_status(list: &Vec<ImportStatus>) -> String {
     out.join("\n")
 }
 
-fn describe_missing(list: &Vec<MissingFile>) -> String {
+fn describe_missing(list: &[MissingFile]) -> String {
     if list.is_empty() {
         return "Nothing is awaiting import.".into();
     }
