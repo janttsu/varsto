@@ -589,7 +589,10 @@
   "A bucket at any S3-compatible provider (AWS, Scaleway, Hetzner, Backblaze B2, Cloudflare R2, MinIO and others), with your own keys.": "En bucket hos valfri S3-kompatibel leverantör (AWS, Scaleway, Hetzner, Backblaze B2, Cloudflare R2, MinIO med flera), med dina egna nycklar.",
   "Any remote you have set up in rclone, for example Google Drive, OneDrive, SFTP or WebDAV.": "Valfritt fjärrmål som du har konfigurerat i rclone, till exempel Google Drive, OneDrive, SFTP eller WebDAV.",
   "Folder path": "Mappens sökväg",
-  "Add a folder, an S3 bucket, an rclone remote or a pool of swappable disks below.": "Lägg till en mapp, en S3-bucket, en rclone-fjärrplats eller en pool med utbytbara diskar nedan."
+  "Add a folder, an S3 bucket, an rclone remote or a pool of swappable disks below.": "Lägg till en mapp, en S3-bucket, en rclone-fjärrplats eller en pool med utbytbara diskar nedan.",
+  "Allow access to photos and videos": "Tillåt åtkomst till bilder och videor",
+  "iOS no longer asks for this permission. Open Varsto's settings and allow access to Photos there.": "iOS frågar inte längre efter den här behörigheten. Öppna inställningarna för Varsto och tillåt åtkomst till Bilder där.",
+  "Varsto can only see the photos you picked; allow access to all photos in Settings to upload new ones": "Varsto ser bara bilderna du har valt; tillåt åtkomst till alla bilder i Inställningar för att ladda upp nya"
  },
  "patterns": [
   [
@@ -691,6 +694,26 @@
   [
    "^(.+) holds (\\d+) blocks? of your files\\. (\\d+) already have enough copies elsewhere; (\\d+) cop(?:y|ies) \\((.+)\\) will first be made on (.+)\\. Then no device counts \\1 as a copy any more\\. Remove leaves its data in place; you can also delete it\\.$",
    "Lagringen $1 innehåller $2 block av dina filer. $3 av dem har redan tillräckligt många kopior på annat håll; först görs $4 kopior ($5) på $6. Därefter räknar ingen enhet $1 som en kopia längre. Ta bort lämnar dess data kvar; du kan också radera den."
+  ],
+  [
+   "^On: new photos and videos go to (.+)\\.$",
+   "På: nya bilder och videor går till $1."
+  ],
+  [
+   "^(\\d+) uploaded so far, last on (.+)\\.$",
+   "$1 uppladdade hittills, senast $2."
+  ],
+  [
+   "^(\\d+) uploaded so far\\.$",
+   "$1 uppladdade hittills."
+  ],
+  [
+   "^Uploading (\\d+) of (\\d+) to (.+)$",
+   "Laddar upp $1 av $2 till $3"
+  ],
+  [
+   "^Camera upload reads new photos and videos on this phone and uploads them to (.+), encrypted\\. Varsto only reads them: the originals are never changed or deleted\\. (Android|iOS) asks you next\\.$",
+   "Kamerauppladdning läser nya bilder och videor på den här telefonen och laddar upp dem krypterade till $1. Varsto bara läser dem: originalen ändras eller raderas aldrig. Sedan frågar $2 om lov."
   ]
  ],
  "review": [
@@ -832,7 +855,15 @@
   "^Type (.+) to confirm$",
   "^Remove storage (.+)\\?$",
   "^(.+) holds (\\d+) blocks? of your files\\. Every block already has enough copies on your other storages\\. Then no device counts \\1 as a copy any more\\. Remove leaves its data in place; you can also delete it\\.$",
-  "^(.+) holds (\\d+) blocks? of your files\\. (\\d+) already have enough copies elsewhere; (\\d+) cop(?:y|ies) \\((.+)\\) will first be made on (.+)\\. Then no device counts \\1 as a copy any more\\. Remove leaves its data in place; you can also delete it\\.$"
+  "^(.+) holds (\\d+) blocks? of your files\\. (\\d+) already have enough copies elsewhere; (\\d+) cop(?:y|ies) \\((.+)\\) will first be made on (.+)\\. Then no device counts \\1 as a copy any more\\. Remove leaves its data in place; you can also delete it\\.$",
+  "Allow access to photos and videos",
+  "iOS no longer asks for this permission. Open Varsto's settings and allow access to Photos there.",
+  "Varsto can only see the photos you picked; allow access to all photos in Settings to upload new ones",
+  "^On: new photos and videos go to (.+)\\.$",
+  "^(\\d+) uploaded so far, last on (.+)\\.$",
+  "^(\\d+) uploaded so far\\.$",
+  "^Uploading (\\d+) of (\\d+) to (.+)$",
+  "^Camera upload reads new photos and videos on this phone and uploads them to (.+), encrypted\\. Varsto only reads them: the originals are never changed or deleted\\. (Android|iOS) asks you next\\.$"
  ],
  "parts": [
   [

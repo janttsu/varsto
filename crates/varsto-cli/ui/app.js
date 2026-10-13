@@ -126,6 +126,11 @@
   // iOS: the equivalent (UIDocumentInteractionController / UIActivityViewController) is not wired yet;
   // without a bridge the page falls back to the download link.
   var droid = window.VarstoAndroid || null;
+  // Camera upload settings: the Android bridge, or the iOS shell's `VarstoIOS` (same methods,
+  // injected by apps/ios before this script runs).
+  var camBridge = droid || window.VarstoIOS || null;
+  // iOS: pictures and videos open in the app's own full-screen viewer instead of the page's.
+  function nativeViewer() { return (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.varstoViewer) || null; }
   function hasAllFiles() { if (droid) { try { return !!droid.hasAllFilesAccess(); } catch (e) {} } return !!appState.plain_root_writable; }
   function phoneActions() { return isMobile() && !!droid; }
 
@@ -296,7 +301,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     if (page === "overview" && lastWhere) { renderWhere(lastWhere); }
     trafficWatch();
     if (page === "files") { ensureFiles(); }
-    if (page === "settings" && droid && lastStatus) { refreshAllFiles(); }
+    if (page === "settings" && camBridge && lastStatus) { refreshAllFiles(); }
     window.scrollTo(0, 0);
   }
   document.querySelectorAll(".nav-item[data-nav], .more-item[data-nav]").forEach(function (b) {
@@ -1477,10 +1482,12 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   // In-app viewer: /api/view decrypts in memory (with range requests for seeking), so pictures,
   // video, audio and text of an encrypted folder are shown without a plaintext copy on the phone.
   var VIEW_KINDS = { image: "jpg jpeg png gif webp avif bmp", video: "mp4 m4v webm mov 3gp mkv", audio: "mp3 m4a aac ogg oga opus wav flac", text: "txt md csv log json xml html htm svg js css rs py sh yaml yml toml ini conf", pdf: "pdf" };
-  function viewKind(path) { var ext = (path.split("/").pop().split(".").slice(1).pop() || "").toLowerCase(); for (var k in VIEW_KINDS) { if (ext && (" " + VIEW_KINDS[k] + " ").indexOf(" " + ext + " ") >= 0) { return k; } } return null; }
+  function viewKind(path) { if (nativeViewer() && /\.(heic|heif)$/i.test(path)) { return "image"; } var ext = (path.split("/").pop().split(".").slice(1).pop() || "").toLowerCase(); for (var k in VIEW_KINDS) { if (ext && (" " + VIEW_KINDS[k] + " ").indexOf(" " + ext + " ") >= 0) { return k; } } return null; }
   function viewUrl(folder, path) { return "/api/view?folder=" + enc(folder) + "&path=" + enc(path) + "&token=" + enc(token); }
   var viewer = { folder: "", list: [], i: 0, open: false };
   function openViewer(folder, list, i) {
+    var nv = nativeViewer();
+    if (nv) { nv.postMessage({ folder: folder, index: i, items: list.map(function (f) { return { path: f.path, name: f.path.split("/").pop(), kind: viewKind(f.path) || "", size: f.size, view: "/api/view?folder=" + enc(folder) + "&path=" + enc(f.path) }; }) }); return; }
     viewer.folder = folder; viewer.list = list; viewer.i = i;
     if (!viewer.open) { viewer.open = true; try { history.pushState({ viewer: 1 }, ""); } catch (e) {} }
     $("viewer").classList.remove("hidden"); document.body.classList.add("modal-open");
@@ -2483,19 +2490,19 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   function refreshAllFiles() {
     var android = !!droid || appState.platform === "android";
     $("allfilescard").classList.toggle("hidden", !android);
-    if (!android) { return; }
+    if (!android) { refreshCamera(); return; }
     var ok = hasAllFiles();
     $("allfiles-state").textContent = ok ? "Allowed: plain-file folders go to Internal storage/Varsto." : "Not allowed yet: folders can only be kept encrypted on this phone.";
     $("allfilesbtn").textContent = ok ? "Open the permission settings" : "Allow all files access";
     document.querySelectorAll(".mode-hint").forEach(function (h) { if (ok) { h.classList.add("hidden"); } });
     if (typeof refreshCamera === "function") { refreshCamera(); }
   }
-  // Android: camera upload settings (Settings card). The shell keeps them and does the uploading;
+  // Android and iOS: camera upload settings (Settings card). The shell keeps them and does the uploading;
   // the page chooses the folder, explains the media permission and shows the status.
   var camNew = "\u0000new";
-  function camSettings() { try { return JSON.parse(droid.cameraUpload()); } catch (e) { return null; } }
+  function camSettings() { try { return JSON.parse(camBridge.cameraUpload()); } catch (e) { return null; } }
   function refreshCamera() {
-    var cs = droid && droid.cameraUpload ? camSettings() : null;
+    var cs = camBridge && camBridge.cameraUpload ? camSettings() : null;
     $("cameracard").classList.toggle("hidden", !cs);
     if (!cs) { return; }
     var sel = $("cam-folder"); var names = ((lastStatus && lastStatus.folders) || []).filter(function (f) { return f.path; }).map(function (f) { return f.name; });
@@ -2505,12 +2512,14 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     var nw = document.createElement("option"); nw.value = camNew; nw.textContent = "New folder…"; sel.appendChild(nw);
     sel.value = cs.folder || (names.indexOf("Camera") >= 0 ? "Camera" : camNew);
     $("cam-on").checked = cs.enabled; $("cam-wifi").checked = cs.wifi_only; $("cam-charging").checked = cs.charging_only; $("cam-shots").checked = cs.screenshots;
-    var line = !cs.enabled ? "Off." : !cs.permission ? "Access to photos and videos is not allowed; turn camera upload off and on again to allow it." : cs.message ? cs.message + "." : "On: new photos and videos go to " + cs.folder + ".";
-    if (cs.uploaded) { line += " " + cs.uploaded + " uploaded so far" + (cs.last_upload ? ", last on " + new Date(cs.last_upload * 1000).toLocaleString() : "") + "."; }
-    $("cam-state").textContent = line;
+    // Separate pieces, so each is found in the translations (the status message comes from the shell).
+    var line = $("cam-state"); line.textContent = "";
+    if (!cs.enabled || !cs.permission || !cs.message) { line.appendChild(el("span", null, !cs.enabled ? "Off." : !cs.permission ? "Access to photos and videos is not allowed; turn camera upload off and on again to allow it." : "On: new photos and videos go to " + cs.folder + ".")); }
+    else { line.appendChild(el("span", null, cs.message)); line.appendChild(document.createTextNode(".")); }
+    if (cs.uploaded) { line.appendChild(document.createTextNode(" ")); line.appendChild(el("span", null, cs.uploaded + " uploaded so far" + (cs.last_upload ? ", last on " + new Date(cs.last_upload * 1000).toLocaleString() : "") + ".")); }
   }
   function saveCamera(enabled) {
-    droid.setCameraUpload(JSON.stringify({ enabled: enabled, folder: $("cam-folder").value === camNew ? "" : $("cam-folder").value, wifi_only: $("cam-wifi").checked, charging_only: $("cam-charging").checked, screenshots: $("cam-shots").checked }));
+    camBridge.setCameraUpload(JSON.stringify({ enabled: enabled, folder: $("cam-folder").value === camNew ? "" : $("cam-folder").value, wifi_only: $("cam-wifi").checked, charging_only: $("cam-charging").checked, screenshots: $("cam-shots").checked }));
     refreshCamera();
   }
   // A new folder for the uploads (kept encrypted on the phone, like any folder added here).
@@ -2528,18 +2537,20 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     var then = camPending; camPending = null;
     if (granted) { if (then) { then(); } return; }
     $("cam-on").checked = false; saveCamera(false);
-    if (blocked) { confirmBox("Android no longer asks for this permission. Open Varsto's app settings and allow Photos and videos there.", { title: "Access was refused", ok: "Open app settings" }).then(function (yes) { if (yes) { droid.openAppSettings(); } }); }
+    if (blocked) { confirmBox(droid ? "Android no longer asks for this permission. Open Varsto's app settings and allow Photos and videos there." : "iOS no longer asks for this permission. Open Varsto's settings and allow access to Photos there.", { title: "Access was refused", ok: "Open app settings" }).then(function (yes) { if (yes) { camBridge.openAppSettings(); } }); }
   };
+  // iOS: the shell's camera upload status changed (an upload ran, the network or charger changed).
+  window.varstoCameraChanged = function () { if (camPending === null && !$("cameracard").classList.contains("hidden")) { refreshCamera(); } };
   $("cam-on").onchange = function () {
     if (!$("cam-on").checked) { saveCamera(false); return; }
     cameraFolder().then(function (name) {
       if (!name) { $("cam-on").checked = false; return refreshCamera(); }
       refreshCamera(); $("cam-folder").value = name; $("cam-on").checked = true;
-      if (droid.hasMediaAccess()) { saveCamera(true); return; }
-      return dialog({ title: "Allow access to photos and videos?", text: "Camera upload reads new photos and videos on this phone and uploads them to " + name + ", encrypted. Varsto only reads them: the originals are never changed or deleted. Android asks you next.", ok: "Continue" }).then(function (r) {
+      if (camBridge.hasMediaAccess()) { saveCamera(true); return; }
+      return dialog({ title: "Allow access to photos and videos?", text: "Camera upload reads new photos and videos on this phone and uploads them to " + name + ", encrypted. Varsto only reads them: the originals are never changed or deleted. " + (droid ? "Android" : "iOS") + " asks you next.", ok: "Continue" }).then(function (r) {
         if (!r) { $("cam-on").checked = false; return; }
         camPending = function () { saveCamera(true); };
-        droid.requestMediaAccess();
+        camBridge.requestMediaAccess();
       });
     }).catch(function (e) { $("cam-on").checked = false; alertBox(e.message); });
   };

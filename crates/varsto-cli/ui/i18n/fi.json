@@ -596,7 +596,10 @@
   "A bucket at any S3-compatible provider (AWS, Scaleway, Hetzner, Backblaze B2, Cloudflare R2, MinIO and others), with your own keys.": "Säilö millä tahansa S3-yhteensopivalla palveluntarjoajalla (AWS, Scaleway, Hetzner, Backblaze B2, Cloudflare R2, MinIO ja muut), omilla avaimillasi.",
   "Any remote you have set up in rclone, for example Google Drive, OneDrive, SFTP or WebDAV.": "Mikä tahansa rclonessa määrittämäsi etäkohde, esimerkiksi Google Drive, OneDrive, SFTP tai WebDAV.",
   "Folder path": "Kansion polku",
-  "Add a folder, an S3 bucket, an rclone remote or a pool of swappable disks below.": "Lisää alla kansio, S3-säilö, rclone-etäkohde tai vaihdettavien levyjen varasto."
+  "Add a folder, an S3 bucket, an rclone remote or a pool of swappable disks below.": "Lisää alla kansio, S3-säilö, rclone-etäkohde tai vaihdettavien levyjen varasto.",
+  "Allow access to photos and videos": "Salli kuvien ja videoiden käyttö",
+  "iOS no longer asks for this permission. Open Varsto's settings and allow access to Photos there.": "iOS ei enää kysy tätä lupaa. Avaa Varston asetukset ja salli siellä pääsy kuviin.",
+  "Varsto can only see the photos you picked; allow access to all photos in Settings to upload new ones": "Varsto näkee vain valitsemasi kuvat; salli pääsy kaikkiin kuviin Asetuksissa, jotta uudet kuvat ladataan"
  },
  "patterns": [
   [
@@ -698,6 +701,26 @@
   [
    "^(.+) holds (\\d+) blocks? of your files\\. (\\d+) already have enough copies elsewhere; (\\d+) cop(?:y|ies) \\((.+)\\) will first be made on (.+)\\. Then no device counts \\1 as a copy any more\\. Remove leaves its data in place; you can also delete it\\.$",
    "Tallennuspaikassa $1 on $2 lohkoa tiedostoistasi. Lohkoista $3 on jo tarpeeksi kopioita muualla; ensin tehdään $4 kopiota ($5) kohteisiin $6. Sen jälkeen mikään laite ei enää laske tallennuspaikkaa $1 kopioksi. Poista jättää sen datan paikalleen; voit myös poistaa datan."
+  ],
+  [
+   "^On: new photos and videos go to (.+)\\.$",
+   "Päällä: uudet kuvat ja videot menevät kansioon $1."
+  ],
+  [
+   "^(\\d+) uploaded so far, last on (.+)\\.$",
+   "$1 ladattu tähän mennessä, viimeksi $2."
+  ],
+  [
+   "^(\\d+) uploaded so far\\.$",
+   "$1 ladattu tähän mennessä."
+  ],
+  [
+   "^Uploading (\\d+) of (\\d+) to (.+)$",
+   "Ladataan $1/$2 kansioon $3"
+  ],
+  [
+   "^Camera upload reads new photos and videos on this phone and uploads them to (.+), encrypted\\. Varsto only reads them: the originals are never changed or deleted\\. (Android|iOS) asks you next\\.$",
+   "Kameralataus lukee tämän puhelimen uudet kuvat ja videot ja lataa ne salattuina kansioon $1. Varsto vain lukee niitä: alkuperäisiä ei koskaan muuteta eikä poisteta. Seuraavaksi $2 kysyy lupaa."
   ]
  ],
  "review": [
@@ -784,7 +807,15 @@
   "^Type (.+) to confirm$",
   "^Remove storage (.+)\\?$",
   "^(.+) holds (\\d+) blocks? of your files\\. Every block already has enough copies on your other storages\\. Then no device counts \\1 as a copy any more\\. Remove leaves its data in place; you can also delete it\\.$",
-  "^(.+) holds (\\d+) blocks? of your files\\. (\\d+) already have enough copies elsewhere; (\\d+) cop(?:y|ies) \\((.+)\\) will first be made on (.+)\\. Then no device counts \\1 as a copy any more\\. Remove leaves its data in place; you can also delete it\\.$"
+  "^(.+) holds (\\d+) blocks? of your files\\. (\\d+) already have enough copies elsewhere; (\\d+) cop(?:y|ies) \\((.+)\\) will first be made on (.+)\\. Then no device counts \\1 as a copy any more\\. Remove leaves its data in place; you can also delete it\\.$",
+  "Allow access to photos and videos",
+  "iOS no longer asks for this permission. Open Varsto's settings and allow access to Photos there.",
+  "Varsto can only see the photos you picked; allow access to all photos in Settings to upload new ones",
+  "^On: new photos and videos go to (.+)\\.$",
+  "^(\\d+) uploaded so far, last on (.+)\\.$",
+  "^(\\d+) uploaded so far\\.$",
+  "^Uploading (\\d+) of (\\d+) to (.+)$",
+  "^Camera upload reads new photos and videos on this phone and uploads them to (.+), encrypted\\. Varsto only reads them: the originals are never changed or deleted\\. (Android|iOS) asks you next\\.$"
  ],
  "parts": [
   [
