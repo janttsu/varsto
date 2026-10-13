@@ -357,6 +357,7 @@ impl Engine {
                         size: md.len(),
                         mtime: mtime_ns(&md),
                         content_hash: content_hash.clone(),
+                        ..Default::default()
                     },
                 );
                 new_state.pinned.insert(file.path.clone());

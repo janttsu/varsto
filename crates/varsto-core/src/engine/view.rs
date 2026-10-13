@@ -15,6 +15,10 @@ impl Engine {
         let (rec, root) = self.resolve_folder(folder)?;
         block_cache::check_rel_path(path)?;
         let disk = root.join(path);
+        if !self.mount_is_encrypted(&rec.folder_id) {
+            // Never through a link: one may point anywhere.
+            crate::fsmeta::check_no_link(&root, path)?;
+        }
         if !self.mount_is_encrypted(&rec.folder_id) && disk.is_file() {
             return Ok(fs::metadata(&disk)?.len());
         }
@@ -32,6 +36,10 @@ impl Engine {
         let (rec, root) = self.resolve_folder(folder)?;
         block_cache::check_rel_path(path)?;
         let disk = root.join(path);
+        if !self.mount_is_encrypted(&rec.folder_id) {
+            // Never through a link: one may point anywhere.
+            crate::fsmeta::check_no_link(&root, path)?;
+        }
         if !self.mount_is_encrypted(&rec.folder_id) && disk.is_file() {
             use std::io::{Read, Seek, SeekFrom};
             let mut f =

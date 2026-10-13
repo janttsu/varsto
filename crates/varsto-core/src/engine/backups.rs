@@ -885,7 +885,7 @@ impl Engine {
             crate::activity::Unit::Bytes,
         );
         for f in &wanted {
-            let disk = match util::safe_join(&root, &f.path) {
+            let disk = match crate::fsmeta::join_entry(&root, &f.path) {
                 Ok(d) => d,
                 Err(e) => {
                     report.unavailable.push(format!("{}: {e:#}", f.path));
@@ -898,11 +898,22 @@ impl Engine {
                     .push(format!("{}: a directory is in the way", f.path));
                 continue;
             }
-            match self.download_to(rec, &fk, &disk, f, &storages, &mut pull) {
+            // A link is restored as a link; permissions and extended
+            // attributes as this system can hold them (`fsmeta`).
+            let written = match f.symlink() {
+                Some(target) => crate::fsmeta::write_link(&disk, target).map(|_| ()),
+                None => self.download_to(rec, &fk, &disk, f, &storages, &mut pull),
+            };
+            match written {
                 Ok(()) => {
                     report.files_restored += 1;
                     report.bytes_restored += f.size;
-                    if f.mtime > 0 {
+                    if let Some(m) = &f.meta {
+                        let settings = crate::fsmeta::MetaSettings::default();
+                        // Metadata never stops a restore.
+                        let _ = crate::fsmeta::apply(&disk, m, &self.meta_caps, &settings);
+                    }
+                    if f.mtime > 0 && !f.is_symlink() {
                         let t =
                             std::time::UNIX_EPOCH + std::time::Duration::from_nanos(f.mtime as u64);
                         if let Ok(file) = fs::File::options().write(true).open(&disk) {

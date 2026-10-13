@@ -1419,6 +1419,7 @@ impl Engine {
             chunks,
             modified_by: me,
             modified_clock: clock,
+            meta: None,
         };
         state.files.insert(path.to_string(), f.clone());
         state.pending_remote.remove(path);
@@ -1600,6 +1601,7 @@ impl Engine {
                 analysis_stale: false,
                 analysis_by: None,
                 analysis_author: None,
+                ..Default::default()
             });
         }
         out.sort_by(|a, b| a.path.cmp(&b.path));
@@ -1988,6 +1990,7 @@ fn index_entry(disk: &Path, hash: &str) -> Result<LocalIndexEntry> {
         size: md.len(),
         mtime: import::dir::mtime_ns(&md),
         content_hash: hash.to_string(),
+        ..Default::default()
     })
 }
 

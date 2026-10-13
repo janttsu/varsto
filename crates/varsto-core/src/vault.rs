@@ -1158,6 +1158,16 @@ pub struct FolderMount {
     /// means plain files as on a desktop.
     #[serde(default)]
     pub encrypted: bool,
+    /// Ignore patterns of this device only (not synced), gitignore syntax,
+    /// before the folder's `.varstoignore` files (`crate::ignore_rules`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ignore_local: Vec<String>,
+    /// Which file metadata this device syncs for the folder (`crate::fsmeta`).
+    #[serde(
+        default,
+        skip_serializing_if = "crate::fsmeta::MetaSettings::is_default"
+    )]
+    pub meta: crate::fsmeta::MetaSettings,
 }
 
 /// Storage credentials: `home/secrets.enc`, encrypted under a key derived

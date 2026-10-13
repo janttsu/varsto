@@ -952,6 +952,7 @@ impl Engine {
             Some((dir, _)) => format!("{dir}/{aside_name}"),
             None => aside_name,
         };
+        let seen = self.settle_meta(&rec.folder_id, &disk, &file, &mut Vec::new());
         if let Ok(md) = fs::metadata(&disk) {
             state.local_index.insert(
                 path.to_string(),
@@ -959,6 +960,7 @@ impl Engine {
                     size: md.len(),
                     mtime: mtime_of(&md),
                     content_hash: file.content_hash.clone(),
+                    meta_seen: seen,
                 },
             );
         }
