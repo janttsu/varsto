@@ -143,7 +143,7 @@
 <td>Thief with a stolen <strong>locked</strong> device</td>
 <td>Physical access, unlimited time, can image the storage, can try passwords offline if the data allows it, can restore old app backups.</td>
 <td>Content and names (except folders the user explicitly chose to sync unencrypted, the S-011 exception), keys.</td>
-<td>Try passphrases offline without the device's hardware-bound secret; reset the failed-attempt counter by restoring a backup; add a new device.</td>
+<td>Try passphrases offline without the device's hardware-bound secret; reset the failed-attempt counter by restoring a backup; add a new device. (Status 0.0.1-alpha.13: not built. <code>keys.enc</code> is wrapped under Argon2id of the passphrase alone, with no hardware-bound secret and no failed-attempt counter, so a stolen <code>keys.enc</code> can be attacked offline with passphrase guesses; the Argon2id minimums are the only cost.)</td>
 </tr>
 <tr>
 <td>A4</td>
@@ -256,7 +256,7 @@
 <td>MCP client and the LLM behind it</td>
 <td>Nothing.</td>
 <td>Tool calls in, tool results out.</td>
-<td>Read-only by default, scoped revocable tokens, summaries instead of names, no secrets, Strongroom invisible, dry-run and external confirmation (F-016, F-038, plan 6.32).</td>
+<td>Read-only by default, scoped revocable tokens, summaries instead of names, no secrets, Strongroom invisible, dry-run and external confirmation (F-016, F-038, plan 6.32). (Status 0.0.1-alpha.13: grants are per folder and read-only by default, scoped MCP keys exist on main after 0.0.1-alpha.13; tool results carry file names, paths and local paths, not summaries; there is no dry run.)</td>
 </tr>
 <tr>
 <td>Storage (cloud, rclone remote, local folder, removable disk)</td>
@@ -268,7 +268,7 @@
 <td>Peers (other devices)</td>
 <td>Own devices after authentication with device keys, until revoked; shared-folder members only for their folder.</td>
 <td>Encrypted chunks, signed ledger events, transfer requests.</td>
-<td>Every chunk is checked against its hash before acceptance; claims of holding data are challenged (plan 6.19).</td>
+<td>Every chunk is checked against its hash before acceptance; claims of holding data are challenged (plan 6.19). (Status 0.0.1-alpha.13: the hash check is built; challenging claims of holding data is not built.)</td>
 </tr>
 <tr>
 <td>Relay and DHT</td>
