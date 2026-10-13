@@ -132,7 +132,7 @@
   // Dialog: the one modal the page uses for every question (WebViews return null for window.prompt).
   // dialog({title, text, code, fields: [{name, label, type, value, placeholder, hint, required}], ok, cancel, extra, danger})
   // resolves with {action: "ok"|"extra", values} or null when cancelled.
-  var modalResolve = null;
+  var modalResolve = null, modalConfirm = null;
   function dialog(o) {
     return new Promise(function (resolve) {
       closeDialog("cancel");
@@ -156,15 +156,27 @@
         if (f.required) { inp.required = true; }
         lab.appendChild(inp); if (f.hint) { lab.appendChild(el("span", "hint muted", f.hint)); } fs.appendChild(lab);
       });
-      fs.classList.toggle("hidden", !(o.fields || []).length);
+      // confirmText: the buttons stay disabled until exactly this is typed.
+      modalConfirm = o.confirmText || null;
+      if (modalConfirm) {
+        var cl = el("label", "", "Type " + modalConfirm + " to confirm"); var ci = el("input"); ci.name = "confirm_text"; ci.autocomplete = "off"; ci.spellcheck = false;
+        ci.addEventListener("input", confirmTyped); cl.appendChild(ci); fs.appendChild(cl);
+      }
+      fs.classList.toggle("hidden", !(o.fields || []).length && !modalConfirm);
       var ok = $("modal-ok"); ok.textContent = o.ok || "OK"; ok.className = o.danger ? "danger-fill" : "";
       $("modal-cancel").textContent = o.cancel || "Cancel"; $("modal-cancel").classList.toggle("hidden", o.cancel === false);
       var ex = $("modal-extra"); ex.textContent = o.extra || ""; ex.classList.toggle("hidden", !o.extra);
+      confirmTyped();
       $("modal").classList.remove("hidden"); document.body.classList.add("modal-open");
       var first = fs.querySelector("input") || ok;
       setTimeout(function () { first.focus(); if (first.select) { first.select(); } }, 30);
     });
   }
+  function confirmMatches() {
+    var ci = $("modal-fields").querySelector("input[name=confirm_text]");
+    return !modalConfirm || (ci && ci.value.trim() === modalConfirm);
+  }
+  function confirmTyped() { var off = !confirmMatches(); $("modal-ok").disabled = off; $("modal-extra").disabled = off; }
   function dialogValues() { var v = {}; $("modal-fields").querySelectorAll("input, select").forEach(function (i) { v[i.name] = i.value; }); return v; }
   function closeDialog(action) {
     if (!modalResolve) { return; }
@@ -177,10 +189,11 @@
     ev.preventDefault();
     var missing = null; $("modal-fields").querySelectorAll("input[required]").forEach(function (i) { if (!missing && !i.value.trim()) { missing = i; } });
     if (missing) { missing.focus(); return; }
+    if (!confirmMatches()) { return; }
     closeDialog("ok");
   };
   $("modal-cancel").onclick = function () { closeDialog("cancel"); };
-  $("modal-extra").onclick = function () { closeDialog("extra"); };
+  $("modal-extra").onclick = function () { if (confirmMatches()) { closeDialog("extra"); } };
   $("modal-backdrop").onclick = function () { closeDialog("cancel"); };
   document.addEventListener("keydown", function (ev) {
     if (!modalResolve) { return; }
@@ -582,7 +595,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
       var text = name + " holds " + p.blocks + " block" + (p.blocks === 1 ? "" : "s") + " of your files. ";
       text += p.copies.length ? p.blocks_ok + " already have enough copies elsewhere; " + p.copies.length + " cop" + (p.copies.length === 1 ? "y" : "ies") + " (" + fmtBytes(p.bytes_to_copy) + ") will first be made on " + p.targets.join(", ") + ". " : "Every block already has enough copies on your other storages. ";
       text += "Then no device counts " + name + " as a copy any more. Remove leaves its data in place; you can also delete it.";
-      return dialog({ title: "Remove storage " + name + "?", text: text, ok: "Remove", extra: "Remove and delete data" }).then(function (r) {
+      return dialog({ title: "Remove storage " + name + "?", text: text, ok: "Remove", extra: "Remove and delete data", danger: true, confirmText: name }).then(function (r) {
         if (!r) { return null; }
         busy(true); log((p.copies.length ? "copying " + p.copies.length + " blocks, then " : "") + "removing storage " + name);
         return api("POST", "/api/storage/remove", { name: name, delete_data: r.action === "extra" }).then(function (x) {

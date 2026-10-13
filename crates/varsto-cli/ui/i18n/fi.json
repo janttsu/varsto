@@ -682,6 +682,22 @@
   [
    "^Backup stopped: (.+)$",
    "Varmuuskopio lopetettu: $1"
+  ],
+  [
+   "^Type (.+) to confirm$",
+   "Vahvista kirjoittamalla $1"
+  ],
+  [
+   "^Remove storage (.+)\\?$",
+   "Poistetaanko tallennuspaikka $1?"
+  ],
+  [
+   "^(.+) holds (\\d+) blocks? of your files\\. Every block already has enough copies on your other storages\\. Then no device counts \\1 as a copy any more\\. Remove leaves its data in place; you can also delete it\\.$",
+   "Tallennuspaikassa $1 on $2 lohkoa tiedostoistasi. Jokaisella lohkolla on jo tarpeeksi kopioita muissa tallennuspaikoissasi. Sen jälkeen mikään laite ei enää laske tallennuspaikkaa $1 kopioksi. Poista jättää sen datan paikalleen; voit myös poistaa datan."
+  ],
+  [
+   "^(.+) holds (\\d+) blocks? of your files\\. (\\d+) already have enough copies elsewhere; (\\d+) cop(?:y|ies) \\((.+)\\) will first be made on (.+)\\. Then no device counts \\1 as a copy any more\\. Remove leaves its data in place; you can also delete it\\.$",
+   "Tallennuspaikassa $1 on $2 lohkoa tiedostoistasi. Lohkoista $3 on jo tarpeeksi kopioita muualla; ensin tehdään $4 kopiota ($5) kohteisiin $6. Sen jälkeen mikään laite ei enää laske tallennuspaikkaa $1 kopioksi. Poista jättää sen datan paikalleen; voit myös poistaa datan."
   ]
  ],
  "review": [
@@ -764,7 +780,11 @@
   "You get the folder key only: this device can read and write that folder, nothing else of the other vault. A sealed token (vst1… or vst2…) can be opened only here, and this device checks that the owner confirmed its fingerprint; a plain token carries the key itself.",
   "You will be shown the vault key once. Write it down and keep it offline; it is the only way to add other devices or recover the data.",
   "Your vault key",
-  "the people removed"
+  "the people removed",
+  "^Type (.+) to confirm$",
+  "^Remove storage (.+)\\?$",
+  "^(.+) holds (\\d+) blocks? of your files\\. Every block already has enough copies on your other storages\\. Then no device counts \\1 as a copy any more\\. Remove leaves its data in place; you can also delete it\\.$",
+  "^(.+) holds (\\d+) blocks? of your files\\. (\\d+) already have enough copies elsewhere; (\\d+) cop(?:y|ies) \\((.+)\\) will first be made on (.+)\\. Then no device counts \\1 as a copy any more\\. Remove leaves its data in place; you can also delete it\\.$"
  ],
  "parts": [
   [
