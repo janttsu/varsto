@@ -10,6 +10,7 @@ use varsto_core::Engine;
 
 mod backup;
 mod desktop;
+mod drives;
 mod filemanager;
 mod icon;
 mod mcp;
@@ -82,7 +83,7 @@ enum Cmd {
         #[command(subcommand)]
         cmd: StorageCmd,
     },
-    /// Removable disks of a disk pool: add, list, check, eject, retire.
+    /// Removable disks of a disk pool: init, add, insert, unmount, list, check, eject, retire.
     Disk {
         #[command(subcommand)]
         cmd: DiskCmd,
@@ -849,6 +850,48 @@ enum DiskCmd {
     },
     /// Write the disk's index and sync it; prints when the disk is safe to remove (does not unmount).
     Eject { label: String },
+    /// Linux: erase a whole drive (e.g. /dev/sdc), make one ext4 partition, record it in
+    /// disks.conf under LABEL (the name on its sticker), mount it, add it to the pool and fill it.
+    Init {
+        /// The whole drive, e.g. /dev/sdc or /dev/disk/by-id/usb-...
+        device: PathBuf,
+        #[arg(long)]
+        pool: String,
+        /// The drive's name, as on its sticker (spaces are fine).
+        #[arg(long)]
+        label: String,
+        /// Where the drive is kept (home, offsite, ...); default the pool's place.
+        #[arg(long, default_value = "")]
+        place: String,
+        /// The device path again, to erase it without being asked (scripts).
+        #[arg(long)]
+        confirm: Option<String>,
+    },
+    /// Linux: mount the known drives that are plugged in (or the named one) and bring them up to
+    /// date: tidy from listings, re-hash old copies, fill, sync; then says to unmount.
+    Insert {
+        label: Option<String>,
+        /// Skip writing new blocks.
+        #[arg(long)]
+        no_fill: bool,
+        /// Skip re-hashing copies older than the pool's verify-after-days.
+        #[arg(long)]
+        no_verify: bool,
+    },
+    /// Linux: write the index, sync, unmount and power off a drive so it can be unplugged.
+    Unmount {
+        label: String,
+        /// Leave the drive powered (only unmount).
+        #[arg(long)]
+        no_power_off: bool,
+    },
+    /// Pool settings: re-hash copies on a disk at insert when their last check is older than N days.
+    PoolSet {
+        pool: String,
+        /// Days (default 180; 0 re-hashes everything at every insert).
+        #[arg(long)]
+        verify_after_days: u32,
+    },
     /// Nothing new goes to this disk; what it holds stays readable.
     Retire { label: String },
 }
@@ -1673,6 +1716,7 @@ fn run(cli: &Cli) -> Result<()> {
                         disks: vec![],
                         scan_roots: scan_root.clone(),
                         copies: (*copies).max(1),
+                        verify_after_days: varsto_core::pool::DEFAULT_VERIFY_AFTER_DAYS,
                     })?;
                     println!("disk pool {name} added; attach a disk with: varsto disk add <mount-path> --pool {name} --label <label>");
                 }
@@ -1792,7 +1836,16 @@ fn run(cli: &Cli) -> Result<()> {
                     label,
                     place,
                 } => {
-                    let r = engine.disk_add_at(mount_path, pool, label, place)?;
+                    let mut progress = drives::ProgressLine::new(cli.json);
+                    let (r, fill) =
+                        engine.disk_add_with(mount_path, pool, label, place, &mut |p| {
+                            progress.update(p)
+                        })?;
+                    progress.finish();
+                    if let Some(why) = fill.failed {
+                        bail!(why);
+                    }
+                    drives::remember_mount(&home, mount_path, pool, label);
                     print(cli, &r, |r| {
                         format!(
                             "disk {} added to pool {} at {}: {} added ({} objects)",
@@ -1814,6 +1867,41 @@ fn run(cli: &Cli) -> Result<()> {
                 }
                 DiskCmd::List => {
                     let disks = engine.disks()?;
+                    // The drives of disks.conf: their partition and whether they are plugged in.
+                    let known = drives::known_drives(&home);
+                    let drive_of = |label: &str| known.iter().find(|(d, _)| d.label == label);
+                    if cli.json {
+                        let mut rows = serde_json::to_value(&disks)?;
+                        for row in rows.as_array_mut().into_iter().flatten() {
+                            let label = row["label"].as_str().unwrap_or_default().to_string();
+                            if let Some((d, at)) = drive_of(&label) {
+                                row["partuuid"] = serde_json::json!(d.partuuid);
+                                row["plugged_in"] = serde_json::json!(at.is_some());
+                                row["partition"] = serde_json::json!(at.as_ref().map(|a| &a.0));
+                            }
+                        }
+                        println!("{}", serde_json::to_string_pretty(&rows)?);
+                        return Ok(());
+                    }
+                    let mut text = String::new();
+                    for (d, at) in &known {
+                        text.push_str(&format!(
+                            "drive \"{}\" (pool {}, PARTUUID {}): {}\n",
+                            d.label,
+                            d.pool,
+                            d.partuuid,
+                            match at {
+                                Some((part, Some(m))) =>
+                                    format!("plugged in as {part}, mounted at {}", m.display()),
+                                Some((part, None)) => format!(
+                                    "plugged in as {part}, not mounted (varsto disk insert \"{}\")",
+                                    d.label
+                                ),
+                                None => "not plugged in".to_string(),
+                            }
+                        ));
+                    }
+                    print!("{text}");
                     print(cli, &disks, |disks| {
                         if disks.is_empty() {
                             return "no disks; add a pool with `varsto storage add-pool <name>` and a disk with `varsto disk add`".to_string();
@@ -1900,6 +1988,51 @@ fn run(cli: &Cli) -> Result<()> {
                             "{label} ({}): index written and synced; safe to remove",
                             mount.display()
                         );
+                    }
+                }
+                DiskCmd::Init {
+                    device,
+                    pool,
+                    label,
+                    place,
+                    confirm,
+                } => {
+                    drives::init(cli, &home, &mut engine, device, pool, label, place, confirm)?;
+                }
+                DiskCmd::Insert {
+                    label,
+                    no_fill,
+                    no_verify,
+                } => {
+                    drives::insert(
+                        cli,
+                        &home,
+                        &mut engine,
+                        label.as_deref(),
+                        varsto_core::engine::InsertOptions {
+                            verify: !no_verify,
+                            fill: !no_fill,
+                        },
+                    )?;
+                }
+                DiskCmd::Unmount {
+                    label,
+                    no_power_off,
+                } => {
+                    drives::unmount(cli, &home, &mut engine, label, !no_power_off)?;
+                }
+                DiskCmd::PoolSet {
+                    pool,
+                    verify_after_days,
+                } => {
+                    engine.set_pool_verify_after_days(pool, *verify_after_days)?;
+                    if cli.json {
+                        println!(
+                            "{}",
+                            serde_json::json!({"pool": pool, "verify_after_days": verify_after_days})
+                        );
+                    } else {
+                        println!("{pool}: copies on a disk are re-hashed at insert when their last check is older than {verify_after_days} days");
                     }
                 }
                 DiskCmd::Retire { label } => {

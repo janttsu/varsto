@@ -190,36 +190,10 @@ impl Engine {
         label: &str,
         place: &str,
     ) -> Result<DiskAddReport> {
-        let spec = self
-            .pool_specs()
-            .into_iter()
-            .find(|s| s.name() == pool_name)
-            .ok_or_else(|| anyhow!("no disk pool named {pool_name}; add one with `varsto storage add-pool {pool_name}`"))?;
-        if self.find_disk(label).is_ok() {
-            bail!("a disk labelled {label} already exists");
+        let (report, fill) = self.disk_add_with(mount, pool_name, label, place, &mut |_| {})?;
+        if let Some(why) = fill.failed {
+            bail!(why);
         }
-        let pool = self.open_pool(&spec)?;
-        let disk = pool.add_disk_at(mount, label, place)?;
-        // A disk no larger than the space the pool keeps free on every disk
-        // would silently take nothing: say so.
-        let warning = (!pool.has_room(&disk.id, 1)).then(|| {
-            format!(
-                "{label} has no room above the reserve the pool keeps free on every disk ({} of {}): nothing will be written to it. Use a larger disk, or a pool with a smaller reserve",
-                crate::util::human_bytes(pool.reserve(disk.capacity_bytes)),
-                crate::util::human_bytes(disk.capacity_bytes)
-            )
-        });
-        let (objects_added, bytes_added) = self.fill_disk(&spec, &pool, &disk.id)?;
-        pool.flush()?;
-        let disks = pool.disks();
-        drop(pool);
-        self.save_pool_disks(spec.name(), disks)?;
-        Ok(DiskAddReport {
-            pool: spec.name().to_string(),
-            disk,
-            objects_added,
-            bytes_added,
-            warning,
-        })
+        Ok(report)
     }
 }

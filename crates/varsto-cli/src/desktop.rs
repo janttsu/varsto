@@ -1155,6 +1155,7 @@ fn api_unlocked(
                         .and_then(|c| c.as_u64().or_else(|| c.as_str()?.trim().parse().ok()))
                         .unwrap_or(1)
                         .clamp(1, 16) as u32,
+                    verify_after_days: varsto_core::pool::DEFAULT_VERIFY_AFTER_DAYS,
                 })?,
                 _ => {
                     let name = s(input, "name")?;
