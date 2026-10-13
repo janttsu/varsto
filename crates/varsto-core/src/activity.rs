@@ -63,6 +63,9 @@ pub const DISK_FETCH: &str = "disk_fetch";
 pub const DISK_UNMOUNT: &str = "disk_unmount";
 /// Bit-rot check; steps "storage", "disk", "files" and "cache".
 pub const SCRUB: &str = "scrub";
+/// Rebuilding the ledger (`engine::ledger_recovery`); steps "local",
+/// "own", "others", "manifests", "list", "verify" and "seal".
+pub const LEDGER_REBUILD: &str = "ledger_rebuild";
 /// A backup with restic (`crate::restic`); steps "check" (the mirror is
 /// complete), "backup", "forget" and "repo_check" (`restic check`).
 pub const RESTIC: &str = "restic";

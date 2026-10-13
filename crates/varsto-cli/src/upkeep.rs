@@ -3,7 +3,7 @@
 //! `varsto storage price`: automatic verification and repair, bit-rot
 //! checks, placement suggestions and storage prices on the command line.
 
-use crate::{fmt_bytes, passphrase, print, Cli};
+use crate::{fmt_bytes, print, Cli};
 use anyhow::{bail, Result};
 use clap::Subcommand;
 use std::path::Path;
@@ -128,7 +128,7 @@ pub struct PriceArgs<'a> {
 }
 
 pub fn verify(cli: &Cli, home: &Path, cmd: &Option<VerifyCmd>) -> Result<()> {
-    let mut engine = Engine::open(home, &passphrase()?)?;
+    let mut engine = crate::open_engine(home)?;
     match cmd.as_ref().unwrap_or(&VerifyCmd::Show) {
         VerifyCmd::Show => {
             let st = engine.verify_status();
@@ -305,7 +305,7 @@ fn describe_scrub_status(s: &ScrubStatus) -> String {
 }
 
 pub fn scrub(cli: &Cli, home: &Path, cmd: &Option<ScrubCmd>, run: &ScrubRunArgs) -> Result<()> {
-    let mut engine = Engine::open(home, &passphrase()?)?;
+    let mut engine = crate::open_engine(home)?;
     match cmd {
         Some(ScrubCmd::Status) => {
             print(cli, &engine.scrub_status(), describe_scrub_status)?;
@@ -451,7 +451,7 @@ pub fn describe_repair(r: &RepairReport) -> String {
 }
 
 pub fn repair(cli: &Cli, home: &Path, args: RepairArgs) -> Result<()> {
-    let mut engine = Engine::open(home, &passphrase()?)?;
+    let mut engine = crate::open_engine(home)?;
     let mut opts = RepairOptions::manual();
     opts.dry_run = args.dry_run;
     opts.from_cold = args.from_cold;
@@ -483,7 +483,7 @@ pub(crate) fn ask(question: &str) -> Result<bool> {
 }
 
 pub fn advice(cli: &Cli, home: &Path, idle_days: i64, cmd: &Option<AdviceCmd>) -> Result<()> {
-    let mut engine = Engine::open(home, &passphrase()?)?;
+    let mut engine = crate::open_engine(home)?;
     let now = varsto_core::util::now_utc();
     match cmd.as_ref().unwrap_or(&AdviceCmd::Show) {
         AdviceCmd::Show => {

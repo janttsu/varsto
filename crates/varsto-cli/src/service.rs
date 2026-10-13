@@ -81,6 +81,13 @@ pub struct ServiceState {
     pub backup_upkeep_utc: Option<i64>,
     pub backup_last: Option<String>,
     pub backup_errors: std::collections::BTreeMap<String, String>,
+    /// The ledger's state as of the last check (`ledger_recovery`).
+    pub ledger_health: Option<varsto_core::engine::LedgerHealth>,
+    /// When the storages were last asked whether they hold newer batches
+    /// of this device than it has.
+    pub ledger_checked: Option<Instant>,
+    /// The last failed rebuild's message (notified once, retried each sync).
+    pub ledger_failed: Option<String>,
     /// Backups with restic: the scheduled run under way (a child process
     /// `varsto restic run --scheduled`), when the user was last warned that
     /// the last good snapshot is too old, and a one-line summary.
@@ -90,6 +97,10 @@ pub struct ServiceState {
     pub restic_not_before_utc: i64,
     pub restic_text: Option<String>,
 }
+
+/// The storages are asked this often whether they hold newer ledger
+/// batches of this device than it has.
+const LEDGER_CHECK_EVERY: Duration = Duration::from_secs(3600);
 
 /// Expired backup snapshots are looked for at most this often.
 const BACKUP_UPKEEP_EVERY: i64 = 6 * 3600;
@@ -127,6 +138,8 @@ impl ServiceState {
             "backup_upkeep_utc": self.backup_upkeep_utc,
             "backup_last": self.backup_last,
             "backup_errors": self.backup_errors,
+            "ledger_health": self.ledger_health,
+            "ledger_text": self.ledger_health.as_ref().filter(|h| !h.is_ok()).map(|h| h.describe()),
             "restic_text": self.restic_text,
         })
     }
@@ -305,6 +318,72 @@ impl ServiceState {
         }
         self.repair = Some(engine.repair_status());
     }
+    /// Before a sync: look after the ledger. A lost or damaged local ledger
+    /// (or no ledger anywhere) is rebuilt from the storages at once, before
+    /// anything is signed; the storages are asked at start and hourly
+    /// whether they hold newer batches of this device (a copy restored from
+    /// a backup), which the interface then offers to adopt.
+    pub fn ledger_guard(&mut self, engine: &mut Engine) {
+        let due = self
+            .ledger_checked
+            .is_none_or(|t| t.elapsed() >= LEDGER_CHECK_EVERY);
+        if due {
+            self.ledger_checked = Some(Instant::now());
+            if let Err(e) = engine.ledger_check_storages() {
+                eprintln!("service: ledger check failed: {e:#}");
+            }
+        }
+        let health = engine.ledger_health();
+        if health.automatic && health.state != "repairing" {
+            self.ledger_rebuild(engine, &health);
+        }
+        self.ledger_health = Some(engine.ledger_health());
+    }
+
+    /// After a sync: no ledger anywhere while folders hold files (checked
+    /// at most hourly, and only without any claims) is rebuilt as well.
+    pub fn ledger_after_sync(&mut self, engine: &mut Engine) {
+        if engine.ledger_lost_everywhere(false).unwrap_or(false) {
+            let health = engine.ledger_health();
+            self.ledger_rebuild(engine, &health);
+        }
+        self.ledger_health = Some(engine.ledger_health());
+    }
+
+    fn ledger_rebuild(&mut self, engine: &mut Engine, health: &varsto_core::engine::LedgerHealth) {
+        eprintln!("service: ledger: {}; rebuilding", health.describe());
+        match engine.ledger_rebuild(&varsto_core::engine::LedgerRebuildOptions::service()) {
+            Ok(r) => {
+                let mut msg = if r.own_found_on_storages {
+                    format!(
+                        "This device's ledger was restored from the storages (up to #{})",
+                        r.own_head_after
+                    )
+                } else {
+                    "This device's ledger was started again".to_string()
+                };
+                if let Some(s) = &r.from_storage {
+                    msg += &format!(
+                        "; where the blocks are was rebuilt from the storages ({} copies recorded, {} damaged)",
+                        s.claims_written, s.objects_corrupt
+                    );
+                }
+                eprintln!("service: {msg}");
+                notify("Varsto ledger", &msg);
+                self.ledger_failed = None;
+            }
+            Err(e) => {
+                let msg = format!("The ledger could not be restored: {e:#}");
+                eprintln!("service: {msg}");
+                self.last_error = Some(msg.clone());
+                if self.ledger_failed.as_deref() != Some(msg.as_str()) {
+                    notify("Varsto ledger", &msg);
+                }
+                self.ledger_failed = Some(msg);
+            }
+        }
+    }
+
     /// Take the scheduled backup snapshots that are due and, at most every
     /// six hours, expire old ones (called after a sync, like repair).
     pub fn backups_if_due(&mut self, engine: &mut Engine) {
@@ -1474,6 +1553,12 @@ pub fn run(opts: Options) -> Result<()> {
             if let Some(e) = st.engine.as_mut() {
                 e.expire_strongrooms();
             }
+            {
+                let st = &mut *st;
+                if let Some(e) = st.engine.as_mut() {
+                    st.service.ledger_guard(e);
+                }
+            }
             let why = if due_change {
                 "files changed"
             } else if requested {
@@ -1518,6 +1603,7 @@ pub fn run(opts: Options) -> Result<()> {
                     snapshot_syncs = st.service.syncs; // the snapshot above is current
                     let st = &mut *st;
                     if let Some(e) = st.engine.as_mut() {
+                        st.service.ledger_after_sync(e);
                         st.service.auto_verify_if_due(e);
                         st.service.scrub_if_due(e);
                         st.service.repair_if_due(e);

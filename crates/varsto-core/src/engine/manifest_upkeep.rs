@@ -68,7 +68,7 @@ struct FolderUpkeep {
 }
 
 /// (device, seq) of a key under `manifests/<folder>/`.
-fn parse_key(folder_prefix: &str, key: &str) -> Option<(DeviceId, u64)> {
+pub(super) fn parse_key(folder_prefix: &str, key: &str) -> Option<(DeviceId, u64)> {
     let rest = key.strip_prefix(folder_prefix)?;
     let (dev, file) = rest.split_once('/')?;
     let seq = file.strip_suffix(".enc")?.parse::<u64>().ok()?;

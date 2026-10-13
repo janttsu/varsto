@@ -362,9 +362,7 @@ impl Engine {
         if self.vault.member {
             bail!("a member device cannot move the owner's data");
         }
-        if self.forked_self {
-            bail!("this device's ledger is forked; it must be re-enrolled as a new device");
-        }
+        self.ensure_ledger_writable()?;
         let (rec, _) = self.resolve_folder(&req.folder)?;
         if !req.dry_run {
             // Decide from the newest claims and drops.
