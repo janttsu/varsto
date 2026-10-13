@@ -58,8 +58,8 @@ mod fetch;
 mod folder_rules;
 mod folder_safety;
 mod guide;
-mod history;
 mod help;
+mod history;
 mod imports;
 mod ledger_recovery;
 mod ledger_upkeep;
@@ -100,11 +100,11 @@ pub use folder_safety::{
     paused_error, ChangeKind, DiscardReport, FolderChanges, FolderPaused, HeldDeletions,
     HeldSummary, PauseKind, RevertReport, FOLDER_MARKER,
 };
+pub use help::{help_without_vault, HelpObserved};
 pub use history::{
     history_kept, parse_utc, FolderHistory, HistoryItem, HistoryList, HistoryRestoreReport,
     HistoryStatus, HistoryTarget, DEFAULT_HISTORY_DAYS, MAX_HISTORY_DAYS,
 };
-pub use help::{help_without_vault, HelpObserved};
 pub use imports::{
     CleanupFile, ImportCleanupReport, ImportOptions, ImportReport, ImportStatus, ImportVerify,
     MissingFile,

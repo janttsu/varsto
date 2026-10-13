@@ -3126,6 +3126,7 @@ mod tests {
                 ..Default::default()
             },
             pair: None,
+            link: None,
         };
         let get = |st: &mut State, query: &str| {
             api(st, Method::Get, "/api/help", query, &json!({})).unwrap()
@@ -3165,6 +3166,7 @@ mod tests {
                 cold: false,
                 carrier: false,
                 place: String::new(),
+                min_free: None,
             })
             .unwrap();
         let h = get(&mut st, "");

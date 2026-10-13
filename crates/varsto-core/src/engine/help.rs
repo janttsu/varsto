@@ -7,8 +7,8 @@
 use super::*;
 use crate::disksuggest::DiskSuggestions;
 use crate::help::{
-    self, BackupIn, DiskIn, FolderIn, HelpState, Inputs, Kit, OrgIn, Phase, PolicyIn, ServiceIn,
-    StorageIn,
+    self, BackupIn, DiskIn, FolderIn, HelpState, Inputs, KeptAsideIn, Kit, LowSpaceIn, OrgIn,
+    PausedIn, Phase, PolicyIn, ServiceIn, StorageIn,
 };
 use crate::policy::PolicyReport;
 use crate::pool::DiskStatus;
@@ -318,8 +318,58 @@ impl Engine {
                 admin: o.this_device_admin,
                 listed: o.this_device_listed,
                 pending: o.unlisted.len(),
+                blocked: o.this_device_blocked.clone(),
             });
         }
+
+        // Folders paused here, read-only folders with changes kept aside.
+        for (rec, root) in self.folders() {
+            let Some(root) = root else { continue };
+            let Ok(state) = self.load_state(&rec.folder_id) else {
+                continue;
+            };
+            if let Some(p) = self.pause_of(&rec, &root, &state) {
+                inputs.paused.push(PausedIn {
+                    folder: rec.name.clone(),
+                    kind: match p.kind {
+                        PauseKind::MarkerMissing => "marker_missing",
+                        PauseKind::MarkerOther => "marker_other",
+                        PauseKind::DeletionsHeld => "deletions_held",
+                    }
+                    .into(),
+                    count: state.held.as_ref().map_or(0, |h| h.paths.len() as u64),
+                });
+            }
+            if self.share_read_only(&rec) {
+                let dir = self
+                    .home
+                    .join(KEPT_ASIDE_DIR)
+                    .join(rec.name.replace(['/', '\\', ':'], "_"));
+                let files = walkdir::WalkDir::new(&dir)
+                    .into_iter()
+                    .filter_map(|e| e.ok())
+                    .filter(|e| e.file_type().is_file())
+                    .count() as u64;
+                if files > 0 {
+                    inputs.kept_aside.push(KeptAsideIn {
+                        folder: rec.name.clone(),
+                        files,
+                        dir: dir.display().to_string(),
+                    });
+                }
+            }
+        }
+
+        // Places below their minimum free space (`freespace`).
+        inputs.low_space = crate::freespace::short_places()
+            .into_iter()
+            .map(|l| LowSpaceIn {
+                key: l.place.key,
+                label: l.place.label,
+                stops: l.place.stops,
+                free: l.free,
+            })
+            .collect();
         Ok(inputs)
     }
 }

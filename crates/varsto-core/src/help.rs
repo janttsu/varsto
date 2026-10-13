@@ -175,6 +175,38 @@ pub struct ServiceIn {
     pub peers: usize,
 }
 
+/// A folder paused on this device (`engine::folder_safety`).
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PausedIn {
+    pub folder: String,
+    /// "marker_missing", "marker_other" or "deletions_held".
+    pub kind: String,
+    /// Deletions held (for "deletions_held").
+    pub count: u64,
+}
+
+/// A folder shared with this device read-only whose local changes were
+/// moved aside (`engine::share_roles`).
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct KeptAsideIn {
+    pub folder: String,
+    pub files: u64,
+    /// Where they are.
+    pub dir: String,
+}
+
+/// A place below its minimum free space (`crate::freespace`).
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LowSpaceIn {
+    /// `folder:<name>`, `storage:<name>`, `device`, `path:<dir>`.
+    pub key: String,
+    /// "folder Photos", "storage usb-disk", "the device directory".
+    pub label: String,
+    /// What waits: "downloads", "uploads", "writes".
+    pub stops: String,
+    pub free: u64,
+}
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct OrgIn {
     pub name: String,
@@ -183,6 +215,9 @@ pub struct OrgIn {
     pub listed: bool,
     /// Devices waiting for an administrator's approval.
     pub pending: usize,
+    /// The organization's platform rule locks this device out: why.
+    #[serde(default)]
+    pub blocked: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -234,6 +269,15 @@ pub struct Inputs {
     pub mcp_used: bool,
     /// Storages at their quota during the last sync (from the service).
     pub quota_full: Vec<String>,
+    /// Folders paused on this device.
+    #[serde(default)]
+    pub paused: Vec<PausedIn>,
+    /// Read-only shared folders with local changes moved aside.
+    #[serde(default)]
+    pub kept_aside: Vec<KeptAsideIn>,
+    /// Places below their minimum free space, as the last checks found.
+    #[serde(default)]
+    pub low_space: Vec<LowSpaceIn>,
 }
 
 // ----- output ----------------------------------------------------------------
@@ -551,8 +595,14 @@ fn ready(h: &mut HelpState, i: &Inputs) {
     h.steps.sort_by_key(|s| level_rank(&s.level));
     let bad = h.attention.iter().filter(|a| a.level == "bad").count();
     if bad > 0 && !storages.is_empty() && !i.folders.is_empty() && fg_unkept_zero(h) {
+        let t = match (storages.len() == 1, bad == 1) {
+            (true, true) => "Your files are kept in 1 storage, but 1 thing needs your attention.",
+            (true, false) => "Your files are kept in 1 storage, but {count} things need your attention.",
+            (false, true) => "Your files are kept in {storages} storages, but 1 thing needs your attention.",
+            (false, false) => "Your files are kept in {storages} storages, but {count} things need your attention.",
+        };
         h.headline = tx(
-            "Your files are kept in {storages} storage(s), but {count} thing(s) need your attention.",
+            t,
             &[
                 ("storages", storages.len().to_string()),
                 ("count", bad.to_string()),
@@ -937,6 +987,68 @@ fn attention(h: &mut HelpState, i: &Inputs, storages: &[&StorageIn]) {
             ),
         );
     }
+    for p in &i.paused {
+        let f = ("folder", p.folder.clone());
+        let text = match p.kind.as_str() {
+            "marker_missing" => tx(
+                "Folder {folder} is paused: its marker file .varsto-folder is missing. Is its disk mounted?",
+                &[f],
+            ),
+            "marker_other" => tx(
+                "Folder {folder} is paused: its directory holds another folder's marker.",
+                &[f],
+            ),
+            _ => tx(
+                "Folder {folder} is paused: {count} deletions wait for your decision.",
+                &[f, ("count", p.count.to_string())],
+            ),
+        };
+        att(h, &format!("paused:{}", p.folder), "bad", text);
+    }
+    for k in &i.kept_aside {
+        att(
+            h,
+            &format!("kept_aside:{}", k.folder),
+            "warn",
+            tx(
+                "Folder {folder} is shared with you read-only: {count} files changed here were moved aside.",
+                &[("folder", k.folder.clone()), ("count", k.files.to_string())],
+            ),
+        );
+    }
+    if let Some(why) = i.org.as_ref().and_then(|o| o.blocked.clone()) {
+        att(
+            h,
+            "org_blocked",
+            "bad",
+            tx(
+                "This device is locked out: {why}. It does not sync until an administrator allows it.",
+                &[("why", why)],
+            ),
+        );
+    }
+    for l in &i.low_space {
+        let free = ("free", human_bytes(l.free));
+        let text = match l.key.split_once(':') {
+            Some(("folder", n)) => tx(
+                "Only {free} free on the disk of folder {name}, below its minimum: downloads into it wait.",
+                &[free, ("name", n.to_string())],
+            ),
+            Some(("storage", n)) => tx(
+                "Only {free} free on storage {name}, below its minimum: blocks for it wait.",
+                &[free, ("name", n.to_string())],
+            ),
+            Some((_, dir)) => tx(
+                "Only {free} free on {name}, below its minimum: writes there wait.",
+                &[free, ("name", dir.to_string())],
+            ),
+            None => tx(
+                "Only {free} free on this device's disk, below its minimum: Varsto's own writes wait.",
+                &[free],
+            ),
+        };
+        att(h, &format!("space:{}", l.key), "warn", text);
+    }
     for s in storages {
         match s.quota_state.as_str() {
             "full" => att(
@@ -1073,7 +1185,10 @@ fn attention(h: &mut HelpState, i: &Inputs, storages: &[&StorageIn]) {
             att(h, "p2p", "info", t0("Your other devices cannot reach this one directly right now; files still move through the storages."));
         }
     }
-    if let Some((free, total)) = i.home_space {
+    if let Some((free, total)) = i
+        .home_space
+        .filter(|_| !i.low_space.iter().any(|l| l.key == "device"))
+    {
         if free < LOW_FREE_BYTES || (total > 0 && free * 100 < total * LOW_FREE_PERCENT) {
             att(
                 h,
@@ -1139,6 +1254,41 @@ fn steps(h: &mut HelpState, i: &Inputs, storages: &[&StorageIn], offsite_configu
                 .act("overview", Some("ledgerbanner"), "Show me")
                 .cmd(i.ledger_command.clone().unwrap_or_else(|| "varsto ledger rebuild".into()))
                 .guide("recovery")
+                .0,
+        );
+    }
+    if let Some(why) = i.org.as_ref().and_then(|o| o.blocked.clone()) {
+        out.push(
+            StepB::new("org_blocked", "urgent", t0("Ask an administrator to allow this device"), tx("The organization's rules lock it out: {why}. Until then it does not sync or open the vault.", &[("why", why)]))
+                .how(t0("An administrator can allow this platform or version under Organization, or you can use the vault on a device the rules allow."))
+                .act("organization", None, "Open Organization")
+                .cmd("varsto org status")
+                .0,
+        );
+    }
+    for p in &i.paused {
+        let f = ("folder", p.folder.clone());
+        let step = if p.kind == "deletions_held" {
+            StepB::new(&format!("paused:{}", p.folder), "urgent", tx("Decide on the deletions held in {folder}", &[f.clone()]), tx("{count} files were deleted at once, so Varsto paused the folder: nothing is deleted on your other devices until you decide.", &[("count", p.count.to_string())]))
+                .how(t0("If you meant it, confirm the deletions. If not, discard them: the files come back from your storages."))
+                .act("overview", Some("foldersafety"), "Show the held deletions")
+                .cmd(format!("varsto folder confirm-deletions {}   (or --discard)", sh(&p.folder)))
+                .guide("folders")
+        } else {
+            StepB::new(&format!("paused:{}", p.folder), "urgent", tx("Bring folder {folder} back", &[f.clone()]), t0("Its directory lacks the folder's marker, so Varsto paused it instead of reading an empty directory as deleted files."))
+                .how(t0("Mount the disk that holds the folder, then sync. If the directory is the right one, repair the marker."))
+                .act("overview", Some("foldersafety"), "Show the paused folder")
+                .cmd(format!("varsto folder repair-marker {}", sh(&p.folder)))
+                .guide("folders")
+        };
+        out.push(step.0);
+    }
+    for k in &i.kept_aside {
+        out.push(
+            StepB::new(&format!("kept_aside:{}", k.folder), "urgent", tx("Keep your changes to {folder} somewhere else", &[("folder", k.folder.clone())]), t0("The folder is shared with you read-only: files changed here are moved aside and the shared version comes back."))
+                .how(tx("The changed files are in {dir}. Copy them to a folder of your own, then delete them there; or ask the owner to make you an editor.", &[("dir", k.dir.clone())]))
+                .act("shared", None, "Open Shared")
+                .cmd(format!("varsto share members {}", sh(&k.folder)))
                 .0,
         );
     }
@@ -1318,7 +1468,44 @@ fn steps(h: &mut HelpState, i: &Inputs, storages: &[&StorageIn], offsite_configu
             .0,
         );
     }
-    if let Some((free, total)) = i.home_space {
+    if let Some(l) = i.low_space.first() {
+        let (page, cmd, title) = match l.key.split_once(':') {
+            Some(("storage", n)) => (
+                "storages",
+                format!("varsto storage set {} --min-free <limit>", sh(n)),
+                tx(
+                    "Free up space on storage {name}",
+                    &[("name", n.to_string())],
+                ),
+            ),
+            Some(("folder", n)) => (
+                "files",
+                format!("varsto folder set {} --min-free <limit>", sh(n)),
+                tx(
+                    "Free up space on the disk of folder {name}",
+                    &[("name", n.to_string())],
+                ),
+            ),
+            Some((_, dir)) => (
+                "files",
+                "varsto status".to_string(),
+                tx("Free up space on {name}", &[("name", dir.to_string())]),
+            ),
+            None => (
+                "files",
+                "varsto status".to_string(),
+                t0("Free up space on this device"),
+            ),
+        };
+        out.push(
+            StepB::new("space", "urgent", title, t0("Varsto keeps a minimum of free space on every disk it writes to; below it, downloads or uploads there wait."))
+                .how(t0("Free up space on that disk, for example by turning files you do not need here into placeholders. Or lower the minimum, if the disk can take it."))
+                .act(page, None, "Show me")
+                .cmd(cmd)
+                .guide("folders")
+                .0,
+        );
+    } else if let Some((free, total)) = i.home_space {
         if free < LOW_FREE_BYTES || (total > 0 && free * 100 < total * LOW_FREE_PERCENT) {
             out.push(
                 StepB::new("space", "urgent", t0("Free up space on this device"), tx("Only {free} is free. Syncing stops when the disk is full.", &[("free", human_bytes(free))]))

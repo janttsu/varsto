@@ -366,3 +366,215 @@ fn kit_out_of_date_and_member_rules() {
     assert!(!ids(&h).contains(&"add_device"));
     assert!(h.headline.render().contains("shared"));
 }
+
+#[test]
+fn paused_folders_come_first() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    let (mut a, _) = Engine::init(&root.join("a-home"), "laptop", PASS).unwrap();
+    a.chunker = ChunkerParams::SMALL;
+    a.add_storage(dir(root, "box", "home")).unwrap();
+    let docs = root.join("docs");
+    fs::create_dir_all(&docs).unwrap();
+    for n in 0..150 {
+        fs::write(docs.join(format!("f{n}.txt")), format!("file {n}")).unwrap();
+    }
+    a.add_folder("docs", &docs).unwrap();
+    a.push("docs").unwrap();
+    let h = a.help_state(running()).unwrap();
+    assert!(
+        !ids(&h).iter().any(|i| i.starts_with("paused:")),
+        "{:?}",
+        ids(&h)
+    );
+
+    // The folder's disk is gone: paused, the marker step first of all.
+    fs::rename(&docs, root.join("docs-away")).unwrap();
+    let h = a.help_state(running()).unwrap();
+    let att = h.attention.iter().find(|x| x.id == "paused:docs").unwrap();
+    assert_eq!(att.level, "bad");
+    assert!(att.text.render().contains(".varsto-folder"));
+    let step = h.steps.iter().find(|s| s.id == "paused:docs").unwrap();
+    assert_eq!(step.level, "urgent");
+    assert_eq!(
+        step.command.as_deref(),
+        Some("varsto folder repair-marker docs")
+    );
+    assert_eq!(
+        step.action.as_ref().unwrap().target.as_deref(),
+        Some("foldersafety")
+    );
+    well_formed(&h);
+    fs::rename(root.join("docs-away"), &docs).unwrap();
+
+    // Every file deleted at once: held, with the count.
+    for n in 0..150 {
+        fs::remove_file(docs.join(format!("f{n}.txt"))).unwrap();
+    }
+    assert!(a.push("docs").is_err());
+    let h = a.help_state(running()).unwrap();
+    let att = h.attention.iter().find(|x| x.id == "paused:docs").unwrap();
+    assert!(att.text.render().contains("150 deletions"), "{att:?}");
+    let step = h.steps.iter().find(|s| s.id == "paused:docs").unwrap();
+    assert_eq!(step.level, "urgent");
+    assert!(step
+        .command
+        .as_deref()
+        .unwrap()
+        .starts_with("varsto folder confirm-deletions docs"));
+    assert!(step.title.render().contains("deletions held"));
+    well_formed(&h);
+
+    // Confirmed: nothing paused any more.
+    a.confirm_deletions("docs").unwrap();
+    let h = a.help_state(running()).unwrap();
+    assert!(!ids(&h).contains(&"paused:docs"), "{:?}", ids(&h));
+}
+
+/// A vault in order, for the pure rules below.
+fn in_order() -> Inputs {
+    Inputs {
+        phase: Phase::Ready,
+        device: "laptop".into(),
+        other_devices: vec!["phone".into()],
+        storages: vec![StorageIn {
+            name: "box".into(),
+            kind: "directory".into(),
+            place: "home".into(),
+            bytes: 10,
+            quota_state: "none".into(),
+            ..Default::default()
+        }],
+        folders: vec![help::FolderIn {
+            name: "docs".into(),
+            attached: true,
+            files: 1,
+            bytes: 10,
+            ..Default::default()
+        }],
+        total_bytes: 10,
+        copies_bytes: [0, 10, 0, 0],
+        kit: Kit::Printed,
+        trash_days: 30,
+        ..Default::default()
+    }
+}
+
+#[test]
+fn read_only_folder_with_changes_kept_aside() {
+    let mut i = in_order();
+    i.kept_aside = vec![help::KeptAsideIn {
+        folder: "team".into(),
+        files: 3,
+        dir: "/home/u/.varsto/kept-aside/team".into(),
+    }];
+    let h = help::build(&i);
+    let att = h
+        .attention
+        .iter()
+        .find(|a| a.id == "kept_aside:team")
+        .unwrap();
+    assert_eq!(att.level, "warn");
+    assert!(att.text.render().contains("3 files"));
+    assert_eq!(first(&h), "kept_aside:team");
+    assert_eq!(h.steps[0].level, "urgent");
+    assert!(h.steps[0].how[0].render().contains("kept-aside/team"));
+    assert_eq!(h.steps[0].action.as_ref().unwrap().page, "shared");
+    well_formed(&h);
+}
+
+#[test]
+fn device_locked_out_by_the_organization() {
+    let mut i = in_order();
+    i.org = Some(help::OrgIn {
+        name: "Acme".into(),
+        listed: true,
+        blocked: Some("this organization (Acme) does not allow linux devices".into()),
+        ..Default::default()
+    });
+    let h = help::build(&i);
+    let att = h.attention.iter().find(|a| a.id == "org_blocked").unwrap();
+    assert_eq!(att.level, "bad");
+    assert!(att.text.render().contains("linux devices"));
+    assert_eq!(first(&h), "org_blocked");
+    assert_eq!(h.steps[0].level, "urgent");
+    assert_eq!(h.steps[0].action.as_ref().unwrap().page, "organization");
+    assert_eq!(h.steps[0].command.as_deref(), Some("varsto org status"));
+    // One bad item: the headline says so in the singular.
+    assert!(h
+        .headline
+        .render()
+        .ends_with("but 1 thing needs your attention."));
+    well_formed(&h);
+}
+
+#[test]
+fn below_the_minimum_free_space() {
+    let mut i = in_order();
+    i.low_space = vec![help::LowSpaceIn {
+        key: "folder:docs".into(),
+        label: "folder docs".into(),
+        stops: "downloads".into(),
+        free: 1_000_000_000,
+    }];
+    let h = help::build(&i);
+    let att = h
+        .attention
+        .iter()
+        .find(|a| a.id == "space:folder:docs")
+        .unwrap();
+    assert!(att.text.render().contains("folder docs"));
+    assert_eq!(first(&h), "space");
+    assert_eq!(h.steps[0].level, "urgent");
+    assert_eq!(
+        h.steps[0].command.as_deref(),
+        Some("varsto folder set docs --min-free <limit>")
+    );
+    well_formed(&h);
+
+    // The device directory short as well as low on the disk: one item
+    // and one step for it, not two.
+    i.low_space = vec![help::LowSpaceIn {
+        key: "device".into(),
+        label: "the device directory".into(),
+        stops: "writes".into(),
+        free: 500_000_000,
+    }];
+    i.home_space = Some((500_000_000, 100_000_000_000));
+    let h = help::build(&i);
+    let space: Vec<&str> = h
+        .attention
+        .iter()
+        .filter(|a| a.id.starts_with("space"))
+        .map(|a| a.id.as_str())
+        .collect();
+    assert_eq!(space, ["space:device"]);
+    assert_eq!(ids(&h).iter().filter(|s| **s == "space").count(), 1);
+    well_formed(&h);
+}
+
+#[test]
+fn headline_counts_in_singular_and_plural() {
+    let mut i = in_order();
+    i.scrub_damaged = 1;
+    i.repair_losses = 1;
+    let h = help::build(&i);
+    assert_eq!(
+        h.headline.render(),
+        "Your files are kept in 1 storage, but 2 things need your attention."
+    );
+    i.storages.push(StorageIn {
+        name: "bucket".into(),
+        kind: "s3".into(),
+        place: "cloud".into(),
+        bytes: 10,
+        quota_state: "none".into(),
+        ..Default::default()
+    });
+    i.repair_losses = 0;
+    let h = help::build(&i);
+    assert_eq!(
+        h.headline.render(),
+        "Your files are kept in 2 storages, but 1 thing needs your attention."
+    );
+}
