@@ -168,6 +168,28 @@ fn handle_unlocked(fixed: &Fixed, request: Request) -> Result<Option<Request>> {
     if *request.method() != Method::Get {
         return Ok(Some(request));
     }
+    if path == "/api/events" {
+        // A stream of its own thread (`sse`); the browser's EventSource
+        // cannot set headers, so the token may come in the query.
+        let query = request
+            .url()
+            .split_once('?')
+            .map_or(String::new(), |(_, q)| q.to_string());
+        let token_ok = request
+            .headers()
+            .iter()
+            .any(|h| h.field.equiv("X-Varsto-Token") && h.value.as_str() == fixed.token)
+            || query_param(&query, "token").as_deref() == Some(fixed.token.as_str());
+        if !token_ok {
+            request.respond(json_response(
+                401,
+                &json!({"error": "missing or wrong token; reopen the start URL"}),
+            ))?;
+            return Ok(None);
+        }
+        crate::sse::serve(request, &query, fixed.traffic.clone());
+        return Ok(None);
+    }
     match path.as_str() {
         "/" => request.respond(html(INDEX_HTML))?,
         "/app.js" => request.respond(text(APP_JS, "text/javascript; charset=utf-8"))?,
@@ -498,10 +520,15 @@ fn handle(state: &Shared, mut request: Request) -> Result<()> {
         service::request_quit(state);
         return Ok(());
     }
+    let post = method == Method::Post;
     let result = {
         let mut st = state.lock().unwrap();
         api(&mut st, method, &path, &query, &input)
     };
+    // Something was changed through the API: open pages load it again.
+    if post && result.is_ok() && path != "/api/sync" {
+        varsto_core::events::publish("config.changed", json!({"source": "api", "path": path}));
+    }
     match result {
         Ok(v) => Ok(request.respond(json_response(200, &v))?),
         Err(e) => Ok(request.respond(json_response(400, &json!({"error": format!("{e:#}")})))?),
@@ -1571,6 +1598,7 @@ fn api_unlocked(
         }
         (Method::Post, "/api/sync") => {
             let folder = opt(input, "folder");
+            varsto_core::events::publish("sync.started", json!({"reason": "requested", "folder": folder}));
             let reports = engine.sync(folder.as_deref())?;
             service.record_sync(&reports);
             Ok(serde_json::to_value(

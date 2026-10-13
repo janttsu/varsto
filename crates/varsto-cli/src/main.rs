@@ -20,6 +20,7 @@ mod mcp_keys;
 mod placing;
 mod restic;
 mod service;
+mod sse;
 mod tray;
 mod update;
 mod upkeep;

@@ -59,22 +59,26 @@
     if (working === 0) { clearTimeout(barTimer); barTimer = null; $("workbar").classList.remove("on"); }
   }
   // While a pressed button downloads a file, the note under it shows how far.
+  // With the event stream up, its `transfers` events say it; otherwise
+  // /api/progress is asked every 400 ms.
   function followDownload(b) {
     var stop = false;
+    function show(j) {
+      var d = j && j.download;
+      if (stop || !d || !(d.total > 0)) { return; }
+      var note = b.nextElementSibling && b.nextElementSibling.classList.contains("busy-note") ? b.nextElementSibling : null;
+      if (!note) { note = el("span", "busy-note muted small"); b.after(note); }
+      note.textContent = "Downloading " + d.path.split("/").pop() + ": " + fmtBytes(d.done) + " of " + fmtBytes(d.total) + " (" + d.percent + " %" + (d.bytes_per_sec > 0 ? ", " + fmtBytes(d.bytes_per_sec) + "/s" : "") + ")";
+    }
+    transferFollowers.push(show);
     (function tick() {
       if (stop) { return; }
-      fetch("/api/progress", { headers: { "X-Varsto-Token": token } }).then(function (r) { return r.json(); }).then(function (j) {
-        if (stop) { return; }
-        var d = j.download;
-        if (d && d.total > 0) {
-          var note = b.nextElementSibling && b.nextElementSibling.classList.contains("busy-note") ? b.nextElementSibling : null;
-          if (!note) { note = el("span", "busy-note muted small"); b.after(note); }
-          note.textContent = "Downloading " + d.path.split("/").pop() + ": " + fmtBytes(d.done) + " of " + fmtBytes(d.total) + " (" + d.percent + " %" + (d.bytes_per_sec > 0 ? ", " + fmtBytes(d.bytes_per_sec) + "/s" : "") + ")";
-        }
-      }).catch(function () {}).then(function () { if (!stop) { setTimeout(tick, 400); } });
+      if (evsOk) { setTimeout(tick, 1000); return; }
+      fetch("/api/progress", { headers: { "X-Varsto-Token": token } }).then(function (r) { return r.json(); }).then(show).catch(function () {}).then(function () { if (!stop) { setTimeout(tick, 400); } });
     })();
-    return function () { stop = true; };
+    return function () { stop = true; transferFollowers = transferFollowers.filter(function (f) { return f !== show; }); };
   }
+  var transferFollowers = [];
   function api(method, path, body) {
     var b = pressed(); var loud = !!b || method !== "GET";
     if (b) { markBusy(b, true); }
@@ -1854,10 +1858,38 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     $("svc-dot").dataset.state = state;
     $("pause").textContent = sv.paused ? "Resume" : "Pause";
     $("pause").dataset.paused = sv.paused ? "1" : "0";
+    renderSpace(sv.low_space || []);
+  }
+  // Places short of disk space: one line each (each translated on its own).
+  function renderSpace(list) {
+    var b = $("spacebanner"); if (!b) { return; }
+    b.innerHTML = "";
+    list.forEach(function (l) { var t = l.text || ""; b.appendChild(el("div", null, t.charAt(0).toUpperCase() + t.slice(1) + ".")); });
+    b.classList.toggle("hidden", list.length === 0);
+  }
+  // The free space kept on the disk of a folder (here) or of a directory storage.
+  function editMinFree(kind, name, current) {
+    dialog({
+      title: "Free space to keep",
+      text: kind === "folder" ? "Downloads into this folder stop while its disk would keep less free space than this. Reading and uploading go on, and downloads resume by themselves when there is room again." : "Blocks are not written to this storage while its disk would keep less free space than this. The other storages still get them, and writing resumes by itself when there is room again.",
+      fields: [{ name: "min_free", label: "Keep free", value: current || "5%", hint: "A share of the disk (5%) or an amount (10GB). The default is 5 %." }],
+      ok: "Save", extra: current ? "Default" : null
+    }).then(function (r) {
+      if (!r) { return; }
+      var v = r.action === "extra" ? "" : (r.values.min_free || "").trim();
+      var body = kind === "folder" ? { folder: name, min_free: v } : { name: name, min_free: v };
+      return api("POST", kind === "folder" ? "/api/folder/min-free" : "/api/storage/min-free", body).then(function () {
+        log(name + ": " + (v || "5%") + " kept free");
+        return refreshStatus();
+      });
+    }).catch(function (e) { alertBox(e.message); });
   }
   // The tray and menu bar pause and sync through the same service; follow them.
-  function pollService() { if (!token || document.visibilityState !== "visible") { return; } api("GET", "/api/service").then(renderService).catch(function () {}); }
-  setInterval(pollService, 5000);
+  var lastServicePoll = 0;
+  function pollService() { if (!token || document.visibilityState !== "visible") { return; } lastServicePoll = Date.now(); api("GET", "/api/service").then(renderService).catch(function () {}); }
+  // Every five seconds without the event stream; with it, the events ask
+  // (serviceSoon) and a slow poll once a minute stays as a safety net.
+  setInterval(function () { if (evsOk && Date.now() - lastServicePoll < 60000) { return; } pollService(); }, 5000);
   window.addEventListener("focus", pollService);
   $("pause").onclick = function () { api("POST", "/api/service/pause", { paused: $("pause").dataset.paused !== "1" }).then(renderService).catch(function (e) { log("error: " + e.message); }); };
   // Updates: checked by themselves (at start and every six hours); the
@@ -2739,12 +2771,13 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   }
   function activityWanted() { return (currentPage === "overview" || currentPage === "peers") && document.body.dataset.view === "app" && document.visibilityState !== "hidden"; }
   function activityWatch() {
-    if (!activityWanted()) { if (actTimer) { clearTimeout(actTimer); actTimer = null; } return; }
+    streamUpdate();
+    if (!activityWanted() || evsOk) { if (actTimer) { clearTimeout(actTimer); actTimer = null; } return; }
     if (actTimer || actBusy) { return; }
     actBusy = true;
     api("GET", "/api/activity").then(renderActivity).catch(function () {}).then(function () {
       actBusy = false;
-      if (activityWanted() && !actTimer) { actTimer = setTimeout(function () { actTimer = null; activityWatch(); }, 2000); }
+      if (activityWanted() && !evsOk && !actTimer) { actTimer = setTimeout(function () { actTimer = null; activityWatch(); }, 2000); }
     });
   }
   // Progress at the top of the window: this device's tasks that have run for
@@ -2766,6 +2799,8 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   function taskbarPoll() {
     tbTimer = null;
     if (!taskbarWanted()) { return; }
+    // The event stream brings this device's tasks as they change.
+    if (evsOk) { taskbarSchedule(5000); return; }
     // The Now card asks every two seconds anyway; between its answers only the fast mode asks.
     if (activityWanted() && !taskbarFast()) { taskbarSchedule(); return; }
     tbBusy = true;
@@ -2812,6 +2847,93 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   }
   document.addEventListener("visibilitychange", function () { if (document.visibilityState === "visible") { taskbarSchedule(0); } else if (tbTimer) { clearTimeout(tbTimer); tbTimer = null; } });
   taskbarSchedule(1000);
+
+  // Event stream (GET /api/events, Server-Sent Events): what the service
+  // does arrives as it happens, so the page stops asking every few seconds.
+  // This device's tasks (the bar at the top, the Now card), the transfers,
+  // and, while the Overview or Peers page shows, the other devices'
+  // activity and the traffic come with it; syncs, changes, problems and
+  // notifications make the page load the service's summary once. The
+  // stream is closed while the page is hidden; when it drops, the browser
+  // reconnects (and the page with doubling waits, up to a minute), the
+  // missed events are replayed from the service's ring (Last-Event-ID), and
+  // meanwhile the old polls take over.
+  var evs = null, evsOk = false, evsKey = null, evsLast = 0, evsRetry = 1000, evsTimer = null;
+  var evsMe = { device: "", name: "" }, evsTasks = {}, evsPeers = [], evsSoon = null, evsStatusSoon = null;
+  function streamWanted() { return !!token && document.body.dataset.view === "app" && document.visibilityState !== "hidden" && typeof EventSource !== "undefined"; }
+  function streamClose() {
+    if (evs) { evs.close(); evs = null; }
+    if (evsTimer) { clearTimeout(evsTimer); evsTimer = null; }
+    evsKey = null;
+    if (evsOk) { evsOk = false; activityWatch(); trafficWatch(); taskbarSchedule(0); }
+  }
+  function streamUpdate() {
+    if (!streamWanted()) { if (evs || evsTimer) { streamClose(); } return; }
+    var peers = activityWanted(), traffic = trafficWanted();
+    var key = (peers ? "p" : "") + (traffic ? "t" : "");
+    if ((evs || evsTimer) && key === evsKey) { return; }
+    if (evs) { evs.close(); evs = null; }
+    if (evsTimer) { clearTimeout(evsTimer); evsTimer = null; }
+    evsKey = key;
+    var url = "/api/events?token=" + enc(token) + (peers ? "&peers=1" : "") + (traffic ? "&traffic=1" : "") + (evsLast ? "&last_id=" + evsLast : "");
+    var es = new EventSource(url); evs = es;
+    es.onopen = function () { if (evs !== es) { return; } evsRetry = 1000; };
+    es.onerror = function () {
+      if (evs !== es) { return; }
+      var was = evsOk; evsOk = false;
+      if (was) { activityWatch(); trafficWatch(); taskbarSchedule(0); }
+      // The browser tries again by itself unless the answer was an error.
+      if (es.readyState === 2) {
+        evs = null;
+        evsTimer = setTimeout(function () { evsTimer = null; evsKey = null; streamUpdate(); }, evsRetry);
+        evsRetry = Math.min(evsRetry * 2, 60000);
+      }
+    };
+    function on(kind, fn) {
+      es.addEventListener(kind, function (ev) {
+        if (evs !== es) { return; }
+        if (ev.lastEventId) { evsLast = +ev.lastEventId || evsLast; }
+        var m = null; try { m = JSON.parse(ev.data); } catch (e) { return; }
+        fn(m.data || {}, m);
+      });
+    }
+    on("hello", function (d) {
+      // A smaller number than we had: the service started again.
+      var restarted = evsLast && d.last_id < evsLast;
+      if (!evsLast || restarted) { evsLast = d.last_id; }
+      var a = d.activity || {}; evsMe = { device: a.device || "", name: a.name || "" };
+      evsTasks = {}; (a.tasks || []).forEach(function (t) { evsTasks[t.id] = t; });
+      var first = !evsOk; evsOk = true;
+      if (actTimer) { clearTimeout(actTimer); actTimer = null; }
+      if (trafficTimer) { clearTimeout(trafficTimer); trafficTimer = null; }
+      tasksChanged();
+      if (restarted) { statusSoon(); }
+      if (first) { serviceSoon(); }
+    });
+    on("reset", function () { statusSoon(); serviceSoon(); });
+    on("activity.started", function (t) { evsTasks[t.id] = t; tasksChanged(); });
+    on("activity.progress", function (t) { evsTasks[t.id] = t; tasksChanged(); });
+    on("activity.finished", function (t) { delete evsTasks[t.id]; tasksChanged(); });
+    on("activity.peers", function (d) { evsPeers = d.peers || []; tasksChanged(); });
+    on("traffic", function (d) { if (trafficWanted()) { renderTraffic(d); } });
+    on("transfers", function (d) { transferFollowers.forEach(function (f) { f(d); }); });
+    on("sync.finished", function () { serviceSoon(); });
+    on("sync.started", function () {});
+    ["policy.changed", "ledger.health", "backup", "trash", "files.new", "space.low", "space.ok", "storage.problem", "storage.ok", "peer.connected", "peer.disconnected"].forEach(function (k) { on(k, function () { serviceSoon(); }); });
+    on("config.changed", function () { serviceSoon(); statusSoon(); });
+    on("notification", function (d) { if (d.title) { log(d.title + ": " + (d.body || "")); } });
+  }
+  // This device's tasks changed: the bar at the top and the Now card.
+  function tasksChanged() {
+    var tasks = Object.keys(evsTasks).map(function (k) { return evsTasks[k]; }).sort(function (a, b) { return a.started_utc - b.started_utc; });
+    var me = { device: evsMe.device, name: evsMe.name, tasks: tasks };
+    taskbarRender(me);
+    if (activityWanted()) { renderActivity({ me: me, peers: evsPeers }); }
+  }
+  // Several events in a row ask once.
+  function serviceSoon() { if (evsSoon) { return; } evsSoon = setTimeout(function () { evsSoon = null; pollService(); }, 300); }
+  function statusSoon() { if (evsStatusSoon) { return; } evsStatusSoon = setTimeout(function () { evsStatusSoon = null; if (busyCount === 0) { refreshStatus().catch(function () {}); } }, 500); }
+  document.addEventListener("visibilitychange", streamUpdate);
 
   // Recovery package: what to keep outside your devices and how to restore,
   // from GET /api/recovery/guide. Every sentence comes as an English
@@ -2937,12 +3059,13 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   var SVGNS = "http://www.w3.org/2000/svg";
   function trafficWanted() { return currentPage === "peers" && document.body.dataset.view === "app" && document.visibilityState !== "hidden"; }
   function trafficWatch() {
-    if (!trafficWanted()) { if (trafficTimer) { clearTimeout(trafficTimer); trafficTimer = null; } return; }
+    streamUpdate();
+    if (!trafficWanted() || evsOk) { if (trafficTimer) { clearTimeout(trafficTimer); trafficTimer = null; } return; }
     if (trafficTimer || trafficBusy) { return; }
     trafficBusy = true;
     api("GET", "/api/p2p/traffic").then(renderTraffic).catch(function () {}).then(function () {
       trafficBusy = false;
-      if (trafficWanted() && !trafficTimer) { trafficTimer = setTimeout(function () { trafficTimer = null; trafficWatch(); }, 1000); }
+      if (trafficWanted() && !evsOk && !trafficTimer) { trafficTimer = setTimeout(function () { trafficTimer = null; trafficWatch(); }, 1000); }
     });
   }
   function fmtRate(n) { return fmtBytes(n) + "/s"; }

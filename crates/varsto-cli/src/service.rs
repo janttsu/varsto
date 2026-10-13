@@ -105,6 +105,8 @@ pub struct ServiceState {
     /// wait until space is back. Notified once per place.
     pub low_space: Vec<varsto_core::freespace::LowSpace>,
     pub low_space_notified: std::collections::BTreeSet<String>,
+    /// Storages a push had to leave out last time (`storage.problem` events).
+    pub storage_problems: std::collections::BTreeSet<String>,
 }
 
 /// The storages are asked this often whether they hold newer ledger
@@ -219,6 +221,12 @@ impl ServiceState {
                 .iter()
                 .find(|p| p.folder == r.folder)
                 .map(|p| p.state);
+            if before != Some(r.state) {
+                varsto_core::events::publish(
+                    "policy.changed",
+                    json!({"folder": r.folder, "state": r.state}),
+                );
+            }
             let worse = match (before, r.state) {
                 (None, PolicyState::Ok) | (None, PolicyState::Unknown) => false,
                 (None, _) => true,
@@ -373,7 +381,18 @@ impl ServiceState {
         if health.automatic && health.state != "repairing" {
             self.ledger_rebuild(engine, &health);
         }
-        self.ledger_health = Some(engine.ledger_health());
+        self.set_ledger_health(engine.ledger_health());
+    }
+
+    /// Keep the ledger's state; a new state is an event.
+    fn set_ledger_health(&mut self, h: varsto_core::engine::LedgerHealth) {
+        if self.ledger_health.as_ref().map(|o| o.state.as_str()) != Some(h.state.as_str()) {
+            varsto_core::events::publish(
+                "ledger.health",
+                json!({"state": h.state, "text": h.describe()}),
+            );
+        }
+        self.ledger_health = Some(h);
     }
 
     /// After a sync: no ledger anywhere while folders hold files (checked
@@ -383,7 +402,7 @@ impl ServiceState {
             let health = engine.ledger_health();
             self.ledger_rebuild(engine, &health);
         }
-        self.ledger_health = Some(engine.ledger_health());
+        self.set_ledger_health(engine.ledger_health());
     }
 
     fn ledger_rebuild(&mut self, engine: &mut Engine, health: &varsto_core::engine::LedgerHealth) {
@@ -432,12 +451,20 @@ impl ServiceState {
                         r.seq, r.files, r.chunks_uploaded
                     );
                     eprintln!("service: {msg}");
+                    varsto_core::events::publish(
+                        "backup",
+                        json!({"name": name, "ok": true, "text": msg}),
+                    );
                     self.backup_last = Some(msg);
                     self.backup_errors.remove(&name);
                 }
                 Err(e) => {
                     let why = format!("{e:#}");
                     eprintln!("service: backup {name} failed: {why}");
+                    varsto_core::events::publish(
+                        "backup",
+                        json!({"name": name, "ok": false, "text": why}),
+                    );
                     // Once per new reason, not on every retry.
                     if self.backup_errors.get(&name) != Some(&why) {
                         notify("Varsto backup", &format!("{name}: {why}"));
@@ -471,6 +498,10 @@ impl ServiceState {
                 Ok(None) => return,
                 Ok(Some(status)) => {
                     self.restic_child = None;
+                    varsto_core::events::publish(
+                        "backup",
+                        json!({"name": "restic", "ok": status.success()}),
+                    );
                     if status.success() {
                         eprintln!("service: scheduled restic backup done");
                     } else {
@@ -553,12 +584,17 @@ impl ServiceState {
                 back.place.label, back.place.stops
             );
             eprintln!("service: {msg}");
+            varsto_core::events::publish("space.ok", json!({"place": back.place.key, "text": msg}));
             self.low_space_notified.remove(&back.place.key);
             self.sync_requested = true;
         }
         let short = varsto_core::freespace::short_places();
         for l in &short {
             if self.low_space_notified.insert(l.place.key.clone()) {
+                varsto_core::events::publish(
+                    "space.low",
+                    json!({"place": l.place.key, "text": l.text}),
+                );
                 eprintln!("service: {}", l.text);
                 notify("Varsto disk space", &l.text);
             }
@@ -579,7 +615,22 @@ impl ServiceState {
         let mut waiting = 0;
         let mut forked = false;
         let mut disks: Vec<String> = Vec::new();
+        let mut left_out: std::collections::BTreeSet<String> = Default::default();
         for (pl, ps) in reports {
+            // Counts only: names of files never go into events.
+            if pl.files_updated > 0 {
+                varsto_core::events::publish(
+                    "files.new",
+                    json!({"folder": pl.folder, "count": pl.files_updated}),
+                );
+            }
+            if pl.files_deleted > 0 {
+                varsto_core::events::publish(
+                    "trash",
+                    json!({"folder": pl.folder, "count": pl.files_deleted}),
+                );
+            }
+            left_out.extend(ps.storages_unavailable.iter().cloned());
             self.p2p_chunks += pl.chunks_from_peers;
             updated += pl.files_updated;
             deleted += pl.files_deleted;
@@ -596,6 +647,30 @@ impl ServiceState {
         }
         self.last_result = format!("{} folders: {updated} updated, {deleted} deleted, {conflicts} conflicts, {uploaded} chunks uploaded{}{}{}{}", reports.len(), if unavailable > 0 { format!(", {unavailable} unavailable") } else { String::new() }, if waiting > 0 { format!(", {waiting} waiting for disk space") } else { String::new() }, if disks.is_empty() { String::new() } else { format!(" (attach disk {})", disks.join(", ")) }, if forked { ", FORKED device" } else { "" });
         self.last_error = None;
+        for s in left_out.difference(&self.storage_problems) {
+            varsto_core::events::publish(
+                "storage.problem",
+                json!({"storage": s, "text": format!("{s} was left out of the last sync (no disk attached, full, or no room)")}),
+            );
+        }
+        for s in self.storage_problems.difference(&left_out) {
+            varsto_core::events::publish("storage.ok", json!({ "storage": s }));
+        }
+        self.storage_problems = left_out;
+        varsto_core::events::publish(
+            "sync.finished",
+            json!({
+                "ok": true,
+                "folders": reports.len(),
+                "updated": updated,
+                "deleted": deleted,
+                "conflicts": conflicts,
+                "uploaded": uploaded,
+                "unavailable": unavailable,
+                "waiting_for_space": waiting,
+                "syncs": self.syncs,
+            }),
+        );
     }
 }
 
@@ -1161,6 +1236,7 @@ impl Drop for P2p {
 
 /// Best-effort desktop notification; silent where no notifier exists.
 pub fn notify(title: &str, body: &str) {
+    varsto_core::events::publish("notification", json!({"title": title, "body": body}));
     #[cfg(target_os = "linux")]
     {
         let _ = std::process::Command::new("notify-send")
@@ -1574,6 +1650,8 @@ pub fn run(opts: Options) -> Result<()> {
     // Asks the peers what they are doing, only while someone watches.
     let activity_stop = Arc::new(AtomicBool::new(false));
     varsto_core::activity::global().spawn_poller(activity_stop.clone());
+    // Tasks, transfers and peers as events while a page listens.
+    crate::sse::spawn_sampler(state.lock().unwrap().traffic.clone(), activity_stop.clone());
 
     // File watcher: sends a signal on any change under an attached folder.
     let (tx, rx) = mpsc::channel::<()>();
@@ -1633,6 +1711,9 @@ pub fn run(opts: Options) -> Result<()> {
             local_stamp = now_stamp;
             let mut st = state.lock().unwrap();
             let reloaded = st.engine.as_mut().map(|e| e.reload_local());
+            if reloaded.as_ref().is_some_and(|r| r.is_ok()) {
+                varsto_core::events::publish("config.changed", json!({"source": "file"}));
+            }
             match reloaded {
                 Some(Ok(true)) => {
                     st.service.folders_changed = true;
@@ -1778,6 +1859,7 @@ pub fn run(opts: Options) -> Result<()> {
                 "interval"
             };
             let started = Instant::now();
+            varsto_core::events::publish("sync.started", json!({ "reason": why }));
             let result = st.engine.as_mut().map(|e| e.sync(None));
             if let Some(Ok(reports)) = &result {
                 {
@@ -1835,6 +1917,10 @@ pub fn run(opts: Options) -> Result<()> {
                 }
                 Some(Err(e)) => {
                     st.service.last_error = Some(format!("{e:#}"));
+                    varsto_core::events::publish(
+                        "sync.finished",
+                        json!({"ok": false, "error": format!("{e:#}")}),
+                    );
                     eprintln!("service: sync failed: {e:#}");
                     // A wipe order was carried out: nothing of the vault is left.
                     if e.downcast_ref::<varsto_core::engine::DeviceRemoved>()
@@ -1854,6 +1940,7 @@ pub fn run(opts: Options) -> Result<()> {
         std::thread::sleep(Duration::from_millis(500));
     }
     activity_stop.store(true, Ordering::Relaxed);
+    crate::sse::SHUTDOWN.store(true, Ordering::Relaxed);
     // Stop peer-to-peer first: the router mappings are removed on the way.
     drop(p2p);
     let restart = state.lock().unwrap().service.restart_requested;
