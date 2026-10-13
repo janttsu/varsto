@@ -588,7 +588,15 @@
   "No more snapshots are taken. The snapshots kept are deleted as their time is up, and then the backup goes.": "Uusia versioita ei enää oteta. Säilytetyt versiot poistetaan sitä mukaa kuin niiden aika täyttyy, ja sen jälkeen varmuuskopio poistuu.",
   "Stop this backup?": "Lopetetaanko tämä varmuuskopio?",
   "Stop backup": "Lopeta varmuuskopio",
-  "Choose at least one storage.": "Valitse vähintään yksi tallennuspaikka."
+  "Choose at least one storage.": "Valitse vähintään yksi tallennuspaikka.",
+  "One folder (a disk, USB disk or network share)": "Yksi kansio (levy, USB-levy tai verkkojako)",
+  "Pool of swappable disks (plugged in one at a time)": "Vaihdettavien levyjen varasto (kytketään yksi kerrallaan)",
+  "One fixed path: an internal disk, a USB disk that usually stays attached, or a mounted network share. Varsto reads and writes it at that path; while it is not there, the storage is simply unavailable. For several disks you swap in and out, choose a pool instead.": "Yksi kiinteä polku: sisäinen levy, yleensä kiinni pysyvä USB-levy tai liitetty verkkojako. Varsto lukee ja kirjoittaa sitä tuossa polussa; kun se ei ole paikalla, tallennuspaikka on vain poissa käytöstä. Jos vaihtelet useita levyjä, valitse sen sijaan levyvarasto.",
+  "Several disks you plug in one at a time, for example old drives kept on a shelf. Varsto recognises each disk by a marker file, not by its path, fills it with what the pool still lacks, checks it when it comes back, and tells you which disk to attach for a file that is on a disk that is away.": "Useita levyjä, joita kytket yksi kerrallaan, esimerkiksi hyllyssä säilytettäviä vanhoja levyjä. Varsto tunnistaa jokaisen levyn merkintätiedostosta eikä polusta, täyttää sen sillä mitä varastosta vielä puuttuu, tarkistaa sen kun se palaa ja kertoo, mikä levy pitää kytkeä, jos tiedosto on poissa olevalla levyllä.",
+  "A bucket at any S3-compatible provider (AWS, Scaleway, Hetzner, Backblaze B2, Cloudflare R2, MinIO and others), with your own keys.": "Säilö millä tahansa S3-yhteensopivalla palveluntarjoajalla (AWS, Scaleway, Hetzner, Backblaze B2, Cloudflare R2, MinIO ja muut), omilla avaimillasi.",
+  "Any remote you have set up in rclone, for example Google Drive, OneDrive, SFTP or WebDAV.": "Mikä tahansa rclonessa määrittämäsi etäkohde, esimerkiksi Google Drive, OneDrive, SFTP tai WebDAV.",
+  "Folder path": "Kansion polku",
+  "Add a folder, an S3 bucket, an rclone remote or a pool of swappable disks below.": "Lisää alla kansio, S3-säilö, rclone-etäkohde tai vaihdettavien levyjen varasto."
  },
  "patterns": [
   [

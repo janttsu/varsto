@@ -394,7 +394,7 @@
         <h2 class="card-title">Storages</h2>
         <p class="muted small">Encrypted objects are written to every storage. Varsto never sends a key anywhere; a storage sees only sealed blocks.</p>
         <ul id="storages" class="list"></ul>
-        <div id="storages-empty" class="empty-state hidden"><div class="empty-icon"><svg class="icon"><use href="#i-storages"/></svg></div><p class="empty-title">No storage yet</p><p class="muted">Add a directory, an S3 bucket, an rclone remote or a pool of removable disks below.</p></div>
+        <div id="storages-empty" class="empty-state hidden"><div class="empty-icon"><svg class="icon"><use href="#i-storages"/></svg></div><p class="empty-title">No storage yet</p><p class="muted">Add a folder, an S3 bucket, an rclone remote or a pool of swappable disks below.</p></div>
       </div>
       <div id="pools"></div>
       <form id="adddisk" class="card narrow desktop-only hidden">
@@ -408,14 +408,16 @@
       </form>
       <form id="addstorage" class="card narrow">
         <h3 class="card-title"><svg class="icon accent"><use href="#i-plus"/></svg>Add a storage</h3>
-        <label>Type <select name="kind" id="storagekind"><option value="local-dir">Directory (disk, removable disk, network mount)</option><option value="s3">S3-compatible bucket</option><option value="rclone">rclone remote</option><option value="pool">Pool of removable disks</option></select></label>
+        <label>Type <select name="kind" id="storagekind"><option value="local-dir">One folder (a disk, USB disk or network share)</option><option value="s3">S3-compatible bucket</option><option value="rclone">rclone remote</option><option value="pool">Pool of swappable disks (plugged in one at a time)</option></select></label>
         <label>Name <input name="name" placeholder="box" required></label>
         <div data-kind="local-dir">
-          <label>Directory <input name="path"></label>
+          <p class="muted small">One fixed path: an internal disk, a USB disk that usually stays attached, or a mounted network share. Varsto reads and writes it at that path; while it is not there, the storage is simply unavailable. For several disks you swap in and out, choose a pool instead.</p>
+          <label>Folder path <input name="path"></label>
           <label class="inline"><input name="carrier" type="checkbox"> Transferrer: removable media that carries only what other devices still lack, emptied once delivered</label>
           <label id="carrierforrow" class="hidden">Carry it for <select name="carrier_for" id="carrierfor"><option value="">any device that lacks the blocks</option></select><span class="hint muted">pick the device the disk travels to, for example one with a slow or no internet connection</span></label>
         </div>
         <div data-kind="s3" class="hidden">
+          <p class="muted small">A bucket at any S3-compatible provider (AWS, Scaleway, Hetzner, Backblaze B2, Cloudflare R2, MinIO and others), with your own keys.</p>
           <label>Endpoint <input name="endpoint" placeholder="https://s3.eu-central-1.amazonaws.com"></label>
           <label>Region <input name="region" placeholder="eu-central-1"></label>
           <label>Bucket <input name="bucket"></label>
@@ -427,10 +429,12 @@
           <p class="muted small">The secret is stored encrypted in this device's secrets.enc and never in config.json. Archive classes are treated as cold.</p>
         </div>
         <div data-kind="rclone" class="hidden">
+          <p class="muted small">Any remote you have set up in rclone, for example Google Drive, OneDrive, SFTP or WebDAV.</p>
           <label>Remote (name:bucket/path) <input name="remote" placeholder="hetzner:backup/varsto"></label>
           <p class="muted small">Uses your rclone and its configuration; Varsto never sees the remote's credentials.</p>
         </div>
         <div data-kind="pool" class="hidden">
+          <p class="muted small">Several disks you plug in one at a time, for example old drives kept on a shelf. Varsto recognises each disk by a marker file, not by its path, fills it with what the pool still lacks, checks it when it comes back, and tells you which disk to attach for a file that is on a disk that is away.</p>
           <label>Place (where the disks are kept) <input name="place" placeholder="shelf"></label>
           <label>Keep free on every disk (%) <input name="reserve_percent" value="5" size="4"></label>
           <label>Copies on disks in different places <input name="copies" value="1" size="3" inputmode="numeric"></label>
