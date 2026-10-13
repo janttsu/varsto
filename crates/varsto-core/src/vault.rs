@@ -1300,6 +1300,21 @@ pub struct P2pConfig {
     /// it was are switched on unless this is set.
     #[serde(default)]
     pub user_disabled: bool,
+    /// The user turned discovery through the public Mainline DHT off
+    /// (`varsto p2p dht off`). It is on whenever peer-to-peer is on.
+    #[serde(default)]
+    pub dht_disabled: bool,
+    /// DHT bootstrap nodes (`host:port`); empty means the public defaults.
+    /// `VARSTO_DHT_BOOTSTRAP` overrides both.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dht_bootstrap: Vec<String>,
+}
+
+impl P2pConfig {
+    /// Whether the service runs a DHT node.
+    pub fn dht_enabled(&self) -> bool {
+        self.enabled && !self.dht_disabled
+    }
 }
 
 /// The port peer-to-peer listens on unless told otherwise: a fixed one is
@@ -1321,6 +1336,8 @@ impl Default for P2pConfig {
             public_addrs: Vec::new(),
             stun: default_stun(),
             user_disabled: false,
+            dht_disabled: false,
+            dht_bootstrap: Vec::new(),
         }
     }
 }

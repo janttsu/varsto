@@ -4472,6 +4472,17 @@ impl Engine {
         Ok(out)
     }
 
+    /// The other devices of the vault that count as peers (known, trusted,
+    /// not revoked), with their names: the devices looked up in the DHT.
+    pub fn peer_devices(&self) -> Vec<(DeviceId, String)> {
+        self.devices
+            .devices
+            .keys()
+            .filter(|d| **d != self.vault.device_id && self.trusted(d))
+            .map(|d| (d.clone(), self.device_name(d)))
+            .collect()
+    }
+
     /// Peers other devices advertised through the storages, as TCP addresses.
     pub fn peer_records(&self) -> Result<Vec<crate::p2p::PeerAddr>> {
         let mut out: Vec<crate::p2p::PeerAddr> = Vec::new();

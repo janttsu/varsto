@@ -2001,6 +2001,8 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
       $("p2pstatus").textContent = (p.listen ? "Listening on " + p.listen + ". " : "Not listening (enable and restart the service). ") + peers.length + " peers known (" + p.lan_peers + " on the LAN), " + p.chunks_from_peers + " blocks received from peers since start.";
       var nat = p.listen ? ("NAT: " + (p.nat || "unknown") + ". " + ((p.public || []).length ? "Public address " + p.public.join(", ") + ". " : "No public address observed. ") + (p.reachable ? "Reachable from the internet; this device relays for the others." : "Not reachable directly" + ((p.relays || []).length ? "; registered with relay " + p.relays.join(", ") + "." : "; no relay yet.")) + (p.cert_sha256 ? " Certificate " + p.cert_sha256.slice(0, 16) + "." : "")) : "";
       $("p2pnat").textContent = nat;
+      f.dht.checked = !p.config.dht_disabled;
+      showDht(p.listen ? p.dht : null, !p.config.dht_disabled);
       var paths = p.paths || [];
       var tb = $("p2ppaths").querySelector("tbody"); tb.innerHTML = "";
       $("p2ppaths").classList.toggle("hidden", !paths.length);
@@ -2010,6 +2012,28 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
         tb.appendChild(tr);
       });
     }).catch(function () {});
+  }
+  // One sentence per span, so each is translated on its own.
+  function showDht(d, on) {
+    var box = $("p2pdht"), lines = [];
+    box.innerHTML = "";
+    if (!on) { lines.push("Discovery through the Mainline DHT is off."); }
+    else if (!d || d.state === "off") { lines.push("Mainline DHT: starts with peer-to-peer."); }
+    else if (d.state === "bootstrapping") { lines.push("Mainline DHT: joining the network."); }
+    else if (d.state === "failed") { lines.push("Mainline DHT: no node answered; trying again later."); }
+    else {
+      lines.push("Mainline DHT: in the network with " + d.nodes + " nodes.");
+      var now = Date.now() / 1000;
+      if (d.last_publish_utc) {
+        var m = Math.floor((now - d.last_publish_utc) / 60);
+        lines.push(m < 1 ? "Published less than a minute ago to " + d.stored_at + " nodes." : "Published " + m + " min ago to " + d.stored_at + " nodes.");
+      } else { lines.push("Not published yet."); }
+      if (d.last_lookup_utc) {
+        var found = (d.found || []).filter(function (x) { return x.updated_utc; }).length;
+        lines.push("Found " + found + " of " + (d.found || []).length + " devices in the DHT.");
+      } else { lines.push("No lookup yet."); }
+    }
+    lines.forEach(function (t, i) { var s = document.createElement("span"); s.textContent = (i ? " " : "") + t; box.appendChild(s); });
   }
   $("p2pbox").ontoggle = function () { if ($("p2pbox").open) { loadP2p(); } };
   // Traffic view (Peers page): /api/p2p/traffic every second while the page is shown.

@@ -40,6 +40,8 @@ unicode-normalization = "0.1"
 sharks = "0.5"
 spake2 = "0.4"
 socket2 = { version = "0.6", features = ["all"] }
+mainline = "8.0.0"
+futures-lite = "2"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

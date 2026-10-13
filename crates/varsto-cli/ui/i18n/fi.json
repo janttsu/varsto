@@ -596,7 +596,15 @@
   "A bucket at any S3-compatible provider (AWS, Scaleway, Hetzner, Backblaze B2, Cloudflare R2, MinIO and others), with your own keys.": "Säilö millä tahansa S3-yhteensopivalla palveluntarjoajalla (AWS, Scaleway, Hetzner, Backblaze B2, Cloudflare R2, MinIO ja muut), omilla avaimillasi.",
   "Any remote you have set up in rclone, for example Google Drive, OneDrive, SFTP or WebDAV.": "Mikä tahansa rclonessa määrittämäsi etäkohde, esimerkiksi Google Drive, OneDrive, SFTP tai WebDAV.",
   "Folder path": "Kansion polku",
-  "Add a folder, an S3 bucket, an rclone remote or a pool of swappable disks below.": "Lisää alla kansio, S3-säilö, rclone-etäkohde tai vaihdettavien levyjen varasto."
+  "Add a folder, an S3 bucket, an rclone remote or a pool of swappable disks below.": "Lisää alla kansio, S3-säilö, rclone-etäkohde tai vaihdettavien levyjen varasto.",
+  "Find my devices through the Mainline DHT": "Etsi laitteeni Mainline DHT:n kautta",
+  "Your devices publish where they can be reached in the public BitTorrent DHT, sealed and under keys that change every day, so they find each other without waiting for the storage. The DHT sees this device's IP address, not which vault it belongs to.": "Laitteesi julkaisevat julkiseen BitTorrent-DHT:hen, mistä ne tavoittaa, salattuna ja päivittäin vaihtuvilla avaimilla, joten ne löytävät toisensa odottamatta tallennuspaikkaa. DHT näkee tämän laitteen IP-osoitteen, mutta ei sitä, mihin holviin laite kuuluu.",
+  "Discovery through the Mainline DHT is off.": "Laitteiden haku Mainline DHT:n kautta on pois päältä.",
+  "Mainline DHT: starts with peer-to-peer.": "Mainline DHT: käynnistyy vertaisverkon kanssa.",
+  "Mainline DHT: joining the network.": "Mainline DHT: liitytään verkkoon.",
+  "Mainline DHT: no node answered; trying again later.": "Mainline DHT: mikään solmu ei vastannut; yritetään myöhemmin uudelleen.",
+  "Not published yet.": "Ei vielä julkaistu.",
+  "No lookup yet.": "Ei vielä hakuja."
  },
  "patterns": [
   [
@@ -698,6 +706,22 @@
   [
    "^(.+) holds (\\d+) blocks? of your files\\. (\\d+) already have enough copies elsewhere; (\\d+) cop(?:y|ies) \\((.+)\\) will first be made on (.+)\\. Then no device counts \\1 as a copy any more\\. Remove leaves its data in place; you can also delete it\\.$",
    "Tallennuspaikassa $1 on $2 lohkoa tiedostoistasi. Lohkoista $3 on jo tarpeeksi kopioita muualla; ensin tehdään $4 kopiota ($5) kohteisiin $6. Sen jälkeen mikään laite ei enää laske tallennuspaikkaa $1 kopioksi. Poista jättää sen datan paikalleen; voit myös poistaa datan."
+  ],
+  [
+   "^Mainline DHT: in the network with (\\d+) nodes\\.$",
+   "Mainline DHT: verkossa, $1 solmua."
+  ],
+  [
+   "^Published less than a minute ago to (\\d+) nodes\\.$",
+   "Julkaistu alle minuutti sitten $1 solmuun."
+  ],
+  [
+   "^Published (\\d+) min ago to (\\d+) nodes\\.$",
+   "Julkaistu $1 min sitten $2 solmuun."
+  ],
+  [
+   "^Found (\\d+) of (\\d+) devices in the DHT\\.$",
+   "DHT:stä löytyi $1/$2 laitetta."
   ]
  ],
  "review": [

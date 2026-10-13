@@ -15,7 +15,12 @@
 //! STUN-learned addresses (`stun`), punch datagrams and, failing that, a
 //! relay through one of the user's own reachable devices. There are no
 //! trackers and no vendor servers: the user's storage is the rendezvous.
+//! Devices also publish the record, sealed, in the public BitTorrent
+//! Mainline DHT under keys only the vault's devices can link (`dht`); the
+//! DHT is a vendor-free network of BitTorrent clients, not a tracker, and
+//! what it gives are hints: every connection is still authenticated.
 
+pub mod dht;
 pub mod quic;
 pub mod stun;
 pub mod traffic;

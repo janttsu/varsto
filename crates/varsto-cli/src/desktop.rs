@@ -1460,10 +1460,13 @@ fn api_unlocked(
             "relays": service.p2p_relays,
             "paths": service.p2p_paths,
             "cert_sha256": service.p2p_cert_sha256,
+            "dht": service.p2p_dht,
+            "dht_text": engine.p2p_config().dht_enabled().then(|| service.p2p_dht.describe()).unwrap_or_else(|| "off".to_string()),
         })),
         (Method::Post, "/api/p2p") => {
             let mut c = engine.p2p_config();
-            let was = (c.enabled, c.port, c.public_addrs.clone(), c.stun.clone());
+            let was = (c.enabled, c.port, c.public_addrs.clone(), c.stun.clone(), c.dht_bootstrap.clone());
+            let dht_was = !c.dht_disabled;
             if let Some(en) = input.get("enabled").and_then(|v| v.as_bool()) {
                 c.enabled = en;
                 c.user_disabled = !en;
@@ -1478,8 +1481,15 @@ fn api_unlocked(
                 // An empty field disables STUN on purpose.
                 c.stun = stun.split(',').map(|a| a.trim().to_string()).filter(|a| !a.is_empty()).collect();
             }
+            // Discovery through the Mainline DHT: on and off at once.
+            if let Some(on) = input.get("dht").and_then(|v| v.as_bool()) {
+                c.dht_disabled = !on;
+            }
+            if let Some(nodes) = input.get("dht_bootstrap").and_then(|v| v.as_str()) {
+                c.dht_bootstrap = nodes.split(',').map(|a| a.trim().to_string()).filter(|a| !a.is_empty()).collect();
+            }
             let enabled = c.enabled;
-            let same_settings = was.1 == c.port && was.2 == c.public_addrs && was.3 == c.stun;
+            let same_settings = was.1 == c.port && was.2 == c.public_addrs && was.3 == c.stun && was.4 == c.dht_bootstrap;
             engine.set_p2p_config(c)?;
             if enabled {
                 engine.p2p_identity()?;
@@ -1487,9 +1497,16 @@ fn api_unlocked(
             // Turning it on or off takes effect within a second; a new
             // port, address or STUN list when the service starts again.
             let note = if same_settings || !was.0 || !enabled {
-                if enabled { "peer-to-peer is on" } else { "peer-to-peer is off" }
+                match input.get("dht").and_then(|v| v.as_bool()) {
+                    // `varsto p2p dht on|off`: say what changed.
+                    Some(on) if on != dht_was && was.0 == enabled && enabled => {
+                        if on { "discovery through the Mainline DHT is on" } else { "discovery through the Mainline DHT is off" }
+                    }
+                    _ if enabled => "peer-to-peer is on",
+                    _ => "peer-to-peer is off",
+                }
             } else {
-                "saved; the new port, addresses or STUN servers apply when the background service starts again"
+                "saved; the new port, addresses, STUN servers or DHT bootstrap nodes apply when the background service starts again"
             };
             Ok(json!({"ok": true, "applied": same_settings || !was.0 || !enabled, "note": note}))
         }

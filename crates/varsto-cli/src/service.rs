@@ -70,6 +70,8 @@ pub struct ServiceState {
     pub p2p_relays: Vec<String>,
     pub p2p_paths: Vec<varsto_core::p2p::PeerStatus>,
     pub p2p_cert_sha256: String,
+    /// Discovery through the Mainline DHT: state, nodes, last publish and lookup.
+    pub p2p_dht: varsto_core::p2p::dht::DhtStatus,
     /// Automatic verification: schedule, last run and next run.
     pub auto_verify: Option<varsto_core::autoverify::VerifyStatus>,
     /// Automatic repair: queue, last run and copies that could not be repaired.
@@ -108,6 +110,7 @@ impl ServiceState {
             "p2p_reachable": self.p2p_reachable,
             "p2p_relays": self.p2p_relays,
             "p2p_paths": self.p2p_paths,
+            "p2p_dht": self.p2p_dht,
             "auto_verify": self.auto_verify,
             "auto_verify_text": self.auto_verify.as_ref().map(|v| v.describe()),
             "repair": self.repair,
@@ -344,8 +347,14 @@ struct P2p {
     listen: std::net::SocketAddr,
     stop: Arc<std::sync::atomic::AtomicBool>,
     quic: Option<Arc<varsto_core::p2p::quic::Node>>,
-    /// Latest records of the other devices, for the relay thread.
+    /// Latest records of the other devices (storage and DHT merged), for
+    /// the relay thread.
     records: Arc<Mutex<Vec<varsto_core::p2p::PeerRecord>>>,
+    /// The records last read from the storage, kept so that DHT results
+    /// can be merged in between syncs without listing the storage again.
+    stored: Mutex<Vec<varsto_core::p2p::PeerRecord>>,
+    /// The Mainline DHT node, while the setting is on.
+    dht: Mutex<Option<varsto_core::p2p::dht::Discovery>>,
     nat: Arc<Mutex<NatInfo>>,
     peers: Mutex<Option<Arc<varsto_core::p2p::Peers>>>,
     last_record: Mutex<Option<varsto_core::p2p::PeerRecord>>,
@@ -505,6 +514,8 @@ impl P2p {
             stop,
             quic,
             records,
+            stored: Mutex::new(Vec::new()),
+            dht: Mutex::new(None),
             nat,
             peers: Mutex::new(None),
             last_record: Mutex::new(None),
@@ -642,26 +653,100 @@ impl P2p {
             .swap(false, std::sync::atomic::Ordering::Relaxed)
     }
 
+    /// Start or stop the DHT node as the setting says, show its state, and
+    /// rebuild the peer table when a lookup found something new.
+    fn follow_dht(&self, st: &mut State) {
+        let Some(e) = st.engine.as_ref() else { return };
+        let cfg = e.p2p_config();
+        let mut slot = self.dht.lock().unwrap();
+        match (cfg.dht_enabled(), slot.is_some()) {
+            (true, false) => {
+                let bootstrap = varsto_core::p2p::dht::bootstrap_nodes(&cfg.dht_bootstrap);
+                match varsto_core::p2p::dht::Discovery::start(
+                    e.vault_id().clone(),
+                    e.peer_key(),
+                    bootstrap,
+                ) {
+                    Ok(d) => {
+                        d.set_targets(e.peer_devices());
+                        if let Some(r) = self.last_record.lock().unwrap().clone() {
+                            d.set_record(r);
+                        }
+                        *slot = Some(d);
+                        eprintln!("service: p2p DHT discovery started");
+                    }
+                    Err(err) => eprintln!("service: p2p DHT discovery failed: {err:#}"),
+                }
+            }
+            (false, true) => {
+                *slot = None; // stops the node
+                st.service.p2p_dht = Default::default();
+                eprintln!("service: p2p DHT discovery stopped (turned off)");
+                return;
+            }
+            _ => {}
+        }
+        let Some(d) = slot.as_ref() else { return };
+        st.service.p2p_dht = d.status();
+        let changed = d.take_changed();
+        drop(slot);
+        if changed {
+            let stored = self.stored.lock().unwrap().clone();
+            self.rebuild_peers(st, stored);
+        }
+    }
+
     /// Merge LAN peers with rendezvous records and hand them to the engine.
     fn refresh_before_sync(&self, st: &mut State) {
         let Some(e) = st.engine.as_mut() else { return };
-        let mut lan = self.lan_peers.lock().unwrap().clone();
-        // A removed device may still send beacons: it is no peer.
-        lan.retain(|p| !e.is_revoked(&p.device));
         // A storage hiccup must not empty the peer table: that would stop
         // the keeper's punches (so NAT mappings lapse and peers' punches
         // steal our port) and make the QUIC server refuse every peer's
         // certificate. Keep the last good records until the next listing.
-        let records = match e.peer_record_list() {
-            Ok(r) => r,
+        let stored = match e.peer_record_list() {
+            Ok(r) => {
+                *self.stored.lock().unwrap() = r.clone();
+                r
+            }
             Err(err) => {
-                let kept = self.records.lock().unwrap().clone();
+                let kept = self.stored.lock().unwrap().clone();
                 eprintln!(
                     "p2p: peer record listing failed, keeping {} known record(s): {err:#}",
                     kept.len()
                 );
                 kept
             }
+        };
+        if let Some(d) = self.dht.lock().unwrap().as_ref() {
+            // A new vault key epoch or a new device: the DHT follows.
+            d.set_key(e.peer_key());
+            d.set_targets(e.peer_devices());
+        }
+        self.rebuild_peers(st, stored);
+    }
+
+    /// Build the peer table from the storage's records, the DHT's and the
+    /// LAN beacons, carrying over what the previous table learned.
+    fn rebuild_peers(&self, st: &mut State, stored: Vec<varsto_core::p2p::PeerRecord>) {
+        let Some(e) = st.engine.as_mut() else { return };
+        let mut lan = self.lan_peers.lock().unwrap().clone();
+        // A removed device may still send beacons: it is no peer.
+        lan.retain(|p| !e.is_revoked(&p.device));
+        // Records from the DHT count like those from the storage, the newer
+        // one per device winning; only devices the registry trusts.
+        let found = self
+            .dht
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map(|d| d.found())
+            .unwrap_or_default();
+        let records = if found.is_empty() {
+            stored
+        } else {
+            let allowed: Vec<varsto_core::ids::DeviceId> =
+                e.peer_devices().into_iter().map(|(d, _)| d).collect();
+            varsto_core::p2p::dht::merge(&stored, &found, &allowed)
         };
         let mut flat = lan.clone();
         for r in &records {
@@ -738,6 +823,9 @@ impl P2p {
         st.service.p2p_nat = rec.nat;
         st.service.p2p_public = rec.udp_public.clone();
         st.service.p2p_reachable = rec.reachable;
+        if let Some(d) = self.dht.lock().unwrap().as_ref() {
+            d.set_record(rec.clone());
+        }
         if let Some(p) = self.peers.lock().unwrap().as_ref() {
             st.service.p2p_paths = p.status();
         }
@@ -1270,6 +1358,7 @@ pub fn run(opts: Options) -> Result<()> {
                     e.set_snapshot_sink(None);
                 }
                 st.service.p2p_listen = None;
+                st.service.p2p_dht = Default::default();
                 eprintln!("service: p2p stopped (turned off)");
             }
         }
@@ -1296,6 +1385,7 @@ pub fn run(opts: Options) -> Result<()> {
             if p.take_republish() {
                 p.publish_record(&mut st);
             }
+            p.follow_dht(&mut st);
             if st.service.syncs != snapshot_syncs {
                 snapshot_syncs = st.service.syncs;
                 p.refresh_after_sync(&mut st);

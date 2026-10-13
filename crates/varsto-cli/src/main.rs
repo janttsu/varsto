@@ -533,6 +533,18 @@ enum P2pCmd {
         no_stun: bool,
     },
     Disable,
+    /// Find your devices through the public BitTorrent Mainline DHT (on by default).
+    /// Only sealed records under daily-changing keys are published there.
+    Dht {
+        #[arg(value_parser = ["on", "off"])]
+        state: String,
+        /// DHT bootstrap node (host:port), repeatable, instead of the public ones.
+        #[arg(long = "bootstrap")]
+        bootstrap: Vec<String>,
+        /// Go back to the public bootstrap nodes.
+        #[arg(long, conflicts_with = "bootstrap")]
+        default_bootstrap: bool,
+    },
     /// Show settings, NAT guess, public address and the path to every peer.
     Status,
     /// Live traffic per peer: speed, totals and path, from the running service.
@@ -2943,7 +2955,7 @@ fn run(cli: &Cli) -> Result<()> {
             // With the background service running, settings go through it:
             // it applies them (on and off at once), and its own copy of the
             // configuration does not overwrite them later.
-            if let (Some((sf, _)), P2pCmd::Enable { .. } | P2pCmd::Disable) =
+            if let (Some((sf, _)), P2pCmd::Enable { .. } | P2pCmd::Disable | P2pCmd::Dht { .. }) =
                 (service::status(&home), cmd)
             {
                 let body = match cmd {
@@ -2966,6 +2978,17 @@ fn run(cli: &Cli) -> Result<()> {
                             "public_addrs": public_addrs.iter().map(|a| a.to_string()).collect::<Vec<_>>().join(","),
                             "stun": stun,
                         })
+                    }
+                    P2pCmd::Dht {
+                        state,
+                        bootstrap,
+                        default_bootstrap,
+                    } => {
+                        let mut body = serde_json::json!({"dht": state.as_str() == "on"});
+                        if *default_bootstrap || !bootstrap.is_empty() {
+                            body["dht_bootstrap"] = bootstrap.join(",").into();
+                        }
+                        body
                     }
                     _ => serde_json::json!({"enabled": false}),
                 };
@@ -2990,12 +3013,14 @@ fn run(cli: &Cli) -> Result<()> {
                     } else {
                         stun.clone()
                     };
+                    let old = engine.p2p_config();
                     engine.set_p2p_config(varsto_core::vault::P2pConfig {
                         enabled: true,
                         port: *port,
                         public_addrs: public_addrs.clone(),
                         stun,
                         user_disabled: false,
+                        ..old
                     })?;
                     let id = engine.p2p_identity()?;
                     println!(
@@ -3010,6 +3035,31 @@ fn run(cli: &Cli) -> Result<()> {
                     engine.set_p2p_config(c)?;
                     println!(
                         "peer-to-peer is off; the background service stays off it when it starts"
+                    );
+                }
+                P2pCmd::Dht {
+                    state,
+                    bootstrap,
+                    default_bootstrap,
+                } => {
+                    let off = state.as_str() == "off";
+                    let mut c = engine.p2p_config();
+                    c.dht_disabled = off;
+                    if *default_bootstrap {
+                        c.dht_bootstrap.clear();
+                    } else if !bootstrap.is_empty() {
+                        c.dht_bootstrap = bootstrap.clone();
+                    }
+                    let p2p_on = c.enabled;
+                    engine.set_p2p_config(c)?;
+                    println!(
+                        "discovery through the Mainline DHT is {}{}",
+                        if off { "off" } else { "on" },
+                        if !off && !p2p_on {
+                            " (it runs when peer-to-peer is enabled)"
+                        } else {
+                            ""
+                        }
                     );
                 }
                 P2pCmd::Status => p2p_status(&engine, &home, cli.json)?,
@@ -4062,6 +4112,7 @@ fn p2p_status(engine: &Engine, home: &std::path::Path, json: bool) -> Result<()>
                 _ => String::new(),
             }
         );
+        println!("DHT: {}", v["dht_text"].as_str().unwrap_or("off"));
         let paths = v["paths"].as_array().cloned().unwrap_or_default();
         if paths.is_empty() {
             println!("no peers known yet (other devices publish a record when their service runs with p2p enabled)");
@@ -4128,6 +4179,14 @@ fn p2p_status(engine: &Engine, home: &std::path::Path, json: bool) -> Result<()>
         }
     );
     println!("background service not running; probing over TCP from this command");
+    println!(
+        "DHT: {}",
+        if c.dht_enabled() {
+            "on (the background service runs it)"
+        } else {
+            "off"
+        }
+    );
     match &stun {
         Some(p) => println!(
             "NAT guess {} ({}, from a temporary socket)",

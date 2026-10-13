@@ -695,3 +695,54 @@ A stopped backup whose last snapshot has expired is removed from the vault like 
 - The first snapshot of a large directory holds the engine for as long as its upload takes.
 
 Tests: `crates/varsto-core/tests/backups.rs` (byte-identical restores by number, date and latest, paths, refusal of a non-empty directory, restores on another device, nothing on devices or transferrers, altered snapshots refused, expiry deleting only unused blocks including packed ones while other folders stay, other devices waiting for the source, a stopped backup removed with its last snapshot, schedules), `snapshot::tests`, `engine::backups::tests` and the random-event view tests in `ledger::tests`.
+
+## 32. Peer discovery through the Mainline DHT (unreleased)
+
+**Why.** Devices find each other across the internet through the rendezvous record in the vault's storage (section 12). That record is only as fresh as the last listing of the storage, and a device that has not synced yet, or whose storage is slow or unreachable, knows nobody's addresses. Each device therefore also publishes its record in the public BitTorrent Mainline DHT (BEP 5) as a signed mutable item (BEP 44). The DHT is a network of millions of BitTorrent clients run by no one in particular: there is still no tracker and no vendor server. The storage record and the LAN beacon stay; the DHT adds a second, faster way to the same addresses.
+
+**Keys.** Everything is derived from the peer authentication key `peer_key` (`derive(vault key of the newest epoch, "p2p-auth")`, section 12), so it follows the vault key epochs and a removed device loses it with the next epoch (section 21). `day` is the UTC day number, `floor(unix time / 86400)`, as 8 bytes little-endian.
+
+- Signing seed of a device for a day: `derive(peer_key, "varsto dht v1", ["sign", vault_id, device_id, day])`, used as an Ed25519 secret key. Its public key `K` names the item; no salt is used, since the key itself already differs per device and day. The DHT target is `SHA-1(K)` (BEP 44).
+- Sealing key: `derive(peer_key, "varsto dht v1", ["seal", vault_id])`.
+
+Every device of the vault can compute every other device's `K` for any day; to anyone else `K` is a random key that changes at midnight UTC and links neither to the vault nor to the same device's key on another day.
+
+**Value.** XChaCha20-Poly1305 under the sealing key with a random nonce (`nonce || ciphertext || tag`), associated data `aad("dht-record", [vault_id, device_id, day])`, over a compact JSON form of the rendezvous record:
+
+| Key | Field of the record | Notes |
+| --- | --- | --- |
+| `t` | `updated_utc` | |
+| `p` | `port` | |
+| `l` | `lan_addrs` | left out when empty |
+| `a` | `public_addrs` | left out when empty |
+| `u` | `udp_public` | left out when empty |
+| `o` | `udp_local` | left out when empty |
+| `c` | `cert_sha256` | left out when empty |
+| `n` | `nat` | |
+| `r` | `relay_via` | left out when empty |
+| `x` | `reachable` | left out when false |
+
+`device` is implied by the key and `name` comes from the device registry, so neither is carried. Each list holds at most six entries. The sealed value is at most 990 bytes, so the bencoded `v` stays under the 1000 bytes BEP 44 allows; a record that does not fit loses entries in this order until it does: `o`, `r`, `l`, `u`, `a`. A typical record (two LAN addresses, a public and a local UDP address, a relay, the certificate hash) seals to 300 to 450 bytes. `seq` is the Unix time of the publish, kept strictly increasing by the publisher.
+
+**Publishing.** While peer-to-peer and the setting are on, the service runs a DHT node on a UDP port of its own (not 17893). It puts today's item when the record changes (new addresses, NAT state, relays, certificate), when a new UTC day starts, and every 30 minutes otherwise (DHT nodes drop items after about two hours). A failed put is tried again after a minute, doubling up to 15 minutes.
+
+**Lookup.** Every 10 minutes, and at most a minute after the list of devices changed, the node asks for today's and yesterday's item of every other trusted device of the vault (known in the registry, not revoked, in the roster of an organization), all at once. Items whose signature or target do not match are dropped by the DHT library; values that do not open (wrong vault, device, day or key), are larger than 990 bytes, or claim a time more than an hour in the future are ignored. Per device the record with the newest `updated_utc` is kept. When a lookup found something newer, the service rebuilds the peer table at once: DHT records are merged with the storage's records per device, the newer `updated_utc` winning (the storage's on a tie), exactly as if they had been read from the storage, so a peer marked unreachable whose addresses changed is tried again at once (section 29). A sync never waits for the DHT.
+
+**Settings.** On whenever peer-to-peer is on. `varsto p2p dht off` (or the check box in the interface) sets `P2pConfig.dht_disabled`; `varsto p2p dht on` clears it. `--bootstrap host:port` (repeatable) stores `P2pConfig.dht_bootstrap`, used instead of the public bootstrap nodes; `--default-bootstrap` clears it. The environment variable `VARSTO_DHT_BOOTSTRAP=host:port,...` overrides both, for test networks without internet access. The service summary (`p2p_dht`), `GET /api/p2p` (`dht`, `dht_text`), `varsto p2p status` and the interface show the state (`off`, `bootstrapping`, `ok` with the number of nodes in the routing table, or `failed`), the time of the last publish and how many nodes stored it, and the last lookup with how many devices were found. `POST /api/p2p` takes `dht` (boolean) and `dht_bootstrap` (comma-separated).
+
+**Privacy.**
+
+- The DHT learns the IP address and port of the device's DHT socket, and the nodes closest to `K` see that this address publishes a small encrypted blob under `K`. They cannot read it, and `K` does not name the vault or the device.
+- The nodes closest to `K` also see which addresses look `K` up. Those are the vault's other devices, so a node that is (or an attacker who places nodes) near a device's key for a day learns which IP addresses belong together on that day. The keys change daily, but an IP address that stays the same links the days anyway.
+- The node may switch to serving the DHT for others (the library's adaptive mode) when it finds itself publicly reachable; it then answers other BitTorrent clients' DHT queries, which costs some upload bandwidth.
+
+**Security.** An item is signed with Ed25519 only: a BEP 44 item has no room for an ML-DSA signature. The addresses are therefore hints and nothing more: every connection to a peer is still authenticated with the membership token and the pinned QUIC certificate (section 12), and every object is checked against its name. Someone without the vault key can neither forge an item nor read one. Someone with the vault key (a device, or a removed device until the next key epoch) could publish false addresses for another device, which costs connection attempts and nothing else. A node near `K` can drop or withhold the item (or eclipse it with many nodes), or replay one of the same day; the storage record and the LAN beacon still work.
+
+**Limits.**
+
+- IPv4 only: the DHT library does not implement BEP 32. The record itself can still carry IPv6 addresses.
+- During a key epoch change, devices that have and have not yet adopted the new key derive different keys and do not find each other through the DHT until both have it.
+- A device whose clock is off by more than a day looks for the wrong days.
+- Lookups ask for every other device every 10 minutes: two queries per device, which bounds how large a vault this suits without spreading the queries out.
+
+Tests: `p2p::dht::tests` (key derivation per device, day, vault and key; seal and open; refusal of another vault, device, day or key and of tampering and future timestamps; size with a realistic and an oversized record; merging with storage records), and `crates/varsto-core/tests/dht.rs` (two devices of one vault find each other's records and a changed address through a local testnet of DHT nodes; a node with another key finds nothing).
