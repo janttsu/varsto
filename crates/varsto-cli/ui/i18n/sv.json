@@ -581,7 +581,15 @@
   "No more snapshots are taken. The snapshots kept are deleted as their time is up, and then the backup goes.": "Inga fler versioner tas. De sparade versionerna tas bort när deras tid är ute, och sedan försvinner säkerhetskopian.",
   "Stop this backup?": "Stoppa den här säkerhetskopian?",
   "Stop backup": "Stoppa säkerhetskopian",
-  "Choose at least one storage.": "Välj minst en lagringsplats."
+  "Choose at least one storage.": "Välj minst en lagringsplats.",
+  "One folder (a disk, USB disk or network share)": "En mapp (en disk, USB-disk eller nätverksresurs)",
+  "Pool of swappable disks (plugged in one at a time)": "Pool med utbytbara diskar (ansluts en i taget)",
+  "One fixed path: an internal disk, a USB disk that usually stays attached, or a mounted network share. Varsto reads and writes it at that path; while it is not there, the storage is simply unavailable. For several disks you swap in and out, choose a pool instead.": "En fast sökväg: en intern disk, en USB-disk som oftast sitter i, eller en monterad nätverksresurs. Varsto läser och skriver den på den sökvägen; när den inte finns där är lagringen bara otillgänglig. Om du byter mellan flera diskar, välj en pool i stället.",
+  "Several disks you plug in one at a time, for example old drives kept on a shelf. Varsto recognises each disk by a marker file, not by its path, fills it with what the pool still lacks, checks it when it comes back, and tells you which disk to attach for a file that is on a disk that is away.": "Flera diskar som du ansluter en i taget, till exempel gamla diskar som förvaras på en hylla. Varsto känner igen varje disk på en markeringsfil, inte på sökvägen, fyller den med det som poolen ännu saknar, kontrollerar den när den kommer tillbaka och säger vilken disk som ska anslutas för en fil som ligger på en disk som är borta.",
+  "A bucket at any S3-compatible provider (AWS, Scaleway, Hetzner, Backblaze B2, Cloudflare R2, MinIO and others), with your own keys.": "En bucket hos valfri S3-kompatibel leverantör (AWS, Scaleway, Hetzner, Backblaze B2, Cloudflare R2, MinIO med flera), med dina egna nycklar.",
+  "Any remote you have set up in rclone, for example Google Drive, OneDrive, SFTP or WebDAV.": "Valfritt fjärrmål som du har konfigurerat i rclone, till exempel Google Drive, OneDrive, SFTP eller WebDAV.",
+  "Folder path": "Mappens sökväg",
+  "Add a folder, an S3 bucket, an rclone remote or a pool of swappable disks below.": "Lägg till en mapp, en S3-bucket, en rclone-fjärrplats eller en pool med utbytbara diskar nedan."
  },
  "patterns": [
   [
