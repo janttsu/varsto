@@ -187,3 +187,87 @@ fn disk_list_sorts_and_disk_suggest_names_the_command() {
     assert!(text.contains("No disk needs docking now."), "{text}");
     assert!(text.contains("Attached now"), "{text}");
 }
+
+#[test]
+fn folder_ignore_rules_and_metadata_settings_through_the_cli() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    let a = root.join("a");
+    let docs = root.join("docs");
+    ok(&a, &["init", "--name", "laptop"]);
+    ok(
+        &a,
+        &[
+            "storage",
+            "add-local",
+            "box",
+            root.join("storage").to_str().unwrap(),
+        ],
+    );
+    ok(&a, &["folder", "add", "docs", docs.to_str().unwrap()]);
+
+    let info = ok(
+        &a,
+        &[
+            "folder", "ignore", "docs", "--add", "*.tmp", "--add", "build/",
+        ],
+    );
+    assert_eq!(info["synced"], "*.tmp\nbuild/\n");
+    assert_eq!(
+        fs::read_to_string(docs.join(".varstoignore")).unwrap(),
+        "*.tmp\nbuild/\n"
+    );
+    let info = ok(
+        &a,
+        &["folder", "ignore", "docs", "--local", "--add", "*.iso"],
+    );
+    assert_eq!(info["local"], serde_json::json!(["*.iso"]));
+    assert!(info["suggested"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|s| s == ".DS_Store"));
+
+    let v = ok(&a, &["folder", "check-ignore", "docs", "sub/x.tmp"]);
+    assert_eq!(v["ignored"], true);
+    assert_eq!(v["pattern"], "*.tmp");
+    assert_eq!(v["source"], ".varstoignore");
+    let v = ok(&a, &["folder", "check-ignore", "docs", "build/deep/file.c"]);
+    assert_eq!(v["matched_path"], "build");
+    let v = ok(&a, &["folder", "check-ignore", "docs", "disk.iso"]);
+    assert_eq!(v["source"], "local");
+    let v = ok(&a, &["folder", "check-ignore", "docs", "notes.txt"]);
+    assert_eq!(v["ignored"], false);
+
+    let info = ok(&a, &["folder", "ignore", "docs", "--remove", "build/"]);
+    assert_eq!(info["synced"], "*.tmp\n");
+
+    // Ignored files stay out of the push; the rules file itself is synced.
+    fs::write(docs.join("keep.txt"), b"k").unwrap();
+    fs::write(docs.join("scratch.tmp"), b"s").unwrap();
+    let push = ok(&a, &["push", "docs"]);
+    assert_eq!(push["files_changed"], 2);
+
+    let s = ok(&a, &["folder", "set", "docs"]);
+    assert_eq!(
+        s,
+        serde_json::json!({"permissions": true, "symlinks": true, "xattrs": true, "ownership": false})
+    );
+    let s = ok(
+        &a,
+        &[
+            "folder",
+            "set",
+            "docs",
+            "--ownership",
+            "on",
+            "--xattrs",
+            "off",
+        ],
+    );
+    assert_eq!(s["ownership"], true);
+    assert_eq!(s["xattrs"], false);
+    assert_eq!(ok(&a, &["folder", "set", "docs"])["ownership"], true);
+    let (success, _, stderr) = varsto(&a, &["folder", "set", "docs", "--permissions", "maybe"]);
+    assert!(!success, "{stderr}");
+}

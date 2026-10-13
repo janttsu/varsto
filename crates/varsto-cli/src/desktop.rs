@@ -2225,6 +2225,62 @@ fn api_unlocked(
             service.request_sync();
             Ok(json!({"ok": true}))
         }
+        (Method::Get, "/api/folder/ignore") => {
+            let folder = query_param(query, "folder")
+                .ok_or_else(|| anyhow!("folder query parameter required"))?;
+            Ok(serde_json::to_value(engine.folder_ignore(&folder)?)?)
+        }
+        (Method::Post, "/api/folder/ignore") => {
+            // `synced`: the root .varstoignore as text; `local`: this
+            // device's own patterns. Either may be left out.
+            let local = input.get("local").and_then(|v| v.as_array()).map(|a| {
+                a.iter()
+                    .filter_map(|p| p.as_str())
+                    .map(str::trim_end)
+                    .filter(|p| !p.trim().is_empty())
+                    .map(str::to_string)
+                    .collect::<Vec<_>>()
+            });
+            let synced = opt(input, "synced");
+            engine.set_folder_ignore(&s(input, "folder")?, synced.as_deref(), local)?;
+            service.request_sync();
+            Ok(json!({"ok": true}))
+        }
+        (Method::Post, "/api/folder/check-ignore") => {
+            // A preview: the texts being edited stand for the saved rules.
+            let local: Option<Vec<String>> =
+                input.get("local").and_then(|v| v.as_array()).map(|a| {
+                    a.iter()
+                        .filter_map(|p| p.as_str().map(str::to_string))
+                        .collect()
+                });
+            Ok(serde_json::to_value(engine.check_ignore(
+                &s(input, "folder")?,
+                &s(input, "path")?,
+                opt(input, "synced").as_deref(),
+                local.as_deref(),
+            )?)?)
+        }
+        (Method::Get, "/api/folder/settings") => {
+            let folder = query_param(query, "folder")
+                .ok_or_else(|| anyhow!("folder query parameter required"))?;
+            Ok(json!({
+                "settings": engine.folder_settings(&folder)?,
+                "caps": engine.meta_caps(),
+            }))
+        }
+        (Method::Post, "/api/folder/settings") => {
+            let folder = s(input, "folder")?;
+            let mut st = engine.folder_settings(&folder)?;
+            let flag = |k: &str, cur: bool| input.get(k).and_then(|v| v.as_bool()).unwrap_or(cur);
+            st.permissions = flag("permissions", st.permissions);
+            st.symlinks = flag("symlinks", st.symlinks);
+            st.xattrs = flag("xattrs", st.xattrs);
+            st.ownership = flag("ownership", st.ownership);
+            engine.set_folder_settings(&folder, st)?;
+            service.request_sync();
+            Ok(json!({"ok": true, "settings": st}))
+        }
         (Method::Get, "/api/dupes") => {
             let folder = query_param(query, "folder")
                 .ok_or_else(|| anyhow!("folder query parameter required"))?;

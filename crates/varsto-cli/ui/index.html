@@ -323,6 +323,7 @@
             <input id="files-filter" type="search" class="files-filter" placeholder="Filter by name, tag or analysis" aria-label="Filter files" autocomplete="off">
             <span class="toolbar-spacer"></span>
             <label class="inline muted" id="selectivelabel" title="Files appear as placeholders until you download them"><input id="selectivetoggle" type="checkbox"> selective sync</label>
+            <button id="files-settings" type="button" class="secondary icon-btn" title="Folder settings: ignore rules and file metadata"><svg class="icon"><use href="#i-settings"/></svg><span class="sr-only">Folder settings</span></button>
           </div>
           <input type="file" id="fileinput" multiple class="hidden" aria-hidden="true" tabindex="-1">
           <div id="files-progress" class="status-line progress hidden" role="status"></div>
@@ -349,6 +350,10 @@
             <dt>Modified</dt><dd id="fd-modified"></dd>
             <dt>Last used here</dt><dd id="fd-used"></dd>
             <dt>Copies</dt><dd id="fd-copies"></dd>
+            <dt class="fd-meta hidden" id="fd-link-dt">Link to</dt><dd class="fd-meta hidden" id="fd-link"></dd>
+            <dt class="fd-meta hidden" id="fd-mode-dt">Permissions</dt><dd class="fd-meta hidden" id="fd-mode" data-no-i18n></dd>
+            <dt class="fd-meta hidden" id="fd-owner-dt">Owner</dt><dd class="fd-meta hidden" id="fd-owner" data-no-i18n></dd>
+            <dt class="fd-meta hidden" id="fd-xattrs-dt">Extended attributes</dt><dd class="fd-meta hidden" id="fd-xattrs" data-no-i18n></dd>
           </dl>
           <section class="fd-analysis" id="fd-analysis" aria-label="Analysis">
             <div class="fd-analysis-head"><span class="field-caption">Analysis</span><span id="fd-analysis-stale" class="pill risk hidden" title="The file changed after it was analysed">Stale</span></div>
@@ -365,6 +370,34 @@
           <div class="actions fd-actions" id="fd-actions"></div>
         </aside>
       </div>
+
+      <section id="foldersettings" class="card folder-settings hidden" aria-label="Folder settings">
+        <div class="details-head"><h2 class="card-title"><svg class="icon accent"><use href="#i-settings"/></svg><span>Folder settings</span> <span id="fs-folder" class="muted" data-no-i18n></span></h2><button type="button" id="fs-close" class="secondary icon-btn" title="Close folder settings"><svg class="icon"><use href="#i-close"/></svg></button></div>
+        <h3 class="field-caption">Ignore rules</h3>
+        <p class="muted small">One pattern per line, as in .gitignore: * and ? match within a name, ** any number of folders, a trailing / only folders, a leading / ties the pattern to the folder's top, ! includes again and # starts a comment. Ignored files are not synced from this device and not deleted on others; a file already in the vault that becomes ignored stays in the vault.</p>
+        <p id="fs-encrypted" class="notice hidden">This device keeps the folder encrypted: ignore rules apply on devices with plain files. Edit the shared rules there.</p>
+        <label for="fs-synced" class="field-caption">Shared with every device (.varstoignore)</label>
+        <textarea id="fs-synced" class="fs-text" rows="7" spellcheck="false" autocomplete="off" placeholder="*.tmp"></textarea>
+        <div class="fs-suggest small"><span class="muted">Common junk files:</span> <span id="fs-suggestions" class="fs-chips" data-no-i18n></span></div>
+        <p id="fs-nested" class="muted small hidden"></p>
+        <label for="fs-local-add" class="field-caption">Only on this device (not synced)</label>
+        <ul id="fs-local" class="list compact-list"></ul>
+        <p id="fs-local-empty" class="muted small">No patterns of this device's own.</p>
+        <div class="fs-row"><input id="fs-local-add" type="text" placeholder="Pattern, e.g. *.iso" autocomplete="off" spellcheck="false"><button type="button" id="fs-local-addbtn" class="secondary">Add</button></div>
+        <label for="fs-test" class="field-caption">Test a path</label>
+        <div class="fs-row"><input id="fs-test" type="text" placeholder="e.g. photos/raw/img.cr2 (end a folder with /)" autocomplete="off" spellcheck="false"><button type="button" id="fs-testbtn" class="secondary">Test</button></div>
+        <p id="fs-test-result" class="small" role="status"></p>
+        <h3 class="field-caption">File metadata</h3>
+        <p class="muted small">What this device syncs besides the content. A device that cannot keep a property leaves it as it is in the vault, and never removes it.</p>
+        <div class="fs-checks">
+          <label class="inline"><input type="checkbox" id="fs-permissions"> Permissions</label>
+          <label class="inline"><input type="checkbox" id="fs-symlinks"> Symbolic links</label>
+          <label class="inline"><input type="checkbox" id="fs-xattrs"> Extended attributes</label>
+          <label class="inline"><input type="checkbox" id="fs-ownership"> Ownership (user and group)</label>
+        </div>
+        <p id="fs-caps" class="muted small"></p>
+        <div class="actions"><button type="button" id="fs-save">Save</button><button type="button" id="fs-cancel" class="secondary">Cancel</button></div>
+      </section>
 
       <div id="folderforms" class="cols hidden">
         <form id="addfolder" class="card">

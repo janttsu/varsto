@@ -1188,6 +1188,44 @@ enum FolderCmd {
     Files {
         folder: String,
     },
+    /// Show or change a folder's ignore rules (gitignore syntax): the
+    /// `.varstoignore` at the folder's root, which every device shares, or
+    /// with --local this device's own patterns, which are not synced.
+    Ignore {
+        folder: String,
+        /// List the rules (what happens without --add or --remove).
+        #[arg(long)]
+        list: bool,
+        /// Add a pattern (repeatable), e.g. --add '*.tmp' --add 'build/'.
+        #[arg(long, allow_hyphen_values = true)]
+        add: Vec<String>,
+        /// Remove a pattern (repeatable).
+        #[arg(long, allow_hyphen_values = true)]
+        remove: Vec<String>,
+        /// This device's own patterns instead of the synced file.
+        #[arg(long)]
+        local: bool,
+    },
+    /// Whether a path of a folder is ignored on this device, and by which
+    /// pattern. A trailing / asks about a directory.
+    CheckIgnore {
+        folder: String,
+        path: String,
+    },
+    /// Show or change which file metadata this device syncs for a folder:
+    /// permissions, symbolic links and extended attributes (on by default)
+    /// and ownership (off by default).
+    Set {
+        folder: String,
+        #[arg(long, value_name = "on|off", value_parser = clap::builder::BoolishValueParser::new())]
+        permissions: Option<bool>,
+        #[arg(long, value_name = "on|off", value_parser = clap::builder::BoolishValueParser::new())]
+        symlinks: Option<bool>,
+        #[arg(long, value_name = "on|off", value_parser = clap::builder::BoolishValueParser::new())]
+        xattrs: Option<bool>,
+        #[arg(long, value_name = "on|off", value_parser = clap::builder::BoolishValueParser::new())]
+        ownership: Option<bool>,
+    },
     /// Show or set which storages a folder's blocks are written to (default: every storage).
     Placement {
         folder: String,
@@ -1202,6 +1240,34 @@ enum FolderCmd {
         every: bool,
     },
     List,
+}
+
+/// `varsto folder ignore` as text.
+fn ignore_listing(i: &varsto_core::engine::IgnoreInfo, local_only: bool) -> String {
+    let mut out = Vec::new();
+    if !local_only {
+        if !i.applies_here {
+            out.push(
+                "(this device keeps the folder encrypted: ignore rules apply only where it has plain files)"
+                    .to_string(),
+            );
+        }
+        out.push("synced (.varstoignore):".to_string());
+        let lines: Vec<&str> = i.synced.lines().filter(|l| !l.trim().is_empty()).collect();
+        if lines.is_empty() {
+            out.push("  (none)".to_string());
+        }
+        out.extend(lines.iter().map(|l| format!("  {l}")));
+        for n in &i.nested {
+            out.push(format!("also: {n}"));
+        }
+    }
+    out.push("this device only:".to_string());
+    if i.local.is_empty() {
+        out.push("  (none)".to_string());
+    }
+    out.extend(i.local.iter().map(|l| format!("  {l}")));
+    out.join("\n")
 }
 
 /// FOLDER PATH as given, or the folder and path of one path on disk.
@@ -2938,15 +3004,94 @@ fn run(cli: &Cli) -> Result<()> {
                         rows.iter()
                             .map(|f| {
                                 format!(
-                                    "{:<12} {:>10} {}{}",
+                                    "{:<12} {:>10} {}{}{}",
                                     f.state,
                                     f.size,
                                     f.path,
+                                    match &f.symlink {
+                                        Some(t) if f.symlink_absolute =>
+                                            format!(" -> {t} (absolute)"),
+                                        Some(t) => format!(" -> {t}"),
+                                        None => String::new(),
+                                    },
                                     if f.pinned { " (pinned)" } else { "" }
                                 )
                             })
                             .collect::<Vec<_>>()
                             .join("\n")
+                    })?;
+                }
+                FolderCmd::Ignore {
+                    folder,
+                    list,
+                    add,
+                    remove,
+                    local,
+                } => {
+                    for p in add {
+                        let done = engine.ignore_add(folder, p, *local)?;
+                        if !cli.json {
+                            println!("{} {p}", if done { "added" } else { "already there:" });
+                        }
+                    }
+                    for p in remove {
+                        let done = engine.ignore_remove(folder, p, *local)?;
+                        if !cli.json {
+                            println!("{} {p}", if done { "removed" } else { "not there:" });
+                        }
+                    }
+                    if *list || (add.is_empty() && remove.is_empty()) || cli.json {
+                        let info = engine.folder_ignore(folder)?;
+                        print(cli, &info, |i| ignore_listing(i, *local))?;
+                    } else if !*local {
+                        println!("the change reaches the other devices with the next sync");
+                    }
+                }
+                FolderCmd::CheckIgnore { folder, path } => {
+                    let v = engine.check_ignore(folder, path, None, None)?;
+                    print(cli, &v, |v| match (&v.pattern, &v.source) {
+                        (Some(p), Some(s)) => format!(
+                            "{path}: {} by {p:?} ({s}{}){}",
+                            if v.ignored { "ignored" } else { "included" },
+                            v.line.map(|l| format!(", line {l}")).unwrap_or_default(),
+                            match &v.matched_path {
+                                Some(m) if m.as_str() != path.trim_matches('/') => {
+                                    format!(" through {m}/")
+                                }
+                                _ => String::new(),
+                            }
+                        ),
+                        _ => format!("{path}: not ignored (no pattern matches)"),
+                    })?;
+                }
+                FolderCmd::Set {
+                    folder,
+                    permissions,
+                    symlinks,
+                    xattrs,
+                    ownership,
+                } => {
+                    let mut s = engine.folder_settings(folder)?;
+                    let change = permissions.is_some()
+                        || symlinks.is_some()
+                        || xattrs.is_some()
+                        || ownership.is_some();
+                    s.permissions = permissions.unwrap_or(s.permissions);
+                    s.symlinks = symlinks.unwrap_or(s.symlinks);
+                    s.xattrs = xattrs.unwrap_or(s.xattrs);
+                    s.ownership = ownership.unwrap_or(s.ownership);
+                    if change {
+                        engine.set_folder_settings(folder, s)?;
+                    }
+                    let onoff = |b: bool| if b { "on" } else { "off" };
+                    print(cli, &s, |s| {
+                        format!(
+                            "permissions {}\nsymlinks {}\nxattrs {}\nownership {}",
+                            onoff(s.permissions),
+                            onoff(s.symlinks),
+                            onoff(s.xattrs),
+                            onoff(s.ownership)
+                        )
                     })?;
                 }
                 FolderCmd::List => {

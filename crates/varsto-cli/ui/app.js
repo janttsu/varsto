@@ -1927,7 +1927,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     $("files-mkdir").disabled = !f;
     updateToolbar();
   }
-  function openFolder(name) { $("filesfolder").value = name; markTree(name); updateFilesHead(); showFolderForms(false); setScreen("folder"); nav("files"); loadFiles(); }
+  function openFolder(name) { if (fsEdit && fsEdit.folder !== name) { closeFolderSettings(); } $("filesfolder").value = name; markTree(name); updateFilesHead(); showFolderForms(false); setScreen("folder"); nav("files"); loadFiles(); }
   function showFolderForms(on, byUser) { $("folderforms").classList.toggle("hidden", !on); if (byUser) { $("folderforms").dataset.user = on ? "1" : "0"; } if (on && byUser) { var inp = $("addfolder").querySelector("input[name=name]"); setTimeout(function () { inp.focus(); }, 50); } }
   $("treeadd").onclick = function () { nav("files"); showFolderForms(true, true); window.scrollTo(0, document.body.scrollHeight); };
   $("filesadd").onclick = function () { var open = $("folderforms").classList.contains("hidden"); showFolderForms(open, true); if (open) { $("folderforms").scrollIntoView({ block: "start", behavior: "smooth" }); } };
@@ -2050,6 +2050,15 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
       if (fs.chunks_verified_elsewhere > 0) { copies.push(fs.chunks_verified_elsewhere + " verified by another device"); }
     }
     $("fd-copies").textContent = copies.join("; ") || "unknown";
+    // File metadata (`fsmeta`): a link's target, permissions, owner, attributes.
+    var meta = [["link", f.symlink || ""],
+      ["mode", f.mode_text ? f.mode_text + " (" + ("000" + f.mode.toString(8)).slice(-4) + ")" : ""],
+      ["owner", f.owner || ""], ["xattrs", (f.xattrs || []).join(", ")]];
+    meta.forEach(function (m) { $("fd-" + m[0]).textContent = m[1]; $("fd-" + m[0]).classList.toggle("hidden", !m[1]); $("fd-" + m[0] + "-dt").classList.toggle("hidden", !m[1]); });
+    if (f.symlink) {
+      var ld = $("fd-link"); ld.textContent = ""; ld.appendChild(el("code", "", f.symlink));
+      if (f.symlink_absolute) { ld.appendChild(document.createTextNode(" ")); ld.appendChild(el("span", "muted", "(absolute: it may point elsewhere on another device)")); }
+    }
     var acts = $("fd-actions"); acts.innerHTML = "";
     fileActions(folder, f, true).forEach(function (b) { acts.appendChild(b); });
     showAnalysis(folder, f);
@@ -2366,6 +2375,106 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   }
   $("filesfolder").onchange = function () { multi.sel = {}; multi.on = false; markTree($("filesfolder").value); updateFilesHead(); clearSelection(); setScreen("folder"); loadFiles(); };
   $("selectivetoggle").onchange = function () { api("POST", "/api/selective", { folder: $("filesfolder").value, on: $("selectivetoggle").checked }).then(function () { log("selective sync " + ($("selectivetoggle").checked ? "on" : "off")); return refreshStatus(); }).catch(function (e) { log("error: " + e.message); }); };
+  // ----- Folder settings: ignore rules and file metadata -----
+  // The shared rules are the folder's .varstoignore (synced like any file);
+  // the local ones stay in this device's configuration. Testing a path uses
+  // what is being edited, saved or not.
+  var fsEdit = null;
+  function fsLines(text) { return text.split("\n").map(function (l) { return l.replace(/\s+$/, ""); }); }
+  function fsRenderLocal() {
+    var ul = $("fs-local"); ul.innerHTML = "";
+    fsEdit.local.forEach(function (p, i) {
+      var li = el("li"); li.appendChild(el("span", "", p));
+      var b = el("button", "secondary", "Remove"); b.type = "button";
+      b.onclick = function () { fsEdit.local.splice(i, 1); fsRenderLocal(); };
+      li.appendChild(b); ul.appendChild(li);
+    });
+    $("fs-local-empty").classList.toggle("hidden", fsEdit.local.length > 0);
+  }
+  function fsRenderSuggestions() {
+    var box = $("fs-suggestions"); box.innerHTML = "";
+    var have = fsLines($("fs-synced").value);
+    fsEdit.suggested.filter(function (p) { return have.indexOf(p) < 0; }).forEach(function (p) {
+      var b = el("button", "secondary", p); b.type = "button"; b.title = "Add to the shared rules";
+      b.onclick = function () { var t = $("fs-synced").value; $("fs-synced").value = t + (t && !/\n$/.test(t) ? "\n" : "") + p + "\n"; fsRenderSuggestions(); };
+      box.appendChild(b);
+    });
+    if (!box.childNodes.length) { box.appendChild(el("span", "muted", "all added")); }
+  }
+  function openFolderSettings() {
+    var folder = $("filesfolder").value;
+    if (!folder) { return; }
+    Promise.all([api("GET", "/api/folder/ignore?folder=" + enc(folder)), api("GET", "/api/folder/settings?folder=" + enc(folder))]).then(function (r) {
+      var ig = r[0], st = r[1];
+      fsEdit = { folder: folder, local: ig.local.slice(), suggested: ig.suggested, original: ig.synced, applies: ig.applies_here };
+      $("fs-folder").textContent = folder;
+      $("fs-synced").value = ig.synced;
+      $("fs-synced").disabled = !ig.applies_here;
+      $("fs-encrypted").classList.toggle("hidden", ig.applies_here);
+      $("fs-nested").textContent = ig.nested.length ? "Rules also in subfolders: " + ig.nested.join(", ") : "";
+      $("fs-nested").classList.toggle("hidden", !ig.nested.length);
+      fsRenderLocal(); fsRenderSuggestions();
+      $("fs-test-result").textContent = "";
+      ["permissions", "symlinks", "xattrs", "ownership"].forEach(function (k) { $("fs-" + k).checked = !!st.settings[k]; });
+      var caps = st.caps, cannot = [];
+      if (caps.mode === "None") { cannot.push("This system cannot keep permissions."); } else if (caps.mode === "ReadOnly") { cannot.push("This system keeps only the read-only flag of permissions."); }
+      if (!caps.symlinks) { cannot.push("This system cannot create symbolic links."); }
+      if (!caps.xattrs) { cannot.push("This system cannot keep extended attributes."); }
+      if (!caps.owner) { cannot.push("This system cannot keep ownership."); }
+      if (cannot.length) { cannot.push("What other devices set stays as it is."); }
+      var capsBox = $("fs-caps"); capsBox.innerHTML = "";
+      cannot.forEach(function (c) { capsBox.appendChild(el("span", "", c)); capsBox.appendChild(document.createTextNode(" ")); });
+      $("foldersettings").classList.remove("hidden");
+      $("foldersettings").scrollIntoView({ block: "nearest" });
+    }).catch(function (e) { log("error: " + e.message); });
+  }
+  function closeFolderSettings() { fsEdit = null; $("foldersettings").classList.add("hidden"); }
+  $("files-settings").onclick = function () { if (fsEdit && fsEdit.folder === $("filesfolder").value) { closeFolderSettings(); } else { openFolderSettings(); } };
+  $("fs-close").onclick = closeFolderSettings;
+  $("fs-cancel").onclick = closeFolderSettings;
+  $("fs-synced").oninput = function () { if (fsEdit) { fsRenderSuggestions(); } };
+  function fsAddLocal() {
+    var p = $("fs-local-add").value.replace(/\s+$/, "");
+    if (!p.trim() || !fsEdit) { return; }
+    if (fsEdit.local.indexOf(p) < 0) { fsEdit.local.push(p); }
+    $("fs-local-add").value = ""; fsRenderLocal();
+  }
+  $("fs-local-addbtn").onclick = fsAddLocal;
+  $("fs-local-add").onkeydown = function (ev) { if (ev.key === "Enter") { ev.preventDefault(); fsAddLocal(); } };
+  function fsTest() {
+    var path = $("fs-test").value.trim();
+    if (!path || !fsEdit) { return; }
+    var body = { folder: fsEdit.folder, path: path, local: fsEdit.local };
+    if (fsEdit.applies) { body.synced = $("fs-synced").value; }
+    api("POST", "/api/folder/check-ignore", body).then(function (v) {
+      var out = $("fs-test-result"); out.innerHTML = "";
+      if (!v.pattern) { out.appendChild(el("span", "", "Not ignored: no pattern matches.")); return; }
+      var sep = function () { out.appendChild(document.createTextNode(" · ")); };
+      out.appendChild(el("strong", "", v.ignored ? "Ignored" : "Included")); sep();
+      out.appendChild(el("span", "", "pattern")); out.appendChild(document.createTextNode(" ")); out.appendChild(el("code", "", v.pattern)); sep();
+      if (v.source === "local") { out.appendChild(el("span", "", "this device's rules")); } else { out.appendChild(el("code", "", v.source)); }
+      sep(); out.appendChild(el("span", "", "line " + v.line));
+      if (v.matched_path && v.matched_path !== path.replace(/^\/+|\/+$/g, "")) {
+        sep(); out.appendChild(el("span", "", "through the folder")); out.appendChild(document.createTextNode(" ")); out.appendChild(el("code", "", v.matched_path + "/"));
+      }
+    }).catch(function (e) { $("fs-test-result").textContent = e.message; });
+  }
+  $("fs-testbtn").onclick = fsTest;
+  $("fs-test").onkeydown = function (ev) { if (ev.key === "Enter") { ev.preventDefault(); fsTest(); } };
+  $("fs-save").onclick = function () {
+    if (!fsEdit) { return; }
+    var folder = fsEdit.folder;
+    var body = { folder: folder, local: fsEdit.local };
+    if (fsEdit.applies && $("fs-synced").value !== fsEdit.original) { body.synced = $("fs-synced").value; }
+    var settings = { folder: folder };
+    ["permissions", "symlinks", "xattrs", "ownership"].forEach(function (k) { settings[k] = $("fs-" + k).checked; });
+    api("POST", "/api/folder/ignore", body).then(function () {
+      return api("POST", "/api/folder/settings", settings);
+    }).then(function () {
+      log("folder settings saved for " + folder);
+      closeFolderSettings(); loadFiles();
+    }).catch(function (e) { log("error: " + e.message); });
+  };
   $("dupes").onclick = function () {
     api("GET", "/api/dupes?folder=" + enc($("dupefolder").value)).then(function (g) {
       $("dupeout").textContent = g.length ? g.map(function (x) { return fmtBytes(x.size) + ": " + x.paths.join(", "); }).join("\n") : "no duplicates";

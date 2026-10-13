@@ -939,3 +939,14 @@ body[data-mobile="1"] .rg-details, body[data-mobile="1"] .rg-status, body[data-m
   .rg-step { break-inside: avoid; }
   .rg-literal, .rg-cmd { background: #fff; border-color: #999; }
 }
+
+/* Folder settings: ignore rules and file metadata. */
+.folder-settings { margin-top: 16px; display: flex; flex-direction: column; gap: 8px; }
+.folder-settings .fs-text { width: 100%; box-sizing: border-box; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; min-height: 120px; resize: vertical; }
+.folder-settings .fs-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.folder-settings .fs-row input { flex: 1 1 200px; min-width: 0; }
+.folder-settings .fs-chips { display: inline-flex; flex-wrap: wrap; gap: 6px; }
+.folder-settings .fs-chips button { padding: 2px 8px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
+.folder-settings .fs-checks { display: flex; flex-wrap: wrap; gap: 8px 20px; }
+.folder-settings #fs-local li { display: flex; align-items: center; gap: 8px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.folder-settings #fs-local li span { flex: 1; overflow-wrap: anywhere; }
