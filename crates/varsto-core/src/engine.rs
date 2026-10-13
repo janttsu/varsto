@@ -49,12 +49,14 @@ mod devinfo;
 mod disk_fetch;
 mod disk_groups;
 mod disk_insert;
+mod drain;
 mod fetch;
 mod ledger_upkeep;
 mod manifest_upkeep;
 mod membership;
 mod org_ops;
 mod placement;
+mod quotas;
 mod repair;
 mod restic_mirror;
 mod scrub;
@@ -76,6 +78,7 @@ pub use disk_fetch::{
 };
 pub use disk_groups::DiskGroupStatus;
 pub use disk_insert::{DiskInsertReport, DiskProgress, FillOutcome, InsertOptions};
+pub use drain::{DrainOptions, DrainPlan, DrainRunLimits, DrainRunReport, DrainStatus};
 pub use manifest_upkeep::ManifestPolicy;
 pub use membership::{
     removal_notice, DeviceInfo, DeviceRemoved, EpochRecord, Grant, KemRecord, Removal, Revocation,
@@ -85,6 +88,7 @@ pub use org_ops::{
     LogView, OrgApproved, OrgBrief, OrgCreated, OrgDevice, OrgRemoveReport, OrgSummary, OrgUser,
     UnlistedDevice,
 };
+pub use quotas::QuotaStatus;
 pub use repair::{
     Damage, DamageKind, RepairOptions, RepairReport, RepairStatus, RepairedCopy, Unrepairable,
 };
@@ -191,6 +195,11 @@ pub struct PushReport {
     /// attached or no room); the next push tries them again.
     #[serde(default)]
     pub storages_unavailable: Vec<String>,
+    /// Storages skipped because they are at their quota, one sentence
+    /// each ("storage X is at its quota (Y of Z)"); blocks that had no
+    /// other storage wait on this device for the next push.
+    #[serde(default)]
+    pub storages_full: Vec<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Default)]
@@ -1315,11 +1324,14 @@ impl Engine {
         // Copies count on this device's other storages that are not
         // transferrers, and on replicas; claims on storages this device does
         // not know are not counted.
+        // Storages being drained are leaving too: they neither count nor
+        // receive copies.
+        let closed = self.closed_storages();
         let others: Vec<&StorageSpec> = self
             .config
             .storages
             .iter()
-            .filter(|s| s.name() != name && !s.is_carrier())
+            .filter(|s| s.name() != name && !s.is_carrier() && !closed.contains(s.name()))
             .collect();
         if others.is_empty() {
             plan.blocked = Some(format!(
@@ -1330,6 +1342,7 @@ impl Engine {
         let place_of: HashMap<&str, String> =
             others.iter().map(|s| (s.name(), s.place())).collect();
         let view = self.view()?;
+        let gate = self.quota_gate(&view);
         let mut targets_used = BTreeSet::new();
         // Backups count too: their blocks are on storages only.
         let records: Vec<FolderRecord> = self
@@ -1379,7 +1392,9 @@ impl Engine {
                     .collect();
                 let mut targets: Vec<&str> = Vec::new();
                 let free = |targets: &Vec<&str>, s: &&StorageSpec| {
-                    !holders.iter().any(|h| h.as_str() == s.name()) && !targets.contains(&s.name())
+                    !holders.iter().any(|h| h.as_str() == s.name())
+                        && !targets.contains(&s.name())
+                        && gate.fits(s.name(), cr.size)
                 };
                 for (place, min) in &policy.min_per_place {
                     let have = holders
@@ -1425,6 +1440,7 @@ impl Engine {
                     plan.blocks_ok += 1;
                 }
                 for t in targets {
+                    gate.take(t, cr.size);
                     targets_used.insert(t.to_string());
                     plan.bytes_to_copy += cr.size;
                     plan.copies.push(PlannedCopy {
@@ -1515,7 +1531,9 @@ impl Engine {
             self.commit_batch()?;
         }
         self.config.storages.retain(|s| s.name() != name);
+        self.config.storage_settings.remove(name);
         self.config.save(&self.home)?;
+        self.forget_drain_state(name);
         self.publish_registry()?;
         Ok(report)
     }
@@ -1534,10 +1552,12 @@ impl Engine {
     /// Storages that carry records, ledger batches, manifests and thumbnails:
     /// everything except data-only disk pools.
     fn metadata_storages(&self, include_cold: bool) -> Result<OpenStorages> {
+        // A drained storage holds nothing Varsto needs any more (`drain`).
+        let drained = self.drained_storages();
         Ok(self
             .open_storages(include_cold)?
             .into_iter()
-            .filter(|(s, _)| !s.is_data_only())
+            .filter(|(s, _)| !s.is_data_only() && !drained.contains(s.name()))
             .collect())
     }
 
@@ -2238,6 +2258,8 @@ impl Engine {
         changed_folders |= folders;
         // Placement records: newest per folder wins, as for policies.
         changed_folders |= self.pull_placement_records()?;
+        // Quotas and drains of the storages (`quotas`): newest per storage wins.
+        self.pull_storage_settings()?;
         // Strongroom conversions and key lists (S-012).
         self.pull_strongroom_records()?;
         changed_devices |= self.pull_device_details().unwrap_or(false);
@@ -2660,6 +2682,9 @@ impl Engine {
         let me = self.vault.device_id.clone();
         let carrier_need = self.carrier_destinations(&view, &folder_id);
         let targets = self.write_targets(rec);
+        // Storages with a quota take what fits; the rest goes to the other
+        // storages, or waits here for the next push.
+        let gate = self.quota_gate(&view);
         // A backup goes to its storages only (never a transferrer), and
         // blocks dropped by an expiry are written again when a new snapshot
         // uses them.
@@ -2858,6 +2883,13 @@ impl Engine {
                         let Some(ct) = self.cached_object(&expected.object) else {
                             continue;
                         };
+                        let targets: Vec<String> = targets
+                            .into_iter()
+                            .filter(|t| gate.take(t, ct.len() as u64))
+                            .collect();
+                        if targets.is_empty() {
+                            continue;
+                        }
                         let job = UploadJob {
                             targets,
                             chunk: expected.chunk.clone(),
@@ -2903,6 +2935,13 @@ impl Engine {
                         &crate::pack::pack(&chunk),
                     )?;
                     let object = ObjectName::from_bytes(&crypto::hash(&ct));
+                    let targets: Vec<String> = targets
+                        .into_iter()
+                        .filter(|t| gate.take(t, ct.len() as u64))
+                        .collect();
+                    if targets.is_empty() {
+                        continue;
+                    }
                     let job = UploadJob {
                         targets,
                         chunk: chunk_id,
@@ -2922,6 +2961,11 @@ impl Engine {
             }
             Ok(())
         })?;
+        for msg in gate.refusals() {
+            if !report.storages_full.contains(&msg) {
+                report.storages_full.push(msg);
+            }
+        }
         if let Some(e) = first_error {
             return Err(e);
         }
@@ -4172,6 +4216,16 @@ impl Engine {
             );
             self.disk_group_findings(&rec, &state, &view, &pools, &mut report);
             reports.push(report);
+        }
+        // Why a policy may not be met: a storage at its quota or leaving.
+        let notes = self.storage_notes(&view);
+        for r in reports.iter_mut().filter(|r| {
+            matches!(
+                r.state,
+                crate::policy::PolicyState::AtRisk | crate::policy::PolicyState::Violated
+            )
+        }) {
+            r.reasons.extend(notes.iter().cloned());
         }
         Ok(reports)
     }

@@ -66,6 +66,9 @@ pub const SCRUB: &str = "scrub";
 /// A backup with restic (`crate::restic`); steps "check" (the mirror is
 /// complete), "backup", "forget" and "repo_check" (`restic check`).
 pub const RESTIC: &str = "restic";
+/// Emptying a storage onto the others (`engine::drain`); steps "copy"
+/// (blocks) and "records" (ledger batches, manifests and records).
+pub const DRAIN: &str = "drain";
 
 /// What `done` and `total` count.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -484,6 +487,8 @@ pub fn describe(t: &TaskView) -> String {
         (SCRUB, "files") => format!("checking the files of folder «{s}» for bit rot"),
         (SCRUB, "cache") => "checking the block cache for bit rot".to_string(),
         (SCRUB, _) => format!("checking storage «{s}» for bit rot"),
+        (DRAIN, "records") => format!("copying the records off storage «{s}»"),
+        (DRAIN, _) => format!("draining storage «{s}»"),
         (RESTIC, "backup") => "backing up the mirror with restic".to_string(),
         (RESTIC, "forget") => "removing old restic snapshots".to_string(),
         (RESTIC, "repo_check") => "checking the restic repository".to_string(),

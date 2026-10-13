@@ -1242,6 +1242,11 @@ pub struct Config {
     /// When large fetches propose pool disks instead of the network.
     #[serde(default)]
     pub disk_fetch: crate::engine::DiskFetchSettings,
+    /// Quotas and drains of the storages, by storage name: this device's
+    /// copy of the vault-wide settings (`crate::storage_settings`).
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub storage_settings:
+        std::collections::BTreeMap<String, crate::storage_settings::SettingsEntry>,
 }
 
 /// A backup taken on this device (local, never published).
