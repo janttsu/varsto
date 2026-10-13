@@ -487,6 +487,10 @@ svg.spark { width: 120px; height: 32px; display: block; flex: none; }
 .fd-list dt { color: var(--muted); font-weight: 500; }
 .fd-list dd { margin: 0; color: var(--text-2); overflow-wrap: anywhere; }
 .fd-actions { flex-direction: column; align-items: stretch; }
+.fd-history { margin-top: 16px; border-top: 1px solid var(--border); padding-top: 12px; }
+.fd-history-title { font-weight: 600; font-size: 13px; margin-bottom: 6px; }
+.fd-history li { justify-content: space-between; }
+.fd-history .li-body { min-width: 0; flex: 1; }
 .fd-actions button, .fd-actions a.button { width: 100%; }
 
 /* Block maps: one small square per block of encrypted data */

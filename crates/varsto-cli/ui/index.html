@@ -344,6 +344,11 @@
             <dt>Copies</dt><dd id="fd-copies"></dd>
           </dl>
           <div class="actions fd-actions" id="fd-actions"></div>
+          <div id="fd-history" class="fd-history hidden">
+            <div class="fd-history-title">Versions</div>
+            <p id="fd-history-note" class="muted small hidden"></p>
+            <ul id="fd-versions" class="list compact-list"></ul>
+          </div>
         </aside>
       </div>
 
@@ -525,6 +530,17 @@
         <label>Trash storage <select name="storage" id="trashstorage"></select><span class="hint muted">Deleted files move to this storage only, for example a cheap cold storage, and leave your other storages. Restoring from cold storage asks first, because retrieval is billed and can take hours.</span></label>
         <div class="actions"><button type="submit">Save</button></div>
         <p id="trashnotes" class="muted small"></p>
+      </form>
+      <form id="historysettings" class="card narrow">
+        <h3 class="card-title"><svg class="icon accent"><use href="#i-backup"/></svg>Version history</h3>
+        <p class="muted small">When a file is overwritten, on any device, its earlier version is kept: every version for an hour, one per hour for a day, one per day for 30 days, then one per week. Unchanged parts are shared between versions, so only the changes take space. Restore a version from the file's details on the Files page.</p>
+        <dl id="historyfacts" class="fd-list"></dl>
+        <label class="inline"><input name="on" type="checkbox"> Keep earlier versions</label>
+        <label>Keep versions (days) <input name="days" type="number" min="1" max="3650" step="1" inputmode="numeric"></label>
+        <label>One folder differently <select name="folder" id="historyfolder"></select></label>
+        <label id="historymode-label">For this folder <select name="mode" id="historymode"><option value="vault">Like every folder</option><option value="days">Its own days</option><option value="off">Off: keep no new versions</option></select></label>
+        <label id="historyfolderdays-label">Days for this folder <input name="folderdays" type="number" min="1" max="3650" step="1" inputmode="numeric"></label>
+        <div class="actions"><button type="submit">Save</button></div>
       </form>
     </div>
 

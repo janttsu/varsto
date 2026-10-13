@@ -742,7 +742,31 @@
   "Trash settings saved": "Roskakorin asetukset tallennettu",
   "Restoring files of folder «{s}» from the trash": "Palauttaa kansion «{s}» tiedostoja roskakorista",
   "Deleting files from the trash for good": "Poistaa tiedostoja roskakorista pysyvästi",
-  "Moving deleted files of folder «{s}» to the trash storage": "Siirtää kansion «{s}» poistettuja tiedostoja roskakorin tallennuspaikkaan"
+  "Moving deleted files of folder «{s}» to the trash storage": "Siirtää kansion «{s}» poistettuja tiedostoja roskakorin tallennuspaikkaan",
+  "Versions": "Versiot",
+  "Version history": "Versiohistoria",
+  "When a file is overwritten, on any device, its earlier version is kept: every version for an hour, one per hour for a day, one per day for 30 days, then one per week. Unchanged parts are shared between versions, so only the changes take space. Restore a version from the file's details on the Files page.": "Kun tiedosto korvataan millä tahansa laitteella, sen aiempi versio säilyy: jokainen versio tunnin ajan, yksi tunnissa vuorokauden ajan, yksi päivässä 30 päivän ajan ja sen jälkeen yksi viikossa. Muuttumattomat osat ovat versioille yhteisiä, joten vain muutokset vievät tilaa. Palauta versio Tiedostot-sivun tiedoston tiedoista.",
+  "Keep earlier versions": "Säilytä aiemmat versiot",
+  "Keep versions (days)": "Säilytä versiot (päivää)",
+  "One folder differently": "Yksi kansio eri tavalla",
+  "For this folder": "Tälle kansiolle",
+  "Like every folder": "Kuten muut kansiot",
+  "Its own days": "Omat päivät",
+  "Off: keep no new versions": "Pois: uusia versioita ei säilytetä",
+  "Days for this folder": "Päiviä tälle kansiolle",
+  "No folder": "Ei kansiota",
+  "Earlier versions": "Aiemmat versiot",
+  "off": "pois",
+  "own changes": "omat muutokset",
+  "Version history is off for this folder: no new versions are kept.": "Versiohistoria on pois tältä kansiolta: uusia versioita ei säilytetä.",
+  "No earlier versions": "Ei aiempia versioita",
+  "Restore as a copy…": "Palauta kopiona…",
+  "Restore as a copy?": "Palautetaanko kopiona?",
+  "New name": "Uusi nimi",
+  "Restore this version?": "Palautetaanko tämä versio?",
+  "Keep versions from 1 to 3650 days.": "Säilytä versioita 1–3650 päivää.",
+  "Version history settings saved": "Versiohistorian asetukset tallennettu",
+  "Restoring an earlier version of a file of folder «{s}»": "Palauttaa kansion «{s}» tiedoston aiempaa versiota"
  },
  "patterns": [
   [
@@ -988,6 +1012,18 @@
   [
    "^(.+): stopped; nothing more is fetched from the disks$",
    "$1: lopetettu; levyiltä ei haeta enempää"
+  ],
+  [
+   "^The version from (.+) is written as a new file beside the current one\\. Nothing is overwritten\\.$",
+   "Versio ajalta $1 kirjoitetaan uutena tiedostona nykyisen viereen. Mitään ei korvata."
+  ],
+  [
+   "^The version from (.+) becomes the current (.+)\\. The current version is kept in the versions, so nothing is lost\\. The change syncs to your other devices\\.$",
+   "Versiosta ajalta $1 tulee nykyinen $2. Nykyinen versio säilyy versioissa, joten mitään ei menetetä. Muutos synkronoituu muille laitteillesi."
+  ],
+  [
+   "^Restored the version of (.+) to (.+)$",
+   "Palautettiin tiedoston $1 versio kohteeseen $2"
   ]
  ],
  "review": [

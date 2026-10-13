@@ -735,7 +735,31 @@
   "Trash settings saved": "Inställningarna för papperskorgen sparades",
   "Restoring files of folder «{s}» from the trash": "Återställer filer i mappen «{s}» från papperskorgen",
   "Deleting files from the trash for good": "Raderar filer från papperskorgen permanent",
-  "Moving deleted files of folder «{s}» to the trash storage": "Flyttar raderade filer i mappen «{s}» till papperskorgens lagringsplats"
+  "Moving deleted files of folder «{s}» to the trash storage": "Flyttar raderade filer i mappen «{s}» till papperskorgens lagringsplats",
+  "Versions": "Versioner",
+  "Version history": "Versionshistorik",
+  "When a file is overwritten, on any device, its earlier version is kept: every version for an hour, one per hour for a day, one per day for 30 days, then one per week. Unchanged parts are shared between versions, so only the changes take space. Restore a version from the file's details on the Files page.": "När en fil skrivs över, på vilken enhet som helst, sparas den tidigare versionen: varje version i en timme, en per timme i ett dygn, en per dag i 30 dagar och därefter en per vecka. Oförändrade delar delas mellan versionerna, så bara ändringarna tar plats. Återställ en version från filens information på sidan Filer.",
+  "Keep earlier versions": "Spara tidigare versioner",
+  "Keep versions (days)": "Spara versioner (dagar)",
+  "One folder differently": "En mapp annorlunda",
+  "For this folder": "För den här mappen",
+  "Like every folder": "Som alla mappar",
+  "Its own days": "Egna dagar",
+  "Off: keep no new versions": "Av: inga nya versioner sparas",
+  "Days for this folder": "Dagar för den här mappen",
+  "No folder": "Ingen mapp",
+  "Earlier versions": "Tidigare versioner",
+  "off": "av",
+  "own changes": "egna ändringar",
+  "Version history is off for this folder: no new versions are kept.": "Versionshistoriken är av för den här mappen: inga nya versioner sparas.",
+  "No earlier versions": "Inga tidigare versioner",
+  "Restore as a copy…": "Återställ som kopia…",
+  "Restore as a copy?": "Återställa som kopia?",
+  "New name": "Nytt namn",
+  "Restore this version?": "Återställa den här versionen?",
+  "Keep versions from 1 to 3650 days.": "Spara versioner i 1–3650 dagar.",
+  "Version history settings saved": "Inställningarna för versionshistoriken har sparats",
+  "Restoring an earlier version of a file of folder «{s}»": "Återställer en tidigare version av en fil i mappen «{s}»"
  },
  "patterns": [
   [
@@ -981,6 +1005,18 @@
   [
    "^(.+): stopped; nothing more is fetched from the disks$",
    "$1: avbrutet; inget mer hämtas från diskarna"
+  ],
+  [
+   "^The version from (.+) is written as a new file beside the current one\\. Nothing is overwritten\\.$",
+   "Versionen från $1 skrivs som en ny fil bredvid den nuvarande. Inget skrivs över."
+  ],
+  [
+   "^The version from (.+) becomes the current (.+)\\. The current version is kept in the versions, so nothing is lost\\. The change syncs to your other devices\\.$",
+   "Versionen från $1 blir den nuvarande $2. Den nuvarande versionen sparas bland versionerna, så inget går förlorat. Ändringen synkroniseras till dina andra enheter."
+  ],
+  [
+   "^Restored the version of (.+) to (.+)$",
+   "Återställde versionen av $1 till $2"
   ]
  ],
  "review": [
