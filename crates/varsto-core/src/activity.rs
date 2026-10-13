@@ -66,6 +66,11 @@ pub const SCRUB: &str = "scrub";
 /// A backup with restic (`crate::restic`); steps "check" (the mirror is
 /// complete), "backup", "forget" and "repo_check" (`restic check`).
 pub const RESTIC: &str = "restic";
+/// The trash (`engine::trash`): restoring entries, deleting them for good,
+/// moving trashed blocks to the trash storage.
+pub const TRASH_RESTORE: &str = "trash_restore";
+pub const TRASH_PURGE: &str = "trash_purge";
+pub const TRASH_MOVE: &str = "trash_move";
 
 /// What `done` and `total` count.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

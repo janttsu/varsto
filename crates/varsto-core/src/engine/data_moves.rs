@@ -33,6 +33,9 @@ pub(super) struct WriteTargets {
     /// `None`: every storage (no placement, or none of its storages here).
     names: Option<BTreeSet<String>>,
     carriers: BTreeSet<String>,
+    /// The vault's trash storage here (`trash`): it takes trashed blocks
+    /// only, unless the folder's placement names it.
+    trash: Option<String>,
 }
 
 impl WriteTargets {
@@ -46,11 +49,19 @@ impl WriteTargets {
         if self.names.as_ref().is_some_and(|n| !n.contains(name)) {
             return false;
         }
+        let trash = self.trash.as_deref();
+        if trash == Some(name) && self.names.is_none() {
+            return false;
+        }
+        // A copy on the trash storage does not keep a current file's block
+        // off the folder's storages (a file restored or created again).
         match record {
-            Some(r) if r.dropped_from(name) => !r
-                .storages
-                .iter()
-                .any(|(n, l)| n != name && !l.claimed_by.is_empty() && !self.carriers.contains(n)),
+            Some(r) if r.dropped_from(name) => !r.storages.iter().any(|(n, l)| {
+                n != name
+                    && Some(n.as_str()) != trash
+                    && !l.claimed_by.is_empty()
+                    && !self.carriers.contains(n)
+            }),
             _ => true,
         }
     }
@@ -110,7 +121,11 @@ impl Engine {
             .filter(|p| !p.is_everywhere())
             .map(|p| self.placement_names(p))
             .filter(|n| !n.is_empty());
-        WriteTargets { names, carriers }
+        WriteTargets {
+            names,
+            carriers,
+            trash: self.trash_storage_here(),
+        }
     }
 
     /// Local names of the storages a placement takes (transferrers aside).
@@ -468,6 +483,14 @@ impl Engine {
                     .entry(c.chunk.clone())
                     .or_insert_with(|| (c.clone(), Vec::new()));
                 e.1.extend(local.clone());
+            }
+        }
+        // Moving a whole folder takes the blocks of its trash along.
+        if idle.is_none() {
+            for c in self.trash_chunks(&rec.folder_id) {
+                moving
+                    .entry(c.chunk.clone())
+                    .or_insert_with(|| (c, Vec::new()));
             }
         }
         moving.retain(|c, _| !staying.contains(c));
@@ -933,7 +956,7 @@ impl Engine {
 
     /// Objects some ledger record still counts as a copy on `storage` (an
     /// object shared with another record must stay).
-    fn objects_claimed_on(&self, storage: &str) -> Result<HashSet<ObjectName>> {
+    pub(super) fn objects_claimed_on(&self, storage: &str) -> Result<HashSet<ObjectName>> {
         let view = self.view()?;
         Ok(view
             .chunks
