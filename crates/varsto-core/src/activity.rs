@@ -63,6 +63,10 @@ pub const DISK_FETCH: &str = "disk_fetch";
 pub const DISK_UNMOUNT: &str = "disk_unmount";
 /// Bit-rot check; steps "storage", "disk", "files" and "cache".
 pub const SCRUB: &str = "scrub";
+/// Deleting a removed folder's data from the storages (`folder remove --purge`).
+pub const FOLDER_PURGE: &str = "folder_purge";
+/// Re-encrypting a folder into a Strongroom, or under a new Strongroom key.
+pub const STRONGROOM_CONVERT: &str = "strongroom_convert";
 
 /// What `done` and `total` count.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -455,6 +459,8 @@ pub fn describe(t: &TaskView) -> String {
     let mut out = match (t.kind.as_str(), t.phase.as_str()) {
         (SYNC_SCAN, _) => format!("looking for changes in folder «{s}»"),
         (UPLOAD, _) => format!("uploading folder «{s}»"),
+        (DOWNLOAD, "file") => format!("fetching a file of folder «{s}»"),
+        (DOWNLOAD, "export") => format!("decrypting a file of folder «{s}»"),
         (DOWNLOAD, _) => format!("fetching changes to folder «{s}»"),
         (DISK_CHECK, "fill") | (DISK_FILL, _) => format!("filling disk «{s}»"),
         (DISK_CHECK, "verify") => format!("checking the blocks of disk «{s}»"),
@@ -481,6 +487,8 @@ pub fn describe(t: &TaskView) -> String {
         (SCRUB, "files") => format!("checking the files of folder «{s}» for bit rot"),
         (SCRUB, "cache") => "checking the block cache for bit rot".to_string(),
         (SCRUB, _) => format!("checking storage «{s}» for bit rot"),
+        (FOLDER_PURGE, _) => format!("deleting the data of folder «{s}»"),
+        (STRONGROOM_CONVERT, _) => format!("re-encrypting folder «{s}» for the Strongroom"),
         (k, _) if s.is_empty() => k.replace('_', " "),
         (k, _) => format!("{} «{s}»", k.replace('_', " ")),
     };
@@ -495,6 +503,8 @@ pub fn item_noun(kind: &str) -> &'static str {
     match kind {
         SYNC_SCAN => "files",
         REPAIR => "copies",
+        STRONGROOM_CONVERT => "files",
+        FOLDER_PURGE => "objects",
         _ => "blocks",
     }
 }

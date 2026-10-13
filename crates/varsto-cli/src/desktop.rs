@@ -185,6 +185,16 @@ fn handle_unlocked(fixed: &Fixed, request: Request) -> Result<Option<Request>> {
                     401,
                     &json!({"error": "missing or wrong token; reopen the start URL"}),
                 ))?;
+            } else if path == "/api/activity"
+                && query_param(request.url().split_once('?').map_or("", |(_, q)| q), "mine")
+                    .is_some_and(|v| v == "1")
+            {
+                // This device's tasks only (the progress bar at the top of
+                // the interface): the peers are not asked.
+                request.respond(json_response(
+                    200,
+                    &json!({ "me": varsto_core::activity::local_here() }),
+                ))?;
             } else if path == "/api/activity" {
                 // What this device and the others are doing now. Asking
                 // keeps the service asking the peers for the next 15 s.

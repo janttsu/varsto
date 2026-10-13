@@ -627,6 +627,13 @@ impl Engine {
         if file.deleted {
             bail!("{path} is deleted");
         }
+        let task = crate::activity::start(
+            crate::activity::DOWNLOAD,
+            &rec.name,
+            file.size,
+            crate::activity::Unit::Bytes,
+        );
+        task.set_phase("file");
         let fk = self.folder_keys(rec)?;
         let storages = self.open_storages(false)?;
         let mut report = PullReport {
@@ -770,11 +777,20 @@ impl Engine {
         fs::create_dir_all(&dir)?;
         let name = path.rsplit('/').next().unwrap_or("file");
         let out = dir.join(name);
+        let task = crate::activity::start(
+            crate::activity::DOWNLOAD,
+            &rec.name,
+            file.size,
+            crate::activity::Unit::Bytes,
+        );
+        task.set_phase("export");
         let written = (|| -> Result<()> {
             let mut f = fs::File::create(&out)?;
             let mut storages = None;
             for cref in &file.chunks {
-                f.write_all(&self.chunk_plain(&fk, cref, &mut storages)?)?;
+                let plain = self.chunk_plain(&fk, cref, &mut storages)?;
+                f.write_all(&plain)?;
+                task.advance(plain.len() as u64);
             }
             f.sync_all()?;
             Ok(())
