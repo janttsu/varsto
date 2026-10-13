@@ -53,6 +53,7 @@ DOCS = [
     ("docs/architecture/threat-model.md", "threat-model", "Threat model (design stage)", "Security"),
     ("docs/architecture/security-principles.md", "security-principles", "Security principles", "Security"),
     ("docs/architecture/logging.md", "logging", "Logging architecture", "Security"),
+    ("docs/recovery.md", "recovery", "Recovery package", "Start here"),
     ("docs/failure-model.md", "failure-model", "Failure model", "Security"),
     ("docs/research/fido2-platform-support.md", "fido2-platform-support", "FIDO2 hmac-secret and PRF platform support", "Security"),
     ("SECURITY.md", "security-policy", "Security policy", "Project"),
