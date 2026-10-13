@@ -194,6 +194,10 @@ impl Engine {
 
     /// One run, deciding what is due as of `now_utc` (tests look ahead in time).
     pub fn auto_verify_at(&mut self, now_utc: i64) -> Result<VerifyRunReport> {
+        crate::logged_op!("auto verify at", "", { self.auto_verify_at_inner(now_utc) })
+    }
+
+    fn auto_verify_at_inner(&mut self, now_utc: i64) -> Result<VerifyRunReport> {
         self.ensure_ledger_writable()?;
         let result = self.run_auto_verify(now_utc);
         let mut st = self.load_verify_state();

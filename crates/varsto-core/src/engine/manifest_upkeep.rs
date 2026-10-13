@@ -171,6 +171,10 @@ impl Engine {
     /// manifest, and delete own manifests every reader has seen past from
     /// the hot storages. Anything left undone is retried after the next sync.
     pub fn manifest_upkeep(&mut self) -> Result<()> {
+        crate::logged_op_plain!("manifest upkeep", "", { self.manifest_upkeep_inner() })
+    }
+
+    fn manifest_upkeep_inner(&mut self) -> Result<()> {
         if self.vault.member
             || self.forked_self
             || self.removal.is_some()

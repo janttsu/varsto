@@ -795,7 +795,7 @@ impl VerifiedCache {
 /// folders (no sync, fetch, free, write, move or restore there). The hold
 /// lapses at `until_utc` unless renewed, and at once when the process that
 /// took it is gone, so a run that dies does not stop syncing for long.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Hold {
     pub token: String,
     pub folders: Vec<FolderId>,
@@ -803,6 +803,8 @@ pub struct Hold {
     pub started_utc: i64,
     pub until_utc: i64,
 }
+
+crate::redacted_debug!(Hold { folders, pid, started_utc ; token });
 
 impl Hold {
     pub fn new(token: &str, folders: Vec<FolderId>, pid: u32, now: i64) -> Hold {

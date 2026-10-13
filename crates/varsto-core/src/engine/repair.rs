@@ -299,6 +299,10 @@ impl Engine {
 
     /// One repair run (see the module documentation).
     pub fn repair(&mut self, opts: &RepairOptions) -> Result<RepairReport> {
+        crate::logged_op!("repair", "", { self.repair_inner(opts) })
+    }
+
+    fn repair_inner(&mut self, opts: &RepairOptions) -> Result<RepairReport> {
         self.ensure_active()?;
         self.ensure_ledger_writable()?;
         let result = self.one_batch(|e| e.run_repair(opts));

@@ -774,6 +774,20 @@
           <div class="actions"><button id="quit" type="button" class="secondary danger"><svg class="icon"><use href="#i-power"/></svg>Quit Varsto</button></div>
         </div>
       </div>
+      <div class="card" id="logscard">
+        <h2 class="card-title">Logs</h2>
+        <p class="muted small">Varsto keeps a detailed log on this device for finding problems. It never contains keys, passphrases or file contents and is never uploaded.</p>
+        <label>Detail <select id="log-level">
+          <option value="trace">Everything (trace)</option>
+          <option value="debug">Detailed (debug, default)</option>
+          <option value="info">Normal (info)</option>
+          <option value="warn">Warnings</option>
+          <option value="error">Errors only</option>
+        </select></label>
+        <p id="log-source" class="muted small hidden"></p>
+        <p id="log-usage" class="muted small"></p>
+        <div class="actions"><button id="log-open" type="button" class="secondary hidden">Open log folder</button><button id="log-bundle" type="button" class="secondary">Save log bundle</button></div>
+      </div>
       <details class="card">
         <summary class="card-title">Duplicate files</summary>
         <div class="row"><select id="dupefolder"></select><button id="dupes" type="button" class="secondary">Find duplicates</button></div>

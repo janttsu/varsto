@@ -31,11 +31,13 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 /// Token the owner gives to a replica: everything it needs, nothing more.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct ReplicaToken {
     pub vault_id: VaultId,
     pub replica_key_hex: String,
 }
+
+crate::redacted_debug!(ReplicaToken { vault_id ; replica_key_hex });
 
 impl ReplicaToken {
     pub fn encode(&self) -> String {
@@ -62,7 +64,7 @@ pub fn replica_record_key(device: &DeviceId) -> String {
 }
 
 /// Local replica state: `home/replica.json` (+ ledger).
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct ReplicaLocal {
     pub format_version: u16,
     pub vault_id: VaultId,
@@ -73,6 +75,8 @@ pub struct ReplicaLocal {
     pub source: StorageSpec,
     pub target: StorageSpec,
 }
+
+crate::redacted_debug!(ReplicaLocal { format_version, vault_id, device_id, name, source, target ; signing_hex, replica_key_hex });
 
 #[derive(Clone, Debug, Serialize, Default)]
 pub struct ReplicaReport {

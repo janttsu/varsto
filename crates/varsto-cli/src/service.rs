@@ -27,7 +27,7 @@ use varsto_core::Engine;
 
 static QUIT: AtomicBool = AtomicBool::new(false);
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct ServiceFile {
     pub pid: u32,
     pub port: u16,
@@ -35,6 +35,8 @@ pub struct ServiceFile {
     pub started_utc: i64,
     pub version: String,
 }
+
+varsto_core::redacted_debug!(ServiceFile { pid, port, started_utc, version ; token });
 
 /// Runtime state of the service, shared with the API.
 #[derive(Default)]
@@ -165,12 +167,12 @@ impl ServiceState {
             }
             Ok(s) => {
                 if let Some(msg) = engine.disk_overdue_reminder(&s, varsto_core::util::now_utc()) {
-                    eprintln!("service: {msg}");
+                    log::info!("{msg}");
                     notify("Varsto disk check due", &msg);
                 }
                 self.disk_suggest = Some(s);
             }
-            Err(e) => eprintln!("service: disk suggestion failed: {e:#}"),
+            Err(e) => log::warn!("disk suggestion failed: {e:#}"),
         }
     }
     /// Store the disk listing; log and notify when a disk appeared or went
@@ -195,7 +197,7 @@ impl ServiceState {
             if let Some(ev) = event {
                 changed = true;
                 let msg = format!("{} {ev}", d.label);
-                eprintln!("service: disk {msg}");
+                log::info!("disk {msg}");
                 notify("Varsto disk", &msg);
                 if ev == "attached" {
                     self.sync_requested = true;
@@ -245,7 +247,7 @@ impl ServiceState {
         self.policy_worst = reports.iter().map(|r| r.state).max();
         self.policies = reports;
         for a in alerts {
-            eprintln!("service: {a}");
+            log::info!("{a}");
             notify("Varsto durability policy", &a);
         }
     }
@@ -255,9 +257,10 @@ impl ServiceState {
         if engine.auto_verify_due(varsto_core::util::now_utc()) {
             match engine.auto_verify() {
                 Ok(r) => {
-                    eprintln!(
-                        "service: automatic verification: {} blocks verified, {} left for the next run",
-                        r.blocks_verified, r.left_for_next_run
+                    log::info!(
+                        "automatic verification: {} blocks verified, {} left for the next run",
+                        r.blocks_verified,
+                        r.left_for_next_run
                     );
                     if !r.corrupt.is_empty() || !r.missing.is_empty() {
                         let msg = format!(
@@ -265,11 +268,11 @@ impl ServiceState {
                             r.corrupt.len(),
                             r.missing.len()
                         );
-                        eprintln!("service: {msg}");
+                        log::info!("{msg}");
                         notify("Varsto verification", &msg);
                     }
                 }
-                Err(e) => eprintln!("service: automatic verification failed: {e:#}"),
+                Err(e) => log::warn!("automatic verification failed: {e:#}"),
             }
         }
         self.auto_verify = Some(engine.verify_status());
@@ -281,8 +284,8 @@ impl ServiceState {
         if engine.scrub_due(varsto_core::util::now_utc()) {
             match engine.scrub(&varsto_core::engine::ScrubOptions::service()) {
                 Ok(r) => {
-                    eprintln!(
-                        "service: bit-rot check: {} objects, {} files and {} cached blocks checked, {} problems",
+                    log::info!(
+                        "bit-rot check: {} objects, {} files and {} cached blocks checked, {} problems",
                         r.objects_checked,
                         r.files_checked,
                         r.cache_checked,
@@ -294,7 +297,7 @@ impl ServiceState {
                             "{copies} stored block cop{} damaged or missing; repairing them from other copies",
                             if copies == 1 { "y is" } else { "ies are" }
                         );
-                        eprintln!("service: {msg}");
+                        log::info!("{msg}");
                         notify("Varsto bit-rot check", &msg);
                     }
                     for d in &r.damaged_files {
@@ -308,14 +311,14 @@ impl ServiceState {
                                 d.path, d.folder
                             ),
                         };
-                        eprintln!("service: {msg}");
+                        log::info!("{msg}");
                         notify("Varsto bit-rot check", &msg);
                     }
                     for d in &r.disks_away {
-                        eprintln!("service: disk not seen for long: {d}");
+                        log::warn!("disk not seen for long: {d}");
                     }
                 }
-                Err(e) => eprintln!("service: bit-rot check failed: {e:#}"),
+                Err(e) => log::warn!("bit-rot check failed: {e:#}"),
             }
         }
         self.scrub = Some(engine.scrub_status());
@@ -327,8 +330,8 @@ impl ServiceState {
         if engine.repair_due(varsto_core::util::now_utc()) {
             match engine.repair(&varsto_core::engine::RepairOptions::service()) {
                 Ok(r) => {
-                    eprintln!(
-                        "service: automatic repair: {} copies repaired, {} could not be repaired, {} left for later",
+                    log::info!(
+                        "automatic repair: {} copies repaired, {} could not be repaired, {} left for later",
                         r.repaired.len(),
                         r.unrepairable.len(),
                         r.left_for_next_run
@@ -344,11 +347,11 @@ impl ServiceState {
                             if r.new_losses == 1 { "y" } else { "ies" },
                             why.join("; ")
                         );
-                        eprintln!("service: {msg}");
+                        log::info!("{msg}");
                         notify("Varsto repair", &msg);
                     }
                 }
-                Err(e) => eprintln!("service: automatic repair failed: {e:#}"),
+                Err(e) => log::warn!("automatic repair failed: {e:#}"),
             }
         }
         self.repair = Some(engine.repair_status());
@@ -365,7 +368,7 @@ impl ServiceState {
         if due {
             self.ledger_checked = Some(Instant::now());
             if let Err(e) = engine.ledger_check_storages() {
-                eprintln!("service: ledger check failed: {e:#}");
+                log::warn!("ledger check failed: {e:#}");
             }
         }
         let health = engine.ledger_health();
@@ -386,7 +389,7 @@ impl ServiceState {
     }
 
     fn ledger_rebuild(&mut self, engine: &mut Engine, health: &varsto_core::engine::LedgerHealth) {
-        eprintln!("service: ledger: {}; rebuilding", health.describe());
+        log::info!("ledger: {}; rebuilding", health.describe());
         match engine.ledger_rebuild(&varsto_core::engine::LedgerRebuildOptions::service()) {
             Ok(r) => {
                 let mut msg = if r.own_found_on_storages {
@@ -403,13 +406,13 @@ impl ServiceState {
                         s.claims_written, s.objects_corrupt
                     );
                 }
-                eprintln!("service: {msg}");
+                log::info!("{msg}");
                 notify("Varsto ledger", &msg);
                 self.ledger_failed = None;
             }
             Err(e) => {
                 let msg = format!("The ledger could not be restored: {e:#}");
-                eprintln!("service: {msg}");
+                log::warn!("{msg}");
                 self.last_error = Some(msg.clone());
                 if self.ledger_failed.as_deref() != Some(msg.as_str()) {
                     notify("Varsto ledger", &msg);
@@ -427,7 +430,7 @@ impl ServiceState {
             match engine.drain_run(&name, &varsto_core::engine::DrainRunLimits::service()) {
                 Ok(r) => {
                     if r.blocks_dropped > 0 || r.drained {
-                        eprintln!("service: drain: {}", r.summary);
+                        log::info!("drain: {}", r.summary);
                     }
                     if r.drained && self.drain_notified.insert(format!("done:{name}")) {
                         notify(
@@ -446,14 +449,14 @@ impl ServiceState {
                         && self.drain_notified.insert(format!("stuck:{name}"))
                     {
                         let msg = format!("Draining {name} cannot go on: {}", r.kept.join("; "));
-                        eprintln!("service: {msg}");
+                        log::warn!("{msg}");
                         notify("Varsto", &msg);
                     }
                     if r.blocks_dropped > 0 {
                         self.drain_notified.remove(&format!("stuck:{name}"));
                     }
                 }
-                Err(e) => eprintln!("service: draining {name} failed: {e:#}"),
+                Err(e) => log::warn!("draining {name} failed: {e:#}"),
             }
         }
         self.drains = engine.drain_statuses().unwrap_or_default();
@@ -469,13 +472,13 @@ impl ServiceState {
                         "backup {name}: snapshot {} taken, {} files, {} blocks uploaded",
                         r.seq, r.files, r.chunks_uploaded
                     );
-                    eprintln!("service: {msg}");
+                    log::info!("{msg}");
                     self.backup_last = Some(msg);
                     self.backup_errors.remove(&name);
                 }
                 Err(e) => {
                     let why = format!("{e:#}");
-                    eprintln!("service: backup {name} failed: {why}");
+                    log::warn!("backup {name} failed: {why}");
                     // Once per new reason, not on every retry.
                     if self.backup_errors.get(&name) != Some(&why) {
                         notify("Varsto backup", &format!("{name}: {why}"));
@@ -491,7 +494,7 @@ impl ServiceState {
             self.backup_upkeep_utc = Some(now);
             match engine.backup_upkeep() {
                 Ok(r) => self.record_backup_upkeep(&r),
-                Err(e) => eprintln!("service: backup expiry failed: {e:#}"),
+                Err(e) => log::warn!("backup expiry failed: {e:#}"),
             }
         }
     }
@@ -510,14 +513,14 @@ impl ServiceState {
                 Ok(Some(status)) => {
                     self.restic_child = None;
                     if status.success() {
-                        eprintln!("service: scheduled restic backup done");
+                        log::info!("scheduled restic backup done");
                     } else {
                         let why = ResticState::load(&home)
                             .last_run
                             .and_then(|r| r.message)
                             .and_then(|m| m.lines().next().map(str::to_string))
                             .unwrap_or_else(|| format!("exit status {status}; see restic-run.log"));
-                        eprintln!("service: scheduled restic backup failed: {why}");
+                        log::warn!("scheduled restic backup failed: {why}");
                         self.restic_not_before_utc =
                             varsto_core::util::now_utc() + varsto_core::restic::RETRY_SECS;
                         notify(
@@ -538,7 +541,7 @@ impl ServiceState {
         if st.stale(cfg, now) && self.restic_warned_utc.is_none_or(|t| now - t >= 86_400) {
             self.restic_warned_utc = Some(now);
             let msg = "The last good restic snapshot is older than its schedule allows; see `varsto restic status`";
-            eprintln!("service: {msg}");
+            log::info!("{msg}");
             notify("Varsto restic backup", msg);
         }
         self.restic_text = Some(match (&st.last_success, st.next_run_utc(cfg)) {
@@ -559,10 +562,10 @@ impl ServiceState {
         {
             match varsto_core::restic::spawn_scheduled(&home) {
                 Ok(c) => {
-                    eprintln!("service: scheduled restic backup started");
+                    log::info!("scheduled restic backup started");
                     self.restic_child = Some(c);
                 }
-                Err(e) => eprintln!("service: could not start the restic backup: {e:#}"),
+                Err(e) => log::warn!("could not start the restic backup: {e:#}"),
             }
         }
     }
@@ -574,25 +577,25 @@ impl ServiceState {
         }
         match engine.trash_upkeep() {
             Ok(r) => self.record_trash_upkeep(&r),
-            Err(e) => eprintln!("service: trash upkeep failed: {e:#}"),
+            Err(e) => log::warn!("trash upkeep failed: {e:#}"),
         }
     }
     pub fn record_trash_upkeep(&mut self, r: &varsto_core::engine::TrashUpkeepReport) {
         if r.expired + r.blocks_dropped + r.blocks_moved + r.local_copies_removed > 0 {
-            eprintln!(
-                "service: trash: {} files expired, {} blocks deleted, {} blocks moved to the trash storage, {} local copies removed",
+            log::info!(
+                "trash: {} files expired, {} blocks deleted, {} blocks moved to the trash storage, {} local copies removed",
                 r.expired, r.blocks_dropped, r.blocks_moved, r.local_copies_removed
             );
         }
         for n in &r.notes {
-            eprintln!("service: trash: {n}");
+            log::info!("trash: {n}");
         }
     }
     pub fn record_backup_upkeep(&mut self, r: &varsto_core::engine::ExpireReport) {
         self.backup_upkeep_utc = Some(varsto_core::util::now_utc());
         if r.snapshots_expired + r.objects_deleted > 0 || !r.backups_removed.is_empty() {
-            eprintln!(
-                "service: backups: {} snapshots expired, {} blocks deleted, {} backups removed",
+            log::info!(
+                "backups: {} snapshots expired, {} blocks deleted, {} backups removed",
                 r.snapshots_expired,
                 r.objects_deleted,
                 r.backups_removed.len()
@@ -635,7 +638,7 @@ impl ServiceState {
         self.last_result = format!("{} folders: {updated} updated, {deleted} deleted, {conflicts} conflicts, {uploaded} chunks uploaded{}{}{}", reports.len(), if unavailable > 0 { format!(", {unavailable} unavailable") } else { String::new() }, if disks.is_empty() { String::new() } else { format!(" (attach disk {})", disks.join(", ")) }, if forked { ", FORKED device" } else { "" });
         // A storage at its quota: blocks go elsewhere or wait here; say so once.
         for f in full.iter().filter(|f| !self.quota_full.contains(f)) {
-            eprintln!("service: {f}");
+            log::info!("{f}");
             notify("Varsto", &format!("{f}. New blocks go to the other storages or wait on this device; raise the quota or add a storage."));
         }
         if !full.is_empty() {
@@ -703,7 +706,7 @@ impl P2p {
             let identity = match e.p2p_identity() {
                 Ok(id) => Some(id),
                 Err(err) => {
-                    eprintln!("service: p2p certificate unavailable, QUIC disabled: {err:#}");
+                    log::warn!("p2p certificate unavailable, QUIC disabled: {err:#}");
                     None
                 }
             };
@@ -723,16 +726,13 @@ impl P2p {
             if cfg.port == 0 {
                 return Err(e);
             }
-            eprintln!(
-                "service: p2p port {} is taken ({e:#}); using a free one",
-                cfg.port
-            );
+            log::warn!("p2p port {} is taken ({e:#}); using a free one", cfg.port);
             varsto_core::p2p::Server::bind(([0, 0, 0, 0], 0).into())
         });
         let server = match bound {
             Ok(s) => s.with_traffic(traffic.clone()),
             Err(e) => {
-                eprintln!("service: p2p listener failed: {e:#}");
+                log::warn!("p2p listener failed: {e:#}");
                 return None;
             }
         };
@@ -760,7 +760,7 @@ impl P2p {
                     Some(n)
                 }
                 Err(e) => {
-                    eprintln!("service: p2p QUIC listener failed, TCP only: {e:#}");
+                    log::warn!("p2p QUIC listener failed, TCP only: {e:#}");
                     None
                 }
             }
@@ -793,7 +793,7 @@ impl P2p {
                         }
                     });
             }
-            Err(e) => eprintln!("service: LAN beacon unavailable: {e:#}"),
+            Err(e) => log::warn!("LAN beacon unavailable: {e:#}"),
         }
 
         let nat: Arc<Mutex<NatInfo>> = Arc::new(Mutex::new(NatInfo::default()));
@@ -859,13 +859,11 @@ impl P2p {
                     let last_probe = Instant::now();
                     let reachable = !cfg.public_addrs.is_empty()
                         || probe.public_addrs().iter().any(|a| node.probe_self(*a));
-                    if std::env::var_os("VARSTO_P2P_DEBUG").is_some() {
-                        eprintln!(
-                            "p2p: stun {:?} nat {} reachable {reachable}",
-                            probe.mapped,
-                            probe.nat.as_str()
-                        );
-                    }
+                    log::debug!(
+                        "stun {:?} nat {} reachable {reachable}",
+                        probe.mapped,
+                        probe.nat.as_str()
+                    );
                     *nat.lock().unwrap() = NatInfo {
                         probe,
                         reachable,
@@ -877,7 +875,7 @@ impl P2p {
                     while Instant::now() < until && !stop.load(std::sync::atomic::Ordering::Relaxed)
                     {
                         if node.take_restun() && last_probe.elapsed() >= NAT_RECHECK_MIN {
-                            eprintln!("p2p: asking STUN again (the NAT mapping may have changed)");
+                            log::info!("asking STUN again (the NAT mapping may have changed)");
                             break;
                         }
                         std::thread::sleep(Duration::from_millis(500));
@@ -936,8 +934,8 @@ impl P2p {
                                         .get(&r.device)
                                         .map(|(_, w)| *w)
                                         .unwrap_or(RELAY_RETRY_MIN);
-                                    eprintln!(
-                                        "service: relay registration with {} failed: {e:#}; next try in {} s",
+                                    log::warn!(
+                                        "relay registration with {} failed: {e:#}; next try in {} s",
                                         r.name,
                                         wait.as_secs()
                                     );
@@ -977,8 +975,8 @@ impl P2p {
             Ok(r) => r,
             Err(err) => {
                 let kept = self.records.lock().unwrap().clone();
-                eprintln!(
-                    "p2p: peer record listing failed, keeping {} known record(s): {err:#}",
+                log::warn!(
+                    "peer record listing failed, keeping {} known record(s): {err:#}",
                     kept.len()
                 );
                 kept
@@ -1027,7 +1025,7 @@ impl P2p {
         let Some(e) = st.engine.as_ref() else { return };
         match e.peer_snapshot() {
             Ok(s) => *self.snapshot.lock().unwrap() = Some(Arc::new(s)),
-            Err(err) => eprintln!("service: p2p snapshot failed: {err:#}"),
+            Err(err) => log::warn!("p2p snapshot failed: {err:#}"),
         }
         self.publish_record(st);
     }
@@ -1069,7 +1067,7 @@ impl P2p {
         let changed = last_rec.as_ref().is_none_or(|r| !r.same_as(&rec));
         if changed || last.is_none_or(|t| t.elapsed() > RECORD_MAX_AGE) {
             if let Err(err) = e.publish_peer_record(&rec) {
-                eprintln!("service: p2p record publish failed: {err:#}");
+                log::warn!("p2p record publish failed: {err:#}");
             }
             *last = Some(Instant::now());
             *last_rec = Some(rec);
@@ -1118,7 +1116,9 @@ pub fn service_file(home: &Path) -> PathBuf {
 
 pub fn read_service_file(home: &Path) -> Option<ServiceFile> {
     let s = fs::read(service_file(home)).ok()?;
-    serde_json::from_slice(&s).ok()
+    let f: ServiceFile = serde_json::from_slice(&s).ok()?;
+    varsto_core::logging::register_secret(&f.token);
+    Some(f)
 }
 
 fn write_service_file(home: &Path, f: &ServiceFile) -> Result<()> {
@@ -1410,6 +1410,7 @@ pub fn run(opts: Options) -> Result<()> {
     let mut token_bytes = [0u8; 32];
     rand::rngs::OsRng.fill_bytes(&mut token_bytes);
     let token = hex::encode(token_bytes);
+    varsto_core::logging::register_secret(&token);
     let port: u16 = bound.rsplit(':').next().unwrap().parse()?;
     let url = format!("http://{bound}/?token={token}");
     fs::create_dir_all(&opts.home)?;
@@ -1429,7 +1430,7 @@ pub fn run(opts: Options) -> Result<()> {
         if let Some(p) = passphrase_from_system(&opts.home) {
             match Engine::open(&opts.home, &p) {
                 Ok(e) => engine = Some(e),
-                Err(e) => eprintln!("service: unlock with the stored passphrase failed: {e:#}"),
+                Err(e) => log::warn!("unlock with the stored passphrase failed: {e:#}"),
             }
         }
         if engine.is_none() {
@@ -1437,10 +1438,10 @@ pub fn run(opts: Options) -> Result<()> {
             // left in folders kept "encrypted on this device" by older versions.
             match Engine::wipe_encrypted_folders_locked(&opts.home) {
                 Ok(n) if n > 0 => {
-                    eprintln!("service: removed {n} plaintext copies of encrypted-here folders")
+                    log::info!("removed {n} plaintext copies of encrypted-here folders")
                 }
                 Ok(_) => {}
-                Err(e) => eprintln!("service: could not clean encrypted-here folders: {e:#}"),
+                Err(e) => log::warn!("could not clean encrypted-here folders: {e:#}"),
             }
         }
     }
@@ -1448,7 +1449,7 @@ pub fn run(opts: Options) -> Result<()> {
     // killed before it locked) go at every start.
     let exports = Engine::clear_exports(&opts.home);
     if exports > 0 {
-        eprintln!("service: removed {exports} decrypted copies made for other apps");
+        log::info!("removed {exports} decrypted copies made for other apps");
     }
     let state: Shared = Arc::new(Mutex::new(State {
         home: opts.home.clone(),
@@ -1538,7 +1539,7 @@ pub fn run(opts: Options) -> Result<()> {
                         }
                     }
                 }
-                Some(Err(e)) => eprintln!("service: disk check failed: {e:#}"),
+                Some(Err(e)) => log::warn!("disk check failed: {e:#}"),
                 None => {}
             }
         }
@@ -1547,6 +1548,7 @@ pub fn run(opts: Options) -> Result<()> {
         let now_stamp = stamp(&local_files);
         if now_stamp != local_stamp {
             local_stamp = now_stamp;
+            log::debug!("local configuration changed on disk; reloading");
             let mut st = state.lock().unwrap();
             let reloaded = st.engine.as_mut().map(|e| e.reload_local());
             match reloaded {
@@ -1556,7 +1558,7 @@ pub fn run(opts: Options) -> Result<()> {
                 }
                 Some(Ok(false)) => {}
                 Some(Err(e)) => {
-                    eprintln!("service: reloading the local configuration failed: {e:#}")
+                    log::warn!("reloading the local configuration failed: {e:#}")
                 }
                 None => {}
             }
@@ -1580,7 +1582,7 @@ pub fn run(opts: Options) -> Result<()> {
                     }
                     for p in &paths {
                         if let Err(e) = watcher.watch(p, notify::RecursiveMode::Recursive) {
-                            eprintln!("service: cannot watch {}: {e}", p.display());
+                            log::warn!("cannot watch {}: {e}", p.display());
                         }
                     }
                     watched = paths;
@@ -1609,7 +1611,7 @@ pub fn run(opts: Options) -> Result<()> {
                 }
                 st.service.p2p_listen = None;
                 varsto_core::activity::global().set_peers(None, None);
-                eprintln!("service: p2p stopped (turned off)");
+                log::info!("p2p stopped (turned off)");
             }
         }
         if p2p.is_none() && Instant::now() >= p2p_retry_at {
@@ -1623,7 +1625,7 @@ pub fn run(opts: Options) -> Result<()> {
             if wanted {
                 p2p = P2p::start(&state);
                 if p2p.is_some() {
-                    eprintln!("service: p2p started after unlock");
+                    log::info!("p2p started after unlock");
                 } else {
                     p2p_retry_at = Instant::now() + Duration::from_secs(30);
                 }
@@ -1641,7 +1643,7 @@ pub fn run(opts: Options) -> Result<()> {
             }
         }
         if state.lock().unwrap().service.restart_requested {
-            eprintln!("service: restarting after update");
+            log::info!("restarting after update");
             std::thread::sleep(Duration::from_millis(300));
             break;
         }
@@ -1695,9 +1697,10 @@ pub fn run(opts: Options) -> Result<()> {
                             b + ps.files_changed,
                         )
                     });
+                    log::debug!(why = why, ms = started.elapsed().as_millis() as u64, pulled = pulled, pushed = pushed, folders = reports.len(); "service sync round");
                     if pulled + pushed > 0 || started.elapsed() > Duration::from_secs(10) {
-                        eprintln!(
-                            "service: sync ({why}) took {:.1} s: {pulled} files from other devices, {pushed} changed here",
+                        log::info!(
+                            "sync ({why}) took {:.1} s: {pulled} files from other devices, {pushed} changed here",
                             started.elapsed().as_secs_f64()
                         );
                     }
@@ -1721,6 +1724,7 @@ pub fn run(opts: Options) -> Result<()> {
                     }
                     snapshot_syncs = st.service.syncs; // the snapshot above is current
                     let st = &mut *st;
+                    let upkeep = varsto_core::logging::Timer::start();
                     if let Some(e) = st.engine.as_mut() {
                         st.service.ledger_after_sync(e);
                         st.service.auto_verify_if_due(e);
@@ -1732,19 +1736,20 @@ pub fn run(opts: Options) -> Result<()> {
                         st.service.restic_if_due(e);
                         st.service.suggest_disks(e);
                         if let Err(err) = e.publish_device_details(st.service.last_sync_utc) {
-                            eprintln!("service: device details not published: {err:#}");
+                            log::info!("device details not published: {err:#}");
                         }
                     }
+                    log::debug!(ms = upkeep.ms(); "service upkeep after sync (ledger, verify, scrub, repair, drains, backups, trash, restic, disk suggestions, device details)");
                     let checked = st.engine.as_ref().map(|e| e.policy_check());
                     match checked {
                         Some(Ok(reps)) => st.service.record_policies(reps),
-                        Some(Err(e)) => eprintln!("service: policy check failed: {e:#}"),
+                        Some(Err(e)) => log::warn!("policy check failed: {e:#}"),
                         None => {}
                     }
                 }
                 Some(Err(e)) => {
                     st.service.last_error = Some(format!("{e:#}"));
-                    eprintln!("service: sync failed: {e:#}");
+                    log::warn!("sync failed: {e:#}");
                     // A wipe order was carried out: nothing of the vault is left.
                     if e.downcast_ref::<varsto_core::engine::DeviceRemoved>()
                         .is_some_and(|r| r.wiped)

@@ -143,7 +143,7 @@ pub fn open_placeholder(
     Ok(real)
 }
 
-fn open_with_desktop(path: &Path) -> Result<()> {
+pub fn open_with_desktop(path: &Path) -> Result<()> {
     let opener = std::env::var("VARSTO_OPENER")
         .ok()
         .filter(|o| !o.is_empty());

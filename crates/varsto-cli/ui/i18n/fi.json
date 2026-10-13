@@ -702,6 +702,20 @@
   "Backing up the mirror with restic": "Varmuuskopioi peilikopiota resticillä",
   "Removing old restic snapshots": "Poistaa vanhoja restic-tilannekuvia",
   "Checking the restic repository": "Tarkistaa restic-varaston",
+  "Logs": "Lokit",
+  "Varsto keeps a detailed log on this device for finding problems. It never contains keys, passphrases or file contents and is never uploaded.": "Varsto pitää tällä laitteella yksityiskohtaista lokia ongelmien selvittämistä varten. Se ei koskaan sisällä avaimia, salalauseita tai tiedostojen sisältöä, eikä sitä lähetetä minnekään.",
+  "Detail": "Tarkkuus",
+  "Everything (trace)": "Kaikki (trace)",
+  "Detailed (debug, default)": "Yksityiskohtainen (debug, oletus)",
+  "Normal (info)": "Tavallinen (info)",
+  "Warnings": "Varoitukset",
+  "Errors only": "Vain virheet",
+  "Open log folder": "Avaa lokikansio",
+  "Save log bundle": "Tallenna lokipaketti",
+  "The VARSTO_LOG environment variable overrides this setting.": "Ympäristömuuttuja VARSTO_LOG ohittaa tämän asetuksen.",
+  "The --log-level option the service was started with overrides this setting.": "Palvelun käynnistyksessä annettu --log-level-valitsin ohittaa tämän asetuksen.",
+  "The bundle has no keys or passphrases, but it does contain file and folder names, device and storage names. Look through it before you share it.": "Paketissa ei ole avaimia eikä salalauseita, mutta siinä on tiedostojen ja kansioiden nimiä sekä laitteiden ja tallennuspaikkojen nimiä. Katso se läpi ennen kuin jaat sen.",
+  "Log bundle saved": "Lokipaketti tallennettu",
   "Drain…": "Tyhjennä…",
   "Empty this storage onto the others, without weakening any policy": "Siirrä tämän tallennuspaikan sisältö muihin heikentämättä yhtään sääntöä",
   "Price and quota": "Hinta ja kiintiö",
@@ -1242,6 +1256,18 @@
   [
    "^(.+): stopped; nothing more is fetched from the disks$",
    "$1: lopetettu; levyiltä ei haeta enempää"
+  ],
+  [
+   "^Using (.+) in (\\d+) files$",
+   "Käytössä $1, $2 tiedostoa"
+  ],
+  [
+   "^log detail set to (.+)$",
+   "lokin tarkkuudeksi asetettu $1"
+  ],
+  [
+   "^log bundle saved: (.+)$",
+   "lokipaketti tallennettu: $1"
   ],
   [
    "^Prices and quota of (.+)$",

@@ -218,6 +218,10 @@ impl Engine {
 
     /// One run as of `now_utc` (tests look ahead in time).
     pub fn scrub_at(&mut self, opts: &ScrubOptions, now_utc: i64) -> Result<ScrubReport> {
+        crate::logged_op!("scrub at", "", { self.scrub_at_inner(opts, now_utc) })
+    }
+
+    fn scrub_at_inner(&mut self, opts: &ScrubOptions, now_utc: i64) -> Result<ScrubReport> {
         self.ensure_active()?;
         self.ensure_ledger_writable()?;
         for n in &opts.storages {

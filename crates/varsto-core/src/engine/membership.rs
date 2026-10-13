@@ -1150,6 +1150,12 @@ impl Engine {
     /// new key to every remaining device. See the module documentation for
     /// what the removed device can and cannot read afterwards.
     pub fn revoke_device(&mut self, name_or_id: &str, wipe: bool) -> Result<RevokeReport> {
+        crate::logged_op!("revoke device", name_or_id, {
+            self.revoke_device_inner(name_or_id, wipe)
+        })
+    }
+
+    fn revoke_device_inner(&mut self, name_or_id: &str, wipe: bool) -> Result<RevokeReport> {
         if self.vault.member {
             bail!("a member device cannot remove devices from the owner's vault");
         }

@@ -24,7 +24,10 @@ class VideoThumbs(private val context: Context) {
         running = true
         Thread {
             while (running) {
-                try { round() } catch (e: Exception) { /* locked, starting, or offline: next round */ }
+                try { round() } catch (e: Exception) {
+                    // Locked, starting, or offline: next round.
+                    AppLog.d("thumbs", "video thumbnail round skipped", e)
+                }
                 Thread.sleep(60_000)
             }
         }.apply { isDaemon = true }.start()
@@ -39,12 +42,21 @@ class VideoThumbs(private val context: Context) {
         val list = JSONObject(call(base, token, "GET", "/api/thumbnails/wanted", null)).optJSONArray("videos") ?: return
         for (i in 0 until list.length()) {
             val v = list.getJSONObject(i)
-            val jpeg = frame { it.setDataSource(v.getString("file")) } ?: continue
+            val jpeg = frame { it.setDataSource(v.getString("file")) }
+            if (jpeg == null) {
+                AppLog.w("thumbs", "no frame from ${v.optString("file")}")
+                continue
+            }
             val body = JSONObject()
                 .put("folder", v.getString("folder"))
                 .put("path", v.getString("path"))
                 .put("jpeg", Base64.encodeToString(jpeg, Base64.NO_WRAP))
-            try { call(base, token, "POST", "/api/thumbnail", body.toString()) } catch (e: Exception) { }
+            try {
+                call(base, token, "POST", "/api/thumbnail", body.toString())
+                AppLog.d("thumbs", "thumbnail stored for ${v.optString("folder")}/${v.optString("path")}")
+            } catch (e: Exception) {
+                AppLog.w("thumbs", "thumbnail for ${v.optString("path")} not stored", e)
+            }
         }
     }
 
@@ -64,6 +76,7 @@ class VideoThumbs(private val context: Context) {
             val small = if (scale < 1) Bitmap.createScaledBitmap(bmp, (bmp.width * scale).toInt().coerceAtLeast(1), (bmp.height * scale).toInt().coerceAtLeast(1), true) else bmp
             ByteArrayOutputStream().also { small.compress(Bitmap.CompressFormat.JPEG, 80, it) }.toByteArray()
         } catch (e: Exception) {
+            AppLog.d("thumbs", "frame extraction failed", e)
             null
         } finally {
             try { r.release() } catch (e: Exception) { }

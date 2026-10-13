@@ -25,6 +25,7 @@ pub mod ids;
 pub mod import;
 pub mod kem;
 pub mod ledger;
+pub mod logging;
 pub mod manifest;
 pub mod media;
 pub mod org;

@@ -220,6 +220,17 @@ impl Engine {
     /// Create a backup of the directory `path` on this device. Nothing is
     /// read yet: `take_snapshot` takes the first snapshot.
     pub fn add_backup(&mut self, name: &str, path: &Path, opts: BackupOptions) -> Result<FolderId> {
+        crate::logged_op_plain!("add backup", name, {
+            self.add_backup_inner(name, path, opts)
+        })
+    }
+
+    fn add_backup_inner(
+        &mut self,
+        name: &str,
+        path: &Path,
+        opts: BackupOptions,
+    ) -> Result<FolderId> {
         self.ensure_active()?;
         if self.vault.member {
             bail!("this device is a member of a shared folder only; it cannot make backups in the owner's vault");
@@ -515,6 +526,12 @@ impl Engine {
     /// upload the blocks the storages lack, and write the snapshot. A
     /// snapshot is written also when nothing changed.
     pub fn take_snapshot(&mut self, backup: &str) -> Result<SnapshotReport> {
+        crate::logged_op!("take snapshot", backup, {
+            self.take_snapshot_inner(backup)
+        })
+    }
+
+    fn take_snapshot_inner(&mut self, backup: &str) -> Result<SnapshotReport> {
         self.ensure_active()?;
         self.ensure_ledger_writable()?;
         let rec = self.resolve_backup(backup)?;
@@ -796,6 +813,20 @@ impl Engine {
         overwrite: bool,
         confirm_cold_read: bool,
     ) -> Result<RestoreReport> {
+        crate::logged_op_plain!("restore snapshot", backup, {
+            self.restore_snapshot_inner(backup, pick, to, paths, overwrite, confirm_cold_read)
+        })
+    }
+
+    fn restore_snapshot_inner(
+        &mut self,
+        backup: &str,
+        pick: SnapshotPick,
+        to: &Path,
+        paths: &[String],
+        overwrite: bool,
+        confirm_cold_read: bool,
+    ) -> Result<RestoreReport> {
         self.ensure_active()?;
         let rec = self.resolve_backup(backup)?;
         self.one_batch(|e| e.restore_inner(&rec, pick, to, paths, overwrite, confirm_cold_read))
@@ -928,6 +959,12 @@ impl Engine {
     /// snapshot of its backup uses and the snapshot objects, and remove
     /// stopped backups that have no snapshot left.
     pub fn expire_backups_at(&mut self, now: i64) -> Result<ExpireReport> {
+        crate::logged_op!("expire backups at", "", {
+            self.expire_backups_at_inner(now)
+        })
+    }
+
+    fn expire_backups_at_inner(&mut self, now: i64) -> Result<ExpireReport> {
         self.ensure_active()?;
         let mut report = ExpireReport::default();
         if self.vault.member || self.forked_self {

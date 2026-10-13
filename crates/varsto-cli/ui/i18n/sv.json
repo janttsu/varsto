@@ -695,6 +695,20 @@
   "Backing up the mirror with restic": "Säkerhetskopierar speglingen med restic",
   "Removing old restic snapshots": "Tar bort gamla restic-ögonblicksbilder",
   "Checking the restic repository": "Kontrollerar restic-förrådet",
+  "Logs": "Loggar",
+  "Varsto keeps a detailed log on this device for finding problems. It never contains keys, passphrases or file contents and is never uploaded.": "Varsto för en detaljerad logg på den här enheten för att hitta problem. Den innehåller aldrig nycklar, lösenfraser eller filinnehåll och laddas aldrig upp.",
+  "Detail": "Detaljnivå",
+  "Everything (trace)": "Allt (trace)",
+  "Detailed (debug, default)": "Detaljerad (debug, standard)",
+  "Normal (info)": "Normal (info)",
+  "Warnings": "Varningar",
+  "Errors only": "Endast fel",
+  "Open log folder": "Öppna loggmappen",
+  "Save log bundle": "Spara loggpaket",
+  "The VARSTO_LOG environment variable overrides this setting.": "Miljövariabeln VARSTO_LOG åsidosätter den här inställningen.",
+  "The --log-level option the service was started with overrides this setting.": "Alternativet --log-level som tjänsten startades med åsidosätter den här inställningen.",
+  "The bundle has no keys or passphrases, but it does contain file and folder names, device and storage names. Look through it before you share it.": "Paketet innehåller inga nycklar eller lösenfraser, men det innehåller fil- och mappnamn samt namn på enheter och lagringsplatser. Gå igenom det innan du delar det.",
+  "Log bundle saved": "Loggpaketet sparat",
   "Drain…": "Töm…",
   "Empty this storage onto the others, without weakening any policy": "Flytta innehållet till de andra lagringsplatserna utan att försvaga någon regel",
   "Price and quota": "Pris och kvot",
@@ -1235,6 +1249,18 @@
   [
    "^(.+): stopped; nothing more is fetched from the disks$",
    "$1: avbrutet; inget mer hämtas från diskarna"
+  ],
+  [
+   "^Using (.+) in (\\d+) files$",
+   "Använder $1 i $2 filer"
+  ],
+  [
+   "^log detail set to (.+)$",
+   "loggens detaljnivå satt till $1"
+  ],
+  [
+   "^log bundle saved: (.+)$",
+   "loggpaket sparat: $1"
   ],
   [
    "^Prices and quota of (.+)$",
