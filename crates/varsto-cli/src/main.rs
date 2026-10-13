@@ -15,6 +15,7 @@ mod drives;
 mod filemanager;
 mod icon;
 mod mcp;
+mod mcp_keys;
 mod placing;
 mod restic;
 mod service;
@@ -301,8 +302,30 @@ enum Cmd {
         #[command(subcommand)]
         cmd: PolicyCmd,
     },
-    /// MCP server for AI assistants (stdio), with per-folder grants.
+    /// File analyses: what a file contains, in words and tags, recorded by
+    /// an assistant (MCP) or by hand; synced encrypted to every device.
+    Analysis {
+        #[command(subcommand)]
+        cmd: AnalysisCmd,
+    },
+    /// Find files by their analysis, tags and path (every word must match).
+    Search {
+        /// Words to look for (case-insensitive).
+        query: Vec<String>,
+        /// Only this folder (default: every attached folder).
+        #[arg(long)]
+        folder: Option<String>,
+        /// Only files with this tag (repeatable).
+        #[arg(long = "tag")]
+        tags: Vec<String>,
+    },
+    /// MCP server for AI assistants (stdio), with per-folder grants and
+    /// scoped keys. See docs/mcp.md.
     Mcp {
+        /// Talk to the running service with this MCP key (from `varsto mcp
+        /// key create`); its scope replaces the grants file.
+        #[arg(long, env = "VARSTO_MCP_KEY", hide_env_values = true)]
+        key: Option<String>,
         #[command(subcommand)]
         cmd: Option<McpCmd>,
     },
@@ -604,16 +627,104 @@ enum PolicyCmd {
 enum McpCmd {
     /// Serve MCP over stdin/stdout (default). Point your assistant at `varsto --home <dir> mcp`.
     Serve,
-    /// Let the assistant see a folder (or `all`); --write also allows moving and renaming files.
+    /// Let the assistant see a folder (or `all`); --analyse also allows
+    /// recording file analyses, --write also moving, renaming and creating files.
     Grant {
         folder: String,
         #[arg(long)]
         write: bool,
+        #[arg(long, alias = "analyze", conflicts_with = "write")]
+        analyse: bool,
     },
     /// Remove a grant (or `all`).
     Revoke { folder: String },
     /// Show current grants.
     List,
+    /// Scoped keys that let an MCP client use the running service.
+    Key {
+        #[command(subcommand)]
+        cmd: McpKeyCmd,
+    },
+    /// Print a ready-to-paste configuration for an MCP client.
+    Config {
+        /// claude (Claude Desktop and Claude Code), opencode, crush, qwen or generic.
+        #[arg(long, default_value = "generic")]
+        client: String,
+        /// Create a key now and put it in the configuration (else a placeholder).
+        #[arg(long)]
+        create_key: bool,
+        /// Name of the key to create.
+        #[arg(long, requires = "create_key")]
+        key_name: Option<String>,
+        /// Folders of the new key, comma-separated, or all (default: the current grants).
+        #[arg(long, value_delimiter = ',', requires = "create_key")]
+        folders: Vec<String>,
+        #[arg(long, requires = "create_key")]
+        write: bool,
+        #[arg(
+            long,
+            alias = "analyze",
+            requires = "create_key",
+            conflicts_with = "write"
+        )]
+        analyse: bool,
+        #[arg(long, requires = "create_key")]
+        expires_days: Option<i64>,
+    },
+}
+
+#[derive(Subcommand)]
+enum McpKeyCmd {
+    /// Create a key and print it once. Its scope: --folders at the level of
+    /// --write or --analyse (read-only otherwise), or the current grants.
+    Create {
+        #[arg(long)]
+        name: Option<String>,
+        /// Comma-separated folder names, or all.
+        #[arg(long, value_delimiter = ',')]
+        folders: Vec<String>,
+        #[arg(long)]
+        write: bool,
+        #[arg(long, alias = "analyze", conflicts_with = "write")]
+        analyse: bool,
+        /// The key stops working after this many days.
+        #[arg(long)]
+        expires_days: Option<i64>,
+    },
+    /// List keys (never the keys themselves).
+    List,
+    /// Revoke a key by name or id; clients using it are refused at once.
+    Revoke { name_or_id: String },
+}
+
+#[derive(Subcommand)]
+enum AnalysisCmd {
+    /// Show a file's analysis in full.
+    Show { folder: String, path: String },
+    /// Record a file's analysis (replaces the earlier one): --text or
+    /// --from-file (`-` reads standard input), at most 16 KiB.
+    Set {
+        folder: String,
+        path: String,
+        #[arg(
+            long,
+            conflicts_with = "from_file",
+            required_unless_present = "from_file"
+        )]
+        text: Option<String>,
+        #[arg(long)]
+        from_file: Option<PathBuf>,
+        /// A tag (repeatable, at most 32).
+        #[arg(long = "tag")]
+        tags: Vec<String>,
+        /// Who wrote it (a model or tool name).
+        #[arg(long)]
+        by: Option<String>,
+    },
+    /// Clear a file's analysis on every device.
+    Clear { folder: String, path: String },
+    /// Every analysis of a folder.
+    List { folder: String },
 }
 
 #[derive(Subcommand)]
@@ -1160,6 +1271,11 @@ fn home(cli: &Cli) -> Result<PathBuf> {
     if let Some(h) = &cli.home {
         return Ok(h.clone());
     }
+    default_home()
+}
+
+/// The device directory when neither --home nor VARSTO_HOME names one.
+fn default_home() -> Result<PathBuf> {
     if cfg!(target_os = "macos") {
         let h = std::env::var_os("HOME").ok_or_else(|| anyhow!("HOME is not set; pass --home"))?;
         return Ok(PathBuf::from(h).join("Library/Application Support/Varsto"));
@@ -1203,6 +1319,319 @@ fn print<T: serde::Serialize>(
         println!("{}", human(value));
     }
     Ok(())
+}
+
+/// `varsto mcp key`.
+fn run_mcp_key(cli: &Cli, home: &Path, cmd: &McpKeyCmd) -> Result<()> {
+    match cmd {
+        McpKeyCmd::Create {
+            name,
+            folders,
+            write,
+            analyse,
+            expires_days,
+        } => {
+            let scope = mcp_keys::scope_for(home, folders, *write, *analyse)?;
+            let (k, secret) = mcp_keys::create(home, name.as_deref(), scope, *expires_days)?;
+            if cli.json {
+                let mut v = k.summary();
+                v["key"] = serde_json::json!(secret);
+                println!("{}", serde_json::to_string_pretty(&v)?);
+            } else {
+                println!(
+                    "MCP key {} ({}) created; it is shown only now:\n\n  {secret}\n\nGive it to the MCP client as VARSTO_MCP_KEY (varsto mcp config prints a configuration). It works while the Varsto service runs{}.",
+                    k.name,
+                    k.id,
+                    k.expires_utc
+                        .map(|e| format!(", until {}", backup::fmt_utc(e)))
+                        .unwrap_or_default()
+                );
+            }
+        }
+        McpKeyCmd::List => {
+            let keys = mcp_keys::list(home)?;
+            let rows: Vec<serde_json::Value> = keys.iter().map(|k| k.summary()).collect();
+            print(cli, &rows, |_| {
+                if keys.is_empty() {
+                    return "no MCP keys (varsto mcp key create)".into();
+                }
+                let now = varsto_core::util::now_utc();
+                keys.iter()
+                    .map(|k| {
+                        let mut scope: Vec<String> = Vec::new();
+                        if let Some(a) = &k.scope.all {
+                            scope.push(format!("all: {a}"));
+                        }
+                        scope.extend(k.scope.folders.iter().map(|(f, l)| format!("{f}: {l}")));
+                        format!(
+                            "{} ({}): {}; created {}{}{}",
+                            k.name,
+                            k.id,
+                            scope.join(", "),
+                            backup::fmt_utc(k.created_utc),
+                            match k.expires_utc {
+                                Some(_) if k.expired(now) => "; EXPIRED".to_string(),
+                                Some(e) => format!("; expires {}", backup::fmt_utc(e)),
+                                None => String::new(),
+                            },
+                            k.last_used_utc
+                                .map(|t| format!("; last used {}", backup::fmt_utc(t)))
+                                .unwrap_or_else(|| "; never used".into())
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            })?;
+        }
+        McpKeyCmd::Revoke { name_or_id } => {
+            let k = mcp_keys::revoke(home, name_or_id)?;
+            println!("revoked MCP key {} ({})", k.name, k.id);
+        }
+    }
+    Ok(())
+}
+
+/// A call to the running service's local API, if it runs.
+fn service_call(
+    home: &Path,
+) -> Option<impl Fn(&str, &str, serde_json::Value) -> Result<serde_json::Value>> {
+    let (sf, _) = service::status(home)?;
+    Some(
+        move |method: &str, path: &str, body: serde_json::Value| -> Result<serde_json::Value> {
+            let url = format!("http://127.0.0.1:{}{path}", sf.port);
+            let r = if method == "GET" {
+                service::http_get(&url, &sf.token)?
+            } else {
+                service::http_post(&url, &sf.token, &body.to_string())?
+            };
+            Ok(serde_json::from_str(&r)?)
+        },
+    )
+}
+
+fn analysis_text(a: &varsto_core::engine::FileAnalysis) -> String {
+    let mut head = format!(
+        "{}{}\n  by {}{} on {}",
+        a.path,
+        if a.stale {
+            " (stale: the file changed since)"
+        } else {
+            ""
+        },
+        a.author,
+        a.by.as_ref().map(|b| format!(" ({b})")).unwrap_or_default(),
+        backup::fmt_utc(a.analysed_utc),
+    );
+    if !a.tags.is_empty() {
+        head.push_str(&format!("\n  tags: {}", a.tags.join(", ")));
+    }
+    format!("{head}\n\n{}", a.analysis)
+}
+
+/// `varsto analysis`: through the service when it runs, else the engine.
+fn run_analysis(cli: &Cli, home: &Path, cmd: &AnalysisCmd) -> Result<()> {
+    use varsto_core::engine::FileAnalysis;
+    let call = service_call(home);
+    match cmd {
+        AnalysisCmd::Show { folder, path } => {
+            let a: Option<FileAnalysis> = match &call {
+                Some(call) => serde_json::from_value(
+                    call(
+                        "GET",
+                        &format!(
+                            "/api/analysis?folder={}&path={}",
+                            mcp::urlencode(folder),
+                            mcp::urlencode(path)
+                        ),
+                        serde_json::Value::Null,
+                    )?["analysis"]
+                        .clone(),
+                )?,
+                None => Engine::open(home, &passphrase()?)?.analysis(folder, path)?,
+            };
+            print(cli, &a, |a| match a {
+                Some(a) => analysis_text(a),
+                None => format!("{path} has no analysis"),
+            })?;
+        }
+        AnalysisCmd::Set {
+            folder,
+            path,
+            text,
+            from_file,
+            tags,
+            by,
+        } => {
+            let text = match (text, from_file) {
+                (Some(t), _) => t.clone(),
+                (None, Some(f)) if f.as_os_str() == "-" => {
+                    let mut t = String::new();
+                    std::io::Read::read_to_string(&mut std::io::stdin(), &mut t)?;
+                    t
+                }
+                (None, Some(f)) => {
+                    std::fs::read_to_string(f).with_context(|| format!("read {}", f.display()))?
+                }
+                (None, None) => bail_usage("give --text or --from-file")?,
+            };
+            let a: FileAnalysis = match &call {
+                Some(call) => serde_json::from_value(call(
+                    "POST",
+                    "/api/analysis",
+                    serde_json::json!({"folder": folder, "path": path, "analysis": text, "tags": tags, "by": by}),
+                )?)?,
+                None => Engine::open(home, &passphrase()?)?.set_analysis(
+                    folder,
+                    path,
+                    &text,
+                    tags,
+                    by.as_deref(),
+                )?,
+            };
+            print(cli, &a, |a| {
+                format!(
+                    "recorded the analysis of {} ({} bytes{}); other devices get it with the next sync",
+                    a.path,
+                    a.analysis.len(),
+                    if a.tags.is_empty() {
+                        String::new()
+                    } else {
+                        format!(", tags {}", a.tags.join(", "))
+                    }
+                )
+            })?;
+        }
+        AnalysisCmd::Clear { folder, path } => {
+            let cleared = match &call {
+                Some(call) => call(
+                    "POST",
+                    "/api/analysis/clear",
+                    serde_json::json!({"folder": folder, "path": path}),
+                )?["cleared"]
+                    .as_bool()
+                    .unwrap_or(false),
+                None => Engine::open(home, &passphrase()?)?.clear_analysis(folder, path)?,
+            };
+            print(cli, &serde_json::json!({"cleared": cleared}), |_| {
+                if cleared {
+                    format!("cleared the analysis of {path}")
+                } else {
+                    format!("{path} had no analysis")
+                }
+            })?;
+        }
+        AnalysisCmd::List { folder } => {
+            let all: Vec<FileAnalysis> = match &call {
+                Some(call) => serde_json::from_value(call(
+                    "GET",
+                    &format!("/api/analyses?folder={}", mcp::urlencode(folder)),
+                    serde_json::Value::Null,
+                )?)?,
+                None => Engine::open(home, &passphrase()?)?.analyses(folder)?,
+            };
+            print(cli, &all, |all| {
+                if all.is_empty() {
+                    return format!("no file of {folder} has an analysis");
+                }
+                all.iter()
+                    .map(|a| {
+                        let first: String = a.analysis.chars().take(100).collect();
+                        format!(
+                            "{}{}\n  {}{}",
+                            a.path,
+                            if a.stale { " (stale)" } else { "" },
+                            first.replace('\n', " "),
+                            if a.analysis.chars().count() > 100 {
+                                "…"
+                            } else {
+                                ""
+                            }
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            })?;
+        }
+    }
+    Ok(())
+}
+
+/// `varsto search`: every attached folder, or one.
+fn run_search(
+    cli: &Cli,
+    home: &Path,
+    query: &str,
+    folder: Option<&str>,
+    tags: &[String],
+) -> Result<()> {
+    use varsto_core::engine::AnalysisHit;
+    let call = service_call(home);
+    let mut engine = None;
+    let folders: Vec<String> = match (folder, &call) {
+        (Some(f), _) => vec![f.to_string()],
+        (None, Some(call)) => call("GET", "/api/folders", serde_json::Value::Null)?
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|f| !f["path"].is_null())
+            .filter_map(|f| f["name"].as_str().map(str::to_string))
+            .collect(),
+        (None, None) => {
+            let e = Engine::open(home, &passphrase()?)?;
+            let names = e
+                .folders()
+                .into_iter()
+                .filter(|(r, m)| m.is_some() && (!r.is_strongroom() || e.is_unlocked(&r.folder_id)))
+                .map(|(r, _)| r.name)
+                .collect();
+            engine = Some(e);
+            names
+        }
+    };
+    let mut hits: Vec<AnalysisHit> = Vec::new();
+    for f in &folders {
+        let found: Vec<AnalysisHit> = match &call {
+            Some(call) => serde_json::from_value(call(
+                "POST",
+                "/api/analysis/search",
+                serde_json::json!({"folder": f, "query": query, "tags": tags}),
+            )?)?,
+            None => {
+                if engine.is_none() {
+                    engine = Some(Engine::open(home, &passphrase()?)?);
+                }
+                engine.as_ref().unwrap().search_analyses(f, query, tags)?
+            }
+        };
+        hits.extend(found);
+    }
+    hits.sort_by(|a, b| b.score.cmp(&a.score).then_with(|| a.path.cmp(&b.path)));
+    print(cli, &hits, |hits| {
+        if hits.is_empty() {
+            return "nothing found".into();
+        }
+        hits.iter()
+            .map(|h| {
+                format!(
+                    "{}/{}{}{}{}",
+                    h.folder,
+                    h.path,
+                    if h.stale { " (stale)" } else { "" },
+                    if h.tags.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" [{}]", h.tags.join(", "))
+                    },
+                    if h.snippet.is_empty() {
+                        String::new()
+                    } else {
+                        format!("\n  {}", h.snippet)
+                    }
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    })
 }
 
 /// Organization commands. When the background service runs it owns the
@@ -3002,6 +3431,12 @@ fn run(cli: &Cli) -> Result<()> {
             }
         },
         Cmd::Org { cmd } => run_org(cli, &home, cmd)?,
+        Cmd::Analysis { cmd } => run_analysis(cli, &home, cmd)?,
+        Cmd::Search {
+            query,
+            folder,
+            tags,
+        } => run_search(cli, &home, &query.join(" "), folder.as_deref(), tags)?,
         Cmd::Strongroom { cmd } => {
             let mut engine = Engine::open(&home, &passphrase()?)?;
             match cmd {
@@ -3351,13 +3786,52 @@ fn run(cli: &Cli) -> Result<()> {
                 }
             }
         }
-        Cmd::Mcp { cmd } => match cmd.as_ref().unwrap_or(&McpCmd::Serve) {
-            McpCmd::Serve => mcp::serve(&home)?,
-            McpCmd::Grant { folder, write } => {
-                mcp::grant(&home, folder, *write)?;
+        Cmd::Mcp { key, cmd } => match cmd.as_ref().unwrap_or(&McpCmd::Serve) {
+            McpCmd::Serve => mcp::serve(&home, key.as_deref())?,
+            McpCmd::Key { cmd } => run_mcp_key(cli, &home, cmd)?,
+            McpCmd::Config {
+                client,
+                create_key,
+                key_name,
+                folders,
+                write,
+                analyse,
+                expires_days,
+            } => {
+                let secret = if *create_key {
+                    let scope = mcp_keys::scope_for(&home, folders, *write, *analyse)?;
+                    let (k, secret) =
+                        mcp_keys::create(&home, key_name.as_deref(), scope, *expires_days)?;
+                    eprintln!(
+                        "created MCP key {} ({}); it is in the configuration below and is not shown again",
+                        k.name, k.id
+                    );
+                    Some(secret)
+                } else {
+                    None
+                };
+                let custom_home = (default_home().ok().as_deref() != Some(home.as_path()))
+                    .then_some(home.as_path());
+                println!(
+                    "{}",
+                    mcp::client_config(client, secret.as_deref(), custom_home)?
+                );
+            }
+            McpCmd::Grant {
+                folder,
+                write,
+                analyse,
+            } => {
+                mcp::grant(&home, folder, *write, *analyse)?;
                 println!(
                     "granted {} access to {folder} (recorded in {})",
-                    if *write { "read-write" } else { "read-only" },
+                    if *write {
+                        "read-write"
+                    } else if *analyse {
+                        "read and analyse"
+                    } else {
+                        "read-only"
+                    },
                     mcp::grants_path(&home).display()
                 );
             }
@@ -3367,7 +3841,23 @@ fn run(cli: &Cli) -> Result<()> {
             }
             McpCmd::List => {
                 let g = mcp::Grants::load(&home)?;
-                println!("{}", serde_json::to_string_pretty(&g)?);
+                print(cli, &g, |g| {
+                    let mut lines = Vec::new();
+                    if let Some(all) = &g.all {
+                        lines.push(format!(
+                            "all folders (not Strongrooms): {all} ({})",
+                            mcp::level_words(all)
+                        ));
+                    }
+                    for (f, l) in &g.folders {
+                        lines.push(format!("{f}: {l} ({})", mcp::level_words(l)));
+                    }
+                    if lines.is_empty() {
+                        "no grants: the assistant sees nothing (varsto mcp grant <folder>)".into()
+                    } else {
+                        lines.join("\n")
+                    }
+                })?;
             }
         },
         Cmd::Update { check } => {

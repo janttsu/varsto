@@ -334,10 +334,43 @@ fn handle(state: &Shared, mut request: Request) -> Result<()> {
         in_header || in_query
     };
     if !token_ok {
-        return Ok(request.respond(json_response(
-            401,
-            &json!({"error": "missing or wrong token; reopen the start URL"}),
-        ))?);
+        // A scoped MCP key (`mcp_keys`): only the routes the MCP tools
+        // need, within the key's folders and levels.
+        let key = request
+            .headers()
+            .iter()
+            .find(|h| h.field.equiv(crate::mcp_keys::HEADER))
+            .map(|h| h.value.as_str().to_string());
+        let Some(key) = key else {
+            return Ok(request.respond(json_response(
+                401,
+                &json!({"error": "missing or wrong token; reopen the start URL"}),
+            ))?);
+        };
+        let home = state.lock().unwrap().home.clone();
+        let key = match crate::mcp_keys::check(&home, &key) {
+            Ok(k) => k,
+            Err(r) => {
+                return Ok(request.respond(json_response(
+                    401,
+                    &json!({"error": match r {
+                        crate::mcp_keys::Refused::Expired => "the MCP key has expired: create a new one with varsto mcp key create",
+                        crate::mcp_keys::Refused::Unknown => "unknown or revoked MCP key",
+                    }}),
+                ))?);
+            }
+        };
+        let mut body = String::new();
+        if *request.method() == Method::Post {
+            request
+                .as_reader()
+                .take(4 << 20)
+                .read_to_string(&mut body)?;
+        }
+        let input: Value = serde_json::from_str(&body).unwrap_or(json!({}));
+        let method = request.method().clone();
+        let (status, v) = mcp_api(state, &key, method, &path, &query, &input);
+        return Ok(request.respond(json_response(status, &v))?);
     }
     if path == "/api/open" {
         // Download a file through the browser; the token may be in the query
@@ -465,6 +498,88 @@ fn handle(state: &Shared, mut request: Request) -> Result<()> {
     }
 }
 
+/// A request made with an MCP key: checked against the key's scope, then
+/// answered like any other, with folder lists cut to the key's folders.
+fn mcp_api(
+    state: &Shared,
+    key: &crate::mcp_keys::McpKey,
+    method: Method,
+    path: &str,
+    query: &str,
+    input: &Value,
+) -> (u16, Value) {
+    use crate::mcp_keys::{allows, route, Need};
+    let m = match method {
+        Method::Get => "GET",
+        Method::Post => "POST",
+        _ => "",
+    };
+    let body_folder = input
+        .get("folder")
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
+    let Some((need, folder)) = route(m, path, query_param(query, "folder"), body_folder) else {
+        return (
+            403,
+            json!({"error": format!("an MCP key may not use {m} {path}")}),
+        );
+    };
+    let mut st = state.lock().unwrap();
+    // Folder names and Strongroom flags, by name and by id.
+    let known: Vec<(String, String, bool)> = match st.engine.as_ref() {
+        Some(e) => e
+            .folders()
+            .into_iter()
+            .map(|(r, _)| (r.name.clone(), r.folder_id.to_string(), r.is_strongroom()))
+            .collect(),
+        None => return (503, json!({"error": "vault is locked"})),
+    };
+    if let Some(f) = &folder {
+        let Some((name, _, strong)) = known.iter().find(|(n, id, _)| n == f || id == f) else {
+            return (403, json!({"error": format!("no access to folder {f}")}));
+        };
+        if !allows(&key.scope, name, *strong, need) {
+            let what = match need {
+                Need::Read => "access to",
+                Need::Analyse => "recording analyses in",
+                Need::Write => "changes in",
+            };
+            return (
+                403,
+                json!({"error": format!("the MCP key {} does not allow {what} folder {name}", key.name)}),
+            );
+        }
+    }
+    if path == "/api/mcp/scope" {
+        return (
+            200,
+            json!({"id": key.id, "name": key.name, "scope": key.scope}),
+        );
+    }
+    let visible = |name: &str| {
+        known
+            .iter()
+            .find(|(n, _, _)| n == name)
+            .is_some_and(|(n, _, s)| allows(&key.scope, n, *s, Need::Read))
+    };
+    match api(&mut st, method, path, query, input) {
+        Ok(mut v) => {
+            let list = if path == "/api/folders" {
+                Some(&mut v)
+            } else if path == "/api/status" {
+                v.get_mut("folders")
+            } else {
+                None
+            };
+            if let Some(a) = list.and_then(|l| l.as_array_mut()) {
+                a.retain(|f| f["name"].as_str().is_some_and(visible));
+            }
+            (200, v)
+        }
+        Err(e) => (400, json!({"error": format!("{e:#}")})),
+    }
+}
+
 /// Reads at most `left` bytes, then fails: an upload larger than allowed is
 /// refused before anything of it is recorded.
 struct Capped<R> {
@@ -553,6 +668,18 @@ fn s(v: &Value, key: &str) -> Result<String> {
         .map(|x| x.trim().to_string())
         .filter(|x| !x.is_empty())
         .ok_or_else(|| anyhow!("missing field {key}"))
+}
+
+/// A list of strings (absent: empty).
+fn str_list(v: &Value, key: &str) -> Vec<String> {
+    v.get(key)
+        .and_then(|x| x.as_array())
+        .map(|a| {
+            a.iter()
+                .filter_map(|x| x.as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 fn opt(v: &Value, key: &str) -> Option<String> {
@@ -1700,6 +1827,44 @@ fn api_unlocked(
             &s(input, "from")?,
             &s(input, "to")?,
         )?)?),
+        // File analyses (`engine::notes`): what a file contains, recorded by
+        // an assistant through MCP or by the user.
+        (Method::Get, "/api/analysis") => {
+            let folder = query_param(query, "folder")
+                .ok_or_else(|| anyhow!("folder query parameter required"))?;
+            let path = query_param(query, "path")
+                .ok_or_else(|| anyhow!("path query parameter required"))?;
+            Ok(json!({"analysis": engine.analysis(&folder, &path)?}))
+        }
+        (Method::Get, "/api/analyses") => {
+            let folder = query_param(query, "folder")
+                .ok_or_else(|| anyhow!("folder query parameter required"))?;
+            Ok(serde_json::to_value(engine.analyses(&folder)?)?)
+        }
+        (Method::Post, "/api/analysis") => {
+            let text = input
+                .get("analysis")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow!("missing field analysis"))?;
+            Ok(serde_json::to_value(engine.set_analysis(
+                &s(input, "folder")?,
+                &s(input, "path")?,
+                text,
+                &str_list(input, "tags"),
+                opt(input, "by").as_deref(),
+            )?)?)
+        }
+        (Method::Post, "/api/analysis/clear") => Ok(json!({
+            "cleared": engine.clear_analysis(&s(input, "folder")?, &s(input, "path")?)?
+        })),
+        (Method::Post, "/api/analysis/search") => {
+            let query = input.get("query").and_then(|v| v.as_str()).unwrap_or("");
+            Ok(serde_json::to_value(engine.search_analyses(
+                &s(input, "folder")?,
+                query,
+                &str_list(input, "tags"),
+            )?)?)
+        }
         (Method::Get, "/api/advice") => {
             let idle_days = query_param(query, "idle_days")
                 .and_then(|d| d.parse().ok())

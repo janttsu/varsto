@@ -185,6 +185,14 @@
           sl.appendChild(sel); if (f.hint) { sl.appendChild(el("span", "hint muted", f.hint)); } fs.appendChild(sl);
           return;
         }
+        // A text of several lines (user data: never translated).
+        if (f.textarea) {
+          var tl = el("label", "", f.label); var ta = el("textarea"); ta.name = f.name; ta.rows = f.rows || 8; ta.value = f.value || "";
+          if (f.maxlength) { ta.maxLength = f.maxlength; }
+          if (f.placeholder) { ta.placeholder = f.placeholder; }
+          tl.appendChild(ta); if (f.hint) { tl.appendChild(el("span", "hint muted", f.hint)); } fs.appendChild(tl);
+          return;
+        }
         var lab = el("label", "", f.label); var inp = el("input"); inp.name = f.name; inp.type = f.type || "text"; inp.autocomplete = "off";
         if (f.type === "number") { inp.min = "0"; inp.step = "1"; inp.inputMode = "numeric"; }
         if (f.value !== undefined && f.value !== null) { inp.value = f.value; }
@@ -204,7 +212,7 @@
       var ex = $("modal-extra"); ex.textContent = o.extra || ""; ex.classList.toggle("hidden", !o.extra);
       confirmTyped();
       $("modal").classList.remove("hidden"); document.body.classList.add("modal-open");
-      var first = fs.querySelector("input") || ok;
+      var first = fs.querySelector("input, textarea") || ok;
       setTimeout(function () { first.focus(); if (first.select) { first.select(); } }, 30);
     });
   }
@@ -215,7 +223,7 @@
   function confirmTyped() { var off = !confirmMatches(); $("modal-ok").disabled = off; $("modal-extra").disabled = off; }
   function dialogValues() {
     var v = {};
-    $("modal-fields").querySelectorAll("input, select").forEach(function (i) {
+    $("modal-fields").querySelectorAll("input, select, textarea").forEach(function (i) {
       if (i.dataset.group) { var g = i.dataset.group; if (!(g in v)) { v[g] = ""; } if (i.checked) { v[g] = v[g] ? v[g] + "," + i.value : i.value; } return; }
       v[i.name] = i.value;
     });
@@ -1786,8 +1794,61 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     $("fd-copies").textContent = copies.join("; ") || "unknown";
     var acts = $("fd-actions"); acts.innerHTML = "";
     fileActions(folder, f, true).forEach(function (b) { acts.appendChild(b); });
+    showAnalysis(folder, f);
     updateToolbar();
   }
+  // The file's analysis (`/api/analysis`): what an assistant or the user
+  // recorded about its contents. A listing has the first 500 characters; the
+  // whole text is asked for when there is more.
+  function showAnalysis(folder, f) {
+    var has = !!f.analysis;
+    $("fd-analysis-empty").classList.toggle("hidden", has);
+    ["fd-analysis-text", "fd-analysis-tags", "fd-analysis-meta"].forEach(function (id) { $(id).classList.toggle("hidden", !has); });
+    $("fd-analysis-stale").classList.toggle("hidden", !(has && f.analysis_stale));
+    $("fd-analysis-clear").classList.toggle("hidden", !has);
+    $("fd-analysis-edit").textContent = has ? "Edit analysis" : "Write analysis";
+    $("fd-analysis-text").textContent = has ? f.analysis + (f.analysis_truncated ? "…" : "") : "";
+    var tags = $("fd-analysis-tags"); tags.innerHTML = "";
+    (f.analysis_tags || []).forEach(function (t) { tags.appendChild(el("span", "tag", t)); });
+    $("fd-analysis-device").textContent = f.analysis_author || "";
+    $("fd-analysis-by").textContent = f.analysis_by || "–";
+    $("fd-analysis-date").textContent = f.analysis_utc ? fmtDate(f.analysis_utc) : "";
+    if (has && f.analysis_truncated) {
+      api("GET", "/api/analysis?folder=" + enc(folder) + "&path=" + enc(f.path)).then(function (r) {
+        if (selectedFile === f && r.analysis) { $("fd-analysis-text").textContent = r.analysis.analysis; }
+      }).catch(function () {});
+    }
+  }
+  $("fd-analysis-edit").onclick = function () {
+    var f = selectedFile; if (!f) { return; }
+    var folder = $("filesfolder").value;
+    var full = f.analysis && f.analysis_truncated ? api("GET", "/api/analysis?folder=" + enc(folder) + "&path=" + enc(f.path)).then(function (r) { return r.analysis ? r.analysis.analysis : ""; }) : Promise.resolve(f.analysis || "");
+    full.then(function (text) {
+      return dialog({ title: "File analysis", text: f.path, fields: [
+        { name: "analysis", label: "What the file contains", textarea: true, rows: 10, value: text, maxlength: 16384 },
+        { name: "tags", label: "Tags", value: (f.analysis_tags || []).join(", "), hint: "separated by commas" }
+      ], ok: "Save" });
+    }).then(function (r) {
+      if (!r) { return; }
+      var tags = r.values.tags.split(",").map(function (t) { return t.trim(); }).filter(Boolean);
+      return api("POST", "/api/analysis", { folder: folder, path: f.path, analysis: r.values.analysis, tags: tags }).then(function () { log("saved the analysis of " + f.path); loadFiles(); });
+    }).catch(function (e) { alertBox(e.message); });
+  };
+  $("fd-analysis-clear").onclick = function () {
+    var f = selectedFile; if (!f) { return; }
+    var folder = $("filesfolder").value;
+    confirmBox("The analysis of this file is removed on every device.", { title: "Clear analysis?", ok: "Clear analysis", danger: true }).then(function (yes) {
+      if (!yes) { return; }
+      return api("POST", "/api/analysis/clear", { folder: folder, path: f.path }).then(function () { log("cleared the analysis of " + f.path); loadFiles(); });
+    }).catch(function (e) { alertBox(e.message); });
+  };
+  // The filter matches every word in the path, the tags or the analysis.
+  function matchesFilter(f, words) {
+    var hay = (f.path + " " + (f.analysis_tags || []).join(" ") + " " + (f.analysis || "")).toLowerCase();
+    return words.every(function (w) { return hay.indexOf(w) >= 0; });
+  }
+  var filterTimer = null;
+  $("files-filter").addEventListener("input", function () { clearTimeout(filterTimer); filterTimer = setTimeout(loadFiles, 250); });
   function clearSelection() { selectedFile = null; document.querySelectorAll("#files tbody tr").forEach(function (r) { r.classList.remove("selected"); }); $("filedetails").classList.add("hidden"); document.querySelector(".files-layout").classList.remove("with-details"); updateToolbar(); }
   $("fd-close").onclick = clearSelection;
   function updateToolbar() {
@@ -1973,11 +2034,14 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     filesLoadedFor = folder;
     var keep = selectedFile ? selectedFile.path : null;
     api("GET", "/api/files?folder=" + enc(folder)).then(function (rows) {
+      var words = ($("files-filter").value || "").toLowerCase().split(/\s+/).filter(Boolean);
+      var filtered = words.length > 0;
+      if (filtered) { rows = rows.filter(function (f) { return matchesFilter(f, words); }); }
       var tb = $("files").querySelector("tbody"); tb.innerHTML = "";
       var dirs = (newDirs[folder] || []).filter(function (d) { return !rows.some(function (r) { return r.path.indexOf(d + "/") === 0; }); });
       var empty = $("files-empty");
-      empty.querySelector(".empty-title").textContent = rows.length || dirs.length ? "" : "This folder is empty";
-      empty.querySelector(".muted").textContent = rows.length || dirs.length ? "" : "Add files here, or put them in " + folder + " on any device; they appear after a sync.";
+      empty.querySelector(".empty-title").textContent = rows.length || dirs.length ? "" : filtered ? "No files match the filter" : "This folder is empty";
+      empty.querySelector(".muted").textContent = rows.length || dirs.length || filtered ? "" : "Add files here, or put them in " + folder + " on any device; they appear after a sync.";
       empty.classList.toggle("hidden", rows.length > 0 || dirs.length > 0);
       dirs.forEach(function (d) {
         var tr = document.createElement("tr"); tr.className = "dir-row";
@@ -2025,7 +2089,9 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
         wrap.appendChild(stateSquare(f));
         if (f.media) { var im = document.createElement("img"); im.className = "thumb"; im.alt = ""; im.loading = "lazy"; im.src = "/api/thumb?folder=" + enc(folder) + "&path=" + enc(f.path) + "&token=" + enc(token); im.onerror = function () { var fi = el("span", "file-icon"); fi.appendChild(icon("image")); im.replaceWith(fi); }; wrap.appendChild(im); }
         else { var fi = el("span", "file-icon"); fi.appendChild(icon("files")); wrap.appendChild(fi); }
-        wrap.appendChild(document.createTextNode(f.path)); nameCell.appendChild(wrap); tr.appendChild(nameCell);
+        wrap.appendChild(document.createTextNode(f.path));
+        if (f.analysis) { var ap = pill(f.analysis_stale ? "risk" : "accent", f.analysis_stale ? "Analysis stale" : "Analysed"); ap.title = f.analysis.slice(0, 200); ap.classList.add("analysis-pill"); wrap.appendChild(ap); }
+        nameCell.appendChild(wrap); tr.appendChild(nameCell);
         td(fmtBytes(f.size), "num");
         var st = document.createElement("td"); st.appendChild(pill(f.state === "placeholder" ? "grey" : f.state === "missing" ? "bad" : "ok", fileStateLabel(f))); tr.appendChild(st);
         td(f.last_accessed_utc ? fmtDate(f.last_accessed_utc) : "Never here", f.last_accessed_utc ? "" : "muted", "Last used");

@@ -701,7 +701,27 @@
   "Checking that the restic mirror is complete": "Tarkistaa, että resticin peilikopio on täydellinen",
   "Backing up the mirror with restic": "Varmuuskopioi peilikopiota resticillä",
   "Removing old restic snapshots": "Poistaa vanhoja restic-tilannekuvia",
-  "Checking the restic repository": "Tarkistaa restic-varaston"
+  "Checking the restic repository": "Tarkistaa restic-varaston",
+  "Filter by name, tag or analysis": "Suodata: nimi, tunniste, analyysi",
+  "Filter files": "Suodata tiedostoja",
+  "Analysis": "Analyysi",
+  "Stale": "Vanhentunut",
+  "The file changed after it was analysed": "Tiedosto on muuttunut analyysin jälkeen",
+  "No analysis yet. An assistant can record one through MCP, or write one yourself.": "Ei vielä analyysia. Avustaja voi tallentaa sen MCP:n kautta, tai voit kirjoittaa sen itse.",
+  "Written on": "Kirjoitettu laitteella",
+  "By": "Tekijä",
+  "Analysed": "Analysoitu",
+  "Write analysis": "Kirjoita analyysi",
+  "Edit analysis": "Muokkaa analyysia",
+  "Clear analysis": "Tyhjennä analyysi",
+  "Clear analysis?": "Tyhjennetäänkö analyysi?",
+  "The analysis of this file is removed on every device.": "Tämän tiedoston analyysi poistetaan kaikilta laitteilta.",
+  "File analysis": "Tiedoston analyysi",
+  "What the file contains": "Mitä tiedosto sisältää",
+  "Tags": "Tunnisteet",
+  "separated by commas": "pilkuilla erotettuina",
+  "No files match the filter": "Mikään tiedosto ei vastaa suodatinta",
+  "Analysis stale": "Analyysi vanhentunut"
  },
  "patterns": [
   [
@@ -903,6 +923,14 @@
   [
    "^(.+): stopped; nothing more is fetched from the disks$",
    "$1: lopetettu; levyiltä ei haeta enempää"
+  ],
+  [
+   "^saved the analysis of (.+)$",
+   "tallennettiin tiedoston $1 analyysi"
+  ],
+  [
+   "^cleared the analysis of (.+)$",
+   "tyhjennettiin tiedoston $1 analyysi"
   ]
  ],
  "review": [
