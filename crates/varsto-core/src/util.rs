@@ -196,6 +196,90 @@ pub fn check_portable_rel_path(path: &str) -> Result<()> {
     Ok(())
 }
 
+/// 16 random hex digits, for names nobody should be able to guess.
+pub fn random_suffix() -> String {
+    let mut b = [0u8; 8];
+    rand::RngCore::fill_bytes(&mut rand::rngs::OsRng, &mut b);
+    hex::encode(b)
+}
+
+/// Create a file that must not exist yet (`O_EXCL`: a planted file or link
+/// of that name is an error, never followed), readable by the owner only.
+pub fn create_new_private(path: &Path) -> std::io::Result<fs::File> {
+    let mut opts = fs::OpenOptions::new();
+    opts.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.mode(0o600);
+    }
+    opts.open(path)
+}
+
+/// A new temporary file next to `target`: `.varsto-<kind>-<pid>-<random>`,
+/// created exclusively with mode 0600, so that nothing another local user
+/// plants or guesses under a predictable name is ever written through, and
+/// what is written is private until the final mode is set.
+pub fn temp_beside(target: &Path, kind: &str) -> std::io::Result<(PathBuf, fs::File)> {
+    let mut last = None;
+    for _ in 0..16 {
+        let tmp = target.with_file_name(format!(
+            ".varsto-{kind}-{}-{}",
+            std::process::id(),
+            random_suffix()
+        ));
+        match create_new_private(&tmp) {
+            Ok(f) => return Ok((tmp, f)),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => last = Some(e),
+            Err(e) => return Err(e),
+        }
+    }
+    Err(last.unwrap_or_else(|| std::io::Error::other("no free temporary name")))
+}
+
+/// What a file created without a mode of its own gets here: `0666` less the
+/// umask.
+#[cfg(unix)]
+pub fn default_file_mode() -> u32 {
+    use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+    static MODE: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
+    *MODE.get_or_init(|| {
+        let dir = std::env::temp_dir();
+        for _ in 0..8 {
+            let p = dir.join(format!(".varsto-umask-{}", random_suffix()));
+            let made = fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(0o666)
+                .open(&p);
+            if let Ok(f) = made {
+                let m = f.metadata().map(|m| m.mode() & 0o777).unwrap_or(0o644);
+                drop(f);
+                let _ = fs::remove_file(&p);
+                return m;
+            }
+        }
+        0o644
+    })
+}
+
+/// Give an open file its final mode before it is renamed into place
+/// (`fchmod`): `mode` when the folder records one, else the default a new
+/// file gets here. Best effort: the metadata step after the rename sets it
+/// again and reports a failure.
+pub fn set_final_mode(file: &fs::File, mode: Option<u32>) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let m = mode.map(|m| m & 0o777).unwrap_or_else(default_file_mode);
+        let _ = file.set_permissions(fs::Permissions::from_mode(m));
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (file, mode);
+    }
+}
+
 /// `root/rel` for writing, where `rel` is the local path (already mapped
 /// for this device's filesystem, see `names::LocalNames`): the path is
 /// checked, and no component of the existing part of the path may be a

@@ -49,6 +49,10 @@ pub const KEY_FILE: &str = "p2p-key.der";
 const MAX_HEAD: usize = 8 * 1024;
 /// Objects are at most one chunk plus overhead; relays copy whole bodies.
 const MAX_BODY: usize = 64 * 1024 * 1024;
+/// Streams a peer may have open on one connection (the fetch window is 32).
+const MAX_STREAMS: u32 = 64;
+/// Incoming connection attempts held at once.
+const MAX_INCOMING: usize = 256;
 const CONNECT_TIMEOUT: Duration = Duration::from_millis(1500);
 /// How long punching toward a peer behind NAT goes on before giving up.
 pub const PUNCH_TIMEOUT: Duration = Duration::from_secs(3);
@@ -150,17 +154,61 @@ fn is_side_traffic(buf: &[u8]) -> bool {
 struct SharedSocket {
     io: tokio::net::UdpSocket,
     state: quinn::udp::UdpSocketState,
-    side: mpsc::UnboundedSender<(SocketAddr, Vec<u8>)>,
+    side: mpsc::Sender<(SocketAddr, Vec<u8>)>,
+    /// True only while `Node::stun` waits for an answer: without an open
+    /// request every STUN-looking datagram from the internet is dropped.
+    probe_in_flight: std::sync::atomic::AtomicBool,
+    /// Transaction id of the open request: only a datagram carrying it
+    /// (bytes 8..20) is queued.
+    expected_tx: Mutex<Option<[u8; 12]>>,
+    /// STUN-looking datagrams dropped (no open request, wrong id, queue full).
+    stun_dropped: std::sync::atomic::AtomicU64,
 }
+
+/// Capacity of the STUN side channel: a handful of answers is all one probe
+/// can use.
+const SIDE_QUEUE: usize = 64;
 
 impl SharedSocket {
     fn new(
         std_sock: UdpSocket,
-        side: mpsc::UnboundedSender<(SocketAddr, Vec<u8>)>,
+        side: mpsc::Sender<(SocketAddr, Vec<u8>)>,
     ) -> io::Result<SharedSocket> {
         let state = quinn::udp::UdpSocketState::new((&std_sock).into())?;
         let io = tokio::net::UdpSocket::from_std(std_sock)?;
-        Ok(SharedSocket { io, state, side })
+        Ok(SharedSocket {
+            io,
+            state,
+            side,
+            probe_in_flight: std::sync::atomic::AtomicBool::new(false),
+            expected_tx: Mutex::new(None),
+            stun_dropped: std::sync::atomic::AtomicU64::new(0),
+        })
+    }
+
+    /// Open a probe: from now on only the answer to `tx` is queued.
+    fn begin_probe(&self, tx: [u8; 12]) {
+        *self.expected_tx.lock().unwrap() = Some(tx);
+        self.probe_in_flight
+            .store(true, std::sync::atomic::Ordering::Release);
+    }
+
+    fn end_probe(&self) {
+        self.probe_in_flight
+            .store(false, std::sync::atomic::Ordering::Release);
+        *self.expected_tx.lock().unwrap() = None;
+    }
+
+    /// Queue one STUN datagram when it answers the open request; everything
+    /// else is dropped without allocating.
+    fn offer_stun(&self, from: SocketAddr, seg: &[u8]) {
+        use std::sync::atomic::Ordering;
+        let wanted = self.probe_in_flight.load(Ordering::Acquire)
+            && seg.len() >= 20
+            && *self.expected_tx.lock().unwrap() == seg[8..20].try_into().ok();
+        if !wanted || self.side.try_send((from, seg.to_vec())).is_err() {
+            self.stun_dropped.fetch_add(1, Ordering::Relaxed);
+        }
     }
 
     /// Route the segments of one received buffer that are not QUIC: STUN
@@ -176,7 +224,7 @@ impl SharedSocket {
         // segment of a side-traffic buffer is side traffic as well.
         for seg in buf[..meta.len].chunks(stride) {
             if stun::is_stun(seg) {
-                let _ = self.side.send((meta.addr, seg.to_vec()));
+                self.offer_stun(meta.addr, seg);
             }
         }
         true
@@ -356,6 +404,10 @@ fn transport() -> Arc<quinn::TransportConfig> {
     let mut t = quinn::TransportConfig::default();
     t.max_idle_timeout(IDLE_TIMEOUT.try_into().ok());
     t.keep_alive_interval(Some(KEEP_ALIVE));
+    // Requests are bidirectional streams the peer opens one per request, up
+    // to the fetch window; nothing in the protocol uses a unidirectional one.
+    t.max_concurrent_bidi_streams(MAX_STREAMS.into());
+    t.max_concurrent_uni_streams(0u32.into());
     Arc::new(t)
 }
 
@@ -491,7 +543,7 @@ pub struct Node {
     rt: tokio::runtime::Runtime,
     endpoint: quinn::Endpoint,
     sock: Arc<SharedSocket>,
-    side_rx: tokio::sync::Mutex<mpsc::UnboundedReceiver<(SocketAddr, Vec<u8>)>>,
+    side_rx: tokio::sync::Mutex<mpsc::Receiver<(SocketAddr, Vec<u8>)>>,
     identity: Identity,
     serving: Arc<Serving>,
     /// Open connections by address, reused across requests.
@@ -567,8 +619,11 @@ impl Node {
             quinn::crypto::rustls::QuicServerConfig::try_from(tls).context("quic server config")?,
         ));
         server.transport_config(transport());
+        // Connection attempts waiting to be accepted: a flood of handshakes
+        // is refused beyond this instead of queued without end.
+        server.max_incoming(MAX_INCOMING);
 
-        let (side_tx, side_rx) = mpsc::unbounded_channel();
+        let (side_tx, side_rx) = mpsc::channel(SIDE_QUEUE);
         let _enter = rt.enter(); // tokio::net and the endpoint driver need the context
         let sock = Arc::new(SharedSocket::new(std_sock, side_tx)?);
         let local_addr = sock.io.local_addr()?;
@@ -750,6 +805,7 @@ impl Node {
                 };
                 while rx.try_recv().is_ok() {} // stale answers
                 let tx = stun::new_transaction_id();
+                self.sock.begin_probe(tx);
                 self.send_raw(server, &stun::encode_binding_request(&tx));
                 let deadline = tokio::time::Instant::now() + timeout;
                 loop {
@@ -766,6 +822,7 @@ impl Node {
                     break;
                 }
             }
+            self.sock.end_probe();
             let nat = stun::classify(&super::local_ipv4_addrs(), &mapped);
             stun::Probe { mapped, nat }
         })
@@ -1258,5 +1315,62 @@ mod tests {
         assert!(!is_side_traffic(&head));
         assert!(is_side_traffic(&PUNCH_MAGIC));
         assert!(is_side_traffic(&stun::encode_binding_request(&[0u8; 12])));
+    }
+
+    fn test_socket() -> (SharedSocket, mpsc::Receiver<(SocketAddr, Vec<u8>)>) {
+        let (tx, rx) = mpsc::channel(SIDE_QUEUE);
+        let std_sock = UdpSocket::bind("127.0.0.1:0").unwrap();
+        std_sock.set_nonblocking(true).unwrap();
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let _enter = rt.enter();
+        let sock = SharedSocket::new(std_sock, tx).unwrap();
+        std::mem::forget(rt); // the socket needs its reactor alive for the test
+        (sock, rx)
+    }
+
+    #[test]
+    fn unsolicited_stun_flood_is_not_queued() {
+        use std::sync::atomic::Ordering;
+        let (sock, mut rx) = test_socket();
+        let from: SocketAddr = "203.0.113.9:3478".parse().unwrap();
+        let fake = stun::encode_binding_request(&[7u8; 12]);
+        for _ in 0..10_000 {
+            sock.offer_stun(from, &fake);
+        }
+        assert!(rx.try_recv().is_err());
+        assert_eq!(sock.stun_dropped.load(Ordering::Relaxed), 10_000);
+        // An open request still only admits its own transaction id, and the
+        // queue stays bounded however many copies arrive.
+        sock.begin_probe([1u8; 12]);
+        for _ in 0..10_000 {
+            sock.offer_stun(from, &fake);
+        }
+        assert!(rx.try_recv().is_err());
+        let ours = stun::encode_binding_request(&[1u8; 12]);
+        for _ in 0..1_000 {
+            sock.offer_stun(from, &ours);
+        }
+        let mut queued = 0;
+        while rx.try_recv().is_ok() {
+            queued += 1;
+        }
+        assert_eq!(queued, SIDE_QUEUE);
+        sock.end_probe();
+        sock.offer_stun(from, &ours);
+        assert!(rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn answer_to_the_open_request_goes_through() {
+        let (sock, mut rx) = test_socket();
+        let from: SocketAddr = "203.0.113.9:3478".parse().unwrap();
+        sock.begin_probe([9u8; 12]);
+        sock.offer_stun(from, &stun::encode_binding_request(&[9u8; 12]));
+        let (addr, buf) = rx.try_recv().unwrap();
+        assert_eq!(addr, from);
+        assert_eq!(&buf[8..20], &[9u8; 12]);
     }
 }

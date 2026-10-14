@@ -20,6 +20,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import urllib.request
 
 from playwright.sync_api import sync_playwright
 
@@ -70,9 +71,18 @@ def stop():
         service = None
 
 
+def boot_url(port, token):
+    """The address that opens the interface: a one-time code, not the token."""
+    req = urllib.request.Request(
+        f"http://127.0.0.1:{port}/api/session/boot", data=b"{}", method="POST",
+        headers={"X-Varsto-Token": token, "Content-Type": "application/json"})
+    with urllib.request.urlopen(req) as r:
+        return f"http://127.0.0.1:{port}/?boot={json.load(r)['boot']}"
+
+
 def url():
     j = json.load(open(os.path.join(home, "service.json")))
-    return f"http://127.0.0.1:{j['port']}/?token={j['token']}"
+    return boot_url(j["port"], j["token"])
 
 
 def check(cond, what):

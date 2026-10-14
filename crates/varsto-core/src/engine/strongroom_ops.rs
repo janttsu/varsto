@@ -226,6 +226,9 @@ impl Engine {
         if self.vault.member {
             bail!("a member device cannot convert folders of the owner's vault");
         }
+        // The key and the wraps come from the caller (the command line): the
+        // key must be the one the wraps' commitment names.
+        info.verify_key(new_id, folder_key)?;
         let rec = self
             .keyring
             .find(folder)
@@ -1023,7 +1026,8 @@ impl Engine {
     ) -> Result<usize> {
         let n = keys.len();
         let updated = util::now_utc().max(info.updated_utc + 1);
-        let new_info = StrongroomInfo::from_keys(keys, updated)?;
+        let mut new_info = StrongroomInfo::from_keys(keys, updated)?;
+        new_info.check_hex = info.check_hex.clone();
         let mut new_rec = rec.clone();
         new_rec.strongroom = Some(new_info.clone());
         self.keyring

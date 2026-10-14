@@ -765,7 +765,7 @@ impl Engine {
                 if e.analysis.len() > ANALYSIS_MAX_BYTES || e.tags.len() > TAGS_MAX {
                     continue;
                 }
-                if util::check_rel_path(&path).is_err() {
+                if crate::names::check_synced_path(&path).is_err() {
                     continue;
                 }
                 if notes.entries.get(&path).is_none_or(|o| e.newer_than(o)) {

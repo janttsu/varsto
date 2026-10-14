@@ -903,6 +903,8 @@ impl Engine {
     }
 
     fn init_inner(home: &Path, device_name: &str, passphrase: &str) -> Result<(Engine, String)> {
+        crypto::check_passphrase(passphrase)?;
+        crate::names::check_display_name(device_name)?;
         ensure_no_vault(home)?;
         util::private_home(home)?;
         let keys = Keys {
@@ -989,6 +991,8 @@ impl Engine {
         secret: Option<String>,
         signer: Option<crypto::SigningKey>,
     ) -> Result<Engine> {
+        crypto::check_passphrase(passphrase)?;
+        crate::names::check_display_name(device_name)?;
         ensure_no_vault(home)?;
         let backend = storage.open_with(&|_| secret.clone())?;
         let meta_bytes = backend.get(VaultMeta::STORAGE_KEY)?.ok_or_else(|| {
@@ -1062,6 +1066,7 @@ impl Engine {
         bundle: &crate::pair::Bundle,
         signer: Option<crypto::SigningKey>,
     ) -> Result<(Engine, Vec<String>)> {
+        crate::names::check_display_name(device_name)?;
         let mut notes = Vec::new();
         let mut first = None;
         for (i, s) in bundle.storages.iter().enumerate() {
@@ -1295,6 +1300,8 @@ impl Engine {
         storage: StorageSpec,
         secret: Option<String>,
     ) -> Result<Engine> {
+        crypto::check_passphrase(passphrase)?;
+        crate::names::check_display_name(device_name)?;
         ensure_no_vault(home)?;
         let backend = storage.open_with(&|_| secret.clone())?;
         let meta: VaultMeta = serde_json::from_slice(
@@ -1747,6 +1754,7 @@ impl Engine {
     fn pool_identity(&self, name: &str) -> PoolIdentity {
         let k = self.root_key().derive("disk-pool", &[]);
         PoolIdentity {
+            marker_key: self.root_key().derive("disk-pool-marker", &[]),
             pool_id: hex::encode(&crypto::keyed_hash(&k, format!("pool:{name}").as_bytes())[..16]),
             vault_tag: hex::encode(
                 &crypto::keyed_hash(&k, format!("vault:{}", self.vault.vault_id).as_bytes())[..16],
@@ -5131,13 +5139,14 @@ impl Engine {
                 );
             }
         }
-        let tmp = disk.with_file_name(format!(".varsto-tmp-{}", std::process::id()));
+        let (tmp, tmp_file) = util::temp_beside(disk, "tmp")
+            .with_context(|| format!("create a temporary file for {}", disk.display()))?;
         if let Some(log) = &self.download_log {
             log.lock().unwrap().push(file.path.clone());
         }
         let progress = crate::progress::Download::begin(&rec.name, &file.path, file.size);
         {
-            let mut out = fs::File::create(&tmp)?;
+            let mut out = tmp_file;
             // No device holds a backup's blocks: storages only.
             let peers = if rec.is_backup() {
                 None
@@ -5295,6 +5304,10 @@ impl Engine {
                 }
             }
             out.sync_all()?;
+            // The mode the folder records, set on the open file before it
+            // becomes visible under its name (the metadata step after the
+            // rename sets it again and reports a failure).
+            util::set_final_mode(&out, file.meta.as_ref().and_then(|m| m.mode));
         }
         fsmeta::make_replaceable(disk);
         fs::rename(&tmp, disk)?;
@@ -5929,8 +5942,12 @@ impl Engine {
             bail!("{folder} is not a Strongroom folder");
         }
         let fk = SecretKey::from_hex(key_hex)?;
-        // Prove the key is right before accepting it: it must open the wrapped key's folder keys.
-        let _ = FolderKeys::from_folder_key(&rec.folder_id, fk.clone());
+        // Prove the key is right before accepting it: it must match the
+        // commitment published with the Strongroom.
+        rec.strongroom
+            .as_ref()
+            .ok_or_else(|| anyhow!("{folder} is not a Strongroom folder"))?
+            .verify_key(&rec.folder_id, &fk)?;
         self.unlocked.insert(
             rec.folder_id.clone(),
             (fk, util::now_utc() + minutes as i64 * 60),
@@ -6328,11 +6345,13 @@ impl Engine {
         if let Some(parent) = disk.parent() {
             fs::create_dir_all(parent)?;
         }
-        let tmp = disk.with_file_name(format!(".varsto-upload-{}", std::process::id()));
+        let (tmp, tmp_file) = util::temp_beside(&disk, "upload")
+            .with_context(|| format!("write {}", disk.display()))?;
         let written = (|| -> Result<()> {
-            let mut out = fs::File::create(&tmp)?;
+            let mut out = tmp_file;
             std::io::copy(&mut { reader }, &mut out)?;
             out.sync_all()?;
+            util::set_final_mode(&out, None);
             Ok(())
         })();
         if let Err(e) = written {
@@ -7199,6 +7218,21 @@ impl Engine {
             .filter(|s| s.is_data_only())
             .cloned()
             .collect()
+    }
+
+    /// Disks that carry a marker of one of this vault's pools but no valid
+    /// MAC: (pool, mount, label). They are not used until `varsto disk add`
+    /// takes them in.
+    pub fn unknown_pool_disks(&self) -> Vec<(String, PathBuf, String)> {
+        let mut out = Vec::new();
+        for spec in self.pool_specs() {
+            if let Ok(pool) = self.open_pool(&spec) {
+                for (mount, marker) in pool.unknown_disks() {
+                    out.push((spec.name().to_string(), mount, marker.label));
+                }
+            }
+        }
+        out
     }
 
     /// Every disk of every pool with its attached state and the bookkeeping

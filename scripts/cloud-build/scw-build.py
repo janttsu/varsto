@@ -354,7 +354,7 @@ def integration(args):
         # Peer-to-peer across the internet: both services advertise public addresses;
         # a second Linux device joins after the bucket's chunks are gone.
         subprocess.run(["rclone", "purge", f"scw:{bucket}/chunks"], env=env, check=False)
-        run_ssh("root", lip, "cd /it && b=$(ls -d /it/varsto-*/ | head -1)varsto && export VARSTO_PASSPHRASE=integration-test-passphrase VARSTO_S3_SECRET='" + secret + "' && $b --home /it/home2 join --name linux-2 --vault-key " + vault_key + f" --storage-name cloud --s3-endpoint {s3['S3_ENDPOINT']} --s3-region fr-par --s3-bucket {bucket} --s3-access-key-id {access} && mkdir -p /it/files2 && $b --home /it/home2 folder attach shared /it/files2 && $b --home /it/home2 p2p enable --port 17894 && $b --home /it/home2 p2p status && $b --home /it/home2 pull shared --json > /it/pull2.json; cat /it/pull2.json")
+        run_ssh("root", lip, "cd /it && b=$(ls -d /it/varsto-*/ | head -1)varsto && export VARSTO_PASSPHRASE=integration-test-passphrase VARSTO_S3_SECRET='" + secret + "' VARSTO_VAULT_KEY=" + vault_key + f" && $b --home /it/home2 join --name linux-2 --storage-name cloud --s3-endpoint {s3['S3_ENDPOINT']} --s3-region fr-par --s3-bucket {bucket} --s3-access-key-id {access} && mkdir -p /it/files2 && $b --home /it/home2 folder attach shared /it/files2 && $b --home /it/home2 p2p enable --port 17894 && $b --home /it/home2 p2p status && $b --home /it/home2 pull shared --json > /it/pull2.json; cat /it/pull2.json")
         pull2 = subprocess.run(ssh_base("root", lip) + ["cat /it/pull2.json"], capture_output=True, text=True).stdout
         try:
             pj = json.loads(pull2)

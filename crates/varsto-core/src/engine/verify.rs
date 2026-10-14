@@ -441,7 +441,13 @@ impl Engine {
         crate::parverify::run_ordered(
             &jobs,
             &plans,
-            |&i| readable_ref[&items_ref[i].4].get(&chunk_storage_key(&items_ref[i].2)),
+            |&i| {
+                let key = chunk_storage_key(&items_ref[i].2);
+                crate::storage::guarded(&key, || {
+                    readable_ref[&items_ref[i].4]
+                        .get_bounded(&key, crate::storage::MAX_BLOCK_OBJECT)
+                })
+            },
             |_, got| got.map(|ct| ct.map(|ct| (ct.len() as u64, crypto::hash(&ct)))),
             |_, &i, got| {
                 task.advance(1);

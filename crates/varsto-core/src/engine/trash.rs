@@ -375,7 +375,7 @@ pub(super) fn entry_valid(e: &TrashEntry, folder: &FolderId, writer: &DeviceId) 
     if &e.deleted_by != writer || e.id != entry_id(folder, &e.path, writer, e.clock) {
         return false;
     }
-    if util::check_rel_path(&e.path).is_err() {
+    if crate::names::check_synced_path(&e.path).is_err() {
         return false;
     }
     let mut total: u64 = 0;

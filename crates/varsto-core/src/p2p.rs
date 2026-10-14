@@ -353,6 +353,55 @@ pub struct Server {
 const CONN_IDLE: Duration = Duration::from_secs(30);
 const MAX_CONNS: usize = 256;
 const MAX_HEAD: usize = 16 * 1024;
+/// A request head must arrive whole within this long of its first byte, and
+/// a new connection must start one within this long of being accepted
+/// (a slow trickle of bytes held a thread for the whole idle time).
+const HEAD_DEADLINE: Duration = Duration::from_secs(5);
+/// Connections of one address that sit with an unfinished request head.
+const MAX_HEADS_PER_IP: usize = 8;
+
+/// Connections per address that hold a request head that has begun but not
+/// ended: an address over the limit has the next one closed at once. A
+/// complete head normally arrives in one piece, so a peer that opens many
+/// parallel connections (the fetch window is 32) is never held back; a
+/// trickle of bytes (a slowloris) fills the few slots and the 5 second
+/// deadline empties them.
+#[derive(Default)]
+struct PerIp {
+    heads: Mutex<std::collections::HashMap<std::net::IpAddr, usize>>,
+}
+
+struct HeadSlot {
+    owner: Arc<PerIp>,
+    ip: std::net::IpAddr,
+}
+
+impl PerIp {
+    fn enter(self: &Arc<Self>, ip: std::net::IpAddr) -> Option<HeadSlot> {
+        let mut m = self.heads.lock().unwrap();
+        let n = m.entry(ip).or_insert(0);
+        if *n >= MAX_HEADS_PER_IP {
+            return None;
+        }
+        *n += 1;
+        Some(HeadSlot {
+            owner: self.clone(),
+            ip,
+        })
+    }
+}
+
+impl Drop for HeadSlot {
+    fn drop(&mut self) {
+        let mut m = self.owner.heads.lock().unwrap();
+        if let Some(n) = m.get_mut(&self.ip) {
+            *n -= 1;
+            if *n == 0 {
+                m.remove(&self.ip);
+            }
+        }
+    }
+}
 
 /// Counting semaphore for the expensive part of an answer.
 struct Slots {
@@ -410,6 +459,7 @@ impl Server {
             cv: std::sync::Condvar::new(),
         });
         let open = Arc::new(AtomicUsize::new(0));
+        let heads = Arc::new(PerIp::default());
         if self.listener.set_nonblocking(true).is_err() {
             return;
         }
@@ -429,12 +479,13 @@ impl Server {
                 continue; // dropped: closed at once
             }
             open.fetch_add(1, Ordering::Relaxed);
-            let (snapshot, stop, slots, conns, traffic) = (
+            let (snapshot, stop, slots, conns, traffic, heads) = (
                 snapshot.clone(),
                 stop.clone(),
                 slots.clone(),
                 open.clone(),
                 self.traffic.clone(),
+                heads.clone(),
             );
             let spawned = std::thread::Builder::new()
                 .name("p2p-conn".into())
@@ -447,7 +498,8 @@ impl Server {
                         }
                     }
                     let _done = Done(conns);
-                    let _ = serve_connection(sock, remote, &snapshot, &stop, &slots, &traffic);
+                    let _ =
+                        serve_connection(sock, remote, &snapshot, &stop, &slots, &traffic, &heads);
                 });
             if spawned.is_err() {
                 open.fetch_sub(1, Ordering::Relaxed);
@@ -466,6 +518,7 @@ fn serve_connection(
     stop: &std::sync::atomic::AtomicBool,
     slots: &Slots,
     traffic: &Traffic,
+    heads: &Arc<PerIp>,
 ) -> Result<()> {
     sock.set_nonblocking(false)?;
     sock.set_nodelay(true)?;
@@ -474,8 +527,13 @@ fn serve_connection(
     let mut buf: Vec<u8> = Vec::with_capacity(4096);
     let mut chunk = [0u8; 4096];
     let mut idle_since = Instant::now();
+    let mut first_request = true;
+    let mut head_slot: Option<HeadSlot> = None;
     loop {
-        // One request head (GET only, no body).
+        // One request head (GET only, no body). From its first byte it has
+        // `HEAD_DEADLINE` to arrive; a connection that never starts one is
+        // given the same time at first and `CONN_IDLE` between requests.
+        let mut head_since: Option<Instant> = (!buf.is_empty()).then(Instant::now);
         let end = loop {
             if let Some(i) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
                 break i;
@@ -483,12 +541,28 @@ fn serve_connection(
             if buf.len() > MAX_HEAD {
                 return Ok(());
             }
-            if stop.load(std::sync::atomic::Ordering::Relaxed) || idle_since.elapsed() > CONN_IDLE {
+            let too_slow = match head_since {
+                Some(t) => t.elapsed() > HEAD_DEADLINE,
+                None if first_request => idle_since.elapsed() > HEAD_DEADLINE,
+                None => idle_since.elapsed() > CONN_IDLE,
+            };
+            if stop.load(std::sync::atomic::Ordering::Relaxed) || too_slow {
                 return Ok(());
             }
             match sock.read(&mut chunk) {
                 Ok(0) => return Ok(()),
-                Ok(n) => buf.extend_from_slice(&chunk[..n]),
+                Ok(n) => {
+                    head_since.get_or_insert_with(Instant::now);
+                    buf.extend_from_slice(&chunk[..n]);
+                    // A head that has begun and is not whole holds a slot of
+                    // its address until it is.
+                    if head_slot.is_none() && !buf.windows(4).any(|w| w == b"\r\n\r\n") {
+                        head_slot = heads.enter(remote.ip());
+                        if head_slot.is_none() {
+                            return Ok(()); // too many unfinished heads from this address
+                        }
+                    }
+                }
                 Err(e)
                     if matches!(
                         e.kind(),
@@ -497,6 +571,9 @@ fn serve_connection(
                 Err(e) => return Err(e.into()),
             }
         };
+        // A whole head arrived: the slot, if it held one, is free again.
+        drop(head_slot.take());
+        first_request = false;
         let head = String::from_utf8_lossy(&buf[..end]).to_string();
         buf.drain(..end + 4);
         let mut lines = head.split("\r\n");
@@ -1824,6 +1901,73 @@ mod tests {
         let text = String::from_utf8_lossy(&raw);
         assert!(text.starts_with("HTTP/1.1 503 "), "{text}");
         assert!(text.ends_with("\r\n\r\nlocked"), "{text}");
+        stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        th.join().unwrap();
+    }
+
+    #[test]
+    fn unfinished_request_heads_are_limited_and_time_out() {
+        // The limit per address, on its own.
+        let heads = Arc::new(PerIp::default());
+        let ip: std::net::IpAddr = "192.0.2.7".parse().unwrap();
+        let held: Vec<_> = (0..MAX_HEADS_PER_IP)
+            .map(|_| heads.enter(ip).unwrap())
+            .collect();
+        assert!(heads.enter(ip).is_none(), "the ninth is refused");
+        assert!(heads.enter("192.0.2.8".parse().unwrap()).is_some());
+        drop(held);
+        assert!(heads.enter(ip).is_some(), "slots are given back");
+
+        // Against a real listener.
+        let server = Server::bind("127.0.0.1:0".parse().unwrap()).unwrap();
+        let addr = server.addr;
+        let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let snap: Arc<Mutex<Option<Arc<Snapshot>>>> = Arc::default();
+        let (s2, st2) = (snap.clone(), stop.clone());
+        let th = std::thread::spawn(move || server.run(s2, st2));
+        // Eight connections begin a head and stop: they fill the slots.
+        let trickling: Vec<TcpStream> = (0..MAX_HEADS_PER_IP)
+            .map(|_| {
+                let mut s = TcpStream::connect(addr).unwrap();
+                s.write_all(b"GET /p2p/info HT").unwrap();
+                s
+            })
+            .collect();
+        std::thread::sleep(Duration::from_millis(400));
+        // A ninth one that begins a head is closed at once ...
+        let mut b = [0u8; 8];
+        let mut ninth = TcpStream::connect(addr).unwrap();
+        ninth.write_all(b"GET /p2p").unwrap();
+        ninth
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
+        assert_eq!(ninth.read(&mut b).unwrap_or(0), 0, "dropped, not served");
+        // ... while an ordinary request, whole in one piece, is answered.
+        let pool = TcpPool::default();
+        let (status, _) = pool
+            .get(addr, "/p2p/info", "x", Duration::from_secs(2))
+            .unwrap();
+        assert_eq!(status, 503);
+        // The trickling ones are closed at the deadline, not after the idle time.
+        let started = Instant::now();
+        let first = &trickling[0];
+        first
+            .set_read_timeout(Some(HEAD_DEADLINE + Duration::from_secs(4)))
+            .unwrap();
+        assert_eq!((&*first).read(&mut b).unwrap_or(0), 0);
+        assert!(
+            started.elapsed() < HEAD_DEADLINE + Duration::from_secs(3),
+            "closed after {:?}",
+            started.elapsed()
+        );
+        // A connection that never sends a byte is closed at the deadline too.
+        let mut mute = TcpStream::connect(addr).unwrap();
+        mute.set_read_timeout(Some(HEAD_DEADLINE + Duration::from_secs(4)))
+            .unwrap();
+        let started = Instant::now();
+        assert_eq!(mute.read(&mut b).unwrap_or(0), 0);
+        assert!(started.elapsed() < HEAD_DEADLINE + Duration::from_secs(3));
+        drop(trickling);
         stop.store(true, std::sync::atomic::Ordering::Relaxed);
         th.join().unwrap();
     }

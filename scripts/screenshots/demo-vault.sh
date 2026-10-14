@@ -33,7 +33,7 @@ v "$laptop" folder add Documents "$H/Documents"
 v "$laptop" folder add Photos "$H/Photos"
 v "$laptop" sync
 v "$laptop" policy set Photos --min-copies 1 --place home=1
-v "$phone" join --name phone --vault-key "$key" --storage-path "$H/Varsto-box"
+VARSTO_VAULT_KEY="$key" v "$phone" join --name phone --storage-path "$H/Varsto-box"
 v "$phone" folder attach Photos "$H/phone/Photos" --selective
 v "$phone" pull Photos
 v "$phone" folder fetch Photos lake.jpg

@@ -16,7 +16,52 @@ spec still names them because sections were written as the work was done.
 
 ## Unreleased
 
-On `main` after 0.0.1-alpha.13; spec sections 32 to 59.
+On `main` after 0.0.1-alpha.13; spec sections 32 to 60.
+
+### Hardening
+
+- The STUN side channel of the peer socket is bounded and only accepts the
+  answer to an open request (spec 60).
+- The browser opens the interface with a one-time start code instead of the
+  session token; the token is accepted in headers only; downloads and the
+  viewer use per-file tickets; API answers are never cached (spec 60).
+- Strongroom: a key given by hand must match the key commitment published
+  with the folder (`check_hex`), and the libfido2 tools always ask for the
+  PIN (`strongroom --uv` also requires user verification) (spec 17, 60).
+- Device passphrases need at least 12 characters, and no secret is taken from
+  the command line any more: `join --vault-key/--words`,
+  `--s3-secret-access-key`, `storage add-s3 --secret-access-key`,
+  `mcp --key`, the shares of `recovery combine` and `org admin --root-words`
+  are replaced by prompts, files, environment variables and standard input;
+  the macOS keychain gets the passphrase on standard input (spec 28, 60).
+- Updater: the manifest must be signed (`manifest.json.minisig`), a signed
+  list older than the last accepted one is refused, the GitHub cross-check is
+  required unless `update --allow-single-source` is given, and a version not
+  newer than the running binary is never installed (spec 60).
+- Reads from storages are bounded (a chunk at most 16 MiB and 64 bytes, a
+  record 256 MiB, S3 and rclone refuse longer answers before reading them),
+  pack indexes are validated, and a panic while checking one object ends only
+  that object (spec 60).
+- restic repository logins (`rest:https://user:password@host`) are cut from
+  logs, status and the kit note, the password command shows its first word
+  only, and a support bundle carries a redacted `config.json` (spec 60).
+- MCP: a key's last use is kept apart from the keys, so a use cannot undo a
+  revocation; `varsto mcp` needs a key while the service runs; a scoped key
+  sees only its folders in `/api/status` (spec 60).
+- Names of devices and people cannot hold control, zero-width or direction
+  characters (checked when made and when read from a code), and the command
+  line shows names escaped (spec 60).
+- Disk pool markers carry a MAC under the vault's key: a disk that only
+  repeats the public fields is not adopted and gets no writes until
+  `varsto disk add` takes it in (spec 60).
+- Peer transport: a router mapping is published only after our own probe
+  reached us, TCP request heads have a 5 second deadline and an address may
+  hold at most 8 unfinished ones, QUIC has limits on incoming connections
+  and streams (spec 60).
+- Temporary files beside a folder's files are created exclusively under a
+  random name with mode 0600, and manifests, trash records and notes cannot
+  name Varsto's own files (`.varsto*`, `.varsto-placeholder`, `.varsto-link`).
+- A malformed `%` escape in a request no longer kills the API worker thread.
 
 ### Added
 

@@ -357,8 +357,8 @@ class Bench:
             h = homes[r]
             # Leftovers of an aborted run: stop its service first.
             self.ssh(r, "for h in /bench/h-*; do [ -f $h/service.json ] && bash /bench/bench-node.sh svc-stop $h >/dev/null; done; true")
-            self.ssh(r, f"rm -rf /bench/h-* /bench/r-*; {self.secret_env()} VARSTO_PASSPHRASE=bench-passphrase /bench/varsto --home {h} join "
-                        f"--name {r}-{tag} --vault-key {self.state['vault_key']} {self.s3_flags()} > /dev/null")
+            self.ssh(r, f"rm -rf /bench/h-* /bench/r-*; {self.secret_env()} VARSTO_PASSPHRASE=bench-passphrase VARSTO_VAULT_KEY={self.state['vault_key']} /bench/varsto --home {h} join "
+                        f"--name {r}-{tag} {self.s3_flags()} > /dev/null")
             # Automatic verification would download (and repair) blocks in the
             # background while the run is measured: off for the benchmark devices.
             self.ssh(r, f"VARSTO_PASSPHRASE=bench-passphrase /bench/varsto --home {h} verify set --off >/dev/null")

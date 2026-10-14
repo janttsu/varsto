@@ -10,7 +10,7 @@ here="$(cd "$(dirname "$0")" && pwd)"
 # Never publish a checksum list the updater would refuse.
 if [ -f "$here/public/downloads/SHA256SUMS" ]; then
   "$here/../scripts/sign-release.sh" --verify "$here/public/downloads/SHA256SUMS" \
-    || { echo "SHA256SUMS is not signed with the release key; run scripts/sign-release.sh first" >&2; exit 1; }
+    || { echo "SHA256SUMS or manifest.json is not signed with the release key; run scripts/sign-release.sh first" >&2; exit 1; }
 fi
 # Without a local download set (a fresh checkout deploying a page or a
 # screenshot), leave the server's downloads alone instead of deleting them.

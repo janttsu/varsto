@@ -10,6 +10,7 @@ Needs `pip install playwright pillow` and `playwright install chromium`
 desktop-overview-*, desktop-files-*, desktop-organization-*, mobile-* (light and dark).
 """
 import json
+import urllib.request
 import os
 import sys
 import time
@@ -26,9 +27,18 @@ raw = os.path.join(out, "raw")
 os.makedirs(raw, exist_ok=True)
 
 
+def boot_url(port, token):
+    """The address that opens the interface: a one-time code, not the token."""
+    req = urllib.request.Request(
+        f"http://127.0.0.1:{port}/api/session/boot", data=b"{}", method="POST",
+        headers={"X-Varsto-Token": token, "Content-Type": "application/json"})
+    with urllib.request.urlopen(req) as r:
+        return f"http://127.0.0.1:{port}/?boot={json.load(r)['boot']}"
+
+
 def url(dev):
     j = json.load(open(os.path.join(work, f"{dev}.json")))
-    return f"http://127.0.0.1:{j['port']}/?token={j['token']}"
+    return boot_url(j["port"], j["token"])
 
 
 # Desktop rows use img.thumb; the compact phone list puts them in .mrow-thumb.

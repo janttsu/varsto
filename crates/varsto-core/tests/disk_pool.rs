@@ -434,6 +434,7 @@ fn index_files_are_written_and_eject_says_where() {
             vault_tag: "2".repeat(32),
             created_utc: 0,
             format: 1,
+            mac_hex: String::new(),
         })
         .unwrap(),
     )
@@ -898,4 +899,58 @@ fn bookkeeping_follows_add_check_fill_and_eject_and_the_overdue_disk_is_suggeste
     // The cheap listing carries the file system check as well.
     let cheap = a.disks().unwrap();
     assert!(cheap.iter().any(|d| d.label == "Blue 4TB" && d.failing));
+}
+
+#[test]
+fn a_disk_with_a_copied_marker_is_not_adopted_until_the_user_adds_it() {
+    let lab = Lab::new();
+    let d1 = lab.mount("d1", 50 * GIB, 100 * GIB);
+    let (mut a, vault_key) = engine(&lab.root.join("a-home"), "laptop");
+    a.add_storage(lab.box_spec()).unwrap();
+    a.add_storage(lab.pool_spec("shelf")).unwrap();
+    a.disk_add(&d1, "shelf", "data-01").unwrap();
+    // Anyone who holds the disk can read its marker, which has no secret in
+    // it, and put the same fields on another disk under an id of their own.
+    let forged = lab.mount("forged", 80 * GIB, 100 * GIB);
+    let mut m = DiskMarker::read(&d1).unwrap();
+    m.disk_id = "f".repeat(32);
+    m.label = "data-02".into();
+    m.mac_hex.clear();
+    fs::create_dir_all(forged.join("varsto")).unwrap();
+    fs::write(DiskMarker::path(&forged), serde_json::to_vec(&m).unwrap()).unwrap();
+    drop(a);
+
+    // Another device of the vault sees the real disk and not the forged one:
+    // it would otherwise be the favourite write target (most free space).
+    let mut b = Engine::join(
+        &lab.root.join("b-home"),
+        "desk",
+        PASS,
+        &vault_key,
+        lab.box_spec(),
+    )
+    .unwrap();
+    b.chunker = ChunkerParams::SMALL;
+    b.add_storage(lab.pool_spec("shelf")).unwrap();
+    let labels: Vec<String> = b.disks().unwrap().into_iter().map(|d| d.label).collect();
+    assert_eq!(labels, ["data-01"]);
+    let unknown = b.unknown_pool_disks();
+    assert_eq!(unknown.len(), 1, "{unknown:?}");
+    assert_eq!(unknown[0].0, "shelf");
+    assert_eq!(unknown[0].2, "data-02");
+    let docs = lab.root.join("b-docs");
+    fs::create_dir_all(&docs).unwrap();
+    fs::write(docs.join("x.bin"), pseudo_random(50_000, 3)).unwrap();
+    b.add_folder("docs", &docs).unwrap();
+    b.push("docs").unwrap();
+    assert!(
+        objects_under(&forged).is_empty(),
+        "nothing is written to it"
+    );
+    assert!(!objects_under(&d1).is_empty());
+    // The user can take it in on purpose; it then has a MAC of the vault.
+    b.disk_add(&forged, "shelf", "data-02").unwrap();
+    assert!(b.unknown_pool_disks().is_empty());
+    assert!(!DiskMarker::read(&forged).unwrap().mac_hex.is_empty());
+    assert_eq!(b.disks().unwrap().len(), 2);
 }

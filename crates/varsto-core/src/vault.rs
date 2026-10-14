@@ -402,9 +402,7 @@ impl ShareRequest {
         };
         let name = name.map(|n| n.trim().to_string());
         if let Some(n) = &name {
-            if n.contains(['\n', '\r']) {
-                bail!("the name must be on one line");
-            }
+            crate::names::check_display_name(n)?;
         }
         let changed = !path.exists() || name.as_ref().is_some_and(|n| *n != r.name);
         if let Some(n) = name {
@@ -444,6 +442,7 @@ impl ShareRequest {
         let (hex_part, name) = rest.split_once('.').unwrap_or((rest, ""));
         let key = crate::kem::EncapsKey::from_bytes(&hex::decode(hex_part)?)?;
         let name = name.trim().to_string();
+        crate::names::check_display_name(&name)?;
         Ok(RequestCode {
             fingerprint: crate::share::fingerprint(&key, &name),
             key,
@@ -797,6 +796,7 @@ impl Keys {
         vault: &VaultId,
         device: &DeviceId,
     ) -> Result<()> {
+        crypto::check_passphrase(passphrase)?;
         let params = PassphraseParams::new();
         let wrap = crypto::passphrase_key(passphrase, &params)?;
         let material = KeyMaterial {
@@ -1638,6 +1638,23 @@ impl Config {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn request_codes_with_control_or_direction_characters_are_refused() {
+        let key = hex::encode(crate::kem::DecapsKey::generate().public().to_bytes());
+        assert!(ShareRequest::parse(&format!("vsr1.{key}.Ville")).is_ok());
+        for bad in ["x\u{1b}[2Ay", "a\u{202e}b", "a\u{200b}b", "tab\there"] {
+            let e = ShareRequest::parse(&format!("vsr1.{key}.{bad}"))
+                .err()
+                .unwrap();
+            assert!(format!("{e:#}").contains("name"), "{bad:?}: {e:#}");
+        }
+        let dir = tempfile::tempdir().unwrap();
+        for bad in ["x\u{1b}[2Ay", "a\u{202e}b"] {
+            assert!(ShareRequest::code_for_named(dir.path(), Some(bad)).is_err());
+        }
+        assert!(ShareRequest::code_for_named(dir.path(), Some("Ville")).is_ok());
+    }
 
     #[test]
     fn debug_output_shows_no_key_material() {

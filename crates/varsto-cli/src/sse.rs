@@ -3,9 +3,8 @@
 //! Server-Sent Events, so that the interface follows syncs, tasks,
 //! transfers, peers and changes instead of asking every few seconds.
 //!
-//! The session token comes in the `X-Varsto-Token` header or, for the
-//! browser's `EventSource` (which cannot set headers), as `?token=` like
-//! the viewer's links. A client that reconnects sends `Last-Event-ID` (or
+//! The session token comes in the `X-Varsto-Token` or `Authorization`
+//! header (never in the address; the page reads the stream with `fetch`). A client that reconnects sends `Last-Event-ID` (or
 //! `?last_id=`) and gets what it missed from the ring, or a `reset` event
 //! when it fell too far behind. A comment line goes out every 15 seconds
 //! when nothing else did, so that proxies and the browser keep the

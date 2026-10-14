@@ -324,12 +324,29 @@ class MainActivity : AppCompatActivity() {
                 false
             }
             if (ok) AppLog.i("activity", "service answered after $attempts attempt(s): loading the interface")
+            // The page opens with a one-time start code, not the session token.
+            val bootUrl = if (!ok) null else try {
+                val c = URL(url.substringBefore("/?") + "/api/session/boot").openConnection() as HttpURLConnection
+                c.requestMethod = "POST"
+                c.connectTimeout = 500
+                c.readTimeout = 1000
+                c.setRequestProperty("X-Varsto-Token", url.substringAfter("token="))
+                c.setRequestProperty("Content-Type", "application/json")
+                c.doOutput = true
+                c.outputStream.use { it.write("{}".toByteArray()) }
+                val code = org.json.JSONObject(c.inputStream.bufferedReader().readText()).getString("boot")
+                c.disconnect()
+                url.substringBefore("/?") + "/?boot=" + code
+            } catch (e: Exception) {
+                AppLog.d("activity", "no start code", e)
+                null
+            }
             handler.post {
-                if (ok) {
+                if (ok && bootUrl != null) {
                     // A link the app was opened with rides along as #link=; the page takes it.
                     val link = pendingLink
                     pendingLink = null
-                    web.loadUrl(if (link == null) url else url + "#link=" + Uri.encode(link))
+                    web.loadUrl(if (link == null) bootUrl else bootUrl + "#link=" + Uri.encode(link))
                 } else retry()
             }
         }.start()

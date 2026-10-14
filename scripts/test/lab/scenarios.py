@@ -36,7 +36,9 @@ PASS_ = "lab-passphrase-1234"
 # `pair offer`, ...) starts with ENV, so VARSTO_LOG reaches all of them. The
 # value comes from the host's VARSTO_LOG when set (e.g. "trace").
 LOG_LEVEL = os.environ.get("VARSTO_LOG") or "debug"
-ENV = f"VARSTO_PASSPHRASE={PASS_} VARSTO_NO_INSTALL=1 VARSTO_LOG={shlex.quote(LOG_LEVEL)}"
+# Secrets travel in the environment, never on the command line: the S3 secret
+# for every command, the vault key per `join` (see v(..., env=)).
+ENV = f"VARSTO_PASSPHRASE={PASS_} VARSTO_NO_INSTALL=1 VARSTO_LOG={shlex.quote(LOG_LEVEL)} VARSTO_S3_SECRET={shlex.quote(lab.S3['secret'])}"
 REPO = pathlib.Path(__file__).resolve().parents[3]
 LOGS_DIR = REPO / "test-results" / "lab" / "logs"
 BUCKET = "vault1"
@@ -60,9 +62,10 @@ def run(vm, cmd, check_rc=True, timeout_note=""):
     return r
 
 
-def v(vm, args, json_out=True, check_rc=True):
-    """Run varsto on a VM; parsed JSON (or text) out."""
-    cmd = f"{ENV} varsto {'--json ' if json_out else ''}{args}"
+def v(vm, args, json_out=True, check_rc=True, env=""):
+    """Run varsto on a VM; parsed JSON (or text) out. `env` adds variables
+    (a vault key for `join`) to this one command."""
+    cmd = f"{ENV} {env} varsto {'--json ' if json_out else ''}{args}"
     r = run(vm, cmd, check_rc=check_rc)
     out = r.stdout.strip()
     if not check_rc and r.returncode != 0:
@@ -173,7 +176,7 @@ def s_init():
     check(len(out["vault_key"]) == 64, "no vault key")
     CTX["vault_key"] = out["vault_key"]
     v("vl-laptop", f"storage add-s3 cloud --insecure-http --endpoint {lab.S3['endpoint']} --region us-east-1 --bucket {BUCKET} "
-                    f"--access-key-id {lab.S3['key']} --secret-access-key {lab.S3['secret']} --place cloud", json_out=False)
+                    f"--access-key-id {lab.S3['key']} --place cloud", json_out=False)
     gen_data("vl-laptop", "/home/varsto/data/docs", seed=1)
     v("vl-laptop", "folder add docs /home/varsto/data/docs", json_out=False)
     push = v("vl-laptop", "push docs")
@@ -227,8 +230,8 @@ def s_words():
     kit = v("vl-laptop", "recovery kit", json_out=False)
     words = " ".join(re.findall(r"\d+\. (\w+)", kit.split("SHARES")[0]))
     check(len(words.split()) == 24, f"kit has {len(words.split())} words")
-    out = v("vl-pub", f"join --name pub --words {shlex.quote(words)} --s3-bucket {BUCKET} --s3-endpoint {lab.S3['endpoint']} --s3-insecure-http "
-                      f"--s3-access-key-id {lab.S3['key']} --s3-secret-access-key {lab.S3['secret']} --storage-name cloud")
+    out = v("vl-pub", f"join --name pub --s3-bucket {BUCKET} --s3-endpoint {lab.S3['endpoint']} --s3-insecure-http "
+                      f"--s3-access-key-id {lab.S3['key']} --storage-name cloud", env=f"VARSTO_VAULT_KEY={shlex.quote(words)}")
     check("docs" in out.get("folders", []), f"pub sees {out}")
     v("vl-pub", "folder attach docs /home/varsto/data/docs", json_out=False)
     v("vl-pub", "sync")
@@ -238,7 +241,8 @@ def s_words():
     shares = re.findall(r"Share (\d+):\n((?:[ \t]*\d+\. \w+[ \t]*\n?)+)", kit)
     check(len(shares) == 3, "no three shares")
     enc = [f"{i}: " + " ".join(re.findall(r"\d+\. (\w+)", body)) for i, body in shares]
-    out = v("vl-laptop", f"recovery combine {shlex.quote(enc[0])} {shlex.quote(enc[2])}", json_out=False)
+    # The shares come on standard input, not on the command line.
+    out = run("vl-laptop", f"printf '%s\\n' {shlex.quote(enc[0])} {shlex.quote(enc[2])} | {ENV} varsto recovery combine").stdout
     check(CTX["vault_key"] in out or "vault key:" in out, "combine failed: " + out[:200])
 
 
@@ -399,8 +403,8 @@ def s_revoke():
     v("vl-desktop", "sync")
     check(run("vl-desktop", "cat ~/data/docs/after2.txt").stdout.strip() == "secret-after-revoke", "desktop missing new data")
     # A new device cannot join with the old key, but can with the current one.
-    old = v("vl-work", f"join --name w2 --vault-key {CTX['vault_key']} --s3-bucket {BUCKET} --s3-endpoint {lab.S3['endpoint']} --s3-insecure-http "
-                       f"--s3-access-key-id {lab.S3['key']} --s3-secret-access-key {lab.S3['secret']}", check_rc=False)
+    old = v("vl-work", f"join --name w2 --s3-bucket {BUCKET} --s3-endpoint {lab.S3['endpoint']} --s3-insecure-http "
+                       f"--s3-access-key-id {lab.S3['key']}", check_rc=False, env=f"VARSTO_VAULT_KEY={shlex.quote(CTX['vault_key'])}")
     check(isinstance(old, dict) and old.get("_failed"), "joined with a key from before the revocation")
 
 
@@ -447,15 +451,15 @@ def s_p2p_setup():
     v("vl-laptop", "init --name laptop", json_out=True)
     key = v("vl-laptop", "recovery kit", json_out=False)
     v("vl-laptop", f"storage add-s3 cloud --insecure-http --endpoint {lab.S3['endpoint']} --region us-east-1 --bucket {BUCKET} "
-                    f"--access-key-id {lab.S3['key']} --secret-access-key {lab.S3['secret']} --place cloud", json_out=False)
+                    f"--access-key-id {lab.S3['key']} --place cloud", json_out=False)
     run("vl-laptop", f"mkdir -p ~/data/media && head -c {P2P_MB << 20} /dev/urandom > ~/data/media/big.bin")
     v("vl-laptop", "folder add media /home/varsto/data/media", json_out=False)
     v("vl-laptop", "push media")
     CTX["p2p_sha"] = run("vl-laptop", "sha256sum ~/data/media/big.bin").stdout.split()[0]
     words = " ".join(re.findall(r"\d+\. (\w+)", key.split("SHARES")[0]))
     for vm, name in (("vl-desktop", "desktop"), ("vl-pub", "pub"), ("vl-work", "work")):
-        v(vm, f"join --name {name} --words {shlex.quote(words)} --s3-bucket {BUCKET} --s3-endpoint {lab.S3['endpoint']} --s3-insecure-http "
-              f"--s3-access-key-id {lab.S3['key']} --s3-secret-access-key {lab.S3['secret']} --storage-name cloud")
+        v(vm, f"join --name {name} --s3-bucket {BUCKET} --s3-endpoint {lab.S3['endpoint']} --s3-insecure-http "
+              f"--s3-access-key-id {lab.S3['key']} --storage-name cloud", env=f"VARSTO_VAULT_KEY={shlex.quote(words)}")
     stun = " ".join(f"--stun {x}" for x in lab.STUN)
     for vm in lab.DEVICES:
         extra = " --public 198.51.100.20:17893" if vm == "vl-pub" else ""
@@ -543,7 +547,7 @@ def s_share():
     check(token, "no sealed token: " + tok[-300:])
     out = v("vl-work", f"{home} share accept --name ville-pc --token {shlex.quote(token.group(1))} --storage-name owner "
                        f"--s3-bucket {BUCKET} --s3-endpoint {lab.S3['endpoint']} --s3-insecure-http --s3-access-key-id {lab.S3['key']} "
-                       f"--s3-secret-access-key {lab.S3['secret']}", json_out=False)
+                       "", json_out=False)
     check("joined shared folder media" in out, out[-300:])
     v("vl-laptop", "push media", check_rc=False)
     v("vl-work", f"{home} folder attach media /home/varsto/shared", json_out=False)
@@ -931,14 +935,14 @@ def s_mixed():
     out = v9("vl-laptop", "init --name laptop")
     key = out["vault_key"]
     v9("vl-laptop", f"storage add-s3 cloud --insecure-http --endpoint {lab.S3['endpoint']} --region us-east-1 --bucket {BUCKET} "
-                     f"--access-key-id {lab.S3['key']} --secret-access-key {lab.S3['secret']} --place cloud", json_out=False)
+                     f"--access-key-id {lab.S3['key']} --place cloud", json_out=False)
     gen_data("vl-laptop", "/home/varsto/data/docs", seed=9, big_mb=2, small=20)
     v9("vl-laptop", "folder add docs /home/varsto/data/docs", json_out=False)
     v9("vl-laptop", "push docs")
     s3 = (f"--s3-bucket {BUCKET} --s3-endpoint {lab.S3['endpoint']} --s3-insecure-http --s3-access-key-id {lab.S3['key']} "
-          f"--s3-secret-access-key {lab.S3['secret']} --storage-name cloud")
-    v("vl-desktop", f"join --name desktop --vault-key {key} {s3}")
-    v("vl-pub", f"join --name pub --vault-key {key} {s3}")
+          "--storage-name cloud")
+    v("vl-desktop", f"join --name desktop {s3}", env=f"VARSTO_VAULT_KEY={shlex.quote(key)}")
+    v("vl-pub", f"join --name pub {s3}", env=f"VARSTO_VAULT_KEY={shlex.quote(key)}")
     for vm in ("vl-desktop", "vl-pub"):
         v(vm, "folder attach docs /home/varsto/data/docs", json_out=False)
         v(vm, "sync")
@@ -972,7 +976,7 @@ def s_mixed():
     # And the other way round: alpha.9 removes a device the new version knows.
     kit = v("vl-desktop", "recovery kit", json_out=False)
     words = " ".join(re.findall(r"\d+\. (\w+)", kit.split("SHARES")[0]))
-    v("vl-work", f"join --name work --words {shlex.quote(words)} {s3}")
+    v("vl-work", f"join --name work {s3}", env=f"VARSTO_VAULT_KEY={shlex.quote(words)}")
     v9("vl-laptop", "sync")
     v9("vl-laptop", "device revoke work --yes", json_out=False)
     v("vl-desktop", "sync")
@@ -1000,14 +1004,14 @@ def fresh_pair():
     s_reset()
     v("vl-laptop", "init --name laptop")
     v("vl-laptop", f"storage add-s3 cloud --insecure-http --endpoint {lab.S3['endpoint']} --region us-east-1 --bucket {BUCKET} "
-                    f"--access-key-id {lab.S3['key']} --secret-access-key {lab.S3['secret']} --place cloud", json_out=False)
+                    f"--access-key-id {lab.S3['key']} --place cloud", json_out=False)
     gen_data("vl-laptop", "/home/varsto/data/docs", seed=5, big_mb=4, small=40)
     v("vl-laptop", "folder add docs /home/varsto/data/docs", json_out=False)
     v("vl-laptop", "push docs")
     kit = v("vl-laptop", "recovery kit", json_out=False)
     words = " ".join(re.findall(r"\d+\. (\w+)", kit.split("SHARES")[0]))
-    v("vl-desktop", f"join --name desktop --words {shlex.quote(words)} --s3-bucket {BUCKET} --s3-endpoint {lab.S3['endpoint']} --s3-insecure-http "
-                    f"--s3-access-key-id {lab.S3['key']} --s3-secret-access-key {lab.S3['secret']} --storage-name cloud")
+    v("vl-desktop", f"join --name desktop --s3-bucket {BUCKET} --s3-endpoint {lab.S3['endpoint']} --s3-insecure-http "
+                    f"--s3-access-key-id {lab.S3['key']} --storage-name cloud", env=f"VARSTO_VAULT_KEY={shlex.quote(words)}")
     v("vl-desktop", "folder attach docs /home/varsto/data/docs", json_out=False)
     v("vl-desktop", "sync")
 
@@ -1138,7 +1142,7 @@ def s_scale():
     s_reset()
     v("vl-laptop", "init --name laptop")
     v("vl-laptop", f"storage add-s3 cloud --insecure-http --endpoint {lab.S3['endpoint']} --region us-east-1 --bucket {BUCKET} "
-                    f"--access-key-id {lab.S3['key']} --secret-access-key {lab.S3['secret']} --place cloud", json_out=False)
+                    f"--access-key-id {lab.S3['key']} --place cloud", json_out=False)
     run("vl-laptop", """python3 - <<'PY'
 import os, random, pathlib
 r = random.Random(7); root = pathlib.Path('/home/varsto/data/many')
@@ -1157,8 +1161,8 @@ PY""")
     res["push_20k_one_changed"] = timed_rss("vl-laptop", "push many")[:2]
     kit = v("vl-laptop", "recovery kit", json_out=False)
     words = " ".join(re.findall(r"\d+\. (\w+)", kit.split("SHARES")[0]))
-    v("vl-desktop", f"join --name desktop --words {shlex.quote(words)} --s3-bucket {BUCKET} --s3-endpoint {lab.S3['endpoint']} --s3-insecure-http "
-                    f"--s3-access-key-id {lab.S3['key']} --s3-secret-access-key {lab.S3['secret']} --storage-name cloud")
+    v("vl-desktop", f"join --name desktop --s3-bucket {BUCKET} --s3-endpoint {lab.S3['endpoint']} --s3-insecure-http "
+                    f"--s3-access-key-id {lab.S3['key']} --storage-name cloud", env=f"VARSTO_VAULT_KEY={shlex.quote(words)}")
     v("vl-desktop", "folder attach many /home/varsto/data/many", json_out=False)
     v("vl-desktop", "folder attach large /home/varsto/data/large", json_out=False)
     res["pull_20k"] = timed_rss("vl-desktop", "pull many")[:2]

@@ -57,6 +57,25 @@ pub fn check_vault_path(path: &str) -> Result<()> {
     Ok(())
 }
 
+/// A path a manifest, a trash record or a note may name: [`check_vault_path`]
+/// and no component that is Varsto's own. `.varsto*` (the folder marker,
+/// staging and temporary files, the import staging area) and the suffixes
+/// `.varsto-placeholder` and `.varsto-link` are never synced, so a record
+/// that names one is not from an honest device; `.varstoignore` is the one
+/// file of that name that does sync.
+pub fn check_synced_path(path: &str) -> Result<()> {
+    check_vault_path(path)?;
+    for part in path.split('/') {
+        if (part.starts_with(".varsto") && part != ".varstoignore")
+            || part.ends_with(".varsto-placeholder")
+            || part.ends_with(".varsto-link")
+        {
+            bail!("{path:?} names a file that belongs to Varsto itself ({part:?})");
+        }
+    }
+    Ok(())
+}
+
 /// A name for people to read: control characters and the invisible
 /// direction overrides (which could make a name look like another one)
 /// are shown as `\u{..}` escapes. Everything else, `:` and `\` included,
@@ -77,7 +96,44 @@ pub fn display(name: &str) -> Cow<'_, str> {
 }
 
 fn needs_escape(ch: char) -> bool {
-    ch.is_control() || matches!(ch, '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
+    ch.is_control() || invisible(ch)
+}
+
+/// Characters that draw nothing or change the direction of the text around
+/// them: zero-width characters, the line and paragraph separators and the
+/// bidirectional controls.
+fn invisible(ch: char) -> bool {
+    matches!(
+        ch,
+        '\u{200b}'..='\u{200f}'
+            | '\u{2028}'..='\u{202e}'
+            | '\u{2060}'..='\u{2064}'
+            | '\u{2066}'..='\u{2069}'
+            | '\u{061c}'
+            | '\u{feff}'
+    )
+}
+
+/// Longest name of a device or a person.
+pub const MAX_DISPLAY_NAME: usize = 64;
+
+/// A name that is shown next to a fingerprint, in a request, in a QR
+/// caption: no control character (an escape sequence redraws the
+/// terminal), no zero-width or direction-changing character (the name could
+/// look like another one), at most 64 characters. Checked when a name is
+/// made and again when one is read from a code, because a code comes from
+/// someone else.
+pub fn check_display_name(name: &str) -> Result<()> {
+    if name.chars().count() > MAX_DISPLAY_NAME {
+        bail!("a name has at most {MAX_DISPLAY_NAME} characters");
+    }
+    if let Some(ch) = name.chars().find(|c| c.is_control() || invisible(*c)) {
+        bail!(
+            "a name cannot hold control, invisible or direction-changing characters (found U+{:04X})",
+            ch as u32
+        );
+    }
+    Ok(())
 }
 
 // ----- the Windows mapping ------------------------------------------------
@@ -781,6 +837,61 @@ fn default_probe(_root: &Path, path: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn synced_paths_never_name_a_file_of_varsto_itself() {
+        for ok in [
+            "a.txt",
+            "dir/sub/b.txt",
+            ".varstoignore",
+            "dir/.varstoignore",
+            "x.varsto",
+            "my.varsto.txt",
+        ] {
+            assert!(check_synced_path(ok).is_ok(), "{ok}");
+        }
+        for bad in [
+            ".varsto-folder",
+            "dir/.varsto-tmp-1-abcd",
+            ".varsto-import-staging/x",
+            "a/.varsto",
+            ".varstoignore.bak",
+            "photo.jpg.varsto-placeholder",
+            "dir/link.varsto-link",
+            "dir/.varsto-placeholder",
+            "../x",
+            "/abs",
+        ] {
+            assert!(check_synced_path(bad).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn display_names_refuse_control_invisible_and_direction_characters() {
+        assert!(check_display_name("Laptop of Ville").is_ok());
+        assert!(check_display_name("Ville \u{e4}\u{f6} \u{1f600}").is_ok());
+        assert!(check_display_name("").is_ok());
+        for bad in [
+            "x\u{1b}[2Ay",
+            "a\u{202e}b",
+            "a\u{200b}b",
+            "a\u{200f}b",
+            "a\u{2060}b",
+            "a\u{feff}b",
+            "a\u{2066}b",
+            "a\nb",
+            "a\u{7f}b",
+            "a\u{2028}b",
+            "a\u{85}b",
+        ] {
+            assert!(check_display_name(bad).is_err(), "{bad:?}");
+        }
+        assert!(check_display_name(&"x".repeat(64)).is_ok());
+        assert!(check_display_name(&"x".repeat(65)).is_err());
+        // What is shown anyway (an old name, a file name) is escaped.
+        assert_eq!(display("a\u{200b}b"), "a\\u{200b}b");
+        assert_eq!(display("a\u{202e}b"), "a\\u{202e}b");
+    }
 
     const AFFECTED: &[&str] = &[
         "12:30.jpg",
