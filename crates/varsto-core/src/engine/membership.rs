@@ -156,16 +156,7 @@ impl VaultEpochs {
         };
         let plain = Zeroizing::new(serde_json::to_vec(&f)?);
         let blob = crypto::encrypt(&Self::file_key(keys), &Self::aad(vault, device), &plain)?;
-        util::write_atomic(&home.join(VAULT_KEYS_FILE), &blob)?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            fs::set_permissions(
-                home.join(VAULT_KEYS_FILE),
-                fs::Permissions::from_mode(0o600),
-            )?;
-        }
-        Ok(())
+        util::write_atomic(&home.join(VAULT_KEYS_FILE), &blob)
     }
 }
 

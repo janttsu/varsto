@@ -122,14 +122,9 @@ impl Identity {
             return Ok(id);
         }
         let id = Self::generate()?;
-        std::fs::create_dir_all(home)?;
+        crate::util::private_dir(home)?;
         crate::util::write_atomic(&home.join(CERT_FILE), &id.cert)?;
         crate::util::write_atomic(&home.join(KEY_FILE), &id.key)?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(home.join(KEY_FILE), std::fs::Permissions::from_mode(0o600))?;
-        }
         Ok(id)
     }
 }

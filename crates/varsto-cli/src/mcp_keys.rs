@@ -71,14 +71,8 @@ fn load(home: &Path) -> Result<KeyFile> {
 }
 
 fn save(home: &Path, f: &KeyFile) -> Result<()> {
-    std::fs::create_dir_all(home)?;
-    let p = path(home);
-    varsto_core::util::write_atomic(&p, &serde_json::to_vec_pretty(f)?)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o600))?;
-    }
+    varsto_core::util::private_dir(home)?;
+    varsto_core::util::write_atomic(&path(home), &serde_json::to_vec_pretty(f)?)?;
     Ok(())
 }
 

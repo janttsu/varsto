@@ -401,11 +401,6 @@ impl ShareRequest {
         }
         if changed {
             util::write_atomic(&path, &serde_json::to_vec_pretty(&r)?)?;
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
-            }
         }
         let dk = crate::kem::DecapsKey::from_bytes(&hex::decode(&r.secret_hex)?)?;
         let mut code = format!(
@@ -1421,16 +1416,7 @@ impl SecretStore {
             &Self::aad(vault, device),
             &serde_json::to_vec(self)?,
         )?;
-        util::write_atomic(&home.join(Self::FILE), &blob)?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(
-                home.join(Self::FILE),
-                std::fs::Permissions::from_mode(0o600),
-            )?;
-        }
-        Ok(())
+        util::write_atomic(&home.join(Self::FILE), &blob)
     }
 }
 

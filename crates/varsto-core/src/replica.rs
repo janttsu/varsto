@@ -27,7 +27,6 @@ use crate::vault::{DeviceRecord, VaultMeta};
 use anyhow::{anyhow, bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
-use std::fs;
 use std::path::{Path, PathBuf};
 
 /// Token the owner gives to a replica: everything it needs, nothing more.
@@ -123,7 +122,7 @@ impl Replica {
         }
         let tgt = target.open()?;
         tgt.put_if_absent(VaultMeta::STORAGE_KEY, &serde_json::to_vec_pretty(&meta)?)?;
-        fs::create_dir_all(home)?;
+        util::private_dir(home)?;
         let signer = SigningKey::generate();
         let device_id = ledger::device_id_for(&signer.public());
         let local = ReplicaLocal {
@@ -137,11 +136,6 @@ impl Replica {
             target,
         };
         util::write_json(&home.join("replica.json"), &local)?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            fs::set_permissions(home.join("replica.json"), fs::Permissions::from_mode(0o600))?;
-        }
         let mut r = Replica::open(home)?;
         let rec = DeviceRecord {
             device_id,

@@ -311,12 +311,7 @@ impl SecurityKey for SoftwareKey {
     fn make_credential(&self) -> Result<String> {
         if !self.path.exists() {
             let k = SecretKey::random();
-            std::fs::write(&self.path, k.to_hex())?;
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                std::fs::set_permissions(&self.path, std::fs::Permissions::from_mode(0o600))?;
-            }
+            crate::util::write_atomic(&self.path, k.to_hex().as_bytes())?;
         }
         Ok(format!("software:{}", self.path.display()))
     }

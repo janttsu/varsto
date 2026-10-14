@@ -813,6 +813,7 @@ impl Engine {
             _ => bail!("unknown file {path}"),
         };
         let fk = self.folder_keys(&rec)?;
+        util::private_dir(&self.home.join(EXPORT_DIR))?;
         let dir = self
             .home
             .join(EXPORT_DIR)

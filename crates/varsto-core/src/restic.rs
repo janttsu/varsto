@@ -968,7 +968,14 @@ pub fn status_value(
 /// its output in `home/restic-run.log`.
 pub fn spawn_scheduled(home: &Path) -> Result<std::process::Child> {
     let exe = std::env::current_exe()?;
-    let log = std::fs::File::create(home.join("restic-run.log"))?;
+    let mut opts = std::fs::OpenOptions::new();
+    opts.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.mode(0o600);
+    }
+    let log = opts.open(home.join("restic-run.log"))?;
     let log2 = log.try_clone()?;
     Ok(std::process::Command::new(exe)
         .arg("--home")
