@@ -1010,13 +1010,7 @@ impl Engine {
             )
         })?;
         let meta: VaultMeta = serde_json::from_slice(&meta_bytes)?;
-        if meta.format_version != crate::FORMAT_VERSION {
-            bail!(
-                "vault format version {} is not readable by this version ({})",
-                meta.format_version,
-                crate::FORMAT_VERSION
-            );
-        }
+        crate::check_format(meta.format_version, "the vault on this storage")?;
         let master = SecretKey::from_hex(vault_key_hex)?;
         let epochs = membership::discover_epochs(backend.as_ref(), &meta.vault_id, &master)?;
         util::private_home(home)?;
@@ -1423,12 +1417,7 @@ impl Engine {
     fn open_inner(home: &Path, passphrase: &str) -> Result<Engine> {
         let vault: LocalVault = util::read_json(&home.join("vault.json"))
             .with_context(|| format!("no vault in {}", home.display()))?;
-        if vault.format_version != crate::FORMAT_VERSION {
-            bail!(
-                "local vault format {} is not readable by this version",
-                vault.format_version
-            );
-        }
+        crate::check_format(vault.format_version, "the vault on this device")?;
         util::private_home(home)?;
         let keys = Keys::load(home, passphrase, &vault.vault_id, &vault.device_id)?;
         let keyring = Keyring::load(home, &keys, &vault.vault_id, &vault.device_id)?;
