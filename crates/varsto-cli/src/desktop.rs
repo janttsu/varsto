@@ -77,7 +77,7 @@ pub fn bind(port: u16) -> Result<(Server, String)> {
 /// it needs never change after start, so they are copied here once.
 pub fn serve_arc(server: Arc<Server>, state: Shared) {
     let fixed = {
-        let st = state.lock().unwrap();
+        let st = state.lock().unwrap_or_else(|e| e.into_inner());
         Fixed {
             bound: st.bound.clone(),
             token: st.token.clone(),
@@ -92,7 +92,15 @@ pub fn serve_arc(server: Arc<Server>, state: Shared) {
                 let (method, url) = (request.method().to_string(), loggable_url(request.url()));
                 let t = varsto_core::logging::Timer::start();
                 STATUS.with(|s| s.set(0));
-                let result = handle(&state, request);
+                // A panic in a handler answers 500 (the dropped request does)
+                // and leaves the worker alive for the next request.
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    handle(&state, request)
+                }))
+                .unwrap_or_else(|_| {
+                    log::error!(method = method, path = url; "api handler panicked");
+                    Err(anyhow::anyhow!("handler panicked"))
+                });
                 let status = STATUS.with(|s| s.get());
                 match result {
                     Ok(()) => log::debug!(method = method, path = url, status = status, ms = t.ms(); "api request"),
@@ -352,7 +360,7 @@ fn json_response(status: u16, value: &Value) -> Response<std::io::Cursor<Vec<u8>
 
 fn handle(state: &Shared, mut request: Request) -> Result<()> {
     let host_ok = {
-        let st = state.lock().unwrap();
+        let st = state.lock().unwrap_or_else(|e| e.into_inner());
         let port = st.bound.rsplit(':').next().unwrap_or("").to_string();
         request
             .headers()
@@ -385,7 +393,7 @@ fn handle(state: &Shared, mut request: Request) -> Result<()> {
         return Ok(request.respond(Response::from_string("not found").with_status_code(404))?);
     }
     let token_ok = {
-        let st = state.lock().unwrap();
+        let st = state.lock().unwrap_or_else(|e| e.into_inner());
         let in_header = request
             .headers()
             .iter()
@@ -410,7 +418,7 @@ fn handle(state: &Shared, mut request: Request) -> Result<()> {
                 &json!({"error": "missing or wrong token; reopen the start URL"}),
             ))?);
         };
-        let home = state.lock().unwrap().home.clone();
+        let home = state.lock().unwrap_or_else(|e| e.into_inner()).home.clone();
         let key = match crate::mcp_keys::check(&home, &key) {
             Ok(k) => k,
             Err(r) => {
@@ -440,7 +448,7 @@ fn handle(state: &Shared, mut request: Request) -> Result<()> {
         // because this is a plain link. Counts as an access.
         let (folder, file) = (query_param(&query, "folder"), query_param(&query, "path"));
         let result = {
-            let mut st = state.lock().unwrap();
+            let mut st = state.lock().unwrap_or_else(|e| e.into_inner());
             match (&mut st.engine, folder, file) {
                 (Some(e), Some(f), Some(p)) => Some(e.read_file(&f, &p).map(|b| (b, p))),
                 _ => None,
@@ -475,7 +483,7 @@ fn handle(state: &Shared, mut request: Request) -> Result<()> {
     if path == "/api/thumb" {
         let (folder, file) = (query_param(&query, "folder"), query_param(&query, "path"));
         let bytes = {
-            let st = state.lock().unwrap();
+            let st = state.lock().unwrap_or_else(|e| e.into_inner());
             match (&st.engine, folder, file) {
                 (Some(e), Some(f), Some(p)) => e.thumbnail(&f, &p).unwrap_or(None),
                 _ => None,
@@ -535,7 +543,7 @@ fn handle(state: &Shared, mut request: Request) -> Result<()> {
             .and_then(|v| v.get("save").and_then(Value::as_bool))
             .unwrap_or(false);
         let (home, state_json) = {
-            let mut st = state.lock().unwrap();
+            let mut st = state.lock().unwrap_or_else(|e| e.into_inner());
             let v = api(&mut st, Method::Get, "/api/state", "", &json!({})).ok();
             (st.home.clone(), v.map(|v| v.to_string()))
         };
@@ -618,7 +626,7 @@ fn handle(state: &Shared, mut request: Request) -> Result<()> {
     }
     let post = method == Method::Post;
     let result = {
-        let mut st = state.lock().unwrap();
+        let mut st = state.lock().unwrap_or_else(|e| e.into_inner());
         api(&mut st, method, &path, &query, &input)
     };
     // Something was changed through the API: open pages load it again.
@@ -657,7 +665,7 @@ fn mcp_api(
             json!({"error": format!("an MCP key may not use {m} {path}")}),
         );
     };
-    let mut st = state.lock().unwrap();
+    let mut st = state.lock().unwrap_or_else(|e| e.into_inner());
     // Folder names and Strongroom flags, by name and by id.
     let known: Vec<(String, String, bool)> = match st.engine.as_ref() {
         Some(e) => e
@@ -739,7 +747,7 @@ impl<R: Read> Read for Capped<R> {
 /// `/api/upload`: stream the request body into `folder/path` and push.
 fn upload(state: &Shared, request: &mut Request, folder: String, path: String) -> Result<Value> {
     let writer = {
-        let st = state.lock().unwrap();
+        let st = state.lock().unwrap_or_else(|e| e.into_inner());
         match &st.engine {
             None => bail!("vault is locked"),
             Some(e) => e.block_writer(&folder)?,
@@ -756,7 +764,7 @@ fn upload(state: &Shared, request: &mut Request, folder: String, path: String) -
     let push = match writer {
         Some(w) => {
             let staged = w.write_sized(&mut body, length)?;
-            let mut st = state.lock().unwrap();
+            let mut st = state.lock().unwrap_or_else(|e| e.into_inner());
             let e = st
                 .engine
                 .as_mut()
@@ -764,7 +772,7 @@ fn upload(state: &Shared, request: &mut Request, folder: String, path: String) -
             e.commit_staged(&folder, &path, staged)?
         }
         None => {
-            let mut st = state.lock().unwrap();
+            let mut st = state.lock().unwrap_or_else(|e| e.into_inner());
             let e = st
                 .engine
                 .as_mut()
@@ -784,11 +792,11 @@ fn pair_join(state: &Shared, input: &Value) -> Result<Value> {
     if passphrase.chars().count() < 8 {
         bail!("the passphrase needs at least 8 characters");
     }
-    if state.lock().unwrap().home.join("vault.json").exists() {
+    if state.lock().unwrap_or_else(|e| e.into_inner()).home.join("vault.json").exists() {
         bail!("this device already holds a vault");
     }
     let bundle = varsto_core::pair::receive(&code, &name, opt(input, "address").as_deref())?;
-    let mut st = state.lock().unwrap();
+    let mut st = state.lock().unwrap_or_else(|e| e.into_inner());
     let (e, notes) = Engine::join_paired(&st.home, &name, &passphrase, &bundle)?;
     st.engine = Some(e);
     st.service.request_sync();
@@ -1110,14 +1118,17 @@ fn default_folder_path(home: &std::path::Path, name: &str, plain: bool) -> Resul
     Ok(folder_root(home).join(name))
 }
 
+/// Decode `%XX` escapes and `+` in a query value. Works on bytes so that a
+/// multi-byte character after a `%` cannot split a character boundary.
 fn percent_decode(v: &str) -> String {
     let bytes = v.as_bytes();
+    let hex = |b: u8| (b as char).to_digit(16).map(|d| d as u8);
     let mut out = Vec::with_capacity(bytes.len());
     let mut i = 0;
     while i < bytes.len() {
         if bytes[i] == b'%' && i + 2 < bytes.len() {
-            if let Ok(h) = u8::from_str_radix(&v[i + 1..i + 3], 16) {
-                out.push(h);
+            if let (Some(h), Some(l)) = (hex(bytes[i + 1]), hex(bytes[i + 2])) {
+                out.push(h << 4 | l);
                 i += 3;
                 continue;
             }
@@ -2980,6 +2991,18 @@ fn api_unlocked(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn percent_decode_survives_malformed_escapes() {
+        assert_eq!(percent_decode("%a\u{e9}"), "%a\u{e9}");
+        assert_eq!(percent_decode("%"), "%");
+        assert_eq!(percent_decode("%4"), "%4");
+        assert_eq!(percent_decode("%zz"), "%zz");
+        assert_eq!(percent_decode("%C3%A4"), "\u{e4}");
+        assert_eq!(percent_decode("a+b%20c%41"), "a b cA");
+        assert_eq!(percent_decode("%\u{e9}\u{e9}"), "%\u{e9}\u{e9}");
+        assert_eq!(query_param("token=%a\u{e9}&x=1", "token").unwrap(), "%a\u{e9}");
+    }
 
     #[test]
     fn session_tokens_match_exactly_and_only_exactly() {
