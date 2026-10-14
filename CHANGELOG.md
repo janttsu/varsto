@@ -45,6 +45,9 @@ On `main` after 0.0.1-alpha.13; spec sections 32 to 59.
 - restic repository logins (`rest:https://user:password@host`) are cut from
   logs, status and the kit note, the password command shows its first word
   only, and a support bundle carries a redacted `config.json` (spec 59).
+- MCP: a key's last use is kept apart from the keys, so a use cannot undo a
+  revocation; `varsto mcp` needs a key while the service runs; a scoped key
+  sees only its folders in `/api/status` (spec 59).
 - A malformed `%` escape in a request no longer kills the API worker thread.
 
 ### Added

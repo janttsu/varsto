@@ -69,12 +69,10 @@ impl Backend {
                 .map_err(|_| not_running())?;
             return Ok(b);
         }
-        if let Some((sf, _)) = crate::service::status(home) {
-            return Ok(Backend::Http {
-                port: sf.port,
-                token: sf.token,
-                key: None,
-            });
+        if crate::service::status(home).is_some() {
+            // The session token opens everything the service holds: an
+            // assistant gets a key with a scope, never the token.
+            bail!("the Varsto service is running, and the MCP server then needs an MCP key that limits what the assistant sees. Create one with `varsto mcp key create --folders <names>` (add --analyse or --write for more than reading) and give it in VARSTO_MCP_KEY or with --key-file; `varsto mcp config --create-key` prints a client configuration with a new key");
         }
         let pass = std::env::var("VARSTO_PASSPHRASE").map_err(|_| {
             anyhow!("the background service is not running and VARSTO_PASSPHRASE is not set")

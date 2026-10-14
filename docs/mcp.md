@@ -26,8 +26,8 @@ VARSTO_MCP_KEY=vmk_... varsto mcp   # with a scoped key (or --key-file <file>), 
 
 Where the data comes from:
 
-1. **With a key** (`--key` or `VARSTO_MCP_KEY`): the running Varsto service (the app, the tray, or `varsto service run`), which checks the key's scope on every call. A key never opens the vault itself; when the service is not running the tools answer "the Varsto service is not running".
-2. **Without a key, service running**: the service, with the access in the grants file.
+1. **With a key** (`--key-file` or `VARSTO_MCP_KEY`): the running Varsto service (the app, the tray, or `varsto service run`), which checks the key's scope on every call. A key never opens the vault itself; when the service is not running the tools answer "the Varsto service is not running".
+2. **Without a key, service running**: refused. The service's session token would give the assistant the whole vault, so the server stops with a message that names `varsto mcp key create`.
 3. **Without a key, no service**: the server opens the vault itself with `VARSTO_PASSPHRASE`.
 
 ## Access: grants and keys

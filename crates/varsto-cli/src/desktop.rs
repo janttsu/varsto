@@ -866,6 +866,15 @@ fn mcp_api(
             .is_some_and(|(n, _, s)| allows(&key.scope, n, *s, Need::Read))
     };
     match api(&mut st, method, path, query, input) {
+        Ok(v) if path == "/api/status" => {
+            // Only the folders the key may read: no devices, no storages, no
+            // paths, no vault identity.
+            let mut folders = v.get("folders").cloned().unwrap_or(json!([]));
+            if let Some(a) = folders.as_array_mut() {
+                a.retain(|f| f["name"].as_str().is_some_and(visible));
+            }
+            (200, json!({ "folders": folders }))
+        }
         Ok(mut v) => {
             let list = if path == "/api/folders" {
                 Some(&mut v)
