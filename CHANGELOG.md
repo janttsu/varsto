@@ -42,6 +42,9 @@ On `main` after 0.0.1-alpha.13; spec sections 32 to 59.
   record 256 MiB, S3 and rclone refuse longer answers before reading them),
   pack indexes are validated, and a panic while checking one object ends only
   that object (spec 59).
+- restic repository logins (`rest:https://user:password@host`) are cut from
+  logs, status and the kit note, the password command shows its first word
+  only, and a support bundle carries a redacted `config.json` (spec 59).
 - A malformed `%` escape in a request no longer kills the API worker thread.
 
 ### Added

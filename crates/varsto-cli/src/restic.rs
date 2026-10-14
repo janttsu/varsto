@@ -249,7 +249,9 @@ fn config(home: &Path) -> Result<ResticConfig> {
 
 fn restic_command(cfg: &ResticConfig, args: &[String]) -> Result<Command> {
     // The password reaches restic through its environment, never the arguments.
-    log::debug!(binary = cfg.binary.as_str(), repository = cfg.repository.as_str(); "restic {}", args.join(" "));
+    // The repository can hold a login (`rest:https://user:password@host`): the
+    // log gets its kind and host only.
+    log::debug!(binary = cfg.binary.as_str(), repository = restic::repository_summary(&cfg.repository); "restic {}", args.join(" "));
     let mut c = Command::new(&cfg.binary);
     c.args(args);
     for k in restic::REMOVED_ENV {
@@ -304,7 +306,7 @@ fn ensure_repository(cfg: &ResticConfig, init: bool) -> Result<bool> {
         if !init {
             bail!(
                 "there is no restic repository at {}; run setup again with --init to create one",
-                cfg.repository
+                restic::display_repository(&cfg.repository)
             );
         }
         let (ok, _, _, err) = restic_output(cfg, &["init".to_string()])?;
@@ -315,7 +317,7 @@ fn ensure_repository(cfg: &ResticConfig, init: bool) -> Result<bool> {
     }
     bail!(
         "the restic repository {} cannot be opened: {}",
-        cfg.repository,
+        restic::display_repository(&cfg.repository),
         tail(&err, 5)
     )
 }
@@ -588,9 +590,15 @@ fn setup(cli: &Cli, home: &Path, a: &SetupArgs) -> Result<()> {
         |_| {
             let mut out = Vec::new();
             if created {
-                out.push(format!("restic repository created at {}", cfg.repository));
+                out.push(format!(
+                    "restic repository created at {}",
+                    restic::display_repository(&cfg.repository)
+                ));
             } else {
-                out.push(format!("restic repository {} opens", cfg.repository));
+                out.push(format!(
+                    "restic repository {} opens",
+                    restic::display_repository(&cfg.repository)
+                ));
             }
             out.push(format!("mirror root: {}", report.root.display()));
             for n in &report.attached {
@@ -922,11 +930,18 @@ pub fn describe_status(v: &Value) -> String {
         )
     };
     let mut out = vec![
-        format!("restic repository: {}", cfg.repository),
+        format!(
+            "restic repository: {}",
+            restic::display_repository(&cfg.repository)
+        ),
         format!(
             "password: {}",
             match &cfg.password {
-                PasswordSource::Command(c) => format!("from the command `{c}`"),
+                // The first word names the program; the rest may hold the password itself.
+                PasswordSource::Command(c) => format!(
+                    "from the command `{}`",
+                    c.split_whitespace().next().unwrap_or("")
+                ),
                 PasswordSource::File(f) => format!("from the file {}", f.display()),
             }
         ),
@@ -1041,8 +1056,53 @@ pub fn kit_note(home: &Path) -> Option<String> {
     let cfg = Config::load(home).ok()?.restic?;
     Some(format!(
         "\nNOTES\nBackups with restic: repository {} (device {}, mirror {}).\nThe restic repository password is kept separately, not in this kit; without it those snapshots cannot be read.\n",
-        cfg.repository,
+        restic::display_repository(&cfg.repository),
         cfg.host,
         cfg.root.display()
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn config(repo: &str, password: PasswordSource) -> ResticConfig {
+        serde_json::from_value(serde_json::json!({
+            "root": "/srv/mirror",
+            "repository": repo,
+            "password": password,
+            "vault_short": "ab12cd34",
+            "host": "nas",
+            "created_utc": 1,
+            "schedule": {"every_hours": 24},
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn status_and_kit_show_no_login_and_no_password_command_arguments() {
+        let cfg = config(
+            "rest:https://u:p@h.example/r",
+            PasswordSource::Command("echo x".into()),
+        );
+        let text = describe_status(&serde_json::json!({"config": cfg}));
+        assert!(!text.contains("u:p@"), "{text}");
+        assert!(text.contains("rest:https://h.example/r"), "{text}");
+        assert!(text.contains("from the command `echo`"), "{text}");
+        assert!(!text.contains("echo x"), "{text}");
+        let home = tempfile::tempdir().unwrap();
+        let c = varsto_core::vault::Config {
+            restic: Some(cfg),
+            ..Default::default()
+        };
+        c.save(home.path()).unwrap();
+        let note = kit_note(home.path()).unwrap();
+        assert!(
+            note.contains("rest:https://h.example/r") && !note.contains("u:p@"),
+            "{note}"
+        );
+        // The scrubber catches the same shapes should one reach a log line.
+        let line = varsto_core::logging::scrub("restic failed: s3:https://K:S@h/b");
+        assert!(!line.contains("K:S"), "{line}");
+    }
 }

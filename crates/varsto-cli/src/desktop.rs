@@ -1753,7 +1753,11 @@ pub fn bundle_extras(home: &std::path::Path, state: Option<String>) -> Vec<(Stri
         extras.push(("status.json".to_string(), s.into_bytes()));
     }
     if let Ok(c) = std::fs::read(home.join("config.json")) {
-        extras.push(("config.json".to_string(), c));
+        // Without the restic password source, S3 key ids and the logins in URLs.
+        extras.push((
+            "config.json".to_string(),
+            varsto_core::logging::redact::redact_config_json(&c),
+        ));
     }
     extras
 }
