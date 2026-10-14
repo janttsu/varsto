@@ -18,7 +18,7 @@ Varsto is an end-to-end encrypted file sync, sharing and backup app that **uses 
 - **No tracker, no account, no vendor cloud.** Devices find each other on the local network, and through a rendezvous record in your own storage (there is no DHT). Designed to avoid single points of failure.
 - **Fast, block-level sync.** Files are split into blocks whose size follows the file; only changed blocks move, and the blocks of small files travel together in packs, so a folder of thousands of notes is a few objects on the storage, not thousands. Peer-to-peer transfer between your own devices, also offline over a LAN, with the cloud brought up to date when you are back online.
 - **Safety nets.** Version history, trash (optionally on cold storage), a marker in every synced folder so an unmounted disk never reads as "everything deleted", a mass-deletion guard that holds large deletions until you confirm them, send-only and receive-only folders per device, encrypted off-site backups of any directory (read-only snapshots kept on your storages only, each for the days you choose), durability policies with alerts, peer-to-peer transfer between your devices on the LAN and over the internet, zstd compression before encryption, Strongroom folders that open only with a FIDO2 security key (libfido2 tools), a printable recovery kit (24 words, 2-of-3 shares) with a personal recovery package checklist ([docs/recovery.md](docs/recovery.md)), place labels on storages and disk groups (geographic sites are planned), and provider-independent recovery. What the design tolerates, and what it does not, is listed in [docs/failure-model.md](docs/failure-model.md).
-- **Clients.** Linux, Windows, macOS, Android, and iOS as a Simulator build only (not run on a real device yet); a command line on Linux, macOS and Windows; an MCP server so you can manage and organize files by talking to a local or cloud AI of your choice ([docs/mcp.md](docs/mcp.md)).
+- **Clients.** Linux, Windows, macOS, Android, and iOS as a Simulator build only (not run on a real device yet); a command line on Linux, macOS and Windows; an MCP server so you can manage and organize files by talking to a language model that runs on your own machine; nothing leaves your devices ([docs/mcp.md](docs/mcp.md)).
 
 None of this is finished. See [docs/architecture](docs/architecture/README.md) for the design principles and [docs/spec](docs/spec/README.md) for the status of the format and protocol specifications.
 
@@ -80,7 +80,7 @@ varsto --home ~/.varsto-laptop policy check
 # synced encrypted to your devices; --write: it may also reorganize). See docs/mcp.md.
 # Analyses, scoped keys (--create-key) and `varsto search` are on main after 0.0.1-alpha.13, not in a release yet
 varsto --home ~/.varsto-laptop mcp grant docs --analyse
-varsto --home ~/.varsto-laptop mcp          # MCP over stdio; point Claude Desktop, Claude Code or any MCP client at this command
+varsto --home ~/.varsto-laptop mcp          # MCP over stdio; point a local MCP client (OpenCode, Qwen Code, Crush, an Ollama front end) at this command
 varsto --home ~/.varsto-laptop mcp config --client opencode --create-key --folders docs --analyse   # a scoped key and a ready config
 varsto --home ~/.varsto-laptop search receipt 2026   # find files by their analysis, tags and path
 

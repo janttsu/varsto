@@ -1,10 +1,10 @@
 # Varsto and AI assistants (MCP)
 
-This page is for two readers: **you**, setting up an assistant, and **the assistant** (a local LLM or a cloud model) that works with your files through Varsto. The server sends a short version of it to the model when a client connects (the `instructions` of MCP `initialize`).
+This page is for two readers: **you**, setting up an assistant, and **the assistant**, a language model running on your own machine, that works with your files through Varsto. Varsto is designed for local models: everything the tools return stays on your hardware. A cloud-hosted model would receive whatever the tools return, so Varsto does not recommend one. The server sends a short version of it to the model when a client connects (the `instructions` of MCP `initialize`).
 
 ## What the server is
 
-`varsto mcp` is a [Model Context Protocol](https://modelcontextprotocol.io) server: JSON-RPC 2.0 over stdin and stdout (protocol version 2025-06-18). An MCP client (Claude Desktop, Claude Code, OpenCode, Crush, Qwen Code or any other) starts it as a subprocess. Through it the assistant can:
+`varsto mcp` is a [Model Context Protocol](https://modelcontextprotocol.io) server: JSON-RPC 2.0 over stdin and stdout (protocol version 2025-06-18). An MCP client that runs on your machine (OpenCode, Crush, Qwen Code, an Ollama or LM Studio front end, or any other) starts it as a subprocess and pairs it with a local model. Through it the assistant can:
 
 - see the folders you granted and their files, with each file's place on this device's disk (`local_path`);
 - record what a file contains, in words and tags: its **analysis**, kept by Varsto and synced encrypted to all your devices;
@@ -190,7 +190,7 @@ Every word of `query` must occur, ignoring case, in the file's analysis, one of 
 
 ## Privacy
 
-- File contents never pass through the MCP server. The assistant reads synced plain files from the disk itself; what it does with them is up to the assistant and where it runs (a local model keeps everything on the device; a cloud model sends what it reads to its provider).
+- File contents never pass through the MCP server. The assistant reads synced plain files from the disk itself; what it does with them is up to the assistant and where it runs. With a local model everything stays on the device, which is the setup Varsto is built for; a cloud-hosted model would send what it reads to its provider, so do not point one at folders you want to keep private.
 - Analyses are encrypted under the folder's key before they reach a storage (storages see only sizes and times) and are readable on every device of the folder, also by members of a shared folder. On the device they are kept in the device directory like the folder's sync state. See section 36 of [the format specification](spec/alpha-0-format.md).
 - Strongroom folders are never visible unless granted by name, and only while unlocked.
 - MCP keys are stored only as hashes; the key itself is shown once.
