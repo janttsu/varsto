@@ -600,10 +600,27 @@ impl PackStore {
         self.state.lock().unwrap().packs.remove(pack);
     }
 
+    /// Places of `object` in packs the last listing of this storage did
+    /// not show (written since by another device, or held elsewhere): a
+    /// request tells.
+    fn unlisted(&self, object: &str) -> Vec<PackLoc> {
+        let st = self.state.lock().unwrap();
+        self.ctx
+            .candidates(object)
+            .into_iter()
+            .filter(|l| l.valid() && !st.packs.contains(&l.pack) && !st.is_dead(l))
+            .collect()
+    }
+
+    /// A pack found by a request: listed from now on.
+    fn found_pack(&self, pack: &str) {
+        self.state.lock().unwrap().packs.insert(pack.to_string());
+    }
+
     fn read_member(&self, object: &str) -> Result<Option<Vec<u8>>> {
         for _ in 0..4 {
-            let Some(loc) = self.locate(object, true)? else {
-                return Ok(None);
+            let Some(loc) = self.locate(object, false)? else {
+                break;
             };
             match self
                 .inner
@@ -614,7 +631,38 @@ impl PackStore {
                 None => self.forget_pack(&loc.pack),
             }
         }
+        for loc in self.unlisted(object) {
+            if let Some(b) = self
+                .inner
+                .get_range(&pack_key(&loc.pack), loc.offset, loc.len)?
+            {
+                if b.len() as u64 == loc.len {
+                    self.found_pack(&loc.pack);
+                    return Ok(Some(b));
+                }
+            }
+        }
         Ok(None)
+    }
+
+    /// Whether a pack not in the listing holds `object` here (one HEAD per
+    /// pack, remembered in `checked`).
+    fn unlisted_here(&self, object: &str, checked: &mut HashMap<String, bool>) -> Result<bool> {
+        for loc in self.unlisted(object) {
+            let here = match checked.get(&loc.pack) {
+                Some(v) => *v,
+                None => {
+                    let v = self.inner.exists(&pack_key(&loc.pack))?;
+                    checked.insert(loc.pack.clone(), v);
+                    v
+                }
+            };
+            if here {
+                self.found_pack(&loc.pack);
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 
     /// Write tombstones recorded since the last call as one list.
@@ -815,7 +863,7 @@ impl Storage for PackStore {
             }
             self.forget_pack(&loc.pack);
         }
-        Ok(false)
+        self.unlisted_here(obj, &mut HashMap::new())
     }
 
     fn list(&self, prefix: &str) -> Result<Vec<String>> {
@@ -858,6 +906,7 @@ impl Storage for PackStore {
         };
         // Tombstones of other devices first: a pack they emptied goes.
         self.ensure_listed()?;
+        self.unlisted_here(obj, &mut HashMap::new())?;
         while let Some(loc) = self.locate(obj, false)? {
             let t = Tombstone {
                 loc: loc.clone(),
@@ -903,7 +952,7 @@ impl Storage for PackStore {
                         v
                     }
                 },
-                None => false,
+                None => self.unlisted_here(o, &mut checked)?,
             };
             if !here {
                 fresh.push((o.clone(), *b));
