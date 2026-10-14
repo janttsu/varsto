@@ -1535,6 +1535,7 @@ A manifest that does not open with any key this device holds stops the folder's 
 - The removed device trusts the signed envelope of its own revocation's epoch: a thief who acts first still removes the others (section 21).
 
 Tests: `ledger::tests::checkpoint_cannot_speak_for_other_devices`, `ledger::tests::checkpoint_far_ahead_is_refused`, `crates/varsto-core/tests/sharing.rs` (`a_members_batch_cannot_reach_outside_its_folder`, `junk_share_epoch_does_not_cut_a_member_off`), `crates/varsto-core/tests/backups.rs` (`a_replica_cannot_expire_snapshots`), `crates/varsto-core/tests/ledger_gaps.rs` (a withheld batch, acknowledgements that reveal one and the warning after three pulls, a malformed batch on one storage, an absurd Lamport time), `crates/varsto-core/tests/revocation.rs` (`junk_under_a_devices_ledger_name_does_not_fence_it`, `junk_epoch_record_does_not_block_revocation`, `a_backdated_revocation_does_not_win`, `two_epochs_under_one_number_wait_for_a_choice`), and the lab scenario `ledger-withhold`.
+
 ## 59. Staged moves to disk pools
 
 Code: `crates/varsto-core/src/staged_move.rs` (the job file), `engine/staged_moves.rs` (running jobs) and the `move` commands in `crates/varsto-cli/src/placing.rs`.
