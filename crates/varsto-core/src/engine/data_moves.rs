@@ -291,16 +291,8 @@ impl Engine {
             updated_utc: now,
             placement,
         };
-        // Signed in an organization, the older form otherwise (see set_policy).
-        let blob = if self.org.is_some() {
-            prec.seal_signed(
-                &self.vault.vault_id,
-                &self.folder_record_key_now(),
-                &self.keys.signer,
-            )?
-        } else {
-            prec.seal(&self.vault.vault_id, &self.folder_record_key_now())?
-        };
+        let (fr_id, fr_key) = self.folder_record_key_id_now();
+        let blob = prec.seal_signed(&self.vault.vault_id, &fr_id, &fr_key, &self.keys.signer)?;
         for (_, backend) in self.metadata_storages(true)? {
             backend.put_if_absent(&prec.storage_key(), &blob)?;
         }
@@ -367,7 +359,6 @@ impl Engine {
         if self.vault.member {
             return Ok(false);
         }
-        let fr_keys = self.folder_record_keys();
         let mut changed = false;
         for (_, backend) in self.metadata_storages(false)? {
             for key in backend.list(PlacementRecord::PREFIX)? {
@@ -402,14 +393,14 @@ impl Engine {
                     continue;
                 };
                 let verify = |d: &DeviceId| self.device_key(d);
+                let key_for = |id: &str| self.folder_record_key_for(id);
                 let Ok(rec) = PlacementRecord::open_any(
                     &blob,
                     &self.vault.vault_id,
                     &fid,
                     &named,
-                    &fr_keys,
+                    &key_for,
                     &verify,
-                    self.org.is_none(),
                 ) else {
                     continue;
                 };

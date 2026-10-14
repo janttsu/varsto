@@ -25,6 +25,7 @@ use super::*;
 use crate::crypto::{SigningKey, VerifyingKey};
 use crate::kem::{DecapsKey, EncapsKey};
 use crate::ledger::EventScope;
+use crate::record::{RecordKind, SignedRecord};
 use zeroize::Zeroizing;
 
 /// `vault/kem/<device>.json`: a device's KEM public key, signed by the device.
@@ -33,8 +34,9 @@ pub const KEM_PREFIX: &str = "vault/kem/";
 pub const REVOCATION_PREFIX: &str = "vault/revocations/";
 /// `vault/epochs/<epoch, 8 digits>.enc`, encrypted under that epoch's key.
 pub const EPOCH_PREFIX: &str = "vault/epochs/";
-/// `vault/grants/<epoch>/<device>/<issuer>.json`: an epoch key sealed to one device.
-pub const GRANT_PREFIX: &str = "vault/grants/";
+/// `vault/epoch-grants/<epoch>/<device>/<issuer>.json`: a vault key epoch
+/// sealed to one device (folder keys travel as grants under `vault/grants/`).
+pub const GRANT_PREFIX: &str = "vault/epoch-grants/";
 
 const VAULT_KEYS_FILE: &str = "vault-keys.enc";
 /// Key epochs written twice under one number by different devices, and
@@ -293,53 +295,52 @@ pub struct Revocation {
     pub new_epoch: u32,
 }
 
-/// A revocation as stored: the body is encrypted under the registry key of
-/// `key_epoch` (always 0 when written by this version, so every device that
-/// ever belonged to the vault can read it, the removed one included), and
-/// the issuer signs the device ids, the epoch and the ciphertext hash.
-/// Storage cannot forge, alter or move one: the AEAD and the signature fail.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+/// A revocation as stored: a signed record of kind `revocation` (format 2),
+/// scope the removed device, writer the issuer, sequence number the key
+/// epoch it started, key id the registry key of `key_epoch` (always 0 when
+/// written by this version, so every device that ever belonged to the
+/// vault can read it, the removed one included). Storage cannot forge,
+/// alter, relabel or move one: the AEAD and the signature fail.
+#[derive(Clone, Debug)]
 pub struct SignedRevocation {
-    pub format_version: u16,
+    /// The removed device (the record's scope).
     pub device: DeviceId,
+    /// The device that removed it (the record's writer).
     pub issuer: DeviceId,
+    /// The vault key epoch of the registry key the body is sealed under.
     pub key_epoch: u32,
-    pub body_hex: String,
-    pub sig_alg: String,
-    pub sig_hex: String,
+    pub record: SignedRecord,
+}
+
+impl Serialize for SignedRevocation {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> std::result::Result<S::Ok, S::Error> {
+        self.record.serialize(s)
+    }
+}
+
+impl<'de> Deserialize<'de> for SignedRevocation {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> std::result::Result<Self, D::Error> {
+        let record = SignedRecord::deserialize(d)?;
+        SignedRevocation::from_record(record).map_err(serde::de::Error::custom)
+    }
 }
 
 impl SignedRevocation {
     pub fn storage_key(device: &DeviceId, issuer: &DeviceId) -> String {
         format!("{REVOCATION_PREFIX}{device}/{issuer}.json")
     }
-    fn aad(vault: &VaultId, device: &DeviceId, issuer: &DeviceId) -> Vec<u8> {
-        crypto::aad(
-            "revocation",
-            &[
-                vault.as_str().as_bytes(),
-                device.as_str().as_bytes(),
-                issuer.as_str().as_bytes(),
-            ],
-        )
-    }
-    fn message(
-        vault: &VaultId,
-        device: &DeviceId,
-        issuer: &DeviceId,
-        key_epoch: u32,
-        body_hash: &[u8],
-    ) -> Vec<u8> {
-        sig_message(
-            "revocation-signature",
-            &[
-                vault.as_str().as_bytes(),
-                device.as_str().as_bytes(),
-                issuer.as_str().as_bytes(),
-                &key_epoch.to_le_bytes(),
-                body_hash,
-            ],
-        )
+    fn from_record(record: SignedRecord) -> Result<Self> {
+        if record.kind != RecordKind::Revocation {
+            bail!("not a revocation");
+        }
+        let key_epoch = crate::record::parse_registry_key_id(&record.key_id)
+            .ok_or_else(|| anyhow!("revocation names no registry key"))?;
+        Ok(SignedRevocation {
+            device: DeviceId::from_hex(&record.scope)?,
+            issuer: record.device.clone(),
+            key_epoch,
+            record,
+        })
     }
     /// Seal and sign. `registry_key` is the device-registry key of `key_epoch`.
     pub fn seal(
@@ -349,27 +350,17 @@ impl SignedRevocation {
         registry_key: &SecretKey,
         signer: &SigningKey,
     ) -> Result<Self> {
-        let ct = crypto::encrypt(
-            registry_key,
-            &Self::aad(vault, &rev.device, &rev.issuer),
-            &serde_json::to_vec(rev)?,
-        )?;
-        let sig = signer.sign(&Self::message(
+        let key_id = crate::record::registry_key_id(key_epoch);
+        let record = crate::record::Header {
+            kind: RecordKind::Revocation,
             vault,
-            &rev.device,
-            &rev.issuer,
-            key_epoch,
-            &crypto::hash(&ct),
-        ));
-        Ok(SignedRevocation {
-            format_version: crate::FORMAT_VERSION,
-            device: rev.device.clone(),
-            issuer: rev.issuer.clone(),
-            key_epoch,
-            body_hex: hex::encode(ct),
-            sig_alg: signer.alg().to_string(),
-            sig_hex: hex::encode(sig),
-        })
+            scope: rev.device.as_str(),
+            device: &rev.issuer,
+            seq: rev.new_epoch as u64,
+            key_id: &key_id,
+        }
+        .seal(registry_key, &serde_json::to_vec(rev)?, signer)?;
+        Self::from_record(record)
     }
     /// Verify the issuer's signature, then decrypt.
     pub fn open(
@@ -378,25 +369,18 @@ impl SignedRevocation {
         registry_key: &SecretKey,
         issuer_key: &VerifyingKey,
     ) -> Result<Revocation> {
-        let ct = hex::decode(&self.body_hex)?;
-        issuer_key.verify(
-            &self.sig_alg,
-            &Self::message(
-                vault,
-                &self.device,
-                &self.issuer,
-                self.key_epoch,
-                &crypto::hash(&ct),
-            ),
-            &hex::decode(&self.sig_hex)?,
+        self.record.expect(
+            &crate::record::Expect::new(RecordKind::Revocation, vault)
+                .scope(self.device.as_str())
+                .device(&self.issuer),
         )?;
-        let plain = crypto::decrypt(
-            registry_key,
-            &Self::aad(vault, &self.device, &self.issuer),
-            &ct,
-        )?;
+        self.record.verify(issuer_key)?;
+        let plain = self.record.open(registry_key)?;
         let rev: Revocation = serde_json::from_slice(&plain)?;
-        if rev.device != self.device || rev.issuer != self.issuer {
+        if rev.device != self.device
+            || rev.issuer != self.issuer
+            || rev.new_epoch as u64 != self.record.seq
+        {
             bail!("revocation body does not match its envelope");
         }
         Ok(rev)
@@ -444,60 +428,24 @@ impl EpochRecord {
     fn key(vault_key: &SecretKey) -> SecretKey {
         vault_key.derive("epoch-record", &[])
     }
-    fn aad(vault: &VaultId, epoch: u32) -> Vec<u8> {
-        crypto::aad(
-            "epoch-record",
-            &[vault.as_str().as_bytes(), &epoch.to_le_bytes()],
-        )
-    }
-    pub fn seal(&self, vault: &VaultId, vault_key: &SecretKey) -> Result<Vec<u8>> {
-        crypto::encrypt(
-            &Self::key(vault_key),
-            &Self::aad(vault, self.epoch),
-            &Zeroizing::new(serde_json::to_vec(self)?),
-        )
-    }
-    pub fn open(blob: &[u8], vault: &VaultId, epoch: u32, vault_key: &SecretKey) -> Result<Self> {
-        let plain = Zeroizing::new(crypto::decrypt(
-            &Self::key(vault_key),
-            &Self::aad(vault, epoch),
-            blob,
-        )?);
-        let rec: EpochRecord = serde_json::from_slice(&plain)?;
-        if rec.epoch != epoch {
-            bail!("epoch record does not match its name");
-        }
-        Ok(rec)
-    }
 }
 
-/// The epoch record as stored: the sealed record plus the issuer's
-/// signature over vault, epoch, issuer and the ciphertext hash. Without the
-/// signature anyone holding the vault key could write a record under the
-/// next number and block every removal and every join. Every vault writes
-/// this form, with or without an organization; a bare sealed record (what
-/// vaults without an organization wrote before) is not read any more.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+/// The epoch record as stored: a signed record of kind `epoch` (format 2),
+/// writer the issuer, sequence number the epoch, key id `epoch@<epoch>`,
+/// the body (`EpochRecord`) sealed under a key derived from that epoch's
+/// vault key. Without the signature anyone holding the vault key could
+/// write a record under the next number and block every removal and every
+/// join; there is no bare form.
+#[derive(Clone, Debug)]
 pub struct SignedEpoch {
-    pub format_version: u16,
     pub epoch: u32,
     pub issuer: DeviceId,
-    pub body_hex: String,
-    pub sig_alg: String,
-    pub sig_hex: String,
+    pub record: SignedRecord,
 }
 
 impl SignedEpoch {
-    fn message(vault: &VaultId, epoch: u32, issuer: &DeviceId, body_hash: &[u8]) -> Vec<u8> {
-        sig_message(
-            "epoch-record-signature",
-            &[
-                vault.as_str().as_bytes(),
-                &epoch.to_le_bytes(),
-                issuer.as_str().as_bytes(),
-                body_hash,
-            ],
-        )
+    fn key_id(epoch: u32) -> String {
+        format!("epoch@{epoch}")
     }
     pub fn seal(
         rec: &EpochRecord,
@@ -505,34 +453,53 @@ impl SignedEpoch {
         vault_key: &SecretKey,
         signer: &SigningKey,
     ) -> Result<Vec<u8>> {
-        let ct = rec.seal(vault, vault_key)?;
-        let sig = signer.sign(&Self::message(
+        let key_id = Self::key_id(rec.epoch);
+        let record = crate::record::Header {
+            kind: RecordKind::Epoch,
             vault,
-            rec.epoch,
-            &rec.issuer,
-            &crypto::hash(&ct),
-        ));
-        Ok(serde_json::to_vec(&SignedEpoch {
-            format_version: crate::FORMAT_VERSION,
-            epoch: rec.epoch,
-            issuer: rec.issuer.clone(),
-            body_hex: hex::encode(ct),
-            sig_alg: signer.alg().to_string(),
-            sig_hex: hex::encode(sig),
-        })?)
+            scope: "",
+            device: &rec.issuer,
+            seq: rec.epoch as u64,
+            key_id: &key_id,
+        }
+        .seal(
+            &EpochRecord::key(vault_key),
+            &Zeroizing::new(serde_json::to_vec(rec)?),
+            signer,
+        )?;
+        Ok(record.to_bytes())
     }
     /// The envelope, if `blob` is one.
     pub fn parse(blob: &[u8]) -> Option<SignedEpoch> {
-        serde_json::from_slice(blob).ok()
+        let record = SignedRecord::parse_kind(blob, RecordKind::Epoch).ok()?;
+        let epoch = u32::try_from(record.seq).ok()?;
+        if record.key_id != Self::key_id(epoch) || !record.scope.is_empty() {
+            return None;
+        }
+        Some(SignedEpoch {
+            epoch,
+            issuer: record.device.clone(),
+            record,
+        })
     }
     /// Check the issuer's signature with its key.
     pub fn verify(&self, vault: &VaultId, issuer_key: &VerifyingKey) -> Result<()> {
-        let ct = hex::decode(&self.body_hex)?;
-        issuer_key.verify(
-            &self.sig_alg,
-            &Self::message(vault, self.epoch, &self.issuer, &crypto::hash(&ct)),
-            &hex::decode(&self.sig_hex)?,
-        )
+        if &self.record.vault != vault {
+            bail!("epoch record of another vault");
+        }
+        self.record.verify(issuer_key)
+    }
+    /// Open the record with the epoch's vault key (signature not checked).
+    pub fn open_record(&self, vault: &VaultId, vault_key: &SecretKey) -> Result<EpochRecord> {
+        if &self.record.vault != vault {
+            bail!("epoch record of another vault");
+        }
+        let plain = Zeroizing::new(self.record.open(&EpochRecord::key(vault_key))?);
+        let rec: EpochRecord = serde_json::from_slice(&plain)?;
+        if rec.epoch != self.epoch || rec.issuer != self.issuer {
+            bail!("epoch record does not match its envelope");
+        }
+        Ok(rec)
     }
     /// Open a signed epoch record with its key. With a verifier that knows
     /// the issuer's key the signature must verify; a record whose issuer is
@@ -554,57 +521,53 @@ impl SignedEpoch {
         if let Some(pk) = verifier(&env.issuer) {
             env.verify(vault, &pk)?;
         }
-        let rec = EpochRecord::open(&hex::decode(&env.body_hex)?, vault, epoch, vault_key)?;
-        if rec.issuer != env.issuer {
-            bail!("epoch record issuer does not match its envelope");
-        }
-        Ok(rec)
+        env.open_record(vault, vault_key)
     }
 }
 
 /// A vault key of one epoch sealed to one device's KEM key and signed by
-/// the device that sealed it.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+/// the device that sealed it: a signed record of kind `grant` (format 2)
+/// with an empty scope (a folder grant names its folder), writer the
+/// issuer, sequence number the epoch, key id `kem:<recipient>`.
+#[derive(Clone, Debug)]
 pub struct Grant {
-    pub format_version: u16,
     pub epoch: u32,
     pub device: DeviceId,
     pub issuer: DeviceId,
-    pub kem_alg: String,
-    pub kem_ct_hex: String,
-    pub sealed_hex: String,
-    pub sig_alg: String,
-    pub sig_hex: String,
+    pub record: SignedRecord,
+}
+
+impl Serialize for Grant {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> std::result::Result<S::Ok, S::Error> {
+        self.record.serialize(s)
+    }
+}
+
+impl<'de> Deserialize<'de> for Grant {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> std::result::Result<Self, D::Error> {
+        let record = SignedRecord::deserialize(d)?;
+        Grant::from_record(record).map_err(serde::de::Error::custom)
+    }
 }
 
 impl Grant {
     pub fn storage_key(epoch: u32, device: &DeviceId, issuer: &DeviceId) -> String {
         format!("{GRANT_PREFIX}{epoch:08}/{device}/{issuer}.json")
     }
-    fn aad(vault: &VaultId, epoch: u32, device: &DeviceId, issuer: &DeviceId) -> Vec<u8> {
-        crypto::aad(
-            "epoch-grant",
-            &[
-                vault.as_str().as_bytes(),
-                &epoch.to_le_bytes(),
-                device.as_str().as_bytes(),
-                issuer.as_str().as_bytes(),
-            ],
-        )
-    }
-    fn message(&self, vault: &VaultId) -> Vec<u8> {
-        sig_message(
-            "epoch-grant-signature",
-            &[
-                vault.as_str().as_bytes(),
-                &self.epoch.to_le_bytes(),
-                self.device.as_str().as_bytes(),
-                self.issuer.as_str().as_bytes(),
-                self.kem_alg.as_bytes(),
-                self.kem_ct_hex.as_bytes(),
-                self.sealed_hex.as_bytes(),
-            ],
-        )
+    fn from_record(record: SignedRecord) -> Result<Self> {
+        if record.kind != RecordKind::Grant || !record.scope.is_empty() {
+            bail!("not a vault key grant");
+        }
+        let recipient = record
+            .key_id
+            .strip_prefix(crate::record::KEM_KEY_PREFIX)
+            .ok_or_else(|| anyhow!("grant is not sealed to a key-exchange key"))?;
+        Ok(Grant {
+            epoch: u32::try_from(record.seq)?,
+            device: DeviceId::from_hex(recipient)?,
+            issuer: record.device.clone(),
+            record,
+        })
     }
     pub fn seal(
         vault: &VaultId,
@@ -615,31 +578,23 @@ impl Grant {
         issuer: &DeviceId,
         signer: &SigningKey,
     ) -> Result<Self> {
-        let (kem_ct, shared) = to.encapsulate()?;
-        let sealed = crypto::encrypt(&shared, &Self::aad(vault, epoch, device, issuer), &key.0)?;
-        let mut g = Grant {
-            format_version: crate::FORMAT_VERSION,
-            epoch,
-            device: device.clone(),
-            issuer: issuer.clone(),
-            kem_alg: crate::kem::KEM_ALG.to_string(),
-            kem_ct_hex: hex::encode(kem_ct),
-            sealed_hex: hex::encode(sealed),
-            sig_alg: signer.alg().to_string(),
-            sig_hex: String::new(),
-        };
-        g.sig_hex = hex::encode(signer.sign(&g.message(vault)));
-        Ok(g)
+        let key_id = crate::record::kem_key_id(device.as_str());
+        let record = crate::record::Header {
+            kind: RecordKind::Grant,
+            vault,
+            scope: "",
+            device: issuer,
+            seq: epoch as u64,
+            key_id: &key_id,
+        }
+        .seal_to(to, &key.0, signer)?;
+        Self::from_record(record)
     }
     pub fn verify(&self, vault: &VaultId, issuer_key: &VerifyingKey) -> Result<()> {
-        if self.kem_alg != crate::kem::KEM_ALG {
-            bail!("unsupported key encapsulation algorithm {}", self.kem_alg);
+        if &self.record.vault != vault {
+            bail!("grant of another vault");
         }
-        issuer_key.verify(
-            &self.sig_alg,
-            &self.message(vault),
-            &hex::decode(&self.sig_hex)?,
-        )
+        self.record.verify(issuer_key)
     }
     /// Check the issuer's signature and open with this device's KEM key.
     pub fn open(
@@ -649,12 +604,7 @@ impl Grant {
         dk: &DecapsKey,
     ) -> Result<SecretKey> {
         self.verify(vault, issuer_key)?;
-        let shared = dk.decapsulate(&hex::decode(&self.kem_ct_hex)?)?;
-        let key = Zeroizing::new(crypto::decrypt(
-            &shared,
-            &Self::aad(vault, self.epoch, &self.device, &self.issuer),
-            &hex::decode(&self.sealed_hex)?,
-        )?);
+        let key = Zeroizing::new(self.record.open_sealed(dk)?);
         SecretKey::from_bytes(&key)
     }
 }
@@ -953,6 +903,36 @@ impl Engine {
         self.current_vault_key().derive("folder-record", &[])
     }
 
+    /// The key id and key records under the folder-record key are sealed
+    /// with now (`folder-record@<epoch>`).
+    pub(super) fn folder_record_key_id_now(&self) -> (String, SecretKey) {
+        (
+            crate::record::folder_record_key_id(self.key_epoch()),
+            self.folder_record_key_now(),
+        )
+    }
+
+    /// The folder-record key a `folder-record@<epoch>` key id names, when
+    /// this device holds that epoch.
+    pub(super) fn folder_record_key_for(&self, id: &str) -> Option<SecretKey> {
+        let e = crate::record::parse_folder_record_key_id(id)?;
+        Some(self.epochs.keys.get(&e)?.derive("folder-record", &[]))
+    }
+
+    /// The key id and key records under the registry key are sealed with now.
+    pub(super) fn registry_key_id_now(&self) -> (String, SecretKey) {
+        (
+            crate::record::registry_key_id(self.key_epoch()),
+            self.registry_key_now(),
+        )
+    }
+
+    /// The registry key a `registry@<epoch>` key id names.
+    pub(super) fn registry_key_for(&self, id: &str) -> Option<SecretKey> {
+        let e = crate::record::parse_registry_key_id(id)?;
+        Some(self.epochs.keys.get(&e)?.derive("device-registry", &[]))
+    }
+
     /// Ledger key for a batch key id `ledger` (epoch 0) or `ledger@<epoch>`.
     pub(super) fn ledger_key_for(&self, id: &str) -> Option<SecretKey> {
         let epoch = if id == KEY_LEDGER {
@@ -1173,6 +1153,13 @@ impl Engine {
             return Some(self.keys.signer.public());
         }
         self.devices.devices.get(device)?.pubkey().ok()
+    }
+
+    /// The key that signs what `device` publishes: a device of the vault
+    /// (registry) or a member of a shared folder (its member record).
+    pub(super) fn writer_key(&self, device: &DeviceId) -> Option<VerifyingKey> {
+        self.device_key(device)
+            .or_else(|| self.devices.members.get(device)?.pubkey().ok())
     }
 
     /// The removal of this device, once it has seen it.
@@ -1584,7 +1571,7 @@ impl Engine {
                         .device_key(&env.issuer)
                         .is_some_and(|pk| env.verify(&self.vault.vault_id, &pk).is_ok());
                 if genuine {
-                    seen.insert(crypto::hash(env.body_hex.as_bytes()).to_vec(), env.issuer);
+                    seen.insert(crypto::hash(env.record.body.as_bytes()).to_vec(), env.issuer);
                 }
             }
             if seen.len() > 1 {
@@ -1705,9 +1692,7 @@ impl Engine {
             }
             match self.epochs.keys.get(&e) {
                 Some(k) => {
-                    let opened = hex::decode(&env.body_hex)
-                        .ok()
-                        .and_then(|ct| EpochRecord::open(&ct, &self.vault.vault_id, e, k).ok());
+                    let opened = env.open_record(&self.vault.vault_id, k).ok();
                     if opened
                         .is_some_and(|r| r.issuer == rev.issuer && r.revoked.contains(&rev.device))
                     {
@@ -2063,16 +2048,16 @@ impl Engine {
             let Ok(Some(blob)) = b.get(&key) else {
                 continue;
             };
-            for (_, k) in self.registry_keys().iter().skip(1) {
-                if let Ok(rec) = crate::p2p::PeerRecord::open(
-                    &blob,
-                    &self.vault.vault_id,
-                    &self.vault.device_id,
-                    k,
-                ) {
-                    let _ = self.publish_peer_record(&rec);
-                    return;
-                }
+            let key_for = |id: &str| self.registry_key_for(id);
+            if let Ok(rec) = crate::p2p::PeerRecord::open(
+                &blob,
+                &self.vault.vault_id,
+                &self.vault.device_id,
+                &self.keys.signer.public(),
+                &key_for,
+            ) {
+                let _ = self.publish_peer_record(&rec);
+                return;
             }
         }
     }
@@ -2177,8 +2162,18 @@ mod tests {
         let s = SignedRevocation::seal(&rev, &vault, 0, &key, &issuer).unwrap();
         assert_eq!(s.open(&vault, &key, &issuer.public()).unwrap(), rev);
         assert!(s.open(&vault, &key, &other.public()).is_err());
+        // Relabelled by a storage (another registry epoch, another removed
+        // device): the signed header no longer verifies.
         let mut t = s.clone();
-        t.key_epoch = 1;
+        t.record.key_id = crate::record::registry_key_id(1);
+        let t: SignedRevocation =
+            serde_json::from_slice(&serde_json::to_vec(&t).unwrap()).unwrap();
+        assert_eq!(t.key_epoch, 1);
+        assert!(t.open(&vault, &key, &issuer.public()).is_err());
+        let mut t = s.clone();
+        t.record.scope = DeviceId::random().to_string();
+        let t: SignedRevocation =
+            serde_json::from_slice(&serde_json::to_vec(&t).unwrap()).unwrap();
         assert!(t.open(&vault, &key, &issuer.public()).is_err());
     }
 
@@ -2206,8 +2201,10 @@ mod tests {
         assert!(g
             .open(&vault, &issuer.public(), &DecapsKey::generate())
             .is_err());
+        // Readdressed to another device by a storage: the signature fails.
         let mut moved = g.clone();
-        moved.device = DeviceId::random();
+        moved.record.key_id = crate::record::kem_key_id(DeviceId::random().as_str());
+        let moved: Grant = serde_json::from_slice(&serde_json::to_vec(&moved).unwrap()).unwrap();
         assert!(moved.open(&vault, &issuer.public(), &dk).is_err());
     }
 }

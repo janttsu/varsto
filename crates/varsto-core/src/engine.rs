@@ -27,6 +27,7 @@ use crate::manifest::{self, ChunkRef, FileState, Manifest, Merge};
 use crate::policy::{Policy, PolicyReport};
 use crate::pool::{self, DiskStatus, PoolDisk, PoolError, PoolIdentity, PoolStorage};
 use crate::replica::{self, ReplicaToken, REPLICA_PREFIX};
+use crate::record::SignedRecord;
 use crate::storage::{Storage, StorageSpec};
 use crate::thumbs;
 use crate::util;
@@ -169,6 +170,13 @@ struct FolderState {
     last_seen: BTreeMap<DeviceId, u64>,
     published_seq: u64,
     published_hash: String,
+    /// `body_hash` of the newest own manifest (what the ledger announces).
+    #[serde(default)]
+    published_body_hash: String,
+    /// The newest own manifest announced in a share batch of the folder
+    /// (members read only those, format 2).
+    #[serde(default)]
+    share_announced_seq: u64,
     /// Selective sync: paths the user wants kept on this device.
     #[serde(default)]
     pinned: BTreeSet<String>,
@@ -347,6 +355,10 @@ pub struct PullReport {
     /// Read-only members whose changes to the folder were not taken (names).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub writes_refused: Vec<String>,
+    /// Records (manifests) found on a storage that their writer's ledger
+    /// has not announced yet, or announced and not found: they wait.
+    #[serde(default, skip_serializing_if = "util::is_zero_u64")]
+    pub records_waiting: u64,
     /// This device may only read the folder: local changes moved to
     /// `kept-aside/` or undone.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -1195,6 +1207,7 @@ impl Engine {
     ) -> Result<Engine> {
         keys.save(home, passphrase, &vault.vault_id, &vault.device_id)?;
         util::write_json(&home.join("vault.json"), &vault)?;
+        let vault_id_for_ledger = vault.vault_id.clone();
         let mut engine = Engine {
             peers: None,
             snapshot_sink: None,
@@ -1208,7 +1221,7 @@ impl Engine {
             keys,
             config: Config::default(),
             keyring: Keyring::default(),
-            ledger: LedgerStore::open(&home.join("ledger"))?,
+            ledger: LedgerStore::open(&home.join("ledger"), &vault_id_for_ledger)?,
             clock: Clock::default(),
             clock_reserved: 0,
             clock_writes: 0,
@@ -1424,6 +1437,7 @@ impl Engine {
         let epochs = membership::VaultEpochs::load(home, &keys, &vault.vault_id, &vault.device_id)?;
         let removal = util::read_json(&home.join("removed.json")).ok();
         let clock: Clock = util::read_json_or_default(&home.join("clock.json"))?;
+        let vault_id_for_ledger = vault.vault_id.clone();
         let mut engine = Engine {
             peers: None,
             snapshot_sink: None,
@@ -1433,7 +1447,7 @@ impl Engine {
             fetch_stats: Default::default(),
             unlocked: BTreeMap::new(),
             config: Config::load(home)?,
-            ledger: LedgerStore::open(&home.join("ledger"))?,
+            ledger: LedgerStore::open(&home.join("ledger"), &vault_id_for_ledger)?,
             clock: clock.clone(),
             // The file holds the end of the last reservation: the values
             // below it may have been handed out before the last exit.
@@ -1499,6 +1513,11 @@ impl Engine {
     pub fn own_device_name(&self) -> &str {
         &self.vault.device_name
     }
+    /// This device's public signing key (what verifies what it publishes).
+    pub fn device_public_key(&self) -> crypto::VerifyingKey {
+        self.keys.signer.public()
+    }
+
     pub fn vault_id(&self) -> &VaultId {
         &self.vault.vault_id
     }
@@ -3043,14 +3062,14 @@ impl Engine {
                     }
                     if let Some(blob) = backend.get(&key)? {
                         let verify = |d: &DeviceId| self.device_key(d);
+                        let key_for = |id: &str| self.folder_record_key_for(id);
                         if let Ok(rec) = vault::PolicyRecord::open_any(
                             &blob,
                             &self.vault.vault_id,
                             &fid,
                             &named,
-                            &fr_keys,
+                            &key_for,
                             &verify,
-                            self.org.is_none(),
                         ) {
                             if !self.trusted(&rec.device)
                                 || !self.org_accepts_policy_from(&rec.device)
@@ -3162,6 +3181,62 @@ impl Engine {
         let events = std::mem::take(&mut self.pending);
         let n_events = events.len();
         if !self.vault.member {
+            // Members of a shared folder cannot read this device's vault
+            // batches, yet a record of the folder counts for them only once
+            // its writer announced it: the announcements of shared folders
+            // go into one batch per folder under the folder's share key too.
+            let mut shared: BTreeMap<FolderId, Vec<Event>> = BTreeMap::new();
+            for ev in &events {
+                let folder = match ev {
+                    Event::ManifestPublished { folder, .. } => Some(folder.clone()),
+                    Event::RecordPublished { scope, .. } => FolderId::from_hex(scope).ok(),
+                    _ => None,
+                };
+                if let Some(f) = folder.filter(|f| {
+                    self.keyring
+                        .folders
+                        .get(f)
+                        .is_some_and(|r| r.shared && !r.is_removed())
+                }) {
+                    shared.entry(f).or_default().push(ev.clone());
+                }
+            }
+            // A folder shared after this device published its newest
+            // manifest: announce that manifest to the members too.
+            let shared_ids: Vec<FolderId> = self
+                .keyring
+                .folders
+                .values()
+                .filter(|r| r.shared && !r.is_removed() && !r.key_hex.is_empty())
+                .map(|r| r.folder_id.clone())
+                .collect();
+            let mut announced_now: Vec<(FolderId, u64)> = Vec::new();
+            for fid in shared_ids {
+                if !self.state_path(&fid).exists() {
+                    continue;
+                }
+                let Ok(st) = self.load_state(&fid) else {
+                    continue;
+                };
+                if st.published_seq == 0
+                    || st.share_announced_seq >= st.published_seq
+                    || st.published_body_hash.is_empty()
+                {
+                    continue;
+                }
+                let evs = shared.entry(fid.clone()).or_default();
+                if !evs.iter().any(|e| {
+                    matches!(e, Event::ManifestPublished { seq, .. } if *seq == st.published_seq)
+                }) {
+                    evs.push(Event::ManifestPublished {
+                        folder: fid.clone(),
+                        seq: st.published_seq,
+                        manifest_hash: st.published_body_hash.clone(),
+                        files: st.files.values().filter(|f| !f.deleted).count() as u64,
+                    });
+                }
+                announced_now.push((fid, st.published_seq));
+            }
             let (key_id, ledger_key) = self.ledger_key_now();
             let signed = self.ledger.append_own_seen(
                 &self.vault.device_id,
@@ -3173,6 +3248,30 @@ impl Engine {
                 &self.keys.signer,
             )?;
             log::debug!(seq = signed.seq, events = n_events, lamport = lamport, key_id = key_id.as_str(); "ledger batch sealed");
+            for (fid, seq) in announced_now {
+                if let Ok(mut st) = self.load_state(&fid) {
+                    if st.share_announced_seq < seq {
+                        st.share_announced_seq = seq;
+                        let _ = self.save_state(&fid, &st);
+                    }
+                }
+            }
+            for (fid, evs) in shared {
+                let Some(rec) = self.keyring.folders.get(&fid).cloned() else {
+                    continue;
+                };
+                let Ok((key_id, key)) = self.share_ledger_key_now(&rec) else {
+                    continue;
+                };
+                self.ledger.append_own_with(
+                    &self.vault.device_id,
+                    evs,
+                    lamport,
+                    &key,
+                    &key_id,
+                    &self.keys.signer,
+                )?;
+            }
             // The events are in a local batch now.
             self.clear_deferred();
             let t = crate::logging::Timer::start();
@@ -3195,6 +3294,7 @@ impl Engine {
                 Event::SnapshotTaken { backup, .. }
                 | Event::SnapshotExpired { backup, .. }
                 | Event::BackupStopped { backup } => Some(backup.clone()),
+                Event::RecordPublished { scope, .. } => FolderId::from_hex(scope).ok(),
                 Event::DeviceEnrolled { .. } | Event::StorageRetired { .. } | Event::Unknown => {
                     None
                 }
@@ -4371,7 +4471,18 @@ impl Engine {
                     created_utc: util::now_utc(),
                     files: state.files.clone(),
                 };
-                blob = Some(m.seal(&self.vault.vault_id, &self.folder_keys(rec)?.meta)?);
+                // No storage holds the published copy any more: seal it
+                // again and announce the new copy's hash, which readers
+                // check it against.
+                let fk = self.folder_keys(rec)?;
+                let env = m.seal(&self.vault.vault_id, fk.epoch, &fk.meta, &self.keys.signer)?;
+                self.pending.push(Event::ManifestPublished {
+                    folder: rec.folder_id.clone(),
+                    seq: state.published_seq,
+                    manifest_hash: env.body_hash.clone(),
+                    files: state.files.values().filter(|f| !f.deleted).count() as u64,
+                });
+                blob = Some(env.to_bytes());
             }
             if let Some(b) = &blob {
                 backend.put_if_absent(&key, b)?;
@@ -4401,7 +4512,9 @@ impl Engine {
             created_utc,
             files: state.files.clone(),
         };
-        let blob = m.seal(&self.vault.vault_id, &self.folder_keys(rec)?.meta)?;
+        let fk = self.folder_keys(rec)?;
+        let env = m.seal(&self.vault.vault_id, fk.epoch, &fk.meta, &self.keys.signer)?;
+        let blob = env.to_bytes();
         let key = Manifest::storage_key(&rec.folder_id, &self.vault.device_id, seq);
         for (_, backend) in self.metadata_storages(true)? {
             backend.put_if_absent(&key, &blob)?;
@@ -4417,9 +4530,10 @@ impl Engine {
         self.pending.push(Event::ManifestPublished {
             folder: rec.folder_id.clone(),
             seq,
-            manifest_hash: hex::encode(crypto::hash(&blob)),
+            manifest_hash: env.body_hash.clone(),
             files: state.files.values().filter(|f| !f.deleted).count() as u64,
         });
+        state.published_body_hash = env.body_hash.clone();
         state.published_seq = seq;
         state.published_hash = hash;
         // This device's own versions enter its change history as published.
@@ -4551,18 +4665,34 @@ impl Engine {
             }
         }
 
-        // Newest manifest per other device, across storages: only what the
-        // ledger announced since the last applied one (`manifest_upkeep`).
-        let newest = self.newest_manifests(&rec.folder_id, &state.last_seen, &storages)?;
-
-        // A revoked device's manifests count only up to the last one its
-        // accepted ledger batches announced.
-        let capped = if self.devices.revoked.is_empty() {
-            BTreeMap::new()
-        } else {
-            self.view()?.manifests
-        };
-        let metas = fk.meta_keys();
+        // Newest manifest per other device: only what the device's own
+        // signed ledger batches announced (format 2, section 3). The
+        // storage listing (`manifest_upkeep`) only says where a copy is;
+        // a manifest nobody announced waits, and a copy whose hash is not
+        // the announced one is refused.
+        let listed = self.newest_manifests(&rec.folder_id, &state.last_seen, &storages)?;
+        let announced: BTreeMap<DeviceId, (u64, String)> = self
+            .view()?
+            .manifest_hashes
+            .iter()
+            .filter(|((f, d), _)| f == &rec.folder_id && d != &self.vault.device_id)
+            .map(|((_, d), a)| (d.clone(), a.clone()))
+            .collect();
+        for (dev, (seq, _)) in &listed {
+            if *seq <= state.last_seen.get(dev).copied().unwrap_or(0) {
+                continue;
+            }
+            if !self.share_writer_ok(&rec, dev) {
+                // A read-only member (or a device that is not a participant):
+                // what it publishes is refused, announced or not.
+                let name = self.member_name(dev);
+                if !report.writes_refused.contains(&name) {
+                    report.writes_refused.push(name);
+                }
+            } else if announced.get(dev).is_none_or(|(a, _)| a < seq) {
+                report.records_waiting += 1;
+            }
+        }
         // Changes made by read-only members (after they stopped being
         // editors) are not taken, even when another device relays them.
         let viewer_clocks = self.share_viewer_clocks(&rec);
@@ -4575,7 +4705,7 @@ impl Engine {
         // then fed by every manifest taken. Never in the way of syncing.
         let mut hist = self.open_history(&rec.folder_id);
         let _ = self.history_backfill(&mut hist, &rec, &state, &storages);
-        for (dev, (seq, idx)) in newest {
+        for (dev, (seq, announced_hash)) in announced {
             if !self.share_manifest_source_ok(&rec, &dev) {
                 // A device that is not a participant of the shared folder.
                 continue;
@@ -4594,48 +4724,94 @@ impl Engine {
                 // A read-only member: what it publishes is not taken. Its
                 // manifest stays unread (`last_seen` does not move), so a
                 // later role as editor takes its newest one.
-                if seq > state.last_seen.get(&dev).copied().unwrap_or(0) {
-                    report.writes_refused.push(self.member_name(&dev));
+                let name = self.member_name(&dev);
+                if seq > state.last_seen.get(&dev).copied().unwrap_or(0)
+                    && !report.writes_refused.contains(&name)
+                {
+                    report.writes_refused.push(name);
                 }
                 continue;
             }
-            let seq = if self.is_revoked(&dev) {
-                seq.min(
-                    capped
-                        .get(&(rec.folder_id.clone(), dev.clone()))
-                        .copied()
-                        .unwrap_or(0),
-                )
-            } else {
-                seq
-            };
             if seq <= state.last_seen.get(&dev).copied().unwrap_or(0) {
                 continue;
             }
-            let key = Manifest::storage_key(&rec.folder_id, &dev, seq);
-            let Some(blob) = storages[idx].1.get(&key)? else {
+            let Some(writer) = self.writer_key(&dev) else {
                 continue;
             };
-            let Some(m) = metas.iter().find_map(|meta| {
-                Manifest::open(&blob, &self.vault.vault_id, &rec.folder_id, &dev, seq, meta).ok()
-            }) else {
-                if self.share_access_lost(&rec.folder_id) {
-                    // Removed from the shared folder: newer manifests are
-                    // under a key this device will not get.
+            let key = Manifest::storage_key(&rec.folder_id, &dev, seq);
+            // The storage the listing found it on first, then the others.
+            let hint = listed.get(&dev).filter(|(s, _)| *s == seq).map(|(_, i)| *i);
+            let mut blob = None;
+            for i in hint.into_iter().chain(0..storages.len()) {
+                if storages[i].0.is_data_only() {
                     continue;
                 }
-                if !self.trusted(&dev) {
-                    // Not a trusted full device (a member, a replica, a
-                    // removed device, or a name planted on the storage):
-                    // what does not open is skipped, so nobody but a
-                    // trusted device can stop this folder's pull.
-                    log::warn!(folder:% = rec.folder_id, device:% = dev, seq = seq; "manifest does not open: skipped");
+                if let Ok(Some(b)) = storages[i].1.get(&key) {
+                    blob = Some(b);
+                    break;
+                }
+            }
+            let Some(blob) = blob else {
+                // Announced but not on any storage yet (or withheld).
+                report.records_waiting += 1;
+                continue;
+            };
+            let meta_for = |e: u32| fk.meta_key_for(e);
+            let opened = Manifest::open(
+                &blob,
+                &self.vault.vault_id,
+                &rec.folder_id,
+                &dev,
+                seq,
+                &writer,
+                &meta_for,
+            );
+            let m = match opened {
+                Ok((m, env)) if env.body_hash == announced_hash => m,
+                Ok(_) => {
+                    // A manifest the writer signed but did not announce under
+                    // this number (another copy, replayed or rewritten).
+                    log::warn!(folder:% = rec.folder_id, device:% = dev, seq = seq; "manifest does not match its announcement: refused");
+                    report.writes_refused.push(self.member_name(&dev));
                     continue;
                 }
-                bail!(
-                    "manifest {seq} of device {} does not open with any key this device holds (a newer vault key has not arrived yet?)",
-                    dev.short()
-                );
+                Err(e) => {
+                    if self.share_access_lost(&rec.folder_id) {
+                        // Removed from the shared folder: newer manifests are
+                        // under a key this device will not get.
+                        continue;
+                    }
+                    // The device's own signed manifest of exactly this
+                    // number, whose body only a key this device lacks opens.
+                    let genuine = SignedRecord::parse(&blob).is_ok_and(|env| {
+                        env.expect(
+                            &crate::record::Expect::new(
+                                crate::record::RecordKind::Manifest,
+                                &self.vault.vault_id,
+                            )
+                            .scope(rec.folder_id.as_str())
+                            .device(&dev)
+                            .seq(seq),
+                        )
+                        .is_ok()
+                            && env.body_hash == announced_hash
+                            && env.verify(&writer).is_ok()
+                    });
+                    if !self.trusted(&dev) || !genuine {
+                        // Not a trusted full device (a member, a replica, a
+                        // removed device), or not the device's signed
+                        // manifest at all (junk planted on the storage):
+                        // skipped, so nobody but a trusted device can stop
+                        // this folder's pull.
+                        log::warn!(folder:% = rec.folder_id, device:% = dev, seq = seq; "manifest refused: {e}");
+                        report.writes_refused.push(self.member_name(&dev));
+                        continue;
+                    }
+                    bail!(
+                        "manifest {seq} of device {} does not open with any key this device holds (a newer folder key has not arrived yet?): {e}",
+                        dev.short()
+                    );
+                }
             };
             self.observe_clock(m.lamport)?;
             // The newest files first (by their modification time), so that
@@ -5685,17 +5861,10 @@ impl Engine {
             updated_utc: now,
             policy,
         };
-        let fr_key = self.folder_record_key_now();
-        // Signed in an organization (where only some devices may set
-        // policies, and every device runs a version that reads signatures);
-        // the older, unsigned form otherwise, so devices still on alpha.9
-        // keep reading it. Without an organization any device may set a
-        // policy, so a signature would prove nothing more.
-        let blob = if self.org.is_some() {
-            prec.seal_signed(&self.vault.vault_id, &fr_key, &self.keys.signer)?
-        } else {
-            prec.seal(&self.vault.vault_id, &fr_key)?
-        };
+        // Always signed (storage format 2): the reader takes it only from
+        // the device its name and signature say.
+        let (fr_id, fr_key) = self.folder_record_key_id_now();
+        let blob = prec.seal_signed(&self.vault.vault_id, &fr_id, &fr_key, &self.keys.signer)?;
         for (_, backend) in self.metadata_storages(true)? {
             backend.put_if_absent(&prec.storage_key(), &blob)?;
         }
@@ -6307,8 +6476,11 @@ impl Engine {
     /// Publish where this device can be reached (rendezvous record).
     pub fn publish_peer_record(&self, rec: &crate::p2p::PeerRecord) -> Result<()> {
         self.ensure_active()?;
-        let key = self.registry_key_now();
-        let blob = rec.seal(&self.vault.vault_id, &key)?;
+        if rec.device != self.vault.device_id {
+            bail!("a device publishes only its own peer record");
+        }
+        let (key_id, key) = self.registry_key_id_now();
+        let blob = rec.seal(&self.vault.vault_id, &key_id, &key, &self.keys.signer)?;
         let k = crate::p2p::PeerRecord::storage_key(&rec.device);
         for (_, backend) in self.metadata_storages(false)? {
             // Records change: delete then write (single writer per path).
@@ -6321,7 +6493,7 @@ impl Engine {
     /// Rendezvous records of the other devices, one per device (the newest
     /// copy when several storages hold one).
     pub fn peer_record_list(&self) -> Result<Vec<crate::p2p::PeerRecord>> {
-        let keys = self.registry_keys();
+        let key_for = |id: &str| self.registry_key_for(id);
         let mut out: Vec<crate::p2p::PeerRecord> = Vec::new();
         for (_, backend) in self.metadata_storages(false)? {
             for k in backend.list(crate::p2p::PeerRecord::PREFIX)? {
@@ -6341,9 +6513,16 @@ impl Engine {
                 let Some(blob) = backend.get(&k)? else {
                     continue;
                 };
-                let Some(rec) = keys.iter().find_map(|(_, key)| {
-                    crate::p2p::PeerRecord::open(&blob, &self.vault.vault_id, &dev, key).ok()
-                }) else {
+                let Some(writer) = self.device_key(&dev) else {
+                    continue;
+                };
+                let Ok(rec) = crate::p2p::PeerRecord::open(
+                    &blob,
+                    &self.vault.vault_id,
+                    &dev,
+                    &writer,
+                    &key_for,
+                ) else {
                     continue;
                 };
                 match out.iter_mut().find(|r| r.device == dev) {
@@ -7543,7 +7722,7 @@ impl Engine {
                 lamport: b.lamport,
                 created_utc: b.created_utc,
                 events: b.events.len(),
-                hash: s.hash.clone(),
+                hash: s.body_hash.clone(),
             });
         }
         Ok(out)

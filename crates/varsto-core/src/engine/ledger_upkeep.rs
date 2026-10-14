@@ -297,7 +297,7 @@ impl Engine {
             Some(_) => self
                 .ledger
                 .checkpoint(&me)?
-                .map(|c| c.body_hex.len() as u64 / 2)
+                .map(|c| c.body.len() as u64 / 2)
                 .unwrap_or(0),
             None => 0,
         };
@@ -656,7 +656,7 @@ impl Engine {
                                 .ok()
                                 .filter(|r| r.device == me && r.seq == seq);
                             match remote {
-                                Some(r) if r.hash == batch.hash => {}
+                                Some(r) if r.body_hash == batch.body_hash => {}
                                 Some(r) if r.verify(&self.keys.signer.public()).is_ok() => {
                                     bail!("ledger fork: storage {} already holds a different batch {} of this device (restored from an old copy?)", backend.name(), seq);
                                 }
@@ -682,7 +682,7 @@ impl Engine {
                     let same = backend
                         .get(&key)?
                         .and_then(|b| serde_json::from_slice::<SignedBatch>(&b).ok())
-                        .is_some_and(|r| r.hash == batch.hash);
+                        .is_some_and(|r| r.body_hash == batch.body_hash);
                     if !same
                         && self.own_object_genuine(
                             spec.name(),
@@ -1158,7 +1158,7 @@ pub(super) mod tests {
                 "checkpoint of {}: through {}, {:.2} MB",
                 e.vault.device_name,
                 cp.seq,
-                cp.body_hex.len() as f64 / 2e6
+                cp.body.len() as f64 / 2e6
             );
         }
         usage();

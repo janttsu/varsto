@@ -1219,7 +1219,7 @@ mod tests {
         let a = root_signer(&root);
         let b = root_signer(&root);
         assert_eq!(a.public().to_bytes(), b.public().to_bytes());
-        assert!(a.is_hybrid());
+        assert_eq!(a.public().to_bytes().len(), crate::crypto::PUBLIC_KEY_LEN);
         let words = crate::recovery::words_from_key(&root.to_hex()).unwrap();
         let (_, c) = root_from_words(&words).unwrap();
         assert_eq!(c.public().to_bytes(), a.public().to_bytes());

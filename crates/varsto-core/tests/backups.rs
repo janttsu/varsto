@@ -628,7 +628,7 @@ fn a_replica_cannot_expire_snapshots() {
     let batch = Batch {
         device: dev.clone(),
         seq: 2,
-        prev: Some(first.hash),
+        prev: Some(first.body_hash.clone()),
         lamport: a.status().unwrap().lamport + 10,
         created_utc: s1.taken_utc,
         events: vec![
@@ -641,7 +641,8 @@ fn a_replica_cannot_expire_snapshots() {
         ],
         seen: Map::new(),
     };
-    let signed = SignedBatch::seal_with(&batch, &key, KEY_REPLICA, &signer).unwrap();
+    let signed =
+        SignedBatch::seal_with(a.vault_id(), &batch, &key, KEY_REPLICA, &signer).unwrap();
     fs::write(
         dir_of.join(format!("{:016}.json", 2)),
         serde_json::to_vec(&signed).unwrap(),

@@ -687,7 +687,7 @@ impl Engine {
                 }
             }
         }
-        let meta = old.keys().ok().map(|k| k.meta);
+        let old_keys = old.keys().ok();
         let manifest_prefix = format!("manifests/{}/", old.folder_id);
         for (_, backend) in storages.iter().filter(|(s, _)| !s.is_data_only()) {
             let Ok(keys) = backend.list(&manifest_prefix) else {
@@ -707,12 +707,21 @@ impl Engine {
                 ) else {
                     continue;
                 };
-                let (Some(meta), Ok(Some(blob))) = (&meta, backend.get(&key)) else {
+                let (Some(fk), Some(writer), Ok(Some(blob))) =
+                    (&old_keys, self.writer_key(&dev), backend.get(&key))
+                else {
                     continue;
                 };
-                if let Ok(m) =
-                    Manifest::open(&blob, &self.vault.vault_id, &old.folder_id, &dev, seq, meta)
-                {
+                let meta_for = |e: u32| fk.meta_key_for(e);
+                if let Ok((m, _)) = Manifest::open(
+                    &blob,
+                    &self.vault.vault_id,
+                    &old.folder_id,
+                    &dev,
+                    seq,
+                    &writer,
+                    &meta_for,
+                ) {
                     for f in m.files.values() {
                         objects.extend(f.chunks.iter().map(|c| c.object.clone()));
                     }

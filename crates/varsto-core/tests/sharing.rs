@@ -236,7 +236,18 @@ fn removed_member_reads_nothing_new_and_the_others_read_on() {
         .max()
         .unwrap();
     let blob = fs::read(mdir.join(format!("{seq:016}.enc"))).unwrap();
-    assert!(Manifest::open(&blob, &vault, &crec.folder_id, a.device_id(), seq, &ck.meta).is_err());
+    let meta_for = |e: u32| ck.meta_key_for(e);
+    let a_key = a.device_public_key();
+    assert!(Manifest::open(
+        &blob,
+        &vault,
+        &crec.folder_id,
+        a.device_id(),
+        seq,
+        &a_key,
+        &meta_for
+    )
+    .is_err());
     // Its later changes are ignored by everyone.
     fs::write(lab.dir("cai").join("late.txt"), b"after removal").unwrap();
     fs::write(lab.dir("cai").join("plan.txt"), b"overwritten by C").unwrap();

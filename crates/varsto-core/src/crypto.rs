@@ -6,8 +6,8 @@
 //! - AEAD: XChaCha20-Poly1305 with a 192-bit nonce.
 //! - Keyed hash and KDF: BLAKE3 (keyed mode and derive_key mode).
 //! - Passphrase stretching: Argon2id with fixed minimum parameters.
-//! - Signatures: Ed25519 plus ML-DSA-65 (hybrid, both must verify); devices
-//!   from alpha-0 keep Ed25519-only keys, which the algorithm identifier marks.
+//! - Signatures: Ed25519 plus ML-DSA-65 (hybrid, both must verify). There
+//!   is no Ed25519-only form (storage format 2).
 //!
 //! Every key has exactly one purpose; derivations carry a context string and
 //! length-prefixed scope identifiers so that two scopes never share a key.
@@ -22,13 +22,10 @@ use zeroize::{Zeroize, ZeroizeOnDrop};
 pub const AEAD_ALG: &str = "xchacha20poly1305";
 pub const HASH_ALG: &str = "blake3";
 pub const KDF_ALG: &str = "blake3-derive-key";
-/// Signature algorithm identifiers carried by every signed object.
-/// `SIG_ALG` is what new keys produce: an Ed25519 signature and an ML-DSA-65
-/// (FIPS 204) signature over the same message, both of which must verify.
-/// `SIG_ALG_LEGACY` is accepted only from keys that were created before the
-/// hybrid scheme and therefore have no post-quantum part.
+/// Signature algorithm identifier carried by every signed object: an
+/// Ed25519 signature and an ML-DSA-65 (FIPS 204) signature over the same
+/// message, both of which must verify. It is the only one accepted.
 pub const SIG_ALG: &str = "ed25519+ml-dsa-65";
-pub const SIG_ALG_LEGACY: &str = "ed25519";
 pub const PASSPHRASE_KDF: &str = "argon2id";
 
 /// Context prefix for key derivation. It is a format constant and must not
@@ -225,8 +222,8 @@ impl Default for PassphraseParams {
 
 /// The passphrase as it is stretched: Unicode NFKC, so that the same
 /// characters typed on a keyboard that composes them differently (a macOS
-/// "ä" versus a Windows "ä") give the same key (plan 6.15). Key files from
-/// before this normalisation are opened with the raw string as a fallback.
+/// "ä" versus a Windows "ä") give the same key (plan 6.15). There is no
+/// fallback to the raw string.
 pub fn normalize_passphrase(passphrase: &str) -> String {
     use unicode_normalization::UnicodeNormalization as _;
     passphrase.nfkc().collect()
@@ -246,12 +243,7 @@ pub fn check_passphrase(passphrase: &str) -> Result<()> {
 /// Stretch a passphrase into a wrapping key. The passphrase is NFKC-normalised
 /// here and may be any length.
 pub fn passphrase_key(passphrase: &str, params: &PassphraseParams) -> Result<SecretKey> {
-    passphrase_key_raw(&normalize_passphrase(passphrase), params)
-}
-
-/// Like `passphrase_key` without normalisation: for key files written
-/// before alpha.10 by a passphrase that NFKC changes.
-pub fn passphrase_key_raw(passphrase: &str, params: &PassphraseParams) -> Result<SecretKey> {
+    let passphrase = zeroize::Zeroizing::new(normalize_passphrase(passphrase));
     if params.kdf != PASSPHRASE_KDF {
         bail!("unsupported passphrase KDF {}", params.kdf);
     }
@@ -280,13 +272,12 @@ const PQ_PK_LEN: usize = 1952;
 const PQ_SIG_LEN: usize = 3309;
 
 /// Device signing key: Ed25519 plus ML-DSA-65, a hybrid so that a break of
-/// either algorithm alone does not let anyone forge ledger batches. The
-/// serialised form is the Ed25519 seed followed by the ML-DSA seed (64 bytes);
-/// a 32-byte value is a legacy Ed25519-only key from alpha-0 and keeps
-/// signing with the legacy algorithm so its existing device record stays valid.
+/// either algorithm alone does not let anyone forge what a device signs. The
+/// serialised form is the Ed25519 seed followed by the ML-DSA seed (64
+/// bytes); nothing else is accepted.
 pub struct SigningKey {
     ed: ed25519_dalek::SigningKey,
-    pq: Option<ml_dsa::SigningKey<ml_dsa::MlDsa65>>,
+    pq: ml_dsa::SigningKey<ml_dsa::MlDsa65>,
 }
 
 crate::redacted_opaque!(SigningKey);
@@ -298,140 +289,97 @@ impl SigningKey {
         rand::RngCore::fill_bytes(&mut rand::rngs::OsRng, &mut seed);
         let pq = ml_dsa::SigningKey::<ml_dsa::MlDsa65>::from_seed(&ml_dsa::Seed::from(seed));
         seed.zeroize();
-        SigningKey { ed, pq: Some(pq) }
+        SigningKey { ed, pq }
     }
     pub fn from_bytes(b: &[u8]) -> Result<Self> {
-        match b.len() {
-            ED_SEED_LEN => {
-                let arr: [u8; ED_SEED_LEN] = b.try_into().unwrap();
-                Ok(SigningKey {
-                    ed: ed25519_dalek::SigningKey::from_bytes(&arr),
-                    pq: None,
-                })
-            }
-            n if n == ED_SEED_LEN + PQ_SEED_LEN => {
-                let ed_arr: [u8; ED_SEED_LEN] = b[..ED_SEED_LEN].try_into().unwrap();
-                let pq_arr: [u8; PQ_SEED_LEN] = b[ED_SEED_LEN..].try_into().unwrap();
-                Ok(SigningKey {
-                    ed: ed25519_dalek::SigningKey::from_bytes(&ed_arr),
-                    pq: Some(ml_dsa::SigningKey::<ml_dsa::MlDsa65>::from_seed(
-                        &ml_dsa::Seed::from(pq_arr),
-                    )),
-                })
-            }
-            n => bail!("signing key must be 32 (legacy) or 64 bytes, got {n}"),
+        if b.len() != ED_SEED_LEN + PQ_SEED_LEN {
+            bail!(
+                "signing key must be {} bytes, got {}",
+                ED_SEED_LEN + PQ_SEED_LEN,
+                b.len()
+            );
         }
+        let ed_arr: [u8; ED_SEED_LEN] = b[..ED_SEED_LEN].try_into().unwrap();
+        let pq_arr: [u8; PQ_SEED_LEN] = b[ED_SEED_LEN..].try_into().unwrap();
+        Ok(SigningKey {
+            ed: ed25519_dalek::SigningKey::from_bytes(&ed_arr),
+            pq: ml_dsa::SigningKey::<ml_dsa::MlDsa65>::from_seed(&ml_dsa::Seed::from(pq_arr)),
+        })
     }
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut out = self.ed.to_bytes().to_vec();
-        if let Some(pq) = &self.pq {
-            out.extend_from_slice(pq.to_seed().as_slice());
-        }
+        out.extend_from_slice(self.pq.to_seed().as_slice());
         out
     }
     /// Algorithm identifier of the signatures this key produces.
     pub fn alg(&self) -> &'static str {
-        if self.pq.is_some() {
-            SIG_ALG
-        } else {
-            SIG_ALG_LEGACY
-        }
-    }
-    pub fn is_hybrid(&self) -> bool {
-        self.pq.is_some()
+        SIG_ALG
     }
     pub fn public(&self) -> VerifyingKey {
+        use ml_dsa::Keypair as _;
         VerifyingKey {
             ed: self.ed.verifying_key(),
-            pq: self.pq.as_ref().map(|k| {
-                use ml_dsa::Keypair as _;
-                k.verifying_key()
-            }),
+            pq: self.pq.verifying_key(),
         }
     }
-    /// Sign `msg`. Hybrid keys return the Ed25519 signature followed by the
-    /// ML-DSA-65 signature (64 + 3309 bytes); legacy keys return 64 bytes.
+    /// Sign `msg`: the Ed25519 signature followed by the ML-DSA-65
+    /// signature (64 + 3309 bytes).
     pub fn sign(&self, msg: &[u8]) -> Vec<u8> {
         use ed25519_dalek::Signer as _;
+        use ml_dsa::Signer as _;
         let mut out = self.ed.sign(msg).to_bytes().to_vec();
-        if let Some(pq) = &self.pq {
-            use ml_dsa::Signer as _;
-            let sig: ml_dsa::Signature<ml_dsa::MlDsa65> = pq.sign(msg);
-            out.extend_from_slice(sig.encode().as_slice());
-        }
+        let sig: ml_dsa::Signature<ml_dsa::MlDsa65> = self.pq.sign(msg);
+        out.extend_from_slice(sig.encode().as_slice());
         out
     }
 }
 
 /// Device public key: Ed25519 key followed by the ML-DSA-65 key (32 + 1952
-/// bytes), or 32 bytes for a legacy Ed25519-only device.
+/// bytes). Only that length is accepted.
 #[derive(Clone)]
 pub struct VerifyingKey {
     ed: ed25519_dalek::VerifyingKey,
-    pq: Option<ml_dsa::VerifyingKey<ml_dsa::MlDsa65>>,
+    pq: ml_dsa::VerifyingKey<ml_dsa::MlDsa65>,
 }
+
+/// Length of a public key in bytes.
+pub const PUBLIC_KEY_LEN: usize = ED_PK_LEN + PQ_PK_LEN;
 
 impl VerifyingKey {
     pub fn from_bytes(b: &[u8]) -> Result<Self> {
-        let (ed_bytes, pq_bytes) = match b.len() {
-            ED_PK_LEN => (b, None),
-            n if n == ED_PK_LEN + PQ_PK_LEN => (&b[..ED_PK_LEN], Some(&b[ED_PK_LEN..])),
-            n => bail!("public key must be 32 (legacy) or 1984 bytes, got {n}"),
-        };
-        let arr: [u8; ED_PK_LEN] = ed_bytes.try_into().unwrap();
+        if b.len() != PUBLIC_KEY_LEN {
+            bail!("public key must be {PUBLIC_KEY_LEN} bytes, got {}", b.len());
+        }
+        let arr: [u8; ED_PK_LEN] = b[..ED_PK_LEN].try_into().unwrap();
         let ed = ed25519_dalek::VerifyingKey::from_bytes(&arr)
             .map_err(|e| anyhow!("public key: {e}"))?;
-        let pq = match pq_bytes {
-            None => None,
-            Some(raw) => {
-                let enc = ml_dsa::EncodedVerifyingKey::<ml_dsa::MlDsa65>::try_from(raw)
-                    .map_err(|_| anyhow!("ml-dsa public key length"))?;
-                Some(ml_dsa::VerifyingKey::<ml_dsa::MlDsa65>::decode(&enc))
-            }
-        };
+        let enc = ml_dsa::EncodedVerifyingKey::<ml_dsa::MlDsa65>::try_from(&b[ED_PK_LEN..])
+            .map_err(|_| anyhow!("ml-dsa public key length"))?;
+        let pq = ml_dsa::VerifyingKey::<ml_dsa::MlDsa65>::decode(&enc);
         Ok(VerifyingKey { ed, pq })
     }
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut out = self.ed.to_bytes().to_vec();
-        if let Some(pq) = &self.pq {
-            out.extend_from_slice(pq.encode().as_slice());
-        }
+        out.extend_from_slice(self.pq.encode().as_slice());
         out
     }
-    pub fn is_hybrid(&self) -> bool {
-        self.pq.is_some()
-    }
-    /// Verify `sig` produced under algorithm `alg`.
-    ///
-    /// A hybrid key accepts only hybrid signatures and requires both parts to
-    /// verify, so an attacker who breaks one algorithm cannot strip the other
-    /// or downgrade the batch to Ed25519-only. A legacy key accepts only the
-    /// legacy algorithm.
+    /// Verify `sig` produced under algorithm `alg`: only the hybrid
+    /// algorithm, and both parts must verify, so an attacker who breaks one
+    /// algorithm cannot strip the other or downgrade to Ed25519 alone.
     pub fn verify(&self, alg: &str, msg: &[u8], sig: &[u8]) -> Result<()> {
-        match (alg, &self.pq) {
-            (SIG_ALG_LEGACY, None) => {
-                if sig.len() != ED_SIG_LEN {
-                    bail!("signature must be 64 bytes");
-                }
-                self.verify_ed(msg, &sig[..ED_SIG_LEN])
-            }
-            (SIG_ALG, Some(pq)) => {
-                if sig.len() != ED_SIG_LEN + PQ_SIG_LEN {
-                    bail!("hybrid signature must be {} bytes", ED_SIG_LEN + PQ_SIG_LEN);
-                }
-                self.verify_ed(msg, &sig[..ED_SIG_LEN])?;
-                let pq_sig = ml_dsa::Signature::<ml_dsa::MlDsa65>::try_from(&sig[ED_SIG_LEN..])
-                    .map_err(|_| anyhow!("ml-dsa signature: invalid encoding"))?;
-                use ml_dsa::Verifier as _;
-                pq.verify(msg, &pq_sig)
-                    .map_err(|_| anyhow!("ml-dsa signature verification failed"))
-            }
-            (SIG_ALG_LEGACY, Some(_)) => {
-                bail!("device has a post-quantum key; an Ed25519-only signature is not accepted")
-            }
-            (SIG_ALG, None) => bail!("legacy device key cannot verify a hybrid signature"),
-            (other, _) => bail!("unsupported signature algorithm {other}"),
+        if alg != SIG_ALG {
+            bail!("unsupported signature algorithm {alg}");
         }
+        if sig.len() != ED_SIG_LEN + PQ_SIG_LEN {
+            bail!("hybrid signature must be {} bytes", ED_SIG_LEN + PQ_SIG_LEN);
+        }
+        self.verify_ed(msg, &sig[..ED_SIG_LEN])?;
+        let pq_sig = ml_dsa::Signature::<ml_dsa::MlDsa65>::try_from(&sig[ED_SIG_LEN..])
+            .map_err(|_| anyhow!("ml-dsa signature: invalid encoding"))?;
+        use ml_dsa::Verifier as _;
+        self.pq
+            .verify(msg, &pq_sig)
+            .map_err(|_| anyhow!("ml-dsa signature verification failed"))
     }
     fn verify_ed(&self, msg: &[u8], sig: &[u8]) -> Result<()> {
         let arr: [u8; ED_SIG_LEN] = sig.try_into().unwrap();
@@ -473,7 +421,6 @@ mod tests {
     #[test]
     fn signatures_verify() {
         let sk = SigningKey::generate();
-        assert!(sk.is_hybrid());
         assert_eq!(sk.alg(), SIG_ALG);
         let sig = sk.sign(b"batch");
         assert_eq!(sig.len(), ED_SIG_LEN + PQ_SIG_LEN);
@@ -487,10 +434,14 @@ mod tests {
         let mut t = sig.clone();
         t[3] ^= 1;
         assert!(sk.public().verify(SIG_ALG, b"batch", &t).is_err());
-        // Downgrade: the Ed25519 half alone is not accepted for a hybrid key.
+        // Downgrade: the Ed25519 half alone is not accepted.
         assert!(sk
             .public()
-            .verify(SIG_ALG_LEGACY, b"batch", &sig[..ED_SIG_LEN])
+            .verify("ed25519", b"batch", &sig[..ED_SIG_LEN])
+            .is_err());
+        assert!(sk
+            .public()
+            .verify(SIG_ALG, b"batch", &sig[..ED_SIG_LEN])
             .is_err());
         // Keys and public keys round-trip through their byte forms.
         let sk2 = SigningKey::from_bytes(&sk.to_bytes()).unwrap();
@@ -500,17 +451,15 @@ mod tests {
     }
 
     #[test]
-    fn legacy_ed25519_keys_still_work_but_cannot_upgrade_silently() {
-        let legacy = SigningKey::from_bytes(&[7u8; 32]).unwrap();
-        assert!(!legacy.is_hybrid());
-        assert_eq!(legacy.alg(), SIG_ALG_LEGACY);
-        let sig = legacy.sign(b"old batch");
-        assert_eq!(sig.len(), ED_SIG_LEN);
-        let pk = VerifyingKey::from_bytes(&legacy.public().to_bytes()).unwrap();
-        assert!(!pk.is_hybrid());
-        pk.verify(SIG_ALG_LEGACY, b"old batch", &sig).unwrap();
-        assert!(pk.verify(SIG_ALG, b"old batch", &sig).is_err());
-        assert_eq!(legacy.to_bytes().len(), 32);
+    fn ed25519_only_keys_are_refused() {
+        // Format 2 has no Ed25519-only keys: neither a 32-byte signing key
+        // nor a 32-byte public key is accepted.
+        assert!(SigningKey::from_bytes(&[7u8; 32]).is_err());
+        let ed = ed25519_dalek::SigningKey::from_bytes(&[7u8; 32]);
+        assert!(VerifyingKey::from_bytes(ed.verifying_key().as_bytes()).is_err());
+        let sk = SigningKey::generate();
+        assert_eq!(sk.public().to_bytes().len(), PUBLIC_KEY_LEN);
+        assert!(VerifyingKey::from_bytes(&sk.public().to_bytes()[..PUBLIC_KEY_LEN - 1]).is_err());
     }
 
     #[test]
@@ -520,7 +469,6 @@ mod tests {
         let a = passphrase_key("p\u{e4}ss", &p).unwrap();
         let b = passphrase_key("pa\u{308}ss", &p).unwrap();
         assert_eq!(a.0, b.0);
-        assert_ne!(passphrase_key_raw("pa\u{308}ss", &p).unwrap().0, a.0);
         assert_eq!(normalize_passphrase("\u{fb01}"), "fi");
     }
 

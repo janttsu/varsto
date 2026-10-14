@@ -165,12 +165,13 @@ impl Replica {
             .get("lamport")
             .and_then(|v| v.as_u64())
             .unwrap_or(0);
+        let ledger = LedgerStore::open(&home.join("ledger"), &local.vault_id)?;
         Ok(Replica {
             home: home.to_path_buf(),
             local,
             signer,
             replica_key,
-            ledger: LedgerStore::open(&home.join("ledger"))?,
+            ledger,
             lamport,
         })
     }

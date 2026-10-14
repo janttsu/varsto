@@ -481,7 +481,16 @@ fn junk_epoch_objects_and_forged_policies_are_skipped() {
             verified_within_days: None,
         }),
     };
-    let blob = forged.seal(a.vault_id(), &fr_key).unwrap();
+    // Signed, but by a key that is not the administrator's (format 2 has no
+    // unsigned records at all).
+    let blob = forged
+        .seal_signed(
+            a.vault_id(),
+            &format!("folder-record@{}", a.key_epoch()),
+            &fr_key,
+            &varsto_core::crypto::SigningKey::generate(),
+        )
+        .unwrap();
     let dir = lab.root.join("storage").join(format!(
         "vault/policies/{}/{}",
         folder.folder_id,

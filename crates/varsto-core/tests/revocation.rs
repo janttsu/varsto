@@ -216,7 +216,19 @@ fn revoked_device_is_cut_off_and_new_data_needs_new_keys() {
         .parse()
         .unwrap();
     let blob = fs::read(&newest).unwrap();
-    assert!(Manifest::open(&blob, &vault, &rec.folder_id, a.device_id(), seq, &fk0.meta).is_err());
+    // Only the old epoch's metadata key, as C holds it.
+    let meta_for = |e: u32| (e == 0).then(|| fk0.meta.clone());
+    let a_key = a.device_public_key();
+    assert!(Manifest::open(
+        &blob,
+        &vault,
+        &rec.folder_id,
+        a.device_id(),
+        seq,
+        &a_key,
+        &meta_for
+    )
+    .is_err());
     let old_ledger = SecretKey::from_hex(&old_key).unwrap().derive("ledger", &[]);
     let batches = lab.store().join("ledger").join(a.device_id().as_str());
     let newest = fs::read_dir(&batches)

@@ -11,7 +11,7 @@
 //! device that set it could read one, and a device that calls the same
 //! bucket by another name still matches it.
 
-use crate::crypto::{self, SecretKey};
+use crate::crypto::SecretKey;
 use crate::ids::{DeviceId, FolderId, VaultId};
 use anyhow::{bail, Result};
 use serde::{Deserialize, Serialize};
@@ -119,46 +119,26 @@ impl PlacementRecord {
         )
     }
 
-    fn aad(vault: &VaultId, folder: &FolderId) -> Vec<u8> {
-        crypto::aad(
-            "placement-record",
-            &[vault.as_str().as_bytes(), folder.as_str().as_bytes()],
-        )
-    }
-
-    pub fn seal(&self, vault: &VaultId, key: &SecretKey) -> Result<Vec<u8>> {
-        crypto::encrypt(
-            key,
-            &Self::aad(vault, &self.folder_id),
-            &serde_json::to_vec(self)?,
-        )
-    }
-
-    pub fn open(blob: &[u8], vault: &VaultId, folder: &FolderId, key: &SecretKey) -> Result<Self> {
-        let plain = crypto::decrypt(key, &Self::aad(vault, folder), blob)?;
-        let rec: PlacementRecord = serde_json::from_slice(&plain)?;
-        if &rec.folder_id != folder {
-            bail!("placement record folder mismatch");
-        }
-        Ok(rec)
-    }
-    /// Seal and sign (alpha.10), see `PolicyRecord::seal_signed`.
+    /// Seal and sign: a signed record of kind `placement`, scope the
+    /// folder, sequence number the time in its name.
     pub fn seal_signed(
         &self,
         vault: &VaultId,
+        key_id: &str,
         key: &SecretKey,
         signer: &crate::crypto::SigningKey,
     ) -> Result<Vec<u8>> {
-        let ct = self.seal(vault, key)?;
-        crate::vault::SignedRecord::wrap(
-            "placement-record-signature",
+        let header = crate::record::Header {
+            kind: crate::record::RecordKind::Placement,
             vault,
-            &self.folder_id,
-            &self.device,
-            self.updated_utc,
-            ct,
-            signer,
-        )
+            scope: self.folder_id.as_str(),
+            device: &self.device,
+            seq: self.updated_utc.max(0) as u64,
+            key_id,
+        };
+        Ok(header
+            .seal(key, &serde_json::to_vec(self)?, signer)?
+            .to_bytes())
     }
     /// See `PolicyRecord::open_any`.
     pub fn open_any(
@@ -166,38 +146,25 @@ impl PlacementRecord {
         vault: &VaultId,
         folder: &FolderId,
         named_device: &DeviceId,
-        keys: &[SecretKey],
+        key_for: &dyn Fn(&str) -> Option<SecretKey>,
         verify: &dyn Fn(&DeviceId) -> Option<crate::crypto::VerifyingKey>,
-        allow_unsigned: bool,
     ) -> Result<Self> {
-        match crate::vault::SignedRecord::parse(blob) {
-            Some(env) => {
-                let pk = verify(&env.device).ok_or_else(|| anyhow::anyhow!("unknown writer"))?;
-                let ct = env.verify("placement-record-signature", vault, folder, &pk)?;
-                let rec = keys
-                    .iter()
-                    .find_map(|k| Self::open(&ct, vault, folder, k).ok())
-                    .ok_or_else(|| anyhow::anyhow!("placement record does not open"))?;
-                if rec.device != env.device
-                    || &rec.device != named_device
-                    || rec.updated_utc != env.updated_utc
-                {
-                    bail!("placement record does not match its envelope");
-                }
-                Ok(rec)
-            }
-            None if allow_unsigned => {
-                let rec = keys
-                    .iter()
-                    .find_map(|k| Self::open(blob, vault, folder, k).ok())
-                    .ok_or_else(|| anyhow::anyhow!("placement record does not open"))?;
-                if &rec.device != named_device {
-                    bail!("placement record does not match its name");
-                }
-                Ok(rec)
-            }
-            None => bail!("unsigned placement record"),
+        let env = crate::record::SignedRecord::parse(blob)?;
+        let plain = env.accept(
+            &crate::record::Expect::new(crate::record::RecordKind::Placement, vault)
+                .scope(folder.as_str())
+                .device(named_device),
+            verify,
+            key_for,
+        )?;
+        let rec: PlacementRecord = serde_json::from_slice(&plain)?;
+        if &rec.folder_id != folder
+            || rec.device != env.device
+            || rec.updated_utc.max(0) as u64 != env.seq
+        {
+            bail!("placement record does not match its envelope");
         }
+        Ok(rec)
     }
 }
 
@@ -333,18 +300,41 @@ mod tests {
     fn record_round_trip() {
         let key = SecretKey::random();
         let vault = VaultId::random();
+        let signer = crate::crypto::SigningKey::generate();
         let rec = PlacementRecord {
             folder_id: FolderId::random(),
-            device: DeviceId::from_bytes(&[1; 16]),
+            device: crate::ledger::device_id_for(&signer.public()),
             updated_utc: 5,
             placement: Some(Placement {
                 places: vec!["cloud".into()],
                 ..Default::default()
             }),
         };
-        let blob = rec.seal(&vault, &key).unwrap();
-        let back = PlacementRecord::open(&blob, &vault, &rec.folder_id, &key).unwrap();
+        let blob = rec
+            .seal_signed(&vault, "folder-record@0", &key, &signer)
+            .unwrap();
+        let k = key.clone();
+        let key_for = move |id: &str| (id == "folder-record@0").then(|| k.clone());
+        let pk = signer.public();
+        let writer = |d: &DeviceId| (d == &rec.device).then(|| pk.clone());
+        let back = PlacementRecord::open_any(
+            &blob,
+            &vault,
+            &rec.folder_id,
+            &rec.device,
+            &key_for,
+            &writer,
+        )
+        .unwrap();
         assert_eq!(back.placement, rec.placement);
-        assert!(PlacementRecord::open(&blob, &vault, &FolderId::random(), &key).is_err());
+        assert!(PlacementRecord::open_any(
+            &blob,
+            &vault,
+            &FolderId::random(),
+            &rec.device,
+            &key_for,
+            &writer
+        )
+        .is_err());
     }
 }

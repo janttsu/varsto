@@ -255,6 +255,19 @@ impl Engine {
             r.shared = true;
         }
         self.save_keyring_now()?;
+        // Members read this device's manifests only as its share batches
+        // announce them (format 2): announce the newest one now.
+        if let Ok(st) = self.load_state(&rec.folder_id) {
+            if st.published_seq > 0 && !st.published_body_hash.is_empty() {
+                self.pending.push(Event::ManifestPublished {
+                    folder: rec.folder_id.clone(),
+                    seq: st.published_seq,
+                    manifest_hash: st.published_body_hash.clone(),
+                    files: st.files.values().filter(|f| !f.deleted).count() as u64,
+                });
+                self.commit_batch()?;
+            }
+        }
         if needs_epoch {
             self.start_share_epoch(&rec.folder_id, Vec::new(), BTreeSet::new())?;
         }
@@ -667,7 +680,7 @@ impl Engine {
         }
         let mut adopted = false;
         for ((fid, e), k) in keys {
-            adopted |= self.adopt_share_epoch(storages, book, &fid, e, &k)?;
+            adopted |= self.adopt_share_epoch(storages, book, &fid, e, &k, None)?;
         }
         Ok((marked, adopted))
     }
@@ -746,9 +759,9 @@ impl Engine {
                     .unwrap_or_default();
                 let mut key = None;
                 for g in list {
-                    // Only the owner's devices hand out keys. A member that
-                    // joined before tokens named them trusts any participant.
-                    if !owners.is_empty() && !owners.contains(&g.issuer) {
+                    // Only the owner's devices hand out keys (format 2: a
+                    // member that knows no owner trusts nobody).
+                    if !owners.contains(&g.issuer) {
                         continue;
                     }
                     let (Some(issuer), Some(dk)) =
@@ -761,8 +774,9 @@ impl Engine {
                         break;
                     }
                 }
-                if let Some(k) = key {
-                    adopted |= self.adopt_share_epoch(storages, book, &fid, e, &k)?;
+                if let Some((k, record_hash)) = key {
+                    adopted |=
+                        self.adopt_share_epoch(storages, book, &fid, e, &k, Some(&record_hash))?;
                 }
             }
             let held = Self::newest_share_epoch(&self.keyring.folders[&fid]);
@@ -781,10 +795,7 @@ impl Engine {
                     else {
                         continue;
                     };
-                    if g.folder != fid
-                        || g.epoch != *e
-                        || (!owners.is_empty() && !owners.contains(&g.issuer))
-                    {
+                    if g.folder != fid || g.epoch != *e || !owners.contains(&g.issuer) {
                         continue;
                     }
                     let Some(pk) = self.share_issuer_key(&g.issuer) else {
@@ -932,8 +943,26 @@ impl Engine {
             .ok()
     }
 
-    /// Adopt share epoch `e` of a folder with its key: open the epoch record,
-    /// keep the key and every older one it names, and apply the removals.
+    /// Whether `issuer` may start a share epoch of `folder` (format 2,
+    /// section 4): on the owner's devices a trusted device of the vault; on
+    /// a member one of the owner's devices its token and the epoch records
+    /// adopted so far named. A record from anyone else is never applied,
+    /// so the list of owners never grows from a record that is not an
+    /// owner's.
+    fn share_epoch_issuer_ok(&self, book: &ShareBook, folder: &FolderId, issuer: &DeviceId) -> bool {
+        if self.vault.member {
+            book.folders
+                .get(folder)
+                .is_some_and(|s| s.owners.contains(issuer))
+        } else {
+            self.trusted(issuer)
+        }
+    }
+
+    /// Adopt share epoch `e` of a folder with its key: open the epoch record
+    /// (signed by one of the owner's devices and, when the key came in a
+    /// grant, the very record the grant names), keep the key and every older
+    /// one it names, and apply the removals.
     fn adopt_share_epoch(
         &mut self,
         storages: &OpenStorages,
@@ -941,11 +970,25 @@ impl Engine {
         folder: &FolderId,
         e: u32,
         key: &SecretKey,
+        record_hash: Option<&str>,
     ) -> Result<bool> {
         let mut record = None;
         for (_, backend) in storages {
             if let Some(blob) = backend.get(&ShareEpochRecord::storage_key(folder, e))? {
-                if let Ok(r) = ShareEpochRecord::open(&blob, &self.vault.vault_id, folder, e, key) {
+                let Ok((r, env)) =
+                    ShareEpochRecord::open(&blob, &self.vault.vault_id, folder, e, key)
+                else {
+                    continue;
+                };
+                if record_hash.is_some_and(|h| h != env.body_hash)
+                    || !self.share_epoch_issuer_ok(book, folder, &r.issuer)
+                {
+                    continue;
+                }
+                let Some(pk) = self.share_issuer_key(&r.issuer) else {
+                    continue;
+                };
+                if env.verify(&pk).is_ok() {
                     record = Some(r);
                     break;
                 }
@@ -1063,6 +1106,26 @@ impl Engine {
             BTreeMap::new()
         };
         let mine = self.keys.signer.public();
+        // The grants pin the epoch's signed record by its hash.
+        let mut record_hash = None;
+        for (_, b) in storages {
+            if let Some(blob) = b.get(&ShareEpochRecord::storage_key(&f.folder_id, e))? {
+                if let Ok((_, env)) =
+                    ShareEpochRecord::open(&blob, &self.vault.vault_id, &f.folder_id, e, &key)
+                {
+                    if self
+                        .share_issuer_key(&env.device)
+                        .is_some_and(|pk| env.verify(&pk).is_ok())
+                    {
+                        record_hash = Some(env.body_hash.clone());
+                        break;
+                    }
+                }
+            }
+        }
+        let Some(record_hash) = record_hash else {
+            return Ok(false);
+        };
         let mut done = Vec::new();
         for (recipient, device, invite) in wanted {
             let path = ShareGrant::storage_key(&f.folder_id, e, &recipient, &me);
@@ -1099,6 +1162,7 @@ impl Engine {
                 &recipient,
                 &ek,
                 &key,
+                &record_hash,
                 &me,
                 &self.keys.signer,
             )?;
@@ -1217,7 +1281,9 @@ impl Engine {
         let mut tries = 0;
         let blob = loop {
             record.epoch = e;
-            let blob = record.seal(&self.vault.vault_id, &key)?;
+            let blob = record
+                .seal(&self.vault.vault_id, &key, &self.keys.signer)?
+                .to_bytes();
             if !first.exists(&ShareKeyRecord::storage_key(folder, e))?
                 && first.put_if_absent(&ShareEpochRecord::storage_key(folder, e), &blob)?
             {

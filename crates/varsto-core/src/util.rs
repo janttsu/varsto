@@ -431,3 +431,8 @@ mod tests {
         );
     }
 }
+
+/// For `skip_serializing_if` on counters.
+pub fn is_zero_u64(v: &u64) -> bool {
+    *v == 0
+}
