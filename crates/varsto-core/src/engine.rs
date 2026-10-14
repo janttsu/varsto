@@ -1754,6 +1754,7 @@ impl Engine {
     fn pool_identity(&self, name: &str) -> PoolIdentity {
         let k = self.root_key().derive("disk-pool", &[]);
         PoolIdentity {
+            marker_key: self.root_key().derive("disk-pool-marker", &[]),
             pool_id: hex::encode(&crypto::keyed_hash(&k, format!("pool:{name}").as_bytes())[..16]),
             vault_tag: hex::encode(
                 &crypto::keyed_hash(&k, format!("vault:{}", self.vault.vault_id).as_bytes())[..16],
@@ -7210,6 +7211,21 @@ impl Engine {
             .filter(|s| s.is_data_only())
             .cloned()
             .collect()
+    }
+
+    /// Disks that carry a marker of one of this vault's pools but no valid
+    /// MAC: (pool, mount, label). They are not used until `varsto disk add`
+    /// takes them in.
+    pub fn unknown_pool_disks(&self) -> Vec<(String, PathBuf, String)> {
+        let mut out = Vec::new();
+        for spec in self.pool_specs() {
+            if let Ok(pool) = self.open_pool(&spec) {
+                for (mount, marker) in pool.unknown_disks() {
+                    out.push((spec.name().to_string(), mount, marker.label));
+                }
+            }
+        }
+        out
     }
 
     /// Every disk of every pool with its attached state and the bookkeeping

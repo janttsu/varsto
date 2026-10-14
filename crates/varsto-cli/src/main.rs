@@ -3640,6 +3640,17 @@ fn run(cli: &Cli) -> Result<()> {
                     } else {
                         text.push_str(&disk_table(&disks));
                     }
+                    // A marker that repeats the pool's public fields without the
+                    // vault's MAC is not adopted, whatever it claims.
+                    for (pool, mount, label) in engine.unknown_pool_disks() {
+                        text.push_str(&format!(
+                            "\nunknown disk \"{}\" at {}: it looks like a disk of pool {pool} but carries no valid marker MAC, so it gets no writes. If it is yours, run `varsto disk add {} --pool {pool} --label \"{}\"`\n",
+                            show(&label),
+                            mount.display(),
+                            mount.display(),
+                            show(&label)
+                        ));
+                    }
                     print!("{text}");
                 }
                 DiskCmd::Suggest { pool, remind } => {
