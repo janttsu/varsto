@@ -545,7 +545,22 @@ impl ServiceState {
     /// Step the torrent jobs of this device (called after a sync); notify
     /// once when one waits for disk space and when one is complete.
     pub fn torrents_if_due(&mut self, engine: &mut Engine) {
-        for j in crate::torrent::service_step(engine) {
+        // Linux only (a local transmission-daemon); not on phones.
+        if !cfg!(target_os = "linux") {
+            return;
+        }
+        let mut changed = Vec::new();
+        for j in engine.torrents_to_run() {
+            let rpc = varsto_core::transmission::Rpc::new(
+                engine.torrent_rpc(&j, &varsto_core::transmission::RpcSettings::default()),
+            );
+            match engine.torrent_tick(&j.hash, &rpc, &mut varsto_core::engine::SystemEnv, false) {
+                Ok(Some(now)) if now.state != j.state => changed.push(now),
+                Ok(_) => {}
+                Err(e) => log::warn!("torrent job {}: {e:#}", j.short()),
+            }
+        }
+        for j in changed {
             match j.state {
                 varsto_core::engine::JobState::Complete => {
                     log::info!("torrent job {} is complete", j.short());

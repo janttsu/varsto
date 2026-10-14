@@ -8,7 +8,7 @@ use anyhow::{bail, Context, Result};
 use clap::{Args, Subcommand};
 use std::path::{Path, PathBuf};
 use varsto_core::engine::{
-    find_job, torrent_jobs_at, JobState, SystemEnv, TorrentAddOptions, TorrentEnv, TorrentJob,
+    find_job, torrent_jobs_at, JobState, TorrentAddOptions, TorrentEnv, TorrentJob,
 };
 use varsto_core::freespace::MinFree;
 use varsto_core::transmission::{AddSource, Rpc, RpcSettings};
@@ -374,22 +374,4 @@ pub fn status_lines(home: &Path) -> Vec<String> {
         .filter(|j| j.state != JobState::Complete)
         .map(TorrentJob::line)
         .collect()
-}
-
-/// Step every running job once (the background service, after a sync).
-/// Returns jobs that completed or started waiting for space in this step.
-pub fn service_step(engine: &mut Engine) -> Vec<TorrentJob> {
-    if !cfg!(target_os = "linux") {
-        return Vec::new();
-    }
-    let mut changed = Vec::new();
-    for j in engine.torrents_to_run() {
-        let rpc = Rpc::new(engine.torrent_rpc(&j, &RpcSettings::default()));
-        match engine.torrent_tick(&j.hash, &rpc, &mut SystemEnv, false) {
-            Ok(Some(now)) if now.state != j.state => changed.push(now),
-            Ok(_) => {}
-            Err(e) => log::warn!("torrent job {}: {e:#}", j.short()),
-        }
-    }
-    changed
 }
