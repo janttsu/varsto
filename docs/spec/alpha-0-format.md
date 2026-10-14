@@ -4,8 +4,8 @@
 
 ## 1. What alpha-0 does
 
-- Content-defined chunking of files (Gear rolling hash, FastCDC-style normalisation; block sizes by file size: below 32 MiB 64 KiB to 1 MiB, average 256 KiB; below 1 GiB 256 KiB to 4 MiB, average 1 MiB; larger files 1 to 16 MiB, average 4 MiB; the size alone decides, so the same file is cut the same way everywhere; section 29).
-- Client-side authenticated encryption of every chunk, manifest, ledger batch and record before it reaches a storage. Storage sees opaque objects and their sizes only.
+- Content-defined chunking of files (Gear rolling hash, FastCDC-style normalisation, with a Gear table keyed per folder since format 2; block sizes by file size: under 1 MiB one block; below 32 MiB 256 KiB to 4 MiB, average 1 MiB; below 1 GiB 1 to 16 MiB, average 4 MiB; larger files 2 to 16 MiB, average 8 MiB; the size and the folder alone decide, so the same file is cut the same way on every device of the folder; section 62).
+- Client-side authenticated encryption of every chunk, manifest, ledger batch and record before it reaches a storage. Storage sees opaque objects and their sizes only; since format 2 every block is inside a pack, so a storage sees pack sizes, never the size of a block (section 62).
 - alpha-0: one storage backend, a local directory (covers local disks, removable disks and network mounts); since alpha.3 S3-compatible buckets and rclone remotes, section 12.
 - A per-device, append-only, signed ledger replicated through every storage. Devices that are never online at the same time converge through the storage ("mailbox").
 - Two-way folder sync between devices with version vectors; concurrent edits produce a deterministic winner and a conflict copy; deletions go to a local trash (since section 43, to a vault-wide trash restorable on every device).
@@ -43,11 +43,13 @@ Subset of [key-hierarchy.md](key-hierarchy.md). All keys are 256 bits. Derivatio
 | local-keyring key | encrypt the local copy of folder keys | derive(K3, `local-keyring`) |
 | folder key (K9) | per folder | random; published in the creating device's folder record |
 | folder hash key (K11) | chunk ids and content hashes | derive(K9, `dedup-hash`, folder) |
+| chunker seed (K12) | Gear table of the folder's chunker (format 2) | derive(K11, `chunker-seed`, folder) |
 | folder metadata key (K10) | manifests | derive(K9, `folder-metadata`, folder) |
 | chunk key (K14) | one chunk | derive(K9, `chunk-key`, folder, chunk id) |
-| chunk nonce | one chunk | derive(K9, `chunk-nonce`, folder, chunk id), first 24 bytes |
+| chunk nonce | one AEAD input | keyed_hash(derive(K9 of the epoch, `chunk-nonce`, folder), packed bytes), first 24 bytes (format 2) |
+| pack tombstone key | tombstone lists of packs (format 2) | derive(K3 of epoch 0, `pack-tombstones`) |
 
-**Alpha-0 decision (convergent chunk keys).** The chunk key and nonce are derived from the chunk's keyed hash, so the same content encrypts to the same object on every device of the vault. Two devices that ingest the same file offline therefore produce one object, deduplication works without coordination, and a future peer-to-peer swarm can advertise object names. The cost: rotating a folder key re-encrypts its data, and anyone holding the folder key can test for known content inside that folder. Shared folders keep convergent keys inside a key epoch and get a new random folder key when a member is removed (section 24, which explains why random per-chunk keys were not chosen). Rationale and alternatives: plan section 8, "Avainnettu hash, lohkot ja padding".
+**Alpha-0 decision (convergent chunk keys).** The chunk key is derived from the chunk's keyed hash and the nonce from the exact bytes encrypted (the packed chunk, section 16; format 2, section 62), so the same content packed the same way encrypts to the same object on every device of the vault, and two different encodings of one chunk (another zstd version, raw against compressed) never share a nonce under the chunk key. Two devices that ingest the same file offline therefore produce one object, deduplication works without coordination, and a future peer-to-peer swarm can advertise object names. The cost: rotating a folder key re-encrypts its data, and anyone holding the folder key can test for known content inside that folder. Shared folders keep convergent keys inside a key epoch and get a new random folder key when a member is removed (section 24, which explains why random per-chunk keys were not chosen). Rationale and alternatives: plan section 8, "Avainnettu hash, lohkot ja padding".
 
 ## 4. Encryption and associated data
 
@@ -55,7 +57,9 @@ AEAD is XChaCha20-Poly1305. Every object is `nonce (24 bytes) || ciphertext || t
 
 | Object | Associated data fields |
 | --- | --- |
-| chunk | vault id, folder id, chunk id, plaintext length |
+| chunk | vault id, folder id, key epoch, chunk id, plaintext length, packed length (format 2) |
+| pack index | format, `pack-index`, vault id, folder id, device id, sequence (section 62) |
+| tombstone list | format, `tombstones`, vault id, empty scope, device id, sequence (section 62) |
 | manifest | vault id, folder id, device id, manifest sequence |
 | ledger batch body | device id, batch sequence |
 | device record | vault id, device id |
@@ -84,10 +88,12 @@ org/roster/<seq>-<attempt>.json          organization: people, devices, policy, 
 org/log/<device>/<seq>-<attempt>.json    organization: one administrator device's chained log (section 27)
 manifests/<folder>/<device>/<seq>.enc    full folder view of one device
 snapshots/<backup>/<device>/<seq>.enc    one snapshot of a backup, never changed (section 31)
-chunks/<first two hex>/<object name>     encrypted chunk
+packs/<first two hex>/<pack id>          encrypted chunks one after another; pack id = BLAKE3 of the pack (format 2, section 62)
+packs/index/<device>/<seq>.enc           a device's pack index of one push and folder (section 62)
+packs/tombstones/<device>/<seq>.enc      a device's list of deleted pack members (section 62)
 ```
 
-Every path has one writer: a device writes only under its own device id, and chunk objects are content-addressed and written with put-if-absent. No conditional writes, locks or leases are needed on the storage. Objects are never overwritten.
+Every path has one writer: a device writes only under its own device id, and packs are content-addressed and written with put-if-absent. Since format 2 no block is an object of its own (`chunks/` is not written); a block keeps its object name (the BLAKE3 hash of its bytes), which the ledger, verification and peers use, and lives at an offset in a pack (section 62). No conditional writes, locks or leases are needed on the storage. Objects are never overwritten.
 
 ## 6. Ledger
 
@@ -292,7 +298,7 @@ Hardening of the STUN side channel, the TCP request head and the QUIC limits: se
 
 ## 16. Compression (0.0.1-alpha.4, format version 1)
 
-Ciphertext does not compress, so compression happens once, before encryption, on the chunk: the payload is one method byte (`0` raw, `1` zstd) followed by the data. zstd level 12 is a format constant, because every device must produce byte-identical objects for the same chunk or deduplication and content addressing would break; data that would save less than 5 % is stored raw, so photos and video cost one byte. The gain reaches every copy and every transfer alike: cloud, disks, transferrers and peers on the LAN or across the internet, with no transport-level compression to tune. Format version 0 objects are not readable by this version (see `format-versions.md`).
+Ciphertext does not compress, so compression happens once, before encryption, on the chunk: the payload is one method byte (`0` raw, `1` zstd) followed by the data. Format 2 compresses at zstd level 3 (level 12 before), and only when a probe says it pays: the chunk's first 64 KiB are compressed at level 1, and when that saves less than 5 % the chunk is stored raw without compressing the rest; otherwise the whole chunk is compressed and kept when it saves at least 5 %. The decision depends on the content alone, so every device packs a chunk alike, and photos and video cost a cheap probe and one byte. Two devices on different zstd versions may pack a chunk differently: that gives two objects (two names), never two inputs under one nonce, because the nonce follows the packed bytes (section 3). The gain reaches every copy and every transfer alike: cloud, disks, transferrers and peers on the LAN or across the internet, with no transport-level compression to tune. Format version 0 objects are not readable by this version (see `format-versions.md`).
 
 ## 17. Strongroom folders (0.0.1-alpha.4, S-012)
 
@@ -333,7 +339,7 @@ A *pool* is one storage made of removable disks that are attached and detached o
 
 ```text
 <mount>/.varsto-disk.json      marker: { pool_id, disk_id, label, vault_tag, created_utc, format: 1 }
-<mount>/varsto/chunks/<xx>/<object name>   encrypted chunks, the local-directory layout of section 5
+<mount>/varsto/packs/<xx>/<pack id>   packs of encrypted chunks, the local-directory layout of section 5 (format 2, section 62)
 <mount>/varsto/index.json      the disk's own index: { format, pool_id, disk_id, label, written_utc, objects: { key: size } }
 ```
 
@@ -350,6 +356,8 @@ A *pool* is one storage made of removable disks that are attached and detached o
 **Not done.** Disk groups (several copies on disks in different places) came in 0.0.1-alpha.9, section 23; no SMART or health reading; no transfer-time estimate in the "attach this disk" prompt; the service does not run `disk check` by itself on attach (the scrub of section 33 reads attached disks on its schedule, after 0.0.1-alpha.13); imports of git-annex repositories are in section 42 (0.0.1-alpha.14); a disk unplugged in the middle of a write fails that push instead of being retried; a disk's `index.json` is rewritten whole, so very large disks pay for it at every eject; members of shared folders cannot use pools (they lack the vault key the pool id is derived from).
 
 **Verification reads.** `disk check`, the verification step of `disk insert` and the scrub of a disk read it according to its medium (section 39): a spinning disk strictly one object after another in key order, as before; a solid-state disk with a few readers in parallel.
+
+**Packs (format 2).** A pool holds packs like every other storage (section 62): the pool index, the disks' `index.json`, placement, queued deletions and disk groups work on pack keys. A push places a whole pack on one disk; a fill packs the blocks the pool lacks into new packs of up to 64 MiB on the disk being filled, and a further copy under a disk group rule copies a whole pack to a disk of another place. A disk check and a scrub hash each pack against its id and count every block the ledger places in it; a block counts as verified, missing or kept elsewhere through its pack (`with_pack_ids`, `blocks_by_pack`), and the tidy step of `disk insert` keeps every pack that holds a block the ledger knows.
 
 ## 20. Automatic verification, storage prices and placement (0.0.1-alpha.8)
 
@@ -641,13 +649,15 @@ Further hardening of the local service, storage reads, passphrases, names and te
 
 **Peer-to-peer on by default.** `P2pConfig` gains `user_disabled`; without it peer-to-peer is on (port 17893). A device that published something new sends `/p2p/changed` to its peers, which sync at once. A push with peers publishes the file list and its ledger batch before the upload, refreshes what the peer-to-peer server offers and tells the peers, so devices that can reach it fetch new files while the upload to the storages runs. A peer marked unreachable is tried again at once when its record changes (a new relay, new addresses).
 
-**Block sizes.** The chunker parameters follow the file size: below 32 MiB 64 KiB to 1 MiB (average 256 KiB), below 1 GiB 256 KiB to 4 MiB (average 1 MiB), larger 1 to 16 MiB (average 4 MiB). The size alone decides; no compatibility with the single set of earlier versions is kept. Memory stays bounded: at most 128 MiB of encrypted data waits for the uploaders, and about 96 MiB of blocks is in flight per downloaded file.
+**Block sizes.** The chunker parameters follow the file size: below 32 MiB 64 KiB to 1 MiB (average 256 KiB), below 1 GiB 256 KiB to 4 MiB (average 1 MiB), larger 1 to 16 MiB (average 4 MiB). Format 2 changes the tiers and keys the chunker (section 62). The size alone decides; no compatibility with the single set of earlier versions is kept. Memory stays bounded: at most 128 MiB of encrypted data waits for the uploaders, and about 96 MiB of blocks is in flight per downloaded file.
 
 **Default policy.** A folder without a policy of its own uses 1 copy on any storage, 1 at place `cloud`, 1 at place `home`, verified by another device within 30 days. `policy clear` stores an empty policy, so the default does not return. A move keeps a copy only when dropping it makes the policy worse; freeing advice ignores places the vault has no storage in.
 
 **Other.** `varsto transfers [--watch] [--json]` lists uploads and downloads running in the service (`/api/progress` field `transfers`) with peer traffic. S3 refusals are explained in words before the technical detail. Turning selective sync off downloads the placeholders on the next sync. Temporary files of atomic writes are unique per write.
 
 ## 30. Packs for small blocks (0.0.1-alpha.12)
+
+> Replaced by format 2 (section 62): every block of every storage is in a pack, pack indexes are encrypted and per push, deletions are encrypted tombstone lists, and readers find blocks from the ledger instead of listing indexes. `.idx` files and `.del.` markers are no longer written or read. What follows describes format 1.
 
 **Why.** A folder of small files is one block per file, and every block was one object on every storage: twenty thousand notes meant twenty thousand uploads, list entries and verifications, and on storage classes with a minimum billable object size each one cost as much as a much larger object.
 
@@ -742,8 +752,8 @@ Tests: `activity::tests` (task lifecycle, nesting, the quiet period, rate and fi
 
 **What is checked.** One run reads, per target:
 
-- *Storages* (directories, S3, rclone): every object the ledger places on the storage, whoever wrote it (this device's own claims under the local name; other devices' claims through the storage identities of section 20, or by equal name for a writer that published none). Packed objects (section 30) are read with ranged reads like any block. The ciphertext is hashed against the object name; an object the storage does not return is missing. Objects the ledger does not know are not read.
-- *Pool disks* (section 19): every attached disk is a target of its own, and its own copy of each object it holds is read (with disk groups, each disk's copy, not only the first one found). A disk that is away waits; one not seen for `scrub_days` is reported ("disk away for long").
+- *Storages* (directories, S3, rclone): every object the ledger places on the storage, whoever wrote it (this device's own claims under the local name; other devices' claims through the storage identities of section 20, or by equal name for a writer that published none). Blocks are read with a ranged read of their pack at the place the ledger gives (section 62); automatic verification reads the blocks due in one pack with one request. The ciphertext is hashed against the object name; an object the storage does not return is missing. Objects the ledger does not know are not read.
+- *Pool disks* (section 19): every attached disk is a target of its own, and its own copy of each object it holds is read (with disk groups, each disk's copy, not only the first one found). Since format 2 these objects are packs, hashed against their id; a lost pack queues a repair of every block in it. A disk that is away waits; one not seen for `scrub_days` is reported ("disk away for long").
 - *Local files*: in every attached folder that is not kept encrypted on this device and not a locked Strongroom, every file whose local index entry and merged file state have the same content hash (a synced file; placeholders and deleted files have none) and whose size and modification time on disk still match the index. The content is hashed with the folder's keyed content hash; the size and time are read again afterwards, and a file that changed meanwhile is left to the next scan.
 - *Block cache* (folders kept encrypted on this device): every object, against its name.
 
@@ -755,7 +765,7 @@ Transferrers are never read (they are emptied on purpose). Cold storages are lef
 
 **Reads.** Each target is read according to its medium (section 39): spinning disks one item after another in key order with the hashing of one item overlapping the read of the next, solid-state disks and network storages with several readers. The results are taken in key order whatever order the reads finish in, so the cursor never passes an item that was not checked, the budgets are spent exactly as in a sequential run, and a run's findings are the same.
 
-**Damaged copies.** A missing or corrupt object on a storage is put in the repair queue (section 26) with `found_by: "scrub"`; the service's repair run, which follows, rewrites it from another copy (a corrupt packed member through its deletion marker and a new object). A bad copy on a pool disk is deleted from that disk and forgotten in the pool index first (as `disk check --full` does); it is queued for repair only when no other disk holds a copy, otherwise the disk group rule restores the copy at the next `disk check`. A corrupt block cache object is deleted and fetched again from a peer or a storage; when no intact copy can be had, the files that need it are no longer counted as cached here and the next sync fetches them when it can.
+**Damaged copies.** A missing or corrupt object on a storage is put in the repair queue (section 26) with `found_by: "scrub"`; the service's repair run, which follows, rewrites it from another copy (a corrupt pack member through a tombstone and a new pack, section 62). A bad copy on a pool disk is deleted from that disk and forgotten in the pool index first (as `disk check --full` does); it is queued for repair only when no other disk holds a copy, otherwise the disk group rule restores the copy at the next `disk check`. A corrupt block cache object is deleted and fetched again from a peer or a storage; when no intact copy can be had, the files that need it are no longer counted as cached here and the next sync fetches them when it can.
 
 **Damaged files.** A local file whose content no longer matches the recorded hash although its size and modification time did not change is treated as bit rot, but it is never overwritten: it may be an edit by a program that kept the time. The recorded version is downloaded first (peers, then storages, as a pull does) into a temporary file next to it; only then is the damaged file renamed to `<stem>.damaged-<YYYYMMDD><.ext>` (`photo.jpg` becomes `photo.damaged-20261013.jpg`; `-2`, `-3`, … when taken; a name without an extension gets the suffix at the end) and the recorded version, with the recorded modification time, takes its place. The local index then describes the restored file, so the next scan sees no change; the damaged copy is an ordinary new file of the folder and syncs as one (with content-defined chunking only its changed blocks are new), so nothing is lost and the user can compare and delete it. A file read error counts as damage. When no good copy can be downloaded, the file is left exactly as it is, recorded in `state/scrub.json` (`unrestored`) and tried first on every run until it is restored, edited (its size or time changed) or gone. Every damaged file raises a desktop notification in the service.
 
@@ -1610,3 +1620,43 @@ Changes that tighten the local service, the peer transport and the reads from st
 - *QUIC.* `ServerConfig::max_incoming` is 256, a connection may have 64 bidirectional streams open (the fetch window is 32) and no unidirectional ones.
 - *Temporary files.* The files Varsto writes beside a folder's files while downloading (`.varsto-tmp-<pid>-<random>`), writing through the engine (`.varsto-upload-…`) and importing (`.varsto-import-…`) are created with `O_EXCL` under a random name and mode 0600, so a link or file another local user plants under the old name `.varsto-tmp-<pid>` is never written through. The mode the folder records for the file (default: what a new file gets here) is set with `fchmod` on the open file before it is renamed into place; before, the file had the default mode from the rename until the metadata step. Tests: `crates/varsto-core/tests/temp_files.rs`.
 - *Paths.* A manifest, a trash record or a note that names a path with a component beginning `.varsto` (except `.varstoignore`) or ending `.varsto-placeholder` or `.varsto-link` is refused (`names::check_synced_path`): those are Varsto's own files and are never synced, so an honest device never writes such a path, and one that did would overwrite the folder marker or a placeholder of another device. Tests: `names::tests::synced_paths_never_name_a_file_of_varsto_itself`, `manifest::tests::a_manifest_cannot_name_files_of_varsto_itself`.
+
+## 62. Format 2: blocks, packs and the keyed chunker
+
+A security review (2026-10-13, findings H1 and H8) found that the nonce of a chunk object was derived from the chunk id while the encrypted input was the zstd output, which is not guaranteed to be the same across zstd versions, and that a storage could recognise a known file from the sizes of its block objects, because cut points were a public function of the content and every block was an object of its own. Format 2 changes the blocks; the records (signed envelopes, grants, recovery) change alongside it in their own section. Vaults are created fresh; nothing older is read.
+
+**Nonce and associated data.** A chunk object is `nonce || ciphertext || tag` (XChaCha20-Poly1305) as before, made by one function (`chunk_seal::seal_chunk`) for every writer: a push, the block cache, an import, a data move, a Strongroom conversion and a peer serving a block again. The key is `derive(K9 of the epoch, "chunk-key", folder, chunk id)`; the nonce is the first 24 bytes of `keyed_hash(derive(K9 of the epoch, "chunk-nonce", folder), packed)`, where `packed` is the exact AEAD input (section 16); the associated data is (format, AEAD, `chunk`, vault, folder, epoch, chunk id, plaintext length, packed length). A reader (`chunk_seal::open_chunk`) takes the packed length from the object's length, opens it, checks that the nonce is the one the packed bytes give (an object with a nonce of its own choosing is refused), unpacks it and checks the plaintext against the chunk id. The same bytes therefore always give the same object (deduplication and content addressing hold); two encodings of one chunk give two objects and two nonces, never one nonce over two inputs.
+
+**Compression.** zstd level 3 after a 64 KiB level-1 probe, as section 16 describes. Measured on one core of the build machine (release build, 64 MiB in 1 MiB chunks): log-like text 51 MB/s at level 12 against 560 MB/s now, stored as 12.2 % and 14.7 % of the input; random data 1.7 GB/s against 19.5 GB/s (stored raw either way).
+
+**Keyed chunker and size tiers.** The Gear table is 256 words of the BLAKE3 output keyed by the folder's chunker seed `derive(K11, "chunker-seed", folder)` (`chunking::gear_table`). K11 is fixed at the folder's first epoch, so a key rotation moves no cut point and deduplication survives it. Block sizes follow the file size (`ChunkerParams::for_size(size, seed)`): under 1 MiB one block; 1 to 32 MiB 256 KiB to 4 MiB, average 1 MiB; 32 MiB to 1 GiB 1 to 16 MiB, average 4 MiB; from 1 GiB 2 to 16 MiB, average 8 MiB. Content of unknown size (an import from a stream, the block cache without a size) is cut with the 1 MiB tier. A file entry cut with the tiers of its size says `chunking: 2` (absent otherwise), so a device can cut the file again the same way.
+
+**Packs.** Every block a device writes to a storage is appended to a pack: `packs/<xx>/<pack id>`, the block objects one after another and nothing else, where the pack id is the BLAKE3 hash of the pack's bytes and `<xx>` its first two hex digits. A push collects, per storage, the blocks that storage needs until a pack's worth is together: 64 MiB on hot, local, pool and transferrer storages, 256 MiB on cold ones. Packs are written with put-if-absent; on S3 an object above 64 MiB is written as a multipart upload in 16 MiB parts (each part's ETag is the MD5 of its bytes; a server that refuses the upload gets one PUT, and a HEAD first finds a pack that is there, since the name is the hash of the bytes). The bytes a push holds are bounded by the pack sizes of the storages it writes (128 to 768 MiB); when the bound is reached, what each storage collected is written as it is, so a pack may be smaller than the target. Data moves, drains and moves to the trash storage write each group of blocks (up to 64) as one call, so as packs too; a repair, an import and a Strongroom conversion write per block or per file, and their packs hold fewer blocks.
+
+No block is an object of its own any more: `chunks/` is not written. A block keeps its object name, the hash of its bytes, which the ledger, verification and peers use, and every reader still checks it.
+
+**Where a block is.** The `chunk_stored` event carries `pack: {pack, offset, len, pack_len}` beside the object name: the place the writer's storage holds the block at. In the location view (section 6) each storage location of a chunk keeps the place from the newest claim that names one (Lamport time, then the larger place, so applying batches in any order gives the same view; view format 7). Whenever the view changes, the engine hands every place in it to the pack layer it shares with every storage it opens (`packs::PackContext`), with the places of packs it wrote itself; a `chunks/<xx>/<object>` read is a ranged read of the pack at that place, on a storage that lists the pack (`packs/` is listed once per process and again at most every 30 seconds on a miss). Readers therefore need no index: the ledger they hold says where every block is. Events recorded before their storage's pack existed get their place when they are sealed or kept for the next batch.
+
+**Pack index.** At the same moment the packs written since are listed in `packs/index/<device>/<seq>.enc`, one record per storage and folder: `(pack, offset, length, pack length, object name, chunk id)` for every block whose claim is in the batch, as fixed-width binary entries (format byte 2, kind, count, then 32 + 8 + 8 + 8 + 32 + 32 bytes per entry), zstd-compressed, encrypted under the folder's metadata key K10 with associated data (format, `pack-index`, vault, folder, device, seq). `seq` is the next free number of the device's indexes on that storage (tombstone lists are numbered the same way). The index is for `fsck`, `ledger rebuild` (which reads every index it can open before it lists blocks, section 38) and devices that join later; the record envelope of the records work replaces the AEAD wrapper through `record_shim`.
+
+**Deletion and garbage collection.** Deleting a block marks it dead in its pack and adds it to this device's tombstone list for the storage; the list is written as `packs/tombstones/<device>/<seq>.enc` (same binary entries without the chunk id, kind `tombstones`) at the end of each operation that deleted blocks, under a key derived from the vault key of epoch 0 (`pack-tombstones`) with associated data (format, `tombstones`, vault, empty scope, device, seq), so every full device can read what every other one deleted. Each device reads the lists it has not read when it lists a storage's packs. A pack whose every byte is dead is deleted by whoever kills its last block. A hot pack more than half dead is rewritten by `pack_upkeep` (run at the end of the trash upkeep): its live blocks are read from one GET of the pack, checked against their names, written into a new pack and claimed there in one batch, then the old pack is deleted. A device rewrites only packs whose every live block belongs to a folder whose key it holds and whose bytes it can account for completely (live blocks and tombstones cover the pack); cold packs are never rewritten, their dead space goes with the pack.
+
+**Verification and repair.** Automatic verification groups the blocks due by pack and reads each group with one ranged request spanning them (`packs::read_members`); a pool disk check and a scrub of a disk hash each pack against its id and count it for every block the ledger places in it. The scrub of other storages reads each block at its place. A repair of a corrupt block writes a tombstone for it and a new pack with the good copy.
+
+**Pools and transferrers.** Pools and transferrers keep packs like any storage (section 19). A pool reads a block with a ranged read of the pack file on the disk that holds it.
+
+**Replicas.** A replica copies packs whole, each checked against its id, and copies pack indexes and tombstone lists as they are. It claims a pack by its id (object and chunk id in an object claim, section 58); the owner's view gives every block placed in that pack on any storage a copy on the replica at the same place.
+
+**Peers.** Peers still ask for single block objects. A device serves a block from a pack on a local-directory storage at the place the ledger gives, from the block cache, or encrypts it again from the local file, which gives the stored object because key, nonce and packing are deterministic for one zstd version (otherwise the name does not match and the peer asks elsewhere).
+
+**What a storage learns.** Pack sizes (one push and folder per pack, at most 64 or 256 MiB), the number and timing of pack indexes and tombstone lists, and which packs go away; not the size or number of blocks in a pack, nor where one ends. The same file pushed to two folders is cut at other places and packed into other packs. A pack index and a tombstone list are opaque.
+
+**Limits.**
+
+- Pack places come from the ledger: a device whose ledger lacks a claim (not pulled yet, or lost) finds the block only after the next pull or by reading the pack indexes (`ledger rebuild`). A reader with an old place for a block that garbage collection moved misses it until it pulls the claim of the new place.
+- Members of shared folders write tombstone lists under their own vault's key, which owners cannot read; their deletions do not count towards rewriting a pack.
+- A block deleted on one device while another device skips writing it because it is still in the pack can be lost when the pack is rewritten before the second device sees the tombstone; verification reports the missing copy and repair writes it again.
+- Imports, repairs and Strongroom conversions write packs per block or per file.
+- `.idx` files and `.del.` markers of format 1 are not read.
+
+Tests: `chunk_seal::tests` (no two encodings of a chunk share a nonce over 200 chunks and six encodings each, the same bytes give the same nonce, a chosen nonce is refused), `pack::tests` (round trips of 1, 63, 64, 4095, 4096, 300 000 and 16 MiB bytes; the probe), `chunking::tests` (different seeds cut differently, the same seed alike; size tiers), `packs::tests` (blocks of those sizes through a pack, packs cut at the target, tombstones and an emptied pack, rewriting a mostly dead pack, index and tombstone bodies, one request per pack), `s3::tests::large_objects_are_uploaded_in_parts`, `tests/packs.rs` (the same 10 MiB file in two folders gives other pack layouts and no block objects; a mostly dead pack is rewritten and a device that joins afterwards reads the moved block), `tests/chunk_sizes.rs`, and every test that damages, loses or counts blocks through `tests/common` (packs are found through the record of packs a debug build keeps of what it wrote, `packs::debug_registry`).

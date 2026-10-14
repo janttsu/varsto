@@ -129,6 +129,12 @@ Spec sections 32 to 60. Storage format 1 unchanged; every device must run alpha.
   per sync, S3 conditional writes are probed once and skip the HEAD before
   PUT, uploads go to several storages side by side (spec 12); a sync scans
   each folder once; release builds use thin LTO and mimalloc.
+- Format 2 blocks (spec 62): chunk nonces follow the packed bytes, chunks are
+  compressed with zstd level 3 after a 64 KiB probe, the chunker's Gear table
+  is keyed per folder with new block sizes by file size, and every block of
+  every storage is stored in packs (64 MiB, 256 MiB on cold storages) with
+  encrypted pack indexes and tombstone lists, places in the ledger and
+  rewriting of mostly dead packs. Vaults of earlier formats are not read.
 
 ### Security
 
