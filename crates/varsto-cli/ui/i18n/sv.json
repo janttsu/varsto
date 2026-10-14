@@ -1502,7 +1502,8 @@
   "Port": "Port",
   "Region": "Region",
   "Bucket": "Bucket",
-  "Status": "Status"
+  "Status": "Status",
+  "A storage may be withholding ledger batches of {device}: another device holds newer ones that no storage gave this device.": "En lagringsplats kan hålla inne liggarbatcher från {device}: en annan enhet har nyare batcher som ingen lagringsplats har gett den här enheten."
  },
  "patterns": [
   [
@@ -2706,7 +2707,8 @@
   "Only {free} free on this device's disk, below its minimum: Varsto's own writes wait.",
   "Free up space on storage {name}",
   "Free up space on the disk of folder {name}",
-  "Free up space on {name}"
+  "Free up space on {name}",
+  "A storage may be withholding ledger batches of {device}: another device holds newer ones that no storage gave this device."
  ],
  "parts": [
   [

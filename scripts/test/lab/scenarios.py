@@ -1396,6 +1396,70 @@ def s_ledger_loss():
               f"{vm}: fsck after the rebuild: {fsck}")
         check(fsck.get("ledger_health", {}).get("state") == "ok", f"{vm}: {fsck.get('ledger_health')}")
 
+@scenario("ledger-withhold")
+def s_ledger_withhold():
+    """Spec 58. The bucket withholds one ledger batch of the laptop and
+    offers the next: the desktop's head for the laptop stays before the gap
+    (the next batch waits), and after three syncs the desktop warns that a
+    storage may be withholding the laptop's batches. Once the bucket offers
+    the batch again both count and the warning goes. Junk under the
+    laptop's own ledger name does not fence it, and `ledger clean-junk
+    --yes` deletes exactly that."""
+    fresh_pair()
+    lap = v("vl-laptop", "status")["device_id"]
+    ledger_dir = lab.DIR / "s3" / BUCKET / "ledger" / lap
+
+    def head(vm, dev):
+        st = v(vm, "ledger status", check_rc=False)
+        st = st.get("_out", st) if isinstance(st, dict) and "_out" in st else st
+        return next((d["head"] for d in st["devices"] if d["device"] == dev), 0), st["health"]
+
+    v("vl-desktop", "sync")
+    h0, _ = head("vl-desktop", lap)
+    for i in (1, 2):
+        run("vl-laptop", f"echo withheld-{i} > ~/data/docs/withheld-{i}.txt")
+        v("vl-laptop", "sync")
+    h_lap, _ = head("vl-laptop", lap)
+    check(h_lap >= h0 + 2, f"laptop head {h_lap}, desktop saw {h0}")
+    gap = h0 + 1
+    hidden = lab.DIR / f"withheld-{gap:016}.json"
+    shutil.move(str(ledger_dir / f"{gap:016}.json"), hidden)
+    try:
+        time.sleep(6)  # rclone serve s3 lists from a 5 s directory cache
+        for pull in (1, 2, 3):
+            v("vl-desktop", "sync")
+            h, health = head("vl-desktop", lap)
+            check(h == h0, f"pull {pull}: the desktop's head for the laptop passed the gap ({h}, gap at {gap})")
+            behind = [b for b in health.get("behind", []) if b["device"] == lap]
+            check(behind and behind[0]["pulls"] == pull, f"pull {pull}: gap not noticed: {health}")
+        warned = " ".join(health.get("warnings", []))
+        check("withholding" in warned, f"no warning after three pulls: {health}")
+        s = v("vl-desktop", "status")
+        check("withholding" in json.dumps(s["ledger_health"]), f"status does not show it: {s['ledger_health']}")
+    finally:
+        if hidden.exists():
+            shutil.move(str(hidden), ledger_dir / f"{gap:016}.json")
+    time.sleep(6)
+    v("vl-desktop", "sync")
+    h, health = head("vl-desktop", lap)
+    check(h >= h0 + 2, f"after the batch came back the head is {h}")
+    check(not health.get("behind") and not health.get("warnings"), f"still warned: {health}")
+
+    # Junk under the laptop's own name.
+    (ledger_dir / "9999999999999999.json").write_text("junk")
+    time.sleep(6)
+    run("vl-laptop", "echo after-junk > ~/data/docs/after-junk.txt")
+    v("vl-laptop", "sync")
+    st = v("vl-laptop", "status")["ledger_health"]
+    check(st["state"] == "ok" and st.get("junk_objects") == 1, f"junk: {st}")
+    r = v("vl-laptop", "ledger clean-junk --yes")
+    check(r["deleted"] == 1 and r["genuine"] > 0, f"clean-junk: {r}")
+    check(not (ledger_dir / "9999999999999999.json").exists(), "the junk is still in the bucket")
+    v("vl-desktop", "sync")
+    got = run("vl-desktop", "cat ~/data/docs/after-junk.txt", check_rc=False).stdout.strip()
+    check(got == "after-junk", "the file written beside the junk did not arrive")
+
+
 def ensure_restic(vm):
     """restic on the VM: the image's, Debian's package, or a copy of the
     binary named by VARSTO_LAB_RESTIC (best a static release build) or of
@@ -1468,7 +1532,8 @@ SCENARIOS = [s_reset, s_init, s_pair, s_sync, s_words, s_conflict, s_selective, 
              s_strongroom, s_org, s_remove_user, s_revoke,
              s_p2p_setup, s_p2p_lan, s_p2p_pub, s_p2p_sym, s_p2p_stop, s_share, s_disks, s_mixed,
              s_outage, s_blackhole, s_crash, s_clock, s_clock_behind, s_p2p_upload, s_scale,
-             s_backup, s_activity, s_disk_init, s_disk_fetch_plan, s_scrub, s_restic, s_ledger_loss]
+             s_backup, s_activity, s_disk_init, s_disk_fetch_plan, s_scrub, s_restic, s_ledger_loss,
+             s_ledger_withhold]
 
 
 def main():

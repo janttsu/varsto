@@ -255,6 +255,10 @@ pub struct Inputs {
     /// What is wrong with the ledger and what to run, when something is.
     pub ledger_problem: Option<String>,
     pub ledger_command: Option<String>,
+    /// Devices whose ledger batches a storage may be withholding (a gap
+    /// that stayed over several pulls).
+    #[serde(default)]
+    pub ledger_withheld: Vec<String>,
     pub repair_queued: u64,
     pub repair_losses: u64,
     pub scrub_damaged: u64,
@@ -940,6 +944,17 @@ fn attention(h: &mut HelpState, i: &Inputs, storages: &[&StorageIn]) {
             tx(
                 "The ledger needs attention: {problem}",
                 &[("problem", p.clone())],
+            ),
+        );
+    }
+    for d in &i.ledger_withheld {
+        att(
+            h,
+            &format!("ledger-withheld:{d}"),
+            "warn",
+            tx(
+                "A storage may be withholding ledger batches of {device}: another device holds newer ones that no storage gave this device.",
+                &[("device", d.clone())],
             ),
         );
     }

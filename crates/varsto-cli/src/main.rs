@@ -90,6 +90,13 @@ enum LedgerCmd {
         #[arg(long)]
         confirm_cold_read: bool,
     },
+    /// Delete the junk under this device's ledger name on the hot storages:
+    /// objects there that this device did not sign (someone with the
+    /// storage's credentials wrote them). Without --yes, only lists them.
+    CleanJunk {
+        #[arg(long)]
+        yes: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -481,6 +488,16 @@ enum DeviceCmd {
         wipe: bool,
         #[arg(long)]
         yes: bool,
+    },
+    /// Two devices wrote the same key epoch at once (each removing a
+    /// device): keep the epoch of one of them. Until then this device signs
+    /// nothing.
+    ResolveEpoch {
+        /// The key epoch number (see `varsto ledger status`).
+        epoch: u32,
+        /// The device whose epoch to keep (name or id).
+        #[arg(long)]
+        keep: String,
     },
 }
 
@@ -4549,6 +4566,21 @@ fn run(cli: &Cli) -> Result<()> {
             }
         }
         Cmd::Device { cmd } => match cmd {
+            DeviceCmd::ResolveEpoch { epoch, keep } => {
+                let mut engine = open_engine(&home)?;
+                engine.resolve_epoch_fork(*epoch, keep)?;
+                print(cli, engine.epoch_forks(), |f| {
+                    format!(
+                        "kept {} for key epoch {epoch}; {}",
+                        keep,
+                        if f.unresolved().is_empty() {
+                            "this device signs again".to_string()
+                        } else {
+                            format!("still to choose: key epochs {:?}", f.unresolved())
+                        }
+                    )
+                })?;
+            }
             DeviceCmd::List => {
                 let engine = open_engine(&home)?;
                 let list = engine.devices_list();
@@ -5433,6 +5465,25 @@ fn run(cli: &Cli) -> Result<()> {
             if !r.health.is_ok() {
                 std::process::exit(1);
             }
+        }
+        Cmd::Ledger {
+            cmd: Some(LedgerCmd::CleanJunk { yes }),
+        } => {
+            let mut engine = open_engine(&home)?;
+            let r = engine.ledger_clean_junk(!*yes)?;
+            print(cli, &r, |r| {
+                let mut out = String::new();
+                for j in &r.junk {
+                    out += &format!("{} {j}\n", if r.dry_run { "junk" } else { "deleted" });
+                }
+                if r.junk.is_empty() {
+                    out += "no junk under this device's ledger name\n";
+                } else if r.dry_run {
+                    out += "run again with --yes to delete these\n";
+                }
+                out += &format!("{} objects of this device verified and kept", r.genuine);
+                out
+            })?;
         }
         Cmd::Ledger { cmd: _ } => {
             let engine = open_engine(&home)?;

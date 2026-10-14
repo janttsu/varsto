@@ -1502,7 +1502,8 @@
   "Your files are kept in {storages} storages and on 1 device.": "Tiedostojasi säilytetään {storages} tallennuspaikassa ja 1 laitteella.",
   "Write it down and keep it offline: it is the only way to recover the data, or to join without another device; devices can also be added by pairing with a code. It is shown once.": "Kirjoita se muistiin ja säilytä offline-tilassa: se on ainoa tapa palauttaa data tai liittyä ilman toista laitetta; laitteita voi lisätä myös muodostamalla parin koodilla. Se näytetään vain kerran.",
   "opening files in other apps is not available on this platform": "tiedostojen avaaminen muissa sovelluksissa ei ole käytettävissä tällä alustalla",
-  "One key opens this Strongroom; if it is lost, so is the folder. Enroll a backup key and keep it somewhere safe.": "Yksi avain avaa tämän Strongroomin; jos se katoaa, katoaa myös kansio. Rekisteröi varaturva-avain ja säilytä se turvallisessa paikassa."
+  "One key opens this Strongroom; if it is lost, so is the folder. Enroll a backup key and keep it somewhere safe.": "Yksi avain avaa tämän Strongroomin; jos se katoaa, katoaa myös kansio. Rekisteröi varaturva-avain ja säilytä se turvallisessa paikassa.",
+  "A storage may be withholding ledger batches of {device}: another device holds newer ones that no storage gave this device.": "Tallennuspaikka saattaa pidättää laitteen {device} kirjanpitoeriä: toisella laitteella on uudempia eriä, joita mikään tallennuspaikka ei ole antanut tälle laitteelle."
  },
  "patterns": [
   [
@@ -2652,7 +2653,8 @@
   "Only {free} free on this device's disk, below its minimum: Varsto's own writes wait.",
   "Free up space on storage {name}",
   "Free up space on the disk of folder {name}",
-  "Free up space on {name}"
+  "Free up space on {name}",
+  "A storage may be withholding ledger batches of {device}: another device holds newer ones that no storage gave this device."
  ],
  "parts": [
   [

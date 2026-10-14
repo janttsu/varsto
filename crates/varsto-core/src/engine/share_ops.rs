@@ -697,12 +697,16 @@ impl Engine {
         let mut adopted = false;
         let mut changed = false;
         for fid in shared {
-            let mut newest_seen = 0u32;
+            let mut epochs_seen: BTreeSet<u32> = BTreeSet::new();
             let mut grants: BTreeMap<u32, Vec<ShareGrant>> = BTreeMap::new();
-            for (_, backend) in storages {
+            // Grants to anyone, by epoch: a newer epoch counts as real (and
+            // this device as left out) only when an owner sealed its key to
+            // some participant, not because a name exists.
+            let mut others: BTreeMap<u32, Vec<(usize, String)>> = BTreeMap::new();
+            for (idx, (_, backend)) in storages.iter().enumerate() {
                 for key in backend.list(&format!("{}{fid}/", share::EPOCH_PREFIX))? {
                     if let Some(e) = key.rsplit('/').next().and_then(share::epoch_from_name) {
-                        newest_seen = newest_seen.max(e);
+                        epochs_seen.insert(e);
                     }
                 }
                 let prefix = format!("{}{fid}/", share::GRANT_PREFIX);
@@ -719,6 +723,7 @@ impl Engine {
                         continue;
                     };
                     if *who != me && Some(*who) != my_invite.as_deref() {
+                        others.entry(e).or_default().push((idx, key.clone()));
                         continue;
                     }
                     if self.keyring.folders[&fid].epoch_keys.contains_key(&e) {
@@ -761,7 +766,36 @@ impl Engine {
                 }
             }
             let held = Self::newest_share_epoch(&self.keyring.folders[&fid]);
-            let lost = newest_seen > held;
+            let owners = book
+                .folders
+                .get(&fid)
+                .map(|s| s.owners.clone())
+                .unwrap_or_default();
+            let mut lost = false;
+            'epochs: for e in epochs_seen.iter().filter(|e| **e > held) {
+                for (idx, key) in others.get(e).map(|v| v.as_slice()).unwrap_or_default() {
+                    let Some(g) = storages[*idx]
+                        .1
+                        .get(key)?
+                        .and_then(|b| serde_json::from_slice::<ShareGrant>(&b).ok())
+                    else {
+                        continue;
+                    };
+                    if g.folder != fid
+                        || g.epoch != *e
+                        || (!owners.is_empty() && !owners.contains(&g.issuer))
+                    {
+                        continue;
+                    }
+                    let Some(pk) = self.share_issuer_key(&g.issuer) else {
+                        continue;
+                    };
+                    if g.verify(&self.vault.vault_id, &pk).is_ok() {
+                        lost = true;
+                        break 'epochs;
+                    }
+                }
+            }
             let st = book.folders.entry(fid.clone()).or_default();
             if st.access_lost != lost {
                 st.access_lost = lost;

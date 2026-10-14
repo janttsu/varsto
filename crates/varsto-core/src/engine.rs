@@ -110,13 +110,13 @@ pub use imports::{
     MissingFile,
 };
 pub use ledger_recovery::{
-    LedgerDeviceStatus, LedgerHealth, LedgerHolding, LedgerProblem, LedgerRebuildOptions,
-    LedgerRebuildReport, LedgerStatus, StorageRebuildReport,
+    JunkReport, LedgerBehind, LedgerDeviceStatus, LedgerHealth, LedgerHolding, LedgerProblem,
+    LedgerRebuildOptions, LedgerRebuildReport, LedgerStatus, StorageRebuildReport,
 };
 pub use manifest_upkeep::ManifestPolicy;
 pub use membership::{
-    removal_notice, DeviceInfo, DeviceRemoved, EpochRecord, Grant, KemRecord, Removal, Revocation,
-    RevokeReport, Revoked, SignedEpoch, SignedRevocation,
+    removal_notice, DeviceInfo, DeviceRemoved, EpochForks, EpochRecord, Grant, KemRecord, Removal,
+    Revocation, RevokeReport, Revoked, SignedEpoch, SignedRevocation,
 };
 pub use notes::{
     check_analysis, AnalysisHit, FileAnalysis, NotesExchangeReport, ANALYSIS_MAX_BYTES,
@@ -4559,6 +4559,14 @@ impl Engine {
                 if self.share_access_lost(&rec.folder_id) {
                     // Removed from the shared folder: newer manifests are
                     // under a key this device will not get.
+                    continue;
+                }
+                if !self.trusted(&dev) {
+                    // Not a trusted full device (a member, a replica, a
+                    // removed device, or a name planted on the storage):
+                    // what does not open is skipped, so nobody but a
+                    // trusted device can stop this folder's pull.
+                    log::warn!(folder:% = rec.folder_id, device:% = dev, seq = seq; "manifest does not open: skipped");
                     continue;
                 }
                 bail!(

@@ -114,7 +114,7 @@ Format and rules are in `alpha-0-format.md` section 22. This section states what
 - That the checkpoint comes from that device and is intact (signature, body hash, associated data binding device, N and H).
 - That later batches continue from it: batch N+1 must name H as its predecessor.
 - Equivocation where it overlaps what the verifier holds: a checkpoint that disagrees with a batch it holds at N, two checkpoints at the same N with different H, or a later batch that does not chain to H all mark the device forked. A copy restored from an old backup still meets its own newer batches or checkpoint on the storages and fences itself.
-- Not, today, that other devices' statements are not forged. The rule is that a checkpoint holds only its writer's own events, and a copy counts as verified only when another device's batch or checkpoint, signed by that other device, says so. The code does not enforce it: a checkpoint is merged into the view without filtering its entries to the writer, so a device can put claims and verifications attributed to other devices into its own checkpoint, and a reader that holds no contradicting batch cannot tell. Until that is fixed (open item in the ledger authorization work), a checkpoint proves only what its writer asserts, about anyone.
+- That other devices' statements are not forged: a checkpoint holds only its writer's own events. A copy counts as verified only when another device's batch or checkpoint, signed by that other device, says so. Enforced since `alpha-0-format.md` section 58: a reader merges a checkpoint restricted to its signer (claims, verifications, manifests, names, snapshots and acknowledgements of other devices are dropped), and reads checkpoints only from full devices.
 - Revocation: checkpoints of a removed device beyond its cut-off are ignored, like its batches.
 
 **What is lost once old batches are pruned.**
@@ -122,7 +122,7 @@ Format and rules are in `alpha-0-format.md` section 22. This section states what
 - Whether the checkpoint is a faithful summary of the batches it replaced. A device could leave a claim out or add one it never made in a batch. This adds no power the device did not have: claims are self-attested, and it could have written the same claims in a batch. But a device that only ever sees the checkpoint cannot tell.
 - History and provenance of single events: which batch made a claim, and when it was first made (claim and verification times are kept only as the newest per copy, as the view already did). An audit of old batches is no longer possible once every device has dropped them.
 - Equivocation over the pruned range is detectable only by devices that saw the old batches before they went. A device that joins later trusts the checkpoint as the device's account of its past. The last 8 batches before the checkpoint are kept so that recent equivocation and restored copies are still caught.
-- A storage that rolls back (serves an older checkpoint and hides newer batches) is caught only by another copy, as before; pruning does not change that.
+- A storage that rolls back (serves an older checkpoint and hides newer batches) is caught only by another copy, as before, or by other devices' acknowledgements (section 11); pruning does not change that.
 - Cryptographic erasure of batch payloads (rule 5 of section 7) does not reach a checkpoint that summarises them: the checkpoint carries the information under the current ledger key.
 
 **Why deletion waits for acknowledgements.** Every reader (trusted, non-revoked full device) must have said, in a signed batch, that it holds the device's batches up to N. A reader that has them needs nothing older than the checkpoint; a device that joins later starts from the checkpoint; a device on an older version never acknowledges, so nothing is deleted while one remains. A reader that disappears blocks pruning until it is revoked; that is the price of never deleting a batch some device still needs.
@@ -130,6 +130,18 @@ Format and rules are in `alpha-0-format.md` section 22. This section states what
 ## 10. Drops (0.0.1-alpha.9)
 
 A `chunk_dropped` event (alpha-0-format.md section 23) is a device's signed statement "I removed this object from this storage". Like a claim it is self-attested, and it is the only event by which one device's batch makes other devices' claims stop counting (as a storage retirement does for a whole storage): a full device of the vault can declare any copy gone. That adds no power such a device lacked, since it holds the storage credentials and could delete the objects; a false drop makes copies count less, never more, so a policy errs on the safe side, and a block left without any other copy is written again by the next push where the placement allows. A drop is ordered against claims by Lamport time; a verification after a drop does not revive the copy. Checkpoints carry drops like claims, so a device that only sees a checkpoint still sees them.
+
+## 11. Who may sign what, gaps and fencing (after 0.0.1-alpha.13)
+
+`alpha-0-format.md` section 58 has the rules; this section states what they mean for trust.
+
+**A signature proves authorship, not authority.** Replicas and members of shared folders hold device keys and sign batches like full devices. What their batches may change is decided by the key id and the signer's role: a replica's batch can only claim objects, a member's only touch its folder, and only full devices retire storages, add folders, expire snapshots or stop backups. A checkpoint is read only from a full device and only for its own statements. Without these rules a replica or a member could make every device delete backup snapshots or forget copies.
+
+**Gaps are visible, not silent.** Model B's sequence numbers and hash chain (section 6) make a missing batch evident; a reader now keeps a batch whose predecessor is missing aside instead of counting it, and asks every storage again. Rule 4 of section 7 (exchange the latest signed headers) is realised through the storages: each full device's batches carry `seen`, the newest batch of every other device it held, and a reader whose head is behind another device's acknowledgement for three pulls reports that a storage may be withholding batches. A storage that hides a batch from everyone, and every acknowledgement of it, is still not caught.
+
+**Fencing needs a signature.** A device fences itself only on an object that its own key signed and that it did not write; junk under its name is reported and can be deleted. Previously a name alone (`ledger/<device>/9999999999999999.json`) stopped a device for good.
+
+**Ordering of membership changes.** Revocations are ordered by the chain of signed key epoch records (put-if-absent decides the number), not by the timestamps their issuers choose; two records under one number wait for the user's choice. The key id of a batch is still outside its signature (a format change, planned).
 
 ## Sources
 

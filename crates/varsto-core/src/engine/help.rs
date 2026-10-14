@@ -287,6 +287,12 @@ impl Engine {
             inputs.ledger_problem = Some(health.describe());
             inputs.ledger_command = health.suggestion.clone();
         }
+        inputs.ledger_withheld = health
+            .behind
+            .iter()
+            .filter(|b| b.pulls >= ledger_recovery::WITHHOLD_PULLS)
+            .map(|b| b.name.clone())
+            .collect();
         let view = self.view()?;
         inputs.forked = self.forked_self || !view.forked.is_empty();
         let repair = observed

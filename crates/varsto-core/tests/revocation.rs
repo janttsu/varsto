@@ -379,3 +379,159 @@ fn forged_wipe_order_is_ignored() {
     assert!(a.devices_list().iter().all(|d| !d.revoked));
     assert_eq!(a.key_epoch(), 0);
 }
+
+/// Junk under a device's own ledger name (anyone with the storage's
+/// credentials can write it) does not fence the device: only an object its
+/// own key signed does. It is reported, and `ledger clean-junk` deletes it
+/// and nothing else (`docs/spec/alpha-0-format.md` section 58).
+#[test]
+fn junk_under_a_devices_ledger_name_does_not_fence_it() {
+    let lab = Lab::new();
+    let (mut a, mut b, _c, _) = three_devices(&lab);
+    let own = lab.store().join("ledger").join(a.device_id().as_str());
+    fs::write(own.join("9999999999999999.json"), b"junk").unwrap();
+    fs::write(
+        own.join("checkpoint-9999999999999998.json"),
+        b"{\"not\": \"a checkpoint\"}",
+    )
+    .unwrap();
+    // A copy of a real batch of another device, under A's name.
+    let theirs = fs::read_dir(lab.store().join("ledger").join(b.device_id().as_str()))
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .find(|p| p.extension().is_some_and(|x| x == "json"))
+        .unwrap();
+    fs::copy(theirs, own.join("9999999999999997.json")).unwrap();
+
+    fs::write(lab.dir("a").join("two.txt"), b"after the junk").unwrap();
+    a.sync(None).expect("junk does not fence the device");
+    let h = a.ledger_health();
+    assert_eq!(h.state, "ok", "{h:?}");
+    assert_eq!(h.junk_objects, 3, "{h:?}");
+    assert!(h.describe().contains("clean-junk"));
+    assert_eq!(a.ledger_check_storages().unwrap().state, "ok");
+    b.sync(None).unwrap();
+    assert!(lab.dir("b").join("two.txt").exists());
+
+    let dry = a.ledger_clean_junk(true).unwrap();
+    assert_eq!(dry.junk.len(), 3, "{dry:?}");
+    assert_eq!(dry.deleted, 0);
+    let names = |p: &Path| fs::read_dir(p).unwrap().count();
+    let before = names(&own);
+    let done = a.ledger_clean_junk(false).unwrap();
+    assert_eq!(done.deleted, 3);
+    assert_eq!(names(&own), before - 3);
+    assert!(done.genuine > 0);
+    assert_eq!(a.ledger_health().junk_objects, 0);
+    fs::write(lab.dir("a").join("three.txt"), b"still fine").unwrap();
+    a.sync(None).unwrap();
+}
+
+/// Junk under the next key epoch number does not stop a removal, with or
+/// without an organization: a number taken by anything but a signed epoch
+/// record of a trusted device is skipped.
+#[test]
+fn junk_epoch_record_does_not_block_revocation() {
+    let lab = Lab::new();
+    let (mut a, mut b, _c, _) = three_devices(&lab);
+    let epochs = lab.store().join("vault/epochs");
+    fs::create_dir_all(&epochs).unwrap();
+    fs::write(epochs.join("00000001.enc"), b"junk").unwrap();
+    let r = a
+        .revoke_device("c", false)
+        .expect("junk does not block the removal");
+    assert_eq!(r.key_epoch, 2);
+    b.sync(None).unwrap();
+    assert_eq!(b.key_epoch(), 2);
+    assert!(b.devices_list().iter().any(|d| d.name == "c" && d.revoked));
+}
+
+/// Revocations apply in the order of the key epochs they started, not of
+/// their timestamps, which the issuer chooses: after A removed C in epoch
+/// 1, C (a stolen device running a modified client) removes A in epoch 2
+/// with a revocation dated 2000-01-01. Every other device keeps A and
+/// ignores C (`docs/spec/alpha-0-format.md` section 58).
+#[test]
+fn a_backdated_revocation_does_not_win() {
+    let lab = Lab::new();
+    let (mut a, mut b, mut c, _) = three_devices(&lab);
+    let r = a.revoke_device("c", false).unwrap();
+    assert_eq!(r.key_epoch, 1);
+    // C has not pulled since; it removes A without looking.
+    let forged = c.revoke_unchecked("a", 946_684_800).unwrap();
+    assert_eq!(forged.key_epoch, 2);
+
+    b.sync(None).unwrap();
+    let list = b.devices_list();
+    let a_entry = list.iter().find(|d| d.name == "a").unwrap();
+    let c_entry = list.iter().find(|d| d.name == "c").unwrap();
+    assert!(
+        !a_entry.revoked,
+        "A was removed by the backdated revocation"
+    );
+    assert!(c_entry.revoked);
+    assert_eq!(b.key_epoch(), 1, "C's epoch is not adopted");
+    a.sync(None).unwrap();
+    assert!(a.removal().is_none());
+    fs::write(lab.dir("a").join("after.txt"), b"A still writes").unwrap();
+    a.sync(None).unwrap();
+    b.sync(None).unwrap();
+    assert!(lab.dir("b").join("after.txt").exists());
+}
+
+/// Two devices that each remove the other at the same moment, through
+/// different first storages, write two key epochs under one number. Every
+/// device that sees both records it, signs nothing until the user keeps
+/// one, and then follows the kept one only.
+#[test]
+fn two_epochs_under_one_number_wait_for_a_choice() {
+    let lab = Lab::new();
+    let (mut a, mut b, c0, _) = three_devices(&lab);
+    drop(c0);
+    let second_dir = lab.root.join("second");
+    let second = StorageSpec::LocalDir {
+        name: "second".into(),
+        path: second_dir.clone(),
+        cold: false,
+        carrier: false,
+        place: String::new(),
+        min_free: None,
+    };
+    a.add_storage(second.clone()).unwrap();
+    a.sync(None).unwrap();
+    b.add_storage(second.clone()).unwrap();
+    b.sync(None).unwrap();
+    // C2 works through the second storage only.
+    let key = a.export_vault_key().unwrap();
+    let mut c = small(Engine::join(&lab.home("c2"), "c2", PASS, &key, second).unwrap());
+    a.sync(None).unwrap();
+    b.sync(None).unwrap();
+    c.sync(None).unwrap();
+    // A removes C2; at the same moment C2 removes A, and on the second
+    // storage C2's record took the number first.
+    let r = a.revoke_device("c2", false).unwrap();
+    assert_eq!(r.key_epoch, 1);
+    fs::remove_file(second_dir.join("vault/epochs/00000001.enc")).unwrap();
+    assert_eq!(c.revoke_unchecked("a", 946_684_800).unwrap().key_epoch, 1);
+
+    fs::write(lab.dir("b").join("b-file.txt"), b"wants to be signed").unwrap();
+    let err = b.sync(None).unwrap_err();
+    assert!(format!("{err:#}").contains("resolve-epoch"), "{err:#}");
+    let h = b.ledger_health();
+    assert_eq!(h.state, "epoch_fork", "{h:?}");
+    assert_eq!(b.epoch_forks().unresolved(), vec![1]);
+    assert!(b.resolve_epoch_fork(1, "nobody").is_err());
+    b.resolve_epoch_fork(1, "a").unwrap();
+    b.sync(None).unwrap();
+    assert_eq!(b.ledger_health().state, "ok");
+    let list = b.devices_list();
+    assert!(!list.iter().find(|d| d.name == "a").unwrap().revoked);
+    assert!(list.iter().find(|d| d.name == "c2").unwrap().revoked);
+    assert_eq!(b.key_epoch(), 1);
+    // A saw both as well, and was not removed by C2's record.
+    let _ = a.sync(None);
+    assert!(a.removal().is_none());
+    a.resolve_epoch_fork(1, "a").unwrap();
+    a.sync(None).unwrap();
+    assert!(lab.dir("a").join("b-file.txt").exists());
+}
