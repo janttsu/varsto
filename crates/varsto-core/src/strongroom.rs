@@ -699,7 +699,7 @@ mod tests {
     fn a_build_without_the_feature_refuses_software_keys() {
         // Unit tests run with the feature; the backend of a build without
         // it is the same type whatever the method says.
-        assert!(SOFTWARE_KEYS_BUILT_IN);
+        const { assert!(SOFTWARE_KEYS_BUILT_IN) };
         let none = NoSoftwareKey;
         assert!(none.make_credential().is_err());
         assert!(none.hmac_secret("software:/x/key", &[0u8; 32]).is_err());
