@@ -724,6 +724,8 @@ pub struct Engine {
     meta_caps: crate::fsmeta::Caps,
     /// Of the last scan: entries ignored, files whose metadata alone changed.
     scan_extra: (u64, u64),
+    /// The scan a pull just made, for the push that follows it in a sync.
+    last_scan: Option<ScanOutcome>,
     /// Tests: behave like a modified client that ignores a read-only role
     /// (`share_roles`).
     role_guard_off: bool,
@@ -809,6 +811,16 @@ struct UploadBatch {
     left: std::sync::atomic::AtomicUsize,
     /// Encrypted bytes it holds (counted once, however many storages).
     held: u64,
+}
+
+/// What a folder scan found, kept from a sync's pull for its push so the
+/// folder is walked once per sync (`Engine::last_scan`).
+struct ScanOutcome {
+    folder: FolderId,
+    scanned: u64,
+    changed: u64,
+    /// Entries ignored, files whose metadata alone changed (`scan_extra`).
+    extra: (u64, u64),
 }
 
 /// How one write went.
@@ -1210,6 +1222,7 @@ impl Engine {
             download_log: None,
             meta_caps: crate::fsmeta::Caps::here(),
             scan_extra: (0, 0),
+            last_scan: None,
             role_guard_off: false,
             platform_override: None,
             version_override: None,
@@ -1443,6 +1456,7 @@ impl Engine {
             download_log: None,
             meta_caps: crate::fsmeta::Caps::here(),
             scan_extra: (0, 0),
+            last_scan: None,
             role_guard_off: false,
             platform_override: None,
             version_override: None,
@@ -3175,13 +3189,9 @@ impl Engine {
         let me = self.vault.device_id.clone();
         // Chunks this folder already references keep their object (and key
         // epoch): after a key change, unchanged content is not re-uploaded.
-        let known: std::collections::HashMap<ChunkId, ChunkRef> = state
-            .files
-            .values()
-            .chain(state.pending_remote.values())
-            .flat_map(|f| f.chunks.iter())
-            .map(|c| (c.chunk.clone(), c.clone()))
-            .collect();
+        // Built when the first changed file needs it: a scan that finds
+        // nothing changed never copies the folder's chunk list.
+        let mut known: Option<std::collections::HashMap<ChunkId, ChunkRef>> = None;
         let mut seen = BTreeSet::new();
         let mut placeholders: BTreeSet<String> = BTreeSet::new();
         // Entries left as they are in the vault: links while links are off
@@ -3422,6 +3432,15 @@ impl Engine {
                 };
                 hasher.update(&chunk);
                 let chunk_id = ChunkId::from_bytes(&crypto::keyed_hash(&fk.hash, &chunk));
+                let known = known.get_or_insert_with(|| {
+                    state
+                        .files
+                        .values()
+                        .chain(state.pending_remote.values())
+                        .flat_map(|f| f.chunks.iter())
+                        .map(|c| (c.chunk.clone(), c.clone()))
+                        .collect()
+                });
                 let (object, epoch) = match known.get(&chunk_id) {
                     Some(c) if c.size == chunk.len() as u64 => (c.object.clone(), c.epoch),
                     _ => {
@@ -3652,10 +3671,18 @@ impl Engine {
     // ----- push ---------------------------------------------------------------
 
     pub fn push(&mut self, folder: &str) -> Result<PushReport> {
-        crate::logged_op!("push", folder, { self.push_inner(folder) })
+        self.push_with_scan(folder, None)
     }
 
-    fn push_inner(&mut self, folder: &str) -> Result<PushReport> {
+    /// `push` with the scan a pull of the same folder just made, so a sync
+    /// walks the folder once (`sync_folders`).
+    fn push_with_scan(&mut self, folder: &str, scan: Option<ScanOutcome>) -> Result<PushReport> {
+        let out = crate::logged_op!("push", folder, { self.push_inner(folder, scan) });
+        self.finish_storages();
+        out
+    }
+
+    fn push_inner(&mut self, folder: &str, scan: Option<ScanOutcome>) -> Result<PushReport> {
         self.ensure_active()?;
         self.ensure_ledger_writable()?;
         if self.forked_self {
@@ -3677,7 +3704,15 @@ impl Engine {
             self.save_state(&rec.folder_id, &state)?;
             return Ok(report);
         }
-        let (scanned, changed) = self.scan(&rec, &root, &mut state)?;
+        let (scanned, changed) = match scan.filter(|s| s.folder == rec.folder_id) {
+            // The pull of this sync scanned the folder moments ago, and the
+            // state it saved carries what it found.
+            Some(s) => {
+                self.scan_extra = s.extra;
+                (s.scanned, s.changed)
+            }
+            None => self.scan(&rec, &root, &mut state)?,
+        };
         report.files_scanned = scanned;
         report.files_changed = changed;
         (report.files_ignored, report.metadata_changed) = self.scan_extra;
@@ -4349,10 +4384,17 @@ impl Engine {
             folder: rec.name.clone(),
             ..Default::default()
         };
+        self.last_scan = None;
         if self.share_read_only(&rec) {
             report.kept_aside = self.read_only_guard(&rec, &root, &mut state)?;
         } else {
-            self.scan(&rec, &root, &mut state)?;
+            let (scanned, changed) = self.scan(&rec, &root, &mut state)?;
+            self.last_scan = Some(ScanOutcome {
+                folder: rec.folder_id.clone(),
+                scanned,
+                changed,
+                extra: self.scan_extra,
+            });
         }
         let forks = self.pull_ledger_once()?;
         report.forked_devices = forks.iter().map(|d| d.to_string()).collect();
@@ -6588,16 +6630,19 @@ impl Engine {
             let mut pull = match self.pull(&name) {
                 Ok(p) => p,
                 Err(e) => {
+                    self.last_scan = None;
                     out.push(paused(e, PullReport::default())?);
                     continue;
                 }
             };
+            // The pull scanned the folder; the push need not walk it again.
+            let scan = self.last_scan.take();
             if self.keyring.find(&name).is_none() {
                 continue; // converted while pulling
             }
             // Selective sync turned off: the placeholders become files.
             pull.files_updated += self.fill_placeholders(&name, &mut pull.files_unavailable)?;
-            match self.push(&name) {
+            match self.push_with_scan(&name, scan) {
                 Ok(push) => out.push((pull, push)),
                 Err(e) => out.push(paused(e, pull)?),
             }
