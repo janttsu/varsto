@@ -1,0 +1,44 @@
+---
+title: Cryptomator-vaihtoehto: Varsto ja Cryptomator vertailussa
+nav: Compare
+output: compare/cryptomator/index.html
+description: Etsitkö Cryptomator-vaihtoehtoa, joka sekä salaa että synkronoi omaan tallennustilaan (S3, NAS, levyt, rclone)? Mihin Cryptomator on tarkoitettu, miten se toimii ja miten se vertautuu Varstoon.
+---
+    <p class="back-link"><a href="{{L}}compare/">Kaikki vertailut</a></p>
+    <h1>Varsto ja Cryptomator</h1>
+    <p class="lead">Cryptomator salaa kansion, holvin, niin että sen voi pitää missä tahansa pilvessä palveluntarjoajan lukematta sitä. Se on ilmainen ja avointa lähdekoodia, sillä on työpöytä- ja mobiilisovellukset, ja se tekee yhden asian: holvin. Holvin siirtäminen toiselle laitteelle jää pilvipalvelun oman asiakasohjelman tehtäväksi.</p>
+
+    <h2>Miten Cryptomator toimii</h2>
+    <p>Holvi on hakemisto salattuja tiedostoja ja hakemistoja, jonka juuressa on <code>vault.cryptomator</code>-asetustiedosto. Työpöydällä holvi näkyy virtuaalisena levyasemana: tiedostot salataan ja puretaan huomaamatta käytön aikana, eikä levylle jää salaamattomia kopioita. Myös tiedostonimet salataan. Sisältö salataan AES:llä (<code>SIV_GCM</code>- tai <code>SIV_CTRMAC</code>-yhdistelmä), ja pääavaimet suojataan salasanalla scryptin ja AES key wrapin avulla. Cryptomator ei siirrä holvia minnekään: holvi laitetaan kansioon, jota Dropbox, Google Drive, OneDrive tai muu asiakasohjelma synkronoi, ja tuo ohjelma kuljettaa salatut tiedostot laitteiden välillä. Kirjanpitoa siitä, millä laitteilla tai tallennuspaikoilla on kopio, ei ole, ei omaa jakamismekanismia (holvin avaa se, jolla on holvikansio ja sen salasana; erillinen Hub-tuote hallinnoi pääsyä organisaatioissa) eikä sääntöjä siitä, montako kopiota pitää olla.</p>
+
+    <h2>Rinnakkain</h2>
+    <table class="compare-table">
+      <thead><tr><th scope="col"></th><th scope="col">Cryptomator</th><th scope="col">Varsto</th></tr></thead>
+      <tbody>
+      <tr><th scope="row">Missä tiedostosi ovat</th><td>Holvikansiossa laitteellasi ja kaikkialla, minne käyttämäsi pilviohjelma kopioi kansion.</td><td>Omilla laitteillasi ja valitsemissasi tallennuspaikoissa: S3-yhteensopivissa bucketeissa, missä tahansa rclone-etäkohteessa, paikallisissa tai verkkohakemistoissa sekä irrotettavien levyjen levyvarastoissa.</td></tr>
+      <tr><th scope="row">Tili tai keskuspalvelin</th><td>Ei Cryptomatorilla itsellään; pilvellä, jossa holvia pidetään, on oma tilinsä.</td><td>Ei kumpaakaan. Varstolla ei ole palvelinta; laitteet löytävät toisensa tallennuspaikkojesi kautta ja lähiverkossa.</td></tr>
+      <tr><th scope="row">Salaus</th><td>Asiakaspäässä, ennen kuin pilviohjelma näkee tiedostot: AES-sisältösalaus, salatut tiedostonimet, salasanalla suojatut pääavaimet. Kypsä ja laajasti tarkasteltu.</td><td>Päästä päähän, asiakaspäässä, ennen kuin mitään lähtee laitteelta; hybridi post-kvanttisalaus (ML-KEM avainten jakamiseen, Ed25519 + ML-DSA-65 -allekirjoitukset). Ei vielä riippumattomasti auditoitu.</td></tr>
+      <tr><th scope="row">Synkronointi laitteiden välillä</th><td>Ei omaa: pilvipalvelun asiakasohjelma synkronoi holvikansion.</td><td>Kyllä: laitteet synkronoituvat tallennuspaikkojesi kautta ja suoraan vertaisyhteydellä, kun ne tavoittavat toisensa.</td></tr>
+      <tr><th scope="row">Tietää, missä jokainen kopio on</th><td>Ei: Cryptomator näkee vain tämän laitteen holvikansion.</td><td>Kyllä: allekirjoitettu kirjanpito kertoo, mikä tallennuspaikka ja laite säilyttää kunkin lohkon; säilytyssäännöt (oletuksena 1 kopio missä tahansa, 1 ulkoinen ja 1 omilla laitteillasi tai levyilläsi, toisen laitteen tarkistamana 30 päivän sisällä) varoittavat, kun jokin sääntö ei täyty.</td></tr>
+      <tr><th scope="row">Jakaminen muiden kanssa</th><td>Ei omaa jakamismekanismia: holvin avaa kuka tahansa, jolla on kansio ja salasana.</td><td>Kyllä: kansio jaetaan toiselle käyttäjälle sinetöidyllä avaimella, jäseniä voi poistaa, ja jäsen voi olla vain lukija.</td></tr>
+      <tr><th scope="row">Irrotettavat ja verkosta irti olevat levyt</th><td>Holvin voi pitää millä tahansa levyllä, mutta mikään ei seuraa poissa olevia levyjä.</td><td>Kyllä: levyvarastot täytetään, tarkistetaan ja tunnistetaan, kun levyt palaavat; poissa olevalla levyllä olevat tiedostot pyytävät kyseistä levyä.</td></tr>
+      <tr><th scope="row">Varmuuskopiot</th><td>Ei omia; pilvipalvelun mahdollinen versiointi koskee salattuja tiedostoja.</td><td>Kyllä: valitse kansio millä tahansa laitteella. Varsto säilyttää siitä salattuja, vain luku -muotoisia versioita pelkästään ulkoisissa tallennuspaikoissasi, ei koskaan laitteillasi. Versiot säilytetään valitsemasi päivämäärän ajan (oletuksena 90 päivää), ja vanhentuneet poistetaan. Minkä tahansa version voi palauttaa nimeämääsi hakemistoon sovelluksesta tai komentoriviltä.</td></tr>
+      <tr><th scope="row">Lisenssi ja hinta</th><td>Avoin lähdekoodi (GPL-3.0), ilmainen; ohjelmistotoimittajille tarjotaan kaupallista lisenssiä.</td><td>Lähdekoodi saatavilla (PolyForm Shield 1.0.0), ilmainen; maksat vain tallennuspalvelun tarjoajallesi.</td></tr>
+      <tr><th scope="row">Kypsyys</th><td>Kypsä, pitkäikäinen projekti.</td><td>Alfa: ei tuotantodatalle, ja formaatit voivat vielä muuttua.</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Kumpi sopii sinulle</h2>
+    <div class="grid two">
+      <div class="card"><h3>Cryptomator</h3><p>Valitse Cryptomator, kun käytät jo pilviohjelmaa, johon olet tyytyväinen, haluat sen kansion salatuksi kypsällä avoimen lähdekoodin työkalulla, etkä tarvitse tietoa kopioiden sijainnista tai jakamista muiden kanssa.</p></div>
+      <div class="card"><h3>Varsto</h3><p>Valitse Varsto, kun salauksen pitää kulkea synkronoinnin mukana bucketeihin, NAS-jakoihin ja irrotettaville levyille, kirjanpidon kanssa siitä, missä jokainen kopio on, varoittavien sääntöjen kanssa ja jakamisen kanssa muiden ihmisten kanssa.</p></div>
+    </div>
+    <p class="note">Varsto on alfavaiheen ohjelmisto: älä luota sille tietoja, joista sinulla ei ole muuta kopiota. Sen kryptografiaa ei ole myöskään auditoitu riippumattomasti. Muut tässä esitellyt tuotteet ovat kypsiä. Niitä koskevat tiedot tarkistettiin niiden omasta dokumentaatiosta lokakuussa 2026; hinnat ja tilausvaihtoehdot muuttuvat usein, joten katso ajantasaiset tiedot niiden omilta sivuilta. Korjaukset ovat tervetulleita <a href="{{P}}forum/">foorumilla</a> tai GitHubissa.</p>
+
+    <h2>Lähteet</h2>
+    <ul>
+      <li><a href="https://cryptomator.org/">Cryptomatorin verkkosivusto</a></li>
+      <li><a href="https://docs.cryptomator.org/">Cryptomatorin dokumentaatio (en)</a></li>
+      <li><a href="https://docs.cryptomator.org/security/architecture/">Tietoturva-arkkitehtuuri: holvin muoto, salaimet, avainten suojaus (en)</a></li>
+      <li><a href="https://github.com/cryptomator/cryptomator">Lähdekoodi (lisenssi: GPL-3.0)</a></li>
+    </ul>

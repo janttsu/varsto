@@ -54,7 +54,7 @@
   <div class="wrap">
 <article class="prose">
 <h1>Security principles</h1>
-<p class="note">From <code>docs/architecture/security-principles.md</code> in the repository, rendered 2026-10-13.</p>
+<p class="note">From <code>docs/architecture/security-principles.md</code> in the repository, rendered 2026-10-14.</p>
 <p>These principles are requirements, not preferences. Details become specifications under <code>docs/spec/</code>.</p>
 <h2 id="1-security-is-never-traded-for-speed">1. Security is never traded for speed</h2>
 <ul>
@@ -84,7 +84,7 @@
 <li>Split the recovery key with threshold sharing (for example 2-of-3 or 3-of-5).</li>
 <li>Write each share by hand on archival paper, or engrave or stamp it on stainless steel for long-term storage.</li>
 <li>Keep the shares in two or three different physical places (home, a trusted person, a workplace or bank). Do not rely on a single safe-deposit box.</li>
-<li>Keep daily unlock separate: at least two hardware security keys.</li>
+<li>Keep daily unlock separate: at least two hardware security keys. (Status 0.0.1-alpha.13: not a product feature; daily unlock is a passphrase, and security keys open Strongroom folders.)</li>
 <li>Test recovery right after creation and then yearly.</li>
 </ol>
 <p>Rules for creating and storing the key:</p>
@@ -92,7 +92,7 @@
 <li>Do not photograph, screenshot, copy to the clipboard, or store it in cloud services or a normal password manager.</li>
 <li>Do not print on a networked or cloud printer (printers can cache output). Prefer handwriting.</li>
 <li>Prefer words over QR codes as the primary medium: they tolerate wear, can be read and written by hand, and do not depend on one application surviving for decades. QR codes may be an optional extra copy.</li>
-<li>The recovery format is openly specified with test vectors, and a small offline reader tool restores the key without the main application.</li>
+<li>The recovery format is openly specified with test vectors; a standalone reader tool that restores the key without the main application does not exist yet (<a href="format-versions.html">docs/spec/format-versions.md</a>).</li>
 </ul>
 <p>Optional layers for advanced users: a memorised passphrase on top of the shares (adds protection, adds loss risk), and tools such as Superbacked-style offline encrypted backups, provided the tool is open source, signed and used on an air-gapped machine.</p>
 

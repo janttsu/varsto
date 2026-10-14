@@ -54,7 +54,7 @@
   <div class="wrap">
 <article class="prose">
 <h1>Ledger signing: design notes</h1>
-<p class="note">From <code>docs/spec/ledger-signing-notes.md</code> in the repository, rendered 2026-10-13.</p>
+<p class="note">From <code>docs/spec/ledger-signing-notes.md</code> in the repository, rendered 2026-10-14.</p>
 <blockquote>
 <p><strong>Design-stage notes.</strong> Section 9 describes checkpoints and pruning as built in 0.0.1-alpha.8; the rest predates the implementation. This document compares ways to sign ledger events and recommends one for further specification. The figures are estimates from cited benchmarks and stated assumptions, made before Varsto code existed; nothing in sections 2 and 3 was measured on it. The recommendation is not a decision. Open points are marked <strong>TBD</strong>.</p>
 </blockquote>
@@ -258,7 +258,7 @@
 <ol type="1">
 <li>Seal a batch when it reaches a maximum size, after a maximum delay, or when a receipt must be delivered, whichever comes first. Values <strong>TBD</strong>; 1024 events is the example used above.</li>
 <li>Collect receipts for many chunks in one batch (for example everything received in the same short window) and have the sender wait for the sealed header, instead of sealing one batch per chunk.</li>
-<li>Seal rare, security-relevant events at once in their own batch: device enrolment and revocation, wipe commands, key rotation, policy changes. Their cost is negligible, and they then carry an immediate hybrid signature (effectively model A for them). (0.0.1-alpha.8 publishes revocations, wipe orders and key epochs as separately signed registry objects instead of ledger events, so a revoked device that cannot read the new ledger key still reads its own revocation; see <code>alpha-0-format.md</code> section 20.)</li>
+<li>Seal rare, security-relevant events at once in their own batch: device enrolment and revocation, wipe commands, key rotation, policy changes. Their cost is negligible, and they then carry an immediate hybrid signature (effectively model A for them). (0.0.1-alpha.8 publishes revocations, wipe orders and key epochs as separately signed registry objects instead of ledger events, so a revoked device that cannot read the new ledger key still reads its own revocation; see <code>alpha-0-format.md</code> section 21.)</li>
 <li>Exchange the latest signed batch header on every contact with a peer or storage, to detect rollback and equivocation.</li>
 <li>Sign the hash of the encrypted event payload, so payload keys can be destroyed later (cryptographic erasure) without breaking the chain (plan section 8, "GDPR and append-only ledger"; K22 in the key hierarchy).</li>
 </ol>
@@ -289,7 +289,7 @@
 <li>That the checkpoint comes from that device and is intact (signature, body hash, associated data binding device, N and H).</li>
 <li>That later batches continue from it: batch N+1 must name H as its predecessor.</li>
 <li>Equivocation where it overlaps what the verifier holds: a checkpoint that disagrees with a batch it holds at N, two checkpoints at the same N with different H, or a later batch that does not chain to H all mark the device forked. A copy restored from an old backup still meets its own newer batches or checkpoint on the storages and fences itself.</li>
-<li>That other devices' statements are not forged: a checkpoint holds only its writer's own events. A copy counts as verified only when another device's batch or checkpoint, signed by that other device, says so; a device cannot put verifications by others into its own checkpoint.</li>
+<li>That other devices' statements are not forged: a checkpoint holds only its writer's own events. A copy counts as verified only when another device's batch or checkpoint, signed by that other device, says so. Not enforced yet: checkpoints are merged without filtering entries to the writer, so a device could put verifications by others into its own checkpoint (a known limitation under repair).</li>
 <li>Revocation: checkpoints of a removed device beyond its cut-off are ignored, like its batches.</li>
 </ul>
 <p><strong>What is lost once old batches are pruned.</strong></p>
