@@ -284,6 +284,10 @@ impl Storage for PackAware {
         self.inner.name()
     }
 
+    fn conditional_writes(&self) -> Option<bool> {
+        self.inner.conditional_writes()
+    }
+
     fn put_if_absent(&self, key: &str, data: &[u8]) -> Result<bool> {
         if let Some(obj) = object_of(key) {
             if self.locate_live(obj)?.is_some() {

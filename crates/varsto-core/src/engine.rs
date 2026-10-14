@@ -699,6 +699,11 @@ pub struct Engine {
     pub chunker: ChunkerParams,
     /// Counts the calls made to every storage this engine opens (measurements).
     storage_calls: Option<std::sync::Arc<crate::storage::StorageCalls>>,
+    /// The storages opened during the current operation, by name, with the
+    /// spec they were opened from: every phase of a sync shares one backend
+    /// (one connection pool, one view of the packs) instead of opening the
+    /// storage again (`open_spec`, `finish_storages`).
+    storages_open: std::sync::Mutex<OpenedStorages>,
     /// The location view, kept up to date as batches arrive.
     view_cache: std::sync::Mutex<ledger_upkeep::ViewSlot>,
     /// Set while one action runs whose ledger events go into one batch.
@@ -733,6 +738,10 @@ pub type SnapshotSink =
 
 /// Open storages with their specs.
 type OpenStorages = Vec<(StorageSpec, Box<dyn Storage>)>;
+
+/// The backends opened during an operation, by storage name, each with the
+/// spec it was opened from (`Engine::storages_open`).
+type OpenedStorages = HashMap<String, (StorageSpec, std::sync::Arc<dyn Storage>)>;
 
 /// Threads that write objects during a push, and how many encrypted
 /// blocks may wait for them.
@@ -789,6 +798,17 @@ struct UploadJob {
     chunk: ChunkId,
     object: ObjectName,
     ct: Vec<u8>,
+}
+
+/// A batch of objects on its way to the storages: one work item per
+/// storage shares it, and its bytes leave the upload budget when the last
+/// of them is done.
+struct UploadBatch {
+    jobs: Vec<UploadJob>,
+    /// Storages still to write it.
+    left: std::sync::atomic::AtomicUsize,
+    /// Encrypted bytes it holds (counted once, however many storages).
+    held: u64,
 }
 
 /// How one write went.
@@ -1181,6 +1201,7 @@ impl Engine {
             org: crate::org::OrgState::load(home),
             chunker: ChunkerParams::DEFAULT,
             storage_calls: None,
+            storages_open: Default::default(),
             view_cache: Default::default(),
             cycle: None,
             ledger_policy: Default::default(),
@@ -1413,6 +1434,7 @@ impl Engine {
             org: crate::org::OrgState::load(home),
             chunker: ChunkerParams::DEFAULT,
             storage_calls: None,
+            storages_open: Default::default(),
             view_cache: Default::default(),
             cycle: None,
             ledger_policy: Default::default(),
@@ -1585,7 +1607,73 @@ impl Engine {
         )
     }
 
+    /// Open a storage, or hand out the one opened earlier in this operation.
+    /// Disk pools are opened anew every time: their disks come and go.
     fn open_spec(&self, spec: &StorageSpec) -> Result<Box<dyn Storage>> {
+        if let StorageSpec::Pool { .. } = spec {
+            return self.open_spec_fresh(spec);
+        }
+        let mut open = self.storages_open.lock().unwrap();
+        if let Some((cached, backend)) = open.get(spec.name()) {
+            if cached == spec {
+                return Ok(Box::new(crate::storage::SharedStorage(backend.clone())));
+            }
+        }
+        let backend: std::sync::Arc<dyn Storage> =
+            std::sync::Arc::from(self.open_spec_fresh(spec)?);
+        open.insert(spec.name().to_string(), (spec.clone(), backend.clone()));
+        Ok(Box::new(crate::storage::SharedStorage(backend)))
+    }
+
+    /// Drop the storages opened so far: the list, a spec or a secret changed.
+    fn forget_storages(&self) {
+        self.storages_open.lock().unwrap().clear();
+    }
+
+    /// The end of a user-level operation (a sync, a push, a pull): what the
+    /// storages learned is kept and the opened backends are dropped, so the
+    /// next operation sees a changed bucket or secret. Inside a sync's cycle
+    /// the storages stay open for its remaining phases.
+    fn finish_storages(&mut self) {
+        if self.cycle.is_some() {
+            return;
+        }
+        self.learn_conditional_writes();
+        self.forget_storages();
+    }
+
+    /// Remember in `config.json` what the S3 storages found out about
+    /// `If-None-Match: *` (`Storage::conditional_writes`), so the probe is
+    /// not repeated by the next process.
+    fn learn_conditional_writes(&mut self) {
+        let learned: Vec<(String, bool)> = self
+            .storages_open
+            .lock()
+            .unwrap()
+            .iter()
+            .filter_map(|(name, (_, backend))| {
+                backend.conditional_writes().map(|c| (name.clone(), c))
+            })
+            .filter(|(name, c)| self.config.conditional_writes.get(name) != Some(c))
+            .collect();
+        if learned.is_empty() {
+            return;
+        }
+        for (name, c) in learned {
+            self.config.conditional_writes.insert(name, c);
+        }
+        if let Err(e) = self.config.save(&self.home) {
+            log::warn!("config.json not saved after probing conditional writes: {e:#}");
+        }
+    }
+
+    /// Whether an S3 storage honours conditional writes (`If-None-Match:
+    /// *`), when its first write has probed it (`crate::s3`).
+    pub fn conditional_writes(&self, storage: &str) -> Option<bool> {
+        self.config.conditional_writes.get(storage).copied()
+    }
+
+    fn open_spec_fresh(&self, spec: &StorageSpec) -> Result<Box<dyn Storage>> {
         let kind = match spec {
             StorageSpec::LocalDir { .. } => "local",
             StorageSpec::S3 { .. } => "s3",
@@ -1596,7 +1684,10 @@ impl Engine {
             Box::new(self.open_pool(spec)?)
         } else {
             let store = self.secret_store()?;
-            let inner = spec.open_with(&|r| store.secrets.get(r).cloned())?;
+            let options = crate::storage::OpenOptions {
+                conditional_writes: self.config.conditional_writes.get(spec.name()).copied(),
+            };
+            let inner = spec.open_with_options(&|r| store.secrets.get(r).cloned(), &options)?;
             // Small blocks go into packs on hot storages; cold storage and
             // transferrers keep one object per block (restores and removals
             // work per object there). Packs are read wherever they are.
@@ -1619,6 +1710,7 @@ impl Engine {
     #[doc(hidden)]
     pub fn count_storage_calls(&mut self, calls: std::sync::Arc<crate::storage::StorageCalls>) {
         self.storage_calls = Some(calls);
+        self.forget_storages();
     }
 
     /// Open a configured storage by name (tests and tools).
@@ -1756,6 +1848,7 @@ impl Engine {
             };
             let mut store = self.secret_store()?;
             store.secrets.insert(reference, secret);
+            self.forget_storages();
             store.save(
                 &self.home,
                 &self.keys,
@@ -2036,7 +2129,9 @@ impl Engine {
         }
         self.config.storages.retain(|s| s.name() != name);
         self.config.storage_settings.remove(name);
+        self.config.conditional_writes.remove(name);
         self.config.save(&self.home)?;
+        self.forget_storages();
         self.forget_drain_state(name);
         self.publish_registry()?;
         Ok(report)
@@ -3713,11 +3808,13 @@ impl Engine {
         });
         // Reading, chunking and encrypting stay on this thread; the writes go
         // to a few uploader threads, so that many small objects do not each
-        // wait for the previous one's round trip to the storage. The queue is
-        // bounded: at most UPLOAD_QUEUE encrypted blocks wait in memory.
-        // A batch: one block, or small blocks that storages keeping packs
-        // write as one pack (crate::packs).
-        let (job_tx, job_rx) = std::sync::mpsc::sync_channel::<Vec<UploadJob>>(UPLOAD_QUEUE);
+        // wait for the previous one's round trip to the storage. A batch (one
+        // block, or small blocks that storages keeping packs write as one
+        // pack, crate::packs) becomes one work item per storage it goes to,
+        // so the storages are written side by side rather than one after the
+        // other. The queue is bounded: at most UPLOAD_QUEUE items wait.
+        let (job_tx, job_rx) =
+            std::sync::mpsc::sync_channel::<(usize, std::sync::Arc<UploadBatch>)>(UPLOAD_QUEUE);
         let job_rx = std::sync::Mutex::new(job_rx);
         let (done_tx, done_rx) = std::sync::mpsc::channel::<UploadDone>();
         let storages_ref = &storages;
@@ -3728,22 +3825,20 @@ impl Engine {
             // Owned by this closure: however it returns (an error reading a
             // file included), the sender goes and the uploaders stop.
             let job_tx = job_tx;
-            for _ in 0..UPLOADERS {
+            for _ in 0..UPLOADERS.max(storages.len()) {
                 let (job_rx, done_tx) = (&job_rx, done_tx.clone());
                 s.spawn(move || loop {
-                    let batch = match job_rx.lock().unwrap().recv() {
+                    let (i, batch) = match job_rx.lock().unwrap().recv() {
                         Ok(j) => j,
                         Err(_) => break,
                     };
-                    let held: u64 = batch.iter().map(|j| j.ct.len() as u64).sum();
-                    for (spec, backend) in storages_ref.iter() {
-                        let mine: Vec<&UploadJob> = batch
-                            .iter()
-                            .filter(|j| j.targets.iter().any(|t| t == spec.name()))
-                            .collect();
-                        if mine.is_empty() {
-                            continue;
-                        }
+                    let (spec, backend) = &storages_ref[i];
+                    let mine: Vec<&UploadJob> = batch
+                        .jobs
+                        .iter()
+                        .filter(|j| j.targets.iter().any(|t| t == spec.name()))
+                        .collect();
+                    if !mine.is_empty() {
                         // One object, or a storage without packs: written
                         // one by one, each with its own outcome (a pool's
                         // "no room" stays a pool error). Several small ones
@@ -3786,8 +3881,11 @@ impl Engine {
                             });
                         }
                     }
-                    *budget_ref.0.lock().unwrap() -= held;
-                    budget_ref.1.notify_all();
+                    // The last storage of the batch done: its bytes are free.
+                    if batch.left.fetch_sub(1, std::sync::atomic::Ordering::AcqRel) == 1 {
+                        *budget_ref.0.lock().unwrap() -= batch.held;
+                        budget_ref.1.notify_all();
+                    }
                 });
             }
             drop(done_tx);
@@ -3801,15 +3899,35 @@ impl Engine {
                     if first_error.is_some() {
                         return false;
                     }
-                    let len: u64 = batch.iter().map(|j| j.ct.len() as u64).sum();
+                    // One item per storage any object of the batch goes to.
+                    let to: Vec<usize> = storages_ref
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, (spec, _))| {
+                            batch
+                                .iter()
+                                .any(|j| j.targets.iter().any(|t| t == spec.name()))
+                        })
+                        .map(|(i, _)| i)
+                        .collect();
+                    if to.is_empty() {
+                        return true;
+                    }
+                    let held: u64 = batch.iter().map(|j| j.ct.len() as u64).sum();
                     {
                         let mut used = budget_ref.0.lock().unwrap();
-                        while *used > 0 && *used + len > UPLOAD_BYTES {
+                        while *used > 0 && *used + held > UPLOAD_BYTES {
                             used = budget_ref.1.wait(used).unwrap();
                         }
-                        *used += len;
+                        *used += held;
                     }
-                    job_tx.send(batch).is_ok()
+                    let item = std::sync::Arc::new(UploadBatch {
+                        jobs: batch,
+                        left: std::sync::atomic::AtomicUsize::new(to.len()),
+                        held,
+                    });
+                    to.into_iter()
+                        .all(|i| job_tx.send((i, item.clone())).is_ok())
                 };
             // `None` sends what is still waiting (at the end).
             let mut send =
@@ -4217,7 +4335,9 @@ impl Engine {
     // ----- pull ---------------------------------------------------------------
 
     pub fn pull(&mut self, folder: &str) -> Result<PullReport> {
-        crate::logged_op!("pull", folder, { self.pull_inner(folder) })
+        let out = crate::logged_op!("pull", folder, { self.pull_inner(folder) });
+        self.finish_storages();
+        out
     }
 
     fn pull_inner(&mut self, folder: &str) -> Result<PullReport> {
@@ -5849,6 +5969,7 @@ impl Engine {
         };
         let before = signature(self);
         self.config = Config::load(&self.home)?;
+        self.forget_storages();
         self.keyring = Keyring::load(
             &self.home,
             &self.keys,
@@ -6410,6 +6531,7 @@ impl Engine {
         let _ = self.ledger_lost_everywhere(false);
         // The other devices' trash records, when due (`trash`).
         let _ = self.trash_refresh(false);
+        self.finish_storages();
         Ok(out)
     }
 

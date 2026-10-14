@@ -2,9 +2,11 @@
 //! S3-compatible object storage (AWS S3, MinIO, Scaleway, Hetzner, Backblaze
 //! B2, Cloudflare R2, `rclone serve s3`, ...). Plain HTTP(S) with Signature
 //! Version 4; no SDK. Objects are written with `If-None-Match: *` so that an
-//! existing object is never overwritten; servers that do not support the
-//! condition fall back to HEAD-then-PUT, which is safe because every object
-//! name is either content-addressed or owned by a single writer.
+//! existing object is never overwritten. Whether a server honours the
+//! condition is probed once per storage (two writes of a probe object); one
+//! that does gets a single PUT per object, one that does not (ignores the
+//! header or refuses it) gets HEAD-then-PUT, which is safe because every
+//! object name is either content-addressed or owned by a single writer.
 
 use crate::storage::Storage;
 use anyhow::{anyhow, bail, Context, Result};
@@ -33,6 +35,9 @@ pub struct S3Config {
     /// transport encryption the request signatures and the (encrypted)
     /// objects travel in clear, so it takes an explicit choice.
     pub allow_insecure_http: bool,
+    /// Whether the server honours `If-None-Match: *`, when known from an
+    /// earlier probe; `None` probes on the first write.
+    pub conditional_writes: Option<bool>,
 }
 
 crate::redacted_debug!(S3Config { name, endpoint, region, bucket, prefix, access_key_id, path_style ; secret_access_key });
@@ -49,7 +54,15 @@ pub struct S3Storage {
     /// clock that is off (S3 refuses signatures more than 15 minutes from
     /// its own time; phones and virtual machines are often that far off).
     clock_offset: std::sync::atomic::AtomicI64,
+    /// Whether the server honours `If-None-Match: *` (see `probe_conditional`).
+    conditional: std::sync::Mutex<Option<bool>>,
+    /// The warning about unconditional writes is given once per storage.
+    fallback_warned: std::sync::atomic::AtomicBool,
 }
+
+/// Bytes of the probe object written to learn whether the server honours
+/// `If-None-Match: *`.
+const PROBE_BODY: &[u8] = b"varsto conditional-write probe";
 
 /// Largest response body read into memory. Chunks are at most a few MiB;
 /// manifests and ledger batches grow with the number of files.
@@ -129,6 +142,7 @@ impl S3Storage {
 
     pub fn new(cfg: S3Config) -> Result<Self> {
         crate::logging::register_secret(&cfg.secret_access_key);
+        let cfg_conditional = cfg.conditional_writes;
         let endpoint = cfg.endpoint.clone();
         let (scheme, rest) = endpoint
             .split_once("://")
@@ -171,7 +185,62 @@ impl S3Storage {
             scheme: scheme.to_string(),
             base_path,
             clock_offset: std::sync::atomic::AtomicI64::new(0),
+            conditional: std::sync::Mutex::new(cfg_conditional),
+            fallback_warned: std::sync::atomic::AtomicBool::new(false),
         })
+    }
+
+    /// Whether the server honours `If-None-Match: *`: the configured answer,
+    /// or one learned now by writing a probe object twice under
+    /// `vault/.probe-<random>` (deleted afterwards). A second conditional PUT
+    /// answered 412 means the condition holds; 200 means the server ignored
+    /// it; 400 or 501 means it refuses the header. Servers that do not
+    /// honour it get HEAD-then-PUT for every object, with one warning.
+    fn conditional_writes_known(&self) -> Result<bool> {
+        if let Some(known) = *self.conditional.lock().unwrap() {
+            return Ok(known);
+        }
+        let key = format!("vault/.probe-{:016x}", rand::random::<u64>());
+        let outcome = match self.put(&key, PROBE_BODY, true)? {
+            200 | 201 => match self.put(&key, PROBE_BODY, true)? {
+                412 => Ok(true),
+                200 | 201 | 400 | 501 => Ok(false),
+                s => Err(self.explain("PUT", &key, s, &[])),
+            },
+            400 | 501 => Ok(false),
+            s => Err(self.explain("PUT", &key, s, &[])),
+        };
+        if let Err(e) = self.delete(&key) {
+            log::debug!(storage = self.cfg.name.as_str(); "s3: probe object not deleted: {e:#}");
+        }
+        let honoured = outcome?;
+        *self.conditional.lock().unwrap() = Some(honoured);
+        log::debug!(storage = self.cfg.name.as_str(), honoured = honoured; "s3: conditional writes probed");
+        if !honoured {
+            self.warn_unconditional();
+        }
+        Ok(honoured)
+    }
+
+    fn warn_unconditional(&self) {
+        use std::sync::atomic::Ordering;
+        if !self.fallback_warned.swap(true, Ordering::Relaxed) {
+            log::warn!(
+                storage = self.cfg.name.as_str();
+                "s3: the server does not honour If-None-Match: *; objects are checked with HEAD and written unconditionally"
+            );
+        }
+    }
+
+    /// `put_if_absent` on a server that does not honour the condition.
+    fn put_after_head(&self, key: &str, data: &[u8]) -> Result<bool> {
+        if self.exists(key)? {
+            return Ok(false);
+        }
+        match self.put(key, data, false)? {
+            200 | 201 => Ok(true),
+            s => Err(self.explain("PUT", key, s, &[])),
+        }
     }
 
     fn object_path(&self, key: &str) -> String {
@@ -372,7 +441,9 @@ impl S3Storage {
             headers.push(("x-amz-storage-class", c));
         }
         let (status, body) = self.request("PUT", &self.object_path(key), &[], &headers, data)?;
-        if status >= 500 {
+        // 501 Not Implemented is how a server refuses `If-None-Match`; the
+        // caller falls back from it. Other server errors are errors here.
+        if status >= 500 && status != 501 {
             return Err(self.explain("PUT", key, status, &body));
         }
         Ok(status)
@@ -510,21 +581,25 @@ impl Storage for S3Storage {
 
     fn put_if_absent(&self, key: &str, data: &[u8]) -> Result<bool> {
         crate::storage::validate_key(key)?;
-        // Some servers silently ignore `If-None-Match`, so check first; the
-        // condition then only closes the window between HEAD and PUT on
-        // servers that do honour it.
-        if self.exists(key)? {
-            return Ok(false);
+        if !self.conditional_writes_known()? {
+            // The server ignores or refuses `If-None-Match`: check first.
+            return self.put_after_head(key, data);
         }
         match self.put(key, data, true)? {
             200 | 201 => Ok(true),
             412 => Ok(false),
-            400 | 501 => match self.put(key, data, false)? {
-                200 | 201 => Ok(true),
-                s => Err(self.explain("PUT", key, s, &[])),
-            },
+            400 | 501 => {
+                // Honoured by the probe, refused now: fall back for good.
+                *self.conditional.lock().unwrap() = Some(false);
+                self.warn_unconditional();
+                self.put_after_head(key, data)
+            }
             s => Err(self.explain("PUT", key, s, &[])),
         }
+    }
+
+    fn conditional_writes(&self) -> Option<bool> {
+        *self.conditional.lock().unwrap()
     }
 
     fn get(&self, key: &str) -> Result<Option<Vec<u8>>> {
@@ -674,6 +749,7 @@ mod tests {
             path_style: true,
             storage_class: None,
             allow_insecure_http: false,
+            conditional_writes: None,
         })
         .unwrap();
         let body = b"<?xml version=\"1.0\"?><Error><Code>AccessDenied</Code><Message>Access Denied</Message></Error>";
@@ -717,10 +793,176 @@ mod tests {
             path_style: true,
             storage_class: None,
             allow_insecure_http: false,
+            conditional_writes: None,
         })
         .unwrap();
         assert_eq!(s.get("manifests/x").unwrap().unwrap(), body);
         th.join().unwrap();
+    }
+
+    /// How a fake server treats `If-None-Match: *` on an existing object.
+    #[derive(Clone, Copy)]
+    enum Condition {
+        Honoured,
+        Ignored,
+        Refused,
+    }
+
+    /// A small S3 look-alike: PUT, HEAD, DELETE on object keys, with the
+    /// methods and paths of every request recorded.
+    struct FakeS3 {
+        port: u16,
+        seen: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+        _thread: std::thread::JoinHandle<()>,
+        server: std::sync::Arc<tiny_http::Server>,
+    }
+
+    fn fake_s3(how: Condition) -> FakeS3 {
+        let server = std::sync::Arc::new(tiny_http::Server::http("127.0.0.1:0").unwrap());
+        let port = server.server_addr().to_ip().unwrap().port();
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let (log, srv) = (seen.clone(), server.clone());
+        let th = std::thread::spawn(move || {
+            let mut objects = std::collections::HashSet::new();
+            for mut req in srv.incoming_requests() {
+                let path = req.url().to_string();
+                let method = req.method().as_str().to_string();
+                log.lock().unwrap().push(format!("{method} {path}"));
+                let conditional = req.headers().iter().any(|h| h.field.equiv("if-none-match"));
+                let mut body = Vec::new();
+                let _ = std::io::Read::read_to_end(&mut req.as_reader(), &mut body);
+                let status = match method.as_str() {
+                    "PUT" => {
+                        if conditional && matches!(how, Condition::Refused) {
+                            501
+                        } else if conditional
+                            && matches!(how, Condition::Honoured)
+                            && objects.contains(&path)
+                        {
+                            412
+                        } else {
+                            objects.insert(path.clone());
+                            200
+                        }
+                    }
+                    "HEAD" => {
+                        if objects.contains(&path) {
+                            200
+                        } else {
+                            404
+                        }
+                    }
+                    "DELETE" => {
+                        objects.remove(&path);
+                        204
+                    }
+                    _ => 400,
+                };
+                let _ = req.respond(tiny_http::Response::empty(status));
+            }
+        });
+        FakeS3 {
+            port,
+            seen,
+            _thread: th,
+            server,
+        }
+    }
+
+    fn storage_at(port: u16) -> S3Storage {
+        S3Storage::new(S3Config {
+            name: "test".into(),
+            endpoint: format!("http://127.0.0.1:{port}"),
+            region: "us-east-1".into(),
+            bucket: "b".into(),
+            prefix: String::new(),
+            access_key_id: "k".into(),
+            secret_access_key: "s".into(),
+            path_style: true,
+            storage_class: None,
+            allow_insecure_http: false,
+            conditional_writes: None,
+        })
+        .unwrap()
+    }
+
+    fn methods(seen: &std::sync::Mutex<Vec<String>>) -> Vec<String> {
+        seen.lock()
+            .unwrap()
+            .iter()
+            .map(|l| l.split(' ').next().unwrap().to_string())
+            .collect()
+    }
+
+    #[test]
+    fn conditional_writes_are_probed_once_and_skip_the_head() {
+        let f = fake_s3(Condition::Honoured);
+        let (seen, server) = (&f.seen, &f.server);
+        let s = storage_at(f.port);
+        assert_eq!(s.conditional_writes(), None);
+        assert!(s.put_if_absent("chunks/ab/abcd", b"x").unwrap());
+        assert_eq!(s.conditional_writes(), Some(true));
+        // The probe (PUT, PUT, DELETE of a probe object), then one PUT.
+        assert_eq!(methods(seen), ["PUT", "PUT", "DELETE", "PUT"]);
+        assert!(seen.lock().unwrap()[0].contains("/b/vault/.probe-"));
+        assert!(!seen.lock().unwrap()[3].contains(".probe-"));
+        // An existing object: one request, answered 412, no HEAD.
+        assert!(!s.put_if_absent("chunks/ab/abcd", b"x").unwrap());
+        assert!(s.put_if_absent("chunks/cd/cdef", b"y").unwrap());
+        assert_eq!(methods(seen)[4..], ["PUT", "PUT"]);
+        server.unblock();
+    }
+
+    #[test]
+    fn a_server_that_ignores_the_condition_gets_head_then_put() {
+        let f = fake_s3(Condition::Ignored);
+        let (seen, server) = (&f.seen, &f.server);
+        let s = storage_at(f.port);
+        assert!(s.put_if_absent("chunks/ab/abcd", b"x").unwrap());
+        assert_eq!(s.conditional_writes(), Some(false));
+        assert_eq!(methods(seen), ["PUT", "PUT", "DELETE", "HEAD", "PUT"]);
+        assert!(!s.put_if_absent("chunks/ab/abcd", b"x").unwrap());
+        assert_eq!(methods(seen)[5..], ["HEAD"]);
+        server.unblock();
+    }
+
+    #[test]
+    fn a_server_that_refuses_the_condition_gets_head_then_put() {
+        let f = fake_s3(Condition::Refused);
+        let (seen, server) = (&f.seen, &f.server);
+        let s = storage_at(f.port);
+        assert!(s.put_if_absent("chunks/ab/abcd", b"x").unwrap());
+        assert_eq!(s.conditional_writes(), Some(false));
+        // The first conditional PUT is refused: the probe stops there.
+        assert_eq!(methods(seen), ["PUT", "DELETE", "HEAD", "PUT"]);
+        server.unblock();
+    }
+
+    #[test]
+    fn a_known_answer_is_not_probed_again() {
+        let f = fake_s3(Condition::Honoured);
+        let (seen, server) = (&f.seen, &f.server);
+        let mut cfg = S3Config {
+            name: "test".into(),
+            endpoint: format!("http://127.0.0.1:{}", f.port),
+            region: "us-east-1".into(),
+            bucket: "b".into(),
+            prefix: String::new(),
+            access_key_id: "k".into(),
+            secret_access_key: "s".into(),
+            path_style: true,
+            storage_class: None,
+            allow_insecure_http: false,
+            conditional_writes: Some(true),
+        };
+        let s = S3Storage::new(cfg.clone()).unwrap();
+        assert!(s.put_if_absent("chunks/ab/abcd", b"x").unwrap());
+        assert_eq!(methods(seen), ["PUT"]);
+        cfg.conditional_writes = Some(false);
+        let s = S3Storage::new(cfg).unwrap();
+        assert!(!s.put_if_absent("chunks/ab/abcd", b"x").unwrap());
+        assert_eq!(methods(seen)[1..], ["HEAD"]);
+        server.unblock();
     }
 
     #[test]
@@ -736,6 +978,7 @@ mod tests {
             path_style: true,
             storage_class: None,
             allow_insecure_http: allow,
+            conditional_writes: None,
         };
         for ok in [
             "https://s3.example.net",

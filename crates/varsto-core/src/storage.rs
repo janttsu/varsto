@@ -70,6 +70,61 @@ pub trait Storage: Send + Sync {
     fn packs_small_objects(&self) -> bool {
         false
     }
+    /// Whether the storage honours a conditional write (S3 `If-None-Match:
+    /// *`): known (true or false) once the backend has probed it, `None`
+    /// for backends where the question does not arise or before the probe.
+    fn conditional_writes(&self) -> Option<bool> {
+        None
+    }
+}
+
+/// One opened storage shared by every phase of an operation: the engine
+/// keeps the backend (its connection pool, its view of the packs) in an
+/// `Arc` and hands out these handles instead of opening the storage again.
+pub struct SharedStorage(pub std::sync::Arc<dyn Storage>);
+
+impl Storage for SharedStorage {
+    fn name(&self) -> &str {
+        self.0.name()
+    }
+    fn put_if_absent(&self, key: &str, data: &[u8]) -> Result<bool> {
+        self.0.put_if_absent(key, data)
+    }
+    fn get(&self, key: &str) -> Result<Option<Vec<u8>>> {
+        self.0.get(key)
+    }
+    fn exists(&self, key: &str) -> Result<bool> {
+        self.0.exists(key)
+    }
+    fn list(&self, prefix: &str) -> Result<Vec<String>> {
+        self.0.list(prefix)
+    }
+    fn list_after(&self, prefix: &str, start_after: &str) -> Result<Vec<String>> {
+        self.0.list_after(prefix, start_after)
+    }
+    fn delete(&self, key: &str) -> Result<()> {
+        self.0.delete(key)
+    }
+    fn get_range(&self, key: &str, offset: u64, len: u64) -> Result<Option<Vec<u8>>> {
+        self.0.get_range(key, offset, len)
+    }
+    fn put_pack(&self, members: &[(String, &[u8])]) -> Result<Vec<bool>> {
+        self.0.put_pack(members)
+    }
+    fn packs_small_objects(&self) -> bool {
+        self.0.packs_small_objects()
+    }
+    fn conditional_writes(&self) -> Option<bool> {
+        self.0.conditional_writes()
+    }
+}
+
+/// What the engine knows about a storage when opening it, beyond its spec.
+#[derive(Clone, Debug, Default)]
+pub struct OpenOptions {
+    /// S3: whether the server honours `If-None-Match: *`, when a probe
+    /// answered it earlier (`config.json`, `conditional_writes`).
+    pub conditional_writes: Option<bool>,
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
@@ -280,6 +335,15 @@ impl StorageSpec {
     }
     /// Open; `secrets` resolves `secret_ref` for backends that need one.
     pub fn open_with(&self, secrets: SecretLookup) -> Result<Box<dyn Storage>> {
+        self.open_with_options(secrets, &OpenOptions::default())
+    }
+
+    /// `open_with` with what the engine learned about the storage earlier.
+    pub fn open_with_options(
+        &self,
+        secrets: SecretLookup,
+        options: &OpenOptions,
+    ) -> Result<Box<dyn Storage>> {
         match self {
             StorageSpec::LocalDir {
                 name,
@@ -331,6 +395,7 @@ impl StorageSpec {
                     path_style: *path_style,
                     storage_class: storage_class.clone(),
                     allow_insecure_http: *allow_insecure_http,
+                    conditional_writes: options.conditional_writes,
                 })?))
             }
             StorageSpec::Rclone { name, remote, .. } => Ok(Box::new(
@@ -599,6 +664,9 @@ impl Storage for CountingStorage {
     fn packs_small_objects(&self) -> bool {
         self.inner.packs_small_objects()
     }
+    fn conditional_writes(&self) -> Option<bool> {
+        self.inner.conditional_writes()
+    }
     fn put_if_absent(&self, key: &str, data: &[u8]) -> Result<bool> {
         self.calls.puts.fetch_add(1, Ordering::Relaxed);
         self.inner.put_if_absent(key, data)
@@ -760,6 +828,9 @@ impl Storage for LoggedStorage {
     }
     fn packs_small_objects(&self) -> bool {
         self.inner.packs_small_objects()
+    }
+    fn conditional_writes(&self) -> Option<bool> {
+        self.inner.conditional_writes()
     }
     fn put_if_absent(&self, key: &str, data: &[u8]) -> Result<bool> {
         let t = crate::logging::Timer::start();
