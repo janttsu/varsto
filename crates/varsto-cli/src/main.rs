@@ -1702,7 +1702,7 @@ fn open_link(home: &Path, uri: &str) -> Result<()> {
         if let Some(e) = answer["error"].as_str() {
             bail!("{e}");
         }
-        let page = format!("http://127.0.0.1:{}/?token={}", f.port, f.token);
+        let page = service::boot_url(&f)?;
         match std::env::var("VARSTO_OPENER")
             .ok()
             .filter(|o| !o.is_empty())
@@ -4193,10 +4193,12 @@ fn run(cli: &Cli) -> Result<()> {
             interval,
         } => {
             if let Some((f, _)) = service::status(&home) {
-                let url = format!("http://127.0.0.1:{}/?token={}", f.port, f.token);
-                println!("service already running (pid {}): {url}", f.pid);
+                println!(
+                    "service already running (pid {}): http://127.0.0.1:{}/",
+                    f.pid, f.port
+                );
                 if !*no_open {
-                    desktop::open_in_browser(&url);
+                    desktop::open_in_browser(&service::boot_url(&f)?);
                 }
                 return Ok(());
             }

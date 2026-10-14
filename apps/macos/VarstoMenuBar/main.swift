@@ -268,8 +268,9 @@ final class ServiceClient {
     }
 
     func uiURL() -> URL? {
-        guard let i = info() else { return nil }
-        return URL(string: "http://127.0.0.1:\(i.port)/?token=\(i.token)")
+        // A one-time start code (valid for a minute), not the session token.
+        guard let i = info(), let boot = call("POST", "/api/session/boot", body: [:])?["boot"] as? String else { return nil }
+        return URL(string: "http://127.0.0.1:\(i.port)/?boot=\(boot)")
     }
 }
 

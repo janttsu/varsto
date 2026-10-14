@@ -189,10 +189,9 @@ impl Supervisor {
 
     pub fn open_ui(&self) {
         if let Some(f) = self.file() {
-            crate::desktop::open_in_browser(&format!(
-                "http://127.0.0.1:{}/?token={}",
-                f.port, f.token
-            ));
+            if let Ok(url) = service::boot_url(&f) {
+                crate::desktop::open_in_browser(&url);
+            }
         }
     }
 

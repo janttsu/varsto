@@ -22,6 +22,10 @@ On `main` after 0.0.1-alpha.13; spec sections 32 to 59.
 
 - The STUN side channel of the peer socket is bounded and only accepts the
   answer to an open request (spec 59).
+- The browser opens the interface with a one-time start code instead of the
+  session token; the token is accepted in headers only; downloads and the
+  viewer use per-file tickets; API answers are never cached (spec 59).
+- A malformed `%` escape in a request no longer kills the API worker thread.
 
 ### Added
 

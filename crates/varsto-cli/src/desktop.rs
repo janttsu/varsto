@@ -3,7 +3,9 @@
 //!
 //! The server binds to 127.0.0.1 only. Every API call must carry a per-session
 //! token that is written to `service.json` in the device directory (mode 0600)
-//! and handed to the browser once through the start URL. The `Host` header is
+//! and handed to the browser through a one-time code in the start URL
+//! (`/?boot=<code>`, valid for a minute, exchanged by `POST /api/session`).
+//! The token is accepted only in a header, never in an address. The `Host` header is
 //! checked against the bound address to defeat DNS rebinding, and no CORS
 //! headers are ever sent. This is the first shape of the local control API of
 //! the plan (6.8, 6.32); the menu-bar app and the CLI are its clients.
@@ -38,6 +40,107 @@ const APP_CSS: &str = include_str!("../ui/app.css");
 /// The body is streamed to disk (or encrypted into the block cache as it
 /// arrives), never held in memory as a whole.
 const MAX_UPLOAD: u64 = 16 << 30;
+
+/// How long a bootstrap code opens the page.
+const BOOT_TTL: std::time::Duration = std::time::Duration::from_secs(60);
+/// How long a download or viewer ticket lives.
+const TICKET_TTL: std::time::Duration = std::time::Duration::from_secs(600);
+/// Most bootstrap codes and tickets kept at once.
+const GRANTS_MAX: usize = 256;
+
+/// Short-lived credentials that stand in for the session token where it must
+/// not appear: a one-time bootstrap code in the address the browser opens,
+/// and tickets for the plain links of downloads and the viewer.
+struct Grants {
+    boot: std::collections::BTreeMap<String, std::time::Instant>,
+    /// ticket -> (what it opens: route, folder and path, expiry)
+    tickets: std::collections::BTreeMap<String, (String, std::time::Instant)>,
+}
+
+static GRANTS: Mutex<Grants> = Mutex::new(Grants {
+    boot: std::collections::BTreeMap::new(),
+    tickets: std::collections::BTreeMap::new(),
+});
+
+fn random_hex() -> String {
+    use rand::RngCore;
+    let mut b = [0u8; 32];
+    rand::rngs::OsRng.fill_bytes(&mut b);
+    hex::encode(b)
+}
+
+/// A new one-time code that `POST /api/session` exchanges for the session
+/// token within a minute.
+pub fn mint_boot_code() -> String {
+    mint_boot_code_at(std::time::Instant::now())
+}
+
+fn mint_boot_code_at(now: std::time::Instant) -> String {
+    let code = random_hex();
+    let mut g = GRANTS.lock().unwrap_or_else(|e| e.into_inner());
+    g.boot.retain(|_, t| *t > now);
+    while g.boot.len() >= GRANTS_MAX {
+        let Some(k) = g.boot.keys().next().cloned() else {
+            break;
+        };
+        g.boot.remove(&k);
+    }
+    g.boot.insert(code.clone(), now + BOOT_TTL);
+    code
+}
+
+/// Use a bootstrap code: true once, and only before it expires.
+fn redeem_boot_code_at(code: &str, now: std::time::Instant) -> bool {
+    let mut g = GRANTS.lock().unwrap_or_else(|e| e.into_inner());
+    g.boot.retain(|_, t| *t > now);
+    g.boot.remove(code).is_some()
+}
+
+fn ticket_scope(route: &str, folder: &str, path: &str) -> String {
+    format!("{route}\0{folder}\0{path}")
+}
+
+fn mint_ticket(route: &str, folder: &str, path: &str) -> String {
+    let now = std::time::Instant::now();
+    let ticket = random_hex();
+    let mut g = GRANTS.lock().unwrap_or_else(|e| e.into_inner());
+    g.tickets.retain(|_, (_, t)| *t > now);
+    while g.tickets.len() >= GRANTS_MAX {
+        let Some(k) = g.tickets.keys().next().cloned() else {
+            break;
+        };
+        g.tickets.remove(&k);
+    }
+    g.tickets.insert(
+        ticket.clone(),
+        (ticket_scope(route, folder, path), now + TICKET_TTL),
+    );
+    ticket
+}
+
+/// Whether `ticket` opens exactly this route, folder and path (it may be
+/// used again within its lifetime: a video asks for ranges).
+fn ticket_valid(ticket: &str, route: &str, folder: &str, path: &str) -> bool {
+    let now = std::time::Instant::now();
+    let mut g = GRANTS.lock().unwrap_or_else(|e| e.into_inner());
+    g.tickets.retain(|_, (_, t)| *t > now);
+    g.tickets
+        .get(ticket)
+        .is_some_and(|(scope, _)| *scope == ticket_scope(route, folder, path))
+}
+
+/// Whether the request carries the session token in `X-Varsto-Token` or as
+/// `Authorization: Bearer`. The token is never accepted in the address.
+fn header_token_ok(request: &Request, expected: &str) -> bool {
+    request.headers().iter().any(|h| {
+        (h.field.equiv("X-Varsto-Token") && token_matches(h.value.as_str(), expected))
+            || (h.field.equiv("Authorization")
+                && h.value
+                    .as_str()
+                    .strip_prefix("Bearer ")
+                    .is_some_and(|t| token_matches(t.trim(), expected)))
+    })
+}
 
 pub struct State {
     pub home: PathBuf,
@@ -138,7 +241,11 @@ fn loggable_url(url: &str) -> String {
         Some((path, query)) => {
             let kept: Vec<&str> = query
                 .split('&')
-                .filter(|kv| !kv.starts_with("token="))
+                .filter(|kv| {
+                    !(kv.starts_with("token=")
+                        || kv.starts_with("boot=")
+                        || kv.starts_with("ticket="))
+                })
                 .collect();
             if kept.is_empty() {
                 path.to_string()
@@ -174,9 +281,7 @@ fn handle_unlocked(fixed: &Fixed, request: Request) -> Result<Option<Request>> {
         // A command of this device reports the tasks it runs (answered
         // here, without the state: a sync may hold it).
         let mut request = request;
-        let token_ok = request.headers().iter().any(|h| {
-            h.field.equiv("X-Varsto-Token") && token_matches(h.value.as_str(), &fixed.token)
-        });
+        let token_ok = header_token_ok(&request, &fixed.token);
         let mut body = String::new();
         let read = request
             .as_reader()
@@ -205,20 +310,74 @@ fn handle_unlocked(fixed: &Fixed, request: Request) -> Result<Option<Request>> {
         }
         return Ok(None);
     }
+    if *request.method() == Method::Post && path == "/api/session" {
+        // The browser trades the one-time code from its start address for
+        // the session token, which then lives in sessionStorage only.
+        let mut request = request;
+        let mut body = String::new();
+        let read = request.as_reader().take(4096).read_to_string(&mut body);
+        let code = read
+            .ok()
+            .and_then(|_| serde_json::from_str::<Value>(&body).ok())
+            .and_then(|v| v["boot"].as_str().map(str::to_string));
+        let ok = code.is_some_and(|c| redeem_boot_code_at(&c, std::time::Instant::now()));
+        if ok {
+            request.respond(json_response(200, &json!({"token": fixed.token})))?;
+        } else {
+            request.respond(json_response(
+                401,
+                &json!({"error": "the start link was used already or has expired; open Varsto again"}),
+            ))?;
+        }
+        return Ok(None);
+    }
+    if *request.method() == Method::Post && (path == "/api/session/boot" || path == "/api/ticket") {
+        // A client that holds the token asks for a code to open the page
+        // with, or for a ticket for a download or viewer link.
+        let mut request = request;
+        if !header_token_ok(&request, &fixed.token) {
+            request.respond(json_response(
+                401,
+                &json!({"error": "missing or wrong token; reopen the start URL"}),
+            ))?;
+            return Ok(None);
+        }
+        if path == "/api/session/boot" {
+            request.respond(json_response(200, &json!({"boot": mint_boot_code()})))?;
+            return Ok(None);
+        }
+        let mut body = String::new();
+        let _ = request.as_reader().take(65536).read_to_string(&mut body);
+        let v: Value = serde_json::from_str(&body).unwrap_or(json!({}));
+        let (route, folder, file) = (
+            v["route"].as_str().unwrap_or(""),
+            v["folder"].as_str().unwrap_or(""),
+            v["path"].as_str().unwrap_or(""),
+        );
+        if !matches!(route, "/api/open" | "/api/view") || folder.is_empty() || file.is_empty() {
+            request.respond(json_response(
+                400,
+                &json!({"error": "route, folder and path required"}),
+            ))?;
+        } else {
+            request.respond(json_response(
+                200,
+                &json!({"ticket": mint_ticket(route, folder, file)}),
+            ))?;
+        }
+        return Ok(None);
+    }
     if *request.method() != Method::Get {
         return Ok(Some(request));
     }
     if path == "/api/events" {
-        // A stream of its own thread (`sse`); the browser's EventSource
-        // cannot set headers, so the token may come in the query.
+        // A stream of its own thread (`sse`); the token is a header, so the
+        // page reads the stream with fetch.
         let query = request
             .url()
             .split_once('?')
             .map_or(String::new(), |(_, q)| q.to_string());
-        let token_ok = request.headers().iter().any(|h| {
-            h.field.equiv("X-Varsto-Token") && token_matches(h.value.as_str(), &fixed.token)
-        }) || query_param(&query, "token")
-            .is_some_and(|t| token_matches(&t, &fixed.token));
+        let token_ok = header_token_ok(&request, &fixed.token);
         if !token_ok {
             request.respond(json_response(
                 401,
@@ -237,9 +396,7 @@ fn handle_unlocked(fixed: &Fixed, request: Request) -> Result<Option<Request>> {
         "/i18n/sv.json" => request.respond(text(I18N_SV, "application/json; charset=utf-8"))?,
         "/app.css" => request.respond(text(APP_CSS, "text/css; charset=utf-8"))?,
         "/api/p2p/traffic" | "/api/progress" | "/api/activity" => {
-            let token_ok = request.headers().iter().any(|h| {
-                h.field.equiv("X-Varsto-Token") && token_matches(h.value.as_str(), &fixed.token)
-            });
+            let token_ok = header_token_ok(&request, &fixed.token);
             if !token_ok {
                 request.respond(json_response(
                     401,
@@ -350,6 +507,14 @@ fn text(body: &str, content_type: &str) -> Response<std::io::Cursor<Vec<u8>>> {
         .with_header(header("Cache-Control", "no-store"))
 }
 
+/// A plain-text answer of an API route: never cached.
+fn api_plain(status: u16, msg: &str) -> Response<std::io::Cursor<Vec<u8>>> {
+    STATUS.with(|s| s.set(status));
+    Response::from_string(msg)
+        .with_status_code(status)
+        .with_header(header("Cache-Control", "no-store"))
+}
+
 fn json_response(status: u16, value: &Value) -> Response<std::io::Cursor<Vec<u8>>> {
     STATUS.with(|s| s.set(status));
     Response::from_string(value.to_string())
@@ -394,15 +559,20 @@ fn handle(state: &Shared, mut request: Request) -> Result<()> {
     }
     let token_ok = {
         let st = state.lock().unwrap_or_else(|e| e.into_inner());
-        let in_header = request
-            .headers()
-            .iter()
-            .any(|h| h.field.equiv("X-Varsto-Token") && token_matches(h.value.as_str(), &st.token));
-        // Thumbnails and the viewer are loaded by <img>/<video>, which cannot
-        // send a header; the session token may come in the query string there.
-        let in_query = (path == "/api/thumb" || path == "/api/open" || path == "/api/view")
-            && query_param(&query, "token").is_some_and(|t| token_matches(&t, &st.token));
-        in_header || in_query
+        let in_header = header_token_ok(&request, &st.token);
+        // Downloads and the viewer are plain links (<a>, <video>) that cannot
+        // send a header: they carry a ticket for exactly that file, never the
+        // session token.
+        let in_ticket = (path == "/api/open" || path == "/api/view")
+            && match (
+                query_param(&query, "ticket"),
+                query_param(&query, "folder"),
+                query_param(&query, "path"),
+            ) {
+                (Some(t), Some(f), Some(p)) => ticket_valid(&t, &path, &f, &p),
+                _ => false,
+            };
+        in_header || in_ticket
     };
     if !token_ok {
         // A scoped MCP key (`mcp_keys`): only the routes the MCP tools
@@ -444,8 +614,8 @@ fn handle(state: &Shared, mut request: Request) -> Result<()> {
         return Ok(request.respond(json_response(status, &v))?);
     }
     if path == "/api/open" {
-        // Download a file through the browser; the token may be in the query
-        // because this is a plain link. Counts as an access.
+        // Download a file through the browser; a plain link, so it carries a
+        // ticket instead of the token. Counts as an access.
         let (folder, file) = (query_param(&query, "folder"), query_param(&query, "path"));
         let result = {
             let mut st = state.lock().unwrap_or_else(|e| e.into_inner());
@@ -460,18 +630,17 @@ fn handle(state: &Shared, mut request: Request) -> Result<()> {
                 request.respond(
                     Response::from_data(bytes)
                         .with_header(header("Content-Type", "application/octet-stream"))
+                        .with_header(header("Cache-Control", "no-store"))
                         .with_header(header("Content-Disposition", &attachment(name))),
                 )?;
                 Ok(())
             }
             Some(Err(e)) => {
-                request.respond(Response::from_string(e.to_string()).with_status_code(400))?;
+                request.respond(api_plain(400, &e.to_string()))?;
                 Ok(())
             }
             None => {
-                request.respond(
-                    Response::from_string("locked or missing parameters").with_status_code(400),
-                )?;
+                request.respond(api_plain(400, "locked or missing parameters"))?;
                 Ok(())
             }
         };
@@ -493,17 +662,10 @@ fn handle(state: &Shared, mut request: Request) -> Result<()> {
             Some(b) => request.respond(
                 Response::from_data(b)
                     .with_header(header("Content-Type", "image/jpeg"))
-                    // Phones keep no decrypted thumbnail in the web view's disk cache.
-                    .with_header(header(
-                        "Cache-Control",
-                        if mobile() {
-                            "no-store"
-                        } else {
-                            "private, max-age=3600"
-                        },
-                    )),
+                    // No decrypted thumbnail in any disk cache.
+                    .with_header(header("Cache-Control", "no-store")),
             )?,
-            None => request.respond(Response::from_string("no thumbnail").with_status_code(404))?,
+            None => request.respond(api_plain(404, "no thumbnail"))?,
         }
         return Ok(());
     }
@@ -792,7 +954,13 @@ fn pair_join(state: &Shared, input: &Value) -> Result<Value> {
     if passphrase.chars().count() < 8 {
         bail!("the passphrase needs at least 8 characters");
     }
-    if state.lock().unwrap_or_else(|e| e.into_inner()).home.join("vault.json").exists() {
+    if state
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .home
+        .join("vault.json")
+        .exists()
+    {
         bail!("this device already holds a vault");
     }
     let bundle = varsto_core::pair::receive(&code, &name, opt(input, "address").as_deref())?;
@@ -2992,6 +3160,208 @@ fn api_unlocked(
 mod tests {
     use super::*;
 
+    /// A real server on a free port with a locked (engine-less) state.
+    fn test_server() -> (u16, String, tempfile::TempDir) {
+        let tmp = tempfile::tempdir().unwrap();
+        let (server, bound) = bind(0).unwrap();
+        let token = random_hex();
+        let state: Shared = Arc::new(Mutex::new(State {
+            home: tmp.path().to_path_buf(),
+            engine: None,
+            token: token.clone(),
+            bound: bound.clone(),
+            traffic: Arc::default(),
+            service: ServiceState::default(),
+            pair: None,
+            link: None,
+        }));
+        let server = Arc::new(server);
+        std::thread::spawn(move || serve_arc(server, state));
+        (
+            bound.rsplit(':').next().unwrap().parse().unwrap(),
+            token,
+            tmp,
+        )
+    }
+
+    /// One raw request; returns (status, lowercase head, body).
+    fn raw(
+        port: u16,
+        method: &str,
+        target: &str,
+        headers: &[(&str, &str)],
+        body: &str,
+    ) -> (u16, String, String) {
+        use std::io::{Read, Write};
+        let mut c = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+        c.set_read_timeout(Some(std::time::Duration::from_secs(20)))
+            .unwrap();
+        let mut req = format!("{method} {target} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\nContent-Length: {}\r\n", body.len());
+        for (k, v) in headers {
+            req.push_str(&format!("{k}: {v}\r\n"));
+        }
+        req.push_str("\r\n");
+        req.push_str(body);
+        c.write_all(req.as_bytes()).unwrap();
+        let mut out = Vec::new();
+        let _ = c.read_to_end(&mut out);
+        let text = String::from_utf8_lossy(&out).to_string();
+        let (head, body) = text.split_once("\r\n\r\n").unwrap_or((&text, ""));
+        let status = head
+            .split_whitespace()
+            .nth(1)
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0);
+        (status, head.to_lowercase(), body.to_string())
+    }
+
+    #[test]
+    fn boot_code_opens_the_session_once() {
+        let (port, token, _tmp) = test_server();
+        let h = [("X-Varsto-Token", token.as_str())];
+        let (st, _, body) = raw(port, "POST", "/api/session/boot", &h, "{}");
+        assert_eq!(st, 200);
+        let code = serde_json::from_str::<Value>(&body).unwrap()["boot"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        assert_eq!(code.len(), 64);
+        let ask = json!({"boot": code}).to_string();
+        let (st, head, body) = raw(port, "POST", "/api/session", &[], &ask);
+        assert_eq!(st, 200);
+        assert!(head.contains("cache-control: no-store"));
+        assert_eq!(
+            serde_json::from_str::<Value>(&body).unwrap()["token"],
+            token.as_str()
+        );
+        // The second use, a wrong code and no code are refused.
+        assert_eq!(raw(port, "POST", "/api/session", &[], &ask).0, 401);
+        assert_eq!(
+            raw(port, "POST", "/api/session", &[], r#"{"boot":"00"}"#).0,
+            401
+        );
+        assert_eq!(raw(port, "POST", "/api/session", &[], "{}").0, 401);
+        // Asking for a code needs the token.
+        assert_eq!(raw(port, "POST", "/api/session/boot", &[], "{}").0, 401);
+    }
+
+    #[test]
+    fn expired_boot_code_is_refused() {
+        let now = std::time::Instant::now();
+        let code = mint_boot_code_at(now);
+        assert!(!redeem_boot_code_at(
+            &code,
+            now + BOOT_TTL + std::time::Duration::from_secs(1)
+        ));
+        let code = mint_boot_code_at(now);
+        assert!(redeem_boot_code_at(
+            &code,
+            now + std::time::Duration::from_secs(30)
+        ));
+        assert!(!redeem_boot_code_at(
+            &code,
+            now + std::time::Duration::from_secs(31)
+        ));
+    }
+
+    #[test]
+    fn the_token_is_never_accepted_in_the_address() {
+        let (port, token, _tmp) = test_server();
+        for route in [
+            "/api/thumb",
+            "/api/open",
+            "/api/view",
+            "/api/events",
+            "/api/state",
+        ] {
+            let target = format!("{route}?folder=a&path=b&token={token}");
+            assert_eq!(raw(port, "GET", &target, &[], "").0, 401, "{route}");
+        }
+        // The header forms work: the locked vault has no thumbnail (404).
+        let t = "/api/thumb?folder=a&path=b";
+        assert_eq!(
+            raw(port, "GET", t, &[("X-Varsto-Token", &token)], "").0,
+            404
+        );
+        let bearer = format!("Bearer {token}");
+        let (st, head, _) = raw(port, "GET", t, &[("Authorization", &bearer)], "");
+        assert_eq!(st, 404);
+        assert!(head.contains("cache-control: no-store"));
+        assert_eq!(
+            raw(port, "GET", t, &[("Authorization", "Bearer nope")], "").0,
+            401
+        );
+        // Malformed escapes in a query do not stop the server.
+        assert_eq!(
+            raw(
+                port,
+                "GET",
+                "/api/thumb?folder=%a%C3%A9&path=%&token=%a%C3%A9",
+                &[],
+                ""
+            )
+            .0,
+            401
+        );
+        assert_eq!(
+            raw(port, "GET", t, &[("X-Varsto-Token", &token)], "").0,
+            404
+        );
+    }
+
+    #[test]
+    fn tickets_open_exactly_one_file() {
+        let (port, token, _tmp) = test_server();
+        let h = [("X-Varsto-Token", token.as_str())];
+        let ask = json!({"route": "/api/open", "folder": "Docs", "path": "a b.txt"}).to_string();
+        let (st, _, body) = raw(port, "POST", "/api/ticket", &h, &ask);
+        assert_eq!(st, 200);
+        let t = serde_json::from_str::<Value>(&body).unwrap()["ticket"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        // Past authentication (the locked vault answers 400), for the same
+        // file only and only on the route it was made for.
+        assert_eq!(
+            raw(
+                port,
+                "GET",
+                &format!("/api/open?folder=Docs&path=a%20b.txt&ticket={t}"),
+                &[],
+                ""
+            )
+            .0,
+            400
+        );
+        assert_eq!(
+            raw(
+                port,
+                "GET",
+                &format!("/api/open?folder=Docs&path=other&ticket={t}"),
+                &[],
+                ""
+            )
+            .0,
+            401
+        );
+        assert_eq!(
+            raw(
+                port,
+                "GET",
+                &format!("/api/view?folder=Docs&path=a%20b.txt&ticket={t}"),
+                &[],
+                ""
+            )
+            .0,
+            401
+        );
+        assert_eq!(
+            raw(port, "GET", &format!("/api/state?ticket={t}"), &[], "").0,
+            401
+        );
+        assert_eq!(raw(port, "POST", "/api/ticket", &[], &ask).0, 401);
+    }
+
     #[test]
     fn percent_decode_survives_malformed_escapes() {
         assert_eq!(percent_decode("%a\u{e9}"), "%a\u{e9}");
@@ -3001,7 +3371,10 @@ mod tests {
         assert_eq!(percent_decode("%C3%A4"), "\u{e4}");
         assert_eq!(percent_decode("a+b%20c%41"), "a b cA");
         assert_eq!(percent_decode("%\u{e9}\u{e9}"), "%\u{e9}\u{e9}");
-        assert_eq!(query_param("token=%a\u{e9}&x=1", "token").unwrap(), "%a\u{e9}");
+        assert_eq!(
+            query_param("token=%a\u{e9}&x=1", "token").unwrap(),
+            "%a\u{e9}"
+        );
     }
 
     #[test]

@@ -1734,7 +1734,7 @@ pub fn run(opts: Options) -> Result<()> {
     let token = hex::encode(token_bytes);
     varsto_core::logging::register_secret(&token);
     let port: u16 = bound.rsplit(':').next().unwrap().parse()?;
-    let url = format!("http://{bound}/?token={token}");
+    let url = format!("http://{bound}/");
     fs::create_dir_all(&opts.home)?;
     write_service_file(
         &opts.home,
@@ -1791,14 +1791,13 @@ pub fn run(opts: Options) -> Result<()> {
     }));
     // The token is not printed: stdout ends up in service.log under the
     // tray and launchd. `varsto desktop` reads it from the service file.
-    let public = url.split("?token=").next().unwrap_or(&url).to_string();
-    println!("Varsto service: {public} (open it with `varsto desktop`)");
+    println!("Varsto service: {url} (open it with `varsto desktop`)");
     println!(
         "Only this computer can reach it. Service file: {}",
         service_file(&opts.home).display()
     );
     if opts.open_browser {
-        desktop::open_in_browser(&url);
+        desktop::open_in_browser(&format!("{url}?boot={}", desktop::mint_boot_code()));
     }
     let http_state = state.clone();
     let server = Arc::new(server);
@@ -2175,6 +2174,19 @@ pub fn status(home: &Path) -> Option<(ServiceFile, Value)> {
     let url = format!("http://127.0.0.1:{}/api/service", f.port);
     let body = http_get(&url, &f.token).ok()?;
     Some((f, serde_json::from_str(&body).unwrap_or(json!({}))))
+}
+
+/// The address that opens the interface in a browser: a one-time code
+/// (valid for a minute) that the page trades for the session token, so that
+/// the token itself is in no process argument or browser history.
+pub fn boot_url(f: &ServiceFile) -> Result<String> {
+    let base = format!("http://127.0.0.1:{}", f.port);
+    let answer = http_post(&format!("{base}/api/session/boot"), &f.token, "{}")?;
+    let code = serde_json::from_str::<serde_json::Value>(&answer)?["boot"]
+        .as_str()
+        .ok_or_else(|| anyhow!("the service gave no start code"))?
+        .to_string();
+    Ok(format!("{base}/?boot={code}"))
 }
 
 /// Minimal HTTP client for talking to the local service (no extra dependency).
