@@ -885,6 +885,17 @@ struct P2p {
 /// Router port mapping is on in the settings, and not switched off for this
 /// process with `VARSTO_NO_PORT_MAPPING` (tests and throwaway services must
 /// never touch the router of the network they run in).
+/// The router mappings that go into our rendezvous record: none until the
+/// probe through the mapped UDP address came back to us.
+fn published_mappings(
+    pm: &varsto_core::p2p::portmap::PortMapStatus,
+) -> (Vec<std::net::SocketAddr>, Vec<std::net::SocketAddr>) {
+    if !pm.verified {
+        return (Vec::new(), Vec::new());
+    }
+    (pm.tcp.into_iter().collect(), pm.udp.into_iter().collect())
+}
+
 fn port_mapping_wanted(cfg: &varsto_core::vault::P2pConfig) -> bool {
     cfg.port_mapping && std::env::var_os("VARSTO_NO_PORT_MAPPING").is_none()
 }
@@ -1351,9 +1362,13 @@ impl P2p {
         rec.nat = info.probe.nat;
         rec.reachable |= info.reachable;
         // The router forwards our port: the most direct way in from outside.
+        // A mapping is announced only after our own probe through its UDP
+        // address reached us: an address that does not lead back is noise at
+        // best and a way to point peers elsewhere at worst.
         let pm = self.portmap_status();
-        rec.mapped_tcp = pm.tcp.into_iter().collect();
-        rec.mapped_udp = pm.udp.into_iter().collect();
+        let (mapped_tcp, mapped_udp) = published_mappings(&pm);
+        rec.mapped_tcp = mapped_tcp;
+        rec.mapped_udp = mapped_udp;
         rec.reachable |= pm.verified;
         st.service.p2p_portmap = pm;
         if let Some(node) = &self.quic {
@@ -2666,6 +2681,22 @@ pub mod linux {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_mapping_is_published_only_after_the_probe_reached_us() {
+        let mut pm = varsto_core::p2p::portmap::PortMapStatus {
+            state: "mapped".into(),
+            tcp: Some("203.0.113.5:41000".parse().unwrap()),
+            udp: Some("203.0.113.5:41001".parse().unwrap()),
+            ..Default::default()
+        };
+        assert_eq!(published_mappings(&pm), (vec![], vec![]));
+        pm.verified = true;
+        let (tcp, udp) = published_mappings(&pm);
+        assert_eq!(tcp, vec!["203.0.113.5:41000".parse().unwrap()]);
+        assert_eq!(udp, vec!["203.0.113.5:41001".parse().unwrap()]);
+    }
+
     use notify::event::{AccessKind, AccessMode, CreateKind, DataChange, EventKind, ModifyKind};
 
     fn ev(kind: EventKind, name: &str) -> notify::Event {

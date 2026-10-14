@@ -54,6 +54,13 @@ On `main` after 0.0.1-alpha.13; spec sections 32 to 59.
 - Disk pool markers carry a MAC under the vault's key: a disk that only
   repeats the public fields is not adopted and gets no writes until
   `varsto disk add` takes it in (spec 59).
+- Peer transport: a router mapping is published only after our own probe
+  reached us, TCP request heads have a 5 second deadline and an address may
+  hold at most 8 unfinished ones, QUIC has limits on incoming connections
+  and streams (spec 59).
+- Temporary files beside a folder's files are created exclusively under a
+  random name with mode 0600, and manifests, trash records and notes cannot
+  name Varsto's own files (`.varsto*`, `.varsto-placeholder`, `.varsto-link`).
 - A malformed `%` escape in a request no longer kills the API worker thread.
 
 ### Added

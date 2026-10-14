@@ -49,6 +49,10 @@ pub const KEY_FILE: &str = "p2p-key.der";
 const MAX_HEAD: usize = 8 * 1024;
 /// Objects are at most one chunk plus overhead; relays copy whole bodies.
 const MAX_BODY: usize = 64 * 1024 * 1024;
+/// Streams a peer may have open on one connection (the fetch window is 32).
+const MAX_STREAMS: u32 = 64;
+/// Incoming connection attempts held at once.
+const MAX_INCOMING: usize = 256;
 const CONNECT_TIMEOUT: Duration = Duration::from_millis(1500);
 /// How long punching toward a peer behind NAT goes on before giving up.
 pub const PUNCH_TIMEOUT: Duration = Duration::from_secs(3);
@@ -400,6 +404,10 @@ fn transport() -> Arc<quinn::TransportConfig> {
     let mut t = quinn::TransportConfig::default();
     t.max_idle_timeout(IDLE_TIMEOUT.try_into().ok());
     t.keep_alive_interval(Some(KEEP_ALIVE));
+    // Requests are bidirectional streams the peer opens one per request, up
+    // to the fetch window; nothing in the protocol uses a unidirectional one.
+    t.max_concurrent_bidi_streams(MAX_STREAMS.into());
+    t.max_concurrent_uni_streams(0u32.into());
     Arc::new(t)
 }
 
@@ -611,6 +619,9 @@ impl Node {
             quinn::crypto::rustls::QuicServerConfig::try_from(tls).context("quic server config")?,
         ));
         server.transport_config(transport());
+        // Connection attempts waiting to be accepted: a flood of handshakes
+        // is refused beyond this instead of queued without end.
+        server.max_incoming(MAX_INCOMING);
 
         let (side_tx, side_rx) = mpsc::channel(SIDE_QUEUE);
         let _enter = rt.enter(); // tokio::net and the endpoint driver need the context

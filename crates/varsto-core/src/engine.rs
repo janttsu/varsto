@@ -5139,13 +5139,14 @@ impl Engine {
                 );
             }
         }
-        let tmp = disk.with_file_name(format!(".varsto-tmp-{}", std::process::id()));
+        let (tmp, tmp_file) = util::temp_beside(disk, "tmp")
+            .with_context(|| format!("create a temporary file for {}", disk.display()))?;
         if let Some(log) = &self.download_log {
             log.lock().unwrap().push(file.path.clone());
         }
         let progress = crate::progress::Download::begin(&rec.name, &file.path, file.size);
         {
-            let mut out = fs::File::create(&tmp)?;
+            let mut out = tmp_file;
             // No device holds a backup's blocks: storages only.
             let peers = if rec.is_backup() {
                 None
@@ -5303,6 +5304,10 @@ impl Engine {
                 }
             }
             out.sync_all()?;
+            // The mode the folder records, set on the open file before it
+            // becomes visible under its name (the metadata step after the
+            // rename sets it again and reports a failure).
+            util::set_final_mode(&out, file.meta.as_ref().and_then(|m| m.mode));
         }
         fsmeta::make_replaceable(disk);
         fs::rename(&tmp, disk)?;
@@ -6340,11 +6345,13 @@ impl Engine {
         if let Some(parent) = disk.parent() {
             fs::create_dir_all(parent)?;
         }
-        let tmp = disk.with_file_name(format!(".varsto-upload-{}", std::process::id()));
+        let (tmp, tmp_file) = util::temp_beside(&disk, "upload")
+            .with_context(|| format!("write {}", disk.display()))?;
         let written = (|| -> Result<()> {
-            let mut out = fs::File::create(&tmp)?;
+            let mut out = tmp_file;
             std::io::copy(&mut { reader }, &mut out)?;
             out.sync_all()?;
+            util::set_final_mode(&out, None);
             Ok(())
         })();
         if let Err(e) = written {

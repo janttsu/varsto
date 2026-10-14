@@ -57,6 +57,25 @@ pub fn check_vault_path(path: &str) -> Result<()> {
     Ok(())
 }
 
+/// A path a manifest, a trash record or a note may name: [`check_vault_path`]
+/// and no component that is Varsto's own. `.varsto*` (the folder marker,
+/// staging and temporary files, the import staging area) and the suffixes
+/// `.varsto-placeholder` and `.varsto-link` are never synced, so a record
+/// that names one is not from an honest device; `.varstoignore` is the one
+/// file of that name that does sync.
+pub fn check_synced_path(path: &str) -> Result<()> {
+    check_vault_path(path)?;
+    for part in path.split('/') {
+        if (part.starts_with(".varsto") && part != ".varstoignore")
+            || part.ends_with(".varsto-placeholder")
+            || part.ends_with(".varsto-link")
+        {
+            bail!("{path:?} names a file that belongs to Varsto itself ({part:?})");
+        }
+    }
+    Ok(())
+}
+
 /// A name for people to read: control characters and the invisible
 /// direction overrides (which could make a name look like another one)
 /// are shown as `\u{..}` escapes. Everything else, `:` and `\` included,
@@ -818,6 +837,34 @@ fn default_probe(_root: &Path, path: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn synced_paths_never_name_a_file_of_varsto_itself() {
+        for ok in [
+            "a.txt",
+            "dir/sub/b.txt",
+            ".varstoignore",
+            "dir/.varstoignore",
+            "x.varsto",
+            "my.varsto.txt",
+        ] {
+            assert!(check_synced_path(ok).is_ok(), "{ok}");
+        }
+        for bad in [
+            ".varsto-folder",
+            "dir/.varsto-tmp-1-abcd",
+            ".varsto-import-staging/x",
+            "a/.varsto",
+            ".varstoignore.bak",
+            "photo.jpg.varsto-placeholder",
+            "dir/link.varsto-link",
+            "dir/.varsto-placeholder",
+            "../x",
+            "/abs",
+        ] {
+            assert!(check_synced_path(bad).is_err(), "{bad}");
+        }
+    }
 
     #[test]
     fn display_names_refuse_control_invisible_and_direction_characters() {

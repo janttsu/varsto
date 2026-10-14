@@ -151,7 +151,7 @@ pub fn validate_files(files: &BTreeMap<String, FileState>) -> Result<()> {
         if key != &f.path {
             bail!("manifest entry {key:?} names another path {:?}", f.path);
         }
-        crate::util::check_rel_path(&f.path)?;
+        crate::names::check_synced_path(&f.path)?;
         if f.deleted {
             continue;
         }
@@ -323,6 +323,30 @@ mod tests {
             modified_by: DeviceId::from_bytes(&[3; 16]),
             modified_clock: 1,
             meta: None,
+        }
+    }
+
+    #[test]
+    fn a_manifest_cannot_name_files_of_varsto_itself() {
+        let files = |paths: &[&str]| -> BTreeMap<String, FileState> {
+            paths
+                .iter()
+                .map(|p| (p.to_string(), entry(p, &[10])))
+                .collect()
+        };
+        assert!(validate_files(&files(&["a.txt", "dir/.varstoignore", "x.varsto"])).is_ok());
+        for bad in [
+            ".varsto-folder",
+            "dir/.varsto-tmp-1-ab",
+            "pic.jpg.varsto-placeholder",
+            "dir/link.varsto-link",
+            ".varsto-import-staging/f",
+        ] {
+            let e = validate_files(&files(&["ok.txt", bad])).unwrap_err();
+            assert!(
+                format!("{e:#}").contains("belongs to Varsto"),
+                "{bad}: {e:#}"
+            );
         }
     }
 
