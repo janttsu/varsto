@@ -54,7 +54,7 @@
   <div class="wrap">
 <article class="prose">
 <h1>Failure model</h1>
-<p class="note">From <code>docs/failure-model.md</code> in the repository, rendered 2026-10-14. These documents describe the main branch; the released version is 0.0.1-alpha.13. Sections marked 'after 0.0.1-alpha.13' are not in a release yet.</p>
+<p class="note">From <code>docs/failure-model.md</code> in the repository, rendered 2026-10-14. These documents describe the main branch; the released version is 0.0.1-alpha.14. Sections marked 'after 0.0.1-alpha.14' are not in a release yet.</p>
 <blockquote>
 <p><strong>Design-stage model, written before the code.</strong> Much of it is now implemented as 0.0.1-alpha.13; the per-row notes and <a href="alpha-0-format.html">docs/spec/alpha-0-format.md</a> record what is built. This document states what the design is meant to tolerate, what it limits, and what it does not cover. Statements such as "designed to" become claims about the product only after the tests named in <a href="testing.html">TESTING.md</a> show them.</p>
 </blockquote>
@@ -125,7 +125,7 @@
 <td>Corruption or silent loss in one copy (bit rot, a peer that claims data it does not hold, a lost object)</td>
 <td>One copy is bad; other verified copies can repair it.</td>
 <td>Affected blocks are marked and fetched from other sources.</td>
-<td>Authenticated encryption and keyed hashes on every object; a periodic scrub re-reads the copies this device can read (<a href="alpha-0-format.html">alpha-0-format.md</a> section 33, after 0.0.1-alpha.13, not in a release yet); self-describing packs so the index can be rebuilt. There is no proof-of-storage challenge: a peer's claim to hold data is not challenged.</td>
+<td>Authenticated encryption and keyed hashes on every object; a periodic scrub re-reads the copies this device can read (<a href="alpha-0-format.html">alpha-0-format.md</a> section 33, new in 0.0.1-alpha.14); self-describing packs so the index can be rebuilt. There is no proof-of-storage challenge: a peer's claim to hold data is not challenged.</td>
 <td>Corruption in every copy at the same time. Blocks that exist in only one place and have no verification yet.</td>
 <td>S-001, S-006, F-020, F-031, N-007</td>
 </tr>
@@ -157,7 +157,7 @@
 <td>A file is deleted by mistake, on any device</td>
 <td>None while the file is in the trash: its last version and its blocks are kept for the trash days (30 by default, per vault and per folder).</td>
 <td>The deletion syncs to every device like any change; each device that had the file also keeps a local trash copy.</td>
-<td>The vault-wide trash (after 0.0.1-alpha.13) lists deleted files on every device, and restores them from the storages (or the local copy) to their path or to <code>name (restored)</code>, never overwriting; their blocks count as used for data moves, storage removal and fsck until they expire; an optional trash storage (for example a cold one) keeps them off warm storage, and reading them back from cold storage asks first (<a href="alpha-0-format.html">alpha-0-format.md</a> section 43).</td>
+<td>The vault-wide trash (0.0.1-alpha.14) lists deleted files on every device, and restores them from the storages (or the local copy) to their path or to <code>name (restored)</code>, never overwriting; their blocks count as used for data moves, storage removal and fsck until they expire; an optional trash storage (for example a cold one) keeps them off warm storage, and reading them back from cold storage asks first (<a href="alpha-0-format.html">alpha-0-format.md</a> section 43).</td>
 <td>A deletion noticed after the trash days, or one purged from the trash on purpose. Deletions made before the trash existed are only in the local trash copies.</td>
 <td>F-025</td>
 </tr>
@@ -165,7 +165,7 @@
 <td>A file is overwritten by mistake (saved over, replaced by a sync from another device)</td>
 <td>None while a version of it is kept: the previous version and its blocks stay in the version history, thinned over time (every version for an hour, one per hour for a day, one per day for 30 days, one per week up to the history days, 90 by default, per vault and per folder or off).</td>
 <td>The new version syncs to every device like any change.</td>
-<td>The version history (after 0.0.1-alpha.13) lists a file's earlier versions on every device and restores one over the current file (which becomes a version itself) or under a new name, never overwriting without keeping; only changed blocks cost space; their blocks count as used like the trash's and can go to the trash storage; cold reads ask first (<a href="alpha-0-format.html">alpha-0-format.md</a> section 50).</td>
+<td>The version history (0.0.1-alpha.14) lists a file's earlier versions on every device and restores one over the current file (which becomes a version itself) or under a new name, never overwriting without keeping; only changed blocks cost space; their blocks count as used like the trash's and can go to the trash storage; cold reads ask first (<a href="alpha-0-format.html">alpha-0-format.md</a> section 50).</td>
 <td>A version the thinning let go (for example the 2 p.m. state of a file saved every minute, after more than an hour), anything past the history days, a folder with the history off, changes made between two scans or never uploaded.</td>
 <td>F-025</td>
 </tr>

@@ -16,7 +16,11 @@ spec still names them because sections were written as the work was done.
 
 ## Unreleased
 
-On `main` after 0.0.1-alpha.13; spec sections 32 to 60.
+Nothing yet.
+
+## [0.0.1-alpha.14] - 2026-10-14
+
+Spec sections 32 to 60. Storage format 1 unchanged; every device must run alpha.14 (the ledger view cache and the record checks changed).
 
 ### Hardening
 
@@ -345,6 +349,7 @@ make the core idea real (spec 1 to 9).
 - `fsck --verify` re-hashes every referenced object and reports claims the
   storage cannot back.
 
+[0.0.1-alpha.14]: https://github.com/janttsu/varsto/releases/tag/v0.0.1-alpha.14
 [0.0.1-alpha.13]: https://github.com/janttsu/varsto/releases/tag/v0.0.1-alpha.13
 [0.0.1-alpha.12]: https://github.com/janttsu/varsto/releases/tag/v0.0.1-alpha.12
 [0.0.1-alpha.11]: https://github.com/janttsu/varsto/releases/tag/v0.0.1-alpha.11

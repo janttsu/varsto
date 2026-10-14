@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Alpha.14: a security review, its fixes, and everything merged since alpha.13: Varsto</title>
+<meta name="description" content="A code-level security review of the whole program, the fixes it asked for, a much faster sync, resumable moves to a stack of removable disks, and the twenty-odd features that had been waiting on the main branch since alpha.13.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="canonical" href="https://varsto.net/blog/2026-10-14-alpha-14-hardening-and-everything-since.html">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Varsto">
+<meta property="og:title" content="Alpha.14: a security review, its fixes, and everything merged since alpha.13: Varsto">
+<meta property="og:description" content="A code-level security review of the whole program, the fixes it asked for, a much faster sync, resumable moves to a stack of removable disks, and the twenty-odd features that had been waiting on the main branch since alpha.13.">
+<meta property="og:url" content="https://varsto.net/blog/2026-10-14-alpha-14-hardening-and-everything-since.html">
+<meta property="og:image" content="https://varsto.net/assets/img/og-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:locale" content="en_GB">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="alternate" hreflang="en" href="https://varsto.net/blog/2026-10-14-alpha-14-hardening-and-everything-since.html">
+<link rel="alternate" hreflang="x-default" href="https://varsto.net/blog/2026-10-14-alpha-14-hardening-and-everything-since.html">
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","headline":"Alpha.14: a security review, its fixes, and everything merged since alpha.13","description":"A code-level security review of the whole program, the fixes it asked for, a much faster sync, resumable moves to a stack of removable disks, and the twenty-odd features that had been waiting on the main branch since alpha.13.","datePublished":"2026-10-14","url":"https://varsto.net/blog/2026-10-14-alpha-14-hardening-and-everything-since.html","inLanguage":"en","author":{"@type":"Organization","name":"The Varsto Authors"},"image":"https://varsto.net/assets/img/og-card.png"}</script>
+<link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../blog/feed.xml">
+<link rel="stylesheet" href="../assets/css/site.css?v=a993e06bd6">
+<script src="../assets/js/theme.js?v=0951491269"></script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="alpha" role="note">
+  <div class="wrap"><strong>Alpha software, not for production data.</strong> Bugs can cause data loss, formats may change without migration, and the cryptography has not been independently audited. Keep your own backups and check that you can restore from them.</div>
+</div>
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="../"><img src="../assets/img/logo.svg" alt="" width="28" height="28"><span>Varsto</span></a>
+
+    <nav class="main" aria-label="Main">
+      <a href="../">Project</a>
+      <a href="../features/">Features</a>
+      <a href="../use-cases/">Use cases</a>
+      <a href="../compare/">Compare</a>
+      <a href="../how-it-works/">How it works</a>
+      <a href="../screenshots/">Screenshots</a>
+      <a href="../docs/">Docs</a>
+      <a href="../downloads/">Downloads</a>
+      <a href="../blog/" aria-current="page">Blog</a>
+      <a href="../forum/">Forum</a>
+      <a href="../contribute/">Contribute</a>
+      <a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a>
+      <button class="theme" id="theme-toggle" type="button" aria-label="Change colour theme">Theme: auto</button>
+    </nav>
+  </div>
+</header>
+<main id="main">
+  <div class="wrap">
+<article class="prose"><h1>Alpha.14: a security review, its fixes, and everything merged since alpha.13</h1><p class="note"><time datetime="2026-10-14">2026-10-14</time></p>
+<p>Alpha.14 is the largest release so far. It carries two things: the backlog of features that landed on the main branch after alpha.13, and the first round of fixes from a security review that read every line of the program with a hostile storage, a hostile network and a hostile fellow device in mind.</p>
+<h2 id="the-security-review">The security review</h2>
+<p>The review found the cryptographic primitives sound and the authorization around them lacking. Alpha.14 closes the parts that could be closed without changing the storage format:</p>
+<ul>
+<li>Ledger events are accepted by role: a replica may only claim copies, a member of a shared folder may only speak about that folder, and checkpoints are taken from full devices alone. A storage that withholds a batch is noticed, a junk object under a device's own name no longer fences the device, and a revocation counts only together with its signed key epoch.</li>
+<li>The service and the peer transport: the STUN side channel is bounded, the browser gets a one-time start code instead of the session token, a crafted request can no longer crash the API, Strongroom keys must match a commitment and the security key asks for its PIN, secrets are gone from the command line, the updater refuses stale signed lists, and storage reads are bounded.</li>
+<li>Hygiene: key files are created private from the first byte, tokens are compared in constant time, key material is wiped from memory, recovery shares carry a check, and the Shamir library was replaced by a fixed fork.</li>
+</ul>
+<p>Two findings need a new storage format and are not in this release: file lists and share epochs are still accepted on the folder key alone, and the chunk nonce still comes from the plaintext. Both are built on the branches for format 2, which is the next release. Until then, treat shared folders and untrusted replicas as the review describes: a holder of a folder's key can still change what that folder shows.</p>
+<h2 id="faster">Faster</h2>
+<p>Syncing 50 000 small files to a local storage went from 167 seconds to 21; 10 000 files from 77 to 8.5. The clock is no longer written to disk per file, storages are opened once per sync, uploads fan out per storage, the S3 client probes once whether conditional writes are honoured, and the binaries are built with link-time optimisation and a faster allocator.</p>
+<h2 id="everything-since-alpha13">Everything since alpha.13</h2>
+<p>Live activity between devices, the bit-rot check, whole drives for disk pools, backups with restic, file analyses and <code>varsto search</code>, scoped MCP keys, ledger rebuild, media-aware verification, disk bookkeeping and "the next disk to dock", the recovery package guide, imports from git-annex, cloud drives and local folders, the vault-wide trash, storage quotas and draining, local debug logs, original names, folder safety (marker, mass-deletion guard, send-only and receive-only), ignore rules, file metadata, version history, QR invitations, router port mapping, minimum free disk space, the event stream, read-only members, platform rules, change history, and resumable moves of a folder onto a stack of removable disks one disk at a time.</p>
+<h2 id="compatibility">Compatibility</h2>
+<p>The storage format is unchanged, but every device of a vault must run alpha.14: the ledger view cache and the record checks changed, and older devices will not read what alpha.14 writes. The torrent download feature on the main branch is not part of this release.</p>
+
+</article>
+  </div>
+</main>
+<footer class="site">
+  <div class="wrap">
+    <span>Varsto is a working name. Source: <a href="https://github.com/janttsu/varsto">github.com/janttsu/varsto</a>, under the PolyForm Shield License 1.0.0 (source-available).</span>
+    <span>No cookies, no tracking. The web server keeps a standard access log for at most seven days.</span>
+    <span><a href="../docs/security-policy.html">Security policy</a> · <a href="../docs/licence.html">Licence</a> · <a href="../docs/trademark.html">Trademark</a></span>
+  </div>
+</footer>
+</body>
+</html>
