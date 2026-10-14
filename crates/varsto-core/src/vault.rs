@@ -1511,6 +1511,11 @@ pub struct Config {
         skip_serializing_if = "crate::changes::ChangeLimits::is_default"
     )]
     pub changes: crate::changes::ChangeLimits,
+    /// Whether each S3 storage honours `If-None-Match: *`, by storage name:
+    /// learned by a probe on the first write (`crate::s3`). Storages that do
+    /// get one PUT per object, the others HEAD-then-PUT.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub conditional_writes: std::collections::BTreeMap<String, bool>,
 }
 
 /// A backup taken on this device (local, never published).

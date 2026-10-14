@@ -8,6 +8,13 @@ use std::path::{Path, PathBuf};
 use varsto_core::storage::StorageSpec;
 use varsto_core::Engine;
 
+/// mimalloc for every allocation of the binary (feature `mimalloc`, on by
+/// default): the system allocator, musl's above all, is a bottleneck on the
+/// allocation-heavy paths (JSON, file lists, per-block buffers).
+#[cfg(feature = "mimalloc")]
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 mod backup;
 mod desktop;
 mod drive_mount;
@@ -3239,6 +3246,9 @@ fn run(cli: &Cli) -> Result<()> {
                         .zip(&quotas)
                         .map(|((spec, e), q)| {
                             let mut v = serde_json::to_value(spec).unwrap_or_default();
+                            if let Some(c) = engine.conditional_writes(spec.name()) {
+                                v["conditional_writes"] = c.into();
+                            }
                             v["price"] = serde_json::to_value(&e.price).unwrap_or_default();
                             v["bytes"] = e.bytes.into();
                             v["monthly_cost"] =
@@ -3255,7 +3265,7 @@ fn run(cli: &Cli) -> Result<()> {
                             .zip(&quotas)
                             .map(|((x, e), q)| {
                                 format!(
-                                    "{}{}{}{}{}{} | {} stored{} | {}{}",
+                                    "{}{}{}{}{}{} | {} stored{} | {}{}{}",
                                     x.name(),
                                     if x.is_cold() { " (cold)" } else { "" },
                                     if x.is_carrier() { " (transferrer)" } else { "" },
@@ -3305,7 +3315,11 @@ fn run(cli: &Cli) -> Result<()> {
                                         .unwrap_or_else(|| "no price set".to_string()),
                                     e.monthly_cost
                                         .map(|c| format!(" | about {c:.2} {} a month", e.currency))
-                                        .unwrap_or_default()
+                                        .unwrap_or_default(),
+                                    match engine.conditional_writes(x.name()) {
+                                        Some(false) => " | conditional writes: unsupported",
+                                        _ => "",
+                                    }
                                 )
                             })
                             .collect::<Vec<_>>()

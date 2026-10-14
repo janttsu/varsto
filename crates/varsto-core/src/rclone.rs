@@ -22,15 +22,7 @@ impl RcloneStorage {
             bail!("rclone remote must look like `name:path` (see `rclone listremotes`)");
         }
         let binary = std::env::var("VARSTO_RCLONE").unwrap_or_else(|_| "rclone".to_string());
-        let st = Command::new(&binary)
-            .arg("version")
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .with_context(|| format!("run {binary} (install rclone or set VARSTO_RCLONE)"))?;
-        if !st.success() {
-            bail!("{binary} version failed");
-        }
+        check_binary(&binary)?;
         Ok(RcloneStorage {
             name,
             remote,
@@ -112,6 +104,38 @@ impl RcloneStorage {
         );
         Ok((out.status.success(), out.stdout, stderr))
     }
+}
+
+/// Binaries that answered `rclone version` in this process: a storage is
+/// opened many times per sync, and the check is the same every time. A
+/// failure is not remembered, so installing rclone takes effect at once.
+static CHECKED: std::sync::Mutex<Option<std::collections::HashSet<String>>> =
+    std::sync::Mutex::new(None);
+
+fn check_binary(binary: &str) -> Result<()> {
+    if CHECKED
+        .lock()
+        .unwrap()
+        .as_ref()
+        .is_some_and(|c| c.contains(binary))
+    {
+        return Ok(());
+    }
+    let st = Command::new(binary)
+        .arg("version")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .with_context(|| format!("run {binary} (install rclone or set VARSTO_RCLONE)"))?;
+    if !st.success() {
+        bail!("{binary} version failed");
+    }
+    CHECKED
+        .lock()
+        .unwrap()
+        .get_or_insert_with(Default::default)
+        .insert(binary.to_string());
+    Ok(())
 }
 
 const NOT_FOUND_MARK: &str = "\u{1}rclone-not-found\u{1}";
