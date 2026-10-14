@@ -71,6 +71,11 @@ On `main` after 0.0.1-alpha.13; spec sections 32 to 57.
 
 - The design documents mark what is built and what is not; the top-level
   documents separate released features from unreleased ones.
+- Faster syncs: the Lamport clock is kept in memory and reserved in
+  `clock.json` in blocks of 1000 values (spec 6); storages are opened once
+  per sync, S3 conditional writes are probed once and skip the HEAD before
+  PUT, uploads go to several storages side by side (spec 12); a sync scans
+  each folder once; release builds use thin LTO and mimalloc.
 
 ## [0.0.1-alpha.13] - 2026-10-13
 
