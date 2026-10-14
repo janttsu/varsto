@@ -841,6 +841,71 @@ def s_disk_fetch_plan():
     dl_clean()
 
 
+@scenario("staged-move-to-pool")
+def s_staged_move():
+    """A folder in the cloud-like "box" storage moves, disk by disk, onto a pool of
+    4 GiB virtual drives (about 1.7 GiB usable on each, the pool keeps 2 GiB free):
+    a job without a disk waits; `--path ... --keep-source` copies a directory; the
+    whole-folder job fills the first drive, stops with "attach the next disk", and
+    finishes on the second; the box then holds none of the folder's blocks."""
+    dl_clean()
+    dl("init --name dl")
+    dl("storage add-local box /home/varsto/dl-box --place cloud", json_out=False)
+    dl("storage add-pool dshelf --place home", json_out=False)
+    run(DL_VM, "mkdir -p ~/dl-docs/big ~/dl-docs/small && for i in 1 2 3; do head -c 1073741824 /dev/urandom > ~/dl-docs/big/f$i.bin; done"
+               " && for i in $(seq 1 20); do head -c 20000 /dev/urandom > ~/dl-docs/small/n$i.bin; done")
+    dl("folder add ddocs /home/varsto/dl-docs", json_out=False)
+    # The pool is filled by the job only, not by pushes or disk fills.
+    dl("folder placement ddocs --storage box", json_out=False)
+    dl("push ddocs")
+    want = run(DL_VM, "cd ~/dl-docs && find . -type f | sort | xargs sha256sum | sha256sum").stdout.split()[0]
+
+    def box_objects():
+        return int(run(DL_VM, "find ~/dl-box/chunks -type f ! -name '.*' | wc -l").stdout)
+
+    before = box_objects()
+    check(before > 0, "the box holds nothing after the push")
+    # No disk yet: the job is recorded and waits for one.
+    r = dl("move ddocs --from box --to dshelf --yes")
+    job = r["job"]
+    check(job["state"] == "open" and job["waiting"]["kind"] == "disk" and job["bytes_done"] == 0, f"first run: {job}")
+    st = dl("move status")
+    check(len(st) == 1 and st[0]["id"] == job["id"] and st[0]["bytes_remaining"] > 3 << 30, f"move status: {st}")
+    sug = dl("disk suggest")["suggestions"]
+    check(len(sug["new_disk_needed"]) == 1, f"disk suggest does not ask for a new disk: {sug['new_disk_needed']}")
+    dl(f"move cancel {job['id']}", json_out=False)
+    check(box_objects() == before, "cancelling a job changed the box")
+
+    # The small directory first, with the source kept, onto the first drive.
+    dl_attach("red")
+    dl("disk init /dev/vdd --pool dshelf --label Red --confirm /dev/vdd")
+    r = dl("move ddocs --from box --to dshelf --path small --keep-source --yes")
+    check(r["job"]["state"] == "done" and r["job"]["disks_used"] == ["Red"], f"path job: {r['job']}")
+    check(box_objects() == before, "--keep-source dropped blocks from the box")
+
+    # The whole folder: the first drive takes what fits, then the job waits for the next one.
+    r = dl("move ddocs --from box --to dshelf --yes")
+    job = r["job"]
+    CTX["staged_move"] = {"run1_done": job["bytes_done"], "left": job["bytes_remaining"], "waiting": job["waiting"]["text"]}
+    check(job["state"] == "open" and 0 < job["bytes_done"] < 2 << 30 and job["bytes_remaining"] > 1 << 30, f"run 1: {job}")
+    check(box_objects() < before, "nothing left the box")
+    dl("disk unmount Red")
+    detach_disk(DL_VM, "vdd")
+    st = dl("disk suggest")["suggestions"]
+    check(st["moves"] and (st["new_disk_needed"] or st["top"]), f"no suggestion for the waiting job: {st['moves']}")
+    dl_attach("green")
+    dl("disk init /dev/vdd --pool dshelf --label Green --confirm /dev/vdd")
+    r = dl(f"move resume {job['id']}")
+    job = r["job"]
+    check(job["state"] == "done" and job["bytes_remaining"] == 0 and job["disks_used"][-1] == "Green", f"run 2: {job}")
+    check(box_objects() == 0, f"the box still holds {box_objects()} objects")
+    chk = dl("disk check Green --full")
+    check(not chk["bad"] and not chk["missing"], f"full check: {chk}")
+    got = run(DL_VM, "cd ~/dl-docs && find . -type f | sort | xargs sha256sum | sha256sum").stdout.split()[0]
+    check(got == want, "the local files changed")
+    dl_clean()
+
+
 # ----- devices on different versions (alpha.9 and this build) -------------------------------
 
 def v9(vm, args, json_out=True, check_rc=True):
@@ -1532,7 +1597,7 @@ SCENARIOS = [s_reset, s_init, s_pair, s_sync, s_words, s_conflict, s_selective, 
              s_strongroom, s_org, s_remove_user, s_revoke,
              s_p2p_setup, s_p2p_lan, s_p2p_pub, s_p2p_sym, s_p2p_stop, s_share, s_disks, s_mixed,
              s_outage, s_blackhole, s_crash, s_clock, s_clock_behind, s_p2p_upload, s_scale,
-             s_backup, s_activity, s_disk_init, s_disk_fetch_plan, s_scrub, s_restic, s_ledger_loss,
+             s_backup, s_activity, s_disk_init, s_disk_fetch_plan, s_staged_move, s_scrub, s_restic, s_ledger_loss,
              s_ledger_withhold]
 
 
