@@ -419,6 +419,11 @@ enum Cmd {
     },
     /// Strongroom folders: opened only with a touch of your FIDO2 security key.
     Strongroom {
+        /// Require user verification (the key's PIN or biometric) in addition to
+        /// the PIN prompt, for every touch. An enrolment made without it opens
+        /// only without it: enrol again to change it.
+        #[arg(long, global = true)]
+        uv: bool,
         #[command(subcommand)]
         cmd: StrongroomCmd,
     },
@@ -4877,7 +4882,10 @@ fn run(cli: &Cli) -> Result<()> {
             folder,
             tags,
         } => run_search(cli, &home, &query.join(" "), folder.as_deref(), tags)?,
-        Cmd::Strongroom { cmd } => {
+        Cmd::Strongroom { uv, cmd } => {
+            if *uv {
+                std::env::set_var("VARSTO_FIDO2_UV", "1");
+            }
             let mut engine = open_engine(&home)?;
             match cmd {
                 StrongroomCmd::Create {

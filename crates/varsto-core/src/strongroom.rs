@@ -70,6 +70,18 @@ pub struct StrongroomInfo {
     /// When the list of keys last changed; the newest list wins across devices.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub updated_utc: i64,
+    /// Key commitment (hex): `keyed_hash(folder_key.derive("strongroom-check"), folder_id)`.
+    /// A folder key given by hand is accepted only when it matches, so that a
+    /// mistyped or foreign key cannot unlock or convert the folder.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub check_hex: String,
+}
+
+/// The commitment to `folder_key` for `folder`; public, reveals nothing
+/// about the key.
+pub fn key_check(folder_key: &SecretKey, folder: &FolderId) -> String {
+    let k = folder_key.derive("strongroom-check", &[]);
+    hex::encode(crypto::keyed_hash(&k, folder.as_str().as_bytes()))
 }
 
 fn is_zero(v: &i64) -> bool {
@@ -91,6 +103,26 @@ pub struct EnrolledKey {
 }
 
 impl StrongroomInfo {
+    /// This info with the commitment to `folder_key` of `folder`.
+    pub fn with_check(mut self, folder_key: &SecretKey, folder: &FolderId) -> Self {
+        self.check_hex = key_check(folder_key, folder);
+        self
+    }
+
+    /// Refuse a folder key that is not the one the Strongroom was made with.
+    pub fn verify_key(&self, folder: &FolderId, folder_key: &SecretKey) -> Result<()> {
+        if self.check_hex.is_empty() {
+            bail!("this Strongroom has no key check (made by an older version): unlock it with the security key, or enrol it again");
+        }
+        if !crypto::ct_eq(
+            self.check_hex.as_bytes(),
+            key_check(folder_key, folder).as_bytes(),
+        ) {
+            bail!("that is not the key of this Strongroom");
+        }
+        Ok(())
+    }
+
     /// Every enrolled key, the first one first.
     pub fn keys(&self) -> Vec<EnrolledKey> {
         let mut out = vec![EnrolledKey {
@@ -120,6 +152,7 @@ impl StrongroomInfo {
             added_utc: first.added_utc,
             backups: keys,
             updated_utc,
+            check_hex: String::new(),
         })
     }
 
@@ -184,6 +217,18 @@ pub struct Fido2Tools {
     pub device: Option<String>,
 }
 
+/// `-t` options of the libfido2 tools: the PIN is always asked for (so the
+/// secret depends on something the key's owner knows, not only on holding
+/// the key), and user verification is required when `VARSTO_FIDO2_UV` is set
+/// (`varsto strongroom --uv`).
+fn fido2_options() -> Vec<&'static str> {
+    let mut o = vec!["-t", "pin=true"];
+    if std::env::var_os("VARSTO_FIDO2_UV").is_some_and(|v| !v.is_empty() && v != "0") {
+        o.extend(["-t", "uv=true"]);
+    }
+    o
+}
+
 impl Fido2Tools {
     fn first_device() -> Result<String> {
         let out = Command::new("fido2-token").arg("-L").output().context(
@@ -226,7 +271,9 @@ impl SecurityKey for Fido2Tools {
         );
         eprintln!("Touch your security key to create the Strongroom credential.");
         let mut child = Command::new("fido2-cred")
-            .args(["-M", "-h", "-r", &dev])
+            .args(["-M", "-h", "-r"])
+            .args(fido2_options())
+            .arg(&dev)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
@@ -274,7 +321,9 @@ impl SecurityKey for Fido2Tools {
         );
         eprintln!("Touch your security key to open the Strongroom.");
         let mut child = Command::new("fido2-assert")
-            .args(["-G", "-h", &dev])
+            .args(["-G", "-h"])
+            .args(fido2_options())
+            .arg(&dev)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
@@ -427,7 +476,7 @@ pub fn enroll(
     folder_key: &SecretKey,
 ) -> Result<StrongroomInfo> {
     let k = enroll_key(key, method, vault, folder, folder_key, "")?;
-    StrongroomInfo::from_keys(vec![k], crate::util::now_utc())
+    Ok(StrongroomInfo::from_keys(vec![k], crate::util::now_utc())?.with_check(folder_key, folder))
 }
 
 /// Enrol one more security key for a folder key already in hand (two
@@ -560,7 +609,10 @@ pub fn rewrap_enrolled(
             )?,
         );
     }
-    StrongroomInfo::from_keys(out, crate::util::now_utc().max(info.updated_utc + 1))
+    Ok(
+        StrongroomInfo::from_keys(out, crate::util::now_utc().max(info.updated_utc + 1))?
+            .with_check(folder_key, folder),
+    )
 }
 
 /// Wrap `folder_key` for one enrolled credential with a fresh salt (one touch).

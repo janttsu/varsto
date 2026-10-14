@@ -5929,8 +5929,12 @@ impl Engine {
             bail!("{folder} is not a Strongroom folder");
         }
         let fk = SecretKey::from_hex(key_hex)?;
-        // Prove the key is right before accepting it: it must open the wrapped key's folder keys.
-        let _ = FolderKeys::from_folder_key(&rec.folder_id, fk.clone());
+        // Prove the key is right before accepting it: it must match the
+        // commitment published with the Strongroom.
+        rec.strongroom
+            .as_ref()
+            .ok_or_else(|| anyhow!("{folder} is not a Strongroom folder"))?
+            .verify_key(&rec.folder_id, &fk)?;
         self.unlocked.insert(
             rec.folder_id.clone(),
             (fk, util::now_utc() + minutes as i64 * 60),
