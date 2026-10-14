@@ -53,8 +53,21 @@ On `main` after 0.0.1-alpha.13; spec sections 32 to 57.
 - CI quality gates: `cargo fmt --check`, `cargo clippy -D warnings`,
   `cargo audit` and `cargo deny check` (`deny.toml`).
 - Website: comparison pages for Cryptomator, rclone and restic/borg.
+- Recovery kit: a "Key check" line and `varsto recovery combine --check`,
+  which refuses a key rebuilt from a share of another kit; two shares with
+  the same index are refused.
+- `storage add-s3 --insecure-http` (`join --s3-insecure-http`): an `http://`
+  endpoint outside this computer is refused without it.
 
 ### Changed
+
+- Hardening: key files and the device directory are created with private
+  modes from the first byte; session tokens and MCP key digests are compared
+  in constant time; key strings are wiped on drop and never shown in Debug
+  output; the Strongroom key wrap binds the vault id; the software security
+  key is built only with the `software-key` feature; a replica skips junk
+  names under `chunks/`; Shamir shares come from `blahaj` instead of `sharks`
+  (RUSTSEC-2024-0398), with the same share encoding.
 
 - The design documents mark what is built and what is not; the top-level
   documents separate released features from unreleased ones.
