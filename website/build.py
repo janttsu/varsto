@@ -36,7 +36,7 @@ ALPHA = (
 REPO = "https://github.com/janttsu/varsto"
 # The last tagged release. Update it when tagging a release: the pages say
 # "released" with this value, while {{VERSION}} follows Cargo.toml (main).
-RELEASED_VERSION = "0.0.1-alpha.13"
+RELEASED_VERSION = "0.0.1-alpha.14"
 RELEASE_KEY = ROOT / "release-key.pub"
 FOOTER = [
     f'{BRAND} is a working name. Source: <a href="{REPO}">github.com/janttsu/varsto</a>, under the PolyForm Shield License 1.0.0 (source-available).',
