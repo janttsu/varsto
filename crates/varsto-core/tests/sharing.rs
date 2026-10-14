@@ -546,3 +546,28 @@ fn a_members_batch_cannot_reach_outside_its_folder() {
         Some(&b"from robin"[..])
     );
 }
+
+/// A name under the folder's share epochs that no owner sealed a key for
+/// (junk anyone with the storage credentials can write) does not make a
+/// member believe it was removed, which would silence its errors.
+#[test]
+fn junk_share_epoch_does_not_cut_a_member_off() {
+    use varsto_core::share::{ShareEpochRecord, SHARE_EPOCH_BASE};
+    let lab = Lab::new();
+    let (mut a, _) = owner(&lab);
+    let mut m = invite(&lab, &mut a, "robin");
+    let project = folder_id(&a, "project");
+    let junk = lab.root.join("storage").join(ShareEpochRecord::storage_key(
+        &project,
+        SHARE_EPOCH_BASE + 5,
+    ));
+    fs::create_dir_all(junk.parent().unwrap()).unwrap();
+    fs::write(&junk, b"junk").unwrap();
+    m.sync(None).unwrap();
+    assert!(!m.share_members("project").unwrap().access_lost);
+    // The owner still shares with it.
+    fs::write(lab.dir("a").join("later.txt"), b"for robin").unwrap();
+    a.sync(None).unwrap();
+    m.sync(None).unwrap();
+    assert!(read(&lab.dir("robin"), "later.txt").is_some());
+}

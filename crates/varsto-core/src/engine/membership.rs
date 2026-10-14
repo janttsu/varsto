@@ -433,11 +433,12 @@ impl EpochRecord {
     }
 }
 
-/// The epoch record as stored since alpha.10: the sealed record plus the
-/// issuer's signature over vault, epoch, issuer and the ciphertext hash.
-/// Without the signature anyone holding the vault key could write a record
-/// under the next number and block every removal and every join. Devices
-/// read records written before as the bare sealed blob (`open_any`).
+/// The epoch record as stored: the sealed record plus the issuer's
+/// signature over vault, epoch, issuer and the ciphertext hash. Without the
+/// signature anyone holding the vault key could write a record under the
+/// next number and block every removal and every join. Every vault writes
+/// this form, with or without an organization; a bare sealed record (what
+/// vaults without an organization wrote before) is not read any more.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SignedEpoch {
     pub format_version: u16,
@@ -482,7 +483,7 @@ impl SignedEpoch {
             sig_hex: hex::encode(sig),
         })?)
     }
-    /// The envelope, if `blob` is one (older records are bare ciphertext).
+    /// The envelope, if `blob` is one.
     pub fn parse(blob: &[u8]) -> Option<SignedEpoch> {
         serde_json::from_slice(blob).ok()
     }
@@ -495,10 +496,10 @@ impl SignedEpoch {
             &hex::decode(&self.sig_hex)?,
         )
     }
-    /// Open an epoch record, signed or bare, with its key. With a verifier
-    /// that knows the issuer's key the signature must verify; a signed
-    /// record whose issuer is unknown is opened on the strength of its key
-    /// (a device joining has no registry yet).
+    /// Open a signed epoch record with its key. With a verifier that knows
+    /// the issuer's key the signature must verify; a record whose issuer is
+    /// unknown is opened on the strength of its key (a device joining has
+    /// no registry yet). Anything that is not a signed envelope is refused.
     pub fn open_any(
         blob: &[u8],
         vault: &VaultId,
@@ -506,22 +507,20 @@ impl SignedEpoch {
         vault_key: &SecretKey,
         verifier: &dyn Fn(&DeviceId) -> Option<VerifyingKey>,
     ) -> Result<EpochRecord> {
-        match Self::parse(blob) {
-            Some(env) => {
-                if env.epoch != epoch {
-                    bail!("epoch envelope does not match its name");
-                }
-                if let Some(pk) = verifier(&env.issuer) {
-                    env.verify(vault, &pk)?;
-                }
-                let rec = EpochRecord::open(&hex::decode(&env.body_hex)?, vault, epoch, vault_key)?;
-                if rec.issuer != env.issuer {
-                    bail!("epoch record issuer does not match its envelope");
-                }
-                Ok(rec)
-            }
-            None => EpochRecord::open(blob, vault, epoch, vault_key),
+        let Some(env) = Self::parse(blob) else {
+            bail!("epoch record {epoch} is not a signed envelope");
+        };
+        if env.epoch != epoch {
+            bail!("epoch envelope does not match its name");
         }
+        if let Some(pk) = verifier(&env.issuer) {
+            env.verify(vault, &pk)?;
+        }
+        let rec = EpochRecord::open(&hex::decode(&env.body_hex)?, vault, epoch, vault_key)?;
+        if rec.issuer != env.issuer {
+            bail!("epoch record issuer does not match its envelope");
+        }
+        Ok(rec)
     }
 }
 
@@ -1000,21 +999,17 @@ impl Engine {
 
     /// Whether an epoch record found under number `epoch` was written by a
     /// device allowed to rotate the vault key: a signed envelope from a
-    /// trusted device (an administrator, in an organization). A bare record
-    /// from before signatures existed counts in a vault without an
-    /// organization, where anyone could rotate anyway.
+    /// trusted device (an administrator, in an organization). Anything that
+    /// does not parse or verify is junk, with or without an organization.
     fn epoch_envelope_genuine(&self, blob: &[u8], epoch: u32) -> bool {
-        match SignedEpoch::parse(blob) {
-            Some(env) => {
-                env.epoch == epoch
-                    && self.trusted(&env.issuer)
-                    && self.org_may_revoke(&env.issuer)
-                    && self
-                        .device_key(&env.issuer)
-                        .is_some_and(|pk| env.verify(&self.vault.vault_id, &pk).is_ok())
-            }
-            None => self.org.is_none(),
-        }
+        SignedEpoch::parse(blob).is_some_and(|env| {
+            env.epoch == epoch
+                && self.trusted(&env.issuer)
+                && self.org_may_revoke(&env.issuer)
+                && self
+                    .device_key(&env.issuer)
+                    .is_some_and(|pk| env.verify(&self.vault.vault_id, &pk).is_ok())
+        })
     }
 
     /// Whether a policy or placement record written by `device` is adopted.
@@ -1387,16 +1382,10 @@ impl Engine {
             bail!("this device has no storage to publish the removal to");
         }
         // The epoch record first: put-if-absent makes two concurrent
-        // rotations collide here instead of splitting the vault.
-        // Signed in an organization, where only administrators may rotate
-        // and junk under an epoch number must be told apart; the bare,
-        // older form otherwise, which devices still on alpha.9 can adopt
-        // (without an organization any device may rotate anyway).
-        let blob = if self.org.is_some() {
-            SignedEpoch::seal(&record, &self.vault.vault_id, &new_key, &self.keys.signer)?
-        } else {
-            record.seal(&self.vault.vault_id, &new_key)?
-        };
+        // rotations collide here instead of splitting the vault. Always
+        // signed, so junk under an epoch number is told apart and the
+        // order of revocations follows the chain of signed epochs.
+        let blob = SignedEpoch::seal(&record, &self.vault.vault_id, &new_key, &self.keys.signer)?;
         for (i, (_, b)) in storages.iter().enumerate() {
             if !b.put_if_absent(&EpochRecord::storage_key(new), &blob)? && i == 0 {
                 bail!(

@@ -607,13 +607,27 @@ impl Engine {
                 objects = remote_objects(backend.as_ref(), &me, 0)?;
                 present = batches_of(&objects);
             }
-            if let Some(&newest) = present.last() {
-                if newest > head.seq {
+            // Only objects this device's key signed are its history; junk
+            // under its name is noted and never taken for a fork.
+            for newest in present.iter().rev().take_while(|n| **n > head.seq) {
+                if self.own_object_genuine(
+                    spec.name(),
+                    backend.as_ref(),
+                    &LedgerObject::Batch(*newest),
+                )? {
                     bail!("ledger fork: storage {} holds batch {} of this device, newer than its own last batch {} (restored from an old copy?)", backend.name(), newest, head.seq);
                 }
             }
-            if let Some(&newest) = checkpoints_of(&objects).last() {
-                if newest > head.seq {
+            for newest in checkpoints_of(&objects)
+                .iter()
+                .rev()
+                .take_while(|n| **n > head.seq)
+            {
+                if self.own_object_genuine(
+                    spec.name(),
+                    backend.as_ref(),
+                    &LedgerObject::Checkpoint(*newest),
+                )? {
                     bail!("ledger fork: storage {} holds checkpoint {} of this device, newer than its own last batch {} (restored from an old copy?)", backend.name(), newest, head.seq);
                 }
             }
@@ -632,9 +646,23 @@ impl Engine {
                         if let (Some(remote), Some(batch)) =
                             (backend.get(&key)?, self.ledger.get(&me, seq)?)
                         {
-                            let remote: SignedBatch = serde_json::from_slice(&remote)?;
-                            if remote.hash != batch.hash {
-                                bail!("ledger fork: storage {} already holds a different batch {} of this device (restored from an old copy?)", backend.name(), seq);
+                            let remote = serde_json::from_slice::<SignedBatch>(&remote)
+                                .ok()
+                                .filter(|r| r.device == me && r.seq == seq);
+                            match remote {
+                                Some(r) if r.hash == batch.hash => {}
+                                Some(r) if r.verify(&self.keys.signer.public()).is_ok() => {
+                                    bail!("ledger fork: storage {} already holds a different batch {} of this device (restored from an old copy?)", backend.name(), seq);
+                                }
+                                _ => {
+                                    // Junk occupies the name: noted; the
+                                    // other storages hold the batch.
+                                    self.own_object_genuine(
+                                        spec.name(),
+                                        backend.as_ref(),
+                                        &LedgerObject::Batch(seq),
+                                    )?;
+                                }
                             }
                         }
                     }
@@ -645,15 +673,28 @@ impl Engine {
                 };
                 let written = backend.put_if_absent(&key, &serde_json::to_vec(&batch)?)?;
                 if !written {
-                    bail!(
-                        "ledger fork: batch {} of this device appeared on {} concurrently",
-                        seq,
-                        backend.name()
-                    );
+                    let same = backend
+                        .get(&key)?
+                        .and_then(|b| serde_json::from_slice::<SignedBatch>(&b).ok())
+                        .is_some_and(|r| r.hash == batch.hash);
+                    if !same
+                        && self.own_object_genuine(
+                            spec.name(),
+                            backend.as_ref(),
+                            &LedgerObject::Batch(seq),
+                        )?
+                    {
+                        bail!(
+                            "ledger fork: batch {} of this device appeared on {} concurrently",
+                            seq,
+                            backend.name()
+                        );
+                    }
                 }
             }
             self.ledger.set_pushed(spec.name(), head.seq)?;
         }
+        self.ledger_alarm.watch.save(&self.home);
         Ok(())
     }
 
@@ -669,7 +710,7 @@ impl Engine {
         devices.sort();
         let mut forks = BTreeSet::new();
         let (mut malformed, mut refused) = (0u64, 0u64);
-        for (_, backend) in self.metadata_storages(false)? {
+        for (spec, backend) in self.metadata_storages(false)? {
             for dev in &devices {
                 let head = self.ledger.head(dev);
                 if !self.batch_accepted(dev, head.seq + 1) {
@@ -686,12 +727,19 @@ impl Engine {
                 }
                 let pk = &dir[dev];
                 if dev == &me {
-                    if checkpoints_of(&objects)
-                        .last()
-                        .is_some_and(|n| *n > self.ledger.head(&me).seq)
-                    {
-                        forks.insert(me.clone());
-                        self.mark_forked(&me)?;
+                    // Only a checkpoint this device's key signed fences it:
+                    // anything else under its name is junk.
+                    let own_head = self.ledger.head(&me).seq;
+                    for n in checkpoints_of(&objects).into_iter().rev() {
+                        if n <= own_head {
+                            break;
+                        }
+                        let o = LedgerObject::Checkpoint(n);
+                        if self.own_object_genuine(spec.name(), backend.as_ref(), &o)? {
+                            forks.insert(me.clone());
+                            self.mark_forked(&me)?;
+                            break;
+                        }
                     }
                 } else if let Some(n) = checkpoints_of(&objects)
                     .into_iter()
@@ -718,22 +766,49 @@ impl Engine {
                     {
                         continue;
                     }
+                    if dev == &me
+                        && self
+                            .ledger_alarm
+                            .watch
+                            .junk
+                            .get(spec.name())
+                            .is_some_and(|j| j.contains(&SignedBatch::storage_key(dev, seq)))
+                    {
+                        // Known junk under this device's name.
+                        continue;
+                    }
                     let Some(blob) = backend.get(&SignedBatch::storage_key(dev, seq))? else {
                         continue;
                     };
                     // One storage holding a damaged or planted object does
                     // not stop the pull: another storage may hold the batch.
-                    let Ok(signed) = serde_json::from_slice::<SignedBatch>(&blob) else {
-                        malformed += 1;
+                    let parsed = serde_json::from_slice::<SignedBatch>(&blob)
+                        .ok()
+                        .filter(|b| &b.device == dev && b.seq == seq);
+                    let Some(signed) = parsed else {
+                        if dev == &me {
+                            self.own_object_genuine(
+                                spec.name(),
+                                backend.as_ref(),
+                                &LedgerObject::Batch(seq),
+                            )?;
+                        } else {
+                            malformed += 1;
+                        }
                         continue;
                     };
-                    if &signed.device != dev || signed.seq != seq {
-                        malformed += 1;
-                        continue;
-                    }
                     // A batch under a key this device lacks is kept unread.
                     let key = self.key_for_id(&signed.key_id);
                     if dev == &me && seq > self.ledger.head(&me).seq {
+                        if signed.verify(pk).is_err() {
+                            // Not signed by this device: junk, it fences nothing.
+                            self.own_object_genuine(
+                                spec.name(),
+                                backend.as_ref(),
+                                &LedgerObject::Batch(seq),
+                            )?;
+                            continue;
+                        }
                         // Another copy of this device identity published ahead of us.
                         forks.insert(me.clone());
                         let _ = self.ledger.ingest_with(signed, pk, key.as_ref());

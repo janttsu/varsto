@@ -379,3 +379,69 @@ fn forged_wipe_order_is_ignored() {
     assert!(a.devices_list().iter().all(|d| !d.revoked));
     assert_eq!(a.key_epoch(), 0);
 }
+
+/// Junk under a device's own ledger name (anyone with the storage's
+/// credentials can write it) does not fence the device: only an object its
+/// own key signed does. It is reported, and `ledger clean-junk` deletes it
+/// and nothing else (`docs/spec/alpha-0-format.md` section 58).
+#[test]
+fn junk_under_a_devices_ledger_name_does_not_fence_it() {
+    let lab = Lab::new();
+    let (mut a, mut b, _c, _) = three_devices(&lab);
+    let own = lab.store().join("ledger").join(a.device_id().as_str());
+    fs::write(own.join("9999999999999999.json"), b"junk").unwrap();
+    fs::write(
+        own.join("checkpoint-9999999999999998.json"),
+        b"{\"not\": \"a checkpoint\"}",
+    )
+    .unwrap();
+    // A copy of a real batch of another device, under A's name.
+    let theirs = fs::read_dir(lab.store().join("ledger").join(b.device_id().as_str()))
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .find(|p| p.extension().is_some_and(|x| x == "json"))
+        .unwrap();
+    fs::copy(theirs, own.join("9999999999999997.json")).unwrap();
+
+    fs::write(lab.dir("a").join("two.txt"), b"after the junk").unwrap();
+    a.sync(None).expect("junk does not fence the device");
+    let h = a.ledger_health();
+    assert_eq!(h.state, "ok", "{h:?}");
+    assert_eq!(h.junk_objects, 3, "{h:?}");
+    assert!(h.describe().contains("clean-junk"));
+    assert_eq!(a.ledger_check_storages().unwrap().state, "ok");
+    b.sync(None).unwrap();
+    assert!(lab.dir("b").join("two.txt").exists());
+
+    let dry = a.ledger_clean_junk(true).unwrap();
+    assert_eq!(dry.junk.len(), 3, "{dry:?}");
+    assert_eq!(dry.deleted, 0);
+    let names = |p: &Path| fs::read_dir(p).unwrap().count();
+    let before = names(&own);
+    let done = a.ledger_clean_junk(false).unwrap();
+    assert_eq!(done.deleted, 3);
+    assert_eq!(names(&own), before - 3);
+    assert!(done.genuine > 0);
+    assert_eq!(a.ledger_health().junk_objects, 0);
+    fs::write(lab.dir("a").join("three.txt"), b"still fine").unwrap();
+    a.sync(None).unwrap();
+}
+
+/// Junk under the next key epoch number does not stop a removal, with or
+/// without an organization: a number taken by anything but a signed epoch
+/// record of a trusted device is skipped.
+#[test]
+fn junk_epoch_record_does_not_block_revocation() {
+    let lab = Lab::new();
+    let (mut a, mut b, _c, _) = three_devices(&lab);
+    let epochs = lab.store().join("vault/epochs");
+    fs::create_dir_all(&epochs).unwrap();
+    fs::write(epochs.join("00000001.enc"), b"junk").unwrap();
+    let r = a
+        .revoke_device("c", false)
+        .expect("junk does not block the removal");
+    assert_eq!(r.key_epoch, 2);
+    b.sync(None).unwrap();
+    assert_eq!(b.key_epoch(), 2);
+    assert!(b.devices_list().iter().any(|d| d.name == "c" && d.revoked));
+}

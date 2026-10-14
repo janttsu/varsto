@@ -34,6 +34,7 @@ use crate::snapshot::Snapshot;
 /// What the command line suggests.
 pub const REBUILD_COMMAND: &str = "varsto ledger rebuild";
 pub const REBUILD_FROM_STORAGE_COMMAND: &str = "varsto ledger rebuild --from-storage";
+pub const CLEAN_JUNK_COMMAND: &str = "varsto ledger clean-junk --yes";
 const REPAIR_ADVICE: &str =
     "pair this computer again as a new device (`varsto reset --yes`, then `varsto join`)";
 
@@ -96,6 +97,11 @@ pub(super) struct Watch {
     /// Events left out of the view because their signer may not make them.
     #[serde(default)]
     pub(super) events_refused: u64,
+    /// Objects under this device's own ledger prefix that do not verify
+    /// with its key, by storage name: junk someone else wrote. They never
+    /// fence this device; `varsto ledger clean-junk --yes` deletes them.
+    #[serde(default)]
+    pub(super) junk: BTreeMap<String, BTreeSet<String>>,
 }
 
 const WATCH_FILE: &str = "ledger/watch.json";
@@ -150,6 +156,10 @@ pub struct LedgerHealth {
     /// replica's or a member's outside its scope).
     #[serde(default)]
     pub events_refused: u64,
+    /// Objects under this device's own ledger name on the storages that
+    /// it did not sign (junk; `varsto ledger clean-junk --yes`).
+    #[serde(default)]
+    pub junk_objects: u64,
     /// Things worth knowing that do not stop syncing.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub warnings: Vec<String>,
@@ -358,6 +368,17 @@ pub struct StorageRebuildReport {
     pub batches: u64,
 }
 
+/// What `ledger_clean_junk` found and deleted.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct JunkReport {
+    pub dry_run: bool,
+    /// This device's own objects that verify (left alone).
+    pub genuine: u64,
+    /// "<storage>: <object>" for each object that does not.
+    pub junk: Vec<String>,
+    pub deleted: u64,
+}
+
 /// What `ledger_rebuild` did.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct LedgerRebuildReport {
@@ -509,6 +530,12 @@ impl Engine {
                 )
             })
             .collect();
+        let junk: u64 = a.watch.junk.values().map(|k| k.len() as u64).sum();
+        if junk > 0 {
+            warnings.push(format!(
+                "{junk} objects under this device's ledger name on the storages were not signed by it (junk, ignored); `{CLEAN_JUNK_COMMAND}` deletes them"
+            ));
+        }
         if a.watch.malformed > 0 {
             warnings.push(format!(
                 "{} ledger batches on a storage did not parse or verify and were skipped",
@@ -527,6 +554,7 @@ impl Engine {
             batches_malformed: a.watch.malformed,
             batches_refused: a.watch.refused,
             events_refused: a.watch.events_refused,
+            junk_objects: junk,
             warnings,
         }
     }
@@ -558,31 +586,125 @@ impl Engine {
     }
 
     /// Own batches or checkpoints after the local head on the first hot
-    /// metadata storage that answers: `Some(newest)` when there are any.
-    fn own_objects_ahead(&self) -> Result<Option<u64>> {
-        let me = &self.vault.device_id;
-        let head = self.ledger.head(me).seq;
+    /// metadata storage that answers: `Some(newest)` when there are any
+    /// that this device's key signed. Anything else under its name is junk
+    /// (noted, never a reason to stop signing).
+    fn own_objects_ahead(&mut self) -> Result<Option<u64>> {
+        let me = self.vault.device_id.clone();
+        let head = self.ledger.head(&me).seq;
         let prefix = format!("ledger/{me}/");
         let start = if head == 0 {
             String::new()
         } else {
-            SignedBatch::storage_key(me, head)
+            SignedBatch::storage_key(&me, head)
         };
-        for (_, backend) in self.metadata_storages(false)? {
+        for (spec, backend) in self.metadata_storages(false)? {
             let Ok(keys) = backend.list_after(&prefix, &start) else {
                 continue;
             };
-            let newest = keys
-                .iter()
-                .filter_map(|k| k.strip_prefix(&prefix).and_then(LedgerObject::parse))
-                .map(|o| match o {
+            let mut newest = None;
+            for k in keys {
+                let Some(o) = k.strip_prefix(&prefix).and_then(LedgerObject::parse) else {
+                    continue;
+                };
+                let seq = match o {
                     LedgerObject::Batch(s) | LedgerObject::Checkpoint(s) => s,
-                })
-                .filter(|s| *s > head)
-                .max();
+                };
+                if seq <= head || newest.is_some_and(|n| n >= seq) {
+                    continue;
+                }
+                if self.own_object_genuine(spec.name(), backend.as_ref(), &o)? {
+                    newest = Some(seq);
+                }
+            }
+            self.ledger_alarm.watch.save(&self.home);
             return Ok(newest);
         }
         Ok(None)
+    }
+
+    /// Whether the own ledger object `o` on a storage was signed by this
+    /// device: it parses as a batch or checkpoint of this device under that
+    /// number and verifies with this device's key. One that does not is
+    /// junk: noted (`Watch::junk`) and not read again. Objects that do not
+    /// answer are neither.
+    pub(super) fn own_object_genuine(
+        &mut self,
+        storage: &str,
+        backend: &dyn Storage,
+        o: &LedgerObject,
+    ) -> Result<bool> {
+        let me = self.vault.device_id.clone();
+        let key = match o {
+            LedgerObject::Batch(s) => SignedBatch::storage_key(&me, *s),
+            LedgerObject::Checkpoint(s) => SignedCheckpoint::storage_key(&me, *s),
+        };
+        if self
+            .ledger_alarm
+            .watch
+            .junk
+            .get(storage)
+            .is_some_and(|j| j.contains(&key))
+        {
+            return Ok(false);
+        }
+        let Some(blob) = backend.get(&key)? else {
+            return Ok(false);
+        };
+        let pk = self.keys.signer.public();
+        let genuine = match o {
+            LedgerObject::Batch(s) => serde_json::from_slice::<SignedBatch>(&blob)
+                .is_ok_and(|b| b.device == me && b.seq == *s && b.verify(&pk).is_ok()),
+            LedgerObject::Checkpoint(s) => serde_json::from_slice::<SignedCheckpoint>(&blob)
+                .is_ok_and(|c| c.device == me && c.seq == *s && c.verify(&pk).is_ok()),
+        };
+        if !genuine {
+            log::warn!(storage = storage, key = key.as_str(); "junk under this device's ledger name");
+            self.ledger_alarm
+                .watch
+                .junk
+                .entry(storage.to_string())
+                .or_default()
+                .insert(key);
+        }
+        Ok(genuine)
+    }
+
+    /// Delete the junk under this device's own ledger name on every hot
+    /// metadata storage: objects that do not verify with its key, and
+    /// names it never writes. With `dry_run` they are only listed. Its
+    /// genuine objects are never touched, whatever their number.
+    pub fn ledger_clean_junk(&mut self, dry_run: bool) -> Result<JunkReport> {
+        self.ensure_active()?;
+        let me = self.vault.device_id.clone();
+        let prefix = format!("ledger/{me}/");
+        let mut report = JunkReport {
+            dry_run,
+            ..Default::default()
+        };
+        self.ledger_alarm.watch.junk.clear();
+        for (spec, backend) in self.metadata_storages(false)? {
+            for key in backend.list(&prefix)? {
+                let genuine = match key.strip_prefix(&prefix).and_then(LedgerObject::parse) {
+                    Some(o) => self.own_object_genuine(spec.name(), backend.as_ref(), &o)?,
+                    None => false,
+                };
+                if genuine {
+                    report.genuine += 1;
+                    continue;
+                }
+                report.junk.push(format!("{}: {key}", spec.name()));
+                if !dry_run {
+                    backend.delete(&key)?;
+                    report.deleted += 1;
+                }
+            }
+        }
+        if !dry_run {
+            self.ledger_alarm.watch.junk.clear();
+        }
+        self.ledger_alarm.watch.save(&self.home);
+        Ok(report)
     }
 
     /// Before signing: a storage that holds this identity's batches after
@@ -998,7 +1120,19 @@ impl Engine {
         // every batch after what is held; `ingest_with` checks that each
         // chains onto the one before, here or in the checkpoint.
         let held_to = self.ledger.head(&me).seq;
-        if let Some((&cseq, cholders)) = listing.checkpoints.iter().next_back() {
+        // The newest checkpoint this device's key signed: junk under its
+        // name (a higher number that does not verify) is passed over.
+        let newest_cp = listing
+            .checkpoints
+            .iter()
+            .rev()
+            .find(|(seq, holders)| {
+                self.fetch_own_checkpoint(&storages, holders, **seq, cold_ok)
+                    .is_some()
+                    || holders.iter().all(|i| storages[*i].0.is_cold())
+            })
+            .or_else(|| listing.checkpoints.iter().next_back());
+        if let Some((&cseq, cholders)) = newest_cp {
             let base = self.ledger.head(&me).base.map(|b| b.seq).unwrap_or(0);
             if cseq > held_to.max(base) {
                 if let Some(cp) = self.fetch_own_checkpoint(&storages, cholders, cseq, cold_ok) {
@@ -1044,11 +1178,9 @@ impl Engine {
             if seq <= now.seq || now.base.as_ref().is_some_and(|b| seq <= b.seq) {
                 continue;
             }
-            if seq > now.seq + 1 && !now.base.as_ref().is_some_and(|b| b.seq + 1 >= seq) {
-                gap = true;
-            }
             let signed = match self.fetch_own_batch(&storages, h, seq, cold_ok)? {
                 Fetched::One(b) => b,
+                // Junk under this device's name: not its history.
                 Fetched::None => continue,
                 Fetched::Disagree => {
                     return self.refuse_fork(format!(
@@ -1056,6 +1188,9 @@ impl Engine {
                     ))
                 }
             };
+            if seq > now.seq + 1 && !now.base.as_ref().is_some_and(|b| b.seq + 1 >= seq) {
+                gap = true;
+            }
             let key = self.key_for_id(&signed.key_id);
             // Its own history continues past a gap no storage can fill:
             // signing a number it already used would be a fork.
