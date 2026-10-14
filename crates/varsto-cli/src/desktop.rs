@@ -946,6 +946,15 @@ fn opt(v: &Value, key: &str) -> Option<String> {
         .filter(|x| !x.is_empty())
 }
 
+/// A boolean field: `true`, or the strings "true", "1", "on" (a form).
+fn flag(v: &Value, key: &str) -> bool {
+    match v.get(key) {
+        Some(Value::Bool(b)) => *b,
+        Some(Value::String(s)) => matches!(s.trim(), "true" | "1" | "on"),
+        _ => false,
+    }
+}
+
 /// A backup schedule field: "daily", "weekly", "manual", or the form the
 /// command line sends (`{"every_hours": N}`). Absent: none given.
 fn backup_schedule(v: &Value) -> Result<Option<varsto_core::vault::BackupSchedule>> {
@@ -1055,6 +1064,7 @@ fn storage_from_input(
                 storage_class: None,
                 cold: false,
                 place: opt(input, "place").unwrap_or_else(|| default_place.into()),
+                allow_insecure_http: flag(input, "insecure_http"),
             },
             Some(secret),
         ));
@@ -1457,6 +1467,7 @@ fn api(st: &mut State, method: Method, path: &str, query: &str, input: &Value) -
                     storage_class: None,
                     cold: false,
                     place: opt(input, "place").unwrap_or_else(|| "cloud".into()),
+                    allow_insecure_http: flag(input, "insecure_http"),
                 }
             } else {
                 StorageSpec::LocalDir {
@@ -1854,6 +1865,7 @@ fn api_unlocked(
                             storage_class: class,
                             cold,
                             place: opt(input, "place").unwrap_or_default(),
+                            allow_insecure_http: flag(input, "insecure_http"),
                         },
                         Some(s(input, "secret_access_key")?),
                     )?;

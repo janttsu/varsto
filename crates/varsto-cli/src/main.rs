@@ -124,6 +124,9 @@ enum Cmd {
         /// Secret access key; read from VARSTO_S3_SECRET if omitted.
         #[arg(long, env = "VARSTO_S3_SECRET", hide_env_values = true)]
         s3_secret_access_key: Option<String>,
+        /// Allow an http:// endpoint outside this computer (no transport encryption).
+        #[arg(long, requires = "s3_endpoint")]
+        s3_insecure_http: bool,
     },
     /// Manage storages.
     Storage {
@@ -977,6 +980,9 @@ enum ShareCmd {
         /// Secret access key; read from VARSTO_S3_SECRET if omitted.
         #[arg(long, env = "VARSTO_S3_SECRET", hide_env_values = true)]
         s3_secret_access_key: Option<String>,
+        /// Allow an http:// endpoint outside this computer (no transport encryption).
+        #[arg(long, requires = "s3_endpoint")]
+        s3_insecure_http: bool,
     },
 }
 
@@ -1076,6 +1082,11 @@ enum StorageCmd {
         /// Use virtual-host style URLs (bucket.host) instead of path style.
         #[arg(long)]
         virtual_host: bool,
+        /// Allow an http:// endpoint outside this computer: the request signatures and the
+        /// (encrypted) objects then travel without transport encryption. A loopback address
+        /// needs no flag.
+        #[arg(long)]
+        insecure_http: bool,
         /// Storage class for new objects (DEEP_ARCHIVE, GLACIER_IR, STANDARD_IA, ...).
         #[arg(long)]
         storage_class: Option<String>,
@@ -2944,6 +2955,7 @@ fn run(cli: &Cli) -> Result<()> {
             s3_prefix,
             s3_access_key_id,
             s3_secret_access_key,
+            s3_insecure_http,
         } => {
             let mut s3_secret: Option<String> = None;
             let spec = match (s3_bucket, storage_path) {
@@ -2978,6 +2990,7 @@ fn run(cli: &Cli) -> Result<()> {
                         storage_class: None,
                         cold: false,
                         place: String::new(),
+                        allow_insecure_http: *s3_insecure_http,
                     }
                 }
                 (None, Some(path)) => StorageSpec::LocalDir {
@@ -3086,6 +3099,7 @@ fn run(cli: &Cli) -> Result<()> {
                     access_key_id,
                     secret_access_key,
                     virtual_host,
+                    insecure_http,
                     storage_class,
                     cold,
                     place,
@@ -3106,6 +3120,7 @@ fn run(cli: &Cli) -> Result<()> {
                                     c.contains("GLACIER") || c.contains("ARCHIVE")
                                 }),
                             place: place.clone(),
+                            allow_insecure_http: *insecure_http,
                         },
                         Some(secret_access_key.clone()),
                     )?;
@@ -4275,6 +4290,7 @@ fn run(cli: &Cli) -> Result<()> {
                 s3_prefix,
                 s3_access_key_id,
                 s3_secret_access_key,
+                s3_insecure_http,
             } => {
                 let token = token
                     .as_ref()
@@ -4305,6 +4321,7 @@ fn run(cli: &Cli) -> Result<()> {
                             storage_class: None,
                             cold: false,
                             place: String::new(),
+                            allow_insecure_http: *s3_insecure_http,
                         },
                         Some(s3_secret_access_key.clone().ok_or_else(|| {
                             anyhow!("give --s3-secret-access-key or set VARSTO_S3_SECRET")
@@ -7172,6 +7189,7 @@ mod recovery_guide_tests {
                     storage_class: Some("DEEP_ARCHIVE".into()),
                     cold: true,
                     place: "cloud".into(),
+                    allow_insecure_http: false,
                 },
                 StorageSpec::S3 {
                     name: "hot bucket".into(),
@@ -7185,6 +7203,7 @@ mod recovery_guide_tests {
                     storage_class: None,
                     cold: false,
                     place: String::new(),
+                    allow_insecure_http: false,
                 },
                 StorageSpec::Rclone {
                     name: "drive".into(),

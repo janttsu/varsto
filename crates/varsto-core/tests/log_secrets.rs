@@ -55,6 +55,7 @@ fn no_secret_reaches_the_log() {
         secret_access_key: s3_secret.into(),
         path_style: true,
         storage_class: None,
+        allow_insecure_http: false,
     };
     // Constructing the storage registers its secret; here register directly.
     logging::register_secret(s3_secret);
