@@ -16,7 +16,7 @@ spec still names them because sections were written as the work was done.
 
 ## Unreleased
 
-On `main` after 0.0.1-alpha.13; spec sections 32 to 57.
+On `main` after 0.0.1-alpha.13; spec sections 32 to 58.
 
 ### Added
 
@@ -76,6 +76,15 @@ On `main` after 0.0.1-alpha.13; spec sections 32 to 57.
   per sync, S3 conditional writes are probed once and skip the HEAD before
   PUT, uploads go to several storages side by side (spec 12); a sync scans
   each folder once; release builds use thin LTO and mimalloc.
+
+### Security
+
+- Ledger authorization and gap handling (spec 58): replicas and members of
+  shared folders count only for their own claims and folder, checkpoints
+  speak only for their signer, a withheld batch holds back the ones after it
+  and is reported, junk under a device's ledger name no longer fences it
+  (`varsto ledger clean-junk`), and revocations follow the order of the key
+  epochs (`varsto device resolve-epoch` when two share a number).
 
 ## [0.0.1-alpha.13] - 2026-10-13
 

@@ -131,6 +131,18 @@ Format and rules are in `alpha-0-format.md` section 22. This section states what
 
 A `chunk_dropped` event (alpha-0-format.md section 23) is a device's signed statement "I removed this object from this storage". Like a claim it is self-attested, and it is the only event by which one device's batch makes other devices' claims stop counting (as a storage retirement does for a whole storage): a full device of the vault can declare any copy gone. That adds no power such a device lacked, since it holds the storage credentials and could delete the objects; a false drop makes copies count less, never more, so a policy errs on the safe side, and a block left without any other copy is written again by the next push where the placement allows. A drop is ordered against claims by Lamport time; a verification after a drop does not revive the copy. Checkpoints carry drops like claims, so a device that only sees a checkpoint still sees them.
 
+## 11. Who may sign what, gaps and fencing (after 0.0.1-alpha.13)
+
+`alpha-0-format.md` section 58 has the rules; this section states what they mean for trust.
+
+**A signature proves authorship, not authority.** Replicas and members of shared folders hold device keys and sign batches like full devices. What their batches may change is decided by the key id and the signer's role: a replica's batch can only claim objects, a member's only touch its folder, and only full devices retire storages, add folders, expire snapshots or stop backups. A checkpoint is read only from a full device and only for its own statements. Without these rules a replica or a member could make every device delete backup snapshots or forget copies.
+
+**Gaps are visible, not silent.** Model B's sequence numbers and hash chain (section 6) make a missing batch evident; a reader now keeps a batch whose predecessor is missing aside instead of counting it, and asks every storage again. Rule 4 of section 7 (exchange the latest signed headers) is realised through the storages: each full device's batches carry `seen`, the newest batch of every other device it held, and a reader whose head is behind another device's acknowledgement for three pulls reports that a storage may be withholding batches. A storage that hides a batch from everyone, and every acknowledgement of it, is still not caught.
+
+**Fencing needs a signature.** A device fences itself only on an object that its own key signed and that it did not write; junk under its name is reported and can be deleted. Previously a name alone (`ledger/<device>/9999999999999999.json`) stopped a device for good.
+
+**Ordering of membership changes.** Revocations are ordered by the chain of signed key epoch records (put-if-absent decides the number), not by the timestamps their issuers choose; two records under one number wait for the user's choice. The key id of a batch is still outside its signature (a format change, planned).
+
 ## Sources
 
 All checked on 2026-10-08.

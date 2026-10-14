@@ -115,8 +115,8 @@ pub use ledger_recovery::{
 };
 pub use manifest_upkeep::ManifestPolicy;
 pub use membership::{
-    removal_notice, DeviceInfo, DeviceRemoved, EpochRecord, Grant, KemRecord, Removal, Revocation,
-    RevokeReport, Revoked, SignedEpoch, SignedRevocation,
+    removal_notice, DeviceInfo, DeviceRemoved, EpochForks, EpochRecord, Grant, KemRecord, Removal,
+    Revocation, RevokeReport, Revoked, SignedEpoch, SignedRevocation,
 };
 pub use notes::{
     check_analysis, AnalysisHit, FileAnalysis, NotesExchangeReport, ANALYSIS_MAX_BYTES,

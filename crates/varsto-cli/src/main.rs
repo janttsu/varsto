@@ -489,6 +489,16 @@ enum DeviceCmd {
         #[arg(long)]
         yes: bool,
     },
+    /// Two devices wrote the same key epoch at once (each removing a
+    /// device): keep the epoch of one of them. Until then this device signs
+    /// nothing.
+    ResolveEpoch {
+        /// The key epoch number (see `varsto ledger status`).
+        epoch: u32,
+        /// The device whose epoch to keep (name or id).
+        #[arg(long)]
+        keep: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -4556,6 +4566,21 @@ fn run(cli: &Cli) -> Result<()> {
             }
         }
         Cmd::Device { cmd } => match cmd {
+            DeviceCmd::ResolveEpoch { epoch, keep } => {
+                let mut engine = open_engine(&home)?;
+                engine.resolve_epoch_fork(*epoch, keep)?;
+                print(cli, engine.epoch_forks(), |f| {
+                    format!(
+                        "kept {} for key epoch {epoch}; {}",
+                        keep,
+                        if f.unresolved().is_empty() {
+                            "this device signs again".to_string()
+                        } else {
+                            format!("still to choose: key epochs {:?}", f.unresolved())
+                        }
+                    )
+                })?;
+            }
             DeviceCmd::List => {
                 let engine = open_engine(&home)?;
                 let list = engine.devices_list();

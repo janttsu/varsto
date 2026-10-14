@@ -445,3 +445,93 @@ fn junk_epoch_record_does_not_block_revocation() {
     assert_eq!(b.key_epoch(), 2);
     assert!(b.devices_list().iter().any(|d| d.name == "c" && d.revoked));
 }
+
+/// Revocations apply in the order of the key epochs they started, not of
+/// their timestamps, which the issuer chooses: after A removed C in epoch
+/// 1, C (a stolen device running a modified client) removes A in epoch 2
+/// with a revocation dated 2000-01-01. Every other device keeps A and
+/// ignores C (`docs/spec/alpha-0-format.md` section 58).
+#[test]
+fn a_backdated_revocation_does_not_win() {
+    let lab = Lab::new();
+    let (mut a, mut b, mut c, _) = three_devices(&lab);
+    let r = a.revoke_device("c", false).unwrap();
+    assert_eq!(r.key_epoch, 1);
+    // C has not pulled since; it removes A without looking.
+    let forged = c.revoke_unchecked("a", 946_684_800).unwrap();
+    assert_eq!(forged.key_epoch, 2);
+
+    b.sync(None).unwrap();
+    let list = b.devices_list();
+    let a_entry = list.iter().find(|d| d.name == "a").unwrap();
+    let c_entry = list.iter().find(|d| d.name == "c").unwrap();
+    assert!(
+        !a_entry.revoked,
+        "A was removed by the backdated revocation"
+    );
+    assert!(c_entry.revoked);
+    assert_eq!(b.key_epoch(), 1, "C's epoch is not adopted");
+    a.sync(None).unwrap();
+    assert!(a.removal().is_none());
+    fs::write(lab.dir("a").join("after.txt"), b"A still writes").unwrap();
+    a.sync(None).unwrap();
+    b.sync(None).unwrap();
+    assert!(lab.dir("b").join("after.txt").exists());
+}
+
+/// Two devices that each remove the other at the same moment, through
+/// different first storages, write two key epochs under one number. Every
+/// device that sees both records it, signs nothing until the user keeps
+/// one, and then follows the kept one only.
+#[test]
+fn two_epochs_under_one_number_wait_for_a_choice() {
+    let lab = Lab::new();
+    let (mut a, mut b, c0, _) = three_devices(&lab);
+    drop(c0);
+    let second_dir = lab.root.join("second");
+    let second = StorageSpec::LocalDir {
+        name: "second".into(),
+        path: second_dir.clone(),
+        cold: false,
+        carrier: false,
+        place: String::new(),
+        min_free: None,
+    };
+    a.add_storage(second.clone()).unwrap();
+    a.sync(None).unwrap();
+    b.add_storage(second.clone()).unwrap();
+    b.sync(None).unwrap();
+    // C2 works through the second storage only.
+    let key = a.export_vault_key().unwrap();
+    let mut c = small(Engine::join(&lab.home("c2"), "c2", PASS, &key, second).unwrap());
+    a.sync(None).unwrap();
+    b.sync(None).unwrap();
+    c.sync(None).unwrap();
+    // A removes C2; at the same moment C2 removes A, and on the second
+    // storage C2's record took the number first.
+    let r = a.revoke_device("c2", false).unwrap();
+    assert_eq!(r.key_epoch, 1);
+    fs::remove_file(second_dir.join("vault/epochs/00000001.enc")).unwrap();
+    assert_eq!(c.revoke_unchecked("a", 946_684_800).unwrap().key_epoch, 1);
+
+    fs::write(lab.dir("b").join("b-file.txt"), b"wants to be signed").unwrap();
+    let err = b.sync(None).unwrap_err();
+    assert!(format!("{err:#}").contains("resolve-epoch"), "{err:#}");
+    let h = b.ledger_health();
+    assert_eq!(h.state, "epoch_fork", "{h:?}");
+    assert_eq!(b.epoch_forks().unresolved(), vec![1]);
+    assert!(b.resolve_epoch_fork(1, "nobody").is_err());
+    b.resolve_epoch_fork(1, "a").unwrap();
+    b.sync(None).unwrap();
+    assert_eq!(b.ledger_health().state, "ok");
+    let list = b.devices_list();
+    assert!(!list.iter().find(|d| d.name == "a").unwrap().revoked);
+    assert!(list.iter().find(|d| d.name == "c2").unwrap().revoked);
+    assert_eq!(b.key_epoch(), 1);
+    // A saw both as well, and was not removed by C2's record.
+    let _ = a.sync(None);
+    assert!(a.removal().is_none());
+    a.resolve_epoch_fork(1, "a").unwrap();
+    a.sync(None).unwrap();
+    assert!(lab.dir("a").join("b-file.txt").exists());
+}

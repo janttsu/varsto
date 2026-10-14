@@ -35,6 +35,7 @@ use crate::snapshot::Snapshot;
 pub const REBUILD_COMMAND: &str = "varsto ledger rebuild";
 pub const REBUILD_FROM_STORAGE_COMMAND: &str = "varsto ledger rebuild --from-storage";
 pub const CLEAN_JUNK_COMMAND: &str = "varsto ledger clean-junk --yes";
+pub const RESOLVE_EPOCH_COMMAND: &str = "varsto device resolve-epoch";
 const REPAIR_ADVICE: &str =
     "pair this computer again as a new device (`varsto reset --yes`, then `varsto join`)";
 
@@ -56,7 +57,7 @@ const LOST_CHECK_EVERY: i64 = 3600;
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct LedgerProblem {
     /// `local_ledger_missing`, `local_files_damaged`, `local_batches_missing`,
-    /// `behind_pushed`, `behind_storage`, `fenced`, `forked`,
+    /// `behind_pushed`, `behind_storage`, `fenced`, `forked`, `epoch_fork`,
     /// `no_ledger_anywhere`.
     pub code: String,
     pub detail: String,
@@ -123,8 +124,9 @@ impl Watch {
 /// interface. `state` is `ok`, `rebuild_needed` (the local ledger was lost
 /// or damaged), `fenced` (the storages hold newer batches of this device
 /// than it has), `forked` (another copy of this identity signed a
-/// different history), `no_ledger` (no ledger anywhere while folders hold
-/// files) or `repairing`.
+/// different history), `epoch_fork` (two devices wrote one key epoch
+/// number; the user keeps one), `no_ledger` (no ledger anywhere while
+/// folders hold files) or `repairing`.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct LedgerHealth {
     pub state: String,
@@ -464,6 +466,23 @@ struct OwnListing {
 }
 
 impl Engine {
+    /// One sentence on key epoch `e`, written by two devices.
+    fn epoch_fork_detail(&self, e: u32) -> String {
+        let who: Vec<String> = self
+            .epochs
+            .forks
+            .found
+            .get(&e)
+            .into_iter()
+            .flatten()
+            .map(|d| format!("{} ({})", self.device_name(d), d.short()))
+            .collect();
+        format!(
+            "two devices wrote key epoch {e} at once: {}",
+            who.join(" and ")
+        )
+    }
+
     /// The ledger's state as far as this device knows without reading a
     /// storage (see `ledger_check_storages` for the one cheap read).
     pub fn ledger_health(&self) -> LedgerHealth {
@@ -490,6 +509,13 @@ impl Engine {
                 detail: "the storages hold newer ledger batches of this device than it has (restored from an older copy?); it signs nothing until it continues from them".into(),
             });
         }
+        let epoch_forks = self.epochs.forks.unresolved();
+        for e in &epoch_forks {
+            problems.push(LedgerProblem {
+                code: "epoch_fork".into(),
+                detail: self.epoch_fork_detail(*e),
+            });
+        }
         if a.no_ledger {
             problems.push(LedgerProblem {
                 code: "no_ledger_anywhere".into(),
@@ -500,6 +526,8 @@ impl Engine {
             "repairing"
         } else if a.fork.is_some() {
             "forked"
+        } else if !epoch_forks.is_empty() {
+            "epoch_fork"
         } else if !a.local.is_empty() {
             "rebuild_needed"
         } else if a.no_ledger {
@@ -513,6 +541,10 @@ impl Engine {
             "rebuild_needed" | "fenced" => Some(REBUILD_COMMAND.to_string()),
             "no_ledger" => Some(REBUILD_FROM_STORAGE_COMMAND.to_string()),
             "forked" => Some(REPAIR_ADVICE.to_string()),
+            "epoch_fork" => Some(format!(
+                "{RESOLVE_EPOCH_COMMAND} {} --keep <device>",
+                epoch_forks[0]
+            )),
             _ => None,
         };
         // A fenced device that holds nothing of its own lost its ledger:
@@ -564,6 +596,12 @@ impl Engine {
     pub(super) fn ensure_ledger_writable(&self) -> Result<()> {
         if let Some(f) = &self.ledger_alarm.fork {
             bail!("{f}; this device signs nothing more: {REPAIR_ADVICE}");
+        }
+        if let Some(e) = self.epochs.forks.unresolved().first() {
+            bail!(
+                "{}; nothing is signed until you keep one: run `{RESOLVE_EPOCH_COMMAND} {e} --keep <device>`",
+                self.epoch_fork_detail(*e)
+            );
         }
         if !self.ledger_alarm.local.is_empty() {
             let what: Vec<&str> = self
