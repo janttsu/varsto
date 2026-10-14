@@ -110,8 +110,8 @@ pub use imports::{
     MissingFile,
 };
 pub use ledger_recovery::{
-    LedgerDeviceStatus, LedgerHealth, LedgerHolding, LedgerProblem, LedgerRebuildOptions,
-    LedgerRebuildReport, LedgerStatus, StorageRebuildReport,
+    LedgerBehind, LedgerDeviceStatus, LedgerHealth, LedgerHolding, LedgerProblem,
+    LedgerRebuildOptions, LedgerRebuildReport, LedgerStatus, StorageRebuildReport,
 };
 pub use manifest_upkeep::ManifestPolicy;
 pub use membership::{

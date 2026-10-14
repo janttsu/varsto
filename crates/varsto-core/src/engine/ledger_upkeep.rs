@@ -668,6 +668,7 @@ impl Engine {
         let mut devices: Vec<DeviceId> = dir.keys().cloned().collect();
         devices.sort();
         let mut forks = BTreeSet::new();
+        let (mut malformed, mut refused) = (0u64, 0u64);
         for (_, backend) in self.metadata_storages(false)? {
             for dev in &devices {
                 let head = self.ledger.head(dev);
@@ -712,14 +713,22 @@ impl Engine {
                         // A checkpoint held here covers it.
                         continue;
                     }
-                    if self.ledger.get(dev, seq)?.is_some() && !head.forked {
+                    if (self.ledger.get(dev, seq)?.is_some() || self.ledger.has_pending(dev, seq))
+                        && !head.forked
+                    {
                         continue;
                     }
                     let Some(blob) = backend.get(&SignedBatch::storage_key(dev, seq))? else {
                         continue;
                     };
-                    let signed: SignedBatch = serde_json::from_slice(&blob)?;
+                    // One storage holding a damaged or planted object does
+                    // not stop the pull: another storage may hold the batch.
+                    let Ok(signed) = serde_json::from_slice::<SignedBatch>(&blob) else {
+                        malformed += 1;
+                        continue;
+                    };
                     if &signed.device != dev || signed.seq != seq {
+                        malformed += 1;
                         continue;
                     }
                     // A batch under a key this device lacks is kept unread.
@@ -731,18 +740,102 @@ impl Engine {
                         self.mark_forked(&me)?;
                         continue;
                     }
-                    match self.ledger.ingest_with(signed, pk, key.as_ref())? {
-                        Ingest::Fork => {
+                    let limit = self.clock.lamport.saturating_add(Self::CLOCK_LEAP);
+                    match self.ledger.ingest_limited(signed, pk, key.as_ref(), limit) {
+                        Ok(Ingest::Fork) => {
                             forks.insert(dev.clone());
                         }
-                        Ingest::New | Ingest::Known | Ingest::Refused => {}
+                        Ok(Ingest::Refused) => {
+                            refused += 1;
+                            log::warn!(device:% = dev, seq = seq, storage = backend.name(); "ledger batch refused");
+                        }
+                        Ok(Ingest::New | Ingest::Known | Ingest::Pending) => {}
+                        Err(e) => {
+                            malformed += 1;
+                            log::warn!(device:% = dev, seq = seq, storage = backend.name(), error:% = e; "ledger batch skipped");
+                        }
                     }
                 }
             }
         }
         let view = self.view()?;
         self.observe_clock(view.max_lamport)?;
+        self.watch_freshness(&view, &dir, malformed, refused);
         Ok(forks.into_iter().collect())
+    }
+
+    /// After a pull: which devices' batches this device still lacks while
+    /// another full device says (`seen`, in its signed batches) that it
+    /// holds them, or while batches wait here for a predecessor. The pull
+    /// has just asked every storage for them; a gap that stays for
+    /// `WITHHOLD_PULLS` pulls in a row is reported as a storage that may be
+    /// withholding batches (`LedgerHealth::warnings`).
+    fn watch_freshness(
+        &mut self,
+        view: &LedgerView,
+        dir: &KeyDirectory,
+        malformed: u64,
+        refused: u64,
+    ) {
+        let me = self.vault.device_id.clone();
+        let mut lacking: BTreeMap<DeviceId, (u64, u64)> = BTreeMap::new();
+        for (reader, acks) in &view.acks {
+            if reader == &me {
+                continue;
+            }
+            for (dev, seen) in acks {
+                if dev == &me || !dir.contains_key(dev) {
+                    continue;
+                }
+                // Never beyond a removed device's cut-off.
+                let seen = match self.devices.revoked.get(dev) {
+                    Some(r) => (*seen).min(r.cutoff_seq),
+                    None => *seen,
+                };
+                let held = self.ledger.head(dev).seq;
+                if seen > held {
+                    let e = lacking.entry(dev.clone()).or_insert((held, 0));
+                    e.1 = e.1.max(seen);
+                }
+            }
+        }
+        for dev in dir.keys().filter(|d| **d != me) {
+            if let Some(&waiting) = self.ledger.pending_seqs(dev).last() {
+                let held = self.ledger.head(dev).seq;
+                let e = lacking.entry(dev.clone()).or_insert((held, 0));
+                e.1 = e.1.max(waiting);
+            }
+        }
+        let watch = &mut self.ledger_alarm.watch;
+        let before = std::mem::take(&mut watch.behind);
+        for (dev, (held, seen)) in lacking {
+            let pulls = before
+                .get(&dev)
+                .map(|b| if b.held == held { b.pulls + 1 } else { 1 })
+                .unwrap_or(1);
+            if pulls == ledger_recovery::WITHHOLD_PULLS {
+                log::warn!(device:% = dev, held = held, seen = seen; "a storage may be withholding ledger batches");
+            }
+            let name = view
+                .devices
+                .get(&dev)
+                .cloned()
+                .unwrap_or_else(|| dev.short().to_string());
+            watch.behind.insert(
+                dev.clone(),
+                ledger_recovery::LedgerBehind {
+                    device: dev.to_string(),
+                    name,
+                    held,
+                    seen,
+                    pulls,
+                },
+            );
+        }
+        watch.malformed = malformed;
+        watch.refused += refused;
+        watch.events_refused = view.events_refused;
+        watch.save(&self.home);
     }
 }
 

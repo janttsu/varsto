@@ -305,13 +305,29 @@ struct HeadsFile {
 /// How far beyond the newest batch held a batch may be and still be kept.
 pub const MAX_AHEAD: u64 = 1 << 16;
 
+/// Directory inside `<device>/` of batches waiting for their predecessor.
+const PENDING_DIR: &str = "pending";
+
+/// A batch held while its predecessor is missing, with the predecessor
+/// hash its body names when this device could open it (`opened` false:
+/// unread, under a key this device does not hold).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct PendingBatch {
+    signed: SignedBatch,
+    opened: bool,
+    prev: Option<String>,
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub enum Ingest {
     New,
     Known,
     /// Same device and sequence number, different content.
     Fork,
-    /// Not kept: too far ahead of what this device holds.
+    /// Kept, waiting for its predecessor (`<device>/pending/`).
+    Pending,
+    /// Not kept: too far ahead of what this device holds, or (batches) a
+    /// Lamport time no device can have reached.
     Refused,
 }
 
@@ -570,6 +586,9 @@ impl LedgerStore {
         }
         self.heads.heads = heads;
         self.save()?;
+        for d in self.devices() {
+            self.promote_pending(&d)?;
+        }
         self.damaged.extend(out.damaged.iter().cloned());
         Ok(out)
     }
@@ -724,10 +743,56 @@ impl LedgerStore {
         pubkey: &VerifyingKey,
         ledger_key: Option<&SecretKey>,
     ) -> Result<Ingest> {
+        self.ingest_limited(signed, pubkey, ledger_key, u64::MAX)
+    }
+
+    /// Like `ingest_with`; a batch whose Lamport time is above
+    /// `lamport_limit` (no device can have counted that far: the reader's
+    /// clock plus the largest leap it adopts) is refused and not kept.
+    ///
+    /// The head of a device is the end of the unbroken chain held here. A
+    /// batch whose predecessor is missing (and no checkpoint covers it) is
+    /// kept in `<device>/pending/` without moving the head, so a storage
+    /// that withholds one batch cannot make the batches after it count as
+    /// if nothing were missing; the pull asks every storage for the gap
+    /// again, and once it arrives the waiting batches follow it.
+    pub fn ingest_limited(
+        &mut self,
+        signed: SignedBatch,
+        pubkey: &VerifyingKey,
+        ledger_key: Option<&SecretKey>,
+        lamport_limit: u64,
+    ) -> Result<Ingest> {
+        self.ingest_inner(signed, pubkey, ledger_key, lamport_limit, false)
+    }
+
+    /// A device taking its own batches back from the storages after it
+    /// lost its local ledger (`varsto ledger rebuild`): its head moves past
+    /// a gap no storage can fill, so it never signs a number it used.
+    pub fn ingest_own_restored(
+        &mut self,
+        signed: SignedBatch,
+        pubkey: &VerifyingKey,
+        ledger_key: Option<&SecretKey>,
+    ) -> Result<Ingest> {
+        self.ingest_inner(signed, pubkey, ledger_key, u64::MAX, true)
+    }
+
+    fn ingest_inner(
+        &mut self,
+        signed: SignedBatch,
+        pubkey: &VerifyingKey,
+        ledger_key: Option<&SecretKey>,
+        lamport_limit: u64,
+        over_gap: bool,
+    ) -> Result<Ingest> {
         signed
             .verify(pubkey)
             .with_context(|| format!("batch {}/{}", signed.device, signed.seq))?;
         let batch = ledger_key.map(|k| signed.open(k)).transpose()?;
+        if batch.as_ref().is_some_and(|b| b.lamport > lamport_limit) {
+            return Ok(Ingest::Refused);
+        }
         let base = self.head(&signed.device).base;
         if let Some(base) = base.as_ref().filter(|b| signed.seq <= b.seq) {
             if self.get(&signed.device, signed.seq)?.is_none() {
@@ -756,6 +821,12 @@ impl LedgerStore {
             self.save_heads()?;
             return Ok(Ingest::Fork);
         }
+        if let Some(waiting) = self.pending(&signed.device, signed.seq)? {
+            if waiting.signed.hash == signed.hash {
+                return Ok(Ingest::Known);
+            }
+            return self.mark_fork(&signed.device);
+        }
         // Batches may arrive out of order, but not absurdly far ahead of
         // what this device holds: the head would jump to any number a
         // device chooses, and every later walk over the sequence would run
@@ -763,7 +834,7 @@ impl LedgerStore {
         let head_seq = self.head(&signed.device).seq;
         let floor = head_seq.max(base.as_ref().map(|b| b.seq).unwrap_or(0));
         if signed.seq > floor.saturating_add(MAX_AHEAD) {
-            return Ok(Ingest::Known);
+            return Ok(Ingest::Refused);
         }
         if let (true, Some(batch)) = (signed.seq > 1, &batch) {
             let prev = match self.get(&signed.device, signed.seq - 1)? {
@@ -778,6 +849,19 @@ impl LedgerStore {
                 }
             }
         }
+        if signed.seq > head_seq + 1 && !over_gap {
+            // Its predecessor is missing: it waits, the head stays.
+            let waiting = PendingBatch {
+                opened: batch.is_some(),
+                prev: batch.and_then(|b| b.prev),
+                signed,
+            };
+            util::write_json(
+                &self.pending_path(&waiting.signed.device, waiting.signed.seq),
+                &waiting,
+            )?;
+            return Ok(Ingest::Pending);
+        }
         util::write_json(&self.batch_path(&signed.device, signed.seq), &signed)?;
         let mut h = self.head(&signed.device);
         if signed.seq > h.seq {
@@ -786,7 +870,106 @@ impl LedgerStore {
         }
         self.heads.heads.insert(signed.device.clone(), h);
         self.save_heads()?;
+        self.promote_pending(&signed.device)?;
         Ok(Ingest::New)
+    }
+
+    fn pending_path(&self, device: &DeviceId, seq: u64) -> PathBuf {
+        self.dir
+            .join(device.as_str())
+            .join(PENDING_DIR)
+            .join(format!("{seq:016}.json"))
+    }
+
+    /// Batch `seq` of `device` waiting for its predecessor, if held.
+    fn pending(&self, device: &DeviceId, seq: u64) -> Result<Option<PendingBatch>> {
+        let p = self.pending_path(device, seq);
+        if !p.exists() {
+            return Ok(None);
+        }
+        match util::read_json(&p) {
+            Ok(w) => Ok(Some(w)),
+            Err(_) => {
+                // A damaged local file: fetched again from the storages.
+                let _ = std::fs::remove_file(&p);
+                Ok(None)
+            }
+        }
+    }
+
+    /// Whether batch `seq` of `device` is held here waiting for its
+    /// predecessor (it is not downloaded again).
+    pub fn has_pending(&self, device: &DeviceId, seq: u64) -> bool {
+        self.pending_path(device, seq).exists()
+    }
+
+    /// Sequence numbers of the batches of `device` waiting for a
+    /// predecessor.
+    pub fn pending_seqs(&self, device: &DeviceId) -> Vec<u64> {
+        let Ok(rd) = std::fs::read_dir(self.dir.join(device.as_str()).join(PENDING_DIR)) else {
+            return Vec::new();
+        };
+        let mut out: Vec<u64> = rd
+            .filter_map(|e| e.ok())
+            .filter_map(|e| {
+                e.file_name()
+                    .to_string_lossy()
+                    .strip_suffix(".json")
+                    .and_then(|n| n.parse().ok())
+            })
+            .collect();
+        out.sort_unstable();
+        out
+    }
+
+    /// Move waiting batches into the chain while each one's predecessor is
+    /// the head: checked against its hash when the batch was opened (a
+    /// batch that names another predecessor is a fork). Waiting batches a
+    /// checkpoint now covers are dropped (one at the checkpoint itself
+    /// must agree with it).
+    fn promote_pending(&mut self, device: &DeviceId) -> Result<()> {
+        let seqs = self.pending_seqs(device);
+        if seqs.is_empty() {
+            return Ok(());
+        }
+        for seq in seqs {
+            let mut h = self.head(device);
+            if seq <= h.seq {
+                let covered = self.pending(device, seq)?;
+                let _ = std::fs::remove_file(self.pending_path(device, seq));
+                if let Some(w) = covered {
+                    let agrees = match self.get(device, seq)? {
+                        Some(b) => b.hash == w.signed.hash,
+                        None => h
+                            .base
+                            .as_ref()
+                            .filter(|b| b.seq == seq)
+                            .is_none_or(|b| b.head_hash == w.signed.hash),
+                    };
+                    if !agrees {
+                        self.mark_fork(device)?;
+                    }
+                }
+                continue;
+            }
+            if seq != h.seq + 1 {
+                break;
+            }
+            let Some(w) = self.pending(device, seq)? else {
+                break;
+            };
+            if w.opened && w.prev.as_deref() != h.hash.as_deref() {
+                self.mark_fork(device)?;
+                break;
+            }
+            util::write_json(&self.batch_path(device, seq), &w.signed)?;
+            let _ = std::fs::remove_file(self.pending_path(device, seq));
+            h.seq = seq;
+            h.hash = Some(w.signed.hash.clone());
+            self.heads.heads.insert(device.clone(), h);
+            self.save_heads()?;
+        }
+        Ok(())
     }
 
     fn mark_fork(&mut self, device: &DeviceId) -> Result<Ingest> {
@@ -871,8 +1054,9 @@ impl LedgerStore {
             h.seq = cp.seq;
             h.hash = Some(cp.head_hash.clone());
         }
-        self.heads.heads.insert(device, h);
+        self.heads.heads.insert(device.clone(), h);
         self.save_heads()?;
+        self.promote_pending(&device)?;
         Ok(Ingest::New)
     }
 
