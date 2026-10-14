@@ -242,6 +242,7 @@ mod tests {
             prefix: String::new(),
             access_key_id: "k".into(),
             secret_ref: String::new(),
+            allow_insecure_http: false,
             path_style: true,
             storage_class: class.map(str::to_string),
             cold: false,

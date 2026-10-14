@@ -17,16 +17,6 @@ unmaintained = "workspace"
 unsound = "all"
 yanked = "deny"
 ignore = [
-    # sharks 0.5.0 (Shamir secret sharing for the recovery kit). The advisory:
-    # polynomial coefficients are drawn from 1..=255 instead of 0..=255, a bias
-    # that lets a holder of threshold-minus-one shares narrow the secret down
-    # when the *same* secret has been split hundreds of times (Cure53's
-    # estimate: 500 to 1500 times for 2-of-N). No fixed version exists, the
-    # maintainer could not be reached, and a corrected fork (`blahaj`) was
-    # published instead. Varsto splits the vault key once per printed kit, so
-    # the practical exposure is small, but moving to the fork is planned
-    # together with the next change to crates/varsto-core/src/recovery.rs.
-    { id = "RUSTSEC-2024-0398", reason = "no fixed sharks release; one split per recovery kit; move to blahaj planned" },
     # glib 0.18.5 through tray-icon -> gtk 0.18: unsound iterator impls on
     # glib::VariantStrIter, a type Varsto never uses. Fixed only in glib 0.20,
     # which gtk 0.18 (the last GTK 3 binding) cannot use.

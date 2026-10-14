@@ -1398,14 +1398,8 @@ pub fn read_service_file(home: &Path) -> Option<ServiceFile> {
 }
 
 fn write_service_file(home: &Path, f: &ServiceFile) -> Result<()> {
-    fs::create_dir_all(home)?;
-    let p = service_file(home);
-    varsto_core::util::write_atomic(&p, &serde_json::to_vec_pretty(f)?)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(&p, fs::Permissions::from_mode(0o600))?;
-    }
+    varsto_core::util::private_dir(home)?;
+    varsto_core::util::write_atomic(&service_file(home), &serde_json::to_vec_pretty(f)?)?;
     Ok(())
 }
 

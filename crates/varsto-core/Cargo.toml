@@ -7,6 +7,12 @@ license.workspace = true
 rust-version.workspace = true
 publish = false
 
+[features]
+# A "security key" whose secret is a plain file next to the vault, for
+# tests and the lab only: it protects nothing beyond the passphrase, so
+# release binaries are built without it.
+software-key = []
+
 [dependencies]
 anyhow.workspace = true
 thiserror.workspace = true
@@ -41,7 +47,8 @@ rqrr = { version = "0.11.0", default-features = false }
 data-encoding = "2.6"
 bip39 = "3"
 unicode-normalization = "0.1"
-sharks = "0.5"
+# Shamir shares over GF(256); the fork fixes RUSTSEC-2024-0398 in `sharks`.
+blahaj = "0.6"
 spake2 = "0.4"
 log = { version = "0.4", features = ["std", "kv"] }
 socket2 = { version = "0.6", features = ["all"] }
@@ -60,3 +67,5 @@ windows-sys = { version = "0.59", features = ["Win32_Storage_FileSystem", "Win32
 
 [dev-dependencies]
 tempfile.workspace = true
+# Integration tests stand in a software key for a FIDO2 authenticator.
+varsto-core = { path = ".", features = ["software-key"] }

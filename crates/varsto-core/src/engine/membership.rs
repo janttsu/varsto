@@ -52,6 +52,16 @@ struct EpochFile {
     frozen: BTreeSet<FolderId>,
 }
 
+impl Drop for EpochFile {
+    fn drop(&mut self) {
+        use zeroize::Zeroize;
+        for v in self.keys.values_mut() {
+            v.zeroize();
+        }
+        self.kem_hex.zeroize();
+    }
+}
+
 /// The vault keys of every epoch this device knows, its KEM key pair, and
 /// what the newest epoch record said. Stored in `vault-keys.enc` under a key
 /// derived from the device's own root key (like the local keyring).
@@ -116,10 +126,13 @@ impl VaultEpochs {
             )
             .context("open vault-keys.enc")?,
         );
-        let f: EpochFile = serde_json::from_slice(&plain)?;
+        let mut f: EpochFile = serde_json::from_slice(&plain)?;
         let mut keys_out = BTreeMap::new();
         for (e, hex) in &f.keys {
-            keys_out.insert(*e, SecretKey::from_hex(hex)?);
+            let k = SecretKey::from_hex(hex)?;
+            // Every epoch key is cut from log lines, like the master key.
+            crate::logging::register_key(k.as_bytes());
+            keys_out.insert(*e, k);
         }
         if keys_out.is_empty() {
             keys_out.insert(0, keys.master.clone());
@@ -131,8 +144,8 @@ impl VaultEpochs {
             } else {
                 Some(DecapsKey::from_bytes(&hex::decode(&f.kem_hex)?)?)
             },
-            members: f.members,
-            frozen: f.frozen,
+            members: std::mem::take(&mut f.members),
+            frozen: std::mem::take(&mut f.frozen),
             kem_published: false,
         })
     }
@@ -156,16 +169,7 @@ impl VaultEpochs {
         };
         let plain = Zeroizing::new(serde_json::to_vec(&f)?);
         let blob = crypto::encrypt(&Self::file_key(keys), &Self::aad(vault, device), &plain)?;
-        util::write_atomic(&home.join(VAULT_KEYS_FILE), &blob)?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            fs::set_permissions(
-                home.join(VAULT_KEYS_FILE),
-                fs::Permissions::from_mode(0o600),
-            )?;
-        }
-        Ok(())
+        util::write_atomic(&home.join(VAULT_KEYS_FILE), &blob)
     }
 }
 
@@ -364,7 +368,7 @@ impl SignedRevocation {
 /// that epoch's vault key: only holders of the new key can write or read it.
 /// It links back to the previous key, so the current key opens the whole
 /// history (a device joining later reads old data with it).
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct EpochRecord {
     pub epoch: u32,
     pub previous_hex: String,
@@ -380,6 +384,15 @@ pub struct EpochRecord {
     pub revoked: Vec<DeviceId>,
     /// Folders that keep their epoch-0 key (shared folders, Strongroom).
     pub frozen: Vec<FolderId>,
+}
+
+crate::redacted_debug!(EpochRecord { epoch, previous_epoch, issuer, issued_utc, members, revoked, frozen ; previous_hex });
+
+impl Drop for EpochRecord {
+    fn drop(&mut self) {
+        use zeroize::Zeroize;
+        self.previous_hex.zeroize();
+    }
 }
 
 impl EpochRecord {
@@ -798,7 +811,7 @@ pub(super) fn discover_epochs(
         {
             let mut out = VaultEpochs::genesis(vault_key);
             out.keys = keys;
-            out.members = newest.members.into_iter().collect();
+            out.members = newest.members.iter().cloned().collect();
             out.frozen = frozen;
             return Ok(out);
         }
@@ -1631,8 +1644,11 @@ impl Engine {
                     self.save_devices()?;
                 }
             }
+            for k in keys.values() {
+                crate::logging::register_key(k.as_bytes());
+            }
             self.epochs.keys.extend(keys);
-            self.epochs.members = newest.members.into_iter().collect();
+            self.epochs.members = newest.members.iter().cloned().collect();
             self.epochs.frozen.extend(frozen);
             self.save_epochs()?;
             self.reseal_own_peer_record();
@@ -1815,6 +1831,28 @@ pub(super) const RESET_EXTRA: [&str; 3] = [VAULT_KEYS_FILE, REMOVED_FILE, WIPED_
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn epoch_record_debug_hides_the_previous_key() {
+        let previous = SecretKey::random().to_hex();
+        let r = EpochRecord {
+            epoch: 2,
+            previous_hex: previous.clone(),
+            previous_epoch: Some(1),
+            issuer: DeviceId::random(),
+            issued_utc: 7,
+            members: vec![DeviceId::random()],
+            revoked: vec![],
+            frozen: vec![FolderId::random()],
+        };
+        let shown = format!("{r:?}");
+        assert!(
+            shown.contains("epoch: 2") && shown.contains("issued_utc: 7"),
+            "{shown}"
+        );
+        assert!(!shown.contains(&previous), "{shown}");
+        assert!(shown.contains("[redacted]"), "{shown}");
+    }
 
     #[test]
     fn revocation_needs_the_issuer_signature() {

@@ -29,6 +29,10 @@ pub struct S3Config {
     pub path_style: bool,
     /// `x-amz-storage-class` for new objects (e.g. `DEEP_ARCHIVE`, `GLACIER_IR`, `ONEZONE_IA`).
     pub storage_class: Option<String>,
+    /// Accept an `http://` endpoint that is not a loopback address. Without
+    /// transport encryption the request signatures and the (encrypted)
+    /// objects travel in clear, so it takes an explicit choice.
+    pub allow_insecure_http: bool,
 }
 
 crate::redacted_debug!(S3Config { name, endpoint, region, bucket, prefix, access_key_id, path_style ; secret_access_key });
@@ -52,6 +56,21 @@ pub struct S3Storage {
 const MAX_BODY: u64 = 2 << 30;
 
 const EMPTY_SHA256: &str = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+
+/// Whether `host[:port]` names this computer: `localhost`, `127.0.0.0/8`
+/// or `::1`. Plain `http://` to such an address never leaves the machine.
+fn is_loopback_host(host_port: &str) -> bool {
+    let host = if let Some(rest) = host_port.strip_prefix('[') {
+        rest.split(']').next().unwrap_or("")
+    } else {
+        host_port.rsplit_once(':').map_or(host_port, |(h, _)| h)
+    };
+    if host.eq_ignore_ascii_case("localhost") {
+        return true;
+    }
+    host.parse::<std::net::IpAddr>()
+        .is_ok_and(|ip| ip.is_loopback())
+}
 
 impl S3Storage {
     /// A refusal in words a person can act on, then the technical details
@@ -117,6 +136,14 @@ impl S3Storage {
         let host_part = rest.trim_end_matches('/');
         if host_part.is_empty() || host_part.contains('/') {
             bail!("endpoint must be scheme://host[:port] without a path");
+        }
+        match scheme {
+            "https" => {}
+            "http" if is_loopback_host(host_part) || cfg.allow_insecure_http => {}
+            "http" => bail!(
+                "the endpoint {endpoint} uses http://, so the request signatures and the objects would travel without transport encryption; use https://, or pass --insecure-http for a server on a network you trust (a loopback address needs no flag)"
+            ),
+            other => bail!("endpoint scheme must be https or http, not {other}://"),
         }
         let (host, base_path) = if cfg.path_style {
             (host_part.to_string(), format!("/{}", cfg.bucket))
@@ -646,6 +673,7 @@ mod tests {
             secret_access_key: "s".into(),
             path_style: true,
             storage_class: None,
+            allow_insecure_http: false,
         })
         .unwrap();
         let body = b"<?xml version=\"1.0\"?><Error><Code>AccessDenied</Code><Message>Access Denied</Message></Error>";
@@ -688,10 +716,50 @@ mod tests {
             secret_access_key: "s".into(),
             path_style: true,
             storage_class: None,
+            allow_insecure_http: false,
         })
         .unwrap();
         assert_eq!(s.get("manifests/x").unwrap().unwrap(), body);
         th.join().unwrap();
+    }
+
+    #[test]
+    fn plain_http_needs_a_loopback_address_or_an_explicit_choice() {
+        let cfg = |endpoint: &str, allow: bool| S3Config {
+            name: "test".into(),
+            endpoint: endpoint.into(),
+            region: "us-east-1".into(),
+            bucket: "b".into(),
+            prefix: String::new(),
+            access_key_id: "k".into(),
+            secret_access_key: "s".into(),
+            path_style: true,
+            storage_class: None,
+            allow_insecure_http: allow,
+        };
+        for ok in [
+            "https://s3.example.net",
+            "http://127.0.0.1:9000",
+            "http://127.0.0.2:9000",
+            "http://localhost:9000",
+            "http://LOCALHOST",
+            "http://[::1]:9000",
+        ] {
+            S3Storage::new(cfg(ok, false)).unwrap_or_else(|e| panic!("{ok}: {e}"));
+        }
+        for refused in [
+            "http://minio.lan:9000",
+            "http://10.0.0.5",
+            "http://[fe80::1]:9000",
+        ] {
+            let e = match S3Storage::new(cfg(refused, false)) {
+                Ok(_) => panic!("{refused} was accepted"),
+                Err(e) => e.to_string(),
+            };
+            assert!(e.contains("--insecure-http"), "{refused}: {e}");
+            S3Storage::new(cfg(refused, true)).unwrap_or_else(|e| panic!("{refused}: {e}"));
+        }
+        assert!(S3Storage::new(cfg("ftp://x", true)).is_err());
     }
 
     #[test]

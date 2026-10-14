@@ -555,6 +555,7 @@ impl Engine {
     /// Move a local file into this device's trash.
     pub(super) fn move_to_trash(&self, folder: &FolderId, disk: &Path, path: &str) -> Result<()> {
         let trash = trash_path(&self.home, |r| self.local_rules(r), folder, path)?;
+        util::private_dir(&self.home.join("trash"))?;
         if let Some(p) = trash.parent() {
             fs::create_dir_all(p)?;
         }

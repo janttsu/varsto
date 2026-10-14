@@ -115,6 +115,10 @@ pub enum StorageSpec {
         cold: bool,
         #[serde(default)]
         place: String,
+        /// The user chose to reach an `http://` endpoint outside this
+        /// computer without transport encryption (`--insecure-http`).
+        #[serde(default, skip_serializing_if = "is_false")]
+        allow_insecure_http: bool,
     },
     /// Any rclone remote (`remote:bucket/path`); credentials stay in rclone's config.
     Rclone {
@@ -170,6 +174,10 @@ fn is_one(v: &u32) -> bool {
 
 fn default_true() -> bool {
     true
+}
+
+fn is_false(b: &bool) -> bool {
+    !*b
 }
 
 fn default_reserve_percent() -> u32 {
@@ -292,6 +300,7 @@ impl StorageSpec {
                 secret_ref,
                 path_style,
                 storage_class,
+                allow_insecure_http,
                 ..
             } => {
                 let reference = if secret_ref.is_empty() {
@@ -321,6 +330,7 @@ impl StorageSpec {
                     secret_access_key: secret,
                     path_style: *path_style,
                     storage_class: storage_class.clone(),
+                    allow_insecure_http: *allow_insecure_http,
                 })?))
             }
             StorageSpec::Rclone { name, remote, .. } => Ok(Box::new(

@@ -2,5 +2,4 @@
 # reasons are in deny.toml next to the same advisory id; keep the two in step.
 [advisories]
 ignore = [
-    "RUSTSEC-2024-0398", # sharks: no fixed release; one split per recovery kit; move to blahaj planned
 ]

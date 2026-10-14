@@ -23,7 +23,7 @@ fn guide_covers_every_storage_and_holds_no_secret() {
         &varsto_core::recovery::words_from_key(&key_hex).unwrap(),
     )
     .unwrap();
-    assert_eq!(words, key_hex);
+    assert_eq!(*words, key_hex);
     let words = varsto_core::recovery::words_from_key(&key_hex).unwrap();
 
     let nas = tmp.path().join("nas");

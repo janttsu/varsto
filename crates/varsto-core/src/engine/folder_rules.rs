@@ -74,7 +74,7 @@ impl Engine {
             .map(|f| f.path.clone())
             .collect();
         Ok(IgnoreInfo {
-            folder: rec.name,
+            folder: rec.name.clone(),
             synced,
             nested,
             local: self.ignore_local(&rec.folder_id),

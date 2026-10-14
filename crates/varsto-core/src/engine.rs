@@ -855,7 +855,7 @@ impl Engine {
 
     fn init_inner(home: &Path, device_name: &str, passphrase: &str) -> Result<(Engine, String)> {
         ensure_no_vault(home)?;
-        fs::create_dir_all(home)?;
+        util::private_home(home)?;
         let keys = Keys {
             master: SecretKey::random(),
             signer: crypto::SigningKey::generate(),
@@ -959,7 +959,7 @@ impl Engine {
         }
         let master = SecretKey::from_hex(vault_key_hex)?;
         let epochs = membership::discover_epochs(backend.as_ref(), &meta.vault_id, &master)?;
-        fs::create_dir_all(home)?;
+        util::private_home(home)?;
         let keys = Keys {
             master,
             signer: signer.unwrap_or_else(crypto::SigningKey::generate),
@@ -1256,7 +1256,7 @@ impl Engine {
                 token.vault_id
             );
         }
-        fs::create_dir_all(home)?;
+        util::private_home(home)?;
         // The "master" of a member is a local random root used only for the
         // local keyring; it never leaves the device and opens nothing shared.
         let keys = Keys {
@@ -1362,6 +1362,7 @@ impl Engine {
                 vault.format_version
             );
         }
+        util::private_home(home)?;
         let keys = Keys::load(home, passphrase, &vault.vault_id, &vault.device_id)?;
         let keyring = Keyring::load(home, &keys, &vault.vault_id, &vault.device_id)?;
         let epochs = membership::VaultEpochs::load(home, &keys, &vault.vault_id, &vault.device_id)?;
@@ -2109,7 +2110,7 @@ impl Engine {
         });
         self.config.save(&self.home)?;
         folder_safety::write_marker(path, &rec)?;
-        Ok(rec.folder_id)
+        Ok(rec.folder_id.clone())
     }
 
     /// Known folders: (record, mount path if attached here).
@@ -5592,7 +5593,8 @@ impl Engine {
         fs::create_dir_all(path)?;
         let folder_id = FolderId::random();
         let folder_key = SecretKey::random();
-        let info = crate::strongroom::enroll(key, method, &folder_id, &folder_key)?;
+        let info =
+            crate::strongroom::enroll(key, method, &self.vault.vault_id, &folder_id, &folder_key)?;
         let rec = FolderRecord {
             folder_id: folder_id.clone(),
             name: name.to_string(),
@@ -5658,7 +5660,7 @@ impl Engine {
             .strongroom
             .as_ref()
             .ok_or_else(|| anyhow!("{folder} is not a Strongroom folder"))?;
-        let fk = crate::strongroom::unlock(key, &rec.folder_id, info)?;
+        let fk = crate::strongroom::unlock(key, &self.vault.vault_id, &rec.folder_id, info)?;
         self.unlocked.insert(
             rec.folder_id.clone(),
             (fk.clone(), util::now_utc() + minutes as i64 * 60),
@@ -5776,7 +5778,7 @@ impl Engine {
             let folders: Vec<_> = e
                 .folders()
                 .into_iter()
-                .map(|(r, m)| (r.folder_id, r.name, m))
+                .map(|(r, m)| (r.folder_id.clone(), r.name.clone(), m))
                 .collect();
             format!(
                 "{}|{}",

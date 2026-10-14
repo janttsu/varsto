@@ -542,6 +542,7 @@ impl Engine {
             activity::Unit::Bytes,
         );
         let tmp_dir = self.home.join("trash").join(".restore");
+        util::private_dir(&self.home.join("trash"))?;
         fs::create_dir_all(&tmp_dir)?;
         let tmp = tmp_dir.join(format!("{}-v{}", std::process::id(), e.id));
         let got = self.restore_from_blocks(&rec, &fk, &e, &tmp, &storages);

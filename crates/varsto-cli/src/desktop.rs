@@ -166,10 +166,9 @@ fn handle_unlocked(fixed: &Fixed, request: Request) -> Result<Option<Request>> {
         // A command of this device reports the tasks it runs (answered
         // here, without the state: a sync may hold it).
         let mut request = request;
-        let token_ok = request
-            .headers()
-            .iter()
-            .any(|h| h.field.equiv("X-Varsto-Token") && h.value.as_str() == fixed.token);
+        let token_ok = request.headers().iter().any(|h| {
+            h.field.equiv("X-Varsto-Token") && token_matches(h.value.as_str(), &fixed.token)
+        });
         let mut body = String::new();
         let read = request
             .as_reader()
@@ -208,11 +207,10 @@ fn handle_unlocked(fixed: &Fixed, request: Request) -> Result<Option<Request>> {
             .url()
             .split_once('?')
             .map_or(String::new(), |(_, q)| q.to_string());
-        let token_ok = request
-            .headers()
-            .iter()
-            .any(|h| h.field.equiv("X-Varsto-Token") && h.value.as_str() == fixed.token)
-            || query_param(&query, "token").as_deref() == Some(fixed.token.as_str());
+        let token_ok = request.headers().iter().any(|h| {
+            h.field.equiv("X-Varsto-Token") && token_matches(h.value.as_str(), &fixed.token)
+        }) || query_param(&query, "token")
+            .is_some_and(|t| token_matches(&t, &fixed.token));
         if !token_ok {
             request.respond(json_response(
                 401,
@@ -231,10 +229,9 @@ fn handle_unlocked(fixed: &Fixed, request: Request) -> Result<Option<Request>> {
         "/i18n/sv.json" => request.respond(text(I18N_SV, "application/json; charset=utf-8"))?,
         "/app.css" => request.respond(text(APP_CSS, "text/css; charset=utf-8"))?,
         "/api/p2p/traffic" | "/api/progress" | "/api/activity" => {
-            let token_ok = request
-                .headers()
-                .iter()
-                .any(|h| h.field.equiv("X-Varsto-Token") && h.value.as_str() == fixed.token);
+            let token_ok = request.headers().iter().any(|h| {
+                h.field.equiv("X-Varsto-Token") && token_matches(h.value.as_str(), &fixed.token)
+            });
             if !token_ok {
                 request.respond(json_response(
                     401,
@@ -392,11 +389,11 @@ fn handle(state: &Shared, mut request: Request) -> Result<()> {
         let in_header = request
             .headers()
             .iter()
-            .any(|h| h.field.equiv("X-Varsto-Token") && h.value.as_str() == st.token);
+            .any(|h| h.field.equiv("X-Varsto-Token") && token_matches(h.value.as_str(), &st.token));
         // Thumbnails and the viewer are loaded by <img>/<video>, which cannot
         // send a header; the session token may come in the query string there.
         let in_query = (path == "/api/thumb" || path == "/api/open" || path == "/api/view")
-            && query_param(&query, "token").as_deref() == Some(st.token.as_str());
+            && query_param(&query, "token").is_some_and(|t| token_matches(&t, &st.token));
         in_header || in_query
     };
     if !token_ok {
@@ -949,6 +946,15 @@ fn opt(v: &Value, key: &str) -> Option<String> {
         .filter(|x| !x.is_empty())
 }
 
+/// A boolean field: `true`, or the strings "true", "1", "on" (a form).
+fn flag(v: &Value, key: &str) -> bool {
+    match v.get(key) {
+        Some(Value::Bool(b)) => *b,
+        Some(Value::String(s)) => matches!(s.trim(), "true" | "1" | "on"),
+        _ => false,
+    }
+}
+
 /// A backup schedule field: "daily", "weekly", "manual", or the form the
 /// command line sends (`{"every_hours": N}`). Absent: none given.
 fn backup_schedule(v: &Value) -> Result<Option<varsto_core::vault::BackupSchedule>> {
@@ -979,6 +985,13 @@ fn string_list(v: &Value, key: &str) -> Vec<String> {
             .collect(),
         _ => Vec::new(),
     }
+}
+
+/// Whether a token a request carries is the session token, compared in
+/// constant time so that the comparison's duration tells nothing about how
+/// many leading bytes were right.
+fn token_matches(given: &str, expected: &str) -> bool {
+    varsto_core::crypto::ct_eq(given.as_bytes(), expected.as_bytes())
 }
 
 fn query_param(query: &str, key: &str) -> Option<String> {
@@ -1051,6 +1064,7 @@ fn storage_from_input(
                 storage_class: None,
                 cold: false,
                 place: opt(input, "place").unwrap_or_else(|| default_place.into()),
+                allow_insecure_http: flag(input, "insecure_http"),
             },
             Some(secret),
         ));
@@ -1453,6 +1467,7 @@ fn api(st: &mut State, method: Method, path: &str, query: &str, input: &Value) -
                     storage_class: None,
                     cold: false,
                     place: opt(input, "place").unwrap_or_else(|| "cloud".into()),
+                    allow_insecure_http: flag(input, "insecure_http"),
                 }
             } else {
                 StorageSpec::LocalDir {
@@ -1469,7 +1484,7 @@ fn api(st: &mut State, method: Method, path: &str, query: &str, input: &Value) -
             let key = if key.trim().contains(char::is_whitespace) {
                 varsto_core::recovery::key_from_words(&key)?
             } else {
-                key.trim().to_string()
+                zeroize::Zeroizing::new(key.trim().to_string())
             };
             let joined = Engine::join(
                 &st.home,
@@ -1850,6 +1865,7 @@ fn api_unlocked(
                             storage_class: class,
                             cold,
                             place: opt(input, "place").unwrap_or_default(),
+                            allow_insecure_http: flag(input, "insecure_http"),
                         },
                         Some(s(input, "secret_access_key")?),
                     )?;
@@ -1974,7 +1990,7 @@ fn api_unlocked(
                         .folders()
                         .into_iter()
                         .find(|(r, _)| r.name == name_or_id || r.folder_id.as_str().starts_with(&name_or_id))
-                        .map(|(r, _)| r.name)
+                        .map(|(r, _)| r.name.clone())
                         .unwrap_or_else(|| name_or_id.clone());
                     default_folder_path(engine.home(), &name, plain)?
                 }
@@ -2948,6 +2964,20 @@ fn api_unlocked(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn session_tokens_match_exactly_and_only_exactly() {
+        // Correctness of the constant-time comparison; its timing is the
+        // property of `crypto::ct_eq`, tested there.
+        let token = "0123456789abcdef0123456789abcdef";
+        assert!(token_matches(token, token));
+        assert!(!token_matches("", token));
+        assert!(!token_matches(token, ""));
+        assert!(!token_matches(&token[..31], token));
+        assert!(!token_matches(&format!("{token}0"), token));
+        assert!(!token_matches("0123456789abcdef0123456789abcdeF", token));
+        assert!(!token_matches("x123456789abcdef0123456789abcdef", token));
+    }
 
     #[test]
     fn disk_api_lists_bookkeeping_and_suggests_the_next_disk() {

@@ -517,5 +517,5 @@ fn junk_epoch_objects_and_forged_policies_are_skipped() {
         .find(|(r, _)| r.name == "docs")
         .unwrap()
         .0;
-    assert_eq!(docs.policy.unwrap().min_copies, 2);
+    assert_eq!(docs.policy.as_ref().unwrap().min_copies, 2);
 }

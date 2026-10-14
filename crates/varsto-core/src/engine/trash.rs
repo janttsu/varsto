@@ -1925,6 +1925,7 @@ impl Engine {
             activity::Unit::Bytes,
         );
         let tmp_dir = self.home.join("trash").join(".restore");
+        util::private_dir(&self.home.join("trash"))?;
         fs::create_dir_all(&tmp_dir)?;
         let mut restored_ids: Vec<(String, i64)> = Vec::new();
         let mut cache_writes: Vec<(String, PathBuf, u64)> = Vec::new();

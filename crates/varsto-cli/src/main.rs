@@ -124,6 +124,9 @@ enum Cmd {
         /// Secret access key; read from VARSTO_S3_SECRET if omitted.
         #[arg(long, env = "VARSTO_S3_SECRET", hide_env_values = true)]
         s3_secret_access_key: Option<String>,
+        /// Allow an http:// endpoint outside this computer (no transport encryption).
+        #[arg(long, requires = "s3_endpoint")]
+        s3_insecure_http: bool,
     },
     /// Manage storages.
     Storage {
@@ -507,6 +510,9 @@ enum RecoveryCmd {
     Combine {
         #[arg(required = true, num_args = 2..)]
         shares: Vec<String>,
+        /// The "Key check" printed on the kit: the rebuilt key is refused when it does not match.
+        #[arg(long)]
+        check: Option<String>,
     },
     /// What to keep outside your devices to restore everything if all of them are lost, and
     /// the restore steps for a new device. Personal to this vault; holds no secret.
@@ -651,7 +657,7 @@ enum StrongroomCmd {
         name: String,
         path: PathBuf,
         /// Use a software key file instead of hardware: for trying the flow only, no real protection.
-        #[arg(long)]
+        #[arg(long, hide = !varsto_core::strongroom::SOFTWARE_KEYS_BUILT_IN)]
         software: bool,
         #[arg(long, default_value_t = 15)]
         minutes: u64,
@@ -671,7 +677,7 @@ enum StrongroomCmd {
     Convert {
         folder: String,
         /// Use a software key file instead of hardware: for trying the flow only, no real protection.
-        #[arg(long)]
+        #[arg(long, hide = !varsto_core::strongroom::SOFTWARE_KEYS_BUILT_IN)]
         software: bool,
         #[arg(long, default_value_t = 15)]
         minutes: u64,
@@ -686,7 +692,7 @@ enum StrongroomCmd {
         #[arg(long, default_value = "")]
         label: String,
         /// The new key is a software key file (testing only).
-        #[arg(long)]
+        #[arg(long, hide = !varsto_core::strongroom::SOFTWARE_KEYS_BUILT_IN)]
         software: bool,
         /// libfido2 device path of the new key (default: ask to swap keys, then the first key found).
         #[arg(long)]
@@ -974,6 +980,9 @@ enum ShareCmd {
         /// Secret access key; read from VARSTO_S3_SECRET if omitted.
         #[arg(long, env = "VARSTO_S3_SECRET", hide_env_values = true)]
         s3_secret_access_key: Option<String>,
+        /// Allow an http:// endpoint outside this computer (no transport encryption).
+        #[arg(long, requires = "s3_endpoint")]
+        s3_insecure_http: bool,
     },
 }
 
@@ -1073,6 +1082,11 @@ enum StorageCmd {
         /// Use virtual-host style URLs (bucket.host) instead of path style.
         #[arg(long)]
         virtual_host: bool,
+        /// Allow an http:// endpoint outside this computer: the request signatures and the
+        /// (encrypted) objects then travel without transport encryption. A loopback address
+        /// needs no flag.
+        #[arg(long)]
+        insecure_http: bool,
         /// Storage class for new objects (DEEP_ARCHIVE, GLACIER_IR, STANDARD_IA, ...).
         #[arg(long)]
         storage_class: Option<String>,
@@ -1884,10 +1898,10 @@ fn share_members_text(l: &varsto_core::engine::ShareMembers) -> String {
 /// The passphrase typed in this run, so that after a successful command a
 /// locked background service can be unlocked with it (and, after setup,
 /// kept in the keyring if the user wants).
-static TYPED: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+static TYPED: std::sync::Mutex<Option<zeroize::Zeroizing<String>>> = std::sync::Mutex::new(None);
 /// The passphrase this command used, typed or from VARSTO_PASSPHRASE: it
 /// unlocks a background service that waits for it.
-static USED: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+static USED: std::sync::Mutex<Option<zeroize::Zeroizing<String>>> = std::sync::Mutex::new(None);
 
 /// Open the device directory. When its ledger needs a rebuild (lost or
 /// damaged local files, a fork), say so on stderr: commands that only read
@@ -1908,7 +1922,7 @@ fn warn_ledger(h: &varsto_core::engine::LedgerHealth) {
 fn passphrase() -> Result<String> {
     if let Ok(p) = std::env::var("VARSTO_PASSPHRASE") {
         varsto_core::logging::register_secret(&p);
-        *USED.lock().unwrap() = Some(p.clone());
+        *USED.lock().unwrap() = Some(zeroize::Zeroizing::new(p.clone()));
         return Ok(p);
     }
     use std::io::IsTerminal;
@@ -1919,8 +1933,8 @@ fn passphrase() -> Result<String> {
             bail_usage::<()>("empty passphrase")?;
         }
         varsto_core::logging::register_secret(&p);
-        *TYPED.lock().unwrap() = Some(p.clone());
-        *USED.lock().unwrap() = Some(p.clone());
+        *TYPED.lock().unwrap() = Some(zeroize::Zeroizing::new(p.clone()));
+        *USED.lock().unwrap() = Some(zeroize::Zeroizing::new(p.clone()));
         return Ok(p);
     }
     Err(anyhow!(
@@ -2419,7 +2433,7 @@ fn run_search(
                 .folders()
                 .into_iter()
                 .filter(|(r, m)| m.is_some() && (!r.is_strongroom() || e.is_unlocked(&r.folder_id)))
-                .map(|(r, _)| r.name)
+                .map(|(r, _)| r.name.clone())
                 .collect();
             engine = Some(e);
             names
@@ -2941,6 +2955,7 @@ fn run(cli: &Cli) -> Result<()> {
             s3_prefix,
             s3_access_key_id,
             s3_secret_access_key,
+            s3_insecure_http,
         } => {
             let mut s3_secret: Option<String> = None;
             let spec = match (s3_bucket, storage_path) {
@@ -2975,6 +2990,7 @@ fn run(cli: &Cli) -> Result<()> {
                         storage_class: None,
                         cold: false,
                         place: String::new(),
+                        allow_insecure_http: *s3_insecure_http,
                     }
                 }
                 (None, Some(path)) => StorageSpec::LocalDir {
@@ -2988,7 +3004,7 @@ fn run(cli: &Cli) -> Result<()> {
                 (None, None) => bail_usage("give --storage-path <dir> or --s3-bucket ...")?,
             };
             let key_hex = match (vault_key, words) {
-                (Some(k), _) => k.clone(),
+                (Some(k), _) => zeroize::Zeroizing::new(k.clone()),
                 (None, Some(w)) => varsto_core::recovery::key_from_words(w)?,
                 (None, None) => bail_usage("give --vault-key <hex> or --words \"<24 words>\"")?,
             };
@@ -3083,6 +3099,7 @@ fn run(cli: &Cli) -> Result<()> {
                     access_key_id,
                     secret_access_key,
                     virtual_host,
+                    insecure_http,
                     storage_class,
                     cold,
                     place,
@@ -3103,6 +3120,7 @@ fn run(cli: &Cli) -> Result<()> {
                                     c.contains("GLACIER") || c.contains("ARCHIVE")
                                 }),
                             place: place.clone(),
+                            allow_insecure_http: *insecure_http,
                         },
                         Some(secret_access_key.clone()),
                     )?;
@@ -4272,6 +4290,7 @@ fn run(cli: &Cli) -> Result<()> {
                 s3_prefix,
                 s3_access_key_id,
                 s3_secret_access_key,
+                s3_insecure_http,
             } => {
                 let token = token
                     .as_ref()
@@ -4302,6 +4321,7 @@ fn run(cli: &Cli) -> Result<()> {
                             storage_class: None,
                             cold: false,
                             place: String::new(),
+                            allow_insecure_http: *s3_insecure_http,
                         },
                         Some(s3_secret_access_key.clone().ok_or_else(|| {
                             anyhow!("give --s3-secret-access-key or set VARSTO_S3_SECRET")
@@ -4440,64 +4460,62 @@ fn run(cli: &Cli) -> Result<()> {
                 })?;
             }
         },
-        Cmd::Replica { cmd } => {
-            match cmd {
-                ReplicaCmd::Token => {
-                    let engine = open_engine(&home)?;
-                    let t = engine.replica_token()?;
-                    print(cli, &t, |t| {
-                        format!("replica token (share only with the device that will hold your encrypted copies):\n  {}", t.encode())
-                    })?;
-                }
-                ReplicaCmd::Init {
+        Cmd::Replica { cmd } => match cmd {
+            ReplicaCmd::Token => {
+                let engine = open_engine(&home)?;
+                let t = engine.replica_token()?;
+                print(cli, &t, |t| {
+                    format!("replica token (share only with the device that will hold your encrypted copies):\n  {}", t.encode())
+                })?;
+            }
+            ReplicaCmd::Init {
+                name,
+                token,
+                source,
+                target,
+            } => {
+                let token = varsto_core::replica::ReplicaToken::decode(token)?;
+                let src = StorageSpec::LocalDir {
+                    name: "source".into(),
+                    path: source.clone(),
+                    cold: false,
+                    carrier: false,
+                    place: String::new(),
+                    min_free: None,
+                };
+                let tgt = StorageSpec::LocalDir {
+                    name: "target".into(),
+                    path: target.clone(),
+                    cold: false,
+                    carrier: false,
+                    place: String::new(),
+                    min_free: None,
+                };
+                let r = varsto_core::replica::Replica::init(&home, name, &token, src, tgt)?;
+                println!(
+                    "replica {} ({}) set up; run `varsto replica run`",
                     name,
-                    token,
-                    source,
-                    target,
-                } => {
-                    let token = varsto_core::replica::ReplicaToken::decode(token)?;
-                    let src = StorageSpec::LocalDir {
-                        name: "source".into(),
-                        path: source.clone(),
-                        cold: false,
-                        carrier: false,
-                        place: String::new(),
-                        min_free: None,
-                    };
-                    let tgt = StorageSpec::LocalDir {
-                        name: "target".into(),
-                        path: target.clone(),
-                        cold: false,
-                        carrier: false,
-                        place: String::new(),
-                        min_free: None,
-                    };
-                    let r = varsto_core::replica::Replica::init(&home, name, &token, src, tgt)?;
-                    println!(
-                        "replica {} ({}) set up; run `varsto replica run`",
-                        name,
-                        r.device_id().short()
-                    );
-                }
-                ReplicaCmd::Run { once, interval } => {
-                    let mut r = varsto_core::replica::Replica::open(&home)?;
-                    loop {
-                        let rep = r.run_once()?;
-                        print(cli, &rep, |rep| {
-                            format!("seen {}, copied {} ({} bytes), verified {}, corrupt {}, batch {:?}", rep.objects_seen, rep.objects_copied, rep.bytes_copied, rep.chunks_verified, rep.objects_corrupt, rep.batch_seq)
-                        })?;
-                        if *once {
-                            break;
-                        }
-                        std::thread::sleep(std::time::Duration::from_secs((*interval).max(15)));
+                    r.device_id().short()
+                );
+            }
+            ReplicaCmd::Run { once, interval } => {
+                let mut r = varsto_core::replica::Replica::open(&home)?;
+                loop {
+                    let rep = r.run_once()?;
+                    print(cli, &rep, |rep| {
+                        format!("seen {}, copied {} ({} bytes), verified {}, corrupt {}, junk skipped {}, batch {:?}", rep.objects_seen, rep.objects_copied, rep.bytes_copied, rep.chunks_verified, rep.objects_corrupt, rep.skipped_junk, rep.batch_seq)
+                    })?;
+                    if *once {
+                        break;
                     }
-                }
-                ReplicaCmd::Status => {
-                    let r = varsto_core::replica::Replica::open(&home)?;
-                    println!("{}", serde_json::to_string_pretty(&r.summary())?);
+                    std::thread::sleep(std::time::Duration::from_secs((*interval).max(15)));
                 }
             }
-        }
+            ReplicaCmd::Status => {
+                let r = varsto_core::replica::Replica::open(&home)?;
+                println!("{}", serde_json::to_string_pretty(&r.summary())?);
+            }
+        },
         Cmd::Reset { yes } => {
             if !*yes {
                 bail_usage::<()>("this removes keys, ledger, state and configuration from this device (files in folders stay); run again with --yes")?;
@@ -4728,14 +4746,21 @@ fn run(cli: &Cli) -> Result<()> {
                     None => print!("{body}"),
                 }
             }
-            RecoveryCmd::Combine { shares } => {
+            RecoveryCmd::Combine { shares, check } => {
                 let parsed: Vec<varsto_core::recovery::Share> = shares
                     .iter()
                     .map(|s| varsto_core::recovery::Share::decode(s))
                     .collect::<Result<_>>()?;
-                let key = varsto_core::recovery::combine(&parsed, 2)?;
-                println!("vault key: {key}");
-                println!("words: {}", varsto_core::recovery::words_from_key(&key)?);
+                let key = varsto_core::recovery::combine(&parsed, 2, check.as_deref())?;
+                println!("vault key: {}", key.as_str());
+                println!(
+                    "words: {}",
+                    varsto_core::recovery::words_from_key(&key)?.as_str()
+                );
+                println!(
+                    "key check: {} (compare with the kit)",
+                    varsto_core::recovery::key_check(&key)?
+                );
             }
         },
         Cmd::Org { cmd } => run_org(cli, &home, cmd)?,
@@ -4755,13 +4780,11 @@ fn run(cli: &Cli) -> Result<()> {
                     minutes,
                 } => {
                     let method = if *software {
+                        software_key_warning()?;
                         varsto_core::strongroom::Method::Software
                     } else {
                         varsto_core::strongroom::Method::Fido2
                     };
-                    if *software {
-                        eprintln!("warning: --software keeps the secret in a file next to the vault; it demonstrates the flow and protects nothing beyond your passphrase");
-                    }
                     let backend = varsto_core::strongroom::backend(&method, &home);
                     let id =
                         engine.create_strongroom(name, path, method, backend.as_ref(), *minutes)?;
@@ -4854,18 +4877,13 @@ fn run(cli: &Cli) -> Result<()> {
                             r.is_strongroom()
                                 && (&r.name == folder || r.folder_id.as_str() == folder)
                         })
-                        .map(|(r, _)| r.folder_id)
+                        .map(|(r, _)| r.folder_id.clone())
                         .ok_or_else(|| anyhow!("{folder} is not a Strongroom folder"))?;
                     eprintln!("First, open {folder} with a key that is enrolled already.");
                     let fk = engine.unlock_strongroom_enrolled(folder, 1)?;
                     let (method, backend): (Method, Box<dyn SecurityKey>) = if *software {
-                        eprintln!(
-                            "warning: a software key protects nothing beyond your passphrase"
-                        );
-                        (
-                            Method::Software,
-                            Box::new(strongroom::new_software_key(&home)),
-                        )
+                        software_key_warning()?;
+                        (Method::Software, strongroom::new_software_backend(&home))
                     } else {
                         if device.is_none() {
                             eprintln!(
@@ -4881,7 +4899,14 @@ fn run(cli: &Cli) -> Result<()> {
                             }),
                         )
                     };
-                    let k = strongroom::enroll_key(backend.as_ref(), method, &id, &fk, label)?;
+                    let k = strongroom::enroll_key(
+                        backend.as_ref(),
+                        method,
+                        engine.vault_id(),
+                        &id,
+                        &fk,
+                        label,
+                    )?;
                     let name = k.short();
                     let n = if let Some((sf, _)) = service::status(&home) {
                         let url = format!("http://127.0.0.1:{}/api/strongroom/add-key", sf.port);
@@ -5955,6 +5980,16 @@ fn first_start_install() -> Option<i32> {
 /// `strongroom convert`: the security key is touched here; the conversion
 /// itself runs in the background service when one is running (it owns the
 /// folder state), otherwise in this process.
+/// `--software`: refused in a binary built without the feature, and a
+/// warning otherwise.
+fn software_key_warning() -> Result<()> {
+    if !varsto_core::strongroom::SOFTWARE_KEYS_BUILT_IN {
+        bail!("software security keys are not built into this binary; they are for tests only (a build with the software-key feature has them)");
+    }
+    eprintln!("warning: --software keeps the secret in a file next to the vault; it demonstrates the flow and protects nothing beyond your passphrase");
+    Ok(())
+}
+
 fn strongroom_convert(
     engine: &mut Engine,
     home: &std::path::Path,
@@ -5971,7 +6006,7 @@ fn strongroom_convert(
         eprintln!(
             "Resuming the interrupted conversion of {folder}: touch the key it was started with."
         );
-        let (fk, _) = strongroom::unlock_enrolled(home, &id, &info)?;
+        let (fk, _) = strongroom::unlock_enrolled(home, engine.vault_id(), &id, &info)?;
         (id, fk, info)
     } else if engine
         .folders()
@@ -5995,7 +6030,7 @@ fn strongroom_convert(
         return Ok(());
     } else {
         let method = if software {
-            eprintln!("warning: --software keeps the secret in a file next to the vault; it demonstrates the flow and protects nothing beyond your passphrase");
+            software_key_warning()?;
             Method::Software
         } else {
             Method::Fido2
@@ -6003,7 +6038,7 @@ fn strongroom_convert(
         let id = FolderId::random();
         let fk = SecretKey::random();
         let backend = strongroom::backend(&method, home);
-        let info = strongroom::enroll(backend.as_ref(), method, &id, &fk)?;
+        let info = strongroom::enroll(backend.as_ref(), method, engine.vault_id(), &id, &fk)?;
         (id, fk, info)
     };
     eprintln!("Re-encrypting {folder} under the new key; this reads and uploads the whole folder.");
@@ -6066,10 +6101,11 @@ fn strongroom_rekey(
         .ok_or_else(|| anyhow!("{folder} is not a Strongroom folder"))?;
     let info = rec.strongroom.clone().expect("a Strongroom");
     eprintln!("Unlock {folder} with an enrolled key:");
-    let (old_key, _) = strongroom::unlock_enrolled(home, &rec.folder_id, &info)?;
+    let vault_id = engine.vault_id().clone();
+    let (old_key, _) = strongroom::unlock_enrolled(home, &vault_id, &rec.folder_id, &info)?;
     let (id, fk, new_info) = if let Some((id, new_info)) = engine.strongroom_conversion(folder) {
         eprintln!("Resuming the interrupted re-key of {folder}: touch an enrolled key again.");
-        let (fk, _) = strongroom::unlock_enrolled(home, &id, &new_info)?;
+        let (fk, _) = strongroom::unlock_enrolled(home, &vault_id, &id, &new_info)?;
         (id, fk, new_info)
     } else {
         let id = FolderId::random();
@@ -6078,7 +6114,7 @@ fn strongroom_rekey(
             "Wrapping the new key for every enrolled key ({}): touch each one when asked.",
             info.keys().len()
         );
-        let new_info = strongroom::rewrap_enrolled(home, &id, &fk, &info)?;
+        let new_info = strongroom::rewrap_enrolled(home, &vault_id, &id, &fk, &info)?;
         (id, fk, new_info)
     };
     eprintln!("Re-encrypting {folder} under the new key; this reads and uploads the whole folder.");
@@ -7153,6 +7189,7 @@ mod recovery_guide_tests {
                     storage_class: Some("DEEP_ARCHIVE".into()),
                     cold: true,
                     place: "cloud".into(),
+                    allow_insecure_http: false,
                 },
                 StorageSpec::S3 {
                     name: "hot bucket".into(),
@@ -7166,6 +7203,7 @@ mod recovery_guide_tests {
                     storage_class: None,
                     cold: false,
                     place: String::new(),
+                    allow_insecure_http: false,
                 },
                 StorageSpec::Rclone {
                     name: "drive".into(),
