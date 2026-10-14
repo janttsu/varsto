@@ -635,7 +635,9 @@ fn situation(h: &mut HelpState, i: &Inputs, storages: &[&StorageIn], fg: &Figure
                 (true, true) => "Your files are kept in 1 storage and on 1 device.",
                 (true, false) => "Your files are kept in 1 storage and on {devices} devices.",
                 (false, true) => "Your files are kept in {storages} storages and on 1 device.",
-                (false, false) => "Your files are kept in {storages} storages and on {devices} devices.",
+                (false, false) => {
+                    "Your files are kept in {storages} storages and on {devices} devices."
+                }
             },
             &[
                 ("storages", storages.len().to_string()),
