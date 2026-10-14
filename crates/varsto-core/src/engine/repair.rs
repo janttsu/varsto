@@ -499,7 +499,9 @@ impl Engine {
             }
             let key = chunk_storage_key(&d.object);
             // 1. The copy as it is now.
-            let corrupt = match opened[&d.storage].get(&key) {
+            let corrupt = match crate::storage::guarded(&key, || {
+                opened[&d.storage].get_bounded(&key, crate::storage::MAX_BLOCK_OBJECT)
+            }) {
                 Ok(Some(ct)) if ObjectName::from_bytes(&crypto::hash(&ct)) == d.object => {
                     report.already_intact += 1;
                     if !opts.dry_run {
@@ -644,7 +646,9 @@ impl Engine {
                     let b = self.open_spec(&specs[name]).ok()?;
                     opened.insert(name.to_string(), b);
                 }
-                match opened[name].get(&key) {
+                match crate::storage::guarded(&key, || {
+                    opened[name].get_bounded(&key, crate::storage::MAX_BLOCK_OBJECT)
+                }) {
                     Ok(Some(ct)) if intact(&ct) => Some(ct),
                     Ok(_) => None,
                     Err(e) => {

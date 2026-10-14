@@ -38,6 +38,10 @@ On `main` after 0.0.1-alpha.13; spec sections 32 to 59.
   list older than the last accepted one is refused, the GitHub cross-check is
   required unless `update --allow-single-source` is given, and a version not
   newer than the running binary is never installed (spec 59).
+- Reads from storages are bounded (a chunk at most 16 MiB and 64 bytes, a
+  record 256 MiB, S3 and rclone refuse longer answers before reading them),
+  pack indexes are validated, and a panic while checking one object ends only
+  that object (spec 59).
 - A malformed `%` escape in a request no longer kills the API worker thread.
 
 ### Added

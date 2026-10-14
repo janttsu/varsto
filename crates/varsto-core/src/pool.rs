@@ -2197,6 +2197,10 @@ impl Storage for PoolStorage {
     }
 
     fn get(&self, key: &str) -> Result<Option<Vec<u8>>> {
+        self.get_bounded(key, crate::storage::read_limit(key))
+    }
+
+    fn get_bounded(&self, key: &str, max: u64) -> Result<Option<Vec<u8>>> {
         let mut st = self.state.lock().unwrap();
         let Some(e) = st.index.objects.get(key).cloned() else {
             return Ok(None);
@@ -2216,11 +2220,24 @@ impl Storage for PoolStorage {
             }));
         };
         let path = Self::data_path(mount, key)?;
-        match fs::read(&path) {
-            Ok(b) => Ok(Some(b)),
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
-            Err(err) => Err(err).with_context(|| format!("read {}", path.display())),
+        use std::io::Read;
+        let f = match fs::File::open(&path) {
+            Ok(f) => f,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(err) => return Err(err).with_context(|| format!("read {}", path.display())),
+        };
+        let size = f.metadata().map(|m| m.len()).unwrap_or(0);
+        if size > max {
+            return Err(crate::storage::too_large(key, size, max));
         }
+        let mut buf = Vec::with_capacity(size as usize);
+        f.take(max + 1)
+            .read_to_end(&mut buf)
+            .with_context(|| format!("read {}", path.display()))?;
+        if buf.len() as u64 > max {
+            return Err(crate::storage::too_large(key, buf.len() as u64, max));
+        }
+        Ok(Some(buf))
     }
 
     fn exists(&self, key: &str) -> Result<bool> {

@@ -35,6 +35,17 @@ impl RcloneStorage {
     }
 
     fn run(&self, args: &[&str], stdin: Option<&[u8]>) -> Result<(bool, Vec<u8>, String)> {
+        self.run_capped(args, stdin, MAX_OUTPUT)
+    }
+
+    /// `run`, reading at most `cap` bytes of rclone's output: a longer
+    /// answer ends the command and is an error, never held in memory.
+    fn run_capped(
+        &self,
+        args: &[&str],
+        stdin: Option<&[u8]>,
+        cap: u64,
+    ) -> Result<(bool, Vec<u8>, String)> {
         let mut cmd = Command::new(&self.binary);
         // Flags first, then `--`, then the remote path: a path that starts
         // with a dash is never read as a flag.
@@ -68,7 +79,40 @@ impl RcloneStorage {
             pipe.write_all(data)?;
             drop(pipe);
         }
-        let out = child.wait_with_output()?;
+        let mut stdout_pipe = child.stdout.take().expect("piped stdout");
+        let mut stderr_pipe = child.stderr.take().expect("piped stderr");
+        // Drain stderr on a thread (keeping its first MiB) so the child
+        // never blocks on a full pipe while stdout is read.
+        let err_reader = std::thread::spawn(move || {
+            use std::io::Read;
+            let (mut keep, mut buf) = (Vec::new(), [0u8; 8192]);
+            while let Ok(n) = stderr_pipe.read(&mut buf) {
+                if n == 0 {
+                    break;
+                }
+                if keep.len() < 1 << 20 {
+                    keep.extend_from_slice(&buf[..n]);
+                }
+            }
+            keep
+        });
+        let mut stdout = Vec::new();
+        {
+            use std::io::Read;
+            (&mut stdout_pipe).take(cap + 1).read_to_end(&mut stdout)?;
+        }
+        if stdout.len() as u64 > cap {
+            let _ = child.kill();
+            let _ = child.wait();
+            bail!("rclone answered with more than the {cap} bytes allowed; not read");
+        }
+        drop(stdout_pipe);
+        let status = child.wait()?;
+        let out = std::process::Output {
+            status,
+            stdout,
+            stderr: err_reader.join().unwrap_or_default(),
+        };
         // rclone's exit codes: 3 = directory not found, 4 = file not found.
         // Anything else that fails is an error, never "absent": a transport
         // failure must not look like a missing object.
@@ -138,6 +182,9 @@ fn check_binary(binary: &str) -> Result<()> {
     Ok(())
 }
 
+/// Most output of one rclone command that is not an object read (listings).
+const MAX_OUTPUT: u64 = 1 << 30;
+
 const NOT_FOUND_MARK: &str = "\u{1}rclone-not-found\u{1}";
 
 fn is_not_found(stderr: &str) -> bool {
@@ -162,9 +209,22 @@ impl Storage for RcloneStorage {
     }
 
     fn get(&self, key: &str) -> Result<Option<Vec<u8>>> {
+        self.get_bounded(key, crate::storage::read_limit(key))
+    }
+
+    fn get_bounded(&self, key: &str, max: u64) -> Result<Option<Vec<u8>>> {
         crate::storage::validate_key(key)?;
-        let (ok, out, err) = self.run(&["cat", &self.target(key)], None)?;
+        // One byte more than allowed says "too large" without reading the rest.
+        let count = (max + 1).to_string();
+        let (ok, out, err) = self.run_capped(
+            &["cat", "--count", &count, &self.target(key)],
+            None,
+            max + 1,
+        )?;
         if ok {
+            if out.len() as u64 > max {
+                return Err(crate::storage::too_large(key, out.len() as u64, max));
+            }
             Ok(Some(out))
         } else if is_not_found(&err) {
             Ok(None)
@@ -175,8 +235,12 @@ impl Storage for RcloneStorage {
 
     fn get_range(&self, key: &str, offset: u64, len: u64) -> Result<Option<Vec<u8>>> {
         crate::storage::validate_key(key)?;
+        let len = len.min(crate::storage::MAX_BLOCK_OBJECT);
+        if offset.checked_add(len).is_none() {
+            bail!("rclone cat {key}: the range starting at {offset} is out of bounds");
+        }
         let (off, count) = (offset.to_string(), len.to_string());
-        let (ok, out, err) = self.run(
+        let (ok, out, err) = self.run_capped(
             &[
                 "cat",
                 "--offset",
@@ -186,6 +250,7 @@ impl Storage for RcloneStorage {
                 &self.target(key),
             ],
             None,
+            len + 1,
         )?;
         if ok {
             Ok(Some(out))

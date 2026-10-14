@@ -64,9 +64,9 @@ pub struct S3Storage {
 /// `If-None-Match: *`.
 const PROBE_BODY: &[u8] = b"varsto conditional-write probe";
 
-/// Largest response body read into memory. Chunks are at most a few MiB;
-/// manifests and ledger batches grow with the number of files.
-const MAX_BODY: u64 = 2 << 30;
+/// Largest response to a listing or any other request that is not an object
+/// read (object reads are capped per key, `storage::read_limit`).
+const MAX_BODY: u64 = crate::storage::MAX_RECORD;
 
 const EMPTY_SHA256: &str = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
 
@@ -273,9 +273,24 @@ impl S3Storage {
         extra_headers: &[(&str, &str)],
         body: &[u8],
     ) -> Result<(u16, Vec<u8>)> {
+        self.request_capped(method, path, query, extra_headers, body, MAX_BODY)
+    }
+
+    /// `request`, reading at most `cap` bytes of the response: a longer
+    /// `Content-Length`, or a body that runs past it, is an error before the
+    /// body is held in memory.
+    fn request_capped(
+        &self,
+        method: &str,
+        path: &str,
+        query: &[(String, String)],
+        extra_headers: &[(&str, &str)],
+        body: &[u8],
+        cap: u64,
+    ) -> Result<(u16, Vec<u8>)> {
         use std::sync::atomic::Ordering;
         let t = crate::logging::Timer::start();
-        let first = self.request_once(method, path, query, extra_headers, body);
+        let first = self.request_once(method, path, query, extra_headers, body, cap);
         let failed = match &first {
             Ok((st, _, _)) => *st >= 400 && *st != 404,
             Err(_) => true,
@@ -311,7 +326,7 @@ impl S3Storage {
                     self.clock_offset
                         .store(server - unix_now(), Ordering::Relaxed);
                     let (status, bytes, _) =
-                        self.request_once(method, path, query, extra_headers, body)?;
+                        self.request_once(method, path, query, extra_headers, body, cap)?;
                     return Ok((status, bytes));
                 }
             }
@@ -327,6 +342,7 @@ impl S3Storage {
         query: &[(String, String)],
         extra_headers: &[(&str, &str)],
         body: &[u8],
+        cap: u64,
     ) -> Result<(u16, Vec<u8>, Option<String>)> {
         let amz_date =
             amz_date_at(unix_now() + self.clock_offset.load(std::sync::atomic::Ordering::Relaxed));
@@ -420,11 +436,23 @@ impl S3Storage {
         let bytes = if method == "HEAD" {
             Vec::new()
         } else {
+            // A server's word for the length is checked before anything is
+            // read: a 2 GiB answer is refused without allocating for it.
+            if status < 400 || status == 404 {
+                if let Some(n) = resp.body().content_length() {
+                    if n > cap {
+                        bail!(
+                            "{method} {}: the response is {n} bytes, more than the {cap} allowed",
+                            self.cfg.name
+                        );
+                    }
+                }
+            }
             // ureq stops at 10 MiB by default, but a ledger batch or a file
             // list of a folder with tens of thousands of files is larger.
             resp.body_mut()
                 .with_config()
-                .limit(MAX_BODY)
+                .limit(cap.max(64 * 1024))
                 .read_to_vec()
                 .with_context(|| format!("{method} {}: reading the response", self.cfg.name))?
         };
@@ -603,8 +631,13 @@ impl Storage for S3Storage {
     }
 
     fn get(&self, key: &str) -> Result<Option<Vec<u8>>> {
+        self.get_bounded(key, crate::storage::read_limit(key))
+    }
+
+    fn get_bounded(&self, key: &str, max: u64) -> Result<Option<Vec<u8>>> {
         crate::storage::validate_key(key)?;
-        let (status, body) = self.request("GET", &self.object_path(key), &[], &[], &[])?;
+        let (status, body) =
+            self.request_capped("GET", &self.object_path(key), &[], &[], &[], max)?;
         match status {
             200 => Ok(Some(body)),
             404 => Ok(None),
@@ -620,13 +653,19 @@ impl Storage for S3Storage {
         if len == 0 {
             return Ok(Some(Vec::new()));
         }
-        let range = format!("bytes={}-{}", offset, offset + len - 1);
-        let (status, body) = self.request(
+        // The offset and length are claims of a pack index: checked, never added blindly.
+        let len = len.min(crate::storage::MAX_BLOCK_OBJECT);
+        let Some(last) = offset.checked_add(len - 1) else {
+            bail!("GET {key}: the range starting at {offset} is out of bounds");
+        };
+        let range = format!("bytes={offset}-{last}");
+        let (status, body) = self.request_capped(
             "GET",
             &self.object_path(key),
             &[],
             &[("range", &range)],
             &[],
+            crate::storage::MAX_BLOCK_OBJECT,
         )?;
         match status {
             206 => Ok(Some(body)),
@@ -635,7 +674,10 @@ impl Storage for S3Storage {
             // the offset is not 0.
             200 if body.len() as u64 == len => Ok(Some(body)),
             200 => Ok(Some(
-                body.get(offset as usize..(offset + len) as usize)
+                usize::try_from(offset)
+                    .ok()
+                    .zip(usize::try_from(last).ok())
+                    .and_then(|(a, z)| body.get(a..=z))
                     .map(<[u8]>::to_vec)
                     .unwrap_or_default(),
             )),
@@ -797,6 +839,64 @@ mod tests {
         })
         .unwrap();
         assert_eq!(s.get("manifests/x").unwrap().unwrap(), body);
+        th.join().unwrap();
+    }
+
+    fn storage_for(port: u16) -> S3Storage {
+        S3Storage::new(S3Config {
+            name: "test".into(),
+            endpoint: format!("http://127.0.0.1:{port}"),
+            region: "us-east-1".into(),
+            bucket: "b".into(),
+            prefix: String::new(),
+            access_key_id: "k".into(),
+            secret_access_key: "s".into(),
+            path_style: true,
+            storage_class: None,
+            allow_insecure_http: false,
+            conditional_writes: None,
+        })
+        .unwrap()
+    }
+
+    #[test]
+    fn a_response_that_claims_two_gib_is_refused_without_reading_it() {
+        // The server announces 2 GiB and sends a few bytes: the length alone
+        // is the answer, nothing is allocated for it.
+        use std::io::{Read, Write};
+        for key in ["manifests/x", "chunks/ab/cdef"] {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let port = listener.local_addr().unwrap().port();
+            let th = std::thread::spawn(move || {
+                let (mut c, _) = listener.accept().unwrap();
+                let mut buf = [0u8; 4096];
+                let _ = c.read(&mut buf);
+                let _ = c.write_all(
+                    format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n", 2u64 << 30).as_bytes(),
+                );
+                let _ = c.write_all(&[0u8; 64]);
+                std::thread::sleep(std::time::Duration::from_millis(300));
+            });
+            let e = storage_for(port).get(key).unwrap_err();
+            assert!(format!("{e:#}").contains("more than"), "{e:#}");
+            th.join().unwrap();
+        }
+    }
+
+    #[test]
+    fn a_block_read_is_capped_at_a_chunk_not_a_record() {
+        // 17 MiB is a fine record but not a block object.
+        let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
+        let port = server.server_addr().to_ip().unwrap().port();
+        let th = std::thread::spawn(move || {
+            for _ in 0..2 {
+                let req = server.recv().unwrap();
+                let _ = req.respond(tiny_http::Response::from_data(vec![7u8; 17 << 20]));
+            }
+        });
+        let s = storage_for(port);
+        assert_eq!(s.get("manifests/x").unwrap().unwrap().len(), 17 << 20);
+        assert!(s.get("chunks/ab/cdef").is_err());
         th.join().unwrap();
     }
 
