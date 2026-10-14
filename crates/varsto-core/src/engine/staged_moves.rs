@@ -287,7 +287,10 @@ impl Engine {
             let why = format!("move job {} is running in another process", job.id);
             return Ok(skipped(job, why));
         };
-        match self.job_run_locked(job.clone(), limits) {
+        let result = self.job_run_locked(job.clone(), limits);
+        // The next operation opens its storages anew (a job run is one).
+        self.finish_storages();
+        match result {
             Ok(run) => Ok(run),
             Err(e) => {
                 // Keep the reason in the job file; the job stays open.
