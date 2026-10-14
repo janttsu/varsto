@@ -437,6 +437,20 @@ fn same_fs(_a: &Path, _b: &Path) -> bool {
     false
 }
 
+/// A file name of the torrent must be a folder path as it is: the import
+/// leaves out names starting with `.varsto`, and refuses empty, `.` and
+/// `..` components.
+fn check_torrent_path(p: &str) -> Result<()> {
+    util::check_rel_path(p)
+        .and_then(|_| {
+            if p.split('/').any(|c| c.starts_with(".varsto")) {
+                bail!("names starting with .varsto are Varsto's own");
+            }
+            Ok(())
+        })
+        .with_context(|| format!("the torrent names a file Varsto cannot store as it is: {p}"))
+}
+
 fn secret_name(hash: &str) -> String {
     format!("transmission:{hash}")
 }
@@ -514,9 +528,7 @@ impl Engine {
             );
         }
         for (p, _) in &files {
-            util::check_rel_path(p).with_context(|| {
-                format!("the torrent names a file Varsto cannot store as it is: {p}")
-            })?;
+            check_torrent_path(p)?;
         }
         let session = rpc.session_get()?;
         if session
@@ -756,12 +768,7 @@ impl Engine {
             rpc.all_unwanted(&job.hash)?;
             rpc.limit_download(&job.hash, None)?;
             for f in &info.files {
-                util::check_rel_path(&f.name).with_context(|| {
-                    format!(
-                        "the torrent names a file Varsto cannot store as it is: {}",
-                        f.name
-                    )
-                })?;
+                check_torrent_path(&f.name)?;
             }
             job.files = info
                 .files
