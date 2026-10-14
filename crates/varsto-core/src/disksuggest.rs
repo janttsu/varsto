@@ -15,6 +15,7 @@
 //! | reclaimable | `30 × min(reclaimable / (capacity / 3), 1)`: a third of the disk to free counts fully |
 //! | file system | 25 when its last forced check corrected errors, plus `10 × min(age / 365 days, 1)` |
 //! | unseen | `20 × min(days since last seen / 365, 1)` |
+//! | staged move | `65 × min(room / bytes left, 1)`, at least `MIN_SCORE`, when an open move job (`staged_move`) waits for room on the disk's pool |
 //!
 //! `share` is the share of the disk's bytes whose last check is older than
 //! the pool's `verify_after_days` (never-checked copies included) and `late`
@@ -30,6 +31,7 @@
 
 use crate::blockdev::FsckVerdict;
 use crate::pool::DiskStatus;
+use crate::staged_move::MoveWait;
 use crate::util;
 use serde::{Deserialize, Serialize};
 
@@ -46,6 +48,7 @@ pub const W_RECLAIM: f64 = 30.0;
 pub const W_FSCK_CORRECTED: f64 = 25.0;
 pub const W_FSCK_AGE: f64 = 10.0;
 pub const W_UNSEEN: f64 = 20.0;
+pub const W_MOVE: f64 = 65.0;
 
 const DAY: i64 = 86_400;
 
@@ -124,6 +127,30 @@ pub struct DiskSuggestions {
     pub excluded: Vec<DiskWarning>,
     /// Labels of the disks that are away with copies past `verify_after_days`.
     pub overdue: Vec<String>,
+    /// Open move jobs that wait for room on a pool.
+    #[serde(default)]
+    pub moves: Vec<MoveWait>,
+    /// Jobs for which no attached or known disk has room: a new disk is
+    /// needed.
+    #[serde(default)]
+    pub new_disk_needed: Vec<NewDiskNeeded>,
+}
+
+/// An open move job that no known disk of its pool can continue.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct NewDiskNeeded {
+    pub id: String,
+    pub folder: String,
+    pub pool: String,
+    pub bytes_left: u64,
+    pub text: String,
+    /// What to run to prepare a disk.
+    pub command: String,
+}
+
+/// The room a disk has for a move: free space within the reserve.
+fn room(d: &DiskStatus) -> u64 {
+    d.free_bytes.unwrap_or(0).saturating_sub(d.reserve_bytes)
 }
 
 /// `varsto disk insert "<label>"`, quoted for a shell.
@@ -157,6 +184,11 @@ fn plural(n: u64, one: &str, many: &str) -> String {
 
 /// The reasons (and points) of one disk at `now`.
 pub fn reasons(d: &DiskStatus, now: i64) -> Vec<SuggestReason> {
+    reasons_with(d, now, &[])
+}
+
+/// `reasons`, with the open move jobs that wait for room on the pool.
+pub fn reasons_with(d: &DiskStatus, now: i64, moves: &[MoveWait]) -> Vec<SuggestReason> {
     let mut out = Vec::new();
     let mut add = |kind: &str, points: f64, text: String| {
         if points >= 0.05 {
@@ -300,6 +332,26 @@ pub fn reasons(d: &DiskStatus, now: i64) -> Vec<SuggestReason> {
         };
         add("fsck", points, text);
     }
+    // A staged move waiting for room on this pool.
+    if !d.retired && !d.failing {
+        let free = room(d);
+        for m in moves.iter().filter(|m| m.pool == d.pool) {
+            if free == 0 || m.bytes_left == 0 {
+                continue;
+            }
+            let share = (free as f64 / m.bytes_left as f64).min(1.0);
+            add(
+                "move",
+                (W_MOVE * share).max(MIN_SCORE),
+                format!(
+                    "continue the move of {}: {} left; this disk has {} free",
+                    m.folder,
+                    util::human_bytes(m.bytes_left),
+                    util::human_bytes(free)
+                ),
+            );
+        }
+    }
     // Long unseen.
     if !d.attached {
         if d.last_seen_utc > 0 {
@@ -319,7 +371,12 @@ pub fn reasons(d: &DiskStatus, now: i64) -> Vec<SuggestReason> {
 
 /// Score one disk.
 pub fn suggest(d: &DiskStatus, now: i64) -> DiskSuggestion {
-    let reasons = reasons(d, now);
+    suggest_with(d, now, &[])
+}
+
+/// Score one disk, counting the open move jobs that wait for room.
+pub fn suggest_with(d: &DiskStatus, now: i64, moves: &[MoveWait]) -> DiskSuggestion {
+    let reasons = reasons_with(d, now, moves);
     // `sum` of no f64 is -0.0: start from 0.
     let score: f64 = reasons.iter().fold(0.0, |s, r| s + r.points);
     let summary = if reasons.is_empty() {
@@ -351,10 +408,41 @@ pub fn suggest(d: &DiskStatus, now: i64) -> DiskSuggestion {
 
 /// Rank every disk (see the module documentation).
 pub fn rank(disks: &[DiskStatus], now: i64) -> DiskSuggestions {
+    rank_with_moves(disks, now, &[])
+}
+
+/// `rank`, with the open move jobs that wait for room on a pool: a disk
+/// with room for one ranks higher, and a job no known disk can continue
+/// says a new disk is needed.
+pub fn rank_with_moves(disks: &[DiskStatus], now: i64, moves: &[MoveWait]) -> DiskSuggestions {
     let mut out = DiskSuggestions {
         computed_utc: now,
+        moves: moves.to_vec(),
         ..Default::default()
     };
+    for m in moves.iter().filter(|m| m.bytes_left > 0) {
+        let usable = disks
+            .iter()
+            .any(|d| d.pool == m.pool && !d.retired && !d.failing && room(d) > 0);
+        if !usable {
+            out.new_disk_needed.push(NewDiskNeeded {
+                id: m.id.clone(),
+                folder: m.folder.clone(),
+                pool: m.pool.clone(),
+                bytes_left: m.bytes_left,
+                text: format!(
+                    "continue the move of {}: {} left, but no known disk of pool {} has room: a new disk is needed",
+                    m.folder,
+                    util::human_bytes(m.bytes_left),
+                    m.pool
+                ),
+                command: format!(
+                    "varsto disk init <device> --pool {} --label <name>   (or: varsto disk add <mount> --pool {} --label <name>)",
+                    m.pool, m.pool
+                ),
+            });
+        }
+    }
     for d in disks {
         if d.retired || d.failing {
             let mut why = Vec::new();
@@ -389,7 +477,7 @@ pub fn rank(disks: &[DiskStatus], now: i64) -> DiskSuggestions {
             });
             continue;
         }
-        let s = suggest(d, now);
+        let s = suggest_with(d, now, moves);
         if d.attached {
             out.attached.push(s);
         } else {

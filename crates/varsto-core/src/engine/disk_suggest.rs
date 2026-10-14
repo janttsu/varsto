@@ -159,7 +159,11 @@ impl Engine {
             .into_iter()
             .filter(|d| pool.is_none_or(|p| d.pool == p))
             .collect();
-        Ok(disksuggest::rank(&rows, util::now_utc()))
+        Ok(disksuggest::rank_with_moves(
+            &rows,
+            util::now_utc(),
+            &self.move_waits(),
+        ))
     }
 
     pub fn disk_suggest_settings(&self) -> SuggestSettings {

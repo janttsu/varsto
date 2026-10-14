@@ -75,6 +75,7 @@ mod restic_mirror;
 mod scrub;
 mod share_ops;
 mod share_roles;
+mod staged_moves;
 mod strongroom_ops;
 mod trash;
 mod verify;
@@ -134,6 +135,7 @@ pub use restic_mirror::{CheckOptions, SetupReport};
 pub use scrub::ScrubOptions;
 pub use share_ops::{ShareMember, ShareMembers, ShareRevokeReport};
 pub use share_roles::{ShareRoleReport, KEPT_ASIDE_DIR};
+pub use staged_moves::{JobRunLimits, MoveJobRequest, MoveJobRun, SERVICE_RUN_GROUPS};
 pub use strongroom_ops::{CleanupReport, ConvertReport, StrongroomKeySummary};
 pub use trash::{
     restored_name, RestoredFile, TrashItem, TrashPurgeReport, TrashRestorePlan, TrashRestoreReport,
