@@ -611,7 +611,7 @@ impl Engine {
             .join(format!("{folder}.json"))
     }
 
-    fn load_book(&self, folder: &FolderId) -> Option<ImportBook> {
+    pub(super) fn load_book(&self, folder: &FolderId) -> Option<ImportBook> {
         util::read_json::<ImportBook>(&self.book_path(folder)).ok()
     }
 

@@ -1515,7 +1515,15 @@
   "Attach disk {disk} to continue moving {folder}": "Liitä levy {disk} jatkaaksesi kansion {folder} siirtoa",
   "Attach a new disk to continue moving {folder}": "Liitä uusi levy jatkaaksesi kansion {folder} siirtoa",
   "{left} of {folder} are still on {from}. The move to {to} stops when the pool has no room and carries on by itself when a disk is attached.": "{left} kansiosta {folder} on yhä kohteessa {from}. Siirto kohteeseen {to} pysähtyy, kun levyvarastossa ei ole tilaa, ja jatkuu itsestään, kun levy liitetään.",
-  "Plug the disk in. Nothing else is needed; `varsto move status` shows how far the move has come.": "Liitä levy. Muuta ei tarvita; `varsto move status` näyttää, kuinka pitkällä siirto on."
+  "Plug the disk in. Nothing else is needed; `varsto move status` shows how far the move has come.": "Liitä levy. Muuta ei tarvita; `varsto move status` näyttää, kuinka pitkällä siirto on.",
+  "Torrent job {name} is waiting for disk space: {free} free on its download disk, {need} more is needed above the reserve.": "Torrent-työ {name} odottaa levytilaa: latauslevyllä on vapaana {free}, varauksen lisäksi tarvitaan vielä {need}.",
+  "Torrent job {name} is complete: all {count} files are in folder {folder}.": "Torrent-työ {name} on valmis: kaikki {count} tiedostoa ovat kansiossa {folder}.",
+  "Make room for torrent job {name}": "Tee tilaa torrent-työlle {name}",
+  "The next files need {need} more free space on the download disk than the reserve leaves; the download waits until there is room.": "Seuraavat tiedostot tarvitsevat latauslevyllä {need} enemmän vapaata tilaa kuin varaus jättää; lataus odottaa, kunnes tilaa on.",
+  "Free up space on the download disk, or lower the reserve with --free-min when you add a job. The job goes on by itself once there is room.": "Vapauta tilaa latauslevyltä tai pienennä varausta valitsimella --free-min, kun lisäät työn. Työ jatkuu itsestään, kun tilaa on.",
+  "Torrent job {name} is complete": "Torrent-työ {name} on valmis",
+  "Every file of the torrent is in folder {folder} on your storages; the download directory is empty.": "Torrentin jokainen tiedosto on kansiossa {folder} tallennuspaikoissasi; latauskansio on tyhjä.",
+  "Remove the job when you no longer want to see it. To move the folder's data to other storages later, use varsto move.": "Poista työ, kun et enää halua nähdä sitä. Kansion tiedot voi siirtää myöhemmin muihin tallennuspaikkoihin komennolla varsto move."
  },
  "patterns": [
   [
@@ -2666,7 +2674,15 @@
   "Free up space on storage {name}",
   "Free up space on the disk of folder {name}",
   "Free up space on {name}",
-  "A storage may be withholding ledger batches of {device}: another device holds newer ones that no storage gave this device."
+  "A storage may be withholding ledger batches of {device}: another device holds newer ones that no storage gave this device.",
+  "Torrent job {name} is waiting for disk space: {free} free on its download disk, {need} more is needed above the reserve.",
+  "Torrent job {name} is complete: all {count} files are in folder {folder}.",
+  "Make room for torrent job {name}",
+  "The next files need {need} more free space on the download disk than the reserve leaves; the download waits until there is room.",
+  "Free up space on the download disk, or lower the reserve with --free-min when you add a job. The job goes on by itself once there is room.",
+  "Torrent job {name} is complete",
+  "Every file of the torrent is in folder {folder} on your storages; the download directory is empty.",
+  "Remove the job when you no longer want to see it. To move the folder's data to other storages later, use varsto move."
  ],
  "parts": [
   [

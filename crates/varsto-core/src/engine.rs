@@ -77,6 +77,7 @@ mod share_ops;
 mod share_roles;
 mod staged_moves;
 mod strongroom_ops;
+mod torrent;
 mod trash;
 mod verify;
 mod view;
@@ -137,6 +138,10 @@ pub use share_ops::{ShareMember, ShareMembers, ShareRevokeReport};
 pub use share_roles::{ShareRoleReport, KEPT_ASIDE_DIR};
 pub use staged_moves::{JobRunLimits, MoveJobRequest, MoveJobRun, SERVICE_RUN_GROUPS};
 pub use strongroom_ops::{CleanupReport, ConvertReport, StrongroomKeySummary};
+pub use torrent::{
+    find_job, plan_batch, torrent_jobs_at, BatchPlan, Candidate, CompletedFiles, JobFile, JobState,
+    SystemEnv, TorrentAddOptions, TorrentEnv, TorrentJob, DEFAULT_FREE_MIN,
+};
 pub use trash::{
     restored_name, RestoredFile, TrashItem, TrashPurgeReport, TrashRestorePlan, TrashRestoreReport,
     TrashSettings, TrashStatus, TrashUpkeepReport, DEFAULT_TRASH_DAYS, MAX_TRASH_DAYS,
