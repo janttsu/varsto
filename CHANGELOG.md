@@ -16,7 +16,7 @@ spec still names them because sections were written as the work was done.
 
 ## Unreleased
 
-On `main` after 0.0.1-alpha.13; spec sections 32 to 59.
+On `main` after 0.0.1-alpha.13; spec sections 32 to 60.
 
 ### Added
 
@@ -50,7 +50,7 @@ On `main` after 0.0.1-alpha.13; spec sections 32 to 59.
 - Read-only members of shared folders (spec 55).
 - Organizations: which device platforms may belong (spec 56).
 - Torrents larger than the disk downloaded through a local transmission-daemon
-  in batches straight into a storage, `varsto torrent` (spec 58, Linux).
+  in batches straight into a storage, `varsto torrent` (spec 60, Linux).
 - Help page in the interface, in English, Finnish and Swedish.
 - CI quality gates: `cargo fmt --check`, `cargo clippy -D warnings`,
   `cargo audit` and `cargo deny check` (`deny.toml`).

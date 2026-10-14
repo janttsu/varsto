@@ -16,6 +16,7 @@ stored. Then the next batch starts, until the whole torrent is in the
 folder.
 
 Linux only, on the command line. After 0.0.1-alpha.13; not in a release yet.
+The details are in [section 60 of the specification](spec/alpha-0-format.md).
 
 ## Installing transmission-daemon
 

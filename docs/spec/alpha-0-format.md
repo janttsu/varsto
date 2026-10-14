@@ -1566,7 +1566,7 @@ Code: `crates/varsto-core/src/staged_move.rs` (the job file), `engine/staged_mov
 
 Tests: `crates/varsto-core/tests/staged_move.rs` (a folder moved to a pool disk by disk with the suggestion and the service trigger, `--keep-source`, `--path`, a disk group rule needing two places, pause and cancel, a job resumed after the engine is dropped between groups, an ordinary storage target and the run lock), `crates/varsto-core/src/disksuggest.rs` (ranking for waiting jobs), `crates/varsto-cli/tests/cli_smoke.rs` (`staged_move_jobs_through_the_cli`) and the scenario `staged-move-to-pool` of the lab (`scripts/test/lab/scenarios.py`).
 
-## 58. Torrents through a local transmission daemon
+## 60. Torrents through a local transmission daemon
 
 **Why.** A torrent can be far larger than the disk of the computer that downloads it (a 2 TB archive on a laptop with 200 GB free). The data should go straight into a storage (an S3 bucket, later perhaps a disk pool through `varsto move`) with the local disk used only as a spool that never runs full, and with the certainty that every file of the torrent ends up stored. Varsto does not speak BitTorrent itself: a local **transmission-daemon** downloads, and Varsto decides which files it downloads when. Code: `crates/varsto-core/src/transmission.rs` (the RPC client, the metainfo and magnet parsing, and `transmission::fake`, an in-process daemon for tests), `engine/torrent.rs` (jobs, the planner and the step) and `crates/varsto-cli/src/torrent.rs`. Linux only; the command line refuses elsewhere. User guide: `docs/torrents.md`.
 

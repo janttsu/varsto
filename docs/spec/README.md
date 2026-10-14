@@ -1,6 +1,6 @@
 # Specifications
 
-Status of the documents that will define formats and protocols. Sections 32 to 57 of alpha-0-format.md are on main after 0.0.1-alpha.13, not in a release yet. Most of what exists is described in [alpha-0-format.md](alpha-0-format.md), section by section; anything marked **not started** has no implementation. They are intended to be open so that implementations remain interoperable and data stays recoverable.
+Status of the documents that will define formats and protocols. Sections 32 to 60 of alpha-0-format.md are on main after 0.0.1-alpha.13, not in a release yet. Most of what exists is described in [alpha-0-format.md](alpha-0-format.md), section by section; anything marked **not started** has no implementation. They are intended to be open so that implementations remain interoperable and data stays recoverable.
 
 | Document | Status |
 |---|---|
@@ -23,6 +23,7 @@ Status of the documents that will define formats and protocols. Sections 32 to 5
 | Folder safety (folder marker, mass-deletion guard, send-only and receive-only folders) | on main, after 0.0.1-alpha.13, not in a release yet: [alpha-0-format.md](alpha-0-format.md) section 47 |
 | Ignore rules and file metadata (permissions, symbolic links, extended attributes, ownership) | on main, after 0.0.1-alpha.13, not in a release yet: [alpha-0-format.md](alpha-0-format.md) sections 48 and 49 |
 | Invitations as QR codes and `varsto://` links | on main, after 0.0.1-alpha.13, not in a release yet: [alpha-0-format.md](alpha-0-format.md) section 51 |
+| Torrents through a local transmission daemon (`varsto torrent`) | on main, after 0.0.1-alpha.13, not in a release yet: [alpha-0-format.md](alpha-0-format.md) section 60 |
 | Minimum free disk space | on main, after 0.0.1-alpha.13, not in a release yet: [alpha-0-format.md](alpha-0-format.md) section 53 |
 | Shared folder roles (read-only members) | on main, after 0.0.1-alpha.13, not in a release yet: [alpha-0-format.md](alpha-0-format.md) section 55 |
 | Change history of files (`varsto changes`) | on main, after 0.0.1-alpha.13, not in a release yet: [alpha-0-format.md](alpha-0-format.md) section 57 |
