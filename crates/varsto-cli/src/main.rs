@@ -4443,64 +4443,62 @@ fn run(cli: &Cli) -> Result<()> {
                 })?;
             }
         },
-        Cmd::Replica { cmd } => {
-            match cmd {
-                ReplicaCmd::Token => {
-                    let engine = open_engine(&home)?;
-                    let t = engine.replica_token()?;
-                    print(cli, &t, |t| {
-                        format!("replica token (share only with the device that will hold your encrypted copies):\n  {}", t.encode())
-                    })?;
-                }
-                ReplicaCmd::Init {
+        Cmd::Replica { cmd } => match cmd {
+            ReplicaCmd::Token => {
+                let engine = open_engine(&home)?;
+                let t = engine.replica_token()?;
+                print(cli, &t, |t| {
+                    format!("replica token (share only with the device that will hold your encrypted copies):\n  {}", t.encode())
+                })?;
+            }
+            ReplicaCmd::Init {
+                name,
+                token,
+                source,
+                target,
+            } => {
+                let token = varsto_core::replica::ReplicaToken::decode(token)?;
+                let src = StorageSpec::LocalDir {
+                    name: "source".into(),
+                    path: source.clone(),
+                    cold: false,
+                    carrier: false,
+                    place: String::new(),
+                    min_free: None,
+                };
+                let tgt = StorageSpec::LocalDir {
+                    name: "target".into(),
+                    path: target.clone(),
+                    cold: false,
+                    carrier: false,
+                    place: String::new(),
+                    min_free: None,
+                };
+                let r = varsto_core::replica::Replica::init(&home, name, &token, src, tgt)?;
+                println!(
+                    "replica {} ({}) set up; run `varsto replica run`",
                     name,
-                    token,
-                    source,
-                    target,
-                } => {
-                    let token = varsto_core::replica::ReplicaToken::decode(token)?;
-                    let src = StorageSpec::LocalDir {
-                        name: "source".into(),
-                        path: source.clone(),
-                        cold: false,
-                        carrier: false,
-                        place: String::new(),
-                        min_free: None,
-                    };
-                    let tgt = StorageSpec::LocalDir {
-                        name: "target".into(),
-                        path: target.clone(),
-                        cold: false,
-                        carrier: false,
-                        place: String::new(),
-                        min_free: None,
-                    };
-                    let r = varsto_core::replica::Replica::init(&home, name, &token, src, tgt)?;
-                    println!(
-                        "replica {} ({}) set up; run `varsto replica run`",
-                        name,
-                        r.device_id().short()
-                    );
-                }
-                ReplicaCmd::Run { once, interval } => {
-                    let mut r = varsto_core::replica::Replica::open(&home)?;
-                    loop {
-                        let rep = r.run_once()?;
-                        print(cli, &rep, |rep| {
-                            format!("seen {}, copied {} ({} bytes), verified {}, corrupt {}, batch {:?}", rep.objects_seen, rep.objects_copied, rep.bytes_copied, rep.chunks_verified, rep.objects_corrupt, rep.batch_seq)
-                        })?;
-                        if *once {
-                            break;
-                        }
-                        std::thread::sleep(std::time::Duration::from_secs((*interval).max(15)));
+                    r.device_id().short()
+                );
+            }
+            ReplicaCmd::Run { once, interval } => {
+                let mut r = varsto_core::replica::Replica::open(&home)?;
+                loop {
+                    let rep = r.run_once()?;
+                    print(cli, &rep, |rep| {
+                        format!("seen {}, copied {} ({} bytes), verified {}, corrupt {}, junk skipped {}, batch {:?}", rep.objects_seen, rep.objects_copied, rep.bytes_copied, rep.chunks_verified, rep.objects_corrupt, rep.skipped_junk, rep.batch_seq)
+                    })?;
+                    if *once {
+                        break;
                     }
-                }
-                ReplicaCmd::Status => {
-                    let r = varsto_core::replica::Replica::open(&home)?;
-                    println!("{}", serde_json::to_string_pretty(&r.summary())?);
+                    std::thread::sleep(std::time::Duration::from_secs((*interval).max(15)));
                 }
             }
-        }
+            ReplicaCmd::Status => {
+                let r = varsto_core::replica::Replica::open(&home)?;
+                println!("{}", serde_json::to_string_pretty(&r.summary())?);
+            }
+        },
         Cmd::Reset { yes } => {
             if !*yes {
                 bail_usage::<()>("this removes keys, ledger, state and configuration from this device (files in folders stay); run again with --yes")?;
