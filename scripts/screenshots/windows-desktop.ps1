@@ -71,7 +71,8 @@ try {
   } else { Write-Host "no Show Hidden Icons button" }
 } catch { Write-Host "overflow capture: $($_.Exception.Message)" }
 $sf = Get-Content "$h\service.json" | ConvertFrom-Json
-$url = "http://127.0.0.1:$($sf.port)/?token=$($sf.token)"
+$boot = (Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:$($sf.port)/api/session/boot" -Headers @{ "X-Varsto-Token" = $sf.token } -Body "{}").boot
+$url = "http://127.0.0.1:$($sf.port)/?boot=$boot"
 $edge = @("${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe", "$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
 $w = [Math]::Min(1280, $screen.Width); $hh = [Math]::Min(752, $screen.Height - 60)
 $p = Start-Process -FilePath $edge -PassThru -ArgumentList "--app=$url", "--no-first-run", "--user-data-dir=$Work\edge-profile", "--window-size=$w,$hh", "--window-position=0,0"

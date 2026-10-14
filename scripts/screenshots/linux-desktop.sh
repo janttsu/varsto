@@ -76,8 +76,10 @@ with s() as p: print(p.chromium.executable_path)' 2>/dev/null || true)}"
 [ -x "$chrome" ] || chrome="$(command -v chromium || command -v google-chrome || true)"
 port="$(python3 -c "import json;print(json.load(open('$work/laptop.json'))['port'])")"
 token="$(python3 -c "import json;print(json.load(open('$work/laptop.json'))['token'])")"
+# The window opens with a one-time start code, not the session token.
+boot="$(curl -fsS -X POST "http://127.0.0.1:$port/api/session/boot" -H "X-Varsto-Token: $token" -d '{}' | python3 -c 'import json,sys; print(json.load(sys.stdin)["boot"])')"
 nohup "$chrome" --no-sandbox --disable-gpu --no-first-run --password-store=basic --disable-infobars \
-  --test-type --user-data-dir="$work/chrome-profile" "--app=http://127.0.0.1:$port/?token=$token" \
+  --test-type --user-data-dir="$work/chrome-profile" "--app=http://127.0.0.1:$port/?boot=$boot" \
   --window-size=1280,772 --window-position=0,28 > "$work/app-window.log" 2>&1 &
 echo $! >> "$work/pids"
 sleep 15

@@ -287,7 +287,9 @@ fn from_storages(
     let key = chunk_storage_key(object);
     let mut needs_disk: Option<PoolError> = None;
     for (spec, backend) in storages {
-        match backend.get(&key) {
+        match crate::storage::guarded(&key, || {
+            backend.get_bounded(&key, crate::storage::MAX_BLOCK_OBJECT)
+        }) {
             Ok(Some(ct)) => {
                 if ObjectName::from_bytes(&crypto::hash(&ct)) != *object {
                     continue; // corrupt copy; try the next storage

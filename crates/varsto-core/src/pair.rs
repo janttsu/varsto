@@ -48,12 +48,32 @@ pub struct Bundle {
     pub storages: Vec<BundleStorage>,
 }
 
+crate::redacted_debug!(Bundle { vault_id, from, storages ; vault_key });
+
+impl Drop for Bundle {
+    fn drop(&mut self) {
+        use zeroize::Zeroize;
+        self.vault_key.zeroize();
+    }
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 pub struct BundleStorage {
     pub spec: StorageSpec,
     /// The S3 secret access key, when the storage needs one.
     #[serde(default)]
     pub secret: Option<String>,
+}
+
+crate::redacted_debug!(BundleStorage { spec ; secret });
+
+impl Drop for BundleStorage {
+    fn drop(&mut self) {
+        use zeroize::Zeroize;
+        if let Some(s) = self.secret.as_mut() {
+            s.zeroize();
+        }
+    }
 }
 
 /// A fresh code, `123-456-789`.
@@ -504,6 +524,18 @@ mod tests {
 
     fn addr(o: &Offer) -> SocketAddr {
         SocketAddr::from(([127, 0, 0, 1], o.status().port))
+    }
+
+    #[test]
+    fn bundle_debug_hides_the_vault_key_and_storage_secret() {
+        let b = bundle();
+        let shown = format!("{b:?}");
+        assert!(
+            shown.contains("laptop") && shown.contains("primary"),
+            "{shown}"
+        );
+        assert!(!shown.contains(&"k".repeat(64)), "{shown}");
+        assert!(!shown.contains("s3cret"), "{shown}");
     }
 
     #[test]

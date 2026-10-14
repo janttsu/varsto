@@ -54,7 +54,7 @@
   <div class="wrap">
 <article class="prose">
 <h1>Contributing</h1>
-<p class="note">From <code>CONTRIBUTING.md</code> in the repository, rendered 2026-10-13. These documents describe the main branch; the released version is 0.0.1-alpha.13. Sections marked 'after 0.0.1-alpha.13' are not in a release yet.</p>
+<p class="note">From <code>CONTRIBUTING.md</code> in the repository, rendered 2026-10-14. These documents describe the main branch; the released version is 0.0.1-alpha.13. Sections marked 'after 0.0.1-alpha.13' are not in a release yet.</p>
 <p>Thanks for your interest. Varsto is alpha (0.0.1-alpha.13) and the contribution process is still being defined.</p>
 <h2 id="rules-that-already-apply">Rules that already apply</h2>
 <ul>
@@ -66,7 +66,7 @@
 <li><strong>Logging.</strong> Never log secrets, keys, file names or paths in clear text. Use the sanctioned logging macros and the secret wrapper types; see <a href="logging.html">docs/architecture/logging.md</a>.</li>
 <li><strong>One name in one place.</strong> The product name lives in <code>brand/brand.toml</code>; do not hard-code it where it can be avoided, because the working name may change.</li>
 <li><strong>Licence headers.</strong> Every source file (Rust, shell, JavaScript, CSS) starts with <code>SPDX-License-Identifier: PolyForm-Shield-1.0.0</code>. Markdown, JSON, YAML and HTML files carry no header.</li>
-<li><strong>Rust.</strong> Stable toolchain (see <code>rust-version</code> in <code>Cargo.toml</code>). <code>cargo fmt --all --check</code>, <code>cargo clippy --workspace --all-targets</code> and <code>cargo test --workspace</code> must pass before a pull request.</li>
+<li><strong>Rust.</strong> Stable toolchain (see <code>rust-version</code> in <code>Cargo.toml</code>). <code>cargo fmt --all --check</code>, <code>cargo clippy --workspace --all-targets -- -D warnings</code> and <code>cargo test --workspace</code> must pass before a pull request. CI runs them, and also <code>cargo audit</code> and <code>cargo deny check</code> (<code>deny.toml</code>: permissive licences only, no known vulnerabilities); a new dependency with another licence, or an advisory without a fix, needs an entry there with its reason.</li>
 </ul>
 <h2 id="licence-of-contributions">Licence of contributions</h2>
 <p>The project is licensed under the PolyForm Shield License 1.0.0. By contributing you agree that your contribution may be distributed under that licence and relicensed by the project. The exact mechanism (Developer Certificate of Origin sign-off or a Contributor Licence Agreement) is not decided yet; until it is, please open an issue before sending large changes.</p>

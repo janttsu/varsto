@@ -223,7 +223,7 @@ class Rig:
             m, ns, home = REMOTE[dev]
             if self.state.get(f"{dev}_joined"):
                 continue
-            self.remote(dev, "join", "--name", dev, "--vault-key", self.state["vault_key"], *self.s3_flags(), env=sec)
+            self.remote(dev, "join", "--name", dev, *self.s3_flags(), env=f"{sec} VARSTO_VAULT_KEY={shlex.quote(self.state['vault_key'])}")
             self.ssh(m, f"mkdir -p /nat/f-{dev}")
             self.remote(dev, "folder", "attach", FOLDER, f"/nat/f-{dev}")
             self.remote(dev, "p2p", "enable", "--port", str(PORT))
@@ -234,7 +234,7 @@ class Rig:
         if not self.state.get("home_joined"):
             files = pathlib.Path(self.args.home_folder).expanduser()
             files.mkdir(parents=True, exist_ok=True)
-            self.local("join", "--name", "home", "--vault-key", self.state["vault_key"], *self.s3_flags(), env={"VARSTO_S3_SECRET": secret})
+            self.local("join", "--name", "home", *self.s3_flags(), env={"VARSTO_S3_SECRET": secret, "VARSTO_VAULT_KEY": self.state["vault_key"]})
             self.local("folder", "attach", FOLDER, str(files))
             self.local("p2p", "enable", "--port", str(PORT))
             self.state["home_joined"] = True
@@ -347,11 +347,11 @@ class Rig:
         _, _, secret = self.s3()
         h = self.work / "home-s3"
         files = self.work / "files-s3"
-        e = dict(os.environ, VARSTO_PASSPHRASE=self.state["pass"], VARSTO_S3_SECRET=secret)
+        e = dict(os.environ, VARSTO_PASSPHRASE=self.state["pass"], VARSTO_S3_SECRET=secret, VARSTO_VAULT_KEY=self.state["vault_key"])
         v = lambda *a: subprocess.run([local_bin(), "--home", str(h), *a], env=e, capture_output=True, text=True, check=True).stdout
         if not (h / "vault.json").exists():
             files.mkdir(parents=True, exist_ok=True)
-            v("join", "--name", "home-s3", "--vault-key", self.state["vault_key"], *self.s3_flags())
+            v("join", "--name", "home-s3", *self.s3_flags())
             v("folder", "attach", FOLDER, str(files))
             v("p2p", "disable")
             v("verify", "set", "--off")

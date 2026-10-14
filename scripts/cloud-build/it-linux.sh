@@ -18,7 +18,7 @@ case "$VARSTO_IT_ROLE" in
     python3 -c "import json;print(json.load(open('/it/init.json'))['vault_key'])" > /it/vault-key
     ;;
   peer)
-    "$bin" --home $H join --name linux-peer --vault-key "$VAULT_KEY" --storage-name cloud --s3-endpoint "$S3_ENDPOINT" --s3-region "$S3_REGION" --s3-bucket "$S3_BUCKET" --s3-access-key-id "$S3_KEY"
+    VARSTO_VAULT_KEY="$VAULT_KEY" "$bin" --home $H join --name linux-peer --storage-name cloud --s3-endpoint "$S3_ENDPOINT" --s3-region "$S3_REGION" --s3-bucket "$S3_BUCKET" --s3-access-key-id "$S3_KEY"
     "$bin" --home $H folder attach shared /it/files
     "$bin" --home $H p2p enable --port 17893 --public "$PUBLIC_IP:17893"
     ;;

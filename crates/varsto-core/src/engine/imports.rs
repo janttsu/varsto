@@ -348,7 +348,12 @@ fn ingest(
         check: check.and_then(|c| Hasher::new(&c.algo)),
         sha: want_sha256.then(sha2::Sha256::new),
         copy: match copy_to {
-            Some(p) => Some(std::io::BufWriter::new(fs::File::create(p)?)),
+            Some(p) => {
+                // Exclusive and private: a leftover of ours is cleared first,
+                // anything else under that unguessable name is an error.
+                let _ = fs::remove_file(p);
+                Some(std::io::BufWriter::new(util::create_new_private(p)?))
+            }
             None => None,
         },
         count: 0,
@@ -1203,7 +1208,11 @@ impl Engine {
         let mut last_save = std::time::Instant::now();
         let mut last_publish = std::time::Instant::now();
         let mut since_save = 0u64;
-        let tmp_copy = root_path.join(format!(".varsto-import-{}", std::process::id()));
+        let tmp_copy = root_path.join(format!(
+            ".varsto-import-{}-{}",
+            std::process::id(),
+            util::random_suffix()
+        ));
         let min_free = self.folder_min_free(&rec.folder_id);
         let mut stop_error: Option<anyhow::Error> = None;
         let delivered = {
@@ -1461,8 +1470,14 @@ impl Engine {
                 continue;
             }
             match &first_disk {
-                None => fs::rename(tmp_copy, &disk)
-                    .with_context(|| format!("write {}", disk.display()))?,
+                None => {
+                    #[cfg(unix)]
+                    if let Ok(f) = fs::File::open(tmp_copy) {
+                        util::set_final_mode(&f, None);
+                    }
+                    fs::rename(tmp_copy, &disk)
+                        .with_context(|| format!("write {}", disk.display()))?
+                }
                 Some(src) => {
                     fs::copy(src, &disk).with_context(|| format!("write {}", disk.display()))?;
                 }
@@ -2120,7 +2135,7 @@ fn holder_list(
 
 /// `p` with its longest existing ancestor resolved (links, `..`), the rest
 /// appended as given.
-fn resolve_existing(p: &Path) -> PathBuf {
+pub(super) fn resolve_existing(p: &Path) -> PathBuf {
     let mut base = p.to_path_buf();
     let mut rest = Vec::new();
     loop {

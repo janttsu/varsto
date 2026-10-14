@@ -2,9 +2,11 @@
 //! S3-compatible object storage (AWS S3, MinIO, Scaleway, Hetzner, Backblaze
 //! B2, Cloudflare R2, `rclone serve s3`, ...). Plain HTTP(S) with Signature
 //! Version 4; no SDK. Objects are written with `If-None-Match: *` so that an
-//! existing object is never overwritten; servers that do not support the
-//! condition fall back to HEAD-then-PUT, which is safe because every object
-//! name is either content-addressed or owned by a single writer.
+//! existing object is never overwritten. Whether a server honours the
+//! condition is probed once per storage (two writes of a probe object); one
+//! that does gets a single PUT per object, one that does not (ignores the
+//! header or refuses it) gets HEAD-then-PUT, which is safe because every
+//! object name is either content-addressed or owned by a single writer.
 
 use crate::storage::Storage;
 use anyhow::{anyhow, bail, Context, Result};
@@ -29,6 +31,13 @@ pub struct S3Config {
     pub path_style: bool,
     /// `x-amz-storage-class` for new objects (e.g. `DEEP_ARCHIVE`, `GLACIER_IR`, `ONEZONE_IA`).
     pub storage_class: Option<String>,
+    /// Accept an `http://` endpoint that is not a loopback address. Without
+    /// transport encryption the request signatures and the (encrypted)
+    /// objects travel in clear, so it takes an explicit choice.
+    pub allow_insecure_http: bool,
+    /// Whether the server honours `If-None-Match: *`, when known from an
+    /// earlier probe; `None` probes on the first write.
+    pub conditional_writes: Option<bool>,
 }
 
 crate::redacted_debug!(S3Config { name, endpoint, region, bucket, prefix, access_key_id, path_style ; secret_access_key });
@@ -45,13 +54,36 @@ pub struct S3Storage {
     /// clock that is off (S3 refuses signatures more than 15 minutes from
     /// its own time; phones and virtual machines are often that far off).
     clock_offset: std::sync::atomic::AtomicI64,
+    /// Whether the server honours `If-None-Match: *` (see `probe_conditional`).
+    conditional: std::sync::Mutex<Option<bool>>,
+    /// The warning about unconditional writes is given once per storage.
+    fallback_warned: std::sync::atomic::AtomicBool,
 }
 
-/// Largest response body read into memory. Chunks are at most a few MiB;
-/// manifests and ledger batches grow with the number of files.
-const MAX_BODY: u64 = 2 << 30;
+/// Bytes of the probe object written to learn whether the server honours
+/// `If-None-Match: *`.
+const PROBE_BODY: &[u8] = b"varsto conditional-write probe";
+
+/// Largest response to a listing or any other request that is not an object
+/// read (object reads are capped per key, `storage::read_limit`).
+const MAX_BODY: u64 = crate::storage::MAX_RECORD;
 
 const EMPTY_SHA256: &str = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+
+/// Whether `host[:port]` names this computer: `localhost`, `127.0.0.0/8`
+/// or `::1`. Plain `http://` to such an address never leaves the machine.
+fn is_loopback_host(host_port: &str) -> bool {
+    let host = if let Some(rest) = host_port.strip_prefix('[') {
+        rest.split(']').next().unwrap_or("")
+    } else {
+        host_port.rsplit_once(':').map_or(host_port, |(h, _)| h)
+    };
+    if host.eq_ignore_ascii_case("localhost") {
+        return true;
+    }
+    host.parse::<std::net::IpAddr>()
+        .is_ok_and(|ip| ip.is_loopback())
+}
 
 impl S3Storage {
     /// A refusal in words a person can act on, then the technical details
@@ -110,6 +142,7 @@ impl S3Storage {
 
     pub fn new(cfg: S3Config) -> Result<Self> {
         crate::logging::register_secret(&cfg.secret_access_key);
+        let cfg_conditional = cfg.conditional_writes;
         let endpoint = cfg.endpoint.clone();
         let (scheme, rest) = endpoint
             .split_once("://")
@@ -117,6 +150,14 @@ impl S3Storage {
         let host_part = rest.trim_end_matches('/');
         if host_part.is_empty() || host_part.contains('/') {
             bail!("endpoint must be scheme://host[:port] without a path");
+        }
+        match scheme {
+            "https" => {}
+            "http" if is_loopback_host(host_part) || cfg.allow_insecure_http => {}
+            "http" => bail!(
+                "the endpoint {endpoint} uses http://, so the request signatures and the objects would travel without transport encryption; use https://, or pass --insecure-http for a server on a network you trust (a loopback address needs no flag)"
+            ),
+            other => bail!("endpoint scheme must be https or http, not {other}://"),
         }
         let (host, base_path) = if cfg.path_style {
             (host_part.to_string(), format!("/{}", cfg.bucket))
@@ -144,7 +185,62 @@ impl S3Storage {
             scheme: scheme.to_string(),
             base_path,
             clock_offset: std::sync::atomic::AtomicI64::new(0),
+            conditional: std::sync::Mutex::new(cfg_conditional),
+            fallback_warned: std::sync::atomic::AtomicBool::new(false),
         })
+    }
+
+    /// Whether the server honours `If-None-Match: *`: the configured answer,
+    /// or one learned now by writing a probe object twice under
+    /// `vault/.probe-<random>` (deleted afterwards). A second conditional PUT
+    /// answered 412 means the condition holds; 200 means the server ignored
+    /// it; 400 or 501 means it refuses the header. Servers that do not
+    /// honour it get HEAD-then-PUT for every object, with one warning.
+    fn conditional_writes_known(&self) -> Result<bool> {
+        if let Some(known) = *self.conditional.lock().unwrap() {
+            return Ok(known);
+        }
+        let key = format!("vault/.probe-{:016x}", rand::random::<u64>());
+        let outcome = match self.put(&key, PROBE_BODY, true)? {
+            200 | 201 => match self.put(&key, PROBE_BODY, true)? {
+                412 => Ok(true),
+                200 | 201 | 400 | 501 => Ok(false),
+                s => Err(self.explain("PUT", &key, s, &[])),
+            },
+            400 | 501 => Ok(false),
+            s => Err(self.explain("PUT", &key, s, &[])),
+        };
+        if let Err(e) = self.delete(&key) {
+            log::debug!(storage = self.cfg.name.as_str(); "s3: probe object not deleted: {e:#}");
+        }
+        let honoured = outcome?;
+        *self.conditional.lock().unwrap() = Some(honoured);
+        log::debug!(storage = self.cfg.name.as_str(), honoured = honoured; "s3: conditional writes probed");
+        if !honoured {
+            self.warn_unconditional();
+        }
+        Ok(honoured)
+    }
+
+    fn warn_unconditional(&self) {
+        use std::sync::atomic::Ordering;
+        if !self.fallback_warned.swap(true, Ordering::Relaxed) {
+            log::warn!(
+                storage = self.cfg.name.as_str();
+                "s3: the server does not honour If-None-Match: *; objects are checked with HEAD and written unconditionally"
+            );
+        }
+    }
+
+    /// `put_if_absent` on a server that does not honour the condition.
+    fn put_after_head(&self, key: &str, data: &[u8]) -> Result<bool> {
+        if self.exists(key)? {
+            return Ok(false);
+        }
+        match self.put(key, data, false)? {
+            200 | 201 => Ok(true),
+            s => Err(self.explain("PUT", key, s, &[])),
+        }
     }
 
     fn object_path(&self, key: &str) -> String {
@@ -177,9 +273,24 @@ impl S3Storage {
         extra_headers: &[(&str, &str)],
         body: &[u8],
     ) -> Result<(u16, Vec<u8>)> {
+        self.request_capped(method, path, query, extra_headers, body, MAX_BODY)
+    }
+
+    /// `request`, reading at most `cap` bytes of the response: a longer
+    /// `Content-Length`, or a body that runs past it, is an error before the
+    /// body is held in memory.
+    fn request_capped(
+        &self,
+        method: &str,
+        path: &str,
+        query: &[(String, String)],
+        extra_headers: &[(&str, &str)],
+        body: &[u8],
+        cap: u64,
+    ) -> Result<(u16, Vec<u8>)> {
         use std::sync::atomic::Ordering;
         let t = crate::logging::Timer::start();
-        let first = self.request_once(method, path, query, extra_headers, body);
+        let first = self.request_once(method, path, query, extra_headers, body, cap);
         let failed = match &first {
             Ok((st, _, _)) => *st >= 400 && *st != 404,
             Err(_) => true,
@@ -215,7 +326,7 @@ impl S3Storage {
                     self.clock_offset
                         .store(server - unix_now(), Ordering::Relaxed);
                     let (status, bytes, _) =
-                        self.request_once(method, path, query, extra_headers, body)?;
+                        self.request_once(method, path, query, extra_headers, body, cap)?;
                     return Ok((status, bytes));
                 }
             }
@@ -231,6 +342,7 @@ impl S3Storage {
         query: &[(String, String)],
         extra_headers: &[(&str, &str)],
         body: &[u8],
+        cap: u64,
     ) -> Result<(u16, Vec<u8>, Option<String>)> {
         let amz_date =
             amz_date_at(unix_now() + self.clock_offset.load(std::sync::atomic::Ordering::Relaxed));
@@ -324,11 +436,23 @@ impl S3Storage {
         let bytes = if method == "HEAD" {
             Vec::new()
         } else {
+            // A server's word for the length is checked before anything is
+            // read: a 2 GiB answer is refused without allocating for it.
+            if status < 400 || status == 404 {
+                if let Some(n) = resp.body().content_length() {
+                    if n > cap {
+                        bail!(
+                            "{method} {}: the response is {n} bytes, more than the {cap} allowed",
+                            self.cfg.name
+                        );
+                    }
+                }
+            }
             // ureq stops at 10 MiB by default, but a ledger batch or a file
             // list of a folder with tens of thousands of files is larger.
             resp.body_mut()
                 .with_config()
-                .limit(MAX_BODY)
+                .limit(cap.max(64 * 1024))
                 .read_to_vec()
                 .with_context(|| format!("{method} {}: reading the response", self.cfg.name))?
         };
@@ -345,7 +469,9 @@ impl S3Storage {
             headers.push(("x-amz-storage-class", c));
         }
         let (status, body) = self.request("PUT", &self.object_path(key), &[], &headers, data)?;
-        if status >= 500 {
+        // 501 Not Implemented is how a server refuses `If-None-Match`; the
+        // caller falls back from it. Other server errors are errors here.
+        if status >= 500 && status != 501 {
             return Err(self.explain("PUT", key, status, &body));
         }
         Ok(status)
@@ -483,26 +609,35 @@ impl Storage for S3Storage {
 
     fn put_if_absent(&self, key: &str, data: &[u8]) -> Result<bool> {
         crate::storage::validate_key(key)?;
-        // Some servers silently ignore `If-None-Match`, so check first; the
-        // condition then only closes the window between HEAD and PUT on
-        // servers that do honour it.
-        if self.exists(key)? {
-            return Ok(false);
+        if !self.conditional_writes_known()? {
+            // The server ignores or refuses `If-None-Match`: check first.
+            return self.put_after_head(key, data);
         }
         match self.put(key, data, true)? {
             200 | 201 => Ok(true),
             412 => Ok(false),
-            400 | 501 => match self.put(key, data, false)? {
-                200 | 201 => Ok(true),
-                s => Err(self.explain("PUT", key, s, &[])),
-            },
+            400 | 501 => {
+                // Honoured by the probe, refused now: fall back for good.
+                *self.conditional.lock().unwrap() = Some(false);
+                self.warn_unconditional();
+                self.put_after_head(key, data)
+            }
             s => Err(self.explain("PUT", key, s, &[])),
         }
     }
 
+    fn conditional_writes(&self) -> Option<bool> {
+        *self.conditional.lock().unwrap()
+    }
+
     fn get(&self, key: &str) -> Result<Option<Vec<u8>>> {
+        self.get_bounded(key, crate::storage::read_limit(key))
+    }
+
+    fn get_bounded(&self, key: &str, max: u64) -> Result<Option<Vec<u8>>> {
         crate::storage::validate_key(key)?;
-        let (status, body) = self.request("GET", &self.object_path(key), &[], &[], &[])?;
+        let (status, body) =
+            self.request_capped("GET", &self.object_path(key), &[], &[], &[], max)?;
         match status {
             200 => Ok(Some(body)),
             404 => Ok(None),
@@ -518,13 +653,19 @@ impl Storage for S3Storage {
         if len == 0 {
             return Ok(Some(Vec::new()));
         }
-        let range = format!("bytes={}-{}", offset, offset + len - 1);
-        let (status, body) = self.request(
+        // The offset and length are claims of a pack index: checked, never added blindly.
+        let len = len.min(crate::storage::MAX_BLOCK_OBJECT);
+        let Some(last) = offset.checked_add(len - 1) else {
+            bail!("GET {key}: the range starting at {offset} is out of bounds");
+        };
+        let range = format!("bytes={offset}-{last}");
+        let (status, body) = self.request_capped(
             "GET",
             &self.object_path(key),
             &[],
             &[("range", &range)],
             &[],
+            crate::storage::MAX_BLOCK_OBJECT,
         )?;
         match status {
             206 => Ok(Some(body)),
@@ -533,7 +674,10 @@ impl Storage for S3Storage {
             // the offset is not 0.
             200 if body.len() as u64 == len => Ok(Some(body)),
             200 => Ok(Some(
-                body.get(offset as usize..(offset + len) as usize)
+                usize::try_from(offset)
+                    .ok()
+                    .zip(usize::try_from(last).ok())
+                    .and_then(|(a, z)| body.get(a..=z))
                     .map(<[u8]>::to_vec)
                     .unwrap_or_default(),
             )),
@@ -646,6 +790,8 @@ mod tests {
             secret_access_key: "s".into(),
             path_style: true,
             storage_class: None,
+            allow_insecure_http: false,
+            conditional_writes: None,
         })
         .unwrap();
         let body = b"<?xml version=\"1.0\"?><Error><Code>AccessDenied</Code><Message>Access Denied</Message></Error>";
@@ -688,10 +834,275 @@ mod tests {
             secret_access_key: "s".into(),
             path_style: true,
             storage_class: None,
+            allow_insecure_http: false,
+            conditional_writes: None,
         })
         .unwrap();
         assert_eq!(s.get("manifests/x").unwrap().unwrap(), body);
         th.join().unwrap();
+    }
+
+    fn storage_for(port: u16) -> S3Storage {
+        S3Storage::new(S3Config {
+            name: "test".into(),
+            endpoint: format!("http://127.0.0.1:{port}"),
+            region: "us-east-1".into(),
+            bucket: "b".into(),
+            prefix: String::new(),
+            access_key_id: "k".into(),
+            secret_access_key: "s".into(),
+            path_style: true,
+            storage_class: None,
+            allow_insecure_http: false,
+            conditional_writes: None,
+        })
+        .unwrap()
+    }
+
+    #[test]
+    fn a_response_that_claims_two_gib_is_refused_without_reading_it() {
+        // The server announces 2 GiB and sends a few bytes: the length alone
+        // is the answer, nothing is allocated for it.
+        use std::io::{Read, Write};
+        for key in ["manifests/x", "chunks/ab/cdef"] {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let port = listener.local_addr().unwrap().port();
+            let th = std::thread::spawn(move || {
+                let (mut c, _) = listener.accept().unwrap();
+                let mut buf = [0u8; 4096];
+                let _ = c.read(&mut buf);
+                let _ = c.write_all(
+                    format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n", 2u64 << 30).as_bytes(),
+                );
+                let _ = c.write_all(&[0u8; 64]);
+                std::thread::sleep(std::time::Duration::from_millis(300));
+            });
+            let e = storage_for(port).get(key).unwrap_err();
+            assert!(format!("{e:#}").contains("more than"), "{e:#}");
+            th.join().unwrap();
+        }
+    }
+
+    #[test]
+    fn a_block_read_is_capped_at_a_chunk_not_a_record() {
+        // 17 MiB is a fine record but not a block object.
+        let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
+        let port = server.server_addr().to_ip().unwrap().port();
+        let th = std::thread::spawn(move || {
+            for _ in 0..2 {
+                let req = server.recv().unwrap();
+                let _ = req.respond(tiny_http::Response::from_data(vec![7u8; 17 << 20]));
+            }
+        });
+        let s = storage_for(port);
+        assert_eq!(s.get("manifests/x").unwrap().unwrap().len(), 17 << 20);
+        assert!(s.get("chunks/ab/cdef").is_err());
+        th.join().unwrap();
+    }
+
+    /// How a fake server treats `If-None-Match: *` on an existing object.
+    #[derive(Clone, Copy)]
+    enum Condition {
+        Honoured,
+        Ignored,
+        Refused,
+    }
+
+    /// A small S3 look-alike: PUT, HEAD, DELETE on object keys, with the
+    /// methods and paths of every request recorded.
+    struct FakeS3 {
+        port: u16,
+        seen: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+        _thread: std::thread::JoinHandle<()>,
+        server: std::sync::Arc<tiny_http::Server>,
+    }
+
+    fn fake_s3(how: Condition) -> FakeS3 {
+        let server = std::sync::Arc::new(tiny_http::Server::http("127.0.0.1:0").unwrap());
+        let port = server.server_addr().to_ip().unwrap().port();
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let (log, srv) = (seen.clone(), server.clone());
+        let th = std::thread::spawn(move || {
+            let mut objects = std::collections::HashSet::new();
+            for mut req in srv.incoming_requests() {
+                let path = req.url().to_string();
+                let method = req.method().as_str().to_string();
+                log.lock().unwrap().push(format!("{method} {path}"));
+                let conditional = req.headers().iter().any(|h| h.field.equiv("if-none-match"));
+                let mut body = Vec::new();
+                let _ = std::io::Read::read_to_end(&mut req.as_reader(), &mut body);
+                let status = match method.as_str() {
+                    "PUT" => {
+                        if conditional && matches!(how, Condition::Refused) {
+                            501
+                        } else if conditional
+                            && matches!(how, Condition::Honoured)
+                            && objects.contains(&path)
+                        {
+                            412
+                        } else {
+                            objects.insert(path.clone());
+                            200
+                        }
+                    }
+                    "HEAD" => {
+                        if objects.contains(&path) {
+                            200
+                        } else {
+                            404
+                        }
+                    }
+                    "DELETE" => {
+                        objects.remove(&path);
+                        204
+                    }
+                    _ => 400,
+                };
+                let _ = req.respond(tiny_http::Response::empty(status));
+            }
+        });
+        FakeS3 {
+            port,
+            seen,
+            _thread: th,
+            server,
+        }
+    }
+
+    fn storage_at(port: u16) -> S3Storage {
+        S3Storage::new(S3Config {
+            name: "test".into(),
+            endpoint: format!("http://127.0.0.1:{port}"),
+            region: "us-east-1".into(),
+            bucket: "b".into(),
+            prefix: String::new(),
+            access_key_id: "k".into(),
+            secret_access_key: "s".into(),
+            path_style: true,
+            storage_class: None,
+            allow_insecure_http: false,
+            conditional_writes: None,
+        })
+        .unwrap()
+    }
+
+    fn methods(seen: &std::sync::Mutex<Vec<String>>) -> Vec<String> {
+        seen.lock()
+            .unwrap()
+            .iter()
+            .map(|l| l.split(' ').next().unwrap().to_string())
+            .collect()
+    }
+
+    #[test]
+    fn conditional_writes_are_probed_once_and_skip_the_head() {
+        let f = fake_s3(Condition::Honoured);
+        let (seen, server) = (&f.seen, &f.server);
+        let s = storage_at(f.port);
+        assert_eq!(s.conditional_writes(), None);
+        assert!(s.put_if_absent("chunks/ab/abcd", b"x").unwrap());
+        assert_eq!(s.conditional_writes(), Some(true));
+        // The probe (PUT, PUT, DELETE of a probe object), then one PUT.
+        assert_eq!(methods(seen), ["PUT", "PUT", "DELETE", "PUT"]);
+        assert!(seen.lock().unwrap()[0].contains("/b/vault/.probe-"));
+        assert!(!seen.lock().unwrap()[3].contains(".probe-"));
+        // An existing object: one request, answered 412, no HEAD.
+        assert!(!s.put_if_absent("chunks/ab/abcd", b"x").unwrap());
+        assert!(s.put_if_absent("chunks/cd/cdef", b"y").unwrap());
+        assert_eq!(methods(seen)[4..], ["PUT", "PUT"]);
+        server.unblock();
+    }
+
+    #[test]
+    fn a_server_that_ignores_the_condition_gets_head_then_put() {
+        let f = fake_s3(Condition::Ignored);
+        let (seen, server) = (&f.seen, &f.server);
+        let s = storage_at(f.port);
+        assert!(s.put_if_absent("chunks/ab/abcd", b"x").unwrap());
+        assert_eq!(s.conditional_writes(), Some(false));
+        assert_eq!(methods(seen), ["PUT", "PUT", "DELETE", "HEAD", "PUT"]);
+        assert!(!s.put_if_absent("chunks/ab/abcd", b"x").unwrap());
+        assert_eq!(methods(seen)[5..], ["HEAD"]);
+        server.unblock();
+    }
+
+    #[test]
+    fn a_server_that_refuses_the_condition_gets_head_then_put() {
+        let f = fake_s3(Condition::Refused);
+        let (seen, server) = (&f.seen, &f.server);
+        let s = storage_at(f.port);
+        assert!(s.put_if_absent("chunks/ab/abcd", b"x").unwrap());
+        assert_eq!(s.conditional_writes(), Some(false));
+        // The first conditional PUT is refused: the probe stops there.
+        assert_eq!(methods(seen), ["PUT", "DELETE", "HEAD", "PUT"]);
+        server.unblock();
+    }
+
+    #[test]
+    fn a_known_answer_is_not_probed_again() {
+        let f = fake_s3(Condition::Honoured);
+        let (seen, server) = (&f.seen, &f.server);
+        let mut cfg = S3Config {
+            name: "test".into(),
+            endpoint: format!("http://127.0.0.1:{}", f.port),
+            region: "us-east-1".into(),
+            bucket: "b".into(),
+            prefix: String::new(),
+            access_key_id: "k".into(),
+            secret_access_key: "s".into(),
+            path_style: true,
+            storage_class: None,
+            allow_insecure_http: false,
+            conditional_writes: Some(true),
+        };
+        let s = S3Storage::new(cfg.clone()).unwrap();
+        assert!(s.put_if_absent("chunks/ab/abcd", b"x").unwrap());
+        assert_eq!(methods(seen), ["PUT"]);
+        cfg.conditional_writes = Some(false);
+        let s = S3Storage::new(cfg).unwrap();
+        assert!(!s.put_if_absent("chunks/ab/abcd", b"x").unwrap());
+        assert_eq!(methods(seen)[1..], ["HEAD"]);
+        server.unblock();
+    }
+
+    #[test]
+    fn plain_http_needs_a_loopback_address_or_an_explicit_choice() {
+        let cfg = |endpoint: &str, allow: bool| S3Config {
+            name: "test".into(),
+            endpoint: endpoint.into(),
+            region: "us-east-1".into(),
+            bucket: "b".into(),
+            prefix: String::new(),
+            access_key_id: "k".into(),
+            secret_access_key: "s".into(),
+            path_style: true,
+            storage_class: None,
+            allow_insecure_http: allow,
+            conditional_writes: None,
+        };
+        for ok in [
+            "https://s3.example.net",
+            "http://127.0.0.1:9000",
+            "http://127.0.0.2:9000",
+            "http://localhost:9000",
+            "http://LOCALHOST",
+            "http://[::1]:9000",
+        ] {
+            S3Storage::new(cfg(ok, false)).unwrap_or_else(|e| panic!("{ok}: {e}"));
+        }
+        for refused in [
+            "http://minio.lan:9000",
+            "http://10.0.0.5",
+            "http://[fe80::1]:9000",
+        ] {
+            let e = match S3Storage::new(cfg(refused, false)) {
+                Ok(_) => panic!("{refused} was accepted"),
+                Err(e) => e.to_string(),
+            };
+            assert!(e.contains("--insecure-http"), "{refused}: {e}");
+            S3Storage::new(cfg(refused, true)).unwrap_or_else(|e| panic!("{refused}: {e}"));
+        }
+        assert!(S3Storage::new(cfg("ftp://x", true)).is_err());
     }
 
     #[test]

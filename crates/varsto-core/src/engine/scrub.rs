@@ -487,7 +487,11 @@ impl Engine {
             parverify::run_ordered(
                 &jobs,
                 &[lanes[&name]],
-                |&i| backend.get(&items[i].0),
+                |&i| {
+                    crate::storage::guarded(&items[i].0, || {
+                        backend.get_bounded(&items[i].0, crate::storage::MAX_BLOCK_OBJECT)
+                    })
+                },
                 |_, got| got.map(|ct| ct.map(|ct| (ct.len() as u64, crypto::hash(&ct)))),
                 |_, &i, got| {
                     let key = &items[i].0;

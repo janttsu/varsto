@@ -141,6 +141,18 @@ pub struct DiskIn {
     pub retired: bool,
 }
 
+/// An open move job that waits (staged moves, `crate::staged_move`).
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MoveIn {
+    pub id: String,
+    pub folder: String,
+    pub from: String,
+    pub to: String,
+    pub bytes_left: u64,
+    /// The known disk with room that continues the move, when there is one.
+    pub disk: Option<String>,
+}
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct BackupIn {
     pub name: String,
@@ -244,6 +256,9 @@ pub struct Inputs {
     pub disks_overdue: Vec<String>,
     /// The disk worth docking next.
     pub disk_next: Option<String>,
+    /// Open move jobs that wait for a disk.
+    #[serde(default)]
+    pub moves: Vec<MoveIn>,
     pub trash_entries: u64,
     pub trash_bytes: u64,
     pub trash_days: u32,
@@ -255,6 +270,10 @@ pub struct Inputs {
     /// What is wrong with the ledger and what to run, when something is.
     pub ledger_problem: Option<String>,
     pub ledger_command: Option<String>,
+    /// Devices whose ledger batches a storage may be withholding (a gap
+    /// that stayed over several pulls).
+    #[serde(default)]
+    pub ledger_withheld: Vec<String>,
     pub repair_queued: u64,
     pub repair_losses: u64,
     pub scrub_damaged: u64,
@@ -635,7 +654,9 @@ fn situation(h: &mut HelpState, i: &Inputs, storages: &[&StorageIn], fg: &Figure
                 (true, true) => "Your files are kept in 1 storage and on 1 device.",
                 (true, false) => "Your files are kept in 1 storage and on {devices} devices.",
                 (false, true) => "Your files are kept in {storages} storages and on 1 device.",
-                (false, false) => "Your files are kept in {storages} storages and on {devices} devices.",
+                (false, false) => {
+                    "Your files are kept in {storages} storages and on {devices} devices."
+                }
             },
             &[
                 ("storages", storages.len().to_string()),
@@ -941,6 +962,17 @@ fn attention(h: &mut HelpState, i: &Inputs, storages: &[&StorageIn]) {
             ),
         );
     }
+    for d in &i.ledger_withheld {
+        att(
+            h,
+            &format!("ledger-withheld:{d}"),
+            "warn",
+            tx(
+                "A storage may be withholding ledger batches of {device}: another device holds newer ones that no storage gave this device.",
+                &[("device", d.clone())],
+            ),
+        );
+    }
     for p in &i.policies {
         match p.state {
             PolicyState::Violated => att(
@@ -1137,6 +1169,21 @@ fn attention(h: &mut HelpState, i: &Inputs, storages: &[&StorageIn]) {
                 ),
             );
         }
+    }
+    for m in &i.moves {
+        att(
+            h,
+            &format!("move:{}", m.id),
+            "warn",
+            tx(
+                "The move of {folder} to {to} waits for a disk: {left} left.",
+                &[
+                    ("folder", m.folder.clone()),
+                    ("to", m.to.clone()),
+                    ("left", human_bytes(m.bytes_left)),
+                ],
+            ),
+        );
     }
     if !i.disks_overdue.is_empty() {
         att(
@@ -1686,6 +1733,38 @@ fn steps(h: &mut HelpState, i: &Inputs, storages: &[&StorageIn], offsite_configu
                 .guide("storages")
                 .0,
         );
+    }
+    for m in &i.moves {
+        let title = match &m.disk {
+            Some(d) => tx(
+                "Attach disk {disk} to continue moving {folder}",
+                &[("disk", d.clone()), ("folder", m.folder.clone())],
+            ),
+            None => tx(
+                "Attach a new disk to continue moving {folder}",
+                &[("folder", m.folder.clone())],
+            ),
+        };
+        let step = StepB::new(
+            &format!("move:{}", m.id),
+            "important",
+            title,
+            tx(
+                "{left} of {folder} are still on {from}. The move to {to} stops when the pool has no room and carries on by itself when a disk is attached.",
+                &[
+                    ("left", human_bytes(m.bytes_left)),
+                    ("folder", m.folder.clone()),
+                    ("from", m.from.clone()),
+                    ("to", m.to.clone()),
+                ],
+            ),
+        )
+        .how(t0("Plug the disk in. Nothing else is needed; `varsto move status` shows how far the move has come."))
+        .act("storages", Some("pools"), "Open the disks");
+        out.push(match &m.disk {
+            Some(d) => step.cmd(crate::disksuggest::insert_command(d)).0,
+            None => step.cmd("varsto disk suggest".to_string()).0,
+        });
     }
     if !i.disks_overdue.is_empty() {
         let label = i

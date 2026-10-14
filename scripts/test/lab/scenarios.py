@@ -36,7 +36,9 @@ PASS_ = "lab-passphrase-1234"
 # `pair offer`, ...) starts with ENV, so VARSTO_LOG reaches all of them. The
 # value comes from the host's VARSTO_LOG when set (e.g. "trace").
 LOG_LEVEL = os.environ.get("VARSTO_LOG") or "debug"
-ENV = f"VARSTO_PASSPHRASE={PASS_} VARSTO_NO_INSTALL=1 VARSTO_LOG={shlex.quote(LOG_LEVEL)}"
+# Secrets travel in the environment, never on the command line: the S3 secret
+# for every command, the vault key per `join` (see v(..., env=)).
+ENV = f"VARSTO_PASSPHRASE={PASS_} VARSTO_NO_INSTALL=1 VARSTO_LOG={shlex.quote(LOG_LEVEL)} VARSTO_S3_SECRET={shlex.quote(lab.S3['secret'])}"
 REPO = pathlib.Path(__file__).resolve().parents[3]
 LOGS_DIR = REPO / "test-results" / "lab" / "logs"
 BUCKET = "vault1"
@@ -60,9 +62,10 @@ def run(vm, cmd, check_rc=True, timeout_note=""):
     return r
 
 
-def v(vm, args, json_out=True, check_rc=True):
-    """Run varsto on a VM; parsed JSON (or text) out."""
-    cmd = f"{ENV} varsto {'--json ' if json_out else ''}{args}"
+def v(vm, args, json_out=True, check_rc=True, env=""):
+    """Run varsto on a VM; parsed JSON (or text) out. `env` adds variables
+    (a vault key for `join`) to this one command."""
+    cmd = f"{ENV} {env} varsto {'--json ' if json_out else ''}{args}"
     r = run(vm, cmd, check_rc=check_rc)
     out = r.stdout.strip()
     if not check_rc and r.returncode != 0:
@@ -172,8 +175,8 @@ def s_init():
     out = v("vl-laptop", "init --name laptop")
     check(len(out["vault_key"]) == 64, "no vault key")
     CTX["vault_key"] = out["vault_key"]
-    v("vl-laptop", f"storage add-s3 cloud --endpoint {lab.S3['endpoint']} --region us-east-1 --bucket {BUCKET} "
-                    f"--access-key-id {lab.S3['key']} --secret-access-key {lab.S3['secret']} --place cloud", json_out=False)
+    v("vl-laptop", f"storage add-s3 cloud --insecure-http --endpoint {lab.S3['endpoint']} --region us-east-1 --bucket {BUCKET} "
+                    f"--access-key-id {lab.S3['key']} --place cloud", json_out=False)
     gen_data("vl-laptop", "/home/varsto/data/docs", seed=1)
     v("vl-laptop", "folder add docs /home/varsto/data/docs", json_out=False)
     push = v("vl-laptop", "push docs")
@@ -227,8 +230,8 @@ def s_words():
     kit = v("vl-laptop", "recovery kit", json_out=False)
     words = " ".join(re.findall(r"\d+\. (\w+)", kit.split("SHARES")[0]))
     check(len(words.split()) == 24, f"kit has {len(words.split())} words")
-    out = v("vl-pub", f"join --name pub --words {shlex.quote(words)} --s3-bucket {BUCKET} --s3-endpoint {lab.S3['endpoint']} "
-                      f"--s3-access-key-id {lab.S3['key']} --s3-secret-access-key {lab.S3['secret']} --storage-name cloud")
+    out = v("vl-pub", f"join --name pub --s3-bucket {BUCKET} --s3-endpoint {lab.S3['endpoint']} --s3-insecure-http "
+                      f"--s3-access-key-id {lab.S3['key']} --storage-name cloud", env=f"VARSTO_VAULT_KEY={shlex.quote(words)}")
     check("docs" in out.get("folders", []), f"pub sees {out}")
     v("vl-pub", "folder attach docs /home/varsto/data/docs", json_out=False)
     v("vl-pub", "sync")
@@ -238,7 +241,8 @@ def s_words():
     shares = re.findall(r"Share (\d+):\n((?:[ \t]*\d+\. \w+[ \t]*\n?)+)", kit)
     check(len(shares) == 3, "no three shares")
     enc = [f"{i}: " + " ".join(re.findall(r"\d+\. (\w+)", body)) for i, body in shares]
-    out = v("vl-laptop", f"recovery combine {shlex.quote(enc[0])} {shlex.quote(enc[2])}", json_out=False)
+    # The shares come on standard input, not on the command line.
+    out = run("vl-laptop", f"printf '%s\\n' {shlex.quote(enc[0])} {shlex.quote(enc[2])} | {ENV} varsto recovery combine").stdout
     check(CTX["vault_key"] in out or "vault key:" in out, "combine failed: " + out[:200])
 
 
@@ -399,8 +403,8 @@ def s_revoke():
     v("vl-desktop", "sync")
     check(run("vl-desktop", "cat ~/data/docs/after2.txt").stdout.strip() == "secret-after-revoke", "desktop missing new data")
     # A new device cannot join with the old key, but can with the current one.
-    old = v("vl-work", f"join --name w2 --vault-key {CTX['vault_key']} --s3-bucket {BUCKET} --s3-endpoint {lab.S3['endpoint']} "
-                       f"--s3-access-key-id {lab.S3['key']} --s3-secret-access-key {lab.S3['secret']}", check_rc=False)
+    old = v("vl-work", f"join --name w2 --s3-bucket {BUCKET} --s3-endpoint {lab.S3['endpoint']} --s3-insecure-http "
+                       f"--s3-access-key-id {lab.S3['key']}", check_rc=False, env=f"VARSTO_VAULT_KEY={shlex.quote(CTX['vault_key'])}")
     check(isinstance(old, dict) and old.get("_failed"), "joined with a key from before the revocation")
 
 
@@ -446,16 +450,16 @@ def s_p2p_setup():
     s_reset()
     v("vl-laptop", "init --name laptop", json_out=True)
     key = v("vl-laptop", "recovery kit", json_out=False)
-    v("vl-laptop", f"storage add-s3 cloud --endpoint {lab.S3['endpoint']} --region us-east-1 --bucket {BUCKET} "
-                    f"--access-key-id {lab.S3['key']} --secret-access-key {lab.S3['secret']} --place cloud", json_out=False)
+    v("vl-laptop", f"storage add-s3 cloud --insecure-http --endpoint {lab.S3['endpoint']} --region us-east-1 --bucket {BUCKET} "
+                    f"--access-key-id {lab.S3['key']} --place cloud", json_out=False)
     run("vl-laptop", f"mkdir -p ~/data/media && head -c {P2P_MB << 20} /dev/urandom > ~/data/media/big.bin")
     v("vl-laptop", "folder add media /home/varsto/data/media", json_out=False)
     v("vl-laptop", "push media")
     CTX["p2p_sha"] = run("vl-laptop", "sha256sum ~/data/media/big.bin").stdout.split()[0]
     words = " ".join(re.findall(r"\d+\. (\w+)", key.split("SHARES")[0]))
     for vm, name in (("vl-desktop", "desktop"), ("vl-pub", "pub"), ("vl-work", "work")):
-        v(vm, f"join --name {name} --words {shlex.quote(words)} --s3-bucket {BUCKET} --s3-endpoint {lab.S3['endpoint']} "
-              f"--s3-access-key-id {lab.S3['key']} --s3-secret-access-key {lab.S3['secret']} --storage-name cloud")
+        v(vm, f"join --name {name} --s3-bucket {BUCKET} --s3-endpoint {lab.S3['endpoint']} --s3-insecure-http "
+              f"--s3-access-key-id {lab.S3['key']} --storage-name cloud", env=f"VARSTO_VAULT_KEY={shlex.quote(words)}")
     stun = " ".join(f"--stun {x}" for x in lab.STUN)
     for vm in lab.DEVICES:
         extra = " --public 198.51.100.20:17893" if vm == "vl-pub" else ""
@@ -542,8 +546,8 @@ def s_share():
     token = re.search(r"(vst[12]\.\S+)", tok)
     check(token, "no sealed token: " + tok[-300:])
     out = v("vl-work", f"{home} share accept --name ville-pc --token {shlex.quote(token.group(1))} --storage-name owner "
-                       f"--s3-bucket {BUCKET} --s3-endpoint {lab.S3['endpoint']} --s3-access-key-id {lab.S3['key']} "
-                       f"--s3-secret-access-key {lab.S3['secret']}", json_out=False)
+                       f"--s3-bucket {BUCKET} --s3-endpoint {lab.S3['endpoint']} --s3-insecure-http --s3-access-key-id {lab.S3['key']} "
+                       "", json_out=False)
     check("joined shared folder media" in out, out[-300:])
     v("vl-laptop", "push media", check_rc=False)
     v("vl-work", f"{home} folder attach media /home/varsto/shared", json_out=False)
@@ -841,6 +845,71 @@ def s_disk_fetch_plan():
     dl_clean()
 
 
+@scenario("staged-move-to-pool")
+def s_staged_move():
+    """A folder in the cloud-like "box" storage moves, disk by disk, onto a pool of
+    4 GiB virtual drives (about 1.7 GiB usable on each, the pool keeps 2 GiB free):
+    a job without a disk waits; `--path ... --keep-source` copies a directory; the
+    whole-folder job fills the first drive, stops with "attach the next disk", and
+    finishes on the second; the box then holds none of the folder's blocks."""
+    dl_clean()
+    dl("init --name dl")
+    dl("storage add-local box /home/varsto/dl-box --place cloud", json_out=False)
+    dl("storage add-pool dshelf --place home", json_out=False)
+    run(DL_VM, "mkdir -p ~/dl-docs/big ~/dl-docs/small && for i in 1 2 3; do head -c 1073741824 /dev/urandom > ~/dl-docs/big/f$i.bin; done"
+               " && for i in $(seq 1 20); do head -c 20000 /dev/urandom > ~/dl-docs/small/n$i.bin; done")
+    dl("folder add ddocs /home/varsto/dl-docs", json_out=False)
+    # The pool is filled by the job only, not by pushes or disk fills.
+    dl("folder placement ddocs --storage box", json_out=False)
+    dl("push ddocs")
+    want = run(DL_VM, "cd ~/dl-docs && find . -type f | sort | xargs sha256sum | sha256sum").stdout.split()[0]
+
+    def box_objects():
+        return int(run(DL_VM, "find ~/dl-box/chunks -type f ! -name '.*' | wc -l").stdout)
+
+    before = box_objects()
+    check(before > 0, "the box holds nothing after the push")
+    # No disk yet: the job is recorded and waits for one.
+    r = dl("move ddocs --from box --to dshelf --yes")
+    job = r["job"]
+    check(job["state"] == "open" and job["waiting"]["kind"] == "disk" and job["bytes_done"] == 0, f"first run: {job}")
+    st = dl("move status")
+    check(len(st) == 1 and st[0]["id"] == job["id"] and st[0]["bytes_remaining"] > 3 << 30, f"move status: {st}")
+    sug = dl("disk suggest")["suggestions"]
+    check(len(sug["new_disk_needed"]) == 1, f"disk suggest does not ask for a new disk: {sug['new_disk_needed']}")
+    dl(f"move cancel {job['id']}", json_out=False)
+    check(box_objects() == before, "cancelling a job changed the box")
+
+    # The small directory first, with the source kept, onto the first drive.
+    dl_attach("red")
+    dl("disk init /dev/vdd --pool dshelf --label Red --confirm /dev/vdd")
+    r = dl("move ddocs --from box --to dshelf --path small --keep-source --yes")
+    check(r["job"]["state"] == "done" and r["job"]["disks_used"] == ["Red"], f"path job: {r['job']}")
+    check(box_objects() == before, "--keep-source dropped blocks from the box")
+
+    # The whole folder: the first drive takes what fits, then the job waits for the next one.
+    r = dl("move ddocs --from box --to dshelf --yes")
+    job = r["job"]
+    CTX["staged_move"] = {"run1_done": job["bytes_done"], "left": job["bytes_remaining"], "waiting": job["waiting"]["text"]}
+    check(job["state"] == "open" and 0 < job["bytes_done"] < 2 << 30 and job["bytes_remaining"] > 1 << 30, f"run 1: {job}")
+    check(box_objects() < before, "nothing left the box")
+    dl("disk unmount Red")
+    detach_disk(DL_VM, "vdd")
+    st = dl("disk suggest")["suggestions"]
+    check(st["moves"] and (st["new_disk_needed"] or st["top"]), f"no suggestion for the waiting job: {st['moves']}")
+    dl_attach("green")
+    dl("disk init /dev/vdd --pool dshelf --label Green --confirm /dev/vdd")
+    r = dl(f"move resume {job['id']}")
+    job = r["job"]
+    check(job["state"] == "done" and job["bytes_remaining"] == 0 and job["disks_used"][-1] == "Green", f"run 2: {job}")
+    check(box_objects() == 0, f"the box still holds {box_objects()} objects")
+    chk = dl("disk check Green --full")
+    check(not chk["bad"] and not chk["missing"], f"full check: {chk}")
+    got = run(DL_VM, "cd ~/dl-docs && find . -type f | sort | xargs sha256sum | sha256sum").stdout.split()[0]
+    check(got == want, "the local files changed")
+    dl_clean()
+
+
 # ----- devices on different versions (alpha.9 and this build) -------------------------------
 
 def v9(vm, args, json_out=True, check_rc=True):
@@ -865,15 +934,15 @@ def s_mixed():
     # The laptop stays on alpha.9; desktop and pub run this build.
     out = v9("vl-laptop", "init --name laptop")
     key = out["vault_key"]
-    v9("vl-laptop", f"storage add-s3 cloud --endpoint {lab.S3['endpoint']} --region us-east-1 --bucket {BUCKET} "
-                     f"--access-key-id {lab.S3['key']} --secret-access-key {lab.S3['secret']} --place cloud", json_out=False)
+    v9("vl-laptop", f"storage add-s3 cloud --insecure-http --endpoint {lab.S3['endpoint']} --region us-east-1 --bucket {BUCKET} "
+                     f"--access-key-id {lab.S3['key']} --place cloud", json_out=False)
     gen_data("vl-laptop", "/home/varsto/data/docs", seed=9, big_mb=2, small=20)
     v9("vl-laptop", "folder add docs /home/varsto/data/docs", json_out=False)
     v9("vl-laptop", "push docs")
-    s3 = (f"--s3-bucket {BUCKET} --s3-endpoint {lab.S3['endpoint']} --s3-access-key-id {lab.S3['key']} "
-          f"--s3-secret-access-key {lab.S3['secret']} --storage-name cloud")
-    v("vl-desktop", f"join --name desktop --vault-key {key} {s3}")
-    v("vl-pub", f"join --name pub --vault-key {key} {s3}")
+    s3 = (f"--s3-bucket {BUCKET} --s3-endpoint {lab.S3['endpoint']} --s3-insecure-http --s3-access-key-id {lab.S3['key']} "
+          "--storage-name cloud")
+    v("vl-desktop", f"join --name desktop {s3}", env=f"VARSTO_VAULT_KEY={shlex.quote(key)}")
+    v("vl-pub", f"join --name pub {s3}", env=f"VARSTO_VAULT_KEY={shlex.quote(key)}")
     for vm in ("vl-desktop", "vl-pub"):
         v(vm, "folder attach docs /home/varsto/data/docs", json_out=False)
         v(vm, "sync")
@@ -907,7 +976,7 @@ def s_mixed():
     # And the other way round: alpha.9 removes a device the new version knows.
     kit = v("vl-desktop", "recovery kit", json_out=False)
     words = " ".join(re.findall(r"\d+\. (\w+)", kit.split("SHARES")[0]))
-    v("vl-work", f"join --name work --words {shlex.quote(words)} {s3}")
+    v("vl-work", f"join --name work {s3}", env=f"VARSTO_VAULT_KEY={shlex.quote(words)}")
     v9("vl-laptop", "sync")
     v9("vl-laptop", "device revoke work --yes", json_out=False)
     v("vl-desktop", "sync")
@@ -934,15 +1003,15 @@ def fresh_pair():
     """laptop + desktop on this build, one folder, synced."""
     s_reset()
     v("vl-laptop", "init --name laptop")
-    v("vl-laptop", f"storage add-s3 cloud --endpoint {lab.S3['endpoint']} --region us-east-1 --bucket {BUCKET} "
-                    f"--access-key-id {lab.S3['key']} --secret-access-key {lab.S3['secret']} --place cloud", json_out=False)
+    v("vl-laptop", f"storage add-s3 cloud --insecure-http --endpoint {lab.S3['endpoint']} --region us-east-1 --bucket {BUCKET} "
+                    f"--access-key-id {lab.S3['key']} --place cloud", json_out=False)
     gen_data("vl-laptop", "/home/varsto/data/docs", seed=5, big_mb=4, small=40)
     v("vl-laptop", "folder add docs /home/varsto/data/docs", json_out=False)
     v("vl-laptop", "push docs")
     kit = v("vl-laptop", "recovery kit", json_out=False)
     words = " ".join(re.findall(r"\d+\. (\w+)", kit.split("SHARES")[0]))
-    v("vl-desktop", f"join --name desktop --words {shlex.quote(words)} --s3-bucket {BUCKET} --s3-endpoint {lab.S3['endpoint']} "
-                    f"--s3-access-key-id {lab.S3['key']} --s3-secret-access-key {lab.S3['secret']} --storage-name cloud")
+    v("vl-desktop", f"join --name desktop --s3-bucket {BUCKET} --s3-endpoint {lab.S3['endpoint']} --s3-insecure-http "
+                    f"--s3-access-key-id {lab.S3['key']} --storage-name cloud", env=f"VARSTO_VAULT_KEY={shlex.quote(words)}")
     v("vl-desktop", "folder attach docs /home/varsto/data/docs", json_out=False)
     v("vl-desktop", "sync")
 
@@ -1072,8 +1141,8 @@ def timed_rss(vm, args):
 def s_scale():
     s_reset()
     v("vl-laptop", "init --name laptop")
-    v("vl-laptop", f"storage add-s3 cloud --endpoint {lab.S3['endpoint']} --region us-east-1 --bucket {BUCKET} "
-                    f"--access-key-id {lab.S3['key']} --secret-access-key {lab.S3['secret']} --place cloud", json_out=False)
+    v("vl-laptop", f"storage add-s3 cloud --insecure-http --endpoint {lab.S3['endpoint']} --region us-east-1 --bucket {BUCKET} "
+                    f"--access-key-id {lab.S3['key']} --place cloud", json_out=False)
     run("vl-laptop", """python3 - <<'PY'
 import os, random, pathlib
 r = random.Random(7); root = pathlib.Path('/home/varsto/data/many')
@@ -1092,8 +1161,8 @@ PY""")
     res["push_20k_one_changed"] = timed_rss("vl-laptop", "push many")[:2]
     kit = v("vl-laptop", "recovery kit", json_out=False)
     words = " ".join(re.findall(r"\d+\. (\w+)", kit.split("SHARES")[0]))
-    v("vl-desktop", f"join --name desktop --words {shlex.quote(words)} --s3-bucket {BUCKET} --s3-endpoint {lab.S3['endpoint']} "
-                    f"--s3-access-key-id {lab.S3['key']} --s3-secret-access-key {lab.S3['secret']} --storage-name cloud")
+    v("vl-desktop", f"join --name desktop --s3-bucket {BUCKET} --s3-endpoint {lab.S3['endpoint']} --s3-insecure-http "
+                    f"--s3-access-key-id {lab.S3['key']} --storage-name cloud", env=f"VARSTO_VAULT_KEY={shlex.quote(words)}")
     v("vl-desktop", "folder attach many /home/varsto/data/many", json_out=False)
     v("vl-desktop", "folder attach large /home/varsto/data/large", json_out=False)
     res["pull_20k"] = timed_rss("vl-desktop", "pull many")[:2]
@@ -1396,6 +1465,70 @@ def s_ledger_loss():
               f"{vm}: fsck after the rebuild: {fsck}")
         check(fsck.get("ledger_health", {}).get("state") == "ok", f"{vm}: {fsck.get('ledger_health')}")
 
+@scenario("ledger-withhold")
+def s_ledger_withhold():
+    """Spec 58. The bucket withholds one ledger batch of the laptop and
+    offers the next: the desktop's head for the laptop stays before the gap
+    (the next batch waits), and after three syncs the desktop warns that a
+    storage may be withholding the laptop's batches. Once the bucket offers
+    the batch again both count and the warning goes. Junk under the
+    laptop's own ledger name does not fence it, and `ledger clean-junk
+    --yes` deletes exactly that."""
+    fresh_pair()
+    lap = v("vl-laptop", "status")["device_id"]
+    ledger_dir = lab.DIR / "s3" / BUCKET / "ledger" / lap
+
+    def head(vm, dev):
+        st = v(vm, "ledger status", check_rc=False)
+        st = st.get("_out", st) if isinstance(st, dict) and "_out" in st else st
+        return next((d["head"] for d in st["devices"] if d["device"] == dev), 0), st["health"]
+
+    v("vl-desktop", "sync")
+    h0, _ = head("vl-desktop", lap)
+    for i in (1, 2):
+        run("vl-laptop", f"echo withheld-{i} > ~/data/docs/withheld-{i}.txt")
+        v("vl-laptop", "sync")
+    h_lap, _ = head("vl-laptop", lap)
+    check(h_lap >= h0 + 2, f"laptop head {h_lap}, desktop saw {h0}")
+    gap = h0 + 1
+    hidden = lab.DIR / f"withheld-{gap:016}.json"
+    shutil.move(str(ledger_dir / f"{gap:016}.json"), hidden)
+    try:
+        time.sleep(6)  # rclone serve s3 lists from a 5 s directory cache
+        for pull in (1, 2, 3):
+            v("vl-desktop", "sync")
+            h, health = head("vl-desktop", lap)
+            check(h == h0, f"pull {pull}: the desktop's head for the laptop passed the gap ({h}, gap at {gap})")
+            behind = [b for b in health.get("behind", []) if b["device"] == lap]
+            check(behind and behind[0]["pulls"] == pull, f"pull {pull}: gap not noticed: {health}")
+        warned = " ".join(health.get("warnings", []))
+        check("withholding" in warned, f"no warning after three pulls: {health}")
+        s = v("vl-desktop", "status")
+        check("withholding" in json.dumps(s["ledger_health"]), f"status does not show it: {s['ledger_health']}")
+    finally:
+        if hidden.exists():
+            shutil.move(str(hidden), ledger_dir / f"{gap:016}.json")
+    time.sleep(6)
+    v("vl-desktop", "sync")
+    h, health = head("vl-desktop", lap)
+    check(h >= h0 + 2, f"after the batch came back the head is {h}")
+    check(not health.get("behind") and not health.get("warnings"), f"still warned: {health}")
+
+    # Junk under the laptop's own name.
+    (ledger_dir / "9999999999999999.json").write_text("junk")
+    time.sleep(6)
+    run("vl-laptop", "echo after-junk > ~/data/docs/after-junk.txt")
+    v("vl-laptop", "sync")
+    st = v("vl-laptop", "status")["ledger_health"]
+    check(st["state"] == "ok" and st.get("junk_objects") == 1, f"junk: {st}")
+    r = v("vl-laptop", "ledger clean-junk --yes")
+    check(r["deleted"] == 1 and r["genuine"] > 0, f"clean-junk: {r}")
+    check(not (ledger_dir / "9999999999999999.json").exists(), "the junk is still in the bucket")
+    v("vl-desktop", "sync")
+    got = run("vl-desktop", "cat ~/data/docs/after-junk.txt", check_rc=False).stdout.strip()
+    check(got == "after-junk", "the file written beside the junk did not arrive")
+
+
 def ensure_restic(vm):
     """restic on the VM: the image's, Debian's package, or a copy of the
     binary named by VARSTO_LAB_RESTIC (best a static release build) or of
@@ -1468,7 +1601,8 @@ SCENARIOS = [s_reset, s_init, s_pair, s_sync, s_words, s_conflict, s_selective, 
              s_strongroom, s_org, s_remove_user, s_revoke,
              s_p2p_setup, s_p2p_lan, s_p2p_pub, s_p2p_sym, s_p2p_stop, s_share, s_disks, s_mixed,
              s_outage, s_blackhole, s_crash, s_clock, s_clock_behind, s_p2p_upload, s_scale,
-             s_backup, s_activity, s_disk_init, s_disk_fetch_plan, s_scrub, s_restic, s_ledger_loss]
+             s_backup, s_activity, s_disk_init, s_disk_fetch_plan, s_staged_move, s_scrub, s_restic, s_ledger_loss,
+             s_ledger_withhold]
 
 
 def main():

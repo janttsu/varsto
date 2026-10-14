@@ -57,6 +57,7 @@ pub mod s3;
 pub mod scrub;
 pub mod share;
 pub mod snapshot;
+pub mod staged_move;
 pub mod storage;
 pub mod storage_settings;
 pub mod strongroom;

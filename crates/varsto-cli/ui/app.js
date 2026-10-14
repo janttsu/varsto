@@ -1,11 +1,47 @@
 // Varsto desktop and mobile UI. Talks to the local API with a per-session token.
 (function () {
   "use strict";
+  // The start address carries a one-time code (?boot=), not the session token:
+  // it is traded for the token once, the address is cleaned at once, and the
+  // token lives in sessionStorage only. The token never goes in an address.
   var token = (function () {
-    var m = location.search.match(/[?&]token=([0-9a-f]+)/);
-    if (m) { try { sessionStorage.setItem("varsto-token", m[1]); } catch (e) {} history.replaceState(null, "", location.pathname); return m[1]; }
+    var m = location.search.match(/[?&]boot=([0-9a-f]+)/);
+    if (m) {
+      try { history.replaceState(null, "", location.pathname + location.hash); } catch (e) {}
+      try {
+        var x = new XMLHttpRequest(); x.open("POST", "/api/session", false); x.setRequestHeader("Content-Type", "application/json"); x.send(JSON.stringify({ boot: m[1] }));
+        if (x.status === 200) { var t = JSON.parse(x.responseText).token; try { sessionStorage.setItem("varsto-token", t); } catch (e) {} return t; }
+      } catch (e) {}
+    }
     try { return sessionStorage.getItem("varsto-token") || ""; } catch (e) { return ""; }
   })();
+  // Pictures and the viewer's links cannot send a header. Thumbnails are
+  // fetched with the header and shown from a blob; the links of downloads and
+  // the viewer carry a ticket for that one file (POST /api/ticket).
+  var thumbQueue = [], thumbBusy = 0;
+  function thumbFetch(job) {
+    fetch(job.url, { headers: { "X-Varsto-Token": token } }).then(function (r) { if (!r.ok) { throw new Error("no thumbnail"); } return r.blob(); })
+      .then(function (b) { var u = URL.createObjectURL(b); job.img.onload = function () { URL.revokeObjectURL(u); }; job.img.src = u; })
+      .catch(function () { if (job.img.onerror) { job.img.onerror(); } })
+      .then(function () { thumbBusy--; thumbPump(); });
+  }
+  function thumbPump() {
+    while (thumbBusy < 6 && thumbQueue.length) { thumbBusy++; thumbFetch(thumbQueue.shift()); }
+  }
+  var thumbSeen = typeof IntersectionObserver === "undefined" ? null : new IntersectionObserver(function (entries) {
+    entries.forEach(function (en) { if (en.isIntersecting) { thumbSeen.unobserve(en.target); thumbQueue.push(en.target.__thumb); } });
+    thumbPump();
+  }, { rootMargin: "200px" });
+  function thumbSrc(img, folder, path) {
+    var job = { img: img, url: "/api/thumb?folder=" + encodeURIComponent(folder) + "&path=" + encodeURIComponent(path) };
+    if (!thumbSeen) { thumbQueue.push(job); thumbPump(); return; }
+    img.__thumb = job; thumbSeen.observe(img);
+  }
+  function ticketUrl(route, folder, path) {
+    return fetch("/api/ticket", { method: "POST", headers: { "X-Varsto-Token": token, "Content-Type": "application/json" }, body: JSON.stringify({ route: route, folder: folder, path: path }) })
+      .then(function (r) { if (!r.ok) { throw new Error("The Varsto service answered " + r.status); } return r.json(); })
+      .then(function (j) { return route + "?folder=" + encodeURIComponent(folder) + "&path=" + encodeURIComponent(path) + "&ticket=" + encodeURIComponent(j.ticket); });
+  }
   var $ = function (id) { return document.getElementById(id); };
   var logEl = $("log");
   // Activity: newest first, one row per event with its time and a mark for
@@ -2480,6 +2516,14 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
         if (!box) { return; }
         box.innerHTML = "";
         var mine = function (x) { return x.pool === p.name; };
+        (s.moves || []).filter(mine).forEach(function (m) {
+          var n = el("div", "notice");
+          n.appendChild(moveLine({ folder: m.folder, to: m.pool, bytes_remaining: m.bytes_left, need_second_place_bytes: m.need_second_place_bytes, state: "open", waiting: null }));
+          var best = s.ranked.filter(mine).filter(function (x) { return x.reasons.some(function (r) { return r.kind === "move"; }); })[0];
+          if (best) { n.firstChild.appendChild(document.createTextNode(" \u2014 ")); n.firstChild.appendChild(el("span", "", "Attach disk")); n.firstChild.appendChild(document.createTextNode(" \u00ab" + best.label + "\u00bb")); }
+          else if ((s.new_disk_needed || []).some(function (x) { return x.id === m.id; })) { n.firstChild.appendChild(document.createTextNode(" \u2014 ")); n.firstChild.appendChild(el("span", "", "A new disk is needed")); }
+          box.appendChild(n);
+        });
         var top = s.ranked.filter(mine).filter(function (x) { return x.score >= 5; })[0];
         var att = s.attached.filter(mine).filter(function (x) { return x.score >= 5; })[0];
         if (top) {
@@ -2546,6 +2590,32 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     $("pause").textContent = sv.paused ? "Resume" : "Pause";
     $("pause").dataset.paused = sv.paused ? "1" : "0";
     renderSpace(sv.low_space || []);
+    renderMoveJobs(sv.move_jobs || []);
+  }
+  // Open move jobs (staged moves to disk pools): one line each, with the
+  // disk to attach when the job waits for room.
+  function moveLine(j, sugg) {
+    var d = el("div");
+    d.appendChild(el("span", "", "Staged move of folder")); d.appendChild(document.createTextNode(" " + j.folder + " \u2192 " + j.to + ": " + fmtBytes(j.bytes_remaining) + " "));
+    d.appendChild(el("span", "", "left to move"));
+    if (j.state === "paused") { d.appendChild(document.createTextNode(" (")); d.appendChild(el("span", "", "paused")); d.appendChild(document.createTextNode(")")); return d; }
+    if (j.need_second_place_bytes > 0) { d.appendChild(document.createTextNode("; " + fmtBytes(j.need_second_place_bytes) + " ")); d.appendChild(el("span", "", "need a second place")); }
+    if (j.waiting) {
+      d.appendChild(document.createTextNode(" \u2014 "));
+      if (j.waiting.kind === "disk" || j.waiting.kind === "place") {
+        var next = j.waiting.disk || null;
+        if (next) { d.appendChild(el("span", "", "Attach disk")); d.appendChild(document.createTextNode(" \u00ab" + next + "\u00bb ")); }
+        else { d.appendChild(el("span", "", "Attach a new disk")); d.appendChild(document.createTextNode(" ")); }
+        d.appendChild(el("span", "", "to continue the move."));
+      } else { d.appendChild(document.createTextNode(j.waiting.text)); }
+    }
+    return d;
+  }
+  function renderMoveJobs(list) {
+    var b = $("movebanner"); if (!b) { return; }
+    b.innerHTML = "";
+    list.filter(function (j) { return j.state === "open" && j.waiting; }).forEach(function (j) { b.appendChild(moveLine(j)); });
+    b.classList.toggle("hidden", b.childNodes.length === 0);
   }
   // Places short of disk space: one line each (each translated on its own).
   function renderSpace(list) {
@@ -2686,7 +2756,6 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   // video, audio and text of an encrypted folder are shown without a plaintext copy on the phone.
   var VIEW_KINDS = { image: "jpg jpeg png gif webp avif bmp", video: "mp4 m4v webm mov 3gp mkv", audio: "mp3 m4a aac ogg oga opus wav flac", text: "txt md csv log json xml html htm svg js css rs py sh yaml yml toml ini conf", pdf: "pdf" };
   function viewKind(path) { var ext = (path.split("/").pop().split(".").slice(1).pop() || "").toLowerCase(); for (var k in VIEW_KINDS) { if (ext && (" " + VIEW_KINDS[k] + " ").indexOf(" " + ext + " ") >= 0) { return k; } } return null; }
-  function viewUrl(folder, path) { return "/api/view?folder=" + enc(folder) + "&path=" + enc(path) + "&token=" + enc(token); }
   var viewer = { folder: "", list: [], i: 0, open: false };
   function openViewer(folder, list, i) {
     viewer.folder = folder; viewer.list = list; viewer.i = i;
@@ -2697,11 +2766,13 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   function clearStage() { var st = $("viewer-stage"); st.querySelectorAll("video, audio").forEach(function (m) { m.pause(); m.removeAttribute("src"); m.load(); }); st.innerHTML = ""; }
   function viewerMsg(text) { var m = el("div", "viewer-msg"); m.appendChild(el("p", null, text)); return m; }
   function showViewerItem() {
-    var f = viewer.list[viewer.i]; var kind = viewKind(f.path); var url = viewUrl(viewer.folder, f.path);
+    var f = viewer.list[viewer.i]; var kind = viewKind(f.path);
     clearStage(); var st = $("viewer-stage");
     $("viewer-name").textContent = showName(f.path.split("/").pop()); $("viewer-name").title = showName(f.path);
     $("viewer-prev").disabled = viewer.i <= 0; $("viewer-next").disabled = viewer.i >= viewer.list.length - 1;
     var fail = function () { clearStage(); st.appendChild(viewerMsg("This file cannot be shown here. Use Open in another app.")); };
+    ticketUrl("/api/view", viewer.folder, f.path).then(function (url) {
+    if (viewer.list[viewer.i] !== f) { return; }
     if (kind === "image") { var im = document.createElement("img"); im.alt = f.path; im.onerror = fail; im.src = url; st.appendChild(im); }
     else if (kind === "video" || kind === "audio") { var m = document.createElement(kind); m.controls = true; m.preload = "metadata"; m.setAttribute("playsinline", ""); m.onerror = fail; m.src = url; st.appendChild(m); }
     else if (kind === "text") {
@@ -2709,6 +2780,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
       fetch(url, { headers: { Range: "bytes=0-262143" } }).then(function (r) { if (!r.ok) { throw new Error(r.statusText); } return r.text(); }).then(function (t) { if (viewer.list[viewer.i] === f) { st.appendChild(el("pre", null, t + (f.size > 262144 ? "\n…" : ""))); } }).catch(fail);
     }
     else { st.appendChild(viewerMsg(kind === "pdf" ? "PDF files cannot be shown inside the app. Open in another app hands a decrypted copy to a PDF viewer." : "This kind of file cannot be shown here. Use Open in another app.")); }
+    }).catch(fail);
     $("viewer-open").classList.toggle("hidden", !droid); $("viewer-share").classList.toggle("hidden", !droid);
   }
   function closeViewer(fromHistory) {
@@ -2743,7 +2815,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
       }
     } else if (f.state !== "missing") {
       var open = document.createElement("a"); open.className = "button secondary"; if (full) { open.appendChild(icon("open")); } open.appendChild(document.createTextNode("Open"));
-      open.href = "/api/open?folder=" + enc(folder) + "&path=" + enc(f.path) + "&token=" + enc(token); open.onclick = function (ev) { ev.stopPropagation(); setTimeout(loadFiles, 1500); }; out.push(open);
+      open.href = "#"; open.onclick = function (ev) { ev.preventDefault(); ev.stopPropagation(); ticketUrl("/api/open", folder, f.path).then(function (u) { var dl = document.createElement("a"); dl.href = u; dl.download = ""; dl.hidden = true; document.body.appendChild(dl); dl.click(); dl.remove(); setTimeout(loadFiles, 1500); }).catch(function (e) { log("Could not open " + f.path + ": " + e.message); }); }; out.push(open);
     }
     var b = document.createElement("button"); b.type = "button"; b.className = "secondary";
     if (f.state === "placeholder" || f.state === "missing") { if (full) { b.className = ""; b.appendChild(icon("download")); } b.appendChild(document.createTextNode("Download")); b.onclick = function (ev) { ev.stopPropagation(); fetchFile(folder, f.path); }; }
@@ -2757,7 +2829,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     var folder = $("filesfolder").value; var fs = folderByName(folder);
     var d = $("filedetails"); d.classList.remove("hidden"); document.querySelector(".files-layout").classList.add("with-details");
     var pv = $("fd-preview"); pv.innerHTML = "";
-    if (f.media) { var im = document.createElement("img"); im.alt = ""; im.src = "/api/thumb?folder=" + enc(folder) + "&path=" + enc(f.path) + "&token=" + enc(token); im.onerror = function () { im.remove(); pv.appendChild(icon("image")); }; pv.appendChild(im); } else { pv.appendChild(icon("files")); }
+    if (f.media) { var im = document.createElement("img"); im.alt = ""; im.onerror = function () { im.remove(); pv.appendChild(icon("image")); }; pv.appendChild(im); thumbSrc(im, folder, f.path); } else { pv.appendChild(icon("files")); }
     $("fd-name").textContent = showName(f.path);
     var st = $("fd-state"); st.innerHTML = ""; st.appendChild(stateSquare(f)); st.appendChild(document.createTextNode(fileStateLabel(f)));
     $("fd-size").textContent = fmtBytes(f.size);
@@ -3109,7 +3181,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
           var cell = document.createElement("td"); var row = el("div", "mrow-in");
           var pick = el("span", "mrow-pick"); pick.setAttribute("aria-hidden", "true"); row.appendChild(pick);
           var media = el("span", "mrow-thumb");
-          if (f.media) { var mi = document.createElement("img"); mi.alt = ""; mi.loading = "lazy"; mi.src = "/api/thumb?folder=" + enc(folder) + "&path=" + enc(f.path) + "&token=" + enc(token); mi.onerror = function () { mi.replaceWith(icon("image")); }; media.appendChild(mi); } else { media.appendChild(icon("files")); }
+          if (f.media) { var mi = document.createElement("img"); mi.alt = ""; mi.loading = "lazy"; mi.onerror = function () { mi.replaceWith(icon("image")); }; media.appendChild(mi); thumbSrc(mi, folder, f.path); } else { media.appendChild(icon("files")); }
           row.appendChild(media);
           var slash = f.path.lastIndexOf("/");
           var body = el("div", "mrow-body");
@@ -3131,7 +3203,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
         function td(t, cls, label) { var d = document.createElement("td"); d.textContent = t; if (cls) { d.className = cls; } if (label) { d.dataset.label = label; } tr.appendChild(d); }
         var nameCell = document.createElement("td"); var wrap = el("span", "file-name");
         wrap.appendChild(stateSquare(f));
-        if (f.media) { var im = document.createElement("img"); im.className = "thumb"; im.alt = ""; im.loading = "lazy"; im.src = "/api/thumb?folder=" + enc(folder) + "&path=" + enc(f.path) + "&token=" + enc(token); im.onerror = function () { var fi = el("span", "file-icon"); fi.appendChild(icon("image")); im.replaceWith(fi); }; wrap.appendChild(im); }
+        if (f.media) { var im = document.createElement("img"); im.className = "thumb"; im.alt = ""; im.loading = "lazy"; im.onerror = function () { var fi = el("span", "file-icon"); fi.appendChild(icon("image")); im.replaceWith(fi); }; wrap.appendChild(im); thumbSrc(im, folder, f.path); }
         else { var fi = el("span", "file-icon"); fi.appendChild(icon("files")); wrap.appendChild(fi); }
         var fname = el("span", null, showName(f.path)); fname.setAttribute("data-no-i18n", ""); wrap.appendChild(fname);
         if (f.analysis) { var ap = pill(f.analysis_stale ? "risk" : "accent", f.analysis_stale ? "Analysis stale" : "Analysed"); ap.title = f.analysis.slice(0, 200); ap.classList.add("analysis-pill"); wrap.appendChild(ap); }
@@ -3739,7 +3811,40 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   // meanwhile the old polls take over.
   var evs = null, evsOk = false, evsKey = null, evsLast = 0, evsRetry = 1000, evsTimer = null;
   var evsMe = { device: "", name: "" }, evsTasks = {}, evsPeers = [], evsSoon = null, evsStatusSoon = null;
-  function streamWanted() { return !!token && document.body.dataset.view === "app" && document.visibilityState !== "hidden" && typeof EventSource !== "undefined"; }
+  // EventSource cannot send the token header, so the stream is read with fetch
+  // and parsed here; the parts of EventSource the code below uses are kept.
+  function HeaderEventSource(url, lastId) {
+    var self = this, ctl = new AbortController(), handlers = {}, buf = "", cur = { type: "message", data: [], id: "" };
+    this.readyState = 0; this.onopen = null; this.onerror = null;
+    this.addEventListener = function (k, fn) { (handlers[k] = handlers[k] || []).push(fn); };
+    this.close = function () { self.readyState = 2; ctl.abort(); };
+    function fail() { if (self.readyState === 2 && ctl.signal.aborted) { return; } self.readyState = 2; if (self.onerror) { self.onerror(); } }
+    function line(l) {
+      if (l === "") {
+        if (cur.data.length) { var ev = { type: cur.type, data: cur.data.join("\n"), lastEventId: cur.id }; (handlers[ev.type] || []).forEach(function (fn) { fn(ev); }); }
+        cur = { type: "message", data: [], id: cur.id }; return;
+      }
+      if (l.charAt(0) === ":") { return; }
+      var i = l.indexOf(":"), k = i < 0 ? l : l.slice(0, i), v = i < 0 ? "" : l.slice(i + 1).replace(/^ /, "");
+      if (k === "event") { cur.type = v; } else if (k === "data") { cur.data.push(v); } else if (k === "id") { cur.id = v; }
+    }
+    var headers = { "X-Varsto-Token": token, "Accept": "text/event-stream" }; if (lastId) { headers["Last-Event-ID"] = String(lastId); }
+    fetch(url, { headers: headers, signal: ctl.signal }).then(function (r) {
+      if (!r.ok || !r.body) { throw new Error("stream refused"); }
+      self.readyState = 1; if (self.onopen) { self.onopen(); }
+      var rd = r.body.getReader(), dec = new TextDecoder();
+      function pump() {
+        return rd.read().then(function (c) {
+          if (c.done) { throw new Error("stream ended"); }
+          buf += dec.decode(c.value, { stream: true });
+          var nl; while ((nl = buf.search(/\r\n|\n|\r/)) >= 0) { var m = buf.slice(nl).match(/^(\r\n|\n|\r)/)[0]; var l = buf.slice(0, nl); buf = buf.slice(nl + m.length); line(l); }
+          return pump();
+        });
+      }
+      return pump();
+    }).catch(fail);
+  }
+  function streamWanted() { return !!token && document.body.dataset.view === "app" && document.visibilityState !== "hidden" && typeof ReadableStream !== "undefined"; }
   function streamClose() {
     if (evs) { evs.close(); evs = null; }
     if (evsTimer) { clearTimeout(evsTimer); evsTimer = null; }
@@ -3754,8 +3859,8 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     if (evs) { evs.close(); evs = null; }
     if (evsTimer) { clearTimeout(evsTimer); evsTimer = null; }
     evsKey = key;
-    var url = "/api/events?token=" + enc(token) + (peers ? "&peers=1" : "") + (traffic ? "&traffic=1" : "") + (evsLast ? "&last_id=" + evsLast : "");
-    var es = new EventSource(url); evs = es;
+    var url = "/api/events?x=1" + (peers ? "&peers=1" : "") + (traffic ? "&traffic=1" : "") + (evsLast ? "&last_id=" + evsLast : "");
+    var es = new HeaderEventSource(url, evsLast); evs = es;
     es.onopen = function () { if (evs !== es) { return; } evsRetry = 1000; };
     es.onerror = function () {
       if (evs !== es) { return; }
@@ -3798,7 +3903,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     on("transfers", function (d) { transferFollowers.forEach(function (f) { f(d); }); });
     on("sync.finished", function () { serviceSoon(); });
     on("sync.started", function () {});
-    ["policy.changed", "ledger.health", "backup", "trash", "files.new", "space.low", "space.ok", "storage.problem", "storage.ok", "folder.paused", "peer.connected", "peer.disconnected"].forEach(function (k) { on(k, function () { serviceSoon(); }); });
+    ["move.waiting", "move.done", "policy.changed", "ledger.health", "backup", "trash", "files.new", "space.low", "space.ok", "storage.problem", "storage.ok", "folder.paused", "peer.connected", "peer.disconnected"].forEach(function (k) { on(k, function () { serviceSoon(); }); });
     on("config.changed", function () { serviceSoon(); statusSoon(); });
     on("notification", function (d) { if (d.title) { log(d.title + ": " + (d.body || "")); } });
   }

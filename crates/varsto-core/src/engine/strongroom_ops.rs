@@ -96,7 +96,7 @@ impl Engine {
     ) -> Result<ConvertReport> {
         let (new_id, info, fk) = match self.strongroom_conversion(folder) {
             Some((id, info)) => {
-                let fk = strongroom::unlock(key, &id, &info)?;
+                let fk = strongroom::unlock(key, &self.vault.vault_id, &id, &info)?;
                 (id, info, fk)
             }
             None => {
@@ -110,7 +110,7 @@ impl Engine {
                 }
                 let id = FolderId::random();
                 let fk = SecretKey::random();
-                let info = strongroom::enroll(key, method, &id, &fk)?;
+                let info = strongroom::enroll(key, method, &self.vault.vault_id, &id, &fk)?;
                 (id, info, fk)
             }
         };
@@ -192,7 +192,8 @@ impl Engine {
     /// tools: one touch to unlock, then one per enrolled key).
     pub fn rekey_strongroom(&mut self, folder: &str, unlock_minutes: u64) -> Result<ConvertReport> {
         if let Some((id, info)) = self.strongroom_conversion(folder) {
-            let (fk, _) = strongroom::unlock_enrolled(&self.home, &id, &info)?;
+            let (fk, _) =
+                strongroom::unlock_enrolled(&self.home, &self.vault.vault_id, &id, &info)?;
             if !self
                 .keyring
                 .find(folder)
@@ -208,7 +209,8 @@ impl Engine {
         }
         let id = FolderId::random();
         let fk = SecretKey::random();
-        let new_info = strongroom::rewrap_enrolled(&self.home, &id, &fk, &info)?;
+        let new_info =
+            strongroom::rewrap_enrolled(&self.home, &self.vault.vault_id, &id, &fk, &info)?;
         self.rekey_strongroom_with(folder, &id, &fk, new_info, unlock_minutes)
     }
 
@@ -224,6 +226,9 @@ impl Engine {
         if self.vault.member {
             bail!("a member device cannot convert folders of the owner's vault");
         }
+        // The key and the wraps come from the caller (the command line): the
+        // key must be the one the wraps' commitment names.
+        info.verify_key(new_id, folder_key)?;
         let rec = self
             .keyring
             .find(folder)
@@ -926,7 +931,8 @@ impl Engine {
     /// the libfido2 tools, software key files in the vault directory).
     pub fn unlock_strongroom_enrolled(&mut self, folder: &str, minutes: u64) -> Result<SecretKey> {
         let (rec, info) = self.strongroom_record(folder)?;
-        let (fk, _) = strongroom::unlock_enrolled(&self.home, &rec.folder_id, &info)?;
+        let (fk, _) =
+            strongroom::unlock_enrolled(&self.home, &self.vault.vault_id, &rec.folder_id, &info)?;
         self.unlocked.insert(
             rec.folder_id.clone(),
             (fk.clone(), util::now_utc() + minutes as i64 * 60),
@@ -959,8 +965,14 @@ impl Engine {
         let unlocked = self
             .with_key(&rec)
             .with_context(|| format!("unlock {} with an enrolled key first", rec.name))?;
-        let k =
-            strongroom::enroll_key(key, method, &rec.folder_id, &unlocked.folder_key()?, label)?;
+        let k = strongroom::enroll_key(
+            key,
+            method,
+            &self.vault.vault_id,
+            &rec.folder_id,
+            &unlocked.folder_key()?,
+            label,
+        )?;
         self.add_strongroom_key_enrolled(folder, k)
     }
 
@@ -1014,7 +1026,8 @@ impl Engine {
     ) -> Result<usize> {
         let n = keys.len();
         let updated = util::now_utc().max(info.updated_utc + 1);
-        let new_info = StrongroomInfo::from_keys(keys, updated)?;
+        let mut new_info = StrongroomInfo::from_keys(keys, updated)?;
+        new_info.check_hex = info.check_hex.clone();
         let mut new_rec = rec.clone();
         new_rec.strongroom = Some(new_info.clone());
         self.keyring

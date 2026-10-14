@@ -8,6 +8,13 @@ use std::path::{Path, PathBuf};
 use varsto_core::storage::StorageSpec;
 use varsto_core::Engine;
 
+/// mimalloc for every allocation of the binary (feature `mimalloc`, on by
+/// default): the system allocator, musl's above all, is a bottleneck on the
+/// allocation-heavy paths (JSON, file lists, per-block buffers).
+#[cfg(feature = "mimalloc")]
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 mod backup;
 mod desktop;
 mod drive_mount;
@@ -83,6 +90,13 @@ enum LedgerCmd {
         #[arg(long)]
         confirm_cold_read: bool,
     },
+    /// Delete the junk under this device's ledger name on the hot storages:
+    /// objects there that this device did not sign (someone with the
+    /// storage's credentials wrote them). Without --yes, only lists them.
+    CleanJunk {
+        #[arg(long)]
+        yes: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -98,12 +112,12 @@ enum Cmd {
         /// Name of this device (default: the computer's name).
         #[arg(long, default_value_t = default_device_name())]
         name: String,
-        /// Vault key in hex (from `init`), or use --words.
-        #[arg(long, conflicts_with = "words")]
-        vault_key: Option<String>,
-        /// The 24 words of the recovery kit instead of the hex key.
-        #[arg(long)]
-        words: Option<String>,
+        /// File with the vault key (64 hex digits, from `init`) or the 24 words
+        /// of the recovery kit. Without it Varsto reads VARSTO_VAULT_KEY, then
+        /// standard input when it is not a terminal, then asks (hidden). The
+        /// key is never taken from the command line.
+        #[arg(long, value_name = "FILE")]
+        key_file: Option<PathBuf>,
         /// Name for the storage on this device.
         #[arg(long, default_value = "primary")]
         storage_name: String,
@@ -121,9 +135,13 @@ enum Cmd {
         s3_prefix: String,
         #[arg(long)]
         s3_access_key_id: Option<String>,
-        /// Secret access key; read from VARSTO_S3_SECRET if omitted.
-        #[arg(long, env = "VARSTO_S3_SECRET", hide_env_values = true)]
-        s3_secret_access_key: Option<String>,
+        /// File with the secret access key. Without it Varsto reads
+        /// VARSTO_S3_SECRET, then asks on the terminal (hidden).
+        #[arg(long, value_name = "FILE")]
+        s3_secret_file: Option<PathBuf>,
+        /// Allow an http:// endpoint outside this computer (no transport encryption).
+        #[arg(long, requires = "s3_endpoint")]
+        s3_insecure_http: bool,
     },
     /// Manage storages.
     Storage {
@@ -149,13 +167,31 @@ enum Cmd {
     /// Move a folder's blocks (or those of its idle files) from one storage
     /// to another: copy, check, then remove from the old one. Never drops a
     /// copy the folder's policy needs, nor the last one; run it again to
-    /// carry on after an interruption.
+    /// carry on after an interruption. A move to a disk pool (or with
+    /// --path, --keep-source or --job) is a job: it moves what fits on the
+    /// attached disks, waits for the next disk and goes on by itself;
+    /// `move status|pause|resume|cancel` manage jobs.
+    #[command(args_conflicts_with_subcommands = true, subcommand_negates_reqs = true)]
     Move {
-        folder: String,
+        #[command(subcommand)]
+        cmd: Option<placing::MoveCmd>,
+        #[arg(required = true)]
+        folder: Option<String>,
+        #[arg(long, required = true)]
+        from: Option<String>,
+        #[arg(long, required = true)]
+        to: Option<String>,
+        /// Only files and directories at or under this path of the folder
+        /// (repeatable; relative to the folder or inside its directory).
+        #[arg(long = "path")]
+        paths: Vec<String>,
+        /// Copy and check, but keep the blocks on the old storage.
         #[arg(long)]
-        from: String,
+        keep_source: bool,
+        /// Record the move as a job that goes on by itself, also between
+        /// ordinary storages.
         #[arg(long)]
-        to: String,
+        job: bool,
         /// Only files not used for this many days.
         #[arg(long)]
         idle_days: Option<i64>,
@@ -324,6 +360,10 @@ enum Cmd {
         /// Only report whether an update exists.
         #[arg(long)]
         check: bool,
+        /// Install on the word of the download site and its signature alone
+        /// when the GitHub release cannot be reached to cross-check it.
+        #[arg(long)]
+        allow_single_source: bool,
     },
     /// Check a downloaded release file: the release signature on SHA256SUMS
     /// (next to the file, or fetched from the download page), then the file's SHA-256.
@@ -384,6 +424,11 @@ enum Cmd {
     },
     /// Strongroom folders: opened only with a touch of your FIDO2 security key.
     Strongroom {
+        /// Require user verification (the key's PIN or biometric) in addition to
+        /// the PIN prompt, for every touch. An enrolment made without it opens
+        /// only without it: enrol again to change it.
+        #[arg(long, global = true)]
+        uv: bool,
         #[command(subcommand)]
         cmd: StrongroomCmd,
     },
@@ -417,10 +462,11 @@ enum Cmd {
     /// MCP server for AI assistants (stdio), with per-folder grants and
     /// scoped keys. See docs/mcp.md in the repository (https://github.com/janttsu/varsto).
     Mcp {
-        /// Talk to the running service with this MCP key (from `varsto mcp
-        /// key create`); its scope replaces the grants file.
-        #[arg(long, env = "VARSTO_MCP_KEY", hide_env_values = true)]
-        key: Option<String>,
+        /// File with the MCP key (from `varsto mcp key create`); its scope
+        /// replaces the grants file. Without it Varsto reads VARSTO_MCP_KEY.
+        /// The key is never taken from the command line.
+        #[arg(long, value_name = "FILE")]
+        key_file: Option<PathBuf>,
         #[command(subcommand)]
         cmd: Option<McpCmd>,
     },
@@ -472,6 +518,16 @@ enum DeviceCmd {
         #[arg(long)]
         yes: bool,
     },
+    /// Two devices wrote the same key epoch at once (each removing a
+    /// device): keep the epoch of one of them. Until then this device signs
+    /// nothing.
+    ResolveEpoch {
+        /// The key epoch number (see `varsto ledger status`).
+        epoch: u32,
+        /// The device whose epoch to keep (name or id).
+        #[arg(long)]
+        keep: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -503,10 +559,17 @@ enum RecoveryCmd {
         #[arg(long)]
         shares: bool,
     },
-    /// Rebuild the vault key from shares (`"<index>: <24 words>"` each).
+    /// Rebuild the vault key from shares (`<index>: <24 words>`, one per line).
+    /// The shares are read from the files given with --file, else from standard
+    /// input when it is not a terminal, else asked for (hidden); they are never
+    /// taken from the command line.
     Combine {
-        #[arg(required = true, num_args = 2..)]
-        shares: Vec<String>,
+        /// A file with one or more shares, one per line (repeatable).
+        #[arg(long = "file", value_name = "FILE")]
+        files: Vec<PathBuf>,
+        /// The "Key check" printed on the kit: the rebuilt key is refused when it does not match.
+        #[arg(long)]
+        check: Option<String>,
     },
     /// What to keep outside your devices to restore everything if all of them are lost, and
     /// the restore steps for a new device. Personal to this vault; holds no secret.
@@ -632,15 +695,18 @@ enum OrgAdminCmd {
     /// Make a device of the organization an administrator.
     Add {
         device: String,
-        /// The 24 root words printed when the organization was created.
-        #[arg(long)]
-        root_words: String,
+        /// File with the 24 root words printed when the organization was
+        /// created. Without it Varsto reads VARSTO_ORG_ROOT_WORDS, then standard
+        /// input when it is not a terminal, then asks (hidden).
+        #[arg(long, value_name = "FILE")]
+        root_words_file: Option<PathBuf>,
     },
     /// Take the administrator role from a device (it stays a member).
     Remove {
         device: String,
-        #[arg(long)]
-        root_words: String,
+        /// File with the 24 root words (see `org admin add`).
+        #[arg(long, value_name = "FILE")]
+        root_words_file: Option<PathBuf>,
     },
 }
 
@@ -651,7 +717,7 @@ enum StrongroomCmd {
         name: String,
         path: PathBuf,
         /// Use a software key file instead of hardware: for trying the flow only, no real protection.
-        #[arg(long)]
+        #[arg(long, hide = !varsto_core::strongroom::SOFTWARE_KEYS_BUILT_IN)]
         software: bool,
         #[arg(long, default_value_t = 15)]
         minutes: u64,
@@ -671,7 +737,7 @@ enum StrongroomCmd {
     Convert {
         folder: String,
         /// Use a software key file instead of hardware: for trying the flow only, no real protection.
-        #[arg(long)]
+        #[arg(long, hide = !varsto_core::strongroom::SOFTWARE_KEYS_BUILT_IN)]
         software: bool,
         #[arg(long, default_value_t = 15)]
         minutes: u64,
@@ -686,7 +752,7 @@ enum StrongroomCmd {
         #[arg(long, default_value = "")]
         label: String,
         /// The new key is a software key file (testing only).
-        #[arg(long)]
+        #[arg(long, hide = !varsto_core::strongroom::SOFTWARE_KEYS_BUILT_IN)]
         software: bool,
         /// libfido2 device path of the new key (default: ask to swap keys, then the first key found).
         #[arg(long)]
@@ -971,9 +1037,13 @@ enum ShareCmd {
         s3_prefix: String,
         #[arg(long)]
         s3_access_key_id: Option<String>,
-        /// Secret access key; read from VARSTO_S3_SECRET if omitted.
-        #[arg(long, env = "VARSTO_S3_SECRET", hide_env_values = true)]
-        s3_secret_access_key: Option<String>,
+        /// File with the secret access key. Without it Varsto reads
+        /// VARSTO_S3_SECRET, then asks on the terminal (hidden).
+        #[arg(long, value_name = "FILE")]
+        s3_secret_file: Option<PathBuf>,
+        /// Allow an http:// endpoint outside this computer (no transport encryption).
+        #[arg(long, requires = "s3_endpoint")]
+        s3_insecure_http: bool,
     },
 }
 
@@ -1067,12 +1137,19 @@ enum StorageCmd {
         prefix: String,
         #[arg(long)]
         access_key_id: String,
-        /// Secret access key; read from VARSTO_S3_SECRET if omitted. Stored encrypted in secrets.enc.
-        #[arg(long, env = "VARSTO_S3_SECRET", hide_env_values = true)]
-        secret_access_key: String,
+        /// File with the secret access key. Without it Varsto reads
+        /// VARSTO_S3_SECRET, then asks on the terminal (hidden). Stored
+        /// encrypted in secrets.enc; never taken from the command line.
+        #[arg(long, value_name = "FILE")]
+        secret_file: Option<PathBuf>,
         /// Use virtual-host style URLs (bucket.host) instead of path style.
         #[arg(long)]
         virtual_host: bool,
+        /// Allow an http:// endpoint outside this computer: the request signatures and the
+        /// (encrypted) objects then travel without transport encryption. A loopback address
+        /// needs no flag.
+        #[arg(long)]
+        insecure_http: bool,
         /// Storage class for new objects (DEEP_ARCHIVE, GLACIER_IR, STANDARD_IA, ...).
         #[arg(long)]
         storage_class: Option<String>,
@@ -1555,14 +1632,14 @@ fn show_qr(text: &str, parts: bool, light: bool) -> Result<()> {
                 if r.name.is_empty() {
                     String::new()
                 } else {
-                    format!(" from {}", r.name)
+                    format!(" from {}", show(&r.name))
                 },
                 r.fingerprint
             )
         }
         Link::ShareToken(t) => format!(
             "Sealed share token for {} (only the requesting device opens it)",
-            varsto_core::vault::SealedShareToken::decode(t)?.name
+            show(&varsto_core::vault::SealedShareToken::decode(t)?.name)
         ),
         Link::Pair { .. } => "Pairing code (works once, for ten minutes)".to_string(),
     };
@@ -1646,7 +1723,7 @@ fn open_link(home: &Path, uri: &str) -> Result<()> {
         if let Some(e) = answer["error"].as_str() {
             bail!("{e}");
         }
-        let page = format!("http://127.0.0.1:{}/?token={}", f.port, f.token);
+        let page = service::boot_url(&f)?;
         match std::env::var("VARSTO_OPENER")
             .ok()
             .filter(|o| !o.is_empty())
@@ -1700,6 +1777,117 @@ fn bail_usage<T>(msg: &str) -> Result<T> {
     Err(anyhow!("{msg}"))
 }
 
+/// A secret that must not ride in the command line (it would show in `ps`,
+/// `/proc/*/cmdline` and the shell history): from a file, else from an
+/// environment variable, else from standard input when it is not a terminal
+/// (`stdin_ok`), else asked for on the terminal without echo.
+fn secret_input(
+    file: Option<&Path>,
+    env: &str,
+    prompt: &str,
+    stdin_ok: bool,
+) -> Result<zeroize::Zeroizing<String>> {
+    use std::io::{IsTerminal, Read};
+    let got = if let Some(f) = file {
+        let text = std::fs::read_to_string(f).with_context(|| format!("read {}", f.display()))?;
+        zeroize::Zeroizing::new(text)
+    } else if let Some(v) = std::env::var(env).ok().filter(|v| !v.trim().is_empty()) {
+        zeroize::Zeroizing::new(v)
+    } else if stdin_ok && !std::io::stdin().is_terminal() {
+        let mut text = zeroize::Zeroizing::new(String::new());
+        std::io::stdin()
+            .lock()
+            .take(64 * 1024)
+            .read_to_string(&mut text)
+            .context("read standard input")?;
+        text
+    } else if std::io::stdin().is_terminal() {
+        zeroize::Zeroizing::new(rpassword::prompt_password(prompt).context("read the secret")?)
+    } else {
+        bail!("no secret given: set {env}, or pass a file, or run from a terminal to be asked");
+    };
+    let trimmed = got.trim();
+    if trimmed.is_empty() {
+        bail_usage::<()>("the secret is empty")?;
+    }
+    varsto_core::logging::register_secret(trimmed);
+    Ok(zeroize::Zeroizing::new(trimmed.to_string()))
+}
+
+/// Several secret lines (the shares of `recovery combine`): from files, else
+/// standard input when it is not a terminal, else asked for line by line
+/// without echo until an empty line.
+fn secret_lines(files: &[PathBuf], prompt: &str) -> Result<Vec<zeroize::Zeroizing<String>>> {
+    use std::io::{IsTerminal, Read};
+    let mut text = zeroize::Zeroizing::new(String::new());
+    if !files.is_empty() {
+        for f in files {
+            text.push_str(
+                &std::fs::read_to_string(f).with_context(|| format!("read {}", f.display()))?,
+            );
+            text.push('\n');
+        }
+    } else if !std::io::stdin().is_terminal() {
+        std::io::stdin()
+            .lock()
+            .take(256 * 1024)
+            .read_to_string(&mut text)
+            .context("read standard input")?;
+    } else {
+        loop {
+            let line = zeroize::Zeroizing::new(
+                rpassword::prompt_password(prompt).context("read a share")?,
+            );
+            if line.trim().is_empty() {
+                break;
+            }
+            text.push_str(&line);
+            text.push('\n');
+        }
+    }
+    let out: Vec<_> = text
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .map(|l| {
+            varsto_core::logging::register_secret(l);
+            zeroize::Zeroizing::new(l.to_string())
+        })
+        .collect();
+    Ok(out)
+}
+
+/// The vault key as hex from what the user gave: 64 hex digits, or the 24
+/// recovery words.
+fn vault_key_from_text(text: &str) -> Result<zeroize::Zeroizing<String>> {
+    let t = text.trim();
+    if t.len() == 64 && t.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Ok(zeroize::Zeroizing::new(t.to_ascii_lowercase()));
+    }
+    varsto_core::recovery::key_from_words(t)
+        .context("this is neither 64 hex digits nor 24 recovery words")
+}
+
+/// The MCP key for `varsto mcp`: from `--key-file`, else `VARSTO_MCP_KEY`.
+fn mcp_key_input(file: Option<&Path>) -> Result<Option<zeroize::Zeroizing<String>>> {
+    if let Some(f) = file {
+        let text = std::fs::read_to_string(f).with_context(|| format!("read {}", f.display()))?;
+        let k = text.trim();
+        if k.is_empty() {
+            bail_usage::<()>("the MCP key file is empty")?;
+        }
+        varsto_core::logging::register_secret(k);
+        return Ok(Some(zeroize::Zeroizing::new(k.to_string())));
+    }
+    Ok(std::env::var("VARSTO_MCP_KEY")
+        .ok()
+        .filter(|k| !k.trim().is_empty())
+        .map(|k| {
+            varsto_core::logging::register_secret(k.trim());
+            zeroize::Zeroizing::new(k.trim().to_string())
+        }))
+}
+
 /// Ask a yes/no question on the terminal; without one the answer is no.
 fn confirm(question: &str) -> Result<bool> {
     use std::io::{BufRead, IsTerminal, Write};
@@ -1728,13 +1916,13 @@ fn url_escape(s: &str) -> String {
 /// `varsto changes` as lines, newest first.
 fn changes_text(r: &varsto_core::engine::ChangesReport) -> String {
     let mut out = format!(
-        "{}{}: {} change(s){}",
+        "{}{}: {}{}",
         r.folder,
         r.path
             .as_ref()
             .map(|p| format!(" {}{p}", if r.file { "" } else { "under " }))
             .unwrap_or_default(),
-        r.changes.len(),
+        plural(r.changes.len(), "change", "changes"),
         if r.truncated {
             " (more with --limit 0)"
         } else {
@@ -1788,8 +1976,8 @@ fn kept_aside_text(paths: &[String]) -> String {
     }
     let shown: Vec<&str> = paths.iter().take(5).map(|p| p.as_str()).collect();
     format!(
-        " ({} file(s) moved to {}/ in the device directory or put back: {}{})",
-        paths.len(),
+        " ({} moved to {}/ in the device directory or put back: {}{})",
+        plural(paths.len(), "file", "files"),
         varsto_core::engine::KEPT_ASIDE_DIR,
         shown.join(", "),
         if paths.len() > shown.len() {
@@ -1865,7 +2053,7 @@ fn share_members_text(l: &varsto_core::engine::ShareMembers) -> String {
         };
         out.push_str(&format!(
             "\n  {:<20} {:<10} {}{}{}",
-            m.name,
+            show(&m.name),
             &m.id[..m.id.len().min(8)],
             what,
             if m.this_device { " (this device)" } else { "" },
@@ -1884,10 +2072,10 @@ fn share_members_text(l: &varsto_core::engine::ShareMembers) -> String {
 /// The passphrase typed in this run, so that after a successful command a
 /// locked background service can be unlocked with it (and, after setup,
 /// kept in the keyring if the user wants).
-static TYPED: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+static TYPED: std::sync::Mutex<Option<zeroize::Zeroizing<String>>> = std::sync::Mutex::new(None);
 /// The passphrase this command used, typed or from VARSTO_PASSPHRASE: it
 /// unlocks a background service that waits for it.
-static USED: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+static USED: std::sync::Mutex<Option<zeroize::Zeroizing<String>>> = std::sync::Mutex::new(None);
 
 /// Open the device directory. When its ledger needs a rebuild (lost or
 /// damaged local files, a fork), say so on stderr: commands that only read
@@ -1908,7 +2096,7 @@ fn warn_ledger(h: &varsto_core::engine::LedgerHealth) {
 fn passphrase() -> Result<String> {
     if let Ok(p) = std::env::var("VARSTO_PASSPHRASE") {
         varsto_core::logging::register_secret(&p);
-        *USED.lock().unwrap() = Some(p.clone());
+        *USED.lock().unwrap() = Some(zeroize::Zeroizing::new(p.clone()));
         return Ok(p);
     }
     use std::io::IsTerminal;
@@ -1919,8 +2107,8 @@ fn passphrase() -> Result<String> {
             bail_usage::<()>("empty passphrase")?;
         }
         varsto_core::logging::register_secret(&p);
-        *TYPED.lock().unwrap() = Some(p.clone());
-        *USED.lock().unwrap() = Some(p.clone());
+        *TYPED.lock().unwrap() = Some(zeroize::Zeroizing::new(p.clone()));
+        *USED.lock().unwrap() = Some(zeroize::Zeroizing::new(p.clone()));
         return Ok(p);
     }
     Err(anyhow!(
@@ -2060,7 +2248,11 @@ fn suggest_text(s: &varsto_core::disksuggest::DiskSuggestions) -> String {
                 t.command
             );
         }
-        None => out += "No disk needs docking now.\n",
+        None if s.new_disk_needed.is_empty() => out += "No disk needs docking now.\n",
+        None => {}
+    }
+    for n in &s.new_disk_needed {
+        out += &format!("{}\n  Run: {}\n", n.text, n.command);
     }
     let rest: Vec<_> = s
         .ranked
@@ -2120,6 +2312,14 @@ fn renamed_note(renamed: &[String]) -> String {
             renamed.join(", ")
         )
     }
+}
+
+/// A count with its noun: "1 file", "3 files".
+fn plural<N>(n: N, one: &str, many: &str) -> String
+where
+    N: Copy + PartialEq + From<u8> + std::fmt::Display,
+{
+    format!("{n} {}", if n == N::from(1) { one } else { many })
 }
 
 fn fmt_bytes(n: u64) -> String {
@@ -2411,7 +2611,7 @@ fn run_search(
                 .folders()
                 .into_iter()
                 .filter(|(r, m)| m.is_some() && (!r.is_strongroom() || e.is_unlocked(&r.folder_id)))
-                .map(|(r, _)| r.name)
+                .map(|(r, _)| r.name.clone())
                 .collect();
             engine = Some(e);
             names
@@ -2567,7 +2767,7 @@ fn run_org(cli: &Cli, home: &Path, cmd: &OrgCmd) -> Result<()> {
                 None => {
                     eprintln!(
                         "Request from device {} ({}, {})\nfingerprint: {}\nAsk the person to read the fingerprint their device shows (varsto org request).",
-                        if info.name.is_empty() { "(no name)" } else { &info.name },
+                        if info.name.is_empty() { "(no name)".into() } else { show(&info.name) },
                         info.device.short(),
                         if info.platform.is_empty() {
                             "platform not given".to_string()
@@ -2740,10 +2940,23 @@ fn run_org(cli: &Cli, home: &Path, cmd: &OrgCmd) -> Result<()> {
             print(cli, &p, policy_text)?;
         }
         OrgCmd::Admin { cmd } => {
-            let (action, device, words) = match cmd {
-                OrgAdminCmd::Add { device, root_words } => ("add", device, root_words),
-                OrgAdminCmd::Remove { device, root_words } => ("remove", device, root_words),
+            let (action, device, file) = match cmd {
+                OrgAdminCmd::Add {
+                    device,
+                    root_words_file,
+                } => ("add", device, root_words_file),
+                OrgAdminCmd::Remove {
+                    device,
+                    root_words_file,
+                } => ("remove", device, root_words_file),
             };
+            let words = secret_input(
+                file.as_deref(),
+                "VARSTO_ORG_ROOT_WORDS",
+                "The 24 root words of the organization: ",
+                true,
+            )?;
+            let words: &str = &words;
             if via_service.is_some() {
                 call(
                     "POST",
@@ -2923,8 +3136,7 @@ fn run(cli: &Cli) -> Result<()> {
         }
         Cmd::Join {
             name,
-            vault_key,
-            words,
+            key_file,
             storage_name,
             storage_path,
             s3_bucket,
@@ -2932,14 +3144,28 @@ fn run(cli: &Cli) -> Result<()> {
             s3_region,
             s3_prefix,
             s3_access_key_id,
-            s3_secret_access_key,
+            s3_secret_file,
+            s3_insecure_http,
         } => {
             let mut s3_secret: Option<String> = None;
+            // The vault key first: it may come from standard input, which the
+            // secret prompt below must not touch.
+            let key_text = secret_input(
+                key_file.as_deref(),
+                "VARSTO_VAULT_KEY",
+                "Vault key (64 hex digits) or the 24 recovery words: ",
+                true,
+            )?;
+            let key_hex = vault_key_from_text(&key_text)?;
             let spec = match (s3_bucket, storage_path) {
                 (Some(bucket), _) => {
-                    let secret = s3_secret_access_key.clone().ok_or_else(|| {
-                        anyhow!("give --s3-secret-access-key or set VARSTO_S3_SECRET")
-                    })?;
+                    let secret = secret_input(
+                        s3_secret_file.as_deref(),
+                        "VARSTO_S3_SECRET",
+                        "S3 secret access key: ",
+                        false,
+                    )?
+                    .to_string();
                     // The storage is opened before the vault exists, so the secret travels via the environment for this process.
                     let env_name = format!(
                         "VARSTO_S3_SECRET_{}",
@@ -2967,6 +3193,7 @@ fn run(cli: &Cli) -> Result<()> {
                         storage_class: None,
                         cold: false,
                         place: String::new(),
+                        allow_insecure_http: *s3_insecure_http,
                     }
                 }
                 (None, Some(path)) => StorageSpec::LocalDir {
@@ -2978,11 +3205,6 @@ fn run(cli: &Cli) -> Result<()> {
                     min_free: None,
                 },
                 (None, None) => bail_usage("give --storage-path <dir> or --s3-bucket ...")?,
-            };
-            let key_hex = match (vault_key, words) {
-                (Some(k), _) => k.clone(),
-                (None, Some(w)) => varsto_core::recovery::key_from_words(w)?,
-                (None, None) => bail_usage("give --vault-key <hex> or --words \"<24 words>\"")?,
             };
             let joined = Engine::join(&home, name, &passphrase()?, &key_hex, spec);
             std::env::remove_var(format!(
@@ -3073,12 +3295,19 @@ fn run(cli: &Cli) -> Result<()> {
                     bucket,
                     prefix,
                     access_key_id,
-                    secret_access_key,
+                    secret_file,
                     virtual_host,
+                    insecure_http,
                     storage_class,
                     cold,
                     place,
                 } => {
+                    let secret_access_key = secret_input(
+                        secret_file.as_deref(),
+                        "VARSTO_S3_SECRET",
+                        "S3 secret access key: ",
+                        true,
+                    )?;
                     engine.add_storage_with_secret(
                         StorageSpec::S3 {
                             name: name.clone(),
@@ -3095,8 +3324,9 @@ fn run(cli: &Cli) -> Result<()> {
                                     c.contains("GLACIER") || c.contains("ARCHIVE")
                                 }),
                             place: place.clone(),
+                            allow_insecure_http: *insecure_http,
                         },
-                        Some(secret_access_key.clone()),
+                        Some(secret_access_key.to_string()),
                     )?;
                     println!("storage {name} added (secret kept in secrets.enc)");
                 }
@@ -3213,6 +3443,9 @@ fn run(cli: &Cli) -> Result<()> {
                         .zip(&quotas)
                         .map(|((spec, e), q)| {
                             let mut v = serde_json::to_value(spec).unwrap_or_default();
+                            if let Some(c) = engine.conditional_writes(spec.name()) {
+                                v["conditional_writes"] = c.into();
+                            }
                             v["price"] = serde_json::to_value(&e.price).unwrap_or_default();
                             v["bytes"] = e.bytes.into();
                             v["monthly_cost"] =
@@ -3229,7 +3462,7 @@ fn run(cli: &Cli) -> Result<()> {
                             .zip(&quotas)
                             .map(|((x, e), q)| {
                                 format!(
-                                    "{}{}{}{}{}{} | {} stored{} | {}{}",
+                                    "{}{}{}{}{}{} | {} stored{} | {}{}{}",
                                     x.name(),
                                     if x.is_cold() { " (cold)" } else { "" },
                                     if x.is_carrier() { " (transferrer)" } else { "" },
@@ -3279,7 +3512,11 @@ fn run(cli: &Cli) -> Result<()> {
                                         .unwrap_or_else(|| "no price set".to_string()),
                                     e.monthly_cost
                                         .map(|c| format!(" | about {c:.2} {} a month", e.currency))
-                                        .unwrap_or_default()
+                                        .unwrap_or_default(),
+                                    match engine.conditional_writes(x.name()) {
+                                        Some(false) => " | conditional writes: unsupported",
+                                        _ => "",
+                                    }
                                 )
                             })
                             .collect::<Vec<_>>()
@@ -3402,6 +3639,17 @@ fn run(cli: &Cli) -> Result<()> {
                         text.push_str("no disks; add a pool with `varsto storage add-pool <name>` and a disk with `varsto disk add`\n");
                     } else {
                         text.push_str(&disk_table(&disks));
+                    }
+                    // A marker that repeats the pool's public fields without the
+                    // vault's MAC is not adopted, whatever it claims.
+                    for (pool, mount, label) in engine.unknown_pool_disks() {
+                        text.push_str(&format!(
+                            "\nunknown disk \"{}\" at {}: it looks like a disk of pool {pool} but carries no valid marker MAC, so it gets no writes. If it is yours, run `varsto disk add {} --pool {pool} --label \"{}\"`\n",
+                            show(&label),
+                            mount.display(),
+                            mount.display(),
+                            show(&label)
+                        ));
                     }
                     print!("{text}");
                 }
@@ -3564,33 +3812,57 @@ fn run(cli: &Cli) -> Result<()> {
                     }
                 }
             }
+            if !cli.json
+                && matches!(
+                    cmd,
+                    DiskCmd::Add { .. }
+                        | DiskCmd::Check { .. }
+                        | DiskCmd::Insert { .. }
+                        | DiskCmd::Init { .. }
+                )
+            {
+                placing::continue_hint(&engine);
+            }
         }
         Cmd::Backup { cmd } => backup::run(cli, &home, cmd)?,
         Cmd::Trash { cmd } => trash::run(cli, &home, cmd)?,
         Cmd::History(args) => history::run(cli, &home, args)?,
+        Cmd::Move { cmd: Some(cmd), .. } => placing::move_cmd(cli, &home, cmd)?,
         Cmd::Move {
+            cmd: None,
             folder,
             from,
             to,
+            paths,
+            keep_source,
+            job,
             idle_days,
             dry_run,
             confirm_cold_read,
             yes,
         } => {
+            let (Some(folder), Some(from), Some(to)) = (folder, from, to) else {
+                return bail_usage("move needs a folder, --from and --to");
+            };
             let mut engine = open_engine(&home)?;
-            placing::move_data(
-                cli,
-                &mut engine,
-                placing::MoveArgs {
-                    folder,
-                    from,
-                    to,
-                    idle_days: *idle_days,
-                    dry_run: *dry_run,
-                    confirm_cold_read: *confirm_cold_read,
-                    yes: *yes,
-                },
-            )?;
+            let args = placing::MoveArgs {
+                folder,
+                from,
+                to,
+                idle_days: *idle_days,
+                dry_run: *dry_run,
+                confirm_cold_read: *confirm_cold_read,
+                yes: *yes,
+            };
+            let to_pool = engine
+                .storages()
+                .iter()
+                .any(|s| s.name() == to.as_str() && s.is_data_only());
+            if to_pool || *job || *keep_source || !paths.is_empty() {
+                placing::move_job(cli, &mut engine, args, paths, *keep_source)?;
+            } else {
+                placing::move_data(cli, &mut engine, args)?;
+            }
         }
         Cmd::Folder { cmd } => {
             if folder_safety_cmd(cli, &home, cmd)? {
@@ -3942,16 +4214,26 @@ fn run(cli: &Cli) -> Result<()> {
                     )
                 );
             }
-            if let Some(v) = from_service {
+            if let Some(mut v) = from_service {
                 if cli.json {
+                    v["move_jobs"] =
+                        serde_json::to_value(varsto_core::staged_move::list_active(&home))?;
                     println!("{}", serde_json::to_string_pretty(&v)?);
                 } else {
                     println!("{}", status_from_value(&v));
+                    for l in placing::status_lines(&home) {
+                        println!("{l}");
+                    }
                 }
                 return Ok(());
             }
             let engine = open_engine(&home)?;
             let s = engine.status()?;
+            let move_lines = if cli.json {
+                Vec::new()
+            } else {
+                placing::status_lines(&home)
+            };
             print(cli, &s, |s| {
                 let mut out = format!(
                     "vault {} device {} ({}) format {} lamport {} batches {}\n",
@@ -3982,6 +4264,9 @@ fn run(cli: &Cli) -> Result<()> {
                     out += &format!("WARNING forked devices: {:?}\n", s.forked_devices);
                 }
                 out += &format!("ledger: {}\n", s.ledger_health.describe());
+                for l in &move_lines {
+                    out += &format!("{l}\n");
+                }
                 out.trim_end().to_string()
             })?;
         }
@@ -4077,10 +4362,12 @@ fn run(cli: &Cli) -> Result<()> {
             interval,
         } => {
             if let Some((f, _)) = service::status(&home) {
-                let url = format!("http://127.0.0.1:{}/?token={}", f.port, f.token);
-                println!("service already running (pid {}): {url}", f.pid);
+                println!(
+                    "service already running (pid {}): http://127.0.0.1:{}/",
+                    f.pid, f.port
+                );
                 if !*no_open {
-                    desktop::open_in_browser(&url);
+                    desktop::open_in_browser(&service::boot_url(&f)?);
                 }
                 return Ok(());
             }
@@ -4216,7 +4503,7 @@ fn run(cli: &Cli) -> Result<()> {
                             None => {
                                 eprintln!(
                                     "Request from {}\nfingerprint: {}\nAsk the requester to read their fingerprint (varsto share request shows it).",
-                                    if req.name.is_empty() { "(no name given)" } else { &req.name },
+                                    if req.name.is_empty() { "(no name given)".into() } else { show(&req.name) },
                                     req.fingerprint
                                 );
                                 if !confirm("Do the six words match exactly?")? {
@@ -4240,7 +4527,7 @@ fn run(cli: &Cli) -> Result<()> {
                                 serde_json::json!({"folder": sealed.name, "token": sealed.encode(), "sealed": true, "fingerprint": req.fingerprint, "name": req.name, "role": role.as_str()})
                             );
                         } else {
-                            println!("sealed share token for folder {} as {} (only the device that made the request code can open it; fingerprint {}):\n  {}", sealed.name, if role.is_editor() { "an editor (read and write)" } else { "a viewer (read only)" }, req.fingerprint, sealed.encode());
+                            println!("sealed share token for folder {} as {} (only the device that made the request code can open it; fingerprint {}):\n  {}", show(&sealed.name), if role.is_editor() { "an editor (read and write)" } else { "a viewer (read only)" }, req.fingerprint, sealed.encode());
                         }
                     }
                     None => {
@@ -4263,7 +4550,8 @@ fn run(cli: &Cli) -> Result<()> {
                 s3_region,
                 s3_prefix,
                 s3_access_key_id,
-                s3_secret_access_key,
+                s3_secret_file,
+                s3_insecure_http,
             } => {
                 let token = token
                     .as_ref()
@@ -4294,10 +4582,17 @@ fn run(cli: &Cli) -> Result<()> {
                             storage_class: None,
                             cold: false,
                             place: String::new(),
+                            allow_insecure_http: *s3_insecure_http,
                         },
-                        Some(s3_secret_access_key.clone().ok_or_else(|| {
-                            anyhow!("give --s3-secret-access-key or set VARSTO_S3_SECRET")
-                        })?),
+                        Some(
+                            secret_input(
+                                s3_secret_file.as_deref(),
+                                "VARSTO_S3_SECRET",
+                                "S3 secret access key: ",
+                                true,
+                            )?
+                            .to_string(),
+                        ),
                     ),
                     (None, Some(path)) => (
                         StorageSpec::LocalDir {
@@ -4327,7 +4622,7 @@ fn run(cli: &Cli) -> Result<()> {
                         token.fingerprint
                     );
                 }
-                println!("joined shared folder {} as device {}; attach it with `varsto folder attach {} <path>` and sync", token.name, engine.device_id().short(), token.name);
+                println!("joined shared folder {} as device {}; attach it with `varsto folder attach {} <path>` and sync", show(&token.name), engine.device_id().short(), show(&token.name));
             }
             ShareCmd::Members { folder } => {
                 let list: varsto_core::engine::ShareMembers =
@@ -4419,8 +4714,8 @@ fn run(cli: &Cli) -> Result<()> {
                         ));
                     }
                     out.push_str(&format!(
-                        "\nnew key sealed to {} member(s) and open token(s)",
-                        r.grants_sealed
+                        "\nnew key sealed to {} (members and open tokens)",
+                        plural(r.grants_sealed, "recipient", "recipients")
                     ));
                     if !r.grants_pending.is_empty() {
                         out.push_str(&format!(
@@ -4432,64 +4727,62 @@ fn run(cli: &Cli) -> Result<()> {
                 })?;
             }
         },
-        Cmd::Replica { cmd } => {
-            match cmd {
-                ReplicaCmd::Token => {
-                    let engine = open_engine(&home)?;
-                    let t = engine.replica_token()?;
-                    print(cli, &t, |t| {
-                        format!("replica token (share only with the device that will hold your encrypted copies):\n  {}", t.encode())
-                    })?;
-                }
-                ReplicaCmd::Init {
+        Cmd::Replica { cmd } => match cmd {
+            ReplicaCmd::Token => {
+                let engine = open_engine(&home)?;
+                let t = engine.replica_token()?;
+                print(cli, &t, |t| {
+                    format!("replica token (share only with the device that will hold your encrypted copies):\n  {}", t.encode())
+                })?;
+            }
+            ReplicaCmd::Init {
+                name,
+                token,
+                source,
+                target,
+            } => {
+                let token = varsto_core::replica::ReplicaToken::decode(token)?;
+                let src = StorageSpec::LocalDir {
+                    name: "source".into(),
+                    path: source.clone(),
+                    cold: false,
+                    carrier: false,
+                    place: String::new(),
+                    min_free: None,
+                };
+                let tgt = StorageSpec::LocalDir {
+                    name: "target".into(),
+                    path: target.clone(),
+                    cold: false,
+                    carrier: false,
+                    place: String::new(),
+                    min_free: None,
+                };
+                let r = varsto_core::replica::Replica::init(&home, name, &token, src, tgt)?;
+                println!(
+                    "replica {} ({}) set up; run `varsto replica run`",
                     name,
-                    token,
-                    source,
-                    target,
-                } => {
-                    let token = varsto_core::replica::ReplicaToken::decode(token)?;
-                    let src = StorageSpec::LocalDir {
-                        name: "source".into(),
-                        path: source.clone(),
-                        cold: false,
-                        carrier: false,
-                        place: String::new(),
-                        min_free: None,
-                    };
-                    let tgt = StorageSpec::LocalDir {
-                        name: "target".into(),
-                        path: target.clone(),
-                        cold: false,
-                        carrier: false,
-                        place: String::new(),
-                        min_free: None,
-                    };
-                    let r = varsto_core::replica::Replica::init(&home, name, &token, src, tgt)?;
-                    println!(
-                        "replica {} ({}) set up; run `varsto replica run`",
-                        name,
-                        r.device_id().short()
-                    );
-                }
-                ReplicaCmd::Run { once, interval } => {
-                    let mut r = varsto_core::replica::Replica::open(&home)?;
-                    loop {
-                        let rep = r.run_once()?;
-                        print(cli, &rep, |rep| {
-                            format!("seen {}, copied {} ({} bytes), verified {}, corrupt {}, batch {:?}", rep.objects_seen, rep.objects_copied, rep.bytes_copied, rep.chunks_verified, rep.objects_corrupt, rep.batch_seq)
-                        })?;
-                        if *once {
-                            break;
-                        }
-                        std::thread::sleep(std::time::Duration::from_secs((*interval).max(15)));
+                    r.device_id().short()
+                );
+            }
+            ReplicaCmd::Run { once, interval } => {
+                let mut r = varsto_core::replica::Replica::open(&home)?;
+                loop {
+                    let rep = r.run_once()?;
+                    print(cli, &rep, |rep| {
+                        format!("seen {}, copied {} ({} bytes), verified {}, corrupt {}, junk skipped {}, batch {:?}", rep.objects_seen, rep.objects_copied, rep.bytes_copied, rep.chunks_verified, rep.objects_corrupt, rep.skipped_junk, rep.batch_seq)
+                    })?;
+                    if *once {
+                        break;
                     }
-                }
-                ReplicaCmd::Status => {
-                    let r = varsto_core::replica::Replica::open(&home)?;
-                    println!("{}", serde_json::to_string_pretty(&r.summary())?);
+                    std::thread::sleep(std::time::Duration::from_secs((*interval).max(15)));
                 }
             }
-        }
+            ReplicaCmd::Status => {
+                let r = varsto_core::replica::Replica::open(&home)?;
+                println!("{}", serde_json::to_string_pretty(&r.summary())?);
+            }
+        },
         Cmd::Reset { yes } => {
             if !*yes {
                 bail_usage::<()>("this removes keys, ledger, state and configuration from this device (files in folders stay); run again with --yes")?;
@@ -4509,6 +4802,21 @@ fn run(cli: &Cli) -> Result<()> {
             }
         }
         Cmd::Device { cmd } => match cmd {
+            DeviceCmd::ResolveEpoch { epoch, keep } => {
+                let mut engine = open_engine(&home)?;
+                engine.resolve_epoch_fork(*epoch, keep)?;
+                print(cli, engine.epoch_forks(), |f| {
+                    format!(
+                        "kept {} for key epoch {epoch}; {}",
+                        keep,
+                        if f.unresolved().is_empty() {
+                            "this device signs again".to_string()
+                        } else {
+                            format!("still to choose: key epochs {:?}", f.unresolved())
+                        }
+                    )
+                })?;
+            }
             DeviceCmd::List => {
                 let engine = open_engine(&home)?;
                 let list = engine.devices_list();
@@ -4720,14 +5028,28 @@ fn run(cli: &Cli) -> Result<()> {
                     None => print!("{body}"),
                 }
             }
-            RecoveryCmd::Combine { shares } => {
-                let parsed: Vec<varsto_core::recovery::Share> = shares
+            RecoveryCmd::Combine { files, check } => {
+                let lines = secret_lines(
+                    files,
+                    "Share (<index>: <24 words>), an empty line when done: ",
+                )?;
+                let parsed: Vec<varsto_core::recovery::Share> = lines
                     .iter()
                     .map(|s| varsto_core::recovery::Share::decode(s))
                     .collect::<Result<_>>()?;
-                let key = varsto_core::recovery::combine(&parsed, 2)?;
-                println!("vault key: {key}");
-                println!("words: {}", varsto_core::recovery::words_from_key(&key)?);
+                if parsed.len() < 2 {
+                    bail_usage::<()>("give at least two shares")?;
+                }
+                let key = varsto_core::recovery::combine(&parsed, 2, check.as_deref())?;
+                println!("vault key: {}", key.as_str());
+                println!(
+                    "words: {}",
+                    varsto_core::recovery::words_from_key(&key)?.as_str()
+                );
+                println!(
+                    "key check: {} (compare with the kit)",
+                    varsto_core::recovery::key_check(&key)?
+                );
             }
         },
         Cmd::Org { cmd } => run_org(cli, &home, cmd)?,
@@ -4737,7 +5059,10 @@ fn run(cli: &Cli) -> Result<()> {
             folder,
             tags,
         } => run_search(cli, &home, &query.join(" "), folder.as_deref(), tags)?,
-        Cmd::Strongroom { cmd } => {
+        Cmd::Strongroom { uv, cmd } => {
+            if *uv {
+                std::env::set_var("VARSTO_FIDO2_UV", "1");
+            }
             let mut engine = open_engine(&home)?;
             match cmd {
                 StrongroomCmd::Create {
@@ -4747,13 +5072,11 @@ fn run(cli: &Cli) -> Result<()> {
                     minutes,
                 } => {
                     let method = if *software {
+                        software_key_warning()?;
                         varsto_core::strongroom::Method::Software
                     } else {
                         varsto_core::strongroom::Method::Fido2
                     };
-                    if *software {
-                        eprintln!("warning: --software keeps the secret in a file next to the vault; it demonstrates the flow and protects nothing beyond your passphrase");
-                    }
                     let backend = varsto_core::strongroom::backend(&method, &home);
                     let id =
                         engine.create_strongroom(name, path, method, backend.as_ref(), *minutes)?;
@@ -4846,18 +5169,13 @@ fn run(cli: &Cli) -> Result<()> {
                             r.is_strongroom()
                                 && (&r.name == folder || r.folder_id.as_str() == folder)
                         })
-                        .map(|(r, _)| r.folder_id)
+                        .map(|(r, _)| r.folder_id.clone())
                         .ok_or_else(|| anyhow!("{folder} is not a Strongroom folder"))?;
                     eprintln!("First, open {folder} with a key that is enrolled already.");
                     let fk = engine.unlock_strongroom_enrolled(folder, 1)?;
                     let (method, backend): (Method, Box<dyn SecurityKey>) = if *software {
-                        eprintln!(
-                            "warning: a software key protects nothing beyond your passphrase"
-                        );
-                        (
-                            Method::Software,
-                            Box::new(strongroom::new_software_key(&home)),
-                        )
+                        software_key_warning()?;
+                        (Method::Software, strongroom::new_software_backend(&home))
                     } else {
                         if device.is_none() {
                             eprintln!(
@@ -4873,7 +5191,14 @@ fn run(cli: &Cli) -> Result<()> {
                             }),
                         )
                     };
-                    let k = strongroom::enroll_key(backend.as_ref(), method, &id, &fk, label)?;
+                    let k = strongroom::enroll_key(
+                        backend.as_ref(),
+                        method,
+                        engine.vault_id(),
+                        &id,
+                        &fk,
+                        label,
+                    )?;
                     let name = k.short();
                     let n = if let Some((sf, _)) = service::status(&home) {
                         let url = format!("http://127.0.0.1:{}/api/strongroom/add-key", sf.port);
@@ -5111,8 +5436,11 @@ fn run(cli: &Cli) -> Result<()> {
                 }
             }
         }
-        Cmd::Mcp { key, cmd } => match cmd.as_ref().unwrap_or(&McpCmd::Serve) {
-            McpCmd::Serve => mcp::serve(&home, key.as_deref())?,
+        Cmd::Mcp { key_file, cmd } => match cmd.as_ref().unwrap_or(&McpCmd::Serve) {
+            McpCmd::Serve => {
+                let key = mcp_key_input(key_file.as_deref())?;
+                mcp::serve(&home, key.as_deref().map(|k| k.as_str()))?
+            }
             McpCmd::Key { cmd } => run_mcp_key(cli, &home, cmd)?,
             McpCmd::Config {
                 client,
@@ -5185,7 +5513,10 @@ fn run(cli: &Cli) -> Result<()> {
                 })?;
             }
         },
-        Cmd::Update { check } => {
+        Cmd::Update {
+            check,
+            allow_single_source,
+        } => {
             let c = update::check()?;
             if *check {
                 print(cli, &c, |c| {
@@ -5206,7 +5537,8 @@ fn run(cli: &Cli) -> Result<()> {
                     }
                 })?;
             } else {
-                println!("{}", update::apply(&c)?);
+                let policy = update::Policy::new(&home, *allow_single_source);
+                println!("{}", update::apply(&c, &policy)?);
                 if c.available && service::restart_running(&home) {
                     println!("the background service restarts with {}", c.latest);
                 }
@@ -5386,6 +5718,25 @@ fn run(cli: &Cli) -> Result<()> {
             if !r.health.is_ok() {
                 std::process::exit(1);
             }
+        }
+        Cmd::Ledger {
+            cmd: Some(LedgerCmd::CleanJunk { yes }),
+        } => {
+            let mut engine = open_engine(&home)?;
+            let r = engine.ledger_clean_junk(!*yes)?;
+            print(cli, &r, |r| {
+                let mut out = String::new();
+                for j in &r.junk {
+                    out += &format!("{} {j}\n", if r.dry_run { "junk" } else { "deleted" });
+                }
+                if r.junk.is_empty() {
+                    out += "no junk under this device's ledger name\n";
+                } else if r.dry_run {
+                    out += "run again with --yes to delete these\n";
+                }
+                out += &format!("{} objects of this device verified and kept", r.genuine);
+                out
+            })?;
         }
         Cmd::Ledger { cmd: _ } => {
             let engine = open_engine(&home)?;
@@ -5947,6 +6298,16 @@ fn first_start_install() -> Option<i32> {
 /// `strongroom convert`: the security key is touched here; the conversion
 /// itself runs in the background service when one is running (it owns the
 /// folder state), otherwise in this process.
+/// `--software`: refused in a binary built without the feature, and a
+/// warning otherwise.
+fn software_key_warning() -> Result<()> {
+    if !varsto_core::strongroom::SOFTWARE_KEYS_BUILT_IN {
+        bail!("software security keys are not built into this binary; they are for tests only (a build with the software-key feature has them)");
+    }
+    eprintln!("warning: --software keeps the secret in a file next to the vault; it demonstrates the flow and protects nothing beyond your passphrase");
+    Ok(())
+}
+
 fn strongroom_convert(
     engine: &mut Engine,
     home: &std::path::Path,
@@ -5963,7 +6324,7 @@ fn strongroom_convert(
         eprintln!(
             "Resuming the interrupted conversion of {folder}: touch the key it was started with."
         );
-        let (fk, _) = strongroom::unlock_enrolled(home, &id, &info)?;
+        let (fk, _) = strongroom::unlock_enrolled(home, engine.vault_id(), &id, &info)?;
         (id, fk, info)
     } else if engine
         .folders()
@@ -5987,7 +6348,7 @@ fn strongroom_convert(
         return Ok(());
     } else {
         let method = if software {
-            eprintln!("warning: --software keeps the secret in a file next to the vault; it demonstrates the flow and protects nothing beyond your passphrase");
+            software_key_warning()?;
             Method::Software
         } else {
             Method::Fido2
@@ -5995,7 +6356,7 @@ fn strongroom_convert(
         let id = FolderId::random();
         let fk = SecretKey::random();
         let backend = strongroom::backend(&method, home);
-        let info = strongroom::enroll(backend.as_ref(), method, &id, &fk)?;
+        let info = strongroom::enroll(backend.as_ref(), method, engine.vault_id(), &id, &fk)?;
         (id, fk, info)
     };
     eprintln!("Re-encrypting {folder} under the new key; this reads and uploads the whole folder.");
@@ -6058,10 +6419,11 @@ fn strongroom_rekey(
         .ok_or_else(|| anyhow!("{folder} is not a Strongroom folder"))?;
     let info = rec.strongroom.clone().expect("a Strongroom");
     eprintln!("Unlock {folder} with an enrolled key:");
-    let (old_key, _) = strongroom::unlock_enrolled(home, &rec.folder_id, &info)?;
+    let vault_id = engine.vault_id().clone();
+    let (old_key, _) = strongroom::unlock_enrolled(home, &vault_id, &rec.folder_id, &info)?;
     let (id, fk, new_info) = if let Some((id, new_info)) = engine.strongroom_conversion(folder) {
         eprintln!("Resuming the interrupted re-key of {folder}: touch an enrolled key again.");
-        let (fk, _) = strongroom::unlock_enrolled(home, &id, &new_info)?;
+        let (fk, _) = strongroom::unlock_enrolled(home, &vault_id, &id, &new_info)?;
         (id, fk, new_info)
     } else {
         let id = FolderId::random();
@@ -6070,7 +6432,7 @@ fn strongroom_rekey(
             "Wrapping the new key for every enrolled key ({}): touch each one when asked.",
             info.keys().len()
         );
-        let new_info = strongroom::rewrap_enrolled(home, &id, &fk, &info)?;
+        let new_info = strongroom::rewrap_enrolled(home, &vault_id, &id, &fk, &info)?;
         (id, fk, new_info)
     };
     eprintln!("Re-encrypting {folder} under the new key; this reads and uploads the whole folder.");
@@ -7038,7 +7400,10 @@ fn p2p_status(engine: &Engine, home: &std::path::Path, json: bool) -> Result<()>
                 if r.relay_via.is_empty() {
                     String::new()
                 } else {
-                    format!(", relays via {} device(s)", r.relay_via.len())
+                    format!(
+                        ", relays via {}",
+                        plural(r.relay_via.len(), "device", "devices")
+                    )
                 }
             ))
             .unwrap_or_default()
@@ -7142,6 +7507,7 @@ mod recovery_guide_tests {
                     storage_class: Some("DEEP_ARCHIVE".into()),
                     cold: true,
                     place: "cloud".into(),
+                    allow_insecure_http: false,
                 },
                 StorageSpec::S3 {
                     name: "hot bucket".into(),
@@ -7155,6 +7521,7 @@ mod recovery_guide_tests {
                     storage_class: None,
                     cold: false,
                     place: String::new(),
+                    allow_insecure_http: false,
                 },
                 StorageSpec::Rclone {
                     name: "drive".into(),
@@ -7295,5 +7662,38 @@ mod recovery_guide_tests {
             Cli::try_parse_from(args).unwrap();
         }
         assert!(Cli::try_parse_from(["varsto", "recovery", "guide", "--format", "pdf"]).is_err());
+    }
+}
+
+#[cfg(test)]
+mod secret_input_tests {
+    use super::*;
+
+    #[test]
+    fn the_vault_key_is_hex_or_words() {
+        let hex = "ab".repeat(32);
+        assert_eq!(&*vault_key_from_text(&format!(" {hex}\n")).unwrap(), &hex);
+        assert_eq!(&*vault_key_from_text(&hex.to_uppercase()).unwrap(), &hex);
+        let words = varsto_core::recovery::words_from_key(&hex).unwrap();
+        assert_eq!(&*vault_key_from_text(&words).unwrap(), &hex);
+        assert!(vault_key_from_text("not a key").is_err());
+        assert!(vault_key_from_text(&hex[..62]).is_err());
+    }
+
+    #[test]
+    fn secrets_come_from_files_and_shares_from_lines() {
+        let dir = tempfile::tempdir().unwrap();
+        let f = dir.path().join("secret");
+        std::fs::write(&f, "  hunter2-hunter2\n").unwrap();
+        let s = secret_input(Some(&f), "VARSTO_TEST_NO_SUCH_VARIABLE", "x: ", false).unwrap();
+        assert_eq!(&*s, "hunter2-hunter2");
+        std::fs::write(&f, "\n\n").unwrap();
+        assert!(secret_input(Some(&f), "VARSTO_TEST_NO_SUCH_VARIABLE", "x: ", false).is_err());
+        let (a, b) = (dir.path().join("a"), dir.path().join("b"));
+        std::fs::write(&a, "1: one two\n\n2: three four\n").unwrap();
+        std::fs::write(&b, "3: five six\n").unwrap();
+        let lines = secret_lines(&[a, b], "share: ").unwrap();
+        let lines: Vec<&str> = lines.iter().map(|l| l.as_str()).collect();
+        assert_eq!(lines, ["1: one two", "2: three four", "3: five six"]);
     }
 }

@@ -75,6 +75,7 @@ mod restic_mirror;
 mod scrub;
 mod share_ops;
 mod share_roles;
+mod staged_moves;
 mod strongroom_ops;
 mod trash;
 mod verify;
@@ -110,13 +111,13 @@ pub use imports::{
     MissingFile,
 };
 pub use ledger_recovery::{
-    LedgerDeviceStatus, LedgerHealth, LedgerHolding, LedgerProblem, LedgerRebuildOptions,
-    LedgerRebuildReport, LedgerStatus, StorageRebuildReport,
+    JunkReport, LedgerBehind, LedgerDeviceStatus, LedgerHealth, LedgerHolding, LedgerProblem,
+    LedgerRebuildOptions, LedgerRebuildReport, LedgerStatus, StorageRebuildReport,
 };
 pub use manifest_upkeep::ManifestPolicy;
 pub use membership::{
-    removal_notice, DeviceInfo, DeviceRemoved, EpochRecord, Grant, KemRecord, Removal, Revocation,
-    RevokeReport, Revoked, SignedEpoch, SignedRevocation,
+    removal_notice, DeviceInfo, DeviceRemoved, EpochForks, EpochRecord, Grant, KemRecord, Removal,
+    Revocation, RevokeReport, Revoked, SignedEpoch, SignedRevocation,
 };
 pub use notes::{
     check_analysis, AnalysisHit, FileAnalysis, NotesExchangeReport, ANALYSIS_MAX_BYTES,
@@ -134,6 +135,7 @@ pub use restic_mirror::{CheckOptions, SetupReport};
 pub use scrub::ScrubOptions;
 pub use share_ops::{ShareMember, ShareMembers, ShareRevokeReport};
 pub use share_roles::{ShareRoleReport, KEPT_ASIDE_DIR};
+pub use staged_moves::{JobRunLimits, MoveJobRequest, MoveJobRun, SERVICE_RUN_GROUPS};
 pub use strongroom_ops::{CleanupReport, ConvertReport, StrongroomKeySummary};
 pub use trash::{
     restored_name, RestoredFile, TrashItem, TrashPurgeReport, TrashRestorePlan, TrashRestoreReport,
@@ -223,10 +225,19 @@ fn now_secs() -> i64 {
         .unwrap_or(0)
 }
 
+/// `clock.json`: the end of this device's current reservation of logical
+/// clock values (every value up to `lamport` is taken or reserved). Ticks
+/// are handed out from memory; the file is written once per
+/// `CLOCK_RESERVE` values (see `Engine::tick`).
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
 struct Clock {
     lamport: u64,
 }
+
+/// Logical clock values reserved in `clock.json` at a time. A crash or a
+/// process exit wastes at most the unused rest of the reservation, which is
+/// harmless: Lamport values only need to grow and never repeat.
+const CLOCK_RESERVE: u64 = 1000;
 
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
 struct DeviceCache {
@@ -669,7 +680,13 @@ pub struct Engine {
     config: Config,
     keyring: Keyring,
     ledger: LedgerStore,
+    /// The current logical clock value (in memory, see `tick`).
     clock: Clock,
+    /// The end of the reservation written to `clock.json`: values up to it
+    /// are this process's to hand out without touching the file.
+    clock_reserved: u64,
+    /// How many times `clock.json` was written by this engine (tests).
+    clock_writes: u64,
     devices: DeviceCache,
     pending: Vec<Event>,
     forked_self: bool,
@@ -684,6 +701,11 @@ pub struct Engine {
     pub chunker: ChunkerParams,
     /// Counts the calls made to every storage this engine opens (measurements).
     storage_calls: Option<std::sync::Arc<crate::storage::StorageCalls>>,
+    /// The storages opened during the current operation, by name, with the
+    /// spec they were opened from: every phase of a sync shares one backend
+    /// (one connection pool, one view of the packs) instead of opening the
+    /// storage again (`open_spec`, `finish_storages`).
+    storages_open: std::sync::Mutex<OpenedStorages>,
     /// The location view, kept up to date as batches arrive.
     view_cache: std::sync::Mutex<ledger_upkeep::ViewSlot>,
     /// Set while one action runs whose ledger events go into one batch.
@@ -704,6 +726,8 @@ pub struct Engine {
     meta_caps: crate::fsmeta::Caps,
     /// Of the last scan: entries ignored, files whose metadata alone changed.
     scan_extra: (u64, u64),
+    /// The scan a pull just made, for the push that follows it in a sync.
+    last_scan: Option<ScanOutcome>,
     /// Tests: behave like a modified client that ignores a read-only role
     /// (`share_roles`).
     role_guard_off: bool,
@@ -718,6 +742,10 @@ pub type SnapshotSink =
 
 /// Open storages with their specs.
 type OpenStorages = Vec<(StorageSpec, Box<dyn Storage>)>;
+
+/// The backends opened during an operation, by storage name, each with the
+/// spec it was opened from (`Engine::storages_open`).
+type OpenedStorages = HashMap<String, (StorageSpec, std::sync::Arc<dyn Storage>)>;
 
 /// Threads that write objects during a push, and how many encrypted
 /// blocks may wait for them.
@@ -774,6 +802,27 @@ struct UploadJob {
     chunk: ChunkId,
     object: ObjectName,
     ct: Vec<u8>,
+}
+
+/// A batch of objects on its way to the storages: one work item per
+/// storage shares it, and its bytes leave the upload budget when the last
+/// of them is done.
+struct UploadBatch {
+    jobs: Vec<UploadJob>,
+    /// Storages still to write it.
+    left: std::sync::atomic::AtomicUsize,
+    /// Encrypted bytes it holds (counted once, however many storages).
+    held: u64,
+}
+
+/// What a folder scan found, kept from a sync's pull for its push so the
+/// folder is walked once per sync (`Engine::last_scan`).
+struct ScanOutcome {
+    folder: FolderId,
+    scanned: u64,
+    changed: u64,
+    /// Entries ignored, files whose metadata alone changed (`scan_extra`).
+    extra: (u64, u64),
 }
 
 /// How one write went.
@@ -854,8 +903,10 @@ impl Engine {
     }
 
     fn init_inner(home: &Path, device_name: &str, passphrase: &str) -> Result<(Engine, String)> {
+        crypto::check_passphrase(passphrase)?;
+        crate::names::check_display_name(device_name)?;
         ensure_no_vault(home)?;
-        fs::create_dir_all(home)?;
+        util::private_home(home)?;
         let keys = Keys {
             master: SecretKey::random(),
             signer: crypto::SigningKey::generate(),
@@ -940,6 +991,8 @@ impl Engine {
         secret: Option<String>,
         signer: Option<crypto::SigningKey>,
     ) -> Result<Engine> {
+        crypto::check_passphrase(passphrase)?;
+        crate::names::check_display_name(device_name)?;
         ensure_no_vault(home)?;
         let backend = storage.open_with(&|_| secret.clone())?;
         let meta_bytes = backend.get(VaultMeta::STORAGE_KEY)?.ok_or_else(|| {
@@ -959,7 +1012,7 @@ impl Engine {
         }
         let master = SecretKey::from_hex(vault_key_hex)?;
         let epochs = membership::discover_epochs(backend.as_ref(), &meta.vault_id, &master)?;
-        fs::create_dir_all(home)?;
+        util::private_home(home)?;
         let keys = Keys {
             master,
             signer: signer.unwrap_or_else(crypto::SigningKey::generate),
@@ -1013,6 +1066,7 @@ impl Engine {
         bundle: &crate::pair::Bundle,
         signer: Option<crypto::SigningKey>,
     ) -> Result<(Engine, Vec<String>)> {
+        crate::names::check_display_name(device_name)?;
         let mut notes = Vec::new();
         let mut first = None;
         for (i, s) in bundle.storages.iter().enumerate() {
@@ -1155,6 +1209,8 @@ impl Engine {
             keyring: Keyring::default(),
             ledger: LedgerStore::open(&home.join("ledger"))?,
             clock: Clock::default(),
+            clock_reserved: 0,
+            clock_writes: 0,
             devices: DeviceCache::default(),
             pending: Vec::new(),
             forked_self: false,
@@ -1164,6 +1220,7 @@ impl Engine {
             org: crate::org::OrgState::load(home),
             chunker: ChunkerParams::DEFAULT,
             storage_calls: None,
+            storages_open: Default::default(),
             view_cache: Default::default(),
             cycle: None,
             ledger_policy: Default::default(),
@@ -1172,6 +1229,7 @@ impl Engine {
             download_log: None,
             meta_caps: crate::fsmeta::Caps::here(),
             scan_extra: (0, 0),
+            last_scan: None,
             role_guard_off: false,
             platform_override: None,
             version_override: None,
@@ -1242,6 +1300,8 @@ impl Engine {
         storage: StorageSpec,
         secret: Option<String>,
     ) -> Result<Engine> {
+        crypto::check_passphrase(passphrase)?;
+        crate::names::check_display_name(device_name)?;
         ensure_no_vault(home)?;
         let backend = storage.open_with(&|_| secret.clone())?;
         let meta: VaultMeta = serde_json::from_slice(
@@ -1256,7 +1316,7 @@ impl Engine {
                 token.vault_id
             );
         }
-        fs::create_dir_all(home)?;
+        util::private_home(home)?;
         // The "master" of a member is a local random root used only for the
         // local keyring; it never leaves the device and opens nothing shared.
         let keys = Keys {
@@ -1362,10 +1422,12 @@ impl Engine {
                 vault.format_version
             );
         }
+        util::private_home(home)?;
         let keys = Keys::load(home, passphrase, &vault.vault_id, &vault.device_id)?;
         let keyring = Keyring::load(home, &keys, &vault.vault_id, &vault.device_id)?;
         let epochs = membership::VaultEpochs::load(home, &keys, &vault.vault_id, &vault.device_id)?;
         let removal = util::read_json(&home.join("removed.json")).ok();
+        let clock: Clock = util::read_json_or_default(&home.join("clock.json"))?;
         let mut engine = Engine {
             peers: None,
             snapshot_sink: None,
@@ -1376,7 +1438,11 @@ impl Engine {
             unlocked: BTreeMap::new(),
             config: Config::load(home)?,
             ledger: LedgerStore::open(&home.join("ledger"))?,
-            clock: util::read_json_or_default(&home.join("clock.json"))?,
+            clock: clock.clone(),
+            // The file holds the end of the last reservation: the values
+            // below it may have been handed out before the last exit.
+            clock_reserved: clock.lamport,
+            clock_writes: 0,
             devices: util::read_json_or_default(&home.join("devices.json"))?,
             home: home.to_path_buf(),
             vault,
@@ -1390,6 +1456,7 @@ impl Engine {
             org: crate::org::OrgState::load(home),
             chunker: ChunkerParams::DEFAULT,
             storage_calls: None,
+            storages_open: Default::default(),
             view_cache: Default::default(),
             cycle: None,
             ledger_policy: Default::default(),
@@ -1398,6 +1465,7 @@ impl Engine {
             download_log: None,
             meta_caps: crate::fsmeta::Caps::here(),
             scan_extra: (0, 0),
+            last_scan: None,
             role_guard_off: false,
             platform_override: None,
             version_override: None,
@@ -1474,20 +1542,55 @@ impl Engine {
         Ok(dir)
     }
 
+    /// The next logical clock value. The clock lives in memory; `clock.json`
+    /// holds the end of a reservation of `CLOCK_RESERVE` values and is
+    /// written (and fsynced) only when the reservation is used up, not on
+    /// every tick. A restart continues after the reserved end, so no value
+    /// is handed out twice; the unused rest of a reservation is wasted,
+    /// which Lamport ordering does not mind.
     fn tick(&mut self) -> Result<u64> {
-        // Another process on this device (the command line beside the
-        // background service) may have ticked meanwhile: go on from the
-        // higher of the two, so no value is ever handed out twice.
-        if let Ok(disk) = util::read_json::<Clock>(&self.home.join("clock.json")) {
-            self.clock.lamport = self.clock.lamport.max(disk.lamport);
+        if self.clock.lamport >= self.clock_reserved {
+            self.reserve_clock()?;
         }
         self.clock.lamport = self
             .clock
             .lamport
             .checked_add(1)
             .ok_or_else(|| anyhow!("the logical clock of this vault is exhausted"))?;
-        util::write_json(&self.home.join("clock.json"), &self.clock)?;
         Ok(self.clock.lamport)
+    }
+
+    /// Reserve the next `CLOCK_RESERVE` values in `clock.json`. Another
+    /// process on this device (the command line beside the background
+    /// service) may have reserved values meanwhile: the new reservation
+    /// starts after the higher of its end and our own value, so the two
+    /// processes never hand out the same value.
+    fn reserve_clock(&mut self) -> Result<()> {
+        let path = self.home.join("clock.json");
+        if let Ok(disk) = util::read_json::<Clock>(&path) {
+            self.clock.lamport = self.clock.lamport.max(disk.lamport);
+        }
+        let end = self
+            .clock
+            .lamport
+            .checked_add(CLOCK_RESERVE)
+            .ok_or_else(|| anyhow!("the logical clock of this vault is exhausted"))?;
+        util::write_json(&path, &Clock { lamport: end })?;
+        self.clock_reserved = end;
+        self.clock_writes += 1;
+        Ok(())
+    }
+
+    /// Tests: one tick of the logical clock.
+    #[doc(hidden)]
+    pub fn tick_clock(&mut self) -> Result<u64> {
+        self.tick()
+    }
+
+    /// Tests: how many times this engine wrote `clock.json`.
+    #[doc(hidden)]
+    pub fn clock_writes(&self) -> u64 {
+        self.clock_writes
     }
 
     /// Most a clock seen elsewhere may be ahead of ours: a device cannot
@@ -1501,7 +1604,11 @@ impl Engine {
         if seen > self.clock.lamport && seen <= self.clock.lamport.saturating_add(Self::CLOCK_LEAP)
         {
             self.clock.lamport = seen;
-            util::write_json(&self.home.join("clock.json"), &self.clock)?;
+            if seen >= self.clock_reserved {
+                // Beyond what the file reserves: the next ticks must not be
+                // reused by another process or after a restart.
+                self.reserve_clock()?;
+            }
         }
         Ok(())
     }
@@ -1523,7 +1630,73 @@ impl Engine {
         )
     }
 
+    /// Open a storage, or hand out the one opened earlier in this operation.
+    /// Disk pools are opened anew every time: their disks come and go.
     fn open_spec(&self, spec: &StorageSpec) -> Result<Box<dyn Storage>> {
+        if let StorageSpec::Pool { .. } = spec {
+            return self.open_spec_fresh(spec);
+        }
+        let mut open = self.storages_open.lock().unwrap();
+        if let Some((cached, backend)) = open.get(spec.name()) {
+            if cached == spec {
+                return Ok(Box::new(crate::storage::SharedStorage(backend.clone())));
+            }
+        }
+        let backend: std::sync::Arc<dyn Storage> =
+            std::sync::Arc::from(self.open_spec_fresh(spec)?);
+        open.insert(spec.name().to_string(), (spec.clone(), backend.clone()));
+        Ok(Box::new(crate::storage::SharedStorage(backend)))
+    }
+
+    /// Drop the storages opened so far: the list, a spec or a secret changed.
+    fn forget_storages(&self) {
+        self.storages_open.lock().unwrap().clear();
+    }
+
+    /// The end of a user-level operation (a sync, a push, a pull): what the
+    /// storages learned is kept and the opened backends are dropped, so the
+    /// next operation sees a changed bucket or secret. Inside a sync's cycle
+    /// the storages stay open for its remaining phases.
+    fn finish_storages(&mut self) {
+        if self.cycle.is_some() {
+            return;
+        }
+        self.learn_conditional_writes();
+        self.forget_storages();
+    }
+
+    /// Remember in `config.json` what the S3 storages found out about
+    /// `If-None-Match: *` (`Storage::conditional_writes`), so the probe is
+    /// not repeated by the next process.
+    fn learn_conditional_writes(&mut self) {
+        let learned: Vec<(String, bool)> = self
+            .storages_open
+            .lock()
+            .unwrap()
+            .iter()
+            .filter_map(|(name, (_, backend))| {
+                backend.conditional_writes().map(|c| (name.clone(), c))
+            })
+            .filter(|(name, c)| self.config.conditional_writes.get(name) != Some(c))
+            .collect();
+        if learned.is_empty() {
+            return;
+        }
+        for (name, c) in learned {
+            self.config.conditional_writes.insert(name, c);
+        }
+        if let Err(e) = self.config.save(&self.home) {
+            log::warn!("config.json not saved after probing conditional writes: {e:#}");
+        }
+    }
+
+    /// Whether an S3 storage honours conditional writes (`If-None-Match:
+    /// *`), when its first write has probed it (`crate::s3`).
+    pub fn conditional_writes(&self, storage: &str) -> Option<bool> {
+        self.config.conditional_writes.get(storage).copied()
+    }
+
+    fn open_spec_fresh(&self, spec: &StorageSpec) -> Result<Box<dyn Storage>> {
         let kind = match spec {
             StorageSpec::LocalDir { .. } => "local",
             StorageSpec::S3 { .. } => "s3",
@@ -1534,7 +1707,10 @@ impl Engine {
             Box::new(self.open_pool(spec)?)
         } else {
             let store = self.secret_store()?;
-            let inner = spec.open_with(&|r| store.secrets.get(r).cloned())?;
+            let options = crate::storage::OpenOptions {
+                conditional_writes: self.config.conditional_writes.get(spec.name()).copied(),
+            };
+            let inner = spec.open_with_options(&|r| store.secrets.get(r).cloned(), &options)?;
             // Small blocks go into packs on hot storages; cold storage and
             // transferrers keep one object per block (restores and removals
             // work per object there). Packs are read wherever they are.
@@ -1557,6 +1733,7 @@ impl Engine {
     #[doc(hidden)]
     pub fn count_storage_calls(&mut self, calls: std::sync::Arc<crate::storage::StorageCalls>) {
         self.storage_calls = Some(calls);
+        self.forget_storages();
     }
 
     /// Open a configured storage by name (tests and tools).
@@ -1577,6 +1754,7 @@ impl Engine {
     fn pool_identity(&self, name: &str) -> PoolIdentity {
         let k = self.root_key().derive("disk-pool", &[]);
         PoolIdentity {
+            marker_key: self.root_key().derive("disk-pool-marker", &[]),
             pool_id: hex::encode(&crypto::keyed_hash(&k, format!("pool:{name}").as_bytes())[..16]),
             vault_tag: hex::encode(
                 &crypto::keyed_hash(&k, format!("vault:{}", self.vault.vault_id).as_bytes())[..16],
@@ -1694,6 +1872,7 @@ impl Engine {
             };
             let mut store = self.secret_store()?;
             store.secrets.insert(reference, secret);
+            self.forget_storages();
             store.save(
                 &self.home,
                 &self.keys,
@@ -1974,7 +2153,9 @@ impl Engine {
         }
         self.config.storages.retain(|s| s.name() != name);
         self.config.storage_settings.remove(name);
+        self.config.conditional_writes.remove(name);
         self.config.save(&self.home)?;
+        self.forget_storages();
         self.forget_drain_state(name);
         self.publish_registry()?;
         Ok(report)
@@ -2109,7 +2290,7 @@ impl Engine {
         });
         self.config.save(&self.home)?;
         folder_safety::write_marker(path, &rec)?;
-        Ok(rec.folder_id)
+        Ok(rec.folder_id.clone())
     }
 
     /// Known folders: (record, mount path if attached here).
@@ -3018,13 +3199,9 @@ impl Engine {
         let me = self.vault.device_id.clone();
         // Chunks this folder already references keep their object (and key
         // epoch): after a key change, unchanged content is not re-uploaded.
-        let known: std::collections::HashMap<ChunkId, ChunkRef> = state
-            .files
-            .values()
-            .chain(state.pending_remote.values())
-            .flat_map(|f| f.chunks.iter())
-            .map(|c| (c.chunk.clone(), c.clone()))
-            .collect();
+        // Built when the first changed file needs it: a scan that finds
+        // nothing changed never copies the folder's chunk list.
+        let mut known: Option<std::collections::HashMap<ChunkId, ChunkRef>> = None;
         let mut seen = BTreeSet::new();
         let mut placeholders: BTreeSet<String> = BTreeSet::new();
         // Entries left as they are in the vault: links while links are off
@@ -3265,6 +3442,15 @@ impl Engine {
                 };
                 hasher.update(&chunk);
                 let chunk_id = ChunkId::from_bytes(&crypto::keyed_hash(&fk.hash, &chunk));
+                let known = known.get_or_insert_with(|| {
+                    state
+                        .files
+                        .values()
+                        .chain(state.pending_remote.values())
+                        .flat_map(|f| f.chunks.iter())
+                        .map(|c| (c.chunk.clone(), c.clone()))
+                        .collect()
+                });
                 let (object, epoch) = match known.get(&chunk_id) {
                     Some(c) if c.size == chunk.len() as u64 => (c.object.clone(), c.epoch),
                     _ => {
@@ -3495,10 +3681,18 @@ impl Engine {
     // ----- push ---------------------------------------------------------------
 
     pub fn push(&mut self, folder: &str) -> Result<PushReport> {
-        crate::logged_op!("push", folder, { self.push_inner(folder) })
+        self.push_with_scan(folder, None)
     }
 
-    fn push_inner(&mut self, folder: &str) -> Result<PushReport> {
+    /// `push` with the scan a pull of the same folder just made, so a sync
+    /// walks the folder once (`sync_folders`).
+    fn push_with_scan(&mut self, folder: &str, scan: Option<ScanOutcome>) -> Result<PushReport> {
+        let out = crate::logged_op!("push", folder, { self.push_inner(folder, scan) });
+        self.finish_storages();
+        out
+    }
+
+    fn push_inner(&mut self, folder: &str, scan: Option<ScanOutcome>) -> Result<PushReport> {
         self.ensure_active()?;
         self.ensure_ledger_writable()?;
         if self.forked_self {
@@ -3520,7 +3714,15 @@ impl Engine {
             self.save_state(&rec.folder_id, &state)?;
             return Ok(report);
         }
-        let (scanned, changed) = self.scan(&rec, &root, &mut state)?;
+        let (scanned, changed) = match scan.filter(|s| s.folder == rec.folder_id) {
+            // The pull of this sync scanned the folder moments ago, and the
+            // state it saved carries what it found.
+            Some(s) => {
+                self.scan_extra = s.extra;
+                (s.scanned, s.changed)
+            }
+            None => self.scan(&rec, &root, &mut state)?,
+        };
         report.files_scanned = scanned;
         report.files_changed = changed;
         (report.files_ignored, report.metadata_changed) = self.scan_extra;
@@ -3651,11 +3853,13 @@ impl Engine {
         });
         // Reading, chunking and encrypting stay on this thread; the writes go
         // to a few uploader threads, so that many small objects do not each
-        // wait for the previous one's round trip to the storage. The queue is
-        // bounded: at most UPLOAD_QUEUE encrypted blocks wait in memory.
-        // A batch: one block, or small blocks that storages keeping packs
-        // write as one pack (crate::packs).
-        let (job_tx, job_rx) = std::sync::mpsc::sync_channel::<Vec<UploadJob>>(UPLOAD_QUEUE);
+        // wait for the previous one's round trip to the storage. A batch (one
+        // block, or small blocks that storages keeping packs write as one
+        // pack, crate::packs) becomes one work item per storage it goes to,
+        // so the storages are written side by side rather than one after the
+        // other. The queue is bounded: at most UPLOAD_QUEUE items wait.
+        let (job_tx, job_rx) =
+            std::sync::mpsc::sync_channel::<(usize, std::sync::Arc<UploadBatch>)>(UPLOAD_QUEUE);
         let job_rx = std::sync::Mutex::new(job_rx);
         let (done_tx, done_rx) = std::sync::mpsc::channel::<UploadDone>();
         let storages_ref = &storages;
@@ -3666,22 +3870,20 @@ impl Engine {
             // Owned by this closure: however it returns (an error reading a
             // file included), the sender goes and the uploaders stop.
             let job_tx = job_tx;
-            for _ in 0..UPLOADERS {
+            for _ in 0..UPLOADERS.max(storages.len()) {
                 let (job_rx, done_tx) = (&job_rx, done_tx.clone());
                 s.spawn(move || loop {
-                    let batch = match job_rx.lock().unwrap().recv() {
+                    let (i, batch) = match job_rx.lock().unwrap().recv() {
                         Ok(j) => j,
                         Err(_) => break,
                     };
-                    let held: u64 = batch.iter().map(|j| j.ct.len() as u64).sum();
-                    for (spec, backend) in storages_ref.iter() {
-                        let mine: Vec<&UploadJob> = batch
-                            .iter()
-                            .filter(|j| j.targets.iter().any(|t| t == spec.name()))
-                            .collect();
-                        if mine.is_empty() {
-                            continue;
-                        }
+                    let (spec, backend) = &storages_ref[i];
+                    let mine: Vec<&UploadJob> = batch
+                        .jobs
+                        .iter()
+                        .filter(|j| j.targets.iter().any(|t| t == spec.name()))
+                        .collect();
+                    if !mine.is_empty() {
                         // One object, or a storage without packs: written
                         // one by one, each with its own outcome (a pool's
                         // "no room" stays a pool error). Several small ones
@@ -3724,8 +3926,11 @@ impl Engine {
                             });
                         }
                     }
-                    *budget_ref.0.lock().unwrap() -= held;
-                    budget_ref.1.notify_all();
+                    // The last storage of the batch done: its bytes are free.
+                    if batch.left.fetch_sub(1, std::sync::atomic::Ordering::AcqRel) == 1 {
+                        *budget_ref.0.lock().unwrap() -= batch.held;
+                        budget_ref.1.notify_all();
+                    }
                 });
             }
             drop(done_tx);
@@ -3739,15 +3944,35 @@ impl Engine {
                     if first_error.is_some() {
                         return false;
                     }
-                    let len: u64 = batch.iter().map(|j| j.ct.len() as u64).sum();
+                    // One item per storage any object of the batch goes to.
+                    let to: Vec<usize> = storages_ref
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, (spec, _))| {
+                            batch
+                                .iter()
+                                .any(|j| j.targets.iter().any(|t| t == spec.name()))
+                        })
+                        .map(|(i, _)| i)
+                        .collect();
+                    if to.is_empty() {
+                        return true;
+                    }
+                    let held: u64 = batch.iter().map(|j| j.ct.len() as u64).sum();
                     {
                         let mut used = budget_ref.0.lock().unwrap();
-                        while *used > 0 && *used + len > UPLOAD_BYTES {
+                        while *used > 0 && *used + held > UPLOAD_BYTES {
                             used = budget_ref.1.wait(used).unwrap();
                         }
-                        *used += len;
+                        *used += held;
                     }
-                    job_tx.send(batch).is_ok()
+                    let item = std::sync::Arc::new(UploadBatch {
+                        jobs: batch,
+                        left: std::sync::atomic::AtomicUsize::new(to.len()),
+                        held,
+                    });
+                    to.into_iter()
+                        .all(|i| job_tx.send((i, item.clone())).is_ok())
                 };
             // `None` sends what is still waiting (at the end).
             let mut send =
@@ -4155,7 +4380,9 @@ impl Engine {
     // ----- pull ---------------------------------------------------------------
 
     pub fn pull(&mut self, folder: &str) -> Result<PullReport> {
-        crate::logged_op!("pull", folder, { self.pull_inner(folder) })
+        let out = crate::logged_op!("pull", folder, { self.pull_inner(folder) });
+        self.finish_storages();
+        out
     }
 
     fn pull_inner(&mut self, folder: &str) -> Result<PullReport> {
@@ -4167,10 +4394,17 @@ impl Engine {
             folder: rec.name.clone(),
             ..Default::default()
         };
+        self.last_scan = None;
         if self.share_read_only(&rec) {
             report.kept_aside = self.read_only_guard(&rec, &root, &mut state)?;
         } else {
-            self.scan(&rec, &root, &mut state)?;
+            let (scanned, changed) = self.scan(&rec, &root, &mut state)?;
+            self.last_scan = Some(ScanOutcome {
+                folder: rec.folder_id.clone(),
+                scanned,
+                changed,
+                extra: self.scan_extra,
+            });
         }
         let forks = self.pull_ledger_once()?;
         report.forked_devices = forks.iter().map(|d| d.to_string()).collect();
@@ -4335,6 +4569,14 @@ impl Engine {
                 if self.share_access_lost(&rec.folder_id) {
                     // Removed from the shared folder: newer manifests are
                     // under a key this device will not get.
+                    continue;
+                }
+                if !self.trusted(&dev) {
+                    // Not a trusted full device (a member, a replica, a
+                    // removed device, or a name planted on the storage):
+                    // what does not open is skipped, so nobody but a
+                    // trusted device can stop this folder's pull.
+                    log::warn!(folder:% = rec.folder_id, device:% = dev, seq = seq; "manifest does not open: skipped");
                     continue;
                 }
                 bail!(
@@ -4897,13 +5139,14 @@ impl Engine {
                 );
             }
         }
-        let tmp = disk.with_file_name(format!(".varsto-tmp-{}", std::process::id()));
+        let (tmp, tmp_file) = util::temp_beside(disk, "tmp")
+            .with_context(|| format!("create a temporary file for {}", disk.display()))?;
         if let Some(log) = &self.download_log {
             log.lock().unwrap().push(file.path.clone());
         }
         let progress = crate::progress::Download::begin(&rec.name, &file.path, file.size);
         {
-            let mut out = fs::File::create(&tmp)?;
+            let mut out = tmp_file;
             // No device holds a backup's blocks: storages only.
             let peers = if rec.is_backup() {
                 None
@@ -5061,6 +5304,10 @@ impl Engine {
                 }
             }
             out.sync_all()?;
+            // The mode the folder records, set on the open file before it
+            // becomes visible under its name (the metadata step after the
+            // rename sets it again and reports a failure).
+            util::set_final_mode(&out, file.meta.as_ref().and_then(|m| m.mode));
         }
         fsmeta::make_replaceable(disk);
         fs::rename(&tmp, disk)?;
@@ -5592,7 +5839,8 @@ impl Engine {
         fs::create_dir_all(path)?;
         let folder_id = FolderId::random();
         let folder_key = SecretKey::random();
-        let info = crate::strongroom::enroll(key, method, &folder_id, &folder_key)?;
+        let info =
+            crate::strongroom::enroll(key, method, &self.vault.vault_id, &folder_id, &folder_key)?;
         let rec = FolderRecord {
             folder_id: folder_id.clone(),
             name: name.to_string(),
@@ -5658,7 +5906,7 @@ impl Engine {
             .strongroom
             .as_ref()
             .ok_or_else(|| anyhow!("{folder} is not a Strongroom folder"))?;
-        let fk = crate::strongroom::unlock(key, &rec.folder_id, info)?;
+        let fk = crate::strongroom::unlock(key, &self.vault.vault_id, &rec.folder_id, info)?;
         self.unlocked.insert(
             rec.folder_id.clone(),
             (fk.clone(), util::now_utc() + minutes as i64 * 60),
@@ -5694,8 +5942,12 @@ impl Engine {
             bail!("{folder} is not a Strongroom folder");
         }
         let fk = SecretKey::from_hex(key_hex)?;
-        // Prove the key is right before accepting it: it must open the wrapped key's folder keys.
-        let _ = FolderKeys::from_folder_key(&rec.folder_id, fk.clone());
+        // Prove the key is right before accepting it: it must match the
+        // commitment published with the Strongroom.
+        rec.strongroom
+            .as_ref()
+            .ok_or_else(|| anyhow!("{folder} is not a Strongroom folder"))?
+            .verify_key(&rec.folder_id, &fk)?;
         self.unlocked.insert(
             rec.folder_id.clone(),
             (fk, util::now_utc() + minutes as i64 * 60),
@@ -5776,7 +6028,7 @@ impl Engine {
             let folders: Vec<_> = e
                 .folders()
                 .into_iter()
-                .map(|(r, m)| (r.folder_id, r.name, m))
+                .map(|(r, m)| (r.folder_id.clone(), r.name.clone(), m))
                 .collect();
             format!(
                 "{}|{}",
@@ -5786,6 +6038,7 @@ impl Engine {
         };
         let before = signature(self);
         self.config = Config::load(&self.home)?;
+        self.forget_storages();
         self.keyring = Keyring::load(
             &self.home,
             &self.keys,
@@ -6092,11 +6345,13 @@ impl Engine {
         if let Some(parent) = disk.parent() {
             fs::create_dir_all(parent)?;
         }
-        let tmp = disk.with_file_name(format!(".varsto-upload-{}", std::process::id()));
+        let (tmp, tmp_file) = util::temp_beside(&disk, "upload")
+            .with_context(|| format!("write {}", disk.display()))?;
         let written = (|| -> Result<()> {
-            let mut out = fs::File::create(&tmp)?;
+            let mut out = tmp_file;
             std::io::copy(&mut { reader }, &mut out)?;
             out.sync_all()?;
+            util::set_final_mode(&out, None);
             Ok(())
         })();
         if let Err(e) = written {
@@ -6347,6 +6602,7 @@ impl Engine {
         let _ = self.ledger_lost_everywhere(false);
         // The other devices' trash records, when due (`trash`).
         let _ = self.trash_refresh(false);
+        self.finish_storages();
         Ok(out)
     }
 
@@ -6403,16 +6659,19 @@ impl Engine {
             let mut pull = match self.pull(&name) {
                 Ok(p) => p,
                 Err(e) => {
+                    self.last_scan = None;
                     out.push(paused(e, PullReport::default())?);
                     continue;
                 }
             };
+            // The pull scanned the folder; the push need not walk it again.
+            let scan = self.last_scan.take();
             if self.keyring.find(&name).is_none() {
                 continue; // converted while pulling
             }
             // Selective sync turned off: the placeholders become files.
             pull.files_updated += self.fill_placeholders(&name, &mut pull.files_unavailable)?;
-            match self.push(&name) {
+            match self.push_with_scan(&name, scan) {
                 Ok(push) => out.push((pull, push)),
                 Err(e) => out.push(paused(e, pull)?),
             }
@@ -6959,6 +7218,21 @@ impl Engine {
             .filter(|s| s.is_data_only())
             .cloned()
             .collect()
+    }
+
+    /// Disks that carry a marker of one of this vault's pools but no valid
+    /// MAC: (pool, mount, label). They are not used until `varsto disk add`
+    /// takes them in.
+    pub fn unknown_pool_disks(&self) -> Vec<(String, PathBuf, String)> {
+        let mut out = Vec::new();
+        for spec in self.pool_specs() {
+            if let Ok(pool) = self.open_pool(&spec) {
+                for (mount, marker) in pool.unknown_disks() {
+                    out.push((spec.name().to_string(), mount, marker.label));
+                }
+            }
+        }
+        out
     }
 
     /// Every disk of every pool with its attached state and the bookkeeping

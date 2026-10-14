@@ -35,6 +35,12 @@ pub fn format_date(secs: i64) -> String {
 
 /// Write `data` to `path` atomically: temporary file in the same directory,
 /// fsync, rename. The parent directory is created if needed.
+///
+/// The temporary file is created new (never an existing file someone else
+/// planted) and, on Unix, readable by this user only from its first byte:
+/// most of what goes through here is key material or encrypted state, and
+/// the umask (usually 022) would otherwise leave it world-readable until a
+/// later `chmod`.
 pub fn write_atomic(path: &Path, data: &[u8]) -> Result<()> {
     let dir = path
         .parent()
@@ -45,19 +51,107 @@ pub fn write_atomic(path: &Path, data: &[u8]) -> Result<()> {
         .and_then(|n| n.to_str())
         .unwrap_or("object");
     // Unique per write, not only per process: uploader threads may write the
-    // same object (a block two files share) at the same moment.
-    static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let tmp = dir.join(format!(".{}.tmp-{}-{}", file_name, std::process::id(), seq));
-    {
-        let mut f = fs::File::create(&tmp)
-            .with_context(|| format!("create temporary file {}", tmp.display()))?;
-        f.write_all(data)?;
-        f.sync_all()?;
+    // same object (a block two files share) at the same moment, and a name
+    // another process could guess from the pid alone must not be enough to
+    // place a file there first.
+    let mut tmp = temp_name(dir, file_name);
+    let mut f = loop {
+        let mut opts = fs::OpenOptions::new();
+        opts.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            opts.mode(0o600);
+        }
+        match opts.open(&tmp) {
+            Ok(f) => break f,
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                tmp = temp_name(dir, file_name);
+            }
+            Err(e) => {
+                return Err(e).with_context(|| format!("create temporary file {}", tmp.display()))
+            }
+        }
+    };
+    let written = f.write_all(data).and_then(|()| f.sync_all());
+    drop(f);
+    if let Err(e) = written {
+        let _ = fs::remove_file(&tmp);
+        return Err(e).with_context(|| format!("write {}", tmp.display()));
     }
-    fs::rename(&tmp, path).with_context(|| format!("rename into {}", path.display()))?;
+    if let Err(e) = fs::rename(&tmp, path) {
+        let _ = fs::remove_file(&tmp);
+        return Err(e).with_context(|| format!("rename into {}", path.display()));
+    }
     if let Ok(d) = fs::File::open(dir) {
         let _ = d.sync_all();
+    }
+    Ok(())
+}
+
+fn temp_name(dir: &Path, file_name: &str) -> PathBuf {
+    dir.join(format!(".{file_name}.tmp-{:016x}", rand::random::<u64>()))
+}
+
+/// Create `dir` readable by this user only (mode 0700 on Unix; parents that
+/// are missing are created with the umask). When it already exists and the
+/// group or others can reach it, its mode is set to 0700 and a warning is
+/// logged: the device directory holds keys, and a directory someone else
+/// can list or read must not stay that way.
+pub fn private_dir(dir: &Path) -> Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+        match fs::metadata(dir) {
+            Ok(m) if m.is_dir() => {
+                let mode = m.permissions().mode() & 0o777;
+                if mode & 0o077 != 0 {
+                    fs::set_permissions(dir, fs::Permissions::from_mode(0o700))
+                        .with_context(|| format!("restrict {}", dir.display()))?;
+                    log::warn!(
+                        "{} was reachable by other users (mode {mode:o}); set to 0700",
+                        dir.display()
+                    );
+                }
+                return Ok(());
+            }
+            Ok(_) => anyhow::bail!("{} is not a directory", dir.display()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e).with_context(|| format!("stat {}", dir.display())),
+        }
+        if let Some(parent) = dir.parent() {
+            if !parent.as_os_str().is_empty() {
+                fs::create_dir_all(parent)
+                    .with_context(|| format!("create {}", parent.display()))?;
+            }
+        }
+        match fs::DirBuilder::new().mode(0o700).create(dir) {
+            Ok(()) => Ok(()),
+            // Another thread or process made it meanwhile: check its mode.
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => private_dir(dir),
+            Err(e) => Err(e).with_context(|| format!("create {}", dir.display())),
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        fs::create_dir_all(dir).with_context(|| format!("create {}", dir.display()))
+    }
+}
+
+/// The subdirectories of a device directory that hold plaintext of the
+/// user's files (trash copies, exports) or local sync state.
+pub const PRIVATE_SUBDIRS: [&str; 3] = ["state", "trash", "exports"];
+
+/// Create a device directory readable by this user only, with its `state/`
+/// directory, and tighten `trash/` and `exports/` when they exist. Called
+/// whenever a device directory is created or opened.
+pub fn private_home(home: &Path) -> Result<()> {
+    private_dir(home)?;
+    for sub in PRIVATE_SUBDIRS {
+        let p = home.join(sub);
+        if sub == "state" || p.is_dir() {
+            private_dir(&p)?;
+        }
     }
     Ok(())
 }
@@ -100,6 +194,90 @@ pub fn check_portable_rel_path(path: &str) -> Result<()> {
         anyhow::bail!("path uses a name Windows does not allow: {path:?}");
     }
     Ok(())
+}
+
+/// 16 random hex digits, for names nobody should be able to guess.
+pub fn random_suffix() -> String {
+    let mut b = [0u8; 8];
+    rand::RngCore::fill_bytes(&mut rand::rngs::OsRng, &mut b);
+    hex::encode(b)
+}
+
+/// Create a file that must not exist yet (`O_EXCL`: a planted file or link
+/// of that name is an error, never followed), readable by the owner only.
+pub fn create_new_private(path: &Path) -> std::io::Result<fs::File> {
+    let mut opts = fs::OpenOptions::new();
+    opts.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.mode(0o600);
+    }
+    opts.open(path)
+}
+
+/// A new temporary file next to `target`: `.varsto-<kind>-<pid>-<random>`,
+/// created exclusively with mode 0600, so that nothing another local user
+/// plants or guesses under a predictable name is ever written through, and
+/// what is written is private until the final mode is set.
+pub fn temp_beside(target: &Path, kind: &str) -> std::io::Result<(PathBuf, fs::File)> {
+    let mut last = None;
+    for _ in 0..16 {
+        let tmp = target.with_file_name(format!(
+            ".varsto-{kind}-{}-{}",
+            std::process::id(),
+            random_suffix()
+        ));
+        match create_new_private(&tmp) {
+            Ok(f) => return Ok((tmp, f)),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => last = Some(e),
+            Err(e) => return Err(e),
+        }
+    }
+    Err(last.unwrap_or_else(|| std::io::Error::other("no free temporary name")))
+}
+
+/// What a file created without a mode of its own gets here: `0666` less the
+/// umask.
+#[cfg(unix)]
+pub fn default_file_mode() -> u32 {
+    use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+    static MODE: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
+    *MODE.get_or_init(|| {
+        let dir = std::env::temp_dir();
+        for _ in 0..8 {
+            let p = dir.join(format!(".varsto-umask-{}", random_suffix()));
+            let made = fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(0o666)
+                .open(&p);
+            if let Ok(f) = made {
+                let m = f.metadata().map(|m| m.mode() & 0o777).unwrap_or(0o644);
+                drop(f);
+                let _ = fs::remove_file(&p);
+                return m;
+            }
+        }
+        0o644
+    })
+}
+
+/// Give an open file its final mode before it is renamed into place
+/// (`fchmod`): `mode` when the folder records one, else the default a new
+/// file gets here. Best effort: the metadata step after the rename sets it
+/// again and reports a failure.
+pub fn set_final_mode(file: &fs::File, mode: Option<u32>) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let m = mode.map(|m| m & 0o777).unwrap_or_else(default_file_mode);
+        let _ = file.set_permissions(fs::Permissions::from_mode(m));
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (file, mode);
+    }
 }
 
 /// `root/rel` for writing, where `rel` is the local path (already mapped
@@ -194,6 +372,48 @@ mod tests {
             );
         }
         check_portable_rel_path("chunks/ab/abcdef").unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn atomic_writes_and_device_directories_are_private_whatever_the_umask() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempfile::tempdir().unwrap();
+        // The usual umask would leave a plain `File::create` at 0644.
+        let old = unsafe { libc::umask(0o022) };
+        let result = std::panic::catch_unwind(|| {
+            let file = tmp.path().join("dir").join("keys.enc");
+            write_atomic(&file, b"secret").unwrap();
+            assert_eq!(fs::read(&file).unwrap(), b"secret");
+            let mode = fs::metadata(&file).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o600, "mode {mode:o}");
+            // Overwriting keeps it private and leaves no temporary file behind.
+            write_atomic(&file, b"other").unwrap();
+            assert_eq!(fs::read(&file).unwrap(), b"other");
+            let names: Vec<_> = fs::read_dir(file.parent().unwrap())
+                .unwrap()
+                .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+                .collect();
+            assert_eq!(names, vec!["keys.enc".to_string()], "{names:?}");
+
+            let home = tmp.path().join("home");
+            private_home(&home).unwrap();
+            for p in [home.clone(), home.join("state")] {
+                let mode = fs::metadata(&p).unwrap().permissions().mode() & 0o777;
+                assert_eq!(mode, 0o700, "{}: mode {mode:o}", p.display());
+            }
+            // An existing directory that others can read is tightened.
+            let open = home.join("trash");
+            fs::create_dir(&open).unwrap();
+            fs::set_permissions(&open, fs::Permissions::from_mode(0o755)).unwrap();
+            private_home(&home).unwrap();
+            let mode = fs::metadata(&open).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o700, "mode {mode:o}");
+            // A missing optional subdirectory is not created.
+            assert!(!home.join("exports").exists());
+        });
+        unsafe { libc::umask(old) };
+        result.unwrap();
     }
 
     #[cfg(unix)]

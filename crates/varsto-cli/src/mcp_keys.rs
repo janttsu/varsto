@@ -6,11 +6,13 @@
 //! `<home>/mcp-keys.json` (owner-readable only), with a name, a scope (the
 //! same shape as the grants file: a level per folder and/or for every
 //! folder), the creation time, an optional expiry and the last use. The MCP
-//! server given a key (`varsto mcp --key`, `VARSTO_MCP_KEY`) talks to the
+//! server given a key (`varsto mcp --key-file`, `VARSTO_MCP_KEY`) talks to the
 //! running service with it in `X-Varsto-Mcp-Key` instead of the session
 //! token, and the service answers only the routes the MCP tools need, only
 //! within the key's folders and levels. A key never opens the vault itself:
-//! without the service it is refused.
+//! without the service it is refused. And when the service runs, `varsto mcp`
+//! without a key is refused too: the full session token would give an
+//! assistant the whole vault.
 
 use anyhow::{anyhow, bail, Result};
 use rand::RngCore;
@@ -19,6 +21,10 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 pub const FILE: &str = "mcp-keys.json";
+/// When each key was last used, apart from the keys: a use writes only this
+/// file (not critical), so it can never overwrite a key that was revoked
+/// meanwhile.
+pub const USED_FILE: &str = "mcp-keys-used.json";
 /// The request header that carries a key.
 pub const HEADER: &str = "X-Varsto-Mcp-Key";
 pub const PREFIX: &str = "vmk_";
@@ -71,15 +77,23 @@ fn load(home: &Path) -> Result<KeyFile> {
 }
 
 fn save(home: &Path, f: &KeyFile) -> Result<()> {
-    std::fs::create_dir_all(home)?;
-    let p = path(home);
-    varsto_core::util::write_atomic(&p, &serde_json::to_vec_pretty(f)?)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o600))?;
-    }
+    varsto_core::util::private_dir(home)?;
+    varsto_core::util::write_atomic(&path(home), &serde_json::to_vec_pretty(f)?)?;
     Ok(())
+}
+
+fn used_path(home: &Path) -> PathBuf {
+    home.join(USED_FILE)
+}
+
+fn load_used(home: &Path) -> BTreeMap<String, i64> {
+    varsto_core::util::read_json_or_default(&used_path(home)).unwrap_or_default()
+}
+
+/// A key with its last use filled in from the use file.
+fn with_use(mut k: McpKey, used: &BTreeMap<String, i64>) -> McpKey {
+    k.last_used_utc = used.get(&k.id).copied().or(k.last_used_utc);
+    k
 }
 
 fn digest(key: &str) -> String {
@@ -161,7 +175,12 @@ pub fn create(
 }
 
 pub fn list(home: &Path) -> Result<Vec<McpKey>> {
-    Ok(load(home)?.keys)
+    let used = load_used(home);
+    Ok(load(home)?
+        .keys
+        .into_iter()
+        .map(|k| with_use(k, &used))
+        .collect())
 }
 
 /// Remove a key by name or id.
@@ -174,6 +193,14 @@ pub fn revoke(home: &Path, name_or_id: &str) -> Result<McpKey> {
         .ok_or_else(|| anyhow!("no MCP key named {name_or_id}"))?;
     let k = f.keys.remove(i);
     save(home, &f)?;
+    // The use record of a revoked key goes too (best effort).
+    let mut used = load_used(home);
+    if used.remove(&k.id).is_some() {
+        let _ = varsto_core::util::write_atomic(
+            &used_path(home),
+            &serde_json::to_vec_pretty(&used).unwrap_or_default(),
+        );
+    }
     Ok(k)
 }
 
@@ -190,19 +217,31 @@ pub fn check(home: &Path, key: &str) -> std::result::Result<McpKey, Refused> {
     if !key.trim().starts_with(PREFIX) {
         return Err(Refused::Unknown);
     }
-    let mut f = load(home).map_err(|_| Refused::Unknown)?;
+    // Read-only: the keys file is written by create and revoke alone.
+    let f = load(home).map_err(|_| Refused::Unknown)?;
     let h = digest(key);
     let now = varsto_core::util::now_utc();
-    let Some(k) = f.keys.iter_mut().find(|k| k.hash == h) else {
+    // Constant time: a timing difference must not say how much of the
+    // digest matched.
+    let Some(k) = f
+        .keys
+        .iter()
+        .find(|k| varsto_core::crypto::ct_eq(k.hash.as_bytes(), h.as_bytes()))
+    else {
         return Err(Refused::Unknown);
     };
     if k.expired(now) {
         return Err(Refused::Expired);
     }
-    let out = k.clone();
-    if k.last_used_utc.is_none_or(|t| now - t >= TOUCH_SECS) {
-        k.last_used_utc = Some(now);
-        let _ = save(home, &f);
+    let mut used = load_used(home);
+    let out = with_use(k.clone(), &used);
+    if out.last_used_utc.is_none_or(|t| now - t >= TOUCH_SECS) {
+        used.insert(k.id.clone(), now);
+        // Only keys that still exist keep an entry.
+        used.retain(|id, _| f.keys.iter().any(|k| &k.id == id));
+        if let Ok(bytes) = serde_json::to_vec_pretty(&used) {
+            let _ = varsto_core::util::write_atomic(&used_path(home), &bytes);
+        }
     }
     Ok(out)
 }
@@ -302,6 +341,50 @@ impl Grants {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_check_never_rewrites_the_keys_and_cannot_resurrect_a_revoked_key() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().to_path_buf();
+        let scope = scope_for(&home, &["docs".into()], false, false).unwrap();
+        let (_, secret) = create(&home, Some("llm"), scope.clone(), None).unwrap();
+        // A use writes the use file, not the keys.
+        let before = std::fs::read(home.join(FILE)).unwrap();
+        let k = check(&home, &secret).unwrap();
+        assert!(k.last_used_utc.is_none(), "first use shows as it happens");
+        assert_eq!(std::fs::read(home.join(FILE)).unwrap(), before);
+        assert!(home.join(USED_FILE).exists());
+        assert!(list(&home).unwrap()[0].last_used_utc.is_some());
+        // Checks racing a revoke: whatever the order, once revoke has
+        // returned the key is gone and stays gone.
+        for round in 0..20 {
+            let (k, secret) =
+                create(&home, Some(&format!("r{round}")), scope.clone(), None).unwrap();
+            let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let workers: Vec<_> = (0..4)
+                .map(|_| {
+                    let (h, s, stop) = (home.clone(), secret.clone(), stop.clone());
+                    std::thread::spawn(move || {
+                        while !stop.load(std::sync::atomic::Ordering::Relaxed) {
+                            let _ = check(&h, &s);
+                        }
+                    })
+                })
+                .collect();
+            std::thread::sleep(std::time::Duration::from_millis(5));
+            revoke(&home, &k.id).unwrap();
+            stop.store(true, std::sync::atomic::Ordering::Relaxed);
+            for w in workers {
+                w.join().unwrap();
+            }
+            assert_eq!(
+                check(&home, &secret).err(),
+                Some(Refused::Unknown),
+                "round {round}"
+            );
+            assert!(list(&home).unwrap().iter().all(|x| x.id != k.id));
+        }
+    }
 
     #[test]
     fn keys_are_created_checked_listed_and_revoked() {

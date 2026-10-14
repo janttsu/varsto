@@ -9,8 +9,10 @@ Every release publishes, next to the archives on the download page:
 - `SHA256SUMS`: the SHA-256 of every file of the release;
 - `SHA256SUMS.sig`: a detached signature of `SHA256SUMS` made with the Varsto
   release key;
-- `manifest.json`: version and per-file notes for the download table (not
-  signed; the updater only trusts what `SHA256SUMS` vouches for).
+- `manifest.json` and `manifest.json.minisig`: version and per-file notes for
+  the download table, and its detached signature (same key and format; the
+  trusted comment is `timestamp:<unix time> file:manifest.json version:<version>`).
+  `scripts/sign-release.sh` signs both, so sign after the manifest is final.
 
 The signature is in [minisign](https://jedisct1.github.io/minisign/) format:
 Ed25519 over the BLAKE2b-512 hash of `SHA256SUMS` (the "ED" prehashed
@@ -36,17 +38,24 @@ Ed25519).
 ### What `varsto update` checks
 
 1. `manifest.json` names the latest version and the archive for this platform
-   (`varsto-<version>-<target>.tar.gz` or `.zip`).
+   (`varsto-<version>-<target>.tar.gz` or `.zip`). `manifest.json.minisig`
+   must verify against the built-in public key and name that same version;
+   an unsigned or differently signed manifest is refused, so the download
+   site cannot name an older release.
 2. `SHA256SUMS.sig` must verify against the built-in public key, and its
    trusted comment must name that same version (an old signed list cannot be
    replayed for a newer version). No signature, a bad one or another key:
-   the update is refused.
+   the update is refused. Its signing time must not be older than that of the
+   last list accepted (`update-state.json` in the device directory), and
+   the version must be newer than the running binary (the version compiled in
+   as `MIN_ACCEPTED_VERSION`). A list more than 90 days old is accepted with a
+   warning when it is the newest on offer.
 3. The archive must be listed in the signed `SHA256SUMS`.
 4. Second channel: `https://github.com/janttsu/varsto/releases/download/v<version>/SHA256SUMS`
    is fetched. If it can be fetched, it must list the archive with the same
    checksum, otherwise the update is refused. If GitHub cannot be reached (or
-   the release has no `SHA256SUMS` yet), the signature alone suffices; the
-   message says which happened.
+   the release has no `SHA256SUMS` yet), the update waits and the message says
+   why; `varsto update --allow-single-source` goes on with the signature alone.
 5. The downloaded archive must have the signed SHA-256. Only then is the
    binary replaced.
 
@@ -82,17 +91,20 @@ on Ubuntu, the Windows zip smoke-tested on Windows Server 2025, the Android
 APK in the emulator, the macOS disk image and the iOS shell on Apple
 Silicon. CI never holds the release key.
 
-1. Bump `version` in `Cargo.toml`, commit, tag `v<version>`, push the tag.
+1. Update `CHANGELOG.md`: rename `## Unreleased` to `## [<version>] - <date>`,
+   add its link at the bottom, start a new empty `## Unreleased` above it,
+   and write the blog post under `website/src/posts/` from the same list.
+2. Bump `version` in `Cargo.toml`, commit, tag `v<version>`, push the tag.
    CI builds every platform, assembles the download set
    (`website/assemble-release.sh`: manifest, source archive, an unsigned
    `SHA256SUMS`) and attaches it to a draft GitHub release.
-2. When the run is green, where the release key is:
+3. When the run is green, where the release key is:
    `VARSTO_RELEASE_KEY=/path/to/release-key.pem website/publish-ci-release.sh v<version> --publish`
    It downloads the run's download set, checks every file against
    `SHA256SUMS`, signs it, uploads `SHA256SUMS` and `SHA256SUMS.sig` to the
    GitHub release (the second channel) and publishes it, puts the run's
    screenshots on the website and deploys the site.
-3. `website/deploy.sh` refuses to publish a `SHA256SUMS` whose signature does
+4. `website/deploy.sh` refuses to publish a `SHA256SUMS` whose signature does
    not verify against `release-key.pub` (`scripts/sign-release.sh --verify`).
 
 Building by hand still works: `website/build-release.sh` (Linux, Windows,

@@ -22,6 +22,26 @@ fn varsto(home: &Path, args: &[&str]) -> (bool, String, String) {
     )
 }
 
+/// Like `ok`, with the vault key in `VARSTO_VAULT_KEY` (`join` takes it from
+/// the environment, a file or standard input, never from the command line).
+fn ok_with_key(home: &Path, key: &str, args: &[&str]) -> serde_json::Value {
+    let out = Command::new(env!("CARGO_BIN_EXE_varsto"))
+        .arg("--home")
+        .arg(home)
+        .arg("--json")
+        .args(args)
+        .env("VARSTO_PASSPHRASE", "test passphrase")
+        .env("VARSTO_VAULT_KEY", key)
+        .output()
+        .expect("run varsto");
+    assert!(
+        out.status.success(),
+        "varsto {args:?} failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    serde_json::from_str(&String::from_utf8_lossy(&out.stdout)).unwrap_or_default()
+}
+
 fn ok(home: &Path, args: &[&str]) -> serde_json::Value {
     let (success, stdout, stderr) = varsto(home, args);
     assert!(success, "varsto {:?} failed: {stderr}", args);
@@ -49,17 +69,10 @@ fn organization_through_the_cli() {
     ok(&a, &["folder", "add", "docs", a_docs.to_str().unwrap()]);
     fs::write(a_docs.join("note.txt"), b"first note").unwrap();
     ok(&a, &["push", "docs"]);
-    ok(
+    ok_with_key(
         &b,
-        &[
-            "join",
-            "--name",
-            "b-phone",
-            "--vault-key",
-            &vault_key,
-            "--storage-path",
-            storage_s,
-        ],
+        &vault_key,
+        &["join", "--name", "b-phone", "--storage-path", storage_s],
     );
     ok(&b, &["sync"]);
     ok(&a, &["sync"]);

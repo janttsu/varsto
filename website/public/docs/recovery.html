@@ -54,7 +54,7 @@
   <div class="wrap">
 <article class="prose">
 <h1>Recovery package</h1>
-<p class="note">From <code>docs/recovery.md</code> in the repository, rendered 2026-10-13. These documents describe the main branch; the released version is 0.0.1-alpha.13. Sections marked 'after 0.0.1-alpha.13' are not in a release yet.</p>
+<p class="note">From <code>docs/recovery.md</code> in the repository, rendered 2026-10-14. These documents describe the main branch; the released version is 0.0.1-alpha.13. Sections marked 'after 0.0.1-alpha.13' are not in a release yet.</p>
 <p>Your devices hold the keys to your vault. If one of them is lost, another one adds a new device with a pairing code and nothing else is needed. This page is about the other case: <strong>every device is lost at once</strong>, in a fire, a burglary or a flood. Then you restore from what you kept somewhere else: the <em>recovery package</em>.</p>
 <p>Varsto makes a checklist of that package for your vault, with the restore steps for a new computer:</p>
 <div class="sourceCode" id="cb1"><pre class="sourceCode sh"><code class="sourceCode bash"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="ex">varsto</span> recovery guide                                   <span class="co"># text in the terminal</span></span>
@@ -128,8 +128,8 @@
 <p>The guide gives the exact commands for your vault. In outline:</p>
 <ol type="1">
 <li>Install Varsto from the download page and check the download with <code>varsto verify-release</code>.</li>
-<li>If you kept shares, rebuild the words: <code>varsto recovery combine "&lt;index&gt;: &lt;words&gt;" "&lt;index&gt;: &lt;words&gt;"</code>.</li>
-<li>Join through a bucket or a directory that holds the vault: <code>varsto join --words "&lt;24 words&gt;" ...</code>.</li>
+<li>If you kept shares, rebuild the words: <code>varsto recovery combine --check &lt;key check&gt;</code> (it asks for two shares, one <code>&lt;index&gt;: &lt;words&gt;</code> per line, or reads them from standard input or <code>--file</code>) (the key check is printed on the kit; with it a share from another kit or a copying mistake is caught).</li>
+<li>Join through a bucket or a directory that holds the vault: <code>varsto join --storage-path ... </code> (or the <code>--s3-*</code> options); it asks for the 24 words without echo. <code>VARSTO_VAULT_KEY</code> or <code>--key-file</code> supply them in scripts; they are never taken from the command line.</li>
 <li>Add the other storages under the same names (<code>varsto storage add-s3</code>, <code>add-rclone</code>, <code>add-local</code>, <code>add-pool</code>).</li>
 <li>Connect the pool disks one at a time (<code>varsto disk insert</code> on Linux).</li>
 <li>Attach the folders (<code>varsto folder attach &lt;folder&gt; &lt;directory&gt;</code>), unlock Strongroom folders with a security key, restore backups (<code>varsto backup restore</code>).</li>

@@ -42,6 +42,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-unknown-linux-musl, x86_64-pc-windows-gnu
+          components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
       - name: Packages for the build and the tests
         run: |
@@ -49,6 +50,20 @@ jobs:
           sudo apt-get install -y -qq musl-tools mingw-w64 ffmpeg libdbus-1-dev zip python3-pil >/dev/null
           curl -fsS https://rclone.org/install.sh | sudo bash >/dev/null 2>&1 || true
           rclone version | head -1 || true
+      - uses: taiki-e/install-action@v2.87.28
+        with:
+          tool: cargo-audit,cargo-deny
+      # Quality gates, as CONTRIBUTING.md asks of every pull request: formatting,
+      # clippy without warnings, known vulnerabilities (.cargo/audit.toml) and
+      # licences, bans and advisories (deny.toml).
+      - name: Formatting
+        run: cargo fmt --all --check
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Vulnerabilities in dependencies
+        run: cargo audit
+      - name: Licences and advisories of dependencies
+        run: cargo deny check
       - name: Tests
         run: cargo test --workspace 2>&1 | tee test.log
       - name: Linux and Windows packages

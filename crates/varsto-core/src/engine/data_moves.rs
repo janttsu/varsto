@@ -72,6 +72,37 @@ impl WriteTargets {
     }
 }
 
+/// What a staged move job adds to a move (`engine/staged_moves.rs`).
+#[derive(Clone, Default)]
+pub(super) struct StagedExtras {
+    /// A job run: a full target stops the run instead of keeping blocks.
+    pub(super) staged: bool,
+    /// Only files at or under these folder paths.
+    pub(super) paths: Vec<String>,
+    /// Copy and check but do not drop from the old storage.
+    pub(super) keep_source: bool,
+    /// Stop after this many groups of blocks.
+    pub(super) max_groups: Option<usize>,
+    /// The job file, updated after every group.
+    pub(super) job_id: Option<String>,
+    /// Bytes and blocks done before this run.
+    pub(super) base_done: u64,
+    pub(super) base_blocks: u64,
+}
+
+impl StagedExtras {
+    /// Whether a file of the folder is in scope.
+    fn includes(&self, path: &str) -> bool {
+        self.paths.is_empty()
+            || self.paths.iter().any(|p| {
+                path == p
+                    || path
+                        .strip_prefix(p.as_str())
+                        .is_some_and(|rest| rest.starts_with('/'))
+            })
+    }
+}
+
 /// One block to move.
 pub(super) struct MoveItem {
     pub(super) chunk: ChunkId,
@@ -85,12 +116,12 @@ pub(super) struct MoveItem {
 }
 
 /// A move worked out from the ledger, before anything is changed.
-struct MovePlan {
-    items: Vec<MoveItem>,
+pub(super) struct MovePlan {
+    pub(super) items: Vec<MoveItem>,
     /// Blocks recorded as dropped from `from` (an earlier run): their
     /// objects may still be there.
     dropped: Vec<ObjectName>,
-    report: MoveReport,
+    pub(super) report: MoveReport,
 }
 
 /// Count a block that stays where it is, naming a few.
@@ -424,13 +455,14 @@ impl Engine {
             .is_none()
             .then(|| self.placement_without(&rec, &req.from, &req.to))
             .flatten();
-        let mut plan = self.plan_move(&rec, req)?;
+        let ex = StagedExtras::default();
+        let mut plan = self.plan_move(&rec, req, &ex)?;
         if req.dry_run {
             plan.report.placement_changed = new_placement.map(|p| p.describe());
             plan.report.summary = Self::move_summary(&plan.report, &rec.name);
             return Ok(plan.report);
         }
-        let mut report = self.run_move(&rec, req, plan)?;
+        let mut report = self.run_move(&rec, req, plan, &ex)?;
         // Only once every block has left: a move that kept some is run again.
         if let Some(p) = new_placement.filter(|_| report.blocks_kept == 0) {
             report.placement_changed = Some(p.describe());
@@ -441,7 +473,12 @@ impl Engine {
     }
 
     /// The folder's placement with `from` replaced by `to`, if that changes it.
-    fn placement_without(&self, rec: &FolderRecord, from: &str, to: &str) -> Option<Placement> {
+    pub(super) fn placement_without(
+        &self,
+        rec: &FolderRecord,
+        from: &str,
+        to: &str,
+    ) -> Option<Placement> {
         let mut names: BTreeSet<String> = match self.write_targets(rec).names {
             Some(n) => n,
             None => self
@@ -459,7 +496,12 @@ impl Engine {
     }
 
     /// Work out a move from the ledger without changing anything.
-    fn plan_move(&self, rec: &FolderRecord, req: &MoveRequest) -> Result<MovePlan> {
+    pub(super) fn plan_move(
+        &self,
+        rec: &FolderRecord,
+        req: &MoveRequest,
+        ex: &StagedExtras,
+    ) -> Result<MovePlan> {
         let find = |name: &str| {
             self.config
                 .storages
@@ -506,7 +548,7 @@ impl Engine {
         let mut files = 0u64;
         let encrypted_here = self.mount_is_encrypted(&rec.folder_id);
         for f in state.files.values().filter(|f| !f.deleted) {
-            let moves = idle.as_ref().is_none_or(|s| s.contains(&f.path));
+            let moves = idle.as_ref().is_none_or(|s| s.contains(&f.path)) && ex.includes(&f.path);
             if !moves {
                 staying.extend(f.chunks.iter().map(|c| c.chunk.clone()));
                 continue;
@@ -526,7 +568,7 @@ impl Engine {
             }
         }
         // Moving a whole folder takes the blocks of its trash along.
-        if idle.is_none() {
+        if idle.is_none() && ex.paths.is_empty() {
             for c in self.trash_chunks(&rec.folder_id) {
                 moving
                     .entry(c.chunk.clone())
@@ -565,6 +607,8 @@ impl Engine {
             .effective_policy()
             .as_ref()
             .filter(|p| p.min_copies > 0 || !p.min_per_place.is_empty())
+            // Nothing is dropped from the old storage: the rules hold.
+            .filter(|_| !ex.keep_source)
             .map(|p| Policy {
                 verified_within_days: None,
                 ..p.clone()
@@ -830,11 +874,12 @@ impl Engine {
     }
 
     /// Carry out a planned move, one group of blocks per ledger batch.
-    fn run_move(
+    pub(super) fn run_move(
         &mut self,
         rec: &FolderRecord,
         req: &MoveRequest,
         plan: MovePlan,
+        ex: &StagedExtras,
     ) -> Result<MoveReport> {
         let MovePlan {
             items,
@@ -851,7 +896,21 @@ impl Engine {
         };
         let (from_spec, to_spec) = (find(&req.from)?, find(&req.to)?);
         let from = self.open_spec(&from_spec)?;
-        let to = self.open_spec(&to_spec)?;
+        // A staged move to a pool talks to the pool itself: it asks which
+        // places hold a block and adds copies for the disk group rule.
+        let to_pool: Option<PoolStorage> = (ex.staged
+            && matches!(to_spec, StorageSpec::Pool { .. }))
+        .then(|| self.open_pool(&to_spec))
+        .transpose()?;
+        let to_box: Option<Box<dyn Storage>> = match &to_pool {
+            Some(_) => None,
+            None => Some(self.open_spec(&to_spec)?),
+        };
+        let to: &dyn Storage = match (&to_pool, &to_box) {
+            (Some(p), _) => p,
+            (None, Some(b)) => b.as_ref(),
+            (None, None) => unreachable!("one of the two is open"),
+        };
         let others: OpenStorages = self
             .open_storages(false)?
             .into_iter()
@@ -869,24 +928,37 @@ impl Engine {
             items.iter().map(|i| i.size).sum(),
             crate::activity::Unit::Bytes,
         );
-        for group in items.chunks(MOVE_GROUP) {
+        // Staged: blocks of this size and larger found no room on `to`.
+        let mut full_at: Option<u64> = None;
+        let mut disks_used: BTreeSet<String> = BTreeSet::new();
+        for (groups_done, group) in items.chunks(MOVE_GROUP).enumerate() {
+            if ex.max_groups.is_some_and(|m| groups_done >= m) {
+                report.stopped_early = true;
+                break;
+            }
             task.advance(group.iter().map(|i| i.size).sum());
             let mut deletes: Vec<(ObjectName, u64)> = Vec::new();
             let present: Vec<bool> = group
                 .iter()
                 .map(|i| i.on_to || to.exists(&chunk_storage_key(&i.object)).unwrap_or(false))
                 .collect();
+            let no_room = |full_at: Option<u64>, i: &MoveItem| full_at.is_some_and(|f| i.size >= f);
             let mut local = self.local_ciphertexts(
                 &fk,
                 group
                     .iter()
                     .zip(&present)
-                    .filter(|(_, p)| !**p)
+                    .filter(|(i, p)| !**p && !no_room(full_at, i))
                     .map(|(i, _)| i),
             );
             for (item, present) in group.iter().zip(present) {
                 let key = chunk_storage_key(&item.object);
                 let mut size = item.size;
+                if !present && no_room(full_at, item) {
+                    report.waiting_room_blocks += 1;
+                    report.waiting_room_bytes += item.size;
+                    continue;
+                }
                 if !present {
                     let ct = local
                         .remove(&item.object)
@@ -900,6 +972,13 @@ impl Engine {
                         continue;
                     };
                     if !gate.take(to_spec.name(), ct.len() as u64) {
+                        if ex.staged {
+                            full_at = Some(full_at.map_or(item.size, |f| f.min(item.size)));
+                            report.waiting_room_blocks += 1;
+                            report.waiting_room_bytes += item.size;
+                            report.waiting_note = Some(gate.message(to_spec.name()));
+                            continue;
+                        }
                         keep(&mut report, &item.object, gate.message(to_spec.name()));
                         continue;
                     }
@@ -910,6 +989,27 @@ impl Engine {
                             size = ct.len() as u64;
                         }
                         Err(e) => {
+                            if ex.staged
+                                && matches!(
+                                    pool::pool_error(&e),
+                                    Some(
+                                        PoolError::NoRoom { .. } | PoolError::NoDiskAttached { .. }
+                                    )
+                                )
+                            {
+                                let at = if matches!(
+                                    pool::pool_error(&e),
+                                    Some(PoolError::NoDiskAttached { .. })
+                                ) {
+                                    0
+                                } else {
+                                    ct.len() as u64
+                                };
+                                full_at = Some(full_at.map_or(at, |f| f.min(at)));
+                                report.waiting_room_blocks += 1;
+                                report.waiting_room_bytes += item.size;
+                                continue;
+                            }
                             let why = match pool::pool_error(&e) {
                                 Some(pe) => pe.to_string(),
                                 None => format!("writing to {} failed: {e:#}", to_spec.name()),
@@ -934,6 +1034,11 @@ impl Engine {
                     continue;
                 }
                 report.blocks_verified += 1;
+                if let Some(p) = &to_pool {
+                    if !present {
+                        disks_used.extend(p.locate_all(&key).into_iter().map(|l| l.label));
+                    }
+                }
                 if !item.on_to {
                     self.pending.push(Event::ChunkStored {
                         folder: rec.folder_id.clone(),
@@ -951,6 +1056,20 @@ impl Engine {
                         storage: to_spec.name().to_string(),
                     });
                 }
+                // A disk group rule counts a block as moved only when its
+                // copies are in enough different places.
+                if let Some(p) = &to_pool {
+                    if !Self::group_rule_met(p, &key, &mut disks_used) {
+                        report.waiting_place_blocks += 1;
+                        report.waiting_place_bytes += item.size;
+                        continue;
+                    }
+                }
+                if ex.keep_source {
+                    report.blocks_done += 1;
+                    report.bytes_done += item.size;
+                    continue;
+                }
                 self.pending.push(Event::ChunkDropped {
                     folder: rec.folder_id.clone(),
                     chunk: item.chunk.clone(),
@@ -958,6 +1077,8 @@ impl Engine {
                     storage: from_spec.name().to_string(),
                 });
                 deletes.push((item.object.clone(), item.size));
+                report.blocks_done += 1;
+                report.bytes_done += item.size;
             }
             // The drops are sealed and pushed before anything is deleted.
             self.commit_batch()?;
@@ -981,7 +1102,13 @@ impl Engine {
                     ),
                 }
             }
+            if ex.job_id.is_some() {
+                report.disks_used = disks_used.iter().cloned().collect();
+                self.staged_checkpoint(ex, &report);
+            }
         }
+        report.disks_used = disks_used.into_iter().collect();
+        report.waiting_min_bytes = full_at.unwrap_or(0);
         // An earlier run that stopped after recording its drops.
         if !dropped.is_empty() {
             let in_use = self.objects_claimed_on(from_spec.name())?;
@@ -995,8 +1122,45 @@ impl Engine {
                 }
             }
         }
+        drop(to_box);
+        if let Some(p) = to_pool {
+            // Keep the registry in `config.json` as the pool learned it.
+            let disks = p.disks();
+            drop(p);
+            self.save_pool_disks(to_spec.name(), disks)?;
+        }
         report.summary = Self::move_summary(&report, &rec.name);
         Ok(report)
+    }
+
+    /// Whether the pool holds `key` in as many different places as its disk
+    /// group rule asks, adding copies on attached disks of other places when
+    /// it can. Records the labels of disks written to.
+    fn group_rule_met(p: &PoolStorage, key: &str, used: &mut BTreeSet<String>) -> bool {
+        let want = p.copies() as usize;
+        if want <= 1 {
+            return true;
+        }
+        let mut places = p.places_of(key);
+        if places.len() >= want {
+            return true;
+        }
+        let Ok(Some(ct)) = p.get(key) else {
+            return false;
+        };
+        for d in p.disks() {
+            if places.len() >= want {
+                break;
+            }
+            if d.retired || p.mount_of(&d.id).is_none() || !p.wants_copy(&d.id, key) {
+                continue;
+            }
+            if p.add_copy_on_disk(&d.id, key, &ct).is_ok() {
+                used.insert(d.label.clone());
+                places = p.places_of(key);
+            }
+        }
+        places.len() >= want
     }
 
     /// Objects some ledger record still counts as a copy on `storage` (an
@@ -1154,7 +1318,7 @@ impl Engine {
                     dry_run: true,
                     confirm_cold_read: false,
                 };
-                let Ok(plan) = self.plan_move(rec, &req) else {
+                let Ok(plan) = self.plan_move(rec, &req, &StagedExtras::default()) else {
                     continue;
                 };
                 let saving = plan

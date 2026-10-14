@@ -70,6 +70,18 @@ pub struct StrongroomInfo {
     /// When the list of keys last changed; the newest list wins across devices.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub updated_utc: i64,
+    /// Key commitment (hex): `keyed_hash(folder_key.derive("strongroom-check"), folder_id)`.
+    /// A folder key given by hand is accepted only when it matches, so that a
+    /// mistyped or foreign key cannot unlock or convert the folder.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub check_hex: String,
+}
+
+/// The commitment to `folder_key` for `folder`; public, reveals nothing
+/// about the key.
+pub fn key_check(folder_key: &SecretKey, folder: &FolderId) -> String {
+    let k = folder_key.derive("strongroom-check", &[]);
+    hex::encode(crypto::keyed_hash(&k, folder.as_str().as_bytes()))
 }
 
 fn is_zero(v: &i64) -> bool {
@@ -91,6 +103,26 @@ pub struct EnrolledKey {
 }
 
 impl StrongroomInfo {
+    /// This info with the commitment to `folder_key` of `folder`.
+    pub fn with_check(mut self, folder_key: &SecretKey, folder: &FolderId) -> Self {
+        self.check_hex = key_check(folder_key, folder);
+        self
+    }
+
+    /// Refuse a folder key that is not the one the Strongroom was made with.
+    pub fn verify_key(&self, folder: &FolderId, folder_key: &SecretKey) -> Result<()> {
+        if self.check_hex.is_empty() {
+            bail!("this Strongroom has no key check (made by an older version): unlock it with the security key, or enrol it again");
+        }
+        if !crypto::ct_eq(
+            self.check_hex.as_bytes(),
+            key_check(folder_key, folder).as_bytes(),
+        ) {
+            bail!("that is not the key of this Strongroom");
+        }
+        Ok(())
+    }
+
     /// Every enrolled key, the first one first.
     pub fn keys(&self) -> Vec<EnrolledKey> {
         let mut out = vec![EnrolledKey {
@@ -120,6 +152,7 @@ impl StrongroomInfo {
             added_utc: first.added_utc,
             backups: keys,
             updated_utc,
+            check_hex: String::new(),
         })
     }
 
@@ -184,6 +217,18 @@ pub struct Fido2Tools {
     pub device: Option<String>,
 }
 
+/// `-t` options of the libfido2 tools: the PIN is always asked for (so the
+/// secret depends on something the key's owner knows, not only on holding
+/// the key), and user verification is required when `VARSTO_FIDO2_UV` is set
+/// (`varsto strongroom --uv`).
+fn fido2_options() -> Vec<&'static str> {
+    let mut o = vec!["-t", "pin=true"];
+    if std::env::var_os("VARSTO_FIDO2_UV").is_some_and(|v| !v.is_empty() && v != "0") {
+        o.extend(["-t", "uv=true"]);
+    }
+    o
+}
+
 impl Fido2Tools {
     fn first_device() -> Result<String> {
         let out = Command::new("fido2-token").arg("-L").output().context(
@@ -226,7 +271,9 @@ impl SecurityKey for Fido2Tools {
         );
         eprintln!("Touch your security key to create the Strongroom credential.");
         let mut child = Command::new("fido2-cred")
-            .args(["-M", "-h", "-r", &dev])
+            .args(["-M", "-h", "-r"])
+            .args(fido2_options())
+            .arg(&dev)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
@@ -274,7 +321,9 @@ impl SecurityKey for Fido2Tools {
         );
         eprintln!("Touch your security key to open the Strongroom.");
         let mut child = Command::new("fido2-assert")
-            .args(["-G", "-h", &dev])
+            .args(["-G", "-h"])
+            .args(fido2_options())
+            .arg(&dev)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
@@ -302,21 +351,25 @@ impl SecurityKey for Fido2Tools {
     }
 }
 
-/// Test and demonstration backend: the "touch" is a secret file.
+/// Whether this build can use software security keys (the `software-key`
+/// feature, meant for tests and the lab). Without it `Method::Software`
+/// is still understood in records, but no backend answers for it.
+pub const SOFTWARE_KEYS_BUILT_IN: bool = cfg!(any(test, feature = "software-key"));
+
+/// Test and demonstration backend: the "touch" is a secret file. Only
+/// built in with the `software-key` feature: a key in a plain file next to
+/// the vault protects nothing beyond the passphrase.
+#[cfg(any(test, feature = "software-key"))]
 pub struct SoftwareKey {
     pub path: std::path::PathBuf,
 }
 
+#[cfg(any(test, feature = "software-key"))]
 impl SecurityKey for SoftwareKey {
     fn make_credential(&self) -> Result<String> {
         if !self.path.exists() {
             let k = SecretKey::random();
-            std::fs::write(&self.path, k.to_hex())?;
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                std::fs::set_permissions(&self.path, std::fs::Permissions::from_mode(0o600))?;
-            }
+            crate::util::write_atomic(&self.path, k.to_hex().as_bytes())?;
         }
         Ok(format!("software:{}", self.path.display()))
     }
@@ -327,12 +380,35 @@ impl SecurityKey for SoftwareKey {
     }
 }
 
+/// What answers for a software key in a build without the feature.
+#[cfg_attr(any(test, feature = "software-key"), allow(dead_code))]
+struct NoSoftwareKey;
+
+impl SecurityKey for NoSoftwareKey {
+    fn make_credential(&self) -> Result<String> {
+        bail!("software security keys are not built into this binary (a build with the software-key feature has them, for tests only)");
+    }
+    fn hmac_secret(&self, _credential: &str, _salt: &[u8; 32]) -> Result<[u8; 32]> {
+        bail!("this Strongroom was enrolled with a software security key, which this binary does not have (a build with the software-key feature does)");
+    }
+}
+
+fn software_backend(path: std::path::PathBuf) -> Box<dyn SecurityKey> {
+    #[cfg(any(test, feature = "software-key"))]
+    {
+        Box::new(SoftwareKey { path })
+    }
+    #[cfg(not(any(test, feature = "software-key")))]
+    {
+        let _ = path;
+        Box::new(NoSoftwareKey)
+    }
+}
+
 pub fn backend(method: &Method, home: &Path) -> Box<dyn SecurityKey> {
     match method {
         Method::Fido2 => Box::new(Fido2Tools { device: None }),
-        Method::Software => Box::new(SoftwareKey {
-            path: home.join("software-security-key"),
-        }),
+        Method::Software => software_backend(home.join("software-security-key")),
     }
 }
 
@@ -347,20 +423,29 @@ pub fn backend_for(key: &EnrolledKey, home: &Path) -> Box<dyn SecurityKey> {
                 .file_name()
                 .map(|n| n.to_os_string())
                 .unwrap_or_else(|| "software-security-key".into());
-            Box::new(SoftwareKey {
-                path: home.join(name),
-            })
+            software_backend(home.join(name))
         }
     }
 }
 
-/// A software key file for a backup key, next to the vault.
-pub fn new_software_key(home: &Path) -> SoftwareKey {
+fn new_software_key_path(home: &Path) -> std::path::PathBuf {
     let mut tag = [0u8; 4];
     rand::RngCore::fill_bytes(&mut rand::rngs::OsRng, &mut tag);
+    home.join(format!("software-security-key-{}", hex::encode(tag)))
+}
+
+/// A software key file for a backup key, next to the vault.
+#[cfg(any(test, feature = "software-key"))]
+pub fn new_software_key(home: &Path) -> SoftwareKey {
     SoftwareKey {
-        path: home.join(format!("software-security-key-{}", hex::encode(tag))),
+        path: new_software_key_path(home),
     }
+}
+
+/// The backend for a new software backup key: the key file in builds with
+/// the feature, a refusal otherwise.
+pub fn new_software_backend(home: &Path) -> Box<dyn SecurityKey> {
+    software_backend(new_software_key_path(home))
 }
 
 fn wrap_key(secret: &[u8; 32], folder: &FolderId) -> SecretKey {
@@ -372,19 +457,26 @@ fn wrap_key(secret: &[u8; 32], folder: &FolderId) -> SecretKey {
     .derive("strongroom", &[folder.as_str().as_bytes()])
 }
 
-fn aad(folder: &FolderId) -> Vec<u8> {
-    crypto::aad("strongroom-key", &[folder.as_str().as_bytes()])
+/// Associated data of the wrapped folder key: the vault and the folder, so
+/// a wrapped key copied into another vault's record (or another folder's)
+/// does not open there.
+fn aad(vault: &VaultId, folder: &FolderId) -> Vec<u8> {
+    crypto::aad(
+        "strongroom-key",
+        &[vault.as_str().as_bytes(), folder.as_str().as_bytes()],
+    )
 }
 
 /// Create the credential (touch 1) and wrap `folder_key` (touch 2).
 pub fn enroll(
     key: &dyn SecurityKey,
     method: Method,
+    vault: &VaultId,
     folder: &FolderId,
     folder_key: &SecretKey,
 ) -> Result<StrongroomInfo> {
-    let k = enroll_key(key, method, folder, folder_key, "")?;
-    StrongroomInfo::from_keys(vec![k], crate::util::now_utc())
+    let k = enroll_key(key, method, vault, folder, folder_key, "")?;
+    Ok(StrongroomInfo::from_keys(vec![k], crate::util::now_utc())?.with_check(folder_key, folder))
 }
 
 /// Enrol one more security key for a folder key already in hand (two
@@ -392,6 +484,7 @@ pub fn enroll(
 pub fn enroll_key(
     key: &dyn SecurityKey,
     method: Method,
+    vault: &VaultId,
     folder: &FolderId,
     folder_key: &SecretKey,
     label: &str,
@@ -402,7 +495,7 @@ pub fn enroll_key(
     let secret = key.hmac_secret(&credential, &salt)?;
     let wrapped = crypto::encrypt(
         &wrap_key(&secret, folder),
-        &aad(folder),
+        &aad(vault, folder),
         folder_key.as_bytes(),
     )?;
     Ok(EnrolledKey {
@@ -415,14 +508,19 @@ pub fn enroll_key(
     })
 }
 
-fn unwrap_one(key: &dyn SecurityKey, folder: &FolderId, k: &EnrolledKey) -> Result<SecretKey> {
+fn unwrap_one(
+    key: &dyn SecurityKey,
+    vault: &VaultId,
+    folder: &FolderId,
+    k: &EnrolledKey,
+) -> Result<SecretKey> {
     let salt: [u8; 32] = hex::decode(&k.salt_hex)?
         .try_into()
         .map_err(|_| anyhow!("strongroom salt must be 32 bytes"))?;
     let secret = key.hmac_secret(&k.credential, &salt)?;
     let plain = crypto::decrypt(
         &wrap_key(&secret, folder),
-        &aad(folder),
+        &aad(vault, folder),
         &hex::decode(&k.wrapped_key_hex)?,
     )
     .map_err(|_| anyhow!("the security key did not open this Strongroom (wrong key?)"))?;
@@ -433,12 +531,13 @@ fn unwrap_one(key: &dyn SecurityKey, folder: &FolderId, k: &EnrolledKey) -> Resu
 /// tried): every enrolled key is tried until one opens.
 pub fn unlock(
     key: &dyn SecurityKey,
+    vault: &VaultId,
     folder: &FolderId,
     info: &StrongroomInfo,
 ) -> Result<SecretKey> {
     let mut last = None;
     for k in info.keys() {
-        match unwrap_one(key, folder, &k) {
+        match unwrap_one(key, vault, folder, &k) {
             Ok(fk) => return Ok(fk),
             Err(e) => last = Some(e),
         }
@@ -451,6 +550,7 @@ pub fn unlock(
 /// folder key and the index of the key that opened it.
 pub fn unlock_enrolled(
     home: &Path,
+    vault: &VaultId,
     folder: &FolderId,
     info: &StrongroomInfo,
 ) -> Result<(SecretKey, usize)> {
@@ -465,7 +565,7 @@ pub fn unlock_enrolled(
                 k.short()
             );
         }
-        match unwrap_one(backend_for(k, home).as_ref(), folder, k) {
+        match unwrap_one(backend_for(k, home).as_ref(), vault, folder, k) {
             Ok(fk) => return Ok((fk, i)),
             Err(e) => errors.push(format!("{}: {e:#}", k.short())),
         }
@@ -482,6 +582,7 @@ pub fn unlock_enrolled(
 /// Credentials, labels and methods stay; every key must answer.
 pub fn rewrap_enrolled(
     home: &Path,
+    vault: &VaultId,
     folder: &FolderId,
     folder_key: &SecretKey,
     info: &StrongroomInfo,
@@ -498,7 +599,7 @@ pub fn rewrap_enrolled(
             );
         }
         out.push(
-            rewrap_one(backend_for(k, home).as_ref(), folder, folder_key, k).with_context(
+            rewrap_one(backend_for(k, home).as_ref(), vault, folder, folder_key, k).with_context(
                 || {
                     format!(
                         "{}: every enrolled key must take the new folder key (remove a key that is gone first: varsto strongroom remove-key)",
@@ -508,12 +609,16 @@ pub fn rewrap_enrolled(
             )?,
         );
     }
-    StrongroomInfo::from_keys(out, crate::util::now_utc().max(info.updated_utc + 1))
+    Ok(
+        StrongroomInfo::from_keys(out, crate::util::now_utc().max(info.updated_utc + 1))?
+            .with_check(folder_key, folder),
+    )
 }
 
 /// Wrap `folder_key` for one enrolled credential with a fresh salt (one touch).
 pub fn rewrap_one(
     key: &dyn SecurityKey,
+    vault: &VaultId,
     folder: &FolderId,
     folder_key: &SecretKey,
     k: &EnrolledKey,
@@ -523,7 +628,7 @@ pub fn rewrap_one(
     let secret = key.hmac_secret(&k.credential, &salt)?;
     let wrapped = crypto::encrypt(
         &wrap_key(&secret, folder),
-        &aad(folder),
+        &aad(vault, folder),
         folder_key.as_bytes(),
     )?;
     Ok(EnrolledKey {
@@ -643,23 +748,56 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_build_without_the_feature_refuses_software_keys() {
+        // Unit tests run with the feature; the backend of a build without
+        // it is the same type whatever the method says.
+        const { assert!(SOFTWARE_KEYS_BUILT_IN) };
+        let none = NoSoftwareKey;
+        assert!(none.make_credential().is_err());
+        assert!(none.hmac_secret("software:/x/key", &[0u8; 32]).is_err());
+        let vault = VaultId::random();
+        let folder = FolderId::random();
+        assert!(enroll(
+            &none,
+            Method::Software,
+            &vault,
+            &folder,
+            &SecretKey::random()
+        )
+        .is_err());
+    }
+
+    #[test]
     fn software_key_wraps_and_unwraps_and_other_keys_fail() {
         let tmp = tempfile::tempdir().unwrap();
         let k = SoftwareKey {
             path: tmp.path().join("key"),
         };
+        let vault = VaultId::random();
         let folder = FolderId::random();
         let fk = SecretKey::random();
-        let info = enroll(&k, Method::Software, &folder, &fk).unwrap();
+        let info = enroll(&k, Method::Software, &vault, &folder, &fk).unwrap();
         assert!(!info.wrapped_key_hex.contains(&fk.to_hex()));
-        assert_eq!(unlock(&k, &folder, &info).unwrap().to_hex(), fk.to_hex());
+        assert_eq!(
+            unlock(&k, &vault, &folder, &info).unwrap().to_hex(),
+            fk.to_hex()
+        );
         let other = SoftwareKey {
             path: tmp.path().join("other"),
         };
         other.make_credential().unwrap();
-        assert!(unlock(&other, &folder, &info).is_err());
-        // The same wrapped key does not open a different folder id.
-        assert!(unlock(&k, &FolderId::random(), &info).is_err());
+        assert!(unlock(&other, &vault, &folder, &info).is_err());
+        // The same wrapped key does not open a different folder id, nor the
+        // same folder id in another vault (the record copied over).
+        assert!(unlock(&k, &vault, &FolderId::random(), &info).is_err());
+        assert!(unlock(&k, &VaultId::random(), &folder, &info).is_err());
+        let rewrapped = rewrap_one(&k, &vault, &folder, &fk, &info.keys()[0]).unwrap();
+        let again = StrongroomInfo::from_keys(vec![rewrapped], 2).unwrap();
+        assert_eq!(
+            unlock(&k, &vault, &folder, &again).unwrap().to_hex(),
+            fk.to_hex()
+        );
+        assert!(unlock(&k, &VaultId::random(), &folder, &again).is_err());
     }
 
     #[test]
@@ -671,16 +809,20 @@ mod tests {
         let spare = SoftwareKey {
             path: tmp.path().join("spare"),
         };
+        let vault = VaultId::random();
         let folder = FolderId::random();
         let fk = SecretKey::random();
-        let mut info = enroll(&first, Method::Software, &folder, &fk).unwrap();
-        let k = enroll_key(&spare, Method::Software, &folder, &fk, "safe").unwrap();
+        let mut info = enroll(&first, Method::Software, &vault, &folder, &fk).unwrap();
+        let k = enroll_key(&spare, Method::Software, &vault, &folder, &fk, "safe").unwrap();
         let mut keys = info.keys();
         keys.push(k);
         info = StrongroomInfo::from_keys(keys, 2).unwrap();
         assert_eq!(info.keys().len(), 2);
         for key in [&first, &spare] {
-            assert_eq!(unlock(key, &folder, &info).unwrap().to_hex(), fk.to_hex());
+            assert_eq!(
+                unlock(key, &vault, &folder, &info).unwrap().to_hex(),
+                fk.to_hex()
+            );
         }
         assert_eq!(info.find_key("safe").unwrap(), 1);
         assert_eq!(info.find_key("1").unwrap(), 0);

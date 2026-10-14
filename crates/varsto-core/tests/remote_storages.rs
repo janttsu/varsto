@@ -171,6 +171,7 @@ fn s3_backend_against_local_s3_server() {
         storage_class: None,
         cold: false,
         place: String::new(),
+        allow_insecure_http: false,
     };
     let secrets = |_: &str| Some("testsecret".to_string());
     let st = spec.open_with(&secrets).unwrap();

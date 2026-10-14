@@ -1,0 +1,5 @@
+# cargo-audit configuration (CI runs `cargo audit` before the tests). The
+# reasons are in deny.toml next to the same advisory id; keep the two in step.
+[advisories]
+ignore = [
+]

@@ -289,8 +289,6 @@ pub fn quote(s: &str) -> String {
     out
 }
 
-const WORDS: &str = "<24 recovery words>";
-
 // ----- building ----------------------------------------------------------------
 
 fn place_of(spec: &StorageSpec) -> Option<String> {
@@ -749,11 +747,11 @@ pub fn build(inputs: &Inputs) -> RecoveryGuide {
         id: "shares".into(),
         title: tx("Only shares of the kit? Rebuild the words", &[]),
         notes: vec![tx(
-            "With two of the three shares this prints the 24 words.",
+            "With two of the three shares this prints the 24 words. The command asks for the shares, one per line and without echo, so they stay out of the shell history.",
             &[],
         )],
         commands: vec![
-            "varsto recovery combine \"<index>: <24 words>\" \"<index>: <24 words>\"".into(),
+            "varsto recovery combine --check \"<key check>\"".into(),
         ],
     });
 
@@ -790,8 +788,7 @@ pub fn build(inputs: &Inputs) -> RecoveryGuide {
             join.commands
                 .push("read -rs VARSTO_S3_SECRET && export VARSTO_S3_SECRET".into());
             let mut c = format!(
-                "varsto join --words {} --storage-name {} --s3-endpoint {} --s3-bucket {} --s3-region {}",
-                quote(WORDS),
+                "varsto join --storage-name {} --s3-endpoint {} --s3-bucket {} --s3-region {}",
                 quote(name),
                 quote(endpoint),
                 quote(bucket),
@@ -810,8 +807,7 @@ pub fn build(inputs: &Inputs) -> RecoveryGuide {
                 &[("storage", name), ("path", &path)],
             ));
             join.commands.push(format!(
-                "varsto join --words {} --storage-name {} --storage-path {}",
-                quote(WORDS),
+                "varsto join --storage-name {} --storage-path {}",
                 quote(name),
                 quote(&path)
             ));
@@ -830,10 +826,10 @@ pub fn build(inputs: &Inputs) -> RecoveryGuide {
                     "rclone mount {} \"<empty directory>\" --daemon",
                     quote(remote)
                 ));
-                join.commands.push(format!(
-                    "varsto join --words {} --storage-name mounted --storage-path \"<empty directory>\"",
-                    quote(WORDS)
-                ));
+                join.commands.push(
+                    "varsto join --storage-name mounted --storage-path \"<empty directory>\""
+                        .into(),
+                );
             } else {
                 join.notes.push(tx(
                     "This vault has no storage a new device can join through yet: add a bucket or a directory outside this device.",
@@ -843,7 +839,7 @@ pub fn build(inputs: &Inputs) -> RecoveryGuide {
         }
     }
     join.notes.push(tx(
-        "Varsto asks for a passphrase for the new device. The words stay in the shell history: clear it afterwards.",
+        "Varsto asks for the 24 words and then for a passphrase for the new device (at least 12 characters). Neither goes on the command line, so nothing stays in the shell history.",
         &[],
     ));
     steps.push(join);
@@ -855,10 +851,11 @@ pub fn build(inputs: &Inputs) -> RecoveryGuide {
             notes: vec![
                 tx("A device that joins with the words reads everything, but the other devices ignore what it writes until an administrator adds it to the organization. If an administrator device survives, add the new device there:", &[]),
                 tx("If no administrator device is left, the root words can appoint an administrator only among devices already in the organization; the data stays readable with the recovery words.", &[]),
+                tx("The administrator command asks for the 24 root words without echo.", &[]),
             ],
             commands: vec![
                 "varsto org add-device \"<new device>\" --user \"<your name>\"".into(),
-                "varsto org admin add \"<device>\" --root-words \"<24 root words>\"".into(),
+                "varsto org admin add \"<device>\"".into(),
             ],
         });
     }

@@ -23,6 +23,26 @@ fn varsto(home: &Path, args: &[&str]) -> Output {
         .expect("run varsto")
 }
 
+/// Like `ok`, with the vault key in `VARSTO_VAULT_KEY` (`join` takes it from
+/// the environment, a file or standard input, never from the command line).
+fn ok_with_key(home: &Path, key: &str, args: &[&str]) -> serde_json::Value {
+    let out = Command::new(env!("CARGO_BIN_EXE_varsto"))
+        .arg("--home")
+        .arg(home)
+        .arg("--json")
+        .args(args)
+        .env("VARSTO_PASSPHRASE", "test passphrase")
+        .env("VARSTO_VAULT_KEY", key)
+        .output()
+        .expect("run varsto");
+    assert!(
+        out.status.success(),
+        "varsto {args:?} failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    serde_json::from_str(&String::from_utf8_lossy(&out.stdout)).unwrap_or_default()
+}
+
 fn ok(home: &Path, args: &[&str]) -> serde_json::Value {
     let out = varsto(home, args);
     let stdout = String::from_utf8_lossy(&out.stdout).to_string();
@@ -112,14 +132,13 @@ fn restic_backup_of_the_mirror_restores_byte_for_byte() {
     fs::write(docs.join("deep/er/big.bin"), &big).unwrap();
     fs::write(photos.join("p.jpg"), b"not really a photo").unwrap();
     ok(&a, &["sync"]);
-    ok(
+    ok_with_key(
         &b,
+        &key,
         &[
             "join",
             "--name",
             "nas",
-            "--vault-key",
-            &key,
             "--storage-path",
             storage.to_str().unwrap(),
         ],

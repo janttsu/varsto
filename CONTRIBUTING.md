@@ -12,7 +12,7 @@ Thanks for your interest. Varsto is alpha (0.0.1-alpha.13) and the contribution 
 - **Logging.** Never log secrets, keys, file names or paths in clear text. Use the sanctioned logging macros and the secret wrapper types; see [docs/architecture/logging.md](docs/architecture/logging.md).
 - **One name in one place.** The product name lives in `brand/brand.toml`; do not hard-code it where it can be avoided, because the working name may change.
 - **Licence headers.** Every source file (Rust, shell, JavaScript, CSS) starts with `SPDX-License-Identifier: PolyForm-Shield-1.0.0`. Markdown, JSON, YAML and HTML files carry no header.
-- **Rust.** Stable toolchain (see `rust-version` in `Cargo.toml`). `cargo fmt --all --check`, `cargo clippy --workspace --all-targets` and `cargo test --workspace` must pass before a pull request.
+- **Rust.** Stable toolchain (see `rust-version` in `Cargo.toml`). `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings` and `cargo test --workspace` must pass before a pull request. CI runs them, and also `cargo audit` and `cargo deny check` (`deny.toml`: permissive licences only, no known vulnerabilities); a new dependency with another licence, or an advisory without a fix, needs an entry there with its reason.
 
 ## Licence of contributions
 

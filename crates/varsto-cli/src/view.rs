@@ -140,7 +140,7 @@ pub fn respond(
         .map(|h| h.value.as_str().to_string());
     // Decrypt under the state lock, like /api/open; the bytes stay in memory.
     let result = {
-        let mut st = state.lock().unwrap();
+        let mut st = state.lock().unwrap_or_else(|e| e.into_inner());
         match st.engine.as_mut() {
             None => Err(plain(400, "vault is locked")),
             Some(engine) => match engine.view_size(&folder, &path) {

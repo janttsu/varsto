@@ -34,6 +34,8 @@ use crate::snapshot::Snapshot;
 /// What the command line suggests.
 pub const REBUILD_COMMAND: &str = "varsto ledger rebuild";
 pub const REBUILD_FROM_STORAGE_COMMAND: &str = "varsto ledger rebuild --from-storage";
+pub const CLEAN_JUNK_COMMAND: &str = "varsto ledger clean-junk --yes";
+pub const RESOLVE_EPOCH_COMMAND: &str = "varsto device resolve-epoch";
 const REPAIR_ADVICE: &str =
     "pair this computer again as a new device (`varsto reset --yes`, then `varsto join`)";
 
@@ -55,18 +57,76 @@ const LOST_CHECK_EVERY: i64 = 3600;
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct LedgerProblem {
     /// `local_ledger_missing`, `local_files_damaged`, `local_batches_missing`,
-    /// `behind_pushed`, `behind_storage`, `fenced`, `forked`,
+    /// `behind_pushed`, `behind_storage`, `fenced`, `forked`, `epoch_fork`,
     /// `no_ledger_anywhere`.
     pub code: String,
     pub detail: String,
+}
+
+/// Another device's ledger batches this device lacks: another full device
+/// said (in a signed batch, `seen`) that it holds them up to `seen`, or
+/// batches up to `seen` wait here for a predecessor no storage offered.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LedgerBehind {
+    pub device: String,
+    pub name: String,
+    /// The newest batch of the device held here (the end of its chain).
+    pub held: u64,
+    pub seen: u64,
+    /// Pulls in a row that found it so; from `WITHHOLD_PULLS` on, a
+    /// storage may be withholding batches and `warnings` says so.
+    pub pulls: u32,
+}
+
+/// Pulls in a row a gap must survive before it is reported as a storage
+/// that may be withholding batches.
+pub const WITHHOLD_PULLS: u32 = 3;
+
+/// What the ledger pulls noticed that needs no repair but should be seen
+/// (`ledger/watch.json`, kept across runs).
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub(super) struct Watch {
+    #[serde(default)]
+    pub(super) behind: BTreeMap<DeviceId, LedgerBehind>,
+    /// Batches that did not parse or verify on some storage (last pull).
+    #[serde(default)]
+    pub(super) malformed: u64,
+    /// Batches refused: a Lamport time no device can have reached, or too
+    /// far ahead of the chain (every pull so far).
+    #[serde(default)]
+    pub(super) refused: u64,
+    /// Events left out of the view because their signer may not make them.
+    #[serde(default)]
+    pub(super) events_refused: u64,
+    /// Objects under this device's own ledger prefix that do not verify
+    /// with its key, by storage name: junk someone else wrote. They never
+    /// fence this device; `varsto ledger clean-junk --yes` deletes them.
+    #[serde(default)]
+    pub(super) junk: BTreeMap<String, BTreeSet<String>>,
+}
+
+const WATCH_FILE: &str = "ledger/watch.json";
+
+impl Watch {
+    pub(super) fn load(home: &Path) -> Watch {
+        util::read_json(&home.join(WATCH_FILE)).unwrap_or_default()
+    }
+
+    pub(super) fn save(&self, home: &Path) {
+        // Never recreate a ledger directory that was removed.
+        if home.join("ledger").is_dir() {
+            let _ = util::write_json(&home.join(WATCH_FILE), self);
+        }
+    }
 }
 
 /// The state of this device's ledger, for `status`, the service and the
 /// interface. `state` is `ok`, `rebuild_needed` (the local ledger was lost
 /// or damaged), `fenced` (the storages hold newer batches of this device
 /// than it has), `forked` (another copy of this identity signed a
-/// different history), `no_ledger` (no ledger anywhere while folders hold
-/// files) or `repairing`.
+/// different history), `epoch_fork` (two devices wrote one key epoch
+/// number; the user keeps one), `no_ledger` (no ledger anywhere while
+/// folders hold files) or `repairing`.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct LedgerHealth {
     pub state: String,
@@ -84,6 +144,27 @@ pub struct LedgerHealth {
     pub own_head: u64,
     /// The newest own batch or checkpoint seen on a storage after it.
     pub storage_ahead: Option<u64>,
+    /// Other devices' batches this device lacks (`LedgerBehind`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub behind: Vec<LedgerBehind>,
+    /// Ledger batches that did not parse or verify on a storage at the
+    /// last pull (skipped; the other storages' copies count).
+    #[serde(default)]
+    pub batches_malformed: u64,
+    /// Ledger batches refused (a Lamport time no device can have reached).
+    #[serde(default)]
+    pub batches_refused: u64,
+    /// Ledger events left out because their signer may not make them (a
+    /// replica's or a member's outside its scope).
+    #[serde(default)]
+    pub events_refused: u64,
+    /// Objects under this device's own ledger name on the storages that
+    /// it did not sign (junk; `varsto ledger clean-junk --yes`).
+    #[serde(default)]
+    pub junk_objects: u64,
+    /// Things worth knowing that do not stop syncing.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
 }
 
 impl LedgerHealth {
@@ -91,10 +172,13 @@ impl LedgerHealth {
         self.state == "ok"
     }
 
-    /// One line: "ok", or what is wrong and what to do.
+    /// One line: "ok", or what is wrong and what to do (with warnings).
     pub fn describe(&self) -> String {
         if self.is_ok() {
-            return "ok".into();
+            if self.warnings.is_empty() {
+                return "ok".into();
+            }
+            return format!("ok; warning: {}", self.warnings.join("; "));
         }
         let what: Vec<&str> = self.problems.iter().map(|p| p.detail.as_str()).collect();
         let mut line = if what.is_empty() {
@@ -120,6 +204,8 @@ impl LedgerHealth {
 /// What this engine knows to be wrong with its ledger.
 #[derive(Default)]
 pub(super) struct Alarm {
+    /// What the pulls noticed (`ledger/watch.json`).
+    pub(super) watch: Watch,
     /// The local copy of this device's own history was lost or damaged.
     local: Vec<LedgerProblem>,
     notes: Vec<String>,
@@ -202,6 +288,7 @@ impl Alarm {
         a.fork = util::read_json::<ForkFile>(&e.home.join(FORK_FILE))
             .ok()
             .map(|f| f.detail);
+        a.watch = Watch::load(&e.home);
         a
     }
 
@@ -281,6 +368,17 @@ pub struct StorageRebuildReport {
     pub manifests_announced: u64,
     pub snapshots_announced: u64,
     pub batches: u64,
+}
+
+/// What `ledger_clean_junk` found and deleted.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct JunkReport {
+    pub dry_run: bool,
+    /// This device's own objects that verify (left alone).
+    pub genuine: u64,
+    /// "<storage>: <object>" for each object that does not.
+    pub junk: Vec<String>,
+    pub deleted: u64,
 }
 
 /// What `ledger_rebuild` did.
@@ -368,6 +466,23 @@ struct OwnListing {
 }
 
 impl Engine {
+    /// One sentence on key epoch `e`, written by two devices.
+    fn epoch_fork_detail(&self, e: u32) -> String {
+        let who: Vec<String> = self
+            .epochs
+            .forks
+            .found
+            .get(&e)
+            .into_iter()
+            .flatten()
+            .map(|d| format!("{} ({})", self.device_name(d), d.short()))
+            .collect();
+        format!(
+            "two devices wrote key epoch {e} at once: {}",
+            who.join(" and ")
+        )
+    }
+
     /// The ledger's state as far as this device knows without reading a
     /// storage (see `ledger_check_storages` for the one cheap read).
     pub fn ledger_health(&self) -> LedgerHealth {
@@ -394,6 +509,13 @@ impl Engine {
                 detail: "the storages hold newer ledger batches of this device than it has (restored from an older copy?); it signs nothing until it continues from them".into(),
             });
         }
+        let epoch_forks = self.epochs.forks.unresolved();
+        for e in &epoch_forks {
+            problems.push(LedgerProblem {
+                code: "epoch_fork".into(),
+                detail: self.epoch_fork_detail(*e),
+            });
+        }
         if a.no_ledger {
             problems.push(LedgerProblem {
                 code: "no_ledger_anywhere".into(),
@@ -404,6 +526,8 @@ impl Engine {
             "repairing"
         } else if a.fork.is_some() {
             "forked"
+        } else if !epoch_forks.is_empty() {
+            "epoch_fork"
         } else if !a.local.is_empty() {
             "rebuild_needed"
         } else if a.no_ledger {
@@ -417,12 +541,39 @@ impl Engine {
             "rebuild_needed" | "fenced" => Some(REBUILD_COMMAND.to_string()),
             "no_ledger" => Some(REBUILD_FROM_STORAGE_COMMAND.to_string()),
             "forked" => Some(REPAIR_ADVICE.to_string()),
+            "epoch_fork" => Some(format!(
+                "{RESOLVE_EPOCH_COMMAND} {} --keep <device>",
+                epoch_forks[0]
+            )),
             _ => None,
         };
         // A fenced device that holds nothing of its own lost its ledger:
         // continuing from the storages cannot contradict anything here.
         let automatic = matches!(state, "rebuild_needed" | "no_ledger" | "repairing")
             || (state == "fenced" && own_head == 0);
+        let behind: Vec<LedgerBehind> = a.watch.behind.values().cloned().collect();
+        let mut warnings: Vec<String> = behind
+            .iter()
+            .filter(|b| b.pulls >= WITHHOLD_PULLS)
+            .map(|b| {
+                format!(
+                    "a storage may be withholding ledger batches of {} (held up to #{}, another device holds #{})",
+                    b.name, b.held, b.seen
+                )
+            })
+            .collect();
+        let junk: u64 = a.watch.junk.values().map(|k| k.len() as u64).sum();
+        if junk > 0 {
+            warnings.push(format!(
+                "{junk} objects under this device's ledger name on the storages were not signed by it (junk, ignored); `{CLEAN_JUNK_COMMAND}` deletes them"
+            ));
+        }
+        if a.watch.malformed > 0 {
+            warnings.push(format!(
+                "{} ledger batches on a storage did not parse or verify and were skipped",
+                a.watch.malformed
+            ));
+        }
         LedgerHealth {
             state: state.into(),
             problems,
@@ -431,6 +582,12 @@ impl Engine {
             suggestion,
             own_head,
             storage_ahead: a.storage_ahead,
+            behind,
+            batches_malformed: a.watch.malformed,
+            batches_refused: a.watch.refused,
+            events_refused: a.watch.events_refused,
+            junk_objects: junk,
+            warnings,
         }
     }
 
@@ -439,6 +596,12 @@ impl Engine {
     pub(super) fn ensure_ledger_writable(&self) -> Result<()> {
         if let Some(f) = &self.ledger_alarm.fork {
             bail!("{f}; this device signs nothing more: {REPAIR_ADVICE}");
+        }
+        if let Some(e) = self.epochs.forks.unresolved().first() {
+            bail!(
+                "{}; nothing is signed until you keep one: run `{RESOLVE_EPOCH_COMMAND} {e} --keep <device>`",
+                self.epoch_fork_detail(*e)
+            );
         }
         if !self.ledger_alarm.local.is_empty() {
             let what: Vec<&str> = self
@@ -461,31 +624,125 @@ impl Engine {
     }
 
     /// Own batches or checkpoints after the local head on the first hot
-    /// metadata storage that answers: `Some(newest)` when there are any.
-    fn own_objects_ahead(&self) -> Result<Option<u64>> {
-        let me = &self.vault.device_id;
-        let head = self.ledger.head(me).seq;
+    /// metadata storage that answers: `Some(newest)` when there are any
+    /// that this device's key signed. Anything else under its name is junk
+    /// (noted, never a reason to stop signing).
+    fn own_objects_ahead(&mut self) -> Result<Option<u64>> {
+        let me = self.vault.device_id.clone();
+        let head = self.ledger.head(&me).seq;
         let prefix = format!("ledger/{me}/");
         let start = if head == 0 {
             String::new()
         } else {
-            SignedBatch::storage_key(me, head)
+            SignedBatch::storage_key(&me, head)
         };
-        for (_, backend) in self.metadata_storages(false)? {
+        for (spec, backend) in self.metadata_storages(false)? {
             let Ok(keys) = backend.list_after(&prefix, &start) else {
                 continue;
             };
-            let newest = keys
-                .iter()
-                .filter_map(|k| k.strip_prefix(&prefix).and_then(LedgerObject::parse))
-                .map(|o| match o {
+            let mut newest = None;
+            for k in keys {
+                let Some(o) = k.strip_prefix(&prefix).and_then(LedgerObject::parse) else {
+                    continue;
+                };
+                let seq = match o {
                     LedgerObject::Batch(s) | LedgerObject::Checkpoint(s) => s,
-                })
-                .filter(|s| *s > head)
-                .max();
+                };
+                if seq <= head || newest.is_some_and(|n| n >= seq) {
+                    continue;
+                }
+                if self.own_object_genuine(spec.name(), backend.as_ref(), &o)? {
+                    newest = Some(seq);
+                }
+            }
+            self.ledger_alarm.watch.save(&self.home);
             return Ok(newest);
         }
         Ok(None)
+    }
+
+    /// Whether the own ledger object `o` on a storage was signed by this
+    /// device: it parses as a batch or checkpoint of this device under that
+    /// number and verifies with this device's key. One that does not is
+    /// junk: noted (`Watch::junk`) and not read again. Objects that do not
+    /// answer are neither.
+    pub(super) fn own_object_genuine(
+        &mut self,
+        storage: &str,
+        backend: &dyn Storage,
+        o: &LedgerObject,
+    ) -> Result<bool> {
+        let me = self.vault.device_id.clone();
+        let key = match o {
+            LedgerObject::Batch(s) => SignedBatch::storage_key(&me, *s),
+            LedgerObject::Checkpoint(s) => SignedCheckpoint::storage_key(&me, *s),
+        };
+        if self
+            .ledger_alarm
+            .watch
+            .junk
+            .get(storage)
+            .is_some_and(|j| j.contains(&key))
+        {
+            return Ok(false);
+        }
+        let Some(blob) = backend.get(&key)? else {
+            return Ok(false);
+        };
+        let pk = self.keys.signer.public();
+        let genuine = match o {
+            LedgerObject::Batch(s) => serde_json::from_slice::<SignedBatch>(&blob)
+                .is_ok_and(|b| b.device == me && b.seq == *s && b.verify(&pk).is_ok()),
+            LedgerObject::Checkpoint(s) => serde_json::from_slice::<SignedCheckpoint>(&blob)
+                .is_ok_and(|c| c.device == me && c.seq == *s && c.verify(&pk).is_ok()),
+        };
+        if !genuine {
+            log::warn!(storage = storage, key = key.as_str(); "junk under this device's ledger name");
+            self.ledger_alarm
+                .watch
+                .junk
+                .entry(storage.to_string())
+                .or_default()
+                .insert(key);
+        }
+        Ok(genuine)
+    }
+
+    /// Delete the junk under this device's own ledger name on every hot
+    /// metadata storage: objects that do not verify with its key, and
+    /// names it never writes. With `dry_run` they are only listed. Its
+    /// genuine objects are never touched, whatever their number.
+    pub fn ledger_clean_junk(&mut self, dry_run: bool) -> Result<JunkReport> {
+        self.ensure_active()?;
+        let me = self.vault.device_id.clone();
+        let prefix = format!("ledger/{me}/");
+        let mut report = JunkReport {
+            dry_run,
+            ..Default::default()
+        };
+        self.ledger_alarm.watch.junk.clear();
+        for (spec, backend) in self.metadata_storages(false)? {
+            for key in backend.list(&prefix)? {
+                let genuine = match key.strip_prefix(&prefix).and_then(LedgerObject::parse) {
+                    Some(o) => self.own_object_genuine(spec.name(), backend.as_ref(), &o)?,
+                    None => false,
+                };
+                if genuine {
+                    report.genuine += 1;
+                    continue;
+                }
+                report.junk.push(format!("{}: {key}", spec.name()));
+                if !dry_run {
+                    backend.delete(&key)?;
+                    report.deleted += 1;
+                }
+            }
+        }
+        if !dry_run {
+            self.ledger_alarm.watch.junk.clear();
+        }
+        self.ledger_alarm.watch.save(&self.home);
+        Ok(report)
     }
 
     /// Before signing: a storage that holds this identity's batches after
@@ -901,16 +1158,40 @@ impl Engine {
         // every batch after what is held; `ingest_with` checks that each
         // chains onto the one before, here or in the checkpoint.
         let held_to = self.ledger.head(&me).seq;
-        if let Some((&cseq, cholders)) = listing.checkpoints.iter().next_back() {
+        // The newest checkpoint this device's key signed: junk under its
+        // name (a higher number that does not verify) is passed over.
+        let newest_cp = listing
+            .checkpoints
+            .iter()
+            .rev()
+            .find(|(seq, holders)| {
+                self.fetch_own_checkpoint(&storages, holders, **seq, cold_ok)
+                    .is_some()
+                    || holders.iter().all(|i| storages[*i].0.is_cold())
+            })
+            .or_else(|| listing.checkpoints.iter().next_back());
+        if let Some((&cseq, cholders)) = newest_cp {
             let base = self.ledger.head(&me).base.map(|b| b.seq).unwrap_or(0);
             if cseq > held_to.max(base) {
                 if let Some(cp) = self.fetch_own_checkpoint(&storages, cholders, cseq, cold_ok) {
+                    // The batch it ends at stays beside it on the storages.
+                    let anchor =
+                        match self.fetch_own_batch(&storages, &holders(cseq), cseq, cold_ok) {
+                            Ok(Fetched::One(b)) => Some(b),
+                            _ => None,
+                        };
                     match self.key_for_id(&cp.key_id) {
                         Some(key) if cp.open(&key).is_ok() => {
-                            if self.ledger.ingest_checkpoint(cp)? == Ingest::Fork {
-                                return self.refuse_fork(format!(
-                                    "this device's checkpoint #{cseq} on the storages contradicts its own ledger"
-                                ));
+                            match self.ledger.ingest_checkpoint_anchored(cp, anchor.as_ref())? {
+                                Ingest::Fork => {
+                                    return self.refuse_fork(format!(
+                                        "this device's checkpoint #{cseq} on the storages contradicts its own ledger"
+                                    ));
+                                }
+                                Ingest::Refused => bail!(
+                                    "this device's checkpoint #{cseq} on the storages is too far ahead of its ledger and the batch it ends at is missing"
+                                ),
+                                _ => {}
                             }
                             report.adopted_checkpoint = Some(cseq);
                         }
@@ -935,11 +1216,9 @@ impl Engine {
             if seq <= now.seq || now.base.as_ref().is_some_and(|b| seq <= b.seq) {
                 continue;
             }
-            if seq > now.seq + 1 && !now.base.as_ref().is_some_and(|b| b.seq + 1 >= seq) {
-                gap = true;
-            }
             let signed = match self.fetch_own_batch(&storages, h, seq, cold_ok)? {
                 Fetched::One(b) => b,
+                // Junk under this device's name: not its history.
                 Fetched::None => continue,
                 Fetched::Disagree => {
                     return self.refuse_fork(format!(
@@ -947,15 +1226,20 @@ impl Engine {
                     ))
                 }
             };
+            if seq > now.seq + 1 && !now.base.as_ref().is_some_and(|b| b.seq + 1 >= seq) {
+                gap = true;
+            }
             let key = self.key_for_id(&signed.key_id);
-            match self.ledger.ingest_with(signed, &pk, key.as_ref())? {
+            // Its own history continues past a gap no storage can fill:
+            // signing a number it already used would be a fork.
+            match self.ledger.ingest_own_restored(signed, &pk, key.as_ref())? {
                 Ingest::Fork => {
                     return self.refuse_fork(format!(
                         "batch #{seq} of this device on the storages does not continue the history this device holds"
                     ));
                 }
                 Ingest::New => report.adopted_batches += 1,
-                Ingest::Known => {}
+                Ingest::Known | Ingest::Refused | Ingest::Pending => {}
             }
         }
         if gap {

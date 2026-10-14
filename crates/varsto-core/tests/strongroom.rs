@@ -445,3 +445,58 @@ fn rekeying_a_strongroom_re_encrypts_it_under_a_new_key_for_every_enrolled_key()
     a.add_folder("plain", &lab.root.join("plain")).unwrap();
     assert!(a.rekey_strongroom("plain", 5).is_err());
 }
+
+#[test]
+fn a_wrong_folder_key_is_refused_by_unlock_convert_and_rekey() {
+    let lab = lab();
+    let (mut a, _key) = Engine::init(&lab.a_home, "laptop", PASS).unwrap();
+    a.chunker = ChunkerParams::SMALL;
+    a.add_storage(lab.storage.clone()).unwrap();
+    let first = SoftwareKey {
+        path: lab.a_home.join("software-security-key"),
+    };
+    a.create_strongroom("vault", &lab.a_dir, Method::Software, &first, 15)
+        .unwrap();
+    fs::write(lab.a_dir.join("deed.pdf"), b"title deed").unwrap();
+    a.push("vault").unwrap();
+    let good = a.unlock_strongroom_enrolled("vault", 15).unwrap();
+    a.lock_strongroom("vault").unwrap();
+
+    // A mistyped or foreign 32-byte key used to be accepted and "unlocked".
+    let wrong = varsto_core::crypto::SecretKey::random();
+    let err = a
+        .unlock_strongroom_with_key("vault", &wrong.to_hex(), 5)
+        .unwrap_err();
+    assert!(format!("{err:#}").contains("not the key"), "{err:#}");
+    assert!(a.read_file("vault", "deed.pdf").is_err(), "still locked");
+    a.unlock_strongroom_with_key("vault", &good.to_hex(), 5)
+        .unwrap();
+    assert_eq!(a.read_file("vault", "deed.pdf").unwrap(), b"title deed");
+
+    // A rekey with a key that does not match its wraps' commitment is refused
+    // before anything is touched.
+    let (rec, info) = {
+        let (r, _) = a.folders().into_iter().next().unwrap();
+        let i = r.strongroom.clone().unwrap();
+        (r, i)
+    };
+    assert!(!info.check_hex.is_empty());
+    let new_id = varsto_core::ids::FolderId::random();
+    let fk = varsto_core::crypto::SecretKey::random();
+    let new_info =
+        varsto_core::strongroom::rewrap_enrolled(&lab.a_home, a.vault_id(), &new_id, &fk, &info)
+            .unwrap();
+    let err = a
+        .rekey_strongroom_with("vault", &new_id, &wrong, new_info.clone(), 5)
+        .unwrap_err();
+    assert!(format!("{err:#}").contains("not the key"), "{err:#}");
+    assert!(a.strongroom_conversions().is_empty(), "nothing journaled");
+    assert_eq!(a.folders()[0].0.folder_id, rec.folder_id);
+    // Nothing was corrupted: the folder reads and syncs as before, and the
+    // matching key still re-keys it.
+    a.push("vault").unwrap();
+    assert_eq!(a.read_file("vault", "deed.pdf").unwrap(), b"title deed");
+    a.rekey_strongroom_with("vault", &new_id, &fk, new_info, 5)
+        .unwrap();
+    assert_eq!(a.read_file("vault", "deed.pdf").unwrap(), b"title deed");
+}

@@ -19,7 +19,7 @@ for f in "$out"/varsto-"$version"-* "$out"/Varsto-"$version"-*; do
   [ -e "$f" ] || continue
   case "$f" in *"/Varsto-$version-macos.dmg") ;; *) rm -f "$f" ;; esac
 done
-rm -f "$out/SHA256SUMS" "$out/SHA256SUMS.sig" "$out/manifest.json"
+rm -f "$out/SHA256SUMS" "$out/SHA256SUMS.sig" "$out/manifest.json" "$out/manifest.json.minisig"
 targets=("$@")
 have_zig=0
 command -v cargo-zigbuild >/dev/null 2>&1 && have_zig=1

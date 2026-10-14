@@ -466,7 +466,7 @@ ssh_pwauth: false
         "-e", "ssh -i " + str(key_path()) + " -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR",
         str(repo) + "/", f"{USER}@{ip_of(BUILD_VM)}:src/"])
     log("build VM: cargo build --release --target x86_64-unknown-linux-musl")
-    r = ssh(BUILD_VM, "cd src && ~/.cargo/bin/cargo build -q --release --locked -p varsto-cli --target x86_64-unknown-linux-musl 2>&1 | tail -20", check=False, capture=True)
+    r = ssh(BUILD_VM, "cd src && ~/.cargo/bin/cargo build -q --release --locked -p varsto-cli --features software-key --target x86_64-unknown-linux-musl 2>&1 | tail -20", check=False, capture=True)
     if r.returncode != 0 or ssh(BUILD_VM, "test -x src/target/x86_64-unknown-linux-musl/release/varsto", check=False).returncode != 0:
         raise SystemExit("build failed:\n" + (r.stdout or "") + (r.stderr or ""))
     sh(["scp", "-q", "-i", str(key_path()), "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null",

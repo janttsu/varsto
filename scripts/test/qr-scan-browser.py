@@ -27,9 +27,20 @@ import subprocess
 import sys
 import tempfile
 import time
+import urllib.request
 
 from PIL import Image
 from playwright.sync_api import sync_playwright
+
+
+def boot_url(port, token):
+    """The address that opens the interface: a one-time code, not the token."""
+    req = urllib.request.Request(
+        f"http://127.0.0.1:{port}/api/session/boot", data=b"{}", method="POST",
+        headers={"X-Varsto-Token": token, "Content-Type": "application/json"})
+    with urllib.request.urlopen(req) as r:
+        return f"http://127.0.0.1:{port}/?boot={json.load(r)['boot']}"
+
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 VARSTO = sys.argv[1] if len(sys.argv) > 1 else os.path.join(ROOT, "target", "debug", "varsto")
@@ -104,7 +115,7 @@ def main():
             sys.exit("the service did not start")
         port, token = st["port"], st["token"]
         time.sleep(1)
-        page_url = f"http://127.0.0.1:{port}/?token={token}"
+        page_url = boot_url(port, token)
         with sync_playwright() as p:
             # Render the codes first (a browser without a fake camera).
             b = p.chromium.launch(executable_path=CHROMIUM)

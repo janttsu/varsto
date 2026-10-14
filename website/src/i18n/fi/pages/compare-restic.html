@@ -1,0 +1,46 @@
+---
+title: restic- ja borg-vaihtoehto: Varsto, restic ja BorgBackup vertailussa
+nav: Compare
+output: compare/restic/index.html
+description: Käytätkö resticiä tai BorgBackupia salattuihin varmuuskopioihin ja mietit, miten Varsto suhtautuu niihin? Mitä nämä kaksi varmuuskopio-ohjelmaa tekevät, miten ne eroavat synkronoinnista ja miten Varston restic-peili liittyy niihin.
+---
+    <p class="back-link"><a href="{{L}}compare/">Kaikki vertailut</a></p>
+    <h1>Varsto, restic ja BorgBackup</h1>
+    <p class="lead">restic ja BorgBackup (borg) ovat varmuuskopio-ohjelmia: ne ottavat hakemistoista versioita salattuun, deduplikoituun varastoon ja palauttavat ne myöhemmin. Ne eivät ole synkronointityökaluja eivätkä yritä olla. Varsto tekee sekä synkronoinnin että omat varmuuskopionsa, ja sen restic-peili antaa resticin varmuuskopioida holvin Varstosta riippumatta.</p>
+
+    <h2>Miten restic ja borg toimivat</h2>
+    <p><strong>restic</strong> on yksi suoritettava tiedosto, joka toimii ilman palvelinta. <code>restic backup</code> ottaa hakemistosta version varastoon siirtäen vain tiedostojen muuttuneet osat; <code>restic snapshots</code> listaa versiot, <code>restic restore</code> palauttaa yhden ja <code>restic check</code> tarkistaa varaston. Varasto voi olla paikallisella levyllä tai monenlaisissa tallennuspaikoissa, itse ylläpidetyissä ja verkkopalveluissa, ja kaikki siinä oleva on salattua. <strong>borg</strong> on niin ikään deduplikoiva varmuuskopio-ohjelma: tiedostot pilkotaan paloihin, ja varastossa jo olevaa palaa ei tallenneta uudestaan, tiedot salataan asiakaspäässä (AES-256 ja HMAC-SHA256) ja halutessa pakataan, varasto on paikallisella levyllä tai millä tahansa SSH:n yli tavoitettavalla koneella, ja arkistot voi liittää tiedostojärjestelmäksi selailua ja palautusta varten. Kumpikaan ei pidä laitteitasi tahdissa: varmuuskopio ajetaan valitsemaasi aikaan yhdeltä koneelta yhteen varastoon, ja koneen tiedostot jäävät sellaisiksi kuin olivat.</p>
+
+    <h2>Rinnakkain</h2>
+    <table class="compare-table">
+      <thead><tr><th scope="col"></th><th scope="col">restic / borg</th><th scope="col">Varsto</th></tr></thead>
+      <tbody>
+      <tr><th scope="row">Mihin se on tarkoitettu</th><td>Varmuuskopiointiin: aikataulutettuja versioita hakemistoista varastoon, palautettaviksi tarvittaessa.</td><td>Synkronointiin laitteidesi välillä, ja varmuuskopioihin vain luku -versioina tallennuspaikoillasi.</td></tr>
+      <tr><th scope="row">Missä tiedostosi ovat</th><td>Varmuuskopioitavalla koneella ja varastossa: paikallisella levyllä, SSH-koneella (borg) tai monenlaisissa tallennuspaikoissa (restic).</td><td>Omilla laitteillasi ja valitsemissasi tallennuspaikoissa: S3-yhteensopivissa bucketeissa, missä tahansa rclone-etäkohteessa, paikallisissa tai verkkohakemistoissa sekä irrotettavien levyjen levyvarastoissa.</td></tr>
+      <tr><th scope="row">Tili tai keskuspalvelin</th><td>Ei kumpaakaan; vain tallennuspaikka, jossa varasto on.</td><td>Ei kumpaakaan. Varstolla ei ole palvelinta; laitteet löytävät toisensa tallennuspaikkojesi kautta ja lähiverkossa.</td></tr>
+      <tr><th scope="row">Salaus</th><td>Kyllä, asiakaspäässä, kaikelle varastossa olevalle (restic: salasanalla suojattu varasto; borg: AES-256 ja HMAC-SHA256). Kypsä ja laajasti tarkasteltu.</td><td>Päästä päähän, asiakaspäässä, ennen kuin mitään lähtee laitteelta; hybridi post-kvanttisalaus (ML-KEM avainten jakamiseen, Ed25519 + ML-DSA-65 -allekirjoitukset). Ei vielä riippumattomasti auditoitu.</td></tr>
+      <tr><th scope="row">Jatkuva synkronointi laitteiden välillä</th><td>Ei: varmuuskopio otetaan yhdeltä koneelta valitsemaasi aikaan; muut koneet eivät saa tiedostoja.</td><td>Kyllä: laitteet synkronoituvat tallennuspaikkojesi kautta ja suoraan vertaisyhteydellä, kun ne tavoittavat toisensa.</td></tr>
+      <tr><th scope="row">Tietää, missä jokainen kopio on</th><td>Varasto tuntee omat versionsa; mikään ei seuraa kopioita sen ulkopuolella.</td><td>Kyllä: allekirjoitettu kirjanpito kertoo, mikä tallennuspaikka ja laite säilyttää kunkin lohkon; säilytyssäännöt (oletuksena 1 kopio missä tahansa, 1 ulkoinen ja 1 omilla laitteillasi tai levyilläsi, toisen laitteen tarkistamana 30 päivän sisällä) varoittavat, kun jokin sääntö ei täyty.</td></tr>
+      <tr><th scope="row">Irrotettavat ja verkosta irti olevat levyt</th><td>Varasto voi olla irrotettavalla levyllä; mikään ei seuraa levyä, kun se on poissa.</td><td>Kyllä: levyvarastot täytetään, tarkistetaan ja tunnistetaan, kun levyt palaavat; poissa olevalla levyllä olevat tiedostot pyytävät kyseistä levyä.</td></tr>
+      <tr><th scope="row">Varmuuskopiot</th><td>Kyllä: deduplikoituja, salattuja versioita säilytyssäännöin (<code>forget</code> ja <code>prune</code>), tarkistettavia ja palautettavia pelkällä työkalulla.</td><td>Kyllä: valitse kansio millä tahansa laitteella. Varsto säilyttää siitä salattuja, vain luku -muotoisia versioita pelkästään ulkoisissa tallennuspaikoissasi, ei koskaan laitteillasi. Versiot säilytetään valitsemasi päivämäärän ajan (oletuksena 90 päivää), ja vanhentuneet poistetaan. Minkä tahansa version voi palauttaa nimeämääsi hakemistoon sovelluksesta tai komentoriviltä.</td></tr>
+      <tr><th scope="row">Käyttö yhdessä</th><td>restic voi varmuuskopioida minkä tahansa hakemiston, myös Varsto-kansion.</td><td>Tulossa 0.0.1-alpha.13:n jälkeen, ei vielä julkaistu: restic-peili. Yksi laite pitää holvista täydellisen selkokielisen kopion, Varsto tarkistaa kopion eheyden, ja restic varmuuskopioi sen varastoon holvin tallennuspaikkojen ulkopuolelle. Palauttamiseen tarvitaan vain restic ja varaston salasana, joten Varston virhe tai kadonnut holvin avain ei ulotu tuohon kopioon.</td></tr>
+      <tr><th scope="row">Lisenssi ja hinta</th><td>Avoin lähdekoodi, ilmainen: restic BSD-2-Clause, borg BSD-3-Clause.</td><td>Lähdekoodi saatavilla (PolyForm Shield 1.0.0), ilmainen; maksat vain tallennuspalvelun tarjoajallesi.</td></tr>
+      <tr><th scope="row">Kypsyys</th><td>Kypsiä, pitkäikäisiä projekteja.</td><td>Alfa: ei tuotantodatalle, ja formaatit voivat vielä muuttua.</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Kumpi sopii sinulle</h2>
+    <div class="grid two">
+      <div class="card"><h3>restic / borg</h3><p>Valitse restic tai borg, kun tarvitset varmuuskopioita: kypsiä, salattuja, deduplikoituja versioita koneesta, palautettavia pelkällä työkalulla, itse ajamallasi aikataululla.</p></div>
+      <div class="card"><h3>Varsto</h3><p>Valitse Varsto, kun laitteidesi pitää lisäksi pysyä tahdissa, haluat kirjanpidon siitä, missä jokainen kopio on, varoittavat säännöt ja varmuuskopiot, joita mikään ei voi muuttaa, samoissa tallennuspaikoissa. Pidä restic toisena, riippumattomana puolustuslinjana peilin kautta.</p></div>
+    </div>
+    <p class="note">Varsto on alfavaiheen ohjelmisto: älä luota sille tietoja, joista sinulla ei ole muuta kopiota. Sen kryptografiaa ei ole myöskään auditoitu riippumattomasti. Muut tässä esitellyt tuotteet ovat kypsiä. Niitä koskevat tiedot tarkistettiin niiden omasta dokumentaatiosta lokakuussa 2026; hinnat ja tilausvaihtoehdot muuttuvat usein, joten katso ajantasaiset tiedot niiden omilta sivuilta. Korjaukset ovat tervetulleita <a href="{{P}}forum/">foorumilla</a> tai GitHubissa.</p>
+
+    <h2>Lähteet</h2>
+    <ul>
+      <li><a href="https://restic.net/">resticin verkkosivusto</a></li>
+      <li><a href="https://restic.readthedocs.io/en/stable/">resticin dokumentaatio (en)</a></li>
+      <li><a href="https://github.com/restic/restic/blob/master/LICENSE">resticin lisenssi (BSD-2-Clause)</a></li>
+      <li><a href="https://borgbackup.readthedocs.io/en/stable/">BorgBackupin dokumentaatio (en)</a></li>
+      <li><a href="https://github.com/borgbackup/borg/blob/master/LICENSE">BorgBackupin lisenssi (BSD-3-Clause)</a></li>
+    </ul>

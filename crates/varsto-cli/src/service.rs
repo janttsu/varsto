@@ -118,6 +118,9 @@ pub struct ServiceState {
     pub low_space_notified: std::collections::BTreeSet<String>,
     /// Storages a push had to leave out last time (`storage.problem` events).
     pub storage_problems: std::collections::BTreeSet<String>,
+    /// Open and paused move jobs (staged moves to disk pools), as of the
+    /// last time the service looked at them.
+    pub move_jobs: Vec<varsto_core::staged_move::MoveJob>,
 }
 
 /// The storages are asked this often whether they hold newer ledger
@@ -170,6 +173,7 @@ impl ServiceState {
             "quota_full": self.quota_full,
             "paused_folders": self.paused_folders,
             "low_space": self.low_space,
+            "move_jobs": self.move_jobs,
         })
     }
     /// Rank the pool disks for docking next (`disk suggest`) and, at most
@@ -189,6 +193,48 @@ impl ServiceState {
             }
             Err(e) => log::warn!("disk suggestion failed: {e:#}"),
         }
+    }
+    /// Continue the open move jobs that can go on: after a sync (jobs to
+    /// ordinary storages) and whenever a disk of a target pool came or its
+    /// space changed. A disk with room is used at once. Returns whether
+    /// anything ran, so the disk suggestion is computed again.
+    pub fn moves_if_due(&mut self, engine: &mut Engine, after_sync: bool) -> bool {
+        if self.paused {
+            return false;
+        }
+        let runs =
+            engine.move_jobs_run_ready(after_sync, &varsto_core::engine::JobRunLimits::service());
+        for r in &runs {
+            let before = self.move_jobs.iter().find(|j| j.id == r.job.id);
+            if r.report.bytes_done > 0 {
+                log::info!(
+                    "move job {}: {} moved of {}, {} left",
+                    r.job.id,
+                    varsto_core::util::human_bytes(r.job.bytes_done),
+                    varsto_core::util::human_bytes(r.job.bytes_total),
+                    varsto_core::util::human_bytes(r.job.bytes_remaining)
+                );
+            }
+            match (&r.job.state, &r.job.waiting) {
+                (varsto_core::staged_move::JobState::Done, _) => notify(
+                    "Varsto",
+                    &format!(
+                        "The move of {} to {} is finished ({}).",
+                        r.job.folder,
+                        r.job.to,
+                        varsto_core::util::human_bytes(r.job.bytes_done)
+                    ),
+                ),
+                (varsto_core::staged_move::JobState::Open, Some(w))
+                    if before.and_then(|b| b.waiting.as_ref()) != Some(w) =>
+                {
+                    notify("Varsto move", &format!("{}: {}", r.job.folder, w.text));
+                }
+                _ => {}
+            }
+        }
+        self.move_jobs = varsto_core::staged_move::list_active(engine.home());
+        !runs.is_empty()
     }
     /// Store the disk listing; log and notify when a disk appeared or went
     /// away, and ask for a sync when one appeared (pending files may be on it).
@@ -768,7 +814,8 @@ impl ServiceState {
         self.quota_full = full;
         if kept_aside > 0 {
             self.last_result.push_str(&format!(
-                "; read-only: your changes were not published ({kept_aside} file(s) kept aside)"
+                "; read-only: your changes were not published ({kept_aside} {} kept aside)",
+                if kept_aside == 1 { "file" } else { "files" }
             ));
         }
         self.last_error = None;
@@ -838,6 +885,17 @@ struct P2p {
 /// Router port mapping is on in the settings, and not switched off for this
 /// process with `VARSTO_NO_PORT_MAPPING` (tests and throwaway services must
 /// never touch the router of the network they run in).
+/// The router mappings that go into our rendezvous record: none until the
+/// probe through the mapped UDP address came back to us.
+fn published_mappings(
+    pm: &varsto_core::p2p::portmap::PortMapStatus,
+) -> (Vec<std::net::SocketAddr>, Vec<std::net::SocketAddr>) {
+    if !pm.verified {
+        return (Vec::new(), Vec::new());
+    }
+    (pm.tcp.into_iter().collect(), pm.udp.into_iter().collect())
+}
+
 fn port_mapping_wanted(cfg: &varsto_core::vault::P2pConfig) -> bool {
     cfg.port_mapping && std::env::var_os("VARSTO_NO_PORT_MAPPING").is_none()
 }
@@ -1238,8 +1296,9 @@ impl P2p {
             Err(err) => {
                 let kept = self.records.lock().unwrap().clone();
                 log::warn!(
-                    "peer record listing failed, keeping {} known record(s): {err:#}",
-                    kept.len()
+                    "peer record listing failed, keeping {} known {}: {err:#}",
+                    kept.len(),
+                    if kept.len() == 1 { "record" } else { "records" }
                 );
                 kept
             }
@@ -1303,9 +1362,13 @@ impl P2p {
         rec.nat = info.probe.nat;
         rec.reachable |= info.reachable;
         // The router forwards our port: the most direct way in from outside.
+        // A mapping is announced only after our own probe through its UDP
+        // address reached us: an address that does not lead back is noise at
+        // best and a way to point peers elsewhere at worst.
         let pm = self.portmap_status();
-        rec.mapped_tcp = pm.tcp.into_iter().collect();
-        rec.mapped_udp = pm.udp.into_iter().collect();
+        let (mapped_tcp, mapped_udp) = published_mappings(&pm);
+        rec.mapped_tcp = mapped_tcp;
+        rec.mapped_udp = mapped_udp;
         rec.reachable |= pm.verified;
         st.service.p2p_portmap = pm;
         if let Some(node) = &self.quic {
@@ -1396,14 +1459,8 @@ pub fn read_service_file(home: &Path) -> Option<ServiceFile> {
 }
 
 fn write_service_file(home: &Path, f: &ServiceFile) -> Result<()> {
-    fs::create_dir_all(home)?;
-    let p = service_file(home);
-    varsto_core::util::write_atomic(&p, &serde_json::to_vec_pretty(f)?)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(&p, fs::Permissions::from_mode(0o600))?;
-    }
+    varsto_core::util::private_dir(home)?;
+    varsto_core::util::write_atomic(&service_file(home), &serde_json::to_vec_pretty(f)?)?;
     Ok(())
 }
 
@@ -1583,19 +1640,39 @@ pub fn remember_passphrase(home: &Path, pass: &str) -> Result<String> {
     let account = home.display().to_string();
     #[cfg(target_os = "macos")]
     {
-        let out = std::process::Command::new("security")
-            .args([
-                "add-generic-password",
-                "-U",
-                "-s",
-                "varsto",
-                "-a",
-                &account,
-                "-w",
-                pass,
-            ])
-            .output()?;
-        if !out.status.success() {
+        // `security -i` reads its commands from standard input, so the
+        // passphrase is in no process argument (`ps` shows arguments of every
+        // process of the user). Inside a command, double quotes and
+        // backslashes are escaped.
+        use std::io::Write;
+        if pass.contains(['\n', '\r']) {
+            return Err(anyhow!(
+                "the passphrase has a line break; it cannot be kept in the keychain"
+            ));
+        }
+        let quote = |s: &str| format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""));
+        let mut child = std::process::Command::new("security")
+            .arg("-i")
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()?;
+        {
+            let mut stdin = child
+                .stdin
+                .take()
+                .ok_or_else(|| anyhow!("security: no stdin"))?;
+            writeln!(
+                stdin,
+                "add-generic-password -U -s varsto -a {} -w {}",
+                quote(&account),
+                quote(pass)
+            )?;
+        }
+        let out = child.wait_with_output()?;
+        // The interactive mode answers on stdout/stderr with the command's
+        // errors; its exit code is 0 after end of input unless the command failed.
+        if !out.status.success() || String::from_utf8_lossy(&out.stderr).contains("security:") {
             return Err(anyhow!(
                 "security: {}",
                 String::from_utf8_lossy(&out.stderr).trim()
@@ -1692,7 +1769,7 @@ pub fn run(opts: Options) -> Result<()> {
     let token = hex::encode(token_bytes);
     varsto_core::logging::register_secret(&token);
     let port: u16 = bound.rsplit(':').next().unwrap().parse()?;
-    let url = format!("http://{bound}/?token={token}");
+    let url = format!("http://{bound}/");
     fs::create_dir_all(&opts.home)?;
     write_service_file(
         &opts.home,
@@ -1749,14 +1826,13 @@ pub fn run(opts: Options) -> Result<()> {
     }));
     // The token is not printed: stdout ends up in service.log under the
     // tray and launchd. `varsto desktop` reads it from the service file.
-    let public = url.split("?token=").next().unwrap_or(&url).to_string();
-    println!("Varsto service: {public} (open it with `varsto desktop`)");
+    println!("Varsto service: {url} (open it with `varsto desktop`)");
     println!(
         "Only this computer can reach it. Service file: {}",
         service_file(&opts.home).display()
     );
     if opts.open_browser {
-        desktop::open_in_browser(&url);
+        desktop::open_in_browser(&format!("{url}?boot={}", desktop::mint_boot_code()));
     }
     let http_state = state.clone();
     let server = Arc::new(server);
@@ -1826,6 +1902,15 @@ pub fn run(opts: Options) -> Result<()> {
                 }
                 Some(Err(e)) => log::warn!("disk check failed: {e:#}"),
                 None => {}
+            }
+            // A disk came, or one has room it had not: go on with the moves.
+            let st = &mut *st;
+            if let Some(e) = st.engine.as_mut() {
+                let ran = st.service.moves_if_due(e, false);
+                st.service.move_jobs = varsto_core::staged_move::list_active(e.home());
+                if ran {
+                    st.service.suggest_disks(e);
+                }
             }
         }
         // Changed by another process: read them again, watch what is now
@@ -2032,6 +2117,7 @@ pub fn run(opts: Options) -> Result<()> {
                         st.service.backups_if_due(e);
                         st.service.trash_if_due(e);
                         st.service.restic_if_due(e);
+                        st.service.moves_if_due(e, true);
                         st.service.suggest_disks(e);
                         if let Err(err) = e.publish_device_details(st.service.last_sync_utc) {
                             log::info!("device details not published: {err:#}");
@@ -2123,6 +2209,19 @@ pub fn status(home: &Path) -> Option<(ServiceFile, Value)> {
     let url = format!("http://127.0.0.1:{}/api/service", f.port);
     let body = http_get(&url, &f.token).ok()?;
     Some((f, serde_json::from_str(&body).unwrap_or(json!({}))))
+}
+
+/// The address that opens the interface in a browser: a one-time code
+/// (valid for a minute) that the page trades for the session token, so that
+/// the token itself is in no process argument or browser history.
+pub fn boot_url(f: &ServiceFile) -> Result<String> {
+    let base = format!("http://127.0.0.1:{}", f.port);
+    let answer = http_post(&format!("{base}/api/session/boot"), &f.token, "{}")?;
+    let code = serde_json::from_str::<serde_json::Value>(&answer)?["boot"]
+        .as_str()
+        .ok_or_else(|| anyhow!("the service gave no start code"))?
+        .to_string();
+    Ok(format!("{base}/?boot={code}"))
 }
 
 /// Minimal HTTP client for talking to the local service (no extra dependency).
@@ -2582,6 +2681,22 @@ pub mod linux {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_mapping_is_published_only_after_the_probe_reached_us() {
+        let mut pm = varsto_core::p2p::portmap::PortMapStatus {
+            state: "mapped".into(),
+            tcp: Some("203.0.113.5:41000".parse().unwrap()),
+            udp: Some("203.0.113.5:41001".parse().unwrap()),
+            ..Default::default()
+        };
+        assert_eq!(published_mappings(&pm), (vec![], vec![]));
+        pm.verified = true;
+        let (tcp, udp) = published_mappings(&pm);
+        assert_eq!(tcp, vec!["203.0.113.5:41000".parse().unwrap()]);
+        assert_eq!(udp, vec!["203.0.113.5:41001".parse().unwrap()]);
+    }
+
     use notify::event::{AccessKind, AccessMode, CreateKind, DataChange, EventKind, ModifyKind};
 
     fn ev(kind: EventKind, name: &str) -> notify::Event {

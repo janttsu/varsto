@@ -375,7 +375,7 @@ pub(super) fn entry_valid(e: &TrashEntry, folder: &FolderId, writer: &DeviceId) 
     if &e.deleted_by != writer || e.id != entry_id(folder, &e.path, writer, e.clock) {
         return false;
     }
-    if util::check_rel_path(&e.path).is_err() {
+    if crate::names::check_synced_path(&e.path).is_err() {
         return false;
     }
     let mut total: u64 = 0;
@@ -1925,6 +1925,7 @@ impl Engine {
             activity::Unit::Bytes,
         );
         let tmp_dir = self.home.join("trash").join(".restore");
+        util::private_dir(&self.home.join("trash"))?;
         fs::create_dir_all(&tmp_dir)?;
         let mut restored_ids: Vec<(String, i64)> = Vec::new();
         let mut cache_writes: Vec<(String, PathBuf, u64)> = Vec::new();

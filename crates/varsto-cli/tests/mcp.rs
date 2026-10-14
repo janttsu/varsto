@@ -561,6 +561,34 @@ fn a_scoped_key_reaches_only_its_folders_through_the_service() {
     assert_eq!(st, 403, "an analyse key moves nothing");
     let (st, _) = with_key(port, "vmk_0000", "GET", "/api/folders", "");
     assert_eq!(st, 401);
+    // The status of a scoped key holds its folders and nothing about the
+    // vault's devices, storages or paths.
+    let (st, body) = with_key(port, &key, "GET", "/api/status", "");
+    assert_eq!(st, 200, "{body}");
+    let status: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(
+        status.as_object().unwrap().keys().collect::<Vec<_>>(),
+        ["folders"],
+        "{body}"
+    );
+    let names: Vec<&str> = status["folders"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|f| f["name"].as_str())
+        .collect();
+    assert_eq!(names, ["docs"], "{body}");
+    assert!(!body.contains("laptop"), "no device names: {body}");
+
+    // The MCP server without a key refuses to run while the service does:
+    // the session token would give the assistant everything.
+    let mut keyless = Client::start(&home, &[], false);
+    let (err, text) = keyless.tool("varsto_folders", serde_json::json!({}));
+    assert!(
+        err && text.contains("needs an MCP key") && text.contains("mcp key create"),
+        "{text}"
+    );
+    drop(keyless);
 
     // MCP end to end with the key and no passphrase.
     let mut c = Client::start(&home, &[("VARSTO_MCP_KEY", key.as_str())], false);
@@ -595,6 +623,11 @@ fn a_scoped_key_reaches_only_its_folders_through_the_service() {
     assert!(docs.join("trip.txt").exists());
     drop(c);
     assert!(run(&["mcp", "key", "list"]).contains("last used"));
+    // The use is recorded apart from the keys, which a use never rewrites.
+    assert!(home.join("mcp-keys-used.json").exists());
+    let keys: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(home.join("mcp-keys.json")).unwrap()).unwrap();
+    assert!(keys["keys"][0]["last_used_utc"].is_null(), "{keys}");
 
     // Expired, then revoked: 401.
     let raw = fs::read_to_string(home.join("mcp-keys.json")).unwrap();

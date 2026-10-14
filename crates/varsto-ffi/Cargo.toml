@@ -11,8 +11,15 @@ publish = false
 name = "varsto_ffi"
 crate-type = ["staticlib", "cdylib"]
 
+[features]
+default = ["mimalloc"]
+# mimalloc as the global allocator (see varsto-cli).
+mimalloc = ["dep:mimalloc"]
+
 [dependencies]
 varsto-core = { path = "../varsto-core" }
+zeroize.workspace = true
+mimalloc = { workspace = true, optional = true }
 anyhow.workspace = true
 log = { version = "0.4", features = ["std", "kv"] }
 serde.workspace = true

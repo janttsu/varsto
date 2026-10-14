@@ -4,7 +4,8 @@
 //!
 //! ```c
 //! int   varsto_start(const char *home_dir, unsigned short port);  // 0 on success
-//! char *varsto_url(void);           // "http://127.0.0.1:PORT/?token=..." or NULL; free with varsto_free
+//! char *varsto_url(void);           // "http://127.0.0.1:PORT/?boot=..." (one-time code) or NULL; free with varsto_free
+//! char *varsto_token(void);         // the session token for the shell's own API calls (header only); free with varsto_free
 //! void  varsto_free(char *s);
 //! void  varsto_log(int level, const char *msg);  // 1 error … 5 trace, into the core's log
 //! ```
@@ -16,6 +17,12 @@
 use std::ffi::{c_char, CStr, CString};
 use std::path::PathBuf;
 use std::sync::Mutex;
+
+/// mimalloc for every allocation of the app's Rust side (feature
+/// `mimalloc`, on by default; see varsto-cli).
+#[cfg(feature = "mimalloc")]
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 #[path = "../../varsto-cli/src/desktop.rs"]
 mod desktop;
@@ -96,11 +103,27 @@ pub extern "C" fn varsto_url() -> *mut c_char {
         return std::ptr::null_mut();
     };
     match service::read_service_file(&home) {
-        Some(f) => CString::new(format!("http://127.0.0.1:{}/?token={}", f.port, f.token))
+        Some(f) => service::boot_url(&f)
+            .ok()
+            .and_then(|u| CString::new(u).ok())
             .map(|c| c.into_raw())
             .unwrap_or(std::ptr::null_mut()),
         None => std::ptr::null_mut(),
     }
+}
+
+/// The session token, for the shell's own calls to the local API (header
+/// `X-Varsto-Token` only; never put it in an address). NULL before the
+/// service has written its service file. Free with `varsto_free`.
+#[no_mangle]
+pub extern "C" fn varsto_token() -> *mut c_char {
+    let Some(home) = HOME.lock().unwrap().clone() else {
+        return std::ptr::null_mut();
+    };
+    service::read_service_file(&home)
+        .and_then(|f| CString::new(f.token.clone()).ok())
+        .map(|c| c.into_raw())
+        .unwrap_or(std::ptr::null_mut())
 }
 
 /// Free a string returned by this library.

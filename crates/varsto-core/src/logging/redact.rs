@@ -105,6 +105,89 @@ pub fn secret_field(name: &str) -> bool {
         || n == "master"
 }
 
+/// Replace the `user:password@` of every URL in `s` with `with` (nothing
+/// at all when `with` is empty, which also drops the `@`): `rest:https://u:p@h/r`
+/// becomes `rest:https://[redacted]@h/r`. The userinfo ends at the last `@`
+/// before the first `/`, `?` or `#` of the authority.
+fn replace_url_userinfo(s: &str, with: &str) -> Option<String> {
+    if !s.contains("://") {
+        return None;
+    }
+    let mut out = String::with_capacity(s.len());
+    let mut rest = s;
+    let mut changed = false;
+    while let Some(i) = rest.find("://") {
+        let (head, after) = rest.split_at(i + 3);
+        out.push_str(head);
+        let end = after
+            .find(|c: char| {
+                matches!(c, '/' | '?' | '#' | '"' | '\'' | '<' | '>') || c.is_whitespace()
+            })
+            .unwrap_or(after.len());
+        let authority = &after[..end];
+        match authority.rfind('@') {
+            Some(at) if at > 0 && &authority[..at] != with => {
+                out.push_str(with);
+                if !with.is_empty() {
+                    out.push_str(&authority[at..]);
+                } else {
+                    out.push_str(&authority[at + 1..]);
+                }
+                changed = true;
+            }
+            _ => out.push_str(authority),
+        }
+        rest = &after[end..];
+    }
+    out.push_str(rest);
+    changed.then_some(out)
+}
+
+/// `scheme://user:password@host/...` with the userinfo removed.
+pub fn strip_url_userinfo(s: &str) -> String {
+    replace_url_userinfo(s, "").unwrap_or_else(|| s.to_string())
+}
+
+/// A copy of `config.json` for a support bundle: the restic password source
+/// and environment file, every S3 access key id and secret, and the
+/// `user:password@` of every URL are replaced by `[redacted]`.
+pub fn redact_config_json(bytes: &[u8]) -> Vec<u8> {
+    fn walk(v: &mut serde_json::Value, in_restic: bool) {
+        match v {
+            serde_json::Value::Object(m) => {
+                for (k, child) in m.iter_mut() {
+                    let secret = k == "access_key_id"
+                        || k == "secret_access_key"
+                        || (in_restic && (k == "password" || k == "env_file"));
+                    if secret && !child.is_null() {
+                        *child = serde_json::Value::String(REDACTED.to_string());
+                    } else {
+                        walk(child, in_restic || k == "restic");
+                    }
+                }
+            }
+            serde_json::Value::Array(a) => {
+                for x in a {
+                    walk(x, in_restic);
+                }
+            }
+            serde_json::Value::String(s) => {
+                if let Some(c) = replace_url_userinfo(s, REDACTED) {
+                    *s = c;
+                }
+            }
+            _ => {}
+        }
+    }
+    match serde_json::from_slice::<serde_json::Value>(bytes) {
+        Ok(mut v) => {
+            walk(&mut v, false);
+            serde_json::to_vec_pretty(&v).unwrap_or_default()
+        }
+        Err(_) => b"{\"config\": \"unreadable; left out of the bundle\"}".to_vec(),
+    }
+}
+
 /// Remove every secret this module recognises from a log line.
 pub fn scrub(line: &str) -> Cow<'_, str> {
     let mut out: Cow<str> = Cow::Borrowed(line);
@@ -120,6 +203,9 @@ pub fn scrub(line: &str) -> Cow<'_, str> {
         if out.contains(prefix) {
             out = Cow::Owned(cut_prefixed(&out, prefix));
         }
+    }
+    if let Some(s) = replace_url_userinfo(&out, REDACTED) {
+        out = Cow::Owned(s);
     }
     if has_marker(&out) {
         out = Cow::Owned(cut_assignments(&out));
@@ -410,6 +496,67 @@ fn cut_bip39(s: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn url_userinfo_is_cut_everywhere() {
+        for (line, host) in [
+            (
+                "repo rest:https://u:p@h.example/r",
+                "rest:https://[redacted]@h.example/r",
+            ),
+            (
+                "s3:https://K:S@h.example:9000/bucket",
+                "s3:https://[redacted]@h.example:9000/bucket",
+            ),
+            (
+                "sftp://user@host/path and https://a:b@c/d",
+                "sftp://[redacted]@host/path and https://[redacted]@c/d",
+            ),
+        ] {
+            let got = scrub(line);
+            assert!(
+                !got.contains("u:p") && !got.contains("K:S") && !got.contains("a:b"),
+                "{got}"
+            );
+            assert!(
+                got.contains(host.split(' ').next().unwrap()) || got == host,
+                "{got}"
+            );
+        }
+        assert_eq!(scrub("rest:https://u:p@h/r"), "rest:https://[redacted]@h/r");
+        // Not a login: no userinfo, an @ later in the path, other schemes.
+        assert_eq!(scrub("https://example.com/a@b"), "https://example.com/a@b");
+        assert_eq!(
+            scrub("see https://example.com:8000/x"),
+            "see https://example.com:8000/x"
+        );
+        assert_eq!(
+            strip_url_userinfo("rest:https://u:p@h:8000/r"),
+            "rest:https://h:8000/r"
+        );
+        assert_eq!(strip_url_userinfo("/mnt/backup"), "/mnt/backup");
+    }
+
+    #[test]
+    fn a_config_copy_for_a_bundle_has_no_credentials() {
+        let cfg = serde_json::json!({
+            "storages": [{"kind": "s3", "name": "c", "bucket": "b", "access_key_id": "AKIAEXAMPLE", "endpoint": "https://k:s@s3.example"}],
+            "restic": {
+                "repository": "rest:https://u:p@h/r",
+                "password": {"command": "pass show backup/restic"},
+                "env_file": "/home/x/restic.env",
+                "binary": "restic"
+            },
+            "log_level": "debug"
+        });
+        let out = String::from_utf8(redact_config_json(cfg.to_string().as_bytes())).unwrap();
+        for secret in ["AKIAEXAMPLE", "u:p", "k:s", "pass show", "restic.env"] {
+            assert!(!out.contains(secret), "{secret} in {out}");
+        }
+        assert!(out.contains("rest:https://[redacted]@h/r"), "{out}");
+        assert!(out.contains("\"log_level\": \"debug\""), "{out}");
+        assert!(redact_config_json(b"not json").starts_with(b"{"));
+    }
 
     #[test]
     fn registered_values_are_cut() {

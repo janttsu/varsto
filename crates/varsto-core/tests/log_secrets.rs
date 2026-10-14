@@ -55,6 +55,8 @@ fn no_secret_reaches_the_log() {
         secret_access_key: s3_secret.into(),
         path_style: true,
         storage_class: None,
+        allow_insecure_http: false,
+        conditional_writes: None,
     };
     // Constructing the storage registers its secret; here register directly.
     logging::register_secret(s3_secret);
@@ -118,7 +120,7 @@ fn no_secret_reaches_the_log() {
     log::debug!(
         "restic env RESTIC_PASSWORD={restic_password} rclone config token = {rclone_token}"
     );
-    log::debug!("recovery words: {words}");
+    log::debug!("recovery words: {}", words.as_str());
     log::debug!("kit:\n1: {}\n2: {}", shares[0].words, shares[1].words);
     log::debug!("master hex by mistake {master_hex} and folder key {folder_hex}");
     // Fields in every capture form.

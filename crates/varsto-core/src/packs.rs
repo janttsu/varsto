@@ -53,8 +53,14 @@ pub struct PackIndex {
     pub members: Vec<Member>,
 }
 
+/// The first two characters of a name, for the directory a name lives in;
+/// never splits a character (a name from a storage is not trusted to be ASCII).
+fn head2(s: &str) -> &str {
+    s.get(..2).unwrap_or(s)
+}
+
 fn dir(id: &str) -> String {
-    format!("{PREFIX}{}/{id}", &id[..2.min(id.len())])
+    format!("{PREFIX}{}/{id}", head2(id))
 }
 pub fn pack_key(id: &str) -> String {
     format!("{}.pack", dir(id))
@@ -79,7 +85,61 @@ fn pack_of_index(key: &str) -> Option<&str> {
 }
 
 fn chunk_key(object: &str) -> String {
-    format!("chunks/{}/{object}", &object[..2.min(object.len())])
+    format!("chunks/{}/{object}", head2(object))
+}
+
+/// Longest pack an index may describe (a pack is built from at most
+/// `MAX_MEMBERS` objects of `MAX_MEMBER` bytes; this leaves room).
+pub const MAX_PACK_BYTES: u64 = 64 * 1024 * 1024;
+/// Most members an index may list.
+const MAX_INDEX_MEMBERS: usize = 4096;
+
+/// A name made by hashing: 64 lowercase hex digits.
+fn is_object_name(s: &str) -> bool {
+    s.len() == 64
+        && s.bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+
+impl PackIndex {
+    /// Check an index read from a storage, whose own key is `key`, before
+    /// anything is built from it. An index is a claim by whoever can write to
+    /// the storage: names that are not object names, a pack id that is not
+    /// the index's own, or an offset and length that leave the pack would
+    /// otherwise reach slicing, allocation and range arithmetic.
+    pub fn validate(&self, key: &str) -> Result<()> {
+        let id = pack_of_index(key).ok_or_else(|| anyhow!("{key} is not a pack index key"))?;
+        if !is_object_name(id) || self.pack != id {
+            return Err(anyhow!(
+                "pack index {key} names another pack ({})",
+                self.pack
+            ));
+        }
+        if self.members.len() > MAX_INDEX_MEMBERS {
+            return Err(anyhow!(
+                "pack index {key} lists {} objects",
+                self.members.len()
+            ));
+        }
+        for m in &self.members {
+            if !is_object_name(&m.object) {
+                return Err(anyhow!(
+                    "pack index {key} lists a member that is not an object name"
+                ));
+            }
+            if m.len == 0 || m.len > crate::storage::MAX_BLOCK_OBJECT {
+                return Err(anyhow!(
+                    "pack index {key} lists a member of {} bytes",
+                    m.len
+                ));
+            }
+            match m.offset.checked_add(m.len) {
+                Some(end) if end <= MAX_PACK_BYTES => {}
+                _ => return Err(anyhow!("pack index {key} lists a member outside its pack")),
+            }
+        }
+        Ok(())
+    }
 }
 
 /// Build a pack from (object name, bytes): the pack's id, bytes and index.
@@ -119,6 +179,9 @@ pub struct Cache {
     /// Pack -> its objects and the ones marked deleted.
     packs: HashMap<String, (Vec<String>, BTreeSet<String>)>,
     seen_index: BTreeSet<String>,
+    /// Indexes found on the storage that failed `PackIndex::validate`:
+    /// skipped, and counted here.
+    invalid_indexes: u64,
 }
 
 impl Cache {
@@ -207,14 +270,28 @@ impl PackAware {
             }
         }
         let mut parsed = Vec::new();
+        let mut invalid = Vec::new();
         for k in fresh {
-            if let Some(b) = self.inner.get(&k)? {
-                if let Ok(idx) = serde_json::from_slice::<PackIndex>(&b) {
-                    parsed.push((k, idx));
+            if let Some(b) = self.inner.get_bounded(&k, crate::storage::MAX_RECORD)? {
+                match serde_json::from_slice::<PackIndex>(&b)
+                    .map_err(anyhow::Error::from)
+                    .and_then(|idx| idx.validate(&k).map(|_| idx))
+                {
+                    Ok(idx) => parsed.push((k, idx)),
+                    Err(e) => {
+                        log::warn!(storage = self.inner.name(); "skipping a pack index: {e:#}");
+                        invalid.push(k);
+                    }
                 }
             }
         }
         let mut c = self.cache.lock().unwrap();
+        for k in invalid {
+            // Not read again until it changes name: counted once.
+            if c.seen_index.insert(k) {
+                c.invalid_indexes += 1;
+            }
+        }
         for k in known.iter().filter(|k| !listed.contains(k.as_str())) {
             if let Some(pack) = pack_of_index(k) {
                 c.forget(pack);
@@ -271,6 +348,11 @@ impl PackAware {
         }
     }
 
+    /// How many pack indexes were skipped as invalid.
+    pub fn invalid_indexes(&self) -> u64 {
+        self.cache.lock().unwrap().invalid_indexes
+    }
+
     fn ensure_loaded(&self) -> Result<()> {
         if self.cache.lock().unwrap().loaded.is_none() {
             self.refresh()?;
@@ -284,6 +366,10 @@ impl Storage for PackAware {
         self.inner.name()
     }
 
+    fn conditional_writes(&self) -> Option<bool> {
+        self.inner.conditional_writes()
+    }
+
     fn put_if_absent(&self, key: &str, data: &[u8]) -> Result<bool> {
         if let Some(obj) = object_of(key) {
             if self.locate_live(obj)?.is_some() {
@@ -295,7 +381,7 @@ impl Storage for PackAware {
 
     fn get(&self, key: &str) -> Result<Option<Vec<u8>>> {
         let Some(obj) = object_of(key) else {
-            return self.inner.get(key);
+            return self.inner.get_bounded(key, crate::storage::read_limit(key));
         };
         self.ensure_loaded()?;
         if let Some(loc) = self.locate(obj, false)? {
@@ -306,7 +392,10 @@ impl Storage for PackAware {
                 return Ok(Some(b));
             }
         }
-        if let Some(b) = self.inner.get(key)? {
+        if let Some(b) = self
+            .inner
+            .get_bounded(key, crate::storage::read_limit(key))?
+        {
             return Ok(Some(b));
         }
         // Packed by another device since the index was read: a read is
@@ -394,6 +483,26 @@ impl Storage for PackAware {
         self.inner.get_range(key, offset, len)
     }
 
+    fn get_bounded(&self, key: &str, max: u64) -> Result<Option<Vec<u8>>> {
+        let Some(obj) = object_of(key) else {
+            return self.inner.get_bounded(key, max);
+        };
+        // A packed object is a range of its validated length; a single one is
+        // read with the key's own limit; `max` can only be smaller.
+        self.ensure_loaded()?;
+        if let Some(loc) = self.locate(obj, false)? {
+            if loc.len > max {
+                return Err(crate::storage::too_large(key, loc.len, max));
+            }
+        }
+        match self.get(key)? {
+            Some(b) if b.len() as u64 > max => {
+                Err(crate::storage::too_large(key, b.len() as u64, max))
+            }
+            other => Ok(other),
+        }
+    }
+
     fn put_pack(&self, members: &[(String, &[u8])]) -> Result<Vec<bool>> {
         if !self.packing || members.len() < 2 {
             return members
@@ -442,6 +551,95 @@ impl Storage for PackAware {
 mod tests {
     use super::*;
     use crate::storage::LocalDirStorage;
+
+    fn member(object: &str, offset: u64, len: u64) -> Member {
+        Member {
+            object: object.into(),
+            offset,
+            len,
+        }
+    }
+
+    fn index(id: &str, members: Vec<Member>) -> PackIndex {
+        PackIndex {
+            format: FORMAT,
+            pack: id.into(),
+            members,
+        }
+    }
+
+    #[test]
+    fn an_index_that_lies_is_rejected_not_trusted() {
+        let id = "ab".repeat(32);
+        let key = index_key(&id);
+        let obj = "cd".repeat(32);
+        assert!(index(&id, vec![member(&obj, 0, 100)])
+            .validate(&key)
+            .is_ok());
+        for (what, idx) in [
+            (
+                "multibyte name",
+                index(&id, vec![member("\u{e4}\u{2026}", 0, 10)]),
+            ),
+            ("short name", index(&id, vec![member("abcd", 0, 10)])),
+            (
+                "upper case name",
+                index(&id, vec![member(&obj.to_uppercase(), 0, 10)]),
+            ),
+            ("len max", index(&id, vec![member(&obj, 0, u64::MAX)])),
+            (
+                "offset overflow",
+                index(&id, vec![member(&obj, u64::MAX - 1, 10)]),
+            ),
+            ("offset max", index(&id, vec![member(&obj, u64::MAX, 1)])),
+            (
+                "outside the pack",
+                index(&id, vec![member(&obj, MAX_PACK_BYTES, 1)]),
+            ),
+            ("empty member", index(&id, vec![member(&obj, 0, 0)])),
+            (
+                "another pack",
+                index(&"ef".repeat(32), vec![member(&obj, 0, 10)]),
+            ),
+        ] {
+            assert!(idx.validate(&key).is_err(), "{what} accepted");
+        }
+        assert!(index("\u{e4}", vec![])
+            .validate("packs/xx/\u{e4}.idx")
+            .is_err());
+    }
+
+    #[test]
+    fn hostile_indexes_in_a_storage_do_not_panic_a_listing() {
+        let t = tempfile::tempdir().unwrap();
+        let inner = LocalDirStorage::new("box".into(), t.path().to_path_buf()).unwrap();
+        let id = "ab".repeat(32);
+        let hostile = serde_json::json!({
+            "format": 1, "pack": id,
+            "members": [
+                {"object": "\u{e4}\u{2026}", "offset": 0, "len": 10},
+                {"object": "cd".repeat(32), "offset": u64::MAX - 1, "len": u64::MAX},
+            ]
+        });
+        inner
+            .put_if_absent(&index_key(&id), hostile.to_string().as_bytes())
+            .unwrap();
+        // Not even JSON of the right shape.
+        let id2 = "12".repeat(32);
+        inner.put_if_absent(&index_key(&id2), b"[1,2,3]").unwrap();
+        let caches: Caches = Default::default();
+        let s = PackAware::new(Box::new(inner), &caches, true);
+        assert!(s.list("chunks/").unwrap().is_empty());
+        assert_eq!(
+            s.invalid_indexes(),
+            2,
+            "both bad indexes are skipped and counted"
+        );
+        assert!(s.list("chunks/").unwrap().is_empty());
+        assert_eq!(s.invalid_indexes(), 2, "counted once, not at every listing");
+        // And reading any object is still fine.
+        assert!(s.get(&chunk_key(&"cd".repeat(32))).unwrap().is_none());
+    }
 
     fn store(dir: &std::path::Path, caches: &Caches) -> PackAware {
         PackAware::new(

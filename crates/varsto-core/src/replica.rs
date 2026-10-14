@@ -27,7 +27,6 @@ use crate::vault::{DeviceRecord, VaultMeta};
 use anyhow::{anyhow, bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
-use std::fs;
 use std::path::{Path, PathBuf};
 
 /// Token the owner gives to a replica: everything it needs, nothing more.
@@ -84,6 +83,9 @@ pub struct ReplicaReport {
     pub objects_copied: u64,
     pub bytes_copied: u64,
     pub objects_corrupt: u64,
+    /// Names under `chunks/` that are not object names (something else
+    /// wrote to the source storage): skipped, never copied.
+    pub skipped_junk: u64,
     pub chunks_verified: u64,
     pub batch_seq: Option<u64>,
 }
@@ -123,7 +125,7 @@ impl Replica {
         }
         let tgt = target.open()?;
         tgt.put_if_absent(VaultMeta::STORAGE_KEY, &serde_json::to_vec_pretty(&meta)?)?;
-        fs::create_dir_all(home)?;
+        util::private_dir(home)?;
         let signer = SigningKey::generate();
         let device_id = ledger::device_id_for(&signer.public());
         let local = ReplicaLocal {
@@ -137,11 +139,6 @@ impl Replica {
             target,
         };
         util::write_json(&home.join("replica.json"), &local)?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            fs::set_permissions(home.join("replica.json"), fs::Permissions::from_mode(0o600))?;
-        }
         let mut r = Replica::open(home)?;
         let rec = DeviceRecord {
             device_id,
@@ -242,15 +239,34 @@ impl Replica {
             if have.contains(&key) {
                 continue;
             }
-            let Some(data) = src.get(&key)? else { continue };
-            let mut chunk_claim = None;
+            // A name under chunks/ that is not an object name is junk left
+            // by something else: it is skipped, not a reason to stop the run.
+            let mut chunk_name = None;
             if let Some(rest) = key.strip_prefix("chunks/") {
                 let object = rest.rsplit('/').next().unwrap_or("");
-                if ObjectName::from_bytes(&crypto::hash(&data)).as_str() != object {
+                match ObjectName::from_hex(object) {
+                    Ok(n) if n.as_str() == object => chunk_name = Some(n),
+                    _ => {
+                        if report.skipped_junk == 0 {
+                            log::warn!(
+                                "replica {}: skipping junk under chunks/ on {}: {key:?}",
+                                self.local.name,
+                                self.local.source.name()
+                            );
+                        }
+                        report.skipped_junk += 1;
+                        continue;
+                    }
+                }
+            }
+            let Some(data) = src.get(&key)? else { continue };
+            let mut chunk_claim = None;
+            if let Some(object) = chunk_name {
+                if ObjectName::from_bytes(&crypto::hash(&data)) != object {
                     report.objects_corrupt += 1;
                     continue; // never replicate a corrupt object
                 }
-                chunk_claim = Some((ObjectName::from_hex(object)?, data.len() as u64));
+                chunk_claim = Some((object, data.len() as u64));
             }
             if tgt.put_if_absent(&key, &data)? {
                 report.objects_copied += 1;
@@ -260,16 +276,20 @@ impl Replica {
                 // A replica does not know chunk ids (they live inside encrypted
                 // manifests); claims are keyed by object name and folded into
                 // the owner's view by object.
+                // An object name is a hash, so the chunk id a replica
+                // records is the same string (the owner folds claims by
+                // object, see above).
+                let chunk: ChunkId = object.clone();
                 events.push(Event::ChunkStored {
                     folder: FolderId::default(),
-                    chunk: ChunkId::from_hex(object.as_str())?,
+                    chunk: chunk.clone(),
                     object: object.clone(),
                     storage: self.storage_name(),
                     size,
                 });
                 events.push(Event::ChunkVerified {
                     folder: FolderId::default(),
-                    chunk: ChunkId::from_hex(object.as_str())?,
+                    chunk,
                     object,
                     storage: self.storage_name(),
                 });

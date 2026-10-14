@@ -68,7 +68,7 @@ for mode in $modes; do
   R="$work/r-$mode-$n"; D="$work/d-$mode-$n"
   mkdir -p "$D"
   if [ "$mode" = p2p ]; then mv "$work/s3/bench/chunks" "$work/s3/bench/chunks.away"; fi
-  "$bin" --home "$R" join --name "reader-$mode" --vault-key "$key" "${s3flags[@]}" >/dev/null
+  VARSTO_VAULT_KEY="$key" "$bin" --home "$R" join --name "reader-$mode" "${s3flags[@]}" >/dev/null
   "$bin" --home "$R" verify set --off >/dev/null
   if [ "$mode" != s3 ]; then "$bin" --home "$R" p2p enable --port $((17900 + n)) >/dev/null; fi
   start_service "$R"

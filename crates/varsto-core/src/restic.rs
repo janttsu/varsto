@@ -48,6 +48,31 @@ const VERIFIED_FILE: &str = "state/restic-verified.json";
 const HOLD_FILE: &str = "state/restic-hold.json";
 const LOCK_FILE: &str = "restic.lock";
 
+/// A repository string for messages and logs: `user:password@` dropped.
+pub fn display_repository(repo: &str) -> String {
+    crate::logging::redact::strip_url_userinfo(repo)
+}
+
+/// Only the kind and host of a repository, for debug logs: no path, no
+/// bucket, no login.
+pub fn repository_summary(repo: &str) -> String {
+    let clean = display_repository(repo);
+    if let Some(i) = clean.find("://") {
+        let host = clean[i + 3..].split(['/', '?', '#']).next().unwrap_or("");
+        return format!("{}{host}", &clean[..i + 3]);
+    }
+    match clean.split_once(':') {
+        // `sftp:host:/path`, `b2:bucket:path`: the kind and the next field.
+        Some((kind, rest))
+            if !kind.is_empty() && kind.len() > 1 && !rest.starts_with(['/', '\\']) =>
+        {
+            format!("{kind}:{}", rest.split(':').next().unwrap_or(""))
+        }
+        Some((kind, _)) if kind.len() > 1 => format!("{kind}:"),
+        _ => "a local path".to_string(),
+    }
+}
+
 /// Where restic gets the repository password. Only the command or the
 /// file's path is kept, never the password.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -968,7 +993,14 @@ pub fn status_value(
 /// its output in `home/restic-run.log`.
 pub fn spawn_scheduled(home: &Path) -> Result<std::process::Child> {
     let exe = std::env::current_exe()?;
-    let log = std::fs::File::create(home.join("restic-run.log"))?;
+    let mut opts = std::fs::OpenOptions::new();
+    opts.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.mode(0o600);
+    }
+    let log = opts.open(home.join("restic-run.log"))?;
     let log2 = log.try_clone()?;
     Ok(std::process::Command::new(exe)
         .arg("--home")
@@ -1068,6 +1100,33 @@ mod tests {
             .iter()
             .any(|(k, v)| k == "RESTIC_PASSWORD_COMMAND" && v == "pass show restic"));
         assert!(REMOVED_ENV.contains(&"RESTIC_PASSWORD"));
+    }
+
+    #[test]
+    fn repositories_are_shown_without_their_login() {
+        for (repo, shown, summary) in [
+            (
+                "rest:https://u:p@h.example:8000/r",
+                "rest:https://h.example:8000/r",
+                "rest:https://h.example:8000",
+            ),
+            (
+                "s3:https://K:S@s3.example/bucket/x",
+                "s3:https://s3.example/bucket/x",
+                "s3:https://s3.example",
+            ),
+            (
+                "sftp:nas:/backup/restic",
+                "sftp:nas:/backup/restic",
+                "sftp:nas",
+            ),
+            ("b2:bucket:path", "b2:bucket:path", "b2:bucket"),
+            ("/mnt/backup/restic", "/mnt/backup/restic", "a local path"),
+        ] {
+            assert_eq!(display_repository(repo), shown);
+            assert_eq!(repository_summary(repo), summary);
+            assert!(!repository_summary(repo).contains(":p@"));
+        }
     }
 
     #[test]

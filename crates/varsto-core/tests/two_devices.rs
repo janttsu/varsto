@@ -297,10 +297,22 @@ fn untrusted_replica_holds_copies_without_keys() {
         place: String::new(),
         min_free: None,
     };
+    // Junk someone else left under chunks/ on the source storage must not
+    // stop the run or be copied; a damaged object is not copied either.
+    let junk_dir = lab
+        .a_home
+        .with_file_name("storage")
+        .join("chunks")
+        .join("zz");
+    fs::create_dir_all(&junk_dir).unwrap();
+    fs::write(junk_dir.join("README.txt"), b"not an object").unwrap();
+    fs::write(junk_dir.join("ZZ"), b"").unwrap();
     let mut r = Replica::init(&b_home, "userB", &token, lab.storage.clone(), target).unwrap();
     let rep = r.run_once().unwrap();
     assert!(rep.objects_copied > 3);
     assert_eq!(rep.objects_corrupt, 0);
+    assert_eq!(rep.skipped_junk, 2, "{rep:?}");
+    assert!(!b_disk.join("chunks").join("zz").exists());
     assert!(rep.chunks_verified >= 2);
     // Nothing on B's disk or in B's home is plaintext.
     for root in [&b_disk, &b_home] {

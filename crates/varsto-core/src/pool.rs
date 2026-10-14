@@ -28,6 +28,7 @@
 //! Preparing whole devices (partitioning, formatting, mounting) lives in
 //! `blockdev`; this module only sees mounted directories.
 
+use crate::crypto::{self, SecretKey};
 use crate::storage::{Storage, StorageSpec};
 use crate::util;
 use anyhow::{anyhow, bail, Context, Result};
@@ -105,6 +106,12 @@ pub struct DiskMarker {
     pub vault_tag: String,
     pub created_utc: i64,
     pub format: u32,
+    /// MAC under the vault's marker key over the pool id, disk id and
+    /// creation time (`PoolIdentity::marker_mac`). Without it a copy of
+    /// another disk's marker (which holds nothing secret) could pass for a
+    /// disk of the vault.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub mac_hex: String,
 }
 
 impl DiskMarker {
@@ -233,10 +240,38 @@ pub fn pool_error(e: &anyhow::Error) -> Option<&PoolError> {
 }
 
 /// Identity of a pool as derived by the engine from the vault key.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug)]
 pub struct PoolIdentity {
     pub pool_id: String,
     pub vault_tag: String,
+    /// Key of the marker MAC (`derive(root, "disk-pool-marker")`): only a
+    /// device of the vault can write a marker that is adopted without asking.
+    pub marker_key: SecretKey,
+}
+
+impl PoolIdentity {
+    /// `keyed_hash(marker_key, len-prefixed(pool_id) || len-prefixed(disk_id) || created_utc)`.
+    pub fn marker_mac(&self, pool_id: &str, disk_id: &str, created_utc: i64) -> String {
+        let msg = crypto::aad(
+            "disk-pool-marker",
+            &[
+                pool_id.as_bytes(),
+                disk_id.as_bytes(),
+                &created_utc.to_le_bytes(),
+            ],
+        );
+        hex::encode(crypto::keyed_hash(&self.marker_key, &msg))
+    }
+
+    /// Whether a marker carries the MAC a device of this vault would write.
+    pub fn marker_authentic(&self, m: &DiskMarker) -> bool {
+        !m.mac_hex.is_empty()
+            && crypto::ct_eq(
+                m.mac_hex.as_bytes(),
+                self.marker_mac(&m.pool_id, &m.disk_id, m.created_utc)
+                    .as_bytes(),
+            )
+    }
 }
 
 /// Free and total bytes of the filesystem holding a path.
@@ -263,8 +298,48 @@ pub fn set_fake_space(mount: &Path, space: Option<DiskSpace>) {
     }
 }
 
+static FAKE_CAPACITY: RwLock<Vec<(PathBuf, u64)>> = RwLock::new(Vec::new());
+
+/// Test hook: a disk of `total` bytes at `mount` whose free space falls as
+/// Varsto's objects are written below it (`varsto/chunks`), like a real
+/// disk filling up. `None` removes it.
+#[doc(hidden)]
+pub fn set_fake_capacity(mount: &Path, total: Option<u64>) {
+    let mount = mount.canonicalize().unwrap_or_else(|_| mount.to_path_buf());
+    let mut v = FAKE_CAPACITY.write().unwrap();
+    v.retain(|(p, _)| p != &mount);
+    if let Some(t) = total {
+        v.push((mount, t));
+    }
+}
+
+/// Bytes of the files below `dir`.
+fn tree_bytes(dir: &Path) -> u64 {
+    fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|e| match e.metadata() {
+            Ok(m) if m.is_dir() => tree_bytes(&e.path()),
+            Ok(m) => m.len(),
+            Err(_) => 0,
+        })
+        .sum()
+}
+
 /// Free and total space of the filesystem at `path`.
 pub fn disk_space(path: &Path) -> Option<DiskSpace> {
+    {
+        let v = FAKE_CAPACITY.read().unwrap();
+        let canon = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+        if let Some((mount, total)) = v.iter().find(|(p, _)| canon.starts_with(p)) {
+            let used = tree_bytes(&mount.join(DATA_DIR).join("chunks"));
+            return Some(DiskSpace {
+                free: total.saturating_sub(used),
+                total: *total,
+            });
+        }
+    }
     {
         let v = FAKE_SPACE.read().unwrap();
         let canon = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
@@ -656,6 +731,10 @@ struct State {
     /// The disk the last put went to: the next one goes there too while it
     /// has room, so the blocks of one file stay together on one disk.
     last_put: Option<String>,
+    /// Disks of this pool and vault by their marker's pool id and vault tag
+    /// that carry no valid MAC: not adopted, not written to; `varsto disk
+    /// add` takes one in on purpose. (mount, marker)
+    unknown: Vec<(PathBuf, DiskMarker)>,
 }
 
 pub struct PoolStorage {
@@ -713,6 +792,7 @@ impl PoolStorage {
                 attached: None,
                 dirty: BTreeSet::new(),
                 last_put: None,
+                unknown: Vec::new(),
             }),
             verify_parallelism: crate::parverify::Parallelism::Auto,
         })
@@ -787,6 +867,26 @@ impl PoolStorage {
         Ok(mount.join(DATA_DIR).join(key))
     }
 
+    /// Write `marker` at `mount` with its MAC (the MAC is made here).
+    fn write_marker(&self, mount: &Path, marker: &DiskMarker) -> Result<DiskMarker> {
+        let mut m = marker.clone();
+        m.mac_hex = self
+            .identity
+            .marker_mac(&m.pool_id, &m.disk_id, m.created_utc);
+        util::write_atomic(&DiskMarker::path(mount), &serde_json::to_vec_pretty(&m)?)?;
+        Ok(m)
+    }
+
+    /// Disks that look like this pool's but carry no valid marker MAC: they
+    /// get no writes and are not adopted. `varsto disk add <mount>` takes one
+    /// in on purpose.
+    pub fn unknown_disks(&self) -> Vec<(PathBuf, DiskMarker)> {
+        let mut st = self.state.lock().unwrap();
+        st.attached = None;
+        let _ = self.attached(&mut st);
+        st.unknown.clone()
+    }
+
     fn marker_matches(&self, mount: &Path, disk_id: &str) -> bool {
         DiskMarker::read(mount)
             .is_some_and(|m| m.pool_id == self.identity.pool_id && m.disk_id == disk_id)
@@ -815,16 +915,28 @@ impl PoolStorage {
             }
         }
         let mut changed = false;
+        st.unknown.clear();
         for (mount, marker) in scan_mounts(&self.roots()) {
             if marker.pool_id != self.identity.pool_id {
                 continue;
             }
             if st.index.disks.contains_key(&marker.disk_id) {
+                // A known disk whose marker predates the MAC gets one.
+                if marker.vault_tag == self.identity.vault_tag && marker.mac_hex.is_empty() {
+                    let _ = self.write_marker(&mount, &marker);
+                }
                 found.entry(marker.disk_id.clone()).or_insert(mount);
             } else if marker.vault_tag == self.identity.vault_tag {
-                self.adopt(st, &mount, &marker);
-                found.insert(marker.disk_id.clone(), mount);
-                changed = true;
+                if self.identity.marker_authentic(&marker) {
+                    self.adopt(st, &mount, &marker);
+                    found.insert(marker.disk_id.clone(), mount);
+                    changed = true;
+                } else {
+                    // The tag is in plain sight on every disk of the pool: a
+                    // marker that merely repeats it proves nothing.
+                    log::warn!(pool = self.name.as_str(), disk = marker.label.as_str(); "unknown disk without a valid marker MAC; not used (varsto disk add takes it in)");
+                    st.unknown.push((mount, marker));
+                }
             }
         }
         let now = util::now_utc();
@@ -1153,6 +1265,37 @@ impl PoolStorage {
         let mount = mount.canonicalize().unwrap_or_else(|_| mount.to_path_buf());
         let mut st = self.state.lock().unwrap();
         if let Some(m) = DiskMarker::read(&mount) {
+            // A disk of this pool and vault that carries no valid MAC (a
+            // copied marker, or one from before the MAC): taken in on the
+            // user's word, with a MAC from here on.
+            if m.pool_id == self.identity.pool_id
+                && m.vault_tag == self.identity.vault_tag
+                && !st.index.disks.contains_key(&m.disk_id)
+            {
+                if st.index.disks.values().any(|d| d.label == label) {
+                    bail!(
+                        "a disk labelled {label} already exists in pool {}",
+                        self.name
+                    );
+                }
+                let mut marker = m.clone();
+                marker.label = label.to_string();
+                let marker = self.write_marker(&mount, &marker)?;
+                self.adopt(&mut st, &mount, &marker);
+                if let Some(d) = st.index.disks.get_mut(&marker.disk_id) {
+                    d.place = place.trim().to_string();
+                    d.last_mount = Some(mount.clone());
+                }
+                st.attached = None;
+                let _ = self.attached(&mut st);
+                self.save_index(&st)?;
+                return st
+                    .index
+                    .disks
+                    .get(&marker.disk_id)
+                    .cloned()
+                    .ok_or_else(|| anyhow!("the disk could not be taken in"));
+            }
             if m.pool_id == self.identity.pool_id && st.index.disks.contains_key(&m.disk_id) {
                 bail!(
                     "{} already is disk {} of this pool; run `varsto disk check {}`",
@@ -1187,12 +1330,10 @@ impl PoolStorage {
             vault_tag: self.identity.vault_tag.clone(),
             created_utc: util::now_utc(),
             format: MARKER_FORMAT,
+            mac_hex: String::new(),
         };
         fs::create_dir_all(mount.join(DATA_DIR))?;
-        util::write_atomic(
-            &DiskMarker::path(&mount),
-            &serde_json::to_vec_pretty(&marker)?,
-        )?;
+        self.write_marker(&mount, &marker)?;
         let mut disk = PoolDisk {
             id: id.clone(),
             label: label.to_string(),
@@ -2157,6 +2298,10 @@ impl Storage for PoolStorage {
     }
 
     fn get(&self, key: &str) -> Result<Option<Vec<u8>>> {
+        self.get_bounded(key, crate::storage::read_limit(key))
+    }
+
+    fn get_bounded(&self, key: &str, max: u64) -> Result<Option<Vec<u8>>> {
         let mut st = self.state.lock().unwrap();
         let Some(e) = st.index.objects.get(key).cloned() else {
             return Ok(None);
@@ -2176,11 +2321,24 @@ impl Storage for PoolStorage {
             }));
         };
         let path = Self::data_path(mount, key)?;
-        match fs::read(&path) {
-            Ok(b) => Ok(Some(b)),
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
-            Err(err) => Err(err).with_context(|| format!("read {}", path.display())),
+        use std::io::Read;
+        let f = match fs::File::open(&path) {
+            Ok(f) => f,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(err) => return Err(err).with_context(|| format!("read {}", path.display())),
+        };
+        let size = f.metadata().map(|m| m.len()).unwrap_or(0);
+        if size > max {
+            return Err(crate::storage::too_large(key, size, max));
         }
+        let mut buf = Vec::with_capacity(size as usize);
+        f.take(max + 1)
+            .read_to_end(&mut buf)
+            .with_context(|| format!("read {}", path.display()))?;
+        if buf.len() as u64 > max {
+            return Err(crate::storage::too_large(key, buf.len() as u64, max));
+        }
+        Ok(Some(buf))
     }
 
     fn exists(&self, key: &str) -> Result<bool> {
@@ -2256,7 +2414,96 @@ mod tests {
             vault_tag: "tag".into(),
             created_utc: 0,
             format: MARKER_FORMAT,
+            mac_hex: String::new(),
         }
+    }
+
+    fn test_marker_key() -> SecretKey {
+        SecretKey::from_bytes(&[7u8; 32]).unwrap()
+    }
+
+    #[test]
+    fn a_copied_marker_without_a_valid_mac_is_never_adopted() {
+        const GIB: u64 = 1 << 30;
+        let tmp = tempfile::tempdir().unwrap();
+        let mounts = tmp.path().join("mounts");
+        let (a, c, d) = (mounts.join("a"), mounts.join("c"), mounts.join("d"));
+        for m in [&a, &c, &d] {
+            fs::create_dir_all(m).unwrap();
+            set_fake_space(
+                m,
+                Some(DiskSpace {
+                    free: 50 * GIB,
+                    total: 100 * GIB,
+                }),
+            );
+        }
+        let spec = StorageSpec::Pool {
+            name: "shelf".into(),
+            place: "home".into(),
+            reserve_percent: 5,
+            min_reserve_bytes: 1,
+            disks: vec![],
+            scan_roots: vec![mounts.clone()],
+            copies: 1,
+            verify_after_days: DEFAULT_VERIFY_AFTER_DAYS,
+        };
+        let id = || PoolIdentity {
+            pool_id: "p".into(),
+            vault_tag: "t".into(),
+            marker_key: test_marker_key(),
+        };
+        let home = |n: &str| {
+            let h = tmp.path().join(n);
+            fs::create_dir_all(&h).unwrap();
+            h
+        };
+        // One device registers disk A: its marker carries a MAC.
+        let real = {
+            let p = PoolStorage::open(&spec, &home("h1"), id()).unwrap();
+            p.add_disk_at(&a, "A", "").unwrap()
+        };
+        let marker_a = DiskMarker::read(&a).unwrap();
+        assert!(id().marker_authentic(&marker_a));
+        // Another device of the vault adopts it on sight.
+        let p2 = PoolStorage::open(&spec, &home("h2"), id()).unwrap();
+        assert_eq!(p2.disks().len(), 1);
+        // Two forgeries: the plain fields copied under another disk id, with
+        // no MAC and with A's MAC. Both are what anyone holding disk A could make.
+        for (mount, disk_id, keep_mac) in [(&c, "forged-c", false), (&d, "forged-d", true)] {
+            let mut m = marker_a.clone();
+            m.disk_id = disk_id.into();
+            m.label = disk_id.into();
+            if !keep_mac {
+                m.mac_hex.clear();
+            }
+            fs::create_dir_all(mount.join(DATA_DIR)).unwrap();
+            fs::write(DiskMarker::path(mount), serde_json::to_vec(&m).unwrap()).unwrap();
+        }
+        let p3 = PoolStorage::open(&spec, &home("h3"), id()).unwrap();
+        let disks = p3.disks();
+        assert_eq!(disks.len(), 1, "{disks:?}");
+        assert_eq!(disks[0].id, real.id);
+        assert_eq!(p3.unknown_disks().len(), 2);
+        // They get no writes: the object goes to A.
+        let obj = object(b"data for the real disk");
+        assert!(p3.put_if_absent(&obj, b"data for the real disk").unwrap());
+        for forged in [&c, &d] {
+            assert!(
+                fs::read_dir(forged.join(DATA_DIR))
+                    .unwrap()
+                    .next()
+                    .is_none(),
+                "{} was written to",
+                forged.display()
+            );
+        }
+        // On purpose, `disk add` takes one in and writes the MAC.
+        let taken = p3.add_disk_at(&c, "C", "offsite").unwrap();
+        assert_eq!(taken.label, "C");
+        assert!(id().marker_authentic(&DiskMarker::read(&c).unwrap()));
+        assert_eq!(p3.unknown_disks().len(), 1);
+        assert_eq!(p3.disks().len(), 2);
     }
 
     fn write_marker(mount: &Path, m: &DiskMarker) {
@@ -2314,6 +2561,7 @@ mod tests {
             PoolIdentity {
                 pool_id: "p".into(),
                 vault_tag: "t".into(),
+                marker_key: test_marker_key(),
             },
         )
         .unwrap();
@@ -2348,6 +2596,7 @@ mod tests {
         let id = || PoolIdentity {
             pool_id: "p".into(),
             vault_tag: "t".into(),
+            marker_key: test_marker_key(),
         };
         let home = tmp.path().join("home");
         fs::create_dir_all(&home).unwrap();

@@ -1,0 +1,44 @@
+---
+title: Alternativ till rclone: Varsto och rclone jämförda
+nav: Compare
+output: compare/rclone/index.html
+description: Använder du rclone med en crypt-fjärrlagring för krypterade kopior på S3 eller ett annat moln? Vad rclone är till för, hur dess crypt-backend och bisync fungerar och hur det står sig mot Varsto.
+---
+    <p class="back-link"><a href="{{L}}compare/">Alla jämförelser</a></p>
+    <h1>Varsto och rclone</h1>
+    <p class="lead">rclone är kommandoradsverktyget för att kopiera och synkronisera filer till och från fler än sjuttio molnlagringssystem. Dess crypt-backend krypterar det som passerar, och många använder de två tillsammans som en hemmagjord krypterad säkerhetskopia. Varsto självt kan använda vilken rclone-fjärrlagring som helst som lagringsplats.</p>
+
+    <h2>Så fungerar rclone</h2>
+    <p>rclone kopierar filer mellan en lokal katalog och en fjärrlagring, eller mellan två fjärrlagringar: <code>rclone copy</code>, <code>rclone sync</code> (enkelriktat, gör målet identiskt med källan), <code>rclone mount</code> och många fler. En <em>crypt</em>-fjärrlagring omsluter en annan fjärrlagring och krypterar filinnehållet med NaCl SecretBox (XSalsa20 och Poly1305); i standardläget krypteras även fil- och katalognamn, och de kan lämnas i klartext eller bara fördunklas. Utanför en crypt-fjärrlagring krypterar rclone ingenting. Tvåvägssynkronisering finns som <code>rclone bisync</code>, som sparar en listning av båda sidor från föregående körning och för över ändringar i båda riktningarna; rclone kallar det ett avancerat kommando, det måste först sättas upp med <code>--resync</code>, och filer som ändras under en körning kan gå förlorade. rclone för ingen förteckning över var kopior finns utöver vad varje körning jämför, och har inget begrepp om enheter: varje maskin kör sina egna kommandon.</p>
+
+    <h2>Sida vid sida</h2>
+    <table class="compare-table">
+      <thead><tr><th scope="col"></th><th scope="col">rclone</th><th scope="col">Varsto</th></tr></thead>
+      <tbody>
+      <tr><th scope="row">Var dina filer finns</th><td>Dit du kopierar dem: lokala kataloger och alla fjärrlagringar som stöds.</td><td>På dina egna enheter och på lagringsplatser du väljer: S3-kompatibla buckets, valfri rclone-fjärrlagring, lokala kataloger eller nätverkskataloger och pooler av flyttbara diskar.</td></tr>
+      <tr><th scope="row">Konto eller central server</th><td>Inget; bara kontona hos de fjärrlagringar du använder.</td><td>Inget. Det finns ingen Varsto-server; enheterna hittar varandra via dina lagringsplatser och i det lokala nätverket.</td></tr>
+      <tr><th scope="row">Kryptering</th><td>Bara genom en crypt-fjärrlagring: XSalsa20-Poly1305 för innehållet; fil- och katalognamn krypterade i standardläget, i klartext eller fördunklade om du väljer det. Andra fjärrlagringar skrivs som de är.</td><td>End-to-end, på klientsidan, innan något lämnar enheten; hybrid postkvantkryptografi (ML-KEM för nycklar vid delning, signaturer med Ed25519 + ML-DSA-65). Ännu inte oberoende granskad.</td></tr>
+      <tr><th scope="row">Synkronisering mellan flera enheter</th><td>Enkelriktat som standard (<code>sync</code>). Tvåvägs kräver en separat <code>bisync</code>-uppsättning per par av sökvägar, med egna listningar och en inledande <code>--resync</code>.</td><td>Ja, mellan alla valvets enheter: ändringar slås samman med versionsvektorer, samtidiga redigeringar behåller båda versionerna, och enheterna synkroniserar via dina lagringsplatser eller peer-to-peer.</td></tr>
+      <tr><th scope="row">Enheterna online samtidigt</th><td>Behövs inte: varje körning talar med fjärrlagringen.</td><td>Behövs inte: enheterna synkroniserar via dina lagringsplatser, och direkt peer-to-peer när de når varandra.</td></tr>
+      <tr><th scope="row">Vet var varje kopia finns</th><td>Nej: varje kommando jämför de två sidor det fick och för ingen förteckning.</td><td>Ja: en signerad liggare registrerar vilken lagringsplats och enhet som har varje block; lagringsregler (som standard 1 kopia var som helst, 1 extern, 1 på dina egna enheter eller diskar, kontrollerad av en annan enhet inom 30 dagar) varnar när en regel inte uppfylls.</td></tr>
+      <tr><th scope="row">Flyttbara diskar och diskar offline</th><td>En disk är en lokal sökväg så länge den är monterad; ingenting håller reda på den när den är borta.</td><td>Ja: diskpooler fylls, kontrolleras och känns igen när de kommer tillbaka; filer på en disk som är borta ber om just den disken.</td></tr>
+      <tr><th scope="row">Säkerhetskopior</th><td>Kopior gjorda med <code>copy</code> eller <code>sync</code>; att behålla gamla versioner kräver fjärrlagringens versionshantering eller flaggor som <code>--backup-dir</code>.</td><td>Ja: välj en mapp på valfri enhet. Varsto sparar krypterade, skrivskyddade versioner av den bara i din externa lagring, aldrig på dina enheter. Versionerna sparas i det antal dagar du väljer (90 som standard), och de som har gått ut raderas. Återställ vilken version som helst till en katalog du anger, från appen eller kommandoraden.</td></tr>
+      <tr><th scope="row">Licens och pris</th><td>Öppen källkod (MIT), gratis.</td><td>Källkoden tillgänglig (PolyForm Shield 1.0.0), gratis; du betalar bara din lagringsleverantör.</td></tr>
+      <tr><th scope="row">Mognad</th><td>Moget, långlivat projekt.</td><td>Alfa: inte för produktionsdata, formaten kan fortfarande ändras.</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Vilken passar</h2>
+    <div class="grid two">
+      <div class="card"><h3>rclone</h3><p>Välj rclone när du vill ha ett moget verktyg som kopierar filer till nästan vilket moln som helst på ditt eget schema, gärna skriptar körningarna själv och nöjer dig med enkelriktade kopior eller ett bisync-par.</p></div>
+      <div class="card"><h3>Varsto</h3><p>Välj Varsto när flera enheter ska hålla jämna steg av sig själva, varje byte ska krypteras innan den lämnar enheten, du vill ha en förteckning över var varje kopia finns och regler som varnar, och du ändå vill använda de rclone-fjärrlagringar du redan har.</p></div>
+    </div>
+    <p class="note">Varsto är alfaprogramvara: anförtro den inga data som du inte har någon annan kopia av, och dess kryptografi har inte granskats av någon oberoende part. De andra produkterna här är mogna. Uppgifterna om dem kontrollerades i deras egen dokumentation i oktober 2026; priser och abonnemang ändras ofta, så se deras egna sidor för aktuella siffror. Rättelser tas gärna emot på <a href="{{P}}forum/">forumet</a> eller på GitHub.</p>
+
+    <h2>Källor</h2>
+    <ul>
+      <li><a href="https://rclone.org/">rclones webbplats</a></li>
+      <li><a href="https://rclone.org/crypt/">Crypt-fjärrlagring: kryptering av innehåll och filnamn (en)</a></li>
+      <li><a href="https://rclone.org/bisync/">bisync: tvåvägssynkronisering (en)</a></li>
+      <li><a href="https://github.com/rclone/rclone/blob/master/COPYING">Licens (MIT)</a></li>
+    </ul>

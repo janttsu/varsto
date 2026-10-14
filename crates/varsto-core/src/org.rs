@@ -944,9 +944,10 @@ impl OrgRequest {
         r.platform = platform;
         if let Some(n) = name {
             let n = n.trim();
-            if n.contains(['\n', '\r', '.']) {
-                bail!("the device name must be on one line and must not contain a dot");
+            if n.contains('.') {
+                bail!("the device name must not contain a dot");
             }
+            crate::names::check_display_name(n)?;
             r.name = n.to_string();
         }
         // Holds the device's signing key until the approval arrives: owner
@@ -1035,6 +1036,7 @@ impl OrgRequest {
             String::new()
         };
         let name = parts.next().unwrap_or("").trim().to_string();
+        crate::names::check_display_name(&name)?;
         let key = EncapsKey::from_bytes(&hex::decode(key_hex)?)?;
         let device = DeviceId::from_hex(dev)?;
         let fingerprint = request_fingerprint(&key, &device, &platform, &name);
@@ -1195,6 +1197,21 @@ pub fn root_kit_text(org_name: &str, org_id: &str, root_hex: &str) -> Result<Str
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn request_names_with_control_or_direction_characters_are_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let code = OrgRequest::code_for_platform(dir.path(), Some("Desk"), "linux").unwrap();
+        assert_eq!(OrgRequest::parse(&code).unwrap().name, "Desk");
+        for bad in ["x\u{1b}[2Ay", "a\u{202e}b", "a\u{200b}b"] {
+            // A changed code, as a hostile sender would make it.
+            let head = code.rsplit_once('.').unwrap().0;
+            let forged = format!("{head}.{bad}");
+            assert!(OrgRequest::parse(&forged).is_err(), "{bad:?}");
+            let other = tempfile::tempdir().unwrap();
+            assert!(OrgRequest::code_for_platform(other.path(), Some(bad), "linux").is_err());
+        }
+    }
 
     #[test]
     fn root_key_is_deterministic_and_ids_follow_it() {

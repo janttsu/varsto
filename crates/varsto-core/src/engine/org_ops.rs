@@ -666,7 +666,9 @@ impl Engine {
         Ok(OrgCreated {
             org_id: org_id.clone(),
             name: name.to_string(),
-            root_words: crate::recovery::words_from_key(&root_hex)?,
+            root_words: crate::recovery::words_from_key(&root_hex)?
+                .as_str()
+                .to_owned(),
             root_kit: org::root_kit_text(name, &org_id, &root_hex)?,
             devices: device_names,
         })
@@ -799,6 +801,8 @@ impl Engine {
         token: &str,
     ) -> Result<(Engine, Vec<String>, Approval)> {
         let (approval, signer) = org::open_approval(home, token)?;
+        crate::crypto::check_passphrase(passphrase)?;
+        crate::names::check_display_name(device_name)?;
         super::ensure_no_vault(home)?;
         // Pin the organization before anything is read from the storages:
         // a manifest chain under another root key is then never adopted.

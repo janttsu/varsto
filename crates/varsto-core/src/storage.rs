@@ -29,11 +29,54 @@ pub fn validate_key(key: &str) -> Result<()> {
         .map_err(|_| anyhow::anyhow!("invalid object key {key:?}"))
 }
 
+/// Largest block object (`chunks/`, `packs/`) a storage read returns: a
+/// chunk is at most `MAX_CHUNK_SIZE` plus its nonce, tag and header.
+pub const MAX_BLOCK_OBJECT: u64 = crate::manifest::MAX_CHUNK_SIZE + 64;
+/// Largest record (`vault/`, `manifests/`, `ledger/`, `org/`, ...) a storage
+/// read returns.
+pub const MAX_RECORD: u64 = 256 << 20;
+
+/// How many bytes a read of `key` may return: nothing a storage holds can
+/// make the program allocate more.
+pub fn read_limit(key: &str) -> u64 {
+    if key.starts_with("chunks/") || key.starts_with(crate::packs::PREFIX) {
+        MAX_BLOCK_OBJECT
+    } else {
+        MAX_RECORD
+    }
+}
+
+/// The error of a read that found an object larger than allowed.
+pub fn too_large(key: &str, size: u64, max: u64) -> anyhow::Error {
+    anyhow::anyhow!("{key} is {size} bytes, more than the {max} bytes an object of that kind may have; not read")
+}
+
+/// Run one storage operation so that a panic in it (a malformed object name
+/// or index met on the way) is an error for this object, not the end of the
+/// whole pass.
+pub fn guarded<T>(what: &str, f: impl FnOnce() -> Result<T>) -> Result<T> {
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)) {
+        Ok(r) => r,
+        Err(_) => Err(anyhow::anyhow!(
+            "{what}: internal error while handling the object"
+        )),
+    }
+}
+
 pub trait Storage: Send + Sync {
     fn name(&self) -> &str;
     /// Write an object unless it already exists. Returns true when written.
     fn put_if_absent(&self, key: &str, data: &[u8]) -> Result<bool>;
     fn get(&self, key: &str) -> Result<Option<Vec<u8>>>;
+    /// Like `get`, refusing an object larger than `max` bytes. Backends
+    /// override it to stop before the whole body is in memory; this default
+    /// only checks after the read.
+    fn get_bounded(&self, key: &str, max: u64) -> Result<Option<Vec<u8>>> {
+        match self.get(key)? {
+            Some(b) if b.len() as u64 > max => Err(too_large(key, b.len() as u64, max)),
+            other => Ok(other),
+        }
+    }
     fn exists(&self, key: &str) -> Result<bool>;
     /// List object keys under a prefix, sorted.
     fn list(&self, prefix: &str) -> Result<Vec<String>>;
@@ -52,8 +95,10 @@ pub trait Storage: Send + Sync {
     /// Backends that can read part of an object override it.
     fn get_range(&self, key: &str, offset: u64, len: u64) -> Result<Option<Vec<u8>>> {
         Ok(self.get(key)?.map(|b| {
-            let start = (offset as usize).min(b.len());
-            let end = (start + len as usize).min(b.len());
+            let start = usize::try_from(offset).unwrap_or(usize::MAX).min(b.len());
+            let end = start
+                .saturating_add(usize::try_from(len).unwrap_or(usize::MAX))
+                .min(b.len());
             b[start..end].to_vec()
         }))
     }
@@ -63,12 +108,117 @@ pub trait Storage: Send + Sync {
     fn put_pack(&self, members: &[(String, &[u8])]) -> Result<Vec<bool>> {
         members
             .iter()
-            .map(|(o, b)| self.put_if_absent(&format!("chunks/{}/{o}", &o[..2.min(o.len())]), b))
+            .map(|(o, b)| self.put_if_absent(&format!("chunks/{}/{o}", o.get(..2).unwrap_or(o)), b))
             .collect()
     }
     /// Whether small block objects are written as packs here.
     fn packs_small_objects(&self) -> bool {
         false
+    }
+    /// Whether the storage honours a conditional write (S3 `If-None-Match:
+    /// *`): known (true or false) once the backend has probed it, `None`
+    /// for backends where the question does not arise or before the probe.
+    fn conditional_writes(&self) -> Option<bool> {
+        None
+    }
+}
+
+/// One opened storage shared by every phase of an operation: the engine
+/// keeps the backend (its connection pool, its view of the packs) in an
+/// `Arc` and hands out these handles instead of opening the storage again.
+pub struct SharedStorage(pub std::sync::Arc<dyn Storage>);
+
+impl Storage for SharedStorage {
+    fn name(&self) -> &str {
+        self.0.name()
+    }
+    fn put_if_absent(&self, key: &str, data: &[u8]) -> Result<bool> {
+        self.0.put_if_absent(key, data)
+    }
+    fn get(&self, key: &str) -> Result<Option<Vec<u8>>> {
+        self.0.get(key)
+    }
+    fn get_bounded(&self, key: &str, max: u64) -> Result<Option<Vec<u8>>> {
+        self.0.get_bounded(key, max)
+    }
+    fn exists(&self, key: &str) -> Result<bool> {
+        self.0.exists(key)
+    }
+    fn list(&self, prefix: &str) -> Result<Vec<String>> {
+        self.0.list(prefix)
+    }
+    fn list_after(&self, prefix: &str, start_after: &str) -> Result<Vec<String>> {
+        self.0.list_after(prefix, start_after)
+    }
+    fn delete(&self, key: &str) -> Result<()> {
+        self.0.delete(key)
+    }
+    fn get_range(&self, key: &str, offset: u64, len: u64) -> Result<Option<Vec<u8>>> {
+        self.0.get_range(key, offset, len)
+    }
+    fn put_pack(&self, members: &[(String, &[u8])]) -> Result<Vec<bool>> {
+        self.0.put_pack(members)
+    }
+    fn packs_small_objects(&self) -> bool {
+        self.0.packs_small_objects()
+    }
+    fn conditional_writes(&self) -> Option<bool> {
+        self.0.conditional_writes()
+    }
+}
+
+/// What the engine knows about a storage when opening it, beyond its spec.
+#[derive(Clone, Debug, Default)]
+pub struct OpenOptions {
+    /// S3: whether the server honours `If-None-Match: *`, when a probe
+    /// answered it earlier (`config.json`, `conditional_writes`).
+    pub conditional_writes: Option<bool>,
+}
+
+#[cfg(test)]
+mod bounded_read_tests {
+    use super::*;
+
+    #[test]
+    fn reads_are_bounded_by_the_kind_of_object() {
+        let t = tempfile::tempdir().unwrap();
+        let s = LocalDirStorage::new("box".into(), t.path().to_path_buf()).unwrap();
+        let big = vec![1u8; (MAX_BLOCK_OBJECT + 1) as usize];
+        s.put_if_absent("chunks/ab/big", &big).unwrap();
+        s.put_if_absent("manifests/big", &big).unwrap();
+        s.put_if_absent("chunks/ab/small", &[2u8; 100]).unwrap();
+        let e = s.get("chunks/ab/big").unwrap_err();
+        assert!(format!("{e:#}").contains("more than"), "{e:#}");
+        assert_eq!(s.get("manifests/big").unwrap().unwrap().len(), big.len());
+        assert!(s.get_bounded("chunks/ab/small", 99).is_err());
+        assert_eq!(
+            s.get_bounded("chunks/ab/small", 100)
+                .unwrap()
+                .unwrap()
+                .len(),
+            100
+        );
+        assert!(s.get_bounded("chunks/ab/none", 10).unwrap().is_none());
+        // A claimed range cannot allocate more than a block object, nor overflow.
+        assert_eq!(
+            s.get_range("chunks/ab/small", 0, u64::MAX)
+                .unwrap()
+                .unwrap()
+                .len(),
+            100
+        );
+        assert!(s
+            .get_range("chunks/ab/small", u64::MAX - 1, u64::MAX)
+            .unwrap()
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn a_panic_in_a_read_is_an_error_for_that_object() {
+        let r: Result<()> = guarded("chunks/ab/x", || panic!("bad name"));
+        assert!(format!("{:#}", r.unwrap_err()).contains("internal error"));
+        assert_eq!(guarded("k", || Ok(3)).unwrap(), 3);
     }
 }
 
@@ -115,6 +265,10 @@ pub enum StorageSpec {
         cold: bool,
         #[serde(default)]
         place: String,
+        /// The user chose to reach an `http://` endpoint outside this
+        /// computer without transport encryption (`--insecure-http`).
+        #[serde(default, skip_serializing_if = "is_false")]
+        allow_insecure_http: bool,
     },
     /// Any rclone remote (`remote:bucket/path`); credentials stay in rclone's config.
     Rclone {
@@ -170,6 +324,10 @@ fn is_one(v: &u32) -> bool {
 
 fn default_true() -> bool {
     true
+}
+
+fn is_false(b: &bool) -> bool {
+    !*b
 }
 
 fn default_reserve_percent() -> u32 {
@@ -272,6 +430,15 @@ impl StorageSpec {
     }
     /// Open; `secrets` resolves `secret_ref` for backends that need one.
     pub fn open_with(&self, secrets: SecretLookup) -> Result<Box<dyn Storage>> {
+        self.open_with_options(secrets, &OpenOptions::default())
+    }
+
+    /// `open_with` with what the engine learned about the storage earlier.
+    pub fn open_with_options(
+        &self,
+        secrets: SecretLookup,
+        options: &OpenOptions,
+    ) -> Result<Box<dyn Storage>> {
         match self {
             StorageSpec::LocalDir {
                 name,
@@ -292,6 +459,7 @@ impl StorageSpec {
                 secret_ref,
                 path_style,
                 storage_class,
+                allow_insecure_http,
                 ..
             } => {
                 let reference = if secret_ref.is_empty() {
@@ -321,6 +489,8 @@ impl StorageSpec {
                     secret_access_key: secret,
                     path_style: *path_style,
                     storage_class: storage_class.clone(),
+                    allow_insecure_http: *allow_insecure_http,
+                    conditional_writes: options.conditional_writes,
                 })?))
             }
             StorageSpec::Rclone { name, remote, .. } => Ok(Box::new(
@@ -377,8 +547,14 @@ impl Storage for LocalDirStorage {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
             Err(e) => return Err(e).with_context(|| format!("open {}", path.display())),
         };
+        // A length from an index is a claim: never allocate more than a
+        // block object may be, and read no more than the file has.
+        let len = len.min(MAX_BLOCK_OBJECT);
+        if offset > i64::MAX as u64 {
+            return Ok(Some(Vec::new())); // past any file
+        }
         f.seek(SeekFrom::Start(offset))?;
-        let mut buf = Vec::with_capacity(len as usize);
+        let mut buf = Vec::new();
         f.take(len).read_to_end(&mut buf)?;
         Ok(Some(buf))
     }
@@ -403,12 +579,33 @@ impl Storage for LocalDirStorage {
     }
 
     fn get(&self, key: &str) -> Result<Option<Vec<u8>>> {
+        self.get_bounded(key, read_limit(key))
+    }
+
+    fn get_bounded(&self, key: &str, max: u64) -> Result<Option<Vec<u8>>> {
+        use std::io::Read;
         let path = self.path_for(key)?;
-        match fs::read(&path) {
-            Ok(b) => Ok(Some(b)),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
-            Err(e) => Err(e).with_context(|| format!("read {}", path.display())),
+        let f = match fs::File::open(&path) {
+            Ok(f) => f,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(e) => return Err(e).with_context(|| format!("read {}", path.display())),
+        };
+        let size = f
+            .metadata()
+            .with_context(|| format!("read {}", path.display()))?
+            .len();
+        if size > max {
+            return Err(too_large(key, size, max));
         }
+        let mut buf = Vec::with_capacity(size as usize);
+        // The file may grow while it is read: one byte past the limit is the answer.
+        f.take(max + 1)
+            .read_to_end(&mut buf)
+            .with_context(|| format!("read {}", path.display()))?;
+        if buf.len() as u64 > max {
+            return Err(too_large(key, buf.len() as u64, max));
+        }
+        Ok(Some(buf))
     }
 
     fn exists(&self, key: &str) -> Result<bool> {
@@ -589,6 +786,9 @@ impl Storage for CountingStorage {
     fn packs_small_objects(&self) -> bool {
         self.inner.packs_small_objects()
     }
+    fn conditional_writes(&self) -> Option<bool> {
+        self.inner.conditional_writes()
+    }
     fn put_if_absent(&self, key: &str, data: &[u8]) -> Result<bool> {
         self.calls.puts.fetch_add(1, Ordering::Relaxed);
         self.inner.put_if_absent(key, data)
@@ -605,6 +805,13 @@ impl Storage for CountingStorage {
             self.calls.chunk_gets.fetch_add(1, Ordering::Relaxed);
         }
         self.inner.get(key)
+    }
+    fn get_bounded(&self, key: &str, max: u64) -> Result<Option<Vec<u8>>> {
+        self.calls.gets.fetch_add(1, Ordering::Relaxed);
+        if key.starts_with("chunks/") {
+            self.calls.chunk_gets.fetch_add(1, Ordering::Relaxed);
+        }
+        self.inner.get_bounded(key, max)
     }
     fn exists(&self, key: &str) -> Result<bool> {
         self.calls.exists.fetch_add(1, Ordering::Relaxed);
@@ -751,6 +958,9 @@ impl Storage for LoggedStorage {
     fn packs_small_objects(&self) -> bool {
         self.inner.packs_small_objects()
     }
+    fn conditional_writes(&self) -> Option<bool> {
+        self.inner.conditional_writes()
+    }
     fn put_if_absent(&self, key: &str, data: &[u8]) -> Result<bool> {
         let t = crate::logging::Timer::start();
         let r = self.inner.put_if_absent(key, data);
@@ -767,6 +977,19 @@ impl Storage for LoggedStorage {
     fn get(&self, key: &str) -> Result<Option<Vec<u8>>> {
         let t = crate::logging::Timer::start();
         let r = self.inner.get(key);
+        self.done(
+            "get",
+            key,
+            0,
+            |v: &Option<Vec<u8>>| v.as_ref().map(|b| b.len() as u64).unwrap_or(0),
+            t,
+            &r,
+        );
+        r
+    }
+    fn get_bounded(&self, key: &str, max: u64) -> Result<Option<Vec<u8>>> {
+        let t = crate::logging::Timer::start();
+        let r = self.inner.get_bounded(key, max);
         self.done(
             "get",
             key,

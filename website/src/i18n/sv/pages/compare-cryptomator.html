@@ -1,0 +1,44 @@
+---
+title: Alternativ till Cryptomator: Varsto och Cryptomator jämförda
+nav: Compare
+output: compare/cryptomator/index.html
+description: Söker du ett alternativ till Cryptomator som både krypterar och synkroniserar, på din egen lagring (S3, NAS, diskar, rclone)? Vad Cryptomator är till för, hur det fungerar och hur det står sig mot Varsto.
+---
+    <p class="back-link"><a href="{{L}}compare/">Alla jämförelser</a></p>
+    <h1>Varsto och Cryptomator</h1>
+    <p class="lead">Cryptomator krypterar en mapp, valvet, så att den kan ligga i vilket moln som helst utan att leverantören kan läsa den. Det är gratis och öppen källkod, har appar för dator och mobil och gör en sak: valvet. Att få valvet till en annan enhet lämnas åt molnleverantörens egen klient.</p>
+
+    <h2>Så fungerar Cryptomator</h2>
+    <p>Ett valv är en katalog med krypterade filer och kataloger och en konfigurationsfil <code>vault.cryptomator</code> i roten. På datorn visas valvet som en virtuell enhet: filerna krypteras och dekrypteras genomskinligt medan du använder dem, och inga okrypterade kopior hamnar på disken. Filnamnen krypteras också. Innehållet krypteras med AES (kombinationen <code>SIV_GCM</code> eller <code>SIV_CTRMAC</code>), och huvudnycklarna skyddas med ett lösenord via scrypt och AES key wrap. Cryptomator flyttar inte valvet någonstans: du lägger det i en mapp som Dropbox, Google Drive, OneDrive eller en annan klient synkroniserar, och den klienten bär de krypterade filerna mellan enheterna. Det finns ingen förteckning över vilka enheter eller lagringsplatser som har en kopia, ingen egen delningsmekanism (den som har valvmappen och dess lösenord öppnar det; en separat Hub-produkt hanterar åtkomst för organisationer) och inga regler för hur många kopior som måste finnas.</p>
+
+    <h2>Sida vid sida</h2>
+    <table class="compare-table">
+      <thead><tr><th scope="col"></th><th scope="col">Cryptomator</th><th scope="col">Varsto</th></tr></thead>
+      <tbody>
+      <tr><th scope="row">Var dina filer finns</th><td>I en valvmapp på din enhet, och överallt dit molnklienten du använder kopierar den mappen.</td><td>På dina egna enheter och på lagringsplatser du väljer: S3-kompatibla buckets, valfri rclone-fjärrlagring, lokala kataloger eller nätverkskataloger och pooler av flyttbara diskar.</td></tr>
+      <tr><th scope="row">Konto eller central server</th><td>Inget för Cryptomator självt; molnet du har valvet i har sitt eget konto.</td><td>Inget. Det finns ingen Varsto-server; enheterna hittar varandra via dina lagringsplatser och i det lokala nätverket.</td></tr>
+      <tr><th scope="row">Kryptering</th><td>På klientsidan, innan molnklienten ser filerna: AES-kryptering av innehållet, krypterade filnamn, lösenordsskyddade huvudnycklar. Moget och brett granskat.</td><td>End-to-end, på klientsidan, innan något lämnar enheten; hybrid postkvantkryptografi (ML-KEM för nycklar vid delning, signaturer med Ed25519 + ML-DSA-65). Ännu inte oberoende granskad.</td></tr>
+      <tr><th scope="row">Synkronisering mellan enheter</th><td>Ingen egen: molnleverantörens klient synkroniserar valvmappen.</td><td>Ja: enheterna synkroniserar via dina lagringsplatser, och direkt peer-to-peer när de når varandra.</td></tr>
+      <tr><th scope="row">Vet var varje kopia finns</th><td>Nej: Cryptomator ser bara valvmappen på den här enheten.</td><td>Ja: en signerad liggare registrerar vilken lagringsplats och enhet som har varje block; lagringsregler (som standard 1 kopia var som helst, 1 extern, 1 på dina egna enheter eller diskar, kontrollerad av en annan enhet inom 30 dagar) varnar när en regel inte uppfylls.</td></tr>
+      <tr><th scope="row">Delning med andra</th><td>Ingen egen delningsmekanism: valvet öppnas av den som har mappen och lösenordet.</td><td>Ja: en mapp delas med en annan användare genom en förseglad nyckel, medlemmar kan tas bort och en medlem kan vara skrivskyddad.</td></tr>
+      <tr><th scope="row">Flyttbara diskar och diskar offline</th><td>Ett valv kan ligga på vilken disk som helst, men ingenting håller reda på diskar som är borta.</td><td>Ja: diskpooler fylls, kontrolleras och känns igen när de kommer tillbaka; filer på en disk som är borta ber om just den disken.</td></tr>
+      <tr><th scope="row">Säkerhetskopior</th><td>Inga egna; molnleverantörens eventuella versionshantering gäller de krypterade filerna.</td><td>Ja: välj en mapp på valfri enhet. Varsto sparar krypterade, skrivskyddade versioner av den bara i din externa lagring, aldrig på dina enheter. Versionerna sparas i det antal dagar du väljer (90 som standard), och de som har gått ut raderas. Återställ vilken version som helst till en katalog du anger, från appen eller kommandoraden.</td></tr>
+      <tr><th scope="row">Licens och pris</th><td>Öppen källkod (GPL-3.0), gratis; en kommersiell licens erbjuds programvaruleverantörer.</td><td>Källkoden tillgänglig (PolyForm Shield 1.0.0), gratis; du betalar bara din lagringsleverantör.</td></tr>
+      <tr><th scope="row">Mognad</th><td>Moget, långlivat projekt.</td><td>Alfa: inte för produktionsdata, formaten kan fortfarande ändras.</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Vilken passar</h2>
+    <div class="grid two">
+      <div class="card"><h3>Cryptomator</h3><p>Välj Cryptomator när du redan använder en molnklient du är nöjd med och vill ha dess mapp krypterad med ett moget verktyg med öppen källkod, och du inte behöver veta var kopiorna finns eller dela med andra.</p></div>
+      <div class="card"><h3>Varsto</h3><p>Välj Varsto när krypteringen ska följa med synkroniseringen själv, över buckets, NAS-utdelningar och flyttbara diskar, med en förteckning över var varje kopia finns, regler som varnar när en kopia saknas och delning med andra.</p></div>
+    </div>
+    <p class="note">Varsto är alfaprogramvara: anförtro den inga data som du inte har någon annan kopia av, och dess kryptografi har inte granskats av någon oberoende part. De andra produkterna här är mogna. Uppgifterna om dem kontrollerades i deras egen dokumentation i oktober 2026; priser och abonnemang ändras ofta, så se deras egna sidor för aktuella siffror. Rättelser tas gärna emot på <a href="{{P}}forum/">forumet</a> eller på GitHub.</p>
+
+    <h2>Källor</h2>
+    <ul>
+      <li><a href="https://cryptomator.org/">Cryptomators webbplats</a></li>
+      <li><a href="https://docs.cryptomator.org/">Cryptomators dokumentation (en)</a></li>
+      <li><a href="https://docs.cryptomator.org/security/architecture/">Säkerhetsarkitektur: valvformat, chiffer, nyckelskydd (en)</a></li>
+      <li><a href="https://github.com/cryptomator/cryptomator">Källkod (licens: GPL-3.0)</a></li>
+    </ul>

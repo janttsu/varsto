@@ -2,7 +2,7 @@
 title: Vertailu
 nav: Compare
 output: compare/index.html
-description: Miten Varsto vertautuu Syncthingiin, Resilio Synciin, MEGAan, Fileniin, Tresoritiin ja git-anneximiin: mihin kukin on tarkoitettu ja missä ne eroavat.
+description: Miten Varsto vertautuu Syncthingiin, Resilio Synciin, MEGAan, Fileniin, Tresoritiin, git-anneximiin, Cryptomatoriin, rcloneen ja resticiin/borgiin: mihin kukin on tarkoitettu ja missä ne eroavat.
 ---
     <h1>Varsto vertailussa</h1>
     <p class="lead">Tiedostojen synkronointityökalut jakautuvat kolmeen ryhmään. Vertaisyhteyttä (P2P) käyttävät työkalut, kuten Syncthing ja Resilio Sync, kopioivat kansioita omien laitteidesi välillä. Salatut pilvet, kuten MEGA, Filen ja Tresorit, säilyttävät tiedostosi yhden palveluntarjoajan luona. git-annex pitää kirjaa suurista tiedostoista kaikilla omistamillasi levyillä ja etäkohteissa. Varsto yhdistää osia kaikista kolmesta: päästä päähän salatut tiedostot valitsemissasi tallennuspaikoissa, siirrot vertaisyhteydellä laitteidesi välillä ja kirjanpidon siitä, missä jokainen kopio on.</p>
@@ -30,5 +30,8 @@ description: Miten Varsto vertautuu Syncthingiin, Resilio Synciin, MEGAan, Filen
       <a class="card" href="{{L}}compare/filen/"><h3>Varsto ja Filen</h3><p>Filen on saksalainen, nollatietoperiaatteella salattu pilvitallennuspalvelu yksityisyyttä arvostaville ihmisille ja tiimeille.</p></a>
       <a class="card" href="{{L}}compare/tresorit/"><h3>Varsto ja Tresorit</h3><p>Tresorit on sveitsiläinen päästä päähän salattu pilvitallennus- ja tiedostonjakopalvelu, joka on suunnattu lähinnä yrityksille ja säännellyille aloille, mutta tarjolla on myös henkilökohtaisia tilauksia.</p></a>
       <a class="card" href="{{L}}compare/git-annex/"><h3>Varsto ja git-annex</h3><p>git-annex hallitsee suuria tiedostoja gitillä tallentamatta niiden sisältöä gitiin.</p></a>
+      <a class="card" href="{{L}}compare/cryptomator/"><h3>Varsto ja Cryptomator</h3><p>Cryptomator salaa holvikansion mitä tahansa pilveä varten; pilvipalvelun oma asiakasohjelma kuljettaa sen laitteiden välillä.</p></a>
+      <a class="card" href="{{L}}compare/rclone/"><h3>Varsto ja rclone</h3><p>rclone kopioi ja synkronoi tiedostoja yli seitsemänkymmenen tallennusjärjestelmän kanssa; sen crypt-etäkohde salaa läpi kulkevat tiedostot.</p></a>
+      <a class="card" href="{{L}}compare/restic/"><h3>Varsto, restic ja BorgBackup</h3><p>restic ja borg ottavat salattuja, deduplikoituja versioita varastoon: varmuuskopiointia, ei synkronointia.</p></a>
     </div>
     <p class="note">Varsto on alfavaiheen ohjelmisto: älä luota sille tietoja, joista sinulla ei ole muuta kopiota. Sen kryptografiaa ei ole myöskään auditoitu riippumattomasti. Muut tässä esitellyt tuotteet ovat kypsiä. Niitä koskevat tiedot tarkistettiin niiden omasta dokumentaatiosta lokakuussa 2026; hinnat ja tilausvaihtoehdot muuttuvat usein, joten katso ajantasaiset tiedot niiden omilta sivuilta. Korjaukset ovat tervetulleita <a href="https://github.com/janttsu/varsto/issues" rel="noopener">GitHub-issueina</a>.</p>

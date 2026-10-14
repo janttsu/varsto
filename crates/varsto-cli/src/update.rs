@@ -1,15 +1,22 @@
 // SPDX-License-Identifier: PolyForm-Shield-1.0.0
 //! Self-update from the project download page, with signed releases.
 //!
-//! `varsto update` fetches `manifest.json`, `SHA256SUMS` and its detached
-//! signature `SHA256SUMS.sig`, and refuses to go on unless the signature
-//! verifies against the release public key built into this binary
-//! (`release-key.pub` at the root of the repository). The signature is in
-//! minisign's format: Ed25519 over the BLAKE2b-512 hash of the file, plus a
-//! signed "trusted comment" that names the version. As a second channel, the
-//! checksum list attached to the GitHub release of that version is compared
-//! too, when GitHub can be reached; a different checksum there stops the
-//! update, an unreachable GitHub does not (the signature alone suffices).
+//! `varsto update` fetches `manifest.json` with its detached signature
+//! `manifest.json.minisig`, `SHA256SUMS` and its detached signature
+//! `SHA256SUMS.sig`, and refuses to go on unless both signatures verify
+//! against the release public key built into this binary (`release-key.pub`
+//! at the root of the repository). The signature is in minisign's format:
+//! Ed25519 over the BLAKE2b-512 hash of the file, plus a signed "trusted
+//! comment" that names the version and the time of signing.
+//!
+//! Against a download site that serves old or withheld releases (a freeze or
+//! rollback): only a version newer than this binary (and than the version
+//! compiled in as `MIN_ACCEPTED_VERSION`) is installed; the signing time of a
+//! checksum list must not be older than the last one accepted
+//! (`update-state.json` in the device directory); and as a second channel
+//! the checksum list attached to the GitHub release of that version must be
+//! reachable and agree. When GitHub does not answer, the update waits and
+//! says why; `--allow-single-source` goes on with the signature alone.
 //! Then the archive for this platform is downloaded, its SHA-256 checked
 //! against the signed list, and the running binary replaced. Downloads use
 //! the system `curl` so that the binary carries no TLS stack of its own.
@@ -30,6 +37,12 @@ pub const DEFAULT_SITE: &str = "https://varsto.net";
 pub const SITE_ENV: &str = "VARSTO_UPDATE_URL";
 /// Second channel: the checksum list attached to each GitHub release.
 pub const GITHUB_RELEASES: &str = "https://github.com/janttsu/varsto/releases/download";
+/// The oldest version this binary will ever install: its own. A signed list
+/// of this version or an older one is a rollback, however valid the signature.
+pub const MIN_ACCEPTED_VERSION: &str = env!("CARGO_PKG_VERSION");
+/// A signed list older than this is reported (an error only when a newer
+/// signature than the last accepted one is not the one offered).
+const STALE_AFTER_SECS: i64 = 90 * 86_400;
 /// The release public key (minisign format), also on the download page.
 pub const RELEASE_KEY: &str = include_str!("../../../release-key.pub");
 
@@ -205,6 +218,51 @@ pub fn sha256_file(path: &Path) -> Result<String> {
     Ok(hex::encode(h.finalize()))
 }
 
+// ----- rollback state ---------------------------------------------------------------
+
+/// What the updater remembers between runs, `update-state.json` in the
+/// device directory.
+#[derive(Serialize, serde::Deserialize, Default, Debug, Clone, PartialEq, Eq)]
+pub struct State {
+    /// Signing time (seconds) of the newest checksum list accepted so far.
+    #[serde(default)]
+    pub last_timestamp: i64,
+    #[serde(default)]
+    pub last_version: String,
+}
+
+pub const STATE_FILE: &str = "update-state.json";
+
+impl State {
+    pub fn load(home: &Path) -> State {
+        varsto_core::util::read_json_or_default(&home.join(STATE_FILE)).unwrap_or_default()
+    }
+    fn save(&self, home: &Path) -> Result<()> {
+        varsto_core::util::private_dir(home)?;
+        varsto_core::util::write_atomic(&home.join(STATE_FILE), &serde_json::to_vec_pretty(self)?)
+    }
+}
+
+/// How strict an update is and where it keeps its state.
+pub struct Policy<'a> {
+    /// The device directory (`update-state.json`); `None` keeps no state.
+    pub home: Option<&'a Path>,
+    /// Go on with the signature alone when GitHub does not answer.
+    pub allow_single_source: bool,
+    /// Now, in seconds since the epoch.
+    pub now: i64,
+}
+
+impl<'a> Policy<'a> {
+    pub fn new(home: &'a Path, allow_single_source: bool) -> Policy<'a> {
+        Policy {
+            home: Some(home),
+            allow_single_source,
+            now: varsto_core::util::now_utc(),
+        }
+    }
+}
+
 // ----- downloads ------------------------------------------------------------------
 
 /// How releases are fetched; tests substitute their own.
@@ -296,17 +354,34 @@ fn version_key(v: &str) -> (u64, u64, u64, u8, u64) {
 }
 
 pub fn check() -> Result<Check> {
-    check_with(&Curl, &downloads_base())
+    check_with(&Curl, &downloads_base(), &release_key())
 }
 
-fn check_with(fetch: &dyn Fetch, base: &str) -> Result<Check> {
-    let manifest: serde_json::Value =
-        serde_json::from_slice(&fetch.get(&format!("{base}manifest.json"))?)?;
+fn check_with(fetch: &dyn Fetch, base: &str, key: &PublicKey) -> Result<Check> {
+    // An unsigned manifest could name any release, an old one included.
+    let manifest_bytes = fetch.get(&format!("{base}manifest.json"))?;
+    let manifest_sig = fetch.get(&format!("{base}manifest.json.minisig")).context(
+        "the release manifest is not signed (no manifest.json.minisig); refusing to trust it",
+    )?;
+    let signed = verify_signature(
+        key,
+        &manifest_bytes,
+        &String::from_utf8_lossy(&manifest_sig),
+    )
+    .context("manifest.json does not carry a valid release signature; refusing to trust it")?;
+    let manifest: serde_json::Value = serde_json::from_slice(&manifest_bytes)?;
     let latest = manifest
         .get("_version")
         .and_then(|v| v.as_str())
         .ok_or_else(|| anyhow!("manifest has no version"))?
         .to_string();
+    match trusted_field(&signed, "version") {
+        Some(v) if v == latest => {}
+        other => bail!(
+            "the signed manifest is for version {}, not {latest}; refusing to trust it",
+            other.unwrap_or("(none)")
+        ),
+    }
     let current = env!("CARGO_PKG_VERSION").to_string();
     let target = target_triple().to_string();
     // Inside Varsto.app the whole bundle is replaced from the disk image;
@@ -320,7 +395,8 @@ fn check_with(fetch: &dyn Fetch, base: &str) -> Result<Check> {
             .find(|k| k.contains(&target) && (k.ends_with(".tar.gz") || k.ends_with(".zip")))
             .cloned()
     });
-    let newer = version_key(&latest) > version_key(&current);
+    let newer = version_key(&latest) > version_key(&current)
+        && version_key(&latest) > version_key(MIN_ACCEPTED_VERSION);
     Ok(Check {
         available: newer && archive.is_some(),
         newer,
@@ -349,7 +425,14 @@ pub fn download_verified(
     key: &PublicKey,
     check: &Check,
     dir: &Path,
+    policy: &Policy,
 ) -> Result<Verified> {
+    if version_key(&check.latest) <= version_key(MIN_ACCEPTED_VERSION) {
+        bail!(
+            "{} is not newer than this binary ({MIN_ACCEPTED_VERSION}); refusing to install an older or the same version",
+            check.latest
+        );
+    }
     let archive = check
         .archive
         .clone()
@@ -373,10 +456,30 @@ pub fn download_verified(
             check.latest
         ),
     }
+    // The signing time must not go backwards: a list older than the last one
+    // accepted is a replayed release.
+    let timestamp: i64 = trusted_field(&trusted, "timestamp")
+        .and_then(|t| t.parse().ok())
+        .ok_or_else(|| anyhow!("the signature carries no signing time; refusing to update"))?;
+    let state = policy.home.map(State::load).unwrap_or_default();
+    if timestamp < state.last_timestamp {
+        bail!(
+            "the signed checksum list is older ({}) than the last one accepted ({}, version {}); refusing to update (a rollback?)",
+            varsto_core::util::format_date(timestamp),
+            varsto_core::util::format_date(state.last_timestamp),
+            state.last_version
+        );
+    }
     let sums = String::from_utf8(sums).context("SHA256SUMS is not text")?;
     let expected = listed_hash(&sums, &archive)
         .ok_or_else(|| anyhow!("{archive} is not listed in the signed SHA256SUMS"))?;
     let mut notes = vec![format!("signature verified (release key {})", key.id_hex())];
+    if policy.now - timestamp > STALE_AFTER_SECS {
+        notes.push(format!(
+            "warning: the signed list is {} days old; it is the newest the download site offers",
+            (policy.now - timestamp) / 86_400
+        ));
+    }
     let github = format!("{GITHUB_RELEASES}/v{}/SHA256SUMS", check.latest);
     match fetch.get_second(&github) {
         Ok(text) => match listed_hash(&String::from_utf8_lossy(&text), &archive) {
@@ -389,7 +492,13 @@ pub fn download_verified(
                 check.latest
             ),
         },
-        Err(_) => notes.push("GitHub release not reachable; the signature alone was checked".into()),
+        Err(e) if policy.allow_single_source => notes.push(format!(
+            "GitHub release not reachable ({e}); --allow-single-source: the signature alone was checked"
+        )),
+        Err(e) => bail!(
+            "the update is postponed: the GitHub release of {} could not be reached to cross-check the download site ({e}). Try again later, or accept the download site alone with --allow-single-source",
+            check.latest
+        ),
     }
     let path = dir.join(&archive);
     fetch.download(&format!("{base}{archive}"), &path)?;
@@ -397,12 +506,20 @@ pub fn download_verified(
     if actual != expected {
         bail!("checksum mismatch for {archive}: expected {expected}, got {actual}");
     }
+    // Only now: a failed check must not move the line.
+    if let Some(home) = policy.home {
+        State {
+            last_timestamp: timestamp.max(state.last_timestamp),
+            last_version: check.latest.clone(),
+        }
+        .save(home)?;
+    }
     Ok(Verified { path, notes })
 }
 
 /// Download, verify and install the latest release over the running binary.
 /// Returns a human-readable message. The caller restarts the service.
-pub fn apply(check: &Check) -> Result<String> {
+pub fn apply(check: &Check, policy: &Policy) -> Result<String> {
     if !check.available {
         if check.newer {
             // Never "up to date" while a newer version exists: say why this
@@ -423,7 +540,7 @@ pub fn apply(check: &Check) -> Result<String> {
         .prefix("varsto-update-")
         .tempdir()
         .context("create a temporary directory for the update")?;
-    install_from(check, tmp.path())
+    install_from(check, tmp.path(), policy)
 }
 
 /// The Varsto.app bundle this binary runs from (macOS), if any.
@@ -505,8 +622,8 @@ fn install_app_from_dmg(dmg: &Path, bundle: &Path, tmp: &Path) -> Result<()> {
     result
 }
 
-fn install_from(check: &Check, tmp: &Path) -> Result<String> {
-    let v = download_verified(&Curl, &downloads_base(), &release_key(), check, tmp)?;
+fn install_from(check: &Check, tmp: &Path, policy: &Policy) -> Result<String> {
+    let v = download_verified(&Curl, &downloads_base(), &release_key(), check, tmp, policy)?;
     if v.path.extension().is_some_and(|e| e == "dmg") {
         let bundle = app_bundle().ok_or_else(|| anyhow!("not running from Varsto.app"))?;
         install_app_from_dmg(&v.path, &bundle, tmp)?;
@@ -800,13 +917,27 @@ mod tests {
     const BASE: &str = "https://example.invalid/downloads/";
     const ARCHIVE: &str = "varsto-9.9.9-x86_64-unknown-linux-musl.tar.gz";
 
+    /// A policy with no state file; `single` is --allow-single-source.
+    fn pol(single: bool) -> Policy<'static> {
+        Policy {
+            home: None,
+            allow_single_source: single,
+            now: 1_000_000,
+        }
+    }
+
     fn release(sk: &SigningKey) -> (Fake, Check) {
+        release_at(sk, 1)
+    }
+
+    /// A release whose checksum list was signed at `ts`.
+    fn release_at(sk: &SigningKey, ts: i64) -> (Fake, Check) {
         let body = b"new release".to_vec();
         let sums = format!("{}  {ARCHIVE}\n", hex::encode(Sha256::digest(&body)));
         let sig = sign(
             sk,
             sums.as_bytes(),
-            "timestamp:1\tfile:SHA256SUMS\tversion:9.9.9",
+            &format!("timestamp:{ts}\tfile:SHA256SUMS\tversion:9.9.9"),
         );
         let mut files = HashMap::new();
         files.insert(format!("{BASE}{ARCHIVE}"), body);
@@ -839,14 +970,14 @@ mod tests {
         let (sk, pk) = test_key(7);
         let (mut fake, check) = release(&sk);
         let dir = tempfile::tempdir().unwrap();
-        // GitHub unreachable: the signature suffices.
-        let v = download_verified(&fake, BASE, &pk, &check, dir.path()).unwrap();
+        // GitHub unreachable: the signature suffices only when asked.
+        let v = download_verified(&fake, BASE, &pk, &check, dir.path(), &pol(true)).unwrap();
         assert_eq!(fs::read(&v.path).unwrap(), b"new release");
         assert!(v.notes.iter().any(|n| n.contains("not reachable")));
         // GitHub agrees.
         let sums = fake.files[&format!("{BASE}SHA256SUMS")].clone();
         fake.files.insert(github_url(), sums);
-        let v = download_verified(&fake, BASE, &pk, &check, dir.path()).unwrap();
+        let v = download_verified(&fake, BASE, &pk, &check, dir.path(), &pol(false)).unwrap();
         assert!(v.notes.iter().any(|n| n.contains("GitHub release")));
     }
 
@@ -857,13 +988,13 @@ mod tests {
         // No signature at all.
         let (mut fake, check) = release(&sk);
         fake.files.remove(&format!("{BASE}SHA256SUMS.sig"));
-        let e = download_verified(&fake, BASE, &pk, &check, dir.path()).unwrap_err();
+        let e = download_verified(&fake, BASE, &pk, &check, dir.path(), &pol(true)).unwrap_err();
         assert!(format!("{e:#}").contains("not signed"), "{e:#}");
         assert!(!*fake.downloaded.borrow());
         // Signed by another key.
         let (other, _) = test_key(9);
         let (fake, check) = release(&other);
-        assert!(download_verified(&fake, BASE, &pk, &check, dir.path()).is_err());
+        assert!(download_verified(&fake, BASE, &pk, &check, dir.path(), &pol(true)).is_err());
         assert!(!*fake.downloaded.borrow());
         // A checksum list changed after signing (archive swapped by the site).
         let (mut fake, check) = release(&sk);
@@ -873,12 +1004,12 @@ mod tests {
             format!("{}  {ARCHIVE}\n", hex::encode(Sha256::digest(&evil))).into_bytes(),
         );
         fake.files.insert(format!("{BASE}{ARCHIVE}"), evil);
-        assert!(download_verified(&fake, BASE, &pk, &check, dir.path()).is_err());
+        assert!(download_verified(&fake, BASE, &pk, &check, dir.path(), &pol(true)).is_err());
         // An archive that does not match the signed list.
         let (mut fake, check) = release(&sk);
         fake.files
             .insert(format!("{BASE}{ARCHIVE}"), b"evil".to_vec());
-        let e = download_verified(&fake, BASE, &pk, &check, dir.path()).unwrap_err();
+        let e = download_verified(&fake, BASE, &pk, &check, dir.path(), &pol(true)).unwrap_err();
         assert!(format!("{e:#}").contains("checksum mismatch"), "{e:#}");
         // A signed list of another version (replayed old release).
         let (mut fake, mut check) = release(&sk);
@@ -888,7 +1019,7 @@ mod tests {
             format!("{BASE}varsto-9.9.10-x86_64-unknown-linux-musl.tar.gz"),
             b"x".to_vec(),
         );
-        assert!(download_verified(&fake, BASE, &pk, &check, dir.path()).is_err());
+        assert!(download_verified(&fake, BASE, &pk, &check, dir.path(), &pol(true)).is_err());
     }
 
     #[test]
@@ -900,13 +1031,13 @@ mod tests {
             github_url(),
             format!("{}  {ARCHIVE}\n", "00".repeat(32)).into_bytes(),
         );
-        let e = download_verified(&fake, BASE, &pk, &check, dir.path()).unwrap_err();
+        let e = download_verified(&fake, BASE, &pk, &check, dir.path(), &pol(false)).unwrap_err();
         assert!(format!("{e:#}").contains("GitHub"), "{e:#}");
         assert!(!*fake.downloaded.borrow());
         let (mut fake, check) = release(&sk);
         fake.files
             .insert(github_url(), b"aa  something-else.zip\n".to_vec());
-        assert!(download_verified(&fake, BASE, &pk, &check, dir.path()).is_err());
+        assert!(download_verified(&fake, BASE, &pk, &check, dir.path(), &pol(false)).is_err());
     }
 
     #[test]
@@ -915,5 +1046,144 @@ mod tests {
         if std::env::var_os(SITE_ENV).is_none() {
             assert_eq!(downloads_base(), format!("{DEFAULT_SITE}/downloads/"));
         }
+    }
+
+    #[test]
+    fn update_waits_when_github_does_not_answer() {
+        let (sk, pk) = test_key(7);
+        let dir = tempfile::tempdir().unwrap();
+        let (fake, check) = release(&sk);
+        let e = download_verified(&fake, BASE, &pk, &check, dir.path(), &pol(false)).unwrap_err();
+        let e = format!("{e:#}");
+        assert!(
+            e.contains("postponed") && e.contains("--allow-single-source"),
+            "{e}"
+        );
+        assert!(
+            !*fake.downloaded.borrow(),
+            "nothing downloaded before the cross-check"
+        );
+    }
+
+    #[test]
+    fn update_refuses_a_checksum_list_older_than_the_last_accepted() {
+        let (sk, pk) = test_key(7);
+        let dir = tempfile::tempdir().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let policy = Policy {
+            home: Some(home.path()),
+            allow_single_source: true,
+            now: 1_000_000,
+        };
+        let go = |ts: i64| {
+            let (fake, check) = release_at(&sk, ts);
+            let r = download_verified(&fake, BASE, &pk, &check, dir.path(), &policy);
+            let downloaded = *fake.downloaded.borrow();
+            (r, downloaded)
+        };
+        assert!(go(500).0.is_ok());
+        assert_eq!(State::load(home.path()).last_timestamp, 500);
+        // An older signed list: valid signature, replayed release.
+        let (r, downloaded) = go(400);
+        let e = format!("{:#}", r.unwrap_err());
+        assert!(e.contains("older") && e.contains("rollback"), "{e}");
+        assert!(!downloaded);
+        assert_eq!(
+            State::load(home.path()).last_timestamp,
+            500,
+            "the line did not move back"
+        );
+        // The same time and newer ones are fine and move the line forward.
+        assert!(go(500).0.is_ok());
+        assert!(go(900).0.is_ok());
+        assert_eq!(State::load(home.path()).last_timestamp, 900);
+        // A refusal for another reason leaves the line where it was.
+        let (mut fake, check) = release_at(&sk, 2000);
+        fake.files
+            .insert(format!("{BASE}{ARCHIVE}"), b"evil".to_vec());
+        assert!(download_verified(&fake, BASE, &pk, &check, dir.path(), &policy).is_err());
+        assert_eq!(State::load(home.path()).last_timestamp, 900);
+    }
+
+    #[test]
+    fn a_signed_list_that_is_months_old_is_reported() {
+        let (sk, pk) = test_key(7);
+        let dir = tempfile::tempdir().unwrap();
+        let (fake, check) = release_at(&sk, 10);
+        let policy = Policy {
+            home: None,
+            allow_single_source: true,
+            now: 10 + 100 * 86_400,
+        };
+        let v = download_verified(&fake, BASE, &pk, &check, dir.path(), &policy).unwrap();
+        assert!(
+            v.notes.iter().any(|n| n.contains("100 days old")),
+            "{:?}",
+            v.notes
+        );
+    }
+
+    #[test]
+    fn the_same_or_an_older_version_is_never_installed() {
+        let (sk, pk) = test_key(7);
+        let dir = tempfile::tempdir().unwrap();
+        let (fake, mut check) = release(&sk);
+        let me = env!("CARGO_PKG_VERSION");
+        assert_eq!(MIN_ACCEPTED_VERSION, me);
+        for v in [me, "0.0.1-alpha.1"] {
+            check.latest = v.into();
+            let e =
+                download_verified(&fake, BASE, &pk, &check, dir.path(), &pol(true)).unwrap_err();
+            assert!(format!("{e:#}").contains("not newer"), "{e:#}");
+        }
+        assert!(!*fake.downloaded.borrow());
+    }
+
+    fn manifest_fake(sk: &SigningKey, version: &str, signed_version: &str) -> Fake {
+        let manifest = format!("{{\"_version\": \"{version}\", \"varsto-{version}-x86_64-unknown-linux-musl.tar.gz\": {{}}}}");
+        let sig = sign(
+            sk,
+            manifest.as_bytes(),
+            &format!("timestamp:1\tfile:manifest.json\tversion:{signed_version}"),
+        );
+        let mut files = HashMap::new();
+        files.insert(format!("{BASE}manifest.json"), manifest.into_bytes());
+        files.insert(format!("{BASE}manifest.json.minisig"), sig.into_bytes());
+        Fake {
+            files,
+            downloaded: RefCell::new(false),
+        }
+    }
+
+    #[test]
+    fn the_manifest_must_carry_the_release_signature() {
+        let (sk, pk) = test_key(7);
+        // Signed: trusted.
+        let fake = manifest_fake(&sk, "9.9.9", "9.9.9");
+        let c = check_with(&fake, BASE, &pk).unwrap();
+        assert_eq!(c.latest, "9.9.9");
+        assert!(c.newer);
+        // No signature file at all.
+        let mut fake = manifest_fake(&sk, "9.9.9", "9.9.9");
+        fake.files.remove(&format!("{BASE}manifest.json.minisig"));
+        let e = check_with(&fake, BASE, &pk).unwrap_err();
+        assert!(format!("{e:#}").contains("not signed"), "{e:#}");
+        // Changed after signing (a newer-looking version injected).
+        let mut fake = manifest_fake(&sk, "9.9.9", "9.9.9");
+        let m = String::from_utf8(fake.files[&format!("{BASE}manifest.json")].clone())
+            .unwrap()
+            .replace("9.9.9", "9.9.10");
+        fake.files
+            .insert(format!("{BASE}manifest.json"), m.into_bytes());
+        assert!(check_with(&fake, BASE, &pk).is_err());
+        // Signed by another key.
+        let (other, _) = test_key(9);
+        assert!(check_with(&manifest_fake(&other, "9.9.9", "9.9.9"), BASE, &pk).is_err());
+        // A genuine signature for another version (an old manifest replayed).
+        let e = check_with(&manifest_fake(&sk, "9.9.9", "9.9.8"), BASE, &pk).unwrap_err();
+        assert!(
+            format!("{e:#}").contains("signed manifest is for version"),
+            "{e:#}"
+        );
     }
 }

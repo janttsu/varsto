@@ -78,10 +78,13 @@ final class ServiceHost: ObservableObject {
             for attempt in 0..<50 {
                 if let c = varsto_url() {
                     let s = String(cString: c); varsto_free(c)
-                    // Not the URL itself: it carries the session token.
+                    // Not the URL itself: it carries the one-time start code.
                     vlog(VLOG_INFO, "service URL ready after \(attempt) retries")
                     DispatchQueue.main.async { self.url = URL(string: s) }
-                    if let u = URL(string: s) { VideoThumbs.shared.start(serviceURL: u) } else { vlog(VLOG_ERROR, "service URL did not parse") }
+                    if let u = URL(string: s), let t = varsto_token() {
+                        let tok = String(cString: t); varsto_free(t)
+                        VideoThumbs.shared.start(serviceURL: u, token: tok)
+                    } else { vlog(VLOG_ERROR, "service URL did not parse") }
                     return
                 }
                 usleep(100_000)
@@ -164,9 +167,9 @@ final class VideoThumbs {
     private var base = ""
     private var token = ""
 
-    func start(serviceURL: URL) {
+    func start(serviceURL: URL, token: String) {
         guard timer == nil, var c = URLComponents(url: serviceURL, resolvingAgainstBaseURL: false) else { return }
-        token = c.queryItems?.first(where: { $0.name == "token" })?.value ?? ""
+        self.token = token
         c.query = nil; c.path = ""
         base = c.string ?? ""
         DispatchQueue.main.async {

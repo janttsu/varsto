@@ -1,5 +1,7 @@
 # Varsto and AI assistants (MCP)
 
+Status: implemented; sections 13 and 37 of [the specification](spec/alpha-0-format.md) record what is built.
+
 This page is for two readers: **you**, setting up an assistant, and **the assistant**, a language model running on your own machine, that works with your files through Varsto. Varsto is designed for local models: everything the tools return stays on your hardware. A cloud-hosted model would receive whatever the tools return, so Varsto does not recommend one. The server sends a short version of it to the model when a client connects (the `instructions` of MCP `initialize`).
 
 ## What the server is
@@ -19,13 +21,13 @@ It never hands out file contents. The assistant reads synced plain files itself,
 ```sh
 varsto mcp                      # stdio; your MCP client runs this command
 varsto --home DIR mcp           # another device directory (also VARSTO_HOME)
-varsto mcp --key vmk_...        # with a scoped key (also VARSTO_MCP_KEY), see below
+VARSTO_MCP_KEY=vmk_... varsto mcp   # with a scoped key (or --key-file <file>), see below
 ```
 
 Where the data comes from:
 
-1. **With a key** (`--key` or `VARSTO_MCP_KEY`): the running Varsto service (the app, the tray, or `varsto service run`), which checks the key's scope on every call. A key never opens the vault itself; when the service is not running the tools answer "the Varsto service is not running".
-2. **Without a key, service running**: the service, with the access in the grants file.
+1. **With a key** (`--key-file` or `VARSTO_MCP_KEY`): the running Varsto service (the app, the tray, or `varsto service run`), which checks the key's scope on every call. A key never opens the vault itself; when the service is not running the tools answer "the Varsto service is not running".
+2. **Without a key, service running**: refused. The service's session token would give the assistant the whole vault, so the server stops with a message that names `varsto mcp key create`.
 3. **Without a key, no service**: the server opens the vault itself with `VARSTO_PASSPHRASE`.
 
 ## Access: grants and keys

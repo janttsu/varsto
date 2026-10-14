@@ -32,3 +32,12 @@ rustls = { version = "0.23", default-features = false, features = ["ring", "std"
 rcgen = { version = "0.14", default-features = false, features = ["crypto", "ring"] }
 tokio = { version = "1", features = ["rt-multi-thread", "net", "sync", "time", "io-util", "macros"] }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "gif", "webp", "bmp", "tiff"] }
+mimalloc = "0.1"
+
+[profile.release]
+# Thin LTO and one codegen unit make the binary smaller and faster for a
+# longer release build. Panics unwind: the engine catches panics of worker
+# threads (`catch_unwind` in parverify and fetch) instead of dying with them.
+lto = "thin"
+codegen-units = 1
+panic = "unwind"

@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="sv">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Alternativ till restic och borg: Varsto, restic och BorgBackup jämförda</title>
+<meta name="description" content="Använder du restic eller BorgBackup för krypterade säkerhetskopior och undrar hur Varsto förhåller sig? Vad de två säkerhetskopieringsprogrammen gör, hur de skiljer sig från synkronisering och hur Varstos restic-spegel knyter dem samman.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="../../../favicon.svg" type="image/svg+xml">
+<link rel="canonical" href="https://varsto.net/sv/compare/restic/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Varsto">
+<meta property="og:title" content="Alternativ till restic och borg: Varsto, restic och BorgBackup jämförda">
+<meta property="og:description" content="Använder du restic eller BorgBackup för krypterade säkerhetskopior och undrar hur Varsto förhåller sig? Vad de två säkerhetskopieringsprogrammen gör, hur de skiljer sig från synkronisering och hur Varstos restic-spegel knyter dem samman.">
+<meta property="og:url" content="https://varsto.net/sv/compare/restic/">
+<meta property="og:image" content="https://varsto.net/assets/img/og-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:locale" content="sv_SE">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="alternate" hreflang="en" href="https://varsto.net/compare/restic/">
+<link rel="alternate" hreflang="x-default" href="https://varsto.net/compare/restic/">
+<link rel="alternate" hreflang="fi" href="https://varsto.net/fi/compare/restic/">
+<link rel="alternate" hreflang="sv" href="https://varsto.net/sv/compare/restic/">
+<link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../../../blog/feed.xml">
+<link rel="stylesheet" href="../../../assets/css/site.css?v=a993e06bd6">
+<script src="../../../assets/js/theme.js?v=0951491269"></script>
+</head>
+<body>
+<a class="skip" href="#main">Hoppa till innehållet</a>
+<div class="alpha" role="note">
+  <div class="wrap"><strong>Alfaprogramvara, inte för produktionsdata.</strong> Fel kan leda till dataförlust, formatet kan ändras utan migrering och krypteringen har ännu inte granskats av utomstående. Behåll egna säkerhetskopior och kontrollera att du kan återställa från dem.</div>
+</div>
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="../../../sv/"><img src="../../../assets/img/logo.svg" alt="" width="28" height="28"><span>Varsto</span></a>
+    <nav class="langs" aria-label="Language"><a href="../../../compare/restic/" hreflang="en" lang="en">English</a> <a href="../../../fi/compare/restic/" hreflang="fi" lang="fi">Suomi</a> <a href="../../../sv/compare/restic/" hreflang="sv" lang="sv" aria-current="true">Svenska</a></nav>
+
+    <nav class="main" aria-label="Main">
+      <a href="../../../sv/">Projekt</a>
+      <a href="../../../sv/features/">Funktioner</a>
+      <a href="../../../sv/use-cases/">Användningsfall</a>
+      <a href="../../../sv/compare/" aria-current="page">Jämförelse</a>
+      <a href="../../../sv/how-it-works/">Så fungerar det</a>
+      <a href="../../../sv/screenshots/">Skärmbilder</a>
+      <a href="../../../docs/">Dokumentation (en)</a>
+      <a href="../../../sv/downloads/">Nedladdningar</a>
+      <a href="../../../blog/">Blogg (en)</a>
+      <a href="../../../forum/">Forum (en)</a>
+      <a href="../../../sv/contribute/">Bidra</a>
+      <a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a>
+      <button class="theme" id="theme-toggle" type="button" aria-label="Change colour theme">Theme: auto</button>
+    </nav>
+  </div>
+</header>
+<main id="main">
+  <div class="wrap">
+    <p class="back-link"><a href="../../compare/">Alla jämförelser</a></p>
+    <h1>Varsto, restic och BorgBackup</h1>
+    <p class="lead">restic och BorgBackup (borg) är säkerhetskopieringsprogram: de tar versioner av kataloger till ett krypterat, deduplicerat arkiv och återställer dem senare. De är inte synkroniseringsverktyg och försöker inte vara det. Varsto gör både synkronisering och egna säkerhetskopior, och dess restic-spegel låter restic säkerhetskopiera ett valv oberoende av Varsto.</p>
+
+    <h2>Så fungerar restic och borg</h2>
+    <p><strong>restic</strong> är en enda körbar fil som fungerar utan server. <code>restic backup</code> tar en version av en katalog till ett arkiv och för över bara de delar av filerna som ändrats; <code>restic snapshots</code> listar versionerna, <code>restic restore</code> hämtar tillbaka en och <code>restic check</code> kontrollerar arkivet. Arkiv kan ligga på en lokal disk eller på många lagringstyper, självhostade och onlinetjänster, och allt i dem är krypterat. <strong>borg</strong> är också ett deduplicerande säkerhetskopieringsprogram: filer delas i bitar och en bit som redan finns i arkivet lagras inte igen, data krypteras på klienten (AES-256 med HMAC-SHA256) och komprimeras om du vill, arkiv ligger på lokala diskar eller på vilken värd som helst som nås över SSH, och arkiven kan monteras som ett filsystem för att bläddra och återställa. Ingen av dem håller dina enheter i jämna steg: en säkerhetskopia körs vid en tid du väljer, från en maskin, till ett arkiv, och filerna på maskinen lämnas som de var.</p>
+
+    <h2>Sida vid sida</h2>
+    <table class="compare-table">
+      <thead><tr><th scope="col"></th><th scope="col">restic / borg</th><th scope="col">Varsto</th></tr></thead>
+      <tbody>
+      <tr><th scope="row">Vad det är till för</th><td>Säkerhetskopior: schemalagda versioner av kataloger till ett arkiv, återställda vid behov.</td><td>Synkronisering mellan dina enheter, med säkerhetskopior som skrivskyddade versioner på dina lagringsplatser.</td></tr>
+      <tr><th scope="row">Var dina filer finns</th><td>På maskinen som säkerhetskopieras och i arkivet: en lokal disk, en SSH-värd (borg) eller många lagringstyper (restic).</td><td>På dina egna enheter och på lagringsplatser du väljer: S3-kompatibla buckets, valfri rclone-fjärrlagring, lokala kataloger eller nätverkskataloger och pooler av flyttbara diskar.</td></tr>
+      <tr><th scope="row">Konto eller central server</th><td>Inget; bara lagringen som arkivet ligger på.</td><td>Inget. Det finns ingen Varsto-server; enheterna hittar varandra via dina lagringsplatser och i det lokala nätverket.</td></tr>
+      <tr><th scope="row">Kryptering</th><td>Ja, på klienten, för allt i arkivet (restic: ett lösenordsskyddat arkiv; borg: AES-256 och HMAC-SHA256). Moget och brett granskat.</td><td>End-to-end, på klientsidan, innan något lämnar enheten; hybrid postkvantkryptografi (ML-KEM för nycklar vid delning, signaturer med Ed25519 + ML-DSA-65). Ännu inte oberoende granskad.</td></tr>
+      <tr><th scope="row">Löpande synkronisering mellan enheter</th><td>Nej: en säkerhetskopia tas från en maskin vid en tid du väljer; andra maskiner får inte filerna.</td><td>Ja: enheterna synkroniserar via dina lagringsplatser, och direkt peer-to-peer när de når varandra.</td></tr>
+      <tr><th scope="row">Vet var varje kopia finns</th><td>Arkivet känner sina egna versioner; ingenting håller reda på kopior utanför det.</td><td>Ja: en signerad liggare registrerar vilken lagringsplats och enhet som har varje block; lagringsregler (som standard 1 kopia var som helst, 1 extern, 1 på dina egna enheter eller diskar, kontrollerad av en annan enhet inom 30 dagar) varnar när en regel inte uppfylls.</td></tr>
+      <tr><th scope="row">Flyttbara diskar och diskar offline</th><td>Ett arkiv kan ligga på en flyttbar disk; ingenting håller reda på disken medan den är borta.</td><td>Ja: diskpooler fylls, kontrolleras och känns igen när de kommer tillbaka; filer på en disk som är borta ber om just den disken.</td></tr>
+      <tr><th scope="row">Säkerhetskopior</th><td>Ja: deduplicerade, krypterade versioner med lagringsregler (<code>forget</code> och <code>prune</code>), kontrollerbara och återställbara med bara verktyget.</td><td>Ja: välj en mapp på valfri enhet. Varsto sparar krypterade, skrivskyddade versioner av den bara i din externa lagring, aldrig på dina enheter. Versionerna sparas i det antal dagar du väljer (90 som standard), och de som har gått ut raderas. Återställ vilken version som helst till en katalog du anger, från appen eller kommandoraden.</td></tr>
+      <tr><th scope="row">Att använda dem tillsammans</th><td>restic kan säkerhetskopiera vilken katalog som helst, en Varsto-mapp inräknad.</td><td>Kommer efter 0.0.1-alpha.13, inte släppt ännu: restic-spegeln. En enhet håller en fullständig kopia av valvet i klartext, Varsto kontrollerar att kopian är hel, och restic säkerhetskopierar den till ett arkiv utanför valvets lagringsplatser. Återställning kräver bara restic och arkivets lösenord, så ett fel i Varsto eller en förlorad valvnyckel når inte den kopian.</td></tr>
+      <tr><th scope="row">Licens och pris</th><td>Öppen källkod, gratis: restic BSD-2-Clause, borg BSD-3-Clause.</td><td>Källkoden tillgänglig (PolyForm Shield 1.0.0), gratis; du betalar bara din lagringsleverantör.</td></tr>
+      <tr><th scope="row">Mognad</th><td>Mogna, långlivade projekt.</td><td>Alfa: inte för produktionsdata, formaten kan fortfarande ändras.</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Vilken passar</h2>
+    <div class="grid two">
+      <div class="card"><h3>restic / borg</h3><p>Välj restic eller borg när det du behöver är säkerhetskopior: mogna, krypterade, deduplicerade versioner av en maskin, återställbara med bara verktyget, på ett schema du kör själv.</p></div>
+      <div class="card"><h3>Varsto</h3><p>Välj Varsto när dina enheter också ska hålla jämna steg, du vill ha en förteckning över var varje kopia finns och regler som varnar, och du vill ha säkerhetskopior som ingenting kan ändra på samma lagringsplatser. Behåll restic som en andra, oberoende försvarslinje genom spegeln.</p></div>
+    </div>
+    <p class="note">Varsto är alfaprogramvara: anförtro den inga data som du inte har någon annan kopia av, och dess kryptografi har inte granskats av någon oberoende part. De andra produkterna här är mogna. Uppgifterna om dem kontrollerades i deras egen dokumentation i oktober 2026; priser och abonnemang ändras ofta, så se deras egna sidor för aktuella siffror. Rättelser tas gärna emot på <a href="../../../forum/">forumet</a> eller på GitHub.</p>
+
+    <h2>Källor</h2>
+    <ul>
+      <li><a href="https://restic.net/">restics webbplats</a></li>
+      <li><a href="https://restic.readthedocs.io/en/stable/">restics dokumentation (en)</a></li>
+      <li><a href="https://github.com/restic/restic/blob/master/LICENSE">restics licens (BSD-2-Clause)</a></li>
+      <li><a href="https://borgbackup.readthedocs.io/en/stable/">BorgBackups dokumentation (en)</a></li>
+      <li><a href="https://github.com/borgbackup/borg/blob/master/LICENSE">BorgBackups licens (BSD-3-Clause)</a></li>
+    </ul>
+
+  </div>
+</main>
+<footer class="site">
+  <div class="wrap">
+    <span>Varsto är ett arbetsnamn. Källkod: <a href="https://github.com/janttsu/varsto">github.com/janttsu/varsto</a>, under PolyForm Shield License 1.0.0 (källkoden tillgänglig).</span>
+    <span>Inga kakor, ingen spårning. Webbservern sparar en vanlig åtkomstlogg i högst sju dagar.</span>
+    <span><a href="../../../docs/security-policy.html">Säkerhetspolicy</a> · <a href="../../../docs/licence.html">Licens</a> · <a href="../../../docs/trademark.html">Varumärke</a> (på engelska)</span>
+  </div>
+</footer>
+</body>
+</html>
