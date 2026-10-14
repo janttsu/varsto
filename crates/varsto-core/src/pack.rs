@@ -2,40 +2,59 @@
 //! Chunk payload packing: compression before encryption. Ciphertext does not
 //! compress, so a chunk is compressed once, here, and every stored copy and
 //! every transfer (cloud, disk, peer on the LAN or across the internet)
-//! carries the small form. The level is a format constant: devices must
-//! produce byte-identical objects for the same chunk, or deduplication and
-//! content addressing break.
+//! carries the small form.
 //!
-//! Payload = one method byte followed by the data: `0` raw, `1` zstd.
-//! Compression is skipped when it would save less than 5 %, so already
-//! compressed media costs nothing but the byte.
+//! Payload = one method byte followed by the data: `0` raw, `1` zstd at
+//! level 3 (format 2). Whether a chunk is compressed depends on its content
+//! alone: its first 64 KiB are compressed at level 1 as a probe, and only
+//! when the probe saves at least 5 % is the whole chunk compressed; the
+//! result is kept when it saves at least 5 % too. Media and other
+//! compressed content therefore cost a cheap probe and the byte.
+//!
+//! The bytes are not required to be identical across zstd versions: the
+//! nonce of a chunk object follows the packed bytes (`crate::chunk_seal`),
+//! so another encoding is another object, never the same nonce over other
+//! bytes.
 
 use anyhow::{anyhow, bail, Result};
 use std::cell::RefCell;
 
 pub const METHOD_RAW: u8 = 0;
 pub const METHOD_ZSTD: u8 = 1;
-/// zstd level used for every chunk (format constant, see module docs).
-pub const ZSTD_LEVEL: i32 = 12;
+/// zstd level of every compressed chunk (format 2).
+pub const ZSTD_LEVEL: i32 = 3;
+/// Level and length of the probe that decides whether to compress.
+pub const PROBE_LEVEL: i32 = 1;
+pub const PROBE_BYTES: usize = 64 << 10;
+/// Chunks shorter than this are stored raw.
+const MIN_COMPRESS: usize = 64;
 
 thread_local! {
-    // One zstd context per thread, reused for every chunk. A fresh context
-    // costs more than compressing a 256 KiB chunk at this level: its tables
-    // are allocated and zeroed every time (four times the work for random
-    // data, more for text, measured with the musl allocator of the Linux
-    // build). Reuse changes no output byte: zstd resets the context per frame.
+    // One zstd context per thread and level, reused for every chunk. A
+    // fresh context costs about as much as compressing a chunk: its tables
+    // are allocated and zeroed every time. Reuse changes no output byte:
+    // zstd resets the context per frame.
     static COMPRESSOR: RefCell<Option<zstd::bulk::Compressor<'static>>> = const { RefCell::new(None) };
+    static PROBE: RefCell<Option<zstd::bulk::Compressor<'static>>> = const { RefCell::new(None) };
     static DECOMPRESSOR: RefCell<Option<zstd::bulk::Decompressor<'static>>> = const { RefCell::new(None) };
 }
 
-fn compress(plain: &[u8]) -> std::io::Result<Vec<u8>> {
-    COMPRESSOR.with(|c| {
+fn compress_with(
+    slot: &'static std::thread::LocalKey<RefCell<Option<zstd::bulk::Compressor<'static>>>>,
+    level: i32,
+    plain: &[u8],
+) -> std::io::Result<Vec<u8>> {
+    slot.with(|c| {
         let mut c = c.borrow_mut();
         if c.is_none() {
-            *c = Some(zstd::bulk::Compressor::new(ZSTD_LEVEL)?);
+            *c = Some(zstd::bulk::Compressor::new(level)?);
         }
         c.as_mut().expect("compressor just created").compress(plain)
     })
+}
+
+fn compress(plain: &[u8]) -> std::io::Result<Vec<u8>> {
+    compress_with(&COMPRESSOR, ZSTD_LEVEL, plain)
 }
 
 fn decompress(data: &[u8], capacity: usize) -> std::io::Result<Vec<u8>> {
@@ -50,17 +69,29 @@ fn decompress(data: &[u8], capacity: usize) -> std::io::Result<Vec<u8>> {
     })
 }
 
+/// Whether `compressed` bytes save at least 5 % of `plain` bytes.
+fn saves(compressed: usize, plain: usize) -> bool {
+    compressed + 1 < plain - plain / 20
+}
+
+/// Whether the chunk's first 64 KiB compress at all (level 1).
+fn worth_compressing(plain: &[u8]) -> bool {
+    let head = &plain[..plain.len().min(PROBE_BYTES)];
+    compress_with(&PROBE, PROBE_LEVEL, head).is_ok_and(|z| saves(z.len(), head.len()))
+}
+
 pub fn pack(plain: &[u8]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(plain.len() + 1);
-    if plain.len() >= 64 {
+    if plain.len() >= MIN_COMPRESS && worth_compressing(plain) {
         if let Ok(z) = compress(plain) {
-            if z.len() + 1 < plain.len() - plain.len() / 20 {
+            if saves(z.len(), plain.len()) {
+                let mut out = Vec::with_capacity(z.len() + 1);
                 out.push(METHOD_ZSTD);
                 out.extend_from_slice(&z);
                 return out;
             }
         }
     }
+    let mut out = Vec::with_capacity(plain.len() + 1);
     out.push(METHOD_RAW);
     out.extend_from_slice(plain);
     out
@@ -126,6 +157,82 @@ mod tests {
                 assert_eq!(compress(input).unwrap(), fresh, "input {i}, round {round}");
                 let p = pack(input);
                 assert_eq!(unpack(&p, input.len() as u64).unwrap(), *input);
+            }
+        }
+    }
+
+    #[test]
+    fn the_probe_decides_by_the_first_64_kib() {
+        let mut rnd = vec![0u8; 2_000_000];
+        rand::RngCore::fill_bytes(&mut rand::rngs::OsRng, &mut rnd);
+        let text = b"2026-10-14 12:00:01 GET /api/v1/items 200 ".repeat(5000);
+        // Random head, compressible tail: stored raw, whatever the tail.
+        let random_head = [&rnd[..PROBE_BYTES], &text[..]].concat();
+        assert_eq!(pack(&random_head)[0], METHOD_RAW);
+        // Compressible head, random tail: compressed when the whole saves 5 %.
+        let text_head = [&text[..], &rnd[..50_000]].concat();
+        let p = pack(&text_head);
+        assert_eq!(p[0], METHOD_ZSTD);
+        assert_eq!(unpack(&p, text_head.len() as u64).unwrap(), text_head);
+        // Compressible head but mostly random (64 KiB of text in 2 MB): the
+        // probe says yes, the whole saves too little, so raw.
+        let mostly_random = [&text[..PROBE_BYTES], &rnd[..]].concat();
+        assert_eq!(pack(&mostly_random)[0], METHOD_RAW);
+        // Short chunks are raw.
+        assert_eq!(pack(&[b'a'; 63])[0], METHOD_RAW);
+        assert_eq!(pack(&[b'a'; 64])[0], METHOD_ZSTD);
+    }
+
+    /// Ad-hoc throughput comparison of the format-1 packing (zstd 12, no
+    /// probe) and this one, on text and on random data:
+    /// `cargo test --release -p varsto-core --lib pack::tests::throughput -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn throughput() {
+        fn old_pack(plain: &[u8]) -> Vec<u8> {
+            let z = zstd::bulk::compress(plain, 12).unwrap();
+            if z.len() + 1 < plain.len() - plain.len() / 20 {
+                [&[METHOD_ZSTD][..], &z].concat()
+            } else {
+                [&[METHOD_RAW][..], plain].concat()
+            }
+        }
+        let chunk = 1 << 20;
+        let total = 64 << 20;
+        let mut text = Vec::with_capacity(total);
+        let mut i = 0u64;
+        while text.len() < total {
+            text.extend_from_slice(
+                format!(
+                    "2026-10-14T12:{:02}:{:02}Z host-{} GET /api/v1/items/{} 200 {} ms user={}\n",
+                    i % 60,
+                    (i * 7) % 60,
+                    i % 13,
+                    i * 31 % 100_000,
+                    i % 997,
+                    i % 41
+                )
+                .as_bytes(),
+            );
+            i += 1;
+        }
+        text.truncate(total);
+        let mut rnd = vec![0u8; total];
+        rand::RngCore::fill_bytes(&mut rand::rngs::OsRng, &mut rnd);
+        for (label, data) in [("text", &text), ("random", &rnd)] {
+            for (name, f) in [
+                ("format 1 (zstd 12)", old_pack as fn(&[u8]) -> Vec<u8>),
+                ("format 2 (probe, zstd 3)", pack as fn(&[u8]) -> Vec<u8>),
+            ] {
+                let t = std::time::Instant::now();
+                let out: usize = data.chunks(chunk).map(|c| f(c).len()).sum();
+                let secs = t.elapsed().as_secs_f64();
+                println!(
+                    "{label:6} {name:26} {:7.1} MB/s, stored {:5.1} % of {} MiB",
+                    data.len() as f64 / secs / 1e6,
+                    out as f64 * 100.0 / data.len() as f64,
+                    data.len() >> 20
+                );
             }
         }
     }

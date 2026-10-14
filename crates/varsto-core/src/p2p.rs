@@ -217,38 +217,14 @@ impl Snapshot {
         if crate::ids::ChunkId::from_bytes(&crypto::keyed_hash(&fk.hash, &plain)) != piece.chunk {
             return Ok(None); // file changed since the snapshot
         }
-        // Incompressible blocks (photos, video, archives) were stored
-        // uncompressed: try that first, which costs one encryption and one
-        // hash, before compressing again, which costs far more and is what
-        // the stored object holds only when it paid off. The nonce follows
-        // the packed bytes, so each attempt is its own AEAD input.
-        let mut raw = Vec::with_capacity(plain.len() + 1);
-        raw.push(crate::pack::METHOD_RAW);
-        raw.extend_from_slice(&plain);
-        let ct = crate::chunk_seal::seal_packed(
-            fk,
-            &self.vault_id,
-            &piece.chunk,
-            piece.epoch,
-            piece.len,
-            &raw,
-        )?;
-        let ct = if ObjectName::from_bytes(&crypto::hash(&ct)) == *name {
-            ct
-        } else {
-            let ct = crate::chunk_seal::seal_chunk(
-                fk,
-                &self.vault_id,
-                &piece.chunk,
-                piece.epoch,
-                &plain,
-            )?;
-            if ObjectName::from_bytes(&crypto::hash(&ct)) != *name {
-                return Ok(None);
-            }
-            served::put(name, &ct);
-            ct
-        };
+        // Packing is deterministic for a zstd version (`crate::pack`), so
+        // the object comes out as stored unless another version packed it.
+        let ct =
+            crate::chunk_seal::seal_chunk(fk, &self.vault_id, &piece.chunk, piece.epoch, &plain)?;
+        if ObjectName::from_bytes(&crypto::hash(&ct)) != *name {
+            return Ok(None);
+        }
+        served::put(name, &ct);
         Ok(Some(ct))
     }
 }
