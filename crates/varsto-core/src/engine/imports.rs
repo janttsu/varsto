@@ -2120,7 +2120,7 @@ fn holder_list(
 
 /// `p` with its longest existing ancestor resolved (links, `..`), the rest
 /// appended as given.
-fn resolve_existing(p: &Path) -> PathBuf {
+pub(super) fn resolve_existing(p: &Path) -> PathBuf {
     let mut base = p.to_path_buf();
     let mut rest = Vec::new();
     loop {

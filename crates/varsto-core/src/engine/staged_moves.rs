@@ -156,14 +156,9 @@ impl Engine {
         for p in given {
             let raw = Path::new(p);
             let rel: String = if raw.is_absolute() {
-                raw.strip_prefix(root)
-                    .map_err(|_| {
-                        anyhow!("{p} is not inside folder {} ({})", rec.name, root.display())
-                    })?
-                    .components()
-                    .map(|c| c.as_os_str().to_string_lossy().to_string())
-                    .collect::<Vec<_>>()
-                    .join("/")
+                relative_to_root(root, raw).ok_or_else(|| {
+                    anyhow!("{p} is not inside folder {} ({})", rec.name, root.display())
+                })?
             } else {
                 p.replace('\\', "/")
             };
@@ -685,5 +680,54 @@ impl Engine {
             }
         }
         out
+    }
+}
+
+/// `path` below `root` as a folder path (forward slashes), or `None` when it
+/// is not inside. Both are resolved first, so a root reached through a link
+/// (macOS: /var is /private/var) matches; a path that does not exist yet is
+/// resolved through its nearest existing ancestor.
+fn relative_to_root(root: &Path, path: &Path) -> Option<String> {
+    use super::imports::resolve_existing;
+    let (root, path) = (resolve_existing(root), resolve_existing(path));
+    let rel = path.strip_prefix(&root).ok()?;
+    Some(
+        rel.components()
+            .map(|c| c.as_os_str().to_string_lossy().to_string())
+            .collect::<Vec<_>>()
+            .join("/"),
+    )
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::relative_to_root;
+
+    #[test]
+    fn absolute_paths_match_a_root_reached_through_a_link() {
+        let t = tempfile::tempdir().unwrap();
+        let real = t.path().join("private/docs");
+        std::fs::create_dir_all(real.join("sub")).unwrap();
+        std::os::unix::fs::symlink(t.path().join("private"), t.path().join("var")).unwrap();
+        let root = t.path().join("var/docs");
+        // The root given through the link, the path really, and the reverse.
+        assert_eq!(
+            relative_to_root(&root, &real.join("sub")).as_deref(),
+            Some("sub")
+        );
+        assert_eq!(
+            relative_to_root(&real, &root.join("sub")).as_deref(),
+            Some("sub")
+        );
+        // Not there yet: the nearest existing ancestor is resolved.
+        assert_eq!(
+            relative_to_root(&root, &real.join("sub/new/x.bin")).as_deref(),
+            Some("sub/new/x.bin")
+        );
+        assert_eq!(relative_to_root(&root, t.path()), None);
+        assert_eq!(
+            relative_to_root(&root, &t.path().join("private/other")),
+            None
+        );
     }
 }
