@@ -7,6 +7,12 @@ license.workspace = true
 rust-version.workspace = true
 publish = false
 
+[features]
+# A "security key" whose secret is a plain file next to the vault, for
+# tests and the lab only: it protects nothing beyond the passphrase, so
+# release binaries are built without it.
+software-key = []
+
 [dependencies]
 anyhow.workspace = true
 thiserror.workspace = true
@@ -61,3 +67,5 @@ windows-sys = { version = "0.59", features = ["Win32_Storage_FileSystem", "Win32
 
 [dev-dependencies]
 tempfile.workspace = true
+# Integration tests stand in a software key for a FIDO2 authenticator.
+varsto-core = { path = ".", features = ["software-key"] }

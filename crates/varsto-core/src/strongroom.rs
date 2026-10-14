@@ -302,11 +302,20 @@ impl SecurityKey for Fido2Tools {
     }
 }
 
-/// Test and demonstration backend: the "touch" is a secret file.
+/// Whether this build can use software security keys (the `software-key`
+/// feature, meant for tests and the lab). Without it `Method::Software`
+/// is still understood in records, but no backend answers for it.
+pub const SOFTWARE_KEYS_BUILT_IN: bool = cfg!(any(test, feature = "software-key"));
+
+/// Test and demonstration backend: the "touch" is a secret file. Only
+/// built in with the `software-key` feature: a key in a plain file next to
+/// the vault protects nothing beyond the passphrase.
+#[cfg(any(test, feature = "software-key"))]
 pub struct SoftwareKey {
     pub path: std::path::PathBuf,
 }
 
+#[cfg(any(test, feature = "software-key"))]
 impl SecurityKey for SoftwareKey {
     fn make_credential(&self) -> Result<String> {
         if !self.path.exists() {
@@ -322,12 +331,35 @@ impl SecurityKey for SoftwareKey {
     }
 }
 
+/// What answers for a software key in a build without the feature.
+#[cfg_attr(any(test, feature = "software-key"), allow(dead_code))]
+struct NoSoftwareKey;
+
+impl SecurityKey for NoSoftwareKey {
+    fn make_credential(&self) -> Result<String> {
+        bail!("software security keys are not built into this binary (a build with the software-key feature has them, for tests only)");
+    }
+    fn hmac_secret(&self, _credential: &str, _salt: &[u8; 32]) -> Result<[u8; 32]> {
+        bail!("this Strongroom was enrolled with a software security key, which this binary does not have (a build with the software-key feature does)");
+    }
+}
+
+fn software_backend(path: std::path::PathBuf) -> Box<dyn SecurityKey> {
+    #[cfg(any(test, feature = "software-key"))]
+    {
+        Box::new(SoftwareKey { path })
+    }
+    #[cfg(not(any(test, feature = "software-key")))]
+    {
+        let _ = path;
+        Box::new(NoSoftwareKey)
+    }
+}
+
 pub fn backend(method: &Method, home: &Path) -> Box<dyn SecurityKey> {
     match method {
         Method::Fido2 => Box::new(Fido2Tools { device: None }),
-        Method::Software => Box::new(SoftwareKey {
-            path: home.join("software-security-key"),
-        }),
+        Method::Software => software_backend(home.join("software-security-key")),
     }
 }
 
@@ -342,20 +374,29 @@ pub fn backend_for(key: &EnrolledKey, home: &Path) -> Box<dyn SecurityKey> {
                 .file_name()
                 .map(|n| n.to_os_string())
                 .unwrap_or_else(|| "software-security-key".into());
-            Box::new(SoftwareKey {
-                path: home.join(name),
-            })
+            software_backend(home.join(name))
         }
     }
 }
 
-/// A software key file for a backup key, next to the vault.
-pub fn new_software_key(home: &Path) -> SoftwareKey {
+fn new_software_key_path(home: &Path) -> std::path::PathBuf {
     let mut tag = [0u8; 4];
     rand::RngCore::fill_bytes(&mut rand::rngs::OsRng, &mut tag);
+    home.join(format!("software-security-key-{}", hex::encode(tag)))
+}
+
+/// A software key file for a backup key, next to the vault.
+#[cfg(any(test, feature = "software-key"))]
+pub fn new_software_key(home: &Path) -> SoftwareKey {
     SoftwareKey {
-        path: home.join(format!("software-security-key-{}", hex::encode(tag))),
+        path: new_software_key_path(home),
     }
+}
+
+/// The backend for a new software backup key: the key file in builds with
+/// the feature, a refusal otherwise.
+pub fn new_software_backend(home: &Path) -> Box<dyn SecurityKey> {
+    software_backend(new_software_key_path(home))
 }
 
 fn wrap_key(secret: &[u8; 32], folder: &FolderId) -> SecretKey {
@@ -653,6 +694,26 @@ pub struct Conversion {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_build_without_the_feature_refuses_software_keys() {
+        // Unit tests run with the feature; the backend of a build without
+        // it is the same type whatever the method says.
+        assert!(SOFTWARE_KEYS_BUILT_IN);
+        let none = NoSoftwareKey;
+        assert!(none.make_credential().is_err());
+        assert!(none.hmac_secret("software:/x/key", &[0u8; 32]).is_err());
+        let vault = VaultId::random();
+        let folder = FolderId::random();
+        assert!(enroll(
+            &none,
+            Method::Software,
+            &vault,
+            &folder,
+            &SecretKey::random()
+        )
+        .is_err());
+    }
 
     #[test]
     fn software_key_wraps_and_unwraps_and_other_keys_fail() {

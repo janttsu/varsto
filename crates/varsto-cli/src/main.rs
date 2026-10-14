@@ -654,7 +654,7 @@ enum StrongroomCmd {
         name: String,
         path: PathBuf,
         /// Use a software key file instead of hardware: for trying the flow only, no real protection.
-        #[arg(long)]
+        #[arg(long, hide = !varsto_core::strongroom::SOFTWARE_KEYS_BUILT_IN)]
         software: bool,
         #[arg(long, default_value_t = 15)]
         minutes: u64,
@@ -674,7 +674,7 @@ enum StrongroomCmd {
     Convert {
         folder: String,
         /// Use a software key file instead of hardware: for trying the flow only, no real protection.
-        #[arg(long)]
+        #[arg(long, hide = !varsto_core::strongroom::SOFTWARE_KEYS_BUILT_IN)]
         software: bool,
         #[arg(long, default_value_t = 15)]
         minutes: u64,
@@ -689,7 +689,7 @@ enum StrongroomCmd {
         #[arg(long, default_value = "")]
         label: String,
         /// The new key is a software key file (testing only).
-        #[arg(long)]
+        #[arg(long, hide = !varsto_core::strongroom::SOFTWARE_KEYS_BUILT_IN)]
         software: bool,
         /// libfido2 device path of the new key (default: ask to swap keys, then the first key found).
         #[arg(long)]
@@ -4765,13 +4765,11 @@ fn run(cli: &Cli) -> Result<()> {
                     minutes,
                 } => {
                     let method = if *software {
+                        software_key_warning()?;
                         varsto_core::strongroom::Method::Software
                     } else {
                         varsto_core::strongroom::Method::Fido2
                     };
-                    if *software {
-                        eprintln!("warning: --software keeps the secret in a file next to the vault; it demonstrates the flow and protects nothing beyond your passphrase");
-                    }
                     let backend = varsto_core::strongroom::backend(&method, &home);
                     let id =
                         engine.create_strongroom(name, path, method, backend.as_ref(), *minutes)?;
@@ -4869,13 +4867,8 @@ fn run(cli: &Cli) -> Result<()> {
                     eprintln!("First, open {folder} with a key that is enrolled already.");
                     let fk = engine.unlock_strongroom_enrolled(folder, 1)?;
                     let (method, backend): (Method, Box<dyn SecurityKey>) = if *software {
-                        eprintln!(
-                            "warning: a software key protects nothing beyond your passphrase"
-                        );
-                        (
-                            Method::Software,
-                            Box::new(strongroom::new_software_key(&home)),
-                        )
+                        software_key_warning()?;
+                        (Method::Software, strongroom::new_software_backend(&home))
                     } else {
                         if device.is_none() {
                             eprintln!(
@@ -5972,6 +5965,16 @@ fn first_start_install() -> Option<i32> {
 /// `strongroom convert`: the security key is touched here; the conversion
 /// itself runs in the background service when one is running (it owns the
 /// folder state), otherwise in this process.
+/// `--software`: refused in a binary built without the feature, and a
+/// warning otherwise.
+fn software_key_warning() -> Result<()> {
+    if !varsto_core::strongroom::SOFTWARE_KEYS_BUILT_IN {
+        bail!("software security keys are not built into this binary; they are for tests only (a build with the software-key feature has them)");
+    }
+    eprintln!("warning: --software keeps the secret in a file next to the vault; it demonstrates the flow and protects nothing beyond your passphrase");
+    Ok(())
+}
+
 fn strongroom_convert(
     engine: &mut Engine,
     home: &std::path::Path,
@@ -6012,7 +6015,7 @@ fn strongroom_convert(
         return Ok(());
     } else {
         let method = if software {
-            eprintln!("warning: --software keeps the secret in a file next to the vault; it demonstrates the flow and protects nothing beyond your passphrase");
+            software_key_warning()?;
             Method::Software
         } else {
             Method::Fido2
