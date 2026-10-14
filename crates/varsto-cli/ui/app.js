@@ -2480,6 +2480,14 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
         if (!box) { return; }
         box.innerHTML = "";
         var mine = function (x) { return x.pool === p.name; };
+        (s.moves || []).filter(mine).forEach(function (m) {
+          var n = el("div", "notice");
+          n.appendChild(moveLine({ folder: m.folder, to: m.pool, bytes_remaining: m.bytes_left, need_second_place_bytes: m.need_second_place_bytes, state: "open", waiting: null }));
+          var best = s.ranked.filter(mine).filter(function (x) { return x.reasons.some(function (r) { return r.kind === "move"; }); })[0];
+          if (best) { n.firstChild.appendChild(document.createTextNode(" \u2014 ")); n.firstChild.appendChild(el("span", "", "Attach disk")); n.firstChild.appendChild(document.createTextNode(" \u00ab" + best.label + "\u00bb")); }
+          else if ((s.new_disk_needed || []).some(function (x) { return x.id === m.id; })) { n.firstChild.appendChild(document.createTextNode(" \u2014 ")); n.firstChild.appendChild(el("span", "", "A new disk is needed")); }
+          box.appendChild(n);
+        });
         var top = s.ranked.filter(mine).filter(function (x) { return x.score >= 5; })[0];
         var att = s.attached.filter(mine).filter(function (x) { return x.score >= 5; })[0];
         if (top) {
@@ -2546,6 +2554,32 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     $("pause").textContent = sv.paused ? "Resume" : "Pause";
     $("pause").dataset.paused = sv.paused ? "1" : "0";
     renderSpace(sv.low_space || []);
+    renderMoveJobs(sv.move_jobs || []);
+  }
+  // Open move jobs (staged moves to disk pools): one line each, with the
+  // disk to attach when the job waits for room.
+  function moveLine(j, sugg) {
+    var d = el("div");
+    d.appendChild(el("span", "", "Staged move of folder")); d.appendChild(document.createTextNode(" " + j.folder + " \u2192 " + j.to + ": " + fmtBytes(j.bytes_remaining) + " "));
+    d.appendChild(el("span", "", "left to move"));
+    if (j.state === "paused") { d.appendChild(document.createTextNode(" (")); d.appendChild(el("span", "", "paused")); d.appendChild(document.createTextNode(")")); return d; }
+    if (j.need_second_place_bytes > 0) { d.appendChild(document.createTextNode("; " + fmtBytes(j.need_second_place_bytes) + " ")); d.appendChild(el("span", "", "need a second place")); }
+    if (j.waiting) {
+      d.appendChild(document.createTextNode(" \u2014 "));
+      if (j.waiting.kind === "disk" || j.waiting.kind === "place") {
+        var next = j.waiting.disk || null;
+        if (next) { d.appendChild(el("span", "", "Attach disk")); d.appendChild(document.createTextNode(" \u00ab" + next + "\u00bb ")); }
+        else { d.appendChild(el("span", "", "Attach a new disk")); d.appendChild(document.createTextNode(" ")); }
+        d.appendChild(el("span", "", "to continue the move."));
+      } else { d.appendChild(document.createTextNode(j.waiting.text)); }
+    }
+    return d;
+  }
+  function renderMoveJobs(list) {
+    var b = $("movebanner"); if (!b) { return; }
+    b.innerHTML = "";
+    list.filter(function (j) { return j.state === "open" && j.waiting; }).forEach(function (j) { b.appendChild(moveLine(j)); });
+    b.classList.toggle("hidden", b.childNodes.length === 0);
   }
   // Places short of disk space: one line each (each translated on its own).
   function renderSpace(list) {
@@ -3798,7 +3832,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     on("transfers", function (d) { transferFollowers.forEach(function (f) { f(d); }); });
     on("sync.finished", function () { serviceSoon(); });
     on("sync.started", function () {});
-    ["policy.changed", "ledger.health", "backup", "trash", "files.new", "space.low", "space.ok", "storage.problem", "storage.ok", "folder.paused", "peer.connected", "peer.disconnected"].forEach(function (k) { on(k, function () { serviceSoon(); }); });
+    ["move.waiting", "move.done", "policy.changed", "ledger.health", "backup", "trash", "files.new", "space.low", "space.ok", "storage.problem", "storage.ok", "folder.paused", "peer.connected", "peer.disconnected"].forEach(function (k) { on(k, function () { serviceSoon(); }); });
     on("config.changed", function () { serviceSoon(); statusSoon(); });
     on("notification", function (d) { if (d.title) { log(d.title + ": " + (d.body || "")); } });
   }

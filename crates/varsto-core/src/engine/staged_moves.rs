@@ -260,29 +260,7 @@ impl Engine {
     /// Pause, resume or cancel a job. Cancelling never deletes anything:
     /// what was moved stays moved, what was copied stays copied.
     pub fn move_job_set_state(&mut self, id: &str, state: JobState) -> Result<MoveJob> {
-        let mut job = jobs::find(&self.home, id)?;
-        match (job.state, state) {
-            (a, b) if a == b => return Ok(job),
-            (JobState::Done, _) | (JobState::Cancelled, _) => {
-                bail!("move job {} is {}", job.id, job.state.label())
-            }
-            (JobState::Open, JobState::Paused)
-            | (JobState::Paused, JobState::Open)
-            | (JobState::Open | JobState::Paused, JobState::Cancelled) => {}
-            (a, b) => bail!(
-                "move job {} is {}: it cannot become {}",
-                job.id,
-                a.label(),
-                b.label()
-            ),
-        }
-        job.state = state;
-        if state == JobState::Cancelled {
-            job.finished_utc = util::now_utc();
-            job.waiting = None;
-        }
-        job.save(&self.home)?;
-        Ok(job)
+        jobs::set_state(&self.home, id, state)
     }
 
     // ----- running -------------------------------------------------------------

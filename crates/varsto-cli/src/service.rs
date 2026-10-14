@@ -118,6 +118,9 @@ pub struct ServiceState {
     pub low_space_notified: std::collections::BTreeSet<String>,
     /// Storages a push had to leave out last time (`storage.problem` events).
     pub storage_problems: std::collections::BTreeSet<String>,
+    /// Open and paused move jobs (staged moves to disk pools), as of the
+    /// last time the service looked at them.
+    pub move_jobs: Vec<varsto_core::staged_move::MoveJob>,
 }
 
 /// The storages are asked this often whether they hold newer ledger
@@ -170,6 +173,7 @@ impl ServiceState {
             "quota_full": self.quota_full,
             "paused_folders": self.paused_folders,
             "low_space": self.low_space,
+            "move_jobs": self.move_jobs,
         })
     }
     /// Rank the pool disks for docking next (`disk suggest`) and, at most
@@ -189,6 +193,50 @@ impl ServiceState {
             }
             Err(e) => log::warn!("disk suggestion failed: {e:#}"),
         }
+    }
+    /// Continue the open move jobs that can go on: after a sync (jobs to
+    /// ordinary storages) and whenever a disk of a target pool came or its
+    /// space changed. A disk with room is used at once. Returns whether
+    /// anything ran, so the disk suggestion is computed again.
+    pub fn moves_if_due(&mut self, engine: &mut Engine, after_sync: bool) -> bool {
+        if self.paused {
+            return false;
+        }
+        let runs = engine.move_jobs_run_ready(
+            after_sync,
+            &varsto_core::engine::JobRunLimits::service(),
+        );
+        for r in &runs {
+            let before = self.move_jobs.iter().find(|j| j.id == r.job.id);
+            if r.report.bytes_done > 0 {
+                log::info!(
+                    "move job {}: {} moved of {}, {} left",
+                    r.job.id,
+                    varsto_core::util::human_bytes(r.job.bytes_done),
+                    varsto_core::util::human_bytes(r.job.bytes_total),
+                    varsto_core::util::human_bytes(r.job.bytes_remaining)
+                );
+            }
+            match (&r.job.state, &r.job.waiting) {
+                (varsto_core::staged_move::JobState::Done, _) => notify(
+                    "Varsto",
+                    &format!(
+                        "The move of {} to {} is finished ({}).",
+                        r.job.folder,
+                        r.job.to,
+                        varsto_core::util::human_bytes(r.job.bytes_done)
+                    ),
+                ),
+                (varsto_core::staged_move::JobState::Open, Some(w))
+                    if before.and_then(|b| b.waiting.as_ref()) != Some(w) =>
+                {
+                    notify("Varsto move", &format!("{}: {}", r.job.folder, w.text));
+                }
+                _ => {}
+            }
+        }
+        self.move_jobs = varsto_core::staged_move::list_active(engine.home());
+        !runs.is_empty()
     }
     /// Store the disk listing; log and notify when a disk appeared or went
     /// away, and ask for a sync when one appeared (pending files may be on it).
@@ -1823,6 +1871,15 @@ pub fn run(opts: Options) -> Result<()> {
                 Some(Err(e)) => log::warn!("disk check failed: {e:#}"),
                 None => {}
             }
+            // A disk came, or one has room it had not: go on with the moves.
+            let st = &mut *st;
+            if let Some(e) = st.engine.as_mut() {
+                let ran = st.service.moves_if_due(e, false);
+                st.service.move_jobs = varsto_core::staged_move::list_active(e.home());
+                if ran {
+                    st.service.suggest_disks(e);
+                }
+            }
         }
         // Changed by another process: read them again, watch what is now
         // attached and sync. (Our own writes land here too, harmlessly.)
@@ -2028,6 +2085,7 @@ pub fn run(opts: Options) -> Result<()> {
                         st.service.backups_if_due(e);
                         st.service.trash_if_due(e);
                         st.service.restic_if_due(e);
+                        st.service.moves_if_due(e, true);
                         st.service.suggest_disks(e);
                         if let Err(err) = e.publish_device_details(st.service.last_sync_utc) {
                             log::info!("device details not published: {err:#}");

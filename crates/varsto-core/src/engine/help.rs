@@ -240,6 +240,20 @@ impl Engine {
             inputs.disk_next = s.top.as_ref().map(|t| t.label.clone());
         }
 
+        // Open move jobs that wait for a disk.
+        inputs.moves = crate::staged_move::list_active(&self.home)
+            .into_iter()
+            .filter(|j| j.state.is_open() && j.waiting.is_some() && j.bytes_remaining > 0)
+            .map(|j| crate::help::MoveIn {
+                disk: j.waiting.as_ref().and_then(|w| w.disk.clone()),
+                id: j.id,
+                folder: j.folder,
+                from: j.from,
+                to: j.to,
+                bytes_left: j.bytes_remaining,
+            })
+            .collect();
+
         // Trash, from the cache.
         inputs.trash_days = self.trash_settings().days;
         if let Ok(t) = self.trash_status_cached() {

@@ -206,6 +206,35 @@ pub fn find(home: &Path, id: &str) -> Result<MoveJob> {
     }
 }
 
+/// Pause, resume or cancel a job (the job file only; no passphrase needed).
+/// Cancelling never deletes anything: what was moved stays moved, what was
+/// copied stays copied.
+pub fn set_state(home: &Path, id: &str, state: JobState) -> Result<MoveJob> {
+    let mut job = find(home, id)?;
+    match (job.state, state) {
+        (a, b) if a == b => return Ok(job),
+        (JobState::Done | JobState::Cancelled, _) => {
+            bail!("move job {} is {}", job.id, job.state.label())
+        }
+        (JobState::Open, JobState::Paused)
+        | (JobState::Paused, JobState::Open)
+        | (JobState::Open | JobState::Paused, JobState::Cancelled) => {}
+        (a, b) => bail!(
+            "move job {} is {}: it cannot become {}",
+            job.id,
+            a.label(),
+            b.label()
+        ),
+    }
+    job.state = state;
+    if state == JobState::Cancelled {
+        job.finished_utc = util::now_utc();
+        job.waiting = None;
+    }
+    job.save(home)?;
+    Ok(job)
+}
+
 /// Held while a process runs a job, so the service and the command line do
 /// not move the same blocks at once.
 pub struct JobLock {
