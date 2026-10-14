@@ -187,7 +187,13 @@ pub fn check(home: &Path, key: &str) -> std::result::Result<McpKey, Refused> {
     let mut f = load(home).map_err(|_| Refused::Unknown)?;
     let h = digest(key);
     let now = varsto_core::util::now_utc();
-    let Some(k) = f.keys.iter_mut().find(|k| k.hash == h) else {
+    // Constant time: a timing difference must not say how much of the
+    // digest matched.
+    let Some(k) = f
+        .keys
+        .iter_mut()
+        .find(|k| varsto_core::crypto::ct_eq(k.hash.as_bytes(), h.as_bytes()))
+    else {
         return Err(Refused::Unknown);
     };
     if k.expired(now) {
