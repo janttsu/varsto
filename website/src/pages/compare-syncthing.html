@@ -8,6 +8,15 @@ description: Looking for a Syncthing alternative with end-to-end encryption on y
     <h1>Varsto and Syncthing</h1>
     <p class="lead">Syncthing keeps folders identical across your own devices, continuously and without any cloud. It is free, mature and popular with technical users and home-lab setups: install it on a laptop, a desktop and a NAS, and the folders stay in step.</p>
 
+    <h2>Where Varsto differs</h2>
+    <ul>
+      <li>No need for two devices to be online together: your storages carry the changes, so a laptop that syncs at night and a phone that syncs in the morning still converge.</li>
+      <li>File names and content are encrypted at rest on every storage, not only on designated "untrusted devices": a bucket, a NAS, a disk or a friend's machine ever holds ciphertext.</li>
+      <li>Copies are counted: a signed ledger says where every copy is and when another device verified it, and a policy such as "one copy outside the house" warns before it breaks.</li>
+      <li>Pools of removable disks that come and go are filled, verified and counted as copies.</li>
+      <li>Backups: read-only, encrypted snapshots of any folder on your storages, kept for the days you choose.</li>
+    </ul>
+
     <h2>How Syncthing works</h2>
     <p>Devices connect peer to peer over TLS, identified by certificate-based device IDs; there is no account. Public discovery and relay servers run by the project help devices find each other, and you can host your own. Data lives only on the participating devices: there is no S3 or rclone backend and no provider copy. Versioning (trash can, simple, staggered or external) applies to changes received from other devices. Selective sync is done with ignore patterns; there are no placeholders. On Android the official app was discontinued in 2024 and a community fork continues; on iOS there is only a third-party client.</p>
 
@@ -32,7 +41,7 @@ description: Looking for a Syncthing alternative with end-to-end encryption on y
       <div class="card"><h3>Syncthing</h3><p>Choose Syncthing when every copy should stay on machines you run, at least one of them is always on, and you want a mature, open-source tool with no accounts at all.</p></div>
       <div class="card"><h3>Varsto</h3><p>Choose Varsto when you want an encrypted copy in a bucket or on removable disks as well, devices that are rarely online together, a record of where every copy is, or a phone that reads files without keeping them in clear text.</p></div>
     </div>
-    <p class="note">Varsto is alpha software: do not trust it with data you have no other copy of, and its cryptography has not been independently audited. The other products here are mature. Facts about them were checked from their own documentation in October 2026; prices and plans change often, so see their own pages for current figures. Corrections are welcome on the <a href="{{P}}forum/">forum</a> or on GitHub.</p>
+    <p class="note">Varsto is alpha software: do not trust it with data you have no other copy of, and its cryptography has not been independently audited. The other products here are mature. Facts about them were checked from their own documentation in October 2026; prices and plans change often, so see their own pages for current figures. Corrections are welcome as <a href="https://github.com/janttsu/varsto/issues" rel="noopener">GitHub issues</a>.</p>
 
     <h2>Sources</h2>
     <ul>

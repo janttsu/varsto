@@ -34,6 +34,9 @@ ALPHA = (
     "audited. Keep your own backups and check that you can restore from them."
 )
 REPO = "https://github.com/janttsu/varsto"
+# The last tagged release. Update it when tagging a release: the pages say
+# "released" with this value, while {{VERSION}} follows Cargo.toml (main).
+RELEASED_VERSION = "0.0.1-alpha.13"
 RELEASE_KEY = ROOT / "release-key.pub"
 FOOTER = [
     f'{BRAND} is a working name. Source: <a href="{REPO}">github.com/janttsu/varsto</a>, under the PolyForm Shield License 1.0.0 (source-available).',
@@ -142,7 +145,7 @@ def json_ld(data: dict) -> str:
 
 def home_structured_data(lang: str, url: str, description: str) -> str:
     """The home page describes the site, the application and its source code."""
-    version = cargo_version()
+    version = RELEASED_VERSION
     return json_ld({
         "@context": "https://schema.org",
         "@graph": [
@@ -302,7 +305,7 @@ PLATFORMS = [
      [("Command line only (Apple Silicon)", lambda n: n.endswith("-aarch64-apple-darwin.tar.gz"))],
      "Apple Silicon. Open the disk image and drag Varsto to Applications. The app has its own window, a menu-bar item, Finder actions (right-click a file: Download or Free up space with Varsto; double-click a placeholder to download and open it), the background service and the varsto command line inside the bundle. Unsigned: right-click, Open the first time."),
     ("Windows", "windows", lambda n: n.endswith("-x86_64-pc-windows-gnu.zip"), [],
-     "x86_64 zip. Double-click Varsto.cmd for the tray icon and the interface. Cross-compiled, not yet tested on Windows."),
+     "x86_64 zip. Double-click Varsto.cmd for the tray icon and the interface. Built and smoke-tested on Windows Server 2025 in CI; not yet through the manual checklist on a real machine."),
     ("Android", "android", lambda n: n.endswith("-android-debug.apk"), [],
      "Debug-signed APK for sideloading: allow the install when the phone asks. Runs the same core as a foreground service. Tested in the Android 15 emulator only."),
     ("iOS", "ios", None, [],
@@ -420,11 +423,10 @@ def build_translated_pages() -> None:
             rel = meta.get("output", f"{src.stem}.html")
             out_rel = f"{lang}/{rel}"
             depth = out_rel.count("/")
-            body = body.replace("{{DOWNLOADS}}", downloads_table(depth)).replace("{{POSTS}}", posts_list(depth))
+            body = fill(body, depth)
             # {{L}}: this language's root (links between translated pages);
             # {{P}}: the site root (assets, docs, blog).
             body = body.replace("{{L}}", "../" * (depth - 1)).replace("{{P}}", "../" * depth)
-            body = body.replace("{{VERSION}}", cargo_version())
             (OUT / out_rel).parent.mkdir(parents=True, exist_ok=True)
             (OUT / out_rel).write_text(page(meta["title"], meta.get("description", ""), body, meta["nav"], depth, lang, rel))
 
@@ -434,13 +436,36 @@ def cargo_version() -> str:
     return m.group(1) if m else ""
 
 
+def tree_counts() -> dict[str, str]:
+    """Figures for the status section, counted from the tree: lines of Rust
+    (rounded to a thousand), test functions and lab scenarios."""
+    rust = tests = 0
+    for f in ROOT.rglob("*.rs"):
+        if "target" in f.parts or ".git" in f.parts:
+            continue
+        text = f.read_text(errors="ignore")
+        rust += text.count("\n")
+        tests += len(re.findall(r"^\s*#\[(?:tokio::)?test", text, re.M))
+    lab = ROOT / "scripts" / "test" / "lab" / "scenarios.py"
+    scenarios = len(re.findall(r'^@scenario\("', lab.read_text(), re.M)) if lab.exists() else 0
+    return {"RUST_LINES": f"{round(rust, -3):,}".replace(",", " "), "TESTS": str(tests), "LAB_SCENARIOS": str(scenarios)}
+
+
+def fill(body: str, depth: int) -> str:
+    """The placeholders every page body may use."""
+    body = body.replace("{{DOWNLOADS}}", downloads_table(depth)).replace("{{POSTS}}", posts_list(depth))
+    body = body.replace("{{VERSION}}", cargo_version()).replace("{{RELEASED}}", RELEASED_VERSION)
+    for key, value in COUNTS.items():
+        body = body.replace("{{" + key + "}}", value)
+    return body
+
+
 def build_pages(slug_by_name: dict[str, str]) -> None:
     for src in sorted((SRC / "pages").glob("*.html")):
         meta, body = front_matter(src.read_text())
         out_rel = meta.get("output", f"{src.stem}.html")
         depth = out_rel.count("/")
-        body = body.replace("{{DOWNLOADS}}", downloads_table(depth)).replace("{{POSTS}}", posts_list(depth))
-        body = body.replace("{{VERSION}}", cargo_version())
+        body = fill(body, depth)
         body = body.replace("{{P}}", "../" * depth)
         (OUT / out_rel).parent.mkdir(parents=True, exist_ok=True)
         (OUT / out_rel).write_text(page(meta["title"], meta.get("description", ""), body, meta["nav"], depth, "en", out_rel))
@@ -463,7 +488,8 @@ def build_docs() -> dict[str, str]:
             if lines and lines[0].startswith("# "):
                 lines = lines[1:]
             body = rewrite_links(pandoc("\n".join(lines)), slug_by_name)
-        body = f"<article class=\"prose\">\n<h1>{html.escape(title)}</h1>\n<p class=\"note\">From <code>{html.escape(path)}</code> in the repository, rendered {datetime.now(timezone.utc).date()}.</p>\n{body}\n</article>"
+        body = (f"<article class=\"prose\">\n<h1>{html.escape(title)}</h1>\n<p class=\"note\">From <code>{html.escape(path)}</code> in the repository, rendered {datetime.now(timezone.utc).date()}. "
+                f"These documents describe the main branch; the released version is {RELEASED_VERSION}. Sections marked 'after {RELEASED_VERSION}' are not in a release yet.</p>\n{body}\n</article>")
         (OUT / "docs").mkdir(parents=True, exist_ok=True)
         (OUT / "docs" / f"{slug}.html").write_text(page(title, f"{BRAND} documentation: {title}", body, "Docs", 1, rel=f"docs/{slug}.html"))
         groups.setdefault(group, []).append((slug, title))
@@ -482,7 +508,7 @@ def build_docs() -> dict[str, str]:
         sections.append(f"    <h2>{group}</h2>\n    <ul class=\"doclist\">\n{lis}\n    </ul>")
     body = (
         "    <h1>Docs</h1>\n"
-        "    <p class=\"lead\">The documents below are rendered from the repository. They describe what alpha-0 does today and what the full design intends; every design document says which parts exist.</p>\n"
+        "    <p class=\"lead\">The documents below are rendered from the repository. They describe what the current alpha does and what the full design intends; every design document says which parts exist.</p>\n"
         + "\n".join(sections)
     )
     (OUT / "docs" / "index.html").write_text(page("Docs", f"{BRAND} documentation", body, "Docs", 1, rel="docs/index.html"))
@@ -581,6 +607,9 @@ def copy_data() -> None:
     for src in sorted((SRC / "data").glob("*.json")):
         (OUT / "data").mkdir(parents=True, exist_ok=True)
         (OUT / "data" / src.name).write_bytes(src.read_bytes())
+
+
+COUNTS = tree_counts()
 
 
 def main() -> None:

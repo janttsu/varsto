@@ -59,6 +59,14 @@
     <h1>Varsto och git-annex</h1>
     <p class="lead">git-annex hanterar stora filer med git utan att lagra deras innehåll i git. Det är ett kraftfullt verktyg för tekniska användare som arkiverar, säkerhetskopierar och flyttar data mellan många diskar och fjärrlagringar, och det är Varstos närmaste släkting på den här listan.</p>
 
+    <h2>Där Varsto skiljer sig</h2>
+    <ul>
+      <li>Samma idé om platsuppföljning, men krypteringen av filnamn och innehåll är alltid på, på varje lagringsplats.</li>
+      <li>Kontinuerlig synkronisering i bakgrunden, ett gränssnitt för dator och telefon, delning med andra personer och regler som larmar innan en regel bryts.</li>
+      <li>Säkerhetskopior som skrivskyddade versioner med en lagringstid på dina lagringsplatser.</li>
+      <li>En importväg från git-annex-repositoryn, disk för disk, är byggd efter 0.0.1-alpha.13, ännu inte i någon release. git-annex är det mognare verktyget och fri programvara; se nedan.</li>
+    </ul>
+
     <h2>Så fungerar git-annex</h2>
     <p>Varje repository kan finnas på valfri maskin eller disk, och ”special remotes” når S3 och kompatibla lagringar, rclone, rsync, vanliga eller flyttbara kataloger, WebDAV med mera. En git-gren registrerar vilket repository som har varje fil (”git annex whereis”), och numcopies vägrar ta bort innehåll om det inte finns tillräckligt många verifierade kopior på andra ställen. Kryptering är valfri för varje special remote och använder GnuPG; filnamnen i själva git-repositoryt förblir synliga om inte gcrypt används. Det är främst ett kommandoradsverktyg; det finns en enklare assistent, Android fungerar via Termux, och det finns ingen iOS-app.</p>
 
@@ -73,7 +81,7 @@
       <tr><th scope="row">Vet var varje kopia finns</th><td>Ja: platsuppföljning och numcopies, förebilden för Varstos liggare och regler.</td><td>Ja: en signerad liggare registrerar vilken lagringsplats och enhet som har varje block; lagringsregler (som standard 1 kopia var som helst, 1 extern, 1 på dina egna enheter eller diskar, kontrollerad av en annan enhet inom 30 dagar) varnar när en regel inte uppfylls.</td></tr>
       <tr><th scope="row">Flyttbara diskar och diskar offline</th><td>Ja: fullt stöd, en disks innehåll förblir känt medan den är urkopplad.</td><td>Ja: diskpooler fylls, kontrolleras och känns igen när de kommer tillbaka; filer på en disk som är borta ber om just den disken.</td></tr>
       <tr><th scope="row">Säkerhetskopior</th><td>Behåller det antal kopior du anger (numcopies) på fjärrlagringar, och gamla versioner finns kvar i git-historiken tills de tas bort. Inga schemalagda versioner eller lagringstid.</td><td>Ja: välj en mapp på valfri enhet. Varsto sparar krypterade, skrivskyddade versioner av den bara i din externa lagring, aldrig på dina enheter. Versionerna sparas i det antal dagar du väljer (90 som standard), och de som har gått ut raderas. Återställ vilken version som helst till en katalog du anger, från appen eller kommandoraden.</td></tr>
-      <tr><th scope="row">Flytta från git-annex</th><td>Gäller inte.</td><td>Kommer efter alpha.13, inte släppt ännu: <code>varsto import git-annex</code> för in ett arkiv i en mapp disk för disk, läser varje klon enbart med git (git-annex körs aldrig och ingenting på diskarna ändras), kontrollerar varje fil mot nyckelns hash och anger utifrån platsloggarna vilken disk som ska sättas in härnäst.</td></tr>
+      <tr><th scope="row">Flytta från git-annex</th><td>Gäller inte.</td><td>Byggt efter 0.0.1-alpha.13, ännu inte i någon release: <code>varsto import git-annex</code> för in ett arkiv i en mapp disk för disk, läser varje klon enbart med git (git-annex körs aldrig och ingenting på diskarna ändras), kontrollerar varje fil mot nyckelns hash och anger utifrån platsloggarna vilken disk som ska sättas in härnäst.</td></tr>
       <tr><th scope="row">Licens och pris</th><td>Fri programvara (AGPL-3+), gratis.</td><td>Källkoden tillgänglig (PolyForm Shield 1.0.0), gratis; du betalar bara din lagringsleverantör.</td></tr>
       <tr><th scope="row">Mognad</th><td>Moget, med aktiva utgåvor i mer än ett decennium.</td><td>Alfa: inte för produktionsdata, formaten kan fortfarande ändras.</td></tr>
       </tbody>
@@ -84,7 +92,7 @@
       <div class="card"><h3>git-annex</h3><p>Välj git-annex när du är van vid git och kommandoraden, vill ha maximal kontroll och insyn och värdesätter ett moget verktyg som är fri programvara framför en färdig app.</p></div>
       <div class="card"><h3>Varsto</h3><p>Varsto vill ge samma garantier (varje kopia redovisad, regler för hur många kopior som måste finnas, flyttbara diskar som kommer och går) till människor som inte använder git: kontinuerlig synkronisering i bakgrunden, ett gränssnitt för dator och telefon, kryptering som alltid omfattar både namn och innehåll, peer-to-peer-överföring och delning med andra.</p></div>
     </div>
-    <p class="note">Varsto är alfaprogramvara: anförtro den inga data som du inte har någon annan kopia av, och dess kryptografi har inte granskats av någon oberoende part. De andra produkterna här är mogna. Uppgifterna om dem kontrollerades i deras egen dokumentation i oktober 2026; priser och abonnemang ändras ofta, så se deras egna sidor för aktuella siffror. Rättelser tas gärna emot på <a href="../../../forum/">forumet</a> eller på GitHub.</p>
+    <p class="note">Varsto är alfaprogramvara: anförtro den inga data som du inte har någon annan kopia av, och dess kryptografi har inte granskats av någon oberoende part. De andra produkterna här är mogna. Uppgifterna om dem kontrollerades i deras egen dokumentation i oktober 2026; priser och abonnemang ändras ofta, så se deras egna sidor för aktuella siffror. Rättelser tas gärna emot som <a href="https://github.com/janttsu/varsto/issues" rel="noopener">ärenden på GitHub</a>.</p>
 
     <h2>Källor</h2>
     <ul>
@@ -92,7 +100,6 @@
       <li><a href="https://git-annex.branchable.com/special_remotes/">Special remotes</a></li>
       <li><a href="https://git-annex.branchable.com/encryption/">Kryptering</a></li>
       <li><a href="https://git-annex.branchable.com/git-annex-numcopies/">numcopies</a></li>
-      <li><a href="https://git-annex.branchable.com/git-annex-numcopies/">git-annex numcopies (en)</a></li>
     </ul>
 
   </div>

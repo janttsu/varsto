@@ -59,6 +59,15 @@
     <h1>Varsto och Syncthing</h1>
     <p class="lead">Syncthing håller mappar identiska mellan dina egna enheter, kontinuerligt och helt utan moln. Det är gratis, moget och populärt bland tekniska användare och i hemmalabb: installera det på en bärbar dator, en stationär dator och en NAS, så håller mapparna jämna steg.</p>
 
+    <h2>Där Varsto skiljer sig</h2>
+    <ul>
+      <li>Två enheter behöver inte vara online samtidigt: dina lagringsplatser bär ändringarna, så en bärbar dator som synkroniserar på natten och en telefon som synkroniserar på morgonen blir ändå samstämmiga.</li>
+      <li>Filnamn och innehåll är krypterade i vila på varje lagringsplats, inte bara på utpekade ”opålitliga enheter”: en bucket, en NAS, en disk eller en väns dator har aldrig annat än chiffertext.</li>
+      <li>Kopiorna räknas: en signerad liggare säger var varje kopia finns och när en annan enhet verifierade den, och en regel som ”en kopia utanför huset” varnar innan den bryts.</li>
+      <li>Pooler av flyttbara diskar som kommer och går fylls, verifieras och räknas som kopior.</li>
+      <li>Säkerhetskopior: skrivskyddade, krypterade versioner av valfri mapp på dina lagringsplatser, sparade i det antal dagar du väljer.</li>
+    </ul>
+
     <h2>Så fungerar Syncthing</h2>
     <p>Enheterna ansluter peer-to-peer över TLS och identifieras med certifikatbaserade enhets-ID:n; det finns inget konto. Publika upptäckts- och reläservrar som projektet driver hjälper enheterna att hitta varandra, och du kan driva egna. Data finns bara på de deltagande enheterna: det finns ingen S3- eller rclone-backend och ingen kopia hos någon leverantör. Versionshantering (papperskorg, enkel, stegvis eller extern) gäller ändringar som tas emot från andra enheter. Selektiv synkronisering görs med ignoreringsmönster; det finns inga platshållare. På Android lades den officiella appen ned 2024 och en gemenskapsfork lever vidare; på iOS finns bara en klient från tredje part.</p>
 
@@ -83,7 +92,7 @@
       <div class="card"><h3>Syncthing</h3><p>Välj Syncthing när varje kopia ska stanna på maskiner du själv driver, minst en av dem alltid är påslagen och du vill ha ett moget verktyg med öppen källkod helt utan konton.</p></div>
       <div class="card"><h3>Varsto</h3><p>Välj Varsto när du också vill ha en krypterad kopia i en bucket eller på flyttbara diskar, har enheter som sällan är online samtidigt, vill ha en förteckning över var varje kopia finns eller en telefon som läser filer utan att förvara dem i klartext.</p></div>
     </div>
-    <p class="note">Varsto är alfaprogramvara: anförtro den inga data som du inte har någon annan kopia av, och dess kryptografi har inte granskats av någon oberoende part. De andra produkterna här är mogna. Uppgifterna om dem kontrollerades i deras egen dokumentation i oktober 2026; priser och abonnemang ändras ofta, så se deras egna sidor för aktuella siffror. Rättelser tas gärna emot på <a href="../../../forum/">forumet</a> eller på GitHub.</p>
+    <p class="note">Varsto är alfaprogramvara: anförtro den inga data som du inte har någon annan kopia av, och dess kryptografi har inte granskats av någon oberoende part. De andra produkterna här är mogna. Uppgifterna om dem kontrollerades i deras egen dokumentation i oktober 2026; priser och abonnemang ändras ofta, så se deras egna sidor för aktuella siffror. Rättelser tas gärna emot som <a href="https://github.com/janttsu/varsto/issues" rel="noopener">ärenden på GitHub</a>.</p>
 
     <h2>Källor</h2>
     <ul>

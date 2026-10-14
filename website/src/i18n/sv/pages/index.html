@@ -2,47 +2,62 @@
 title: Projekt
 nav: Project
 output: index.html
-description: Varsto: end-to-end-krypterad filsynkronisering och säkerhetskopiering på lagring du redan äger. Alfa, arbetsnamn.
+description: Varsto: end-to-end-krypterad synkronisering, delning och säkerhetskopiering på lagring du redan äger, med hybrid postkvantkryptografi och en signerad förteckning över var varje kopia finns. Alfa, arbetsnamn.
 ---
-    <h1>Dina filer. Din lagring.</h1>
-    <p class="lead">Varsto är en end-to-end-krypterad app för synkronisering och säkerhetskopiering som använder dina egna enheter och de lagringstjänster du själv väljer. En disk, en NAS-utdelning, en S3-bucket eller valfri rclone-remote: appen krypterar allt på dina enheter, för en signerad förteckning över var varje block finns och låter enheter som aldrig är online samtidigt hålla sig synkroniserade via den lagringen.</p>
+    <h1>Ta med din egen lagring. Behåll dina egna nycklar. Vet var varje block finns.</h1>
+    <p class="lead">End-to-end-krypterad synkronisering, delning och säkerhetskopiering mellan dina enheter, med hybrid postkvantkryptografi och en bokföring du kan granska. Ingen server, inget konto, ingen leverantör att lita på.</p>
     <p><a class="button" href="{{L}}downloads/">Ladda ner alfaversionen</a> <a class="button secondary" href="{{P}}docs/quick-start.html">Snabbstart</a> <a class="button secondary" href="https://github.com/janttsu/varsto" rel="noopener">Källkoden på GitHub</a></p>
+
+    <h2>Därför är Varsto annorlunda</h2>
+    <div class="grid">
+      <section class="card"><h3>Bokföring du kan granska</h3><p>Varje enhet för en signerad liggare över vad den har lagrat och verifierat, så Varsto vet hur många kopior av varje block som finns, var de finns och när en annan enhet senast kontrollerade dem. En regel som ”två kopior i molnet och en hemma, verifierade inom 30 dagar” varnar dig innan den slutar gälla. <a href="{{L}}features/#ledger">Liggare och regler</a>.</p></section>
+      <section class="card"><h3>Din lagring, dina nycklar, ingen server</h3><p>En katalog, en NAS-utdelning, en S3-bucket hos valfri leverantör eller valfri rclone-remote blir en lagringsplats, och en lagringsplats ser aldrig annat än ogenomskinliga krypterade objekt. Det finns inget Varsto-konto, ingen server och inget relä att lita på eller förlora. <a href="{{L}}features/#storage">Din egen lagring</a>.</p></section>
+      <section class="card"><h3>Hybrid postkvantkryptografi</h3><p>Varje liggarbatch bär en Ed25519- och en ML-DSA-65-signatur, och varje mappnyckel färdas förseglad till en X25519 + ML-KEM-768-nyckel. Utformad för en postkvantvärld; ännu inte granskad. <a href="{{L}}features/#pq">Så fungerar signaturerna och nycklarna</a>.</p></section>
+      <section class="card"><h3>Gamla diskar som räknade, verifierade kopior</h3><p>Anslut en disk till en docka och lägg till den i en pool: den fylls med de data som har minst antal kopior, talar om när den säkert kan matas ut, känns igen när den kommer tillbaka och räknas in i ”en kopia hemma, en någon annanstans”. <a href="{{L}}features/#disks">Diskpooler</a>.</p></section>
+      <section class="card"><h3>Strongroom</h3><p>Mappar vars nyckel är inkapslad under en hemlighet som bara din FIDO2-säkerhetsnyckel tar fram efter en beröring, aldrig lagrad någonstans. Ingen lösenfras, stulen bärbar dator eller assistent öppnar dem. <a href="{{L}}features/#strongroom">Strongroom</a>.</p></section>
+      <section class="card"><h3>Enheter som hjälper varandra</h3><p>Dina enheter utbyter krypterade block direkt, i det lokala nätverket och genom NAT, utan leverantörsrelä. Ett USB-minne kan bära enbart det den andra sidan saknar, och en väns NAS kan hålla verifierade kopior som den inte kan läsa. <a href="{{L}}features/#p2p">Peer-to-peer och överföringsdiskar</a>, <a href="{{L}}features/#replicas">opålitliga repliker</a>.</p></section>
+    </div>
+
+    <h2 id="where">Var dina data kan finnas</h2>
+    <p>Vilken katalog som helst som enheten når, en NAS eller nätverksutdelning, vilken S3-kompatibel bucket som helst med dina egna nycklar (AWS, Scaleway, Hetzner, Backblaze B2, Cloudflare R2, MinIO och andra), valfri rclone-remote (SFTP, WebDAV, Google Drive och resten), kalla arkivklasser som skrivs till men aldrig läses utan din bekräftelse, och pooler av flyttbara diskar på en hylla. Använd flera samtidigt; var och en har en platsetikett och ett pris, så en regel kan kräva en kopia utanför huset och appen kan visa vad varje mapp kostar per månad. Filer delas upp i block, komprimeras och krypteras på din enhet, så en lagringsplats ser aldrig annat än ogenomskinliga objekt och deras storlekar, aldrig filnamn, hashar av klartext eller innehåll.</p>
     <figure class="hero"><picture class="theme-light"><source type="image/webp" srcset="{{P}}assets/img/hero.webp"><img src="{{P}}assets/img/hero.png" alt="Diagram: dina nycklar i mitten, förbundna med krypterade länkar till en S3-bucket, ett kallt arkiv, hårddiskar på en hylla, en NAS, en bärbar dator och en telefon; varje plats rymmer bara låsta, krypterade block." width="1200" height="600"></picture><picture class="theme-dark"><source type="image/webp" srcset="{{P}}assets/img/hero-dark.webp"><img src="{{P}}assets/img/hero-dark.png" alt="Diagram: dina nycklar i mitten, förbundna med krypterade länkar till en S3-bucket, ett kallt arkiv, hårddiskar på en hylla, en NAS, en bärbar dator och en telefon; varje plats rymmer bara låsta, krypterade block." width="1200" height="600" loading="lazy"></picture><figcaption>Kopior där du bestämmer: en bucket, ett kallt arkiv, gamla diskar på en hylla, dina egna datorer. Varje kopia är chiffertext; nycklarna stannar hos dig.</figcaption></figure>
 
-    <h2>Det här fungerar i dag (alfa, {{VERSION}})</h2>
-    <div class="grid">
-      <section class="card"><h3>Krypterat innan det lämnar din enhet</h3><p>Filerna delas upp i innehållsdefinierade bitar som var och en krypteras med XChaCha20-Poly1305 under nycklar härledda ur ditt valv. Lagringen ser bara ogenomskinliga objekt och storlekar, aldrig namn, hashvärden eller innehåll. <a href="{{L}}how-it-works/">Så fungerar det</a>.</p></section>
-      <section class="card"><h3>Använd din egen lagring</h3><p>Vilken katalog som helst som enheten når, vilken S3-kompatibel bucket som helst (AWS, Scaleway, Hetzner, B2, R2, MinIO) med dina egna nycklar, eller valfri rclone-remote. Kall lagring och arkivklasser skrivs till men läses aldrig utan att du bekräftar.</p></section>
-      <section class="card"><h3>Enheter som aldrig möts blir ändå samstämmiga</h3><p>Varje enhet för en signerad, krypterad liggare och publicerar den via lagringen. Ändringar, raderingar och konflikter avgörs deterministiskt; samtidiga ändringar behåller båda versionerna, raderade filer hamnar i en papperskorg.</p></section>
-      <section class="card"><h3>Bakgrundsapp på varje dator</h3><p>Bakgrundstjänsten startar vid inloggning, bevakar mappar och synkroniserar inom några sekunder, utan knappar att trycka på; gränssnittet öppnas i din webbläsare (i ett eget fönster på macOS) och visas bara för den här datorn. Uppdateringar söks automatiskt och erbjuds när en nyare version finns.</p></section>
-      <section class="card"><h3>Selektiv synkronisering, överföringsdiskar, opålitliga repliker, delning</h3><p>Platshållare tills du hämtar filen; ett USB-minne som bara bär det den andra enheten saknar; en väns NAS som lagrar dina kopior utan att kunna öppna dem; en mapp som delas med en annan användare genom sin nyckel. Se <a href="{{L}}features/">Funktioner</a>, <a href="{{L}}use-cases/">Användningsfall</a> och <a href="{{L}}screenshots/">Skärmbilder</a>.</p></section>
-      <section class="card"><h3>Postkvantsäker hybridkryptografi</h3><p>Varje liggarbatch signeras med Ed25519 och ML-DSA-65, och båda måste verifieras. En delningstoken förseglas till mottagarens X25519 + ML-KEM-768-nyckel, så den kan skickas via vilken kanal som helst. Äldre batcher med enbart Ed25519 förblir giltiga tack vare den algoritmidentifierare de bär.</p></section>
-      <section class="card"><h3>En assistent med begränsad åtkomst</h3><p>En MCP-server låter den AI-assistent du väljer läsa, analysera och omorganisera filer i exakt de mappar du ger åtkomst till, med enbart läsrätt om du inte säger annat. Varsto håller själv reda på när filer senast användes och föreslår var oanvänd data är billigast att förvara.</p></section>
-      <section class="card"><h3>Regler som varnar i tid</h3><p>”Två kopior i molnet och en hemma, verifierade inom 30 dagar.” Varje enhet kontrollerar regeln mot liggaren och varnar, i appen och med en avisering, innan den slutar gälla.</p></section>
-      <section class="card"><h3>Peer-to-peer, komprimerat</h3><p>Dina enheter utbyter krypterade block direkt, som med torrent: automatiskt i det lokala nätverket, över internet genom NAT med hole punching, och via en av dina egna nåbara enheter när det misslyckas. Inga trackers, inget leverantörsrelä. Blocken komprimeras före krypteringen, så varje kopia och överföring blir liten. I ett hem bakom NAT kom stora filer från peers med 8 till 9 MB/s på en 100 Mbit/s-linje, upp till 1,8 gånger så snabbt som från bucketen: <a href="{{L}}benchmarks/#home">Prestandatester</a>.</p></section>
-      <section class="card"><h3>Strongroom-mappar</h3><p>En mapp vars nyckel bara finns medan du rör vid din FIDO2-säkerhetsnyckel. Kryptografiskt, inte en dialogruta: ingen lösenfras, valvnyckel eller stulen bärbar dator öppnar den.</p></section>
-      <section class="card"><h3>Gamla diskar som en pool</h3><p>Anslut en disk till dockan, lägg till den i poolen, så fylls den med det poolen saknar upp till sin reserv. Mata ut den när du blir ombedd och förvara den var som helst; när den kommer tillbaka känns den igen på sin markör, kontrolleras och fylls på. En fil vars enda kopia finns på en disk som inte är ansluten säger det: ”anslut disken data-01 (hyllan)”.</p></section>
-      <section class="card"><h3>Organisationer för företag</h3><p>Administratörer godkänner enheter för namngivna personer, tar bort en person med alla personens enheter i ett steg, bestämmer vad medlemmarna får göra och för en signerad, kedjad logg över allt detta. En rotnyckel på papper utser administratörerna. Ett valv utan organisation påverkas inte av något av detta. <a href="{{L}}features/#organizations">Mer</a>.</p></section>
-      <section class="card"><h3>Bokföring du kan kontrollera</h3><p><code>varsto fsck --verify</code> jämför liggaren med vad lagringen faktiskt innehåller och hashar om varje objekt. En enhet som återställts från en gammal säkerhetskopia upptäcks och spärras.</p></section>
-    </div>
-
-    <h2>Det här är utformat men inte byggt än</h2>
-    <div class="grid">
-      <section class="card todo"><h3>iOS, bredare NAT-tester</h3><p>Nästa steg är iOS-versionen på riktiga enheter. NAT-traversering är byggd men bara testad på localhost och i underhållarens egna nätverk; ett valv där alla enheter sitter bakom NAT har fortfarande ingen väg över internet.</p></section>
-    </div>
-
-    <h2>Ärlig status</h2>
+    <h2 id="security">Säkerhet, ärligt talat</h2>
     <ul>
-      <li>Alfaversionen är en första vertikal skiva: kärnbibliotek, CLI, bakgrundstjänst, skal för systemfältet och menyraden, Android-skal, ungefär 54 000 rader Rust, över 200 automatiska tester och en labbmiljö med virtuella maskiner bakom hem- och kontors-NAT, bland annat konvergens mellan två enheter offline, konflikter, spärr av återställd enhet, repliker, delning, regler, peers, Strongrooms och diskpooler. Använd den bara med testdata.</li>
+      <li>Innehållet krypteras med XChaCha20-Poly1305 under nycklar härledda ur en slumpmässig valvnyckel som bara dina enheter har; en lagringsplats ser chiffertextobjekt namngivna efter sin hash och inget annat. <a href="{{L}}how-it-works/">Så fungerar det</a>, steg för steg.</li>
+      <li>Varje lagrad signatur är hybrid (Ed25519 + ML-DSA-65, båda måste verifieras) och varje förseglad nyckel är hybrid (X25519 + ML-KEM-768): hybrid postkvantkryptografi, utformad för det, inte granskad. Transporten (direkta anslutningar bär bara krypterade block med en token per förfrågan; QUIC med TLS 1.3 och fästa certifikat genom NAT) och signeringen av releaser (minisign) använder klassiska algoritmer.</li>
+      <li>Strongroom-mappar öppnas bara med en FIDO2-säkerhetsnyckel; skyddet är kryptografiskt, inte en dialogruta.</li>
+      <li>AI-hjälpen stannar lokalt: MCP-servern är avsedd för språkmodeller som körs på din egen dator, bara i de mappar du beviljar och aldrig i ett Strongroom. Inget skickas till någon modelleverantör.</li>
+      <li>En förlorad enhet tas bort med en signerad återkallelse och valvet byter till nya nycklar; en raderingsorder utförs nästa gång enheten når en lagringsplats. Det finns inget konto och ingen deponering: återställningspaketet, 24 ord eller tre delar, är ditt att ta vara på.</li>
+      <li>Varken designen eller koden har granskats eller reviderats. <a href="{{P}}docs/threat-model.html">Hotmodellen</a> och <a href="{{P}}docs/failure-model.html">felmodellen</a> beskriver vad designen är avsedd att göra, vad varje part kan se och var den tar slut.</li>
+    </ul>
+
+    <h2 id="teams">För team</h2>
+    <p>En organisation lägger till det lager som ett företag behöver ovanpå ett valv: administratörer godkänner enheter för namngivna personer efter att ha jämfört ett fingeravtryck på sex ord med dem, tar bort en person med alla hens enheter i ett steg (de kvarvarande enheterna får nya nycklar), bestämmer vad medlemmar får göra på egen hand och för en logg över allt detta som signeras av deras enheter och kedjas. Rotnyckeln som utser administratörer är 24 ord på papper, aldrig på en enhet. Ett valv utan organisation påverkas inte av något av detta. <a href="{{L}}features/#organizations">Organisationer</a>.</p>
+
+    <h2 id="next">Vad som kommer härnäst</h2>
+    <p class="note">Byggt på huvudgrenen efter 0.0.1-alpha.13, ännu inte i någon release (after 0.0.1-alpha.13, not in a release yet):</p>
+    <ul>
+      <li>En papperskorg för hela valvet, återställbar på varje enhet, och versionshistorik för filer.</li>
+      <li>En andra, oberoende säkerhetskopia med restic: en enhet håller en okrypterad spegel av valvet och restic säkerhetskopierar den till ett repository utanför dina lagringsplatser, återställbar med enbart restic.</li>
+      <li>Import från git-annex-repositoryn, molndiskar (via rclone) och lokala kataloger, varje fil kontrollerad mot sin hash.</li>
+      <li>QR-inbjudningar och <code>varsto://</code>-länkar för delning och parkoppling.</li>
+      <li>Tömning av en lagringsplats inom en daglig budget, och lagringskvoter.</li>
+      <li>En rullande kontroll av bitröta för varje kopia på dina lagringsplatser och diskar, med reparation från en annan kopia.</li>
+      <li>Portmappning i routern (PCP, NAT-PMP, UPnP) för peer-to-peer.</li>
+      <li>Mappsäkerhet: ett skydd mot massradering, mappar som bara skickar eller bara tar emot, och ignoreringsregler.</li>
+    </ul>
+
+    <h2 id="status">Ärlig status</h2>
+    <ul>
+      <li>Släppt version: {{RELEASED}}. Alfaversionen är en vertikal skiva: kärnbibliotek, kommandorad, bakgrundstjänst, skal för systemfältet och menyraden, Android-skal, ungefär {{RUST_LINES}} rader Rust, {{TESTS}} automatiska tester och ett labb med {{LAB_SCENARIOS}} scenarier på virtuella maskiner bakom hem- och kontors-NAT: konvergens offline, konflikter, spärr av återställd enhet, repliker, delning, regler, peers, Strongrooms, diskpooler, säkerhetskopior med mera. Använd den bara med testdata.</li>
       <li>Den kryptografiska designen har inte granskats eller reviderats. <a href="{{P}}docs/threat-model.html">Hotmodellen</a> och <a href="{{P}}docs/failure-model.html">felmodellen</a> beskriver vad designen är avsedd att göra och var den tar slut.</li>
       <li>Källkoden är offentlig på <a href="https://github.com/janttsu/varsto" rel="noopener">github.com/janttsu/varsto</a> under <a href="{{P}}docs/licence.html">PolyForm Shield License 1.0.0</a> (källkoden tillgänglig, inte öppen källkod); buggar och frågor tas emot i ärendehanteringen där. Lagringsformatet är <a href="{{P}}docs/alpha-0-format.html">dokumenterat</a> så att dina data förblir återställningsbara.</li>
+      <li>Varsto är skrivet i Rust, med skal i Swift och Kotlin och ett vanligt webbgränssnitt. Säkerhetsgranskning, plattformsarbete, nätverks- och lagringstester, paketering och översättningar är välkomna: <a href="{{L}}contribute/">så bidrar du</a>.</li>
       <li>Namnet är preliminärt.</li>
     </ul>
 
-    <h2>För utvecklare</h2>
-    <p>Varsto är skrivet i Rust, med skal i Swift och Kotlin och ett vanligt webbgränssnitt. Källkoden och specifikationen av lagringsformatet är offentliga. Säkerhetsgranskning, plattformsarbete, nätverks- och lagringstester, paketering och översättningar är välkomna: <a href="{{L}}contribute/">så bidrar du</a>.</p>
-
-    <h2>Nedladdningar</h2>
+    <h2>Nedladdningar <span class="note">(på engelska)</span></h2>
     {{DOWNLOADS}}
     <p class="note">Verifiera en nedladdning: listan med kontrollsummor är signerad med Varstos releasenyckel (se ”Verify your download” ovan): <code>varsto verify-release &lt;file&gt; --github</code>, eller minisign och <code>sha256sum -c SHA256SUMS --ignore-missing</code>. <code>varsto update</code> kontrollerar själv signaturen och GitHub-releasen.</p>
 

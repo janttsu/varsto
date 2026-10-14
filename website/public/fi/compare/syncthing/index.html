@@ -59,6 +59,15 @@
     <h1>Varsto ja Syncthing</h1>
     <p class="lead">Syncthing pitää kansiot samanlaisina kaikilla omilla laitteillasi, jatkuvasti ja ilman pilveä. Se on ilmainen, kypsä ja suosittu teknisten käyttäjien ja kotilaboratorioiden keskuudessa: asenna se kannettavaan, pöytäkoneeseen ja NAS-laitteeseen, niin kansiot pysyvät tahdissa.</p>
 
+    <h2>Missä Varsto eroaa</h2>
+    <ul>
+      <li>Kahden laitteen ei tarvitse olla verkossa yhtä aikaa: tallennuspaikkasi kuljettavat muutokset, joten yöllä synkronoiva kannettava ja aamulla synkronoiva puhelin päätyvät silti samaan tilaan.</li>
+      <li>Tiedostonimet ja sisältö ovat salattuina levossa jokaisessa tallennuspaikassa, ei vain erikseen nimetyillä ”epäluotetuilla laitteilla”: bucketissa, NASissa, levyllä tai ystävän koneella on aina vain salakirjoitusta.</li>
+      <li>Kopiot lasketaan: allekirjoitettu kirjanpito kertoo, missä jokainen kopio on ja milloin toinen laite tarkisti sen, ja säilytyssääntö kuten ”yksi kopio kodin ulkopuolella” varoittaa ennen kuin se rikkoutuu.</li>
+      <li>Tulevista ja lähtevistä irrotettavista levyistä kootut levyvarastot täytetään, tarkistetaan ja lasketaan kopioiksi.</li>
+      <li>Varmuuskopiot: vain luku -muotoiset, salatut versiot mistä tahansa kansiosta tallennuspaikoissasi, säilytettyinä valitsemasi päivämäärän.</li>
+    </ul>
+
     <h2>Miten Syncthing toimii</h2>
     <p>Laitteet muodostavat vertaisyhteyden TLS:n yli, ja ne tunnistetaan varmenteisiin perustuvilla laitetunnuksilla; tiliä ei ole. Projektin ylläpitämät julkiset haku- ja välittäjäpalvelimet auttavat laitteita löytämään toisensa, ja voit ajaa myös omiasi. Tiedot ovat vain mukana olevilla laitteilla: S3- tai rclone-taustajärjestelmää ei ole, eikä palveluntarjoajalla ole kopiota. Versiointi (roskakori, yksinkertainen, porrastettu tai ulkoinen) koskee muilta laitteilta tulleita muutoksia. Valikoiva synkronointi tehdään ohitusmallien avulla; paikkamerkkejä ei ole. Androidin virallisen sovelluksen kehitys lopetettiin vuonna 2024, ja yhteisön haara jatkaa sitä; iOS:lle on vain kolmannen osapuolen asiakasohjelma.</p>
 
@@ -83,7 +92,7 @@
       <div class="card"><h3>Syncthing</h3><p>Valitse Syncthing, kun jokaisen kopion pitää pysyä itse ylläpitämilläsi koneilla, ainakin yksi niistä on aina päällä ja haluat kypsän avoimen lähdekoodin työkalun ilman minkäänlaisia tilejä.</p></div>
       <div class="card"><h3>Varsto</h3><p>Valitse Varsto, kun haluat lisäksi salatun kopion bucketiin tai irrotettaville levyille, laitteesi ovat harvoin yhtä aikaa verkossa, haluat kirjanpidon siitä, missä jokainen kopio on, tai haluat puhelimen, joka lukee tiedostoja säilyttämättä niitä selväkielisinä.</p></div>
     </div>
-    <p class="note">Varsto on alfavaiheen ohjelmisto: älä luota sille tietoja, joista sinulla ei ole muuta kopiota. Sen kryptografiaa ei ole myöskään auditoitu riippumattomasti. Muut tässä esitellyt tuotteet ovat kypsiä. Niitä koskevat tiedot tarkistettiin niiden omasta dokumentaatiosta lokakuussa 2026; hinnat ja tilausvaihtoehdot muuttuvat usein, joten katso ajantasaiset tiedot niiden omilta sivuilta. Korjaukset ovat tervetulleita <a href="../../../forum/">foorumilla</a> tai GitHubissa.</p>
+    <p class="note">Varsto on alfavaiheen ohjelmisto: älä luota sille tietoja, joista sinulla ei ole muuta kopiota. Sen kryptografiaa ei ole myöskään auditoitu riippumattomasti. Muut tässä esitellyt tuotteet ovat kypsiä. Niitä koskevat tiedot tarkistettiin niiden omasta dokumentaatiosta lokakuussa 2026; hinnat ja tilausvaihtoehdot muuttuvat usein, joten katso ajantasaiset tiedot niiden omilta sivuilta. Korjaukset ovat tervetulleita <a href="https://github.com/janttsu/varsto/issues" rel="noopener">GitHub-issueina</a>.</p>
 
     <h2>Lähteet</h2>
     <ul>

@@ -2,45 +2,60 @@
 title: Project
 nav: Project
 output: index.html
-description: Varsto: end-to-end encrypted file sync and backup on storage you already own. Alpha, working name.
+description: Varsto: end-to-end encrypted sync, sharing and backup on storage you already own, with post-quantum hybrid cryptography and a signed record of where every copy is. Alpha, working name.
 ---
-    <h1>Your files. Your storage.</h1>
-    <p class="lead">Varsto is an end-to-end encrypted sync and backup app that uses your own devices and storage services of your choice. A disk, a NAS share, an S3 bucket or any rclone remote; the app encrypts everything on your devices, keeps a signed record of where every block is, and lets devices that are never online at the same time stay in sync through that storage.</p>
+    <h1>Bring your own storage. Keep your own keys. Know where every block is.</h1>
+    <p class="lead">End-to-end encrypted sync, sharing and backup across your devices, with post-quantum hybrid cryptography and bookkeeping you can audit. No server, no account, no provider to trust.</p>
     <p><a class="button" href="downloads/">Download the alpha</a> <a class="button secondary" href="docs/quick-start.html">Quick start</a> <a class="button secondary" href="https://github.com/janttsu/varsto" rel="noopener">Source on GitHub</a></p>
+
+    <h2>Why Varsto is different</h2>
+    <div class="grid">
+      <section class="card"><h3>Bookkeeping you can audit</h3><p>Every device keeps a signed ledger of what it stored and verified, so Varsto knows how many copies of every block exist, where they are and when another device last checked them. A policy such as "two cloud copies and one at home, verified within 30 days" warns you before it stops being true. <a href="features/#ledger">Ledger and policies</a>.</p></section>
+      <section class="card"><h3>Your storage, your keys, no server</h3><p>A directory, a NAS share, an S3 bucket at any provider or any rclone remote becomes a storage, and a storage ever sees only opaque encrypted objects. There is no Varsto account, server or relay to trust or to lose. <a href="features/#storage">Your own storage</a>.</p></section>
+      <section class="card"><h3>Post-quantum hybrid cryptography</h3><p>Every ledger batch carries an Ed25519 and an ML-DSA-65 signature, and every folder key travels sealed to an X25519 + ML-KEM-768 key. Designed for a post-quantum world; not audited yet. <a href="features/#pq">How the signatures and keys work</a>.</p></section>
+      <section class="card"><h3>Old disks as counted, verified copies</h3><p>Plug a disk into a dock and add it to a pool: it fills with the data that has the fewest copies, tells you when it is safe to eject, is recognised when it comes back, and counts toward "one copy at home, one elsewhere". <a href="features/#disks">Disk pools</a>.</p></section>
+      <section class="card"><h3>Strongroom</h3><p>Folders whose key is wrapped under a secret only your FIDO2 security key produces after a touch, never at rest anywhere. No passphrase, stolen laptop or assistant opens them. <a href="features/#strongroom">Strongroom</a>.</p></section>
+      <section class="card"><h3>Devices that help each other</h3><p>Your devices exchange encrypted blocks directly, on the LAN and through NAT, with no vendor relay. A USB stick can carry only what the other side lacks, and a friend's NAS can hold verified copies it cannot read. <a href="features/#p2p">Peer to peer and transferrers</a>, <a href="features/#replicas">untrusted replicas</a>.</p></section>
+    </div>
+
+    <h2 id="where">Where your data can live</h2>
+    <p>Any directory this device can reach, a NAS or network share, any S3-compatible bucket with your own keys (AWS, Scaleway, Hetzner, Backblaze B2, Cloudflare R2, MinIO and others), any rclone remote (SFTP, WebDAV, Google Drive and the rest), cold archive classes that are written but never read without your confirmation, and pools of removable disks on a shelf. Use several at once; each carries a place label and a price, so a policy can ask for one copy outside the house and the app can show what every folder costs a month. Files are cut into blocks, compressed and encrypted on your device, so a storage ever sees only opaque objects and their sizes, never file names, plaintext hashes or content.</p>
     <figure class="hero"><picture class="theme-light"><source type="image/webp" srcset="assets/img/hero.webp"><img src="assets/img/hero.png" alt="Diagram: your keys in the centre, connected by encrypted links to an S3 bucket, a cold archive, hard drives on a shelf, a NAS, a laptop and a phone; every place holds only locked, encrypted blocks." width="1200" height="600"></picture><picture class="theme-dark"><source type="image/webp" srcset="assets/img/hero-dark.webp"><img src="assets/img/hero-dark.png" alt="Diagram: your keys in the centre, connected by encrypted links to an S3 bucket, a cold archive, hard drives on a shelf, a NAS, a laptop and a phone; every place holds only locked, encrypted blocks." width="1200" height="600" loading="lazy"></picture><figcaption>Copies wherever you decide: a bucket, a cold archive, old disks on a shelf, your own machines. Every copy is ciphertext; the keys stay with you.</figcaption></figure>
 
-    <h2>What works today (alpha, {{VERSION}})</h2>
-    <div class="grid">
-      <section class="card"><h3>Encrypted before it leaves your device</h3><p>Files are cut into content-defined chunks, each encrypted with XChaCha20-Poly1305 under keys derived from your vault. Storage sees opaque objects and sizes, never names, hashes or content. <a href="how-it-works/">How it all works</a>.</p></section>
-      <section class="card"><h3>Bring your own storage</h3><p>Any directory this device can reach, any S3-compatible bucket (AWS, Scaleway, Hetzner, B2, R2, MinIO) with your own keys, or any rclone remote. Cold storages and archive classes are written but never read without your confirmation.</p></section>
-      <section class="card"><h3>Devices that never meet still converge</h3><p>Each device keeps a signed, encrypted ledger and publishes it through the storage. Edits, deletions and conflicts resolve deterministically; concurrent edits keep both versions, deletions go to a trash.</p></section>
-      <section class="card"><h3>Background app on every desktop</h3><p>The background service starts at login, watches folders and syncs within seconds, with no buttons to press; the interface opens in your browser (its own window on macOS), served only to this computer. Updates are checked automatically and offered when a newer version exists.</p></section>
-      <section class="card"><h3>Selective sync, transferrer disks, untrusted replicas, sharing</h3><p>Placeholders until you fetch; a USB stick that carries only what the other device lacks; a friend's NAS that stores your copies without being able to open them; a folder shared with another user by its key. See <a href="features/">Features</a>, <a href="use-cases/">Use cases</a> and <a href="screenshots/">Screenshots</a>.</p></section>
-      <section class="card"><h3>Post-quantum hybrid cryptography</h3><p>Every ledger batch is signed with Ed25519 and ML-DSA-65, and both must verify. A share token is sealed to the recipient's X25519 + ML-KEM-768 key, so it can travel over any channel. Old Ed25519-only batches stay valid through the algorithm identifier they carry.</p></section>
-      <section class="card"><h3>An assistant with limited access</h3><p>An MCP server lets the AI assistant of your choice read, analyse and reorganise files in exactly the folders you grant, read-only unless you say otherwise. Varsto itself tracks when files were last used and suggests where idle data is cheapest to keep.</p></section>
-      <section class="card"><h3>Policies that warn in time</h3><p>"Two cloud copies and one at home, verified within 30 days." Every device checks it from the ledger and warns, in the app and by notification, before it stops being true.</p></section>
-      <section class="card"><h3>Peer-to-peer, compressed</h3><p>Your devices exchange encrypted blocks directly, torrent-style: on the LAN automatically, across the internet through NAT with hole punching, and through one of your own reachable devices when punching fails. No trackers, no vendor relay. Blocks are compressed before encryption, so every copy and transfer is small. From a home behind NAT, large files arrived from peers at 8 to 9 MB/s on a 100 Mbit/s line, up to 1.8 times as fast as from the bucket: <a href="benchmarks/#home">Benchmarks</a>.</p></section>
-      <section class="card"><h3>Strongroom folders</h3><p>A folder whose key exists only while you touch your FIDO2 security key. Cryptographic, not a dialog: no passphrase, vault key or stolen laptop opens it.</p></section>
-      <section class="card"><h3>Old disks as a pool</h3><p>Plug a disk into the dock, add it to the pool, and it fills with what the pool lacks until its reserve. Eject when told, keep it anywhere; when it comes back it is recognised by its marker, checked and topped up. A file whose only copy is on a disk that is away says so: "attach disk data-01 (shelf)".</p></section>
-      <section class="card"><h3>Organizations for business use</h3><p>Administrators approve devices for named people, remove a person with every device of theirs in one step, set what members may do, and keep a signed, chained log of it. A root key on paper appoints administrators. A vault without an organization sees none of it. <a href="features/#organizations">More</a>.</p></section>
-      <section class="card"><h3>Bookkeeping you can check</h3><p><code>varsto fsck --verify</code> compares the ledger with what the storage actually holds and re-hashes every object. A device restored from an old backup is detected and fenced.</p></section>
-    </div>
-
-    <h2>What is designed but not built yet</h2>
-    <div class="grid">
-      <section class="card todo"><h3>iOS, wider NAT testing</h3><p>The iOS build on real devices is next. NAT traversal is built but tested on localhost and the maintainer's own networks only; a vault with every device behind NAT still has no path across the internet.</p></section>
-    </div>
-
-    <h2>Honest status</h2>
+    <h2 id="security">Security, honestly</h2>
     <ul>
-      <li>The alpha is a first vertical slice: core library, CLI, background service, tray and menu-bar shells, Android shell, about 54 000 lines of Rust, over 200 automated tests and a lab of virtual machines behind home and office NAT, including two-device offline convergence, conflicts, a restored-device fence, replicas, sharing, policies, peers, Strongrooms and disk pools. Use it with test data only.</li>
-      <li>The cryptographic design has not been reviewed or audited. The <a href="docs/threat-model.html">threat model</a> and the <a href="docs/failure-model.html">failure model</a> say what the design intends and where it stops.</li>
-      <li>The source is public at <a href="https://github.com/janttsu/varsto" rel="noopener">github.com/janttsu/varsto</a> under the <a href="docs/licence.html">PolyForm Shield License 1.0.0</a> (source-available, not open source); bugs and questions go to the issue tracker there. The storage format is <a href="docs/alpha-0-format.html">documented</a> so that your data stays recoverable.</li>
-      <li>The name is provisional.</li>
+      <li>Content is encrypted with XChaCha20-Poly1305 under keys derived from a random vault key that only your devices hold; a storage sees ciphertext objects named by their hash and nothing else. <a href="how-it-works/">How it works</a>, step by step.</li>
+      <li>Every stored signature is hybrid (Ed25519 + ML-DSA-65, both must verify) and every sealed key is hybrid (X25519 + ML-KEM-768): post-quantum hybrid cryptography, designed for, not audited. Transport (direct connections carry only encrypted blocks with a per-request token; QUIC with TLS 1.3 and pinned certificates through NAT) and release signing (minisign) use classical algorithms.</li>
+      <li>Strongroom folders open only with a FIDO2 security key; the enforcement is cryptographic, not a dialog.</li>
+      <li>AI assistance stays local: the MCP server is meant for language models that run on your own machine, inside the folders you grant and never a Strongroom. Nothing is sent to a model provider.</li>
+      <li>A lost device is removed with a signed revocation and the vault moves to new keys; a wipe order runs when the device next reaches a storage. There is no account and no escrow: the recovery kit, 24 words or three shares, is yours to keep.</li>
+      <li>Neither the design nor the code has been reviewed or audited. The <a href="docs/threat-model.html">threat model</a> and the <a href="docs/failure-model.html">failure model</a> say what the design intends, what each party can see, and where it stops.</li>
     </ul>
 
-    <h2>For developers</h2>
-    <p>Varsto is written in Rust, with Swift and Kotlin shells and a plain web interface; the source and the storage format specification are public. Security review, platform work, network and storage testing, packaging and translations are all welcome: <a href="contribute/">how to contribute</a>.</p>
+    <h2 id="teams">For teams</h2>
+    <p>An organization adds the layer a company needs on top of a vault: administrators approve devices for named people after comparing a six-word fingerprint with them, remove a person with every device of theirs in one step (the remaining devices get new keys), set what members may do on their own, and keep a log of it that is signed by their devices and chained. The root key that appoints administrators is 24 words on paper, never on a device. A vault without an organization sees none of it. <a href="features/#organizations">Organizations</a>.</p>
+
+    <h2 id="next">What is next</h2>
+    <p class="note">Built on the main branch after 0.0.1-alpha.13, not in a release yet:</p>
+    <ul>
+      <li>A vault-wide trash restorable on every device, and version history of files.</li>
+      <li>A second, independent backup with restic: one device keeps a plain mirror of the vault and restic backs it up into a repository outside your storages, restorable with restic alone.</li>
+      <li>Imports from git-annex repositories, cloud drives (through rclone) and local directories, every file checked against its hash.</li>
+      <li>QR invitations and <code>varsto://</code> links for sharing and pairing.</li>
+      <li>Draining a storage within a daily budget, and storage quotas.</li>
+      <li>A rolling bit-rot scrub of every copy on your storages and disks, with repair from another copy.</li>
+      <li>Router port mapping (PCP, NAT-PMP, UPnP) for peer-to-peer.</li>
+      <li>Folder safety: a mass-deletion guard, send-only and receive-only folders, and ignore rules.</li>
+    </ul>
+
+    <h2 id="status">Honest status</h2>
+    <ul>
+      <li>Released version: {{RELEASED}}. The alpha is a vertical slice: core library, command line, background service, tray and menu-bar shells, Android shell, about {{RUST_LINES}} lines of Rust, {{TESTS}} automated tests and a lab of {{LAB_SCENARIOS}} scenarios on virtual machines behind home and office NAT: offline convergence, conflicts, a restored-device fence, replicas, sharing, policies, peers, Strongrooms, disk pools, backups and more. Use it with test data only.</li>
+      <li>The cryptographic design has not been reviewed or audited. The <a href="docs/threat-model.html">threat model</a> and the <a href="docs/failure-model.html">failure model</a> say what the design intends and where it stops.</li>
+      <li>The source is public at <a href="https://github.com/janttsu/varsto" rel="noopener">github.com/janttsu/varsto</a> under the <a href="docs/licence.html">PolyForm Shield License 1.0.0</a> (source-available, not open source); bugs and questions go to the issue tracker there. The storage format is <a href="docs/alpha-0-format.html">documented</a> so that your data stays recoverable.</li>
+      <li>Varsto is written in Rust, with Swift and Kotlin shells and a plain web interface. Security review, platform work, network and storage testing, packaging and translations are all welcome: <a href="contribute/">how to contribute</a>.</li>
+      <li>The name is provisional.</li>
+    </ul>
 
     <h2>Downloads</h2>
     {{DOWNLOADS}}

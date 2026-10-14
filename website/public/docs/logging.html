@@ -54,7 +54,7 @@
   <div class="wrap">
 <article class="prose">
 <h1>Logging architecture</h1>
-<p class="note">From <code>docs/architecture/logging.md</code> in the repository, rendered 2026-10-14.</p>
+<p class="note">From <code>docs/architecture/logging.md</code> in the repository, rendered 2026-10-14. These documents describe the main branch; the released version is 0.0.1-alpha.13. Sections marked 'after 0.0.1-alpha.13' are not in a release yet.</p>
 <p>Status: implemented; section 45 of <a href="alpha-0-format.html">the specification</a> records what is built.</p>
 <p>Every Varsto program (background service, CLI, tray, desktop app, MCP server, mobile library, app shells) keeps a <strong>local debug log, on by default at level <code>debug</code></strong>, so that a problem can be investigated after the fact on the device where it happened. The log is for the owner of the device: it stays on that device and is never uploaded. Logging must never weaken the security model: the things that protect the data never appear in it.</p>
 <h2 id="where">Where</h2>

@@ -59,6 +59,15 @@
     <h1>Varsto och Resilio Sync</h1>
     <p class="lead">Resilio Sync synkroniserar och delar mappar mellan enheter peer-to-peer, byggt på BitTorrent-teknik. Gratisutgåvan Sync Home är för privatpersoner; företagets huvudsakliga verksamhet är filöverföring för storföretag. Resilio köptes av Nasuni i mars 2026.</p>
 
+    <h2>Där Varsto skiljer sig</h2>
+    <ul>
+      <li>Källkoden tillgänglig, med ett publicerat lagringsformat: dina data förblir återställningsbara utan leverantören.</li>
+      <li>Hybrid postkvantkryptografi för varje lagrad signatur och varje förseglad nyckel (utformad för det; inte granskad).</li>
+      <li>Dina lagringsplatser är den alltid tillgängliga kopian, så ingen enhet behöver vara igång hela tiden; enheterna utbyter ändå block direkt när de når varandra.</li>
+      <li>En signerad liggare räknar och verifierar varje kopia, och lagringsregler varnar innan en regel bryts.</li>
+      <li>Inga trackers eller reläer hos leverantören: enheterna hittar varandra via dina lagringsplatser och i det lokala nätverket, och går via en av dina egna enheter när NAT inte kan punchas.</li>
+    </ul>
+
     <h2>Så fungerar Resilio Sync</h2>
     <p>Enheterna ansluter direkt till varandra; det finns inget konto, och mappar delas med nycklar eller länkar (skrivskyddade eller med läs- och skrivrätt). Trackers och reläer som Resilio driver hjälper enheterna att hitta varandra. Data finns bara på enheterna; Sync Home har ingen S3- eller rclone-backend. Selektiv synkronisering med platshållarfiler finns, och en ”krypterad mapp” låter en enhet på en opålitlig maskin lagra data som den inte kan läsa (den enheten är skrivskyddad och saknar selektiv synkronisering).</p>
 
@@ -83,7 +92,7 @@
       <div class="card"><h3>Resilio Sync</h3><p>Välj Resilio Sync när du vill ha snabb överföring i BitTorrent-stil mellan ständigt påslagna maskiner och enkel delning med nyckel eller länk, och en leverantörsprodukt med stängd källkod är acceptabel.</p></div>
       <div class="card"><h3>Varsto</h3><p>Varstos peer-to-peer-överföring bygger på samma idé (krypterade block från flera enheter samtidigt), men lägger till dina egna lagringsplatser som den alltid tillgängliga kopian, en förteckning över var varje kopia finns, lagringsregler och en öppen specifikation av formaten.</p></div>
     </div>
-    <p class="note">Varsto är alfaprogramvara: anförtro den inga data som du inte har någon annan kopia av, och dess kryptografi har inte granskats av någon oberoende part. De andra produkterna här är mogna. Uppgifterna om dem kontrollerades i deras egen dokumentation i oktober 2026; priser och abonnemang ändras ofta, så se deras egna sidor för aktuella siffror. Rättelser tas gärna emot på <a href="../../../forum/">forumet</a> eller på GitHub.</p>
+    <p class="note">Varsto är alfaprogramvara: anförtro den inga data som du inte har någon annan kopia av, och dess kryptografi har inte granskats av någon oberoende part. De andra produkterna här är mogna. Uppgifterna om dem kontrollerades i deras egen dokumentation i oktober 2026; priser och abonnemang ändras ofta, så se deras egna sidor för aktuella siffror. Rättelser tas gärna emot som <a href="https://github.com/janttsu/varsto/issues" rel="noopener">ärenden på GitHub</a>.</p>
 
     <h2>Källor</h2>
     <ul>
