@@ -17,6 +17,12 @@ use std::ffi::{c_char, CStr, CString};
 use std::path::PathBuf;
 use std::sync::Mutex;
 
+/// mimalloc for every allocation of the app's Rust side (feature
+/// `mimalloc`, on by default; see varsto-cli).
+#[cfg(feature = "mimalloc")]
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 #[path = "../../varsto-cli/src/desktop.rs"]
 mod desktop;
 #[path = "../../varsto-cli/src/drive_mount.rs"]

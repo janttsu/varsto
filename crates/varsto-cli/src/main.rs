@@ -8,6 +8,13 @@ use std::path::{Path, PathBuf};
 use varsto_core::storage::StorageSpec;
 use varsto_core::Engine;
 
+/// mimalloc for every allocation of the binary (feature `mimalloc`, on by
+/// default): the system allocator, musl's above all, is a bottleneck on the
+/// allocation-heavy paths (JSON, file lists, per-block buffers).
+#[cfg(feature = "mimalloc")]
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 mod backup;
 mod desktop;
 mod drive_mount;

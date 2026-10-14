@@ -12,14 +12,20 @@ name = "varsto"
 path = "src/main.rs"
 
 [features]
+default = ["mimalloc"]
 # Use FSEvents instead of kqueue for folder watching (native macOS builds).
 fsevents = ["notify/macos_fsevent"]
 # `--software` security keys (a secret in a file): tests and the lab only.
 software-key = ["varsto-core/software-key"]
+# mimalloc as the global allocator: faster than the system allocator on the
+# allocation-heavy paths (JSON, file lists, per-block buffers), much faster
+# than musl's. Builds C; turn it off where no C compiler is at hand.
+mimalloc = ["dep:mimalloc"]
 
 [dependencies]
 varsto-core = { path = "../varsto-core" }
 zeroize.workspace = true
+mimalloc = { workspace = true, optional = true }
 tempfile.workspace = true
 anyhow.workspace = true
 log = { version = "0.4", features = ["std", "kv"] }
