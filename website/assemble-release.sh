@@ -11,7 +11,7 @@ set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 out="$(realpath "${1:-$root/website/public/downloads}")"
 version="$(grep -m1 '^version' "$root/Cargo.toml" | sed 's/.*"\(.*\)".*/\1/')"
-rm -f "$out/SHA256SUMS" "$out/SHA256SUMS.sig" "$out/manifest.json"
+rm -f "$out/SHA256SUMS" "$out/SHA256SUMS.sig" "$out/manifest.json" "$out/manifest.json.minisig"
 if [ ! -f "$out/varsto-$version-source.tar.gz" ]; then
   if git -C "$root" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     if git -C "$root" rev-parse --verify -q "v$version" >/dev/null; then ref="v$version"; else ref="HEAD"; fi
@@ -56,5 +56,5 @@ PY
 cat "$out/SHA256SUMS"
 echo "== signing SHA256SUMS"
 if ! "$root/scripts/sign-release.sh" "$out/SHA256SUMS"; then
-  echo "!! SHA256SUMS is NOT signed: run scripts/sign-release.sh before deploying (updates refuse unsigned releases)" >&2
+  echo "!! SHA256SUMS and manifest.json are NOT signed: run scripts/sign-release.sh before deploying (updates refuse unsigned releases and unsigned manifests)" >&2
 fi

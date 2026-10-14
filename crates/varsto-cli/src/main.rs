@@ -360,6 +360,10 @@ enum Cmd {
         /// Only report whether an update exists.
         #[arg(long)]
         check: bool,
+        /// Install on the word of the download site and its signature alone
+        /// when the GitHub release cannot be reached to cross-check it.
+        #[arg(long)]
+        allow_single_source: bool,
     },
     /// Check a downloaded release file: the release signature on SHA256SUMS
     /// (next to the file, or fetched from the download page), then the file's SHA-256.
@@ -5498,7 +5502,10 @@ fn run(cli: &Cli) -> Result<()> {
                 })?;
             }
         },
-        Cmd::Update { check } => {
+        Cmd::Update {
+            check,
+            allow_single_source,
+        } => {
             let c = update::check()?;
             if *check {
                 print(cli, &c, |c| {
@@ -5519,7 +5526,8 @@ fn run(cli: &Cli) -> Result<()> {
                     }
                 })?;
             } else {
-                println!("{}", update::apply(&c)?);
+                let policy = update::Policy::new(&home, *allow_single_source);
+                println!("{}", update::apply(&c, &policy)?);
                 if c.available && service::restart_running(&home) {
                     println!("the background service restarts with {}", c.latest);
                 }

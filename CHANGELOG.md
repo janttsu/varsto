@@ -34,6 +34,10 @@ On `main` after 0.0.1-alpha.13; spec sections 32 to 59.
   `mcp --key`, the shares of `recovery combine` and `org admin --root-words`
   are replaced by prompts, files, environment variables and standard input;
   the macOS keychain gets the passphrase on standard input (spec 28, 59).
+- Updater: the manifest must be signed (`manifest.json.minisig`), a signed
+  list older than the last accepted one is refused, the GitHub cross-check is
+  required unless `update --allow-single-source` is given, and a version not
+  newer than the running binary is never installed (spec 59).
 - A malformed `%` escape in a request no longer kills the API worker thread.
 
 ### Added

@@ -1396,7 +1396,8 @@ fn api(st: &mut State, method: Method, path: &str, query: &str, input: &Value) -
         (Method::Get, "/api/update/check") => Ok(serde_json::to_value(crate::update::check()?)?),
         (Method::Post, "/api/update") => {
             let c = crate::update::check()?;
-            let message = crate::update::apply(&c)?;
+            let policy = crate::update::Policy::new(&st.home, false);
+            let message = crate::update::apply(&c, &policy)?;
             if c.available {
                 st.service.restart_requested = true;
             }

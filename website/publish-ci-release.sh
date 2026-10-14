@@ -32,7 +32,7 @@ gh run download "$id" -R "$repo" -n downloads -D "$tmp/dl"
 (cd "$tmp/dl" && sha256sum -c SHA256SUMS)
 mkdir -p "$out"
 # The new set replaces the previous version's files.
-find "$out" -maxdepth 1 -type f \( -name 'varsto-*' -o -name 'Varsto-*' -o -name SHA256SUMS -o -name SHA256SUMS.sig -o -name manifest.json \) -delete
+find "$out" -maxdepth 1 -type f \( -name 'varsto-*' -o -name 'Varsto-*' -o -name SHA256SUMS -o -name SHA256SUMS.sig -o -name manifest.json -o -name manifest.json.minisig \) -delete
 cp "$tmp/dl"/* "$out/"
 "$root/scripts/sign-release.sh" "$out/SHA256SUMS"
 "$root/scripts/sign-release.sh" --verify "$out/SHA256SUMS"

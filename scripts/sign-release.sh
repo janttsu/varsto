@@ -2,13 +2,19 @@
 # SPDX-License-Identifier: PolyForm-Shield-1.0.0
 # Sign (or check) the release checksum list with the release key.
 #
-#   scripts/sign-release.sh [SHA256SUMS]            sign, writes SHA256SUMS.sig next to it
-#   scripts/sign-release.sh --verify [SHA256SUMS]   check SHA256SUMS.sig against release-key.pub
+#   scripts/sign-release.sh [SHA256SUMS]            sign, writes SHA256SUMS.sig next to it and,
+#                                                   when manifest.json is next to the list,
+#                                                   manifest.json.minisig for it
+#   scripts/sign-release.sh --verify [SHA256SUMS]   check both signatures against release-key.pub
 #   scripts/sign-release.sh --public-key            print the public key file for the private key
 #
 # The default list is website/public/downloads/SHA256SUMS. Before signing,
 # every file listed must be present next to the list with the listed SHA-256,
 # so sign last, after every file (including a Mac-built disk image) is in.
+#
+# The updater refuses a release whose manifest.json has no valid
+# manifest.json.minisig (an unsigned manifest could name an old release), so
+# sign after the manifest is final.
 #
 # The signature is minisign-compatible (Ed25519 over the BLAKE2b-512 hash of
 # the file, plus a signed trusted comment), so `minisign -Vm SHA256SUMS -p
@@ -59,12 +65,14 @@ public_key() {
   echo
 }
 
-verify() {
-  [ -f "$sums.sig" ] || { echo "missing $sums.sig" >&2; return 1; }
+# verify FILE SIGFILE
+verify_one() {
+  local sums="$1" sigf="$2"
+  [ -f "$sigf" ] || { echo "missing $sigf" >&2; return 1; }
   sed -n 2p "$pub" | unb64 > "$tmp/pub.bin"
-  sed -n 2p "$sums.sig" | unb64 > "$tmp/sig.bin"
-  sed -n 4p "$sums.sig" | unb64 > "$tmp/gsig.bin"
-  local trusted; trusted="$(sed -n 3p "$sums.sig")"
+  sed -n 2p "$sigf" | unb64 > "$tmp/sig.bin"
+  sed -n 4p "$sigf" | unb64 > "$tmp/gsig.bin"
+  local trusted; trusted="$(sed -n 3p "$sigf")"
   trusted="${trusted#trusted comment: }"
   [ "$(head -c 2 "$tmp/sig.bin")" = "ED" ] || { echo "not a prehashed (ED) signature" >&2; return 1; }
   [ "$(head -c 10 "$tmp/pub.bin" | tail -c 8 | bin2hex)" = "$(head -c 10 "$tmp/sig.bin" | tail -c 8 | bin2hex)" ] \
@@ -77,8 +85,33 @@ verify() {
     || { echo "BAD signature on $sums" >&2; return 1; }
   { cat "$tmp/s"; printf '%s' "$trusted"; } > "$tmp/g"
   "$ossl" pkeyutl -verify -pubin -keyform DER -inkey "$tmp/pub.der" -rawin -in "$tmp/g" -sigfile "$tmp/gsig.bin" >/dev/null \
-    || { echo "BAD signature on the trusted comment of $sums.sig" >&2; return 1; }
+    || { echo "BAD signature on the trusted comment of $sigf" >&2; return 1; }
   echo "good signature: $sums ($trusted)"
+}
+
+verify() {
+  verify_one "$sums" "$sums.sig" || return 1
+  local manifest; manifest="$(dirname "$sums")/manifest.json"
+  if [ -f "$manifest" ]; then
+    verify_one "$manifest" "$manifest.minisig" || return 1
+  fi
+}
+
+# sign_one FILE SIGFILE: the minisign-compatible signature of FILE.
+sign_one() {
+  local file="$1" sigf="$2" trusted
+  trusted="$(printf 'timestamp:%s\tfile:%s\tversion:%s' "$(date +%s)" "$(basename "$file")" "$version")"
+  "$ossl" dgst -blake2b512 -binary "$file" > "$tmp/h"
+  "$ossl" pkeyutl -sign -inkey "$key" -rawin -in "$tmp/h" -out "$tmp/s"
+  { cat "$tmp/s"; printf '%s' "$trusted"; } > "$tmp/g"
+  "$ossl" pkeyutl -sign -inkey "$key" -rawin -in "$tmp/g" -out "$tmp/gs"
+  {
+    echo "untrusted comment: signature from the Varsto release key"
+    { printf 'ED'; cat "${key%.pem}.id" | hex2bin; cat "$tmp/s"; } | b64; echo
+    echo "trusted comment: $trusted"
+    b64 < "$tmp/gs"; echo
+  } > "$sigf.new"
+  mv "$sigf.new" "$sigf"
 }
 
 case "$mode" in
@@ -95,22 +128,13 @@ dir="$(cd "$(dirname "$sums")" && pwd)"
   || { echo "files do not match $sums; not signing" >&2; exit 1; }
 for f in "$dir"/*; do
   n="$(basename "$f")"
-  case "$n" in SHA256SUMS|SHA256SUMS.sig|manifest.json|release-key.pub) continue ;; esac
+  case "$n" in SHA256SUMS|SHA256SUMS.sig|manifest.json|manifest.json.minisig|release-key.pub) continue ;; esac
   grep -q "  $n\$" "$sums" || echo "note: $n is not listed in $(basename "$sums") (not covered by the signature)" >&2
 done
 [ "$(public_key)" = "$(cat "$pub")" ] || { echo "the key at $key does not match release-key.pub" >&2; exit 1; }
 
 version="$(grep -m1 '^version' "$root/Cargo.toml" | sed 's/.*"\(.*\)".*/\1/')"
-trusted="$(printf 'timestamp:%s\tfile:%s\tversion:%s' "$(date +%s)" "$(basename "$sums")" "$version")"
-"$ossl" dgst -blake2b512 -binary "$sums" > "$tmp/h"
-"$ossl" pkeyutl -sign -inkey "$key" -rawin -in "$tmp/h" -out "$tmp/s"
-{ cat "$tmp/s"; printf '%s' "$trusted"; } > "$tmp/g"
-"$ossl" pkeyutl -sign -inkey "$key" -rawin -in "$tmp/g" -out "$tmp/gs"
-{
-  echo "untrusted comment: signature from the Varsto release key"
-  { printf 'ED'; cat "${key%.pem}.id" | hex2bin; cat "$tmp/s"; } | b64; echo
-  echo "trusted comment: $trusted"
-  b64 < "$tmp/gs"; echo
-} > "$sums.sig.new"
-mv "$sums.sig.new" "$sums.sig"
+sign_one "$sums" "$sums.sig"
+manifest="$dir/manifest.json"
+[ -f "$manifest" ] && sign_one "$manifest" "$manifest.minisig"
 verify
