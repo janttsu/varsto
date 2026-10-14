@@ -2110,7 +2110,7 @@ impl Engine {
         });
         self.config.save(&self.home)?;
         folder_safety::write_marker(path, &rec)?;
-        Ok(rec.folder_id)
+        Ok(rec.folder_id.clone())
     }
 
     /// Known folders: (record, mount path if attached here).
@@ -5777,7 +5777,7 @@ impl Engine {
             let folders: Vec<_> = e
                 .folders()
                 .into_iter()
-                .map(|(r, m)| (r.folder_id, r.name, m))
+                .map(|(r, m)| (r.folder_id.clone(), r.name.clone(), m))
                 .collect();
             format!(
                 "{}|{}",

@@ -118,7 +118,7 @@ fn no_secret_reaches_the_log() {
     log::debug!(
         "restic env RESTIC_PASSWORD={restic_password} rclone config token = {rclone_token}"
     );
-    log::debug!("recovery words: {words}");
+    log::debug!("recovery words: {}", words.as_str());
     log::debug!("kit:\n1: {}\n2: {}", shares[0].words, shares[1].words);
     log::debug!("master hex by mistake {master_hex} and folder key {folder_hex}");
     // Fields in every capture form.

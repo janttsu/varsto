@@ -17,6 +17,7 @@ fsevents = ["notify/macos_fsevent"]
 
 [dependencies]
 varsto-core = { path = "../varsto-core" }
+zeroize.workspace = true
 tempfile.workspace = true
 anyhow.workspace = true
 log = { version = "0.4", features = ["std", "kv"] }

@@ -7,36 +7,41 @@
 
 use anyhow::{anyhow, bail, Result};
 use bip39::Mnemonic;
+use zeroize::{Zeroize, Zeroizing};
 
-/// 24 words for a 32-byte key (hex in, words out).
-pub fn words_from_key(key_hex: &str) -> Result<String> {
-    let bytes = hex::decode(key_hex)?;
+/// 24 words for a 32-byte key (hex in, words out). The words are the key:
+/// the returned string is wiped when dropped.
+pub fn words_from_key(key_hex: &str) -> Result<Zeroizing<String>> {
+    let bytes = Zeroizing::new(hex::decode(key_hex)?);
     if bytes.len() != 32 {
         bail!("vault key must be 32 bytes");
     }
     let m = Mnemonic::from_entropy(&bytes).map_err(|e| anyhow!("mnemonic: {e}"))?;
-    Ok(m.words().collect::<Vec<_>>().join(" "))
+    Ok(Zeroizing::new(m.words().collect::<Vec<_>>().join(" ")))
 }
 
 /// Words in (any spacing, any case), hex key out. Fails on a wrong word or a
 /// checksum mismatch.
-pub fn key_from_words(words: &str) -> Result<String> {
-    let normalised = words
-        .split_whitespace()
-        .map(|w| w.to_lowercase())
-        .collect::<Vec<_>>()
-        .join(" ");
+pub fn key_from_words(words: &str) -> Result<Zeroizing<String>> {
+    let normalised = Zeroizing::new(
+        words
+            .split_whitespace()
+            .map(|w| w.to_lowercase())
+            .collect::<Vec<_>>()
+            .join(" "),
+    );
     let m: Mnemonic = normalised
         .parse()
         .map_err(|e| anyhow!("these words are not a valid recovery phrase: {e}"))?;
-    let entropy = m.to_entropy();
+    let entropy = Zeroizing::new(m.to_entropy());
     if entropy.len() != 32 {
         bail!("the phrase must have 24 words");
     }
-    Ok(hex::encode(entropy))
+    Ok(Zeroizing::new(hex::encode(&*entropy)))
 }
 
-/// One share: an index 1..=255 and 24 words.
+/// One share: an index 1..=255 and 24 words. The words are wiped when the
+/// share is dropped.
 #[derive(Clone, PartialEq, Eq)]
 pub struct Share {
     pub index: u8,
@@ -44,6 +49,12 @@ pub struct Share {
 }
 
 crate::redacted_debug!(Share { index ; words });
+
+impl Drop for Share {
+    fn drop(&mut self) {
+        self.words.zeroize();
+    }
+}
 
 impl Share {
     pub fn encode(&self) -> String {
@@ -91,22 +102,24 @@ pub fn split(key_hex: &str, threshold: u8, count: u8) -> Result<Vec<Share>> {
 }
 
 /// Rebuild the key from enough shares.
-pub fn combine(shares: &[Share], threshold: u8) -> Result<String> {
+pub fn combine(shares: &[Share], threshold: u8) -> Result<Zeroizing<String>> {
     let mut raw_shares = Vec::new();
     for s in shares {
-        let y = hex::decode(key_from_words(&s.words)?)?;
-        let mut raw = vec![s.index];
+        let y = Zeroizing::new(hex::decode(key_from_words(&s.words)?.as_str())?);
+        let mut raw = Zeroizing::new(vec![s.index]);
         raw.extend_from_slice(&y);
         let share = sharks::Share::try_from(raw.as_slice()).map_err(|e| anyhow!("share: {e}"))?;
         raw_shares.push(share);
     }
-    let key = sharks::Sharks(threshold)
-        .recover(raw_shares.iter())
-        .map_err(|e| anyhow!("cannot rebuild the key from these shares: {e}"))?;
+    let key = Zeroizing::new(
+        sharks::Sharks(threshold)
+            .recover(raw_shares.iter())
+            .map_err(|e| anyhow!("cannot rebuild the key from these shares: {e}"))?,
+    );
     if key.len() != 32 {
         bail!("rebuilt key has the wrong length");
     }
-    Ok(hex::encode(key))
+    Ok(Zeroizing::new(hex::encode(&*key)))
 }
 
 /// The printable kit.
@@ -165,8 +178,8 @@ mod tests {
         let key = hex::encode([7u8; 32]);
         let w = words_from_key(&key).unwrap();
         assert_eq!(w.split(' ').count(), 24);
-        assert_eq!(key_from_words(&w).unwrap(), key);
-        assert_eq!(key_from_words(&w.to_uppercase()).unwrap(), key);
+        assert_eq!(*key_from_words(&w).unwrap(), key);
+        assert_eq!(*key_from_words(&w.to_uppercase()).unwrap(), key);
         let mut bad: Vec<&str> = w.split(' ').collect();
         bad[3] = "zebra";
         assert!(key_from_words(&bad.join(" ")).is_err());
@@ -179,7 +192,7 @@ mod tests {
         assert_eq!(shares.len(), 3);
         for pair in [(0, 1), (1, 2), (0, 2)] {
             let two = vec![shares[pair.0].clone(), shares[pair.1].clone()];
-            assert_eq!(combine(&two, 2).unwrap(), key);
+            assert_eq!(*combine(&two, 2).unwrap(), key);
         }
         assert!(combine(&shares[..1], 2).is_err());
         let enc = shares[0].encode();

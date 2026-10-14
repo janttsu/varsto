@@ -1884,10 +1884,10 @@ fn share_members_text(l: &varsto_core::engine::ShareMembers) -> String {
 /// The passphrase typed in this run, so that after a successful command a
 /// locked background service can be unlocked with it (and, after setup,
 /// kept in the keyring if the user wants).
-static TYPED: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+static TYPED: std::sync::Mutex<Option<zeroize::Zeroizing<String>>> = std::sync::Mutex::new(None);
 /// The passphrase this command used, typed or from VARSTO_PASSPHRASE: it
 /// unlocks a background service that waits for it.
-static USED: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+static USED: std::sync::Mutex<Option<zeroize::Zeroizing<String>>> = std::sync::Mutex::new(None);
 
 /// Open the device directory. When its ledger needs a rebuild (lost or
 /// damaged local files, a fork), say so on stderr: commands that only read
@@ -1908,7 +1908,7 @@ fn warn_ledger(h: &varsto_core::engine::LedgerHealth) {
 fn passphrase() -> Result<String> {
     if let Ok(p) = std::env::var("VARSTO_PASSPHRASE") {
         varsto_core::logging::register_secret(&p);
-        *USED.lock().unwrap() = Some(p.clone());
+        *USED.lock().unwrap() = Some(zeroize::Zeroizing::new(p.clone()));
         return Ok(p);
     }
     use std::io::IsTerminal;
@@ -1919,8 +1919,8 @@ fn passphrase() -> Result<String> {
             bail_usage::<()>("empty passphrase")?;
         }
         varsto_core::logging::register_secret(&p);
-        *TYPED.lock().unwrap() = Some(p.clone());
-        *USED.lock().unwrap() = Some(p.clone());
+        *TYPED.lock().unwrap() = Some(zeroize::Zeroizing::new(p.clone()));
+        *USED.lock().unwrap() = Some(zeroize::Zeroizing::new(p.clone()));
         return Ok(p);
     }
     Err(anyhow!(
@@ -2419,7 +2419,7 @@ fn run_search(
                 .folders()
                 .into_iter()
                 .filter(|(r, m)| m.is_some() && (!r.is_strongroom() || e.is_unlocked(&r.folder_id)))
-                .map(|(r, _)| r.name)
+                .map(|(r, _)| r.name.clone())
                 .collect();
             engine = Some(e);
             names
@@ -2988,7 +2988,7 @@ fn run(cli: &Cli) -> Result<()> {
                 (None, None) => bail_usage("give --storage-path <dir> or --s3-bucket ...")?,
             };
             let key_hex = match (vault_key, words) {
-                (Some(k), _) => k.clone(),
+                (Some(k), _) => zeroize::Zeroizing::new(k.clone()),
                 (None, Some(w)) => varsto_core::recovery::key_from_words(w)?,
                 (None, None) => bail_usage("give --vault-key <hex> or --words \"<24 words>\"")?,
             };
@@ -4734,8 +4734,11 @@ fn run(cli: &Cli) -> Result<()> {
                     .map(|s| varsto_core::recovery::Share::decode(s))
                     .collect::<Result<_>>()?;
                 let key = varsto_core::recovery::combine(&parsed, 2)?;
-                println!("vault key: {key}");
-                println!("words: {}", varsto_core::recovery::words_from_key(&key)?);
+                println!("vault key: {}", key.as_str());
+                println!(
+                    "words: {}",
+                    varsto_core::recovery::words_from_key(&key)?.as_str()
+                );
             }
         },
         Cmd::Org { cmd } => run_org(cli, &home, cmd)?,
@@ -4854,7 +4857,7 @@ fn run(cli: &Cli) -> Result<()> {
                             r.is_strongroom()
                                 && (&r.name == folder || r.folder_id.as_str() == folder)
                         })
-                        .map(|(r, _)| r.folder_id)
+                        .map(|(r, _)| r.folder_id.clone())
                         .ok_or_else(|| anyhow!("{folder} is not a Strongroom folder"))?;
                     eprintln!("First, open {folder} with a key that is enrolled already.");
                     let fk = engine.unlock_strongroom_enrolled(folder, 1)?;

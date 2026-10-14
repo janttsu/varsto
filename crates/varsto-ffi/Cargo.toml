@@ -13,6 +13,7 @@ crate-type = ["staticlib", "cdylib"]
 
 [dependencies]
 varsto-core = { path = "../varsto-core" }
+zeroize.workspace = true
 anyhow.workspace = true
 log = { version = "0.4", features = ["std", "kv"] }
 serde.workspace = true

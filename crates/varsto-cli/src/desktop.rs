@@ -1473,7 +1473,7 @@ fn api(st: &mut State, method: Method, path: &str, query: &str, input: &Value) -
             let key = if key.trim().contains(char::is_whitespace) {
                 varsto_core::recovery::key_from_words(&key)?
             } else {
-                key.trim().to_string()
+                zeroize::Zeroizing::new(key.trim().to_string())
             };
             let joined = Engine::join(
                 &st.home,
@@ -1978,7 +1978,7 @@ fn api_unlocked(
                         .folders()
                         .into_iter()
                         .find(|(r, _)| r.name == name_or_id || r.folder_id.as_str().starts_with(&name_or_id))
-                        .map(|(r, _)| r.name)
+                        .map(|(r, _)| r.name.clone())
                         .unwrap_or_else(|| name_or_id.clone());
                     default_folder_path(engine.home(), &name, plain)?
                 }

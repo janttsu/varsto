@@ -80,7 +80,18 @@ pub struct ShareToken {
     pub join_secret_hex: String,
 }
 
-crate::redacted_debug!(ShareToken { vault_id, folder_id, name ; key_hex, epoch_keys });
+crate::redacted_debug!(ShareToken { vault_id, folder_id, name, fingerprint, owners, role, invite ; key_hex, epoch_keys, join_secret_hex });
+
+impl Drop for ShareToken {
+    fn drop(&mut self) {
+        use zeroize::Zeroize;
+        self.key_hex.zeroize();
+        self.join_secret_hex.zeroize();
+        for v in self.epoch_keys.values_mut() {
+            v.zeroize();
+        }
+    }
+}
 
 impl ShareToken {
     pub fn encode(&self) -> String {
@@ -926,14 +937,33 @@ pub struct FolderRecord {
 }
 
 /// See `FolderRecord::share_join`.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ShareJoin {
     pub invite: String,
     pub secret_hex: String,
     pub role: crate::share::ShareRole,
 }
 
-crate::redacted_debug!(FolderRecord { folder_id, name, created_by, created_utc, strongroom, removed_utc, backup, placement, policy ; key_hex, epoch_keys });
+crate::redacted_debug!(ShareJoin { invite, role ; secret_hex });
+
+impl Drop for ShareJoin {
+    fn drop(&mut self) {
+        use zeroize::Zeroize;
+        self.secret_hex.zeroize();
+    }
+}
+
+crate::redacted_debug!(FolderRecord { folder_id, name, created_by, created_utc, shared, strongroom, removed_utc, backup, placement, policy, share_join ; key_hex, epoch_keys });
+
+impl Drop for FolderRecord {
+    fn drop(&mut self) {
+        use zeroize::Zeroize;
+        self.key_hex.zeroize();
+        for v in self.epoch_keys.values_mut() {
+            v.zeroize();
+        }
+    }
+}
 
 /// What a backup's folder record says about it (published with the record).
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -1597,5 +1627,58 @@ impl Config {
     }
     pub fn save(&self, home: &Path) -> Result<()> {
         util::write_json(&home.join("config.json"), self)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn debug_output_shows_no_key_material() {
+        let key = "ab".repeat(32);
+        let later = "cd".repeat(32);
+        let secret = "ef".repeat(32);
+        let token = ShareToken {
+            vault_id: VaultId::random(),
+            folder_id: FolderId::random(),
+            key_hex: key.clone(),
+            name: "docs".into(),
+            epoch_keys: BTreeMap::from([(1_048_576, later.clone())]),
+            fingerprint: "one two three".into(),
+            owners: vec![],
+            role: Default::default(),
+            invite: "inv".into(),
+            join_secret_hex: secret.clone(),
+        };
+        let shown = format!("{token:?}");
+        assert!(shown.contains("docs") && shown.contains("inv"), "{shown}");
+        for s in [&key, &later, &secret] {
+            assert!(!shown.contains(s.as_str()), "{shown}");
+        }
+
+        let join = ShareJoin {
+            invite: "inv".into(),
+            secret_hex: secret.clone(),
+            role: Default::default(),
+        };
+        let shown = format!("{join:?}");
+        assert!(shown.contains("inv") && !shown.contains(&secret), "{shown}");
+
+        let rec: FolderRecord = serde_json::from_value(serde_json::json!({
+            "folder_id": FolderId::random(),
+            "name": "docs",
+            "key_hex": key,
+            "created_by": DeviceId::random(),
+            "created_utc": 1,
+            "epoch_keys": {"1048576": later},
+            "share_join": join,
+        }))
+        .unwrap();
+        let shown = format!("{rec:?}");
+        assert!(shown.contains("docs"), "{shown}");
+        for s in [&key, &later, &secret] {
+            assert!(!shown.contains(s.as_str()), "{shown}");
+        }
     }
 }

@@ -456,7 +456,7 @@ impl Engine {
             util::now_utc(),
         )
         .write(&self.home)?;
-        Ok(folders.into_iter().map(|(r, _)| r.name).collect())
+        Ok(folders.into_iter().map(|(r, _)| r.name.clone()).collect())
     }
 
     // ----- completeness --------------------------------------------------------
