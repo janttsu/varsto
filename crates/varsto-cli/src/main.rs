@@ -1632,14 +1632,14 @@ fn show_qr(text: &str, parts: bool, light: bool) -> Result<()> {
                 if r.name.is_empty() {
                     String::new()
                 } else {
-                    format!(" from {}", r.name)
+                    format!(" from {}", show(&r.name))
                 },
                 r.fingerprint
             )
         }
         Link::ShareToken(t) => format!(
             "Sealed share token for {} (only the requesting device opens it)",
-            varsto_core::vault::SealedShareToken::decode(t)?.name
+            show(&varsto_core::vault::SealedShareToken::decode(t)?.name)
         ),
         Link::Pair { .. } => "Pairing code (works once, for ten minutes)".to_string(),
     };
@@ -2053,7 +2053,7 @@ fn share_members_text(l: &varsto_core::engine::ShareMembers) -> String {
         };
         out.push_str(&format!(
             "\n  {:<20} {:<10} {}{}{}",
-            m.name,
+            show(&m.name),
             &m.id[..m.id.len().min(8)],
             what,
             if m.this_device { " (this device)" } else { "" },
@@ -2767,7 +2767,7 @@ fn run_org(cli: &Cli, home: &Path, cmd: &OrgCmd) -> Result<()> {
                 None => {
                     eprintln!(
                         "Request from device {} ({}, {})\nfingerprint: {}\nAsk the person to read the fingerprint their device shows (varsto org request).",
-                        if info.name.is_empty() { "(no name)" } else { &info.name },
+                        if info.name.is_empty() { "(no name)".into() } else { show(&info.name) },
                         info.device.short(),
                         if info.platform.is_empty() {
                             "platform not given".to_string()
@@ -4492,7 +4492,7 @@ fn run(cli: &Cli) -> Result<()> {
                             None => {
                                 eprintln!(
                                     "Request from {}\nfingerprint: {}\nAsk the requester to read their fingerprint (varsto share request shows it).",
-                                    if req.name.is_empty() { "(no name given)" } else { &req.name },
+                                    if req.name.is_empty() { "(no name given)".into() } else { show(&req.name) },
                                     req.fingerprint
                                 );
                                 if !confirm("Do the six words match exactly?")? {
@@ -4516,7 +4516,7 @@ fn run(cli: &Cli) -> Result<()> {
                                 serde_json::json!({"folder": sealed.name, "token": sealed.encode(), "sealed": true, "fingerprint": req.fingerprint, "name": req.name, "role": role.as_str()})
                             );
                         } else {
-                            println!("sealed share token for folder {} as {} (only the device that made the request code can open it; fingerprint {}):\n  {}", sealed.name, if role.is_editor() { "an editor (read and write)" } else { "a viewer (read only)" }, req.fingerprint, sealed.encode());
+                            println!("sealed share token for folder {} as {} (only the device that made the request code can open it; fingerprint {}):\n  {}", show(&sealed.name), if role.is_editor() { "an editor (read and write)" } else { "a viewer (read only)" }, req.fingerprint, sealed.encode());
                         }
                     }
                     None => {
@@ -4611,7 +4611,7 @@ fn run(cli: &Cli) -> Result<()> {
                         token.fingerprint
                     );
                 }
-                println!("joined shared folder {} as device {}; attach it with `varsto folder attach {} <path>` and sync", token.name, engine.device_id().short(), token.name);
+                println!("joined shared folder {} as device {}; attach it with `varsto folder attach {} <path>` and sync", show(&token.name), engine.device_id().short(), show(&token.name));
             }
             ShareCmd::Members { folder } => {
                 let list: varsto_core::engine::ShareMembers =

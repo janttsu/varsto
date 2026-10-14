@@ -48,6 +48,9 @@ On `main` after 0.0.1-alpha.13; spec sections 32 to 59.
 - MCP: a key's last use is kept apart from the keys, so a use cannot undo a
   revocation; `varsto mcp` needs a key while the service runs; a scoped key
   sees only its folders in `/api/status` (spec 59).
+- Names of devices and people cannot hold control, zero-width or direction
+  characters (checked when made and when read from a code), and the command
+  line shows names escaped (spec 59).
 - A malformed `%` escape in a request no longer kills the API worker thread.
 
 ### Added

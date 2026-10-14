@@ -369,9 +369,7 @@ fn request_from_bytes(b: &[u8]) -> Result<String> {
     let n = r.u16()? as usize;
     let key = EncapsKey::from_bytes(r.take(n)?)?;
     let name = std::str::from_utf8(r.0).map_err(|_| anyhow!("the name is not UTF-8"))?;
-    if name.contains(['\n', '\r']) {
-        bail!("the name must be on one line");
-    }
+    crate::names::check_display_name(name.trim())?;
     let mut code = format!("{SHARE_REQUEST_PREFIX}{}", hex::encode(key.to_bytes()));
     if !name.trim().is_empty() {
         code.push('.');

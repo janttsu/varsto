@@ -904,6 +904,7 @@ impl Engine {
 
     fn init_inner(home: &Path, device_name: &str, passphrase: &str) -> Result<(Engine, String)> {
         crypto::check_passphrase(passphrase)?;
+        crate::names::check_display_name(device_name)?;
         ensure_no_vault(home)?;
         util::private_home(home)?;
         let keys = Keys {
@@ -991,6 +992,7 @@ impl Engine {
         signer: Option<crypto::SigningKey>,
     ) -> Result<Engine> {
         crypto::check_passphrase(passphrase)?;
+        crate::names::check_display_name(device_name)?;
         ensure_no_vault(home)?;
         let backend = storage.open_with(&|_| secret.clone())?;
         let meta_bytes = backend.get(VaultMeta::STORAGE_KEY)?.ok_or_else(|| {
@@ -1064,6 +1066,7 @@ impl Engine {
         bundle: &crate::pair::Bundle,
         signer: Option<crypto::SigningKey>,
     ) -> Result<(Engine, Vec<String>)> {
+        crate::names::check_display_name(device_name)?;
         let mut notes = Vec::new();
         let mut first = None;
         for (i, s) in bundle.storages.iter().enumerate() {
@@ -1298,6 +1301,7 @@ impl Engine {
         secret: Option<String>,
     ) -> Result<Engine> {
         crypto::check_passphrase(passphrase)?;
+        crate::names::check_display_name(device_name)?;
         ensure_no_vault(home)?;
         let backend = storage.open_with(&|_| secret.clone())?;
         let meta: VaultMeta = serde_json::from_slice(
