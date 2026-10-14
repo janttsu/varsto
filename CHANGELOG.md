@@ -18,6 +18,11 @@ spec still names them because sections were written as the work was done.
 
 On `main` after 0.0.1-alpha.13; spec sections 32 to 59.
 
+### Hardening
+
+- The STUN side channel of the peer socket is bounded and only accepts the
+  answer to an open request (spec 59).
+
 ### Added
 
 - Live activity between devices (spec 32).
