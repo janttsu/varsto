@@ -1593,12 +1593,153 @@ def s_restic():
         run(vm, "pkill -x varsto; true", check_rc=False)
 
 
+TRACKER_PY = r"""
+import socketserver, http.server, urllib.parse, struct, socket, time
+peers = {}
+class H(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query, keep_blank_values=True)
+        port = int(q.get("port", ["0"])[0])
+        ip = self.client_address[0]
+        if port:
+            peers[(ip, port)] = time.time()
+        compact = b"".join(socket.inet_aton(i) + struct.pack(">H", p) for (i, p) in peers if (i, p) != (ip, port))
+        body = b"d8:intervali15e5:peers" + str(len(compact)).encode() + b":" + compact + b"e"
+        self.send_response(200); self.send_header("Content-Length", str(len(body))); self.end_headers()
+        self.wfile.write(body)
+    def log_message(self, *a):
+        pass
+socketserver.ThreadingTCPServer.allow_reuse_address = True
+socketserver.ThreadingTCPServer(("0.0.0.0", 6969), H).serve_forever()
+"""
+
+
+def ensure_transmission(vm):
+    """transmission-daemon and transmission-create on `vm`: the image's,
+    Debian's packages, or (the device VMs have no internet) the packages and
+    their dependencies downloaded by the build VM and installed with dpkg."""
+    have = "command -v transmission-daemon >/dev/null && command -v transmission-create >/dev/null"
+    if run(vm, have, check_rc=False).returncode == 0:
+        return
+    run(vm, "sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq transmission-daemon transmission-cli >/dev/null 2>&1",
+        check_rc=False)
+    if run(vm, have, check_rc=False).returncode != 0:
+        b = lab.BUILD_VM
+        run(b, "test -n \"$(ls ~/tdebs/*.deb 2>/dev/null)\" || { sudo apt-get update -qq >/dev/null 2>&1; rm -rf ~/tdebs; mkdir -p ~/tdebs; "
+               "cd ~/tdebs && apt-get download $(apt-cache depends --recurse --no-recommends --no-suggests --no-conflicts "
+               "--no-breaks --no-replaces --no-enhances transmission-daemon transmission-cli | grep '^[a-z]' | sort -u) "
+               ">/dev/null 2>&1; true; }")
+        r = subprocess.run(lab.ssh_cmd(b, "tar cf - -C ~/tdebs ."), capture_output=True)
+        check(r.returncode == 0 and r.stdout, f"no transmission packages from {b}: {r.stderr[-300:]!r}")
+        r = subprocess.run(lab.ssh_cmd(vm, "rm -rf ~/tdebs && mkdir -p ~/tdebs && tar xf - -C ~/tdebs"), input=r.stdout,
+                           capture_output=True)
+        check(r.returncode == 0, f"copying the packages to {vm}: {r.stderr[-300:]!r}")
+        run(vm, "sudo DEBIAN_FRONTEND=noninteractive dpkg -i --skip-same-version ~/tdebs/*.deb >/dev/null 2>&1; true")
+    check(run(vm, have, check_rc=False).returncode == 0, f"no transmission-daemon on {vm}")
+    # The packaged system service runs as another user; ours run as varsto.
+    run(vm, "sudo systemctl disable --now transmission-daemon >/dev/null 2>&1; true", check_rc=False)
+
+
+def start_transmission(vm, conf, download_dir):
+    run(vm, f"pkill -x transmission-da; sleep 1; rm -rf {conf}; mkdir -p {conf} {download_dir}; "
+            f"nohup transmission-daemon --foreground --config-dir {conf} --download-dir {download_dir} "
+            f"--no-incomplete-dir --no-auth --rpc-bind-address 127.0.0.1 --allowed 127.0.0.1 --port 9091 "
+            f"--peerport 51413 --no-dht --no-portmap > ~/transmission.log 2>&1 &")
+    for _ in range(30):
+        if run(vm, "transmission-remote 127.0.0.1:9091 -l >/dev/null 2>&1", check_rc=False).returncode == 0:
+            return
+        time.sleep(1)
+    raise Fail(f"transmission-daemon did not start on {vm}: " + run(vm, "tail -5 ~/transmission.log", check_rc=False).stdout)
+
+
+@scenario("torrent-spool")
+def s_torrent_spool():
+    """The desktop seeds a generated 2 GB torrent (20 files of 100 MiB) with
+    transmission-daemon behind a tiny tracker; the laptop's Varsto downloads
+    it through its own transmission-daemon into a 512 MB tmpfs with a 20 %
+    reserve, batch by batch, into a folder on the S3 bucket. Every file must
+    be in the folder, the tmpfs must never fall below the reserve (df polled
+    during the run), and the tmpfs must be empty at the end."""
+    s_reset()
+    seed, lap = "vl-desktop", "vl-laptop"
+    for vm in (seed, lap):
+        ensure_transmission(vm)
+    # The seed: data, tracker, torrent.
+    run(seed, "pkill -f tracker.py; rm -rf ~/seed ~/big.torrent; mkdir -p ~/seed/Bigset/sub; true")
+    run(seed, "for i in $(seq -w 1 20); do d=~/seed/Bigset; [ $((10#$i % 3)) -eq 0 ] && d=~/seed/Bigset/sub; "
+              "head -c 100M /dev/urandom > $d/part-$i.bin; done")
+    run(seed, f"cat > ~/tracker.py <<'PY'\n{TRACKER_PY}\nPY\nnohup python3 ~/tracker.py > ~/tracker.log 2>&1 &")
+    run(seed, "transmission-create -o ~/big.torrent -s 1024 -t http://10.78.1.11:6969/announce ~/seed/Bigset >/dev/null")
+    start_transmission(seed, "/home/varsto/tr-seed", "/home/varsto/seed")
+    run(seed, "transmission-remote 127.0.0.1:9091 -a ~/big.torrent -w /home/varsto/seed >/dev/null")
+    for _ in range(120):
+        if "100%" in run(seed, "transmission-remote 127.0.0.1:9091 -l", check_rc=False).stdout:
+            break
+        time.sleep(2)
+    else:
+        raise Fail("the seed did not verify its data: " + run(seed, "transmission-remote 127.0.0.1:9091 -l").stdout)
+    sums = {line[66:].removeprefix("./"): line[:64] for line in
+            run(seed, "cd ~/seed && find Bigset -type f -print0 | sort -z | xargs -0 sha256sum").stdout.splitlines() if line}
+    check(len(sums) == 20, f"seed files: {len(sums)}")
+    r = subprocess.run(lab.ssh_cmd(seed, "cat ~/big.torrent"), capture_output=True)
+    subprocess.run(lab.ssh_cmd(lap, "cat > ~/big.torrent"), input=r.stdout, check=True)
+
+    # The laptop: a 512 MB spool, its own daemon, a vault on the bucket.
+    run(lap, "sudo umount /mnt/spool 2>/dev/null; sudo mkdir -p /mnt/spool && sudo mount -t tmpfs -o size=512m tmpfs /mnt/spool "
+             "&& sudo chown varsto:varsto /mnt/spool")
+    start_transmission(lap, "/home/varsto/tr-dl", "/mnt/spool")
+    v(lap, "init --name laptop")
+    v(lap, f"storage add-s3 cloud --endpoint {lab.S3['endpoint']} --region us-east-1 --bucket {BUCKET} "
+           f"--access-key-id {lab.S3['key']} --secret-access-key {lab.S3['secret']} --place cloud", json_out=False)
+    job = v(lap, "torrent add /home/varsto/big.torrent --folder big --storage cloud --free-min 20% --download-dir /mnt/spool")
+    h = job["hash"]
+    check(job["state"] == "downloading" and len(job["files"]) == 20, f"job: {str(job)[:400]}")
+    run(lap, f"{ENV} nohup varsto torrent run {h} --interval 2 > ~/torrent-run.log 2>&1 &")
+    size = int(run(lap, "df -B1 --output=size /mnt/spool | tail -1").stdout)
+    reserve = size * 20 // 100
+    lowest, state, t0 = size, None, time.time()
+    try:
+        while time.time() - t0 < 25 * 60:
+            avail = int(run(lap, "df -B1 --output=avail /mnt/spool | tail -1").stdout)
+            lowest = min(lowest, avail)
+            st = v(lap, f"torrent status {h}", check_rc=False)
+            state = st.get("state") if isinstance(st, dict) else None
+            if state == "complete":
+                break
+            time.sleep(2)
+    finally:
+        run(lap, "pkill -f 'varsto torrent run'; true", check_rc=False)
+    CTX["torrent_secs"] = round(time.time() - t0, 1)
+    CTX["torrent_lowest_free"] = lowest
+    CTX["torrent_reserve"] = reserve
+    check(state == "complete", f"the job did not complete ({state}): " +
+          run(lap, "tail -20 ~/torrent-run.log", check_rc=False).stdout[-1500:])
+    check(lowest >= reserve, f"the spool fell to {lowest} bytes free, below the {reserve} byte reserve")
+    check(run(lap, "find /mnt/spool -mindepth 1 | head -5").stdout.strip() == "", "the spool is not empty")
+    st = v(lap, f"torrent status {h}")
+    check(st["batches"] >= 4 and st["bytes_stored"] == 20 * (100 << 20), f"batches {st['batches']}, stored {st['bytes_stored']}")
+    files = {f["path"]: f for f in v(lap, "folder files big")}
+    check(set(files) == set(sums), f"folder files differ: {sorted(set(sums) ^ set(files))[:6]}")
+    check(all(f["size"] == 100 << 20 for f in files.values()), "a file has the wrong size")
+    # Two files read back from the bucket match the seed.
+    for p in ("Bigset/part-01.bin", "Bigset/sub/part-12.bin"):
+        v(lap, f"folder fetch big {shlex.quote(p)}", json_out=False)
+        root = next(f["path"] for f in v(lap, "status")["folders"] if f["name"] == "big")
+        got = run(lap, f"sha256sum {shlex.quote(root + '/' + p)}").stdout[:64]
+        check(got == sums[p], f"{p}: content differs from the seed")
+    v(lap, f"torrent remove {h}", json_out=False)
+    for vm in (seed, lap):
+        run(vm, "pkill -x transmission-da; pkill -f tracker.py; rm -rf ~/seed ~/tr-seed ~/tr-dl ~/big.torrent; true",
+            check_rc=False)
+    run(lap, "sudo umount /mnt/spool; true", check_rc=False)
+
+
 SCENARIOS = [s_reset, s_init, s_pair, s_sync, s_words, s_conflict, s_selective, s_repair, s_policy,
              s_strongroom, s_org, s_remove_user, s_revoke,
              s_p2p_setup, s_p2p_lan, s_p2p_pub, s_p2p_sym, s_p2p_stop, s_share, s_disks, s_mixed,
              s_outage, s_blackhole, s_crash, s_clock, s_clock_behind, s_p2p_upload, s_scale,
              s_backup, s_activity, s_disk_init, s_disk_fetch_plan, s_staged_move, s_scrub, s_restic, s_ledger_loss,
-             s_ledger_withhold]
+             s_ledger_withhold, s_torrent_spool]
 
 
 def main():
