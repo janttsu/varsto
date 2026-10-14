@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Run a test suite inside a provisioned VM over SSH and write JUnit XML and JSON results.
-# Only the "smoke" suite exists so far.
+# The "smoke" suite runs here; the end-to-end scenarios (35 of them) live in
+# the lab, scripts/test/lab/lab.py and scenarios.py, not in this script.
 #
 # Usage: run-suite.sh [--dry-run] <suite> <vm>
 # Exit:  0 suite passed, 1 suite failed, 2 usage error or suite not implemented,

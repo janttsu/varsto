@@ -768,7 +768,8 @@ impl ServiceState {
         self.quota_full = full;
         if kept_aside > 0 {
             self.last_result.push_str(&format!(
-                "; read-only: your changes were not published ({kept_aside} file(s) kept aside)"
+                "; read-only: your changes were not published ({kept_aside} {} kept aside)",
+                if kept_aside == 1 { "file" } else { "files" }
             ));
         }
         self.last_error = None;
@@ -1238,8 +1239,9 @@ impl P2p {
             Err(err) => {
                 let kept = self.records.lock().unwrap().clone();
                 log::warn!(
-                    "peer record listing failed, keeping {} known record(s): {err:#}",
-                    kept.len()
+                    "peer record listing failed, keeping {} known {}: {err:#}",
+                    kept.len(),
+                    if kept.len() == 1 { "record" } else { "records" }
                 );
                 kept
             }

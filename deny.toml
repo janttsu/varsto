@@ -1,0 +1,75 @@
+# cargo-deny configuration (CI runs `cargo deny check` before the tests).
+# https://embarkstudios.github.io/cargo-deny/
+
+[graph]
+# Every target: the tray's GTK dependencies are Linux-only, the Windows and
+# Apple crates are theirs, and all of them ship in a release.
+all-features = false
+
+[advisories]
+# A vulnerability or an unsound advisory on any crate fails the check; an
+# unmaintained crate fails it only when it is a direct dependency, where we can
+# act on it. Transitive unmaintained crates still show up as warnings in
+# `cargo audit` (also run by CI); at the time of writing that is
+# proc-macro-error 1.0.4 (RUSTSEC-2024-0370) through tray-icon -> gtk 0.18 ->
+# glib-macros, which has no newer release of gtk 0.18 to move to.
+unmaintained = "workspace"
+unsound = "all"
+yanked = "deny"
+ignore = [
+    # sharks 0.5.0 (Shamir secret sharing for the recovery kit). The advisory:
+    # polynomial coefficients are drawn from 1..=255 instead of 0..=255, a bias
+    # that lets a holder of threshold-minus-one shares narrow the secret down
+    # when the *same* secret has been split hundreds of times (Cure53's
+    # estimate: 500 to 1500 times for 2-of-N). No fixed version exists, the
+    # maintainer could not be reached, and a corrected fork (`blahaj`) was
+    # published instead. Varsto splits the vault key once per printed kit, so
+    # the practical exposure is small, but moving to the fork is planned
+    # together with the next change to crates/varsto-core/src/recovery.rs.
+    { id = "RUSTSEC-2024-0398", reason = "no fixed sharks release; one split per recovery kit; move to blahaj planned" },
+    # glib 0.18.5 through tray-icon -> gtk 0.18: unsound iterator impls on
+    # glib::VariantStrIter, a type Varsto never uses. Fixed only in glib 0.20,
+    # which gtk 0.18 (the last GTK 3 binding) cannot use.
+    { id = "RUSTSEC-2024-0429", reason = "VariantStrIter is not used; gtk 0.18 pins glib 0.18" },
+]
+
+[licenses]
+# Permissive licences only. MPL-2.0 is allowed because it was already in use
+# (option-ext, through dirs). Anything else, GPL and AGPL included, fails the
+# check unless it is listed as an exception below.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-3.0",
+    "Zlib",
+    "MPL-2.0",
+]
+confidence-threshold = 0.8
+exceptions = [
+    # Public-domain dedications of single crates.
+    { allow = ["CC0-1.0"], crate = "bip39" },
+    { allow = ["CC0-1.0"], crate = "bitcoin_hashes" },
+    { allow = ["CC0-1.0"], crate = "hex-conservative" },
+    { allow = ["CC0-1.0"], crate = "notify" },
+    { allow = ["Unlicense"], crate = "ksni" },
+    # Mozilla's root certificate store as data.
+    { allow = ["CDLA-Permissive-2.0"], crate = "webpki-roots" },
+    # Apache-2.0 with the LLVM exception (a narrowing of Apache-2.0's terms).
+    { allow = ["Apache-2.0 WITH LLVM-exception"], crate = "target-lexicon" },
+]
+
+[licenses.private]
+# The workspace crates (PolyForm Shield 1.0.0, `publish = false`) are not
+# checked: the identifier is not in cargo-deny's SPDX list.
+ignore = true
+
+[bans]
+multiple-versions = "allow"
+wildcards = "allow"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"

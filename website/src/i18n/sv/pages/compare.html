@@ -2,7 +2,7 @@
 title: Jämförelser
 nav: Compare
 output: compare/index.html
-description: Hur Varsto står sig mot Syncthing, Resilio Sync, MEGA, Filen, Tresorit och git-annex: vad var och en är till för och var de skiljer sig åt.
+description: Hur Varsto står sig mot Syncthing, Resilio Sync, MEGA, Filen, Tresorit, git-annex, Cryptomator, rclone och restic/borg: vad var och en är till för och var de skiljer sig åt.
 ---
     <h1>Så står sig Varsto</h1>
     <p class="lead">Verktyg för att hålla filer synkroniserade delas in i tre grupper. Peer-to-peer-verktyg som Syncthing och Resilio Sync kopierar mappar mellan dina egna enheter. Krypterade moln som MEGA, Filen och Tresorit förvarar dina filer hos en enda leverantör. git-annex håller reda på stora filer på alla diskar och fjärrlagringar du äger. Varsto kombinerar delar av alla tre: end-to-end-krypterade filer på lagringsplatser du själv väljer, peer-to-peer-överföring mellan dina enheter och en förteckning över var varje kopia finns.</p>
@@ -30,5 +30,8 @@ description: Hur Varsto står sig mot Syncthing, Resilio Sync, MEGA, Filen, Tres
       <a class="card" href="{{L}}compare/filen/"><h3>Varsto och Filen</h3><p>Filen är nollkunskapskrypterad molnlagring från Tyskland, för integritetsmedvetna privatpersoner och team.</p></a>
       <a class="card" href="{{L}}compare/tresorit/"><h3>Varsto och Tresorit</h3><p>Tresorit är end-to-end-krypterad molnlagring och fildelning från Schweiz, främst riktad till företag och reglerade branscher, men med abonnemang för privatpersoner också.</p></a>
       <a class="card" href="{{L}}compare/git-annex/"><h3>Varsto och git-annex</h3><p>git-annex hanterar stora filer med git utan att lagra deras innehåll i git.</p></a>
+      <a class="card" href="{{L}}compare/cryptomator/"><h3>Varsto och Cryptomator</h3><p>Cryptomator krypterar en valvmapp för vilket moln som helst; molnleverantörens egen klient bär den mellan enheterna.</p></a>
+      <a class="card" href="{{L}}compare/rclone/"><h3>Varsto och rclone</h3><p>rclone kopierar och synkroniserar filer till och från fler än sjuttio lagringssystem, med en crypt-fjärrlagring som krypterar det som passerar.</p></a>
+      <a class="card" href="{{L}}compare/restic/"><h3>Varsto, restic och BorgBackup</h3><p>restic och borg tar krypterade, deduplicerade versioner till ett arkiv: säkerhetskopiering, inte synkronisering.</p></a>
     </div>
     <p class="note">Varsto är alfaprogramvara: anförtro den inga data som du inte har någon annan kopia av, och dess kryptografi har inte granskats av någon oberoende part. De andra produkterna här är mogna. Uppgifterna om dem kontrollerades i deras egen dokumentation i oktober 2026; priser och abonnemang ändras ofta, så se deras egna sidor för aktuella siffror. Rättelser tas gärna emot på <a href="{{P}}forum/">forumet</a> eller på GitHub.</p>

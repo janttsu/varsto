@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cryptomator alternative: Varsto and Cryptomator compared</title>
+<meta name="description" content="Looking for a Cryptomator alternative that syncs as well as encrypts, on your own storage (S3, NAS, disks, rclone)? What Cryptomator is for, how it works, and how it compares with Varsto.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="../../favicon.svg" type="image/svg+xml">
+<link rel="canonical" href="https://varsto.net/compare/cryptomator/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Varsto">
+<meta property="og:title" content="Cryptomator alternative: Varsto and Cryptomator compared">
+<meta property="og:description" content="Looking for a Cryptomator alternative that syncs as well as encrypts, on your own storage (S3, NAS, disks, rclone)? What Cryptomator is for, how it works, and how it compares with Varsto.">
+<meta property="og:url" content="https://varsto.net/compare/cryptomator/">
+<meta property="og:image" content="https://varsto.net/assets/img/og-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:locale" content="en_GB">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="alternate" hreflang="en" href="https://varsto.net/compare/cryptomator/">
+<link rel="alternate" hreflang="x-default" href="https://varsto.net/compare/cryptomator/">
+<link rel="alternate" hreflang="fi" href="https://varsto.net/fi/compare/cryptomator/">
+<link rel="alternate" hreflang="sv" href="https://varsto.net/sv/compare/cryptomator/">
+<link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../../blog/feed.xml">
+<link rel="stylesheet" href="../../assets/css/site.css?v=a993e06bd6">
+<script src="../../assets/js/theme.js?v=0951491269"></script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="alpha" role="note">
+  <div class="wrap"><strong>Alpha software, not for production data.</strong> Bugs can cause data loss, formats may change without migration, and the cryptography has not been independently audited. Keep your own backups and check that you can restore from them.</div>
+</div>
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="../../"><img src="../../assets/img/logo.svg" alt="" width="28" height="28"><span>Varsto</span></a>
+    <nav class="langs" aria-label="Language"><a href="../../compare/cryptomator/" hreflang="en" lang="en" aria-current="true">English</a> <a href="../../fi/compare/cryptomator/" hreflang="fi" lang="fi">Suomi</a> <a href="../../sv/compare/cryptomator/" hreflang="sv" lang="sv">Svenska</a></nav>
+
+    <nav class="main" aria-label="Main">
+      <a href="../../">Project</a>
+      <a href="../../features/">Features</a>
+      <a href="../../use-cases/">Use cases</a>
+      <a href="../../compare/" aria-current="page">Compare</a>
+      <a href="../../how-it-works/">How it works</a>
+      <a href="../../screenshots/">Screenshots</a>
+      <a href="../../docs/">Docs</a>
+      <a href="../../downloads/">Downloads</a>
+      <a href="../../blog/">Blog</a>
+      <a href="../../forum/">Forum</a>
+      <a href="../../contribute/">Contribute</a>
+      <a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a>
+      <button class="theme" id="theme-toggle" type="button" aria-label="Change colour theme">Theme: auto</button>
+    </nav>
+  </div>
+</header>
+<main id="main">
+  <div class="wrap">
+    <p class="back-link"><a href="../../compare/">All comparisons</a></p>
+    <h1>Varsto and Cryptomator</h1>
+    <p class="lead">Cryptomator encrypts a folder, the vault, so that it can be kept in any cloud without the provider reading it. It is free and open source, has desktop and mobile apps, and does one thing: the vault. Getting the vault to another device is left to the cloud provider's own client.</p>
+
+    <h2>How Cryptomator works</h2>
+    <p>A vault is a directory of encrypted files and directories with a <code>vault.cryptomator</code> configuration file at its root. On the desktop the vault is shown as a virtual drive: files are encrypted and decrypted transparently as you use them, and there are no unencrypted copies on disk. File names are encrypted too. Content is encrypted with AES (the <code>SIV_GCM</code> or <code>SIV_CTRMAC</code> combination), and the master keys are protected with a password through scrypt and AES key wrap. Cryptomator does not move the vault anywhere: you put it in a folder that Dropbox, Google Drive, OneDrive or another client synchronises, and that client carries the encrypted files between devices. There is no record of which devices or storages hold a copy, no sharing mechanism of its own (whoever has the vault folder and its password opens it; a separate Hub product manages access for organisations), and no rules about how many copies must exist.</p>
+
+    <h2>Side by side</h2>
+    <table class="compare-table">
+      <thead><tr><th scope="col"></th><th scope="col">Cryptomator</th><th scope="col">Varsto</th></tr></thead>
+      <tbody>
+      <tr><th scope="row">Where your files live</th><td>In a vault folder on your device, and wherever the cloud client you use copies that folder.</td><td>On your own devices and on storages you choose: S3-compatible buckets, any rclone remote, local or network directories, and pools of removable disks.</td></tr>
+      <tr><th scope="row">Account or central server</th><td>None for Cryptomator itself; the cloud you keep the vault in has its own account.</td><td>None. There is no Varsto server; devices find each other through your storages and on the LAN.</td></tr>
+      <tr><th scope="row">Encryption</th><td>Client-side, before the cloud client sees the files: AES content encryption, encrypted file names, password-protected master keys. Mature and widely reviewed.</td><td>End-to-end, client-side, before anything leaves the device; hybrid post-quantum (ML-KEM for sharing keys, Ed25519 + ML-DSA-65 signatures). Not independently audited yet.</td></tr>
+      <tr><th scope="row">Sync between devices</th><td>None of its own: the cloud provider's client synchronises the vault folder.</td><td>Yes: devices sync through your storages, and directly peer to peer when they can reach each other.</td></tr>
+      <tr><th scope="row">Knows where every copy is</th><td>No: Cryptomator sees only the vault folder on this device.</td><td>Yes: a signed ledger records which storage and device holds every block; durability policies (by default 1 copy anywhere, 1 external, 1 on your own devices or disks, checked by another device within 30 days) warn when a rule is not met.</td></tr>
+      <tr><th scope="row">Sharing with other people</th><td>No sharing mechanism of its own: a vault is opened by anyone who has the folder and the password.</td><td>Yes: a folder is shared with another user by a sealed key, members can be removed, and a member can be read-only.</td></tr>
+      <tr><th scope="row">Removable and offline disks</th><td>A vault can be kept on any disk, but nothing tracks disks that are away.</td><td>Yes: disk pools are filled, checked and recognised when they come back; files on a disk that is away ask for that disk.</td></tr>
+      <tr><th scope="row">Backups</th><td>None of its own; the cloud provider's versioning, if any, applies to the encrypted files.</td><td>Yes: pick a folder on any device and Varsto keeps encrypted, read-only snapshots of it on your external storages only, never on your devices, for the number of days you choose (90 by default), then deletes the expired ones. Restore any snapshot into a directory you name, from the app or the command line.</td></tr>
+      <tr><th scope="row">Licence and price</th><td>Open source (GPL-3.0), free; a commercial licence is offered to software vendors.</td><td>Source-available (PolyForm Shield 1.0.0), free; you pay only your storage provider.</td></tr>
+      <tr><th scope="row">Maturity</th><td>Mature, long-running project.</td><td>Alpha: not for production data, formats may still change.</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Which one fits</h2>
+    <div class="grid two">
+      <div class="card"><h3>Cryptomator</h3><p>Choose Cryptomator when you already use a cloud client you are happy with and want its folder encrypted with a mature, open-source tool, and you do not need to know where copies are or to share with others.</p></div>
+      <div class="card"><h3>Varsto</h3><p>Choose Varsto when the encryption should come with the sync itself, across buckets, NAS shares and removable disks, with a record of where every copy is, policies that warn when a copy is missing, and sharing with other people.</p></div>
+    </div>
+    <p class="note">Varsto is alpha software: do not trust it with data you have no other copy of, and its cryptography has not been independently audited. The other products here are mature. Facts about them were checked from their own documentation in October 2026; prices and plans change often, so see their own pages for current figures. Corrections are welcome on the <a href="../../forum/">forum</a> or on GitHub.</p>
+
+    <h2>Sources</h2>
+    <ul>
+      <li><a href="https://cryptomator.org/">Cryptomator website</a></li>
+      <li><a href="https://docs.cryptomator.org/">Cryptomator documentation</a></li>
+      <li><a href="https://docs.cryptomator.org/security/architecture/">Security architecture (vault format, ciphers, key protection)</a></li>
+      <li><a href="https://github.com/cryptomator/cryptomator">Source repository (licence: GPL-3.0)</a></li>
+    </ul>
+
+  </div>
+</main>
+<footer class="site">
+  <div class="wrap">
+    <span>Varsto is a working name. Source: <a href="https://github.com/janttsu/varsto">github.com/janttsu/varsto</a>, under the PolyForm Shield License 1.0.0 (source-available).</span>
+    <span>No cookies, no tracking. The web server keeps a standard access log for at most seven days.</span>
+    <span><a href="../../docs/security-policy.html">Security policy</a> · <a href="../../docs/licence.html">Licence</a> · <a href="../../docs/trademark.html">Trademark</a></span>
+  </div>
+</footer>
+</body>
+</html>

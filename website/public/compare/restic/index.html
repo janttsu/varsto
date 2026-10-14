@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>restic and borg alternative: Varsto, restic and BorgBackup compared</title>
+<meta name="description" content="Using restic or BorgBackup for encrypted backups and wondering how Varsto relates? What the two backup programs do, how they differ from sync, and how Varsto&#x27;s restic mirror joins them.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="../../favicon.svg" type="image/svg+xml">
+<link rel="canonical" href="https://varsto.net/compare/restic/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Varsto">
+<meta property="og:title" content="restic and borg alternative: Varsto, restic and BorgBackup compared">
+<meta property="og:description" content="Using restic or BorgBackup for encrypted backups and wondering how Varsto relates? What the two backup programs do, how they differ from sync, and how Varsto&#x27;s restic mirror joins them.">
+<meta property="og:url" content="https://varsto.net/compare/restic/">
+<meta property="og:image" content="https://varsto.net/assets/img/og-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:locale" content="en_GB">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="alternate" hreflang="en" href="https://varsto.net/compare/restic/">
+<link rel="alternate" hreflang="x-default" href="https://varsto.net/compare/restic/">
+<link rel="alternate" hreflang="fi" href="https://varsto.net/fi/compare/restic/">
+<link rel="alternate" hreflang="sv" href="https://varsto.net/sv/compare/restic/">
+<link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../../blog/feed.xml">
+<link rel="stylesheet" href="../../assets/css/site.css?v=a993e06bd6">
+<script src="../../assets/js/theme.js?v=0951491269"></script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="alpha" role="note">
+  <div class="wrap"><strong>Alpha software, not for production data.</strong> Bugs can cause data loss, formats may change without migration, and the cryptography has not been independently audited. Keep your own backups and check that you can restore from them.</div>
+</div>
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="../../"><img src="../../assets/img/logo.svg" alt="" width="28" height="28"><span>Varsto</span></a>
+    <nav class="langs" aria-label="Language"><a href="../../compare/restic/" hreflang="en" lang="en" aria-current="true">English</a> <a href="../../fi/compare/restic/" hreflang="fi" lang="fi">Suomi</a> <a href="../../sv/compare/restic/" hreflang="sv" lang="sv">Svenska</a></nav>
+
+    <nav class="main" aria-label="Main">
+      <a href="../../">Project</a>
+      <a href="../../features/">Features</a>
+      <a href="../../use-cases/">Use cases</a>
+      <a href="../../compare/" aria-current="page">Compare</a>
+      <a href="../../how-it-works/">How it works</a>
+      <a href="../../screenshots/">Screenshots</a>
+      <a href="../../docs/">Docs</a>
+      <a href="../../downloads/">Downloads</a>
+      <a href="../../blog/">Blog</a>
+      <a href="../../forum/">Forum</a>
+      <a href="../../contribute/">Contribute</a>
+      <a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a>
+      <button class="theme" id="theme-toggle" type="button" aria-label="Change colour theme">Theme: auto</button>
+    </nav>
+  </div>
+</header>
+<main id="main">
+  <div class="wrap">
+    <p class="back-link"><a href="../../compare/">All comparisons</a></p>
+    <h1>Varsto, restic and BorgBackup</h1>
+    <p class="lead">restic and BorgBackup (borg) are backup programs: they take snapshots of directories into an encrypted, deduplicated repository and restore them later. They are not sync tools and do not try to be. Varsto does both sync and backups of its own, and its restic mirror lets restic back up a vault independently of Varsto.</p>
+
+    <h2>How restic and borg work</h2>
+    <p><strong>restic</strong> is a single executable that runs without a server. <code>restic backup</code> takes a snapshot of a directory into a repository, transferring only the parts of files that changed; <code>restic snapshots</code> lists them, <code>restic restore</code> brings one back, and <code>restic check</code> verifies the repository. Repositories can live on a local disk or on many storage types, self-hosted and online, and everything in them is encrypted. <strong>borg</strong> is a deduplicating backup program as well: files are split into chunks and a chunk already in the repository is not stored again, data is encrypted on the client (AES-256 with HMAC-SHA256) and optionally compressed, repositories live on local disks or on any host reachable over SSH, and archives can be mounted as a file system to browse and restore. Neither keeps your devices in step: a backup runs at a time you choose, from one machine, into one repository, and the files on the machine are left as they were.</p>
+
+    <h2>Side by side</h2>
+    <table class="compare-table">
+      <thead><tr><th scope="col"></th><th scope="col">restic / borg</th><th scope="col">Varsto</th></tr></thead>
+      <tbody>
+      <tr><th scope="row">What it is for</th><td>Backups: scheduled snapshots of directories into a repository, restored when needed.</td><td>Sync between your devices, with backups as read-only snapshots on your storages.</td></tr>
+      <tr><th scope="row">Where your files live</th><td>On the machine that is backed up, and in the repository: a local disk, an SSH host (borg) or many storage types (restic).</td><td>On your own devices and on storages you choose: S3-compatible buckets, any rclone remote, local or network directories, and pools of removable disks.</td></tr>
+      <tr><th scope="row">Account or central server</th><td>None; only the storage the repository is on.</td><td>None. There is no Varsto server; devices find each other through your storages and on the LAN.</td></tr>
+      <tr><th scope="row">Encryption</th><td>Yes, on the client, for everything in the repository (restic: a password-protected repository; borg: AES-256 and HMAC-SHA256). Mature and widely reviewed.</td><td>End-to-end, client-side, before anything leaves the device; hybrid post-quantum (ML-KEM for sharing keys, Ed25519 + ML-DSA-65 signatures). Not independently audited yet.</td></tr>
+      <tr><th scope="row">Live sync between devices</th><td>No: a backup is taken from one machine at a time you choose; other machines do not receive the files.</td><td>Yes: devices sync through your storages, and directly peer to peer when they can reach each other.</td></tr>
+      <tr><th scope="row">Knows where every copy is</th><td>The repository knows its own snapshots; nothing tracks copies outside it.</td><td>Yes: a signed ledger records which storage and device holds every block; durability policies (by default 1 copy anywhere, 1 external, 1 on your own devices or disks, checked by another device within 30 days) warn when a rule is not met.</td></tr>
+      <tr><th scope="row">Removable and offline disks</th><td>A repository can be on a removable disk; nothing tracks the disk while it is away.</td><td>Yes: disk pools are filled, checked and recognised when they come back; files on a disk that is away ask for that disk.</td></tr>
+      <tr><th scope="row">Backups</th><td>Yes: deduplicated, encrypted snapshots with retention rules (<code>forget</code> and <code>prune</code>), verifiable and restorable with the tool alone.</td><td>Yes: pick a folder on any device and Varsto keeps encrypted, read-only snapshots of it on your external storages only, never on your devices, for the number of days you choose (90 by default), then deletes the expired ones. Restore any snapshot into a directory you name, from the app or the command line.</td></tr>
+      <tr><th scope="row">Using them together</th><td>restic can back up any directory, a Varsto folder included.</td><td>After 0.0.1-alpha.13, not in a release yet: the restic mirror. One device keeps a complete plaintext copy of the vault, Varsto checks the copy is whole, and restic backs it up into a repository outside the vault's storages. Restoring needs only restic and the repository password, so a bug in Varsto or a lost vault key does not reach that copy.</td></tr>
+      <tr><th scope="row">Licence and price</th><td>Open source, free: restic BSD-2-Clause, borg BSD-3-Clause.</td><td>Source-available (PolyForm Shield 1.0.0), free; you pay only your storage provider.</td></tr>
+      <tr><th scope="row">Maturity</th><td>Mature, long-running projects.</td><td>Alpha: not for production data, formats may still change.</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Which one fits</h2>
+    <div class="grid two">
+      <div class="card"><h3>restic / borg</h3><p>Choose restic or borg when what you need is backups: mature, encrypted, deduplicated snapshots of a machine, restorable with the tool alone, on a schedule you run yourself.</p></div>
+      <div class="card"><h3>Varsto</h3><p>Choose Varsto when your devices should stay in step as well, you want a record of where every copy is and policies that warn, and you want backups that nothing can change on the same storages. Keep restic as a second, independent line of defence through the mirror.</p></div>
+    </div>
+    <p class="note">Varsto is alpha software: do not trust it with data you have no other copy of, and its cryptography has not been independently audited. The other products here are mature. Facts about them were checked from their own documentation in October 2026; prices and plans change often, so see their own pages for current figures. Corrections are welcome on the <a href="../../forum/">forum</a> or on GitHub.</p>
+
+    <h2>Sources</h2>
+    <ul>
+      <li><a href="https://restic.net/">restic website</a></li>
+      <li><a href="https://restic.readthedocs.io/en/stable/">restic documentation</a></li>
+      <li><a href="https://github.com/restic/restic/blob/master/LICENSE">restic licence (BSD-2-Clause)</a></li>
+      <li><a href="https://borgbackup.readthedocs.io/en/stable/">BorgBackup documentation</a></li>
+      <li><a href="https://github.com/borgbackup/borg/blob/master/LICENSE">BorgBackup licence (BSD-3-Clause)</a></li>
+    </ul>
+
+  </div>
+</main>
+<footer class="site">
+  <div class="wrap">
+    <span>Varsto is a working name. Source: <a href="https://github.com/janttsu/varsto">github.com/janttsu/varsto</a>, under the PolyForm Shield License 1.0.0 (source-available).</span>
+    <span>No cookies, no tracking. The web server keeps a standard access log for at most seven days.</span>
+    <span><a href="../../docs/security-policy.html">Security policy</a> · <a href="../../docs/licence.html">Licence</a> · <a href="../../docs/trademark.html">Trademark</a></span>
+  </div>
+</footer>
+</body>
+</html>

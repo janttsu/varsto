@@ -1,0 +1,44 @@
+---
+title: rclone-vaihtoehto: Varsto ja rclone vertailussa
+nav: Compare
+output: compare/rclone/index.html
+description: Käytätkö rclonea crypt-etäkohteen kanssa salattujen kopioiden pitämiseen S3:ssa tai muussa pilvessä? Mihin rclone on tarkoitettu, miten sen crypt-taustajärjestelmä ja bisync toimivat ja miten se vertautuu Varstoon.
+---
+    <p class="back-link"><a href="{{L}}compare/">Kaikki vertailut</a></p>
+    <h1>Varsto ja rclone</h1>
+    <p class="lead">rclone on komentorivityökalu tiedostojen kopiointiin ja synkronointiin yli seitsemänkymmenen pilvitallennusjärjestelmän kanssa. Sen crypt-taustajärjestelmä salaa sen läpi kulkevat tiedostot, ja moni käyttää näitä kahta yhdessä omatekoisena salattuna varmuuskopiona. Varsto itse voi käyttää mitä tahansa rclone-etäkohdetta tallennuspaikkana.</p>
+
+    <h2>Miten rclone toimii</h2>
+    <p>rclone kopioi tiedostoja paikallisen hakemiston ja etäkohteen välillä tai kahden etäkohteen välillä: <code>rclone copy</code>, <code>rclone sync</code> (yksisuuntainen, tekee kohteesta lähteen kaltaisen), <code>rclone mount</code> ja monta muuta. <em>crypt</em>-etäkohde kääriytyy toisen etäkohteen ympärille ja salaa tiedostojen sisällön NaCl SecretBoxilla (XSalsa20 ja Poly1305); oletustilassa myös tiedosto- ja hakemistonimet salataan, ja ne voi jättää selkokielisiksi tai vain hämärtää. crypt-etäkohteen ulkopuolella rclone ei salaa mitään. Kaksisuuntainen synkronointi on <code>rclone bisync</code>, joka säilyttää molempien puolten listauksen edellisestä ajosta ja välittää muutokset kumpaankin suuntaan; rclone kutsuu sitä edistyneeksi komennoksi, se on ensin otettava käyttöön <code>--resync</code>-valitsimella, ja ajon aikana muuttuvat tiedostot voivat hävitä. rclone ei pidä kirjaa siitä, missä kopioita on, muuten kuin kunkin ajon vertailun verran, eikä sillä ole käsitystä laitteista: jokainen kone ajaa omia komentojaan.</p>
+
+    <h2>Rinnakkain</h2>
+    <table class="compare-table">
+      <thead><tr><th scope="col"></th><th scope="col">rclone</th><th scope="col">Varsto</th></tr></thead>
+      <tbody>
+      <tr><th scope="row">Missä tiedostosi ovat</th><td>Minne ne kopioit: paikallisissa hakemistoissa ja missä tahansa tuetussa etäkohteessa.</td><td>Omilla laitteillasi ja valitsemissasi tallennuspaikoissa: S3-yhteensopivissa bucketeissa, missä tahansa rclone-etäkohteessa, paikallisissa tai verkkohakemistoissa sekä irrotettavien levyjen levyvarastoissa.</td></tr>
+      <tr><th scope="row">Tili tai keskuspalvelin</th><td>Ei kumpaakaan; vain käyttämiesi etäkohteiden tilit.</td><td>Ei kumpaakaan. Varstolla ei ole palvelinta; laitteet löytävät toisensa tallennuspaikkojesi kautta ja lähiverkossa.</td></tr>
+      <tr><th scope="row">Salaus</th><td>Vain crypt-etäkohteen kautta: XSalsa20-Poly1305 sisällölle; tiedosto- ja hakemistonimet salattuina oletustilassa, selkokielisinä tai hämärrettyinä valinnan mukaan. Muihin etäkohteisiin kirjoitetaan sellaisenaan.</td><td>Päästä päähän, asiakaspäässä, ennen kuin mitään lähtee laitteelta; hybridi post-kvanttisalaus (ML-KEM avainten jakamiseen, Ed25519 + ML-DSA-65 -allekirjoitukset). Ei vielä riippumattomasti auditoitu.</td></tr>
+      <tr><th scope="row">Synkronointi useiden laitteiden välillä</th><td>Oletuksena yksisuuntainen (<code>sync</code>). Kaksisuuntainen vaatii erillisen <code>bisync</code>-asetuksen polkuparia kohden, omat listauksensa ja alustavan <code>--resync</code>-ajon.</td><td>Kyllä, holvin kaikkien laitteiden välillä: muutokset yhdistetään versiovektoreilla, samanaikaiset muokkaukset säilyttävät molemmat versiot, ja laitteet synkronoituvat tallennuspaikkojesi kautta tai vertaisyhteydellä.</td></tr>
+      <tr><th scope="row">Laitteet verkossa yhtä aikaa</th><td>Ei tarvita: jokainen ajo keskustelee etäkohteen kanssa.</td><td>Ei tarvita: laitteet synkronoituvat tallennuspaikkojesi kautta ja suoraan vertaisyhteydellä, kun ne tavoittavat toisensa.</td></tr>
+      <tr><th scope="row">Tietää, missä jokainen kopio on</th><td>Ei: jokainen komento vertaa saamiaan kahta puolta eikä pidä kirjaa.</td><td>Kyllä: allekirjoitettu kirjanpito kertoo, mikä tallennuspaikka ja laite säilyttää kunkin lohkon; säilytyssäännöt (oletuksena 1 kopio missä tahansa, 1 ulkoinen ja 1 omilla laitteillasi tai levyilläsi, toisen laitteen tarkistamana 30 päivän sisällä) varoittavat, kun jokin sääntö ei täyty.</td></tr>
+      <tr><th scope="row">Irrotettavat ja verkosta irti olevat levyt</th><td>Levy on paikallinen polku niin kauan kuin se on liitettynä; mikään ei seuraa sitä, kun se on poissa.</td><td>Kyllä: levyvarastot täytetään, tarkistetaan ja tunnistetaan, kun levyt palaavat; poissa olevalla levyllä olevat tiedostot pyytävät kyseistä levyä.</td></tr>
+      <tr><th scope="row">Varmuuskopiot</th><td><code>copy</code>- tai <code>sync</code>-komennolla tehdyt kopiot; vanhojen versioiden säilyttäminen vaatii etäkohteen versioinnin tai valitsimia kuten <code>--backup-dir</code>.</td><td>Kyllä: valitse kansio millä tahansa laitteella. Varsto säilyttää siitä salattuja, vain luku -muotoisia versioita pelkästään ulkoisissa tallennuspaikoissasi, ei koskaan laitteillasi. Versiot säilytetään valitsemasi päivämäärän ajan (oletuksena 90 päivää), ja vanhentuneet poistetaan. Minkä tahansa version voi palauttaa nimeämääsi hakemistoon sovelluksesta tai komentoriviltä.</td></tr>
+      <tr><th scope="row">Lisenssi ja hinta</th><td>Avoin lähdekoodi (MIT), ilmainen.</td><td>Lähdekoodi saatavilla (PolyForm Shield 1.0.0), ilmainen; maksat vain tallennuspalvelun tarjoajallesi.</td></tr>
+      <tr><th scope="row">Kypsyys</th><td>Kypsä, pitkäikäinen projekti.</td><td>Alfa: ei tuotantodatalle, ja formaatit voivat vielä muuttua.</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Kumpi sopii sinulle</h2>
+    <div class="grid two">
+      <div class="card"><h3>rclone</h3><p>Valitse rclone, kun haluat kypsän työkalun, joka kopioi tiedostoja lähes mihin tahansa pilveen omalla aikataulullasi, teet ajot mielelläsi itse skripteillä ja yksisuuntaiset kopiot tai yksi bisync-pari riittävät.</p></div>
+      <div class="card"><h3>Varsto</h3><p>Valitse Varsto, kun useiden laitteiden pitää pysyä tahdissa itsestään, jokainen tavu pitää salata ennen lähtöä, haluat kirjanpidon siitä, missä jokainen kopio on, ja varoittavat säännöt, ja haluat silti käyttää jo olemassa olevia rclone-etäkohteitasi.</p></div>
+    </div>
+    <p class="note">Varsto on alfavaiheen ohjelmisto: älä luota sille tietoja, joista sinulla ei ole muuta kopiota. Sen kryptografiaa ei ole myöskään auditoitu riippumattomasti. Muut tässä esitellyt tuotteet ovat kypsiä. Niitä koskevat tiedot tarkistettiin niiden omasta dokumentaatiosta lokakuussa 2026; hinnat ja tilausvaihtoehdot muuttuvat usein, joten katso ajantasaiset tiedot niiden omilta sivuilta. Korjaukset ovat tervetulleita <a href="{{P}}forum/">foorumilla</a> tai GitHubissa.</p>
+
+    <h2>Lähteet</h2>
+    <ul>
+      <li><a href="https://rclone.org/">rclonen verkkosivusto</a></li>
+      <li><a href="https://rclone.org/crypt/">Crypt-etäkohde: sisällön ja tiedostonimien salaus (en)</a></li>
+      <li><a href="https://rclone.org/bisync/">bisync: kaksisuuntainen synkronointi (en)</a></li>
+      <li><a href="https://github.com/rclone/rclone/blob/master/COPYING">Lisenssi (MIT)</a></li>
+    </ul>

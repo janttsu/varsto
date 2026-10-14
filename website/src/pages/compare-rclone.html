@@ -1,0 +1,44 @@
+---
+title: rclone alternative: Varsto and rclone compared
+nav: Compare
+output: compare/rclone/index.html
+description: Using rclone with a crypt remote to keep encrypted copies on S3 or another cloud? What rclone is for, how its crypt backend and bisync work, and how it compares with Varsto.
+---
+    <p class="back-link"><a href="{{P}}compare/">All comparisons</a></p>
+    <h1>Varsto and rclone</h1>
+    <p class="lead">rclone is the command-line tool for copying and syncing files to and from more than seventy cloud storage systems. Its crypt backend encrypts what passes through it, and many people use the two together as a do-it-yourself encrypted backup. Varsto itself can use any rclone remote as a storage.</p>
+
+    <h2>How rclone works</h2>
+    <p>rclone copies files between a local directory and a remote, or between two remotes: <code>rclone copy</code>, <code>rclone sync</code> (one way, making the destination identical to the source), <code>rclone mount</code> and many more. A <em>crypt</em> remote wraps another remote and encrypts file contents with NaCl SecretBox (XSalsa20 and Poly1305); file names and directory names are encrypted too in its default mode, and can be left in clear or merely obfuscated. Outside a crypt remote nothing is encrypted by rclone. Two-way sync exists as <code>rclone bisync</code>, which keeps a listing of both sides from the previous run and propagates changes in both directions; rclone calls it an advanced command, it has to be set up with <code>--resync</code> first, and files that change during a run may be lost. rclone keeps no record of which copies exist where beyond what each run compares, and has no notion of devices: each machine runs its own commands.</p>
+
+    <h2>Side by side</h2>
+    <table class="compare-table">
+      <thead><tr><th scope="col"></th><th scope="col">rclone</th><th scope="col">Varsto</th></tr></thead>
+      <tbody>
+      <tr><th scope="row">Where your files live</th><td>Wherever you copy them: local directories and any supported remote.</td><td>On your own devices and on storages you choose: S3-compatible buckets, any rclone remote, local or network directories, and pools of removable disks.</td></tr>
+      <tr><th scope="row">Account or central server</th><td>None; only the accounts of the remotes you use.</td><td>None. There is no Varsto server; devices find each other through your storages and on the LAN.</td></tr>
+      <tr><th scope="row">Encryption</th><td>Only through a crypt remote: XSalsa20-Poly1305 for contents; file and directory names encrypted in the default mode, in clear or obfuscated if you choose. Other remotes are written as they are.</td><td>End-to-end, client-side, before anything leaves the device; hybrid post-quantum (ML-KEM for sharing keys, Ed25519 + ML-DSA-65 signatures). Not independently audited yet.</td></tr>
+      <tr><th scope="row">Sync between several devices</th><td>One way by default (<code>sync</code>). Two-way needs a separate <code>bisync</code> setup per pair of paths, with its own listings and an initial <code>--resync</code>.</td><td>Yes, between all devices of the vault: changes merge with version vectors, concurrent edits keep both versions, and devices sync through your storages or peer to peer.</td></tr>
+      <tr><th scope="row">Devices online together</th><td>Not needed: each run talks to the remote.</td><td>Not needed: devices sync through your storages, and directly peer to peer when they can reach each other.</td></tr>
+      <tr><th scope="row">Knows where every copy is</th><td>No: each command compares the two sides it was given and keeps no record.</td><td>Yes: a signed ledger records which storage and device holds every block; durability policies (by default 1 copy anywhere, 1 external, 1 on your own devices or disks, checked by another device within 30 days) warn when a rule is not met.</td></tr>
+      <tr><th scope="row">Removable and offline disks</th><td>A disk is a local path while it is mounted; nothing tracks it when it is away.</td><td>Yes: disk pools are filled, checked and recognised when they come back; files on a disk that is away ask for that disk.</td></tr>
+      <tr><th scope="row">Backups</th><td>Copies made by <code>copy</code> or <code>sync</code>; keeping old versions needs the remote's versioning or options such as <code>--backup-dir</code>.</td><td>Yes: pick a folder on any device and Varsto keeps encrypted, read-only snapshots of it on your external storages only, never on your devices, for the number of days you choose (90 by default), then deletes the expired ones. Restore any snapshot into a directory you name, from the app or the command line.</td></tr>
+      <tr><th scope="row">Licence and price</th><td>Open source (MIT), free.</td><td>Source-available (PolyForm Shield 1.0.0), free; you pay only your storage provider.</td></tr>
+      <tr><th scope="row">Maturity</th><td>Mature, long-running project.</td><td>Alpha: not for production data, formats may still change.</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Which one fits</h2>
+    <div class="grid two">
+      <div class="card"><h3>rclone</h3><p>Choose rclone when you want a mature tool that copies files to almost any cloud on your own schedule, you are happy to script the runs yourself, and one-way copies or a bisync pair are enough.</p></div>
+      <div class="card"><h3>Varsto</h3><p>Choose Varsto when several devices should stay in step by themselves, every byte should be encrypted before it leaves, you want a record of where every copy is and policies that warn, and you still want to use the rclone remotes you already have.</p></div>
+    </div>
+    <p class="note">Varsto is alpha software: do not trust it with data you have no other copy of, and its cryptography has not been independently audited. The other products here are mature. Facts about them were checked from their own documentation in October 2026; prices and plans change often, so see their own pages for current figures. Corrections are welcome on the <a href="{{P}}forum/">forum</a> or on GitHub.</p>
+
+    <h2>Sources</h2>
+    <ul>
+      <li><a href="https://rclone.org/">rclone website</a></li>
+      <li><a href="https://rclone.org/crypt/">Crypt remote (contents and file name encryption)</a></li>
+      <li><a href="https://rclone.org/bisync/">bisync (two-way sync)</a></li>
+      <li><a href="https://github.com/rclone/rclone/blob/master/COPYING">Licence (MIT)</a></li>
+    </ul>

@@ -82,17 +82,20 @@ on Ubuntu, the Windows zip smoke-tested on Windows Server 2025, the Android
 APK in the emulator, the macOS disk image and the iOS shell on Apple
 Silicon. CI never holds the release key.
 
-1. Bump `version` in `Cargo.toml`, commit, tag `v<version>`, push the tag.
+1. Update `CHANGELOG.md`: rename `## Unreleased` to `## [<version>] - <date>`,
+   add its link at the bottom, start a new empty `## Unreleased` above it,
+   and write the blog post under `website/src/posts/` from the same list.
+2. Bump `version` in `Cargo.toml`, commit, tag `v<version>`, push the tag.
    CI builds every platform, assembles the download set
    (`website/assemble-release.sh`: manifest, source archive, an unsigned
    `SHA256SUMS`) and attaches it to a draft GitHub release.
-2. When the run is green, where the release key is:
+3. When the run is green, where the release key is:
    `VARSTO_RELEASE_KEY=/path/to/release-key.pem website/publish-ci-release.sh v<version> --publish`
    It downloads the run's download set, checks every file against
    `SHA256SUMS`, signs it, uploads `SHA256SUMS` and `SHA256SUMS.sig` to the
    GitHub release (the second channel) and publishes it, puts the run's
    screenshots on the website and deploys the site.
-3. `website/deploy.sh` refuses to publish a `SHA256SUMS` whose signature does
+4. `website/deploy.sh` refuses to publish a `SHA256SUMS` whose signature does
    not verify against `release-key.pub` (`scripts/sign-release.sh --verify`).
 
 Building by hand still works: `website/build-release.sh` (Linux, Windows,
