@@ -62,6 +62,7 @@ pub mod storage;
 pub mod storage_settings;
 pub mod strongroom;
 pub mod thumbs;
+pub mod transmission;
 pub mod util;
 pub mod vault;
 
