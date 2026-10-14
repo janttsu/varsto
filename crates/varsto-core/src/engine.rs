@@ -223,10 +223,19 @@ fn now_secs() -> i64 {
         .unwrap_or(0)
 }
 
+/// `clock.json`: the end of this device's current reservation of logical
+/// clock values (every value up to `lamport` is taken or reserved). Ticks
+/// are handed out from memory; the file is written once per
+/// `CLOCK_RESERVE` values (see `Engine::tick`).
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
 struct Clock {
     lamport: u64,
 }
+
+/// Logical clock values reserved in `clock.json` at a time. A crash or a
+/// process exit wastes at most the unused rest of the reservation, which is
+/// harmless: Lamport values only need to grow and never repeat.
+const CLOCK_RESERVE: u64 = 1000;
 
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
 struct DeviceCache {
@@ -669,7 +678,13 @@ pub struct Engine {
     config: Config,
     keyring: Keyring,
     ledger: LedgerStore,
+    /// The current logical clock value (in memory, see `tick`).
     clock: Clock,
+    /// The end of the reservation written to `clock.json`: values up to it
+    /// are this process's to hand out without touching the file.
+    clock_reserved: u64,
+    /// How many times `clock.json` was written by this engine (tests).
+    clock_writes: u64,
     devices: DeviceCache,
     pending: Vec<Event>,
     forked_self: bool,
@@ -1155,6 +1170,8 @@ impl Engine {
             keyring: Keyring::default(),
             ledger: LedgerStore::open(&home.join("ledger"))?,
             clock: Clock::default(),
+            clock_reserved: 0,
+            clock_writes: 0,
             devices: DeviceCache::default(),
             pending: Vec::new(),
             forked_self: false,
@@ -1367,6 +1384,7 @@ impl Engine {
         let keyring = Keyring::load(home, &keys, &vault.vault_id, &vault.device_id)?;
         let epochs = membership::VaultEpochs::load(home, &keys, &vault.vault_id, &vault.device_id)?;
         let removal = util::read_json(&home.join("removed.json")).ok();
+        let clock: Clock = util::read_json_or_default(&home.join("clock.json"))?;
         let mut engine = Engine {
             peers: None,
             snapshot_sink: None,
@@ -1377,7 +1395,11 @@ impl Engine {
             unlocked: BTreeMap::new(),
             config: Config::load(home)?,
             ledger: LedgerStore::open(&home.join("ledger"))?,
-            clock: util::read_json_or_default(&home.join("clock.json"))?,
+            clock: clock.clone(),
+            // The file holds the end of the last reservation: the values
+            // below it may have been handed out before the last exit.
+            clock_reserved: clock.lamport,
+            clock_writes: 0,
             devices: util::read_json_or_default(&home.join("devices.json"))?,
             home: home.to_path_buf(),
             vault,
@@ -1475,20 +1497,55 @@ impl Engine {
         Ok(dir)
     }
 
+    /// The next logical clock value. The clock lives in memory; `clock.json`
+    /// holds the end of a reservation of `CLOCK_RESERVE` values and is
+    /// written (and fsynced) only when the reservation is used up, not on
+    /// every tick. A restart continues after the reserved end, so no value
+    /// is handed out twice; the unused rest of a reservation is wasted,
+    /// which Lamport ordering does not mind.
     fn tick(&mut self) -> Result<u64> {
-        // Another process on this device (the command line beside the
-        // background service) may have ticked meanwhile: go on from the
-        // higher of the two, so no value is ever handed out twice.
-        if let Ok(disk) = util::read_json::<Clock>(&self.home.join("clock.json")) {
-            self.clock.lamport = self.clock.lamport.max(disk.lamport);
+        if self.clock.lamport >= self.clock_reserved {
+            self.reserve_clock()?;
         }
         self.clock.lamport = self
             .clock
             .lamport
             .checked_add(1)
             .ok_or_else(|| anyhow!("the logical clock of this vault is exhausted"))?;
-        util::write_json(&self.home.join("clock.json"), &self.clock)?;
         Ok(self.clock.lamport)
+    }
+
+    /// Reserve the next `CLOCK_RESERVE` values in `clock.json`. Another
+    /// process on this device (the command line beside the background
+    /// service) may have reserved values meanwhile: the new reservation
+    /// starts after the higher of its end and our own value, so the two
+    /// processes never hand out the same value.
+    fn reserve_clock(&mut self) -> Result<()> {
+        let path = self.home.join("clock.json");
+        if let Ok(disk) = util::read_json::<Clock>(&path) {
+            self.clock.lamport = self.clock.lamport.max(disk.lamport);
+        }
+        let end = self
+            .clock
+            .lamport
+            .checked_add(CLOCK_RESERVE)
+            .ok_or_else(|| anyhow!("the logical clock of this vault is exhausted"))?;
+        util::write_json(&path, &Clock { lamport: end })?;
+        self.clock_reserved = end;
+        self.clock_writes += 1;
+        Ok(())
+    }
+
+    /// Tests: one tick of the logical clock.
+    #[doc(hidden)]
+    pub fn tick_clock(&mut self) -> Result<u64> {
+        self.tick()
+    }
+
+    /// Tests: how many times this engine wrote `clock.json`.
+    #[doc(hidden)]
+    pub fn clock_writes(&self) -> u64 {
+        self.clock_writes
     }
 
     /// Most a clock seen elsewhere may be ahead of ours: a device cannot
@@ -1502,7 +1559,11 @@ impl Engine {
         if seen > self.clock.lamport && seen <= self.clock.lamport.saturating_add(Self::CLOCK_LEAP)
         {
             self.clock.lamport = seen;
-            util::write_json(&self.home.join("clock.json"), &self.clock)?;
+            if seen >= self.clock_reserved {
+                // Beyond what the file reserves: the next ticks must not be
+                // reused by another process or after a restart.
+                self.reserve_clock()?;
+            }
         }
         Ok(())
     }
