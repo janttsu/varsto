@@ -4,7 +4,7 @@
 //! folder, one folder per source; see `docs/import-git-annex.md`,
 //! `docs/import-cloud.md` and `docs/import-local.md`.
 
-use crate::{confirm, fmt_bytes, passphrase, print, show, Cli};
+use crate::{confirm, fmt_bytes, passphrase, plural, print, show, Cli};
 use anyhow::Result;
 use clap::{Args, Subcommand};
 use std::io::IsTerminal;
@@ -336,8 +336,8 @@ fn cleanup_after_plan(
     }
     if !yes {
         let q = format!(
-            "Remove {} source file(s) ({}) from {}? They are stored safely and meet the folder's policy.",
-            plan.eligible,
+            "Remove {} ({}) from {}? They are stored safely and meet the folder's policy.",
+            plural(plan.eligible, "source file", "source files"),
             fmt_bytes(plan.eligible_bytes),
             plan.source
         );
@@ -393,15 +393,15 @@ fn describe_report(r: &ImportReport) -> String {
         };
         if r.kind == "git-annex" {
             out.push(format!(
-                "  imported: {} keys ({}) in {} file(s){unverified}",
-                r.imported_ids,
+                "  imported: {} ({}) in {}{unverified}",
+                plural(r.imported_ids, "key", "keys"),
                 fmt_bytes(r.imported_bytes),
-                r.imported_files
+                plural(r.imported_files, "file", "files")
             ));
         } else {
             out.push(format!(
-                "  imported: {} file(s) ({}){unverified}",
-                r.imported_files,
+                "  imported: {} ({}){unverified}",
+                plural(r.imported_files, "file", "files"),
                 fmt_bytes(r.imported_bytes)
             ));
         }
@@ -416,8 +416,8 @@ fn describe_report(r: &ImportReport) -> String {
     out.push(format!("  already imported: {} {unit}", r.already_ids));
     if r.linked_files > 0 {
         out.push(format!(
-            "  {} more path(s) for content already in the vault (nothing read)",
-            r.linked_files
+            "  {} for content already in the vault (nothing read)",
+            plural(r.linked_files, "more path", "more paths")
         ));
     }
     if !r.damaged.is_empty() {
@@ -437,9 +437,9 @@ fn describe_report(r: &ImportReport) -> String {
     }
     if r.missing_ids > 0 {
         out.push(format!(
-            "  missing here: {} {unit} in {} file(s) ({}), awaiting import",
+            "  missing here: {} {unit} in {} ({}), awaiting import",
             r.missing_ids,
-            r.missing_files,
+            plural(r.missing_files, "file", "files"),
             fmt_bytes(r.missing_bytes)
         ));
         for (i, h) in r.holders.iter().take(8).enumerate() {
@@ -476,8 +476,8 @@ fn describe_report(r: &ImportReport) -> String {
     }
     if r.mapped_on_windows > 0 {
         out.push(format!(
-            "  note: {} name(s) are kept as they are but hold characters Windows does not allow (such as : ? * or a name like CON); a Windows device shows them with look-alike characters",
-            r.mapped_on_windows
+            "  note: {}: characters Windows does not allow (such as : ? * or a name like CON) are kept as they are; a Windows device shows look-alike characters instead",
+            plural(r.mapped_on_windows, "name", "names")
         ));
     }
     if r.kept_in_varsto_count > 0 {
@@ -508,23 +508,30 @@ fn describe_cleanup(c: &ImportCleanupReport) -> String {
     let mut out = Vec::new();
     if c.applied {
         out.push(format!(
-            "Removed {} source file(s) ({}) and {} empty director{} from {}",
-            c.removed.len(),
+            "Removed {} ({}) and {} from {}",
+            plural(c.removed.len(), "source file", "source files"),
             fmt_bytes(c.removed_bytes),
-            c.dirs_removed,
-            if c.dirs_removed == 1 { "y" } else { "ies" },
+            plural(c.dirs_removed, "empty directory", "empty directories"),
             c.source
         ));
     } else {
         out.push(format!(
-            "{} source file(s) ({}) in {} can be removed now",
-            c.eligible,
+            "{} ({}) in {} can be removed now",
+            plural(c.eligible, "source file", "source files"),
             fmt_bytes(c.eligible_bytes),
             c.source
         ));
     }
     if c.waiting_count > 0 {
-        out.push(format!("{} file(s) stay for now:", c.waiting_count));
+        out.push(format!(
+            "{} {} for now:",
+            plural(c.waiting_count, "file", "files"),
+            if c.waiting_count == 1 {
+                "stays"
+            } else {
+                "stay"
+            }
+        ));
         for w in c.waiting.iter().take(30) {
             out.push(format!("  {}: {}", show(&w.path), w.reason));
         }
@@ -546,19 +553,19 @@ fn describe_status(list: &Vec<ImportStatus>) -> String {
         out.push(format!("{} ({} import of {})", s.folder, s.kind, s.source));
         if s.kind == "git-annex" {
             out.push(format!(
-                "  {} file(s), {} keys: {} imported, {} missing ({} of {}), {} file(s) awaiting import",
-                s.files_total,
-                s.ids_total,
+                "  {}, {}: {} imported, {} missing ({} of {}), {} awaiting import",
+                plural(s.files_total, "file", "files"),
+                plural(s.ids_total, "key", "keys"),
                 s.ids_imported,
                 s.ids_missing,
                 fmt_bytes(s.bytes_missing),
                 fmt_bytes(s.bytes_total),
-                s.files_awaiting
+                plural(s.files_awaiting, "file", "files")
             ));
         } else {
             out.push(format!(
-                "  {} file(s) ({}): {} imported, {} awaiting import",
-                s.files_total,
+                "  {} ({}): {} imported, {} awaiting import",
+                plural(s.files_total, "file", "files"),
                 fmt_bytes(s.bytes_total),
                 s.ids_imported,
                 s.files_awaiting
@@ -604,8 +611,8 @@ fn describe_status(list: &Vec<ImportStatus>) -> String {
         }
         if s.removed_files > 0 {
             out.push(format!(
-                "  removed from the source: {} file(s), {}",
-                s.removed_files,
+                "  removed from the source: {}, {}",
+                plural(s.removed_files, "file", "files"),
                 fmt_bytes(s.removed_bytes)
             ));
         }
@@ -637,13 +644,16 @@ fn describe_missing(list: &[MissingFile]) -> String {
 fn describe_verify(v: &ImportVerify) -> String {
     let mut out = vec![if v.complete {
         format!(
-            "{}: complete. All {} file(s) are imported, on storages, and the policy is met; the source is no longer needed by Varsto.",
-            v.folder, v.files_total
+            "{}: complete. All {} are imported, on storages, and the policy is met; the source is no longer needed by Varsto.",
+            v.folder,
+            plural(v.files_total, "file", "files")
         )
     } else {
         format!(
-            "{}: not complete yet ({} of {} file(s) imported and unchanged).",
-            v.folder, v.files_ok, v.files_total
+            "{}: not complete yet ({} of {} imported and unchanged).",
+            v.folder,
+            v.files_ok,
+            plural(v.files_total, "file", "files")
         )
     }];
     for r in &v.reasons {

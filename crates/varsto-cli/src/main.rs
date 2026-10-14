@@ -1728,13 +1728,13 @@ fn url_escape(s: &str) -> String {
 /// `varsto changes` as lines, newest first.
 fn changes_text(r: &varsto_core::engine::ChangesReport) -> String {
     let mut out = format!(
-        "{}{}: {} change(s){}",
+        "{}{}: {}{}",
         r.folder,
         r.path
             .as_ref()
             .map(|p| format!(" {}{p}", if r.file { "" } else { "under " }))
             .unwrap_or_default(),
-        r.changes.len(),
+        plural(r.changes.len(), "change", "changes"),
         if r.truncated {
             " (more with --limit 0)"
         } else {
@@ -1788,8 +1788,8 @@ fn kept_aside_text(paths: &[String]) -> String {
     }
     let shown: Vec<&str> = paths.iter().take(5).map(|p| p.as_str()).collect();
     format!(
-        " ({} file(s) moved to {}/ in the device directory or put back: {}{})",
-        paths.len(),
+        " ({} moved to {}/ in the device directory or put back: {}{})",
+        plural(paths.len(), "file", "files"),
         varsto_core::engine::KEPT_ASIDE_DIR,
         shown.join(", "),
         if paths.len() > shown.len() {
@@ -2120,6 +2120,14 @@ fn renamed_note(renamed: &[String]) -> String {
             renamed.join(", ")
         )
     }
+}
+
+/// A count with its noun: "1 file", "3 files".
+fn plural<N>(n: N, one: &str, many: &str) -> String
+where
+    N: Copy + PartialEq + From<u8> + std::fmt::Display,
+{
+    format!("{n} {}", if n == N::from(1) { one } else { many })
 }
 
 fn fmt_bytes(n: u64) -> String {
@@ -4419,8 +4427,8 @@ fn run(cli: &Cli) -> Result<()> {
                         ));
                     }
                     out.push_str(&format!(
-                        "\nnew key sealed to {} member(s) and open token(s)",
-                        r.grants_sealed
+                        "\nnew key sealed to {} (members and open tokens)",
+                        plural(r.grants_sealed, "recipient", "recipients")
                     ));
                     if !r.grants_pending.is_empty() {
                         out.push_str(&format!(
@@ -7038,7 +7046,10 @@ fn p2p_status(engine: &Engine, home: &std::path::Path, json: bool) -> Result<()>
                 if r.relay_via.is_empty() {
                     String::new()
                 } else {
-                    format!(", relays via {} device(s)", r.relay_via.len())
+                    format!(
+                        ", relays via {}",
+                        plural(r.relay_via.len(), "device", "devices")
+                    )
                 }
             ))
             .unwrap_or_default()

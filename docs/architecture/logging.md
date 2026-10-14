@@ -1,5 +1,7 @@
 # Logging
 
+Status: implemented; section 45 of [the specification](../spec/alpha-0-format.md) records what is built.
+
 Every Varsto program (background service, CLI, tray, desktop app, MCP server, mobile library, app shells) keeps a **local debug log, on by default at level `debug`**, so that a problem can be investigated after the fact on the device where it happened. The log is for the owner of the device: it stays on that device and is never uploaded. Logging must never weaken the security model: the things that protect the data never appear in it.
 
 ## Where

@@ -1,5 +1,7 @@
 # Varsto and AI assistants (MCP)
 
+Status: implemented; sections 13 and 37 of [the specification](spec/alpha-0-format.md) record what is built.
+
 This page is for two readers: **you**, setting up an assistant, and **the assistant** (a local LLM or a cloud model) that works with your files through Varsto. The server sends a short version of it to the model when a client connects (the `instructions` of MCP `initialize`).
 
 ## What the server is
