@@ -21,7 +21,7 @@ It never hands out file contents. The assistant reads synced plain files itself,
 ```sh
 varsto mcp                      # stdio; your MCP client runs this command
 varsto --home DIR mcp           # another device directory (also VARSTO_HOME)
-varsto mcp --key vmk_...        # with a scoped key (also VARSTO_MCP_KEY), see below
+VARSTO_MCP_KEY=vmk_... varsto mcp   # with a scoped key (or --key-file <file>), see below
 ```
 
 Where the data comes from:

@@ -1,5 +1,6 @@
 {
  "strings": {
+  "At least 12 characters": "Minst 12 tecken",
   "'s request?": "s begäran?",
   ") is cut off at once: their ledger entries from now on are ignored, the other devices refuse their peer connections, and the vault gets new keys that only the remaining devices receive. What they could read until now they can still read, and their storage credentials work until you change them at the provider. Remove and wipe also orders their devices to delete their keys, sync state and folder contents the next time they reach a storage. The log records who did this. This cannot be undone.": ") stängs ute omedelbart: deras poster i liggaren ignoreras från och med nu, de andra enheterna vägrar deras peer-anslutningar och valvet får nya nycklar som bara de återstående enheterna tar emot. Det de hittills har kunnat läsa kan de fortfarande läsa, och deras inloggningsuppgifter till lagringsplatserna fungerar tills du ändrar dem hos leverantören. Ta bort och rensa beordrar dessutom deras enheter att radera sina nycklar, sitt synkroniseringstillstånd och mapparnas innehåll nästa gång de når en lagringsplats. Loggen registrerar vem som gjorde detta. Detta kan inte ångras.",
   "), or remove it from the vault on every device.": "), eller ta bort den från valvet på alla enheter.",
@@ -909,13 +910,13 @@
   "Install Varsto on the new computer": "Installera Varsto på den nya datorn",
   "Download Varsto from {site} and unpack it. Check the download against the signed checksums before you trust it:": "Ladda ned Varsto från {site} och packa upp det. Kontrollera nedladdningen mot de signerade kontrollsummorna innan du litar på den:",
   "Only shares of the kit? Rebuild the words": "Bara delar av orden? Återskapa orden",
-  "With two of the three shares this prints the 24 words.": "Med två av de tre delarna skriver detta ut de 24 orden.",
+  "With two of the three shares this prints the 24 words. The command asks for the shares, one per line and without echo, so they stay out of the shell history.": "Med två av de tre delarna skriver detta ut de 24 orden. Kommandot frågar efter delarna, en per rad och utan eko, så att de inte hamnar i skalets historik.",
   "Join the vault with the recovery words": "Anslut till valvet med återställningsorden",
   "Through bucket {bucket} (storage {storage}). Varsto reads the secret access key from the variable VARSTO_S3_SECRET; the first line sets it without showing it or keeping it in the shell history (bash, zsh).": "Genom bucket {bucket} (lagringsplats {storage}). Varsto läser den hemliga åtkomstnyckeln från variabeln VARSTO_S3_SECRET; den första raden sätter den utan att visa den eller spara den i skalets historik (bash, zsh).",
   "Through the directory of storage {storage}: mount the disk, NAS or share first. It was at {path}; give the path it has on the new device.": "Genom katalogen för lagringsplatsen {storage}: montera disken, NAS:en eller resursen först. Den låg på {path}; ange sökvägen den har på den nya enheten.",
   "Joining needs a directory or a bucket. Mount the rclone remote {remote} as a directory first (`rclone mount`), join through it, then add the remote as a storage and remove the directory storage.": "För att ansluta behövs en katalog eller en bucket. Montera rclone-fjärrplatsen {remote} som en katalog först (`rclone mount`), anslut genom den, lägg sedan till fjärrplatsen som lagringsplats och ta bort kataloglagringsplatsen.",
   "This vault has no storage a new device can join through yet: add a bucket or a directory outside this device.": "Det här valvet har ännu ingen lagringsplats som en ny enhet kan ansluta genom: lägg till en bucket eller en katalog utanför den här enheten.",
-  "Varsto asks for a passphrase for the new device. The words stay in the shell history: clear it afterwards.": "Varsto frågar efter en lösenfras för den nya enheten. Orden blir kvar i skalets historik: rensa den efteråt.",
+  "Varsto asks for the 24 words and then for a passphrase for the new device (at least 12 characters). Neither goes on the command line, so nothing stays in the shell history.": "Varsto frågar efter de 24 orden och sedan efter en lösenfras för den nya enheten (minst 12 tecken). Inget av dem hamnar på kommandoraden, så ingenting blir kvar i skalets historik.",
   "Organization «{org}»": "Organisationen «{org}»",
   "A device that joins with the words reads everything, but the other devices ignore what it writes until an administrator adds it to the organization. If an administrator device survives, add the new device there:": "En enhet som ansluter med orden läser allt, men de andra enheterna ignorerar det den skriver tills en administratör lägger till den i organisationen. Om en administratörsenhet finns kvar, lägg till den nya enheten där:",
   "If no administrator device is left, the root words can appoint an administrator only among devices already in the organization; the data stays readable with the recovery words.": "Om ingen administratörsenhet finns kvar kan rotorden bara utse en administratör bland enheter som redan finns i organisationen; data förblir läsbara med återställningsorden.",
@@ -1515,7 +1516,8 @@
   "Attach disk {disk} to continue moving {folder}": "Anslut disken {disk} för att fortsätta flytta {folder}",
   "Attach a new disk to continue moving {folder}": "Anslut en ny disk för att fortsätta flytta {folder}",
   "{left} of {folder} are still on {from}. The move to {to} stops when the pool has no room and carries on by itself when a disk is attached.": "{left} av {folder} ligger kvar på {from}. Flytten till {to} stannar när poolen saknar plats och fortsätter av sig själv när en disk ansluts.",
-  "Plug the disk in. Nothing else is needed; `varsto move status` shows how far the move has come.": "Anslut disken. Inget mer behövs; `varsto move status` visar hur långt flytten har kommit."
+  "Plug the disk in. Nothing else is needed; `varsto move status` shows how far the move has come.": "Anslut disken. Inget mer behövs; `varsto move status` visar hur långt flytten har kommit.",
+  "The administrator command asks for the 24 root words without echo.": "Administratörskommandot frågar efter de 24 rotorden utan eko."
  },
  "patterns": [
   [

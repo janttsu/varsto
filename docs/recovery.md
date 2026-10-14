@@ -45,8 +45,8 @@ Test the package once a year: install Varsto on a spare computer or a virtual ma
 The guide gives the exact commands for your vault. In outline:
 
 1. Install Varsto from the download page and check the download with `varsto verify-release`.
-2. If you kept shares, rebuild the words: `varsto recovery combine --check <key check> "<index>: <words>" "<index>: <words>"` (the key check is printed on the kit; with it a share from another kit or a copying mistake is caught).
-3. Join through a bucket or a directory that holds the vault: `varsto join --words "<24 words>" ...`.
+2. If you kept shares, rebuild the words: `varsto recovery combine --check <key check>` (it asks for two shares, one `<index>: <words>` per line, or reads them from standard input or `--file`) (the key check is printed on the kit; with it a share from another kit or a copying mistake is caught).
+3. Join through a bucket or a directory that holds the vault: `varsto join --storage-path ... ` (or the `--s3-*` options); it asks for the 24 words without echo. `VARSTO_VAULT_KEY` or `--key-file` supply them in scripts; they are never taken from the command line.
 4. Add the other storages under the same names (`varsto storage add-s3`, `add-rclone`, `add-local`, `add-pool`).
 5. Connect the pool disks one at a time (`varsto disk insert` on Linux).
 6. Attach the folders (`varsto folder attach <folder> <directory>`), unlock Strongroom folders with a security key, restore backups (`varsto backup restore`).

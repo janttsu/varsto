@@ -179,7 +179,7 @@ pub fn kit_text(vault_id: &str, key_hex: &str, shares: Option<(u8, Vec<Share>)>)
     t.push_str(
         "Keep this on paper or metal, in more than one place, never in a photo or a cloud note.\n",
     );
-    t.push_str("Test it once a year: `varsto join --words \"...\"` on a spare device.\n\n");
+    t.push_str("Test it once a year: `varsto join` (it asks for the words) on a spare device.\n\n");
     for row in numbered.chunks(4) {
         t.push_str(&row.join("   "));
         t.push('\n');
@@ -207,7 +207,7 @@ pub fn kit_text(vault_id: &str, key_hex: &str, shares: Option<(u8, Vec<Share>)>)
             }
         }
         t.push_str(
-            "\nRebuild: varsto recovery combine --check <key check> \"<index>: <24 words>\" \"<index>: <24 words>\"\n",
+            "\nRebuild: varsto recovery combine --check <key check>   (it asks for two shares, one \"<index>: <24 words>\" per line)\n",
         );
     }
     Ok(t)

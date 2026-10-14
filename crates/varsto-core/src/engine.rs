@@ -903,6 +903,7 @@ impl Engine {
     }
 
     fn init_inner(home: &Path, device_name: &str, passphrase: &str) -> Result<(Engine, String)> {
+        crypto::check_passphrase(passphrase)?;
         ensure_no_vault(home)?;
         util::private_home(home)?;
         let keys = Keys {
@@ -989,6 +990,7 @@ impl Engine {
         secret: Option<String>,
         signer: Option<crypto::SigningKey>,
     ) -> Result<Engine> {
+        crypto::check_passphrase(passphrase)?;
         ensure_no_vault(home)?;
         let backend = storage.open_with(&|_| secret.clone())?;
         let meta_bytes = backend.get(VaultMeta::STORAGE_KEY)?.ok_or_else(|| {
@@ -1295,6 +1297,7 @@ impl Engine {
         storage: StorageSpec,
         secret: Option<String>,
     ) -> Result<Engine> {
+        crypto::check_passphrase(passphrase)?;
         ensure_no_vault(home)?;
         let backend = storage.open_with(&|_| secret.clone())?;
         let meta: VaultMeta = serde_json::from_slice(

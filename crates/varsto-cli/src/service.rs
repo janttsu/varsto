@@ -1625,19 +1625,39 @@ pub fn remember_passphrase(home: &Path, pass: &str) -> Result<String> {
     let account = home.display().to_string();
     #[cfg(target_os = "macos")]
     {
-        let out = std::process::Command::new("security")
-            .args([
-                "add-generic-password",
-                "-U",
-                "-s",
-                "varsto",
-                "-a",
-                &account,
-                "-w",
-                pass,
-            ])
-            .output()?;
-        if !out.status.success() {
+        // `security -i` reads its commands from standard input, so the
+        // passphrase is in no process argument (`ps` shows arguments of every
+        // process of the user). Inside a command, double quotes and
+        // backslashes are escaped.
+        use std::io::Write;
+        if pass.contains(['\n', '\r']) {
+            return Err(anyhow!(
+                "the passphrase has a line break; it cannot be kept in the keychain"
+            ));
+        }
+        let quote = |s: &str| format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""));
+        let mut child = std::process::Command::new("security")
+            .arg("-i")
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()?;
+        {
+            let mut stdin = child
+                .stdin
+                .take()
+                .ok_or_else(|| anyhow!("security: no stdin"))?;
+            writeln!(
+                stdin,
+                "add-generic-password -U -s varsto -a {} -w {}",
+                quote(&account),
+                quote(pass)
+            )?;
+        }
+        let out = child.wait_with_output()?;
+        // The interactive mode answers on stdout/stderr with the command's
+        // errors; its exit code is 0 after end of input unless the command failed.
+        if !out.status.success() || String::from_utf8_lossy(&out.stderr).contains("security:") {
             return Err(anyhow!(
                 "security: {}",
                 String::from_utf8_lossy(&out.stderr).trim()

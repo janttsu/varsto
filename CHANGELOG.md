@@ -28,6 +28,12 @@ On `main` after 0.0.1-alpha.13; spec sections 32 to 59.
 - Strongroom: a key given by hand must match the key commitment published
   with the folder (`check_hex`), and the libfido2 tools always ask for the
   PIN (`strongroom --uv` also requires user verification) (spec 17, 59).
+- Device passphrases need at least 12 characters, and no secret is taken from
+  the command line any more: `join --vault-key/--words`,
+  `--s3-secret-access-key`, `storage add-s3 --secret-access-key`,
+  `mcp --key`, the shares of `recovery combine` and `org admin --root-words`
+  are replaced by prompts, files, environment variables and standard input;
+  the macOS keychain gets the passphrase on standard input (spec 28, 59).
 - A malformed `%` escape in a request no longer kills the API worker thread.
 
 ### Added

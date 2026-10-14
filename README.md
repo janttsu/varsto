@@ -38,7 +38,7 @@ varsto desktop                             # local graphical interface in your b
 export VARSTO_PASSPHRASE='a long passphrase'
 varsto --home ~/.varsto-laptop init --name laptop            # prints the vault key once
 varsto --home ~/.varsto-laptop storage add-local box /mnt/box
-varsto --home ~/.varsto-laptop storage add-s3 cloud --endpoint https://s3.fr-par.scw.cloud --region fr-par --bucket my-bucket --access-key-id AK... --secret-access-key ...
+varsto --home ~/.varsto-laptop storage add-s3 cloud --endpoint https://s3.fr-par.scw.cloud --region fr-par --bucket my-bucket --access-key-id AK...   # asks for the secret key; VARSTO_S3_SECRET or --secret-file in scripts
 varsto --home ~/.varsto-laptop storage add-rclone hetzner storagebox:varsto   # any rclone remote
 varsto --home ~/.varsto-laptop folder add docs ~/Documents/synced
 varsto --home ~/.varsto-laptop sync
@@ -48,7 +48,7 @@ varsto update --check                      # self-update from the download page 
 varsto transfers --watch                   # uploads, downloads and peer traffic running now
 
 # on another device that can reach the same storage:
-varsto --home ~/.varsto-desk join --name desk --vault-key <hex> --storage-path /mnt/box
+varsto --home ~/.varsto-desk join --name desk --storage-path /mnt/box   # asks for the vault key (hex or the 24 words)
 varsto --home ~/.varsto-desk folder attach docs ~/synced
 varsto --home ~/.varsto-desk sync
 varsto --home ~/.varsto-desk status --json

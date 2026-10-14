@@ -112,12 +112,12 @@ enum Cmd {
         /// Name of this device (default: the computer's name).
         #[arg(long, default_value_t = default_device_name())]
         name: String,
-        /// Vault key in hex (from `init`), or use --words.
-        #[arg(long, conflicts_with = "words")]
-        vault_key: Option<String>,
-        /// The 24 words of the recovery kit instead of the hex key.
-        #[arg(long)]
-        words: Option<String>,
+        /// File with the vault key (64 hex digits, from `init`) or the 24 words
+        /// of the recovery kit. Without it Varsto reads VARSTO_VAULT_KEY, then
+        /// standard input when it is not a terminal, then asks (hidden). The
+        /// key is never taken from the command line.
+        #[arg(long, value_name = "FILE")]
+        key_file: Option<PathBuf>,
         /// Name for the storage on this device.
         #[arg(long, default_value = "primary")]
         storage_name: String,
@@ -135,9 +135,10 @@ enum Cmd {
         s3_prefix: String,
         #[arg(long)]
         s3_access_key_id: Option<String>,
-        /// Secret access key; read from VARSTO_S3_SECRET if omitted.
-        #[arg(long, env = "VARSTO_S3_SECRET", hide_env_values = true)]
-        s3_secret_access_key: Option<String>,
+        /// File with the secret access key. Without it Varsto reads
+        /// VARSTO_S3_SECRET, then asks on the terminal (hidden).
+        #[arg(long, value_name = "FILE")]
+        s3_secret_file: Option<PathBuf>,
         /// Allow an http:// endpoint outside this computer (no transport encryption).
         #[arg(long, requires = "s3_endpoint")]
         s3_insecure_http: bool,
@@ -457,10 +458,11 @@ enum Cmd {
     /// MCP server for AI assistants (stdio), with per-folder grants and
     /// scoped keys. See docs/mcp.md in the repository (https://github.com/janttsu/varsto).
     Mcp {
-        /// Talk to the running service with this MCP key (from `varsto mcp
-        /// key create`); its scope replaces the grants file.
-        #[arg(long, env = "VARSTO_MCP_KEY", hide_env_values = true)]
-        key: Option<String>,
+        /// File with the MCP key (from `varsto mcp key create`); its scope
+        /// replaces the grants file. Without it Varsto reads VARSTO_MCP_KEY.
+        /// The key is never taken from the command line.
+        #[arg(long, value_name = "FILE")]
+        key_file: Option<PathBuf>,
         #[command(subcommand)]
         cmd: Option<McpCmd>,
     },
@@ -553,10 +555,14 @@ enum RecoveryCmd {
         #[arg(long)]
         shares: bool,
     },
-    /// Rebuild the vault key from shares (`"<index>: <24 words>"` each).
+    /// Rebuild the vault key from shares (`<index>: <24 words>`, one per line).
+    /// The shares are read from the files given with --file, else from standard
+    /// input when it is not a terminal, else asked for (hidden); they are never
+    /// taken from the command line.
     Combine {
-        #[arg(required = true, num_args = 2..)]
-        shares: Vec<String>,
+        /// A file with one or more shares, one per line (repeatable).
+        #[arg(long = "file", value_name = "FILE")]
+        files: Vec<PathBuf>,
         /// The "Key check" printed on the kit: the rebuilt key is refused when it does not match.
         #[arg(long)]
         check: Option<String>,
@@ -685,15 +691,18 @@ enum OrgAdminCmd {
     /// Make a device of the organization an administrator.
     Add {
         device: String,
-        /// The 24 root words printed when the organization was created.
-        #[arg(long)]
-        root_words: String,
+        /// File with the 24 root words printed when the organization was
+        /// created. Without it Varsto reads VARSTO_ORG_ROOT_WORDS, then standard
+        /// input when it is not a terminal, then asks (hidden).
+        #[arg(long, value_name = "FILE")]
+        root_words_file: Option<PathBuf>,
     },
     /// Take the administrator role from a device (it stays a member).
     Remove {
         device: String,
-        #[arg(long)]
-        root_words: String,
+        /// File with the 24 root words (see `org admin add`).
+        #[arg(long, value_name = "FILE")]
+        root_words_file: Option<PathBuf>,
     },
 }
 
@@ -1024,9 +1033,10 @@ enum ShareCmd {
         s3_prefix: String,
         #[arg(long)]
         s3_access_key_id: Option<String>,
-        /// Secret access key; read from VARSTO_S3_SECRET if omitted.
-        #[arg(long, env = "VARSTO_S3_SECRET", hide_env_values = true)]
-        s3_secret_access_key: Option<String>,
+        /// File with the secret access key. Without it Varsto reads
+        /// VARSTO_S3_SECRET, then asks on the terminal (hidden).
+        #[arg(long, value_name = "FILE")]
+        s3_secret_file: Option<PathBuf>,
         /// Allow an http:// endpoint outside this computer (no transport encryption).
         #[arg(long, requires = "s3_endpoint")]
         s3_insecure_http: bool,
@@ -1123,9 +1133,11 @@ enum StorageCmd {
         prefix: String,
         #[arg(long)]
         access_key_id: String,
-        /// Secret access key; read from VARSTO_S3_SECRET if omitted. Stored encrypted in secrets.enc.
-        #[arg(long, env = "VARSTO_S3_SECRET", hide_env_values = true)]
-        secret_access_key: String,
+        /// File with the secret access key. Without it Varsto reads
+        /// VARSTO_S3_SECRET, then asks on the terminal (hidden). Stored
+        /// encrypted in secrets.enc; never taken from the command line.
+        #[arg(long, value_name = "FILE")]
+        secret_file: Option<PathBuf>,
         /// Use virtual-host style URLs (bucket.host) instead of path style.
         #[arg(long)]
         virtual_host: bool,
@@ -1759,6 +1771,117 @@ fn name_before_dot() -> Option<String> {
 
 fn bail_usage<T>(msg: &str) -> Result<T> {
     Err(anyhow!("{msg}"))
+}
+
+/// A secret that must not ride in the command line (it would show in `ps`,
+/// `/proc/*/cmdline` and the shell history): from a file, else from an
+/// environment variable, else from standard input when it is not a terminal
+/// (`stdin_ok`), else asked for on the terminal without echo.
+fn secret_input(
+    file: Option<&Path>,
+    env: &str,
+    prompt: &str,
+    stdin_ok: bool,
+) -> Result<zeroize::Zeroizing<String>> {
+    use std::io::{IsTerminal, Read};
+    let got = if let Some(f) = file {
+        let text = std::fs::read_to_string(f).with_context(|| format!("read {}", f.display()))?;
+        zeroize::Zeroizing::new(text)
+    } else if let Some(v) = std::env::var(env).ok().filter(|v| !v.trim().is_empty()) {
+        zeroize::Zeroizing::new(v)
+    } else if stdin_ok && !std::io::stdin().is_terminal() {
+        let mut text = zeroize::Zeroizing::new(String::new());
+        std::io::stdin()
+            .lock()
+            .take(64 * 1024)
+            .read_to_string(&mut text)
+            .context("read standard input")?;
+        text
+    } else if std::io::stdin().is_terminal() {
+        zeroize::Zeroizing::new(rpassword::prompt_password(prompt).context("read the secret")?)
+    } else {
+        bail!("no secret given: set {env}, or pass a file, or run from a terminal to be asked");
+    };
+    let trimmed = got.trim();
+    if trimmed.is_empty() {
+        bail_usage::<()>("the secret is empty")?;
+    }
+    varsto_core::logging::register_secret(trimmed);
+    Ok(zeroize::Zeroizing::new(trimmed.to_string()))
+}
+
+/// Several secret lines (the shares of `recovery combine`): from files, else
+/// standard input when it is not a terminal, else asked for line by line
+/// without echo until an empty line.
+fn secret_lines(files: &[PathBuf], prompt: &str) -> Result<Vec<zeroize::Zeroizing<String>>> {
+    use std::io::{IsTerminal, Read};
+    let mut text = zeroize::Zeroizing::new(String::new());
+    if !files.is_empty() {
+        for f in files {
+            text.push_str(
+                &std::fs::read_to_string(f).with_context(|| format!("read {}", f.display()))?,
+            );
+            text.push('\n');
+        }
+    } else if !std::io::stdin().is_terminal() {
+        std::io::stdin()
+            .lock()
+            .take(256 * 1024)
+            .read_to_string(&mut text)
+            .context("read standard input")?;
+    } else {
+        loop {
+            let line = zeroize::Zeroizing::new(
+                rpassword::prompt_password(prompt).context("read a share")?,
+            );
+            if line.trim().is_empty() {
+                break;
+            }
+            text.push_str(&line);
+            text.push('\n');
+        }
+    }
+    let out: Vec<_> = text
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .map(|l| {
+            varsto_core::logging::register_secret(l);
+            zeroize::Zeroizing::new(l.to_string())
+        })
+        .collect();
+    Ok(out)
+}
+
+/// The vault key as hex from what the user gave: 64 hex digits, or the 24
+/// recovery words.
+fn vault_key_from_text(text: &str) -> Result<zeroize::Zeroizing<String>> {
+    let t = text.trim();
+    if t.len() == 64 && t.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Ok(zeroize::Zeroizing::new(t.to_ascii_lowercase()));
+    }
+    varsto_core::recovery::key_from_words(t)
+        .context("this is neither 64 hex digits nor 24 recovery words")
+}
+
+/// The MCP key for `varsto mcp`: from `--key-file`, else `VARSTO_MCP_KEY`.
+fn mcp_key_input(file: Option<&Path>) -> Result<Option<zeroize::Zeroizing<String>>> {
+    if let Some(f) = file {
+        let text = std::fs::read_to_string(f).with_context(|| format!("read {}", f.display()))?;
+        let k = text.trim();
+        if k.is_empty() {
+            bail_usage::<()>("the MCP key file is empty")?;
+        }
+        varsto_core::logging::register_secret(k);
+        return Ok(Some(zeroize::Zeroizing::new(k.to_string())));
+    }
+    Ok(std::env::var("VARSTO_MCP_KEY")
+        .ok()
+        .filter(|k| !k.trim().is_empty())
+        .map(|k| {
+            varsto_core::logging::register_secret(k.trim());
+            zeroize::Zeroizing::new(k.trim().to_string())
+        }))
 }
 
 /// Ask a yes/no question on the terminal; without one the answer is no.
@@ -2813,10 +2936,23 @@ fn run_org(cli: &Cli, home: &Path, cmd: &OrgCmd) -> Result<()> {
             print(cli, &p, policy_text)?;
         }
         OrgCmd::Admin { cmd } => {
-            let (action, device, words) = match cmd {
-                OrgAdminCmd::Add { device, root_words } => ("add", device, root_words),
-                OrgAdminCmd::Remove { device, root_words } => ("remove", device, root_words),
+            let (action, device, file) = match cmd {
+                OrgAdminCmd::Add {
+                    device,
+                    root_words_file,
+                } => ("add", device, root_words_file),
+                OrgAdminCmd::Remove {
+                    device,
+                    root_words_file,
+                } => ("remove", device, root_words_file),
             };
+            let words = secret_input(
+                file.as_deref(),
+                "VARSTO_ORG_ROOT_WORDS",
+                "The 24 root words of the organization: ",
+                true,
+            )?;
+            let words: &str = &words;
             if via_service.is_some() {
                 call(
                     "POST",
@@ -2996,8 +3132,7 @@ fn run(cli: &Cli) -> Result<()> {
         }
         Cmd::Join {
             name,
-            vault_key,
-            words,
+            key_file,
             storage_name,
             storage_path,
             s3_bucket,
@@ -3005,15 +3140,28 @@ fn run(cli: &Cli) -> Result<()> {
             s3_region,
             s3_prefix,
             s3_access_key_id,
-            s3_secret_access_key,
+            s3_secret_file,
             s3_insecure_http,
         } => {
             let mut s3_secret: Option<String> = None;
+            // The vault key first: it may come from standard input, which the
+            // secret prompt below must not touch.
+            let key_text = secret_input(
+                key_file.as_deref(),
+                "VARSTO_VAULT_KEY",
+                "Vault key (64 hex digits) or the 24 recovery words: ",
+                true,
+            )?;
+            let key_hex = vault_key_from_text(&key_text)?;
             let spec = match (s3_bucket, storage_path) {
                 (Some(bucket), _) => {
-                    let secret = s3_secret_access_key.clone().ok_or_else(|| {
-                        anyhow!("give --s3-secret-access-key or set VARSTO_S3_SECRET")
-                    })?;
+                    let secret = secret_input(
+                        s3_secret_file.as_deref(),
+                        "VARSTO_S3_SECRET",
+                        "S3 secret access key: ",
+                        false,
+                    )?
+                    .to_string();
                     // The storage is opened before the vault exists, so the secret travels via the environment for this process.
                     let env_name = format!(
                         "VARSTO_S3_SECRET_{}",
@@ -3053,11 +3201,6 @@ fn run(cli: &Cli) -> Result<()> {
                     min_free: None,
                 },
                 (None, None) => bail_usage("give --storage-path <dir> or --s3-bucket ...")?,
-            };
-            let key_hex = match (vault_key, words) {
-                (Some(k), _) => zeroize::Zeroizing::new(k.clone()),
-                (None, Some(w)) => varsto_core::recovery::key_from_words(w)?,
-                (None, None) => bail_usage("give --vault-key <hex> or --words \"<24 words>\"")?,
             };
             let joined = Engine::join(&home, name, &passphrase()?, &key_hex, spec);
             std::env::remove_var(format!(
@@ -3148,13 +3291,19 @@ fn run(cli: &Cli) -> Result<()> {
                     bucket,
                     prefix,
                     access_key_id,
-                    secret_access_key,
+                    secret_file,
                     virtual_host,
                     insecure_http,
                     storage_class,
                     cold,
                     place,
                 } => {
+                    let secret_access_key = secret_input(
+                        secret_file.as_deref(),
+                        "VARSTO_S3_SECRET",
+                        "S3 secret access key: ",
+                        true,
+                    )?;
                     engine.add_storage_with_secret(
                         StorageSpec::S3 {
                             name: name.clone(),
@@ -3173,7 +3322,7 @@ fn run(cli: &Cli) -> Result<()> {
                             place: place.clone(),
                             allow_insecure_http: *insecure_http,
                         },
-                        Some(secret_access_key.clone()),
+                        Some(secret_access_key.to_string()),
                     )?;
                     println!("storage {name} added (secret kept in secrets.enc)");
                 }
@@ -4386,7 +4535,7 @@ fn run(cli: &Cli) -> Result<()> {
                 s3_region,
                 s3_prefix,
                 s3_access_key_id,
-                s3_secret_access_key,
+                s3_secret_file,
                 s3_insecure_http,
             } => {
                 let token = token
@@ -4420,9 +4569,15 @@ fn run(cli: &Cli) -> Result<()> {
                             place: String::new(),
                             allow_insecure_http: *s3_insecure_http,
                         },
-                        Some(s3_secret_access_key.clone().ok_or_else(|| {
-                            anyhow!("give --s3-secret-access-key or set VARSTO_S3_SECRET")
-                        })?),
+                        Some(
+                            secret_input(
+                                s3_secret_file.as_deref(),
+                                "VARSTO_S3_SECRET",
+                                "S3 secret access key: ",
+                                true,
+                            )?
+                            .to_string(),
+                        ),
                     ),
                     (None, Some(path)) => (
                         StorageSpec::LocalDir {
@@ -4858,11 +5013,18 @@ fn run(cli: &Cli) -> Result<()> {
                     None => print!("{body}"),
                 }
             }
-            RecoveryCmd::Combine { shares, check } => {
-                let parsed: Vec<varsto_core::recovery::Share> = shares
+            RecoveryCmd::Combine { files, check } => {
+                let lines = secret_lines(
+                    files,
+                    "Share (<index>: <24 words>), an empty line when done: ",
+                )?;
+                let parsed: Vec<varsto_core::recovery::Share> = lines
                     .iter()
                     .map(|s| varsto_core::recovery::Share::decode(s))
                     .collect::<Result<_>>()?;
+                if parsed.len() < 2 {
+                    bail_usage::<()>("give at least two shares")?;
+                }
                 let key = varsto_core::recovery::combine(&parsed, 2, check.as_deref())?;
                 println!("vault key: {}", key.as_str());
                 println!(
@@ -5259,8 +5421,11 @@ fn run(cli: &Cli) -> Result<()> {
                 }
             }
         }
-        Cmd::Mcp { key, cmd } => match cmd.as_ref().unwrap_or(&McpCmd::Serve) {
-            McpCmd::Serve => mcp::serve(&home, key.as_deref())?,
+        Cmd::Mcp { key_file, cmd } => match cmd.as_ref().unwrap_or(&McpCmd::Serve) {
+            McpCmd::Serve => {
+                let key = mcp_key_input(key_file.as_deref())?;
+                mcp::serve(&home, key.as_deref().map(|k| k.as_str()))?
+            }
             McpCmd::Key { cmd } => run_mcp_key(cli, &home, cmd)?,
             McpCmd::Config {
                 client,
@@ -7478,5 +7643,38 @@ mod recovery_guide_tests {
             Cli::try_parse_from(args).unwrap();
         }
         assert!(Cli::try_parse_from(["varsto", "recovery", "guide", "--format", "pdf"]).is_err());
+    }
+}
+
+#[cfg(test)]
+mod secret_input_tests {
+    use super::*;
+
+    #[test]
+    fn the_vault_key_is_hex_or_words() {
+        let hex = "ab".repeat(32);
+        assert_eq!(&*vault_key_from_text(&format!(" {hex}\n")).unwrap(), &hex);
+        assert_eq!(&*vault_key_from_text(&hex.to_uppercase()).unwrap(), &hex);
+        let words = varsto_core::recovery::words_from_key(&hex).unwrap();
+        assert_eq!(&*vault_key_from_text(&words).unwrap(), &hex);
+        assert!(vault_key_from_text("not a key").is_err());
+        assert!(vault_key_from_text(&hex[..62]).is_err());
+    }
+
+    #[test]
+    fn secrets_come_from_files_and_shares_from_lines() {
+        let dir = tempfile::tempdir().unwrap();
+        let f = dir.path().join("secret");
+        std::fs::write(&f, "  hunter2-hunter2\n").unwrap();
+        let s = secret_input(Some(&f), "VARSTO_TEST_NO_SUCH_VARIABLE", "x: ", false).unwrap();
+        assert_eq!(&*s, "hunter2-hunter2");
+        std::fs::write(&f, "\n\n").unwrap();
+        assert!(secret_input(Some(&f), "VARSTO_TEST_NO_SUCH_VARIABLE", "x: ", false).is_err());
+        let (a, b) = (dir.path().join("a"), dir.path().join("b"));
+        std::fs::write(&a, "1: one two\n\n2: three four\n").unwrap();
+        std::fs::write(&b, "3: five six\n").unwrap();
+        let lines = secret_lines(&[a, b], "share: ").unwrap();
+        let lines: Vec<&str> = lines.iter().map(|l| l.as_str()).collect();
+        assert_eq!(lines, ["1: one two", "2: three four", "3: five six"]);
     }
 }

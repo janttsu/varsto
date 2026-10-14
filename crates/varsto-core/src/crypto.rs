@@ -230,6 +230,17 @@ pub fn normalize_passphrase(passphrase: &str) -> String {
     passphrase.nfkc().collect()
 }
 
+/// Shortest device passphrase (characters after NFKC normalisation).
+pub const MIN_PASSPHRASE_CHARS: usize = 12;
+
+/// Refuse a passphrase that is too short to protect the key file.
+pub fn check_passphrase(passphrase: &str) -> Result<()> {
+    if normalize_passphrase(passphrase).chars().count() < MIN_PASSPHRASE_CHARS {
+        bail!("the passphrase must be at least {MIN_PASSPHRASE_CHARS} characters long");
+    }
+    Ok(())
+}
+
 /// Stretch a passphrase into a wrapping key. The passphrase is NFKC-normalised
 /// here and may be any length.
 pub fn passphrase_key(passphrase: &str, params: &PassphraseParams) -> Result<SecretKey> {

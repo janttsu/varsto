@@ -801,6 +801,7 @@ impl Engine {
         token: &str,
     ) -> Result<(Engine, Vec<String>, Approval)> {
         let (approval, signer) = org::open_approval(home, token)?;
+        crate::crypto::check_passphrase(passphrase)?;
         super::ensure_no_vault(home)?;
         // Pin the organization before anything is read from the storages:
         // a manifest chain under another root key is then never adopted.

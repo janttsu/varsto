@@ -3408,7 +3408,8 @@ mod tests {
                 total: 100 * GIB,
             }),
         );
-        let (mut engine, _) = Engine::init(&root.join("home"), "laptop", "pass phrase").unwrap();
+        let (mut engine, _) =
+            Engine::init(&root.join("home"), "laptop", "pass phrase 123").unwrap();
         engine
             .add_storage(StorageSpec::LocalDir {
                 name: "box".into(),
@@ -3585,7 +3586,7 @@ mod tests {
         assert!(t["text"].as_str().unwrap().contains("WHAT TO DO NEXT"));
 
         // A vault, locked.
-        let (engine, _) = Engine::init(&home, "laptop", "pass phrase").unwrap();
+        let (engine, _) = Engine::init(&home, "laptop", "pass phrase 123").unwrap();
         drop(engine);
         let h = get(&mut st, "");
         assert_eq!(h["phase"], "locked");
@@ -3593,7 +3594,7 @@ mod tests {
         assert_eq!(h["headline"]["p"]["device"], "laptop");
 
         // Open, no storage: add a storage; then a folder.
-        st.engine = Some(Engine::open(&home, "pass phrase").unwrap());
+        st.engine = Some(Engine::open(&home, "pass phrase 123").unwrap());
         let h = get(&mut st, "");
         assert_eq!(h["phase"], "ready");
         assert_eq!(h["steps"][0]["id"], "add_storage");

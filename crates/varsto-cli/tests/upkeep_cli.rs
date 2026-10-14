@@ -5,6 +5,26 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
+/// Like `ok`, with the vault key in `VARSTO_VAULT_KEY` (`join` takes it from
+/// the environment, a file or standard input, never from the command line).
+fn ok_with_key(home: &Path, key: &str, args: &[&str]) -> serde_json::Value {
+    let out = Command::new(env!("CARGO_BIN_EXE_varsto"))
+        .arg("--home")
+        .arg(home)
+        .arg("--json")
+        .args(args)
+        .env("VARSTO_PASSPHRASE", "test passphrase")
+        .env("VARSTO_VAULT_KEY", key)
+        .output()
+        .expect("run varsto");
+    assert!(
+        out.status.success(),
+        "varsto {args:?} failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    serde_json::from_str(&String::from_utf8_lossy(&out.stdout)).unwrap_or_default()
+}
+
 fn ok(home: &Path, args: &[&str]) -> serde_json::Value {
     let out = Command::new(env!("CARGO_BIN_EXE_varsto"))
         .arg("--home")
@@ -70,14 +90,13 @@ fn verify_price_and_advice_commands() {
         run["blocks_verified"], 0,
         "the writer does not verify itself"
     );
-    ok(
+    ok_with_key(
         &b,
+        &key,
         &[
             "join",
             "--name",
             "nas",
-            "--vault-key",
-            &key,
             "--storage-path",
             storage.to_str().unwrap(),
         ],

@@ -797,6 +797,7 @@ impl Keys {
         vault: &VaultId,
         device: &DeviceId,
     ) -> Result<()> {
+        crypto::check_passphrase(passphrase)?;
         let params = PassphraseParams::new();
         let wrap = crypto::passphrase_key(passphrase, &params)?;
         let material = KeyMaterial {

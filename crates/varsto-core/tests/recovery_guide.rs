@@ -175,7 +175,7 @@ fn guide_covers_every_storage_and_holds_no_secret() {
         "private",
         "backup.example",
         &nas.display().to_string(),
-        "varsto join --words \"<24 recovery words>\" --storage-name \"hot\"",
+        "varsto join --storage-name \"hot\"",
         "varsto storage add-pool \"shelf\" --place \"offsite\" --copies 2",
         "varsto strongroom unlock \"private\"",
         "restic -r \"rest:https://<user>:<password>@backup.example:8000/vault\"",

@@ -18,7 +18,8 @@ $init = & $exe --home $home1 init --name win-a --json | ConvertFrom-Json
 & $exe --home $home1 folder add docs $fa
 "hello from windows" | Set-Content "$fa\note.txt"
 & $exe --home $home1 sync
-& $exe --home $home2 join --name win-b --vault-key $init.vault_key --storage-path $st
+$env:VARSTO_VAULT_KEY = $init.vault_key
+& $exe --home $home2 join --name win-b --storage-path $st
 & $exe --home $home2 folder attach docs $fb
 & $exe --home $home2 sync
 if ((Get-Content "$fb\note.txt") -ne "hello from windows") { throw "sync across two device directories failed" }

@@ -22,6 +22,26 @@ fn varsto(home: &Path, args: &[&str]) -> (bool, String, String) {
     )
 }
 
+/// Like `ok`, with the vault key in `VARSTO_VAULT_KEY` (`join` takes it from
+/// the environment, a file or standard input, never from the command line).
+fn ok_with_key(home: &Path, key: &str, args: &[&str]) -> serde_json::Value {
+    let out = Command::new(env!("CARGO_BIN_EXE_varsto"))
+        .arg("--home")
+        .arg(home)
+        .arg("--json")
+        .args(args)
+        .env("VARSTO_PASSPHRASE", "test passphrase")
+        .env("VARSTO_VAULT_KEY", key)
+        .output()
+        .expect("run varsto");
+    assert!(
+        out.status.success(),
+        "varsto {args:?} failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    serde_json::from_str(&String::from_utf8_lossy(&out.stdout)).unwrap_or_default()
+}
+
 fn ok(home: &Path, args: &[&str]) -> serde_json::Value {
     let (success, stdout, stderr) = varsto(home, args);
     assert!(success, "varsto {:?} failed: {stderr}", args);
@@ -46,17 +66,10 @@ fn two_devices_through_the_cli() {
     let push = ok(&a, &["push", "docs"]);
     assert_eq!(push["files_changed"], 1);
 
-    ok(
+    ok_with_key(
         &b,
-        &[
-            "join",
-            "--name",
-            "phone",
-            "--vault-key",
-            &vault_key,
-            "--storage-path",
-            storage_s,
-        ],
+        &vault_key,
+        &["join", "--name", "phone", "--storage-path", storage_s],
     );
     ok(&b, &["folder", "attach", "docs", b_docs.to_str().unwrap()]);
     let sync = ok(&b, &["sync"]);
@@ -380,4 +393,108 @@ fn staged_move_jobs_through_the_cli() {
     assert_eq!(run["job"]["paths"][0], "sub");
     assert_eq!(run["job"]["keep_source"], true);
     assert_eq!(run["job"]["disks_used"][0], "data-01");
+}
+
+#[test]
+fn secrets_stay_off_the_command_line() {
+    use std::io::Write;
+    use std::process::Stdio;
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    let (a, b) = (root.join("a"), root.join("b"));
+    let storage = root.join("storage");
+    let storage_s = storage.to_str().unwrap();
+
+    // A short passphrase is refused and leaves nothing behind.
+    let short = Command::new(env!("CARGO_BIN_EXE_varsto"))
+        .arg("--home")
+        .arg(&a)
+        .args(["init", "--name", "laptop"])
+        .env("VARSTO_PASSPHRASE", "too short")
+        .output()
+        .unwrap();
+    assert!(!short.status.success());
+    assert!(String::from_utf8_lossy(&short.stderr).contains("at least 12 characters"));
+    assert!(!a.join("keys.enc").exists());
+
+    let init = ok(&a, &["init", "--name", "laptop"]);
+    let key = init["vault_key"].as_str().unwrap().to_string();
+    ok(&a, &["storage", "add-local", "box", storage_s]);
+
+    // The option that carried the key is gone.
+    let (okk, _, err) = varsto(
+        &b,
+        &[
+            "join",
+            "--name",
+            "phone",
+            "--vault-key",
+            &key,
+            "--storage-path",
+            storage_s,
+        ],
+    );
+    assert!(!okk);
+    assert!(err.contains("--vault-key"), "{err}");
+    let (okk, _, _) = varsto(
+        &b,
+        &[
+            "join",
+            "--name",
+            "phone",
+            "--words",
+            "a b c",
+            "--storage-path",
+            storage_s,
+        ],
+    );
+    assert!(!okk);
+
+    // Without a terminal, `join` reads the key from standard input.
+    let mut child = Command::new(env!("CARGO_BIN_EXE_varsto"))
+        .arg("--home")
+        .arg(&b)
+        .arg("--json")
+        .args(["join", "--name", "phone", "--storage-path", storage_s])
+        .env("VARSTO_PASSPHRASE", "test passphrase")
+        .env_remove("VARSTO_VAULT_KEY")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(format!("{key}\n").as_bytes())
+        .unwrap();
+    let out = child.wait_with_output().unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(b.join("keys.enc").exists());
+
+    // A wrong key on standard input is an error, not a hang.
+    let c = root.join("c");
+    let mut child = Command::new(env!("CARGO_BIN_EXE_varsto"))
+        .arg("--home")
+        .arg(&c)
+        .args(["join", "--name", "tablet", "--storage-path", storage_s])
+        .env("VARSTO_PASSPHRASE", "test passphrase")
+        .env_remove("VARSTO_VAULT_KEY")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"not a key\n")
+        .unwrap();
+    assert!(!child.wait_with_output().unwrap().status.success());
 }

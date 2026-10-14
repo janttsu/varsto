@@ -8,7 +8,8 @@ Expand-Archive -Force varsto-windows.zip -DestinationPath .\unzipped
 $exe = Join-Path (Get-ChildItem .\unzipped | Select-Object -First 1).FullName "varsto.exe"
 $env:VARSTO_PASSPHRASE = "integration-test-passphrase"; $env:VARSTO_S3_SECRET = $S3Secret
 $H = "C:\it\home"; New-Item -ItemType Directory -Force C:\it\files | Out-Null
-& $exe --home $H join --name windows --vault-key $VaultKey --storage-name cloud --s3-endpoint $S3Endpoint --s3-region $S3Region --s3-bucket $S3Bucket --s3-access-key-id $S3Key
+$env:VARSTO_VAULT_KEY = $VaultKey
+& $exe --home $H join --name windows --storage-name cloud --s3-endpoint $S3Endpoint --s3-region $S3Region --s3-bucket $S3Bucket --s3-access-key-id $S3Key
 & $exe --home $H folder attach shared C:\it\files
 & $exe --home $H sync
 if (-not (Test-Path C:\it\files\from-linux.bin)) { throw "file from Linux did not arrive through S3" }
