@@ -753,7 +753,7 @@ pub fn build(inputs: &Inputs) -> RecoveryGuide {
             &[],
         )],
         commands: vec![
-            "varsto recovery combine \"<index>: <24 words>\" \"<index>: <24 words>\"".into(),
+            "varsto recovery combine --check <key check> \"<index>: <24 words>\" \"<index>: <24 words>\"".into(),
         ],
     });
 

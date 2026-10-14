@@ -45,7 +45,7 @@ Test the package once a year: install Varsto on a spare computer or a virtual ma
 The guide gives the exact commands for your vault. In outline:
 
 1. Install Varsto from the download page and check the download with `varsto verify-release`.
-2. If you kept shares, rebuild the words: `varsto recovery combine "<index>: <words>" "<index>: <words>"`.
+2. If you kept shares, rebuild the words: `varsto recovery combine --check <key check> "<index>: <words>" "<index>: <words>"` (the key check is printed on the kit; with it a share from another kit or a copying mistake is caught).
 3. Join through a bucket or a directory that holds the vault: `varsto join --words "<24 words>" ...`.
 4. Add the other storages under the same names (`varsto storage add-s3`, `add-rclone`, `add-local`, `add-pool`).
 5. Connect the pool disks one at a time (`varsto disk insert` on Linux).

@@ -41,7 +41,8 @@ rqrr = { version = "0.11.0", default-features = false }
 data-encoding = "2.6"
 bip39 = "3"
 unicode-normalization = "0.1"
-sharks = "0.5"
+# Shamir shares over GF(256); the fork fixes RUSTSEC-2024-0398 in `sharks`.
+blahaj = "0.6"
 spake2 = "0.4"
 log = { version = "0.4", features = ["std", "kv"] }
 socket2 = { version = "0.6", features = ["all"] }

@@ -507,6 +507,9 @@ enum RecoveryCmd {
     Combine {
         #[arg(required = true, num_args = 2..)]
         shares: Vec<String>,
+        /// The "Key check" printed on the kit: the rebuilt key is refused when it does not match.
+        #[arg(long)]
+        check: Option<String>,
     },
     /// What to keep outside your devices to restore everything if all of them are lost, and
     /// the restore steps for a new device. Personal to this vault; holds no secret.
@@ -4728,16 +4731,20 @@ fn run(cli: &Cli) -> Result<()> {
                     None => print!("{body}"),
                 }
             }
-            RecoveryCmd::Combine { shares } => {
+            RecoveryCmd::Combine { shares, check } => {
                 let parsed: Vec<varsto_core::recovery::Share> = shares
                     .iter()
                     .map(|s| varsto_core::recovery::Share::decode(s))
                     .collect::<Result<_>>()?;
-                let key = varsto_core::recovery::combine(&parsed, 2)?;
+                let key = varsto_core::recovery::combine(&parsed, 2, check.as_deref())?;
                 println!("vault key: {}", key.as_str());
                 println!(
                     "words: {}",
                     varsto_core::recovery::words_from_key(&key)?.as_str()
+                );
+                println!(
+                    "key check: {} (compare with the kit)",
+                    varsto_core::recovery::key_check(&key)?
                 );
             }
         },
