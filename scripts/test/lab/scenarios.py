@@ -1665,7 +1665,7 @@ def s_torrent_spool():
     for vm in (seed, lap):
         ensure_transmission(vm)
     # The seed: data, tracker, torrent.
-    run(seed, "pkill -f tracker.py; rm -rf ~/seed ~/big.torrent; mkdir -p ~/seed/Bigset/sub; true")
+    run(seed, "pkill -f '[t]racker.py'; rm -rf ~/seed ~/big.torrent; mkdir -p ~/seed/Bigset/sub; true")
     run(seed, "for i in $(seq -w 1 20); do d=~/seed/Bigset; [ $((10#$i % 3)) -eq 0 ] && d=~/seed/Bigset/sub; "
               "head -c 100M /dev/urandom > $d/part-$i.bin; done")
     run(seed, f"cat > ~/tracker.py <<'PY'\n{TRACKER_PY}\nPY\nnohup python3 ~/tracker.py > ~/tracker.log 2>&1 &")
@@ -1689,7 +1689,7 @@ def s_torrent_spool():
              "&& sudo chown varsto:varsto /mnt/spool")
     start_transmission(lap, "/home/varsto/tr-dl", "/mnt/spool")
     v(lap, "init --name laptop")
-    v(lap, f"storage add-s3 cloud --endpoint {lab.S3['endpoint']} --region us-east-1 --bucket {BUCKET} "
+    v(lap, f"storage add-s3 cloud --insecure-http --endpoint {lab.S3['endpoint']} --region us-east-1 --bucket {BUCKET} "
            f"--access-key-id {lab.S3['key']} --secret-access-key {lab.S3['secret']} --place cloud", json_out=False)
     job = v(lap, "torrent add /home/varsto/big.torrent --folder big --storage cloud --free-min 20% --download-dir /mnt/spool")
     h = job["hash"]
@@ -1708,7 +1708,7 @@ def s_torrent_spool():
                 break
             time.sleep(2)
     finally:
-        run(lap, "pkill -f 'varsto torrent run'; true", check_rc=False)
+        run(lap, "pkill -f '[v]arsto torrent run'; true", check_rc=False)
     CTX["torrent_secs"] = round(time.time() - t0, 1)
     CTX["torrent_lowest_free"] = lowest
     CTX["torrent_reserve"] = reserve
@@ -1729,7 +1729,7 @@ def s_torrent_spool():
         check(got == sums[p], f"{p}: content differs from the seed")
     v(lap, f"torrent remove {h}", json_out=False)
     for vm in (seed, lap):
-        run(vm, "pkill -x transmission-da; pkill -f tracker.py; rm -rf ~/seed ~/tr-seed ~/tr-dl ~/big.torrent; true",
+        run(vm, "pkill -x transmission-da; pkill -f '[t]racker.py'; rm -rf ~/seed ~/tr-seed ~/tr-dl ~/big.torrent; true",
             check_rc=False)
     run(lap, "sudo umount /mnt/spool; true", check_rc=False)
 
