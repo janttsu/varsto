@@ -48,6 +48,8 @@ pub struct BlockWriter {
 pub struct StagedFile {
     folder: FolderId,
     size: u64,
+    /// `FileState::chunking` of the entry.
+    chunking: u8,
     content_hash: String,
     chunks: Vec<ChunkRef>,
 }
@@ -68,9 +70,10 @@ impl BlockWriter {
     /// `write` for content of a known size: the block sizes follow it
     /// (`ChunkerParams::for_size`). Without a size, the fixed default sizes.
     pub fn write_sized(&self, reader: impl Read, expected: Option<u64>) -> Result<StagedFile> {
+        let seed = self.fk.chunker_seed();
         let params = match expected {
-            Some(n) if self.chunker == ChunkerParams::DEFAULT => ChunkerParams::for_size(n),
-            _ => self.chunker,
+            Some(n) if self.chunker == ChunkerParams::DEFAULT => ChunkerParams::for_size(n, &seed),
+            _ => self.chunker.with_seed(&seed),
         };
         let mut hasher = KeyedHasher::new(&self.fk.hash);
         let mut chunks = Vec::new();
@@ -97,9 +100,15 @@ impl BlockWriter {
         }
         // Shorter or longer than announced: the blocks were cut for another
         // size, so the entry must not claim the size rule.
+        let by_size = self.chunker == ChunkerParams::DEFAULT && expected == Some(size);
         Ok(StagedFile {
             folder: self.folder.clone(),
             size,
+            chunking: if by_size {
+                crate::chunking::CHUNKING
+            } else {
+                0
+            },
             content_hash: hex::encode(hasher.finalize()),
             chunks,
         })
@@ -278,6 +287,7 @@ impl Engine {
                     modified_by: me,
                     modified_clock: clock,
                     meta,
+                    chunking: staged.chunking,
                 },
             );
         }
@@ -698,6 +708,7 @@ impl Engine {
                 modified_by: me.clone(),
                 modified_clock: clock,
                 meta: None,
+                chunking: 0,
             },
         );
         let clock = self.tick()?;

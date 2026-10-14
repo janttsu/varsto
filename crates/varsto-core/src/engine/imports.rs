@@ -360,10 +360,11 @@ fn ingest(
         copy_error: None,
     };
     let verified = tap.check.is_some();
+    let seed = ctx.fk.chunker_seed();
     let params = match (size_hint, ctx.small_chunker) {
-        (_, Some(p)) => p,
-        (Some(s), None) => ChunkerParams::for_size(s),
-        (None, None) => ctx.chunker,
+        (_, Some(p)) => p.with_seed(&seed),
+        (Some(s), None) => ChunkerParams::for_size(s, &seed),
+        (None, None) => ctx.chunker.with_seed(&seed),
     };
     let mut hasher = KeyedHasher::new(&ctx.fk.hash);
     let mut chunks: Vec<ChunkRef> = Vec::new();
@@ -1538,6 +1539,7 @@ impl Engine {
             modified_by: me,
             modified_clock: clock,
             meta: None,
+            chunking: 0,
         };
         state.files.insert(path.to_string(), f.clone());
         state.pending_remote.remove(path);

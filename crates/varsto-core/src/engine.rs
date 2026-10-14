@@ -3355,6 +3355,7 @@ impl Engine {
                             modified_by: me.clone(),
                             modified_clock: clock,
                             meta: Some(meta),
+                            chunking: 0,
                         },
                     );
                     changed += 1;
@@ -3428,7 +3429,7 @@ impl Engine {
             };
             let mut hasher = KeyedHasher::new(&fk.hash);
             let mut chunks = Vec::new();
-            let params = self.chunker_for(size);
+            let params = self.chunker_for(size, &fk);
             let events_before = self.pending.len();
             let mut read_failed = false;
             for chunk in Chunker::new(std::io::BufReader::new(file), params)? {
@@ -3565,6 +3566,7 @@ impl Engine {
                     modified_by: me.clone(),
                     modified_clock: clock,
                     meta,
+                    chunking: self.chunking_mark(),
                 },
             );
             new_index.insert(
@@ -3638,6 +3640,7 @@ impl Engine {
                     modified_by: me.clone(),
                     modified_clock: clock,
                     meta: None,
+                    chunking: 0,
                 },
             );
             trashed.push((prev, clock));
@@ -4042,9 +4045,11 @@ impl Engine {
                     continue;
                 };
                 let progress = crate::progress::Transfer::upload(&rec.name, &file.path, file.size);
-                for (index, chunk) in
-                    Chunker::new(std::io::BufReader::new(handle), self.chunker_for(file.size))?
-                        .enumerate()
+                for (index, chunk) in Chunker::new(
+                    std::io::BufReader::new(handle),
+                    self.chunker_for(file.size, &fk),
+                )?
+                .enumerate()
                 {
                     let chunk = chunk?;
                     progress.advance(chunk.len() as u64);
@@ -6008,14 +6013,26 @@ impl Engine {
         self.config.save(&self.home)
     }
 
-    /// Block sizes for a file of `size` bytes: the same everywhere, so the
-    /// same content gives the same blocks. Tests that set their own sizes
-    /// keep them.
-    pub(crate) fn chunker_for(&self, size: u64) -> ChunkerParams {
+    /// Block sizes and Gear table for a file of `size` bytes in the folder
+    /// of `fk`: the same on every device, so the same content in one folder
+    /// gives the same blocks. Tests that set their own sizes keep them (with
+    /// the folder's table).
+    pub(crate) fn chunker_for(&self, size: u64, fk: &FolderKeys) -> ChunkerParams {
+        let seed = fk.chunker_seed();
         if self.chunker == ChunkerParams::DEFAULT {
-            ChunkerParams::for_size(size)
+            ChunkerParams::for_size(size, &seed)
         } else {
-            self.chunker
+            self.chunker.with_seed(&seed)
+        }
+    }
+
+    /// The `chunking` of a file entry cut by `chunker_for` (format 2), or 0
+    /// when tests set their own sizes.
+    pub(crate) fn chunking_mark(&self) -> u8 {
+        if self.chunker == ChunkerParams::DEFAULT {
+            crate::chunking::CHUNKING
+        } else {
+            0
         }
     }
 
@@ -7411,7 +7428,7 @@ impl Engine {
         epoch: u32,
     ) -> Result<Vec<u8>> {
         let size = fs::metadata(path)?.len();
-        for params in [self.chunker_for(size)] {
+        for params in [self.chunker_for(size, fk)] {
             let file = fs::File::open(path)?;
             for piece in Chunker::new(std::io::BufReader::new(file), params)? {
                 let piece = piece?;

@@ -1160,6 +1160,15 @@ impl FolderKeys {
             .collect()
     }
 
+    /// Seed of the folder's Gear table (`crate::chunking`): derived from the
+    /// hash key, which stays the same across epochs, so a rotation does not
+    /// move any cut point.
+    pub fn chunker_seed(&self) -> [u8; 32] {
+        self.hash
+            .derive("chunker-seed", &[self.folder.as_str().as_bytes()])
+            .0
+    }
+
     /// Alpha-0 decision: the chunk key is derived from the chunk's keyed hash
     /// (convergent inside the folder and epoch), so the same content encrypts
     /// to the same object on every device, which makes offline deduplication

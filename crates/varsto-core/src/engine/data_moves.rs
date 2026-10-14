@@ -1201,7 +1201,7 @@ impl Engine {
                 continue;
             };
             let size = file.metadata().map(|m| m.len()).unwrap_or(0);
-            for params in [self.chunker_for(size)] {
+            for params in [self.chunker_for(size, fk)] {
                 if wanted.keys().all(|c| out.contains_key(&wanted[c].object)) {
                     break;
                 }

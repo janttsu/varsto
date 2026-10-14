@@ -458,6 +458,7 @@ mod tests {
             modified_by: dev.clone(),
             modified_clock: clock,
             meta: None,
+            chunking: 0,
         }
     }
 

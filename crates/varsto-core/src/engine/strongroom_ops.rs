@@ -499,7 +499,10 @@ impl Engine {
         let mut old_hash = KeyedHasher::new(&old.hash);
         let mut new_hash = KeyedHasher::new(&new.hash);
         let mut chunks = Vec::new();
-        for chunk in Chunker::new(std::io::BufReader::new(handle), self.chunker_for(file.size))? {
+        for chunk in Chunker::new(
+            std::io::BufReader::new(handle),
+            self.chunker_for(file.size, new),
+        )? {
             let chunk = chunk?;
             old_hash.update(&chunk);
             new_hash.update(&chunk);
