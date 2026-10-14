@@ -4891,7 +4891,14 @@ fn run(cli: &Cli) -> Result<()> {
                             }),
                         )
                     };
-                    let k = strongroom::enroll_key(backend.as_ref(), method, &id, &fk, label)?;
+                    let k = strongroom::enroll_key(
+                        backend.as_ref(),
+                        method,
+                        engine.vault_id(),
+                        &id,
+                        &fk,
+                        label,
+                    )?;
                     let name = k.short();
                     let n = if let Some((sf, _)) = service::status(&home) {
                         let url = format!("http://127.0.0.1:{}/api/strongroom/add-key", sf.port);
@@ -5981,7 +5988,7 @@ fn strongroom_convert(
         eprintln!(
             "Resuming the interrupted conversion of {folder}: touch the key it was started with."
         );
-        let (fk, _) = strongroom::unlock_enrolled(home, &id, &info)?;
+        let (fk, _) = strongroom::unlock_enrolled(home, engine.vault_id(), &id, &info)?;
         (id, fk, info)
     } else if engine
         .folders()
@@ -6013,7 +6020,7 @@ fn strongroom_convert(
         let id = FolderId::random();
         let fk = SecretKey::random();
         let backend = strongroom::backend(&method, home);
-        let info = strongroom::enroll(backend.as_ref(), method, &id, &fk)?;
+        let info = strongroom::enroll(backend.as_ref(), method, engine.vault_id(), &id, &fk)?;
         (id, fk, info)
     };
     eprintln!("Re-encrypting {folder} under the new key; this reads and uploads the whole folder.");
@@ -6076,10 +6083,11 @@ fn strongroom_rekey(
         .ok_or_else(|| anyhow!("{folder} is not a Strongroom folder"))?;
     let info = rec.strongroom.clone().expect("a Strongroom");
     eprintln!("Unlock {folder} with an enrolled key:");
-    let (old_key, _) = strongroom::unlock_enrolled(home, &rec.folder_id, &info)?;
+    let vault_id = engine.vault_id().clone();
+    let (old_key, _) = strongroom::unlock_enrolled(home, &vault_id, &rec.folder_id, &info)?;
     let (id, fk, new_info) = if let Some((id, new_info)) = engine.strongroom_conversion(folder) {
         eprintln!("Resuming the interrupted re-key of {folder}: touch an enrolled key again.");
-        let (fk, _) = strongroom::unlock_enrolled(home, &id, &new_info)?;
+        let (fk, _) = strongroom::unlock_enrolled(home, &vault_id, &id, &new_info)?;
         (id, fk, new_info)
     } else {
         let id = FolderId::random();
@@ -6088,7 +6096,7 @@ fn strongroom_rekey(
             "Wrapping the new key for every enrolled key ({}): touch each one when asked.",
             info.keys().len()
         );
-        let new_info = strongroom::rewrap_enrolled(home, &id, &fk, &info)?;
+        let new_info = strongroom::rewrap_enrolled(home, &vault_id, &id, &fk, &info)?;
         (id, fk, new_info)
     };
     eprintln!("Re-encrypting {folder} under the new key; this reads and uploads the whole folder.");

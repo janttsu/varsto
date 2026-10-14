@@ -5593,7 +5593,8 @@ impl Engine {
         fs::create_dir_all(path)?;
         let folder_id = FolderId::random();
         let folder_key = SecretKey::random();
-        let info = crate::strongroom::enroll(key, method, &folder_id, &folder_key)?;
+        let info =
+            crate::strongroom::enroll(key, method, &self.vault.vault_id, &folder_id, &folder_key)?;
         let rec = FolderRecord {
             folder_id: folder_id.clone(),
             name: name.to_string(),
@@ -5659,7 +5660,7 @@ impl Engine {
             .strongroom
             .as_ref()
             .ok_or_else(|| anyhow!("{folder} is not a Strongroom folder"))?;
-        let fk = crate::strongroom::unlock(key, &rec.folder_id, info)?;
+        let fk = crate::strongroom::unlock(key, &self.vault.vault_id, &rec.folder_id, info)?;
         self.unlocked.insert(
             rec.folder_id.clone(),
             (fk.clone(), util::now_utc() + minutes as i64 * 60),
