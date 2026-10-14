@@ -20,6 +20,8 @@ fn run(home: &Path, args: &[&str], json: bool) -> (bool, String, String) {
         .args(args)
         .env("VARSTO_PASSPHRASE", "test passphrase")
         .env("VARSTO_NO_INSTALL", "1")
+        // New folders go next to the device directory, never into ~/Varsto.
+        .env("VARSTO_FOLDER_ROOT", home.parent().unwrap().join("folders"))
         .env_remove("VARSTO_TRANSMISSION_URL")
         .output()
         .expect("run varsto");
@@ -126,6 +128,11 @@ fn a_torrent_job_through_the_cli() {
     assert_eq!(done["state"], "complete", "{done:#}");
     assert_eq!(done["bytes_stored"], (a.len() + b.len()) as u64);
     assert_eq!(fs::read_dir(&dl).unwrap().count(), 0);
+    assert!(
+        root.join("folders/album/Album/a.flac.varsto-placeholder")
+            .is_file(),
+        "the folder is attached selectively under the folder root"
+    );
 
     let list = ok(&home, &["torrent", "list"]);
     assert_eq!(list.as_array().unwrap().len(), 1);
