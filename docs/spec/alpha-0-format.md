@@ -109,6 +109,8 @@ Model B of [ledger-signing-notes.md](ledger-signing-notes.md): events are groupe
 
 A batch may hold event types a reader does not know (written by a newer version); since 0.0.1-alpha.9 such events are read as `unknown` and ignored, and the rest of the batch counts. Earlier versions reject the whole batch (section 23, Compatibility).
 
+Not every signer may make every event: the key id of a batch and the signer's role decide what of it counts (section 58). A trusted full device's batches (`ledger`, `ledger@<epoch>`) count in full; a replica's (`replica`) only for object claims; a member's (`share:<folder>[@<epoch>]`) only for block claims, drops and manifests of that folder. Other events are left out and counted (`events_refused` in the view).
+
 Replaying every batch yields the location view: for each (folder, chunk) the object name, size, which storages claim it (by whom) and which devices verified it there. Applying a batch is order-independent: sets are unions, times are maxima, and where events disagree (the object name and size of a chunk, a device's name) the event with the largest (Lamport time, device, sequence, position) wins. A device therefore keeps the view in `ledger/view.enc` (zstd-compressed JSON, XChaCha20-Poly1305 under a key derived from the device's root key, associated data vault and device) with the last sequence number applied per device, applies only new batches, and rebuilds it from the batches when the keys it can open or the revocation cut-offs change. Retirements, replica claims and forks are applied on top of the cached view at every read, exactly as after a full replay. A storage copy counts as **verified** only when a device other than the writer has verified it. `varsto status` reports chunks without any storage copy and chunks verified elsewhere.
 
 Mailbox rules:
@@ -1488,3 +1490,25 @@ Code: `crates/varsto-core/src/changes.rs` (events, the index, limits) and `engin
 **Queries.** `varsto changes <folder> [<path>] [--device <name|id>] [--user <person>] [--since <YYYY-MM-DD[THH:MM]|seconds|7d|12h>] [--limit N] [--json]` (the name `varsto log` is left to logging): with a path that has versions, that file's versions (`file: true`); with any other path, the changes under it as a directory; without, the folder's recent changes; newest first, default 100 (0: all), `truncated` when more matched. `--user` matches the organization's person of the device (section 27). `GET /api/changes?folder=&path=&device=&user=&since=&limit=` gives `{folder, path, file, changes: [{…event, device_name, user?, source_name}], truncated}`. Interface: a Changes list in the file details and a Recent changes panel on the Files page with filters for a directory, a device, a person and a time; English, Finnish and Swedish.
 
 **Limits.** Times are the publishers' clocks, and a change seen first through another device's manifest gets that manifest's time. A version made and replaced before any manifest named it (two edits between syncs) is not seen. Content events only: moving data between storages, placement and pool disks are not in it. Tests: `crates/varsto-core/tests/changes.rs` (edits on two devices with the right devices and order, verified against the ledger; a rename shown as a rename and followed back; a deletion and a restore; the folder feed by device, directory, time and limit; by person in an organization; the history surviving a restart; a device joining later starting from the manifests), `changes::tests` (actions, renames, limits, dates) and `crates/varsto-cli/tests/cli_smoke.rs`.
+
+## 58. Ledger authorization and gap handling
+
+A security review (2026-10-13) found that the ledger took every event from every signer whose batch opened. Replicas and members of shared folders hold storage credentials and sign batches; the storages can withhold, reorder, replay and write junk. These rules follow. The storage format does not change: batch envelopes, checkpoints and epoch records keep their fields.
+
+**Who may say what.** The key id of a batch names the role it claims, and the signer must have that role in the device's registry (`EventScope`, `Engine::event_scope`):
+
+| Key id | Scope | Signer | Events that count |
+| --- | --- | --- | --- |
+| `ledger`, `ledger@<epoch>` | full | a trusted full device, or a removed one up to its cut-off | every event |
+| `replica` | replica | a registered replica | `chunk_stored` and `chunk_verified` with an empty folder (object claims) |
+| `share:<folder>[@<epoch>]` | member of `<folder>` | a known member device (or this device) | `chunk_stored`, `chunk_verified`, `chunk_on_device`, `manifest_published`, `chunk_dropped` of that folder |
+
+`device_enrolled` (the signer's own name) and unknown event types count in every scope; everything else outside the scope is left out when the batch is applied and counted (`LedgerView::events_refused`). A member never retires a storage, adds a folder, takes or expires a snapshot or stops a backup; a replica only claims objects. `snapshot_expired` and `backup_stopped` therefore count only from full devices: the backup's source device or another trusted full device of the vault (section 31). Acknowledgements (`seen`) count only from full devices. A batch whose signer has no scope (a key id it has no role for) does not count at all. The scope of every device is part of the cached view's context, so a change of role rebuilds the view (view format 6).
+
+A manifest that does not open with any key this device holds stops the folder's pull only when a trusted full device wrote it (a newer vault key has not arrived yet); from anyone else (a member, a replica, a removed device, or a name planted on the storage) it is skipped.
+
+**Limits.**
+
+- `key_id` is not covered by the batch signature yet (a storage can relabel it); a relabelled batch then does not open, or opens under a scope its signer does not have and does not count. Signed key ids are a format change (planned).
+- Manifests, trash records and snapshots are still accepted on the folder key alone; signing them is a format change (planned).
+

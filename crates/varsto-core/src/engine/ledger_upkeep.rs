@@ -345,6 +345,58 @@ impl Engine {
         };
     }
 
+    /// Tests: what a modified client could sign, a batch of exactly
+    /// `events` under the key with id `key_id` (`None`: this device's own,
+    /// a member's for its first shared folder) at Lamport time `lamport`
+    /// (`None`: the next tick), pushed to every storage. Other devices must
+    /// take from it only what this device's role allows.
+    #[doc(hidden)]
+    pub fn seal_batch_unchecked(
+        &mut self,
+        key_id: Option<&str>,
+        events: Vec<Event>,
+        lamport: Option<u64>,
+    ) -> Result<u64> {
+        let (key_id, key) = match key_id {
+            Some(id) => (
+                id.to_string(),
+                self.key_for_id(id)
+                    .ok_or_else(|| anyhow!("no key for {id} on this device"))?,
+            ),
+            None if self.vault.member => {
+                let rec = self
+                    .keyring
+                    .folders
+                    .values()
+                    .next()
+                    .cloned()
+                    .ok_or_else(|| anyhow!("no shared folder"))?;
+                self.share_ledger_key_now(&rec)?
+            }
+            None => self.ledger_key_now(),
+        };
+        let lamport = match lamport {
+            Some(l) => l,
+            None => self.tick()?,
+        };
+        let seen = if self.vault.member {
+            BTreeMap::new()
+        } else {
+            self.seen_heads()
+        };
+        let signed = self.ledger.append_own_seen(
+            &self.vault.device_id.clone(),
+            events,
+            seen,
+            lamport,
+            &key,
+            &key_id,
+            &self.keys.signer,
+        )?;
+        self.push_own_batches()?;
+        Ok(signed.seq)
+    }
+
     /// Pull the ledger, once per `one_batch` action.
     pub(super) fn pull_ledger_once(&mut self) -> Result<Vec<DeviceId>> {
         if let Some(forks) = self.cycle.as_ref().and_then(|c| c.forks.clone()) {
@@ -395,10 +447,11 @@ impl Engine {
             *unsaved = VIEW_SAVE_EVERY;
         }
         let c = cache.as_mut().expect("set above");
-        *unsaved += self.ledger.update_view(
+        *unsaved += self.ledger.update_view_scoped(
             c,
             |id| self.key_for_id(id),
             |d, seq| self.batch_accepted(d, seq),
+            |d, id| self.event_scope(d, id),
         )?;
         if *unsaved >= VIEW_SAVE_EVERY && self.save_view_cache(c).is_ok() {
             *unsaved = 0;
@@ -424,14 +477,16 @@ impl Engine {
     /// The view replayed from every local batch, without the cache (and
     /// without events not sealed into a batch yet).
     pub fn view_replayed(&self) -> Result<LedgerView> {
-        self.ledger.view_filtered(
+        self.ledger.view_scoped(
             |id| self.key_for_id(id),
             |d, seq| self.batch_accepted(d, seq),
+            |d, id| self.event_scope(d, id),
         )
     }
 
     /// Fingerprint of what decides which batches count: every key id this
-    /// device can open (with a hash of the key) and every revocation cut-off.
+    /// device can open (with a hash of the key), every revocation cut-off
+    /// and the role of every device.
     fn view_context(&self) -> String {
         let mut ids = vec![KEY_LEDGER.to_string(), KEY_REPLICA.to_string()];
         ids.extend(
@@ -458,6 +513,9 @@ impl Engine {
             parts.push(d.as_str().as_bytes().to_vec());
             parts.push(cutoff.to_le_bytes().to_vec());
         }
+        // Which role each device's batches are read with (`event_scope`).
+        parts.push(b"scopes".to_vec());
+        parts.push(self.scope_context());
         let refs: Vec<&[u8]> = parts.iter().map(|p| p.as_slice()).collect();
         hex::encode(crypto::hash(&crypto::aad("ledger-view-context", &refs)))
     }

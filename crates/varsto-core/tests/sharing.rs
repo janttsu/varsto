@@ -475,3 +475,74 @@ fn last_access_is_merged_across_devices() {
             >= used_on_a
     );
 }
+
+/// The id of a folder of `e` by name.
+fn folder_id(e: &Engine, name: &str) -> varsto_core::ids::FolderId {
+    let st = e.status().unwrap();
+    let f = st.folders.iter().find(|f| f.name == name).unwrap();
+    varsto_core::ids::FolderId::from_hex(&f.folder_id).unwrap()
+}
+
+/// A member's ledger batches count only inside its shared folder: a
+/// modified client that retires the owner's storage and announces a
+/// manifest of the owner's private folder (and plants it on the storage)
+/// changes nothing for the owner, whose pull of that folder does not stop
+/// at the planted manifest (`docs/spec/alpha-0-format.md` section 58).
+#[test]
+fn a_members_batch_cannot_reach_outside_its_folder() {
+    use varsto_core::ledger::Event;
+    let lab = Lab::new();
+    let (mut a, _) = owner(&lab);
+    a.add_folder("private", &lab.dir("a-private")).unwrap();
+    fs::write(lab.dir("a-private").join("secret.txt"), b"mine alone").unwrap();
+    a.sync(None).unwrap();
+    let mut m = invite(&lab, &mut a, "robin");
+    let private = folder_id(&a, "private");
+    let clock = a.status().unwrap().lamport;
+    m.seal_batch_unchecked(
+        None,
+        vec![
+            Event::StorageRetired {
+                storage: "box".into(),
+            },
+            Event::ManifestPublished {
+                folder: private.clone(),
+                seq: 7,
+                manifest_hash: String::new(),
+                files: 1,
+            },
+            Event::FolderAdded {
+                folder: private.clone(),
+            },
+        ],
+        Some(clock + 1000),
+    )
+    .unwrap();
+    let planted = lab
+        .root
+        .join("storage")
+        .join(Manifest::storage_key(&private, m.device_id(), 7));
+    fs::create_dir_all(planted.parent().unwrap()).unwrap();
+    fs::write(&planted, b"junk that opens with no key").unwrap();
+
+    fs::write(lab.dir("a-private").join("later.txt"), b"still syncing").unwrap();
+    a.sync(None)
+        .expect("the owner's sync does not stop at the planted manifest");
+    let st = a.status().unwrap();
+    for f in &st.folders {
+        assert_eq!(
+            f.chunks_without_storage_copy, 0,
+            "{}: the member retired the owner's storage",
+            f.name
+        );
+    }
+    assert!(a.view().unwrap().events_refused >= 3);
+    // The member's own folder still takes its legitimate events.
+    fs::write(lab.dir("robin").join("note.txt"), b"from robin").unwrap();
+    m.sync(None).unwrap();
+    a.sync(None).unwrap();
+    assert_eq!(
+        read(&lab.dir("a"), "note.txt").as_deref(),
+        Some(&b"from robin"[..])
+    );
+}

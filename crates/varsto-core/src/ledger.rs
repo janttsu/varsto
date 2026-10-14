@@ -104,6 +104,62 @@ pub enum Event {
     Unknown,
 }
 
+/// What the signer of a batch may change, from the key that seals the batch
+/// and the signer's role in the vault (`docs/spec/alpha-0-format.md`
+/// section 58). Events outside the scope are dropped when the batch is
+/// applied and counted in `LedgerView::events_refused`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum EventScope {
+    /// A trusted full device of the vault (or a removed one, for its
+    /// batches up to its cut-off): every event.
+    Full,
+    /// An untrusted replica: claims on objects only (`chunk_stored` and
+    /// `chunk_verified` with an empty folder).
+    Replica,
+    /// A member device of a shared folder: block claims, drops and
+    /// manifests of that folder only.
+    Member(FolderId),
+}
+
+impl EventScope {
+    /// The scope a key id implies on its own: `ledger` and `ledger@<e>` are
+    /// full devices, `replica` replicas, `share:<folder>[@<e>]` members.
+    /// The engine also checks that the signer has that role.
+    pub fn of_key_id(key_id: &str) -> Option<EventScope> {
+        if key_id == KEY_LEDGER || key_id.starts_with(KEY_LEDGER_EPOCH_PREFIX) {
+            Some(EventScope::Full)
+        } else if key_id == KEY_REPLICA {
+            Some(EventScope::Replica)
+        } else {
+            crate::share::parse_ledger_key_id(key_id).map(|(f, _)| EventScope::Member(f))
+        }
+    }
+
+    /// Whether an event of a batch in this scope counts. A device naming
+    /// itself (`device_enrolled`) and events this version does not know
+    /// count in every scope: they change nothing about anyone else.
+    pub fn allows(&self, ev: &Event) -> bool {
+        match (self, ev) {
+            (EventScope::Full, _) | (_, Event::DeviceEnrolled { .. }) | (_, Event::Unknown) => true,
+            (
+                EventScope::Replica,
+                Event::ChunkStored { folder, .. } | Event::ChunkVerified { folder, .. },
+            ) => folder.as_str().is_empty(),
+            (EventScope::Replica, _) => false,
+            (
+                EventScope::Member(f),
+                Event::ChunkStored { folder, .. }
+                | Event::ChunkVerified { folder, .. }
+                | Event::ChunkOnDevice { folder, .. }
+                | Event::ManifestPublished { folder, .. }
+                | Event::ChunkDropped { folder, .. },
+            ) => folder == f,
+            // Never storage retirements, folders, snapshots or backups.
+            (EventScope::Member(_), _) => false,
+        }
+    }
+}
+
 /// Plaintext batch body (encrypted before signing and storage).
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Batch {
@@ -903,9 +959,18 @@ impl LedgerStore {
         device: &DeviceId,
         key_for: &impl Fn(&str) -> Option<SecretKey>,
         keep: &impl Fn(&DeviceId, u64) -> bool,
+        scope: &impl Fn(&DeviceId, &str) -> Option<EventScope>,
     ) -> u64 {
+        // Only full devices write checkpoints; one under another key (a
+        // replica or a member writing one anyway) is not used.
         match &head.base {
-            Some(b) if keep(device, b.seq) && key_for(&b.key_id).is_some() => b.seq,
+            Some(b)
+                if keep(device, b.seq)
+                    && key_for(&b.key_id).is_some()
+                    && scope(device, &b.key_id) == Some(EventScope::Full) =>
+            {
+                b.seq
+            }
             _ => 0,
         }
     }
@@ -969,15 +1034,28 @@ impl LedgerStore {
         key_for: impl Fn(&str) -> Option<SecretKey>,
         keep: impl Fn(&DeviceId, u64) -> bool,
     ) -> Result<LedgerView> {
+        self.view_scoped(key_for, keep, |_: &DeviceId, id: &str| {
+            EventScope::of_key_id(id)
+        })
+    }
+
+    /// Like `view_filtered`, with the scope of each batch decided by
+    /// `scope(signer, key_id)` (`None`: the batch does not count at all).
+    pub fn view_scoped(
+        &self,
+        key_for: impl Fn(&str) -> Option<SecretKey>,
+        keep: impl Fn(&DeviceId, u64) -> bool,
+        scope: impl Fn(&DeviceId, &str) -> Option<EventScope>,
+    ) -> Result<LedgerView> {
         let mut view = LedgerView::default();
         for (device, head) in &self.heads.heads {
-            let base = Self::usable_base(head, device, &key_for, &keep);
+            let base = Self::usable_base(head, device, &key_for, &keep, &scope);
             if base > 0 {
                 self.apply_checkpoint(&mut view, device, base, &key_for)?;
             }
             for seq in (base.max(head.dropped) + 1)..=head.seq {
                 if let Some(signed) = self.get(device, seq)? {
-                    apply_signed(&mut view, &signed, &key_for, &keep);
+                    apply_signed(&mut view, &signed, &key_for, &keep, &scope);
                 }
             }
         }
@@ -995,12 +1073,27 @@ impl LedgerStore {
         key_for: impl Fn(&str) -> Option<SecretKey>,
         keep: impl Fn(&DeviceId, u64) -> bool,
     ) -> Result<u64> {
+        self.update_view_scoped(cache, key_for, keep, |_: &DeviceId, id: &str| {
+            EventScope::of_key_id(id)
+        })
+    }
+
+    /// Like `update_view`, with the scope of each batch decided by `scope`
+    /// (see `view_scoped`). The cache's context must change whenever the
+    /// scope of a device does.
+    pub fn update_view_scoped(
+        &self,
+        cache: &mut ViewCache,
+        key_for: impl Fn(&str) -> Option<SecretKey>,
+        keep: impl Fn(&DeviceId, u64) -> bool,
+        scope: impl Fn(&DeviceId, &str) -> Option<EventScope>,
+    ) -> Result<u64> {
         let mut applied = 0;
         let bases: BTreeMap<DeviceId, u64> = self
             .heads
             .heads
             .iter()
-            .map(|(d, h)| (d.clone(), Self::usable_base(h, d, &key_for, &keep)))
+            .map(|(d, h)| (d.clone(), Self::usable_base(h, d, &key_for, &keep, &scope)))
             .filter(|(_, b)| *b > 0)
             .collect();
         if bases != cache.bases {
@@ -1025,7 +1118,7 @@ impl LedgerStore {
                     .collect();
                 for seq in filled {
                     if let Some(signed) = self.get(device, seq)? {
-                        apply_signed(&mut cache.raw, &signed, &key_for, &keep);
+                        apply_signed(&mut cache.raw, &signed, &key_for, &keep, &scope);
                         applied += 1;
                     }
                     gaps.remove(&seq);
@@ -1043,7 +1136,7 @@ impl LedgerStore {
             for seq in from + 1..=head.seq {
                 match self.get(device, seq)? {
                     Some(signed) => {
-                        apply_signed(&mut cache.raw, &signed, &key_for, &keep);
+                        apply_signed(&mut cache.raw, &signed, &key_for, &keep, &scope);
                         applied += 1;
                     }
                     None => {
@@ -1087,12 +1180,14 @@ impl LedgerStore {
     }
 }
 
-/// Apply one stored batch to a view if `keep` accepts it and its key is known.
+/// Apply one stored batch to a view if `keep` accepts it, its key is known
+/// and its signer has a scope; events outside the scope are dropped.
 fn apply_signed(
     view: &mut LedgerView,
     signed: &SignedBatch,
     key_for: &impl Fn(&str) -> Option<SecretKey>,
     keep: &impl Fn(&DeviceId, u64) -> bool,
+    scope: &impl Fn(&DeviceId, &str) -> Option<EventScope>,
 ) {
     if !keep(&signed.device, signed.seq) {
         return;
@@ -1100,8 +1195,11 @@ fn apply_signed(
     let Some(key) = key_for(&signed.key_id) else {
         return;
     };
+    let Some(scope) = scope(&signed.device, &signed.key_id) else {
+        return;
+    };
     if let Ok(batch) = signed.open(&key) {
-        view.apply(&batch);
+        view.apply_scoped(&batch, &scope);
     }
 }
 
@@ -1130,7 +1228,8 @@ impl ViewCache {
     /// 3: chunk records carry drops and claim times (`ChunkDropped`).
     /// 4: backup snapshots and stopped backups.
     /// 5: the hash of each device's newest announced manifest.
-    pub const FORMAT: u32 = 5;
+    /// 6: events are filtered by the signer's scope (`EventScope`).
+    pub const FORMAT: u32 = 6;
 
     pub fn new(context: String) -> Self {
         ViewCache {
@@ -1329,9 +1428,33 @@ pub struct LedgerView {
     /// Backups that take no more snapshots.
     #[serde(default)]
     pub backups_stopped: BTreeSet<FolderId>,
+    /// Events left out because their signer may not make them: a replica's
+    /// or a member's events outside its scope (`EventScope`).
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub events_refused: u64,
 }
 
 impl LedgerView {
+    /// Apply a batch whose signer has `scope`: events outside it are left
+    /// out and counted; only full devices' acknowledgements count.
+    pub(crate) fn apply_scoped(&mut self, batch: &Batch, scope: &EventScope) {
+        if *scope == EventScope::Full {
+            return self.apply(batch);
+        }
+        let events: Vec<Event> = batch
+            .events
+            .iter()
+            .filter(|ev| scope.allows(ev))
+            .cloned()
+            .collect();
+        self.events_refused += (batch.events.len() - events.len()) as u64;
+        self.apply(&Batch {
+            events,
+            seen: BTreeMap::new(),
+            ..batch.clone()
+        });
+    }
+
     pub(crate) fn apply(&mut self, batch: &Batch) {
         self.batches += 1;
         self.max_lamport = self.max_lamport.max(batch.lamport);
@@ -1536,6 +1659,7 @@ impl LedgerView {
         }
         self.backups_stopped
             .extend(other.backups_stopped.iter().cloned());
+        self.events_refused += other.events_refused;
         for (device, seen) in &other.acks {
             let acks = self.acks.entry(device.clone()).or_default();
             for (d, seq) in seen {

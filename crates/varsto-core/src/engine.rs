@@ -4561,6 +4561,14 @@ impl Engine {
                     // under a key this device will not get.
                     continue;
                 }
+                if !self.trusted(&dev) {
+                    // Not a trusted full device (a member, a replica, a
+                    // removed device, or a name planted on the storage):
+                    // what does not open is skipped, so nobody but a
+                    // trusted device can stop this folder's pull.
+                    log::warn!(folder:% = rec.folder_id, device:% = dev, seq = seq; "manifest does not open: skipped");
+                    continue;
+                }
                 bail!(
                     "manifest {seq} of device {} does not open with any key this device holds (a newer vault key has not arrived yet?)",
                     dev.short()

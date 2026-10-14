@@ -24,6 +24,7 @@
 use super::*;
 use crate::crypto::{SigningKey, VerifyingKey};
 use crate::kem::{DecapsKey, EncapsKey};
+use crate::ledger::EventScope;
 use zeroize::Zeroizing;
 
 /// `vault/kem/<device>.json`: a device's KEM public key, signed by the device.
@@ -1083,6 +1084,44 @@ impl Engine {
                     .share_viewers
                     .get(device)
                     .is_none_or(|cutoff| seq <= *cutoff))
+    }
+
+    /// What a ledger batch of `device` sealed under `key_id` may change
+    /// (`ledger::EventScope`): the key id says which role the batch claims,
+    /// and the device must have that role here. A full device's batches
+    /// count when it is trusted, or removed (up to its cut-off, which
+    /// `batch_accepted` applies); a replica's when it is a known replica; a
+    /// member's when it is a known member of shared folders (or this
+    /// device). Anything else does not count at all.
+    pub(super) fn event_scope(&self, device: &DeviceId, key_id: &str) -> Option<EventScope> {
+        let scope = EventScope::of_key_id(key_id)?;
+        let me = device == &self.vault.device_id;
+        let ok = match &scope {
+            EventScope::Full => {
+                (me && !self.vault.member)
+                    || (self.devices.devices.contains_key(device)
+                        && (self.trusted(device) || self.is_revoked(device)))
+            }
+            EventScope::Replica => self.devices.replicas.contains_key(device),
+            EventScope::Member(_) => me || self.devices.members.contains_key(device),
+        };
+        ok.then_some(scope)
+    }
+
+    /// What decides `event_scope` for every device with batches here, for
+    /// the cached view's context: a change of role rebuilds the view.
+    pub(super) fn scope_context(&self) -> Vec<u8> {
+        let mut out = Vec::new();
+        for d in self.ledger.devices() {
+            let class = [
+                self.event_scope(&d, KEY_LEDGER).is_some(),
+                self.event_scope(&d, KEY_REPLICA).is_some(),
+                d == self.vault.device_id || self.devices.members.contains_key(&d),
+            ];
+            out.extend_from_slice(d.as_str().as_bytes());
+            out.extend(class.iter().map(|c| *c as u8));
+        }
+        out
     }
 
     pub(super) fn device_name(&self, device: &DeviceId) -> String {

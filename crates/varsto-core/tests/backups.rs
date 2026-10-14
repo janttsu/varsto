@@ -599,3 +599,74 @@ fn schedules_and_settings() {
         .add_backup("x", &lab.p("src"), BackupOptions::default())
         .is_err());
 }
+
+/// A replica holds the storage credentials and signs ledger batches, but it
+/// may only claim objects: a batch of a modified replica that expires a
+/// snapshot and stops the backup changes nothing, and the blocks stay
+/// (`docs/spec/alpha-0-format.md` section 58).
+#[test]
+fn a_replica_cannot_expire_snapshots() {
+    use std::collections::BTreeMap as Map;
+    use varsto_core::crypto::{SecretKey, SigningKey};
+    use varsto_core::ledger::{Batch, Event, SignedBatch, KEY_REPLICA};
+    use varsto_core::replica::Replica;
+    let (lab, mut a) = lab();
+    let id = a
+        .add_backup("bk", &lab.p("src"), BackupOptions::default())
+        .unwrap();
+    let s1 = a.take_snapshot("bk").unwrap();
+    let token = a.replica_token().unwrap();
+    fs::create_dir_all(lab.p("rdisk")).unwrap();
+    let r = Replica::init(
+        &lab.p("replica"),
+        "r",
+        &token,
+        dir("one", &lab.p("one"), false),
+        dir("rdisk", &lab.p("rdisk"), false),
+    )
+    .unwrap();
+    // The replica's own keys, as a modified client holds them.
+    let local: serde_json::Value =
+        serde_json::from_slice(&fs::read(lab.p("replica/replica.json")).unwrap()).unwrap();
+    let signer =
+        SigningKey::from_bytes(&hex::decode(local["signing_hex"].as_str().unwrap()).unwrap())
+            .unwrap();
+    let key = SecretKey::from_hex(local["replica_key_hex"].as_str().unwrap()).unwrap();
+    let dev = r.device_id().clone();
+    let dir_of = lab.p("one").join("ledger").join(dev.as_str());
+    let first: SignedBatch =
+        serde_json::from_slice(&fs::read(dir_of.join(format!("{:016}.json", 1))).unwrap()).unwrap();
+    let batch = Batch {
+        device: dev.clone(),
+        seq: 2,
+        prev: Some(first.hash),
+        lamport: a.status().unwrap().lamport + 10,
+        created_utc: s1.taken_utc,
+        events: vec![
+            Event::SnapshotExpired {
+                backup: id.clone(),
+                device: a.device_id().clone(),
+                seq: s1.seq,
+            },
+            Event::BackupStopped { backup: id.clone() },
+        ],
+        seen: Map::new(),
+    };
+    let signed = SignedBatch::seal_with(&batch, &key, KEY_REPLICA, &signer).unwrap();
+    fs::write(
+        dir_of.join(format!("{:016}.json", 2)),
+        serde_json::to_vec(&signed).unwrap(),
+    )
+    .unwrap();
+
+    let before = stored(&a, "one", &id);
+    a.sync(None).unwrap();
+    assert!(a.status().unwrap().replicas.len() == 1);
+    assert_eq!(a.backup_snapshots("bk").unwrap().len(), 1);
+    assert!(!a.backups().unwrap()[0].stopped);
+    let rep = a.expire_backups_at(s1.taken_utc + 60).unwrap();
+    assert_eq!(rep.snapshots_expired, 0);
+    assert_eq!(rep.objects_deleted, 0);
+    assert_eq!(stored(&a, "one", &id), before);
+    assert!(a.view().unwrap().events_refused >= 2);
+}
