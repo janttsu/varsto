@@ -102,6 +102,9 @@ pub struct MoveJob {
     /// Which attached disks had how much room when the job last waited for
     /// room: the service runs the job again when this changes.
     pub room_sig: String,
+    /// The smallest block that found no room at the last wait: a disk
+    /// with less room than this cannot continue the job.
+    pub room_needed: u64,
     /// Blocks in scope that stay on `from` (the folder's policy needs the
     /// copy there, a cold read is not confirmed).
     pub kept_blocks: u64,
@@ -267,4 +270,7 @@ pub struct MoveWait {
     pub pool: String,
     pub bytes_left: u64,
     pub need_second_place_bytes: u64,
+    /// A disk with less room than this cannot continue the job.
+    #[serde(default)]
+    pub room_needed: u64,
 }

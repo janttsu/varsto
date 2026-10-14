@@ -263,8 +263,48 @@ pub fn set_fake_space(mount: &Path, space: Option<DiskSpace>) {
     }
 }
 
+static FAKE_CAPACITY: RwLock<Vec<(PathBuf, u64)>> = RwLock::new(Vec::new());
+
+/// Test hook: a disk of `total` bytes at `mount` whose free space falls as
+/// Varsto's objects are written below it (`varsto/chunks`), like a real
+/// disk filling up. `None` removes it.
+#[doc(hidden)]
+pub fn set_fake_capacity(mount: &Path, total: Option<u64>) {
+    let mount = mount.canonicalize().unwrap_or_else(|_| mount.to_path_buf());
+    let mut v = FAKE_CAPACITY.write().unwrap();
+    v.retain(|(p, _)| p != &mount);
+    if let Some(t) = total {
+        v.push((mount, t));
+    }
+}
+
+/// Bytes of the files below `dir`.
+fn tree_bytes(dir: &Path) -> u64 {
+    fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|e| match e.metadata() {
+            Ok(m) if m.is_dir() => tree_bytes(&e.path()),
+            Ok(m) => m.len(),
+            Err(_) => 0,
+        })
+        .sum()
+}
+
 /// Free and total space of the filesystem at `path`.
 pub fn disk_space(path: &Path) -> Option<DiskSpace> {
+    {
+        let v = FAKE_CAPACITY.read().unwrap();
+        let canon = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+        if let Some((mount, total)) = v.iter().find(|(p, _)| canon.starts_with(p)) {
+            let used = tree_bytes(&mount.join(DATA_DIR).join("chunks"));
+            return Some(DiskSpace {
+                free: total.saturating_sub(used),
+                total: *total,
+            });
+        }
+    }
     {
         let v = FAKE_SPACE.read().unwrap();
         let canon = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());

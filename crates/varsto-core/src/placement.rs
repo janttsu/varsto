@@ -299,6 +299,8 @@ pub struct MoveReport {
     pub waiting_place_bytes: u64,
     /// Why the run waits for room, when `to` said.
     pub waiting_note: Option<String>,
+    /// The smallest block that found no room (0: none, or no disk at all).
+    pub waiting_min_bytes: u64,
     /// The run stopped at its limit of block groups; more is left to move.
     pub stopped_early: bool,
     /// Labels of the pool disks this run wrote to.

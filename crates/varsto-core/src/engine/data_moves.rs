@@ -1102,6 +1102,7 @@ impl Engine {
             }
         }
         report.disks_used = disks_used.into_iter().collect();
+        report.waiting_min_bytes = full_at.unwrap_or(0);
         // An earlier run that stopped after recording its drops.
         if !dropped.is_empty() {
             let in_use = self.objects_claimed_on(from_spec.name())?;

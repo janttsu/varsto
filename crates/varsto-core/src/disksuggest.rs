@@ -336,7 +336,7 @@ pub fn reasons_with(d: &DiskStatus, now: i64, moves: &[MoveWait]) -> Vec<Suggest
     if !d.retired && !d.failing {
         let free = room(d);
         for m in moves.iter().filter(|m| m.pool == d.pool) {
-            if free == 0 || m.bytes_left == 0 {
+            if free < m.room_needed.max(1) || m.bytes_left == 0 {
                 continue;
             }
             let share = (free as f64 / m.bytes_left as f64).min(1.0);
@@ -423,7 +423,7 @@ pub fn rank_with_moves(disks: &[DiskStatus], now: i64, moves: &[MoveWait]) -> Di
     for m in moves.iter().filter(|m| m.bytes_left > 0) {
         let usable = disks
             .iter()
-            .any(|d| d.pool == m.pool && !d.retired && !d.failing && room(d) > 0);
+            .any(|d| d.pool == m.pool && !d.retired && !d.failing && room(d) >= m.room_needed.max(1));
         if !usable {
             out.new_disk_needed.push(NewDiskNeeded {
                 id: m.id.clone(),

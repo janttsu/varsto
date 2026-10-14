@@ -435,6 +435,7 @@ impl Engine {
         if report.stopped_early {
             finished = false;
         } else if report.waiting_room_blocks > 0 {
+            j.room_needed = report.waiting_min_bytes;
             j.waiting = Some(self.room_waiting(&to_spec, &j, &report));
             j.room_sig = self.room_signature(&to_spec);
             finished = false;
@@ -586,7 +587,7 @@ impl Engine {
         let next = self
             .open_pool(to)
             .ok()
-            .and_then(|pool| Self::next_known_disk(&pool));
+            .and_then(|pool| Self::next_known_disk(&pool, j.room_needed));
         match next {
             Some((label, room)) => Waiting {
                 kind: "disk".to_string(),
@@ -608,12 +609,12 @@ impl Engine {
     }
 
     /// The known disk of a pool that is away and has the most room.
-    fn next_known_disk(pool: &PoolStorage) -> Option<(String, u64)> {
+    fn next_known_disk(pool: &PoolStorage, needed: u64) -> Option<(String, u64)> {
         pool.disks()
             .into_iter()
             .filter(|d| !d.retired && pool.mount_of(&d.id).is_none())
             .map(|d| (Self::disk_room(pool, &d), d))
-            .filter(|(room, d)| *room > 0 && d.write_failed_utc == 0)
+            .filter(|(room, d)| *room >= needed.max(1) && d.write_failed_utc == 0)
             .max_by_key(|(room, _)| *room)
             .map(|(room, d)| (d.label, room))
     }
@@ -654,6 +655,7 @@ impl Engine {
                 pool: j.to,
                 bytes_left: j.bytes_remaining,
                 need_second_place_bytes: j.need_second_place_bytes,
+                room_needed: j.room_needed,
             })
             .collect()
     }
@@ -679,8 +681,8 @@ impl Engine {
                 // Something has room, and it is not what the job last saw.
                 let has_room = sig
                     .split(',')
-                    .filter(|p| !p.is_empty())
-                    .any(|p| !p.ends_with(":0"));
+                    .filter_map(|p| p.rsplit(':').next()?.parse::<u64>().ok())
+                    .any(|room| room >= j.room_needed.max(1));
                 has_room && (j.waiting.is_none() || sig != j.room_sig)
             })
             .map(|j| j.id)
