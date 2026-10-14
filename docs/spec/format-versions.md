@@ -21,7 +21,7 @@ During alpha development, storage formats may change without migration paths. On
 
 ## Service, transport and storage hardening after 0.0.1-alpha.13 (format version 1 unchanged)
 
-Additive fields and local files only (alpha-0-format.md section 59): `check_hex` in the `strongroom` block of a folder record, `mac_hex` in a disk pool's `.varsto-disk.json`, and the device-local files `mcp-keys-used.json` and `update-state.json`. Earlier versions ignore the fields and read the same records. Three things need a hand: a Strongroom enrolled before this change has no key check (key-by-hand operations refuse it) and was enrolled without the PIN prompt, which changes the secret the security key derives, so enrol it again; a disk marker without a MAC is added one when the disk is attached, and a copy of a marker is not adopted without `varsto disk add`; and an updater needs `manifest.json.minisig` next to `manifest.json` on the download site.
+Additive fields and local files only (alpha-0-format.md section 60): `check_hex` in the `strongroom` block of a folder record, `mac_hex` in a disk pool's `.varsto-disk.json`, and the device-local files `mcp-keys-used.json` and `update-state.json`. Earlier versions ignore the fields and read the same records. Three things need a hand: a Strongroom enrolled before this change has no key check (key-by-hand operations refuse it) and was enrolled without the PIN prompt, which changes the secret the security key derives, so enrol it again; a disk marker without a MAC is added one when the disk is attached, and a copy of a marker is not adopted without `varsto disk add`; and an updater needs `manifest.json.minisig` next to `manifest.json` on the download site.
 
 ## Packs in 0.0.1-alpha.12 (format version 1 unchanged)
 

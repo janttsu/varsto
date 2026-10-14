@@ -175,7 +175,7 @@ These were the limits of alpha-0; the sections below record what later versions 
 
 ### Self-update
 
-`varsto update`, and the automatic check in the page, the tray and the menu bar (which offer an update only when a newer version exists), fetch `manifest.json`, `manifest.json.minisig`, `SHA256SUMS` and `SHA256SUMS.sig` from the download page with the system `curl` (base URL `https://varsto.net/downloads/`, one constant in `update.rs`, overridable with `VARSTO_UPDATE_URL`; varsto.net serves `/downloads/`; the old host varsto.soderlund.in redirects there). The update is refused unless `SHA256SUMS.sig` verifies against the release public key built into the binary (`release-key.pub`; minisign format: Ed25519 over the BLAKE2b-512 hash of the file, plus a signed trusted comment that must name the version being installed), the archive named in the manifest is listed in the signed file, and the downloaded archive has that SHA-256. Second channel: the `SHA256SUMS` attached to the GitHub release `v<version>` is fetched too and must list the archive with the same checksum; if GitHub cannot be reached (or the release has no checksum list), the update waits and says why, unless `varsto update --allow-single-source` is given (section 59). Then the running binary is replaced (rename-over on Unix, rename-aside on Windows). `varsto verify-release <file> [--github]` runs the same checks on a file downloaded by hand. The private key is kept offline by the maintainer; see [RELEASING.md](../../RELEASING.md).
+`varsto update`, and the automatic check in the page, the tray and the menu bar (which offer an update only when a newer version exists), fetch `manifest.json`, `manifest.json.minisig`, `SHA256SUMS` and `SHA256SUMS.sig` from the download page with the system `curl` (base URL `https://varsto.net/downloads/`, one constant in `update.rs`, overridable with `VARSTO_UPDATE_URL`; varsto.net serves `/downloads/`; the old host varsto.soderlund.in redirects there). The update is refused unless `SHA256SUMS.sig` verifies against the release public key built into the binary (`release-key.pub`; minisign format: Ed25519 over the BLAKE2b-512 hash of the file, plus a signed trusted comment that must name the version being installed), the archive named in the manifest is listed in the signed file, and the downloaded archive has that SHA-256. Second channel: the `SHA256SUMS` attached to the GitHub release `v<version>` is fetched too and must list the archive with the same checksum; if GitHub cannot be reached (or the release has no checksum list), the update waits and says why, unless `varsto update --allow-single-source` is given (section 60). Then the running binary is replaced (rename-over on Unix, rename-aside on Windows). `varsto verify-release <file> [--github]` runs the same checks on a file downloaded by hand. The private key is kept offline by the maintainer; see [RELEASING.md](../../RELEASING.md).
 
 **File-manager integration.** `varsto paths fetch|free <paths>` downloads or frees files given by their paths on disk, through the running service (`POST /api/paths`) or, without one, on the vault directly; `varsto open-placeholder <path>` downloads a placeholder and opens the file with the desktop's default application. On Linux, `varsto install` adds a MIME type `application/x-varsto-placeholder` (`*.varsto-placeholder`) with a hidden handler entry (double-click downloads and opens), Nautilus scripts (Scripts > Varsto > Download / Free up space), a Dolphin service menu and Nemo actions (Download / Free up space with Varsto); Thunar's custom actions live in one shared `uca.xml` and are not touched (add a custom action with the command `varsto paths --notify fetch -- %F` by hand). On Windows, `varsto install` registers per-user (HKCU) context-menu verbs on all files and the `.varsto-placeholder` association. `varsto uninstall` removes all of it. macOS uses Finder Services in the native app.
 
@@ -288,7 +288,7 @@ Traffic: the service counts, per peer and direction, the object bodies it receiv
 
 Honest limits: tested on localhost (QUIC with pinned certificates, rejection of an unknown certificate, a relayed fetch A -> R -> B, the multi-homed reply source), on the maintainer's own networks, and on a rig of three devices (a public cloud machine as relay, a device behind a Linux `MASQUERADE` NAT on it, a device behind a home NAT) in both directions, direct and with direct UDP blocked (relayed). A Linux NAT keeps one external port for all flows of an internal socket until a peer's punch arrives while no flow of ours is alive (service start, a pause): then the port is in use and the NAT picks a random one for every later flow, so the published `udp_public` is stale until the next STUN probe, which is why probes are repeated on suspicion. Symmetric NATs on both sides are not punchable and fall back to the relay, which needs one reachable device in the vault (a home server, a VPS, a forwarded port); a vault whose devices are all behind NAT has no path across the internet. There is no DHT and no packaged self-hosted relay for vaults without a reachable device; IPv6 is parsed but the sockets are IPv4; port-restricted and symmetric cases are guessed, not measured with a second port.
 
-Hardening of the STUN side channel, the TCP request head and the QUIC limits: section 59.
+Hardening of the STUN side channel, the TCP request head and the QUIC limits: section 60.
 
 ## 16. Compression (0.0.1-alpha.4, format version 1)
 
@@ -631,7 +631,7 @@ A security review of alpha.10 looked at what a device holding the vault key, a s
 
 Tests: `util::tests`, `manifest::tests`, `ids::tests`, `p2p::tests` (chunked bodies, one-time tokens), `crypto::tests`, and in `crates/varsto-core/tests/organization.rs` junk under organization and epoch names, two administrators writing at once, a dismissed administrator, and a forged policy record.
 
-Further hardening of the local service, storage reads, passphrases, names and temporary files: section 59.
+Further hardening of the local service, storage reads, passphrases, names and temporary files: section 60.
 
 ## 29. Background by default, block sizes by file size, peer-to-peer during uploads (0.0.1-alpha.11)
 
@@ -888,7 +888,7 @@ Tests: `crates/varsto-core/tests/analyses.rs` (set and read back, listings cut t
 
 Tests: `mcp_keys::tests` (create, check, list, revoke, routes and scopes) and `crates/varsto-cli/tests/mcp.rs` (a key with an analyse scope on one folder against a real service: allowed route, a folder out of scope and a non-MCP route 403, move refused, MCP end to end without a passphrase, no service no access, expired and revoked keys 401, `mcp key list`, `mcp config`).
 
-The use of a key is recorded apart from the keys, `varsto mcp` needs a key while the service runs, and a scoped `/api/status` lists only the key's folders: section 59.
+The use of a key is recorded apart from the keys, `varsto mcp` needs a key while the service runs, and a scoped `/api/status` lists only the key's folders: section 60.
 
 ## 38. Losing ledger copies and rebuilding them
 
@@ -1150,7 +1150,7 @@ The logs are local files of the device, like `state/`: they are not part of the 
 
 Tests: `varsto_core::logging` (filters, format, timestamps, rotation and cap, tar, scrubber shapes and field names) and `crates/varsto-core/tests/log_secrets.rs` (every secret type through every log macro form, in the files and in a bundle; file modes).
 
-The scrubber also cuts the login of every URL, and a support bundle carries a redacted `config.json`: section 59.
+The scrubber also cuts the login of every URL, and a support bundle carries a redacted `config.json`: section 60.
 
 ## 46. Original names and local name mapping
 
@@ -1384,7 +1384,7 @@ Default gateways come from the routing table (`/proc/net/route` on Linux and And
 
 Tests: `p2p::portmap::tests`: encoders and parsers, route tables, an in-process PCP server and a NAT-PMP server on loopback (mapping of TCP and UDP, the fallback from PCP to NAT-PMP, renewal at half the lease with the same nonce, a short lease renewed in time, a failed renewal retried and a lapsed mapping mapped again, removal with lifetime 0, a router without a public address refused), a fake IGD (SSDP responder plus an HTTP server with the description and SOAP control: mapping after PCP and NAT-PMP fail, renewal, removal, another computer's entry left alone, `AddAnyPortMapping` on version 2, a hand-made mapping used and never touched, our leftover taken over on a permanent-only router), SSDP answers pointing elsewhere ignored, and nothing answering at all; `p2p::tests` (record order with mapped addresses). The lab has no router VM that offers UPnP yet.
 
-A mapping is published only after the probe through it succeeded: section 59.
+A mapping is published only after the probe through it succeeded: section 60.
 
 ## 53. Minimum free disk space
 
@@ -1408,7 +1408,7 @@ Tests: `freespace::tests` (parsing and wording, refusal, recheck and resumption 
 
 **Why.** The interface asked the service every few seconds (the service summary every 5 s, the Now card every 2 s, the progress bar every 1-5 s, the traffic view every second), most of the time for nothing new. Now the service tells.
 
-**`GET /api/events`.** Server-Sent Events (`text/event-stream`), answered on a thread of its own without the state lock (`sse.rs`; at most 16 at a time, more get 503 with `Retry-After`). The token comes in `X-Varsto-Token` or `Authorization: Bearer`, never in the address (section 59); the page reads the stream with `fetch`. The response has no length and no chunking; every event is written and flushed as it happens, and the stream ends when the client goes away or the service stops. It starts with `retry: 3000` and an unnumbered `hello` event (`last_id`, this device's activity as in `/api/activity?mine=1`, the transfers as in `/api/progress`); a comment line goes out after 15 seconds of silence.
+**`GET /api/events`.** Server-Sent Events (`text/event-stream`), answered on a thread of its own without the state lock (`sse.rs`; at most 16 at a time, more get 503 with `Retry-After`). The token comes in `X-Varsto-Token` or `Authorization: Bearer`, never in the address (section 60); the page reads the stream with `fetch`. The response has no length and no chunking; every event is written and flushed as it happens, and the stream ends when the client goes away or the service stops. It starts with `retry: 3000` and an unnumbered `hello` event (`last_id`, this device's activity as in `/api/activity?mine=1`, the transfers as in `/api/progress`); a comment line goes out after 15 seconds of silence.
 
 Each event is `id: <n>`, `event: <kind>`, `data: {"id", "kind", "utc", "data"}`. Numbers count up per service process (`varsto_core::events`); the last 1024 events are kept. A client that reconnects sends `Last-Event-ID` (the browser does by itself; `?last_id=` works too) and gets what it missed, or an unnumbered `reset` (`last_id`) when its number is older than the ring or larger than the newest (the service started again): the client loads everything again. Nothing is written to disk.
 
@@ -1577,7 +1577,7 @@ Code: `crates/varsto-core/src/staged_move.rs` (the job file), `engine/staged_mov
 **Limits.** Jobs are per device (`<home>/state`): another device does not see them, though it sees the moved blocks in the ledger. The room of a pool is the free space the file system reports; a disk whose reserve leaves less than the smallest remaining block counts as full. A group rule needs disks in enough different places to exist; a job cannot finish with fewer. Moving a block to a pool does not change which disks a later `disk check` fills.
 
 Tests: `crates/varsto-core/tests/staged_move.rs` (a folder moved to a pool disk by disk with the suggestion and the service trigger, `--keep-source`, `--path`, a disk group rule needing two places, pause and cancel, a job resumed after the engine is dropped between groups, an ordinary storage target and the run lock), `crates/varsto-core/src/disksuggest.rs` (ranking for waiting jobs), `crates/varsto-cli/tests/cli_smoke.rs` (`staged_move_jobs_through_the_cli`) and the scenario `staged-move-to-pool` of the lab (`scripts/test/lab/scenarios.py`).
-## 59. Service and transport hardening
+## 60. Service and transport hardening
 
 Changes that tighten the local service, the peer transport and the reads from storages. None of them changes an object or record on a storage.
 

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: PolyForm-Shield-1.0.0
-//! Temporary files next to a folder's files (spec section 59): created
+//! Temporary files next to a folder's files (spec section 60): created
 //! exclusively under unguessable names and with mode 0600, so a symbolic link
 //! or file planted under the old predictable name (`.varsto-tmp-<pid>`) is
 //! never written through.

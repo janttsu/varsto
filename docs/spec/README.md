@@ -1,6 +1,6 @@
 # Specifications
 
-Status of the documents that will define formats and protocols. Sections 32 to 57 of alpha-0-format.md are on main after 0.0.1-alpha.13, not in a release yet. Most of what exists is described in [alpha-0-format.md](alpha-0-format.md), section by section; anything marked **not started** has no implementation. They are intended to be open so that implementations remain interoperable and data stays recoverable.
+Status of the documents that will define formats and protocols. Sections 32 to 60 of alpha-0-format.md are on main after 0.0.1-alpha.13, not in a release yet. Most of what exists is described in [alpha-0-format.md](alpha-0-format.md), section by section; anything marked **not started** has no implementation. They are intended to be open so that implementations remain interoperable and data stays recoverable.
 
 | Document | Status |
 |---|---|
