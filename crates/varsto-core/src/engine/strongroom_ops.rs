@@ -504,11 +504,12 @@ impl Engine {
             old_hash.update(&chunk);
             new_hash.update(&chunk);
             let chunk_id = ChunkId::from_bytes(&crypto::keyed_hash(&new.hash, &chunk));
-            let ct = crypto::encrypt_with_nonce(
-                &new.chunk_key(new.epoch, &chunk_id)?,
-                &new.chunk_nonce(new.epoch, &chunk_id)?,
-                &new.chunk_aad(&self.vault.vault_id, &chunk_id, chunk.len() as u64),
-                &crate::pack::pack(&chunk),
+            let ct = crate::chunk_seal::seal_chunk(
+                new,
+                &self.vault.vault_id,
+                &chunk_id,
+                new.epoch,
+                &chunk,
             )?;
             let object = ObjectName::from_bytes(&crypto::hash(&ct));
             let key = chunk_storage_key(&object);

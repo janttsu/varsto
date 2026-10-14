@@ -190,11 +190,10 @@ fn revoked_device_is_cut_off_and_new_data_needs_new_keys() {
             .unwrap();
     for secret in [&a_secret[..], &b_secret[..]] {
         let id = ChunkId::from_bytes(&crypto::keyed_hash(&fk0.hash, secret));
-        let k = fk0.chunk_key(0, &id).unwrap();
-        let aad = fk0.chunk_aad(&vault, &id, secret.len() as u64);
         for ct in chunk_objects(&lab.store()) {
             assert!(
-                crypto::decrypt(&k, &aad, &ct).is_err(),
+                varsto_core::chunk_seal::open_chunk(&fk0, &vault, &id, 0, secret.len() as u64, &ct)
+                    .is_err(),
                 "new chunk opens with an old key"
             );
         }

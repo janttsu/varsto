@@ -2063,17 +2063,14 @@ impl Engine {
                     ),
                 },
             };
-            let plain = crate::pack::unpack(
-                &crypto::decrypt(
-                    &fk.chunk_key(c.epoch, &c.chunk)?,
-                    &fk.chunk_aad(&self.vault.vault_id, &c.chunk, c.size),
-                    &ct,
-                )?,
+            let plain = crate::chunk_seal::open_chunk(
+                &fk,
+                &self.vault.vault_id,
+                &c.chunk,
+                c.epoch,
                 c.size,
+                &ct,
             )?;
-            if ChunkId::from_bytes(&crypto::keyed_hash(&fk.hash, &plain)) != c.chunk {
-                bail!("block {} failed its content check", c.chunk.short());
-            }
             file.write_all(&plain)?;
             if let Some(s) = source.filter(|s| !s.starts_with("peer:")) {
                 self.pending.push(Event::ChunkVerified {

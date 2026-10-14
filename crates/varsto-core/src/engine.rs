@@ -3454,11 +3454,12 @@ impl Engine {
                 let (object, epoch) = match known.get(&chunk_id) {
                     Some(c) if c.size == chunk.len() as u64 => (c.object.clone(), c.epoch),
                     _ => {
-                        let ct = crypto::encrypt_with_nonce(
-                            &fk.chunk_key(fk.epoch, &chunk_id)?,
-                            &fk.chunk_nonce(fk.epoch, &chunk_id)?,
-                            &fk.chunk_aad(&self.vault.vault_id, &chunk_id, chunk.len() as u64),
-                            &crate::pack::pack(&chunk),
+                        let ct = crate::chunk_seal::seal_chunk(
+                            &fk,
+                            &self.vault.vault_id,
+                            &chunk_id,
+                            fk.epoch,
+                            &chunk,
                         )?;
                         (ObjectName::from_bytes(&crypto::hash(&ct)), fk.epoch)
                     }
@@ -4062,11 +4063,12 @@ impl Engine {
                     if targets.is_empty() {
                         continue;
                     }
-                    let ct = crypto::encrypt_with_nonce(
-                        &fk.chunk_key(expected.epoch, &chunk_id)?,
-                        &fk.chunk_nonce(expected.epoch, &chunk_id)?,
-                        &fk.chunk_aad(&self.vault.vault_id, &chunk_id, chunk.len() as u64),
-                        &crate::pack::pack(&chunk),
+                    let ct = crate::chunk_seal::seal_chunk(
+                        &fk,
+                        &self.vault.vault_id,
+                        &chunk_id,
+                        expected.epoch,
+                        &chunk,
                     )?;
                     let object = ObjectName::from_bytes(&crypto::hash(&ct));
                     let targets: Vec<String> = targets
@@ -5210,18 +5212,20 @@ impl Engine {
                         );
                     }
                 };
-                let plain = crate::pack::unpack(
-                    &crypto::decrypt(
-                        &fk.chunk_key(cref.epoch, &cref.chunk)?,
-                        &fk.chunk_aad(&self.vault.vault_id, &cref.chunk, cref.size),
-                        &ct,
-                    )?,
+                let plain = match crate::chunk_seal::open_chunk(
+                    &fk,
+                    &self.vault.vault_id,
+                    &cref.chunk,
+                    cref.epoch,
                     cref.size,
-                )?;
-                if ChunkId::from_bytes(&crypto::keyed_hash(&fk.hash, &plain)) != cref.chunk {
-                    let _ = fs::remove_file(&tmp);
-                    bail!("chunk {} failed its content check", cref.chunk.short());
-                }
+                    &ct,
+                ) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        let _ = fs::remove_file(&tmp);
+                        return Err(e);
+                    }
+                };
                 out.write_all(&plain)?;
                 progress.advance(plain.len() as u64);
                 report.chunks_downloaded += 1;
@@ -7414,11 +7418,12 @@ impl Engine {
                 if ChunkId::from_bytes(&crypto::keyed_hash(&fk.hash, &piece)) != *chunk {
                     continue;
                 }
-                return crypto::encrypt_with_nonce(
-                    &fk.chunk_key(epoch, chunk)?,
-                    &fk.chunk_nonce(epoch, chunk)?,
-                    &fk.chunk_aad(&self.vault.vault_id, chunk, piece.len() as u64),
-                    &crate::pack::pack(&piece),
+                return crate::chunk_seal::seal_chunk(
+                    fk,
+                    &self.vault.vault_id,
+                    chunk,
+                    epoch,
+                    &piece,
                 );
             }
         }

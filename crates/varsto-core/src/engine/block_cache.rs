@@ -17,6 +17,7 @@
 //! objects verbatim.
 
 use super::*;
+use crate::chunk_seal::seal_chunk;
 use std::io::Read;
 
 /// Block cache directory inside the device directory.
@@ -105,23 +106,6 @@ impl BlockWriter {
     }
 }
 
-/// The object of one chunk: deterministic, so every device that encrypts the
-/// same chunk under the same epoch gets the same bytes.
-fn seal_chunk(
-    fk: &FolderKeys,
-    vault: &VaultId,
-    chunk: &ChunkId,
-    epoch: u32,
-    plain: &[u8],
-) -> Result<Vec<u8>> {
-    crypto::encrypt_with_nonce(
-        &fk.chunk_key(epoch, chunk)?,
-        &fk.chunk_nonce(epoch, chunk)?,
-        &fk.chunk_aad(vault, chunk, plain.len() as u64),
-        &crate::pack::pack(plain),
-    )
-}
-
 /// Decrypt one object and check it against its chunk id and size.
 pub(super) fn open_chunk(
     fk: &FolderKeys,
@@ -129,20 +113,7 @@ pub(super) fn open_chunk(
     cref: &ChunkRef,
     ct: &[u8],
 ) -> Result<Vec<u8>> {
-    let plain = crate::pack::unpack(
-        &crypto::decrypt(
-            &fk.chunk_key(cref.epoch, &cref.chunk)?,
-            &fk.chunk_aad(vault, &cref.chunk, cref.size),
-            ct,
-        )?,
-        cref.size,
-    )?;
-    if ChunkId::from_bytes(&crypto::keyed_hash(&fk.hash, &plain)) != cref.chunk
-        || plain.len() as u64 != cref.size
-    {
-        bail!("chunk {} failed its content check", cref.chunk.short());
-    }
-    Ok(plain)
+    crate::chunk_seal::open_chunk(fk, vault, &cref.chunk, cref.epoch, cref.size, ct)
 }
 
 pub(super) fn cache_path(root: &Path, object: &ObjectName) -> PathBuf {

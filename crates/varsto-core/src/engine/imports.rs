@@ -411,13 +411,12 @@ fn ingest(
                     Some(c) if c.size == chunk.len() as u64 => (c.object.clone(), c.epoch),
                     _ => {
                         let e = ctx_ref.fk.epoch;
-                        let sealed = crypto::encrypt_with_nonce(
-                            &ctx_ref.fk.chunk_key(e, &chunk_id)?,
-                            &ctx_ref.fk.chunk_nonce(e, &chunk_id)?,
-                            &ctx_ref
-                                .fk
-                                .chunk_aad(&ctx_ref.vault, &chunk_id, chunk.len() as u64),
-                            &crate::pack::pack(&chunk),
+                        let sealed = crate::chunk_seal::seal_chunk(
+                            &ctx_ref.fk,
+                            &ctx_ref.vault,
+                            &chunk_id,
+                            e,
+                            &chunk,
                         )?;
                         let o = ObjectName::from_bytes(&crypto::hash(&sealed));
                         ct = Some(sealed);
@@ -456,13 +455,12 @@ fn ingest(
                 if !targets.is_empty() {
                     let ct = match ct {
                         Some(c) => c,
-                        None => crypto::encrypt_with_nonce(
-                            &ctx_ref.fk.chunk_key(epoch, &chunk_id)?,
-                            &ctx_ref.fk.chunk_nonce(epoch, &chunk_id)?,
-                            &ctx_ref
-                                .fk
-                                .chunk_aad(&ctx_ref.vault, &chunk_id, chunk.len() as u64),
-                            &crate::pack::pack(&chunk),
+                        None => crate::chunk_seal::seal_chunk(
+                            &ctx_ref.fk,
+                            &ctx_ref.vault,
+                            &chunk_id,
+                            epoch,
+                            &chunk,
                         )?,
                     };
                     if job_tx

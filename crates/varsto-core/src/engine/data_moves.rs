@@ -1217,14 +1217,13 @@ impl Engine {
                     let Some(item) = wanted.get(&id) else {
                         continue;
                     };
-                    let ct = (|| {
-                        crypto::encrypt_with_nonce(
-                            &fk.chunk_key(item.epoch, &id)?,
-                            &fk.chunk_nonce(item.epoch, &id)?,
-                            &fk.chunk_aad(&self.vault.vault_id, &id, piece.len() as u64),
-                            &crate::pack::pack(&piece),
-                        )
-                    })();
+                    let ct = crate::chunk_seal::seal_chunk(
+                        fk,
+                        &self.vault.vault_id,
+                        &id,
+                        item.epoch,
+                        &piece,
+                    );
                     if let Ok(ct) = ct {
                         if ObjectName::from_bytes(&crypto::hash(&ct)) == item.object {
                             out.insert(item.object.clone(), ct);
