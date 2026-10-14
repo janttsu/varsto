@@ -16,7 +16,7 @@ spec still names them because sections were written as the work was done.
 
 ## Unreleased
 
-On `main` after 0.0.1-alpha.13; spec sections 32 to 58.
+On `main` after 0.0.1-alpha.13; spec sections 32 to 59.
 
 ### Added
 
@@ -61,7 +61,7 @@ On `main` after 0.0.1-alpha.13; spec sections 32 to 58.
 - Staged moves to disk pools: `varsto move <folder> --from <storage> --to <pool>` records a
   resumable job that moves what fits on the attached disks, waits for the next
   disk and goes on by itself; `--path`, `--keep-source`, `move status|pause|resume|cancel`,
-  disk groups, `disk suggest` and the `move.waiting` and `move.done` events (spec 58).
+  disk groups, `disk suggest` and the `move.waiting` and `move.done` events (spec 59).
 
 ### Changed
 

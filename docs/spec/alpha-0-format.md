@@ -496,7 +496,7 @@ With `--dry-run` that is all. Otherwise blocks are moved in groups of 64: each b
 - Varsto's own reads of a file at scan and upload still update its access time, so a file reads as used right after it changed or was uploaded to a new storage.
 - The ledger records one claim per pool; which disks hold copies is in the pool index of each device (adopted from the disks' own indexes).
 - Strongroom conversion re-encrypts into every storage; the new folder keeps the placement for later writes.
-- Moves are not scheduled by the service; the suggestion and `varsto move` are the ways to run one. Moves to a disk pool that go on over several disks, with the service continuing them, are move jobs (section 58).
+- Moves are not scheduled by the service; the suggestion and `varsto move` are the ways to run one. Moves to a disk pool that go on over several disks, with the service continuing them, are move jobs (section 59).
 
 Tests: `crates/varsto-core/tests/placement.rs` (`a_drop_removes_earlier_claims_and_later_claims_count_again` with the cached view and a checkpoint, `unknown_event_types_are_read_and_ignored`, `placement_writes_only_to_the_chosen_storages_on_every_device` with two devices that name storages differently, `moving_keeps_the_policy_and_lowers_the_bill` with the cold-storage suggestion and a second device, `moving_a_whole_folder_changes_its_placement_and_never_drops_the_last_copy`, `an_interrupted_move_is_carried_on_by_running_it_again`, `disk_groups_keep_copies_in_different_places`), and `ledger::tests::cached_view_equals_full_replay`, whose random events now include drops.
 
@@ -1420,7 +1420,7 @@ Each event is `id: <n>`, `event: <kind>`, `data: {"id", "kind", "utc", "data"}`.
 | `policy.changed` | `folder`, `state` (ok, at_risk, violated, unknown) |
 | `ledger.health` | `state`, `text` |
 | `backup` | `name` (or `restic`), `ok`, `text` |
-| `move.waiting`, `move.done` | `id`, `folder`, `to`, and for a waiting job `kind`, `disk`, `bytes_left`, `text`; for a finished one `from`, `bytes`, `disks` (section 58) |
+| `move.waiting`, `move.done` | `id`, `folder`, `to`, and for a waiting job `kind`, `disk`, `bytes_left`, `text`; for a finished one `from`, `bytes`, `disks` (section 59) |
 
 Two unnumbered events only for a connection that asks: `?traffic=1` adds `traffic` (the report of `/api/p2p/traffic`) every second; `?peers=1` adds `activity.peers` (`peers`, as in `/api/activity`) whenever it changes, and the service keeps asking the other devices while such a connection is open. Tasks, transfers and peers are sampled once a second by one thread while any stream is open.
 
@@ -1535,7 +1535,7 @@ A manifest that does not open with any key this device holds stops the folder's 
 - The removed device trusts the signed envelope of its own revocation's epoch: a thief who acts first still removes the others (section 21).
 
 Tests: `ledger::tests::checkpoint_cannot_speak_for_other_devices`, `ledger::tests::checkpoint_far_ahead_is_refused`, `crates/varsto-core/tests/sharing.rs` (`a_members_batch_cannot_reach_outside_its_folder`, `junk_share_epoch_does_not_cut_a_member_off`), `crates/varsto-core/tests/backups.rs` (`a_replica_cannot_expire_snapshots`), `crates/varsto-core/tests/ledger_gaps.rs` (a withheld batch, acknowledgements that reveal one and the warning after three pulls, a malformed batch on one storage, an absurd Lamport time), `crates/varsto-core/tests/revocation.rs` (`junk_under_a_devices_ledger_name_does_not_fence_it`, `junk_epoch_record_does_not_block_revocation`, `a_backdated_revocation_does_not_win`, `two_epochs_under_one_number_wait_for_a_choice`), and the lab scenario `ledger-withhold`.
-## 58. Staged moves to disk pools
+## 59. Staged moves to disk pools
 
 Code: `crates/varsto-core/src/staged_move.rs` (the job file), `engine/staged_moves.rs` (running jobs) and the `move` commands in `crates/varsto-cli/src/placing.rs`.
 
