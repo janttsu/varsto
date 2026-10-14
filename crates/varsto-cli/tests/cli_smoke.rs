@@ -313,10 +313,7 @@ fn staged_move_jobs_through_the_cli() {
         ],
     );
     ok(&home, &["folder", "add", "docs", docs.to_str().unwrap()]);
-    ok(
-        &home,
-        &["folder", "placement", "docs", "--storage", "box"],
-    );
+    ok(&home, &["folder", "placement", "docs", "--storage", "box"]);
     ok(&home, &["push", "docs"]);
 
     // No disk yet: the job is recorded and waits.
@@ -329,11 +326,20 @@ fn staged_move_jobs_through_the_cli() {
     assert_eq!(run["job"]["state"], "open");
     assert_eq!(run["job"]["waiting"]["kind"], "disk");
     assert!(run["job"]["bytes_remaining"].as_u64().unwrap() > 0);
-    assert!(root.join("home/state/moves").join(format!("{id}.json")).is_file());
+    assert!(root
+        .join("home/state/moves")
+        .join(format!("{id}.json"))
+        .is_file());
     let status = ok(&home, &["move", "status"]);
     assert_eq!(status.as_array().unwrap().len(), 1);
     let s = ok(&home, &["disk", "suggest"]);
-    assert_eq!(s["suggestions"]["new_disk_needed"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        s["suggestions"]["new_disk_needed"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
 
     // Paused, then resumed with a disk attached: moves only the path asked for.
     ok(&home, &["move", "pause", &id]);
@@ -358,7 +364,15 @@ fn staged_move_jobs_through_the_cli() {
     let run = ok(
         &home,
         &[
-            "move", "docs", "--from", "box", "--to", "shelf", "--path", "sub", "--keep-source",
+            "move",
+            "docs",
+            "--from",
+            "box",
+            "--to",
+            "shelf",
+            "--path",
+            "sub",
+            "--keep-source",
             "--yes",
         ],
     );

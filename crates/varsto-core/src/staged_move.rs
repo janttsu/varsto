@@ -273,7 +273,6 @@ impl JobLock {
         }
         None
     }
-
 }
 
 /// Show that a run is alive (called after every group of blocks).

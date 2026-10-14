@@ -473,7 +473,12 @@ impl Engine {
     }
 
     /// The folder's placement with `from` replaced by `to`, if that changes it.
-    pub(super) fn placement_without(&self, rec: &FolderRecord, from: &str, to: &str) -> Option<Placement> {
+    pub(super) fn placement_without(
+        &self,
+        rec: &FolderRecord,
+        from: &str,
+        to: &str,
+    ) -> Option<Placement> {
         let mut names: BTreeSet<String> = match self.write_targets(rec).names {
             Some(n) => n,
             None => self
@@ -893,9 +898,10 @@ impl Engine {
         let from = self.open_spec(&from_spec)?;
         // A staged move to a pool talks to the pool itself: it asks which
         // places hold a block and adds copies for the disk group rule.
-        let to_pool: Option<PoolStorage> = (ex.staged && matches!(to_spec, StorageSpec::Pool { .. }))
-            .then(|| self.open_pool(&to_spec))
-            .transpose()?;
+        let to_pool: Option<PoolStorage> = (ex.staged
+            && matches!(to_spec, StorageSpec::Pool { .. }))
+        .then(|| self.open_pool(&to_spec))
+        .transpose()?;
         let to_box: Option<Box<dyn Storage>> = match &to_pool {
             Some(_) => None,
             None => Some(self.open_spec(&to_spec)?),
@@ -924,14 +930,12 @@ impl Engine {
         );
         // Staged: blocks of this size and larger found no room on `to`.
         let mut full_at: Option<u64> = None;
-        let mut groups_done = 0usize;
         let mut disks_used: BTreeSet<String> = BTreeSet::new();
-        for group in items.chunks(MOVE_GROUP) {
+        for (groups_done, group) in items.chunks(MOVE_GROUP).enumerate() {
             if ex.max_groups.is_some_and(|m| groups_done >= m) {
                 report.stopped_early = true;
                 break;
             }
-            groups_done += 1;
             task.advance(group.iter().map(|i| i.size).sum());
             let mut deletes: Vec<(ObjectName, u64)> = Vec::new();
             let present: Vec<bool> = group
@@ -988,7 +992,9 @@ impl Engine {
                             if ex.staged
                                 && matches!(
                                     pool::pool_error(&e),
-                                    Some(PoolError::NoRoom { .. } | PoolError::NoDiskAttached { .. })
+                                    Some(
+                                        PoolError::NoRoom { .. } | PoolError::NoDiskAttached { .. }
+                                    )
                                 )
                             {
                                 let at = if matches!(

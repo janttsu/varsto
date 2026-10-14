@@ -421,9 +421,9 @@ pub fn rank_with_moves(disks: &[DiskStatus], now: i64, moves: &[MoveWait]) -> Di
         ..Default::default()
     };
     for m in moves.iter().filter(|m| m.bytes_left > 0) {
-        let usable = disks
-            .iter()
-            .any(|d| d.pool == m.pool && !d.retired && !d.failing && room(d) >= m.room_needed.max(1));
+        let usable = disks.iter().any(|d| {
+            d.pool == m.pool && !d.retired && !d.failing && room(d) >= m.room_needed.max(1)
+        });
         if !usable {
             out.new_disk_needed.push(NewDiskNeeded {
                 id: m.id.clone(),

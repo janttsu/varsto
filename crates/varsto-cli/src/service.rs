@@ -202,10 +202,8 @@ impl ServiceState {
         if self.paused {
             return false;
         }
-        let runs = engine.move_jobs_run_ready(
-            after_sync,
-            &varsto_core::engine::JobRunLimits::service(),
-        );
+        let runs =
+            engine.move_jobs_run_ready(after_sync, &varsto_core::engine::JobRunLimits::service());
         for r in &runs {
             let before = self.move_jobs.iter().find(|j| j.id == r.job.id);
             if r.report.bytes_done > 0 {

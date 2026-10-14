@@ -3658,9 +3658,7 @@ fn run(cli: &Cli) -> Result<()> {
         Cmd::Backup { cmd } => backup::run(cli, &home, cmd)?,
         Cmd::Trash { cmd } => trash::run(cli, &home, cmd)?,
         Cmd::History(args) => history::run(cli, &home, args)?,
-        Cmd::Move {
-            cmd: Some(cmd), ..
-        } => placing::move_cmd(cli, &home, cmd)?,
+        Cmd::Move { cmd: Some(cmd), .. } => placing::move_cmd(cli, &home, cmd)?,
         Cmd::Move {
             cmd: None,
             folder,
@@ -4049,7 +4047,8 @@ fn run(cli: &Cli) -> Result<()> {
             }
             if let Some(mut v) = from_service {
                 if cli.json {
-                    v["move_jobs"] = serde_json::to_value(varsto_core::staged_move::list_active(&home))?;
+                    v["move_jobs"] =
+                        serde_json::to_value(varsto_core::staged_move::list_active(&home))?;
                     println!("{}", serde_json::to_string_pretty(&v)?);
                 } else {
                     println!("{}", status_from_value(&v));
@@ -4061,7 +4060,11 @@ fn run(cli: &Cli) -> Result<()> {
             }
             let engine = open_engine(&home)?;
             let s = engine.status()?;
-            let move_lines = if cli.json { Vec::new() } else { placing::status_lines(&home) };
+            let move_lines = if cli.json {
+                Vec::new()
+            } else {
+                placing::status_lines(&home)
+            };
             print(cli, &s, |s| {
                 let mut out = format!(
                     "vault {} device {} ({}) format {} lamport {} batches {}\n",

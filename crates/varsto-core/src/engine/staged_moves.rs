@@ -346,7 +346,8 @@ impl Engine {
                 let met = i.on_to
                     && pool.as_ref().is_none_or(|p| {
                         p.copies() <= 1
-                            || p.places_of(&chunk_storage_key(&i.object)).len() >= p.copies() as usize
+                            || p.places_of(&chunk_storage_key(&i.object)).len()
+                                >= p.copies() as usize
                     });
                 if met {
                     pre_bytes += i.size;
@@ -358,7 +359,8 @@ impl Engine {
         let todo_bytes: u64 = plan.items.iter().map(|i| i.size).sum();
         let todo_blocks = plan.items.len() as u64;
         let planned_kept = plan.report.blocks_kept;
-        let planned_kept_why: Vec<String> = plan.report.kept.iter().map(|(_, w)| w.clone()).collect();
+        let planned_kept_why: Vec<String> =
+            plan.report.kept.iter().map(|(_, w)| w.clone()).collect();
         let done0 = job
             .bytes_done
             .max(job.bytes_total.saturating_sub(todo_bytes))
@@ -409,14 +411,13 @@ impl Engine {
         }
         let before = j.waiting.clone();
         j.waiting = None;
-        let finished;
-        if report.stopped_early {
-            finished = false;
+        let finished = if report.stopped_early {
+            false
         } else if report.waiting_room_blocks > 0 {
             j.room_needed = report.waiting_min_bytes;
             j.waiting = Some(self.room_waiting(&to_spec, &j, &report));
             j.room_sig = self.room_signature(&to_spec);
-            finished = false;
+            false
         } else if report.waiting_place_blocks > 0 {
             j.waiting = Some(Waiting {
                 kind: "place".to_string(),
@@ -428,10 +429,10 @@ impl Engine {
                 ),
             });
             j.room_sig = self.room_signature(&to_spec);
-            finished = false;
+            false
         } else {
-            finished = true;
-        }
+            true
+        };
         let mut notes: Vec<String> = planned_kept_why;
         notes.extend(report.kept.iter().map(|(_, w)| w.clone()));
         notes.dedup();
@@ -445,10 +446,7 @@ impl Engine {
                     n,
                     if n == 1 { "" } else { "s" },
                     j.from,
-                    notes
-                        .first()
-                        .map(|w| format!(": {w}"))
-                        .unwrap_or_default()
+                    notes.first().map(|w| format!(": {w}")).unwrap_or_default()
                 ));
             }
             j.bytes_remaining = 0;

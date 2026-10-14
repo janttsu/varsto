@@ -127,7 +127,11 @@ fn on(e: &Engine, storage: &str) -> (usize, u64) {
     let hits: Vec<_> = v
         .chunks
         .values()
-        .filter(|c| c.storages.get(storage).is_some_and(|l| !l.claimed_by.is_empty()))
+        .filter(|c| {
+            c.storages
+                .get(storage)
+                .is_some_and(|l| !l.claimed_by.is_empty())
+        })
         .collect();
     (hits.len(), hits.iter().map(|c| c.size).sum())
 }
@@ -173,7 +177,11 @@ fn a_folder_moves_to_the_pool_one_disk_at_a_time() {
     // Disk 1 has room for about a third.
     let d1 = lab.mount("d1", third);
     a.disk_add(&d1, "shelf", "data-01").unwrap();
-    assert_eq!(on(&a, "shelf").0, 0, "adding a disk does not fill from the folder");
+    assert_eq!(
+        on(&a, "shelf").0,
+        0,
+        "adding a disk does not fill from the folder"
+    );
     let plan = a.move_job_plan(&request("docs")).unwrap();
     assert_eq!((plan.blocks as usize, plan.bytes), (blocks, bytes));
     let (job, existing) = a.move_job_start(&request("docs")).unwrap();
@@ -185,8 +193,14 @@ fn a_folder_moves_to_the_pool_one_disk_at_a_time() {
     let r = run(&mut a, &job.id);
     assert!(r.ran);
     let (on_shelf, shelf_bytes) = on(&a, "shelf");
-    assert!(on_shelf > 0 && shelf_bytes <= third, "{on_shelf} blocks, {shelf_bytes} bytes");
-    assert!(shelf_bytes * 4 > bytes, "about a third moved: {shelf_bytes} of {bytes}");
+    assert!(
+        on_shelf > 0 && shelf_bytes <= third,
+        "{on_shelf} blocks, {shelf_bytes} bytes"
+    );
+    assert!(
+        shelf_bytes * 4 > bytes,
+        "about a third moved: {shelf_bytes} of {bytes}"
+    );
     // What moved left the box; the rest is still there.
     assert_eq!(on(&a, "box"), (blocks - on_shelf, bytes - shelf_bytes));
     assert_eq!(r.job.state, JobState::Open);
@@ -215,9 +229,13 @@ fn a_folder_moves_to_the_pool_one_disk_at_a_time() {
     let s = a.disk_suggestions().unwrap();
     let top = s.top.expect("a disk is suggested");
     assert_eq!(top.label, "data-02");
-    assert!(top.reasons.iter().any(|r| r.kind == "move"
-        && r.text.starts_with("continue the move of docs: ")
-        && r.text.contains(" left; this disk has ")), "{:?}", top.reasons);
+    assert!(
+        top.reasons.iter().any(|r| r.kind == "move"
+            && r.text.starts_with("continue the move of docs: ")
+            && r.text.contains(" left; this disk has ")),
+        "{:?}",
+        top.reasons
+    );
     assert!(s.new_disk_needed.is_empty());
     assert!(a.move_jobs()[0].waiting.is_some());
     // Docked, it continues the job.
@@ -252,7 +270,10 @@ fn a_folder_moves_to_the_pool_one_disk_at_a_time() {
     assert_eq!(common::object_count(&lab.root.join("box")), 0);
     every_block_present(&a);
     // A whole-folder move makes the pool the folder's place for new blocks.
-    assert_eq!(a.placement("docs").unwrap().targets, vec!["shelf".to_string()]);
+    assert_eq!(
+        a.placement("docs").unwrap().targets,
+        vec!["shelf".to_string()]
+    );
     // Running it again does nothing; it survives a restart as done.
     assert!(!run(&mut a, &job.id).ran);
     let a = lab.reopen();
@@ -286,7 +307,10 @@ fn keep_source_copies_without_dropping() {
     assert_eq!(on(&a, "shelf"), (blocks, bytes));
     assert_eq!(on(&a, "box"), (blocks, bytes));
     // The placement is left alone when the source is kept.
-    assert_eq!(a.placement("docs").unwrap().targets, vec!["box".to_string()]);
+    assert_eq!(
+        a.placement("docs").unwrap().targets,
+        vec!["box".to_string()]
+    );
 }
 
 #[test]
@@ -298,7 +322,11 @@ fn paths_limit_the_job_to_files_under_them() {
     // A missing path is refused; an absolute path inside the folder works.
     let mut bad = request("docs");
     bad.paths = vec!["nowhere".into()];
-    assert!(a.move_job_start(&bad).unwrap_err().to_string().contains("no file"));
+    assert!(a
+        .move_job_start(&bad)
+        .unwrap_err()
+        .to_string()
+        .contains("no file"));
     let mut req = request("docs");
     req.paths = vec![lab.root.join("docs/sub").display().to_string()];
     let (job, _) = a.move_job_start(&req).unwrap();
@@ -313,7 +341,10 @@ fn paths_limit_the_job_to_files_under_them() {
     assert!(shelf_bytes > left_bytes && left > 0);
     assert_eq!(r.job.bytes_total, shelf_bytes);
     // A path job does not change the folder's placement.
-    assert_eq!(a.placement("docs").unwrap().targets, vec!["box".to_string()]);
+    assert_eq!(
+        a.placement("docs").unwrap().targets,
+        vec!["box".to_string()]
+    );
     // One file, by relative path.
     let mut one = request("docs");
     one.paths = vec!["other/z.bin".into()];
@@ -369,7 +400,12 @@ fn pause_resume_and_cancel_leave_the_data_consistent() {
 
     // One group of 64 blocks, then stop.
     let r = a
-        .move_job_run(&job.id, &JobRunLimits { max_groups: Some(1) })
+        .move_job_run(
+            &job.id,
+            &JobRunLimits {
+                max_groups: Some(1),
+            },
+        )
         .unwrap();
     assert_eq!(r.job.state, JobState::Open);
     assert!(r.report.stopped_early);
@@ -410,7 +446,12 @@ fn a_job_resumes_after_the_engine_is_dropped_between_groups() {
     a.disk_add(&d1, "shelf", "data-01").unwrap();
     let (job, _) = a.move_job_start(&request("docs")).unwrap();
     let r = a
-        .move_job_run(&job.id, &JobRunLimits { max_groups: Some(1) })
+        .move_job_run(
+            &job.id,
+            &JobRunLimits {
+                max_groups: Some(1),
+            },
+        )
         .unwrap();
     let (moved, moved_bytes) = on(&a, "shelf");
     assert_eq!(moved, 64);
@@ -423,7 +464,11 @@ fn a_job_resumes_after_the_engine_is_dropped_between_groups() {
     assert_eq!(j.state, JobState::Open);
     assert_eq!(j.bytes_done, moved_bytes);
     assert_eq!(j.bytes_remaining, bytes - moved_bytes);
-    assert!(!lab.home.join("state/moves").join(format!("{}.lock", job.id)).exists());
+    assert!(!lab
+        .home
+        .join("state/moves")
+        .join(format!("{}.lock", job.id))
+        .exists());
     let r = run(&mut a, &job.id);
     assert_eq!(r.job.state, JobState::Done);
     assert_eq!(r.job.runs, 2);
