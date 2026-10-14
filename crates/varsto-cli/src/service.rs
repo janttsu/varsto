@@ -107,6 +107,9 @@ pub struct ServiceState {
     pub drains: Vec<varsto_core::engine::DrainStatus>,
     /// Drains already announced as finished or waiting (not repeated).
     pub drain_notified: std::collections::BTreeSet<String>,
+    /// Torrent jobs already announced as waiting for space (not repeated
+    /// while they wait).
+    pub torrent_notified: std::collections::BTreeSet<String>,
     /// Storages at their quota during the last sync, one sentence each.
     pub quota_full: Vec<String>,
     /// Folders paused on this device (marker missing, deletions held), by
@@ -538,6 +541,36 @@ impl ServiceState {
             }
         }
         self.drains = engine.drain_statuses().unwrap_or_default();
+    }
+    /// Step the torrent jobs of this device (called after a sync); notify
+    /// once when one waits for disk space and when one is complete.
+    pub fn torrents_if_due(&mut self, engine: &mut Engine) {
+        for j in crate::torrent::service_step(engine) {
+            match j.state {
+                varsto_core::engine::JobState::Complete => {
+                    log::info!("torrent job {} is complete", j.short());
+                    self.torrent_notified.remove(&j.hash);
+                    notify(
+                        "Varsto torrent",
+                        &format!(
+                            "{} is complete: every file is in folder {}.",
+                            j.name, j.folder
+                        ),
+                    );
+                }
+                varsto_core::engine::JobState::WaitingSpace => {
+                    if self.torrent_notified.insert(j.hash.clone()) {
+                        notify(
+                            "Varsto torrent",
+                            &format!("{} waits for disk space: {}", j.name, j.text),
+                        );
+                    }
+                }
+                _ => {
+                    self.torrent_notified.remove(&j.hash);
+                }
+            }
+        }
     }
     /// Take the scheduled backup snapshots that are due and, at most every
     /// six hours, expire old ones (called after a sync, like repair).
@@ -2084,12 +2117,13 @@ pub fn run(opts: Options) -> Result<()> {
                         st.service.trash_if_due(e);
                         st.service.restic_if_due(e);
                         st.service.moves_if_due(e, true);
+                        st.service.torrents_if_due(e);
                         st.service.suggest_disks(e);
                         if let Err(err) = e.publish_device_details(st.service.last_sync_utc) {
                             log::info!("device details not published: {err:#}");
                         }
                     }
-                    log::debug!(ms = upkeep.ms(); "service upkeep after sync (ledger, verify, scrub, repair, drains, backups, trash, restic, disk suggestions, device details)");
+                    log::debug!(ms = upkeep.ms(); "service upkeep after sync (ledger, verify, scrub, repair, drains, backups, trash, restic, torrents, disk suggestions, device details)");
                     let checked = st.engine.as_ref().map(|e| e.policy_check());
                     match checked {
                         Some(Ok(reps)) => st.service.record_policies(reps),

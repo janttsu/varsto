@@ -30,6 +30,7 @@ mod placing;
 mod restic;
 mod service;
 mod sse;
+mod torrent;
 mod trash;
 mod tray;
 mod update;
@@ -215,6 +216,12 @@ enum Cmd {
     Import {
         #[command(subcommand)]
         cmd: import::ImportCmd,
+    },
+    /// Download a torrent larger than this disk straight into a folder,
+    /// batch by batch, through a local transmission-daemon (Linux).
+    Torrent {
+        #[command(subcommand)]
+        cmd: torrent::TorrentCmd,
     },
     /// The trash: files deleted on any device, kept for a number of days
     /// (30 by default) and restorable on every device.
@@ -4044,6 +4051,9 @@ fn run(cli: &Cli) -> Result<()> {
                         api("/api/state")
                     )
                 );
+                for line in torrent::status_lines(&home) {
+                    println!("{line}");
+                }
             }
             if let Some(mut v) = from_service {
                 if cli.json {
@@ -4138,6 +4148,7 @@ fn run(cli: &Cli) -> Result<()> {
         Cmd::Verify { cmd } => upkeep::verify(cli, &home, cmd)?,
         Cmd::Scrub { cmd, run } => upkeep::scrub(cli, &home, cmd, run)?,
         Cmd::Import { cmd } => import::run(cli, &home, cmd)?,
+        Cmd::Torrent { cmd } => torrent::run(cli, &home, cmd)?,
         Cmd::Advice { idle_days, cmd } => upkeep::advice(cli, &home, *idle_days, cmd)?,
         Cmd::Restic { cmd } => restic::run(cli, &home, cmd)?,
         Cmd::Repair {
