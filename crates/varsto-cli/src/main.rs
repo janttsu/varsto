@@ -166,13 +166,31 @@ enum Cmd {
     /// Move a folder's blocks (or those of its idle files) from one storage
     /// to another: copy, check, then remove from the old one. Never drops a
     /// copy the folder's policy needs, nor the last one; run it again to
-    /// carry on after an interruption.
+    /// carry on after an interruption. A move to a disk pool (or with
+    /// --path, --keep-source or --job) is a job: it moves what fits on the
+    /// attached disks, waits for the next disk and goes on by itself;
+    /// `move status|pause|resume|cancel` manage jobs.
+    #[command(args_conflicts_with_subcommands = true, subcommand_negates_reqs = true)]
     Move {
-        folder: String,
+        #[command(subcommand)]
+        cmd: Option<placing::MoveCmd>,
+        #[arg(required = true)]
+        folder: Option<String>,
+        #[arg(long, required = true)]
+        from: Option<String>,
+        #[arg(long, required = true)]
+        to: Option<String>,
+        /// Only files and directories at or under this path of the folder
+        /// (repeatable; relative to the folder or inside its directory).
+        #[arg(long = "path")]
+        paths: Vec<String>,
+        /// Copy and check, but keep the blocks on the old storage.
         #[arg(long)]
-        from: String,
+        keep_source: bool,
+        /// Record the move as a job that goes on by itself, also between
+        /// ordinary storages.
         #[arg(long)]
-        to: String,
+        job: bool,
         /// Only files not used for this many days.
         #[arg(long)]
         idle_days: Option<i64>,
@@ -2098,7 +2116,11 @@ fn suggest_text(s: &varsto_core::disksuggest::DiskSuggestions) -> String {
                 t.command
             );
         }
-        None => out += "No disk needs docking now.\n",
+        None if s.new_disk_needed.is_empty() => out += "No disk needs docking now.\n",
+        None => {}
+    }
+    for n in &s.new_disk_needed {
+        out += &format!("{}\n  Run: {}\n", n.text, n.command);
     }
     let rest: Vec<_> = s
         .ranked
@@ -3621,33 +3643,57 @@ fn run(cli: &Cli) -> Result<()> {
                     }
                 }
             }
+            if !cli.json
+                && matches!(
+                    cmd,
+                    DiskCmd::Add { .. }
+                        | DiskCmd::Check { .. }
+                        | DiskCmd::Insert { .. }
+                        | DiskCmd::Init { .. }
+                )
+            {
+                placing::continue_hint(&engine);
+            }
         }
         Cmd::Backup { cmd } => backup::run(cli, &home, cmd)?,
         Cmd::Trash { cmd } => trash::run(cli, &home, cmd)?,
         Cmd::History(args) => history::run(cli, &home, args)?,
+        Cmd::Move { cmd: Some(cmd), .. } => placing::move_cmd(cli, &home, cmd)?,
         Cmd::Move {
+            cmd: None,
             folder,
             from,
             to,
+            paths,
+            keep_source,
+            job,
             idle_days,
             dry_run,
             confirm_cold_read,
             yes,
         } => {
+            let (Some(folder), Some(from), Some(to)) = (folder, from, to) else {
+                return bail_usage("move needs a folder, --from and --to");
+            };
             let mut engine = open_engine(&home)?;
-            placing::move_data(
-                cli,
-                &mut engine,
-                placing::MoveArgs {
-                    folder,
-                    from,
-                    to,
-                    idle_days: *idle_days,
-                    dry_run: *dry_run,
-                    confirm_cold_read: *confirm_cold_read,
-                    yes: *yes,
-                },
-            )?;
+            let args = placing::MoveArgs {
+                folder,
+                from,
+                to,
+                idle_days: *idle_days,
+                dry_run: *dry_run,
+                confirm_cold_read: *confirm_cold_read,
+                yes: *yes,
+            };
+            let to_pool = engine
+                .storages()
+                .iter()
+                .any(|s| s.name() == to.as_str() && s.is_data_only());
+            if to_pool || *job || *keep_source || !paths.is_empty() {
+                placing::move_job(cli, &mut engine, args, paths, *keep_source)?;
+            } else {
+                placing::move_data(cli, &mut engine, args)?;
+            }
         }
         Cmd::Folder { cmd } => {
             if folder_safety_cmd(cli, &home, cmd)? {
@@ -3999,16 +4045,26 @@ fn run(cli: &Cli) -> Result<()> {
                     )
                 );
             }
-            if let Some(v) = from_service {
+            if let Some(mut v) = from_service {
                 if cli.json {
+                    v["move_jobs"] =
+                        serde_json::to_value(varsto_core::staged_move::list_active(&home))?;
                     println!("{}", serde_json::to_string_pretty(&v)?);
                 } else {
                     println!("{}", status_from_value(&v));
+                    for l in placing::status_lines(&home) {
+                        println!("{l}");
+                    }
                 }
                 return Ok(());
             }
             let engine = open_engine(&home)?;
             let s = engine.status()?;
+            let move_lines = if cli.json {
+                Vec::new()
+            } else {
+                placing::status_lines(&home)
+            };
             print(cli, &s, |s| {
                 let mut out = format!(
                     "vault {} device {} ({}) format {} lamport {} batches {}\n",
@@ -4039,6 +4095,9 @@ fn run(cli: &Cli) -> Result<()> {
                     out += &format!("WARNING forked devices: {:?}\n", s.forked_devices);
                 }
                 out += &format!("ledger: {}\n", s.ledger_health.describe());
+                for l in &move_lines {
+                    out += &format!("{l}\n");
+                }
                 out.trim_end().to_string()
             })?;
         }

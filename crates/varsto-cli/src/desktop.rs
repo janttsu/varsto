@@ -2683,6 +2683,22 @@ fn api_unlocked(
             }
             Ok(serde_json::to_value(r)?)
         }
+        // Staged moves to disk pools: the open jobs, and pause/resume/cancel.
+        (Method::Get, "/api/moves") => Ok(json!({"jobs": engine.move_jobs()})),
+        (Method::Post, "/api/move/state") => {
+            use varsto_core::staged_move::JobState;
+            let state = match s(input, "action")?.as_str() {
+                "pause" => JobState::Paused,
+                "resume" => JobState::Open,
+                "cancel" => JobState::Cancelled,
+                other => bail!("unknown action {other}: use pause, resume or cancel"),
+            };
+            let job = engine.move_job_set_state(&s(input, "id")?, state)?;
+            service.move_jobs = engine.move_jobs();
+            service.move_jobs.retain(|j| j.state.is_open() || j.state == JobState::Paused);
+            service.suggest_disks(engine);
+            Ok(json!({"ok": true, "job": job}))
+        }
         (Method::Get, "/api/disk/groups") => Ok(serde_json::to_value(engine.disk_groups()?)?),
         (Method::Post, "/api/disk/group") => {
             let copies = input

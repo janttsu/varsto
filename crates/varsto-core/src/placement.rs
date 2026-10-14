@@ -286,6 +286,25 @@ pub struct MoveReport {
     pub cold_notes: Vec<String>,
     /// The folder's placement was changed so that new blocks go to `to`.
     pub placement_changed: Option<String>,
+    /// Staged moves (`engine/staged_moves.rs`): blocks moved by this run
+    /// (dropped from `from`, or with `keep_source` copied and checked) and
+    /// their bytes.
+    pub blocks_done: u64,
+    pub bytes_done: u64,
+    /// Blocks that wait for room on `to` (no attached disk with room, or a
+    /// quota) and for a second place under a disk group rule, with bytes.
+    pub waiting_room_blocks: u64,
+    pub waiting_room_bytes: u64,
+    pub waiting_place_blocks: u64,
+    pub waiting_place_bytes: u64,
+    /// Why the run waits for room, when `to` said.
+    pub waiting_note: Option<String>,
+    /// The smallest block that found no room (0: none, or no disk at all).
+    pub waiting_min_bytes: u64,
+    /// The run stopped at its limit of block groups; more is left to move.
+    pub stopped_early: bool,
+    /// Labels of the pool disks this run wrote to.
+    pub disks_used: Vec<String>,
     pub summary: String,
 }
 

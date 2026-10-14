@@ -1503,7 +1503,19 @@
   "Write it down and keep it offline: it is the only way to recover the data, or to join without another device; devices can also be added by pairing with a code. It is shown once.": "Kirjoita se muistiin ja säilytä offline-tilassa: se on ainoa tapa palauttaa data tai liittyä ilman toista laitetta; laitteita voi lisätä myös muodostamalla parin koodilla. Se näytetään vain kerran.",
   "opening files in other apps is not available on this platform": "tiedostojen avaaminen muissa sovelluksissa ei ole käytettävissä tällä alustalla",
   "One key opens this Strongroom; if it is lost, so is the folder. Enroll a backup key and keep it somewhere safe.": "Yksi avain avaa tämän Strongroomin; jos se katoaa, katoaa myös kansio. Rekisteröi varaturva-avain ja säilytä se turvallisessa paikassa.",
-  "A storage may be withholding ledger batches of {device}: another device holds newer ones that no storage gave this device.": "Tallennuspaikka saattaa pidättää laitteen {device} kirjanpitoeriä: toisella laitteella on uudempia eriä, joita mikään tallennuspaikka ei ole antanut tälle laitteelle."
+  "A storage may be withholding ledger batches of {device}: another device holds newer ones that no storage gave this device.": "Tallennuspaikka saattaa pidättää laitteen {device} kirjanpitoeriä: toisella laitteella on uudempia eriä, joita mikään tallennuspaikka ei ole antanut tälle laitteelle.",
+  "Staged move of folder": "Vaiheittainen siirto, kansio",
+  "left to move": "siirrettävää jäljellä",
+  "need a second place": "tarvitsevat kopion toiseen paikkaan",
+  "Attach disk": "Liitä levy",
+  "Attach a new disk": "Liitä uusi levy",
+  "to continue the move.": "siirron jatkamiseksi.",
+  "A new disk is needed": "Tarvitaan uusi levy",
+  "The move of {folder} to {to} waits for a disk: {left} left.": "Kansion {folder} siirto kohteeseen {to} odottaa levyä: {left} jäljellä.",
+  "Attach disk {disk} to continue moving {folder}": "Liitä levy {disk} jatkaaksesi kansion {folder} siirtoa",
+  "Attach a new disk to continue moving {folder}": "Liitä uusi levy jatkaaksesi kansion {folder} siirtoa",
+  "{left} of {folder} are still on {from}. The move to {to} stops when the pool has no room and carries on by itself when a disk is attached.": "{left} kansiosta {folder} on yhä kohteessa {from}. Siirto kohteeseen {to} pysähtyy, kun levyvarastossa ei ole tilaa, ja jatkuu itsestään, kun levy liitetään.",
+  "Plug the disk in. Nothing else is needed; `varsto move status` shows how far the move has come.": "Liitä levy. Muuta ei tarvita; `varsto move status` näyttää, kuinka pitkällä siirto on."
  },
  "patterns": [
   [

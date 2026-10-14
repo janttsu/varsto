@@ -280,3 +280,104 @@ fn folder_ignore_rules_and_metadata_settings_through_the_cli() {
     let (success, _, stderr) = varsto(&a, &["folder", "set", "docs", "--permissions", "maybe"]);
     assert!(!success, "{stderr}");
 }
+
+#[test]
+fn staged_move_jobs_through_the_cli() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    let home = root.join("home");
+    let mounts = root.join("mounts");
+    let docs = root.join("docs");
+    fs::create_dir_all(mounts.join("d1")).unwrap();
+    fs::create_dir_all(docs.join("sub")).unwrap();
+    fs::write(docs.join("sub/a.txt"), vec![7u8; 5000]).unwrap();
+    fs::write(docs.join("b.txt"), vec![9u8; 5000]).unwrap();
+    ok(&home, &["init", "--name", "laptop"]);
+    ok(
+        &home,
+        &[
+            "storage",
+            "add-local",
+            "box",
+            root.join("box").to_str().unwrap(),
+        ],
+    );
+    ok(
+        &home,
+        &[
+            "storage",
+            "add-pool",
+            "shelf",
+            "--scan-root",
+            mounts.to_str().unwrap(),
+        ],
+    );
+    ok(&home, &["folder", "add", "docs", docs.to_str().unwrap()]);
+    ok(&home, &["folder", "placement", "docs", "--storage", "box"]);
+    ok(&home, &["push", "docs"]);
+
+    // No disk yet: the job is recorded and waits.
+    let run = ok(
+        &home,
+        &["move", "docs", "--from", "box", "--to", "shelf", "--yes"],
+    );
+    assert_eq!(run["ran"], true);
+    let id = run["job"]["id"].as_str().unwrap().to_string();
+    assert_eq!(run["job"]["state"], "open");
+    assert_eq!(run["job"]["waiting"]["kind"], "disk");
+    assert!(run["job"]["bytes_remaining"].as_u64().unwrap() > 0);
+    assert!(root
+        .join("home/state/moves")
+        .join(format!("{id}.json"))
+        .is_file());
+    let status = ok(&home, &["move", "status"]);
+    assert_eq!(status.as_array().unwrap().len(), 1);
+    let s = ok(&home, &["disk", "suggest"]);
+    assert_eq!(
+        s["suggestions"]["new_disk_needed"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+
+    // Paused, then resumed with a disk attached: moves only the path asked for.
+    ok(&home, &["move", "pause", &id]);
+    assert_eq!(ok(&home, &["move", "status", &id])[0]["state"], "paused");
+    let (success, _, stderr) = varsto(&home, &["move", "resume", "mv-nope"]);
+    assert!(!success && stderr.contains("no move job"), "{stderr}");
+    ok(&home, &["move", "cancel", &id]);
+    assert_eq!(ok(&home, &["move", "status"]).as_array().unwrap().len(), 0);
+
+    ok(
+        &home,
+        &[
+            "disk",
+            "add",
+            mounts.join("d1").to_str().unwrap(),
+            "--pool",
+            "shelf",
+            "--label",
+            "data-01",
+        ],
+    );
+    let run = ok(
+        &home,
+        &[
+            "move",
+            "docs",
+            "--from",
+            "box",
+            "--to",
+            "shelf",
+            "--path",
+            "sub",
+            "--keep-source",
+            "--yes",
+        ],
+    );
+    assert_eq!(run["job"]["state"], "done", "{run}");
+    assert_eq!(run["job"]["paths"][0], "sub");
+    assert_eq!(run["job"]["keep_source"], true);
+    assert_eq!(run["job"]["disks_used"][0], "data-01");
+}
