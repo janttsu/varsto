@@ -50,6 +50,7 @@ pub mod progress;
 pub mod providers;
 pub mod qr;
 pub mod rclone;
+pub mod record_shim;
 pub mod recovery;
 pub mod recovery_guide;
 pub mod replica;

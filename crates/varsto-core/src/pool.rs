@@ -2341,6 +2341,43 @@ impl Storage for PoolStorage {
         Ok(Some(buf))
     }
 
+    fn get_range(&self, key: &str, offset: u64, len: u64) -> Result<Option<Vec<u8>>> {
+        // A block inside a pack: read only its bytes from the disk.
+        let path = {
+            let mut st = self.state.lock().unwrap();
+            let Some(e) = st.index.objects.get(key).cloned() else {
+                return Ok(None);
+            };
+            let attached = self.attached(&mut st);
+            let mount = e.holders().find_map(|d| attached.get(d)).cloned();
+            match mount {
+                Some(mount) => Self::data_path(&mount, key)?,
+                None => {
+                    // Away: the whole read says which disk to bring.
+                    drop(st);
+                    return Ok(self.get(key)?.map(|b| {
+                        let start = (offset as usize).min(b.len());
+                        let end = start.saturating_add(len as usize).min(b.len());
+                        b[start..end].to_vec()
+                    }));
+                }
+            }
+        };
+        let read = || -> std::io::Result<Vec<u8>> {
+            use std::io::{Read, Seek, SeekFrom};
+            let mut f = fs::File::open(&path)?;
+            f.seek(SeekFrom::Start(offset))?;
+            let mut b = Vec::new();
+            f.take(len).read_to_end(&mut b)?;
+            Ok(b)
+        };
+        match read() {
+            Ok(b) => Ok(Some(b)),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(err) => Err(err).with_context(|| format!("read {}", path.display())),
+        }
+    }
+
     fn exists(&self, key: &str) -> Result<bool> {
         let st = self.state.lock().unwrap();
         Ok(st.index.objects.contains_key(key))

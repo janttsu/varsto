@@ -68,6 +68,7 @@ mod manifest_upkeep;
 mod membership;
 mod notes;
 mod org_ops;
+mod pack_upkeep;
 mod placement;
 mod quotas;
 mod repair;
@@ -751,10 +752,18 @@ type OpenedStorages = HashMap<String, (StorageSpec, std::sync::Arc<dyn Storage>)
 /// blocks may wait for them.
 const UPLOADERS: usize = 8;
 const UPLOAD_QUEUE: usize = 16;
-/// At most this much encrypted data waits for or is with the uploaders:
-/// with the large blocks of big files (up to 16 MiB) the queue alone would
-/// otherwise hold hundreds of megabytes, too much for a phone.
+/// At least this much encrypted data may wait for or be with the uploaders
+/// (counted once per storage it goes to); the budget grows with the pack
+/// sizes of the storages written (`upload_budget`), up to `UPLOAD_BYTES_MAX`.
 const UPLOAD_BYTES: u64 = 128 << 20;
+const UPLOAD_BYTES_MAX: u64 = 768 << 20;
+
+/// Bytes a push may hold for `targets` (pack sizes of the storages it
+/// writes): a pack's worth for each, and some to fill the next.
+fn upload_budget(targets: impl Iterator<Item = usize>) -> u64 {
+    let sum: u64 = targets.map(|t| t as u64).sum();
+    (sum + (64 << 20)).clamp(UPLOAD_BYTES, UPLOAD_BYTES_MAX)
+}
 
 /// Count one finished write in the report and the ledger.
 fn apply_upload(
@@ -776,6 +785,7 @@ fn apply_upload(
                 object: d.object,
                 storage: d.storage,
                 size: d.size,
+                pack: None,
             });
         }
         // A pool with no disk attached (or no room) is left out for the rest
@@ -804,14 +814,11 @@ struct UploadJob {
     ct: Vec<u8>,
 }
 
-/// A batch of objects on its way to the storages: one work item per
-/// storage shares it, and its bytes leave the upload budget when the last
-/// of them is done.
+/// The blocks of one pack on their way to one storage; their bytes leave
+/// the upload budget when it is written.
 struct UploadBatch {
-    jobs: Vec<UploadJob>,
-    /// Storages still to write it.
-    left: std::sync::atomic::AtomicUsize,
-    /// Encrypted bytes it holds (counted once, however many storages).
+    jobs: Vec<std::sync::Arc<UploadJob>>,
+    /// Encrypted bytes it holds.
     held: u64,
 }
 
@@ -1661,6 +1668,8 @@ impl Engine {
         if self.cycle.is_some() {
             return;
         }
+        // Deletions of the operation go out as tombstone lists now.
+        self.flush_pack_deletions();
         self.learn_conditional_writes();
         self.forget_storages();
     }
@@ -1696,6 +1705,28 @@ impl Engine {
         self.config.conditional_writes.get(storage).copied()
     }
 
+    /// `inner` with its block objects in packs (format 2, `crate::packs`):
+    /// 64 MiB on hot, local, pool and transferrer storages, 256 MiB on cold
+    /// ones.
+    pub(crate) fn pack_store(
+        &self,
+        spec: &StorageSpec,
+        inner: Box<dyn Storage>,
+    ) -> crate::packs::PackStore {
+        self.ensure_pack_keys();
+        let target = if spec.is_cold() {
+            crate::packs::COLD_TARGET
+        } else {
+            crate::packs::HOT_TARGET
+        };
+        let packed = crate::packs::PackStore::new(inner, &self.pack_caches, target);
+        if spec.is_data_only() {
+            packed.blocks_only()
+        } else {
+            packed
+        }
+    }
+
     fn open_spec_fresh(&self, spec: &StorageSpec) -> Result<Box<dyn Storage>> {
         let kind = match spec {
             StorageSpec::LocalDir { .. } => "local",
@@ -1703,29 +1734,36 @@ impl Engine {
             StorageSpec::Rclone { .. } => "rclone",
             StorageSpec::Pool { .. } => "pool",
         };
-        let backend: Box<dyn Storage> = if let StorageSpec::Pool { .. } = spec {
+        let inner: Box<dyn Storage> = if let StorageSpec::Pool { .. } = spec {
             Box::new(self.open_pool(spec)?)
         } else {
             let store = self.secret_store()?;
             let options = crate::storage::OpenOptions {
                 conditional_writes: self.config.conditional_writes.get(spec.name()).copied(),
             };
-            let inner = spec.open_with_options(&|r| store.secrets.get(r).cloned(), &options)?;
-            // Small blocks go into packs on hot storages; cold storage and
-            // transferrers keep one object per block (restores and removals
-            // work per object there). Packs are read wherever they are.
-            let packing = !spec.is_cold() && !spec.is_carrier();
-            Box::new(crate::packs::PackAware::new(
-                inner,
-                &self.pack_caches,
-                packing,
-            ))
+            spec.open_with_options(&|r| store.secrets.get(r).cloned(), &options)?
         };
+        let backend: Box<dyn Storage> = Box::new(self.pack_store(spec, inner));
         let backend: Box<dyn Storage> = Box::new(crate::storage::LoggedStorage::new(backend, kind));
         Ok(match &self.storage_calls {
             Some(calls) => Box::new(crate::storage::CountingStorage::new(backend, calls.clone())),
             None => backend,
         })
+    }
+
+    /// The tombstone lists of packs are written and read under a key of
+    /// the vault (any full device deletes blocks and reads what the others
+    /// deleted, `crate::packs`).
+    fn ensure_pack_keys(&self) {
+        if !self.pack_caches.has_tombstone_keys() {
+            self.pack_caches.set_tombstone_keys(
+                crate::record_shim::Records::new(
+                    self.vault.vault_id.clone(),
+                    self.vault.device_id.clone(),
+                ),
+                self.root_key().derive("pack-tombstones", &[]),
+            );
+        }
     }
 
     /// Count every call this engine makes to its storages from now on
@@ -2123,6 +2161,7 @@ impl Engine {
                     object: c.object.clone(),
                     storage: c.target.clone(),
                     size: bytes.len() as u64,
+                    pack: None,
                 });
                 report.blocks_copied += 1;
                 report.bytes_copied += bytes.len() as u64;
@@ -3066,6 +3105,9 @@ impl Engine {
     // ----- ledger mailbox ----------------------------------------------------
 
     fn commit_batch(&mut self) -> Result<Option<u64>> {
+        // Blocks written since: their places into the claims, pack indexes
+        // and tombstone lists out (`pack_upkeep`).
+        self.settle_packs();
         if self.pending.is_empty() {
             return Ok(None);
         }
@@ -3856,20 +3898,21 @@ impl Engine {
             )
         });
         // Reading, chunking and encrypting stay on this thread; the writes go
-        // to a few uploader threads, so that many small objects do not each
-        // wait for the previous one's round trip to the storage. A batch (one
-        // block, or small blocks that storages keeping packs write as one
-        // pack, crate::packs) becomes one work item per storage it goes to,
-        // so the storages are written side by side rather than one after the
-        // other. The queue is bounded: at most UPLOAD_QUEUE items wait.
-        let (job_tx, job_rx) =
-            std::sync::mpsc::sync_channel::<(usize, std::sync::Arc<UploadBatch>)>(UPLOAD_QUEUE);
+        // to a few uploader threads. Every block goes into a pack
+        // (`crate::packs`): each storage collects the blocks it needs until
+        // a pack's worth (64 MiB, 256 MiB on cold storages) is together and
+        // then writes them as one work item, so storages are written side by
+        // side and a storage sees pack sizes only. The queue is bounded, and
+        // so are the bytes held (`upload_budget`): when the budget is used
+        // up, what each storage collected goes out as it is.
+        let (job_tx, job_rx) = std::sync::mpsc::sync_channel::<(usize, UploadBatch)>(UPLOAD_QUEUE);
         let job_rx = std::sync::Mutex::new(job_rx);
         let (done_tx, done_rx) = std::sync::mpsc::channel::<UploadDone>();
         let storages_ref = &storages;
         let mut first_error: Option<anyhow::Error> = None;
         let budget = (std::sync::Mutex::new(0u64), std::sync::Condvar::new());
         let budget_ref = &budget;
+        let limit = upload_budget(storages.iter().map(|(_, b)| b.pack_target().max(1 << 20)));
         std::thread::scope(|s| -> Result<()> {
             // Owned by this closure: however it returns (an error reading a
             // file included), the sender goes and the uploaders stop.
@@ -3882,124 +3925,101 @@ impl Engine {
                         Err(_) => break,
                     };
                     let (spec, backend) = &storages_ref[i];
-                    let mine: Vec<&UploadJob> = batch
+                    let members: Vec<(String, &[u8])> = batch
                         .jobs
                         .iter()
-                        .filter(|j| j.targets.iter().any(|t| t == spec.name()))
+                        .map(|j| (j.object.as_str().to_string(), j.ct.as_slice()))
                         .collect();
-                    if !mine.is_empty() {
-                        // One object, or a storage without packs: written
-                        // one by one, each with its own outcome (a pool's
-                        // "no room" stays a pool error). Several small ones
-                        // on a storage keeping packs: one pack.
-                        let outcomes: Vec<Result<bool>> =
-                            if mine.len() == 1 || !backend.packs_small_objects() {
-                                mine.iter()
-                                    .map(|j| {
-                                        backend.put_if_absent(&chunk_storage_key(&j.object), &j.ct)
-                                    })
-                                    .collect()
-                            } else {
-                                let members: Vec<(String, &[u8])> = mine
-                                    .iter()
-                                    .map(|j| (j.object.as_str().to_string(), j.ct.as_slice()))
-                                    .collect();
-                                match backend.put_pack(&members) {
-                                    Ok(flags) => flags.into_iter().map(Ok).collect(),
-                                    Err(e) => {
-                                        // A full disk stays that error (the
-                                        // storage is left out, not the push).
-                                        let low = crate::freespace::low_space(&e).cloned();
-                                        let msg = format!("{e:#}");
-                                        mine.iter()
-                                            .map(|_| match &low {
-                                                Some(l) => Err(anyhow::Error::new(l.clone())),
-                                                None => Err(anyhow!("{msg}")),
-                                            })
-                                            .collect()
-                                    }
-                                }
-                            };
-                        for (job, outcome) in mine.iter().zip(outcomes) {
-                            let _ = done_tx.send(UploadDone {
-                                storage: spec.name().to_string(),
-                                chunk: job.chunk.clone(),
-                                object: job.object.clone(),
-                                size: job.ct.len() as u64,
-                                outcome,
-                            });
+                    let outcomes: Vec<Result<bool>> = match backend.put_pack(&members) {
+                        Ok(flags) => flags.into_iter().map(Ok).collect(),
+                        Err(e) => {
+                            // A full disk stays that error (the storage is
+                            // left out, not the push), and so does a pool's
+                            // "no disk".
+                            let low = crate::freespace::low_space(&e).cloned();
+                            let pool = pool::pool_error(&e).cloned();
+                            let msg = format!("{e:#}");
+                            batch
+                                .jobs
+                                .iter()
+                                .map(|_| match (&low, &pool) {
+                                    (Some(l), _) => Err(anyhow::Error::new(l.clone())),
+                                    (None, Some(p)) => Err(anyhow::Error::new(p.clone())),
+                                    _ => Err(anyhow!("{msg}")),
+                                })
+                                .collect()
                         }
+                    };
+                    for (job, outcome) in batch.jobs.iter().zip(outcomes) {
+                        let _ = done_tx.send(UploadDone {
+                            storage: spec.name().to_string(),
+                            chunk: job.chunk.clone(),
+                            object: job.object.clone(),
+                            size: job.ct.len() as u64,
+                            outcome,
+                        });
                     }
-                    // The last storage of the batch done: its bytes are free.
-                    if batch.left.fetch_sub(1, std::sync::atomic::Ordering::AcqRel) == 1 {
-                        *budget_ref.0.lock().unwrap() -= batch.held;
-                        budget_ref.1.notify_all();
-                    }
+                    *budget_ref.0.lock().unwrap() -= batch.held;
+                    budget_ref.1.notify_all();
                 });
             }
             drop(done_tx);
-            // Small blocks wait here until a pack's worth is together.
-            let mut small: Vec<UploadJob> = Vec::new();
-            let mut send_batch =
-                |me: &mut Self, report: &mut PushReport, batch: Vec<UploadJob>| -> bool {
+            // What each storage collected for its next pack.
+            let mut collected: Vec<(Vec<std::sync::Arc<UploadJob>>, u64)> =
+                storages.iter().map(|_| (Vec::new(), 0)).collect();
+            let send_to =
+                |collected: &mut Vec<(Vec<std::sync::Arc<UploadJob>>, u64)>, i: usize| -> bool {
+                    let (jobs, held) = std::mem::take(&mut collected[i]);
+                    jobs.is_empty() || job_tx.send((i, UploadBatch { jobs, held })).is_ok()
+                };
+            // `None` sends everything collected (at the end).
+            let mut send =
+                |me: &mut Self, report: &mut PushReport, job: Option<UploadJob>| -> bool {
                     while let Ok(d) = done_rx.try_recv() {
                         apply_upload(me, &folder_id, d, report, &mut first_error);
                     }
                     if first_error.is_some() {
                         return false;
                     }
-                    // One item per storage any object of the batch goes to.
+                    let Some(job) = job else {
+                        return (0..collected.len()).all(|i| send_to(&mut collected, i));
+                    };
                     let to: Vec<usize> = storages_ref
                         .iter()
                         .enumerate()
-                        .filter(|(_, (spec, _))| {
-                            batch
-                                .iter()
-                                .any(|j| j.targets.iter().any(|t| t == spec.name()))
-                        })
+                        .filter(|(_, (spec, _))| job.targets.iter().any(|t| t == spec.name()))
                         .map(|(i, _)| i)
                         .collect();
                     if to.is_empty() {
                         return true;
                     }
-                    let held: u64 = batch.iter().map(|j| j.ct.len() as u64).sum();
-                    {
+                    let need = job.ct.len() as u64 * to.len() as u64;
+                    let over = {
+                        let used = budget_ref.0.lock().unwrap();
+                        *used > 0 && *used + need > limit
+                    };
+                    if over {
+                        // Hand over what is collected, then wait for room.
+                        if !(0..collected.len()).all(|i| send_to(&mut collected, i)) {
+                            return false;
+                        }
                         let mut used = budget_ref.0.lock().unwrap();
-                        while *used > 0 && *used + held > UPLOAD_BYTES {
+                        while *used > 0 && *used + need > limit {
                             used = budget_ref.1.wait(used).unwrap();
                         }
-                        *used += held;
                     }
-                    let item = std::sync::Arc::new(UploadBatch {
-                        jobs: batch,
-                        left: std::sync::atomic::AtomicUsize::new(to.len()),
-                        held,
-                    });
-                    to.into_iter()
-                        .all(|i| job_tx.send((i, item.clone())).is_ok())
-                };
-            // `None` sends what is still waiting (at the end).
-            let mut send =
-                |me: &mut Self, report: &mut PushReport, job: Option<UploadJob>| -> bool {
-                    match job {
-                        Some(job) if job.ct.len() <= crate::packs::MAX_MEMBER => {
-                            small.push(job);
-                            let bytes: usize = small.iter().map(|j| j.ct.len()).sum();
-                            if bytes >= crate::packs::TARGET_BYTES
-                                || small.len() >= crate::packs::MAX_MEMBERS
-                            {
-                                let batch = std::mem::take(&mut small);
-                                return send_batch(me, report, batch);
-                            }
-                            true
-                        }
-                        Some(job) => send_batch(me, report, vec![job]),
-                        None if small.is_empty() => true,
-                        None => {
-                            let batch = std::mem::take(&mut small);
-                            send_batch(me, report, batch)
+                    *budget_ref.0.lock().unwrap() += need;
+                    let job = std::sync::Arc::new(job);
+                    for i in to {
+                        let size = job.ct.len() as u64;
+                        collected[i].0.push(job.clone());
+                        collected[i].1 += size;
+                        let target = storages_ref[i].1.pack_target().max(1) as u64;
+                        if collected[i].1 >= target && !send_to(&mut collected, i) {
+                            return false;
                         }
                     }
+                    true
                 };
             'files: for file in state.files.values().filter(|f| !f.deleted) {
                 if file.chunks.iter().all(|c| missing_on(c).is_empty()) {
@@ -5218,7 +5238,7 @@ impl Engine {
                     }
                 };
                 let plain = match crate::chunk_seal::open_chunk(
-                    &fk,
+                    fk,
                     &self.vault.vault_id,
                     &cref.chunk,
                     cref.epoch,
@@ -5782,7 +5802,7 @@ impl Engine {
                     // One copy per disk that holds the object (disk
                     // groups keep several), each at its disk's place.
                     for (copy, at, v, v_utc, readable) in
-                        Self::pool_copies(name, pool, &record.object, verified, verified_utc)
+                        Self::pool_copies(name, pool, record, verified, verified_utc)
                     {
                         if !readable {
                             let list = ctx.unreadable_places.entry(at.clone()).or_default();
@@ -6150,15 +6170,33 @@ impl Engine {
             }
             folder_keys.insert(rec.folder_id.clone(), fk);
         }
-        let mut local_roots: Vec<PathBuf> = self
+        // Blocks in packs on local-directory storages, where the ledger
+        // places them.
+        let dirs: BTreeMap<&str, &PathBuf> = self
             .config
             .storages
             .iter()
             .filter_map(|s| match s {
-                StorageSpec::LocalDir { path, .. } if !s.is_cold() => Some(path.clone()),
+                StorageSpec::LocalDir { name, path, .. } if !s.is_cold() => {
+                    Some((name.as_str(), path))
+                }
                 _ => None,
             })
             .collect();
+        let mut packed = BTreeMap::new();
+        if !dirs.is_empty() {
+            for rec in self.view()?.chunks.values() {
+                for (storage, loc) in &rec.storages {
+                    if let (Some(root), Some(p)) = (dirs.get(storage.as_str()), &loc.pack) {
+                        packed.insert(
+                            rec.object.clone(),
+                            (root.join(crate::packs::pack_key(&p.pack)), p.offset, p.len),
+                        );
+                    }
+                }
+            }
+        }
+        let mut local_roots: Vec<PathBuf> = Vec::new();
         if self.block_cache_root().is_dir() {
             local_roots.push(self.block_cache_root());
         }
@@ -6169,6 +6207,7 @@ impl Engine {
             folder_keys,
             pieces,
             local_roots,
+            packed,
             // Refused at the door: revoked devices, and in an organization
             // every device the roster does not list.
             revoked: self
@@ -7316,23 +7355,18 @@ impl Engine {
         if full {
             // Every object on the disk was re-hashed: that is a verification
             // other devices can rely on through the ledger.
+            // The disk holds packs: every block in a checked pack is.
             let view = self.view()?;
-            let mut by_object: BTreeMap<ObjectName, (FolderId, ChunkId)> = BTreeMap::new();
-            for ((folder, chunk), r) in view.chunks.iter() {
-                by_object.insert(r.object.clone(), (folder.clone(), chunk.clone()));
-            }
+            let by_pack = pack_upkeep::blocks_by_pack(&view, spec.name());
             for (key, _) in pool.objects_on(&disk.id) {
-                let Some(name) = key.rsplit('/').next() else {
+                let Some(pack) = crate::packs::pack_of_key(&key) else {
                     continue;
                 };
-                let Ok(object) = ObjectName::from_hex(name) else {
-                    continue;
-                };
-                if let Some((folder, chunk)) = by_object.get(&object) {
+                for (folder, chunk, object) in by_pack.get(pack).into_iter().flatten() {
                     self.pending.push(Event::ChunkVerified {
                         folder: folder.clone(),
                         chunk: chunk.clone(),
-                        object,
+                        object: object.clone(),
                         storage: spec.name().to_string(),
                     });
                 }
@@ -7396,20 +7430,21 @@ impl Engine {
         let (spec, pool, disk) = self.find_disk(label)?;
         pool.set_retired(&disk.id, true)?;
         let view = self.view()?;
-        let mut elsewhere: HashSet<ObjectName> = HashSet::new();
+        let mut elsewhere: HashSet<String> = HashSet::new();
         for r in view.chunks.values() {
             if r.storages.keys().any(|s| s != spec.name()) {
-                elsewhere.insert(r.object.clone());
+                elsewhere.insert(r.object.as_str().to_string());
             }
         }
+        // The disk holds packs: one is elsewhere when every block in it is.
+        pack_upkeep::with_pack_ids(&view, spec.name(), &mut elsewhere, true);
         let only_here = pool
             .objects_on(&disk.id)
             .iter()
             .filter(|(key, _)| {
                 key.rsplit('/')
                     .next()
-                    .and_then(|n| ObjectName::from_hex(n).ok())
-                    .is_none_or(|o| !elsewhere.contains(&o))
+                    .is_none_or(|n| !elsewhere.contains(n))
             })
             .count() as u64;
         let disks = pool.disks();

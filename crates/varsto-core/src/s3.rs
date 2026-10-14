@@ -68,6 +68,10 @@ const PROBE_BODY: &[u8] = b"varsto conditional-write probe";
 /// read (object reads are capped per key, `storage::read_limit`).
 const MAX_BODY: u64 = crate::storage::MAX_RECORD;
 
+/// Objects larger than this (packs, `crate::packs`) are written in parts
+/// of `MULTIPART_PART` bytes.
+const MULTIPART_ABOVE: usize = 64 << 20;
+const MULTIPART_PART: usize = 16 << 20;
 const EMPTY_SHA256: &str = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
 
 /// Whether `host[:port]` names this computer: `localhost`, `127.0.0.0/8`
@@ -406,8 +410,12 @@ impl S3Storage {
             send_headers.push((k.to_string(), v.to_string()));
         }
         let mut resp = match method {
-            "PUT" => {
-                let mut r = self.agent.put(&url);
+            "PUT" | "POST" => {
+                let mut r = if method == "PUT" {
+                    self.agent.put(&url)
+                } else {
+                    self.agent.post(&url)
+                };
                 for (k, v) in &send_headers {
                     r = r.header(k.as_str(), v.as_str());
                 }
@@ -457,6 +465,92 @@ impl S3Storage {
                 .with_context(|| format!("{method} {}: reading the response", self.cfg.name))?
         };
         Ok((status, bytes, server_date))
+    }
+
+    /// `put_if_absent` for a large object: a multipart upload. Large
+    /// objects are packs, named by the hash of their bytes, so whatever
+    /// already has the name holds the same bytes: a HEAD decides. A server
+    /// that refuses the multipart upload gets one PUT.
+    fn put_large(&self, key: &str, data: &[u8]) -> Result<bool> {
+        if self.exists(key)? {
+            return Ok(false);
+        }
+        if let Err(e) = self.put_multipart(key, data) {
+            log::warn!(storage = self.cfg.name.as_str(); "s3: multipart upload of {key} failed, writing it in one request: {e:#}");
+            match self.put(key, data, false)? {
+                200 | 201 => {}
+                s => return Err(self.explain("PUT", key, s, &[])),
+            }
+        }
+        Ok(true)
+    }
+
+    fn put_multipart(&self, key: &str, data: &[u8]) -> Result<()> {
+        crate::storage::validate_key(key)?;
+        let path = self.object_path(key);
+        let mut headers: Vec<(&str, &str)> = Vec::new();
+        if let Some(c) = &self.cfg.storage_class {
+            headers.push(("x-amz-storage-class", c));
+        }
+        let (status, body) = self.request(
+            "POST",
+            &path,
+            &[("uploads".to_string(), String::new())],
+            &headers,
+            &[],
+        )?;
+        if status != 200 {
+            return Err(self.explain("POST", key, status, &body));
+        }
+        let doc = String::from_utf8_lossy(&body).to_string();
+        let id = xml_tag(&doc, "UploadId")
+            .map(xml_unescape)
+            .filter(|i| !i.is_empty())
+            .ok_or_else(|| anyhow!("POST {key}: the answer names no upload"))?;
+        let upload = || -> Result<()> {
+            let mut done = String::from("<CompleteMultipartUpload>");
+            for (i, part) in data.chunks(MULTIPART_PART).enumerate() {
+                let n = (i + 1).to_string();
+                let query = [
+                    ("partNumber".to_string(), n.clone()),
+                    ("uploadId".to_string(), id.clone()),
+                ];
+                let (status, body) = self.request("PUT", &path, &query, &[], part)?;
+                if status != 200 {
+                    return Err(self.explain("PUT", key, status, &body));
+                }
+                // The part's ETag is the MD5 of its bytes (no server-side
+                // encryption with customer keys is used).
+                let etag = hex::encode(<md5::Md5 as Digest>::digest(part));
+                done.push_str(&format!(
+                    "<Part><PartNumber>{n}</PartNumber><ETag>\"{etag}\"</ETag></Part>"
+                ));
+            }
+            done.push_str("</CompleteMultipartUpload>");
+            let (status, body) = self.request(
+                "POST",
+                &path,
+                &[("uploadId".to_string(), id.clone())],
+                &[],
+                done.as_bytes(),
+            )?;
+            // A completion can fail inside a 200 answer.
+            if status != 200 || String::from_utf8_lossy(&body).contains("<Error>") {
+                return Err(self.explain("POST", key, status, &body));
+            }
+            Ok(())
+        };
+        let result = upload();
+        if result.is_err() {
+            let _ = self.request(
+                "DELETE",
+                &path,
+                &[("uploadId".to_string(), id.clone())],
+                &[],
+                &[],
+            );
+        }
+        result
     }
 
     fn put(&self, key: &str, data: &[u8], if_none_match: bool) -> Result<u16> {
@@ -609,6 +703,9 @@ impl Storage for S3Storage {
 
     fn put_if_absent(&self, key: &str, data: &[u8]) -> Result<bool> {
         crate::storage::validate_key(key)?;
+        if data.len() > MULTIPART_ABOVE {
+            return self.put_large(key, data);
+        }
         if !self.conditional_writes_known()? {
             // The server ignores or refuses `If-None-Match`: check first.
             return self.put_after_head(key, data);
@@ -654,7 +751,7 @@ impl Storage for S3Storage {
             return Ok(Some(Vec::new()));
         }
         // The offset and length are claims of a pack index: checked, never added blindly.
-        let len = len.min(crate::storage::MAX_BLOCK_OBJECT);
+        let len = len.min(crate::storage::MAX_PACK);
         let Some(last) = offset.checked_add(len - 1) else {
             bail!("GET {key}: the range starting at {offset} is out of bounds");
         };
@@ -665,7 +762,7 @@ impl Storage for S3Storage {
             &[],
             &[("range", &range)],
             &[],
-            crate::storage::MAX_BLOCK_OBJECT,
+            crate::storage::MAX_PACK,
         )?;
         match status {
             206 => Ok(Some(body)),
@@ -900,6 +997,71 @@ mod tests {
         th.join().unwrap();
     }
 
+    #[test]
+    fn large_objects_are_uploaded_in_parts() {
+        // A look-alike of the multipart calls: start, parts, completion.
+        let server = std::sync::Arc::new(tiny_http::Server::http("127.0.0.1:0").unwrap());
+        let port = server.server_addr().to_ip().unwrap().port();
+        let srv = server.clone();
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let log = seen.clone();
+        let th = std::thread::spawn(move || {
+            let mut parts: std::collections::BTreeMap<u32, Vec<u8>> = Default::default();
+            let mut done: Option<Vec<u8>> = None;
+            for mut req in srv.incoming_requests() {
+                let url = req.url().to_string();
+                let method = req.method().as_str().to_string();
+                log.lock().unwrap().push(format!("{method} {url}"));
+                let mut body = Vec::new();
+                let _ = std::io::Read::read_to_end(&mut req.as_reader(), &mut body);
+                let reply = match method.as_str() {
+                    "HEAD" => tiny_http::Response::from_data(Vec::new())
+                        .with_status_code(if done.is_some() { 200 } else { 404 }),
+                    "POST" if url.contains("uploads") => tiny_http::Response::from_data(
+                        b"<InitiateMultipartUploadResult><UploadId>u1</UploadId></InitiateMultipartUploadResult>".to_vec(),
+                    ),
+                    "PUT" if url.contains("partNumber=") => {
+                        let n: u32 = url
+                            .split("partNumber=")
+                            .nth(1)
+                            .unwrap()
+                            .split('&')
+                            .next()
+                            .unwrap()
+                            .parse()
+                            .unwrap();
+                        parts.insert(n, body);
+                        tiny_http::Response::from_data(Vec::new())
+                    }
+                    "POST" => {
+                        let etags = body.windows(6).filter(|w| w == b"<ETag>").count();
+                        assert_eq!(etags, parts.len());
+                        done = Some(parts.values().flatten().copied().collect());
+                        tiny_http::Response::from_data(
+                            b"<CompleteMultipartUploadResult></CompleteMultipartUploadResult>"
+                                .to_vec(),
+                        )
+                    }
+                    "GET" => tiny_http::Response::from_data(done.clone().unwrap_or_default()),
+                    _ => tiny_http::Response::from_data(Vec::new()).with_status_code(400),
+                };
+                let _ = req.respond(reply);
+            }
+        });
+        let s = storage_for(port);
+        let data: Vec<u8> = (0..(MULTIPART_ABOVE + 3 * MULTIPART_PART + 5) as u32)
+            .map(|i| (i % 253) as u8)
+            .collect();
+        assert!(s.put_if_absent("packs/ab/abcd", &data).unwrap());
+        assert_eq!(s.get("packs/ab/abcd").unwrap().unwrap(), data);
+        assert!(!s.put_if_absent("packs/ab/abcd", &data).unwrap());
+        let calls = seen.lock().unwrap().clone();
+        let parts = calls.iter().filter(|c| c.contains("partNumber=")).count();
+        assert_eq!(parts, 8, "{calls:?}");
+        server.unblock();
+        th.join().unwrap();
+    }
+
     /// How a fake server treats `If-None-Match: *` on an existing object.
     #[derive(Clone, Copy)]
     enum Condition {
@@ -969,23 +1131,6 @@ mod tests {
         }
     }
 
-    fn storage_at(port: u16) -> S3Storage {
-        S3Storage::new(S3Config {
-            name: "test".into(),
-            endpoint: format!("http://127.0.0.1:{port}"),
-            region: "us-east-1".into(),
-            bucket: "b".into(),
-            prefix: String::new(),
-            access_key_id: "k".into(),
-            secret_access_key: "s".into(),
-            path_style: true,
-            storage_class: None,
-            allow_insecure_http: false,
-            conditional_writes: None,
-        })
-        .unwrap()
-    }
-
     fn methods(seen: &std::sync::Mutex<Vec<String>>) -> Vec<String> {
         seen.lock()
             .unwrap()
@@ -998,7 +1143,7 @@ mod tests {
     fn conditional_writes_are_probed_once_and_skip_the_head() {
         let f = fake_s3(Condition::Honoured);
         let (seen, server) = (&f.seen, &f.server);
-        let s = storage_at(f.port);
+        let s = storage_for(f.port);
         assert_eq!(s.conditional_writes(), None);
         assert!(s.put_if_absent("chunks/ab/abcd", b"x").unwrap());
         assert_eq!(s.conditional_writes(), Some(true));
@@ -1017,7 +1162,7 @@ mod tests {
     fn a_server_that_ignores_the_condition_gets_head_then_put() {
         let f = fake_s3(Condition::Ignored);
         let (seen, server) = (&f.seen, &f.server);
-        let s = storage_at(f.port);
+        let s = storage_for(f.port);
         assert!(s.put_if_absent("chunks/ab/abcd", b"x").unwrap());
         assert_eq!(s.conditional_writes(), Some(false));
         assert_eq!(methods(seen), ["PUT", "PUT", "DELETE", "HEAD", "PUT"]);
@@ -1030,7 +1175,7 @@ mod tests {
     fn a_server_that_refuses_the_condition_gets_head_then_put() {
         let f = fake_s3(Condition::Refused);
         let (seen, server) = (&f.seen, &f.server);
-        let s = storage_at(f.port);
+        let s = storage_for(f.port);
         assert!(s.put_if_absent("chunks/ab/abcd", b"x").unwrap());
         assert_eq!(s.conditional_writes(), Some(false));
         // The first conditional PUT is refused: the probe stops there.

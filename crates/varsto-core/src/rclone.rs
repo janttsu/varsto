@@ -235,7 +235,7 @@ impl Storage for RcloneStorage {
 
     fn get_range(&self, key: &str, offset: u64, len: u64) -> Result<Option<Vec<u8>>> {
         crate::storage::validate_key(key)?;
-        let len = len.min(crate::storage::MAX_BLOCK_OBJECT);
+        let len = len.min(crate::storage::MAX_PACK);
         if offset.checked_add(len).is_none() {
             bail!("rclone cat {key}: the range starting at {offset} is out of bounds");
         }

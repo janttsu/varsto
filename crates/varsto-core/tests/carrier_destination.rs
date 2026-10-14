@@ -3,6 +3,8 @@
 //! when other devices already hold it, and empties as the destination
 //! receives it. Transferrer and cold storage exclude each other.
 
+mod common;
+
 use std::fs;
 use std::path::Path;
 use varsto_core::storage::StorageSpec;
@@ -22,11 +24,7 @@ fn dir(name: &str, path: &Path, carrier: bool, cold: bool) -> StorageSpec {
 }
 
 fn objects(path: &Path) -> usize {
-    walkdir::WalkDir::new(path.join("chunks"))
-        .into_iter()
-        .filter_map(|e| e.ok())
-        .filter(|e| e.file_type().is_file())
-        .count()
+    common::object_count(path)
 }
 
 #[test]

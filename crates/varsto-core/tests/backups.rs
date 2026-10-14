@@ -5,6 +5,8 @@
 //! exactly the blocks no live snapshot uses (packed ones included), leaves
 //! other folders alone and removes a stopped backup with its last snapshot.
 
+mod common;
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -100,11 +102,7 @@ fn tree(root: &Path) -> BTreeMap<String, Vec<u8>> {
 }
 
 fn objects(path: &Path) -> usize {
-    walkdir::WalkDir::new(path.join("chunks"))
-        .into_iter()
-        .filter_map(|e| e.ok())
-        .filter(|e| e.file_type().is_file())
-        .count()
+    common::object_count(path)
 }
 
 fn chunk_key(object: &str) -> String {
@@ -124,18 +122,9 @@ fn stored(e: &Engine, storage: &str, folder: &FolderId) -> BTreeSet<String> {
         .collect()
 }
 
-/// Object names listed in the pack indexes of a storage directory.
+/// Object names in the packs of a storage directory.
 fn packed(path: &Path) -> BTreeSet<String> {
-    walkdir::WalkDir::new(path.join("packs"))
-        .into_iter()
-        .filter_map(|e| e.ok())
-        .filter(|e| e.path().extension().is_some_and(|x| x == "idx"))
-        .flat_map(|e| {
-            let idx: varsto_core::packs::PackIndex =
-                serde_json::from_slice(&fs::read(e.path()).unwrap()).unwrap();
-            idx.members.into_iter().map(|m| m.object)
-        })
-        .collect()
+    common::object_names(path)
 }
 
 fn snapshot_files(path: &Path) -> Vec<PathBuf> {

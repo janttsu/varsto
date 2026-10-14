@@ -561,6 +561,7 @@ fn ingest(
             object: c.object.clone(),
             storage: name,
             size: c.size,
+            pack: None,
         });
     }
     for (index, c) in chunks.iter().enumerate() {

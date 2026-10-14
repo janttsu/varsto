@@ -536,14 +536,29 @@ impl Engine {
         }
         // Pools: each attached disk is a target of its own; a disk that is
         // away waits, and one not seen within the period is reported.
-        let by_object: HashMap<ObjectName, (FolderId, ChunkId)> = if pools.is_empty() {
-            HashMap::new()
-        } else {
-            view.chunks
-                .iter()
-                .map(|((f, c), r)| (r.object.clone(), (f.clone(), c.clone())))
-                .collect()
-        };
+        // A disk holds packs (`crate::packs`): a pack is checked against its
+        // id, and a lost pack is every block in it.
+        let mut by_object: HashMap<ObjectName, Vec<(FolderId, ChunkId, ObjectName)>> =
+            HashMap::new();
+        if !pools.is_empty() {
+            for ((f, c), r) in &view.chunks {
+                let block = (f.clone(), c.clone(), r.object.clone());
+                by_object
+                    .entry(r.object.clone())
+                    .or_default()
+                    .push(block.clone());
+                for loc in r.storages.values() {
+                    if let Some(p) = loc.pack.as_ref() {
+                        if let Ok(id) = ObjectName::from_hex(&p.pack) {
+                            let e = by_object.entry(id).or_default();
+                            if !e.contains(&block) {
+                                e.push(block.clone());
+                            }
+                        }
+                    }
+                }
+            }
+        }
         for spec in pools {
             let pool = match self.open_pool(&spec) {
                 Ok(p) => p,
@@ -660,8 +675,8 @@ impl Engine {
                             return true;
                         }
                         if let Ok(o) = ObjectName::from_hex(name) {
-                            if let Some((f, c)) = by_object.get(&o) {
-                                damage.push(damaged(&pool_name, f, c, &o, DamageKind::Missing));
+                            for (f, c, block) in by_object.get(&o).into_iter().flatten() {
+                                damage.push(damaged(&pool_name, f, c, block, DamageKind::Missing));
                             }
                         }
                         true

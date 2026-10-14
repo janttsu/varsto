@@ -166,8 +166,12 @@ pub struct Snapshot {
     pub peer_key: SecretKey,
     pub folder_keys: BTreeMap<FolderId, FolderKeys>,
     pub pieces: BTreeMap<ObjectName, Piece>,
-    /// Roots of local-directory storages whose objects can be served verbatim.
+    /// Roots holding objects as single files (the block cache), served
+    /// verbatim.
     pub local_roots: Vec<PathBuf>,
+    /// Blocks in packs on local-directory storages: the pack file, offset
+    /// and length, served verbatim.
+    pub packed: BTreeMap<ObjectName, (PathBuf, u64, u64)>,
     /// Revoked devices: refused even if they still hold a valid token.
     pub revoked: std::collections::BTreeSet<DeviceId>,
     /// Devices told what this one is doing (`/p2p/activity`): in an
@@ -191,6 +195,20 @@ impl Snapshot {
                 .join(&name.as_str()[..2])
                 .join(name.as_str());
             if let Ok(bytes) = std::fs::read(&p) {
+                if ObjectName::from_bytes(&crypto::hash(&bytes)) == *name {
+                    return Ok(Some(bytes));
+                }
+            }
+        }
+        if let Some((path, offset, len)) = self.packed.get(name) {
+            let read = || -> std::io::Result<Vec<u8>> {
+                let mut f = std::fs::File::open(path)?;
+                f.seek(SeekFrom::Start(*offset))?;
+                let mut b = vec![0u8; *len as usize];
+                f.read_exact(&mut b)?;
+                Ok(b)
+            };
+            if let Ok(bytes) = read() {
                 if ObjectName::from_bytes(&crypto::hash(&bytes)) == *name {
                     return Ok(Some(bytes));
                 }
@@ -1803,6 +1821,7 @@ mod tests {
             folder_keys: BTreeMap::new(),
             pieces: BTreeMap::new(),
             local_roots: Vec::new(),
+            packed: BTreeMap::new(),
             revoked: [gone.clone()].into_iter().collect(),
             activity_audience: None,
         };
@@ -1832,6 +1851,7 @@ mod tests {
             folder_keys: BTreeMap::new(),
             pieces: BTreeMap::new(),
             local_roots: Vec::new(),
+            packed: BTreeMap::new(),
             revoked: Default::default(),
             activity_audience: None,
         };

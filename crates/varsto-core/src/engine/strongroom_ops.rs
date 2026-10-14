@@ -543,6 +543,7 @@ impl Engine {
                     object: object.clone(),
                     storage: spec.name().to_string(),
                     size: ct.len() as u64,
+                    pack: None,
                 });
             }
             if !held {

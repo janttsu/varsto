@@ -586,6 +586,7 @@ impl Engine {
                         object: d.object.clone(),
                         storage: d.storage.clone(),
                         size: ct.len() as u64,
+                        pack: None,
                     });
                 }
                 Ok(false) => {

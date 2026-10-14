@@ -113,6 +113,7 @@ fn a_drop_removes_earlier_claims_and_later_claims_count_again() {
         object: object.clone(),
         storage: storage.into(),
         size: 10,
+        pack: None,
     };
     let dropped = |storage: &str| Event::ChunkDropped {
         folder: folder.clone(),

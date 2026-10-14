@@ -238,6 +238,21 @@ mod tests {
     }
 
     #[test]
+    fn every_length_round_trips() {
+        for n in [1usize, 63, 64, 4095, 4096, 300_000, 16 << 20] {
+            let text: Vec<u8> = b"round trip ".iter().cycle().take(n).copied().collect();
+            let mut rnd = vec![0u8; n];
+            rand::RngCore::fill_bytes(&mut rand::rngs::OsRng, &mut rnd);
+            for plain in [text, rnd] {
+                let p = pack(&plain);
+                assert!(p.len() <= plain.len() + 1, "{n}: packed {}", p.len());
+                assert_eq!(unpack(&p, n as u64).unwrap(), plain, "{n}");
+                assert_eq!(pack(&plain), p, "{n}: deterministic");
+            }
+        }
+    }
+
+    #[test]
     fn incompressible_data_is_stored_raw() {
         let mut rnd = vec![0u8; 100_000];
         rand::RngCore::fill_bytes(&mut rand::rngs::OsRng, &mut rnd);

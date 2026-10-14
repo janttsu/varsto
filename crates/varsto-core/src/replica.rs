@@ -21,7 +21,7 @@
 use crate::crypto::{self, SecretKey, SigningKey};
 use crate::ids::{ChunkId, DeviceId, FolderId, ObjectName, VaultId};
 use crate::ledger::{self, Event, LedgerStore, SignedBatch, KEY_REPLICA};
-use crate::storage::{Storage, StorageSpec};
+use crate::storage::StorageSpec;
 use crate::util;
 use crate::vault::{DeviceRecord, VaultMeta};
 use anyhow::{anyhow, bail, Context, Result};
@@ -216,69 +216,58 @@ impl Replica {
     /// One replication round: copy every object the target lacks from the
     /// source, verify chunk hashes, and record claims in the replica ledger.
     pub fn run_once(&mut self) -> Result<ReplicaReport> {
-        // Packed objects are read out of their packs and copied as single
-        // objects; the packs themselves (and their deletion markers) are
-        // not copied as they are (crate::packs).
-        let open = |spec: &StorageSpec| -> Result<crate::packs::PackAware> {
-            Ok(crate::packs::PackAware::new(
-                spec.open()?,
-                &Default::default(),
-                false,
-            ))
-        };
-        let src = open(&self.local.source)?;
-        let tgt = open(&self.local.target)?;
+        // Blocks live in packs (`crate::packs`): a pack is copied whole,
+        // checked against its name (the hash of its bytes), and claimed by
+        // its id; the owner's view places every block of the pack on the
+        // replica from where the pack's original holds it. Everything else
+        // (records, indexes, tombstone lists) is copied as it is.
+        let src = self.local.source.open()?;
+        let tgt = self.local.target.open()?;
         let mut report = ReplicaReport::default();
         let have: HashSet<String> = tgt.list("")?.into_iter().collect();
         let mut events = Vec::new();
         for key in src.list("")? {
-            if key.starts_with(crate::packs::PREFIX) {
-                continue;
-            }
             report.objects_seen += 1;
             if have.contains(&key) {
                 continue;
             }
-            // A name under chunks/ that is not an object name is junk left
-            // by something else: it is skipped, not a reason to stop the run.
-            let mut chunk_name = None;
-            if let Some(rest) = key.strip_prefix("chunks/") {
-                let object = rest.rsplit('/').next().unwrap_or("");
-                match ObjectName::from_hex(object) {
-                    Ok(n) if n.as_str() == object => chunk_name = Some(n),
-                    _ => {
-                        if report.skipped_junk == 0 {
-                            log::warn!(
-                                "replica {}: skipping junk under chunks/ on {}: {key:?}",
-                                self.local.name,
-                                self.local.source.name()
-                            );
-                        }
-                        report.skipped_junk += 1;
-                        continue;
-                    }
+            // Objects under chunks/ are not written any more, and a name
+            // under packs/ that is not a pack, index or tombstone list is
+            // junk left by something else: skipped, not a reason to stop.
+            let pack = crate::packs::pack_of_key(&key);
+            let record = key.starts_with(crate::packs::INDEX_PREFIX)
+                || key.starts_with(crate::packs::TOMBSTONE_PREFIX);
+            if key.starts_with("chunks/")
+                || (key.starts_with(crate::packs::PREFIX) && pack.is_none() && !record)
+            {
+                if report.skipped_junk == 0 {
+                    log::warn!(
+                        "replica {}: skipping junk on {}: {key:?}",
+                        self.local.name,
+                        self.local.source.name()
+                    );
                 }
+                report.skipped_junk += 1;
+                continue;
             }
             let Some(data) = src.get(&key)? else { continue };
-            let mut chunk_claim = None;
-            if let Some(object) = chunk_name {
-                if ObjectName::from_bytes(&crypto::hash(&data)) != object {
+            let mut claim = None;
+            if let Some(id) = pack {
+                if hex::encode(crypto::hash(&data)) != id {
                     report.objects_corrupt += 1;
-                    continue; // never replicate a corrupt object
+                    continue; // never replicate a corrupt pack
                 }
-                chunk_claim = Some((object, data.len() as u64));
+                claim = Some((ObjectName::from_hex(id)?, data.len() as u64));
             }
             if tgt.put_if_absent(&key, &data)? {
                 report.objects_copied += 1;
                 report.bytes_copied += data.len() as u64;
             }
-            if let Some((object, size)) = chunk_claim {
-                // A replica does not know chunk ids (they live inside encrypted
-                // manifests); claims are keyed by object name and folded into
-                // the owner's view by object.
-                // An object name is a hash, so the chunk id a replica
-                // records is the same string (the owner folds claims by
-                // object, see above).
+            if let Some((object, size)) = claim {
+                // A replica knows neither chunk ids nor which blocks a pack
+                // holds: it claims the pack by its id, as chunk and object,
+                // and the owner folds the claim into every block placed in
+                // that pack.
                 let chunk: ChunkId = object.clone();
                 events.push(Event::ChunkStored {
                     folder: FolderId::default(),
@@ -286,6 +275,7 @@ impl Replica {
                     object: object.clone(),
                     storage: self.storage_name(),
                     size,
+                    pack: None,
                 });
                 events.push(Event::ChunkVerified {
                     folder: FolderId::default(),

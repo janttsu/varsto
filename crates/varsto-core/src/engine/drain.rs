@@ -1084,19 +1084,60 @@ impl Engine {
                     local.extend(self.local_ciphertexts(&fk, list.iter()));
                 }
             }
+            // Every copy this group needs, written per target in one go (as
+            // packs on a storage that keeps them, `crate::packs`).
+            let mut cts: HashMap<ObjectName, Vec<u8>> = HashMap::new();
+            for item in group.iter().filter(|i| !i.targets.is_empty()) {
+                let ct = local.remove(&item.object).or_else(|| {
+                    self.move_source(&self.move_item(item), &others, source.as_ref(), read_source)
+                });
+                if let Some(ct) = ct {
+                    cts.insert(item.object.clone(), ct);
+                }
+            }
+            let mut write_failed: BTreeMap<String, String> = BTreeMap::new();
+            let wanted_targets: BTreeSet<String> = group
+                .iter()
+                .filter(|i| cts.contains_key(&i.object))
+                .flat_map(|i| i.targets.iter().cloned())
+                .collect();
+            for t in wanted_targets {
+                if !targets.contains_key(&t) {
+                    let Some(tspec) = self.config.storages.iter().find(|s| s.name() == t).cloned()
+                    else {
+                        continue;
+                    };
+                    match self.open_spec(&tspec) {
+                        Ok(b) => {
+                            targets.insert(t.clone(), (tspec, b));
+                        }
+                        Err(e) => {
+                            write_failed.insert(t.clone(), format!("{t} cannot be opened: {e:#}"));
+                            continue;
+                        }
+                    }
+                }
+                let members: Vec<(String, &[u8])> = group
+                    .iter()
+                    .filter(|i| i.targets.contains(&t))
+                    .filter_map(|i| {
+                        cts.get(&i.object)
+                            .map(|c| (i.object.as_str().to_string(), c.as_slice()))
+                    })
+                    .collect();
+                if let Err(e) = targets[&t].1.put_pack(&members) {
+                    let why = match pool::pool_error(&e) {
+                        Some(pe) => pe.to_string(),
+                        None => format!("writing to {t} failed: {e:#}"),
+                    };
+                    write_failed.insert(t.clone(), why);
+                }
+            }
             for item in group {
                 task.advance(item.size);
                 let mut made: Vec<(String, String)> = Vec::new();
                 if !item.targets.is_empty() {
-                    let ct = local.remove(&item.object).or_else(|| {
-                        self.move_source(
-                            &self.move_item(item),
-                            &others,
-                            source.as_ref(),
-                            read_source,
-                        )
-                    });
-                    let Some(ct) = ct else {
+                    let Some(ct) = cts.get(&item.object) else {
                         report.blocks_kept += 1;
                         push_reason(
                             &mut report.kept,
@@ -1106,34 +1147,13 @@ impl Engine {
                     };
                     let key = chunk_storage_key(&item.object);
                     for t in &item.targets {
-                        if !targets.contains_key(t) {
-                            let Some(tspec) =
-                                self.config.storages.iter().find(|s| s.name() == t).cloned()
-                            else {
-                                continue;
-                            };
-                            match self.open_spec(&tspec) {
-                                Ok(b) => {
-                                    targets.insert(t.clone(), (tspec, b));
-                                }
-                                Err(e) => {
-                                    push_reason(
-                                        &mut report.kept,
-                                        format!("{t} cannot be opened: {e:#}"),
-                                    );
-                                    continue;
-                                }
-                            }
-                        }
-                        let (tspec, backend) = &targets[t];
-                        if let Err(e) = backend.put_if_absent(&key, &ct) {
-                            let why = match pool::pool_error(&e) {
-                                Some(pe) => pe.to_string(),
-                                None => format!("writing to {t} failed: {e:#}"),
-                            };
-                            push_reason(&mut report.kept, why);
+                        if let Some(why) = write_failed.get(t) {
+                            push_reason(&mut report.kept, why.clone());
                             continue;
                         }
+                        let Some((tspec, backend)) = targets.get(t) else {
+                            continue;
+                        };
                         // Read back before the old copy may go.
                         let read_back = !tspec.is_cold();
                         let ok = if read_back {
@@ -1156,6 +1176,7 @@ impl Engine {
                             object: item.object.clone(),
                             storage: t.clone(),
                             size: ct.len() as u64,
+                            pack: None,
                         });
                         if read_back {
                             self.pending.push(Event::ChunkVerified {
@@ -1213,6 +1234,7 @@ impl Engine {
                 }
             }
         }
+        self.flush_pack_deletions();
         Ok(())
     }
 

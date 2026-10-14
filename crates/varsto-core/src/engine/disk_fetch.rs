@@ -341,9 +341,13 @@ impl Engine {
                     cost_of.insert(object.clone(), None);
                 }
             }
-            let key = chunk_storage_key(object);
             let mut on_any = false;
             for (spec, pool) in &pools {
+                // The disks hold the block's pack.
+                let key = view
+                    .locate(&rec.folder_id, &blocks[object].1)
+                    .map(|r| super::pack_upkeep::held_key(r, spec.name()))
+                    .unwrap_or_else(|| chunk_storage_key(object));
                 for l in pool.locate_all(&key) {
                     on_any = true;
                     let id = (spec.name().to_string(), l.disk_id.clone());
@@ -535,17 +539,27 @@ impl Engine {
             label: step.label.clone(),
             ..Default::default()
         };
+        // The disk holds packs: each block is read from its place in one.
+        let view = self.view()?;
+        let mut place: HashMap<String, crate::packs::PackLoc> = HashMap::new();
+        for r in view.chunks.values() {
+            if let Some(p) = r.storages.get(&step.pool).and_then(|l| l.pack.as_ref()) {
+                place.insert(chunk_storage_key(&r.object), p.clone());
+            }
+        }
         for key in &step.objects {
             let dest = root.join(key);
             if dest.is_file() {
                 continue;
             }
             let name = key.rsplit('/').next().unwrap_or("");
-            let got = pool
-                .get(key)
-                .ok()
-                .flatten()
-                .filter(|b| hex::encode(crypto::hash(b)) == name);
+            let got = match place.get(key) {
+                Some(p) => pool.get_range(&crate::packs::pack_key(&p.pack), p.offset, p.len),
+                None => pool.get(key),
+            }
+            .ok()
+            .flatten()
+            .filter(|b| hex::encode(crypto::hash(b)) == name);
             match got {
                 Some(b) => {
                     crate::activity::advance_current(b.len() as u64);

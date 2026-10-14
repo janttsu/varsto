@@ -81,16 +81,11 @@ fn engine(home: &Path, name: &str) -> (Engine, String) {
     (e, key)
 }
 
+/// The packs on a disk (every block is in one, `varsto_core::packs`).
 fn objects_under(mount: &Path) -> Vec<PathBuf> {
-    let data = mount.join(pool::DATA_DIR).join("chunks");
-    if !data.exists() {
-        return vec![];
-    }
-    walkdir::WalkDir::new(&data)
+    common::pack_files(&mount.join(pool::DATA_DIR))
         .into_iter()
-        .filter_map(|e| e.ok())
-        .filter(|e| e.file_type().is_file())
-        .map(|e| e.path().to_path_buf())
+        .map(|(p, _)| p)
         .collect()
 }
 
