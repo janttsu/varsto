@@ -778,3 +778,18 @@ def hero():
         n = (dx * dx + dy * dy) ** 0.5
         sx, sy = kx + dx / n * 95, ky + dy / n * 95
         L((sx, sy), (kx + dx / n * 170, ky + dy / n * 170), (ex, ey - 60), (ex, ey), h=0.45, dash=8, gap=6, r=0.014)
+
+
+@scene("usecases/tidy")
+def tidy():
+    bb_node(K.card(440, 40, 14, "blue600"), 388, 58, 0.6, toward=0.0, kind="card")
+    K.text(388, 63, 'You: "Tidy this folder: taxes per year, rest by sender."', "white")
+    c = card_at(32, 96, 500, 148, r=14)
+    ui(c, K.sparkle(), 58, 120)
+    K.text(76, 125, "Assistant (MCP), granted: Letters/ only", "title", "s")
+    K.text(48, 150, "Proposed:  Letters/2019/Tax/ (23 files)   Letters/2020/Tax/ (19)", "sub", "s")
+    K.text(48, 168, "Letters/Bank/ (41)   Letters/Insurance/ (12)   index.md written", "sub", "s")
+    K.text(48, 194, "Moves and renames only to free names; nothing is deleted or overwritten.", "row", "s")
+    ui(c, K.card(92, 26, 13, "blue600"), 94, 221, toward=0.02, kind="card")
+    K.text(94, 225.3, "Confirm", "white")
+    K.caption("It sees only the folder you granted, never a Strongroom; you confirm first.")
