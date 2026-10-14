@@ -156,7 +156,11 @@ impl Engine {
     }
 
     /// Fetch, check and keep checkpoint `seq` of another device. One that
-    /// does not verify or open is skipped (the batches still count).
+    /// does not verify or open is skipped (the batches still count), and so
+    /// is one that is not a trusted full device's: replicas and members
+    /// write none, and a checkpoint speaks for its signer only anyway
+    /// (`LedgerView::restricted_to`). One far beyond the batches held is
+    /// kept only beside the signed batch it ends at.
     fn pull_checkpoint(
         &mut self,
         backend: &dyn Storage,
@@ -173,8 +177,23 @@ impl Engine {
         if &cp.device != dev || cp.seq != seq || cp.verify(pk).is_err() {
             return Ok(Ingest::Known);
         }
+        if self.event_scope(dev, &cp.key_id) != Some(ledger::EventScope::Full) {
+            return Ok(Ingest::Known);
+        }
+        let head = self.ledger.head(dev);
+        let floor = head.seq.max(head.base.as_ref().map(|b| b.seq).unwrap_or(0));
+        let anchor = if seq > floor.saturating_add(ledger::MAX_AHEAD) {
+            backend
+                .get(&SignedBatch::storage_key(dev, seq))?
+                .and_then(|b| serde_json::from_slice::<SignedBatch>(&b).ok())
+                .filter(|b| b.verify(pk).is_ok())
+        } else {
+            None
+        };
         match self.key_for_id(&cp.key_id) {
-            Some(key) if cp.open(&key).is_ok() => self.ledger.ingest_checkpoint(cp),
+            Some(key) if cp.open(&key).is_ok() => {
+                self.ledger.ingest_checkpoint_anchored(cp, anchor.as_ref())
+            }
             _ => Ok(Ingest::Known),
         }
     }
@@ -716,7 +735,7 @@ impl Engine {
                         Ingest::Fork => {
                             forks.insert(dev.clone());
                         }
-                        Ingest::New | Ingest::Known => {}
+                        Ingest::New | Ingest::Known | Ingest::Refused => {}
                     }
                 }
             }

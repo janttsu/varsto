@@ -905,12 +905,24 @@ impl Engine {
             let base = self.ledger.head(&me).base.map(|b| b.seq).unwrap_or(0);
             if cseq > held_to.max(base) {
                 if let Some(cp) = self.fetch_own_checkpoint(&storages, cholders, cseq, cold_ok) {
+                    // The batch it ends at stays beside it on the storages.
+                    let anchor =
+                        match self.fetch_own_batch(&storages, &holders(cseq), cseq, cold_ok) {
+                            Ok(Fetched::One(b)) => Some(b),
+                            _ => None,
+                        };
                     match self.key_for_id(&cp.key_id) {
                         Some(key) if cp.open(&key).is_ok() => {
-                            if self.ledger.ingest_checkpoint(cp)? == Ingest::Fork {
-                                return self.refuse_fork(format!(
-                                    "this device's checkpoint #{cseq} on the storages contradicts its own ledger"
-                                ));
+                            match self.ledger.ingest_checkpoint_anchored(cp, anchor.as_ref())? {
+                                Ingest::Fork => {
+                                    return self.refuse_fork(format!(
+                                        "this device's checkpoint #{cseq} on the storages contradicts its own ledger"
+                                    ));
+                                }
+                                Ingest::Refused => bail!(
+                                    "this device's checkpoint #{cseq} on the storages is too far ahead of its ledger and the batch it ends at is missing"
+                                ),
+                                _ => {}
                             }
                             report.adopted_checkpoint = Some(cseq);
                         }
@@ -955,7 +967,7 @@ impl Engine {
                     ));
                 }
                 Ingest::New => report.adopted_batches += 1,
-                Ingest::Known => {}
+                Ingest::Known | Ingest::Refused => {}
             }
         }
         if gap {
