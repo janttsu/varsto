@@ -1,0 +1,37 @@
+---
+title: Téléchargements
+nav: Downloads
+output: downloads/index.html
+description: Téléchargez l’alpha de Varsto pour Linux, macOS, Windows et Android, ou le code source, et vérifiez les sommes de contrôle.
+---
+    <h1>Téléchargements</h1>
+    <p class="note">Consultez les <a href="{{L}}screenshots/">captures d’écran</a> pour voir à quoi ressemble l’alpha.</p>
+    <p class="lead">Un paquet par plateforme, avec le service en arrière-plan, l’interface et la même ligne de commande à l’intérieur ; sous Linux et macOS, le service démarre à l’ouverture de session (une unité utilisateur systemd ou un launch agent), sous Windows il est lancé par l’application de la zone de notification. Sous Linux et Windows, l’interface s’ouvre dans votre navigateur ; sous macOS, l’application native a sa propre fenêtre. Alpha : à utiliser uniquement avec des données de test, en conservant vos propres sauvegardes.</p>
+    <p class="note">La liste des téléchargements est en anglais.</p>
+    {{DOWNLOADS}}
+    <h2>Installer et vérifier</h2>
+    <pre><code>curl -O https://varsto.net/downloads/SHA256SUMS
+curl -O https://varsto.net/downloads/varsto-{{VERSION}}-x86_64-unknown-linux-musl.tar.gz
+sha256sum -c SHA256SUMS --ignore-missing
+tar xzf varsto-{{VERSION}}-x86_64-unknown-linux-musl.tar.gz
+cd varsto-{{VERSION}}-x86_64-unknown-linux-musl
+./varsto desktop        # opens the desktop interface in your browser
+./varsto --help         # command line</code></pre>
+    <h2>Compiler depuis les sources</h2>
+    <p>Le code source se trouve sur <a href="https://github.com/janttsu/varsto" rel="noopener">github.com/janttsu/varsto</a> ; chaque version y est une étiquette, avec les mêmes fichiers joints à sa <a href="https://github.com/janttsu/varsto/releases" rel="noopener">version GitHub</a>, et l’archive des sources ci-dessous lui correspond. Avec une chaîne d’outils Rust stable (1.85 ou plus récente) : <code>git clone https://github.com/janttsu/varsto.git</code> ou décompressez l’archive, puis <code>cargo build --release</code> ; le binaire est <code>target/release/varsto</code>. <code>cargo test --workspace</code> lance la suite de tests, y compris les scénarios à deux appareils.</p>
+    <h2>Interface de bureau</h2>
+    <p>Sous Linux et Windows, le mode par défaut est <code>varsto tray</code> : une icône dans la zone de notification avec ouvrir et mettre en pause, et un élément d’installation lorsqu’une version plus récente existe ; le service en arrière-plan synchronise seul les changements en quelques secondes. <code>varsto desktop</code> démarre un petit serveur web lié à 127.0.0.1 sur un port aléatoire, affiche un lien à usage unique contenant un jeton de session et l’ouvre dans votre navigateur par défaut. Seuls les programmes de cet ordinateur peuvent y accéder ; la page refuse les requêtes sans le jeton et celles dont l’en-tête Host n’est pas l’adresse locale. Depuis l’interface, vous pouvez créer ou rejoindre un coffre, ajouter des stockages et des dossiers, partager, définir des politiques et lister les doublons ; la synchronisation, la vérification et la réparation s’exécutent d’elles-mêmes. Le bundle de l’application et <code>Varsto.cmd</code> font exactement cela.</p>
+    <h2>Démarrage rapide (ligne de commande)</h2>
+    <pre><code>export VARSTO_PASSPHRASE='a long passphrase'
+varsto --home ~/.varsto-laptop init --name laptop            # prints the vault key once; keep it offline
+varsto --home ~/.varsto-laptop storage add-local box /mnt/box
+varsto --home ~/.varsto-laptop folder add docs ~/Documents/synced
+varsto --home ~/.varsto-laptop sync
+
+# another device that can reach the same storage
+varsto --home ~/.varsto-desk join --name desk --vault-key &lt;hex&gt; --storage-path /mnt/box
+varsto --home ~/.varsto-desk folder attach docs ~/synced
+varsto --home ~/.varsto-desk sync
+varsto --home ~/.varsto-desk status --json
+varsto --home ~/.varsto-desk fsck --verify</code></pre>
+    <p class="note">La clé du coffre est la clé maîtresse en hexadécimal. La perdre, ainsi que tous vos appareils, revient à perdre les données : il n’y a ni compte ni séquestre.</p>

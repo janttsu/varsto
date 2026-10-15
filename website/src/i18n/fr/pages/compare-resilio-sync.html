@@ -1,0 +1,52 @@
+---
+title: Alternative à Resilio Sync : Varsto et Resilio Sync comparés
+nav: Compare
+output: compare/resilio-sync/index.html
+description: Vous cherchez une alternative à Resilio Sync avec chiffrement de bout en bout sur votre propre stockage (S3, NAS, disques, rclone) ? À quoi sert Resilio Sync, comment il fonctionne et comment il se compare à Varsto.
+---
+    <p class="back-link"><a href="{{L}}compare/">Toutes les comparaisons</a></p>
+    <h1>Varsto et Resilio Sync</h1>
+    <p class="lead">Resilio Sync synchronise et partage des dossiers entre appareils en pair à pair, grâce à la technologie BitTorrent. L’édition gratuite Sync Home s’adresse aux particuliers ; l’activité principale de l’entreprise est le transfert de fichiers pour les grandes organisations. Resilio a été rachetée par Nasuni en mars 2026.</p>
+
+    <h2>En quoi Varsto diffère</h2>
+    <ul>
+      <li>Code source disponible, avec un format de stockage publié : vos données restent récupérables sans l’éditeur.</li>
+      <li>Cryptographie hybride post-quantique pour chaque signature stockée et chaque clé scellée (conçue pour cela ; non auditée).</li>
+      <li>Vos stockages sont la copie toujours disponible, donc aucun pair toujours allumé n’est nécessaire ; les appareils échangent quand même des blocs directement lorsqu’ils peuvent se joindre.</li>
+      <li>Un registre signé compte et vérifie chaque copie, et des politiques de durabilité avertissent avant qu’une règle ne soit rompue.</li>
+      <li>Ni traqueurs ni relais d’un éditeur : les appareils se trouvent via vos stockages et sur le réseau local, et passent par l’un de vos propres appareils en relais lorsque le NAT ne peut pas être percé.</li>
+    </ul>
+
+    <h2>Comment fonctionne Resilio Sync</h2>
+    <p>Les appareils se connectent directement ; il n’y a pas de compte, et les dossiers sont partagés par des clés ou des liens (lecture seule ou lecture-écriture). Des traqueurs et des relais gérés par Resilio aident les pairs à se trouver. Les données ne vivent que sur les pairs ; Sync Home n’a ni backend S3 ni backend rclone. La synchronisation sélective avec des fichiers substituts est disponible, et un « dossier chiffré » permet à un pair situé sur une machine non fiable de stocker des données qu’il ne peut pas lire (ce pair est en lecture seule et n’a pas de synchronisation sélective).</p>
+
+    <h2>Côte à côte</h2>
+    <table class="compare-table">
+      <thead><tr><th scope="col"></th><th scope="col">Resilio Sync</th><th scope="col">Varsto</th></tr></thead>
+      <tbody>
+      <tr><th scope="row">Où vivent vos fichiers</th><td>Uniquement sur les pairs (un NAS ou un serveur compte s’il exécute Resilio).</td><td>Sur vos propres appareils et sur les stockages que vous choisissez : buckets compatibles S3, n’importe quelle destination rclone, dossiers locaux ou réseau, et pools de disques amovibles.</td></tr>
+      <tr><th scope="row">Compte ou serveur central</th><td>Pas de compte ; traqueurs et relais gérés par Resilio.</td><td>Aucun. Il n’y a pas de serveur Varsto ; les appareils se trouvent via vos stockages et sur le réseau local.</td></tr>
+      <tr><th scope="row">Chiffrement</th><td>Chiffré en transit ; dossiers chiffrés pour les pairs non fiables. Code source fermé, donc non vérifiable de façon indépendante.</td><td>De bout en bout, côté client, avant que quoi que ce soit ne quitte l’appareil ; hybride post-quantique (ML-KEM pour les clés de partage, signatures Ed25519 + ML-DSA-65). Pas encore audité de façon indépendante.</td></tr>
+      <tr><th scope="row">Appareils en ligne en même temps</th><td>Oui, à moins de garder un pair toujours allumé.</td><td>Inutile : les appareils se synchronisent via vos stockages, et directement en pair à pair lorsqu’ils peuvent se joindre.</td></tr>
+      <tr><th scope="row">Sait où se trouve chaque copie</th><td>Aucun suivi des copies ni du nombre de copies.</td><td>Oui : un registre signé enregistre quel stockage et quel appareil détient chaque bloc ; des politiques de durabilité (par défaut 1 copie n’importe où, 1 externe, 1 sur vos propres appareils ou disques, vérifiée par un autre appareil sous 30 jours) avertissent lorsqu’une règle n’est pas respectée.</td></tr>
+      <tr><th scope="row">Disques amovibles et hors ligne</th><td>Pas de processus pour les disques amovibles.</td><td>Oui : les pools de disques sont remplis, vérifiés et reconnus à leur retour ; les fichiers situés sur un disque absent demandent ce disque.</td></tr>
+      <tr><th scope="row">Sauvegardes</th><td>Un dossier Archive sur chaque appareil conserve les fichiers supprimés et remplacés, 30 jours par défaut sur les ordinateurs de bureau ; pas de sauvegarde distincte hors site.</td><td>Oui : choisissez un dossier sur n’importe quel appareil et Varsto en conserve des instantanés chiffrés en lecture seule sur vos stockages externes uniquement, jamais sur vos appareils, pendant le nombre de jours que vous choisissez (90 par défaut), puis supprime ceux qui ont expiré. Restaurez n’importe quel instantané dans un dossier que vous nommez, depuis l’application ou la ligne de commande.</td></tr>
+      <tr><th scope="row">Licence et prix</th><td>Propriétaire ; Sync Home est gratuit.</td><td>Code source disponible (PolyForm Shield 1.0.0), gratuit ; vous ne payez que votre fournisseur de stockage.</td></tr>
+      <tr><th scope="row">Maturité</th><td>Produit commercial mature ; son avenir après le rachat de 2026 n’est pas encore précisé.</td><td>Alpha : pas pour des données de production, les formats peuvent encore changer.</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Lequel choisir</h2>
+    <div class="grid two">
+      <div class="card"><h3>Resilio Sync</h3><p>Choisissez Resilio Sync quand vous voulez un transfert rapide de type BitTorrent entre des machines toujours allumées et un partage facile par clé ou par lien, et qu’un produit d’éditeur à code source fermé vous convient.</p></div>
+      <div class="card"><h3>Varsto</h3><p>Le transfert pair à pair de Varsto s’inspire de la même idée (des blocs chiffrés provenant de plusieurs pairs à la fois), mais il y ajoute vos propres stockages comme copie toujours disponible, un registre de l’emplacement de chaque copie, des politiques de durabilité et une spécification ouverte des formats.</p></div>
+    </div>
+    <p class="note">Varsto est un logiciel alpha : ne lui confiez pas de données dont vous n’avez aucune autre copie, et sa cryptographie n’a pas été auditée de façon indépendante. Les autres produits présentés ici sont matures. Les faits les concernant ont été vérifiés dans leur propre documentation en octobre 2026 ; les prix et les offres changent souvent, consultez donc leurs pages pour les chiffres actuels. Les corrections sont les bienvenues sous forme de <a href="https://github.com/janttsu/varsto/issues" rel="noopener">tickets GitHub</a>.</p>
+
+    <h2>Sources</h2>
+    <ul>
+      <li><a href="https://www.resilio.com/sync/">Site web de Resilio Sync</a></li>
+      <li><a href="https://www.resilio.com/blog/understanding-the-sync-encrypted-folder">Dossiers chiffrés</a></li>
+      <li><a href="https://www.resilio.com/news/nasuni-acquires-resilio/">Nasuni rachète Resilio</a></li>
+      <li><a href="https://help.resilio.com/hc/en-us/articles/204754239-Does-Sync-support-versioning-">Sync prend-il en charge la gestion des versions ?</a></li>
+    </ul>
