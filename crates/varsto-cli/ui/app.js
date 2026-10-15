@@ -261,6 +261,7 @@
       $("modal-cancel").textContent = o.cancel || "Cancel"; $("modal-cancel").classList.toggle("hidden", o.cancel === false);
       var ex = $("modal-extra"); ex.textContent = o.extra || ""; ex.classList.toggle("hidden", !o.extra);
       confirmTyped();
+      if (o.onopen) { o.onopen(fs); }
       $("modal").classList.remove("hidden"); document.body.classList.add("modal-open");
       var first = fs.querySelector("input, textarea") || ok;
       setTimeout(function () { first.focus(); if (first.select) { first.select(); } }, 30);
@@ -631,15 +632,17 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   // Folder placement: which storages a folder's blocks are written to (all
   // by default). Published like the policy, so every device writes it the same way.
   function editPlacement(folder) {
-    var names = [];
+    var names = []; var placeOf = {}; var saved = null; var effective = [];
     api("GET", "/api/placement").then(function (p) {
       var cur = null; (p.folders || []).forEach(function (x) { if (x.folder === folder) { cur = x; } });
       var places = {}; var storages = [];
-      var pl = cur && cur.placement;
-      var on = function (list, x) { return !!(pl && list.indexOf(x) >= 0); };
+      var pl = cur && cur.placement; saved = pl;
+      // Without a placement the folder goes to the storages this device writes it to: show those.
+      effective = (cur && cur.targets) || [];
+      var onS = function (n) { return pl ? pl.storages.indexOf(n) >= 0 : effective.indexOf(n) >= 0; };
       (p.storages || []).filter(function (s) { return !s.carrier; }).forEach(function (s) {
-        places[s.place] = 1;
-        storages.push([s.name, s.name, on(pl ? pl.storages : [], s.name), true, placeShort(s.place) + (s.cold ? ", cold" : "")]);
+        places[s.place] = 1; placeOf[s.name] = s.place;
+        storages.push([s.name, s.name, onS(s.name), true, placeShort(s.place) + (s.cold ? ", cold" : "")]);
       });
       names = Object.keys(places);
       return dialog({
@@ -647,14 +650,20 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
         text: "By default every block goes to every storage. Tick storages or places to write this folder only there; a place means every storage in it, now and later. Blocks already stored stay where they are until you move them; policies still count every copy." + (cur && cur.warnings.length ? " Note: " + cur.warnings.join(" ") : ""),
         fields: [
           { name: "storages", label: "Storages", checks: storages, empty: "No storage yet" },
-          { name: "places", label: "Places", checks: names.map(function (n) { return [n, placeLabel(n), on(pl ? pl.places : [], n)]; }) }
+          { name: "places", label: "Places", checks: names.map(function (n) { return [n, placeLabel(n), onP(n)]; }) }
         ],
         ok: "Save", extra: pl ? "Every storage" : null
       });
     }).then(function (r) {
       if (!r) { return; }
-      var v = r.values; var every = r.action === "extra" || (!(v.storages || "").trim() && !(v.places || "").trim());
-      return api("POST", "/api/placement", { folder: folder, storages: v.storages, places: v.places, every: every }).then(function (info) {
+      var v = r.values;
+      var chosen = (v.storages || "").split(",").filter(Boolean);
+      var forced = {}; chosen.forEach(function (n) { forced[placeOf[n]] = 1; });
+      // A place that is on only because a ticked storage is in it is not a rule of its own.
+      var ownPlaces = (v.places || "").split(",").filter(function (x) { return x && (!forced[x] || (saved && saved.places.indexOf(x) >= 0)); });
+      var unchanged = !saved && !ownPlaces.length && chosen.length === effective.length && chosen.every(function (n) { return effective.indexOf(n) >= 0; });
+      var every = r.action === "extra" || unchanged || (!chosen.length && !ownPlaces.length);
+      return api("POST", "/api/placement", { folder: folder, storages: chosen.join(","), places: ownPlaces.join(","), every: every }).then(function (info) {
         log(folder + ": new blocks go to " + info.targets.join(", ") + (info.placement ? " (" + info.description + ")" : ""));
         return refreshStatus();
       });
@@ -674,6 +683,18 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     }, Promise.resolve()).catch(function (e) { alertBox(e.message); }).then(function () { busy(false); return refreshStatus(); });
   };
   // Transferrers: which devices one travels to. It then carries what those
+        onopen: function (root) {
+          var sync = function () {
+            var forced = {};
+            root.querySelectorAll("input[data-group=storages]").forEach(function (i) { if (i.checked) { forced[placeOf[i.value]] = 1; } });
+            root.querySelectorAll("input[data-group=places]").forEach(function (i) {
+              var f = !!forced[i.value]; if (f) { i.checked = true; } else if (i.dataset.forced) { i.checked = onP(i.value); }
+              i.dataset.forced = f ? "1" : ""; i.disabled = f;
+            });
+          };
+          root.querySelectorAll("input[data-group=storages]").forEach(function (i) { i.addEventListener("change", sync); });
+          sync();
+        },
   // devices lack and is emptied as they receive it.
   function otherDeviceNames() {
     var me = lastStatus ? lastStatus.device_name : "";
