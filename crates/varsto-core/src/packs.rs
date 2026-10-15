@@ -1,56 +1,87 @@
 // SPDX-License-Identifier: PolyForm-Shield-1.0.0
-//! Packs: many small block objects stored as one storage object.
+//! Packs: every block object is stored inside a pack (format 2).
 //!
-//! A folder of small files would otherwise be one object per file on every
-//! storage: thousands of requests to upload, list and verify, and on some
-//! storage classes a minimum billable size per object. A push collects the
-//! encrypted objects of small blocks and writes them together:
+//! A push collects the encrypted objects of its blocks and writes them to
+//! each storage as append-only packs:
 //!
-//! - `packs/<id[..2]>/<id>.pack`: the objects' bytes one after another;
-//! - `packs/<id[..2]>/<id>.idx`: JSON listing each object's name, offset
-//!   and length in the pack (written after the pack: it makes them visible);
-//! - `packs/<id[..2]>/<id>.del.<object>`: one empty marker per object
-//!   deleted from the pack; when every object of a pack is marked, the pack,
-//!   its index and the markers go.
+//! - `packs/<id[..2]>/<id>`: the objects' bytes one after another, nothing
+//!   else; `<id>` is the BLAKE3 hash of the pack's bytes, so a pack is
+//!   written with put-if-absent and checked like any object. Packs are cut
+//!   at [`HOT_TARGET`] bytes (hot, local, pool and transferrer storages)
+//!   or [`COLD_TARGET`] (cold storages).
+//! - `packs/index/<device>/<seq>.enc`: per push and folder, the encrypted
+//!   list of every block the device wrote (pack, offset, length, object
+//!   name, chunk id), for `fsck`, recovery and devices that join later.
+//! - `packs/tombstones/<device>/<seq>.enc`: per device and run, the
+//!   encrypted list of pack members it deleted.
 //!
-//! `<id>` is the hash of the pack's bytes. Nothing in a pack is secret
-//! beyond what single objects show: the objects are ciphertext named by
-//! their hash, which every reader checks. The rest of the engine sees
-//! nothing of this: [`PackAware`] answers `chunks/<xx>/<object>` for packed
-//! objects as if they were single objects (a ranged read of the pack), and
-//! the ledger records objects as before.
+//! A storage therefore sees pack sizes only, never the size of a block.
+//! Where a block lives is in the ledger: a `chunk_stored` claim carries its
+//! pack, offset and length ([`PackLoc`]), and the engine hands those to the
+//! [`PackContext`] it shares with every storage it opens. The rest of the
+//! engine reads and writes `chunks/<xx>/<object>` keys as before: a
+//! [`PackStore`] answers them from the packs.
+//!
+//! Deleting a block records a tombstone. A pack whose members are all dead
+//! is deleted; a hot pack more than half dead is rewritten by
+//! [`PackStore::collect_garbage`] (the live members go into a new pack, the
+//! old one goes); cold packs are never rewritten.
 
+use crate::crypto::SecretKey;
+use crate::record_shim::Records;
 use crate::storage::Storage;
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, bail, Result};
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeSet, HashMap};
-use std::sync::{Arc, Mutex};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant};
 
-/// Objects up to this size go into packs.
-pub const MAX_MEMBER: usize = 128 * 1024;
-/// A pack is written when it holds this many bytes or objects.
-pub const TARGET_BYTES: usize = 4 * 1024 * 1024;
-pub const MAX_MEMBERS: usize = 256;
-/// How long a loaded pack index is trusted before a miss reloads it.
-const STALE: Duration = Duration::from_secs(30);
-
-/// Where packs, their indexes and deletion markers are kept.
+/// Where packs, pack indexes and tombstone lists are kept.
 pub const PREFIX: &str = "packs/";
-const FORMAT: u32 = 1;
+pub const INDEX_PREFIX: &str = "packs/index/";
+pub const TOMBSTONE_PREFIX: &str = "packs/tombstones/";
+/// Pack size on hot, local, pool and transferrer storages.
+pub const HOT_TARGET: usize = 64 << 20;
+/// Pack size on cold storages (fewer, larger objects: per-object fees and
+/// minimum sizes).
+pub const COLD_TARGET: usize = 256 << 20;
+/// Largest block object: the largest chunk, its method byte, nonce and tag.
+pub const MAX_OBJECT: u64 =
+    crate::manifest::MAX_CHUNK_SIZE + 1 + crate::chunk_seal::OBJECT_OVERHEAD as u64;
+/// A listing of a storage's packs is trusted this long before a miss
+/// lists again.
+const STALE: Duration = Duration::from_secs(30);
+/// Record kinds of the envelope (`crate::record_shim`).
+pub const KIND_INDEX: &str = "pack-index";
+pub const KIND_TOMBSTONES: &str = "tombstones";
+/// Version byte of the binary bodies of indexes and tombstone lists.
+const BODY_FORMAT: u8 = 2;
+/// Largest decompressed body of an index or tombstone list.
+const MAX_BODY: usize = 64 << 20;
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct Member {
-    pub object: String,
+/// Where one block object is: `len` bytes from `offset` in pack `pack`,
+/// which is `pack_len` bytes long.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub struct PackLoc {
+    pub pack: String,
     pub offset: u64,
     pub len: u64,
+    pub pack_len: u64,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct PackIndex {
-    pub format: u32,
-    pub pack: String,
-    pub members: Vec<Member>,
+impl PackLoc {
+    /// Whether the numbers can describe a member at all (they come from
+    /// other devices' ledger batches and from storages).
+    pub fn valid(&self) -> bool {
+        is_hash(&self.pack)
+            && self.len > 0
+            && self.len <= MAX_OBJECT
+            && self.pack_len <= crate::storage::MAX_PACK
+            && self
+                .offset
+                .checked_add(self.len)
+                .is_some_and(|end| end <= self.pack_len)
+    }
 }
 
 /// The first two characters of a name, for the directory a name lives in;
@@ -59,17 +90,20 @@ fn head2(s: &str) -> &str {
     s.get(..2).unwrap_or(s)
 }
 
-fn dir(id: &str) -> String {
+fn is_hash(s: &str) -> bool {
+    s.len() == 64 && s.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+}
+
+/// The storage key of a pack.
+pub fn pack_key(id: &str) -> String {
     format!("{PREFIX}{}/{id}", head2(id))
 }
-pub fn pack_key(id: &str) -> String {
-    format!("{}.pack", dir(id))
-}
-pub fn index_key(id: &str) -> String {
-    format!("{}.idx", dir(id))
-}
-fn tombstone_key(id: &str, object: &str) -> String {
-    format!("{}.del.{object}", dir(id))
+
+/// The pack id of a key `packs/<xx>/<id>`.
+pub fn pack_of_key(key: &str) -> Option<&str> {
+    let rest = key.strip_prefix(PREFIX)?;
+    let (dir, id) = rest.split_once('/')?;
+    (is_hash(id) && dir == &id[..2]).then_some(id)
 }
 
 /// The object name a block key `chunks/<xx>/<object>` stands for.
@@ -79,289 +113,889 @@ pub fn object_of(key: &str) -> Option<&str> {
     (!obj.is_empty() && !obj.contains('/')).then_some(obj)
 }
 
-/// The pack id of an index key `packs/<xx>/<id>.idx`.
-fn pack_of_index(key: &str) -> Option<&str> {
-    key.strip_suffix(".idx")?.rsplit('/').next()
-}
-
-fn chunk_key(object: &str) -> String {
+/// The block key of an object name.
+pub fn chunk_key(object: &str) -> String {
     format!("chunks/{}/{object}", head2(object))
 }
 
-/// Longest pack an index may describe (a pack is built from at most
-/// `MAX_MEMBERS` objects of `MAX_MEMBER` bytes; this leaves room).
-pub const MAX_PACK_BYTES: u64 = 64 * 1024 * 1024;
-/// Most members an index may list.
-const MAX_INDEX_MEMBERS: usize = 4096;
-
-/// A name made by hashing: 64 lowercase hex digits.
-fn is_object_name(s: &str) -> bool {
-    s.len() == 64
-        && s.bytes()
-            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
-}
-
-impl PackIndex {
-    /// Check an index read from a storage, whose own key is `key`, before
-    /// anything is built from it. An index is a claim by whoever can write to
-    /// the storage: names that are not object names, a pack id that is not
-    /// the index's own, or an offset and length that leave the pack would
-    /// otherwise reach slicing, allocation and range arithmetic.
-    pub fn validate(&self, key: &str) -> Result<()> {
-        let id = pack_of_index(key).ok_or_else(|| anyhow!("{key} is not a pack index key"))?;
-        if !is_object_name(id) || self.pack != id {
-            return Err(anyhow!(
-                "pack index {key} names another pack ({})",
-                self.pack
-            ));
-        }
-        if self.members.len() > MAX_INDEX_MEMBERS {
-            return Err(anyhow!(
-                "pack index {key} lists {} objects",
-                self.members.len()
-            ));
-        }
-        for m in &self.members {
-            if !is_object_name(&m.object) {
-                return Err(anyhow!(
-                    "pack index {key} lists a member that is not an object name"
-                ));
-            }
-            if m.len == 0 || m.len > crate::storage::MAX_BLOCK_OBJECT {
-                return Err(anyhow!(
-                    "pack index {key} lists a member of {} bytes",
-                    m.len
-                ));
-            }
-            match m.offset.checked_add(m.len) {
-                Some(end) if end <= MAX_PACK_BYTES => {}
-                _ => return Err(anyhow!("pack index {key} lists a member outside its pack")),
-            }
-        }
-        Ok(())
-    }
-}
-
-/// Build a pack from (object name, bytes): the pack's id, bytes and index.
-pub fn build(members: &[(String, &[u8])]) -> (String, Vec<u8>, PackIndex) {
+/// Build a pack from (object name, bytes): its id, bytes and members.
+pub fn build(members: &[(String, &[u8])]) -> (String, Vec<u8>, Vec<(String, PackLoc)>) {
     let mut bytes = Vec::with_capacity(members.iter().map(|(_, b)| b.len()).sum());
-    let mut index = Vec::with_capacity(members.len());
+    let mut spans = Vec::with_capacity(members.len());
     for (object, data) in members {
-        index.push(Member {
-            object: object.clone(),
-            offset: bytes.len() as u64,
-            len: data.len() as u64,
-        });
+        spans.push((object.clone(), bytes.len() as u64, data.len() as u64));
         bytes.extend_from_slice(data);
     }
     let id = hex::encode(crate::crypto::hash(&bytes));
-    let idx = PackIndex {
-        format: FORMAT,
-        pack: id.clone(),
-        members: index,
-    };
-    (id, bytes, idx)
+    let pack_len = bytes.len() as u64;
+    let locs = spans
+        .into_iter()
+        .map(|(o, offset, len)| {
+            (
+                o,
+                PackLoc {
+                    pack: id.clone(),
+                    offset,
+                    len,
+                    pack_len,
+                },
+            )
+        })
+        .collect();
+    (id, bytes, locs)
 }
 
+/// A pack this process wrote, not yet listed in a pack index.
 #[derive(Clone, Debug)]
-struct Loc {
-    pack: String,
-    offset: u64,
-    len: u64,
+pub struct NewPack {
+    pub pack: String,
+    pub members: Vec<(String, PackLoc)>,
+}
+
+/// One block of a pack index: where it is and which chunk it holds.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct IndexEntry {
+    pub loc: PackLoc,
+    pub object: String,
+    pub chunk: String,
+}
+
+/// One deleted pack member.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Tombstone {
+    pub loc: PackLoc,
+    pub object: String,
+}
+
+fn hash_bytes(hex_str: &str) -> Result<[u8; 32]> {
+    let v = hex::decode(hex_str)?;
+    v.try_into().map_err(|_| anyhow!("a hash has 32 bytes"))
+}
+
+fn put_loc(out: &mut Vec<u8>, l: &PackLoc) -> Result<()> {
+    out.extend_from_slice(&hash_bytes(&l.pack)?);
+    out.extend_from_slice(&l.offset.to_le_bytes());
+    out.extend_from_slice(&l.len.to_le_bytes());
+    out.extend_from_slice(&l.pack_len.to_le_bytes());
+    Ok(())
+}
+
+struct Reader<'a>(&'a [u8]);
+impl Reader<'_> {
+    fn take(&mut self, n: usize) -> Result<&[u8]> {
+        if self.0.len() < n {
+            bail!("record body is cut short");
+        }
+        let (a, b) = self.0.split_at(n);
+        self.0 = b;
+        Ok(a)
+    }
+    fn u64(&mut self) -> Result<u64> {
+        Ok(u64::from_le_bytes(
+            self.take(8)?.try_into().expect("8 bytes"),
+        ))
+    }
+    fn hash(&mut self) -> Result<String> {
+        Ok(hex::encode(self.take(32)?))
+    }
+    fn loc(&mut self) -> Result<PackLoc> {
+        let l = PackLoc {
+            pack: self.hash()?,
+            offset: self.u64()?,
+            len: self.u64()?,
+            pack_len: self.u64()?,
+        };
+        if !l.valid() {
+            bail!("record body names an impossible pack member");
+        }
+        Ok(l)
+    }
+}
+
+fn seal_body(kind: u8, n: usize, fill: impl FnOnce(&mut Vec<u8>) -> Result<()>) -> Result<Vec<u8>> {
+    let mut raw = vec![BODY_FORMAT, kind];
+    raw.extend_from_slice(&(n as u32).to_le_bytes());
+    fill(&mut raw)?;
+    Ok(zstd::bulk::compress(&raw, crate::pack::ZSTD_LEVEL)?)
+}
+
+fn open_body(kind: u8, body: &[u8]) -> Result<(usize, Vec<u8>)> {
+    let raw = zstd::bulk::decompress(body, MAX_BODY)?;
+    if raw.len() < 6 || raw[0] != BODY_FORMAT || raw[1] != kind {
+        bail!("not a format-2 record body of this kind");
+    }
+    let n = u32::from_le_bytes(raw[2..6].try_into().expect("4 bytes")) as usize;
+    Ok((n, raw[6..].to_vec()))
+}
+
+/// The body of a pack index: fixed-width binary entries, zstd-compressed.
+pub fn encode_index(entries: &[IndexEntry]) -> Result<Vec<u8>> {
+    seal_body(1, entries.len(), |out| {
+        for e in entries {
+            put_loc(out, &e.loc)?;
+            out.extend_from_slice(&hash_bytes(&e.object)?);
+            out.extend_from_slice(&hash_bytes(&e.chunk)?);
+        }
+        Ok(())
+    })
+}
+
+pub fn decode_index(body: &[u8]) -> Result<Vec<IndexEntry>> {
+    let (n, raw) = open_body(1, body)?;
+    let mut r = Reader(&raw);
+    let mut out = Vec::with_capacity(n.min(raw.len() / 128 + 1));
+    for _ in 0..n {
+        out.push(IndexEntry {
+            loc: r.loc()?,
+            object: r.hash()?,
+            chunk: r.hash()?,
+        });
+    }
+    Ok(out)
+}
+
+pub fn encode_tombstones(entries: &[Tombstone]) -> Result<Vec<u8>> {
+    seal_body(2, entries.len(), |out| {
+        for e in entries {
+            put_loc(out, &e.loc)?;
+            out.extend_from_slice(&hash_bytes(&e.object)?);
+        }
+        Ok(())
+    })
+}
+
+pub fn decode_tombstones(body: &[u8]) -> Result<Vec<Tombstone>> {
+    let (n, raw) = open_body(2, body)?;
+    let mut r = Reader(&raw);
+    let mut out = Vec::with_capacity(n.min(raw.len() / 96 + 1));
+    for _ in 0..n {
+        out.push(Tombstone {
+            loc: r.loc()?,
+            object: r.hash()?,
+        });
+    }
+    Ok(out)
+}
+
+/// `packs/<kind dir>/<device>/<seq 16 digits>.enc` and back.
+pub fn record_key(prefix: &str, device: &str, seq: u64) -> String {
+    format!("{prefix}{device}/{seq:016}.enc")
+}
+
+pub fn parse_record_key<'a>(prefix: &str, key: &'a str) -> Option<(&'a str, u64)> {
+    let rest = key.strip_prefix(prefix)?;
+    let (device, file) = rest.split_once('/')?;
+    let seq = file.strip_suffix(".enc")?;
+    if device.is_empty() || seq.len() != 16 || !seq.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    Some((device, seq.parse().ok()?))
+}
+
+/// Where blocks are, as the ledger and this process's writes say.
+#[derive(Default)]
+struct Locator {
+    /// From the ledger view (`PackContext::set_view_locations`).
+    view: HashMap<String, Vec<PackLoc>>,
+    /// Written or learned by this process.
+    own: HashMap<String, Vec<PackLoc>>,
+    /// (storage, pack, offset) of every place a live claim of the view
+    /// names: a tombstone of another device never makes one of them dead.
+    claimed: HashSet<(String, String, u64)>,
+    generation: Option<u64>,
+}
+
+/// The folders this device holds the keys of, for folder-scoped tombstone
+/// lists (format 2: under the folder's metadata key K10, so every device
+/// of the folder, members of a shared folder too, reads them).
+#[derive(Default)]
+struct Folders {
+    /// Folder id -> its metadata keys, the one written under first.
+    keys: HashMap<String, Vec<SecretKey>>,
+    /// Object name -> the folder whose block it is (from the view).
+    of_object: HashMap<String, String>,
+    /// Changes whenever `keys` does: lists no key opened are tried again.
+    generation: u64,
+}
+
+impl Locator {
+    fn candidates(&self, object: &str) -> Vec<PackLoc> {
+        let mut out: Vec<PackLoc> = self.own.get(object).cloned().unwrap_or_default();
+        for l in self.view.get(object).into_iter().flatten() {
+            if !out.contains(l) {
+                out.push(l.clone());
+            }
+        }
+        out
+    }
 }
 
 /// What this device knows of one storage's packs.
 #[derive(Default)]
-pub struct Cache {
-    loaded: Option<Instant>,
-    /// Packed object -> where it is (deleted objects are left out).
-    objects: HashMap<String, Loc>,
-    /// Pack -> its objects and the ones marked deleted.
-    packs: HashMap<String, (Vec<String>, BTreeSet<String>)>,
-    seen_index: BTreeSet<String>,
-    /// Indexes found on the storage that failed `PackIndex::validate`:
-    /// skipped, and counted here.
-    invalid_indexes: u64,
+struct StoreState {
+    /// Packs listed on the storage (and written since).
+    packs: HashSet<String>,
+    listed: Option<Instant>,
+    /// Dead members by pack: offset -> (length, deleted by this device).
+    dead: HashMap<String, BTreeMap<u64, (u64, bool)>>,
+    /// Tombstone lists no key of this device opened, and the folder key
+    /// generation they were tried with.
+    unreadable: BTreeSet<String>,
+    unreadable_generation: u64,
+    tombstones_seen: BTreeSet<String>,
+    /// This device's highest tombstone list sequence number seen.
+    own_tombstone_seq: u64,
+    /// Members deleted by this process, not yet written as a list.
+    pending: Vec<Tombstone>,
+    new_packs: Vec<NewPack>,
 }
 
-impl Cache {
-    fn add_index(&mut self, idx: &PackIndex) {
-        let names: Vec<String> = idx.members.iter().map(|m| m.object.clone()).collect();
-        let deleted = self
-            .packs
-            .get(&idx.pack)
-            .map(|(_, d)| d.clone())
-            .unwrap_or_default();
-        for m in &idx.members {
-            if !deleted.contains(&m.object) {
-                self.objects.insert(
-                    m.object.clone(),
-                    Loc {
-                        pack: idx.pack.clone(),
-                        offset: m.offset,
-                        len: m.len,
-                    },
-                );
-            }
-        }
-        self.packs.insert(idx.pack.clone(), (names, deleted));
+impl StoreState {
+    fn is_dead(&self, l: &PackLoc) -> bool {
+        self.dead
+            .get(&l.pack)
+            .is_some_and(|d| d.contains_key(&l.offset))
     }
 
-    /// A pack whose index is gone: every object in it was deleted (or the
-    /// pack was lost).
-    fn forget(&mut self, pack: &str) {
-        self.objects.retain(|_, l| l.pack != pack);
-        self.packs.remove(pack);
-        self.seen_index.remove(&index_key(pack));
+    /// Dead members of `pack` that may go: deleted by this device, or by
+    /// another device and not claimed live by the view on `storage`.
+    fn gone(&self, ctx: &PackContext, storage: &str, pack: &str) -> BTreeMap<u64, u64> {
+        self.dead
+            .get(pack)
+            .into_iter()
+            .flatten()
+            .filter(|(off, (_, own))| *own || !ctx.claims(storage, pack, **off))
+            .map(|(off, (len, _))| (*off, *len))
+            .collect()
     }
 
-    fn mark_deleted(&mut self, pack: &str, object: &str) {
-        let entry = self.packs.entry(pack.to_string()).or_default();
-        entry.1.insert(object.to_string());
-        if self.objects.get(object).is_some_and(|l| l.pack == pack) {
-            self.objects.remove(object);
-        }
+    fn gone_bytes(&self, ctx: &PackContext, storage: &str, pack: &str) -> u64 {
+        self.gone(ctx, storage, pack).values().sum()
     }
-}
 
-/// One cache per storage, shared by every engine operation that opens it.
-pub type Caches = Arc<Mutex<HashMap<String, Arc<Mutex<Cache>>>>>;
-
-/// A storage that knows the packs in it. `packing`: whether new small
-/// objects are written as packs here (hot buckets, rclone remotes and
-/// directories; not cold storage, transferrers or disk pools).
-pub struct PackAware {
-    inner: Box<dyn Storage>,
-    cache: Arc<Mutex<Cache>>,
-    packing: bool,
-}
-
-impl PackAware {
-    pub fn new(inner: Box<dyn Storage>, caches: &Caches, packing: bool) -> PackAware {
-        let cache = caches
-            .lock()
-            .unwrap()
-            .entry(inner.name().to_string())
+    fn mark_dead(&mut self, storage: &str, t: &Tombstone, own: bool) {
+        let e = self
+            .dead
+            .entry(t.loc.pack.clone())
             .or_default()
-            .clone();
-        PackAware {
-            inner,
-            cache,
-            packing,
-        }
+            .entry(t.loc.offset)
+            .or_insert((t.loc.len, own));
+        e.1 |= own;
+        debug_registry::dead(storage, &t.loc);
+    }
+}
+
+/// What every storage an engine opens shares: where blocks are, the state
+/// of each storage's packs, and the keys of the tombstone lists.
+#[derive(Default)]
+pub struct PackContext {
+    locator: RwLock<Locator>,
+    stores: Mutex<HashMap<String, Arc<Mutex<StoreState>>>>,
+    tombstones: RwLock<Option<(Records, SecretKey)>>,
+    folders: RwLock<Folders>,
+    /// Pack indexes read (storage, key), and the ones no folder key opened
+    /// with the folder key generation they were tried at.
+    indexes: Mutex<IndexesRead>,
+}
+
+/// (storage, key) of pack indexes read, of those no folder key opened, and
+/// the folder key generation the latter were tried at.
+type IndexesRead = (HashSet<(String, String)>, HashSet<(String, String)>, u64);
+
+/// One context per engine (the name is older than packs for everything).
+pub type Caches = Arc<PackContext>;
+
+impl PackContext {
+    /// The device that writes tombstone lists, and their key (vault-wide:
+    /// any full device deletes blocks and reads what the others deleted).
+    pub fn set_tombstone_keys(&self, records: Records, key: SecretKey) {
+        *self.tombstones.write().unwrap() = Some((records, key));
     }
 
-    /// Read the pack indexes and markers this device has not seen yet, and
-    /// forget packs whose index has gone since.
-    fn refresh(&self) -> Result<()> {
-        // Taken before the listing: a pack this device writes meanwhile is
-        // not in it and is not taken for gone.
-        let known: BTreeSet<String> = self.cache.lock().unwrap().seen_index.clone();
-        let keys = self.inner.list(PREFIX)?;
-        let listed: BTreeSet<&str> = keys.iter().map(String::as_str).collect();
-        let mut fresh = Vec::new();
-        let mut tombs = Vec::new();
-        for k in &keys {
-            if k.ends_with(".idx") && !known.contains(k) {
-                fresh.push(k.clone());
-            } else if let Some((left, object)) = k.split_once(".del.") {
-                let pack = left.rsplit('/').next().unwrap_or_default().to_string();
-                tombs.push((pack, object.to_string()));
-            }
-        }
-        let mut parsed = Vec::new();
-        let mut invalid = Vec::new();
-        for k in fresh {
-            if let Some(b) = self.inner.get_bounded(&k, crate::storage::MAX_RECORD)? {
-                match serde_json::from_slice::<PackIndex>(&b)
-                    .map_err(anyhow::Error::from)
-                    .and_then(|idx| idx.validate(&k).map(|_| idx))
-                {
-                    Ok(idx) => parsed.push((k, idx)),
-                    Err(e) => {
-                        log::warn!(storage = self.inner.name(); "skipping a pack index: {e:#}");
-                        invalid.push(k);
-                    }
+    pub fn has_tombstone_keys(&self) -> bool {
+        self.tombstones.read().unwrap().is_some()
+    }
+
+    /// The ledger generation the view locations were taken from.
+    pub fn view_generation(&self) -> Option<u64> {
+        self.locator.read().unwrap().generation
+    }
+
+    /// Replace what was taken from the ledger view: the locations of
+    /// blocks, the places a live claim names (storage, pack, offset), and
+    /// the folder of each block.
+    pub fn set_view_locations(
+        &self,
+        generation: u64,
+        view: HashMap<String, Vec<PackLoc>>,
+        claimed: HashSet<(String, String, u64)>,
+        of_object: HashMap<String, String>,
+    ) {
+        let mut l = self.locator.write().unwrap();
+        // A place the view drops (a block just dropped from the ledger) is
+        // kept: deleting the block after its drop is sealed still finds it.
+        let old = std::mem::take(&mut l.view);
+        for (object, locs) in old {
+            let now = view.get(&object);
+            for loc in locs {
+                if now.is_some_and(|n| n.contains(&loc)) {
+                    continue;
+                }
+                let e = l.own.entry(object.clone()).or_default();
+                if !e.contains(&loc) {
+                    e.push(loc);
                 }
             }
         }
-        let mut c = self.cache.lock().unwrap();
-        for k in invalid {
-            // Not read again until it changes name: counted once.
-            if c.seen_index.insert(k) {
-                c.invalid_indexes += 1;
+        l.view = view;
+        l.claimed = claimed;
+        l.generation = Some(generation);
+        self.folders.write().unwrap().of_object = of_object;
+    }
+
+    /// The metadata keys (K10, the one to write under first) of the folders
+    /// this device holds: tombstones of their blocks are listed per folder
+    /// under them.
+    pub fn set_folder_keys(&self, keys: HashMap<String, Vec<SecretKey>>) {
+        let mut f = self.folders.write().unwrap();
+        let same = f.keys.len() == keys.len()
+            && keys.iter().all(|(id, ks)| {
+                f.keys.get(id).is_some_and(|old| {
+                    old.len() == ks.len() && old.iter().zip(ks).all(|(a, b)| a.0 == b.0)
+                })
+            });
+        if !same {
+            f.keys = keys;
+            f.generation += 1;
+        }
+    }
+
+    /// Whether pack index `key` on `storage` is still to be read: not read
+    /// yet, and not refused by every folder key this device holds now.
+    pub fn index_unread(&self, storage: &str, key: &str) -> bool {
+        let generation = self.folders.read().unwrap().generation;
+        let mut i = self.indexes.lock().unwrap();
+        if i.2 != generation {
+            i.1.clear();
+            i.2 = generation;
+        }
+        let k = (storage.to_string(), key.to_string());
+        !i.0.contains(&k) && !i.1.contains(&k)
+    }
+
+    /// Pack index `key` on `storage` was read (`opened`) or no key of this
+    /// device opens it.
+    pub fn index_done(&self, storage: &str, key: &str, opened: bool) {
+        let k = (storage.to_string(), key.to_string());
+        let mut i = self.indexes.lock().unwrap();
+        if opened {
+            i.0.insert(k);
+        } else {
+            i.1.insert(k);
+        }
+    }
+
+    fn claims(&self, storage: &str, pack: &str, offset: u64) -> bool {
+        self.locator.read().unwrap().claimed.contains(&(
+            storage.to_string(),
+            pack.to_string(),
+            offset,
+        ))
+    }
+
+    /// A location learned outside the view (a write, a pack index).
+    pub fn learn(&self, object: &str, loc: PackLoc) {
+        if !loc.valid() {
+            return;
+        }
+        let mut l = self.locator.write().unwrap();
+        let e = l.own.entry(object.to_string()).or_default();
+        if !e.contains(&loc) {
+            e.push(loc);
+        }
+    }
+
+    fn candidates(&self, object: &str) -> Vec<PackLoc> {
+        self.locator.read().unwrap().candidates(object)
+    }
+
+    /// Every block with a known location (for listings).
+    fn all_objects(&self) -> Vec<(String, Vec<PackLoc>)> {
+        let l = self.locator.read().unwrap();
+        let mut out: HashMap<String, Vec<PackLoc>> = HashMap::new();
+        for (o, locs) in l.view.iter().chain(l.own.iter()) {
+            let e = out.entry(o.clone()).or_default();
+            for loc in locs {
+                if !e.contains(loc) {
+                    e.push(loc.clone());
+                }
             }
         }
-        for k in known.iter().filter(|k| !listed.contains(k.as_str())) {
-            if let Some(pack) = pack_of_index(k) {
-                c.forget(pack);
+        out.into_iter().collect()
+    }
+
+    fn store(&self, name: &str) -> Arc<Mutex<StoreState>> {
+        self.stores
+            .lock()
+            .unwrap()
+            .entry(name.to_string())
+            .or_default()
+            .clone()
+    }
+
+    /// A pack written to storage `name` outside a `PackStore` (a pool disk
+    /// being filled): its blocks are located, and it goes into the next
+    /// pack index.
+    pub fn record_pack(&self, name: &str, pack: NewPack) {
+        for (o, l) in &pack.members {
+            self.learn(o, l.clone());
+        }
+        debug_registry::written(&pack.members);
+        let st = self.store(name);
+        let mut st = st.lock().unwrap();
+        st.packs.insert(pack.pack.clone());
+        st.new_packs.push(pack);
+    }
+
+    /// Whether storage `name` has packs to index or tombstones to write.
+    pub fn has_work(&self, name: &str) -> bool {
+        let st = self.store(name);
+        let st = st.lock().unwrap();
+        !st.new_packs.is_empty() || !st.pending.is_empty()
+    }
+
+    /// Where `object` is on storage `name`, as far as this device knows
+    /// (no request): a live member of a pack the storage holds.
+    pub fn location_on(&self, name: &str, object: &str) -> Option<PackLoc> {
+        let st = self.store(name);
+        let st = st.lock().unwrap();
+        self.candidates(object)
+            .into_iter()
+            .find(|l| st.packs.contains(&l.pack) && !st.is_dead(l))
+    }
+}
+
+/// A storage whose block objects live in packs. `target`: the pack size
+/// written here.
+pub struct PackStore {
+    inner: Box<dyn Storage>,
+    ctx: Caches,
+    state: Arc<Mutex<StoreState>>,
+    target: usize,
+    /// Whether tombstone lists are written here (not on disk pools, which
+    /// hold blocks only).
+    records: bool,
+}
+
+impl PackStore {
+    pub fn new(inner: Box<dyn Storage>, ctx: &Caches, target: usize) -> PackStore {
+        let state = ctx.store(inner.name());
+        PackStore {
+            inner,
+            ctx: ctx.clone(),
+            state,
+            target: target.max(1),
+            records: true,
+        }
+    }
+
+    /// The largest whole pack read here: the target plus the one block
+    /// object by which the last member may pass it.
+    fn pack_limit(&self) -> u64 {
+        (self.target as u64 + MAX_OBJECT).min(crate::storage::MAX_PACK)
+    }
+
+    /// A storage that holds blocks only (a disk pool): no tombstone lists.
+    pub fn blocks_only(mut self) -> PackStore {
+        self.records = false;
+        self
+    }
+
+    /// List the storage's packs and read the tombstone lists not read yet.
+    fn refresh(&self) -> Result<()> {
+        let keys = self.inner.list(PREFIX)?;
+        let mut packs = HashSet::new();
+        let mut tomb_keys = Vec::new();
+        for k in &keys {
+            if let Some(id) = pack_of_key(k) {
+                packs.insert(id.to_string());
+            } else if k.starts_with(TOMBSTONE_PREFIX) {
+                tomb_keys.push(k.clone());
             }
         }
-        for (pack, object) in &tombs {
-            c.mark_deleted(pack, object);
+        let keys_for = self.ctx.tombstones.read().unwrap().clone();
+        let me = keys_for
+            .as_ref()
+            .map(|(r, _)| r.device().as_str().to_string());
+        let (folder_keys, folder_gen) = {
+            let f = self.ctx.folders.read().unwrap();
+            (f.keys.clone(), f.generation)
+        };
+        let unseen: Vec<String> = {
+            let mut st = self.state.lock().unwrap();
+            if st.unreadable_generation != folder_gen {
+                st.unreadable.clear();
+                st.unreadable_generation = folder_gen;
+            }
+            tomb_keys
+                .into_iter()
+                .filter(|k| !st.tombstones_seen.contains(k) && !st.unreadable.contains(k))
+                .collect()
+        };
+        let mut read: Vec<(String, Vec<Tombstone>)> = Vec::new();
+        let mut unreadable: Vec<String> = Vec::new();
+        let mut own_seq = 0;
+        for k in unseen {
+            let Some((device, seq)) = parse_record_key(TOMBSTONE_PREFIX, &k) else {
+                read.push((k, Vec::new()));
+                continue;
+            };
+            if me.as_deref() == Some(device) {
+                own_seq = own_seq.max(seq);
+            }
+            let Some((records, key)) = &keys_for else {
+                // Without the key nothing is recorded as read: a later
+                // engine with the key reads it.
+                continue;
+            };
+            let entries = (|| -> Result<Option<Vec<Tombstone>>> {
+                let blob = self.inner.get(&k)?.ok_or_else(|| anyhow!("gone"))?;
+                let writer = crate::ids::DeviceId::from_hex(device)?;
+                // Vault-scoped (blocks of no folder this device knows), or
+                // scoped to a folder whose metadata key this device holds.
+                let body = records
+                    .open(KIND_TOMBSTONES, "", &writer, seq, key, &blob)
+                    .ok()
+                    .or_else(|| {
+                        folder_keys.iter().find_map(|(folder, keys)| {
+                            keys.iter().find_map(|fk| {
+                                records
+                                    .open(KIND_TOMBSTONES, folder, &writer, seq, fk, &blob)
+                                    .ok()
+                            })
+                        })
+                    });
+                body.map(|b| decode_tombstones(&b)).transpose()
+            })();
+            match entries {
+                Ok(Some(e)) => read.push((k, e)),
+                // Under a key this device does not hold (yet): read again
+                // when its folder keys change.
+                Ok(None) => unreadable.push(k),
+                Err(e) => {
+                    log::debug!(storage = self.inner.name(); "packs: tombstone list {k} skipped: {e:#}");
+                    read.push((k, Vec::new()));
+                }
+            }
         }
-        for (k, idx) in parsed {
-            c.add_index(&idx);
-            c.seen_index.insert(k);
+        let mut st = self.state.lock().unwrap();
+        // Packs this process wrote after the listing started stay known.
+        let written: Vec<String> = st.new_packs.iter().map(|p| p.pack.clone()).collect();
+        st.packs = packs;
+        st.packs.extend(written);
+        st.own_tombstone_seq = st.own_tombstone_seq.max(own_seq);
+        let me_writer = me.unwrap_or_default();
+        for (k, entries) in read {
+            let own = parse_record_key(TOMBSTONE_PREFIX, &k).is_some_and(|(d, _)| d == me_writer);
+            for t in &entries {
+                st.mark_dead(self.inner.name(), t, own);
+            }
+            st.tombstones_seen.insert(k);
         }
-        c.loaded = Some(Instant::now());
+        st.unreadable.extend(unreadable);
+        st.listed = Some(Instant::now());
         Ok(())
     }
 
-    fn locate(&self, object: &str, reload_on_miss: bool) -> Result<Option<Loc>> {
-        let (loc, stale) = {
-            let c = self.cache.lock().unwrap();
-            (
-                c.objects.get(object).cloned(),
-                c.loaded.is_none_or(|t| t.elapsed() > STALE),
-            )
-        };
-        if loc.is_some() || !(stale && reload_on_miss) {
-            return Ok(loc);
-        }
-        self.refresh()?;
-        Ok(self.cache.lock().unwrap().objects.get(object).cloned())
-    }
-
-    /// Whether a packed object this device located is still there: another
-    /// device may have marked it deleted, or deleted its whole pack, since
-    /// the index was read. Asked before a write is skipped or a copy is
-    /// counted as present, where a stale answer would lose the block.
-    fn still_packed(&self, object: &str, loc: &Loc) -> Result<bool> {
-        if self.inner.exists(&tombstone_key(&loc.pack, object))? {
-            self.cache.lock().unwrap().mark_deleted(&loc.pack, object);
-            return Ok(false);
-        }
-        if !self.inner.exists(&index_key(&loc.pack))? {
-            self.cache.lock().unwrap().forget(&loc.pack);
-            return Ok(false);
-        }
-        Ok(true)
-    }
-
-    /// The object's place in a pack, checked as `still_packed`.
-    fn locate_live(&self, object: &str) -> Result<Option<Loc>> {
-        self.ensure_loaded()?;
-        match self.locate(object, false)? {
-            Some(loc) if self.still_packed(object, &loc)? => Ok(Some(loc)),
-            _ => Ok(None),
-        }
-    }
-
-    /// How many pack indexes were skipped as invalid.
-    pub fn invalid_indexes(&self) -> u64 {
-        self.cache.lock().unwrap().invalid_indexes
-    }
-
-    fn ensure_loaded(&self) -> Result<()> {
-        if self.cache.lock().unwrap().loaded.is_none() {
+    fn ensure_listed(&self) -> Result<()> {
+        if self.state.lock().unwrap().listed.is_none() {
             self.refresh()?;
         }
         Ok(())
     }
+
+    /// The live location of `object` here; with `relist`, a miss lists
+    /// the storage again when the last listing is old.
+    fn locate(&self, object: &str, relist: bool) -> Result<Option<PackLoc>> {
+        self.ensure_listed()?;
+        let find = || {
+            let st = self.state.lock().unwrap();
+            self.ctx
+                .candidates(object)
+                .into_iter()
+                .find(|l| l.valid() && st.packs.contains(&l.pack) && !st.is_dead(l))
+        };
+        if let Some(l) = find() {
+            return Ok(Some(l));
+        }
+        let stale = self
+            .state
+            .lock()
+            .unwrap()
+            .listed
+            .is_none_or(|t| t.elapsed() > STALE);
+        if relist && stale && !self.ctx.candidates(object).is_empty() {
+            self.refresh()?;
+            return Ok(find());
+        }
+        Ok(None)
+    }
+
+    /// The pack is gone from the storage (another device deleted it).
+    fn forget_pack(&self, pack: &str) {
+        self.state.lock().unwrap().packs.remove(pack);
+    }
+
+    /// Every live place of `object`, also in packs the last listing of this
+    /// storage did not show (written since by another device, or held
+    /// elsewhere): a request tells. Listed packs are included, since another
+    /// thread may have added one since `locate` looked.
+    fn unlisted(&self, object: &str) -> Vec<PackLoc> {
+        let st = self.state.lock().unwrap();
+        self.ctx
+            .candidates(object)
+            .into_iter()
+            .filter(|l| l.valid() && !st.is_dead(l))
+            .collect()
+    }
+
+    /// A pack found by a request: listed from now on.
+    fn found_pack(&self, pack: &str) {
+        self.state.lock().unwrap().packs.insert(pack.to_string());
+    }
+
+    fn read_member(&self, object: &str) -> Result<Option<Vec<u8>>> {
+        for _ in 0..4 {
+            let Some(loc) = self.locate(object, false)? else {
+                break;
+            };
+            match self
+                .inner
+                .get_range(&pack_key(&loc.pack), loc.offset, loc.len)?
+            {
+                Some(b) if b.len() as u64 == loc.len => return Ok(Some(b)),
+                Some(_) => return Ok(None),
+                None => self.forget_pack(&loc.pack),
+            }
+        }
+        for loc in self.unlisted(object) {
+            if let Some(b) = self
+                .inner
+                .get_range(&pack_key(&loc.pack), loc.offset, loc.len)?
+            {
+                if b.len() as u64 == loc.len {
+                    self.found_pack(&loc.pack);
+                    return Ok(Some(b));
+                }
+            }
+        }
+        Ok(None)
+    }
+
+    /// Whether a pack not in the listing holds `object` here (one HEAD per
+    /// pack, remembered in `checked`).
+    fn unlisted_here(&self, object: &str, checked: &mut HashMap<String, bool>) -> Result<bool> {
+        for loc in self.unlisted(object) {
+            let here = match checked.get(&loc.pack) {
+                Some(v) => *v,
+                None => {
+                    let v = self.inner.exists(&pack_key(&loc.pack))?;
+                    checked.insert(loc.pack.clone(), v);
+                    v
+                }
+            };
+            if here {
+                self.found_pack(&loc.pack);
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
+    /// Write tombstones recorded since the last call as one list.
+    fn write_tombstones(&self) -> Result<()> {
+        let pending = std::mem::take(&mut self.state.lock().unwrap().pending);
+        if pending.is_empty() || !self.records {
+            return Ok(());
+        }
+        let Some((records, key)) = self.ctx.tombstones.read().unwrap().clone() else {
+            return Ok(());
+        };
+        // One list per folder whose key this device holds (under its
+        // metadata key, readable by every device of the folder), one under
+        // the vault key for the rest.
+        let mut lists: BTreeMap<String, Vec<Tombstone>> = BTreeMap::new();
+        let mut scoped: HashMap<String, SecretKey> = HashMap::new();
+        {
+            let f = self.ctx.folders.read().unwrap();
+            for t in pending {
+                let folder = f
+                    .of_object
+                    .get(&t.object)
+                    .and_then(|id| Some((id, f.keys.get(id)?.first()?)));
+                let scope = match folder {
+                    Some((id, k)) => {
+                        scoped.entry(id.clone()).or_insert_with(|| k.clone());
+                        id.clone()
+                    }
+                    None => String::new(),
+                };
+                lists.entry(scope).or_default().push(t);
+            }
+        }
+        let device = records.device().as_str().to_string();
+        for (scope, list) in lists {
+            let body = encode_tombstones(&list)?;
+            let key = scoped.get(&scope).unwrap_or(&key);
+            let mut seq = self.state.lock().unwrap().own_tombstone_seq + 1;
+            loop {
+                let k = record_key(TOMBSTONE_PREFIX, &device, seq);
+                let blob = records.seal(KIND_TOMBSTONES, &scope, seq, key, &body)?;
+                if self.inner.put_if_absent(&k, &blob)? {
+                    let mut st = self.state.lock().unwrap();
+                    st.own_tombstone_seq = seq;
+                    st.tombstones_seen.insert(k);
+                    break;
+                }
+                seq += 1;
+            }
+        }
+        Ok(())
+    }
+
+    /// Write packs of the fresh members; returns their locations.
+    fn write_packs(&self, fresh: &[(String, &[u8])]) -> Result<()> {
+        let mut start = 0;
+        while start < fresh.len() {
+            let mut end = start;
+            let mut bytes = 0usize;
+            while end < fresh.len() && (end == start || bytes + fresh[end].1.len() <= self.target) {
+                bytes += fresh[end].1.len();
+                end += 1;
+            }
+            let (id, data, members) = build(&fresh[start..end]);
+            self.inner.put_if_absent(&pack_key(&id), &data)?;
+            for (o, l) in &members {
+                self.ctx.learn(o, l.clone());
+            }
+            debug_registry::written(&members);
+            let mut st = self.state.lock().unwrap();
+            st.packs.insert(id.clone());
+            st.new_packs.push(NewPack { pack: id, members });
+            start = end;
+        }
+        Ok(())
+    }
+
+    /// Rewrite the hot packs here that are more than half dead and whose
+    /// members this device knows completely and `keep` accepts (the engine
+    /// keeps to folders whose key it holds): the live members go into new
+    /// packs, then the old pack is deleted. Returns the new location of every moved
+    /// member. Cold storages never call this.
+    pub fn collect_garbage(&self, keep: &dyn Fn(&str) -> bool) -> Result<Vec<(String, PackLoc)>> {
+        self.refresh()?;
+        let candidates: Vec<(String, u64)> = {
+            let st = self.state.lock().unwrap();
+            let mut packs: HashMap<String, u64> = HashMap::new();
+            for (o, locs) in self.ctx.all_objects() {
+                let _ = o;
+                for l in locs {
+                    if st.packs.contains(&l.pack) {
+                        packs.insert(l.pack.clone(), l.pack_len);
+                    }
+                }
+            }
+            packs
+                .into_iter()
+                .filter(|(p, len)| st.gone_bytes(&self.ctx, self.inner.name(), p) * 2 > *len)
+                .collect()
+        };
+        let mut moved = Vec::new();
+        for (pack, pack_len) in candidates {
+            // Every byte of the pack must be accounted for: a member this
+            // device does not know would be lost.
+            let all = self.ctx.all_objects();
+            let (live, dead): (Vec<(String, PackLoc)>, BTreeMap<u64, u64>) = {
+                let gone = self
+                    .state
+                    .lock()
+                    .unwrap()
+                    .gone(&self.ctx, self.inner.name(), &pack);
+                let live = all
+                    .iter()
+                    .flat_map(|(o, locs)| locs.iter().map(move |l| (o, l)))
+                    .filter(|(_, l)| l.pack == pack && !gone.contains_key(&l.offset))
+                    .map(|(o, l)| (o.clone(), l.clone()))
+                    .collect();
+                (live, gone)
+            };
+            let mut spans: BTreeMap<u64, u64> = dead;
+            let mut live_unique: BTreeMap<u64, (String, PackLoc)> = BTreeMap::new();
+            for (o, l) in live {
+                live_unique.insert(l.offset, (o, l));
+            }
+            for (off, (_, l)) in &live_unique {
+                spans.insert(*off, l.len);
+            }
+            let mut at = 0u64;
+            let mut complete = true;
+            for (off, len) in &spans {
+                if *off != at {
+                    complete = false;
+                    break;
+                }
+                at += len;
+            }
+            if !complete || at != pack_len {
+                continue;
+            }
+            if pack_len > self.pack_limit() {
+                continue; // not a pack written with this target
+            }
+            let Some(bytes) = self
+                .inner
+                .get_bounded(&pack_key(&pack), self.pack_limit())?
+            else {
+                self.forget_pack(&pack);
+                continue;
+            };
+            if hex::encode(crate::crypto::hash(&bytes)) != pack {
+                continue; // damaged: repair, not garbage collection, handles it
+            }
+            if live_unique.values().any(|(o, _)| !keep(o)) {
+                continue;
+            }
+            let keep_members: Vec<(String, &[u8])> = live_unique
+                .values()
+                .map(|(o, l)| {
+                    let s = l.offset as usize;
+                    (o.clone(), &bytes[s..s + l.len as usize])
+                })
+                .filter(|(o, b)| hex::encode(crate::crypto::hash(b)) == *o)
+                .collect();
+            if keep_members.len() != live_unique.len() {
+                continue; // a damaged member: repair first
+            }
+            let before = self.state.lock().unwrap().new_packs.len();
+            if !keep_members.is_empty() {
+                self.write_packs(&keep_members)?;
+            }
+            let written: Vec<(String, PackLoc)> = self.state.lock().unwrap().new_packs[before..]
+                .iter()
+                .flat_map(|p| p.members.clone())
+                .collect();
+            self.inner.delete(&pack_key(&pack))?;
+            {
+                let mut st = self.state.lock().unwrap();
+                st.packs.remove(&pack);
+            }
+            moved.extend(written);
+        }
+        Ok(moved)
+    }
 }
 
-impl Storage for PackAware {
+impl Storage for PackStore {
     fn name(&self) -> &str {
         self.inner.name()
     }
@@ -371,52 +1005,45 @@ impl Storage for PackAware {
     }
 
     fn put_if_absent(&self, key: &str, data: &[u8]) -> Result<bool> {
-        if let Some(obj) = object_of(key) {
-            if self.locate_live(obj)?.is_some() {
-                return Ok(false);
-            }
+        match object_of(key) {
+            Some(obj) => Ok(self.put_pack(&[(obj.to_string(), data)])?[0]),
+            None => self.inner.put_if_absent(key, data),
         }
-        self.inner.put_if_absent(key, data)
     }
 
     fn get(&self, key: &str) -> Result<Option<Vec<u8>>> {
-        let Some(obj) = object_of(key) else {
-            return self.inner.get_bounded(key, crate::storage::read_limit(key));
-        };
-        self.ensure_loaded()?;
-        if let Some(loc) = self.locate(obj, false)? {
-            if let Some(b) = self
-                .inner
-                .get_range(&pack_key(&loc.pack), loc.offset, loc.len)?
-            {
-                return Ok(Some(b));
-            }
+        match object_of(key) {
+            Some(obj) => self.read_member(obj),
+            None => self.inner.get(key),
         }
-        if let Some(b) = self
-            .inner
-            .get_bounded(key, crate::storage::read_limit(key))?
-        {
-            return Ok(Some(b));
-        }
-        // Packed by another device since the index was read: a read is
-        // asked for a block that should exist, so look again right away.
-        self.refresh()?;
-        let loc = self.cache.lock().unwrap().objects.get(obj).cloned();
-        match loc {
-            Some(loc) => self
-                .inner
-                .get_range(&pack_key(&loc.pack), loc.offset, loc.len),
-            None => Ok(None),
+    }
+
+    fn get_bounded(&self, key: &str, max: u64) -> Result<Option<Vec<u8>>> {
+        match object_of(key) {
+            // A member is a range of a validated length (`PackLoc::valid`).
+            Some(obj) => match self.read_member(obj)? {
+                Some(b) if b.len() as u64 > max => {
+                    Err(crate::storage::too_large(key, b.len() as u64, max))
+                }
+                other => Ok(other),
+            },
+            None => self.inner.get_bounded(key, max),
         }
     }
 
     fn exists(&self, key: &str) -> Result<bool> {
-        if let Some(obj) = object_of(key) {
-            if self.locate_live(obj)?.is_some() {
+        let Some(obj) = object_of(key) else {
+            return self.inner.exists(key);
+        };
+        // The listing may be older than another device's deletion of the
+        // pack: asked before a write is skipped or a copy counted.
+        while let Some(loc) = self.locate(obj, false)? {
+            if self.inner.exists(&pack_key(&loc.pack))? {
                 return Ok(true);
             }
+            self.forget_pack(&loc.pack);
         }
-        self.inner.exists(key)
+        self.unlisted_here(obj, &mut HashMap::new())
     }
 
     fn list(&self, prefix: &str) -> Result<Vec<String>> {
@@ -424,255 +1051,372 @@ impl Storage for PackAware {
     }
 
     fn list_after(&self, prefix: &str, start_after: &str) -> Result<Vec<String>> {
-        let mut out = self.inner.list_after(prefix, start_after)?;
-        if "chunks/".starts_with(prefix) || prefix.starts_with("chunks/") {
-            // A listing reads every index anew: what other devices packed
-            // or deleted since shows.
-            self.refresh()?;
-            let c = self.cache.lock().unwrap();
-            for obj in c.objects.keys() {
-                let k = chunk_key(obj);
-                if k.starts_with(prefix) && k.as_str() > start_after {
-                    out.push(k);
-                }
-            }
-            out.sort();
-            out.dedup();
+        if !("chunks/".starts_with(prefix) || prefix.starts_with("chunks/")) {
+            return self.inner.list_after(prefix, start_after);
         }
+        // A listing of blocks lists the packs anew: what other devices
+        // wrote or deleted since shows.
+        self.refresh()?;
+        let mut out = if prefix.is_empty() {
+            self.inner.list_after(prefix, start_after)?
+        } else {
+            Vec::new()
+        };
+        let st = self.state.lock().unwrap();
+        for (obj, locs) in self.ctx.all_objects() {
+            if !locs
+                .iter()
+                .any(|l| l.valid() && st.packs.contains(&l.pack) && !st.is_dead(l))
+            {
+                continue;
+            }
+            let k = chunk_key(&obj);
+            if k.starts_with(prefix) && k.as_str() > start_after {
+                out.push(k);
+            }
+        }
+        out.sort();
+        out.dedup();
         Ok(out)
     }
 
     fn delete(&self, key: &str) -> Result<()> {
-        if let Some(obj) = object_of(key) {
-            self.ensure_loaded()?;
-            if let Some(loc) = self.locate(obj, false)? {
-                self.inner
-                    .put_if_absent(&tombstone_key(&loc.pack, obj), b"")?;
-                let gone = {
-                    let mut c = self.cache.lock().unwrap();
-                    c.mark_deleted(&loc.pack, obj);
-                    c.packs
-                        .get(&loc.pack)
-                        .is_some_and(|(all, del)| all.iter().all(|o| del.contains(o)))
-                };
-                if gone {
-                    // Every object of the pack is deleted: the pack goes.
-                    let names = self
-                        .cache
-                        .lock()
-                        .unwrap()
-                        .packs
-                        .get(&loc.pack)
-                        .map(|(all, _)| all.clone())
-                        .unwrap_or_default();
-                    self.inner.delete(&index_key(&loc.pack))?;
-                    self.inner.delete(&pack_key(&loc.pack))?;
-                    for o in names {
-                        let _ = self.inner.delete(&tombstone_key(&loc.pack, &o));
-                    }
-                    self.cache.lock().unwrap().packs.remove(&loc.pack);
+        let Some(obj) = object_of(key) else {
+            return self.inner.delete(key);
+        };
+        // Tombstones of other devices first: a pack they emptied goes.
+        self.ensure_listed()?;
+        self.unlisted_here(obj, &mut HashMap::new())?;
+        while let Some(loc) = self.locate(obj, false)? {
+            let t = Tombstone {
+                loc: loc.clone(),
+                object: obj.to_string(),
+            };
+            let empty = {
+                let mut st = self.state.lock().unwrap();
+                st.mark_dead(self.inner.name(), &t, true);
+                st.pending.push(t);
+                st.gone_bytes(&self.ctx, self.inner.name(), &loc.pack) >= loc.pack_len
+            };
+            if empty {
+                // The block is dead either way (its tombstone is recorded);
+                // a pack that cannot go now is garbage `collect_garbage`
+                // removes later.
+                match self.inner.delete(&pack_key(&loc.pack)) {
+                    Ok(()) => self.forget_pack(&loc.pack),
+                    Err(e) => log::warn!(
+                        storage = self.inner.name();
+                        "packs: an emptied pack stays until garbage collection: {e:#}"
+                    ),
                 }
-                // A single object of the same name (written before) goes too.
-                return self.inner.delete(key);
             }
         }
-        self.inner.delete(key)
+        Ok(())
     }
 
     fn get_range(&self, key: &str, offset: u64, len: u64) -> Result<Option<Vec<u8>>> {
         self.inner.get_range(key, offset, len)
     }
 
-    fn get_bounded(&self, key: &str, max: u64) -> Result<Option<Vec<u8>>> {
-        let Some(obj) = object_of(key) else {
-            return self.inner.get_bounded(key, max);
-        };
-        // A packed object is a range of its validated length; a single one is
-        // read with the key's own limit; `max` can only be smaller.
-        self.ensure_loaded()?;
-        if let Some(loc) = self.locate(obj, false)? {
-            if loc.len > max {
-                return Err(crate::storage::too_large(key, loc.len, max));
-            }
-        }
-        match self.get(key)? {
-            Some(b) if b.len() as u64 > max => {
-                Err(crate::storage::too_large(key, b.len() as u64, max))
-            }
-            other => Ok(other),
-        }
-    }
-
     fn put_pack(&self, members: &[(String, &[u8])]) -> Result<Vec<bool>> {
-        if !self.packing || members.len() < 2 {
-            return members
-                .iter()
-                .map(|(o, b)| self.put_if_absent(&chunk_key(o), b))
-                .collect();
-        }
-        self.ensure_loaded()?;
-        // Objects already here (single or packed) are not packed again.
+        self.ensure_listed()?;
         let mut written = vec![false; members.len()];
         let mut fresh: Vec<(String, &[u8])> = Vec::new();
-        let mut positions = Vec::new();
+        let mut taken: HashSet<&str> = HashSet::new();
+        let mut checked: HashMap<String, bool> = HashMap::new();
         for (i, (o, b)) in members.iter().enumerate() {
-            if self.locate_live(o)?.is_none() && !self.inner.exists(&chunk_key(o))? {
+            if !taken.insert(o.as_str()) {
+                continue;
+            }
+            let here = match self.locate(o, false)? {
+                Some(loc) => match checked.get(&loc.pack) {
+                    Some(v) => *v,
+                    None => {
+                        let v = self.inner.exists(&pack_key(&loc.pack))?;
+                        if !v {
+                            self.forget_pack(&loc.pack);
+                        }
+                        checked.insert(loc.pack.clone(), v);
+                        v
+                    }
+                },
+                None => self.unlisted_here(o, &mut checked)?,
+            };
+            if !here {
                 fresh.push((o.clone(), *b));
-                positions.push(i);
+                written[i] = true;
             }
         }
-        if fresh.len() < 2 {
-            for (i, (o, b)) in positions.iter().zip(fresh.iter()) {
-                written[*i] = self.inner.put_if_absent(&chunk_key(o), b)?;
-            }
-            return Ok(written);
-        }
-        let (id, bytes, idx) = build(&fresh);
-        self.inner.put_if_absent(&pack_key(&id), &bytes)?;
-        let json = serde_json::to_vec(&idx).map_err(|e| anyhow!("pack index: {e}"))?;
-        self.inner.put_if_absent(&index_key(&id), &json)?;
-        {
-            let mut c = self.cache.lock().unwrap();
-            c.add_index(&idx);
-            c.seen_index.insert(index_key(&id));
-        }
-        for i in positions {
-            written[i] = true;
-        }
+        self.write_packs(&fresh)?;
         Ok(written)
     }
 
-    fn packs_small_objects(&self) -> bool {
-        self.packing
+    fn pack_target(&self) -> usize {
+        self.target
+    }
+
+    fn pack_location(&self, object: &str) -> Option<PackLoc> {
+        self.locate(object, false).ok().flatten()
+    }
+
+    fn take_new_packs(&self) -> Vec<NewPack> {
+        std::mem::take(&mut self.state.lock().unwrap().new_packs)
+    }
+
+    fn flush_deletions(&self) -> Result<()> {
+        self.write_tombstones()
+    }
+
+    fn collect_pack_garbage(&self, keep: &dyn Fn(&str) -> bool) -> Result<Vec<(String, PackLoc)>> {
+        self.collect_garbage(keep)
+    }
+}
+
+impl Drop for PackStore {
+    fn drop(&mut self) {
+        // Best effort: an engine writes them at the end of each operation.
+        if let Err(e) = self.write_tombstones() {
+            log::debug!(storage = self.inner.name(); "packs: tombstones not written: {e:#}");
+        }
+    }
+}
+
+/// One group of `group_by_pack`: the lane, and (item, object, place) of
+/// each block in it.
+pub type PackGroup<T> = (String, Vec<(T, String, Option<PackLoc>)>);
+
+/// Items to read from storages, grouped so that the blocks of one pack on
+/// one storage are read together: `(item, lane, object, location)` in,
+/// groups out, in the order of each group's first item. Items without a
+/// location stay alone.
+pub fn group_by_pack<T>(
+    items: impl IntoIterator<Item = (T, String, String, Option<PackLoc>)>,
+) -> Vec<PackGroup<T>> {
+    let mut groups: Vec<PackGroup<T>> = Vec::new();
+    let mut at: HashMap<(String, String), usize> = HashMap::new();
+    for (item, lane, object, loc) in items {
+        match &loc {
+            Some(l) => {
+                let k = (lane.clone(), l.pack.clone());
+                match at.get(&k) {
+                    Some(&g) => groups[g].1.push((item, object, loc)),
+                    None => {
+                        at.insert(k, groups.len());
+                        groups.push((lane, vec![(item, object, loc)]));
+                    }
+                }
+            }
+            None => groups.push((lane, vec![(item, object, loc)])),
+        }
+    }
+    groups
+}
+
+/// Read a group of `group_by_pack`: the blocks of one pack with one ranged
+/// read of the span they cover (verification reads a pack once and checks
+/// every member), others one by one. `None` for a block that is not there.
+pub fn read_members(
+    backend: &dyn Storage,
+    members: &[(String, Option<PackLoc>)],
+) -> Result<Vec<Option<Vec<u8>>>> {
+    let packed: Vec<&PackLoc> = members.iter().filter_map(|(_, l)| l.as_ref()).collect();
+    // Places come from other devices' ledger batches: one span is read
+    // only for valid places in one pack.
+    if packed.len() == members.len()
+        && !members.is_empty()
+        && packed.iter().all(|l| l.valid() && l.pack == packed[0].pack)
+    {
+        let start = packed.iter().map(|l| l.offset).min().unwrap_or(0);
+        let end = packed.iter().map(|l| l.offset + l.len).max().unwrap_or(0);
+        let span = backend.get_range(&pack_key(&packed[0].pack), start, end - start)?;
+        return Ok(packed
+            .iter()
+            .map(|l| {
+                span.as_ref().and_then(|b| {
+                    let s = (l.offset - start) as usize;
+                    b.get(s..s + l.len as usize).map(<[u8]>::to_vec)
+                })
+            })
+            .collect());
+    }
+    members
+        .iter()
+        .map(|(o, _)| backend.get(&chunk_key(o)))
+        .collect()
+}
+
+/// Debug builds remember the members of every pack this process wrote and
+/// the ones it deleted, so tests can find, damage and count block objects
+/// in a storage directory without the ledger (`tests/common`). Release
+/// builds keep nothing.
+pub mod debug_registry {
+    use super::PackLoc;
+    #[cfg(debug_assertions)]
+    use std::collections::{HashMap, HashSet};
+    use std::path::Path;
+    #[cfg(debug_assertions)]
+    use std::path::PathBuf;
+    #[cfg(debug_assertions)]
+    use std::sync::Mutex;
+
+    #[cfg(debug_assertions)]
+    #[derive(Default)]
+    struct Registry {
+        members: HashMap<String, Vec<(String, PackLoc)>>,
+        /// (storage, pack, offset): one pack id can be on several storages.
+        dead: HashSet<(String, String, u64)>,
+        /// Directory of a local storage -> its name.
+        roots: HashMap<PathBuf, String>,
+    }
+
+    #[cfg(debug_assertions)]
+    fn registry() -> &'static Mutex<Registry> {
+        static R: std::sync::OnceLock<Mutex<Registry>> = std::sync::OnceLock::new();
+        R.get_or_init(Default::default)
+    }
+
+    pub(super) fn written(_members: &[(String, PackLoc)]) {
+        #[cfg(debug_assertions)]
+        if let Some((_, l)) = _members.first() {
+            registry()
+                .lock()
+                .unwrap()
+                .members
+                .insert(l.pack.clone(), _members.to_vec());
+        }
+    }
+
+    pub(super) fn dead(_storage: &str, _loc: &PackLoc) {
+        #[cfg(debug_assertions)]
+        registry().lock().unwrap().dead.insert((
+            _storage.to_string(),
+            _loc.pack.clone(),
+            _loc.offset,
+        ));
+    }
+
+    /// The directory a local storage named `name` keeps (debug builds).
+    pub fn root(_name: &str, _path: &Path) {
+        #[cfg(debug_assertions)]
+        registry()
+            .lock()
+            .unwrap()
+            .roots
+            .insert(_path.to_path_buf(), _name.to_string());
+    }
+
+    /// The live members of a pack this process wrote, as the storage kept
+    /// in directory `root` sees them (debug builds; nothing in release
+    /// builds).
+    pub fn members_on(_root: &Path, _pack: &str) -> Vec<(String, PackLoc)> {
+        #[cfg(debug_assertions)]
+        {
+            let r = registry().lock().unwrap();
+            let name = r.roots.get(_root).cloned().or_else(|| {
+                let canon = _root.canonicalize().ok()?;
+                r.roots
+                    .iter()
+                    .find(|(p, _)| p.canonicalize().ok().as_ref() == Some(&canon))
+                    .map(|(_, n)| n.clone())
+            });
+            r.members
+                .get(_pack)
+                .map(|m| {
+                    m.iter()
+                        .filter(|(_, l)| {
+                            !r.dead.iter().any(|(s, p, o)| {
+                                *p == l.pack
+                                    && *o == l.offset
+                                    && name.as_ref().is_none_or(|n| n == s)
+                            })
+                        })
+                        .cloned()
+                        .collect()
+                })
+                .unwrap_or_default()
+        }
+        #[cfg(not(debug_assertions))]
+        Vec::new()
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ids::{DeviceId, VaultId};
     use crate::storage::LocalDirStorage;
 
-    fn member(object: &str, offset: u64, len: u64) -> Member {
-        Member {
-            object: object.into(),
-            offset,
-            len,
-        }
-    }
-
-    fn index(id: &str, members: Vec<Member>) -> PackIndex {
-        PackIndex {
-            format: FORMAT,
-            pack: id.into(),
-            members,
-        }
-    }
-
-    #[test]
-    fn an_index_that_lies_is_rejected_not_trusted() {
-        let id = "ab".repeat(32);
-        let key = index_key(&id);
-        let obj = "cd".repeat(32);
-        assert!(index(&id, vec![member(&obj, 0, 100)])
-            .validate(&key)
-            .is_ok());
-        for (what, idx) in [
-            (
-                "multibyte name",
-                index(&id, vec![member("\u{e4}\u{2026}", 0, 10)]),
+    fn ctx(device: u8) -> Caches {
+        let c: Caches = Default::default();
+        c.set_tombstone_keys(
+            Records::new(
+                VaultId::from_bytes(&[1; 16]),
+                DeviceId::from_bytes(&[device; 16]),
             ),
-            ("short name", index(&id, vec![member("abcd", 0, 10)])),
-            (
-                "upper case name",
-                index(&id, vec![member(&obj.to_uppercase(), 0, 10)]),
-            ),
-            ("len max", index(&id, vec![member(&obj, 0, u64::MAX)])),
-            (
-                "offset overflow",
-                index(&id, vec![member(&obj, u64::MAX - 1, 10)]),
-            ),
-            ("offset max", index(&id, vec![member(&obj, u64::MAX, 1)])),
-            (
-                "outside the pack",
-                index(&id, vec![member(&obj, MAX_PACK_BYTES, 1)]),
-            ),
-            ("empty member", index(&id, vec![member(&obj, 0, 0)])),
-            (
-                "another pack",
-                index(&"ef".repeat(32), vec![member(&obj, 0, 10)]),
-            ),
-        ] {
-            assert!(idx.validate(&key).is_err(), "{what} accepted");
-        }
-        assert!(index("\u{e4}", vec![])
-            .validate("packs/xx/\u{e4}.idx")
-            .is_err());
-    }
-
-    #[test]
-    fn hostile_indexes_in_a_storage_do_not_panic_a_listing() {
-        let t = tempfile::tempdir().unwrap();
-        let inner = LocalDirStorage::new("box".into(), t.path().to_path_buf()).unwrap();
-        let id = "ab".repeat(32);
-        let hostile = serde_json::json!({
-            "format": 1, "pack": id,
-            "members": [
-                {"object": "\u{e4}\u{2026}", "offset": 0, "len": 10},
-                {"object": "cd".repeat(32), "offset": u64::MAX - 1, "len": u64::MAX},
-            ]
-        });
-        inner
-            .put_if_absent(&index_key(&id), hostile.to_string().as_bytes())
-            .unwrap();
-        // Not even JSON of the right shape.
-        let id2 = "12".repeat(32);
-        inner.put_if_absent(&index_key(&id2), b"[1,2,3]").unwrap();
-        let caches: Caches = Default::default();
-        let s = PackAware::new(Box::new(inner), &caches, true);
-        assert!(s.list("chunks/").unwrap().is_empty());
-        assert_eq!(
-            s.invalid_indexes(),
-            2,
-            "both bad indexes are skipped and counted"
+            SecretKey([9; 32]),
         );
-        assert!(s.list("chunks/").unwrap().is_empty());
-        assert_eq!(s.invalid_indexes(), 2, "counted once, not at every listing");
-        // And reading any object is still fine.
-        assert!(s.get(&chunk_key(&"cd".repeat(32))).unwrap().is_none());
+        c
     }
 
-    fn store(dir: &std::path::Path, caches: &Caches) -> PackAware {
-        PackAware::new(
+    fn store(dir: &std::path::Path, ctx: &Caches, target: usize) -> PackStore {
+        PackStore::new(
             Box::new(LocalDirStorage::new("box".into(), dir.to_path_buf()).unwrap()),
-            caches,
-            true,
+            ctx,
+            target,
         )
     }
 
-    #[test]
-    fn packed_objects_read_list_and_delete_like_single_ones() {
-        let t = tempfile::tempdir().unwrap();
-        let caches: Caches = Default::default();
-        let s = store(t.path(), &caches);
-        let objs: Vec<(String, Vec<u8>)> = (0..5u8)
-            .map(|i| {
-                (
-                    hex::encode(crate::crypto::hash(&[i])),
-                    vec![i; 100 + i as usize],
-                )
+    fn objects(lens: &[usize]) -> Vec<(String, Vec<u8>)> {
+        lens.iter()
+            .enumerate()
+            .map(|(i, n)| {
+                let b: Vec<u8> = (0..*n).map(|j| (i * 7 + j) as u8).collect();
+                (hex::encode(crate::crypto::hash(&b)), b)
             })
-            .collect();
+            .collect()
+    }
+
+    /// Another device learns the places from the ledger: here, from the
+    /// writer's new packs.
+    fn share(from: &PackStore, to: &Caches) -> Vec<NewPack> {
+        let new = from.take_new_packs();
+        for p in &new {
+            for (o, l) in &p.members {
+                to.learn(o, l.clone());
+            }
+        }
+        new
+    }
+
+    #[test]
+    fn blocks_of_any_size_round_trip_through_packs() {
+        let t = tempfile::tempdir().unwrap();
+        let c = ctx(2);
+        let s = store(t.path(), &c, HOT_TARGET);
+        let objs = objects(&[1, 63, 64, 4095, 4096, 300_000, 16 << 20]);
         let refs: Vec<(String, &[u8])> = objs
             .iter()
             .map(|(o, b)| (o.clone(), b.as_slice()))
             .collect();
-        assert_eq!(s.put_pack(&refs).unwrap(), vec![true; 5]);
-        // One pack object and its index, not five objects.
-        let packs = s.inner.list("packs/").unwrap();
-        assert_eq!(packs.iter().filter(|k| k.ends_with(".pack")).count(), 1);
-        assert!(s.inner.list("chunks/").unwrap().is_empty());
-        // Another engine (fresh cache) sees them.
-        let other = store(t.path(), &Caches::default());
+        assert_eq!(s.put_pack(&refs).unwrap(), vec![true; objs.len()]);
+        // One pack, no block object of its own, named by its bytes.
+        let keys = s.inner.list("").unwrap();
+        assert!(keys.iter().all(|k| !k.starts_with("chunks/")), "{keys:?}");
+        let packs: Vec<&String> = keys.iter().filter(|k| pack_of_key(k).is_some()).collect();
+        assert_eq!(packs.len(), 1);
+        let bytes = s.inner.get(packs[0]).unwrap().unwrap();
+        assert_eq!(
+            hex::encode(crate::crypto::hash(&bytes)),
+            pack_of_key(packs[0]).unwrap()
+        );
+        assert_eq!(
+            bytes.len(),
+            objs.iter().map(|(_, b)| b.len()).sum::<usize>()
+        );
+        // Another device that knows the places reads every block.
+        let other_ctx = ctx(3);
+        share(&s, &other_ctx);
+        let other = store(t.path(), &other_ctx, HOT_TARGET);
         for (o, b) in &objs {
             assert_eq!(
                 other.get(&chunk_key(o)).unwrap().as_deref(),
@@ -680,101 +1424,350 @@ mod tests {
             );
             assert!(other.exists(&chunk_key(o)).unwrap());
         }
-        assert_eq!(other.list("chunks/").unwrap().len(), 5);
-        // Writing again packs nothing new.
-        assert_eq!(other.put_pack(&refs).unwrap(), vec![false; 5]);
-        // Deleting four leaves the pack; the fifth removes it with its markers.
-        for (o, _) in &objs[..4] {
-            other.delete(&chunk_key(o)).unwrap();
-        }
-        assert_eq!(
-            store(t.path(), &Caches::default())
-                .list("chunks/")
-                .unwrap()
-                .len(),
-            1
-        );
-        other.delete(&chunk_key(&objs[4].0)).unwrap();
-        assert!(
-            s.inner.list("packs/").unwrap().is_empty(),
-            "{:?}",
-            s.inner.list("packs/").unwrap()
-        );
-        assert!(store(t.path(), &Caches::default())
-            .get(&chunk_key(&objs[0].0))
-            .unwrap()
-            .is_none());
+        assert_eq!(other.list("chunks/").unwrap().len(), objs.len());
+        // Writing again writes nothing.
+        assert_eq!(other.put_pack(&refs).unwrap(), vec![false; objs.len()]);
+        // A device that does not know the places finds nothing.
+        let stranger = store(t.path(), &ctx(4), HOT_TARGET);
+        assert!(stranger.get(&chunk_key(&objs[0].0)).unwrap().is_none());
     }
 
     #[test]
-    fn deletions_by_another_device_are_seen_before_a_write_is_skipped() {
+    fn packs_are_cut_at_the_target_size() {
         let t = tempfile::tempdir().unwrap();
-        let objs: Vec<(String, Vec<u8>)> = (0..4u8)
-            .map(|i| (hex::encode(crate::crypto::hash(&[i, 1])), vec![i; 64]))
-            .collect();
+        let c = ctx(2);
+        let s = store(t.path(), &c, 10_000);
+        let objs = objects(&[4000; 7]);
         let refs: Vec<(String, &[u8])> = objs
             .iter()
             .map(|(o, b)| (o.clone(), b.as_slice()))
             .collect();
-        let a = store(t.path(), &Caches::default());
-        // Two packs of two.
-        a.put_pack(&refs[..2]).unwrap();
-        a.put_pack(&refs[2..]).unwrap();
-        let key = |i: usize| chunk_key(&objs[i].0);
-        // Another device deletes one object of the first pack and the whole
-        // second pack, while this one keeps its loaded indexes.
-        let b = store(t.path(), &Caches::default());
-        for i in [0, 2, 3] {
-            b.delete(&key(i)).unwrap();
+        s.put_pack(&refs).unwrap();
+        let new = s.take_new_packs();
+        // 4000 + 4000 fit 10 000, a third would not: 2 + 2 + 2 + 1.
+        let sizes: Vec<usize> = new.iter().map(|p| p.members.len()).collect();
+        assert_eq!(sizes, vec![2, 2, 2, 1]);
+        for (o, b) in &objs {
+            assert_eq!(s.get(&chunk_key(o)).unwrap().as_deref(), Some(b.as_slice()));
         }
-        for i in [0, 2] {
-            assert!(!a.exists(&key(i)).unwrap(), "object {i}");
-            // Writing it again writes it, rather than trusting the old index.
-            assert!(a.put_if_absent(&key(i), &objs[i].1).unwrap(), "object {i}");
-            assert_eq!(
-                b.get(&key(i)).unwrap().as_deref(),
-                Some(objs[i].1.as_slice())
-            );
-        }
-        assert!(a.exists(&key(1)).unwrap());
-        assert_eq!(a.put_pack(&refs[3..]).unwrap(), vec![true]);
-        let listed = a.list("chunks/").unwrap();
-        assert_eq!(listed.len(), 4, "{listed:?}");
     }
 
     #[test]
-    fn a_listing_leaves_out_what_another_device_deleted() {
+    fn deletions_become_tombstones_and_an_empty_pack_goes() {
         let t = tempfile::tempdir().unwrap();
-        let objs: Vec<(String, Vec<u8>)> = (0..3u8)
-            .map(|i| (hex::encode(crate::crypto::hash(&[i, 2])), vec![i; 64]))
-            .collect();
+        let (ca, cb) = (ctx(2), ctx(3));
+        let a = store(t.path(), &ca, HOT_TARGET);
+        let objs = objects(&[100, 200, 300]);
         let refs: Vec<(String, &[u8])> = objs
             .iter()
             .map(|(o, b)| (o.clone(), b.as_slice()))
             .collect();
-        let a = store(t.path(), &Caches::default());
         a.put_pack(&refs).unwrap();
-        assert_eq!(a.list("chunks/").unwrap().len(), 3);
-        let b = store(t.path(), &Caches::default());
-        b.delete(&chunk_key(&objs[0].0)).unwrap();
-        assert_eq!(a.list("chunks/").unwrap().len(), 2);
+        share(&a, &cb);
+        a.delete(&chunk_key(&objs[0].0)).unwrap();
+        assert!(!a.exists(&chunk_key(&objs[0].0)).unwrap());
+        assert!(a.get(&chunk_key(&objs[0].0)).unwrap().is_none());
+        a.flush_deletions().unwrap();
+        // The list is encrypted: no object name in it.
+        let tomb = a
+            .inner
+            .list(TOMBSTONE_PREFIX)
+            .unwrap()
+            .into_iter()
+            .next()
+            .expect("a tombstone list");
+        let raw = a.inner.get(&tomb).unwrap().unwrap();
+        assert!(!raw.windows(8).any(|w| objs[0].0.as_bytes().starts_with(w)));
+        // Another device reads it: the block is gone for it too.
+        let b = store(t.path(), &cb, HOT_TARGET);
+        assert!(!b.exists(&chunk_key(&objs[0].0)).unwrap());
+        assert!(b.exists(&chunk_key(&objs[1].0)).unwrap());
+        // The last two deleted (by the other device): the pack goes.
         for (o, _) in &objs[1..] {
             b.delete(&chunk_key(o)).unwrap();
         }
-        assert!(a.list("chunks/").unwrap().is_empty());
+        assert!(b
+            .inner
+            .list(PREFIX)
+            .unwrap()
+            .iter()
+            .all(|k| pack_of_key(k).is_none()));
+        // Its own deletions go out as one list when it is done.
+        let lists = b.inner.list(TOMBSTONE_PREFIX).unwrap();
+        assert!(!lists.is_empty());
+        drop(b);
+        assert_eq!(b_lists_after_drop(t.path()), lists.len() + 1);
+    }
+
+    /// The view of a device: every block of `objs` in folder `f1`, and
+    /// the places in `claimed` held by a live claim on storage `box`.
+    fn view_of(c: &Caches, objs: &[(String, Vec<u8>)], claimed: &[PackLoc], generation: u64) {
+        let of_object = objs
+            .iter()
+            .map(|(o, _)| (o.clone(), "f1".to_string()))
+            .collect();
+        let claimed = claimed
+            .iter()
+            .map(|l| ("box".to_string(), l.pack.clone(), l.offset))
+            .collect();
+        c.set_view_locations(generation, HashMap::new(), claimed, of_object);
     }
 
     #[test]
-    fn a_reader_sees_packs_written_after_it_loaded_the_indexes() {
+    fn folder_tombstones_are_read_by_every_device_of_the_folder() {
         let t = tempfile::tempdir().unwrap();
-        let reader = store(t.path(), &Caches::default());
-        let o = hex::encode(crate::crypto::hash(b"late"));
-        assert!(reader.get(&chunk_key(&o)).unwrap().is_none());
-        let writer = store(t.path(), &Caches::default());
-        writer.put_pack(&[(o.clone(), b"late".as_slice())]).unwrap();
-        assert_eq!(
-            reader.get(&chunk_key(&o)).unwrap().as_deref(),
-            Some(b"late".as_slice())
+        let folder_keys: HashMap<String, Vec<SecretKey>> =
+            [("f1".to_string(), vec![SecretKey([5; 32])])].into();
+        let (ca, cb) = (ctx(2), ctx(3));
+        // A member of the folder: another vault key, the same folder key.
+        let member: Caches = Default::default();
+        member.set_tombstone_keys(
+            Records::new(
+                crate::ids::VaultId::from_bytes(&[1; 16]),
+                crate::ids::DeviceId::from_bytes(&[4; 16]),
+            ),
+            SecretKey([8; 32]),
         );
+        let objs = objects(&[100, 200, 300]);
+        for c in [&ca, &cb, &member] {
+            view_of(c, &objs, &[], 1);
+        }
+        ca.set_folder_keys(folder_keys.clone());
+        member.set_folder_keys(folder_keys.clone());
+        let a = store(t.path(), &ca, HOT_TARGET);
+        let refs: Vec<(String, &[u8])> = objs
+            .iter()
+            .map(|(o, b)| (o.clone(), b.as_slice()))
+            .collect();
+        a.put_pack(&refs).unwrap();
+        let new = a.take_new_packs();
+        for c in [&cb, &member] {
+            for p in &new {
+                for (o, l) in &p.members {
+                    c.learn(o, l.clone());
+                }
+            }
+        }
+        a.delete(&chunk_key(&objs[0].0)).unwrap();
+        a.flush_deletions().unwrap();
+        // Written under the folder's metadata key, scoped to the folder.
+        let tomb = a.inner.list(TOMBSTONE_PREFIX).unwrap().remove(0);
+        let (_, seq) = parse_record_key(TOMBSTONE_PREFIX, &tomb).unwrap();
+        let blob = a.inner.get(&tomb).unwrap().unwrap();
+        let (records, vault_key) = ca.tombstones.read().unwrap().clone().unwrap();
+        let writer = records.device().clone();
+        assert!(records
+            .open(KIND_TOMBSTONES, "", &writer, seq, &vault_key, &blob)
+            .is_err());
+        assert!(records
+            .open(
+                KIND_TOMBSTONES,
+                "f1",
+                &writer,
+                seq,
+                &SecretKey([5; 32]),
+                &blob
+            )
+            .is_ok());
+        // A member reads it with the folder key alone.
+        let m = store(t.path(), &member, HOT_TARGET);
+        assert!(!m.exists(&chunk_key(&objs[0].0)).unwrap());
+        assert!(m.exists(&chunk_key(&objs[1].0)).unwrap());
+        // A device without the folder key does not, until it gets the key.
+        let b = store(t.path(), &cb, HOT_TARGET);
+        assert!(b.exists(&chunk_key(&objs[0].0)).unwrap());
+        cb.set_folder_keys(folder_keys);
+        b.refresh().unwrap();
+        assert!(!b.exists(&chunk_key(&objs[0].0)).unwrap());
+    }
+
+    #[test]
+    fn a_tombstone_of_another_device_cannot_kill_a_claimed_block() {
+        let t = tempfile::tempdir().unwrap();
+        let (owner, hostile) = (ctx(2), ctx(3));
+        let objs = objects(&[1000, 1000, 1000, 1000, 500]);
+        let o = store(t.path(), &owner, HOT_TARGET);
+        let refs: Vec<(String, &[u8])> = objs
+            .iter()
+            .map(|(o, b)| (o.clone(), b.as_slice()))
+            .collect();
+        o.put_pack(&refs).unwrap();
+        let new = share(&o, &hostile);
+        let pack = new[0].pack.clone();
+        let places: Vec<PackLoc> = new[0].members.iter().map(|(_, l)| l.clone()).collect();
+        // The owner's ledger holds a live claim of every block.
+        view_of(&owner, &objs, &places, 1);
+        // Another device marks four of five blocks dead.
+        let h = store(t.path(), &hostile, HOT_TARGET);
+        for (obj, _) in &objs[..4] {
+            h.delete(&chunk_key(obj)).unwrap();
+        }
+        drop(h);
+        // The owner deletes the last one: the pack stays, nothing is
+        // rewritten away, and the claimed blocks are still in it.
+        o.refresh().unwrap();
+        o.delete(&chunk_key(&objs[4].0)).unwrap();
+        assert!(o.inner.exists(&pack_key(&pack)).unwrap());
+        assert!(o.collect_garbage(&|_| true).unwrap().is_empty());
+        let bytes = o.inner.get(&pack_key(&pack)).unwrap().unwrap();
+        for ((_, b), l) in objs.iter().zip(&places).take(4) {
+            assert_eq!(
+                &bytes[l.offset as usize..(l.offset + l.len) as usize],
+                b.as_slice()
+            );
+        }
+        // Once the ledger drops the claims, the dead pack goes.
+        view_of(&owner, &objs, &[], 2);
+        assert!(o.collect_garbage(&|_| true).unwrap().is_empty());
+        assert!(!o.inner.exists(&pack_key(&pack)).unwrap());
+    }
+
+    #[test]
+    fn places_outside_the_read_limits_are_refused() {
+        let ok = PackLoc {
+            pack: "ab".repeat(32),
+            offset: crate::storage::MAX_PACK - 10,
+            len: 10,
+            pack_len: crate::storage::MAX_PACK,
+        };
+        assert!(ok.valid());
+        for bad in [
+            PackLoc {
+                pack_len: crate::storage::MAX_PACK + 1,
+                ..ok.clone()
+            },
+            PackLoc {
+                len: MAX_OBJECT + 1,
+                offset: 0,
+                ..ok.clone()
+            },
+            PackLoc {
+                offset: u64::MAX,
+                ..ok.clone()
+            },
+            PackLoc {
+                pack: "\u{e4}".repeat(32),
+                ..ok.clone()
+            },
+        ] {
+            assert!(!bad.valid(), "{bad:?}");
+        }
+        // A name that is not ASCII never panics a key.
+        assert_eq!(pack_key("\u{e4}"), "packs/\u{e4}/\u{e4}");
+        assert_eq!(chunk_key("\u{e4}x"), "chunks/\u{e4}/\u{e4}x");
+    }
+
+    fn b_lists_after_drop(dir: &std::path::Path) -> usize {
+        LocalDirStorage::new("box".into(), dir.to_path_buf())
+            .unwrap()
+            .list(TOMBSTONE_PREFIX)
+            .unwrap()
+            .len()
+    }
+
+    #[test]
+    fn a_mostly_dead_pack_is_rewritten_with_its_live_blocks() {
+        let t = tempfile::tempdir().unwrap();
+        let c = ctx(2);
+        let s = store(t.path(), &c, HOT_TARGET);
+        let objs = objects(&[1000, 1000, 1000, 1000, 500]);
+        let refs: Vec<(String, &[u8])> = objs
+            .iter()
+            .map(|(o, b)| (o.clone(), b.as_slice()))
+            .collect();
+        s.put_pack(&refs).unwrap();
+        let old = s.take_new_packs().remove(0).pack;
+        // Less than half dead: nothing to do.
+        s.delete(&chunk_key(&objs[0].0)).unwrap();
+        assert!(s.collect_garbage(&|_| true).unwrap().is_empty());
+        // More than half: the two live blocks move, the old pack goes.
+        s.delete(&chunk_key(&objs[1].0)).unwrap();
+        s.delete(&chunk_key(&objs[2].0)).unwrap();
+        // A device that may not rewrite one of the blocks leaves the pack.
+        assert!(s.collect_garbage(&|o| o != objs[4].0).unwrap().is_empty());
+        let moved = s.collect_garbage(&|_| true).unwrap();
+        let names: BTreeSet<&str> = moved.iter().map(|(o, _)| o.as_str()).collect();
+        assert_eq!(names, [objs[3].0.as_str(), objs[4].0.as_str()].into());
+        assert!(!s.inner.exists(&pack_key(&old)).unwrap());
+        for (o, b) in &objs[3..] {
+            assert_eq!(s.get(&chunk_key(o)).unwrap().as_deref(), Some(b.as_slice()));
+        }
+        let new = &moved[0].1;
+        assert_eq!(new.pack_len, 1500);
+    }
+
+    #[test]
+    fn index_and_tombstone_bodies_round_trip_and_refuse_impossible_places() {
+        let loc = PackLoc {
+            pack: "ab".repeat(32),
+            offset: 10,
+            len: 41,
+            pack_len: 100,
+        };
+        let entries = vec![IndexEntry {
+            loc: loc.clone(),
+            object: "cd".repeat(32),
+            chunk: "ef".repeat(32),
+        }];
+        assert_eq!(
+            decode_index(&encode_index(&entries).unwrap()).unwrap(),
+            entries
+        );
+        let tombs = vec![Tombstone {
+            loc: loc.clone(),
+            object: "cd".repeat(32),
+        }];
+        assert_eq!(
+            decode_tombstones(&encode_tombstones(&tombs).unwrap()).unwrap(),
+            tombs
+        );
+        // A body of the other kind, or one naming a place past the pack.
+        assert!(decode_tombstones(&encode_index(&entries).unwrap()).is_err());
+        let bad = vec![Tombstone {
+            loc: PackLoc { offset: 90, ..loc },
+            object: "cd".repeat(32),
+        }];
+        assert!(decode_tombstones(&encode_tombstones(&bad).unwrap()).is_err());
+        assert_eq!(
+            parse_record_key(INDEX_PREFIX, &record_key(INDEX_PREFIX, "dev", 7)),
+            Some(("dev", 7))
+        );
+    }
+
+    #[test]
+    fn members_of_one_pack_are_read_with_one_request() {
+        let t = tempfile::tempdir().unwrap();
+        let c = ctx(2);
+        let s = store(t.path(), &c, HOT_TARGET);
+        let objs = objects(&[300, 400, 500]);
+        let refs: Vec<(String, &[u8])> = objs
+            .iter()
+            .map(|(o, b)| (o.clone(), b.as_slice()))
+            .collect();
+        s.put_pack(&refs).unwrap();
+        let calls = std::sync::Arc::new(crate::storage::StorageCalls::default());
+        let counted = crate::storage::CountingStorage::new(
+            Box::new(store(t.path(), &c, HOT_TARGET)),
+            calls.clone(),
+        );
+        let items = objs
+            .iter()
+            .enumerate()
+            .map(|(i, (o, _))| (i, "box".to_string(), o.clone(), counted.pack_location(o)));
+        let groups = group_by_pack(items);
+        assert_eq!(groups.len(), 1);
+        let wanted: Vec<(String, Option<PackLoc>)> = groups[0]
+            .1
+            .iter()
+            .map(|(_, o, l)| (o.clone(), l.clone()))
+            .collect();
+        let before = calls.snapshot();
+        let got = read_members(&counted, &wanted).unwrap();
+        let after = calls.snapshot();
+        let d = after - before;
+        assert_eq!((d.gets, d.lists), (1, 0));
+        for ((_, b), g) in objs.iter().zip(got) {
+            assert_eq!(g.as_deref(), Some(b.as_slice()));
+        }
     }
 }

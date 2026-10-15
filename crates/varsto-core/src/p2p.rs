@@ -166,8 +166,12 @@ pub struct Snapshot {
     pub peer_key: SecretKey,
     pub folder_keys: BTreeMap<FolderId, FolderKeys>,
     pub pieces: BTreeMap<ObjectName, Piece>,
-    /// Roots of local-directory storages whose objects can be served verbatim.
+    /// Roots holding objects as single files (the block cache), served
+    /// verbatim.
     pub local_roots: Vec<PathBuf>,
+    /// Blocks in packs on local-directory storages: the pack file, offset
+    /// and length, served verbatim.
+    pub packed: BTreeMap<ObjectName, (PathBuf, u64, u64)>,
     /// Revoked devices: refused even if they still hold a valid token.
     pub revoked: std::collections::BTreeSet<DeviceId>,
     /// Devices told what this one is doing (`/p2p/activity`): in an
@@ -196,6 +200,20 @@ impl Snapshot {
                 }
             }
         }
+        if let Some((path, offset, len)) = self.packed.get(name) {
+            let read = || -> std::io::Result<Vec<u8>> {
+                let mut f = std::fs::File::open(path)?;
+                f.seek(SeekFrom::Start(*offset))?;
+                let mut b = vec![0u8; *len as usize];
+                f.read_exact(&mut b)?;
+                Ok(b)
+            };
+            if let Ok(bytes) = read() {
+                if ObjectName::from_bytes(&crypto::hash(&bytes)) == *name {
+                    return Ok(Some(bytes));
+                }
+            }
+        }
         if let Some(bytes) = served::get(name) {
             return Ok(Some(bytes.to_vec()));
         }
@@ -217,27 +235,14 @@ impl Snapshot {
         if crate::ids::ChunkId::from_bytes(&crypto::keyed_hash(&fk.hash, &plain)) != piece.chunk {
             return Ok(None); // file changed since the snapshot
         }
-        let key = fk.chunk_key(piece.epoch, &piece.chunk)?;
-        let nonce = fk.chunk_nonce(piece.epoch, &piece.chunk)?;
-        let aad = fk.chunk_aad(&self.vault_id, &piece.chunk, piece.len);
-        // Incompressible blocks (photos, video, archives) were stored
-        // uncompressed: try that first, which costs one encryption and one
-        // hash, before compressing again, which costs far more and is what
-        // the stored object holds only when it paid off.
-        let mut raw = Vec::with_capacity(plain.len() + 1);
-        raw.push(crate::pack::METHOD_RAW);
-        raw.extend_from_slice(&plain);
-        let ct = crypto::encrypt_with_nonce(&key, &nonce, &aad, &raw)?;
-        let ct = if ObjectName::from_bytes(&crypto::hash(&ct)) == *name {
-            ct
-        } else {
-            let ct = crypto::encrypt_with_nonce(&key, &nonce, &aad, &crate::pack::pack(&plain))?;
-            if ObjectName::from_bytes(&crypto::hash(&ct)) != *name {
-                return Ok(None);
-            }
-            served::put(name, &ct);
-            ct
-        };
+        // Packing is deterministic for a zstd version (`crate::pack`), so
+        // the object comes out as stored unless another version packed it.
+        let ct =
+            crate::chunk_seal::seal_chunk(fk, &self.vault_id, &piece.chunk, piece.epoch, &plain)?;
+        if ObjectName::from_bytes(&crypto::hash(&ct)) != *name {
+            return Ok(None);
+        }
+        served::put(name, &ct);
         Ok(Some(ct))
     }
 }
@@ -1816,6 +1821,7 @@ mod tests {
             folder_keys: BTreeMap::new(),
             pieces: BTreeMap::new(),
             local_roots: Vec::new(),
+            packed: BTreeMap::new(),
             revoked: [gone.clone()].into_iter().collect(),
             activity_audience: None,
         };
@@ -1845,6 +1851,7 @@ mod tests {
             folder_keys: BTreeMap::new(),
             pieces: BTreeMap::new(),
             local_roots: Vec::new(),
+            packed: BTreeMap::new(),
             revoked: Default::default(),
             activity_audience: None,
         };

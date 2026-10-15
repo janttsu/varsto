@@ -430,6 +430,7 @@ impl Engine {
         let mut opened: BTreeMap<String, Box<dyn Storage>> = BTreeMap::new();
         let mut unreachable: BTreeSet<String> = BTreeSet::new();
         let mut keep: Vec<Damage> = Vec::new();
+        let mut waiting: BTreeMap<String, (Vec<PendingRepair>, usize)> = BTreeMap::new();
         let (mut blocks, mut bytes) = (0u64, 0u64);
         let task = crate::activity::start(
             crate::activity::REPAIR,
@@ -565,61 +566,111 @@ impl Engine {
                 report.repaired.push(done);
                 continue;
             }
-            // 3. Write, read back, record.
-            let target = &opened[&d.storage];
-            let written = (|| -> Result<bool> {
-                if corrupt {
-                    target.delete(&key)?;
-                }
-                target.put_if_absent(&key, &ct)?;
-                Ok(target
-                    .get(&key)?
-                    .is_some_and(|back| ObjectName::from_bytes(&crypto::hash(&back)) == d.object))
-            })();
-            match written {
-                Ok(true) => {
-                    report.bytes_written += ct.len() as u64;
-                    report.repaired.push(done);
-                    self.pending.push(Event::ChunkStored {
-                        folder: d.folder.clone(),
-                        chunk: d.chunk.clone(),
-                        object: d.object.clone(),
-                        storage: d.storage.clone(),
-                        size: ct.len() as u64,
-                    });
-                }
-                Ok(false) => {
-                    let reason = format!(
-                        "{} did not return the object intact after it was written again",
-                        d.storage
-                    );
-                    report
-                        .unrepairable
-                        .push(self.unrepairable(&d, reason.clone()));
-                    d.reason = Some(reason);
-                    d.retry_utc = now + RETRY_UNREPAIRABLE_SECS;
-                    keep.push(d);
-                }
-                Err(e) => {
-                    let why = match pool::pool_error(&e) {
-                        Some(PoolError::NoDiskAttached { .. }) => {
-                            format!("{} (no disk attached)", d.storage)
-                        }
-                        Some(PoolError::NoRoom { .. }) => {
-                            format!("{} (no room on the attached disks)", d.storage)
-                        }
-                        _ => format!("{} ({e:#})", d.storage),
-                    };
-                    report.unreachable.push(why);
-                    unreachable.insert(d.storage.clone());
-                    d.retry_utc = now + RETRY_UNREACHABLE_SECS;
-                    report.left_for_next_run += 1;
-                    keep.push(d);
-                }
+            // 3. Written with the other repairs of the storage as packs
+            //    (`crate::packs`), then read back and recorded.
+            let w = waiting.entry(d.storage.clone()).or_default();
+            w.1 += ct.len();
+            let storage = d.storage.clone();
+            w.0.push(PendingRepair {
+                damage: d,
+                done,
+                ct,
+                corrupt,
+            });
+            if w.1 >= crate::packs::HOT_TARGET {
+                let (list, _) = waiting.remove(&storage).unwrap_or_default();
+                let mut out = RepairBook {
+                    report: &mut report,
+                    keep: &mut keep,
+                    unreachable: &mut unreachable,
+                    now,
+                };
+                self.write_repairs(opened[&storage].as_ref(), list, &mut out);
             }
+        }
+        for (storage, (list, _)) in std::mem::take(&mut waiting) {
+            let mut out = RepairBook {
+                report: &mut report,
+                keep: &mut keep,
+                unreachable: &mut unreachable,
+                now,
+            };
+            self.write_repairs(opened[&storage].as_ref(), list, &mut out);
         }
         report.finished_utc = util::now_utc();
         Ok((report, keep))
+    }
+
+    /// Write the repaired copies of one storage together, read each back
+    /// and record it (or keep the damage for the next run).
+    fn write_repairs(
+        &mut self,
+        target: &dyn Storage,
+        list: Vec<PendingRepair>,
+        out: &mut RepairBook<'_>,
+    ) {
+        if list.is_empty() {
+            return;
+        }
+        let written = (|| -> Result<()> {
+            for p in list.iter().filter(|p| p.corrupt) {
+                target.delete(&chunk_storage_key(&p.damage.object))?;
+            }
+            let members: Vec<(String, &[u8])> = list
+                .iter()
+                .map(|p| (p.damage.object.as_str().to_string(), p.ct.as_slice()))
+                .collect();
+            target.put_pack(&members)?;
+            Ok(())
+        })();
+        if let Err(e) = written {
+            let storage = &list[0].damage.storage;
+            let why = match pool::pool_error(&e) {
+                Some(PoolError::NoDiskAttached { .. }) => format!("{storage} (no disk attached)"),
+                Some(PoolError::NoRoom { .. }) => {
+                    format!("{storage} (no room on the attached disks)")
+                }
+                _ => format!("{storage} ({e:#})"),
+            };
+            out.report.unreachable.push(why);
+            out.unreachable.insert(storage.clone());
+            for p in list {
+                let mut d = p.damage;
+                d.retry_utc = out.now + RETRY_UNREACHABLE_SECS;
+                out.report.left_for_next_run += 1;
+                out.keep.push(d);
+            }
+            return;
+        }
+        for p in list {
+            let mut d = p.damage;
+            let key = chunk_storage_key(&d.object);
+            let back = crate::storage::guarded(&key, || target.get(&key));
+            if matches!(&back, Ok(Some(b)) if ObjectName::from_bytes(&crypto::hash(b)) == d.object)
+            {
+                out.report.bytes_written += p.ct.len() as u64;
+                out.report.repaired.push(p.done);
+                self.pending.push(Event::ChunkStored {
+                    folder: d.folder.clone(),
+                    chunk: d.chunk.clone(),
+                    object: d.object.clone(),
+                    storage: d.storage.clone(),
+                    size: p.ct.len() as u64,
+                    pack: None,
+                });
+                continue;
+            }
+            let reason = format!(
+                "{} did not return the object intact after it was written again",
+                d.storage
+            );
+            out.report
+                .unrepairable
+                .push(self.unrepairable(&d, reason.clone()));
+            d.reason = Some(reason);
+            d.retry_utc = out.now + RETRY_UNREPAIRABLE_SECS;
+            out.keep.push(d);
+        }
     }
 
     /// The intact ciphertext of `d.object` from somewhere other than the
@@ -743,4 +794,20 @@ pub(super) fn merge_damage(queue: &mut Vec<Damage>, found: Vec<Damage>) {
             None => queue.push(f),
         }
     }
+}
+
+/// A repaired copy waiting to be written with others of its storage.
+struct PendingRepair {
+    damage: Damage,
+    done: RepairedCopy,
+    ct: Vec<u8>,
+    corrupt: bool,
+}
+
+/// Where `write_repairs` records what happened.
+struct RepairBook<'a> {
+    report: &'a mut RepairReport,
+    keep: &'a mut Vec<Damage>,
+    unreachable: &'a mut BTreeSet<String>,
+    now: i64,
 }

@@ -3,56 +3,95 @@
 //! normalisation). A chunk boundary depends only on content, so inserting
 //! bytes in the middle of a file shifts only nearby chunks.
 //!
+//! Format 2 keys the Gear table: it is derived from a seed of the folder
+//! (`FolderKeys::chunker_seed`, from the folder hash key K11), so where a
+//! file is cut is secret per folder, and the same file pushed to two
+//! folders is cut differently. K11 does not change with key epochs, so the
+//! cuts (and with them deduplication) survive a rotation.
+//!
 //! The chunker streams from any `Read`, holding at most `max` bytes in memory.
 
 use std::io::{self, Read};
+
+/// The chunking a file entry was cut with (`FileState::chunking`): the
+/// size tiers of [`ChunkerParams::for_size`] and a keyed Gear table.
+pub const CHUNKING: u8 = 2;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ChunkerParams {
     pub min: usize,
     pub avg: usize,
     pub max: usize,
+    /// Seed of the Gear table (format 2: per folder).
+    pub seed: [u8; 32],
 }
 
 impl ChunkerParams {
-    /// Alpha-0 default: 64 KiB minimum, 256 KiB average, 1 MiB maximum.
-    /// The plan's target (256 KiB to 4 MiB) will be measured with a prototype.
+    /// Files under 1 MiB: one block (a file is never larger than `min`).
+    pub const ONE_BLOCK: ChunkerParams = ChunkerParams {
+        min: 1 << 20,
+        avg: 1 << 20,
+        max: 1 << 20,
+        seed: [0; 32],
+    };
+
+    /// Files from 1 MiB to 32 MiB (and content of unknown size): 256 KiB
+    /// minimum, 1 MiB average, 4 MiB maximum.
     pub const DEFAULT: ChunkerParams = ChunkerParams {
-        min: 64 * 1024,
-        avg: 256 * 1024,
-        max: 1024 * 1024,
+        min: 256 << 10,
+        avg: 1 << 20,
+        max: 4 << 20,
+        seed: [0; 32],
     };
 
-    /// Files from 32 MiB: 256 KiB minimum, 1 MiB average, 4 MiB maximum.
+    /// Files from 32 MiB to 1 GiB: 1 MiB minimum, 4 MiB average, 16 MiB
+    /// maximum.
     pub const MEDIUM: ChunkerParams = ChunkerParams {
-        min: 256 * 1024,
-        avg: 1024 * 1024,
-        max: 4 * 1024 * 1024,
+        min: 1 << 20,
+        avg: 4 << 20,
+        max: 16 << 20,
+        seed: [0; 32],
     };
 
-    /// Files from 1 GiB: 1 MiB minimum, 4 MiB average, 16 MiB maximum. A
-    /// 50 GB file is about 12 000 blocks instead of 200 000: a shorter file
-    /// list, fewer ledger events and fewer requests, while a change in the
-    /// middle still rewrites only a few megabytes.
+    /// Files from 1 GiB: 2 MiB minimum, 8 MiB average, 16 MiB maximum. A
+    /// 50 GB file is about 6 000 blocks: a short file list, few ledger
+    /// events and requests, while a change in the middle still rewrites
+    /// only a few megabytes.
     pub const LARGE: ChunkerParams = ChunkerParams {
-        min: 1024 * 1024,
-        avg: 4 * 1024 * 1024,
-        max: 16 * 1024 * 1024,
+        min: 2 << 20,
+        avg: 8 << 20,
+        max: 16 << 20,
+        seed: [0; 32],
     };
 
-    /// The block sizes for a file of `size` bytes (format: a file chunked
-    /// this way says so in its file entry, `chunking: 1`). Depends on the
-    /// size alone, so the same content gives the same blocks everywhere.
-    /// Small files keep the default: documents edited in place dedupe best
-    /// with small blocks, and a file under the minimum is one block anyway.
-    pub fn for_size(size: u64) -> ChunkerParams {
-        if size >= 1 << 30 {
+    /// The block sizes for a file of `size` bytes in a folder with chunker
+    /// seed `seed` (format 2, `chunking: 2` in the file entry). Depends on
+    /// the size and the folder alone, so the same content in one folder
+    /// gives the same blocks on every device. Photos and other files that
+    /// never deduplicate inside themselves stay a handful of blocks.
+    pub fn for_size(size: u64, seed: &[u8; 32]) -> ChunkerParams {
+        let tier = if size >= 1 << 30 {
             Self::LARGE
         } else if size >= 32 << 20 {
             Self::MEDIUM
-        } else {
+        } else if size >= 1 << 20 {
             Self::DEFAULT
-        }
+        } else {
+            Self::ONE_BLOCK
+        };
+        tier.with_seed(seed)
+    }
+
+    /// The same sizes with another Gear table seed.
+    pub fn with_seed(mut self, seed: &[u8; 32]) -> ChunkerParams {
+        self.seed = *seed;
+        self
+    }
+
+    /// Whether these are the sizes of a tier (seed aside): what an engine
+    /// left at its default uses.
+    pub fn same_sizes(&self, other: &ChunkerParams) -> bool {
+        (self.min, self.avg, self.max) == (other.min, other.avg, other.max)
     }
 
     /// Small sizes for tests.
@@ -60,6 +99,7 @@ impl ChunkerParams {
         min: 1024,
         avg: 4096,
         max: 16384,
+        seed: [0; 32],
     };
 
     fn validate(&self) -> io::Result<()> {
@@ -77,28 +117,25 @@ impl ChunkerParams {
     }
 }
 
-/// Deterministic Gear table (splitmix64 from a fixed seed). Part of the format:
-/// changing it changes every chunk boundary.
-fn gear_table() -> &'static [u64; 256] {
-    use std::sync::OnceLock;
-    static TABLE: OnceLock<[u64; 256]> = OnceLock::new();
-    TABLE.get_or_init(|| {
-        let mut t = [0u64; 256];
-        let mut state: u64 = 0x5f3b_e2a1_c0de_0001;
-        for slot in t.iter_mut() {
-            state = state.wrapping_add(0x9E37_79B9_7F4A_7C15);
-            let mut z = state;
-            z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
-            z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
-            *slot = z ^ (z >> 31);
-        }
-        t
-    })
+/// The Gear table of a seed: 256 words of BLAKE3 output keyed by the seed.
+/// Part of the format: another table cuts every file elsewhere.
+pub fn gear_table(seed: &[u8; 32]) -> Box<[u64; 256]> {
+    let mut bytes = [0u8; 256 * 8];
+    blake3::Hasher::new_keyed(seed)
+        .update(b"varsto gear table")
+        .finalize_xof()
+        .fill(&mut bytes);
+    let mut t = Box::new([0u64; 256]);
+    for (slot, b) in t.iter_mut().zip(bytes.chunks_exact(8)) {
+        *slot = u64::from_le_bytes(b.try_into().expect("8 bytes"));
+    }
+    t
 }
 
 /// Find the cut point in `buf` (which holds at most `max` bytes and may end
-/// at end of file). Returns the length of the next chunk.
-pub fn find_cut(buf: &[u8], p: &ChunkerParams) -> usize {
+/// at end of file) with Gear table `table`. Returns the length of the next
+/// chunk.
+pub fn find_cut(buf: &[u8], p: &ChunkerParams, table: &[u64; 256]) -> usize {
     let n = buf.len().min(p.max);
     if n <= p.min {
         return n;
@@ -106,7 +143,6 @@ pub fn find_cut(buf: &[u8], p: &ChunkerParams) -> usize {
     let bits = p.avg.trailing_zeros();
     let mask_small: u64 = !0u64 << (64 - (bits + 1)); // stricter before avg
     let mask_large: u64 = !0u64 << (64 - (bits.saturating_sub(1)).max(1)); // looser after avg
-    let table = gear_table();
     let mut fp: u64 = 0;
     let avg = p.avg.min(n);
     let mut i = p.min;
@@ -133,6 +169,7 @@ pub struct Chunker<R: Read> {
     buf: Vec<u8>,
     eof: bool,
     params: ChunkerParams,
+    table: Box<[u64; 256]>,
 }
 
 impl<R: Read> Chunker<R> {
@@ -142,6 +179,7 @@ impl<R: Read> Chunker<R> {
             reader,
             buf: Vec::with_capacity(params.max * 2),
             eof: false,
+            table: gear_table(&params.seed),
             params,
         })
     }
@@ -170,7 +208,7 @@ impl<R: Read> Iterator for Chunker<R> {
         if self.buf.is_empty() {
             return None;
         }
-        let cut = find_cut(&self.buf, &self.params);
+        let cut = find_cut(&self.buf, &self.params, &self.table);
         let chunk: Vec<u8> = self.buf.drain(..cut).collect();
         Some(Ok(chunk))
     }
@@ -230,6 +268,50 @@ mod tests {
             "only {common} of {} chunks shared",
             b.len()
         );
+    }
+
+    #[test]
+    fn the_seed_decides_the_cuts() {
+        let data = pseudo_random(400_000, 13);
+        let seeded = |b: u8| chunk_bytes(&data, ChunkerParams::SMALL.with_seed(&[b; 32]));
+        let lens = |c: &Vec<Vec<u8>>| c.iter().map(Vec::len).collect::<Vec<_>>();
+        // The same seed cuts the same way every time.
+        assert_eq!(seeded(1), seeded(1));
+        // Other seeds cut elsewhere: no two of these share their sizes.
+        let all: Vec<Vec<usize>> = (1..=8).map(|b| lens(&seeded(b))).collect();
+        for i in 0..all.len() {
+            for j in i + 1..all.len() {
+                assert_ne!(all[i], all[j], "seeds {} and {} cut alike", i + 1, j + 1);
+            }
+        }
+        for b in 1..=8 {
+            assert_eq!(seeded(b).concat(), data);
+        }
+    }
+
+    #[test]
+    fn size_tiers() {
+        let seed = [5; 32];
+        let tier = |n: u64| ChunkerParams::for_size(n, &seed);
+        assert!(tier(0).same_sizes(&ChunkerParams::ONE_BLOCK));
+        assert!(tier((1 << 20) - 1).same_sizes(&ChunkerParams::ONE_BLOCK));
+        assert!(tier(1 << 20).same_sizes(&ChunkerParams::DEFAULT));
+        assert!(tier((32 << 20) - 1).same_sizes(&ChunkerParams::DEFAULT));
+        assert!(tier(32 << 20).same_sizes(&ChunkerParams::MEDIUM));
+        assert!(tier(1 << 30).same_sizes(&ChunkerParams::LARGE));
+        assert_eq!(tier(1 << 30).seed, seed);
+        // A file under 1 MiB is one block.
+        let data = pseudo_random((1 << 20) - 1, 3);
+        assert_eq!(chunk_bytes(&data, tier(data.len() as u64)).len(), 1);
+        for p in [
+            ChunkerParams::ONE_BLOCK,
+            ChunkerParams::DEFAULT,
+            ChunkerParams::MEDIUM,
+            ChunkerParams::LARGE,
+        ] {
+            p.validate().unwrap();
+            assert!(p.max as u64 <= crate::manifest::MAX_CHUNK_SIZE);
+        }
     }
 
     #[test]

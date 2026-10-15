@@ -17,6 +17,7 @@
 //! objects verbatim.
 
 use super::*;
+use crate::chunk_seal::seal_chunk;
 use std::io::Read;
 
 /// Block cache directory inside the device directory.
@@ -47,6 +48,8 @@ pub struct BlockWriter {
 pub struct StagedFile {
     folder: FolderId,
     size: u64,
+    /// `FileState::chunking` of the entry.
+    chunking: u8,
     content_hash: String,
     chunks: Vec<ChunkRef>,
 }
@@ -67,9 +70,10 @@ impl BlockWriter {
     /// `write` for content of a known size: the block sizes follow it
     /// (`ChunkerParams::for_size`). Without a size, the fixed default sizes.
     pub fn write_sized(&self, reader: impl Read, expected: Option<u64>) -> Result<StagedFile> {
+        let seed = self.fk.chunker_seed();
         let params = match expected {
-            Some(n) if self.chunker == ChunkerParams::DEFAULT => ChunkerParams::for_size(n),
-            _ => self.chunker,
+            Some(n) if self.chunker == ChunkerParams::DEFAULT => ChunkerParams::for_size(n, &seed),
+            _ => self.chunker.with_seed(&seed),
         };
         let mut hasher = KeyedHasher::new(&self.fk.hash);
         let mut chunks = Vec::new();
@@ -96,30 +100,19 @@ impl BlockWriter {
         }
         // Shorter or longer than announced: the blocks were cut for another
         // size, so the entry must not claim the size rule.
+        let by_size = self.chunker == ChunkerParams::DEFAULT && expected == Some(size);
         Ok(StagedFile {
             folder: self.folder.clone(),
             size,
+            chunking: if by_size {
+                crate::chunking::CHUNKING
+            } else {
+                0
+            },
             content_hash: hex::encode(hasher.finalize()),
             chunks,
         })
     }
-}
-
-/// The object of one chunk: deterministic, so every device that encrypts the
-/// same chunk under the same epoch gets the same bytes.
-fn seal_chunk(
-    fk: &FolderKeys,
-    vault: &VaultId,
-    chunk: &ChunkId,
-    epoch: u32,
-    plain: &[u8],
-) -> Result<Vec<u8>> {
-    crypto::encrypt_with_nonce(
-        &fk.chunk_key(epoch, chunk)?,
-        &fk.chunk_nonce(epoch, chunk)?,
-        &fk.chunk_aad(vault, chunk, plain.len() as u64),
-        &crate::pack::pack(plain),
-    )
 }
 
 /// Decrypt one object and check it against its chunk id and size.
@@ -129,20 +122,7 @@ pub(super) fn open_chunk(
     cref: &ChunkRef,
     ct: &[u8],
 ) -> Result<Vec<u8>> {
-    let plain = crate::pack::unpack(
-        &crypto::decrypt(
-            &fk.chunk_key(cref.epoch, &cref.chunk)?,
-            &fk.chunk_aad(vault, &cref.chunk, cref.size),
-            ct,
-        )?,
-        cref.size,
-    )?;
-    if ChunkId::from_bytes(&crypto::keyed_hash(&fk.hash, &plain)) != cref.chunk
-        || plain.len() as u64 != cref.size
-    {
-        bail!("chunk {} failed its content check", cref.chunk.short());
-    }
-    Ok(plain)
+    crate::chunk_seal::open_chunk(fk, vault, &cref.chunk, cref.epoch, cref.size, ct)
 }
 
 pub(super) fn cache_path(root: &Path, object: &ObjectName) -> PathBuf {
@@ -307,6 +287,7 @@ impl Engine {
                     modified_by: me,
                     modified_clock: clock,
                     meta,
+                    chunking: staged.chunking,
                 },
             );
         }
@@ -727,6 +708,7 @@ impl Engine {
                 modified_by: me.clone(),
                 modified_clock: clock,
                 meta: None,
+                chunking: 0,
             },
         );
         let clock = self.tick()?;

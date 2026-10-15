@@ -214,16 +214,15 @@ fn removed_member_reads_nothing_new_and_the_others_read_on() {
     let vault = a.vault_id().clone();
     let secret = b"written after C left";
     let id = ChunkId::from_bytes(&crypto::keyed_hash(&ck.hash, secret));
-    let (k, aad) = (
-        ck.chunk_key(0, &id).unwrap(),
-        ck.chunk_aad(&vault, &id, secret.len() as u64),
-    );
     let store = lab.root.join("storage");
     let objs = common::object_names(&store);
     assert!(!objs.is_empty());
     for n in &objs {
         let ct = common::read_object(&store, n).unwrap();
-        assert!(crypto::decrypt(&k, &aad, &ct).is_err());
+        assert!(
+            varsto_core::chunk_seal::open_chunk(&ck, &vault, &id, 0, secret.len() as u64, &ct)
+                .is_err()
+        );
     }
     let mdir = lab
         .root

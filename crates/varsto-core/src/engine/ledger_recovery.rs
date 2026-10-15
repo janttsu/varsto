@@ -1452,6 +1452,11 @@ impl Engine {
         let mut found: Vec<(usize, ObjectName)> = Vec::new();
         let mut anywhere: HashSet<ObjectName> = HashSet::new();
         for (i, (spec, backend)) in storages.iter().enumerate() {
+            // Blocks are in packs: where they are comes from the pack
+            // indexes when the ledger lost the claims.
+            if let Err(e) = self.load_pack_indexes(backend.as_ref()) {
+                log::warn!(storage = spec.name(); "pack indexes not read: {e:#}");
+            }
             let listed: HashSet<String> = backend.list("chunks/")?.into_iter().collect();
             r.storages_listed.push(spec.name().to_string());
             for object in map.objects.keys() {
@@ -1539,6 +1544,7 @@ impl Engine {
                     object: object.clone(),
                     storage: storages[*i].0.name().to_string(),
                     size: *sz,
+                    pack: storages[*i].1.pack_location(object.as_str()),
                 });
             }
             r.claims_written += 1;

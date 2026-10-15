@@ -29,9 +29,14 @@ pub fn validate_key(key: &str) -> Result<()> {
         .map_err(|_| anyhow::anyhow!("invalid object key {key:?}"))
 }
 
-/// Largest block object (`chunks/`, `packs/`) a storage read returns: a
-/// chunk is at most `MAX_CHUNK_SIZE` plus its nonce, tag and header.
+/// Largest block object (`chunks/`) a storage read returns: a chunk is at
+/// most `MAX_CHUNK_SIZE` plus its nonce, tag and header.
 pub const MAX_BLOCK_OBJECT: u64 = crate::manifest::MAX_CHUNK_SIZE + 64;
+/// Largest pack (`packs/<xx>/<id>`) a storage read returns, and the longest
+/// ranged read: the largest pack target (cold storages) plus one block
+/// object, by which the last member may pass the target. A `PackStore`
+/// reads its own whole packs with its configured target plus that slack.
+pub const MAX_PACK: u64 = crate::packs::COLD_TARGET as u64 + crate::packs::MAX_OBJECT;
 /// Largest record (`vault/`, `manifests/`, `ledger/`, `org/`, ...) a storage
 /// read returns.
 pub const MAX_RECORD: u64 = 256 << 20;
@@ -39,8 +44,13 @@ pub const MAX_RECORD: u64 = 256 << 20;
 /// How many bytes a read of `key` may return: nothing a storage holds can
 /// make the program allocate more.
 pub fn read_limit(key: &str) -> u64 {
-    if key.starts_with("chunks/") || key.starts_with(crate::packs::PREFIX) {
+    if key.starts_with("chunks/") {
         MAX_BLOCK_OBJECT
+    } else if key.starts_with(crate::packs::PREFIX)
+        && !key.starts_with(crate::packs::INDEX_PREFIX)
+        && !key.starts_with(crate::packs::TOMBSTONE_PREFIX)
+    {
+        MAX_PACK
     } else {
         MAX_RECORD
     }
@@ -103,17 +113,37 @@ pub trait Storage: Send + Sync {
         }))
     }
     /// Write several block objects (name, bytes). A storage that keeps
-    /// packs (`packs::PackAware`) writes small ones as one pack; others
-    /// write them one by one. One flag per object: written now.
+    /// packs (`packs::PackStore`) writes them as packs; others write them
+    /// one by one. One flag per object: written now.
     fn put_pack(&self, members: &[(String, &[u8])]) -> Result<Vec<bool>> {
         members
             .iter()
             .map(|(o, b)| self.put_if_absent(&format!("chunks/{}/{o}", o.get(..2).unwrap_or(o)), b))
             .collect()
     }
-    /// Whether small block objects are written as packs here.
-    fn packs_small_objects(&self) -> bool {
-        false
+    /// The size of the packs written here (0: block objects are not packed).
+    fn pack_target(&self) -> usize {
+        0
+    }
+    /// Where a block object is here, as far as this device knows.
+    fn pack_location(&self, _object: &str) -> Option<crate::packs::PackLoc> {
+        None
+    }
+    /// The packs written since the last call, for the pack index.
+    fn take_new_packs(&self) -> Vec<crate::packs::NewPack> {
+        Vec::new()
+    }
+    /// Write the tombstones of the pack members deleted since the last call.
+    fn flush_deletions(&self) -> Result<()> {
+        Ok(())
+    }
+    /// Rewrite the packs here that are mostly dead (`packs::PackStore`):
+    /// the new location of every moved block.
+    fn collect_pack_garbage(
+        &self,
+        _keep: &dyn Fn(&str) -> bool,
+    ) -> Result<Vec<(String, crate::packs::PackLoc)>> {
+        Ok(Vec::new())
     }
     /// Whether the storage honours a conditional write (S3 `If-None-Match:
     /// *`): known (true or false) once the backend has probed it, `None`
@@ -159,8 +189,23 @@ impl Storage for SharedStorage {
     fn put_pack(&self, members: &[(String, &[u8])]) -> Result<Vec<bool>> {
         self.0.put_pack(members)
     }
-    fn packs_small_objects(&self) -> bool {
-        self.0.packs_small_objects()
+    fn pack_target(&self) -> usize {
+        self.0.pack_target()
+    }
+    fn pack_location(&self, object: &str) -> Option<crate::packs::PackLoc> {
+        self.0.pack_location(object)
+    }
+    fn take_new_packs(&self) -> Vec<crate::packs::NewPack> {
+        self.0.take_new_packs()
+    }
+    fn flush_deletions(&self) -> Result<()> {
+        self.0.flush_deletions()
+    }
+    fn collect_pack_garbage(
+        &self,
+        keep: &dyn Fn(&str) -> bool,
+    ) -> Result<Vec<(String, crate::packs::PackLoc)>> {
+        self.0.collect_pack_garbage(keep)
     }
     fn conditional_writes(&self) -> Option<bool> {
         self.0.conditional_writes()
@@ -212,6 +257,33 @@ mod bounded_read_tests {
             .unwrap()
             .unwrap()
             .is_empty());
+    }
+
+    #[test]
+    fn a_pack_is_read_up_to_the_largest_pack_and_a_range_spans_blocks() {
+        let t = tempfile::tempdir().unwrap();
+        let s = LocalDirStorage::new("box".into(), t.path().to_path_buf()).unwrap();
+        // Larger than a block object: a pack, a pack index and a record may be.
+        let big = vec![3u8; (MAX_BLOCK_OBJECT + 1) as usize];
+        let pack = format!("packs/ab/{}", "ab".repeat(32));
+        s.put_if_absent(&pack, &big).unwrap();
+        assert_eq!(read_limit(&pack), MAX_PACK);
+        assert_eq!(read_limit("packs/index/d/0000000000000001.enc"), MAX_RECORD);
+        assert_eq!(
+            read_limit("packs/tombstones/d/0000000000000001.enc"),
+            MAX_RECORD
+        );
+        assert_eq!(read_limit("chunks/ab/cd"), MAX_BLOCK_OBJECT);
+        assert_eq!(s.get(&pack).unwrap().unwrap().len(), big.len());
+        // A span of several blocks is one ranged read.
+        assert_eq!(
+            s.get_range(&pack, 1, MAX_BLOCK_OBJECT)
+                .unwrap()
+                .unwrap()
+                .len(),
+            MAX_BLOCK_OBJECT as usize
+        );
+        assert!(s.get_bounded(&pack, MAX_BLOCK_OBJECT).is_err());
     }
 
     #[test]
@@ -547,9 +619,9 @@ impl Storage for LocalDirStorage {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
             Err(e) => return Err(e).with_context(|| format!("open {}", path.display())),
         };
-        // A length from an index is a claim: never allocate more than a
-        // block object may be, and read no more than the file has.
-        let len = len.min(MAX_BLOCK_OBJECT);
+        // A length from the ledger is a claim: never allocate more than a
+        // pack may be, and read no more than the file has.
+        let len = len.min(MAX_PACK);
         if offset > i64::MAX as u64 {
             return Ok(Some(Vec::new())); // past any file
         }
@@ -783,8 +855,23 @@ impl Storage for CountingStorage {
         self.calls.puts.fetch_add(1, Ordering::Relaxed);
         self.inner.put_pack(members)
     }
-    fn packs_small_objects(&self) -> bool {
-        self.inner.packs_small_objects()
+    fn pack_target(&self) -> usize {
+        self.inner.pack_target()
+    }
+    fn pack_location(&self, object: &str) -> Option<crate::packs::PackLoc> {
+        self.inner.pack_location(object)
+    }
+    fn take_new_packs(&self) -> Vec<crate::packs::NewPack> {
+        self.inner.take_new_packs()
+    }
+    fn flush_deletions(&self) -> Result<()> {
+        self.inner.flush_deletions()
+    }
+    fn collect_pack_garbage(
+        &self,
+        keep: &dyn Fn(&str) -> bool,
+    ) -> Result<Vec<(String, crate::packs::PackLoc)>> {
+        self.inner.collect_pack_garbage(keep)
     }
     fn conditional_writes(&self) -> Option<bool> {
         self.inner.conditional_writes()
@@ -955,8 +1042,23 @@ impl Storage for LoggedStorage {
         }
         r
     }
-    fn packs_small_objects(&self) -> bool {
-        self.inner.packs_small_objects()
+    fn pack_target(&self) -> usize {
+        self.inner.pack_target()
+    }
+    fn pack_location(&self, object: &str) -> Option<crate::packs::PackLoc> {
+        self.inner.pack_location(object)
+    }
+    fn take_new_packs(&self) -> Vec<crate::packs::NewPack> {
+        self.inner.take_new_packs()
+    }
+    fn flush_deletions(&self) -> Result<()> {
+        self.inner.flush_deletions()
+    }
+    fn collect_pack_garbage(
+        &self,
+        keep: &dyn Fn(&str) -> bool,
+    ) -> Result<Vec<(String, crate::packs::PackLoc)>> {
+        self.inner.collect_pack_garbage(keep)
     }
     fn conditional_writes(&self) -> Option<bool> {
         self.inner.conditional_writes()

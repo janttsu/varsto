@@ -21,6 +21,7 @@ use crate::advice::{add_cost, Costs};
 use crate::ledger::ChunkRecord;
 use crate::placement::{MoveReport, MoveRequest, Placement, PlacementInfo, PlacementRecord};
 use crate::policy::{ChunkFacts, PolicyState};
+use std::sync::Arc;
 
 /// Blocks moved per ledger batch: their drops are sealed and pushed before
 /// any of them is deleted from the old storage.
@@ -898,19 +899,20 @@ impl Engine {
         let from = self.open_spec(&from_spec)?;
         // A staged move to a pool talks to the pool itself: it asks which
         // places hold a block and adds copies for the disk group rule.
-        let to_pool: Option<PoolStorage> = (ex.staged
+        let to_pool: Option<Arc<PoolStorage>> = (ex.staged
             && matches!(to_spec, StorageSpec::Pool { .. }))
         .then(|| self.open_pool(&to_spec))
-        .transpose()?;
-        let to_box: Option<Box<dyn Storage>> = match &to_pool {
-            Some(_) => None,
-            None => Some(self.open_spec(&to_spec)?),
+        .transpose()?
+        .map(Arc::new);
+        // Blocks go into packs on the pool as on any storage.
+        let to_box: Box<dyn Storage> = match &to_pool {
+            Some(p) => {
+                let shared: Arc<dyn Storage> = p.clone();
+                Box::new(self.pack_store(&to_spec, Box::new(crate::storage::SharedStorage(shared))))
+            }
+            None => self.open_spec(&to_spec)?,
         };
-        let to: &dyn Storage = match (&to_pool, &to_box) {
-            (Some(p), _) => p,
-            (None, Some(b)) => b.as_ref(),
-            (None, None) => unreachable!("one of the two is open"),
-        };
+        let to: &dyn Storage = to_box.as_ref();
         let others: OpenStorages = self
             .open_storages(false)?
             .into_iter()
@@ -951,74 +953,89 @@ impl Engine {
                     .filter(|(i, p)| !**p && !no_room(full_at, i))
                     .map(|(i, _)| i),
             );
-            for (item, present) in group.iter().zip(present) {
-                let key = chunk_storage_key(&item.object);
-                let mut size = item.size;
-                if !present && no_room(full_at, item) {
+            // The blocks the target lacks are written together: as packs
+            // on a storage that keeps them (`crate::packs`).
+            let mut skip = vec![false; group.len()];
+            let mut sizes: Vec<u64> = group.iter().map(|i| i.size).collect();
+            let mut fresh: Vec<(usize, Vec<u8>)> = Vec::new();
+            for (n, (item, present)) in group.iter().zip(&present).enumerate() {
+                if *present {
+                    continue;
+                }
+                skip[n] = true;
+                if no_room(full_at, item) {
                     report.waiting_room_blocks += 1;
                     report.waiting_room_bytes += item.size;
                     continue;
                 }
-                if !present {
-                    let ct = local
-                        .remove(&item.object)
-                        .or_else(|| self.move_source(item, &others, from.as_ref(), read_from));
-                    let Some(ct) = ct else {
-                        keep(
-                            &mut report,
-                            &item.object,
-                            "no readable copy of the block was found".to_string(),
-                        );
-                        continue;
-                    };
-                    if !gate.take(to_spec.name(), ct.len() as u64) {
-                        if ex.staged {
-                            full_at = Some(full_at.map_or(item.size, |f| f.min(item.size)));
-                            report.waiting_room_blocks += 1;
-                            report.waiting_room_bytes += item.size;
-                            report.waiting_note = Some(gate.message(to_spec.name()));
-                            continue;
-                        }
-                        keep(&mut report, &item.object, gate.message(to_spec.name()));
+                let ct = local
+                    .remove(&item.object)
+                    .or_else(|| self.move_source(item, &others, from.as_ref(), read_from));
+                let Some(ct) = ct else {
+                    keep(
+                        &mut report,
+                        &item.object,
+                        "no readable copy of the block was found".to_string(),
+                    );
+                    continue;
+                };
+                if !gate.take(to_spec.name(), ct.len() as u64) {
+                    if ex.staged {
+                        full_at = Some(full_at.map_or(item.size, |f| f.min(item.size)));
+                        report.waiting_room_blocks += 1;
+                        report.waiting_room_bytes += item.size;
+                        report.waiting_note = Some(gate.message(to_spec.name()));
                         continue;
                     }
-                    match to.put_if_absent(&key, &ct) {
-                        Ok(_) => {
-                            report.blocks_copied += 1;
-                            report.bytes_copied += ct.len() as u64;
-                            size = ct.len() as u64;
-                        }
-                        Err(e) => {
-                            if ex.staged
-                                && matches!(
-                                    pool::pool_error(&e),
-                                    Some(
-                                        PoolError::NoRoom { .. } | PoolError::NoDiskAttached { .. }
-                                    )
-                                )
-                            {
-                                let at = if matches!(
-                                    pool::pool_error(&e),
-                                    Some(PoolError::NoDiskAttached { .. })
-                                ) {
-                                    0
-                                } else {
-                                    ct.len() as u64
-                                };
-                                full_at = Some(full_at.map_or(at, |f| f.min(at)));
-                                report.waiting_room_blocks += 1;
-                                report.waiting_room_bytes += item.size;
-                                continue;
-                            }
-                            let why = match pool::pool_error(&e) {
-                                Some(pe) => pe.to_string(),
-                                None => format!("writing to {} failed: {e:#}", to_spec.name()),
-                            };
-                            keep(&mut report, &item.object, why);
-                            continue;
-                        }
-                    }
+                    keep(&mut report, &item.object, gate.message(to_spec.name()));
+                    continue;
                 }
+                skip[n] = false;
+                fresh.push((n, ct));
+            }
+            let members: Vec<(String, &[u8])> = fresh
+                .iter()
+                .map(|(n, ct)| (group[*n].object.as_str().to_string(), ct.as_slice()))
+                .collect();
+            let outcomes = put_members(to, &members, ex.staged);
+            for ((n, ct), outcome) in fresh.iter().zip(outcomes) {
+                let item = &group[*n];
+                let Some(e) = outcome else {
+                    report.blocks_copied += 1;
+                    report.bytes_copied += ct.len() as u64;
+                    sizes[*n] = ct.len() as u64;
+                    continue;
+                };
+                skip[*n] = true;
+                let pe = pool::pool_error(&e);
+                if ex.staged
+                    && matches!(
+                        pe,
+                        Some(PoolError::NoRoom { .. } | PoolError::NoDiskAttached { .. })
+                    )
+                {
+                    let at = if matches!(pe, Some(PoolError::NoDiskAttached { .. })) {
+                        0
+                    } else {
+                        ct.len() as u64
+                    };
+                    full_at = Some(full_at.map_or(at, |f| f.min(at)));
+                    report.waiting_room_blocks += 1;
+                    report.waiting_room_bytes += item.size;
+                    continue;
+                }
+                let why = match pe {
+                    Some(pe) => pe.to_string(),
+                    None => format!("writing to {} failed: {e:#}", to_spec.name()),
+                };
+                keep(&mut report, &item.object, why);
+            }
+            for (n, item) in group.iter().enumerate() {
+                if skip[n] {
+                    continue;
+                }
+                let key = chunk_storage_key(&item.object);
+                let size = sizes[n];
                 // Check the copy before the old one may go.
                 let checked = if read_to {
                     matches!(to.get(&key), Ok(Some(b)) if ObjectName::from_bytes(&crypto::hash(&b)) == item.object)
@@ -1034,9 +1051,13 @@ impl Engine {
                     continue;
                 }
                 report.blocks_verified += 1;
+                // A pool holds the block inside a pack: its disks are the pack's.
+                let held = to
+                    .pack_location(item.object.as_str())
+                    .map_or_else(|| key.clone(), |l| crate::packs::pack_key(&l.pack));
                 if let Some(p) = &to_pool {
-                    if !present {
-                        disks_used.extend(p.locate_all(&key).into_iter().map(|l| l.label));
+                    if !present[n] {
+                        disks_used.extend(p.locate_all(&held).into_iter().map(|l| l.label));
                     }
                 }
                 if !item.on_to {
@@ -1046,6 +1067,7 @@ impl Engine {
                         object: item.object.clone(),
                         storage: to_spec.name().to_string(),
                         size,
+                        pack: None,
                     });
                 }
                 if read_to {
@@ -1059,7 +1081,7 @@ impl Engine {
                 // A disk group rule counts a block as moved only when its
                 // copies are in enough different places.
                 if let Some(p) = &to_pool {
-                    if !Self::group_rule_met(p, &key, &mut disks_used) {
+                    if !Self::group_rule_met(p, &held, &mut disks_used) {
                         report.waiting_place_blocks += 1;
                         report.waiting_place_bytes += item.size;
                         continue;
@@ -1123,6 +1145,7 @@ impl Engine {
             }
         }
         drop(to_box);
+        self.flush_pack_deletions();
         if let Some(p) = to_pool {
             // Keep the registry in `config.json` as the pool learned it.
             let disks = p.disks();
@@ -1133,7 +1156,7 @@ impl Engine {
         Ok(report)
     }
 
-    /// Whether the pool holds `key` in as many different places as its disk
+    /// Whether the pool holds `key` (a pack) in as many different places as its disk
     /// group rule asks, adding copies on attached disks of other places when
     /// it can. Records the labels of disks written to.
     fn group_rule_met(p: &PoolStorage, key: &str, used: &mut BTreeSet<String>) -> bool {
@@ -1201,7 +1224,7 @@ impl Engine {
                 continue;
             };
             let size = file.metadata().map(|m| m.len()).unwrap_or(0);
-            for params in [self.chunker_for(size)] {
+            for params in [self.chunker_for(size, fk)] {
                 if wanted.keys().all(|c| out.contains_key(&wanted[c].object)) {
                     break;
                 }
@@ -1217,14 +1240,13 @@ impl Engine {
                     let Some(item) = wanted.get(&id) else {
                         continue;
                     };
-                    let ct = (|| {
-                        crypto::encrypt_with_nonce(
-                            &fk.chunk_key(item.epoch, &id)?,
-                            &fk.chunk_nonce(item.epoch, &id)?,
-                            &fk.chunk_aad(&self.vault.vault_id, &id, piece.len() as u64),
-                            &crate::pack::pack(&piece),
-                        )
-                    })();
+                    let ct = crate::chunk_seal::seal_chunk(
+                        fk,
+                        &self.vault.vault_id,
+                        &id,
+                        item.epoch,
+                        &piece,
+                    );
                     if let Ok(ct) = ct {
                         if ObjectName::from_bytes(&crypto::hash(&ct)) == item.object {
                             out.insert(item.object.clone(), ct);
@@ -1355,5 +1377,32 @@ impl Engine {
             dry_run: false,
             confirm_cold_read: false,
         })
+    }
+}
+
+/// Write `members` to `to` together; per member, the error that kept it
+/// off. With `split` (a staged move to a pool whose disks fill up), a pack
+/// a disk has no room for is split in halves, so a disk fills to its edge.
+fn put_members(
+    to: &dyn Storage,
+    members: &[(String, &[u8])],
+    split: bool,
+) -> Vec<Option<Arc<anyhow::Error>>> {
+    if members.is_empty() {
+        return Vec::new();
+    }
+    match to.put_pack(members) {
+        Ok(_) => vec![None; members.len()],
+        Err(e)
+            if split
+                && members.len() > 1
+                && matches!(pool::pool_error(&e), Some(PoolError::NoRoom { .. })) =>
+        {
+            let (a, b) = members.split_at(members.len() / 2);
+            let mut out = put_members(to, a, split);
+            out.extend(put_members(to, b, split));
+            out
+        }
+        Err(e) => vec![Some(Arc::new(e)); members.len()],
     }
 }

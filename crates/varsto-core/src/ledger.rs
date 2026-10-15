@@ -35,12 +35,16 @@ pub enum Event {
     /// A folder was created by this device.
     FolderAdded { folder: FolderId },
     /// This device wrote `object` to `storage` (a claim, self-attested).
+    /// `pack`: where in which pack the storage holds it (format 2: every
+    /// block is in a pack, `crate::packs`).
     ChunkStored {
         folder: FolderId,
         chunk: ChunkId,
         object: ObjectName,
         storage: String,
         size: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pack: Option<crate::packs::PackLoc>,
     },
     /// This device fetched `object` from `storage` and the hash matched.
     ChunkVerified {
@@ -1459,7 +1463,7 @@ impl ViewCache {
     /// 4: backup snapshots and stopped backups.
     /// 5: the hash of each device's newest announced manifest.
     /// 6: events are filtered by the signer's scope (`EventScope`).
-    pub const FORMAT: u32 = 6;
+    pub const FORMAT: u32 = 7;
 
     pub fn new(context: String) -> Self {
         ViewCache {
@@ -1516,6 +1520,26 @@ pub struct Location {
     /// before drops existed; `lamport` stands in for it then.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub claimed_lamport: u64,
+    /// Where in which pack the storage holds the object: from the newest
+    /// claim that says (Lamport time `pack_lamport`; ties go to the larger
+    /// location, so every order of applying gives the same answer).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pack: Option<crate::packs::PackLoc>,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub pack_lamport: u64,
+}
+
+impl Location {
+    /// Take a pack location claimed at Lamport time `at`.
+    pub fn set_pack(&mut self, pack: &crate::packs::PackLoc, at: u64) {
+        if !pack.valid() {
+            return;
+        }
+        if (at, Some(pack)) > (self.pack_lamport, self.pack.as_ref()) {
+            self.pack = Some(pack.clone());
+            self.pack_lamport = at;
+        }
+    }
 }
 
 fn is_zero(v: &u64) -> bool {
@@ -1714,6 +1738,7 @@ impl LedgerView {
                     object,
                     storage,
                     size,
+                    pack,
                 } => {
                     let rec = self
                         .chunks
@@ -1722,6 +1747,9 @@ impl LedgerView {
                     rec.set_object(object, stamp());
                     rec.set_size(*size, stamp());
                     let loc = rec.storages.entry(storage.clone()).or_default();
+                    if let Some(p) = pack {
+                        loc.set_pack(p, batch.lamport);
+                    }
                     loc.claimed_by.insert(batch.device.clone());
                     loc.claimed_utc = loc.claimed_utc.max(batch.created_utc);
                     loc.lamport = loc.lamport.max(batch.lamport);
@@ -1858,6 +1886,9 @@ impl LedgerView {
                 m.verified_utc = m.verified_utc.max(loc.verified_utc);
                 m.lamport = m.lamport.max(loc.lamport);
                 m.claimed_lamport = m.claimed_lamport.max(loc.claimed_lamport);
+                if let Some(p) = &loc.pack {
+                    m.set_pack(p, loc.pack_lamport);
+                }
             }
             for (name, at) in &rec.dropped {
                 let d = mine.dropped.entry(name.clone()).or_insert(0);
@@ -2081,6 +2112,26 @@ impl LedgerView {
                     e.verified_by.extend(loc.verified_by.iter().cloned());
                 }
             }
+            // A replica copies whole packs and claims them by pack id
+            // (`crate::replica`): every block in a copied pack is there,
+            // at the place it has in the pack.
+            let packed: Vec<crate::packs::PackLoc> = rec
+                .storages
+                .values()
+                .filter_map(|l| l.pack.clone())
+                .collect();
+            for p in packed {
+                let Some(claim) = by_object.get(&ObjectName::from_hex(&p.pack).unwrap_or_default())
+                else {
+                    continue;
+                };
+                for (storage, loc) in &claim.storages {
+                    let e = rec.storages.entry(storage.clone()).or_default();
+                    e.claimed_by.extend(loc.claimed_by.iter().cloned());
+                    e.verified_by.extend(loc.verified_by.iter().cloned());
+                    e.set_pack(&p, loc.lamport);
+                }
+            }
         }
         self.object_claims = by_object.len() as u64;
     }
@@ -2266,6 +2317,7 @@ mod tests {
                 object,
                 storage: "replica:r".into(),
                 size: 5,
+                pack: None,
             };
         }
         let folder = |rng: &mut Rng| FolderId::from_bytes(&[1 + rng.below(3) as u8]);
@@ -2282,6 +2334,7 @@ mod tests {
                 object: object(rng),
                 storage: storage(rng),
                 size: rng.below(1000),
+                pack: None,
             },
             4 => Event::ChunkVerified {
                 folder: folder(rng),
@@ -2443,6 +2496,7 @@ mod tests {
                     object: object.clone(),
                     storage: "box".into(),
                     size: 4,
+                    pack: None,
                 },
             ),
             (

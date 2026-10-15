@@ -67,8 +67,12 @@ fn present(o: &Obj) -> bool {
     common::object_names(&o.root).contains(&o.name)
 }
 
-fn lose(o: &Obj) {
-    common::lose_object(&o.root, &o.name)
+/// Lose the object's pack: it and every block packed with it go. Returns
+/// how many blocks went.
+fn lose(o: &Obj) -> usize {
+    let n = common::pack_mates(&o.root, &o.name).len();
+    common::lose_object(&o.root, &o.name);
+    n
 }
 
 fn corrupt(o: &Obj) {
@@ -119,10 +123,10 @@ fn missing_copy_is_rewritten_from_another_storage() {
     );
     let all = objects(&lab.p("box"));
     assert!(all.len() >= 3, "a multi-chunk file");
-    // Two objects disappear from "box"; another storage is the first source
-    // tried after the block cache.
-    lose(&all[0]);
-    lose(&all[1]);
+    // The pack holding them disappears from "box"; another storage is the
+    // first source tried after the block cache.
+    let n = lose(&all[0]);
+    assert_eq!(n, all.len(), "one push, one pack");
 
     let preview = a
         .repair(&RepairOptions {
@@ -130,27 +134,29 @@ fn missing_copy_is_rewritten_from_another_storage() {
             ..RepairOptions::manual()
         })
         .unwrap();
-    assert_eq!(preview.repaired.len(), 2, "{preview:?}");
+    assert_eq!(preview.repaired.len(), n, "{preview:?}");
     assert!(!present(&all[0]), "a dry run writes nothing");
 
     let r = a.repair(&RepairOptions::manual()).unwrap();
-    assert_eq!(r.repaired.len(), 2, "{r:?}");
+    assert_eq!(r.repaired.len(), n, "{r:?}");
     assert!(r.unrepairable.is_empty());
     for c in &r.repaired {
         assert_eq!(c.storage, "box");
         assert_eq!(c.source, "storage spare");
         assert_eq!(c.kind, DamageKind::Missing);
     }
-    assert!(intact(&all[0]) && intact(&all[1]));
+    assert!(all.iter().all(intact));
+    // The repaired copies are packed together again, not one per block.
+    assert_eq!(common::pack_files(&lab.p("box")).len(), 1);
     // Nothing left: fsck is clean and the queue is empty.
     let f = a.fsck(false).unwrap();
     assert_eq!(f.claims_without_object, 0);
     assert_eq!(f.repairs_queued, 0);
     let st = a.repair_status();
     assert_eq!(st.queued, 0);
-    assert_eq!(st.total_repaired, 2);
+    assert_eq!(st.total_repaired, n as u64);
     assert!(
-        st.describe().contains("2 copies repaired"),
+        st.describe().contains(&format!("{n} copies repaired")),
         "{}",
         st.describe()
     );
@@ -162,11 +168,11 @@ fn corrupt_copy_is_rewritten_from_the_local_file() {
     let (mut a, _) = device(&lab, &[dir("box", &lab.p("box"), false)]);
     let all = objects(&lab.p("box"));
     corrupt(&all[1]);
-    lose(&all[2]);
+    corrupt(&all[2]);
 
     // fsck --verify finds both and queues them.
     let f = a.fsck(true).unwrap();
-    assert_eq!(f.objects_corrupt.len(), 1);
+    assert_eq!(f.objects_corrupt.len(), 2);
     assert_eq!(f.repairs_queued, 2, "{f:?}");
     assert!(a.repair_due(varsto_core::util::now_utc()));
 
@@ -174,12 +180,11 @@ fn corrupt_copy_is_rewritten_from_the_local_file() {
     let r = a.repair(&RepairOptions::service()).unwrap();
     assert_eq!(r.repaired.len(), 2, "{r:?}");
     let kinds: BTreeSet<DamageKind> = r.repaired.iter().map(|c| c.kind).collect();
-    assert_eq!(
-        kinds,
-        BTreeSet::from([DamageKind::Missing, DamageKind::Corrupt])
-    );
+    assert_eq!(kinds, BTreeSet::from([DamageKind::Corrupt]));
     assert!(r.repaired.iter().all(|c| c.source == "local file"), "{r:?}");
     assert!(intact(&all[1]) && intact(&all[2]));
+    // Both good copies went into one new pack.
+    assert_eq!(common::pack_files(&lab.p("box")).len(), 2);
     assert!(!a.repair_due(varsto_core::util::now_utc()));
     assert!(a.fsck(true).unwrap().objects_corrupt.is_empty());
 }
@@ -231,11 +236,11 @@ fn missing_copy_is_rewritten_from_a_peer() {
     b.attach_folder("docs", &lab.p("b-docs"), true).unwrap();
     b.sync(None).unwrap();
     let all = objects(&lab.p("box"));
-    lose(&all[0]);
+    let n = lose(&all[0]);
 
-    // Without a peer nothing can repair it.
+    // Without a peer nothing can repair them.
     let r = b.repair(&RepairOptions::manual()).unwrap();
-    assert_eq!(r.unrepairable.len(), 1, "{r:?}");
+    assert_eq!(r.unrepairable.len(), n, "{r:?}");
 
     // The laptop serves its blocks over TCP.
     let server = p2p::Server::bind("127.0.0.1:0".parse().unwrap()).unwrap();
@@ -256,9 +261,12 @@ fn missing_copy_is_rewritten_from_a_peer() {
     let r = b.repair(&RepairOptions::manual()).unwrap();
     stop.store(true, std::sync::atomic::Ordering::SeqCst);
     let _ = th.join();
-    assert_eq!(r.repaired.len(), 1, "{r:?}");
-    assert!(r.repaired[0].source.starts_with("peer "), "{r:?}");
-    assert!(intact(&all[0]));
+    assert_eq!(r.repaired.len(), n, "{r:?}");
+    assert!(
+        r.repaired.iter().all(|c| c.source.starts_with("peer ")),
+        "{r:?}"
+    );
+    assert!(all.iter().all(intact));
     assert!(b.repair_status().open_losses.is_empty());
 }
 
@@ -274,21 +282,24 @@ fn cold_storage_is_read_only_when_asked() {
     );
     assert!(!objects(&lab.p("deep")).is_empty(), "cold storage written");
     let all = objects(&lab.p("box"));
-    lose(&all[0]);
+    let n = lose(&all[0]);
     fs::remove_file(lab.p("a-docs/big.bin")).unwrap();
 
     let calls = Arc::new(StorageCalls::default());
     a.count_storage_calls(calls.clone());
     let r = a.repair(&RepairOptions::manual()).unwrap();
     assert!(r.repaired.is_empty(), "{r:?}");
-    assert_eq!(r.unrepairable.len(), 1);
+    assert_eq!(r.unrepairable.len(), n);
     assert!(
-        r.unrepairable[0].reason.contains("cold storage deep"),
+        r.unrepairable
+            .iter()
+            .all(|u| u.reason.contains("cold storage deep")),
         "{r:?}"
     );
-    // One read: the damaged copy itself, nothing from the cold storage.
+    // One read per block: the damaged copy itself, nothing from the cold
+    // storage.
     let c = calls.snapshot();
-    assert_eq!(c.chunk_gets, 1, "{c:?}");
+    assert_eq!(c.chunk_gets, n as u64, "{c:?}");
     assert!(!present(&all[0]));
 
     let r = a
@@ -297,9 +308,9 @@ fn cold_storage_is_read_only_when_asked() {
             ..RepairOptions::manual()
         })
         .unwrap();
-    assert_eq!(r.repaired.len(), 1, "{r:?}");
-    assert_eq!(r.repaired[0].source, "cold storage deep");
-    assert!(intact(&all[0]));
+    assert_eq!(r.repaired.len(), n, "{r:?}");
+    assert!(r.repaired.iter().all(|c| c.source == "cold storage deep"));
+    assert!(all.iter().all(intact));
 }
 
 #[test]
@@ -307,19 +318,19 @@ fn unrepairable_loss_is_reported_once() {
     let lab = Lab::new();
     let (mut a, _) = device(&lab, &[dir("box", &lab.p("box"), false)]);
     let all = objects(&lab.p("box"));
-    lose(&all[0]);
+    let n = lose(&all[0]);
     fs::remove_file(lab.p("a-docs/big.bin")).unwrap();
 
     let r = a.repair(&RepairOptions::manual()).unwrap();
     assert!(r.repaired.is_empty());
-    assert_eq!(r.unrepairable.len(), 1, "{r:?}");
+    assert_eq!(r.unrepairable.len(), n, "{r:?}");
     assert!(r.unrepairable[0].reason.contains("no intact copy"));
-    assert_eq!(r.new_losses, 1);
+    assert_eq!(r.new_losses, n as u64);
     let st = a.repair_status();
-    assert_eq!(st.open_losses.len(), 1);
+    assert_eq!(st.open_losses.len(), n);
     assert!(
         st.describe()
-            .contains("1 could not be repaired: no intact copy"),
+            .contains(&format!("{n} could not be repaired: no intact copy")),
         "{}",
         st.describe()
     );
@@ -327,7 +338,7 @@ fn unrepairable_loss_is_reported_once() {
     // does not count it as new.
     assert!(!a.repair_due(varsto_core::util::now_utc()));
     let r = a.repair(&RepairOptions::manual()).unwrap();
-    assert_eq!(r.unrepairable.len(), 1);
+    assert_eq!(r.unrepairable.len(), n);
     assert_eq!(r.new_losses, 0);
 }
 
@@ -370,9 +381,9 @@ fn moved_blocks_are_not_repaired_back() {
         ],
     );
     let all = objects(&lab.p("box"));
-    lose(&all[0]);
-    // fsck queues the missing copy on "box"...
-    assert_eq!(a.fsck(false).unwrap().repairs_queued, 1);
+    let n = lose(&all[0]);
+    // fsck queues the missing copies on "box"...
+    assert_eq!(a.fsck(false).unwrap().repairs_queued, n as u64);
     // ...then the folder's data is moved off "box" on purpose.
     let moved = a
         .move_data(&varsto_core::placement::MoveRequest {

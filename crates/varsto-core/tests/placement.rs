@@ -113,6 +113,7 @@ fn a_drop_removes_earlier_claims_and_later_claims_count_again() {
         object: object.clone(),
         storage: storage.into(),
         size: 10,
+        pack: None,
     };
     let dropped = |storage: &str| Event::ChunkDropped {
         folder: folder.clone(),
@@ -410,7 +411,7 @@ fn moving_keeps_the_policy_and_lowers_the_bill() {
             ..req.clone()
         })
         .unwrap();
-    assert_eq!(r.blocks_dropped, plan.blocks);
+    assert_eq!(r.blocks_dropped, plan.blocks, "{r:?}");
     assert_eq!(r.blocks_kept, 0);
     assert!(
         r.placement_changed.is_none(),
@@ -578,25 +579,16 @@ fn moving_a_whole_folder_changes_its_placement_and_never_drops_the_last_copy() {
 
 #[cfg(unix)]
 #[test]
-fn an_interrupted_move_is_carried_on_by_running_it_again() {
+fn a_pack_that_cannot_be_deleted_is_collected_later() {
     use std::os::unix::fs::PermissionsExt;
     let mut lab = move_lab();
     let blocks = on_storage(&lab.a, "hot1");
-    // Some blocks are on hot2's replacement already (an earlier run copied
-    // them before it stopped): "spare" holds a copy of a few objects without
-    // any ledger record.
     let spare = lab.p("spare");
     lab.a
         .add_storage(dir("spare", &spare, false, "cloud"))
         .unwrap();
-    let mut copied = 0;
-    for name in common::object_names(&lab.p("h1")).iter().take(2) {
-        let path = spare.join("chunks").join(&name[..2]).join(name);
-        fs::create_dir_all(path.parent().unwrap()).unwrap();
-        fs::write(path, common::read_object(&lab.p("h1"), name).unwrap()).unwrap();
-        copied += 1;
-    }
-    // Deleting from hot1 fails: the drops are recorded, the objects stay.
+    // The pack files of hot1 cannot be deleted: a deleted block is a
+    // tombstone all the same, and the emptied pack stays as garbage.
     let chunk_dirs: Vec<PathBuf> = ["chunks", "packs"]
         .iter()
         .filter_map(|d| fs::read_dir(lab.p("h1").join(d)).ok())
@@ -619,20 +611,20 @@ fn an_interrupted_move_is_carried_on_by_running_it_again() {
         fs::set_permissions(d, fs::Permissions::from_mode(0o755)).unwrap();
     }
     let first = first.unwrap();
-    if first.blocks_dropped as usize == blocks {
-        // Running as a user that ignores permissions: nothing to resume.
-        return;
+    assert_eq!(first.blocks_copied as usize, blocks);
+    assert_eq!(first.blocks_dropped as usize, blocks);
+    assert_eq!(on_storage(&lab.a, "hot1"), 0, "the drops are recorded");
+    assert_eq!(objects(&lab.p("h1")), 0, "every block in it is dead");
+    // Unless permissions are ignored (root), the dead pack is still there;
+    // garbage collection removes it once it can.
+    if !common::pack_files(&lab.p("h1")).is_empty() {
+        lab.a.pack_upkeep().unwrap();
     }
-    assert_eq!(first.blocks_copied as usize, blocks - copied);
-    assert_eq!(first.blocks_dropped, 0);
-    assert_eq!(objects(&lab.p("h1")), blocks, "deletes failed");
-    assert_eq!(on_storage(&lab.a, "hot1"), 0, "but the drops are recorded");
-    // Run again: the leftovers go, nothing is copied twice.
+    assert!(common::pack_files(&lab.p("h1")).is_empty());
+    // Run again: nothing is left to move or copy.
     let second = lab.a.move_data(&req).unwrap();
     assert_eq!(second.blocks, 0);
     assert_eq!(second.blocks_copied, 0);
-    assert_eq!(second.leftovers_removed as usize, blocks);
-    assert_eq!(objects(&lab.p("h1")), 0);
     assert_eq!(objects(&spare), blocks);
     assert_eq!(on_storage(&lab.a, "spare"), blocks);
 }
@@ -691,7 +683,8 @@ fn disk_groups_keep_copies_in_different_places() {
     // One place only: the rule is not met and the policy says so.
     let g = a.disk_groups().unwrap();
     assert_eq!(g[0].copies, 2);
-    assert_eq!(g[0].objects_short as usize, blocks);
+    // Counted in pool objects: the push wrote its blocks as one pack.
+    assert_eq!(g[0].objects_short, 1);
     assert!(!g[0].warnings.is_empty());
     let report = &a.policy_check().unwrap()[0];
     assert_eq!(report.state, PolicyState::Violated);

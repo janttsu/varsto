@@ -1160,6 +1160,15 @@ impl FolderKeys {
             .collect()
     }
 
+    /// Seed of the folder's Gear table (`crate::chunking`): derived from the
+    /// hash key, which stays the same across epochs, so a rotation does not
+    /// move any cut point.
+    pub fn chunker_seed(&self) -> [u8; 32] {
+        self.hash
+            .derive("chunker-seed", &[self.folder.as_str().as_bytes()])
+            .0
+    }
+
     /// Alpha-0 decision: the chunk key is derived from the chunk's keyed hash
     /// (convergent inside the folder and epoch), so the same content encrypts
     /// to the same object on every device, which makes offline deduplication
@@ -1171,24 +1180,40 @@ impl FolderKeys {
         ))
     }
 
-    pub fn chunk_nonce(&self, epoch: u32, chunk: &ChunkId) -> Result<[u8; crypto::NONCE_LEN]> {
-        let k = self.epoch_base(epoch)?.derive(
-            "chunk-nonce",
-            &[self.folder.as_str().as_bytes(), chunk.as_str().as_bytes()],
-        );
+    /// The nonce of one chunk object: a keyed hash of the exact bytes that
+    /// are encrypted (the packed chunk, `crate::pack`), under a key of the
+    /// folder and epoch. Two different encodings of one chunk (another zstd
+    /// version, raw against compressed) therefore never share a nonce under
+    /// the chunk key, while the same bytes always give the same nonce, so
+    /// objects stay deterministic and deduplicate (format 2, audit H1).
+    pub fn chunk_nonce(&self, epoch: u32, packed: &[u8]) -> Result<[u8; crypto::NONCE_LEN]> {
+        let k = self
+            .epoch_base(epoch)?
+            .derive("chunk-nonce", &[self.folder.as_str().as_bytes()]);
         let mut n = [0u8; crypto::NONCE_LEN];
-        n.copy_from_slice(&k.0[..crypto::NONCE_LEN]);
+        n.copy_from_slice(&crypto::keyed_hash(&k, packed)[..crypto::NONCE_LEN]);
         Ok(n)
     }
 
-    pub fn chunk_aad(&self, vault: &VaultId, chunk: &ChunkId, len: u64) -> Vec<u8> {
+    /// Associated data of a chunk object: vault, folder, key epoch, chunk
+    /// id, plaintext length and packed length.
+    pub fn chunk_aad(
+        &self,
+        vault: &VaultId,
+        epoch: u32,
+        chunk: &ChunkId,
+        plain_len: u64,
+        packed_len: u64,
+    ) -> Vec<u8> {
         crypto::aad(
             "chunk",
             &[
                 vault.as_str().as_bytes(),
                 self.folder.as_str().as_bytes(),
+                &epoch.to_le_bytes(),
                 chunk.as_str().as_bytes(),
-                &len.to_le_bytes(),
+                &plain_len.to_le_bytes(),
+                &packed_len.to_le_bytes(),
             ],
         )
     }

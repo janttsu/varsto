@@ -33,11 +33,12 @@ impl Engine {
     pub(super) fn pool_copies(
         name: &str,
         pool: &PoolStorage,
-        object: &ObjectName,
+        record: &crate::ledger::ChunkRecord,
         verified: bool,
         verified_utc: i64,
     ) -> Vec<(String, String, bool, i64, bool)> {
-        let all = pool.locate_all(&chunk_storage_key(object));
+        // The disks hold the block's pack.
+        let all = pool.locate_all(&super::pack_upkeep::held_key(record, name));
         if all.is_empty() {
             return vec![(
                 format!("{name}:unknown disk"),
@@ -97,13 +98,15 @@ impl Engine {
                     if !seen.insert(&c.chunk) {
                         continue;
                     }
-                    let on_pool = view.locate(&rec.folder_id, &c.chunk).is_some_and(|r| {
-                        r.storages
-                            .get(name)
-                            .is_some_and(|l| !l.claimed_by.is_empty())
-                    });
+                    let Some(r) = view.locate(&rec.folder_id, &c.chunk) else {
+                        continue;
+                    };
+                    let on_pool = r
+                        .storages
+                        .get(name)
+                        .is_some_and(|l| !l.claimed_by.is_empty());
                     if on_pool
-                        && (pool.places_of(&chunk_storage_key(&c.object)).len() as u32)
+                        && (pool.places_of(&super::pack_upkeep::held_key(r, name)).len() as u32)
                             < pool.copies()
                     {
                         short += 1;

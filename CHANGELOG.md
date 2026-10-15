@@ -16,7 +16,19 @@ spec still names them because sections were written as the work was done.
 
 ## Unreleased
 
-Nothing yet.
+### Changed
+
+- Format 2 blocks (spec 62): chunk nonces follow the packed bytes, chunks are
+  compressed with zstd level 3 after a 64 KiB probe, the chunker's Gear table
+  is keyed per folder with new block sizes by file size, and every block of
+  every storage is stored in packs (64 MiB, 256 MiB on cold storages) with
+  encrypted pack indexes, places in the ledger and rewriting of mostly dead
+  packs. Tombstone lists are kept per folder under the folder's metadata key,
+  so members of a shared folder read them, and a tombstone of another device
+  never kills a block the ledger still claims. Pushes, moves, repairs,
+  storage removals and Strongroom conversions collect blocks across files
+  into packs; imports pack each content. Reads of packs are bounded by the
+  pack target plus one block. Vaults of earlier formats are not read.
 
 ## [0.0.1-alpha.14] - 2026-10-14
 

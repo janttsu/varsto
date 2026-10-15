@@ -153,10 +153,12 @@ pub fn encrypt(key: &SecretKey, aad: &[u8], plaintext: &[u8]) -> Result<Vec<u8>>
     encrypt_with_nonce(key, &nonce, aad, plaintext)
 }
 
-/// Encrypt with a caller-chosen nonce. Only safe when the key is never used
-/// with another nonce for a different plaintext (alpha-0 uses this for chunk
-/// keys that are derived from the chunk's own keyed hash, so key and nonce are
-/// unique per plaintext and the ciphertext is deterministic for deduplication).
+/// Encrypt with a caller-chosen nonce. Only safe when a nonce is never used
+/// twice with one key for different plaintexts. Chunk objects
+/// (`crate::chunk_seal`) are the one user: the key is derived from the
+/// chunk id and the nonce is a keyed hash of the exact bytes encrypted, so a
+/// nonce repeats only for the same input and the ciphertext is
+/// deterministic for deduplication.
 pub fn encrypt_with_nonce(
     key: &SecretKey,
     nonce: &[u8; NONCE_LEN],

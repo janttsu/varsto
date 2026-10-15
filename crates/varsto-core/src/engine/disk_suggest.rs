@@ -88,6 +88,12 @@ impl Engine {
                     wanted.insert(obj);
                 }
             }
+            // The disks hold packs: a pack is wanted when a block in it is,
+            // elsewhere when every block in it is.
+            super::pack_upkeep::with_pack_ids(&view, &name, &mut wanted, false);
+            super::pack_upkeep::with_pack_ids(&view, &name, &mut elsewhere, true);
+            let mut repair = repair.clone();
+            super::pack_upkeep::with_pack_ids(&view, &name, &mut repair, false);
             // Blocks of current files placed on this pool: the ones it holds
             // on no disk, and every key (further copies under a disk group rule).
             let have = pool.objects();
@@ -107,7 +113,9 @@ impl Engine {
                         if !targets.wants(&name, record) {
                             continue;
                         }
-                        let key = chunk_storage_key(&c.object);
+                        let key = record
+                            .map(|r| super::pack_upkeep::held_key(r, &name))
+                            .unwrap_or_else(|| chunk_storage_key(&c.object));
                         if !have.contains_key(&key) && !current.contains(&key) {
                             // Ciphertext is a little larger than the chunk.
                             first_copy_bytes += c.size + 64;
@@ -117,12 +125,25 @@ impl Engine {
                 }
             }
             let mut fetch: BTreeMap<String, Vec<String>> = BTreeMap::new();
+            // A fetch plan names blocks; the disk holds their packs.
+            let mut pack_key_of: HashMap<String, String> = HashMap::new();
+            for r in view.chunks.values() {
+                if let Some(p) = r.storages.get(&name).and_then(|l| l.pack.as_ref()) {
+                    pack_key_of.insert(
+                        chunk_storage_key(&r.object),
+                        crate::packs::pack_key(&p.pack),
+                    );
+                }
+            }
             for step in plan.iter().flat_map(|p| p.steps.iter()) {
                 if step.pool == name && step.state == "pending" {
-                    fetch
-                        .entry(step.disk_id.clone())
-                        .or_default()
-                        .extend(step.objects.iter().cloned());
+                    let keys = fetch.entry(step.disk_id.clone()).or_default();
+                    for k in &step.objects {
+                        let k = pack_key_of.get(k).cloned().unwrap_or_else(|| k.clone());
+                        if !keys.contains(&k) {
+                            keys.push(k);
+                        }
+                    }
                 }
             }
             let input = pool::BookInput {

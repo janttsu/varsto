@@ -333,7 +333,10 @@ pub fn disk_space(path: &Path) -> Option<DiskSpace> {
         let v = FAKE_CAPACITY.read().unwrap();
         let canon = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
         if let Some((mount, total)) = v.iter().find(|(p, _)| canon.starts_with(p)) {
-            let used = tree_bytes(&mount.join(DATA_DIR).join("chunks"));
+            let used = BLOCK_DIRS
+                .iter()
+                .map(|d| tree_bytes(&mount.join(DATA_DIR).join(d)))
+                .sum::<u64>();
             return Some(DiskSpace {
                 free: total.saturating_sub(used),
                 total: *total,
@@ -437,6 +440,10 @@ fn measure(d: &mut PoolDisk, mount: &Path, now: i64) -> bool {
 }
 
 /// The object name a key ends with, when it is one (64 hex digits).
+/// The directories under a disk's data directory that hold block objects:
+/// packs (format 2) and single objects of older disks.
+const BLOCK_DIRS: [&str; 2] = ["packs", "chunks"];
+
 fn object_name_of(key: &str) -> Option<&str> {
     let name = key.rsplit('/').next()?;
     (name.len() == 64 && name.bytes().all(|b| b.is_ascii_hexdigit())).then_some(name)
@@ -1471,8 +1478,11 @@ impl PoolStorage {
         // What the disk holds: key -> size, from the directory listing.
         let data = mount.join(DATA_DIR);
         let mut present: BTreeMap<String, u64> = BTreeMap::new();
-        let chunks = data.join("chunks");
-        if chunks.is_dir() {
+        for chunks in BLOCK_DIRS
+            .iter()
+            .map(|d| data.join(d))
+            .filter(|d| d.is_dir())
+        {
             for entry in walkdir::WalkDir::new(&chunks)
                 .into_iter()
                 .filter_map(|e| e.ok())
@@ -1818,9 +1828,12 @@ impl PoolStorage {
             return Err(e);
         }
         // Objects on the disk that the index does not know (written by another device).
-        let data = mount.join(DATA_DIR).join("chunks");
         let mut unknown: Vec<crate::parverify::Job<(String, PathBuf, u64)>> = Vec::new();
-        if data.is_dir() {
+        for data in BLOCK_DIRS
+            .iter()
+            .map(|d| mount.join(DATA_DIR).join(d))
+            .filter(|d| d.is_dir())
+        {
             for entry in walkdir::WalkDir::new(&data)
                 .into_iter()
                 .filter_map(|e| e.ok())
@@ -2339,6 +2352,43 @@ impl Storage for PoolStorage {
             return Err(crate::storage::too_large(key, buf.len() as u64, max));
         }
         Ok(Some(buf))
+    }
+
+    fn get_range(&self, key: &str, offset: u64, len: u64) -> Result<Option<Vec<u8>>> {
+        // A block inside a pack: read only its bytes from the disk.
+        let path = {
+            let mut st = self.state.lock().unwrap();
+            let Some(e) = st.index.objects.get(key).cloned() else {
+                return Ok(None);
+            };
+            let attached = self.attached(&mut st);
+            let mount = e.holders().find_map(|d| attached.get(d)).cloned();
+            match mount {
+                Some(mount) => Self::data_path(&mount, key)?,
+                None => {
+                    // Away: the whole read says which disk to bring.
+                    drop(st);
+                    return Ok(self.get(key)?.map(|b| {
+                        let start = (offset as usize).min(b.len());
+                        let end = start.saturating_add(len as usize).min(b.len());
+                        b[start..end].to_vec()
+                    }));
+                }
+            }
+        };
+        let read = || -> std::io::Result<Vec<u8>> {
+            use std::io::{Read, Seek, SeekFrom};
+            let mut f = fs::File::open(&path)?;
+            f.seek(SeekFrom::Start(offset))?;
+            let mut b = Vec::new();
+            f.take(len).read_to_end(&mut b)?;
+            Ok(b)
+        };
+        match read() {
+            Ok(b) => Ok(Some(b)),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(err) => Err(err).with_context(|| format!("read {}", path.display())),
+        }
     }
 
     fn exists(&self, key: &str) -> Result<bool> {

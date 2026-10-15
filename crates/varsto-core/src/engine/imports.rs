@@ -36,8 +36,10 @@ const SAVE_EVERY_SECS: u64 = 20;
 const SAVE_EVERY_ITEMS: u64 = 500;
 /// Publish the folder's manifest and the book at least this often.
 const PUBLISH_EVERY_SECS: u64 = 600;
-/// Uploads in flight per imported file.
-const IMPORT_UPLOADERS: usize = 4;
+/// Packs being written per imported file (each up to `packs::HOT_TARGET`
+/// bytes, so at most four of them are in memory with the one being filled
+/// and the one queued).
+const IMPORT_UPLOADERS: usize = 2;
 /// How many examples of each kind a report names.
 const EXAMPLES: usize = 25;
 
@@ -326,11 +328,53 @@ impl Read for Tap<'_> {
     }
 }
 
+/// Blocks of one content written together, as packs (`crate::packs`).
+#[derive(Default)]
 struct Job {
-    index: usize,
-    object: ObjectName,
-    ct: Vec<u8>,
-    targets: Vec<usize>,
+    /// (chunk index, object, bytes, storage indexes)
+    blocks: Vec<(usize, ObjectName, Vec<u8>, Vec<usize>)>,
+    bytes: usize,
+}
+
+impl Job {
+    /// Write the blocks to each storage that wants any of them: one
+    /// outcome per (chunk index, storage index).
+    fn write(&self, storages: &OpenStorages) -> Vec<(usize, usize, Result<bool>)> {
+        let mut wanted: BTreeSet<usize> = BTreeSet::new();
+        for (_, _, _, t) in &self.blocks {
+            wanted.extend(t.iter().copied());
+        }
+        let mut out = Vec::new();
+        for t in wanted {
+            let mine: Vec<&(usize, ObjectName, Vec<u8>, Vec<usize>)> = self
+                .blocks
+                .iter()
+                .filter(|(_, _, _, ts)| ts.contains(&t))
+                .collect();
+            let members: Vec<(String, &[u8])> = mine
+                .iter()
+                .map(|(_, o, ct, _)| (o.as_str().to_string(), ct.as_slice()))
+                .collect();
+            match storages[t].1.put_pack(&members) {
+                Ok(flags) => {
+                    for ((index, ..), new) in mine.iter().zip(flags) {
+                        out.push((*index, t, Ok(new)));
+                    }
+                }
+                Err(e) => {
+                    // One error for the pack, the same for each block of it.
+                    for (index, ..) in &mine {
+                        let copy = match pool::pool_error(&e) {
+                            Some(pe) => anyhow::Error::new(pe.clone()),
+                            None => anyhow!("{e:#}"),
+                        };
+                        out.push((*index, t, Err(copy)));
+                    }
+                }
+            }
+        }
+        out
+    }
 }
 
 /// Chunk, encrypt and store one content, checking its hash. Nothing of it
@@ -360,10 +404,11 @@ fn ingest(
         copy_error: None,
     };
     let verified = tap.check.is_some();
+    let seed = ctx.fk.chunker_seed();
     let params = match (size_hint, ctx.small_chunker) {
-        (_, Some(p)) => p,
-        (Some(s), None) => ChunkerParams::for_size(s),
-        (None, None) => ctx.chunker,
+        (_, Some(p)) => p.with_seed(&seed),
+        (Some(s), None) => ChunkerParams::for_size(s, &seed),
+        (None, None) => ctx.chunker.with_seed(&seed),
     };
     let mut hasher = KeyedHasher::new(&ctx.fk.hash);
     let mut chunks: Vec<ChunkRef> = Vec::new();
@@ -373,7 +418,7 @@ fn ingest(
     {
         let ctx_ref = &*ctx;
         let storages = &ctx_ref.storages;
-        let (job_tx, job_rx) = std::sync::mpsc::sync_channel::<Job>(IMPORT_UPLOADERS * 2);
+        let (job_tx, job_rx) = std::sync::mpsc::sync_channel::<Job>(1);
         let job_rx = std::sync::Mutex::new(job_rx);
         let (done_tx, done_rx) = std::sync::mpsc::channel::<(usize, usize, Result<bool>)>();
         std::thread::scope(|s| -> Result<()> {
@@ -385,15 +430,13 @@ fn ingest(
                         Ok(j) => j,
                         Err(_) => break,
                     };
-                    for t in &job.targets {
-                        let r = storages[*t]
-                            .1
-                            .put_if_absent(&chunk_storage_key(&job.object), &job.ct);
-                        let _ = done_tx.send((job.index, *t, r));
+                    for r in job.write(storages) {
+                        let _ = done_tx.send(r);
                     }
                 });
             }
             drop(done_tx);
+            let mut job = Job::default();
             let chunker =
                 Chunker::new(std::io::BufReader::with_capacity(1 << 20, &mut tap), params)?;
             for chunk in chunker {
@@ -411,13 +454,12 @@ fn ingest(
                     Some(c) if c.size == chunk.len() as u64 => (c.object.clone(), c.epoch),
                     _ => {
                         let e = ctx_ref.fk.epoch;
-                        let sealed = crypto::encrypt_with_nonce(
-                            &ctx_ref.fk.chunk_key(e, &chunk_id)?,
-                            &ctx_ref.fk.chunk_nonce(e, &chunk_id)?,
-                            &ctx_ref
-                                .fk
-                                .chunk_aad(&ctx_ref.vault, &chunk_id, chunk.len() as u64),
-                            &crate::pack::pack(&chunk),
+                        let sealed = crate::chunk_seal::seal_chunk(
+                            &ctx_ref.fk,
+                            &ctx_ref.vault,
+                            &chunk_id,
+                            e,
+                            &chunk,
                         )?;
                         let o = ObjectName::from_bytes(&crypto::hash(&sealed));
                         ct = Some(sealed);
@@ -456,27 +498,25 @@ fn ingest(
                 if !targets.is_empty() {
                     let ct = match ct {
                         Some(c) => c,
-                        None => crypto::encrypt_with_nonce(
-                            &ctx_ref.fk.chunk_key(epoch, &chunk_id)?,
-                            &ctx_ref.fk.chunk_nonce(epoch, &chunk_id)?,
-                            &ctx_ref
-                                .fk
-                                .chunk_aad(&ctx_ref.vault, &chunk_id, chunk.len() as u64),
-                            &crate::pack::pack(&chunk),
+                        None => crate::chunk_seal::seal_chunk(
+                            &ctx_ref.fk,
+                            &ctx_ref.vault,
+                            &chunk_id,
+                            epoch,
+                            &chunk,
                         )?,
                     };
-                    if job_tx
-                        .send(Job {
-                            index,
-                            object,
-                            ct,
-                            targets,
-                        })
-                        .is_err()
+                    job.bytes += ct.len();
+                    job.blocks.push((index, object, ct, targets));
+                    if job.bytes >= crate::packs::HOT_TARGET
+                        && job_tx.send(std::mem::take(&mut job)).is_err()
                     {
                         break;
                     }
                 }
+            }
+            if !job.blocks.is_empty() {
+                let _ = job_tx.send(job);
             }
             drop(job_tx);
             results.extend(done_rx.iter());
@@ -562,6 +602,7 @@ fn ingest(
             object: c.object.clone(),
             storage: name,
             size: c.size,
+            pack: None,
         });
     }
     for (index, c) in chunks.iter().enumerate() {
@@ -1540,6 +1581,7 @@ impl Engine {
             modified_by: me,
             modified_clock: clock,
             meta: None,
+            chunking: 0,
         };
         state.files.insert(path.to_string(), f.clone());
         state.pending_remote.remove(path);

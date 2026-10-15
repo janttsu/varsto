@@ -52,6 +52,16 @@ pub struct FileState {
     /// change here alone is a new version that reuses the chunks.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub meta: Option<FileMeta>,
+    /// How the chunks were cut: `2` (format 2) for the size tiers of
+    /// `ChunkerParams::for_size` with the folder's keyed Gear table, so a
+    /// device can cut the file again the same way; absent (0) when the
+    /// size was not known in advance or the entry has no chunks.
+    #[serde(default, skip_serializing_if = "is_zero_u8")]
+    pub chunking: u8,
+}
+
+fn is_zero_u8(v: &u8) -> bool {
+    *v == 0
 }
 
 impl FileState {
@@ -323,6 +333,7 @@ mod tests {
             modified_by: DeviceId::from_bytes(&[3; 16]),
             modified_clock: 1,
             meta: None,
+            chunking: 0,
         }
     }
 
@@ -411,6 +422,7 @@ mod tests {
             modified_by: DeviceId::from_bytes(dev.as_bytes()),
             modified_clock: clock,
             meta: None,
+            chunking: 0,
         }
     }
 

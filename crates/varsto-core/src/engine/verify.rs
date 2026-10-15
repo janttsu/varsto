@@ -13,7 +13,7 @@
 //! is read from whichever local storage has the same identity, and the check
 //! is recorded under the writer's name so that it meets the writer's claim.
 
-use super::{chunk_storage_key, Damage, DamageKind, Engine};
+use super::{Damage, DamageKind, Engine};
 use crate::autoverify::{
     self, Candidate, VerifyRunReport, VerifySchedule, VerifyState, VerifyStatus,
 };
@@ -423,39 +423,59 @@ impl Engine {
         );
         // One lane per local storage, read ahead in parallel where its
         // medium allows; the results come back here in the planned order.
+        // The blocks due in one pack are read together, with one request
+        // (`packs::read_members`).
         let lane_names: Vec<String> = lanes.keys().cloned().collect();
         let plans: Vec<crate::parverify::LanePlan> = lanes.values().copied().collect();
-        let jobs: Vec<crate::parverify::Job<usize>> = order
-            .into_iter()
-            .map(|i| crate::parverify::Job {
-                item: i,
-                lane: lane_names
+        let groups = crate::packs::group_by_pack(order.into_iter().map(|i| {
+            let local = items[i].4.clone();
+            let loc = readable[&local].pack_location(items[i].2.as_str());
+            (i, local, items[i].2.as_str().to_string(), loc)
+        }));
+        let jobs: Vec<crate::parverify::Job<usize>> = groups
+            .iter()
+            .enumerate()
+            .map(|(g, (local, members))| crate::parverify::Job {
+                item: g,
+                lane: lane_names.iter().position(|n| n == local).unwrap_or(0),
+                size: members
                     .iter()
-                    .position(|n| *n == items[i].4)
-                    .unwrap_or(0),
-                size: view.locate(&items[i].0, &items[i].1).map_or(0, |r| r.size),
+                    .map(|(i, _, _)| {
+                        view.locate(&items[*i].0, &items[*i].1)
+                            .map_or(0, |r| r.size)
+                    })
+                    .sum(),
             })
             .collect();
         let mut failed: Option<anyhow::Error> = None;
-        let (items_ref, readable_ref) = (&items, &readable);
+        let (groups_ref, readable_ref) = (&groups, &readable);
         crate::parverify::run_ordered(
             &jobs,
             &plans,
-            |&i| {
-                let key = chunk_storage_key(&items_ref[i].2);
-                crate::storage::guarded(&key, || {
-                    readable_ref[&items_ref[i].4]
-                        .get_bounded(&key, crate::storage::MAX_BLOCK_OBJECT)
+            |&g| {
+                let (local, members) = &groups_ref[g];
+                let wanted: Vec<(String, Option<crate::packs::PackLoc>)> = members
+                    .iter()
+                    .map(|(_, o, l)| (o.clone(), l.clone()))
+                    .collect();
+                crate::storage::guarded(local, || {
+                    crate::packs::read_members(readable_ref[local].as_ref(), &wanted)
                 })
             },
-            |_, got| got.map(|ct| ct.map(|ct| (ct.len() as u64, crypto::hash(&ct)))),
-            |_, &i, got| {
-                task.advance(1);
-                let (folder, chunk, object, storage, _) = &items[i];
+            |_, got| {
+                got.map(|all| {
+                    all.into_iter()
+                        .map(|ct| ct.map(|ct| (ct.len() as u64, crypto::hash(&ct))))
+                        .collect::<Vec<_>>()
+                })
+            },
+            |_, &g, got| {
+                let members = &groups[g].1;
                 let got = match got {
                     Ok(got) => got,
                     Err(e) if matches!(pool::pool_error(&e), Some(PoolError::NeedsDisk { .. })) => {
-                        report.offline += 1;
+                        report.offline += members.len() as u64;
+                        task.advance(members.len() as u64);
                         return true;
                     }
                     Err(e) => {
@@ -463,24 +483,29 @@ impl Engine {
                         return false;
                     }
                 };
-                report.blocks_checked += 1;
-                let Some((len, hash)) = got else {
-                    report.missing.push(format!("{storage}:{}", object.short()));
-                    damage.push(damaged(i, DamageKind::Missing));
-                    return true;
-                };
-                report.bytes_downloaded += len;
-                if ObjectName::from_bytes(&hash) == *object {
-                    report.blocks_verified += 1;
-                    self.pending.push(Event::ChunkVerified {
-                        folder: folder.clone(),
-                        chunk: chunk.clone(),
-                        object: object.clone(),
-                        storage: storage.clone(),
-                    });
-                } else {
-                    report.corrupt.push(format!("{storage}:{}", object.short()));
-                    damage.push(damaged(i, DamageKind::Corrupt));
+                for ((i, _, _), got) in members.iter().zip(got) {
+                    let i = *i;
+                    task.advance(1);
+                    let (folder, chunk, object, storage, _) = &items[i];
+                    report.blocks_checked += 1;
+                    let Some((len, hash)) = got else {
+                        report.missing.push(format!("{storage}:{}", object.short()));
+                        damage.push(damaged(i, DamageKind::Missing));
+                        continue;
+                    };
+                    report.bytes_downloaded += len;
+                    if ObjectName::from_bytes(&hash) == *object {
+                        report.blocks_verified += 1;
+                        self.pending.push(Event::ChunkVerified {
+                            folder: folder.clone(),
+                            chunk: chunk.clone(),
+                            object: object.clone(),
+                            storage: storage.clone(),
+                        });
+                    } else {
+                        report.corrupt.push(format!("{storage}:{}", object.short()));
+                        damage.push(damaged(i, DamageKind::Corrupt));
+                    }
                 }
                 true
             },

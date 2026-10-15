@@ -81,16 +81,11 @@ fn engine(home: &Path, name: &str) -> (Engine, String) {
     (e, key)
 }
 
+/// The packs on a disk (every block is in one, `varsto_core::packs`).
 fn objects_under(mount: &Path) -> Vec<PathBuf> {
-    let data = mount.join(pool::DATA_DIR).join("chunks");
-    if !data.exists() {
-        return vec![];
-    }
-    walkdir::WalkDir::new(&data)
+    common::pack_files(&mount.join(pool::DATA_DIR))
         .into_iter()
-        .filter_map(|e| e.ok())
-        .filter(|e| e.file_type().is_file())
-        .map(|e| e.path().to_path_buf())
+        .map(|(p, _)| p)
         .collect()
 }
 
@@ -317,7 +312,7 @@ fn delete_while_detached_is_queued_and_applied_by_check() {
     fs::rename(&d1, &away).unwrap();
     {
         let pool = a.open_storage("shelf").unwrap();
-        assert!(pool.list("chunks/").unwrap().contains(&key));
+        assert!(pool.list("packs/").unwrap().contains(&key));
         pool.delete(&key).unwrap();
         assert!(!pool.exists(&key).unwrap());
         assert!(pool.get(&key).unwrap().is_none());
@@ -335,9 +330,10 @@ fn delete_while_detached_is_queued_and_applied_by_check() {
     assert_eq!(r.objects_removed, 1);
     assert!(r.bytes_removed > 0);
     assert!(r.bad.is_empty());
-    // The object is still referenced by a current file, so the check put it back.
-    assert_eq!(r.objects_added, 1);
-    assert!(d1.join(pool::DATA_DIR).join(&key).exists());
+    // The blocks are still referenced by a current file, so the check put
+    // them back (in a pack again).
+    assert!(r.objects_added >= 1);
+    assert!(!objects_under(&d1).is_empty());
     let disks = a.disks().unwrap();
     assert_eq!(disks[0].pending_deletes, 0);
     assert!(disks[0].last_verified_utc > 0);
@@ -347,8 +343,8 @@ fn delete_while_detached_is_queued_and_applied_by_check() {
     fs::write(victim, b"rotten").unwrap();
     let r = a.disk_check("data-01", true).unwrap();
     assert_eq!(r.bad.len(), 1);
-    assert_eq!(r.objects_added, 1);
-    assert_ne!(fs::read(victim).unwrap(), b"rotten");
+    assert!(r.objects_added >= 1);
+    assert!(objects_under(&d1).iter().all(|f| intact(f)));
 }
 
 #[test]
@@ -549,8 +545,9 @@ fn every_write_is_read_back_and_a_disk_that_lies_twice_is_given_up() {
     assert_eq!(phases, ["tidy", "verify", "fill"]);
     assert!(r.fill.failed.is_none());
     assert!(r.fill.objects > 1);
+    // The blocks go to the disk in packs.
     let files = objects_under(&d1);
-    assert_eq!(files.len() as u64, r.fill.objects);
+    assert!(!files.is_empty() && files.len() as u64 <= r.fill.objects);
     assert!(files.iter().all(|f| intact(f)));
     // Written and read back now: nothing is due for a check.
     let again = a
@@ -571,9 +568,16 @@ fn insert_tidies_from_listings_rehashes_only_stale_copies_and_fills_within_the_r
     a.disk_add(&d1, "shelf", "data-01").unwrap();
     let docs = lab.root.join("a-docs");
     fs::create_dir_all(&docs).unwrap();
-    fs::write(docs.join("one.bin"), pseudo_random(200_000, 31)).unwrap();
     a.add_folder("docs", &docs).unwrap();
-    a.push("docs").unwrap();
+    // One small file (one block) per push: one pack each.
+    for i in 0..6 {
+        fs::write(
+            docs.join(format!("one-{i}.bin")),
+            pseudo_random(900, 31 + 2 * i),
+        )
+        .unwrap();
+        a.push("docs").unwrap();
+    }
     let mut files = objects_under(&d1);
     files.sort();
     assert!(files.len() >= 6);
@@ -583,7 +587,7 @@ fn insert_tidies_from_listings_rehashes_only_stale_copies_and_fills_within_the_r
     let stray_name = hex::encode(varsto_core::crypto::hash(b"stray"));
     let stray = d1
         .join(pool::DATA_DIR)
-        .join("chunks")
+        .join("packs")
         .join(&stray_name[..2])
         .join(&stray_name);
     fs::create_dir_all(stray.parent().unwrap()).unwrap();
@@ -665,7 +669,13 @@ fn insert_tidies_from_listings_rehashes_only_stale_copies_and_fills_within_the_r
         .unwrap();
     assert_eq!(r.verified_objects, 0);
     assert!(r.fill.objects >= 2, "{:?}", r.fill);
-    assert!(rotten_stale.exists() && intact(&rotten_stale));
+    // The bad copy's block and the new file's blocks went into one new pack.
+    let now = objects_under(&d1);
+    assert_eq!(now.len(), files.len());
+    assert!(now
+        .iter()
+        .filter(|f| **f != rotten_fresh)
+        .all(|f| intact(f)));
     let disks = a.disks().unwrap();
     assert!(disks[0].last_verified_utc > 1_000);
 
@@ -728,8 +738,11 @@ fn bookkeeping_follows_add_check_fill_and_eject_and_the_overdue_disk_is_suggeste
     fs::write(docs.join("one.bin"), pseudo_random(120_000, 41)).unwrap();
     a.add_folder("docs", &docs).unwrap();
     a.push("docs").unwrap();
+    // A second push: a second pack, of one small block.
+    fs::write(docs.join("one-b.bin"), pseudo_random(1_000, 43)).unwrap();
+    a.push("docs").unwrap();
     let r = row(&mut a, "Blue 4TB");
-    assert!(r.objects > 1);
+    assert!(r.objects >= 1);
     assert_eq!(r.copies_overdue, 0, "written and read back just now");
     assert_eq!(r.only_copy_objects, Some(0), "the box holds them too");
     assert_eq!(r.lacking_bytes, Some(0));
@@ -811,13 +824,16 @@ fn bookkeeping_follows_add_check_fill_and_eject_and_the_overdue_disk_is_suggeste
     let idx_path = pool_index_path(&home, &away.join("d1"));
     let mut idx: serde_json::Value = serde_json::from_slice(&fs::read(&idx_path).unwrap()).unwrap();
     let disk_id = DiskMarker::read(&away.join("d1")).unwrap().disk_id;
-    let keys: Vec<String> = idx["objects"]
+    // The smallest pack first: the one block deleted below.
+    let mut keys: Vec<(u64, String)> = idx["objects"]
         .as_object()
         .unwrap()
         .iter()
         .filter(|(_, e)| e["disk"] == serde_json::json!(disk_id))
-        .map(|(k, _)| k.clone())
+        .map(|(k, e)| (e["size"].as_u64().unwrap_or(0), k.clone()))
         .collect();
+    keys.sort();
+    let keys: Vec<String> = keys.into_iter().map(|(_, k)| k).collect();
     for k in &keys {
         idx["objects"][k]["checked"][&disk_id] = serde_json::json!(1_000);
     }

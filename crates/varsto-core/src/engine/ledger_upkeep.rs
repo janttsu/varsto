@@ -431,6 +431,7 @@ impl Engine {
     /// Keep the recorded events for the next batch, on disk so a restart
     /// does not lose them. They count in this device's view meanwhile.
     pub(super) fn defer_events(&mut self) -> Result<()> {
+        self.locate_pending();
         if self.pending.is_empty() {
             self.clear_deferred();
             return Ok(());
@@ -475,8 +476,11 @@ impl Engine {
         if *unsaved >= VIEW_SAVE_EVERY && self.save_view_cache(c).is_ok() {
             *unsaved = 0;
         }
+        let generation = Self::pack_generation(&c.raw, &c.context);
         if self.pending.is_empty() {
-            return Ok(self.ledger.finish(&c.raw));
+            let view = self.ledger.finish(&c.raw);
+            self.feed_pack_locator(&view, generation);
+            return Ok(view);
         }
         // Events recorded and not sealed yet count as this device's next batch.
         let mut raw = c.raw.clone();
@@ -490,7 +494,9 @@ impl Engine {
             seen: BTreeMap::new(),
         });
         raw.batches -= 1;
-        Ok(self.ledger.finish_owned(raw))
+        let view = self.ledger.finish_owned(raw);
+        self.feed_pack_locator(&view, generation);
+        Ok(view)
     }
 
     /// The view replayed from every local batch, without the cache (and
@@ -935,6 +941,7 @@ pub(super) mod tests {
                 object: object.clone(),
                 storage: "box".into(),
                 size: 4096 + i,
+                pack: None,
             },
             Event::ChunkOnDevice {
                 folder: folder.clone(),

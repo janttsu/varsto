@@ -302,6 +302,8 @@ pub struct TrashUpkeepReport {
     pub blocks_moved: u64,
     pub bytes_moved: u64,
     pub local_copies_removed: u64,
+    /// Live blocks moved out of packs that were mostly dead (`pack_upkeep`).
+    pub blocks_repacked: u64,
     pub notes: Vec<String>,
 }
 
@@ -1285,29 +1287,51 @@ impl Engine {
         for group in items.chunks(MOVE_GROUP) {
             task.advance(group.iter().map(|(c, _)| c.size).sum());
             let mut deletes: Vec<(String, ObjectName, u64)> = Vec::new();
+            // The blocks the trash storage lacks, fetched and then written
+            // together (as packs, `crate::packs`).
+            let mut cts: HashMap<ObjectName, Vec<u8>> = HashMap::new();
+            let mut skipped: HashSet<ObjectName> = HashSet::new();
+            for (c, on_ts) in group {
+                if *on_ts {
+                    continue;
+                }
+                if !gate.take(&ts_name, c.size) {
+                    skipped.insert(c.object.clone());
+                    continue;
+                }
+                let good = |ct: &Vec<u8>| ObjectName::from_bytes(&crypto::hash(ct)) == c.object;
+                let ct = self.cached_object(&c.object).or_else(|| {
+                    match fetch::fetch_object(
+                        self.peers.as_deref(),
+                        &c.object,
+                        &sources,
+                        &self.fetch_stats,
+                    ) {
+                        Fetched::Got { bytes, .. } if good(&bytes) => Some(bytes),
+                        _ => None,
+                    }
+                });
+                if let Some(ct) = ct {
+                    cts.insert(c.object.clone(), ct);
+                }
+            }
+            let members: Vec<(String, &[u8])> = cts
+                .iter()
+                .map(|(o, ct)| (o.as_str().to_string(), ct.as_slice()))
+                .collect();
+            let written = members.is_empty() || ts.put_pack(&members).is_ok();
             for (c, on_ts) in group {
                 let key = chunk_storage_key(&c.object);
                 let good = |ct: &Vec<u8>| ObjectName::from_bytes(&crypto::hash(ct)) == c.object;
                 if !on_ts {
-                    if !gate.take(&ts_name, c.size) {
+                    if skipped.contains(&c.object) {
                         continue;
                     }
-                    let ct = self.cached_object(&c.object).or_else(|| {
-                        match fetch::fetch_object(
-                            self.peers.as_deref(),
-                            &c.object,
-                            &sources,
-                            &self.fetch_stats,
-                        ) {
-                            Fetched::Got { bytes, .. } if good(&bytes) => Some(bytes),
-                            _ => None,
-                        }
-                    });
-                    let Some(ct) = ct else {
+                    let Some(ct) = cts.get(&c.object) else {
                         failed += 1;
                         continue;
                     };
-                    if ts.put_if_absent(&key, &ct).is_err() {
+                    if !written {
                         failed += 1;
                         continue;
                     }
@@ -1326,6 +1350,7 @@ impl Engine {
                         object: c.object.clone(),
                         storage: ts_name.clone(),
                         size: ct.len() as u64,
+                        pack: None,
                     });
                     if read_back {
                         self.pending.push(Event::ChunkVerified {
@@ -2063,17 +2088,14 @@ impl Engine {
                     ),
                 },
             };
-            let plain = crate::pack::unpack(
-                &crypto::decrypt(
-                    &fk.chunk_key(c.epoch, &c.chunk)?,
-                    &fk.chunk_aad(&self.vault.vault_id, &c.chunk, c.size),
-                    &ct,
-                )?,
+            let plain = crate::chunk_seal::open_chunk(
+                fk,
+                &self.vault.vault_id,
+                &c.chunk,
+                c.epoch,
                 c.size,
+                &ct,
             )?;
-            if ChunkId::from_bytes(&crypto::keyed_hash(&fk.hash, &plain)) != c.chunk {
-                bail!("block {} failed its content check", c.chunk.short());
-            }
             file.write_all(&plain)?;
             if let Some(s) = source.filter(|s| !s.starts_with("peer:")) {
                 self.pending.push(Event::ChunkVerified {
@@ -2168,6 +2190,7 @@ impl Engine {
         }
         let mut counts = DropCounts::default();
         self.trash_drop_queued(now, &stale, &mut counts)?;
+        self.flush_pack_deletions();
         report.blocks_dropped = counts.dropped;
         report.bytes_dropped = counts.bytes;
         report.blocks_waiting = counts.waiting;
@@ -2282,6 +2305,14 @@ impl Engine {
                 counts.waiting,
                 if counts.waiting == 1 { "y" } else { "ies" }
             ));
+        }
+        // What the drops left of the packs: mostly dead hot packs are
+        // rewritten (`crate::packs`).
+        if !self.vault.member && !self.forked_self {
+            match self.pack_upkeep() {
+                Ok(p) => report.blocks_repacked = p.blocks_moved,
+                Err(e) => report.notes.push(format!("packs not tidied: {e:#}")),
+            }
         }
         let mut c = self.load_settings_cache();
         c.upkeep_utc = now;
