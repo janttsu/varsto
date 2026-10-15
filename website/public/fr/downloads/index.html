@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Téléchargements: Varsto</title>
+<meta name="description" content="Téléchargez l’alpha de Varsto pour Linux, macOS, Windows et Android, ou le code source, et vérifiez les sommes de contrôle.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="../../favicon.svg" type="image/svg+xml">
+<link rel="canonical" href="https://varsto.net/fr/downloads/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Varsto">
+<meta property="og:title" content="Téléchargements: Varsto">
+<meta property="og:description" content="Téléchargez l’alpha de Varsto pour Linux, macOS, Windows et Android, ou le code source, et vérifiez les sommes de contrôle.">
+<meta property="og:url" content="https://varsto.net/fr/downloads/">
+<meta property="og:image" content="https://varsto.net/assets/img/og-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:locale" content="fr_FR">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="alternate" hreflang="en" href="https://varsto.net/downloads/">
+<link rel="alternate" hreflang="x-default" href="https://varsto.net/downloads/">
+<link rel="alternate" hreflang="fi" href="https://varsto.net/fi/downloads/">
+<link rel="alternate" hreflang="sv" href="https://varsto.net/sv/downloads/">
+<link rel="alternate" hreflang="fr" href="https://varsto.net/fr/downloads/">
+<link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../../blog/feed.xml">
+<link rel="stylesheet" href="../../assets/css/site.css?v=a993e06bd6">
+<script src="../../assets/js/theme.js?v=0951491269"></script>
+</head>
+<body>
+<a class="skip" href="#main">Aller au contenu</a>
+<div class="alpha" role="note">
+  <div class="wrap"><strong>Logiciel alpha, pas pour des données de production.</strong> Des erreurs peuvent entraîner une perte de données, le format de stockage peut changer sans outil de migration et le chiffrement n'a pas encore été audité. Conservez vos propres sauvegardes et vérifiez que vous pouvez en restaurer.</div>
+</div>
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="../../fr/"><img src="../../assets/img/logo.svg" alt="" width="28" height="28"><span>Varsto</span></a>
+    <nav class="langs" aria-label="Language"><a href="../../downloads/" hreflang="en" lang="en">English</a> <a href="../../fi/downloads/" hreflang="fi" lang="fi">Suomi</a> <a href="../../sv/downloads/" hreflang="sv" lang="sv">Svenska</a> <a href="../../fr/downloads/" hreflang="fr" lang="fr" aria-current="true">Français</a></nav>
+
+    <nav class="main" aria-label="Main">
+      <a href="../../fr/">Projet</a>
+      <a href="../../fr/features/">Fonctionnalités</a>
+      <a href="../../fr/use-cases/">Cas d'usage</a>
+      <a href="../../fr/compare/">Comparaison</a>
+      <a href="../../fr/how-it-works/">Fonctionnement</a>
+      <a href="../../fr/screenshots/">Captures d'écran</a>
+      <a href="../../docs/">Documentation (en)</a>
+      <a href="../../fr/downloads/" aria-current="page">Téléchargements</a>
+      <a href="../../blog/">Blog (en)</a>
+      <a href="../../forum/">Forum (en)</a>
+      <a href="../../fr/contribute/">Contribuer</a>
+      <a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a>
+      <button class="theme" id="theme-toggle" type="button" aria-label="Change colour theme">Theme: auto</button>
+    </nav>
+  </div>
+</header>
+<main id="main">
+  <div class="wrap">
+    <h1>Téléchargements</h1>
+    <p class="note">Consultez les <a href="../screenshots/">captures d’écran</a> pour voir à quoi ressemble l’alpha.</p>
+    <p class="lead">Un paquet par plateforme, avec le service en arrière-plan, l’interface et la même ligne de commande à l’intérieur ; sous Linux et macOS, le service démarre à l’ouverture de session (une unité utilisateur systemd ou un launch agent), sous Windows il est lancé par l’application de la zone de notification. Sous Linux et Windows, l’interface s’ouvre dans votre navigateur ; sous macOS, l’application native a sa propre fenêtre. Alpha : à utiliser uniquement avec des données de test, en conservant vos propres sauvegardes.</p>
+    <p class="note">La liste des téléchargements est en anglais.</p>
+    <p class="note">No binaries are published yet. Build from source with <code>cargo build --release</code>.</p>
+    <h2>Installer et vérifier</h2>
+    <pre><code>curl -O https://varsto.net/downloads/SHA256SUMS
+curl -O https://varsto.net/downloads/varsto-0.0.1-alpha.14-x86_64-unknown-linux-musl.tar.gz
+sha256sum -c SHA256SUMS --ignore-missing
+tar xzf varsto-0.0.1-alpha.14-x86_64-unknown-linux-musl.tar.gz
+cd varsto-0.0.1-alpha.14-x86_64-unknown-linux-musl
+./varsto desktop        # opens the desktop interface in your browser
+./varsto --help         # command line</code></pre>
+    <h2>Compiler depuis les sources</h2>
+    <p>Le code source se trouve sur <a href="https://github.com/janttsu/varsto" rel="noopener">github.com/janttsu/varsto</a> ; chaque version y est une étiquette, avec les mêmes fichiers joints à sa <a href="https://github.com/janttsu/varsto/releases" rel="noopener">version GitHub</a>, et l’archive des sources ci-dessous lui correspond. Avec une chaîne d’outils Rust stable (1.85 ou plus récente) : <code>git clone https://github.com/janttsu/varsto.git</code> ou décompressez l’archive, puis <code>cargo build --release</code> ; le binaire est <code>target/release/varsto</code>. <code>cargo test --workspace</code> lance la suite de tests, y compris les scénarios à deux appareils.</p>
+    <h2>Interface de bureau</h2>
+    <p>Sous Linux et Windows, le mode par défaut est <code>varsto tray</code> : une icône dans la zone de notification avec ouvrir et mettre en pause, et un élément d’installation lorsqu’une version plus récente existe ; le service en arrière-plan synchronise seul les changements en quelques secondes. <code>varsto desktop</code> démarre un petit serveur web lié à 127.0.0.1 sur un port aléatoire, affiche un lien à usage unique contenant un jeton de session et l’ouvre dans votre navigateur par défaut. Seuls les programmes de cet ordinateur peuvent y accéder ; la page refuse les requêtes sans le jeton et celles dont l’en-tête Host n’est pas l’adresse locale. Depuis l’interface, vous pouvez créer ou rejoindre un coffre, ajouter des stockages et des dossiers, partager, définir des politiques et lister les doublons ; la synchronisation, la vérification et la réparation s’exécutent d’elles-mêmes. Le bundle de l’application et <code>Varsto.cmd</code> font exactement cela.</p>
+    <h2>Démarrage rapide (ligne de commande)</h2>
+    <pre><code>export VARSTO_PASSPHRASE='a long passphrase'
+varsto --home ~/.varsto-laptop init --name laptop            # prints the vault key once; keep it offline
+varsto --home ~/.varsto-laptop storage add-local box /mnt/box
+varsto --home ~/.varsto-laptop folder add docs ~/Documents/synced
+varsto --home ~/.varsto-laptop sync
+
+# another device that can reach the same storage
+varsto --home ~/.varsto-desk join --name desk --vault-key &lt;hex&gt; --storage-path /mnt/box
+varsto --home ~/.varsto-desk folder attach docs ~/synced
+varsto --home ~/.varsto-desk sync
+varsto --home ~/.varsto-desk status --json
+varsto --home ~/.varsto-desk fsck --verify</code></pre>
+    <p class="note">La clé du coffre est la clé maîtresse en hexadécimal. La perdre, ainsi que tous vos appareils, revient à perdre les données : il n’y a ni compte ni séquestre.</p>
+
+  </div>
+</main>
+<footer class="site">
+  <div class="wrap">
+    <span>Varsto est un nom de travail. Code source : <a href="https://github.com/janttsu/varsto">github.com/janttsu/varsto</a>, sous licence PolyForm Shield License 1.0.0 (code source disponible).</span>
+    <span>Pas de cookies, pas de suivi. Le serveur web conserve un journal d'accès ordinaire pendant sept jours au plus.</span>
+    <span><a href="../../docs/security-policy.html">Politique de sécurité</a> · <a href="../../docs/licence.html">Licence</a> · <a href="../../docs/trademark.html">Marque</a> (en anglais)</span>
+  </div>
+</footer>
+</body>
+</html>

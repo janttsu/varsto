@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Alternative à Tresorit : Varsto et Tresorit comparés</title>
+<meta name="description" content="Vous cherchez une alternative à Tresorit avec chiffrement de bout en bout sur votre propre stockage (S3, NAS, disques, rclone) ? À quoi sert Tresorit, comment il fonctionne et comment il se compare à Varsto.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="../../../favicon.svg" type="image/svg+xml">
+<link rel="canonical" href="https://varsto.net/fr/compare/tresorit/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Varsto">
+<meta property="og:title" content="Alternative à Tresorit : Varsto et Tresorit comparés">
+<meta property="og:description" content="Vous cherchez une alternative à Tresorit avec chiffrement de bout en bout sur votre propre stockage (S3, NAS, disques, rclone) ? À quoi sert Tresorit, comment il fonctionne et comment il se compare à Varsto.">
+<meta property="og:url" content="https://varsto.net/fr/compare/tresorit/">
+<meta property="og:image" content="https://varsto.net/assets/img/og-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:locale" content="fr_FR">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="alternate" hreflang="en" href="https://varsto.net/compare/tresorit/">
+<link rel="alternate" hreflang="x-default" href="https://varsto.net/compare/tresorit/">
+<link rel="alternate" hreflang="fi" href="https://varsto.net/fi/compare/tresorit/">
+<link rel="alternate" hreflang="sv" href="https://varsto.net/sv/compare/tresorit/">
+<link rel="alternate" hreflang="fr" href="https://varsto.net/fr/compare/tresorit/">
+<link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../../../blog/feed.xml">
+<link rel="stylesheet" href="../../../assets/css/site.css?v=a993e06bd6">
+<script src="../../../assets/js/theme.js?v=0951491269"></script>
+</head>
+<body>
+<a class="skip" href="#main">Aller au contenu</a>
+<div class="alpha" role="note">
+  <div class="wrap"><strong>Logiciel alpha, pas pour des données de production.</strong> Des erreurs peuvent entraîner une perte de données, le format de stockage peut changer sans outil de migration et le chiffrement n'a pas encore été audité. Conservez vos propres sauvegardes et vérifiez que vous pouvez en restaurer.</div>
+</div>
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="../../../fr/"><img src="../../../assets/img/logo.svg" alt="" width="28" height="28"><span>Varsto</span></a>
+    <nav class="langs" aria-label="Language"><a href="../../../compare/tresorit/" hreflang="en" lang="en">English</a> <a href="../../../fi/compare/tresorit/" hreflang="fi" lang="fi">Suomi</a> <a href="../../../sv/compare/tresorit/" hreflang="sv" lang="sv">Svenska</a> <a href="../../../fr/compare/tresorit/" hreflang="fr" lang="fr" aria-current="true">Français</a></nav>
+
+    <nav class="main" aria-label="Main">
+      <a href="../../../fr/">Projet</a>
+      <a href="../../../fr/features/">Fonctionnalités</a>
+      <a href="../../../fr/use-cases/">Cas d'usage</a>
+      <a href="../../../fr/compare/" aria-current="page">Comparaison</a>
+      <a href="../../../fr/how-it-works/">Fonctionnement</a>
+      <a href="../../../fr/screenshots/">Captures d'écran</a>
+      <a href="../../../docs/">Documentation (en)</a>
+      <a href="../../../fr/downloads/">Téléchargements</a>
+      <a href="../../../blog/">Blog (en)</a>
+      <a href="../../../forum/">Forum (en)</a>
+      <a href="../../../fr/contribute/">Contribuer</a>
+      <a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a>
+      <button class="theme" id="theme-toggle" type="button" aria-label="Change colour theme">Theme: auto</button>
+    </nav>
+  </div>
+</header>
+<main id="main">
+  <div class="wrap">
+    <p class="back-link"><a href="../../compare/">Toutes les comparaisons</a></p>
+    <h1>Varsto et Tresorit</h1>
+    <p class="lead">Tresorit est un stockage cloud et un service de partage de fichiers chiffrés de bout en bout, venus de Suisse, destinés surtout aux entreprises et aux secteurs réglementés, avec aussi des offres pour les particuliers. Son interface claire et soignée est l’une des inspirations de celle de Varsto.</p>
+
+    <h2>En quoi Varsto diffère</h2>
+    <ul>
+      <li>Aucun fournisseur ne détient de copie ni de compte : vos propres buckets, partages NAS et disques, aux tarifs de vos fournisseurs.</li>
+      <li>Des copies sur des disques amovibles, comptées et vérifiées, à côté des copies dans le cloud.</li>
+      <li>Des dossiers Strongroom qui ne s’ouvrent qu’avec une clé de sécurité matérielle, garanti par la cryptographie.</li>
+      <li>Des organisations avec administrateurs, approbations d’appareils et un journal signé et chaîné (nouveau, alpha).</li>
+    </ul>
+
+    <h2>Comment fonctionne Tresorit</h2>
+    <p>Vous créez un compte et les fichiers sont stockés dans les centres de données de Tresorit, avec des choix de résidence des données pour les clients professionnels. Les fichiers et les métadonnées pertinentes sont chiffrés de bout en bout ; les clés sont partagées par cryptographie à clé publique. Il propose des liens de partage chiffrés, un historique des versions (le nombre de versions dépend de l’offre), l’effacement à distance d’un appareil et des applications pour Windows, macOS, Linux, Android, iOS et le web.</p>
+
+    <h2>Côte à côte</h2>
+    <table class="compare-table">
+      <thead><tr><th scope="col"></th><th scope="col">Tresorit</th><th scope="col">Varsto</th></tr></thead>
+      <tbody>
+      <tr><th scope="row">Où vivent vos fichiers</th><td>Dans le cloud de Tresorit ; pas de backends personnels.</td><td>Sur vos propres appareils et sur les stockages que vous choisissez : buckets compatibles S3, n’importe quelle destination rclone, dossiers locaux ou réseau, et pools de disques amovibles.</td></tr>
+      <tr><th scope="row">Compte ou serveur central</th><td>Compte obligatoire.</td><td>Aucun. Il n’y a pas de serveur Varsto ; les appareils se trouvent via vos stockages et sur le réseau local.</td></tr>
+      <tr><th scope="row">Chiffrement</th><td>De bout en bout, à connaissance nulle ; code source fermé.</td><td>De bout en bout, côté client, avant que quoi que ce soit ne quitte l’appareil ; hybride post-quantique (ML-KEM pour les clés de partage, signatures Ed25519 + ML-DSA-65). Pas encore audité de façon indépendante.</td></tr>
+      <tr><th scope="row">Appareils en ligne en même temps</th><td>Inutile : le cloud détient la copie.</td><td>Inutile : les appareils se synchronisent via vos stockages, et directement en pair à pair lorsqu’ils peuvent se joindre.</td></tr>
+      <tr><th scope="row">Sait où se trouve chaque copie</th><td>Une copie chez le fournisseur ; aucun suivi à travers vos propres supports.</td><td>Oui : un registre signé enregistre quel stockage et quel appareil détient chaque bloc ; des politiques de durabilité (par défaut 1 copie n’importe où, 1 externe, 1 sur vos propres appareils ou disques, vérifiée par un autre appareil sous 30 jours) avertissent lorsqu’une règle n’est pas respectée.</td></tr>
+      <tr><th scope="row">Disques amovibles et hors ligne</th><td>Pas de processus pour les disques amovibles.</td><td>Oui : les pools de disques sont remplis, vérifiés et reconnus à leur retour ; les fichiers situés sur un disque absent demandent ce disque.</td></tr>
+      <tr><th scope="row">Sauvegardes</th><td>Synchronisation bidirectionnelle avec historique des versions des fichiers (nombre de versions selon l’offre) et restauration des fichiers supprimés ; pas de sauvegarde à sens unique.</td><td>Oui : choisissez un dossier sur n’importe quel appareil et Varsto en conserve des instantanés chiffrés en lecture seule sur vos stockages externes uniquement, jamais sur vos appareils, pendant le nombre de jours que vous choisissez (90 par défaut), puis supprime ceux qui ont expiré. Restaurez n’importe quel instantané dans un dossier que vous nommez, depuis l’application ou la ligne de commande.</td></tr>
+      <tr><th scope="row">Licence et prix</th><td>Propriétaire ; une petite offre gratuite et des forfaits payants pour particuliers et entreprises.</td><td>Code source disponible (PolyForm Shield 1.0.0), gratuit ; vous ne payez que votre fournisseur de stockage.</td></tr>
+      <tr><th scope="row">Maturité</th><td>Service commercial mature, avec des fonctions de conformité.</td><td>Alpha : pas pour des données de production, les formats peuvent encore changer.</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Lequel choisir</h2>
+    <div class="grid two">
+      <div class="card"><h3>Tresorit</h3><p>Choisissez Tresorit quand vous avez besoin d’un service professionnel conforme et pris en charge, avec administration, résidence des données et partage soigné, et qu’un fournisseur à code source fermé vous convient.</p></div>
+      <div class="card"><h3>Varsto</h3><p>Choisissez Varsto quand vous voulez un chiffrement de bout en bout comparable sans fournisseur au milieu : vos propres buckets et disques, un transfert pair à pair entre vos appareils, un registre de chaque copie et un code source que vous pouvez lire. Les fonctions d’organisation de Varsto (administrateurs, approbations, retrait d’une personne) sont nouvelles et encore en alpha.</p></div>
+    </div>
+    <p class="note">Varsto est un logiciel alpha : ne lui confiez pas de données dont vous n’avez aucune autre copie, et sa cryptographie n’a pas été auditée de façon indépendante. Les autres produits présentés ici sont matures. Les faits les concernant ont été vérifiés dans leur propre documentation en octobre 2026 ; les prix et les offres changent souvent, consultez donc leurs pages pour les chiffres actuels. Les corrections sont les bienvenues sous forme de <a href="https://github.com/janttsu/varsto/issues" rel="noopener">tickets GitHub</a>.</p>
+
+    <h2>Sources</h2>
+    <ul>
+      <li><a href="https://tresorit.com/">Site web de Tresorit</a></li>
+      <li><a href="https://tresorit.com/security">Sécurité de Tresorit</a></li>
+      <li><a href="https://tresorit.com/pricing/personal">Offres personnelles de Tresorit</a></li>
+      <li><a href="https://support.tresorit.com/hc/en-us/articles/216114307-Backups-in-Tresorit">Sauvegardes dans Tresorit</a></li>
+    </ul>
+
+  </div>
+</main>
+<footer class="site">
+  <div class="wrap">
+    <span>Varsto est un nom de travail. Code source : <a href="https://github.com/janttsu/varsto">github.com/janttsu/varsto</a>, sous licence PolyForm Shield License 1.0.0 (code source disponible).</span>
+    <span>Pas de cookies, pas de suivi. Le serveur web conserve un journal d'accès ordinaire pendant sept jours au plus.</span>
+    <span><a href="../../../docs/security-policy.html">Politique de sécurité</a> · <a href="../../../docs/licence.html">Licence</a> · <a href="../../../docs/trademark.html">Marque</a> (en anglais)</span>
+  </div>
+</footer>
+</body>
+</html>

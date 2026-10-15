@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Alternative à MEGA : Varsto et MEGA comparés</title>
+<meta name="description" content="Vous cherchez une alternative à MEGA avec chiffrement de bout en bout sur votre propre stockage (S3, NAS, disques, rclone) ? À quoi sert MEGA, comment il fonctionne et comment il se compare à Varsto.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="../../../favicon.svg" type="image/svg+xml">
+<link rel="canonical" href="https://varsto.net/fr/compare/mega/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Varsto">
+<meta property="og:title" content="Alternative à MEGA : Varsto et MEGA comparés">
+<meta property="og:description" content="Vous cherchez une alternative à MEGA avec chiffrement de bout en bout sur votre propre stockage (S3, NAS, disques, rclone) ? À quoi sert MEGA, comment il fonctionne et comment il se compare à Varsto.">
+<meta property="og:url" content="https://varsto.net/fr/compare/mega/">
+<meta property="og:image" content="https://varsto.net/assets/img/og-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:locale" content="fr_FR">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="alternate" hreflang="en" href="https://varsto.net/compare/mega/">
+<link rel="alternate" hreflang="x-default" href="https://varsto.net/compare/mega/">
+<link rel="alternate" hreflang="fi" href="https://varsto.net/fi/compare/mega/">
+<link rel="alternate" hreflang="sv" href="https://varsto.net/sv/compare/mega/">
+<link rel="alternate" hreflang="fr" href="https://varsto.net/fr/compare/mega/">
+<link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../../../blog/feed.xml">
+<link rel="stylesheet" href="../../../assets/css/site.css?v=a993e06bd6">
+<script src="../../../assets/js/theme.js?v=0951491269"></script>
+</head>
+<body>
+<a class="skip" href="#main">Aller au contenu</a>
+<div class="alpha" role="note">
+  <div class="wrap"><strong>Logiciel alpha, pas pour des données de production.</strong> Des erreurs peuvent entraîner une perte de données, le format de stockage peut changer sans outil de migration et le chiffrement n'a pas encore été audité. Conservez vos propres sauvegardes et vérifiez que vous pouvez en restaurer.</div>
+</div>
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="../../../fr/"><img src="../../../assets/img/logo.svg" alt="" width="28" height="28"><span>Varsto</span></a>
+    <nav class="langs" aria-label="Language"><a href="../../../compare/mega/" hreflang="en" lang="en">English</a> <a href="../../../fi/compare/mega/" hreflang="fi" lang="fi">Suomi</a> <a href="../../../sv/compare/mega/" hreflang="sv" lang="sv">Svenska</a> <a href="../../../fr/compare/mega/" hreflang="fr" lang="fr" aria-current="true">Français</a></nav>
+
+    <nav class="main" aria-label="Main">
+      <a href="../../../fr/">Projet</a>
+      <a href="../../../fr/features/">Fonctionnalités</a>
+      <a href="../../../fr/use-cases/">Cas d'usage</a>
+      <a href="../../../fr/compare/" aria-current="page">Comparaison</a>
+      <a href="../../../fr/how-it-works/">Fonctionnement</a>
+      <a href="../../../fr/screenshots/">Captures d'écran</a>
+      <a href="../../../docs/">Documentation (en)</a>
+      <a href="../../../fr/downloads/">Téléchargements</a>
+      <a href="../../../blog/">Blog (en)</a>
+      <a href="../../../forum/">Forum (en)</a>
+      <a href="../../../fr/contribute/">Contribuer</a>
+      <a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a>
+      <button class="theme" id="theme-toggle" type="button" aria-label="Change colour theme">Theme: auto</button>
+    </nav>
+  </div>
+</header>
+<main id="main">
+  <div class="wrap">
+    <p class="back-link"><a href="../../compare/">Toutes les comparaisons</a></p>
+    <h1>Varsto et MEGA</h1>
+    <p class="lead">MEGA est un stockage cloud chiffré de bout en bout pour les particuliers et les entreprises, avec de généreux forfaits de stockage, une synchronisation de bureau, des applications mobiles et des services associés comme une messagerie et un VPN.</p>
+
+    <h2>En quoi Varsto diffère</h2>
+    <ul>
+      <li>Plusieurs fournisseurs à la fois, ou votre propre NAS et vos disques, au lieu d’un seul cloud.</li>
+      <li>Un registre signé dit où se trouve chaque copie et quand un autre appareil l’a vérifiée pour la dernière fois.</li>
+      <li>Des sauvegardes chiffrées en lecture seule, avec une durée de conservation, sur vos propres stockages.</li>
+      <li>Cryptographie hybride post-quantique pour chaque signature stockée et chaque clé scellée (conçue pour cela ; non auditée).</li>
+    </ul>
+
+    <h2>Comment fonctionne MEGA</h2>
+    <p>Vous créez un compte et vos fichiers sont stockés dans les centres de données de MEGA ; les appareils se synchronisent via les serveurs de MEGA. Les fichiers sont chiffrés sur le client avec des clés propres à chaque fichier, sous une clé dérivée de votre mot de passe. En 2022, des chercheurs de l’ETH Zurich ont publié des attaques contre la cryptographie de MEGA ; MEGA les a corrigées, et les auteurs ont noté qu’une correction complète demanderait une refonte. Il existe des applications de bureau pour Windows, macOS et Linux, des applications mobiles et un client en ligne de commande.</p>
+
+    <h2>Côte à côte</h2>
+    <table class="compare-table">
+      <thead><tr><th scope="col"></th><th scope="col">MEGA</th><th scope="col">Varsto</th></tr></thead>
+      <tbody>
+      <tr><th scope="row">Où vivent vos fichiers</th><td>Dans le cloud de MEGA ; vous ne pouvez pas utiliser votre propre stockage pour le disque.</td><td>Sur vos propres appareils et sur les stockages que vous choisissez : buckets compatibles S3, n’importe quelle destination rclone, dossiers locaux ou réseau, et pools de disques amovibles.</td></tr>
+      <tr><th scope="row">Compte ou serveur central</th><td>Compte obligatoire ; tout passe par MEGA.</td><td>Aucun. Il n’y a pas de serveur Varsto ; les appareils se trouvent via vos stockages et sur le réseau local.</td></tr>
+      <tr><th scope="row">Chiffrement</th><td>De bout en bout, côté client ; les faiblesses antérieures trouvées par des chercheurs universitaires ont été corrigées.</td><td>De bout en bout, côté client, avant que quoi que ce soit ne quitte l’appareil ; hybride post-quantique (ML-KEM pour les clés de partage, signatures Ed25519 + ML-DSA-65). Pas encore audité de façon indépendante.</td></tr>
+      <tr><th scope="row">Appareils en ligne en même temps</th><td>Inutile : le cloud détient la copie.</td><td>Inutile : les appareils se synchronisent via vos stockages, et directement en pair à pair lorsqu’ils peuvent se joindre.</td></tr>
+      <tr><th scope="row">Sait où se trouve chaque copie</th><td>Une copie chez le fournisseur ; aucun suivi à travers vos propres supports.</td><td>Oui : un registre signé enregistre quel stockage et quel appareil détient chaque bloc ; des politiques de durabilité (par défaut 1 copie n’importe où, 1 externe, 1 sur vos propres appareils ou disques, vérifiée par un autre appareil sous 30 jours) avertissent lorsqu’une règle n’est pas respectée.</td></tr>
+      <tr><th scope="row">Disques amovibles et hors ligne</th><td>Pas de processus pour les disques amovibles.</td><td>Oui : les pools de disques sont remplis, vérifiés et reconnus à leur retour ; les fichiers situés sur un disque absent demandent ce disque.</td></tr>
+      <tr><th scope="row">Sauvegardes</th><td>L’application de bureau sauvegarde des dossiers à sens unique vers le cloud de MEGA, où ils sont en lecture seule ; l’historique des versions dépend de l’offre.</td><td>Oui : choisissez un dossier sur n’importe quel appareil et Varsto en conserve des instantanés chiffrés en lecture seule sur vos stockages externes uniquement, jamais sur vos appareils, pendant le nombre de jours que vous choisissez (90 par défaut), puis supprime ceux qui ont expiré. Restaurez n’importe quel instantané dans un dossier que vous nommez, depuis l’application ou la ligne de commande.</td></tr>
+      <tr><th scope="row">Licence et prix</th><td>Offre gratuite et forfaits payants avec quotas de transfert ; code source des clients publié (SDK sous licence BSD, application de bureau sous la propre licence de MEGA).</td><td>Code source disponible (PolyForm Shield 1.0.0), gratuit ; vous ne payez que votre fournisseur de stockage.</td></tr>
+      <tr><th scope="row">Maturité</th><td>Service de grande taille et ancien.</td><td>Alpha : pas pour des données de production, les formats peuvent encore changer.</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Lequel choisir</h2>
+    <div class="grid two">
+      <div class="card"><h3>MEGA</h3><p>Choisissez MEGA quand vous voulez beaucoup d’espace cloud chiffré chez un seul fournisseur, avec des applications soignées partout, et que cela ne vous gêne pas que le fournisseur détienne la seule copie hors site.</p></div>
+      <div class="card"><h3>Varsto</h3><p>Choisissez Varsto quand vous voulez choisir vous-même le stockage (ou plusieurs fournisseurs à la fois), éviter l’enfermement chez un fournisseur, garder aussi des copies sur vos propres disques et savoir à tout moment où se trouve chaque copie.</p></div>
+    </div>
+    <p class="note">Varsto est un logiciel alpha : ne lui confiez pas de données dont vous n’avez aucune autre copie, et sa cryptographie n’a pas été auditée de façon indépendante. Les autres produits présentés ici sont matures. Les faits les concernant ont été vérifiés dans leur propre documentation en octobre 2026 ; les prix et les offres changent souvent, consultez donc leurs pages pour les chiffres actuels. Les corrections sont les bienvenues sous forme de <a href="https://github.com/janttsu/varsto/issues" rel="noopener">tickets GitHub</a>.</p>
+
+    <h2>Sources</h2>
+    <ul>
+      <li><a href="https://mega.io/">Site web de MEGA</a></li>
+      <li><a href="https://eprint.iacr.org/2022/959">MEGA: Malleable Encryption Goes Awry (ETH Zurich)</a></li>
+      <li><a href="https://github.com/meganz/MEGAsync">Code source de l’application de bureau MEGA</a></li>
+    </ul>
+
+  </div>
+</main>
+<footer class="site">
+  <div class="wrap">
+    <span>Varsto est un nom de travail. Code source : <a href="https://github.com/janttsu/varsto">github.com/janttsu/varsto</a>, sous licence PolyForm Shield License 1.0.0 (code source disponible).</span>
+    <span>Pas de cookies, pas de suivi. Le serveur web conserve un journal d'accès ordinaire pendant sept jours au plus.</span>
+    <span><a href="../../../docs/security-policy.html">Politique de sécurité</a> · <a href="../../../docs/licence.html">Licence</a> · <a href="../../../docs/trademark.html">Marque</a> (en anglais)</span>
+  </div>
+</footer>
+</body>
+</html>

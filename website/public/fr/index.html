@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Varsto: synchronisation et sauvegarde de fichiers chiffrées sur votre propre stockage</title>
+<meta name="description" content="Varsto : synchronisation, partage et sauvegarde chiffrés de bout en bout sur un stockage que vous possédez déjà, avec une cryptographie hybride post-quantique et un registre signé de l’emplacement de chaque copie. Alpha, nom provisoire.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="canonical" href="https://varsto.net/fr/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Varsto">
+<meta property="og:title" content="Varsto: synchronisation et sauvegarde de fichiers chiffrées sur votre propre stockage">
+<meta property="og:description" content="Varsto : synchronisation, partage et sauvegarde chiffrés de bout en bout sur un stockage que vous possédez déjà, avec une cryptographie hybride post-quantique et un registre signé de l’emplacement de chaque copie. Alpha, nom provisoire.">
+<meta property="og:url" content="https://varsto.net/fr/">
+<meta property="og:image" content="https://varsto.net/assets/img/og-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:locale" content="fr_FR">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="alternate" hreflang="en" href="https://varsto.net/">
+<link rel="alternate" hreflang="x-default" href="https://varsto.net/">
+<link rel="alternate" hreflang="fi" href="https://varsto.net/fi/">
+<link rel="alternate" hreflang="sv" href="https://varsto.net/sv/">
+<link rel="alternate" hreflang="fr" href="https://varsto.net/fr/">
+<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"WebSite","@id":"https://varsto.net/#site","url":"https://varsto.net/","name":"Varsto","inLanguage":["en","fi","sv","fr"]},{"@type":"SoftwareApplication","name":"Varsto","url":"https://varsto.net/fr/","description":"Varsto : synchronisation, partage et sauvegarde chiffrés de bout en bout sur un stockage que vous possédez déjà, avec une cryptographie hybride post-quantique et un registre signé de l’emplacement de chaque copie. Alpha, nom provisoire.","applicationCategory":"UtilitiesApplication","applicationSubCategory":"File synchronisation and backup","operatingSystem":"Linux, Windows, macOS, Android","softwareVersion":"0.0.1-alpha.14","downloadUrl":"https://varsto.net/downloads/","screenshot":"https://varsto.net/assets/img/screenshots/desktop-files-light.png","offers":{"@type":"Offer","price":"0","priceCurrency":"EUR"},"isAccessibleForFree":true},{"@type":"SoftwareSourceCode","name":"Varsto source code","codeRepository":"https://github.com/janttsu/varsto","programmingLanguage":["Rust","Swift","Kotlin","JavaScript"],"runtimePlatform":"Rust","license":"https://polyformproject.org/licenses/shield/1.0.0/","version":"0.0.1-alpha.14","targetProduct":{"@type":"SoftwareApplication","name":"Varsto"}}]}</script>
+<link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../blog/feed.xml">
+<link rel="stylesheet" href="../assets/css/site.css?v=a993e06bd6">
+<script src="../assets/js/theme.js?v=0951491269"></script>
+</head>
+<body>
+<a class="skip" href="#main">Aller au contenu</a>
+<div class="alpha" role="note">
+  <div class="wrap"><strong>Logiciel alpha, pas pour des données de production.</strong> Des erreurs peuvent entraîner une perte de données, le format de stockage peut changer sans outil de migration et le chiffrement n'a pas encore été audité. Conservez vos propres sauvegardes et vérifiez que vous pouvez en restaurer.</div>
+</div>
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="../fr/"><img src="../assets/img/logo.svg" alt="" width="28" height="28"><span>Varsto</span></a>
+    <nav class="langs" aria-label="Language"><a href="../" hreflang="en" lang="en">English</a> <a href="../fi/" hreflang="fi" lang="fi">Suomi</a> <a href="../sv/" hreflang="sv" lang="sv">Svenska</a> <a href="../fr/" hreflang="fr" lang="fr" aria-current="true">Français</a></nav>
+
+    <nav class="main" aria-label="Main">
+      <a href="../fr/" aria-current="page">Projet</a>
+      <a href="../fr/features/">Fonctionnalités</a>
+      <a href="../fr/use-cases/">Cas d'usage</a>
+      <a href="../fr/compare/">Comparaison</a>
+      <a href="../fr/how-it-works/">Fonctionnement</a>
+      <a href="../fr/screenshots/">Captures d'écran</a>
+      <a href="../docs/">Documentation (en)</a>
+      <a href="../fr/downloads/">Téléchargements</a>
+      <a href="../blog/">Blog (en)</a>
+      <a href="../forum/">Forum (en)</a>
+      <a href="../fr/contribute/">Contribuer</a>
+      <a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a>
+      <button class="theme" id="theme-toggle" type="button" aria-label="Change colour theme">Theme: auto</button>
+    </nav>
+  </div>
+</header>
+<main id="main">
+  <div class="wrap">
+    <h1>Apportez votre propre stockage. Gardez vos propres clés. Sachez où se trouve chaque bloc.</h1>
+    <p class="lead">Synchronisation, partage et sauvegarde chiffrés de bout en bout entre vos appareils, avec une cryptographie hybride post-quantique et une comptabilité que vous pouvez auditer. Pas de serveur, pas de compte, aucun fournisseur auquel se fier.</p>
+    <p><a class="button" href="downloads/">Télécharger l’alpha</a> <a class="button secondary" href="../docs/quick-start.html">Démarrage rapide</a> <a class="button secondary" href="https://github.com/janttsu/varsto" rel="noopener">Le code source sur GitHub</a></p>
+
+    <h2>Ce qui distingue Varsto</h2>
+    <div class="grid">
+      <section class="card"><h3>Une comptabilité que vous pouvez auditer</h3><p>Chaque appareil tient un registre signé de ce qu’il a stocké et vérifié. Varsto sait donc combien de copies de chaque bloc existent, où elles se trouvent et quand un autre appareil les a vérifiées pour la dernière fois. Une politique comme « deux copies dans le cloud et une à la maison, vérifiées sous 30 jours » vous avertit avant de cesser d’être vraie. <a href="features/#ledger">Registre et politiques</a>.</p></section>
+      <section class="card"><h3>Votre stockage, vos clés, pas de serveur</h3><p>Un dossier, un partage NAS, un bucket S3 chez n’importe quel fournisseur ou n’importe quelle destination rclone devient un stockage, et un stockage ne voit jamais que des objets chiffrés opaques. Il n’y a ni compte Varsto, ni serveur, ni relais auquel se fier ou que l’on puisse perdre. <a href="features/#storage">Votre propre stockage</a>.</p></section>
+      <section class="card"><h3>Cryptographie hybride post-quantique</h3><p>Chaque lot du registre porte une signature Ed25519 et une signature ML-DSA-65, et chaque clé de dossier voyage scellée sous une clé X25519 + ML-KEM-768. Conçue pour un monde post-quantique ; pas encore auditée. <a href="features/#pq">Comment fonctionnent les signatures et les clés</a>.</p></section>
+      <section class="card"><h3>De vieux disques comme copies comptées et vérifiées</h3><p>Branchez un disque sur une station d’accueil et ajoutez-le à un pool : il se remplit avec les données qui ont le moins de copies, vous dit quand l’éjecter sans risque, est reconnu à son retour et compte pour « une copie à la maison, une ailleurs ». <a href="features/#disks">Pools de disques</a>.</p></section>
+      <section class="card"><h3>Strongroom</h3><p>Des dossiers dont la clé est protégée par un secret que seule votre clé de sécurité FIDO2 produit après un contact, et qui n’est jamais stocké nulle part. Ni phrase secrète, ni ordinateur portable volé, ni assistant ne les ouvre. <a href="features/#strongroom">Strongroom</a>.</p></section>
+      <section class="card"><h3>Des appareils qui s’entraident</h3><p>Vos appareils échangent directement des blocs chiffrés, sur le réseau local et à travers le NAT, sans relais d’un éditeur. Une clé USB peut transporter uniquement ce qui manque à l’autre côté, et le NAS d’un ami peut conserver des copies vérifiées qu’il ne peut pas lire. <a href="features/#p2p">Pair à pair et transporteurs</a>, <a href="features/#replicas">réplicas non fiables</a>.</p></section>
+    </div>
+
+    <h2 id="where">Où vos données peuvent vivre</h2>
+    <p>N’importe quel dossier accessible depuis cet appareil, un NAS ou un partage réseau, n’importe quel bucket compatible S3 avec vos propres clés (AWS, Scaleway, Hetzner, Backblaze B2, Cloudflare R2, MinIO et d’autres), n’importe quelle destination rclone (SFTP, WebDAV, Google Drive et le reste), des classes d’archivage à froid où l’on écrit mais où l’on ne lit jamais sans votre confirmation, et des pools de disques amovibles posés sur une étagère. Utilisez-en plusieurs à la fois ; chacun porte une étiquette de lieu et un prix, si bien qu’une politique peut exiger une copie hors de la maison et que l’application peut montrer ce que coûte chaque dossier par mois. Les fichiers sont découpés en blocs, compressés et chiffrés sur votre appareil ; un stockage ne voit donc jamais que des objets opaques et leur taille, jamais les noms de fichiers, les empreintes du texte en clair ni le contenu.</p>
+    <figure class="hero"><picture class="theme-light"><source type="image/webp" srcset="../assets/img/hero.webp?v=f2481e59f5"><img src="../assets/img/hero.png?v=6d41c5852e" alt="Schéma : vos clés au centre, reliées par des liens chiffrés à un bucket S3, une archive à froid, des disques durs sur une étagère, un NAS, un ordinateur portable et un téléphone ; chaque lieu ne contient que des blocs chiffrés et verrouillés." width="1200" height="600"></picture><picture class="theme-dark"><source type="image/webp" srcset="../assets/img/hero-dark.webp?v=9d1431c50e"><img src="../assets/img/hero-dark.png?v=e46b35baa4" alt="Schéma : vos clés au centre, reliées par des liens chiffrés à un bucket S3, une archive à froid, des disques durs sur une étagère, un NAS, un ordinateur portable et un téléphone ; chaque lieu ne contient que des blocs chiffrés et verrouillés." width="1200" height="600" loading="lazy"></picture><figcaption>Des copies là où vous le décidez : un bucket, une archive à froid, de vieux disques sur une étagère, vos propres machines. Chaque copie est un texte chiffré ; les clés restent chez vous.</figcaption></figure>
+
+    <h2 id="security">La sécurité, en toute honnêteté</h2>
+    <ul>
+      <li>Le contenu est chiffré avec XChaCha20-Poly1305 sous des clés dérivées d’une clé de coffre aléatoire que seuls vos appareils détiennent ; un stockage voit des objets chiffrés nommés d’après leur empreinte, et rien d’autre. <a href="how-it-works/">Fonctionnement</a>, étape par étape.</li>
+      <li>Chaque signature stockée est hybride (Ed25519 + ML-DSA-65, les deux doivent être valides) et chaque clé scellée est hybride (X25519 + ML-KEM-768) : une cryptographie hybride post-quantique, conçue pour cela, non auditée. Le transport (les connexions directes ne portent que des blocs chiffrés avec un jeton par requête ; QUIC avec TLS 1.3 et certificats épinglés à travers le NAT) et la signature des versions (minisign) utilisent des algorithmes classiques.</li>
+      <li>Les dossiers Strongroom ne s’ouvrent qu’avec une clé de sécurité FIDO2 ; l’application de cette règle est cryptographique, pas une boîte de dialogue.</li>
+      <li>L’assistance par IA reste locale : le serveur MCP est destiné aux modèles de langage qui tournent sur votre propre machine, dans les dossiers que vous autorisez et jamais dans un Strongroom. Rien n’est envoyé à un fournisseur de modèles.</li>
+      <li>Un appareil perdu est retiré par une révocation signée et le coffre passe à de nouvelles clés ; un ordre d’effacement s’exécute la prochaine fois que l’appareil atteint un stockage. Il n’y a ni compte ni séquestre : le kit de récupération, 24 mots ou trois parts, est à vous de le conserver.</li>
+      <li>Ni la conception ni le code n’ont été relus ou audités. Le <a href="../docs/threat-model.html">modèle de menaces</a> et le <a href="../docs/failure-model.html">modèle de défaillances</a> disent ce que la conception prévoit, ce que chaque partie peut voir et où elle s’arrête.</li>
+    </ul>
+
+    <h2 id="teams">Pour les équipes</h2>
+    <p>Une organisation ajoute au-dessus d’un coffre la couche dont une entreprise a besoin : des administrateurs approuvent les appareils de personnes nommées après avoir comparé avec elles une empreinte de six mots, retirent une personne avec tous ses appareils en une seule étape (les appareils restants reçoivent de nouvelles clés), définissent ce que les membres peuvent faire seuls, et tiennent un journal de tout cela, signé par leurs appareils et chaîné. La clé racine qui nomme les administrateurs tient en 24 mots sur papier, jamais sur un appareil. Un coffre sans organisation n’en voit rien. <a href="features/#organizations">Organisations</a>.</p>
+
+    <h2 id="next">Et ensuite</h2>
+    <p class="note">Intégré à la branche principale, nouveau dans la version 0.0.1-alpha.14 :</p>
+    <ul>
+      <li>Une corbeille commune à tout le coffre, restaurable sur chaque appareil, et l’historique des versions des fichiers.</li>
+      <li>Une seconde sauvegarde indépendante avec restic : un appareil conserve un miroir en clair du coffre et restic le sauvegarde dans un dépôt extérieur à vos stockages, restaurable avec restic seul.</li>
+      <li>Des imports depuis des dépôts git-annex, des disques cloud (via rclone) et des dossiers locaux, chaque fichier étant vérifié par son empreinte.</li>
+      <li>Des invitations par code QR et des liens <code>varsto://</code> pour le partage et l’appairage.</li>
+      <li>Le vidage d’un stockage dans la limite d’un budget quotidien, et des quotas de stockage.</li>
+      <li>Une vérification continue de la dégradation silencieuse de chaque copie sur vos stockages et vos disques, avec réparation à partir d’une autre copie.</li>
+      <li>Le mappage de ports du routeur (PCP, NAT-PMP, UPnP) pour le pair à pair.</li>
+      <li>La sécurité des dossiers : une protection contre les suppressions massives, des dossiers en envoi seul ou en réception seule, et des règles d’exclusion.</li>
+    </ul>
+
+    <h2 id="status">État des lieux, en toute honnêteté</h2>
+    <ul>
+      <li>Version publiée : 0.0.1-alpha.14. L’alpha est une tranche verticale : bibliothèque centrale, ligne de commande, service en arrière-plan, interfaces pour la zone de notification et la barre de menus, interface Android, environ 136 000 lignes de Rust, 638 tests automatisés et un laboratoire de 37 scénarios sur des machines virtuelles derrière des NAT domestiques et de bureau : convergence hors ligne, conflits, barrière pour appareil restauré, réplicas, partage, politiques, pairs, Strongrooms, pools de disques, sauvegardes et plus encore. À utiliser uniquement avec des données de test.</li>
+      <li>La conception cryptographique n’a été ni relue ni auditée. Le <a href="../docs/threat-model.html">modèle de menaces</a> et le <a href="../docs/failure-model.html">modèle de défaillances</a> disent ce que la conception prévoit et où elle s’arrête.</li>
+      <li>Le code source est public sur <a href="https://github.com/janttsu/varsto" rel="noopener">github.com/janttsu/varsto</a> sous la <a href="../docs/licence.html">PolyForm Shield License 1.0.0</a> (code source disponible, pas open source) ; les bogues et les questions vont au suivi des tickets qui s’y trouve. Le format de stockage est <a href="../docs/alpha-0-format.html">documenté</a> afin que vos données restent récupérables.</li>
+      <li>Varsto est écrit en Rust, avec des interfaces natives en Swift et Kotlin et une interface web simple. La relecture de sécurité, le travail sur les plateformes, les tests réseau et de stockage, le packaging et les traductions sont tous les bienvenus : <a href="contribute/">comment contribuer</a>.</li>
+      <li>Le nom est provisoire.</li>
+    </ul>
+
+    <h2>Téléchargements</h2>
+    <p class="note">No binaries are published yet. Build from source with <code>cargo build --release</code>.</p>
+    <p class="note">Vérifier un téléchargement : la liste des sommes de contrôle est signée avec la clé de version de Varsto (voir « Verify your download » ci-dessus) : <code>varsto verify-release &lt;file&gt; --github</code>, ou minisign et <code>sha256sum -c SHA256SUMS --ignore-missing</code>. <code>varsto update</code> vérifie lui-même la signature et la version GitHub.</p>
+
+    <h2>Dernières nouvelles du blog</h2>
+    <ul class="posts"><li><time datetime="2026-10-14">2026-10-14</time> <a href="../blog/2026-10-14-alpha-14-hardening-and-everything-since.html">Alpha.14: a security review, its fixes, and everything merged since alpha.13</a><br><span class="note">A code-level security review of the whole program, the fixes it asked for, a much faster sync, resumable moves to a stack of removable disks, and the twenty-odd features that had been waiting on the main branch since alpha.13.</span></li>
+<li><time datetime="2026-10-13">2026-10-13</time> <a href="../blog/2026-10-13-alpha-13-backups.html">Alpha.13: backups that nothing can change</a><br><span class="note">Pick a folder on any device and Varsto keeps encrypted, read-only snapshots of it on your external storages, never on your devices, for as many days as you choose (90 by default). Restores go into a directory you name, from the app or the command line.</span></li>
+<li><time datetime="2026-10-12">2026-10-12</time> <a href="../blog/2026-10-12-alpha-12-packs-and-languages.html">Alpha.12: small files in packs, and Varsto in Finnish and Swedish</a><br><span class="note">Small encrypted blocks are now written in packs, so a folder of 20,000 small files becomes 79 objects on a bucket instead of 20,000. The interface, tray, menu bar, mobile shells and this website are available in Finnish and Swedish as well as English.</span></li>
+<li><time datetime="2026-10-10">2026-10-10</time> <a href="../blog/2026-10-10-alpha-9-placement-repair-signed.html">Alpha.9: data where you want it, repair by itself, signed updates, and every platform built in the open</a><br><span class="note">Folders can be placed on chosen storages and moved between them, lost copies are repaired automatically, updates are signed with an offline key, peer-to-peer downloads fetch many blocks at once, and every package is now built, tested and photographed on GitHub&#x27;s runners.</span></li>
+<li><time datetime="2026-10-09">2026-10-09</time> <a href="../blog/2026-10-09-alpha-8-ledger-and-devices.html">Alpha.8: a ledger that stays small, removable devices, and phones that keep nothing in clear text</a><br><span class="note">The ledger now lists only what is new, keeps a cached view and prunes itself behind signed checkpoints; devices can be removed with new keys for everything written afterwards; phones keep encrypted folders as encrypted blocks; and the interface shows where your data is and how peer-to-peer traffic flows.</span></li>
+<li><time datetime="2026-10-09">2026-10-09</time> <a href="../blog/2026-10-09-alpha-7-pairing-and-finder.html">Alpha.7: pair devices with a code, Finder actions, and a real NAT path</a><br><span class="note">Devices now pair from the interface with a one-time code, Finder can download a placeholder or free up space with a right-click, the macOS app installs from a disk image, devices reach each other through NAT, and removable disks can form a pool.</span></li>
+<li><time datetime="2026-10-09">2026-10-09</time> <a href="../blog/2026-10-09-alpha-6-source-on-github.html">Alpha.6: the source is public, and every platform builds in the cloud</a><br><span class="note">The repository is now public on GitHub under the PolyForm Shield licence, the native macOS and iOS apps build on GitHub Actions, Linux, Windows and Android build on short-lived cloud machines, and the interface was redone around a file view.</span></li>
+<li><time datetime="2026-10-08">2026-10-08</time> <a href="../blog/2026-10-08-alpha-0.html">Alpha-0: the first vertical slice</a><br><span class="note">A command-line tool that encrypts, stores and syncs a folder between two devices through storage you own, with a signed ledger you can check.</span></li></ul>
+
+  </div>
+</main>
+<footer class="site">
+  <div class="wrap">
+    <span>Varsto est un nom de travail. Code source : <a href="https://github.com/janttsu/varsto">github.com/janttsu/varsto</a>, sous licence PolyForm Shield License 1.0.0 (code source disponible).</span>
+    <span>Pas de cookies, pas de suivi. Le serveur web conserve un journal d'accès ordinaire pendant sept jours au plus.</span>
+    <span><a href="../docs/security-policy.html">Politique de sécurité</a> · <a href="../docs/licence.html">Licence</a> · <a href="../docs/trademark.html">Marque</a> (en anglais)</span>
+  </div>
+</footer>
+</body>
+</html>

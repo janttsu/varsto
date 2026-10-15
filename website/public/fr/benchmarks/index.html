@@ -1,0 +1,398 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Benchmarks: Varsto</title>
+<meta name="description" content="Varsto mesuré entre Paris, Amsterdam et Varsovie les 9 et 10 octobre 2026, et depuis une connexion domestique derrière un NAT : des téléchargements en pair à pair depuis un autre appareil comparés aux mêmes téléchargements depuis un bucket S3, avec la méthode, les chiffres bruts, les corrections auxquelles les essais ont mené et leurs limites.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="../../favicon.svg" type="image/svg+xml">
+<link rel="canonical" href="https://varsto.net/fr/benchmarks/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Varsto">
+<meta property="og:title" content="Benchmarks: Varsto">
+<meta property="og:description" content="Varsto mesuré entre Paris, Amsterdam et Varsovie les 9 et 10 octobre 2026, et depuis une connexion domestique derrière un NAT : des téléchargements en pair à pair depuis un autre appareil comparés aux mêmes téléchargements depuis un bucket S3, avec la méthode, les chiffres bruts, les corrections auxquelles les essais ont mené et leurs limites.">
+<meta property="og:url" content="https://varsto.net/fr/benchmarks/">
+<meta property="og:image" content="https://varsto.net/assets/img/og-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:locale" content="fr_FR">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="alternate" hreflang="en" href="https://varsto.net/benchmarks/">
+<link rel="alternate" hreflang="x-default" href="https://varsto.net/benchmarks/">
+<link rel="alternate" hreflang="fi" href="https://varsto.net/fi/benchmarks/">
+<link rel="alternate" hreflang="sv" href="https://varsto.net/sv/benchmarks/">
+<link rel="alternate" hreflang="fr" href="https://varsto.net/fr/benchmarks/">
+<link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../../blog/feed.xml">
+<link rel="stylesheet" href="../../assets/css/site.css?v=a993e06bd6">
+<script src="../../assets/js/theme.js?v=0951491269"></script>
+</head>
+<body>
+<a class="skip" href="#main">Aller au contenu</a>
+<div class="alpha" role="note">
+  <div class="wrap"><strong>Logiciel alpha, pas pour des données de production.</strong> Des erreurs peuvent entraîner une perte de données, le format de stockage peut changer sans outil de migration et le chiffrement n'a pas encore été audité. Conservez vos propres sauvegardes et vérifiez que vous pouvez en restaurer.</div>
+</div>
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="../../fr/"><img src="../../assets/img/logo.svg" alt="" width="28" height="28"><span>Varsto</span></a>
+    <nav class="langs" aria-label="Language"><a href="../../benchmarks/" hreflang="en" lang="en">English</a> <a href="../../fi/benchmarks/" hreflang="fi" lang="fi">Suomi</a> <a href="../../sv/benchmarks/" hreflang="sv" lang="sv">Svenska</a> <a href="../../fr/benchmarks/" hreflang="fr" lang="fr" aria-current="true">Français</a></nav>
+
+    <nav class="main" aria-label="Main">
+      <a href="../../fr/">Projet</a>
+      <a href="../../fr/features/">Fonctionnalités</a>
+      <a href="../../fr/use-cases/">Cas d'usage</a>
+      <a href="../../fr/compare/">Comparaison</a>
+      <a href="../../fr/how-it-works/" aria-current="page">Fonctionnement</a>
+      <a href="../../fr/screenshots/">Captures d'écran</a>
+      <a href="../../docs/">Documentation (en)</a>
+      <a href="../../fr/downloads/">Téléchargements</a>
+      <a href="../../blog/">Blog (en)</a>
+      <a href="../../forum/">Forum (en)</a>
+      <a href="../../fr/contribute/">Contribuer</a>
+      <a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a>
+      <button class="theme" id="theme-toggle" type="button" aria-label="Change colour theme">Theme: auto</button>
+    </nav>
+  </div>
+</header>
+<main id="main">
+  <div class="wrap">
+    <div class="tech">
+    <h1>Benchmarks : le pair à pair à travers l’Europe</h1>
+    <p class="lead">Un appareil à Paris détient les fichiers. Des appareils à Amsterdam et à Varsovie rejoignent le coffre avec un dossier vide et téléchargent tout : une fois directement depuis l’appareil de Paris et l’un depuis l’autre (pair à pair), une fois depuis un bucket S3 à Paris. Mesuré les 9 et 10 octobre 2026 sur des machines cloud louées.</p>
+    <p>Cette page rapporte ce qui a été mesuré, comment, ce qui l’a limité, et ce qui a changé dans Varsto à cause de cela. Chaque cas prévu a désormais des chiffres, issus de deux essais chacun sauf mention contraire d’un tableau. Les chiffres appartiennent à une alpha : ils décrivent le code tel qu’il était ces jours-là. Depuis la version 0.0.1-alpha.11, les gros fichiers sont découpés en blocs plus grands (1 Mio en moyenne à partir de 32 Mio, 4 Mio à partir de 1 Gio), si bien que les nombres de blocs indiqués ici ne s’y appliquent plus. Le programme de mesure se trouve dans le dépôt sous <code>scripts/bench/</code>, et les résultats résumés sont publiés en <a href="../../data/benchmarks-2026-10.json">JSON</a>, de sorte que les chiffres des essais dans le cloud peuvent être vérifiés et les essais répétés (la section du NAT domestique et les durées d’envoi de chaque essai ne figurent que dans le texte).</p>
+
+    <nav class="toc" aria-label="Sur cette page">
+      <p class="toc-title">Sur cette page</p>
+      <ol>
+        <li><a href="#summary">Résumé</a></li>
+        <li><a href="#home">Depuis une maison derrière un NAT</a></li>
+        <li><a href="#done">Ce qui a été mesuré</a></li>
+        <li><a href="#setup">Installation et référence</a></li>
+        <li><a href="#p2p-only">Ce que signifie « pair à pair seulement »</a></li>
+        <li><a href="#large">Gros fichiers</a></li>
+        <li><a href="#files">Beaucoup de petits fichiers</a></li>
+        <li><a href="#text">Texte compressible</a></li>
+        <li><a href="#writer">Le côté rédacteur</a></li>
+        <li><a href="#fixes">Corrigé en chemin</a></li>
+        <li><a href="#quic">Essayé et annulé : QUIC d’abord</a></li>
+        <li><a href="#bottlenecks">Toujours lent, et pourquoi</a></li>
+        <li><a href="#when">Quand le pair à pair gagne, et quand c’est le bucket</a></li>
+        <li><a href="#cost">Coût</a></li>
+        <li><a href="#limits">Limites de ce benchmark</a></li>
+      </ol>
+    </nav>
+
+    <h2 id="summary">Résumé</h2>
+    <ul>
+      <li><strong>Depuis une connexion domestique derrière un NAT (100 Mbit/s) :</strong> chacun des 14 transferts entre un PC domestique et des serveurs à Amsterdam et à Varsovie est arrivé uniquement de pairs, à travers le NAT du routeur domestique, de NAT à NAT, et à travers un NAT symétrique par relais. Les gros fichiers ont circulé à 8.0 à 9.3 MB/s, de 1.3 à 1.8 fois plus vite que le même téléchargement depuis le bucket sur la même ligne. <a href="#home">Détails</a>.</li>
+      <li><strong>Beaucoup de petits fichiers, Paris vers Amsterdam (9 ms d’écart) :</strong> 10 000 fichiers sont arrivés en pair à pair en 111 s (90 fichiers/s), depuis le bucket en 299 s (34 fichiers/s) : le pair à pair était 2.7 fois plus rapide. Vers Varsovie (33 ms d’écart), les deux étaient proches : 260 s contre 294 s. La vitesse du bucket a pourtant changé avec l’heure : trois heures plus tard, avec deux lecteurs à la fois, il a délivré 64 fichiers/s à Amsterdam et 53 à Varsovie, près des 70 et 39 du pair à pair avec deux lecteurs.</li>
+      <li><strong>Gros fichiers :</strong> vers Amsterdam, 4 Gio en pair à pair en 159 s (27.0 MB/s) contre 180 s (23.9 MB/s) depuis le bucket, et bien plus régulier. Vers Varsovie, le bucket était plus rapide : 190 s (23.4 MB/s) contre 423 s (10.2 MB/s). Le chemin pair à pair ouvre une connexion TCP pour chaque bloc, ce qui coûte des allers-retours ; plus la distance est longue, plus c’est coûteux.</li>
+      <li><strong>Deux lecteurs à la fois, en pair à pair :</strong> les lecteurs s’entraident. Varsovie a pris 69 % de ses blocs chez Amsterdam, qui les avait déjà, et seulement 31 % chez Paris, de sorte que l’appareil de Paris a envoyé 5.6 Go au lieu de 8.6 Go. Aucun des lecteurs n’a ralenti.</li>
+      <li><strong>Texte compressible :</strong> le bucket était un peu plus rapide vers Amsterdam (18.1 contre 16.7 MB/s) et plus de deux fois plus rapide vers Varsovie (16.7 contre 7.2 MB/s). Un appareil qui sert du texte recompresse chaque bloc à chaque requête, à un niveau choisi pour une petite taille de stockage, pas pour la vitesse.</li>
+      <li><strong>Chaque bloc des essais en pair à pair venait d’un pair :</strong> 202 544 blocs sur 202 544 dans 24 téléchargements mesurés, aucun du bucket, dont les blocs avaient été supprimés ; chaque fichier correspondait ensuite à son SHA-256.</li>
+      <li><strong>Les essais ont trouvé et corrigé neuf problèmes</strong>, parmi lesquels des téléchargements qui récupéraient un bloc à la fois (désormais huit en vol, et les petits fichiers récupérés à l’avance d’un fichier à l’autre) et un serveur pair à pair qui répondait à une requête à la fois. Faire de QUIC le chemin préféré à travers internet a été essayé, mesuré plus lent ici, et annulé. <a href="#fixes">Détails et chiffres</a>.</li>
+    </ul>
+
+    <h2 id="home">Depuis une maison derrière un NAT (10 octobre)</h2>
+    <p>Les essais ci-dessus se font entre des centres de données avec des adresses publiques. Ceux-ci viennent d’une maison : un PC de bureau sur une connexion grand public de 100 Mbit/s derrière le NAT de son routeur, avec Varsto installé comme l’installe un utilisateur (le paquet Linux, un service en arrière-plan de l’utilisateur). Deux machines cloud l’ont rejoint : l’une à Amsterdam avec une adresse publique, l’autre à Varsovie hébergeant deux appareils dans des espaces de noms réseau derrière un NAT, l’un derrière un NAT à cône (le MASQUERADE de Linux conserve le port) et l’autre derrière un NAT symétrique (MASQUERADE avec ports aléatoires, qui met en échec le perçage). Comme ci-dessus, le bucket à Paris ne contenait que le registre et les listes de fichiers : avant chaque récupération, ses blocs étaient supprimés, si bien que chaque bloc devait venir d’un pair, et chaque fichier était contrôlé par son SHA-256. Le programme de mesure est <code>scripts/nat-test/home-nat.py</code>.</p>
+    <h3>La ligne</h3>
+    <table class="downloads bench-table">
+      <thead><tr><th>PC domestique et</th><th>Aller-retour</th><th>TCP, un flux, vers la maison</th><th>TCP, un flux, depuis la maison</th></tr></thead>
+      <tbody>
+        <tr><td>Amsterdam</td><td>31 ms</td><td>9.1 MB/s</td><td>12.1 MB/s</td></tr>
+        <tr><td>Varsovie</td><td>21 ms</td><td>10.6 MB/s</td><td>11.9 MB/s</td></tr>
+        <tr><td>Le bucket (Paris), rclone, 256 Mio</td><td>–</td><td>7.5 MB/s</td><td>4.3 MB/s</td></tr>
+      </tbody>
+    </table>
+    <p>100 Mbit/s font 12.5 MB/s au maximum, c’est donc le plafond de tout ce qui passe sur cette ligne.</p>
+    <h3>À travers les NAT</h3>
+    <p>STUN a classé le routeur domestique comme un NAT à cône. Chaque transfert déplaçait un fichier de 64 Mio d’octets aléatoires ; à cette taille, le coût fixe d’une synchronisation (registre et liste de fichiers dans le bucket) représente une grande part de la durée.</p>
+    <table class="downloads bench-table">
+      <thead><tr><th>De</th><th>Vers</th><th>Chemin utilisé par le récepteur</th><th>Durée</th><th>Vitesse</th></tr></thead>
+      <tbody>
+        <tr><td>Maison</td><td>Amsterdam (public)</td><td>direct, vers le NAT domestique</td><td>12.2 s</td><td>5.5 MB/s</td></tr>
+        <tr><td>Amsterdam</td><td>Maison</td><td>direct</td><td>14.3 s</td><td>4.7 MB/s</td></tr>
+        <tr><td>Varsovie, NAT à cône</td><td>Maison</td><td>direct, de NAT à NAT (perçage)</td><td>13.3 s</td><td>5.0 MB/s</td></tr>
+        <tr><td>Maison</td><td>Varsovie, NAT à cône</td><td>direct, de NAT à NAT</td><td>14.5 s</td><td>4.6 MB/s</td></tr>
+        <tr><td>Varsovie, NAT symétrique</td><td>Maison</td><td>relayé par Amsterdam</td><td>65.7 s</td><td>1.0 MB/s</td></tr>
+        <tr><td>Maison</td><td>Varsovie, NAT symétrique</td><td>relayé par Amsterdam</td><td>65.3 s</td><td>1.0 MB/s</td></tr>
+      </tbody>
+    </table>
+    <p>Chaque chemin a fonctionné comme le prévoit la conception : direct là où un NAT conserve son mappage, un relais par l’un des appareils joignables de l’utilisateur là où il ne le conserve pas. Aucun serveur d’éditeur n’est intervenu ; les appareils se sont trouvés grâce à des enregistrements dans le bucket et à des serveurs STUN publics.</p>
+    <figure class="shot"><img class="shot-light" src="../../assets/img/benchmarks/home-traffic-light.png?v=deb42d53b0" alt="La carte Traffic de Varsto sur le PC domestique : des lignes de cet appareil vers waw-cone (direct), ams (direct) et waw-sym (via ams), un tableau avec le chemin, l’adresse, les débits et les totaux de chaque appareil, et en haut à droite la courbe d’un téléchargement qui vient de se terminer." width="976" height="553" loading="lazy"><img class="shot-dark" src="../../assets/img/benchmarks/home-traffic-dark.png?v=5eeaef02bb" alt="La même carte Traffic en mode sombre." width="976" height="553" loading="lazy"><figcaption>La carte Traffic du PC domestique quelques secondes après un téléchargement de 512 Mio depuis l’appareil à NAT à cône de Varsovie (la courbe en haut à droite) : Varsovie et Amsterdam joints directement, l’appareil à NAT symétrique via Amsterdam.</figcaption></figure>
+    <h3>Gros fichiers</h3>
+    <p>Un fichier de 512 Mio d’octets aléatoires par transfert, en pair à pair seulement. La première colonne est la version alpha.9 (publiée avec alpha.10) avec la correction du relais ci-dessous ; la seconde y ajoute les changements de téléchargement du même jour (connexions gardées ouvertes par pair, objets envoyés sans être recompressés, fenêtre qui s’adapte entre 8 et 32 blocs).</p>
+    <table class="downloads bench-table">
+      <thead><tr><th>Transfert</th><th>Avant les changements</th><th>Avec les changements</th><th>Part d’un flux TCP</th><th>Part de 100 Mbit/s</th></tr></thead>
+      <tbody>
+        <tr><td>Amsterdam → maison</td><td>4.7 MB/s</td><td>8.0 MB/s</td><td>88 %</td><td>64 %</td></tr>
+        <tr><td>Varsovie (NAT à cône) → maison</td><td>6.9 MB/s</td><td>9.3 MB/s</td><td>88 %</td><td>74 %</td></tr>
+        <tr><td>Maison → Amsterdam</td><td>8.7 MB/s</td><td>9.3 MB/s</td><td>77 %</td><td>74 %</td></tr>
+        <tr><td>Maison → Varsovie (NAT à cône)</td><td>–</td><td>8.6 MB/s</td><td>72 %</td><td>69 %</td></tr>
+      </tbody>
+    </table>
+    <h3>Le même téléchargement depuis le bucket</h3>
+    <p>Un second appareil sur le PC domestique, avec le pair à pair désactivé, a récupéré un fichier de 512 Mio qu’un serveur venait d’envoyer vers le bucket, par la même ligne.</p>
+    <table class="downloads bench-table">
+      <thead><tr><th>Écrit par</th><th>Depuis le bucket</th><th>Pair à pair (ci-dessus)</th><th>Le pair à pair était</th></tr></thead>
+      <tbody>
+        <tr><td>Amsterdam</td><td>6.1 MB/s</td><td>8.0 MB/s</td><td>1.3 fois plus rapide</td></tr>
+        <tr><td>Varsovie (NAT à cône)</td><td>5.2 MB/s</td><td>9.3 MB/s</td><td>1.8 fois plus rapide</td></tr>
+      </tbody>
+    </table>
+    <p>Entre centres de données, le bucket peut suivre, parce que le bucket et les machines se trouvent sur la même dorsale rapide. Depuis une maison, le bucket est un saut lointain de plus avec son propre coût par requête, alors qu’un pair envoie directement le long de la ligne.</p>
+    <h3>Trouvé et corrigé</h3>
+    <ul>
+      <li><strong>Le relais ne pouvait pas joindre l’appareil pour lequel il relaie.</strong> Un appareil derrière un NAT symétrique garde une connexion ouverte avec un appareil joignable du coffre, et les autres appareils l’atteignent par ce relais. Le relais lui-même n’avait aucune route vers lui : il ne relayait pas par lui-même et continuait à composer des adresses que rien ne peut joindre. Il le sollicite désormais par la connexion que l’appareil entretient avec lui.</li>
+      <li><strong>Des téléchargements pair à pair proches de la vitesse de la ligne.</strong> Les changements ci-dessus ont à peu près doublé le téléchargement d’Amsterdam vers la maison (4.7 à 8.0 MB/s).</li>
+    </ul>
+    <h3>Toujours lent</h3>
+    <ul>
+      <li><strong>Le chemin relayé</strong> n’a transporté que 1 à 1.6 MB/s : chaque bloc voyage comme sa propre requête sur deux sauts, de la maison à Amsterdam puis à Varsovie et retour. C’est le repli pour les NAT les plus difficiles, mais il devrait quand même remplir davantage de la ligne.</li>
+      <li><strong>Les petits transferts</strong> paient un coût fixe pour le registre et la liste de fichiers dans le bucket : 64 Mio ont pris 12 à 15 s là où les octets seuls en demandent environ 7.</li>
+      <li><strong>L’interface du service</strong> pouvait attendre des minutes une réponse pendant qu’une synchronisation tournait et réessayait un pair injoignable ; les appels d’état ne devraient pas attendre la synchronisation.</li>
+    </ul>
+    <p class="note">Limites : une connexion domestique, un après-midi, un essai par cas (une répétition de Varsovie vers la maison pendant la capture d’écran a tourné à 5.2 MB/s, avec Amsterdam brièvement injoignable) ; les NAT de Varsovie sont ceux de Linux, pas ceux de routeurs grand public ; les serveurs étaient petits (Scaleway DEV1-M).</p>
+
+    <h2 id="done">Ce qui a été mesuré</h2>
+    <table class="downloads bench-table">
+      <thead><tr><th>Jeu de données</th><th>Depuis le bucket (S3)</th><th>Pair à pair</th></tr></thead>
+      <tbody>
+        <tr><td>Gros fichiers (2 × 2 Gio)</td><td>Amsterdam, Varsovie, les deux à la fois (9 oct.)</td><td>Amsterdam, Varsovie (9 oct.) ; les deux à la fois (10 oct.)</td></tr>
+        <tr><td>Beaucoup de petits fichiers (10 000)</td><td>Amsterdam, Varsovie, les deux à la fois (10 oct. ; les essais du 9 oct. sont conservés sous « avant la récupération à l’avance »)</td><td>Amsterdam, Varsovie, les deux à la fois (10 oct.)</td></tr>
+        <tr><td>Texte compressible (512 Mio)</td><td>Amsterdam, Varsovie (9 oct.) ; les deux à la fois (10 oct.)</td><td>Amsterdam, Varsovie, les deux à la fois (10 oct.)</td></tr>
+        <tr><td>L’envoi du rédacteur</td><td>2 essais par jeu, un chaque jour</td><td>Disque en RAM : 2 essais par jeu ; disque local : 1 essai par jeu</td></tr>
+      </tbody>
+    </table>
+    <p>Deux essais par cas ; les durées des tableaux en sont la médiane (la moyenne de deux), avec les deux essais à côté. Les essais uniques le disent. Entre les deux jours, le code de téléchargement n’a changé que de façons qui ne touchent pas le cas comparé : les essais de gros fichiers et de texte du 9 octobre récupèrent les blocs à l’intérieur d’un fichier exactement comme la version du 10 octobre, et les essais du bucket avec beaucoup de petits fichiers ont été répétés le 10 octobre parce que la récupération à l’avance d’un fichier à l’autre est nouvelle. Les deux derniers cas, le texte compressible en pair à pair et beaucoup de petits fichiers depuis le bucket, chacun avec les deux lecteurs à la fois, ont été exécutés trois heures après les autres sur des machines neuves avec la version fusionnée ; le bucket était nettement plus rapide durant cette session que durant la précédente.</p>
+
+    <h2 id="setup">Installation et référence</h2>
+    <ul>
+      <li><strong>Machines :</strong> trois instances Scaleway POP2-4C-16G (4 vCPU AMD EPYC 7543, 16 Go de RAM, volume bloc réseau de 80 Go, Ubuntu 24.04), créées neuves chaque jour : le rédacteur à Paris (fr-par-1), les lecteurs à Amsterdam (nl-ams-1) et à Varsovie (pl-waw-1). Chaque machine avait une adresse IPv4 publique sur sa propre interface, il n’y avait donc aucun NAT entre elles.</li>
+      <li><strong>Bucket :</strong> un bucket Scaleway Object Storage temporaire à Paris (fr-par), la région du rédacteur. Les lecteurs d’Amsterdam et de Varsovie le lisent à travers les frontières.</li>
+      <li><strong>Varsto :</strong> 0.0.1-alpha.8 avec les corrections listées plus bas, un build Linux statique (musl). 9 octobre : commits jusqu’à <code>37bee19</code> (essais du bucket : <code>0180ca8</code>, qui ne diffère que par le serveur pair à pair et l’observateur de fichiers). 10 octobre : commit <code>9b93263</code> pour les essais en pair à pair ; les essais du bucket de ce jour-là, plus tôt, ont utilisé <code>a3ba1c0</code>, qui ne diffère que par l’ordre des routes pair à pair ; les deux cas exécutés en dernier ont utilisé la version fusionnée <code>dc09721</code>, le même code que <code>9b93263</code> pour ces essais.</li>
+      <li><strong>Un essai :</strong> un nouvel appareil rejoint le coffre avec la clé du coffre, démarre le service en arrière-plan, le met en pause, rattache un dossier vide et demande au service une synchronisation de ce dossier (<code>POST /api/sync</code>). La durée va de cette requête à sa réponse : la liste de fichiers est lue, chaque bloc est récupéré, contrôlé par son empreinte, déchiffré, contrôlé par l’identifiant du morceau et écrit. Ensuite, le programme de mesure compare une liste SHA-256 du dossier avec celle du rédacteur. Puis l’appareil est de nouveau retiré. La vérification automatique a été désactivée sur tous les appareils du benchmark, parce qu’elle télécharge et répare des blocs en arrière-plan.</li>
+    </ul>
+    <h3>Référence réseau</h3>
+    <table class="downloads bench-table">
+      <thead><tr><th>Entre</th><th>Aller-retour (ping)</th><th>TCP, un flux (iperf3, Paris envoie), 9 / 10 oct.</th><th>TCP, quatre flux</th></tr></thead>
+      <tbody>
+        <tr><td>Paris – Amsterdam</td><td>9.4 ms</td><td>925 / 958 Mbit/s</td><td>875 / 836 Mbit/s</td></tr>
+        <tr><td>Paris – Varsovie</td><td>33.4 ms</td><td>738 / 777 Mbit/s</td><td>949 / 909 Mbit/s</td></tr>
+        <tr><td>Amsterdam – Varsovie</td><td>20.6 ms</td><td>–</td><td>–</td></tr>
+      </tbody>
+    </table>
+    <table class="downloads bench-table">
+      <thead><tr><th>Lecteur</th><th>S3 : un objet de 256 Mio, un flux (rclone), 9 / 10 oct.</th><th>S3 : objets de 4 Kio l’un après l’autre, 9 / 10 oct.</th></tr></thead>
+      <tbody>
+        <tr><td>Paris</td><td>91 / 59 MB/s</td><td>7 / 45 ms chacun</td></tr>
+        <tr><td>Amsterdam</td><td>26 / 21 MB/s</td><td>16 / 107 ms chacun</td></tr>
+        <tr><td>Varsovie</td><td>52 / 15 MB/s</td><td>52 / 122 ms chacun</td></tr>
+      </tbody>
+    </table>
+    <p class="note">Les liens entre les machines ont transporté de 700 à 950 Mbit/s (90 à 120 MB/s) dans un seul flux TCP, et aucun des transferts de Varsto n’en a approché : tous étaient limités par les allers-retours et le travail par requête. La vitesse propre du bucket a beaucoup varié d’un jour à l’autre (la seconde mesure a été prise tôt le matin) ; ses essais ont varié davantage que les essais en pair à pair tout du long.</p>
+    <h3>Jeux de données</h3>
+    <ul>
+      <li><strong>Gros fichiers :</strong> deux fichiers de 2 Gio d’octets aléatoires (incompressibles), 4 Gio en tout, environ 13 400 blocs.</li>
+      <li><strong>Beaucoup de petits fichiers :</strong> 10 000 fichiers dans 500 répertoires, tailles tirées d’une loi log-normale de médiane 16 Kio, ramenées à 1 Kio…256 Kio, un fichier sur vingt étant la copie d’un autre ; 281 Mio en tout. Un jeu de 50 000 fichiers de même forme a été envoyé, pas téléchargé.</li>
+      <li><strong>Texte compressible :</strong> 128 fichiers de 4 Mio de lignes de journal de serveur web générées, 512 Mio en tout ; zstd les stocke en 138 Mio.</li>
+    </ul>
+
+    <h2 id="p2p-only">Ce que signifie « pair à pair seulement »</h2>
+    <p>Varsto interroge d’abord les pairs puis les stockages, donc une mesure en pair à pair doit s’assurer que le bucket ne peut pas aider. Une fois que le rédacteur avait envoyé et que les essais du bucket étaient terminés, chaque objet sous <code>chunks/</code> a été supprimé du bucket. Le bucket gardait ce dont les appareils ont besoin pour se trouver et savoir ce qui existe (registre signé, listes de fichiers, enregistrements d’appareils et de pairs), mais aucun contenu de fichier : un bloc qu’aucun pair n’aurait pu livrer aurait rendu le fichier indisponible. Ensuite :</p>
+    <ul>
+      <li>le rapport de récupération de chaque essai comptait les blocs venus de pairs et les blocs au total, et le programme de mesure faisait échouer tout essai où les deux différaient ;</li>
+      <li>les compteurs de trafic des lecteurs (<code>/api/p2p/traffic</code>) et ceux du rédacteur concordaient : avec un seul lecteur, le lecteur a reçu de <code>writer-paris</code> exactement la taille stockée du jeu de données et le rédacteur a envoyé la même chose ; avec deux lecteurs, ce que chacun a reçu de Paris et de l’autre lecteur faisait au total la taille stockée, et l’appareil de Paris a envoyé le reste ;</li>
+      <li>le chemin était <strong>direct</strong> à chaque essai, en TCP vers l’adresse publique du rédacteur sur le port 17893 (le journal du service nomme la route retenue), et entre les deux lecteurs dans les essais à la fois. Aucun relais n’est intervenu ; un chemin par réseau local était impossible entre trois pays.</li>
+    </ul>
+<!-- fragment: verify -->
+<table class="downloads bench-table"><tbody><tr><th>Essai</th><th>Morceaux téléchargés</th><th>De pairs</th><th>De S3</th><th>Chemin</th></tr><tr><td>files, Amsterdam, seul (×2)</td><td>20 240</td><td>20 240</td><td>0</td><td>writer-paris : direct</td></tr><tr><td>files, Amsterdam, les deux à la fois (×2)</td><td>20 240</td><td>20 240</td><td>0</td><td>waw-p2p-files-ams+waw-1 : direct, writer-paris : direct</td></tr><tr><td>files, Varsovie, les deux à la fois (×2)</td><td>20 240</td><td>20 240</td><td>0</td><td> : direct, ams-p2p-files-ams+waw-2 : , writer-paris : direct</td></tr><tr><td>files, Varsovie, seul (×2)</td><td>20 240</td><td>20 240</td><td>0</td><td>writer-paris : direct</td></tr><tr><td>large, Amsterdam, seul (×2)</td><td>26 946</td><td>26 946</td><td>0</td><td>writer-paris : direct</td></tr><tr><td>large, Amsterdam, les deux à la fois (×2)</td><td>26 758</td><td>26 758</td><td>0</td><td> : direct, writer-paris : direct</td></tr><tr><td>large, Varsovie, les deux à la fois (×2)</td><td>26 758</td><td>26 758</td><td>0</td><td>ams-p2p-large-ams+waw-1 : direct, ams-p2p-large-ams+waw-2 : direct, writer-paris : direct</td></tr><tr><td>large, Varsovie, seul (×2)</td><td>26 946</td><td>26 946</td><td>0</td><td>writer-paris : direct</td></tr><tr><td>text, Amsterdam, seul (×2)</td><td>3 544</td><td>3 544</td><td>0</td><td>writer-paris : direct</td></tr><tr><td>text, Amsterdam, les deux à la fois (×2)</td><td>3 544</td><td>3 544</td><td>0</td><td> : direct, writer-paris : direct</td></tr><tr><td>text, Varsovie, les deux à la fois (×2)</td><td>3 544</td><td>3 544</td><td>0</td><td>ams-p2p-text-ams+waw-1 : direct, writer-paris : direct</td></tr><tr><td>text, Varsovie, seul (×2)</td><td>3 544</td><td>3 544</td><td>0</td><td>writer-paris : direct</td></tr></tbody></table>
+<!-- /fragment -->
+
+    <h2 id="large">Gros fichiers</h2>
+    <p>4 Gio en deux fichiers, contenu aléatoire, donc zstd les stocke tels quels.</p>
+<!-- fragment: large -->
+<p class="bench-legend"><span class="bench-key bench-p2p-key"></span>Pair à pair (depuis le rédacteur à Paris) <span class="bench-key bench-s3-key"></span>Bucket S3 à Paris <span class="note">(MB/s, plus c’est élevé, mieux c’est)</span></p>
+<svg class="bench-chart" viewBox="0 0 620 188" role="img" aria-label="large : MB/s par lecteur, pair à pair et S3">
+<text class="bench-label" x="162" y="20" text-anchor="end">Amsterdam, seul</text>
+<rect class="bench-p2p" x="170" y="4" width="215" height="14" rx="3"><title>Amsterdam, seul, pair à pair : 27.0 MB/s</title></rect>
+<text class="bench-value" x="391" y="15">27.0</text>
+<rect class="bench-s3" x="170" y="21" width="190" height="14" rx="3"><title>Amsterdam, seul, bucket S3 : 23.9 MB/s</title></rect>
+<text class="bench-value" x="366" y="32">23.9</text>
+<text class="bench-label" x="162" y="68" text-anchor="end">Varsovie, seul</text>
+<rect class="bench-p2p" x="170" y="52" width="81" height="14" rx="3"><title>Varsovie, seul, pair à pair : 10.2 MB/s</title></rect>
+<text class="bench-value" x="257" y="63">10.2</text>
+<rect class="bench-s3" x="170" y="69" width="186" height="14" rx="3"><title>Varsovie, seul, bucket S3 : 23.4 MB/s</title></rect>
+<text class="bench-value" x="362" y="80">23.4</text>
+<text class="bench-label" x="162" y="116" text-anchor="end">Amsterdam, les deux à la fois</text>
+<rect class="bench-p2p" x="170" y="100" width="212" height="14" rx="3"><title>Amsterdam, les deux à la fois, pair à pair : 26.6 MB/s</title></rect>
+<text class="bench-value" x="388" y="111">26.6</text>
+<rect class="bench-s3" x="170" y="117" width="360" height="14" rx="3"><title>Amsterdam, les deux à la fois, bucket S3 : 45.2 MB/s</title></rect>
+<text class="bench-value" x="536" y="128">45.2</text>
+<text class="bench-label" x="162" y="164" text-anchor="end">Varsovie, les deux à la fois</text>
+<rect class="bench-p2p" x="170" y="148" width="94" height="14" rx="3"><title>Varsovie, les deux à la fois, pair à pair : 11.8 MB/s</title></rect>
+<text class="bench-value" x="270" y="159">11.8</text>
+<rect class="bench-s3" x="170" y="165" width="166" height="14" rx="3"><title>Varsovie, les deux à la fois, bucket S3 : 20.9 MB/s</title></rect>
+<text class="bench-value" x="342" y="176">20.9</text>
+<line class="bench-axis" x1="170" y1="0" x2="170" y2="188"/>
+</svg>
+<table class="downloads bench-table"><thead><tr><th>Lecteur</th><th>Pair à pair : durée</th><th>MB/s</th><th>S3 : durée</th><th>MB/s</th><th>P2P face à S3</th></tr></thead><tbody><tr><td>Amsterdam, seul</td><td>159 s <span class="note">(158 s / 161 s)</span></td><td>27.0</td><td>180 s <span class="note">(171 s / 190 s)</span></td><td>23.9</td><td>1.1× plus rapide</td></tr><tr><td>Varsovie, seul</td><td>423 s <span class="note">(420 s / 426 s)</span></td><td>10.2</td><td>190 s <span class="note">(155 s / 226 s)</span></td><td>23.4</td><td>2.2× plus lent</td></tr><tr><td>Amsterdam, les deux à la fois</td><td>162 s <span class="note">(162 s / 161 s)</span></td><td>26.6</td><td>95 s <span class="note">(90 s / 101 s)</span></td><td>45.2</td><td>1.7× plus lent</td></tr><tr><td>Varsovie, les deux à la fois</td><td>365 s <span class="note">(367 s / 362 s)</span></td><td>11.8</td><td>208 s <span class="note">(185 s / 232 s)</span></td><td>20.9</td><td>1.8× plus lent</td></tr></tbody></table>
+<table class="downloads bench-table"><thead><tr><th>Version</th><th>Lecteur</th><th>Durée</th><th>MB/s</th></tr></thead><tbody><tr><td>Pair à pair avec QUIC essayé avant TCP (une connexion par pair), 10 octobre</td><td>Amsterdam, seul</td><td>230 s <span class="note">(229 s / 230 s)</span></td><td>18.7</td></tr><tr><td>Pair à pair avec QUIC essayé avant TCP (une connexion par pair), 10 octobre</td><td>Varsovie, seul</td><td>466 s <span class="note">(466 s)</span></td><td>9.2</td></tr></tbody></table>
+<!-- /fragment -->
+    <p>Vers Amsterdam, à neuf millisecondes, le pair à pair a battu le bucket de peu et s’est montré bien plus régulier : chaque essai en pair à pair a pris de 158 s à 162 s, contre 171 s et 190 s pour le bucket. Vers Varsovie, le bucket était plus de deux fois plus rapide. Chaque bloc d’environ 300 Kio est une requête HTTP sur une nouvelle connexion TCP : une poignée de main, puis le démarrage lent de TCP à partir de dix paquets, si bien qu’un bloc demande plusieurs allers-retours quelle que soit la vitesse du lien. À 33 ms, cela plafonne huit requêtes en vol à environ 10 MB/s, ce qui est exactement ce qui a été mesuré. Les connexions HTTPS du bucket sont gardées ouvertes entre les requêtes.</p>
+    <p>Avec les deux lecteurs à la fois, Varsovie a pris 2.97 Go de ses 4.30 Go chez Amsterdam (à 20 ms, plus près que Paris) et seulement 1.3 Go chez Paris ; Amsterdam, qui avait les blocs en premier, les a servis pendant qu’il téléchargeait. Varsovie a même été un peu plus rapide que seul (11.8 contre 10.2 MB/s) et Amsterdam aussi rapide que seul. Le bucket a lui aussi servi deux lecteurs à la fois sans ralentir aucun des deux (45 et 21 MB/s) ; c’est une infrastructure partagée conçue pour de nombreux lecteurs.</p>
+    <p class="note">Le travail du lecteur lui-même : environ 40 s de temps CPU pour 4 Gio (déchiffrement, deux empreintes par bloc, écriture), au plus 490 Mo de mémoire. L’appareil de Paris a utilisé 40 s de temps CPU pour servir chaque 4 Gio, un cœur occupé à environ un quart.</p>
+
+    <h2 id="files">Beaucoup de petits fichiers</h2>
+    <p>10 000 fichiers de 1 Kio à 256 Kio. Chaque fichier est un bloc. Depuis le 10 octobre, une récupération prend ensemble les blocs de jusqu’à 32 fichiers à venir, huit requêtes à la fois, avant de les écrire un par un.</p>
+<!-- fragment: files -->
+<p class="bench-legend"><span class="bench-key bench-p2p-key"></span>Pair à pair (depuis le rédacteur à Paris) <span class="bench-key bench-s3-key"></span>Bucket S3 à Paris <span class="note">(fichiers/s, plus c’est élevé, mieux c’est)</span></p>
+<svg class="bench-chart" viewBox="0 0 620 188" role="img" aria-label="files : fichiers/s par lecteur, pair à pair et S3">
+<text class="bench-label" x="162" y="20" text-anchor="end">Amsterdam, seul</text>
+<rect class="bench-p2p" x="170" y="4" width="360" height="14" rx="3"><title>Amsterdam, seul, pair à pair : 90.2 fichiers/s</title></rect>
+<text class="bench-value" x="536" y="15">90.2</text>
+<rect class="bench-s3" x="170" y="21" width="135" height="14" rx="3"><title>Amsterdam, seul, bucket S3 : 33.7 fichiers/s</title></rect>
+<text class="bench-value" x="311" y="32">33.7</text>
+<text class="bench-label" x="162" y="68" text-anchor="end">Varsovie, seul</text>
+<rect class="bench-p2p" x="170" y="52" width="153" height="14" rx="3"><title>Varsovie, seul, pair à pair : 38.4 fichiers/s</title></rect>
+<text class="bench-value" x="329" y="63">38.4</text>
+<rect class="bench-s3" x="170" y="69" width="137" height="14" rx="3"><title>Varsovie, seul, bucket S3 : 34.2 fichiers/s</title></rect>
+<text class="bench-value" x="313" y="80">34.2</text>
+<text class="bench-label" x="162" y="116" text-anchor="end">Amsterdam, les deux à la fois</text>
+<rect class="bench-p2p" x="170" y="100" width="281" height="14" rx="3"><title>Amsterdam, les deux à la fois, pair à pair : 70.3 fichiers/s</title></rect>
+<text class="bench-value" x="457" y="111">70.3</text>
+<rect class="bench-s3" x="170" y="117" width="258" height="14" rx="3"><title>Amsterdam, les deux à la fois, bucket S3 : 64.7 fichiers/s</title></rect>
+<text class="bench-value" x="434" y="128">64.7</text>
+<text class="bench-label" x="162" y="164" text-anchor="end">Varsovie, les deux à la fois</text>
+<rect class="bench-p2p" x="170" y="148" width="154" height="14" rx="3"><title>Varsovie, les deux à la fois, pair à pair : 38.6 fichiers/s</title></rect>
+<text class="bench-value" x="330" y="159">38.6</text>
+<rect class="bench-s3" x="170" y="165" width="213" height="14" rx="3"><title>Varsovie, les deux à la fois, bucket S3 : 53.5 fichiers/s</title></rect>
+<text class="bench-value" x="389" y="176">53.5</text>
+<line class="bench-axis" x1="170" y1="0" x2="170" y2="188"/>
+</svg>
+<table class="downloads bench-table"><thead><tr><th>Lecteur</th><th>Pair à pair : durée</th><th>MB/s</th><th>fichiers/s</th><th>S3 : durée</th><th>MB/s</th><th>fichiers/s</th><th>P2P face à S3</th></tr></thead><tbody><tr><td>Amsterdam, seul</td><td>111 s <span class="note">(111 s / 111 s)</span></td><td>2.6</td><td>90.2</td><td>299 s <span class="note">(323 s / 274 s)</span></td><td>1.0</td><td>33.7</td><td>2.7× plus rapide</td></tr><tr><td>Varsovie, seul</td><td>260 s <span class="note">(258 s / 263 s)</span></td><td>1.1</td><td>38.4</td><td>294 s <span class="note">(269 s / 320 s)</span></td><td>1.0</td><td>34.2</td><td>1.1× plus rapide</td></tr><tr><td>Amsterdam, les deux à la fois</td><td>156 s <span class="note">(202 s / 110 s)</span></td><td>2.1</td><td>70.3</td><td>156 s <span class="note">(142 s / 170 s)</span></td><td>1.9</td><td>64.7</td><td>1.0× plus rapide</td></tr><tr><td>Varsovie, les deux à la fois</td><td>259 s <span class="note">(265 s / 253 s)</span></td><td>1.1</td><td>38.6</td><td>192 s <span class="note">(161 s / 223 s)</span></td><td>1.6</td><td>53.5</td><td>1.3× plus lent</td></tr></tbody></table>
+<table class="downloads bench-table"><thead><tr><th>Version</th><th>Lecteur</th><th>Durée</th><th>MB/s</th><th>fichiers/s</th></tr></thead><tbody><tr><td>S3 avant la récupération à l’avance d’un fichier à l’autre (un fichier à la fois), 9 octobre</td><td>Amsterdam, seul</td><td>404 s <span class="note">(313 s / 495 s)</span></td><td>0.8</td><td>26.1</td></tr><tr><td>S3 avant la récupération à l’avance d’un fichier à l’autre (un fichier à la fois), 9 octobre</td><td>Amsterdam, les deux à la fois</td><td>381 s <span class="note">(381 s / 380 s)</span></td><td>0.8</td><td>26.2</td></tr><tr><td>S3 avant la récupération à l’avance d’un fichier à l’autre (un fichier à la fois), 9 octobre</td><td>Varsovie, les deux à la fois</td><td>528 s <span class="note">(494 s / 563 s)</span></td><td>0.6</td><td>19.1</td></tr><tr><td>S3 avant la récupération à l’avance d’un fichier à l’autre (un fichier à la fois), 9 octobre</td><td>Varsovie, seul</td><td>596 s <span class="note">(536 s / 655 s)</span></td><td>0.5</td><td>16.9</td></tr></tbody></table>
+<!-- /fragment -->
+    <p>Vers Amsterdam, le pair à pair a livré 90 fichiers par seconde, 2.7 fois les 34 du bucket. Vers Varsovie, trois fois et demie plus loin, les deux sont arrivés aux mêmes 34 à 38 fichiers par seconde : l’aller-retour par requête domine là, sur les deux chemins. La récupération à l’avance d’un fichier à l’autre a doublé la vitesse du bucket vers Varsovie (de 17 à 34 fichiers par seconde) et aidé vers Amsterdam (26 à 34). Une fois les blocs là, écrire chaque fichier (données synchronisées sur le disque, un renommage, des événements de registre) coûte quelques millisecondes sur ces volumes bloc réseau, ce qui plafonne toute source à quelques centaines de fichiers par seconde.</p>
+    <p>Avec les deux lecteurs à la fois, Varsovie était aussi rapide que seul et les deux essais d’Amsterdam différaient (202 s et 110 s) : les blocs des lecteurs sont récupérés chez le pair qui répond le premier, et un essai a attendu l’autre lecteur plus que l’autre essai. Le bucket, mesuré avec les deux lecteurs trois heures plus tard, a livré 64 fichiers par seconde à Amsterdam et 53 à Varsovie : presque le double de ce qu’il donnait aux lecteurs seuls dans la session précédente. Sa vitesse dépend plus de l’heure que du nombre de lecteurs.</p>
+
+    <h2 id="text">Texte compressible</h2>
+    <p>512 Mio de lignes de journal, stockées en 138 Mio. Moins d’octets circulent, un lecteur obtient donc plus de fichier par seconde qu’avec des données aléatoires.</p>
+<!-- fragment: text -->
+<p class="bench-legend"><span class="bench-key bench-p2p-key"></span>Pair à pair (depuis le rédacteur à Paris) <span class="bench-key bench-s3-key"></span>Bucket S3 à Paris <span class="note">(MB/s, plus c’est élevé, mieux c’est)</span></p>
+<svg class="bench-chart" viewBox="0 0 620 188" role="img" aria-label="text : MB/s par lecteur, pair à pair et S3">
+<text class="bench-label" x="162" y="20" text-anchor="end">Amsterdam, seul</text>
+<rect class="bench-p2p" x="170" y="4" width="327" height="14" rx="3"><title>Amsterdam, seul, pair à pair : 16.7 MB/s</title></rect>
+<text class="bench-value" x="503" y="15">16.7</text>
+<rect class="bench-s3" x="170" y="21" width="354" height="14" rx="3"><title>Amsterdam, seul, bucket S3 : 18.1 MB/s</title></rect>
+<text class="bench-value" x="530" y="32">18.1</text>
+<text class="bench-label" x="162" y="68" text-anchor="end">Varsovie, seul</text>
+<rect class="bench-p2p" x="170" y="52" width="142" height="14" rx="3"><title>Varsovie, seul, pair à pair : 7.2 MB/s</title></rect>
+<text class="bench-value" x="318" y="63">7.2</text>
+<rect class="bench-s3" x="170" y="69" width="327" height="14" rx="3"><title>Varsovie, seul, bucket S3 : 16.7 MB/s</title></rect>
+<text class="bench-value" x="503" y="80">16.7</text>
+<text class="bench-label" x="162" y="116" text-anchor="end">Amsterdam, les deux à la fois</text>
+<rect class="bench-p2p" x="170" y="100" width="332" height="14" rx="3"><title>Amsterdam, les deux à la fois, pair à pair : 16.9 MB/s</title></rect>
+<text class="bench-value" x="508" y="111">16.9</text>
+<rect class="bench-s3" x="170" y="117" width="360" height="14" rx="3"><title>Amsterdam, les deux à la fois, bucket S3 : 18.4 MB/s</title></rect>
+<text class="bench-value" x="536" y="128">18.4</text>
+<text class="bench-label" x="162" y="164" text-anchor="end">Varsovie, les deux à la fois</text>
+<rect class="bench-p2p" x="170" y="148" width="160" height="14" rx="3"><title>Varsovie, les deux à la fois, pair à pair : 8.1 MB/s</title></rect>
+<text class="bench-value" x="336" y="159">8.1</text>
+<rect class="bench-s3" x="170" y="165" width="241" height="14" rx="3"><title>Varsovie, les deux à la fois, bucket S3 : 12.3 MB/s</title></rect>
+<text class="bench-value" x="417" y="176">12.3</text>
+<line class="bench-axis" x1="170" y1="0" x2="170" y2="188"/>
+</svg>
+<table class="downloads bench-table"><thead><tr><th>Lecteur</th><th>Pair à pair : durée</th><th>MB/s</th><th>S3 : durée</th><th>MB/s</th><th>P2P face à S3</th></tr></thead><tbody><tr><td>Amsterdam, seul</td><td>32 s <span class="note">(33 s / 31 s)</span></td><td>16.7</td><td>36 s <span class="note">(21 s / 52 s)</span></td><td>18.1</td><td>1.1× plus rapide</td></tr><tr><td>Varsovie, seul</td><td>74 s <span class="note">(70 s / 79 s)</span></td><td>7.2</td><td>32 s <span class="note">(32 s / 32 s)</span></td><td>16.7</td><td>2.3× plus lent</td></tr><tr><td>Amsterdam, les deux à la fois</td><td>32 s <span class="note">(32 s / 31 s)</span></td><td>16.9</td><td>31 s <span class="note">(23 s / 39 s)</span></td><td>18.4</td><td>1.0× plus lent</td></tr><tr><td>Varsovie, les deux à la fois</td><td>66 s <span class="note">(63 s / 69 s)</span></td><td>8.1</td><td>63 s <span class="note">(28 s / 98 s)</span></td><td>12.3</td><td>1.0× plus lent</td></tr></tbody></table>
+
+<!-- /fragment -->
+    <p>Ici, le bucket était un peu plus rapide vers Amsterdam et plus de deux fois plus rapide vers Varsovie. Avec les deux lecteurs à la fois, le pair à pair a donné à Amsterdam les mêmes 16.9 MB/s que seul et à Varsovie 8.1 MB/s, un peu plus que seul ; lors du premier des deux essais, Varsovie a pris deux tiers de ses blocs chez Amsterdam, lors du second tout chez Paris. Un appareil qui sert un bloc ne garde pas la copie compressée : il lit le fichier en clair et recompresse le bloc, au niveau 12 de zstd, à chaque requête ; l’appareil de Paris a dépensé 31 s de temps CPU par 512 Mio servis, contre 40 s pour 4 Gio de données aléatoires. Le bucket renvoie l’objet stocké tel quel.</p>
+
+    <h2 id="writer">Le côté rédacteur</h2>
+    <p>Avant que quoi que ce soit puisse être téléchargé, le rédacteur découpe ses fichiers en blocs, les compresse, les chiffre et les stocke. Trois destinations montrent où part le temps : un disque en RAM (le seul travail de Varsto), le disque de la machine (un volume bloc réseau, où chaque objet est écrit avec une synchronisation sur le disque), et le bucket.</p>
+<!-- fragment: writer -->
+<table class="downloads bench-table"><tbody><tr><th>Jeu de données</th><th>Destination</th><th>Version</th><th>Durée</th><th>MB/s</th><th>CPU (utilisateur + système)</th><th>Mémoire maximale</th></tr><tr><td>files : 10 000 fichiers, 0.27 GiB</td><td>Disque en RAM (tmpfs)</td><td>version mesurée</td><td>50 s <span class="note">(médiane de 2)</span></td><td>5.9</td><td>12 s (5 + 7)</td><td>68 MiB</td></tr><tr><td>files : 10 000 fichiers, 0.27 GiB</td><td>Bucket S3, même région</td><td>version mesurée</td><td>652 s <span class="note">(médiane de 2)</span></td><td>0.5</td><td>21 s (8 + 13)</td><td>69 MiB</td></tr><tr><td>small : 50 000 fichiers, 1.36 GiB</td><td>Disque en RAM (tmpfs)</td><td>version mesurée</td><td>255 s <span class="note">(médiane de 2)</span></td><td>5.7</td><td>62 s (27 + 35)</td><td>258 MiB</td></tr><tr><td>small : 50 000 fichiers, 1.36 GiB</td><td>Disque local (volume bloc réseau)</td><td>version mesurée</td><td>468 s</td><td>3.1</td><td>67 s (27 + 41)</td><td>258 MiB</td></tr><tr><td>small : 50 000 fichiers, 1.36 GiB</td><td>Disque local (volume bloc réseau)</td><td>alpha.8 (avant la correction de zstd)</td><td>515 s</td><td>2.8</td><td>109 s (31 + 78)</td><td>253 MiB</td></tr><tr><td>large : 2 fichiers, 4.00 GiB</td><td>Bucket S3, même région</td><td>version mesurée</td><td>932 s <span class="note">(médiane de 2)</span></td><td>4.6</td><td>80 s (37 + 43)</td><td>108 MiB</td></tr><tr><td>big : 5 fichiers, 12.00 GiB</td><td>Disque local (volume bloc réseau)</td><td>version mesurée</td><td>418 s</td><td>30.9</td><td>197 s (85 + 112)</td><td>147 MiB</td></tr><tr><td>big : 5 fichiers, 12.00 GiB</td><td>Disque local (volume bloc réseau)</td><td>alpha.8 (avant la correction de zstd)</td><td>694 s</td><td>18.6</td><td>483 s (110 + 373)</td><td>137 MiB</td></tr><tr><td>text : 128 fichiers, 0.50 GiB</td><td>Disque en RAM (tmpfs)</td><td>version mesurée</td><td>45 s <span class="note">(médiane de 2)</span></td><td>12.0</td><td>44 s (41 + 2)</td><td>68 MiB</td></tr><tr><td>text : 128 fichiers, 0.50 GiB</td><td>Disque local (volume bloc réseau)</td><td>version mesurée</td><td>56 s</td><td>9.6</td><td>45 s (42 + 3)</td><td>68 MiB</td></tr><tr><td>text : 128 fichiers, 0.50 GiB</td><td>Disque local (volume bloc réseau)</td><td>alpha.8 (avant la correction de zstd)</td><td>68 s</td><td>7.9</td><td>56 s (43 + 13)</td><td>68 MiB</td></tr><tr><td>text : 128 fichiers, 0.50 GiB</td><td>Bucket S3, même région</td><td>version mesurée</td><td>145 s <span class="note">(médiane de 2)</span></td><td>3.7</td><td>45 s (41 + 4)</td><td>77 MiB</td></tr></tbody></table>
+<!-- /fragment -->
+    <ul>
+      <li>Les <strong>données aléatoires</strong> coûtent environ 16 s de CPU par Gio sur ces cœurs après la correction de zstd (12 Gio : 197 s), contre 40 s par Gio avant elle.</li>
+      <li>Le <strong>texte</strong> coûte environ 85 s de CPU par Gio : zstd au niveau 12, une constante du format, est lent sur des données compressibles ; il achète le rapport de 3.7 : 1 dont profite chaque transfert ultérieur.</li>
+      <li>Les <strong>petits fichiers</strong> ne sont pas limités par le CPU, même sur un disque en RAM : 10 000 fichiers ont pris 50 s, dont 12 s de CPU. L’horloge logique de l’appareil est écrite sur le disque, avec deux synchronisations, pour chaque fichier envoyé. Pas encore corrigé.</li>
+      <li><strong>Le bucket</strong> est de loin le plus lent : chaque bloc est un HEAD et un PUT, l’un après l’autre. 10 000 fichiers ont pris 622 s et 681 s, 4 Gio 578 s et 1 287 s sur les deux jours. Les envois ne sont pas encore parallèles.</li>
+    </ul>
+
+    <h2 id="fixes">Corrigé en chemin</h2>
+    <p>Le benchmark a aussi été une chasse aux goulots d’étranglement. Ces changements figurent dans les versions mesurées, chacun avec un test :</p>
+    <table class="downloads bench-table">
+      <thead><tr><th>Problème</th><th>Correction</th><th>Avant</th><th>Après</th></tr></thead>
+      <tbody>
+        <tr><td>Un téléchargement récupérait un bloc à la fois : chaque bloc attendait un aller-retour complet avant que le suivant ne soit demandé.</td><td>Jusqu’à huit blocs d’un fichier en vol à la fois, depuis des pairs ou des stockages, dans une fenêtre glissante ; ils sont toujours contrôlés et écrits dans l’ordre. Le client S3 garde assez de connexions inactives pour eux.</td><td>Texte du bucket vers Varsovie : 122 s (4.4 MB/s)</td><td>27.8 s (19.4 MB/s), 4.4 fois plus rapide (essais uniques ; étapes intermédiaires : lots fixes de huit 104 s, avec connexions inactives conservées 61 s)</td></tr>
+        <tr><td>Les petits fichiers passaient un par un : chaque fichier est un bloc, donc la fenêtre ci-dessus ne s’appliquait jamais.</td><td>Une récupération prend ensemble les blocs de jusqu’à 32 fichiers à bloc unique à venir (10 oct.).</td><td>10 000 fichiers du bucket vers Varsovie : 596 s (17 fichiers/s)</td><td>294 s (34 fichiers/s)</td></tr>
+        <tr><td>Le serveur HTTP pair à pair répondait à une requête à la fois, si bien que huit requêtes en vol faisaient la queue au serveur.</td><td>Huit requêtes traitées à la fois.</td><td>Gros fichiers en pair à pair vers Amsterdam : 363 s (11.8 MB/s), un essai</td><td>159 s (27.0 MB/s)</td></tr>
+        <tr><td>Un nouveau contexte zstd était créé pour chaque bloc ; ses tables étaient allouées et vidées à chaque fois, plus de travail que de compresser le bloc.</td><td>Un contexte par thread, réutilisé (la sortie est identique octet pour octet, ce que vérifie un test).</td><td>12 Gio vers le disque local : 694 s, 483 s de CPU</td><td>418 s, 197 s de CPU (essais uniques)</td></tr>
+        <tr><td>Le client S3 refusait toute réponse de plus de 10 Mio. Après l’envoi de quelques milliers de fichiers, le lot du registre faisait 13 Mo, et aucun autre appareil ne pouvait rejoindre ni se synchroniser.</td><td>Les réponses allant jusqu’à 2 Gio sont lues.</td><td>Rejoindre échouait</td><td>Rejoindre fonctionne ; test avec un objet de 12 Mio</td></tr>
+        <tr><td>Le service en arrière-plan traitait chaque fichier ouvert comme un changement : servir des blocs à des pairs, un outil de sauvegarde ou une visionneuse de fichiers lançait une synchronisation complète toutes les quelques secondes.</td><td>Ouvrir et lire ne sont pas des changements ; fermer un fichier ouvert en écriture en reste un.</td><td>90 synchronisations en 11 minutes pendant la lecture de fichiers</td><td>Lecture des 10 000 fichiers : aucune synchronisation supplémentaire</td></tr>
+        <tr><td>Des requêtes en vol ensemble ouvraient chacune leur propre connexion QUIC vers un pair avec lequel elles n’avaient pas encore de connexion.</td><td>Une tentative de connexion par adresse ; les autres attendent et la partagent (un test vérifie une seule connexion pour toute une récupération).</td><td colspan="2">Trouvé en testant QUIC (ci-dessous)</td></tr>
+        <tr><td>Une connexion QUIC conservée vers un pair qui avait redémarré faisait échouer chaque requête sur elle, et le pair passait définitivement à la route suivante.</td><td>Se reconnecter une fois et redemander.</td><td colspan="2">Trouvé en testant QUIC (ci-dessous)</td></tr>
+        <tr><td>Des requêtes qui se terminaient sur une ancienne route pouvaient défaire le passage à une meilleure route qu’une autre requête venait d’effectuer.</td><td>Une réponse tardive conserve la route actuelle.</td><td colspan="2">Trouvé en testant QUIC (ci-dessous)</td></tr>
+      </tbody>
+    </table>
+
+    <h2 id="quic">Essayé et annulé : QUIC d’abord</h2>
+    <p>Comme le chemin TCP ouvre une connexion par bloc, QUIC semblait le remède : Varsto parle déjà QUIC aux pairs derrière un NAT, avec une connexion par pair et un flux par requête. Le 10 octobre, l’ordre des routes a été changé pour essayer QUIC avant TCP pour les adresses hors du réseau local. C’était plus lent sur ces machines, et cela a utilisé plus de deux fois le temps CPU :</p>
+    <table class="downloads bench-table">
+      <thead><tr><th>Gros fichiers, pair à pair</th><th>TCP d’abord (conservé)</th><th>QUIC d’abord (annulé)</th></tr></thead>
+      <tbody>
+        <tr><td>Amsterdam</td><td>159 s, 27.0 MB/s ; lecteur 38 s de CPU, Paris 40 s</td><td>230 s, 18.7 MB/s (229 s / 230 s) ; lecteur 98 s de CPU, Paris 88 s</td></tr>
+        <tr><td>Varsovie</td><td>423 s, 10.2 MB/s</td><td>466 s, 9.2 MB/s (un essai) ; lecteur 130 s de CPU</td></tr>
+      </tbody>
+    </table>
+    <p>TCP reste donc en premier et QUIC reste le moyen de traverser les NAT. L’endroit où le chemin QUIC perd son temps n’a pas été trouvé dans le temps disponible ; l’hôte n’a perdu aucun paquet UDP. L’expérience a aussi révélé une lacune qui n’est pas encore corrigée : la table de pairs d’un appareil est construite avant qu’une synchronisation ne lise l’annuaire des appareils, si bien qu’un appareil qui vient de rejoindre est refusé en QUIC par ses pairs jusqu’à leur prochaine synchronisation (en TCP, il est servi immédiatement).</p>
+
+    <h2 id="bottlenecks">Toujours lent, et pourquoi</h2>
+    <ul>
+      <li><strong>Une connexion TCP par bloc sur le chemin pair à pair</strong> (les versions mesurées ici). Chaque requête payait une poignée de main et un nouveau démarrage lent, ce qui a limité Varsovie. <em>Changé depuis :</em> les connexions vers un pair sont désormais gardées ouvertes entre les requêtes, jusqu’à 32 requêtes sont en vol, la fenêtre suit le débit mesuré, et les blocs stockés sans compression ne sont plus recompressés lorsqu’ils sont servis. Sur une machine avec un espace de noms réseau émulant un aller-retour de 32 ms (Paris–Varsovie) à 800 Mbit/s, qui transportait 62 MB/s dans un flux TCP et 81 MB/s dans 16, le pair à pair est passé de 10.4 à 44.7 MB/s pour des données incompressibles et de 11.3 à 38.6 MB/s pour du texte, et le bucket (servi par <code>rclone serve s3</code> sur le même lien) de 41.5 à 45.5 et de 39.1 à 52.8 MB/s (moyennes de deux essais). Ce sont des mesures locales, pas une répétition des essais ci-dessus ; le programme de mesure est <code>scripts/bench/netem-local.sh</code>.</li>
+      <li><strong>Servir des données compressibles coûte du CPU,</strong> parce que chaque requête recompresse le bloc ; c’est pourquoi le texte en pair à pair reste sous le bucket dans l’émulation. Les blocs compressés pour un pair sont désormais gardés en mémoire (64 Mio par défaut) pour le prochain appareil qui les demande, comme lorsque plusieurs appareils se mettent à jour en même temps.</li>
+      <li><strong>Un téléchargement avec le pair à pair activé utilise désormais aussi le bucket</strong> lorsqu’il répond plus vite, proportionnellement à sa vitesse. Dans l’émulation, les deux partageaient un seul lien, donc utiliser les deux n’était pas plus rapide que l’un ou l’autre seul (44.4 MB/s pour les deux jeux de données) ; sur de vrais réseaux, les deux chemins diffèrent.</li>
+      <li><strong>Écrire beaucoup de petits fichiers</strong> coûte une synchronisation disque par fichier chez le lecteur, et chez le rédacteur deux synchronisations par fichier pour l’horloge logique.</li>
+      <li><strong>Les envois vers un bucket se font un bloc à la fois,</strong> avec un HEAD avant chaque PUT.</li>
+      <li><strong>Le registre grossit d’environ 1 Ko par bloc :</strong> envoyer le jeu de 4 Gio a écrit un lot de registre de 13 Mo, que chaque appareil lit en rejoignant.</li>
+    </ul>
+
+    <h2 id="when">Quand le pair à pair gagne, et quand c’est le bucket</h2>
+    <p>Varsto utilise les deux exprès, et les mesures montrent pourquoi.</p>
+    <ul>
+      <li><strong>Le pair à pair a besoin d’un pair en ligne.</strong> Les lecteurs n’ont pu récupérer que parce qu’un appareil qui avait les blocs était en marche. Le bucket est toujours là : un portable fermé, un téléphone dans un tiroir, des appareils qui ne sont jamais en ligne en même temps se synchronisent tous quand même par lui. C’est pourquoi un coffre a toujours au moins un stockage, et pourquoi les listes de fichiers et le registre y restent.</li>
+      <li><strong>Pour des appareils proches, le pair à pair gagne :</strong> 2.7 fois plus rapide pour beaucoup de petits fichiers vers Amsterdam que le bucket dans la même session (dans une session ultérieure, le bucket s’en est approché), un peu plus rapide et bien plus régulier pour les gros fichiers. Sur un réseau local, l’aller-retour est une fraction de milliseconde.</li>
+      <li><strong>Les appareils qui ont déjà les données les partagent.</strong> Avec deux lecteurs, Varsovie a pris la plupart de ses blocs chez Amsterdam ; le premier appareil à se synchroniser devient une source pour le suivant, et l’envoi du rédacteur est épargné.</li>
+      <li><strong>Pour des appareils éloignés et des données compressibles, le bucket a gagné</strong> sur ces liens : gros fichiers et texte vers Varsovie, texte vers Amsterdam de peu. Les causes sont connues (une connexion par bloc, recompression au service) et ne sont pas dans le réseau : le lien vers Varsovie transportait 777 Mbit/s dans un flux.</li>
+      <li><strong>Le bucket passe à l’échelle pour de nombreux lecteurs</strong> sans l’envoi de personne ; un appareil domestique qui en sert beaucoup d’autres est limité par son débit montant, à moins que les lecteurs ne s’entraident comme ci-dessus.</li>
+      <li><strong>Le pair à pair ne coûte rien par gigaoctet et ne laisse aucune copie chez un fournisseur.</strong> Les données vont de votre appareil à votre appareil ; le bucket n’a besoin des blocs que pour les appareils qui sont hors ligne quand d’autres les veulent.</li>
+    </ul>
+
+    <h2 id="cost">Coût</h2>
+    <p>Liste de prix publique de Scaleway (consultée le 9 octobre 2026, région de Paris, hors taxes) : Object Storage Standard Multi-AZ 0.000022 € par Go-heure (environ 0.016 € par Go-mois), requêtes comprises, entrée comprise, sortie les 75 premiers Go par mois gratuits puis 0.01 € par Go. Les transferts entre régions (Paris – Amsterdam, Paris – Varsovie) comptent comme sortie ; au sein d’une région, ils sont gratuits.</p>
+    <p>Ainsi, un lecteur à Amsterdam qui télécharge le jeu de 4 Gio depuis le bucket de Paris coûte environ 0.04 € une fois les 75 Go gratuits utilisés, et un foyer qui synchronise 500 Go par mois vers des appareils hors de la région du bucket paie environ 4 € par mois de sortie. Le pair à pair déplace les mêmes octets sur les propres connexions des appareils et n’ajoute rien à la facture de stockage. D’autres fournisseurs facturent davantage la sortie ou chaque requête ; la méthode ci-dessus s’y applique sans changement. Les machines de ce benchmark (trois instances à 0.147 € l’heure, environ sept heures et demie sur les deux jours) ont coûté environ 3.50 €.</p>
+
+    <h2 id="limits">Limites de ce benchmark</h2>
+    <ul>
+      <li><strong>Deux jours, deux versions.</strong> Les essais de gros fichiers pour des lecteurs seuls et une partie des essais du bucket datent du 9 octobre, le reste du 10 octobre ; les changements entre eux ne touchent pas les cas comparés (voir <a href="#done">plus haut</a>). La vitesse du bucket différait d’un jour à l’autre.</li>
+      <li><strong>Des machines cloud, pas des maisons.</strong> Liens de centre de données, adresses publiques sur l’interface, pas de NAT, pas de Wi-Fi. À la maison, le chemin pair à pair à travers internet est généralement QUIC à travers un NAT percé, que ces essais n’ont mesuré que dans l’expérience annulée ; le débit montant de la maison serait souvent la limite.</li>
+      <li><strong>Trois régions d’un seul fournisseur, en Europe.</strong> Le bucket et les machines partagent un fournisseur et sa dorsale ; d’autres fournisseurs et de plus longues distances donneront d’autres résultats.</li>
+      <li><strong>Les volumes bloc réseau</strong> rendent chaque synchronisation disque lente (des millisecondes), ce qui pèse sur les petits fichiers ; le SSD d’un portable se synchronise plus vite.</li>
+      <li><strong>Deux essais par cas</strong> sont peu ; les résultats du bucket ont varié jusqu’à 58 % entre répétitions pour les petits fichiers et d’un facteur 3.5 pour le texte, et la vitesse du bucket sur les petits fichiers a presque doublé entre deux sessions le même jour.</li>
+      <li><strong>Logiciel alpha.</strong> Les formats et les valeurs par défaut peuvent encore changer, et ces chiffres avec eux.</li>
+    </ul>
+    <p class="note">Reproduire : <code>scripts/bench/p2p-bench.py</code> crée les machines et le bucket avec la ligne de commande de Scaleway, exécute chaque étape, écrit <code>results.jsonl</code> et supprime tout de nouveau ; <code>report.py</code> et <code>page.py</code> transforment les résultats en résumé et en tableaux sur cette page.</p>
+    </div>
+
+  </div>
+</main>
+<footer class="site">
+  <div class="wrap">
+    <span>Varsto est un nom de travail. Code source : <a href="https://github.com/janttsu/varsto">github.com/janttsu/varsto</a>, sous licence PolyForm Shield License 1.0.0 (code source disponible).</span>
+    <span>Pas de cookies, pas de suivi. Le serveur web conserve un journal d'accès ordinaire pendant sept jours au plus.</span>
+    <span><a href="../../docs/security-policy.html">Politique de sécurité</a> · <a href="../../docs/licence.html">Licence</a> · <a href="../../docs/trademark.html">Marque</a> (en anglais)</span>
+  </div>
+</footer>
+</body>
+</html>
