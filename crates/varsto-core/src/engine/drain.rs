@@ -830,7 +830,7 @@ impl Engine {
             .filter(|r| {
                 r.placement.as_ref().is_some_and(|p| {
                     p.storages.iter().any(|s| s == name)
-                        || (only_in_place && p.places.iter().any(|x| *x == place))
+                        || (only_in_place && p.places.contains(&place))
                 })
             })
             .map(|r| r.name.clone())
