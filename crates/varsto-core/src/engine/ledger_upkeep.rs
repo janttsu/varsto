@@ -297,7 +297,7 @@ impl Engine {
             Some(_) => self
                 .ledger
                 .checkpoint(&me)?
-                .map(|c| c.body_hex.len() as u64 / 2)
+                .map(|c| c.body.len() as u64 / 2)
                 .unwrap_or(0),
             None => 0,
         };
@@ -563,7 +563,7 @@ impl Engine {
 
     fn view_cache_key(&self) -> (SecretKey, Vec<u8>) {
         (
-            self.keys.master.derive("ledger-view-cache", &[]),
+            self.keys.local.derive("ledger-view-cache", &[]),
             crypto::aad(
                 "ledger-view-cache",
                 &[
@@ -656,7 +656,7 @@ impl Engine {
                                 .ok()
                                 .filter(|r| r.device == me && r.seq == seq);
                             match remote {
-                                Some(r) if r.hash == batch.hash => {}
+                                Some(r) if r.body_hash == batch.body_hash => {}
                                 Some(r) if r.verify(&self.keys.signer.public()).is_ok() => {
                                     bail!("ledger fork: storage {} already holds a different batch {} of this device (restored from an old copy?)", backend.name(), seq);
                                 }
@@ -682,7 +682,7 @@ impl Engine {
                     let same = backend
                         .get(&key)?
                         .and_then(|b| serde_json::from_slice::<SignedBatch>(&b).ok())
-                        .is_some_and(|r| r.hash == batch.hash);
+                        .is_some_and(|r| r.body_hash == batch.body_hash);
                     if !same
                         && self.own_object_genuine(
                             spec.name(),
@@ -1158,7 +1158,7 @@ pub(super) mod tests {
                 "checkpoint of {}: through {}, {:.2} MB",
                 e.vault.device_name,
                 cp.seq,
-                cp.body_hex.len() as f64 / 2e6
+                cp.body.len() as f64 / 2e6
             );
         }
         usage();
@@ -1365,6 +1365,11 @@ pub(super) mod tests {
             &[("one.jpg", &[7u8; 20_000])],
         );
         devs[0].sync(None).unwrap();
+        {
+            // Format 2: dev1 gets the folder's key by approval.
+            let (a, rest) = devs.split_at_mut(1);
+            Engine::grant_all_for_tests(&mut a[0], &mut rest[0]).unwrap();
+        }
         let b = &mut devs[1];
         b.pull_ledger().unwrap();
         b.attach_folder("photos", &lab.root.join("b-photos"), true)

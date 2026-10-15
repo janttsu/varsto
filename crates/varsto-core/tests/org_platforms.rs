@@ -65,6 +65,7 @@ fn org(lab: &Lab) -> (Engine, Engine, Engine) {
     for (who, platform) in [("b", "windows"), ("c", "linux")] {
         let mut e =
             small(Engine::join(&lab.home(who), who, PASS, &key, lab.storage.clone()).unwrap());
+        Engine::grant_all_for_tests(&mut a, &mut e).unwrap();
         e.set_platform_for_tests(platform, None);
         e.attach_folder("docs", &lab.dir(who), false).unwrap();
         e.sync(None).unwrap();
@@ -132,6 +133,7 @@ fn approval_refuses_platforms_the_policy_does_not_allow() {
     let (e, _, _) = Engine::org_join(&lab.home("e"), "e-laptop", PASS, &approved.token).unwrap();
     let mut e = small(e);
     e.set_platform_for_tests("linux", None);
+    Engine::grant_all_for_tests(&mut a, &mut e).unwrap();
     e.attach_folder("docs", &lab.dir("e"), false).unwrap();
     e.sync(None).unwrap();
     assert!(lab.dir("e").join("one.txt").exists());

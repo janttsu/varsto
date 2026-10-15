@@ -54,6 +54,10 @@ struct Cli {
     /// VARSTO_LOG and `log_level` in config.json.
     #[arg(long, global = true, value_name = "LEVEL")]
     log_level: Option<String>,
+    /// Ask for the recovery words (or read VARSTO_RECOVERY_WORDS) and keep the recovery key
+    /// for this command only: new folder keys get their recovery copies at once.
+    #[arg(long, global = true)]
+    with_recovery_key: bool,
     #[command(subcommand)]
     cmd: Cmd,
 }
@@ -118,6 +122,15 @@ enum Cmd {
         /// key is never taken from the command line.
         #[arg(long, value_name = "FILE")]
         key_file: Option<PathBuf>,
+        /// Also restore every folder's key from its recovery copy with the recovery
+        /// words of the kit (the second word set; all devices lost). The words are
+        /// read from --recovery-words-file, VARSTO_RECOVERY_WORDS, or asked for
+        /// (hidden); never from the command line.
+        #[arg(long)]
+        recovery_words: bool,
+        /// File with the recovery words (implies --recovery-words).
+        #[arg(long, value_name = "FILE")]
+        recovery_words_file: Option<PathBuf>,
         /// Name for the storage on this device.
         #[arg(long, default_value = "primary")]
         storage_name: String,
@@ -537,6 +550,13 @@ enum PairCmd {
         /// Also show a QR code (a varsto://pair link with the code and the addresses).
         #[arg(long)]
         qr: bool,
+        /// Folders (names or ids, comma-separated) the new device gets at once. Without
+        /// --folders or --all-folders it gets none: it asks for them and you approve.
+        #[arg(long, value_delimiter = ',')]
+        folders: Vec<String>,
+        /// Give the new device every folder this device holds.
+        #[arg(long, conflicts_with = "folders")]
+        all_folders: bool,
     },
     /// On the new device: join the vault of the device showing the code.
     Join {
@@ -554,11 +574,20 @@ enum PairCmd {
 
 #[derive(Subcommand)]
 enum RecoveryCmd {
-    /// Print the printable kit (24 words; with --shares also 3 shares of which 2 rebuild the key).
+    /// Print the printable kit: the vault key and, with --with-recovery-key or
+    /// --new-recovery-key, the recovery key (24 words each; with --shares also 3 shares of
+    /// each of which 2 rebuild the key).
     Kit {
         #[arg(long)]
         shares: bool,
+        /// Make a new recovery key: every folder this device holds gets a new recovery copy
+        /// under it (folders it does not hold keep the old copy).
+        #[arg(long)]
+        new_recovery_key: bool,
     },
+    /// Write the missing recovery copies of the folders this device holds (asks for the
+    /// recovery words, or reads VARSTO_RECOVERY_WORDS).
+    Escrow,
     /// Rebuild the vault key from shares (`<index>: <24 words>`, one per line).
     /// The shares are read from the files given with --file, else from standard
     /// input when it is not a terminal, else asked for (hidden); they are never
@@ -623,6 +652,10 @@ enum OrgCmd {
         /// Approve without asking whether the fingerprint matches.
         #[arg(long)]
         yes: bool,
+        /// Folders (names or ids, comma-separated) the device gets with the approval;
+        /// without them it sees names and sizes only until an owner approves its requests.
+        #[arg(long, value_delimiter = ',')]
+        folders: Vec<String>,
     },
     /// (New device) Join the vault with the approval token.
     Join {
@@ -951,9 +984,8 @@ enum ShareCmd {
         qr: bool,
     },
     /// Show a request code, a sealed token or a varsto:// link as a QR code in the terminal.
-    /// Plain tokens are refused: they carry the folder key.
     Qr {
-        /// The request code, sealed token (vst1…/vst2…) or varsto:// link.
+        /// The request code, sealed token (vst2…) or varsto:// link.
         text: String,
         /// Show it as a sequence of smaller codes, one after another, for cameras that cannot read
         /// the dense one (the Varsto scanner collects them; Ctrl-C stops).
@@ -963,15 +995,16 @@ enum ShareCmd {
         #[arg(long)]
         light: bool,
     },
-    /// (Owner) Print a share token for a folder. With --to <request-code> the folder key is
-    /// encapsulated to the recipient (hybrid X25519 + ML-KEM-768) and the token is safe to send
-    /// over any channel; without it the key is in the token and the channel must be secure.
-    /// Before sealing, compare the code's six-word fingerprint with the requester (call them,
-    /// or meet): it proves the code is theirs.
+    /// (Owner) Print a share token for a folder, sealed to the recipient's request code: the
+    /// folder key is encapsulated to the recipient (hybrid X25519 + ML-KEM-768), so the token is
+    /// safe to send over any channel, and it can be accepted for 14 days. Before sealing,
+    /// compare the code's six-word fingerprint with the requester (call them, or meet): it
+    /// proves the code is theirs.
     Create {
         folder: String,
+        /// The recipient's request code (`varsto share request` on their device).
         #[arg(long)]
-        to: Option<String>,
+        to: String,
         /// The fingerprint the requester read to you; it must match the code's (skips the question).
         #[arg(long)]
         fingerprint: Option<String>,
@@ -982,7 +1015,7 @@ enum ShareCmd {
         #[arg(long)]
         qr: bool,
         /// What the recipient may do: editor (read and write) or viewer (read only: nothing it
-        /// changes is accepted by your devices or the editors). A viewer needs --to.
+        /// changes is accepted by your devices or the editors).
         #[arg(long, default_value = "editor")]
         role: String,
     },
@@ -1384,6 +1417,35 @@ enum DiskCmd {
 
 #[derive(Subcommand)]
 enum FolderCmd {
+    /// Ask the owners of a folder for its key. A device that joined with the
+    /// vault words sees every folder's name and size but no content until an
+    /// owner approves (`varsto folder approve` on one of their devices).
+    Request {
+        name: String,
+    },
+    /// List the requests for folders this device may grant.
+    Requests,
+    /// Give a device a folder's key (its request, or any device of the
+    /// vault). Nothing approves on its own: only this command and the
+    /// interface's Approve do.
+    Approve {
+        folder: String,
+        /// The device's name or id.
+        device: String,
+        /// The device may read the folder; what it writes there is not taken.
+        #[arg(long)]
+        read_only: bool,
+    },
+    /// Refuse a device's request for a folder.
+    Deny {
+        folder: String,
+        device: String,
+    },
+    /// The devices of the vault that hold a folder's key, with their roles, as
+    /// the folder's signed participants list says (owners grant the key).
+    Participants {
+        folder: String,
+    },
     /// Stop syncing a folder on this device; its files stay where they are.
     Detach {
         name: String,
@@ -2081,9 +2143,25 @@ static USED: std::sync::Mutex<Option<zeroize::Zeroizing<String>>> = std::sync::M
 /// damaged local files, a fork), say so on stderr: commands that only read
 /// go on, commands that would sign stop with the same advice.
 pub(crate) fn open_engine(home: &Path) -> Result<Engine> {
-    let e = Engine::open(home, &passphrase()?)?;
+    let mut e = Engine::open(home, &passphrase()?)?;
     warn_ledger(&e.ledger_health());
+    // The recovery key for this command only (`--with-recovery-key`).
+    if let Ok(w) = std::env::var("VARSTO_RECOVERY_WORDS") {
+        varsto_core::logging::register_secret(&w);
+        let k = varsto_core::recovery::key_from_words(&w)?;
+        e.set_recovery_key(&k)?;
+    }
     Ok(e)
+}
+
+/// The recovery words, from VARSTO_RECOVERY_WORDS or typed (not echoed).
+fn recovery_words_input() -> Result<zeroize::Zeroizing<String>> {
+    secret_input(
+        None,
+        "VARSTO_RECOVERY_WORDS",
+        "Recovery words (24): ",
+        false,
+    )
 }
 
 /// A one-line warning about the ledger on stderr, unless it is fine.
@@ -2759,6 +2837,7 @@ fn run_org(cli: &Cli, home: &Path, cmd: &OrgCmd) -> Result<()> {
             user,
             fingerprint,
             yes,
+            folders,
         } => {
             let info = OrgRequest::parse(code)?;
             let confirmed = match fingerprint {
@@ -2786,11 +2865,11 @@ fn run_org(cli: &Cli, home: &Path, cmd: &OrgCmd) -> Result<()> {
                 serde_json::from_value(call(
                     "POST",
                     "/api/org/approve",
-                    serde_json::json!({"code": code, "user": user, "fingerprint": confirmed}),
+                    serde_json::json!({"code": code, "user": user, "fingerprint": confirmed, "folders": folders}),
                 )?)?
             } else {
                 let mut engine = open_engine(home)?;
-                engine.org_approve(code, user, confirmed.as_deref())?
+                engine.org_approve_folders(code, user, confirmed.as_deref(), folders)?
             };
             if cli.json {
                 println!("{}", serde_json::to_string_pretty(&approved)?);
@@ -3117,11 +3196,13 @@ fn run(cli: &Cli) -> Result<()> {
     match &cli.cmd {
         Cmd::Log { cmd } => logcmd::run(&home, cmd, cli.json)?,
         Cmd::Init { name } => {
-            let (engine, vault_key) = Engine::init(&home, name, &passphrase()?)?;
+            let (engine, vault_key, recovery_key) =
+                Engine::init_with_recovery(&home, name, &passphrase()?)?;
+            let recovery_words = varsto_core::recovery::words_from_key(&recovery_key)?;
             if cli.json {
                 println!(
                     "{}",
-                    serde_json::json!({ "vault_id": engine.vault_id().to_string(), "device_id": engine.device_id().to_string(), "vault_key": vault_key })
+                    serde_json::json!({ "vault_id": engine.vault_id().to_string(), "device_id": engine.device_id().to_string(), "vault_key": vault_key, "recovery_words": recovery_words.as_str() })
                 );
             } else {
                 println!(
@@ -3131,12 +3212,16 @@ fn run(cli: &Cli) -> Result<()> {
                 );
                 println!("Vault key (needed to join other devices; shown once, keep it offline):");
                 println!("  {vault_key}");
+                println!("Recovery words (with the vault key they restore every folder if all your devices are lost; shown once, keep them offline and apart from the vault key; they are never stored on a device):");
+                println!("  {}", recovery_words.as_str());
                 println!("Next: print the recovery kit (`varsto recovery kit`) and, once storages are added, see `varsto recovery guide` for everything to keep in case all your devices are lost.");
             }
         }
         Cmd::Join {
             name,
             key_file,
+            recovery_words,
+            recovery_words_file,
             storage_name,
             storage_path,
             s3_bucket,
@@ -3216,6 +3301,25 @@ fn run(cli: &Cli) -> Result<()> {
             let mut engine = joined?;
             if let Some(secret) = s3_secret {
                 engine.store_secret(storage_name, &secret)?;
+            }
+            if *recovery_words || recovery_words_file.is_some() {
+                let w = secret_input(
+                    recovery_words_file.as_deref(),
+                    "VARSTO_RECOVERY_WORDS",
+                    "Recovery words (24): ",
+                    false,
+                )?;
+                let k = varsto_core::recovery::key_from_words(&w)?;
+                let r = engine.recover_folders(&k)?;
+                eprintln!(
+                    "restored the keys of {} folder(s){}",
+                    r.folders.len(),
+                    if r.missing.is_empty() {
+                        String::new()
+                    } else {
+                        format!("; no recovery copy of: {}", r.missing.join(", "))
+                    }
+                );
             }
             let folders = engine.folders();
             if cli.json {
@@ -3877,6 +3981,85 @@ fn run(cli: &Cli) -> Result<()> {
             }
             let mut engine = open_engine(&home)?;
             match cmd {
+                FolderCmd::Request { name } => {
+                    engine.folder_request(name)?;
+                    let id = engine.device_id().to_string();
+                    print(
+                        cli,
+                        &serde_json::json!({"folder": name, "device_id": id}),
+                        |_| {
+                            format!(
+                            "asked for {name}: an owner approves it on one of their devices (varsto folder requests, then varsto folder approve {name} {})",
+                            &id[..8]
+                        )
+                        },
+                    )?;
+                }
+                FolderCmd::Participants { folder } => {
+                    let p = engine.folder_participants(folder)?;
+                    print(cli, &p, |p| {
+                        if p.participants.is_empty() {
+                            return format!("{}: no signed participants list yet", p.folder);
+                        }
+                        let mut out = format!("{} (key epoch {}):", p.folder, p.epoch);
+                        for d in &p.participants {
+                            out.push_str(&format!(
+                                "\n  {} ({}){}: {}",
+                                show(&d.device),
+                                &d.device_id[..8],
+                                if d.this_device { ", this device" } else { "" },
+                                d.role.as_str()
+                            ));
+                        }
+                        out
+                    })?;
+                }
+                FolderCmd::Requests => {
+                    let rows = engine.folder_requests()?;
+                    print(cli, &rows, |rows| {
+                        if rows.is_empty() {
+                            return "no requests".to_string();
+                        }
+                        rows.iter()
+                            .map(|r| {
+                                format!(
+                                    "{} asks for {} (device {}, {}): varsto folder approve {} {} [--read-only], or deny",
+                                    r.device,
+                                    r.folder,
+                                    &r.device_id[..8],
+                                    varsto_core::util::format_date(r.requested_utc),
+                                    r.folder,
+                                    &r.device_id[..8]
+                                )
+                            })
+                            .collect::<Vec<_>>()
+                            .join("\n")
+                    })?;
+                }
+                FolderCmd::Approve {
+                    folder,
+                    device,
+                    read_only,
+                } => {
+                    let r = engine.folder_approve(folder, device, *read_only)?;
+                    print(cli, &r, |r| {
+                        format!(
+                            "{} ({}) now holds {}{}",
+                            r.device,
+                            &r.device_id[..8],
+                            r.folder,
+                            if r.read_only { ", read-only" } else { "" }
+                        )
+                    })?;
+                }
+                FolderCmd::Deny { folder, device } => {
+                    engine.folder_deny(folder, device)?;
+                    print(
+                        cli,
+                        &serde_json::json!({"folder": folder, "device": device, "denied": true}),
+                        |_| format!("request of {device} for {folder} denied"),
+                    )?;
+                }
                 FolderCmd::Placement {
                     folder,
                     storage,
@@ -4490,53 +4673,36 @@ fn run(cli: &Cli) -> Result<()> {
                 role,
             } => {
                 let role = varsto_core::share::ShareRole::parse(role)?;
-                if !role.is_editor() && to.is_none() {
-                    bail_usage::<()>("a viewer's token must be sealed to their request code: give --to <request-code> (a plain token cannot say what its holder may do)")?;
-                }
                 let mut engine = open_engine(&home)?;
-                match to {
-                    Some(code) => {
-                        let req = Engine::share_request_info(code)?;
-                        let confirmed = match fingerprint {
-                            Some(f) => Some(f.clone()),
-                            None if *yes => None,
-                            None => {
-                                eprintln!(
-                                    "Request from {}\nfingerprint: {}\nAsk the requester to read their fingerprint (varsto share request shows it).",
-                                    if req.name.is_empty() { "(no name given)".into() } else { show(&req.name) },
-                                    req.fingerprint
-                                );
-                                if !confirm("Do the six words match exactly?")? {
-                                    bail!("not shared: the fingerprint was not confirmed");
-                                }
-                                Some(req.fingerprint.clone())
-                            }
-                        };
-                        let (sealed, req) = engine.share_create_sealed_as(
-                            folder,
-                            code,
-                            confirmed.as_deref(),
-                            role,
-                        )?;
-                        if *qr && !cli.json {
-                            show_qr(&sealed.encode(), false, false)?;
-                        }
-                        if cli.json {
-                            println!(
-                                "{}",
-                                serde_json::json!({"folder": sealed.name, "token": sealed.encode(), "sealed": true, "fingerprint": req.fingerprint, "name": req.name, "role": role.as_str()})
-                            );
-                        } else {
-                            println!("sealed share token for folder {} as {} (only the device that made the request code can open it; fingerprint {}):\n  {}", show(&sealed.name), if role.is_editor() { "an editor (read and write)" } else { "a viewer (read only)" }, req.fingerprint, sealed.encode());
-                        }
-                    }
+                let code = to;
+                let req = Engine::share_request_info(code)?;
+                let confirmed = match fingerprint {
+                    Some(f) => Some(f.clone()),
+                    None if *yes => None,
                     None => {
-                        let t = engine.share_create_plain(folder)?;
-                        let encoded = t.encode_plain()?;
-                        print(cli, &t, |t| {
-                            format!("share token for folder {} (the folder key is INSIDE this token: anyone holding it can read and write the folder; prefer `share create --to <request-code>`):\n  {encoded}", t.name)
-                        })?
+                        eprintln!(
+                            "Request from {}\nfingerprint: {}\nAsk the requester to read their fingerprint (varsto share request shows it).",
+                            if req.name.is_empty() { "(no name given)".into() } else { show(&req.name) },
+                            req.fingerprint
+                        );
+                        if !confirm("Do the six words match exactly?")? {
+                            bail!("not shared: the fingerprint was not confirmed");
+                        }
+                        Some(req.fingerprint.clone())
                     }
+                };
+                let (sealed, req) =
+                    engine.share_create_sealed_as(folder, code, confirmed.as_deref(), role)?;
+                if *qr && !cli.json {
+                    show_qr(&sealed.encode(), false, false)?;
+                }
+                if cli.json {
+                    println!(
+                        "{}",
+                        serde_json::json!({"folder": sealed.name, "token": sealed.encode(), "sealed": true, "fingerprint": req.fingerprint, "name": req.name, "role": role.as_str()})
+                    );
+                } else {
+                    println!("sealed share token for folder {} as {} (only the device that made the request code can open it, within 14 days; fingerprint {}):\n  {}", show(&sealed.name), if role.is_editor() { "an editor (read and write)" } else { "a viewer (read only)" }, req.fingerprint, sealed.encode());
                 }
             }
             ShareCmd::Accept {
@@ -4557,11 +4723,7 @@ fn run(cli: &Cli) -> Result<()> {
                     .as_ref()
                     .or(token_arg.as_ref())
                     .ok_or_else(|| anyhow!("give the share token"))?;
-                let token = if varsto_core::vault::SealedShareToken::is_sealed(token) {
-                    varsto_core::vault::ShareRequest::open_token(&home, token)?
-                } else {
-                    varsto_core::vault::ShareToken::decode(token)?
-                };
+                let token = varsto_core::vault::ShareRequest::open_token(&home, token)?;
                 let (spec, secret) = match (s3_bucket, storage_path) {
                     (Some(bucket), _) => (
                         StorageSpec::S3 {
@@ -4904,8 +5066,12 @@ fn run(cli: &Cli) -> Result<()> {
         },
         Cmd::Pair { cmd } => {
             match cmd {
-                PairCmd::Offer { qr } => {
-                    let engine = open_engine(&home)?;
+                PairCmd::Offer {
+                    qr,
+                    folders,
+                    all_folders,
+                } => {
+                    let mut engine = open_engine(&home)?;
                     let offer = varsto_core::pair::Offer::start(engine.pairing_bundle()?)?;
                     let st = offer.status();
                     if *qr {
@@ -4935,6 +5101,16 @@ fn run(cli: &Cli) -> Result<()> {
                             match (st.paired_with, st.closed_reason) {
                                 (Some(n), _) => println!("Sent the vault to {n}."),
                                 (None, r) => bail!("pairing closed: {}", r.unwrap_or_default()),
+                            }
+                            // The folders chosen here, sealed to the new device's key.
+                            match st.joiner {
+                                Some(j) if !folders.is_empty() || *all_folders => {
+                                    let names = engine.grant_paired(&j, folders, *all_folders)?;
+                                    println!("Gave it the folders: {}", names.join(", "));
+                                }
+                                _ => println!(
+                                    "It got no folder: it asks for them (varsto folder request) and you approve (varsto folder approve)."
+                                ),
                             }
                             break;
                         }
@@ -4968,13 +5144,14 @@ fn run(cli: &Cli) -> Result<()> {
                             break;
                         }
                     }
-                    let bundle = result?;
-                    let (engine, notes) = Engine::join_paired(&home, name, &pass, &bundle)?;
+                    let received = result?;
+                    let from = received.bundle.from.clone();
+                    let (engine, notes) = Engine::join_paired(&home, name, &pass, received)?;
                     println!(
                         "joined vault {} as {} (paired with {})",
                         engine.vault_id(),
                         name,
-                        bundle.from
+                        from
                     );
                     for n in notes {
                         println!("  {n}");
@@ -4983,17 +5160,47 @@ fn run(cli: &Cli) -> Result<()> {
             }
         }
         Cmd::Recovery { cmd } => match cmd {
-            RecoveryCmd::Kit { shares } => {
-                let engine = open_engine(&home)?;
+            RecoveryCmd::Kit {
+                shares,
+                new_recovery_key,
+            } => {
+                let mut engine = open_engine(&home)?;
                 let key = engine.export_vault_key()?;
                 let sh = if *shares {
                     Some((2u8, varsto_core::recovery::split(&key, 2, 3)?))
                 } else {
                     None
                 };
+                // The recovery key: a new one, or the words given (checked).
+                let recovery: Option<zeroize::Zeroizing<String>> = if *new_recovery_key {
+                    let (k, not_held) = engine.rotate_recovery_key()?;
+                    if !not_held.is_empty() {
+                        eprintln!(
+                            "warning: this device does not hold {}: their recovery copies stay under the old recovery key; rotate on a device that holds them too",
+                            not_held.join(", ")
+                        );
+                    }
+                    Some(zeroize::Zeroizing::new(k))
+                } else if cli.with_recovery_key || std::env::var("VARSTO_RECOVERY_WORDS").is_ok() {
+                    let w = recovery_words_input()?;
+                    let k = varsto_core::recovery::key_from_words(&w)?;
+                    engine.set_recovery_key(&k)?;
+                    Some(k)
+                } else {
+                    None
+                };
+                let rsh = match (&recovery, *shares) {
+                    (Some(k), true) => Some((2u8, varsto_core::recovery::split(k, 2, 3)?)),
+                    _ => None,
+                };
                 print!(
                     "{}",
-                    varsto_core::recovery::kit_text(&engine.vault_id().to_string(), &key, sh)?
+                    varsto_core::recovery::kit_text_full(
+                        &engine.vault_id().to_string(),
+                        &key,
+                        sh,
+                        recovery.as_deref().map(|k| (k.as_str(), rsh)),
+                    )?
                 );
                 if let Some(note) = restic::kit_note(&home) {
                     print!("{note}");
@@ -5004,6 +5211,30 @@ fn run(cli: &Cli) -> Result<()> {
                     *shares,
                 )?;
                 println!("\nThe words alone are not the whole recovery package: `varsto recovery guide` lists what else to keep (storage keys, disks, security keys) and how to restore on a new device.");
+            }
+            RecoveryCmd::Escrow => {
+                let mut engine = open_engine(&home)?;
+                if !engine.has_recovery_key() {
+                    let w = recovery_words_input()?;
+                    let k = varsto_core::recovery::key_from_words(&w)?;
+                    engine.set_recovery_key(&k)?;
+                }
+                let n = engine.write_escrows()?;
+                let missing = engine.folders_without_escrow();
+                print(
+                    cli,
+                    &serde_json::json!({"written": n, "missing": missing}),
+                    |_| {
+                        if missing.is_empty() {
+                            format!("{n} recovery copies written; every folder this device holds has one")
+                        } else {
+                            format!(
+                                "{n} recovery copies written; still without one: {}",
+                                missing.join(", ")
+                            )
+                        }
+                    },
+                )?;
             }
             RecoveryCmd::Guide { format, output } => {
                 let engine = Engine::open(&home, &passphrase()?)?;
@@ -5784,6 +6015,16 @@ fn main() {
         });
     }
     let cli = Cli::parse_from(args);
+    if cli.with_recovery_key && std::env::var("VARSTO_RECOVERY_WORDS").is_err() {
+        // Asked once; `open_engine` then keeps the key for this command.
+        match recovery_words_input() {
+            Ok(w) => std::env::set_var("VARSTO_RECOVERY_WORDS", w.as_str()),
+            Err(e) => {
+                eprintln!("error: {e:#}");
+                std::process::exit(2);
+            }
+        }
+    }
     init_logging(&cli);
     report_activity(&cli);
     let timer = varsto_core::logging::Timer::start();

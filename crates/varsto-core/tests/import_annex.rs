@@ -350,6 +350,10 @@ fn import_annex_from_two_disks() {
         storage(root),
     )
     .unwrap();
+    {
+        let mut a = Engine::open(&root.join("a-home"), PASS).unwrap();
+        Engine::grant_all_for_tests(&mut a, &mut b).unwrap();
+    }
     b.chunker = ChunkerParams::SMALL;
     let st = &b.import_status(Some("photos")).unwrap()[0];
     assert_eq!(st.ids_missing, 3, "the book came through the storage");
@@ -394,6 +398,7 @@ fn import_annex_from_two_disks() {
         storage(root),
     )
     .unwrap();
+    Engine::grant_all_for_tests(&mut a, &mut c).unwrap();
     c.attach_folder("photos", &root.join("c-photos"), false)
         .unwrap();
     c.pull("photos").unwrap();

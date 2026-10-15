@@ -836,23 +836,47 @@ impl PeerRecord {
     pub fn storage_key(device: &DeviceId) -> String {
         format!("{}{}.enc", Self::PREFIX, device)
     }
-    fn aad(vault: &VaultId, device: &DeviceId) -> Vec<u8> {
-        crypto::aad(
-            "peer-record",
-            &[vault.as_str().as_bytes(), device.as_str().as_bytes()],
-        )
+    /// Seal under the registry key `key_id` names and sign by the device:
+    /// a signed record of kind `peer` (format 2), sequence number its
+    /// update time. Nobody but the device itself can say where it is.
+    pub fn seal(
+        &self,
+        vault: &VaultId,
+        key_id: &str,
+        key: &SecretKey,
+        signer: &crate::crypto::SigningKey,
+    ) -> Result<Vec<u8>> {
+        let header = crate::record::Header {
+            kind: crate::record::RecordKind::Peer,
+            vault,
+            scope: "",
+            device: &self.device,
+            seq: self.updated_utc.max(0) as u64,
+            key_id,
+        };
+        Ok(header
+            .seal(key, &serde_json::to_vec(self)?, signer)?
+            .to_bytes())
     }
-    pub fn seal(&self, vault: &VaultId, key: &SecretKey) -> Result<Vec<u8>> {
-        crypto::encrypt(
-            key,
-            &Self::aad(vault, &self.device),
-            &serde_json::to_vec(self)?,
-        )
-    }
-    pub fn open(blob: &[u8], vault: &VaultId, device: &DeviceId, key: &SecretKey) -> Result<Self> {
-        let plain = crypto::decrypt(key, &Self::aad(vault, device), blob)?;
+    /// Open a peer record of `device`: signed by that device's key
+    /// (`writer`), body under the registry key its key id names.
+    pub fn open(
+        blob: &[u8],
+        vault: &VaultId,
+        device: &DeviceId,
+        writer: &crate::crypto::VerifyingKey,
+        key_for: &dyn Fn(&str) -> Option<SecretKey>,
+    ) -> Result<Self> {
+        let env = crate::record::SignedRecord::parse(blob)?;
+        env.expect(
+            &crate::record::Expect::new(crate::record::RecordKind::Peer, vault)
+                .scope("")
+                .device(device),
+        )?;
+        env.verify(writer)?;
+        let plain = env.open_with(key_for)?;
         let rec: PeerRecord = serde_json::from_slice(&plain)?;
-        if &rec.device != device {
+        if &rec.device != device || rec.updated_utc.max(0) as u64 != env.seq {
             bail!("peer record device mismatch");
         }
         Ok(rec)
@@ -1990,7 +2014,8 @@ mod tests {
     fn peer_records_seal_open_and_read_old_versions() {
         let key = SecretKey::random();
         let vault = VaultId::from_bytes(&[9u8; 16]);
-        let dev = DeviceId::from_bytes(&[3u8; 16]);
+        let signer = crate::crypto::SigningKey::generate();
+        let dev = crate::ledger::device_id_for(&signer.public());
         let relay = DeviceId::from_bytes(&[4u8; 16]);
         let rec = PeerRecord {
             version: PeerRecord::VERSION,
@@ -2009,14 +2034,21 @@ mod tests {
             mapped_tcp: vec![],
             mapped_udp: vec![],
         };
-        let blob = rec.seal(&vault, &key).unwrap();
-        let back = PeerRecord::open(&blob, &vault, &dev, &key).unwrap();
+        let blob = rec.seal(&vault, "registry@0", &key, &signer).unwrap();
+        let k = key.clone();
+        let key_for = move |id: &str| (id == "registry@0").then(|| k.clone());
+        let pk = signer.public();
+        let back = PeerRecord::open(&blob, &vault, &dev, &pk, &key_for).unwrap();
         assert_eq!(back, rec);
         assert_eq!(back.udp_addrs().len(), 2);
         assert_eq!(back.udp_addrs()[0], rec.udp_public[0]);
-        // Another device id or key does not open it.
-        assert!(PeerRecord::open(&blob, &vault, &relay, &key).is_err());
-        assert!(PeerRecord::open(&blob, &vault, &dev, &SecretKey::random()).is_err());
+        // Another device id, another key or another signer does not open it.
+        assert!(PeerRecord::open(&blob, &vault, &relay, &pk, &key_for).is_err());
+        let other = |_: &str| Some(SecretKey::random());
+        assert!(PeerRecord::open(&blob, &vault, &dev, &pk, &other).is_err());
+        let forger = crate::crypto::SigningKey::generate();
+        let forged = rec.seal(&vault, "registry@0", &key, &forger).unwrap();
+        assert!(PeerRecord::open(&forged, &vault, &dev, &pk, &key_for).is_err());
         // Same content, new timestamp: nothing to republish.
         let mut later = rec.clone();
         later.updated_utc += 600;

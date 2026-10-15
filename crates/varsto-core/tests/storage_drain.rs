@@ -497,6 +497,7 @@ fn quotas_and_drains_are_the_same_on_every_device() {
         dir("box", &lab.path("s1"), "cloud"),
     )
     .unwrap();
+    Engine::grant_all_for_tests(&mut a, &mut b).unwrap();
     b.chunker = ChunkerParams::SMALL;
     b.add_storage(dir("other", &lab.path("s2"), "cloud"))
         .unwrap();

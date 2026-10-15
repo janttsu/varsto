@@ -253,12 +253,8 @@ impl Engine {
             updated_utc: now,
             settings: settings.clone(),
         };
-        let fr_key = self.folder_record_key_now();
-        let blob = if self.org.is_some() {
-            rec.seal_signed(&self.vault.vault_id, &fr_key, &self.keys.signer)?
-        } else {
-            rec.seal(&self.vault.vault_id, &fr_key)?
-        };
+        let (fr_id, fr_key) = self.folder_record_key_id_now();
+        let blob = rec.seal_signed(&self.vault.vault_id, &fr_id, &fr_key, &self.keys.signer)?;
         // Every storage that holds records, drained ones too: they say so.
         let mut written = 0;
         let mut last_err = None;
@@ -301,7 +297,6 @@ impl Engine {
         }
         let keys = self.storage_keys();
         let by_key: BTreeMap<&Id, &String> = keys.iter().map(|(n, k)| (k, n)).collect();
-        let fr_keys = self.folder_record_keys();
         let mut newest: BTreeMap<String, StorageSettingsRecord> = BTreeMap::new();
         for (_, backend) in self.metadata_storages(false)? {
             let Ok(list) = backend.list(storage_settings::PREFIX) else {
@@ -337,14 +332,14 @@ impl Engine {
                     continue;
                 };
                 let verify = |d: &DeviceId| self.device_key(d);
+                let key_for = |id: &str| self.folder_record_key_for(id);
                 let Ok(rec) = StorageSettingsRecord::open_any(
                     &blob,
                     &self.vault.vault_id,
                     &sk,
                     &dev,
-                    &fr_keys,
+                    &key_for,
                     &verify,
-                    self.org.is_none(),
                 ) else {
                     continue;
                 };

@@ -33,6 +33,7 @@ fn folders_are_unique_detachable_and_removable() {
     a.sync(None).unwrap();
 
     let mut b = Engine::join(&t.path().join("b"), "phone", PASS, &key, spec).unwrap();
+    Engine::grant_all_for_tests(&mut a, &mut b).unwrap();
     // The same top-level name, in any case, is refused on another device.
     let e = b.add_folder("photos", &t.path().join("b-new")).unwrap_err();
     assert!(

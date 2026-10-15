@@ -67,9 +67,11 @@ fn seed(lab: &Lab, who: &str, name: &str) -> (Engine, String) {
     (e, key)
 }
 
-fn join(lab: &Lab, who: &str, name: &str, key: &str) -> Engine {
+/// A device of the vault that the seeding device approved for "docs".
+fn join(lab: &Lab, owner: &mut Engine, who: &str, name: &str, key: &str) -> Engine {
     let mut e = Engine::join(&lab.home(who), name, PASS, key, lab.storage.clone()).unwrap();
     e.chunker = ChunkerParams::SMALL;
+    Engine::grant_all_for_tests(owner, &mut e).unwrap();
     e.attach_folder("docs", &lab.dir(who), false).unwrap();
     e
 }
@@ -128,7 +130,7 @@ fn peer<'a>(r: &'a TrafficReport, d: &DeviceId) -> &'a PeerTraffic {
 #[test]
 fn downloads_and_uploads_are_counted_on_both_ends_over_tcp_and_quic() {
     let lab = lab();
-    let (a, key) = seed(&lab, "a", "laptop");
+    let (mut a, key) = seed(&lab, "a", "laptop");
     let traffic_a = Arc::new(Traffic::new());
     let snap_a = served(&a);
     let node_a = node(&a, snap_a.clone(), &traffic_a);
@@ -143,7 +145,7 @@ fn downloads_and_uploads_are_counted_on_both_ends_over_tcp_and_quic() {
     let th = std::thread::spawn(move || server.run(snap2, stop2));
 
     // The desk pulls over QUIC.
-    let mut b = join(&lab, "b", "desk", &key);
+    let mut b = join(&lab, &mut a, "b", "desk", &key);
     let traffic_b = Arc::new(Traffic::new());
     let node_b = node(&b, empty(), &traffic_b);
     let (rec_a, rec_b) = (record(&a, &node_a, true), record(&b, &node_b, true));
@@ -168,7 +170,7 @@ fn downloads_and_uploads_are_counted_on_both_ends_over_tcp_and_quic() {
     assert!(rep_b.chunks_from_peers >= 2);
 
     // The phone pulls over TCP only.
-    let mut c = join(&lab, "c", "phone", &key);
+    let mut c = join(&lab, &mut a, "c", "phone", &key);
     let traffic_c = Arc::new(Traffic::new());
     let peers_c = Peers::new(
         c.peer_key(),
@@ -250,16 +252,16 @@ fn downloads_and_uploads_are_counted_on_both_ends_over_tcp_and_quic() {
 fn relayed_transfer_is_counted_by_both_ends_and_the_relay() {
     let lab = lab();
     // B holds the data behind "NAT", R relays, A fetches.
-    let (b, key) = seed(&lab, "b", "nas");
+    let (mut b, key) = seed(&lab, "b", "nas");
     let (traffic_a, traffic_b, traffic_r) = (
         Arc::new(Traffic::new()),
         Arc::new(Traffic::new()),
         Arc::new(Traffic::new()),
     );
     let node_b = node(&b, served(&b), &traffic_b);
-    let r = join(&lab, "r", "home-server", &key);
+    let r = join(&lab, &mut b, "r", "home-server", &key);
     let node_r = node(&r, empty(), &traffic_r);
-    let mut a = join(&lab, "a", "travel", &key);
+    let mut a = join(&lab, &mut b, "a", "travel", &key);
     let node_a = node(&a, empty(), &traffic_a);
 
     let mut rec_b = record(&b, &node_b, false);
@@ -358,7 +360,7 @@ fn many_blocks_and_small_files_share_one_quic_connection() {
 
     let traffic_a = Arc::new(Traffic::new());
     let node_a = node(&a, served(&a), &traffic_a);
-    let mut b = join(&lab, "b", "desk", &key);
+    let mut b = join(&lab, &mut a, "b", "desk", &key);
     let traffic_b = Arc::new(Traffic::new());
     let node_b = node(&b, empty(), &traffic_b);
     let (rec_a, rec_b) = (record(&a, &node_a, true), record(&b, &node_b, true));

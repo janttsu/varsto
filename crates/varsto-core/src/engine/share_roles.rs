@@ -75,13 +75,87 @@ impl Engine {
     }
 
     /// Whether `dev` is one of the folder owner's devices as this device
-    /// knows them.
+    /// knows them: on a member the owners its token and epochs named; on
+    /// the owner's devices a device of the vault that the folder's role
+    /// record does not list as an editor or a viewer (format 2: an own
+    /// device approved read-only is a viewer like any member).
     fn share_owner_device(&self, st: &FolderShareState, dev: &DeviceId) -> bool {
         if self.vault.member {
             st.owners.contains(dev)
         } else {
-            dev == &self.vault.device_id || self.devices.devices.contains_key(dev)
+            (dev == &self.vault.device_id || self.devices.devices.contains_key(dev))
+                && !Self::listed_below_owner(st, dev)
         }
+    }
+
+    /// Whether the role record lists `dev` with a role below owner.
+    fn listed_below_owner(st: &FolderShareState, dev: &DeviceId) -> bool {
+        st.roles
+            .as_ref()
+            .and_then(|r| r.roles.get(dev))
+            .is_some_and(|e| e.role != ShareRole::Owner)
+    }
+
+    /// This device's role in a folder of its own vault: owner unless the
+    /// folder's role record lists it otherwise.
+    pub(super) fn own_folder_role(&self, folder: &FolderId) -> ShareRole {
+        if self.vault.member {
+            return self.share_own_role(folder);
+        }
+        self.share_book()
+            .folders
+            .get(folder)
+            .and_then(|st| {
+                st.roles
+                    .as_ref()?
+                    .roles
+                    .get(&self.vault.device_id)
+                    .map(|e| e.role)
+            })
+            .unwrap_or(ShareRole::Owner)
+    }
+
+    /// Whether `dev` may hand out a folder's keys and start its epochs as
+    /// this device knows the folder: a trusted full device the role record
+    /// (when this device can read one) does not list below owner.
+    pub(super) fn device_may_grant(&self, folder: &FolderId, dev: &DeviceId) -> bool {
+        if !self.trusted(dev) {
+            return false;
+        }
+        !self
+            .share_book()
+            .folders
+            .get(folder)
+            .is_some_and(|st| Self::listed_below_owner(st, dev))
+    }
+
+    /// List one of the vault's own devices in a folder's role record (an
+    /// approval with `--read-only`, or a role change of an own device).
+    pub(super) fn set_own_device_role(
+        &mut self,
+        rec: &FolderRecord,
+        dev: &DeviceId,
+        role: ShareRole,
+    ) -> Result<()> {
+        let mut book = self.share_book();
+        let mut roles = book
+            .folders
+            .get(&rec.folder_id)
+            .and_then(|st| st.roles.as_ref())
+            .map(|r| r.roles.clone())
+            .unwrap_or_default();
+        roles.insert(
+            dev.clone(),
+            RoleEntry {
+                role,
+                name: self.device_name(dev),
+                since_utc: util::now_utc(),
+                editor_until_clock: 0,
+                editor_until_seq: 0,
+            },
+        );
+        self.publish_share_roles(&mut book, rec, roles)?;
+        Ok(())
     }
 
     /// Whether a role record signed by `issuer` counts: one of the owner's
@@ -121,7 +195,7 @@ impl Engine {
     /// said (a viewer when the folder has roles and lists neither).
     pub fn share_own_role(&self, folder: &FolderId) -> ShareRole {
         if !self.vault.member {
-            return ShareRole::Editor;
+            return self.own_folder_role(folder);
         }
         let book = self.share_book();
         let st = book.folders.get(folder);
@@ -146,8 +220,7 @@ impl Engine {
 
     /// Whether this device keeps a folder read-only (it is a viewer there).
     pub fn share_read_only(&self, rec: &FolderRecord) -> bool {
-        self.vault.member
-            && rec.shared
+        (rec.shared || !self.vault.member)
             && !self.role_guard_off
             && !self.share_own_role(&rec.folder_id).is_editor()
     }
@@ -176,18 +249,13 @@ impl Engine {
         if !self.share_manifest_source_ok(rec, dev) {
             return false;
         }
-        !rec.shared
-            || dev == &self.vault.device_id
-            || self.share_role_of(&rec.folder_id, dev).is_editor()
+        dev == &self.vault.device_id || self.share_role_of(&rec.folder_id, dev).is_editor()
     }
 
     /// Viewers of a folder with the Lamport clock up to which their changes
     /// (made while they were editors) stay valid. Empty without roles.
     pub(super) fn share_viewer_clocks(&self, rec: &FolderRecord) -> BTreeMap<DeviceId, u64> {
         let mut out = BTreeMap::new();
-        if !rec.shared {
-            return out;
-        }
         let book = self.share_book();
         let Some(st) = book.folders.get(&rec.folder_id) else {
             return out;
@@ -222,11 +290,13 @@ impl Engine {
         storages: &OpenStorages,
         book: &mut ShareBook,
     ) -> Result<bool> {
+        // Every folder whose key this device holds: own devices approved
+        // read-only are listed in the same records (format 2).
         let shared: Vec<FolderRecord> = self
             .keyring
             .folders
             .values()
-            .filter(|f| f.shared && !f.is_removed())
+            .filter(|f| !f.is_removed() && !f.key_hex.is_empty())
             .cloned()
             .collect();
         let mut changed = false;
@@ -395,7 +465,12 @@ impl Engine {
                 continue;
             };
             for d in st.members.iter().chain(roles.roles.keys()) {
-                if d == &self.vault.device_id || self.share_owner_device(st, d) {
+                // Own devices that are viewers of one folder keep their
+                // vault batches (their writes to it are refused instead).
+                if d == &self.vault.device_id
+                    || self.share_owner_device(st, d)
+                    || self.devices.devices.contains_key(d)
+                {
                     continue;
                 }
                 let cutoff = match roles.roles.get(d) {
@@ -523,6 +598,9 @@ impl Engine {
         if self.vault.member {
             bail!("only the owner's devices can change what a member of a shared folder may do");
         }
+        if role == ShareRole::Owner {
+            bail!("a member of a shared folder is an editor or a viewer; the owner's own devices are owners");
+        }
         self.ensure_active()?;
         self.org_allows(|p| p.members_may_share, "share folders with other people")?;
         let rec = self
@@ -608,7 +686,7 @@ impl Engine {
             (Some(_), None) => false,
         };
         let entry = match role {
-            ShareRole::Editor => RoleEntry {
+            ShareRole::Editor | ShareRole::Owner => RoleEntry {
                 role,
                 name: m.name.clone(),
                 since_utc: now,

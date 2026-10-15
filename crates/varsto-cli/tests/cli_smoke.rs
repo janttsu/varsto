@@ -71,6 +71,21 @@ fn two_devices_through_the_cli() {
         &vault_key,
         &["join", "--name", "phone", "--storage-path", storage_s],
     );
+    // Format 2: the vault key opens no folder; B asks, A approves by hand.
+    assert!(!varsto(&b, &["folder", "attach", "docs", b_docs.to_str().unwrap()]).0);
+    ok(&b, &["sync"]);
+    let asked = ok(&b, &["folder", "request", "docs"]);
+    assert_eq!(asked["folder"], "docs");
+    ok(&a, &["sync"]);
+    let reqs = ok(&a, &["folder", "requests"]);
+    assert_eq!(reqs.as_array().unwrap().len(), 1, "{reqs}");
+    assert_eq!(reqs[0]["device"], "phone");
+    let approved = ok(&a, &["folder", "approve", "docs", "phone"]);
+    assert_eq!(approved["read_only"], false);
+    assert!(ok(&a, &["folder", "requests"])
+        .as_array()
+        .unwrap()
+        .is_empty());
     ok(&b, &["folder", "attach", "docs", b_docs.to_str().unwrap()]);
     let sync = ok(&b, &["sync"]);
     assert_eq!(sync[0][0]["files_updated"], 1);

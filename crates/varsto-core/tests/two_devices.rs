@@ -103,6 +103,11 @@ fn devices_never_online_together_converge() {
 
     // Device B joins later through the storage only.
     let mut b = Engine::join(&lab.b_home, "phone", PASS, &vault_key, lab.storage.clone()).unwrap();
+    {
+        // Format 2: A approves B's request for "docs" (briefly online).
+        let mut a = open(&lab.a_home);
+        Engine::grant_all_for_tests(&mut a, &mut b).unwrap();
+    }
     b.chunker = ChunkerParams::SMALL;
     let folders = b.folders();
     assert_eq!(
@@ -185,6 +190,7 @@ fn concurrent_edits_keep_both_versions() {
     fs::write(lab.a_dir.join("report.txt"), b"v1").unwrap();
     a.push("docs").unwrap();
     let mut b = Engine::join(&lab.b_home, "phone", PASS, &vault_key, lab.storage.clone()).unwrap();
+    Engine::grant_all_for_tests(&mut a, &mut b).unwrap();
     b.chunker = ChunkerParams::SMALL;
     b.attach_folder("docs", &lab.b_dir, false).unwrap();
     b.pull("docs").unwrap();
@@ -411,6 +417,7 @@ fn carrier_disk_only_carries_what_is_missing_and_empties_itself() {
     );
     // The disk travels to the second device.
     let mut b = Engine::join(&lab.b_home, "office-pc", PASS, &key, usb.clone()).unwrap();
+    Engine::grant_all_for_tests(&mut a, &mut b).unwrap();
     b.chunker = ChunkerParams::SMALL;
     b.attach_folder("docs", &lab.b_dir, false).unwrap();
     b.sync(None).unwrap();
@@ -443,6 +450,7 @@ fn selective_sync_uses_placeholders() {
     fs::write(lab.a_dir.join("two.jpg"), pseudo_random(30_000, 2)).unwrap();
     a.push("photos").unwrap();
     let mut b = Engine::join(&lab.b_home, "phone", PASS, &key, lab.storage.clone()).unwrap();
+    Engine::grant_all_for_tests(&mut a, &mut b).unwrap();
     b.chunker = ChunkerParams::SMALL;
     b.attach_folder("photos", &lab.b_dir, true).unwrap();
     b.pull("photos").unwrap();
@@ -529,6 +537,7 @@ fn thumbnails_are_generated_once_and_shared_encrypted() {
     );
     // Another device shows the preview without fetching the picture itself (selective sync).
     let mut b = Engine::join(&lab.b_home, "phone", PASS, &key, lab.storage.clone()).unwrap();
+    Engine::grant_all_for_tests(&mut a, &mut b).unwrap();
     b.chunker = ChunkerParams::SMALL;
     b.attach_folder("photos", &lab.b_dir, true).unwrap();
     b.pull("photos").unwrap();
@@ -607,6 +616,7 @@ fn last_accessed_is_recorded_and_files_can_be_moved() {
     assert!(before.modified_utc > 1_600_000_000);
 
     let mut b = Engine::join(&lab.b_home, "phone", PASS, &key, lab.storage.clone()).unwrap();
+    Engine::grant_all_for_tests(&mut a, &mut b).unwrap();
     b.chunker = ChunkerParams::SMALL;
     b.attach_folder("docs", &lab.b_dir, true).unwrap();
     b.pull("docs").unwrap();
@@ -658,6 +668,7 @@ fn durability_policy_is_shared_and_evaluated_from_the_ledger() {
 
     // Another device joins, adopts the policy through the registry and verifies the storage.
     let mut b = Engine::join(&lab.b_home, "desk", PASS, &key, lab.storage.clone()).unwrap();
+    Engine::grant_all_for_tests(&mut a, &mut b).unwrap();
     b.chunker = ChunkerParams::SMALL;
     b.attach_folder("docs", &lab.b_dir, false).unwrap();
     b.pull("docs").unwrap();
@@ -739,6 +750,7 @@ fn peers_serve_chunks_when_the_storage_has_none() {
     let th = std::thread::spawn(move || server.run(snap2, stop2));
 
     let mut b = Engine::join(&lab.b_home, "desk", PASS, &key, lab.storage.clone()).unwrap();
+    Engine::grant_all_for_tests(&mut a, &mut b).unwrap();
     b.chunker = ChunkerParams::SMALL;
     b.attach_folder("docs", &lab.b_dir, false).unwrap();
     // Without peers the pull cannot complete.
@@ -831,6 +843,7 @@ fn strongroom_folder_needs_the_security_key_on_every_device() {
 
     // Another device adopts the record and needs the same security key.
     let mut b = Engine::join(&lab.b_home, "desk", PASS, &key, lab.storage.clone()).unwrap();
+    Engine::grant_all_for_tests(&mut a, &mut b).unwrap();
     b.chunker = ChunkerParams::SMALL;
     b.attach_folder("taxes", &lab.b_dir, true).unwrap();
     assert!(b.pull("taxes").is_err(), "locked on the new device too");
@@ -890,6 +903,7 @@ fn many_chunk_files_arrive_in_order_and_a_missing_chunk_fails_the_file() {
     assert!(common::read_object(&store, hidden).is_none());
 
     let mut b = Engine::join(&lab.b_home, "desk", PASS, &key, lab.storage.clone()).unwrap();
+    Engine::grant_all_for_tests(&mut a, &mut b).unwrap();
     b.chunker = ChunkerParams::SMALL;
     b.attach_folder("docs", &lab.b_dir, false).unwrap();
     let r = b.pull("docs").unwrap();
@@ -918,6 +932,7 @@ fn turning_selective_sync_off_downloads_the_placeholders() {
     a.sync(None).unwrap();
 
     let mut b = Engine::join(&lab.b_home, "desk", PASS, &key, lab.storage.clone()).unwrap();
+    Engine::grant_all_for_tests(&mut a, &mut b).unwrap();
     b.attach_folder("docs", &lab.b_dir, true).unwrap();
     b.sync(None).unwrap();
     assert!(
@@ -957,6 +972,7 @@ fn small_files_travel_in_packs() {
     assert!(!store.join("chunks").exists());
     // Another device reads every file from the pack.
     let mut b = Engine::join(&lab.b_home, "desk", PASS, &key, lab.storage.clone()).unwrap();
+    Engine::grant_all_for_tests(&mut a, &mut b).unwrap();
     b.attach_folder("docs", &lab.b_dir, false).unwrap();
     let r = b.sync(None).unwrap();
     assert!(

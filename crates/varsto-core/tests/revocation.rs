@@ -77,6 +77,7 @@ fn three_devices(lab: &Lab) -> (Engine, Engine, Engine, String) {
     for who in ["b", "c"] {
         let mut e =
             small(Engine::join(&lab.home(who), who, PASS, &key, lab.storage.clone()).unwrap());
+        Engine::grant_all_for_tests(&mut a, &mut e).unwrap();
         e.attach_folder("docs", &lab.dir(who), false).unwrap();
         e.sync(None).unwrap();
         assert!(lab.dir(who).join("one.txt").exists());
@@ -216,7 +217,19 @@ fn revoked_device_is_cut_off_and_new_data_needs_new_keys() {
         .parse()
         .unwrap();
     let blob = fs::read(&newest).unwrap();
-    assert!(Manifest::open(&blob, &vault, &rec.folder_id, a.device_id(), seq, &fk0.meta).is_err());
+    // Only the old epoch's metadata key, as C holds it.
+    let meta_for = |e: u32| (e == 0).then(|| fk0.meta.clone());
+    let a_key = a.device_public_key();
+    assert!(Manifest::open(
+        &blob,
+        &vault,
+        &rec.folder_id,
+        a.device_id(),
+        seq,
+        &a_key,
+        &meta_for
+    )
+    .is_err());
     let old_ledger = SecretKey::from_hex(&old_key).unwrap().derive("ledger", &[]);
     let batches = lab.store().join("ledger").join(a.device_id().as_str());
     let newest = fs::read_dir(&batches)
@@ -247,6 +260,7 @@ fn revoked_device_is_cut_off_and_new_data_needs_new_keys() {
     let mut d =
         small(Engine::join(&lab.home("d"), "d", PASS, &new_key, lab.storage.clone()).unwrap());
     assert_eq!(d.key_epoch(), 1);
+    Engine::grant_all_for_tests(&mut a, &mut d).unwrap();
     d.attach_folder("docs", &lab.dir("d"), false).unwrap();
     d.sync(None).unwrap();
     assert!(lab.dir("d").join("one.txt").exists());

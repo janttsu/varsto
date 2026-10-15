@@ -139,6 +139,7 @@ fn two_devices_through(spec_a: StorageSpec, secret: Option<String>, spec_b: Stor
         std::env::set_var(var, s);
     }
     let mut b = Engine::join(&b_home, "desk", PASS, &key, spec_b).unwrap();
+    Engine::grant_all_for_tests(&mut a, &mut b).unwrap();
     b.chunker = ChunkerParams::SMALL;
     b.attach_folder("docs", &b_dir, false).unwrap();
     b.pull("docs").unwrap();

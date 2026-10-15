@@ -16,6 +16,24 @@ spec still names them because sections were written as the work was done.
 
 ## Unreleased
 
+### Added
+
+- Storage format 2 (spec 61): every record a device publishes is signed and
+  counts only as its writer's ledger announced it; folder keys reach a
+  device only as grants an owner approves by hand (`varsto folder request`,
+  `approve`, `deny`; pairing with `--folders`); a second recovery word set
+  restores every folder when all devices are lost. Vaults of format 0 and 1
+  are refused: create a fresh vault.
+- Every folder has a signed participants list (`varsto folder participants`):
+  only a device it names as an owner can hand the folder's key on.
+- Share tokens are always sealed to a request code (`vst2.`, `share create
+  --to`) and expire after 14 days, as do organization approval tokens;
+  plain and `vst1.` tokens are refused. An invitation's join secret is
+  removed from its record once a member has used it.
+- `varsto join --recovery-words` reads the recovery words from
+  `VARSTO_RECOVERY_WORDS`, `--recovery-words-file` or a hidden prompt,
+  never from the command line.
+
 ### Changed
 
 - Format 2 blocks (spec 62): chunk nonces follow the packed bytes, chunks are

@@ -98,6 +98,7 @@ fn another_device_verifies_automatically_and_the_policy_becomes_ok() {
     // is the same storage (by the identity object on it).
     let renamed = dir_storage("primary", &lab.root.join("storage"), false);
     let mut b = Engine::join(&lab.root.join("b-home"), "nas", PASS, &key, renamed).unwrap();
+    Engine::grant_all_for_tests(&mut a, &mut b).unwrap();
     let now = varsto_core::util::now_utc();
     assert!(b.auto_verify_due(now), "a first run is due at once");
     // A budget of one block per run: one is verified, the rest waits.
@@ -165,6 +166,7 @@ fn automatic_verification_skips_cold_storage_and_reports_corruption() {
         lab.storage.clone(),
     )
     .unwrap();
+    Engine::grant_all_for_tests(&mut a, &mut b).unwrap();
     b.add_storage(cold).unwrap();
     // Damage one object on the hot storage.
     let hot = lab.root.join("storage");

@@ -75,6 +75,9 @@ impl Engine {
             }
         }
         self.pack_caches.set_folder_keys(keys);
+        // The devices whose tombstone lists count may have changed too.
+        self.pack_caches
+            .set_tombstone_keys(self.pack_records(), self.pack_tombstone_key());
     }
 
     /// Give every `chunk_stored` event waiting for the next batch the place
@@ -172,10 +175,7 @@ impl Engine {
                 }
             }
         }
-        let records = crate::record_shim::Records::new(
-            self.vault.vault_id.clone(),
-            self.vault.device_id.clone(),
-        );
+        let records = self.pack_records();
         for (folder, entries) in by_folder {
             let Some(rec) = self.keyring.folders.get(&folder).cloned() else {
                 continue;
@@ -211,10 +211,7 @@ impl Engine {
     /// when the ledger lost the claims (`ledger rebuild`, `fsck`). Returns
     /// the entries read.
     pub fn load_pack_indexes(&self, storage: &dyn Storage) -> Result<Vec<(FolderId, IndexEntry)>> {
-        let records = crate::record_shim::Records::new(
-            self.vault.vault_id.clone(),
-            self.vault.device_id.clone(),
-        );
+        let records = self.pack_records();
         let mut keys: Vec<(FolderId, Vec<SecretKey>)> = Vec::new();
         for rec in self.keyring.folders.values() {
             if let Ok(fk) = self.folder_keys(rec) {
@@ -262,10 +259,7 @@ impl Engine {
             return;
         };
         let metas = fk.meta_keys();
-        let records = crate::record_shim::Records::new(
-            self.vault.vault_id.clone(),
-            self.vault.device_id.clone(),
-        );
+        let records = self.pack_records();
         for (spec, backend) in storages {
             if spec.is_data_only() {
                 continue;

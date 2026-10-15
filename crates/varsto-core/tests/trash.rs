@@ -100,6 +100,7 @@ fn a_deletion_on_one_device_is_restored_on_another() {
     a.sync(None).unwrap();
 
     let mut b = join(&lab.p("b"), "phone", &key, store.clone());
+    Engine::grant_all_for_tests(&mut a, &mut b).unwrap();
     b.attach_folder("docs", &b_dir, false).unwrap();
     b.sync(None).unwrap();
     assert_eq!(fs::read(b_dir.join("report.bin")).unwrap(), report);
@@ -197,6 +198,7 @@ fn the_local_trash_copy_is_used_first_and_cleared_with_the_entry() {
     fs::write(a_dir.join("y.txt"), b"why").unwrap();
     a.sync(None).unwrap();
     let mut b = join(&lab.p("b"), "phone", &key, store.clone());
+    Engine::grant_all_for_tests(&mut a, &mut b).unwrap();
     b.attach_folder("docs", &b_dir, false).unwrap();
     b.sync(None).unwrap();
     fs::remove_file(a_dir.join("x.bin")).unwrap();
@@ -352,6 +354,7 @@ fn purging_deletes_for_good() {
     fs::write(a_dir.join("two.bin"), pseudo_random(50_000, 11)).unwrap();
     a.sync(None).unwrap();
     let mut b = join(&lab.p("b"), "phone", &key, store.clone());
+    Engine::grant_all_for_tests(&mut a, &mut b).unwrap();
     b.attach_folder("docs", &b_dir, false).unwrap();
     b.sync(None).unwrap();
     fs::remove_file(a_dir.join("one.bin")).unwrap();
@@ -426,6 +429,7 @@ fn a_trash_storage_takes_the_trashed_blocks() {
 
     // Another device restores: the cold read must be confirmed.
     let mut b = join(&lab.p("b"), "phone", &key, dir("one", &one, false));
+    Engine::grant_all_for_tests(&mut a, &mut b).unwrap();
     b.add_storage(dir("glacier", &cold, true)).unwrap();
     b.attach_folder("docs", &b_dir, false).unwrap();
     b.sync(None).unwrap();

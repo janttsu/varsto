@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 use varsto_core::chunking::ChunkerParams;
 use varsto_core::crypto::{SecretKey, SigningKey};
-use varsto_core::ids::{ChunkId, FolderId, ObjectName};
+use varsto_core::ids::{ChunkId, FolderId, ObjectName, VaultId};
 use varsto_core::ledger::{self, Batch, Event, LedgerStore, ViewCache, KEY_LEDGER};
 use varsto_core::placement::{MoveRequest, Placement};
 use varsto_core::policy::{Policy, PolicyState};
@@ -98,8 +98,8 @@ fn price(gb_month: f64) -> Option<StoragePrice> {
 fn a_drop_removes_earlier_claims_and_later_claims_count_again() {
     let t = tempfile::tempdir().unwrap();
     let key = SecretKey::random();
-    let a = SigningKey::from_bytes(&[3; 32]).unwrap();
-    let b = SigningKey::from_bytes(&[4; 32]).unwrap();
+    let a = SigningKey::from_bytes(&[3; 64]).unwrap();
+    let b = SigningKey::from_bytes(&[4; 64]).unwrap();
     let (da, db) = (
         ledger::device_id_for(&a.public()),
         ledger::device_id_for(&b.public()),
@@ -121,8 +121,8 @@ fn a_drop_removes_earlier_claims_and_later_claims_count_again() {
         object: object.clone(),
         storage: storage.into(),
     };
-    let mut own_a = LedgerStore::open(&t.path().join("a")).unwrap();
-    let mut own_b = LedgerStore::open(&t.path().join("b")).unwrap();
+    let mut own_a = LedgerStore::open(&t.path().join("a"), &VaultId::from_bytes(&[7; 16])).unwrap();
+    let mut own_b = LedgerStore::open(&t.path().join("b"), &VaultId::from_bytes(&[7; 16])).unwrap();
     let mut batches = vec![
         (
             0,
@@ -156,7 +156,8 @@ fn a_drop_removes_earlier_claims_and_later_claims_count_again() {
                 .unwrap(),
         ),
     ];
-    let mut reader = LedgerStore::open(&t.path().join("reader")).unwrap();
+    let mut reader =
+        LedgerStore::open(&t.path().join("reader"), &VaultId::from_bytes(&[7; 16])).unwrap();
     let key_for = |id: &str| (id == KEY_LEDGER).then(|| key.clone());
     let pk = [a.public(), b.public()];
     // Arrival order does not matter: apply the drop first.
@@ -191,7 +192,8 @@ fn a_drop_removes_earlier_claims_and_later_claims_count_again() {
     let cp = own_a
         .make_checkpoint(&da, 2, key_for, &key, KEY_LEDGER, &a)
         .unwrap();
-    let mut fresh = LedgerStore::open(&t.path().join("fresh")).unwrap();
+    let mut fresh =
+        LedgerStore::open(&t.path().join("fresh"), &VaultId::from_bytes(&[7; 16])).unwrap();
     cp.verify(&pk[0]).unwrap();
     fresh.ingest_checkpoint(cp).unwrap();
     for (who, batch) in &batches {
@@ -285,6 +287,7 @@ fn placement_writes_only_to_the_chosen_storages_on_every_device() {
         dir("one", &p("s1"), false, "home"),
     )
     .unwrap();
+    Engine::grant_all_for_tests(&mut a, &mut b).unwrap();
     b.chunker = ChunkerParams::SMALL;
     b.add_storage(dir("second", &p("s2"), false, "cloud"))
         .unwrap();
@@ -474,6 +477,7 @@ fn moving_keeps_the_policy_and_lowers_the_bill() {
         dir("hot1", &lab.p("h1"), false, "cloud"),
     )
     .unwrap();
+    Engine::grant_all_for_tests(&mut lab.a, &mut b).unwrap();
     b.add_storage(dir("hot2", &lab.p("h2"), false, "cloud"))
         .unwrap();
     b.add_storage(dir("cold", &lab.p("c"), true, "cloud"))

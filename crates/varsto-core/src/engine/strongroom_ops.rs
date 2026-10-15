@@ -414,6 +414,7 @@ impl Engine {
             folder_id: new_id.clone(),
             name: rec.name.clone(),
             key_hex: folder_key.to_hex(),
+            key_check: String::new(),
             created_by: me.clone(),
             created_utc: util::now_utc(),
             shared: false,
@@ -687,7 +688,7 @@ impl Engine {
                 }
             }
         }
-        let meta = old.keys().ok().map(|k| k.meta);
+        let old_keys = old.keys().ok();
         let manifest_prefix = format!("manifests/{}/", old.folder_id);
         for (_, backend) in storages.iter().filter(|(s, _)| !s.is_data_only()) {
             let Ok(keys) = backend.list(&manifest_prefix) else {
@@ -707,12 +708,21 @@ impl Engine {
                 ) else {
                     continue;
                 };
-                let (Some(meta), Ok(Some(blob))) = (&meta, backend.get(&key)) else {
+                let (Some(fk), Some(writer), Ok(Some(blob))) =
+                    (&old_keys, self.writer_key(&dev), backend.get(&key))
+                else {
                     continue;
                 };
-                if let Ok(m) =
-                    Manifest::open(&blob, &self.vault.vault_id, &old.folder_id, &dev, seq, meta)
-                {
+                let meta_for = |e: u32| fk.meta_key_for(e);
+                if let Ok((m, _)) = Manifest::open(
+                    &blob,
+                    &self.vault.vault_id,
+                    &old.folder_id,
+                    &dev,
+                    seq,
+                    &writer,
+                    &meta_for,
+                ) {
                     for f in m.files.values() {
                         objects.extend(f.chunks.iter().map(|c| c.object.clone()));
                     }
@@ -1080,7 +1090,9 @@ impl Engine {
         let key = record.storage_key();
         let prefix = format!("{}{}/", KeysRecord::PREFIX, rec.folder_id);
         let folder_key = FolderRecord::storage_key(&new_rec.created_by, &new_rec.folder_id);
-        let folder_blob = new_rec.seal(&self.vault.vault_id, &fr_key)?;
+        let (reg_id, reg_key) = self.registry_key_id_now();
+        let folder_blob =
+            new_rec.seal(&self.vault.vault_id, &reg_id, &reg_key, &self.keys.signer)?;
         for (_, backend) in self.metadata_storages(true)? {
             backend.put_if_absent(&key, &blob)?;
             // Older lists, and the folder record's first copy, hold wraps

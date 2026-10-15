@@ -145,6 +145,7 @@ fn removed_member_reads_nothing_new_and_the_others_read_on() {
     // A second device of the owner.
     let mut a2 =
         small(Engine::join(&lab.home("a2"), "desk", PASS, &key, lab.storage.clone()).unwrap());
+    Engine::grant_all_for_tests(&mut a, &mut a2).unwrap();
     a2.attach_folder("project", &lab.dir("a2"), false).unwrap();
     a2.sync(None).unwrap();
     let mut b = invite(&lab, &mut a, "bea");
@@ -236,7 +237,18 @@ fn removed_member_reads_nothing_new_and_the_others_read_on() {
         .max()
         .unwrap();
     let blob = fs::read(mdir.join(format!("{seq:016}.enc"))).unwrap();
-    assert!(Manifest::open(&blob, &vault, &crec.folder_id, a.device_id(), seq, &ck.meta).is_err());
+    let meta_for = |e: u32| ck.meta_key_for(e);
+    let a_key = a.device_public_key();
+    assert!(Manifest::open(
+        &blob,
+        &vault,
+        &crec.folder_id,
+        a.device_id(),
+        seq,
+        &a_key,
+        &meta_for
+    )
+    .is_err());
     // Its later changes are ignored by everyone.
     fs::write(lab.dir("cai").join("late.txt"), b"after removal").unwrap();
     fs::write(lab.dir("cai").join("plan.txt"), b"overwritten by C").unwrap();
@@ -278,10 +290,11 @@ fn removed_member_reads_nothing_new_and_the_others_read_on() {
         name: "project".into(),
         epoch_keys: Default::default(),
         fingerprint: String::new(),
-        owners: Vec::new(),
+        owners: vec![a.device_id().clone()],
         role: Default::default(),
         invite: String::new(),
         join_secret_hex: String::new(),
+        issued_utc: varsto_core::util::now_utc(),
     };
     let mut c2 = small(
         Engine::accept_share(
@@ -388,11 +401,14 @@ fn a_token_not_accepted_yet_can_be_revoked() {
 }
 
 #[test]
-fn removing_every_member_and_plain_tokens() {
+fn removing_every_member_revokes_open_tokens() {
     let lab = Lab::new();
     let (mut a, _) = owner(&lab);
     let mut b = invite(&lab, &mut a, "bea");
-    let plain = a.share_create_plain("project").unwrap();
+    // A token not accepted yet.
+    let home = lab.home("cal");
+    let code = ShareRequest::code_for_named(&home, Some("cal")).unwrap();
+    a.share_create_sealed("project", &code, None).unwrap();
     let r = a.share_revoke("project", "all").unwrap();
     assert_eq!(r.removed, vec!["bea".to_string()]);
     assert_eq!(r.invites_revoked.len(), 1, "{r:?}");
@@ -400,11 +416,48 @@ fn removing_every_member_and_plain_tokens() {
     a.sync(None).unwrap();
     b.sync(None).unwrap();
     assert!(read(&lab.dir("bea"), "after.txt").is_none());
-    // A plain token cannot carry the new key.
-    assert!(a.share_create_plain("project").is_err());
-    assert!(plain.encode_plain().is_ok());
     // Nobody left to remove.
     assert!(a.share_revoke("project", "bea").is_err());
+}
+
+/// Storage format 2 (design section 1): plain share tokens and `vst1.`
+/// tokens are gone, a sealed token expires 14 days after it was made, and
+/// a token naming none of the owner's devices is refused.
+#[test]
+fn only_fresh_sealed_tokens_are_accepted() {
+    let lab = Lab::new();
+    let (mut a, _) = owner(&lab);
+    let home = lab.home("dan");
+    let code = ShareRequest::code_for_named(&home, Some("dan")).unwrap();
+    let (sealed, _) = a.share_create_sealed("project", &code, None).unwrap();
+    let text = sealed.encode();
+    assert!(text.starts_with("vst2."));
+    // The plain form of storage format 1: vault.folder.key.name.
+    let key = SecretKey::random().to_hex();
+    let plain = format!("{}.{}.{key}.project", "1a".repeat(16), "2b".repeat(16));
+    let err = ShareRequest::open_token(&home, &plain).unwrap_err();
+    assert!(format!("{err:#}").contains("vst2"), "{err:#}");
+    // A vst1. token is refused by its prefix.
+    let old = text.replacen("vst2.", "vst1.", 1);
+    let err = ShareRequest::open_token(&home, &old).unwrap_err();
+    assert!(format!("{err:#}").contains("older"), "{err:#}");
+    // A token made 15 days ago (the owner's clock) is refused; 13 days ago opens.
+    let req = ShareRequest::parse(&code).unwrap();
+    let mut t = a.share_create("project").unwrap();
+    t.issued_utc = varsto_core::util::now_utc() - 15 * 86_400;
+    let stale = t.seal(&req.key).unwrap().encode();
+    let err = ShareRequest::open_token(&home, &stale).unwrap_err();
+    assert!(format!("{err:#}").contains("expired"), "{err:#}");
+    t.issued_utc = varsto_core::util::now_utc() - 13 * 86_400;
+    let fresh = t.seal(&req.key).unwrap().encode();
+    assert!(ShareRequest::open_token(&home, &fresh).is_ok());
+    // A token without the owner's devices is not accepted.
+    let mut opened = ShareRequest::open_token(&home, &text).unwrap();
+    opened.owners.clear();
+    let err = Engine::accept_share(&home, "dan", PASS, &opened, lab.storage.clone())
+        .err()
+        .unwrap();
+    assert!(format!("{err:#}").contains("sealed token"), "{err:#}");
 }
 
 #[test]
@@ -413,6 +466,7 @@ fn a_folder_re_keyed_by_a_device_removal_can_be_shared() {
     let (mut a, key) = owner(&lab);
     let mut lost =
         small(Engine::join(&lab.home("lost"), "lost", PASS, &key, lab.storage.clone()).unwrap());
+    Engine::grant_all_for_tests(&mut a, &mut lost).unwrap();
     lost.attach_folder("project", &lab.dir("lost"), false)
         .unwrap();
     lost.sync(None).unwrap();
@@ -442,6 +496,7 @@ fn last_access_is_merged_across_devices() {
     // B keeps placeholders only: it never used plan.txt itself.
     let mut b =
         small(Engine::join(&lab.home("b"), "phone", PASS, &key, lab.storage.clone()).unwrap());
+    Engine::grant_all_for_tests(&mut a, &mut b).unwrap();
     b.attach_folder("project", &lab.dir("b"), true).unwrap();
     b.sync(None).unwrap();
     let used_on_a = a.list_files("project").unwrap()[0]

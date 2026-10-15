@@ -9,7 +9,8 @@ During alpha development, storage formats may change without migration paths. On
 | Format version | First release | Releases that read it | Standalone reader tool | Archived tag |
 |---|---|---|---|---|
 | 0 (alpha-0) | 0.0.1-alpha.0 | 0.0.1-alpha.0 to 0.0.1-alpha.3 (no `v0.0.1-alpha.3` tag exists; the last format-0 reader tag is `v0.0.1-alpha.2`) | none (`varsto pull` and `varsto fsck` of those versions) | see the format version 1 note below |
-| 1 (compression, alpha-0-format.md section 16) | 0.0.1-alpha.4 | 0.0.1-alpha.4 and later, including 0.0.1-alpha.13 | none yet (`varsto pull` and `varsto fsck` of the same version) | every tag from `v0.0.1-alpha.4` on |
+| 1 (compression, alpha-0-format.md section 16) | 0.0.1-alpha.4 | 0.0.1-alpha.4 and later, up to 0.0.1-alpha.14 | none yet (`varsto pull` and `varsto fsck` of the same version) | every tag from `v0.0.1-alpha.4` on |
+| 2 (signed records, folder grants, recovery escrow, packs for everything; [format-2-design.md](format-2-design.md)) | not released yet | read by nothing older; vaults are created fresh (format-0/1 vaults are refused with a message) | none yet | none yet |
 
 ## Release rules
 
@@ -18,6 +19,10 @@ During alpha development, storage formats may change without migration paths. On
 3. Before publishing a new storage format version, ensure the previous version has a reader tool (built-in or standalone).
 4. Update this table before publishing each storage format version, with the release number and reader status.
 5. Once the product launches (first public release), every subsequent format change requires forward compatibility for at least one previous version.
+
+## Format version 2 (not released yet)
+
+The binding design is [format-2-design.md](format-2-design.md); `alpha-0-format.md` section 61 records what is built. Every object a device publishes (ledger batches and checkpoints, manifests, trash records, snapshots, epochs, share epochs, grants, requests, revocations, policies, placements, peer records) is one signed envelope whose key id is signed; folder keys are random and reach a device only as a signed grant sealed to its key-exchange key; the recovery kit carries a second word set that opens an escrow copy of every folder key. Nothing older reads format 2 and format 2 reads nothing older: vaults are created fresh, and a format-0 or format-1 vault (on a storage or in a device directory) is refused with a message that says so.
 
 ## Service, transport and storage hardening after 0.0.1-alpha.13 (format version 1 unchanged)
 

@@ -152,6 +152,9 @@ pub struct State {
     pub service: ServiceState,
     /// An open pairing offer (this device adding another one).
     pub pair: Option<varsto_core::pair::Offer>,
+    /// The folders the person chose for the device that pairs (names or
+    /// ids, or every folder), granted once it has joined.
+    pub pair_folders: Option<(Vec<String>, bool)>,
     /// A `varsto://` link the system handed to Varsto (`varsto open-link`),
     /// waiting for the interface to pick it up.
     pub link: Option<String>,
@@ -972,12 +975,13 @@ fn pair_join(state: &Shared, input: &Value) -> Result<Value> {
     {
         bail!("this device already holds a vault");
     }
-    let bundle = varsto_core::pair::receive(&code, &name, opt(input, "address").as_deref())?;
+    let received = varsto_core::pair::receive(&code, &name, opt(input, "address").as_deref())?;
+    let from = received.bundle.from.clone();
     let mut st = state.lock().unwrap_or_else(|e| e.into_inner());
-    let (e, notes) = Engine::join_paired(&st.home, &name, &passphrase, &bundle)?;
+    let (e, notes) = Engine::join_paired(&st.home, &name, &passphrase, received)?;
     st.engine = Some(e);
     st.service.request_sync();
-    Ok(json!({"ok": true, "from": bundle.from, "storages": notes}))
+    Ok(json!({"ok": true, "from": from, "storages": notes}))
 }
 
 /// The URIs to show for a link: one code, or parts when asked (a camera
@@ -1485,12 +1489,42 @@ fn api(st: &mut State, method: Method, path: &str, query: &str, input: &Value) -
             let offer = varsto_core::pair::Offer::start(e.pairing_bundle()?)?;
             let status = offer.status();
             st.pair = Some(offer);
+            // The person chose these folders before the code was shown.
+            let folders: Vec<String> = input
+                .get("folders")
+                .and_then(|v| v.as_array())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|f| f.as_str().map(str::to_string))
+                        .collect()
+                })
+                .unwrap_or_default();
+            let all = input
+                .get("all_folders")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            st.pair_folders = (all || !folders.is_empty()).then_some((folders, all));
             pair_status(status)
         }
-        (Method::Get, "/api/pair/status") => Ok(match &st.pair {
-            Some(o) => pair_status(o.status())?,
-            None => json!({"open": false}),
-        }),
+        (Method::Get, "/api/pair/status") => {
+            let status = st.pair.as_ref().map(|o| o.status());
+            let mut v = match &status {
+                Some(s) => pair_status(s.clone())?,
+                None => json!({"open": false}),
+            };
+            // Joined: seal the chosen folders to it, once.
+            if let Some(j) = status.and_then(|s| s.joiner) {
+                if let Some((folders, all)) = st.pair_folders.take() {
+                    let e = st
+                        .engine
+                        .as_mut()
+                        .ok_or_else(|| anyhow!("unlock the vault first"))?;
+                    v["folders_granted"] = json!(e.grant_paired(&j, &folders, all)?);
+                    st.service.request_sync();
+                }
+            }
+            Ok(v)
+        }
         // QR invitations (section 51): the QR codes of a request code, a
         // sealed token or a pairing link, and what a scanned text is.
         (Method::Post, "/api/qr") => {
@@ -1562,9 +1596,11 @@ fn api(st: &mut State, method: Method, path: &str, query: &str, input: &Value) -
             Ok(json!({"ok": true}))
         }
         (Method::Post, "/api/init") => {
-            let (e, key) = Engine::init(&st.home, &s(input, "name")?, &s(input, "passphrase")?)?;
+            let (e, key, recovery) =
+                Engine::init_with_recovery(&st.home, &s(input, "name")?, &s(input, "passphrase")?)?;
+            let words = varsto_core::recovery::words_from_key(&recovery)?;
             st.engine = Some(e);
-            Ok(json!({"ok": true, "vault_key": key}))
+            Ok(json!({"ok": true, "vault_key": key, "recovery_words": words.as_str()}))
         }
         (Method::Post, "/api/share/request") => {
             let name = opt(input, "name").filter(|n| !n.trim().is_empty());
@@ -1598,11 +1634,7 @@ fn api(st: &mut State, method: Method, path: &str, query: &str, input: &Value) -
         }
         (Method::Post, "/api/share/accept") => {
             let raw = s(input, "token")?;
-            let token = if varsto_core::vault::SealedShareToken::is_sealed(&raw) {
-                varsto_core::vault::ShareRequest::open_token(&st.home, &raw)?
-            } else {
-                varsto_core::vault::ShareToken::decode(&raw)?
-            };
+            let token = varsto_core::vault::ShareRequest::open_token(&st.home, &raw)?;
             let storage_name = opt(input, "storage_name")
                 .filter(|n| !n.trim().is_empty())
                 .unwrap_or_else(|| "shared".into());
@@ -1827,28 +1859,47 @@ fn api_unlocked(
                 Some(r) => varsto_core::share::ShareRole::parse(&r)?,
                 None => varsto_core::share::ShareRole::Editor,
             };
-            match opt(input, "to").filter(|c| !c.trim().is_empty()) {
-                Some(code) => {
-                    // The interface sends the words the user confirmed; they
-                    // must be the code's.
-                    let confirmed = opt(input, "fingerprint").filter(|f| !f.trim().is_empty());
-                    let (sealed, req) =
-                        engine.share_create_sealed_as(&folder, &code, confirmed.as_deref(), role)?;
-                    Ok(json!({"ok": true, "token": sealed.encode(), "folder": sealed.name, "sealed": true, "fingerprint": req.fingerprint, "name": req.name, "role": role.as_str()}))
-                }
-                None if !role.is_editor() => {
-                    bail!("a viewer's token must be sealed to their request code: paste it (a plain token cannot say what its holder may do)")
-                }
-                None => {
-                    let t = engine.share_create_plain(&folder)?;
-                    Ok(json!({"ok": true, "token": t.encode_plain()?, "folder": t.name, "sealed": false}))
-                }
-            }
+            // Format 2: a token is always sealed to the recipient's request
+            // code; there is no plain token.
+            let code = opt(input, "to")
+                .filter(|c| !c.trim().is_empty())
+                .ok_or_else(|| anyhow!("paste the recipient's request code: a share token is always sealed to it"))?;
+            // The interface sends the words the user confirmed; they must
+            // be the code's.
+            let confirmed = opt(input, "fingerprint").filter(|f| !f.trim().is_empty());
+            let (sealed, req) =
+                engine.share_create_sealed_as(&folder, &code, confirmed.as_deref(), role)?;
+            Ok(json!({"ok": true, "token": sealed.encode(), "folder": sealed.name, "sealed": true, "fingerprint": req.fingerprint, "name": req.name, "role": role.as_str()}))
         }
         (Method::Get, "/api/share/members") => {
             let folder = query_param(query, "folder")
                 .ok_or_else(|| anyhow!("folder query parameter required"))?;
             Ok(serde_json::to_value(engine.share_members(&folder)?)?)
+        }
+        (Method::Get, "/api/folder/requests") => {
+            Ok(serde_json::to_value(engine.folder_requests()?)?)
+        }
+        (Method::Post, "/api/folder/request") => {
+            engine.folder_request(&s(input, "folder")?)?;
+            service.request_sync();
+            Ok(json!({"ok": true}))
+        }
+        (Method::Post, "/api/folder/approve") => {
+            // A person's decision, never the service's: the caller confirms.
+            if !input.get("confirm").and_then(|v| v.as_bool()).unwrap_or(false) {
+                bail!("approving a request needs \"confirm\": true");
+            }
+            let read_only = input
+                .get("read_only")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let r = engine.folder_approve(&s(input, "folder")?, &s(input, "device")?, read_only)?;
+            service.request_sync();
+            Ok(serde_json::to_value(r)?)
+        }
+        (Method::Post, "/api/folder/deny") => {
+            engine.folder_deny(&s(input, "folder")?, &s(input, "device")?)?;
+            Ok(json!({"ok": true}))
         }
         (Method::Post, "/api/share/role") => {
             let role = varsto_core::share::ShareRole::parse(&s(input, "role")?)?;
@@ -1916,7 +1967,17 @@ fn api_unlocked(
         }
         (Method::Post, "/api/org/approve") => {
             let fp = opt(input, "fingerprint").filter(|f| !f.trim().is_empty());
-            let r = engine.org_approve(&s(input, "code")?, &s(input, "user")?, fp.as_deref())?;
+            let folders: Vec<String> = input
+                .get("folders")
+                .and_then(|v| v.as_array())
+                .map(|a| a.iter().filter_map(|f| f.as_str().map(str::to_string)).collect())
+                .unwrap_or_default();
+            let r = engine.org_approve_folders(
+                &s(input, "code")?,
+                &s(input, "user")?,
+                fp.as_deref(),
+                &folders,
+            )?;
             service.request_sync();
             Ok(serde_json::to_value(r)?)
         }
@@ -3187,6 +3248,7 @@ mod tests {
             traffic: Arc::default(),
             service: ServiceState::default(),
             pair: None,
+            pair_folders: None,
             link: None,
         }));
         let server = Arc::new(server);
@@ -3583,6 +3645,7 @@ mod tests {
                 ..Default::default()
             },
             pair: None,
+            pair_folders: None,
             link: None,
         };
         let get = |st: &mut State, query: &str| {

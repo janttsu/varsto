@@ -144,6 +144,9 @@ fn organization_through_the_cli() {
     assert_eq!(joined["user"], "carol");
     assert_eq!(joined["device_id"], approved["device_id"]);
     let c_docs = root.join("c-docs");
+    ok(&c, &["folder", "request", "docs"]);
+    ok(&a, &["sync"]);
+    ok(&a, &["folder", "approve", "docs", "c-laptop"]);
     ok(&c, &["folder", "attach", "docs", c_docs.to_str().unwrap()]);
     ok(&c, &["sync"]);
     assert_eq!(fs::read(c_docs.join("note.txt")).unwrap(), b"first note");

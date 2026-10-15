@@ -1077,6 +1077,9 @@ pub struct Approval {
     pub approver: DeviceId,
     /// The fingerprint the admin confirmed; the device checks it against its own.
     pub fingerprint: String,
+    /// When the administrator made the token (seconds); it is refused 14
+    /// days later (`vault::TOKEN_LIFETIME_SECS`).
+    pub issued_utc: i64,
 }
 
 /// An approval sealed to a request code: `vot1.<vault id>.<kem ct hex>.<sealed hex>`.
@@ -1146,6 +1149,11 @@ impl SealedApproval {
         if a.bundle.vault_id != self.vault_id.to_string() {
             bail!("approval token names another vault than its envelope");
         }
+        crate::vault::check_token_age(
+            "organization approval token",
+            a.issued_utc,
+            crate::util::now_utc(),
+        )?;
         Ok(a)
     }
 }
@@ -1219,7 +1227,7 @@ mod tests {
         let a = root_signer(&root);
         let b = root_signer(&root);
         assert_eq!(a.public().to_bytes(), b.public().to_bytes());
-        assert!(a.is_hybrid());
+        assert_eq!(a.public().to_bytes().len(), crate::crypto::PUBLIC_KEY_LEN);
         let words = crate::recovery::words_from_key(&root.to_hex()).unwrap();
         let (_, c) = root_from_words(&words).unwrap();
         assert_eq!(c.public().to_bytes(), a.public().to_bytes());
@@ -1344,6 +1352,7 @@ mod tests {
             user: "dana".into(),
             approver: DeviceId::random(),
             fingerprint: info2.fingerprint.clone(),
+            issued_utc: crate::util::now_utc(),
         };
         let token = SealedApproval::seal(&a, &info2.key).unwrap().encode();
         assert!(SealedApproval::is_token(&token));
@@ -1359,5 +1368,15 @@ mod tests {
         b.fingerprint = info.fingerprint.clone();
         let t2 = SealedApproval::seal(&b, &info2.key).unwrap().encode();
         assert!(open_approval(&home, &t2).is_err());
+        // A token made more than 14 days ago is refused, one made 13 days
+        // ago opens.
+        let mut old = a.clone();
+        old.issued_utc = crate::util::now_utc() - crate::vault::TOKEN_LIFETIME_SECS - 60;
+        let t3 = SealedApproval::seal(&old, &info2.key).unwrap().encode();
+        let err = open_approval(&home, &t3).err().unwrap().to_string();
+        assert!(err.contains("expired"), "{err}");
+        old.issued_utc = crate::util::now_utc() - 13 * 86_400;
+        let t4 = SealedApproval::seal(&old, &info2.key).unwrap().encode();
+        assert!(open_approval(&home, &t4).is_ok());
     }
 }

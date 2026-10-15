@@ -76,7 +76,10 @@ impl Engine {
         };
         view.manifest_hashes
             .get(&(folder.clone(), dev.clone()))
-            .is_some_and(|(s, h)| *s == seq && *h == hex::encode(crypto::hash(blob)))
+            .is_some_and(|(s, h)| {
+                *s == seq
+                    && crate::record::SignedRecord::parse(blob).is_ok_and(|env| env.body_hash == *h)
+            })
     }
 
     /// Record the versions a manifest a pull took names, except those
@@ -143,7 +146,8 @@ impl Engine {
         if hist.index.backfilled {
             return Ok(());
         }
-        let metas = self.folder_keys(rec)?.meta_keys();
+        let fk = self.folder_keys(rec)?;
+        let view = self.view()?;
         let prefix = format!("manifests/{}/", rec.folder_id);
         let mut newest: BTreeMap<DeviceId, (u64, usize)> = BTreeMap::new();
         for (idx, (spec, backend)) in storages.iter().enumerate() {
@@ -180,11 +184,32 @@ impl Engine {
             let Some(blob) = storages[idx].1.get(&key)? else {
                 continue;
             };
-            let Some(m) = metas.iter().find_map(|k| {
-                Manifest::open(&blob, &self.vault.vault_id, &rec.folder_id, &dev, seq, k).ok()
-            }) else {
+            // Signed by its writer and, when the ledger announced that
+            // number, the announced copy.
+            let Some(writer) = self.writer_key(&dev) else {
                 continue;
             };
+            let meta_for = |e: u32| fk.meta_key_for(e);
+            let Ok((m, env)) = Manifest::open(
+                &blob,
+                &self.vault.vault_id,
+                &rec.folder_id,
+                &dev,
+                seq,
+                &writer,
+                &meta_for,
+            ) else {
+                continue;
+            };
+            match view
+                .manifest_hashes
+                .get(&(rec.folder_id.clone(), dev.clone()))
+            {
+                Some((a, h)) if *a == seq && *h != env.body_hash => continue,
+                Some((a, _)) if *a < seq && !mine => continue,
+                None if !mine => continue,
+                _ => {}
+            }
             self.history_from_manifest(hist, &m, &blob, &refused)?;
         }
         let me = self.vault.device_id.clone();

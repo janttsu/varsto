@@ -31,8 +31,21 @@ fn no_secret_reaches_the_log() {
     // Tokens.
     let vault = "1a".repeat(16);
     let folder = "2b".repeat(16);
-    let share = ShareToken::decode(&format!("{vault}.{folder}.{folder_hex}.Photos")).unwrap();
-    let share_text = share.encode();
+    let share = ShareToken {
+        vault_id: varsto_core::ids::VaultId::from_hex(&vault).unwrap(),
+        folder_id: varsto_core::ids::FolderId::from_hex(&folder).unwrap(),
+        key_hex: folder_hex.clone(),
+        name: "Photos".into(),
+        epoch_keys: Default::default(),
+        fingerprint: String::new(),
+        owners: Vec::new(),
+        role: Default::default(),
+        invite: String::new(),
+        join_secret_hex: String::new(),
+        issued_utc: 0,
+    };
+    // The plain text form older versions printed (still scrubbed if pasted).
+    let share_text = format!("{vault}.{folder}.{folder_hex}.Photos");
     let replica_hex = SecretKey::random().to_hex();
     let replica = ReplicaToken {
         vault_id: share.vault_id.clone(),

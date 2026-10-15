@@ -139,13 +139,13 @@ fn a_share_with_qr_links_and_the_service_endpoints() {
             storage.to_str().unwrap(),
         ],
     );
-    // A plain token never becomes a QR code.
+    // The plain token form of storage format 1 is not a Varsto code.
     let out = varsto(root, &owner)
         .args(["share", "qr", "00aa.11bb.22cc33dd.docs"])
         .output()
         .unwrap();
     assert!(!out.status.success());
-    assert!(String::from_utf8_lossy(&out.stderr).contains("folder key"));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("sealed share token"));
     // The terminal code.
     let out = varsto(root, &owner)
         .args(["share", "qr", &token_uri])

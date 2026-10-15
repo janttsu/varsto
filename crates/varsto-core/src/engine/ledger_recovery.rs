@@ -448,6 +448,7 @@ pub struct LedgerStatus {
 }
 
 /// The copies of one own batch on the storages.
+#[allow(clippy::large_enum_variant)]
 enum Fetched {
     None,
     One(SignedBatch),
@@ -966,7 +967,7 @@ impl Engine {
                 continue;
             }
             match &found {
-                Some(f) if f.hash != b.hash => return Ok(Fetched::Disagree),
+                Some(f) if f.body_hash != b.body_hash => return Ok(Fetched::Disagree),
                 Some(_) => {}
                 None => found = Some(b),
             }
@@ -1056,7 +1057,7 @@ impl Engine {
                         Fetched::One(next) => self
                             .key_for_id(&next.key_id)
                             .and_then(|key| next.open(&key).ok())
-                            .is_some_and(|n| n.prev.as_deref() == Some(local.hash.as_str())),
+                            .is_some_and(|n| n.prev.as_deref() == Some(local.body_hash.as_str())),
                         Fetched::Disagree => {
                             return self.refuse_fork(format!(
                                 "{TWO_HISTORIES} (batch #{} differs between them)",
@@ -1074,7 +1075,7 @@ impl Engine {
                 continue;
             }
             match self.fetch_own_batch(&storages, &holders(seq), seq, cold_ok)? {
-                Fetched::One(remote) if remote.hash == local.hash => {
+                Fetched::One(remote) if remote.body_hash == local.body_hash => {
                     break;
                 }
                 Fetched::One(_) => diverged.push(seq),
@@ -1115,7 +1116,7 @@ impl Engine {
                     }
                     if let Ok(Some(blob)) = backend.get(&SignedBatch::storage_key(&me, *seq)) {
                         if let Ok(b) = serde_json::from_slice::<SignedBatch>(&blob) {
-                            if b.hash == local.hash {
+                            if b.body_hash == local.body_hash {
                                 return self.refuse_fork(format!(
                                     "{TWO_HISTORIES} (batch #{seq} differs between them)"
                                 ));
@@ -1323,7 +1324,7 @@ impl Engine {
                 map.skipped.push(rec.name.clone());
                 continue;
             };
-            let metas = fk.meta_keys();
+
             map.folders += 1;
             if rec.is_backup() {
                 let prefix = Snapshot::backup_prefix(&rec.folder_id);
@@ -1339,13 +1340,18 @@ impl Engine {
                         let Some(blob) = backend.get(&key)? else {
                             continue;
                         };
-                        let Ok(snap) = Snapshot::open(
+                        let Some(writer) = self.writer_key(&dev) else {
+                            continue;
+                        };
+                        let meta_for = |e: u32| fk.meta_key_for(e);
+                        let Ok((snap, env)) = Snapshot::open(
                             &blob,
                             &self.vault.vault_id,
                             &rec.folder_id,
                             &dev,
                             seq,
-                            &metas,
+                            &writer,
+                            &meta_for,
                         ) else {
                             continue;
                         };
@@ -1359,7 +1365,7 @@ impl Engine {
                                 expires_utc: snap.expires_utc,
                                 files: snap.files.len() as u64,
                                 bytes: snap.bytes(),
-                                snapshot_hash: hex::encode(crypto::hash(&blob)),
+                                snapshot_hash: env.body_hash.clone(),
                             });
                         }
                         if first_only && map.objects_named() > 0 {
@@ -1388,9 +1394,19 @@ impl Engine {
                 let Some(blob) = storages[idx].1.get(&key)? else {
                     continue;
                 };
-                let Some(m) = metas.iter().find_map(|k| {
-                    Manifest::open(&blob, &self.vault.vault_id, &rec.folder_id, &dev, seq, k).ok()
-                }) else {
+                let Some(writer) = self.writer_key(&dev) else {
+                    continue;
+                };
+                let meta_for = |e: u32| fk.meta_key_for(e);
+                let Ok((m, env)) = Manifest::open(
+                    &blob,
+                    &self.vault.vault_id,
+                    &rec.folder_id,
+                    &dev,
+                    seq,
+                    &writer,
+                    &meta_for,
+                ) else {
                     continue;
                 };
                 map.manifests_read += 1;
@@ -1399,7 +1415,7 @@ impl Engine {
                     map.own_manifests.push(Event::ManifestPublished {
                         folder: rec.folder_id.clone(),
                         seq,
-                        manifest_hash: hex::encode(crypto::hash(&blob)),
+                        manifest_hash: env.body_hash.clone(),
                         files: m.files.values().filter(|f| !f.deleted).count() as u64,
                     });
                 }

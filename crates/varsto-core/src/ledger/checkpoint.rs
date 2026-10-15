@@ -7,8 +7,9 @@
 //! batches can be dropped once every device has seen past the checkpoint.
 
 use super::LedgerView;
-use crate::crypto::{self, SecretKey, SigningKey, VerifyingKey};
-use crate::ids::DeviceId;
+use crate::crypto::{SecretKey, SigningKey, VerifyingKey};
+use crate::ids::{DeviceId, VaultId};
+use crate::record::{self, RecordKind, SignedRecord};
 use anyhow::{bail, Result};
 use serde::{Deserialize, Serialize};
 
@@ -26,20 +27,19 @@ pub struct Checkpoint {
     pub view: LedgerView,
 }
 
-/// What is stored and replicated, at `ledger/<device>/checkpoint-<seq>.json`.
-/// The signature covers `device || seq || head_hash || hash`, where `hash`
-/// is the hash of the encrypted body.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct SignedCheckpoint {
-    pub format_version: u16,
-    pub sig_alg: String,
-    pub key_id: String,
-    pub device: DeviceId,
-    pub seq: u64,
-    pub head_hash: String,
-    pub body_hex: String,
-    pub hash: String,
-    pub sig_hex: String,
+/// What is stored and replicated, at `ledger/<device>/checkpoint-<seq>.json`:
+/// a signed record of kind `checkpoint` (`crate::record`) whose scope is
+/// the hash of batch `seq` (the chain continues from it), so the head hash
+/// and the key id are both covered by the signature.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(transparent)]
+pub struct SignedCheckpoint(pub SignedRecord);
+
+impl std::ops::Deref for SignedCheckpoint {
+    type Target = SignedRecord;
+    fn deref(&self) -> &SignedRecord {
+        &self.0
+    }
 }
 
 /// Object name prefix of checkpoints inside `ledger/<device>/`. Versions
@@ -47,88 +47,50 @@ pub struct SignedCheckpoint {
 pub const CHECKPOINT_PREFIX: &str = "checkpoint-";
 
 impl SignedCheckpoint {
-    fn signed_message(device: &DeviceId, seq: u64, head_hash: &str, hash: &str) -> Vec<u8> {
-        crypto::aad(
-            "ledger-checkpoint-signature",
-            &[
-                device.as_str().as_bytes(),
-                &seq.to_le_bytes(),
-                head_hash.as_bytes(),
-                hash.as_bytes(),
-            ],
-        )
-    }
-
-    fn body_aad(device: &DeviceId, seq: u64, head_hash: &str) -> Vec<u8> {
-        crypto::aad(
-            "ledger-checkpoint",
-            &[
-                device.as_str().as_bytes(),
-                &seq.to_le_bytes(),
-                head_hash.as_bytes(),
-            ],
-        )
-    }
-
     pub fn storage_key(device: &DeviceId, seq: u64) -> String {
         format!("ledger/{device}/{CHECKPOINT_PREFIX}{seq:016}.json")
     }
 
+    /// The hash of batch `seq` this checkpoint ends at (its signed scope).
+    pub fn head_hash(&self) -> &str {
+        &self.0.scope
+    }
+
     pub fn seal(
+        vault: &VaultId,
         cp: &Checkpoint,
         ledger_key: &SecretKey,
         key_id: &str,
         signer: &SigningKey,
     ) -> Result<Self> {
         let plain = zstd::bulk::compress(&serde_json::to_vec(cp)?, 3)?;
-        let ct = crypto::encrypt(
-            ledger_key,
-            &Self::body_aad(&cp.device, cp.seq, &cp.head_hash),
-            &plain,
-        )?;
-        let hash = hex::encode(crypto::hash(&ct));
-        let sig = signer.sign(&Self::signed_message(
-            &cp.device,
-            cp.seq,
-            &cp.head_hash,
-            &hash,
-        ));
-        Ok(SignedCheckpoint {
-            format_version: crate::FORMAT_VERSION,
-            sig_alg: signer.alg().to_string(),
-            key_id: key_id.to_string(),
-            device: cp.device.clone(),
+        let header = record::Header {
+            kind: RecordKind::Checkpoint,
+            vault,
+            scope: &cp.head_hash,
+            device: &cp.device,
             seq: cp.seq,
-            head_hash: cp.head_hash.clone(),
-            body_hex: hex::encode(ct),
-            hash,
-            sig_hex: hex::encode(sig),
-        })
+            key_id,
+        };
+        Ok(SignedCheckpoint(header.seal(ledger_key, &plain, signer)?))
     }
 
-    /// Check signature and hash; does not decrypt.
+    /// Check kind, signature and hash; does not decrypt.
     pub fn verify(&self, pubkey: &VerifyingKey) -> Result<()> {
-        let ct = hex::decode(&self.body_hex)?;
-        if hex::encode(crypto::hash(&ct)) != self.hash {
-            bail!("checkpoint hash does not match body");
+        if self.kind != RecordKind::Checkpoint {
+            bail!("not a ledger checkpoint");
         }
-        pubkey.verify(
-            &self.sig_alg,
-            &Self::signed_message(&self.device, self.seq, &self.head_hash, &self.hash),
-            &hex::decode(&self.sig_hex)?,
-        )
+        self.0.verify(pubkey)
     }
 
     pub fn open(&self, ledger_key: &SecretKey) -> Result<Checkpoint> {
-        let ct = hex::decode(&self.body_hex)?;
-        let packed = crypto::decrypt(
-            ledger_key,
-            &Self::body_aad(&self.device, self.seq, &self.head_hash),
-            &ct,
-        )?;
+        if self.kind != RecordKind::Checkpoint {
+            bail!("not a ledger checkpoint");
+        }
+        let packed = self.0.open(ledger_key)?;
         let plain = zstd::bulk::decompress(&packed, 1 << 30)?;
         let cp: Checkpoint = serde_json::from_slice(&plain)?;
-        if cp.device != self.device || cp.seq != self.seq || cp.head_hash != self.head_hash {
+        if cp.device != self.device || cp.seq != self.seq || cp.head_hash != self.head_hash() {
             bail!("checkpoint body does not match its envelope");
         }
         Ok(cp)

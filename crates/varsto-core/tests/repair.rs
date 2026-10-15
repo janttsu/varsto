@@ -192,7 +192,7 @@ fn corrupt_copy_is_rewritten_from_the_local_file() {
 #[test]
 fn verification_queues_damage_and_another_device_repairs_it() {
     let lab = Lab::new();
-    let (_a, key) = device(&lab, &[dir("box", &lab.p("box"), false)]);
+    let (mut a, key) = device(&lab, &[dir("box", &lab.p("box"), false)]);
     let mut b = Engine::join(
         &lab.p("b-home"),
         "desk",
@@ -201,6 +201,7 @@ fn verification_queues_damage_and_another_device_repairs_it() {
         dir("box", &lab.p("box"), false),
     )
     .unwrap();
+    Engine::grant_all_for_tests(&mut a, &mut b).unwrap();
     b.chunker = ChunkerParams::SMALL;
     b.attach_folder("docs", &lab.p("b-docs"), false).unwrap();
     b.sync(None).unwrap();
@@ -222,7 +223,7 @@ fn verification_queues_damage_and_another_device_repairs_it() {
 #[test]
 fn missing_copy_is_rewritten_from_a_peer() {
     let lab = Lab::new();
-    let (a, key) = device(&lab, &[dir("box", &lab.p("box"), false)]);
+    let (mut a, key) = device(&lab, &[dir("box", &lab.p("box"), false)]);
     // The phone keeps placeholders only: it has no plain copy.
     let mut b = Engine::join(
         &lab.p("b-home"),
@@ -232,6 +233,7 @@ fn missing_copy_is_rewritten_from_a_peer() {
         dir("box", &lab.p("box"), false),
     )
     .unwrap();
+    Engine::grant_all_for_tests(&mut a, &mut b).unwrap();
     b.chunker = ChunkerParams::SMALL;
     b.attach_folder("docs", &lab.p("b-docs"), true).unwrap();
     b.sync(None).unwrap();

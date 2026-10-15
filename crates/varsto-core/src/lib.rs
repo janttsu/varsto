@@ -50,7 +50,7 @@ pub mod progress;
 pub mod providers;
 pub mod qr;
 pub mod rclone;
-pub mod record_shim;
+pub mod record;
 pub mod recovery;
 pub mod recovery_guide;
 pub mod replica;
@@ -68,7 +68,47 @@ pub mod util;
 pub mod vault;
 
 /// Storage format version written into every object header. See
-/// `docs/spec/format-versions.md`.
-pub const FORMAT_VERSION: u16 = 1;
+/// `docs/spec/format-versions.md` and `docs/spec/format-2-design.md`.
+pub const FORMAT_VERSION: u16 = 2;
+
+/// Refuse a vault (on a storage, or a device directory) written in another
+/// storage format. Format 2 is read by nothing older and reads nothing
+/// older: its vaults are created fresh.
+pub fn check_format(found: u16, what: &str) -> anyhow::Result<()> {
+    if found == FORMAT_VERSION {
+        return Ok(());
+    }
+    if found < FORMAT_VERSION {
+        anyhow::bail!(
+            "{what} uses storage format {found}, which this version of Varsto no longer reads \
+             (it reads format {FORMAT_VERSION} only, and nothing older reads format {FORMAT_VERSION}). \
+             Format-{FORMAT_VERSION} vaults are created fresh: keep the files you synced, \
+             create a new vault with `varsto init` and add the folders again"
+        );
+    }
+    anyhow::bail!(
+        "{what} uses storage format {found}, which is newer than this version of Varsto \
+         reads (format {FORMAT_VERSION}): update Varsto"
+    )
+}
 
 pub use engine::{Engine, FsckReport, PullReport, PushReport, StatusReport};
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn older_and_newer_formats_are_refused() {
+        assert!(super::check_format(super::FORMAT_VERSION, "x").is_ok());
+        for old in [0, 1] {
+            let e = super::check_format(old, "the vault")
+                .unwrap_err()
+                .to_string();
+            assert!(e.contains(&format!("format {old}")), "{e}");
+            assert!(e.contains("created fresh"), "{e}");
+        }
+        let e = super::check_format(super::FORMAT_VERSION + 1, "the vault")
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("update Varsto"), "{e}");
+    }
+}

@@ -283,6 +283,7 @@ fn snapshots_restore_byte_for_byte() {
         dir("one", &lab.p("one"), false),
     )
     .unwrap();
+    Engine::grant_all_for_tests(&mut a, &mut b).unwrap();
     b.sync(None).unwrap();
     let list = b.backups().unwrap();
     assert_eq!(list.len(), 1);
@@ -332,6 +333,7 @@ fn devices_and_transferrers_never_receive_backup_contents() {
         dir("one", &lab.p("one"), false),
     )
     .unwrap();
+    Engine::grant_all_for_tests(&mut a, &mut b).unwrap();
     b.sync(None).unwrap();
     assert!(b.folders().iter().all(|(r, _)| r.folder_id != id));
     let err = b.attach_folder("bk", &lab.p("b-bk"), false).unwrap_err();
@@ -508,6 +510,7 @@ fn other_devices_wait_for_the_source() {
         dir("one", &lab.p("one"), false),
     )
     .unwrap();
+    Engine::grant_all_for_tests(&mut a, &mut b).unwrap();
     b.add_storage(dir("two", &lab.p("two"), false)).unwrap();
     b.sync(None).unwrap();
     // The source is in the vault: b leaves the expiry to it at first ...
@@ -628,7 +631,7 @@ fn a_replica_cannot_expire_snapshots() {
     let batch = Batch {
         device: dev.clone(),
         seq: 2,
-        prev: Some(first.hash),
+        prev: Some(first.body_hash.clone()),
         lamport: a.status().unwrap().lamport + 10,
         created_utc: s1.taken_utc,
         events: vec![
@@ -641,7 +644,7 @@ fn a_replica_cannot_expire_snapshots() {
         ],
         seen: Map::new(),
     };
-    let signed = SignedBatch::seal_with(&batch, &key, KEY_REPLICA, &signer).unwrap();
+    let signed = SignedBatch::seal_with(a.vault_id(), &batch, &key, KEY_REPLICA, &signer).unwrap();
     fs::write(
         dir_of.join(format!("{:016}.json", 2)),
         serde_json::to_vec(&signed).unwrap(),

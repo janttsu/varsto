@@ -79,6 +79,7 @@ fn two_devices() -> (Lab, Engine, Engine) {
     fs::write(root.join("a-docs/sub/three.bin"), pseudo_random(90_000, 3)).unwrap();
     a.sync(None).unwrap();
     let mut b = Engine::join(&root.join("b"), "phone", PASS, &key, storage.clone()).unwrap();
+    Engine::grant_all_for_tests(&mut a, &mut b).unwrap();
     b.chunker = ChunkerParams::SMALL;
     b.attach_folder("docs", &root.join("b-docs"), false)
         .unwrap();
@@ -185,6 +186,7 @@ fn s1_storage_that_lost_its_ledger_is_filled_again() {
         lab.storage.clone(),
     )
     .unwrap();
+    Engine::grant_all_for_tests(&mut a, &mut c).unwrap();
     c.sync(None).unwrap();
     assert!(claims(&c).is_superset(&before));
     assert!(c.status().unwrap().forked_devices.is_empty());
@@ -523,6 +525,7 @@ fn s4_ledger_lost_everywhere_is_rebuilt_from_storage() {
         lab.storage.clone(),
     )
     .unwrap();
+    Engine::grant_all_for_tests(&mut a, &mut c).unwrap();
     c.chunker = ChunkerParams::SMALL;
     c.attach_folder("docs", &lab.root.join("c-docs"), false)
         .unwrap();

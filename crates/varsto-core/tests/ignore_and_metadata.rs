@@ -47,6 +47,7 @@ fn two(files: &[(&str, &[u8])]) -> (Lab, Engine, Engine) {
     }
     a.push("docs").unwrap();
     let mut b = Engine::join(&lab.root.join("b-home"), "desk", PASS, &vault_key, storage).unwrap();
+    Engine::grant_all_for_tests(&mut a, &mut b).unwrap();
     b.chunker = ChunkerParams::SMALL;
     b.attach_folder("docs", &lab.b_dir, false).unwrap();
     (lab, a, b)

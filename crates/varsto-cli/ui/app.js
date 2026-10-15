@@ -848,9 +848,9 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   function shareFolder(f) {
     dialog({
       title: (f.shared ? "New token for " : "Share ") + f.name,
-      text: (f.shared ? "" : "An editor reads and writes this folder; a viewer only reads it: nothing a viewer changes is accepted by your devices or the editors. ") + "Paste the recipient's request code or scan its QR code to seal the token to their device, or leave it empty for a plain token that carries the folder key itself (editors only).",
+      text: (f.shared ? "" : "An editor reads and writes this folder; a viewer only reads it: nothing a viewer changes is accepted by your devices or the editors. ") + "Paste the recipient's request code or scan its QR code: the token is sealed to their device and can be accepted for 14 days.",
       fields: [
-        { name: "to", label: "Recipient's request code (optional)", placeholder: "vsr1…" },
+        { name: "to", label: "Recipient's request code", placeholder: "vsr1…" },
         { name: "role", label: "Role", options: [["editor", "Editor: read and write"], ["viewer", "Viewer: read only"]], value: "editor", hint: "A viewer can still copy what it reads; a key cannot prevent that." }
       ],
       ok: f.shared ? "Create token" : "Share",
@@ -860,8 +860,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
       var role = r.values.role || "editor";
       if (r.action === "extra") { return scanQr("request").then(function (info) { if (info) { return sealTo(f, info.text, role); } }); }
       var code = (r.values.to || "").trim();
-      if (!code && role === "viewer") { return alertBox("A viewer's token must be sealed to their request code: paste it or scan it. A plain token cannot say what its holder may do."); }
-      if (!code) { return createToken(f, "", "", role); }
+      if (!code) { return alertBox("Paste the recipient's request code or scan it: a share token is always sealed to it."); }
       return sealTo(f, code, role);
     }).catch(function (e) { alertBox(e.message); });
   }
@@ -1189,6 +1188,49 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     };
   }
 
+  // Folder requests: a device of this vault asks for a folder's key. Only
+  // a click here (or `varsto folder approve`) gives it; the background
+  // service never does.
+  function renderFolderRequests(s) {
+    var box = $("folderrequests"); if (!box) { return; }
+    box.innerHTML = "";
+    (s.folder_requests || []).forEach(function (r) {
+      var n = el("div", "notice warn banner-action");
+      n.appendChild(el("span", null, "A device asks for a folder:"));
+      var who = el("strong", null, " " + r.device + " (" + r.device_id.slice(0, 8) + ") \u2192 " + r.folder + " ");
+      who.setAttribute("data-no-i18n", "");
+      n.appendChild(who);
+      var decide = function (path, body, done) {
+        busy(true);
+        api("POST", path, body).then(function () { log(done); return refreshStatus(); })
+          .catch(function (e) { alertBox(e.message); }).then(function () { busy(false); });
+      };
+      var approve = function (readOnly) {
+        confirmBox(readOnly ? "Give this device the folder's key, read-only? It can read everything in the folder; what it writes there is not taken." : "Give this device the folder's key? It can then read and change everything in the folder. Approve only a device you know.", { ok: readOnly ? "Approve read-only" : "Approve" }).then(function (yes) {
+          if (yes) { decide("/api/folder/approve", { folder: r.folder_id, device: r.device_id, read_only: readOnly, confirm: true }, r.folder + ": " + r.device); }
+        });
+      };
+      n.appendChild(safetyButton("Approve", null, function () { approve(false); }));
+      n.appendChild(safetyButton("Approve read-only", null, function () { approve(true); }));
+      n.appendChild(safetyButton("Deny", "secondary danger", function () { decide("/api/folder/deny", { folder: r.folder_id, device: r.device_id }, r.folder + ": " + r.device); }));
+      box.appendChild(n);
+    });
+    // Folders this device knows by name only: ask their owners.
+    (s.folders_without_key || []).forEach(function (name) {
+      var n = el("div", "notice banner-action");
+      n.appendChild(el("span", null, "This device does not hold this folder's key; an owner approves a request on one of their devices:"));
+      var f = el("strong", null, " " + name + " ");
+      f.setAttribute("data-no-i18n", "");
+      n.appendChild(f);
+      n.appendChild(safetyButton("Ask for it", null, function () {
+        busy(true);
+        api("POST", "/api/folder/request", { folder: name }).then(function () { log(name + ": requested"); })
+          .catch(function (e) { alertBox(e.message); }).then(function () { busy(false); });
+      }));
+      box.appendChild(n);
+    });
+  }
+
   // Folder safety: a banner per folder that is paused on this device (its
   // marker is missing or names another folder; deletions are held) or has
   // changes waiting in send-only / receive-only mode, with the actions.
@@ -1298,6 +1340,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
       lastStatus = s;
       setTimeout(function () { helpAfterStatus(s); }, 0);
       renderLedger(s.ledger_health);
+      renderFolderRequests(s);
       renderFolderSafety(s);
       $("who").textContent = s.device_name + " · vault " + s.vault_id.slice(0, 8) + " · " + s.ledger_batches + " ledger batches";
       var tb = $("folders").querySelector("tbody"); tb.innerHTML = "";
@@ -3337,7 +3380,9 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
       // The key is shown once: in a dialog now, and on the overview until the user confirms.
       $("vaultkey-text").textContent = "Vault key (shown once, write it down and keep it offline): " + r.vault_key;
       $("vaultkey").classList.remove("hidden");
-      return dialog({ title: "Your vault key", text: "Write it down and keep it offline: it is the only way to recover the data, or to join without another device; devices can also be added by pairing with a code. It is shown once.", code: r.vault_key, ok: "Continue", cancel: false }).then(function () { return refreshState(); });
+      return dialog({ title: "Your vault key", text: "Write it down and keep it offline: it is the only way to recover the data, or to join without another device; devices can also be added by pairing with a code. It is shown once.", code: r.vault_key, ok: "Continue", cancel: false })
+        .then(function () { return r.recovery_words ? dialog({ title: "Your recovery words", text: "Write them down too and keep them offline, apart from the vault key: with the vault key they restore every folder if all your devices are lost. They are never stored on a device and are shown once.", code: r.recovery_words, ok: "Continue", cancel: false }) : null; })
+        .then(function () { return refreshState(); });
     }).catch(function (e) { alertBox(e.message); });
   };
   $("vaultkey-done").onclick = function () { $("vaultkey").classList.add("hidden"); $("vaultkey-text").textContent = ""; };
@@ -3370,11 +3415,22 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     }
     if (pairTimer) { clearInterval(pairTimer); pairTimer = null; }
     $("pairinfo").textContent = s.paired_with ? "Sent the vault to " + s.paired_with + ". It appears among the devices after its first sync." : "The code is no longer valid (" + (s.closed_reason || "closed") + "). Choose Add a device for a new one.";
+    if (s.folders_granted && s.folders_granted.length) { log("gave " + s.paired_with + ": " + s.folders_granted.join(", ")); }
     if (s.paired_with) { log("added device " + s.paired_with); }
   }
   function pollPair() { api("GET", "/api/pair/status").then(function (s) { if (s.code) { renderPair(s); if (s.open && !pairTimer) { pairTimer = setInterval(pollPair, 1500); } } }).catch(function () {}); }
   if (token) { pollPair(); }
-  $("pairstart").onclick = function () { api("POST", "/api/pair/start", {}).then(function (s) { renderPair(s); if (!pairTimer) { pairTimer = setInterval(pollPair, 1500); } }).catch(function (e) { alertBox(e.message); }); };
+  // Format 2: the person chooses here which folders the new device gets at
+  // once; it asks for the others later and they are approved by hand.
+  $("pairstart").onclick = function () {
+    var names = ((lastStatus && lastStatus.folders) || []).map(function (f) { return f.name; })
+      .filter(function (n) { return ((lastStatus && lastStatus.folders_without_key) || []).indexOf(n) < 0; });
+    dialog({ title: "Add a device", text: "Which folders may the new device read at once? It sees the names of the others and can ask for them later.", fields: [{ name: "folders", label: "Folders", checks: names.map(function (n) { return [n, n, false, true]; }), empty: "No folder yet" }], ok: "Show the code" }).then(function (r) {
+      if (!r) { return; }
+      var chosen = (r.folders || "").split(",").filter(function (x) { return x; });
+      return api("POST", "/api/pair/start", { folders: chosen }).then(function (s) { renderPair(s); if (!pairTimer) { pairTimer = setInterval(pollPair, 1500); } });
+    }).catch(function (e) { alertBox(e.message); });
+  };
   $("pairscan").onclick = function () { scanQr("pair").then(function (info) { if (info) { fillPair(info); } }); };
   $("sharetokenscan").onclick = function () {
     scanQr("token").then(function (info) { if (info) { $("acceptshare").querySelector("input[name=token]").value = info.text; log("scanned the sealed share token for " + info.folder); } });

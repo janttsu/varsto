@@ -122,84 +122,51 @@ impl StorageSettingsRecord {
         )
     }
 
-    fn aad(vault: &VaultId, storage: &Id) -> Vec<u8> {
-        crypto::aad(
-            "storage-settings-record",
-            &[vault.as_str().as_bytes(), storage.as_str().as_bytes()],
-        )
-    }
-
-    pub fn seal(&self, vault: &VaultId, key: &SecretKey) -> Result<Vec<u8>> {
-        crypto::encrypt(
-            key,
-            &Self::aad(vault, &self.storage),
-            &serde_json::to_vec(self)?,
-        )
-    }
-
-    fn open(blob: &[u8], vault: &VaultId, storage: &Id, key: &SecretKey) -> Result<Self> {
-        let plain = crypto::decrypt(key, &Self::aad(vault, storage), blob)?;
-        let rec: Self = serde_json::from_slice(&plain)?;
-        if &rec.storage != storage {
-            bail!("storage settings record names another storage");
-        }
-        Ok(rec)
-    }
-
-    /// Seal and sign (in an organization), as placement records are.
+    /// Seal and sign: a signed record of kind `storage-settings`, scope
+    /// the storage, sequence number the time in its name.
     pub fn seal_signed(
         &self,
         vault: &VaultId,
+        key_id: &str,
         key: &SecretKey,
         signer: &crypto::SigningKey,
     ) -> Result<Vec<u8>> {
-        let ct = self.seal(vault, key)?;
-        crate::vault::SignedRecord::wrap(
-            "storage-settings-signature",
+        let header = crate::record::Header {
+            kind: crate::record::RecordKind::StorageSettings,
             vault,
-            &self.storage,
-            &self.device,
-            self.updated_utc,
-            ct,
-            signer,
-        )
+            scope: self.storage.as_str(),
+            device: &self.device,
+            seq: self.updated_utc.max(0) as u64,
+            key_id,
+        };
+        Ok(header
+            .seal(key, &serde_json::to_vec(self)?, signer)?
+            .to_bytes())
     }
 
-    /// Open a record found under `named_device`'s part of the key: signed
-    /// (always accepted when the signature holds) or, outside an
-    /// organization, sealed only.
+    /// Open a signed record found under `named_device`'s part of the key.
     pub fn open_any(
         blob: &[u8],
         vault: &VaultId,
         storage: &Id,
         named_device: &DeviceId,
-        keys: &[SecretKey],
+        key_for: &dyn Fn(&str) -> Option<SecretKey>,
         verify: &dyn Fn(&DeviceId) -> Option<crypto::VerifyingKey>,
-        allow_unsigned: bool,
     ) -> Result<Self> {
-        let (rec, signer) = match crate::vault::SignedRecord::parse(blob) {
-            Some(env) => {
-                let pk = verify(&env.device).ok_or_else(|| anyhow::anyhow!("unknown writer"))?;
-                let ct = env.verify("storage-settings-signature", vault, storage, &pk)?;
-                let rec = keys
-                    .iter()
-                    .find_map(|k| Self::open(&ct, vault, storage, k).ok())
-                    .ok_or_else(|| anyhow::anyhow!("storage settings record does not open"))?;
-                if rec.updated_utc != env.updated_utc {
-                    bail!("storage settings record does not match its envelope");
-                }
-                (rec, Some(env.device))
-            }
-            None if allow_unsigned => (
-                keys.iter()
-                    .find_map(|k| Self::open(blob, vault, storage, k).ok())
-                    .ok_or_else(|| anyhow::anyhow!("storage settings record does not open"))?,
-                None,
-            ),
-            None => bail!("unsigned storage settings record"),
-        };
-        if &rec.device != named_device || signer.is_some_and(|s| s != rec.device) {
-            bail!("storage settings record does not match its name");
+        let env = crate::record::SignedRecord::parse(blob)?;
+        let plain = env.accept(
+            &crate::record::Expect::new(crate::record::RecordKind::StorageSettings, vault)
+                .scope(storage.as_str())
+                .device(named_device),
+            verify,
+            key_for,
+        )?;
+        let rec: Self = serde_json::from_slice(&plain)?;
+        if &rec.storage != storage
+            || rec.device != env.device
+            || rec.updated_utc.max(0) as u64 != env.seq
+        {
+            bail!("storage settings record does not match its envelope");
         }
         Ok(rec)
     }
@@ -264,7 +231,8 @@ mod tests {
     fn records_open_only_for_their_storage_and_writer() {
         let vault = VaultId::random();
         let key = SecretKey::random();
-        let dev = DeviceId::random();
+        let signer = crypto::SigningKey::generate();
+        let dev = crate::ledger::device_id_for(&signer.public());
         let storage = Id::random();
         let rec = StorageSettingsRecord {
             storage: storage.clone(),
@@ -276,28 +244,25 @@ mod tests {
                 ..Default::default()
             },
         };
-        let blob = rec.seal(&vault, &key).unwrap();
-        let none = |_: &DeviceId| None;
-        let opened = StorageSettingsRecord::open_any(
-            &blob,
-            &vault,
-            &storage,
-            &dev,
-            std::slice::from_ref(&key),
-            &none,
-            true,
-        )
-        .unwrap();
+        let id = crate::record::folder_record_key_id(0);
+        let blob = rec.seal_signed(&vault, &id, &key, &signer).unwrap();
+        let k = key.clone();
+        let key_for = move |i: &str| (i == "folder-record@0").then(|| k.clone());
+        let pk = signer.public();
+        let known =
+            move |d: &DeviceId| (d == &crate::ledger::device_id_for(&pk)).then(|| pk.clone());
+        let opened =
+            StorageSettingsRecord::open_any(&blob, &vault, &storage, &dev, &key_for, &known)
+                .unwrap();
         assert_eq!(opened, rec);
-        // Another storage's key, another writer, or unsigned when signatures are required.
+        // Another storage, another writer named, an unknown writer.
         assert!(StorageSettingsRecord::open_any(
             &blob,
             &vault,
             &Id::random(),
             &dev,
-            std::slice::from_ref(&key),
-            &none,
-            true
+            &key_for,
+            &known
         )
         .is_err());
         assert!(StorageSettingsRecord::open_any(
@@ -305,21 +270,15 @@ mod tests {
             &vault,
             &storage,
             &DeviceId::random(),
-            std::slice::from_ref(&key),
-            &none,
-            true
+            &key_for,
+            &known
         )
         .is_err());
-        assert!(StorageSettingsRecord::open_any(
-            &blob,
-            &vault,
-            &storage,
-            &dev,
-            &[key],
-            &none,
-            false
-        )
-        .is_err());
+        let none = |_: &DeviceId| None;
+        assert!(
+            StorageSettingsRecord::open_any(&blob, &vault, &storage, &dev, &key_for, &none)
+                .is_err()
+        );
     }
 
     #[test]

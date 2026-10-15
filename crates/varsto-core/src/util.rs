@@ -324,6 +324,11 @@ pub fn manifest_path(rel: &Path) -> Option<String> {
     }
 }
 
+/// For `skip_serializing_if` on counters.
+pub fn is_zero_u64(v: &u64) -> bool {
+    *v == 0
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

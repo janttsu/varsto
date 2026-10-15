@@ -195,7 +195,7 @@
           <p class="muted small">Credentials the owner gave you for this bucket. The secret is kept in this device's encrypted secret store.</p>
         </div>
         <div class="actions"><button type="submit">Accept</button></div>
-        <p class="muted small">You get the folder key only: this device can read and write that folder, nothing else of the other vault. A sealed token (vst1… or vst2…) can be opened only here, and this device checks that the owner confirmed its fingerprint; a plain token carries the key itself.</p>
+        <p class="muted small">You get the folder key only: this device can read and write that folder, nothing else of the other vault. The token (vst2…) can be opened only here, within 14 days of being made, and this device checks that the owner confirmed its fingerprint.</p>
       </form>
     </div>
   </section>
@@ -218,6 +218,7 @@
     <div class="page" data-page="overview">
       <div id="vaultkey" class="notice warn vaultkey hidden"><span id="vaultkey-text"></span><button type="button" id="vaultkey-done" class="secondary">I have written it down</button></div>
       <div id="ledgerbanner" class="notice warn banner-action hidden"><span id="ledgerbanner-text"></span><button type="button" id="ledgerbanner-btn" class="secondary hidden">Continue from the storages</button></div>
+      <div id="folderrequests"></div>
       <div id="foldersafety"></div>
       <div id="policybanner" class="notice warn hidden"></div>
       <div id="spacebanner" class="notice warn hidden" role="status"></div>

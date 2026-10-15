@@ -162,6 +162,63 @@ pub fn combine(shares: &[Share], threshold: u8, check: Option<&str>) -> Result<Z
     Ok(key_hex)
 }
 
+/// A key (hex) with its shares, when printed in shares.
+pub type KeyWithShares<'a> = (&'a str, Option<(u8, Vec<Share>)>);
+
+/// The printable kit with both word sets (format 2, section 5): the vault
+/// key and, when given, the recovery key, each with its key check and,
+/// when given, its shares.
+pub fn kit_text_full(
+    vault_id: &str,
+    key_hex: &str,
+    shares: Option<(u8, Vec<Share>)>,
+    recovery: Option<KeyWithShares<'_>>,
+) -> Result<String> {
+    let mut t = kit_text(vault_id, key_hex, shares)?;
+    match recovery {
+        Some((rk, rshares)) => {
+            t.push_str("\nRECOVERY KEY (the second word set)\n");
+            t.push_str("With the vault key above, these 24 words restore every folder if all your devices are lost.\n");
+            t.push_str("Keep them apart from the vault key. They are never stored on a device.\n\n");
+            let words = words_from_key(rk)?;
+            let numbered: Vec<String> = words
+                .split(' ')
+                .enumerate()
+                .map(|(i, w)| format!("{:>2}. {w}", i + 1))
+                .collect();
+            for row in numbered.chunks(4) {
+                t.push_str(&row.join("   "));
+                t.push('\n');
+            }
+            t.push_str(&format!("\nRecovery key check: {}\n", key_check(rk)?));
+            if let Some((threshold, shares)) = rshares {
+                t.push_str(&format!(
+                    "\nRECOVERY KEY SHARES ({threshold} of {} rebuild it):\n",
+                    shares.len()
+                ));
+                for s in shares {
+                    t.push_str(&format!("\nShare {}:\n", s.index));
+                    let n: Vec<String> = s
+                        .words
+                        .split(' ')
+                        .enumerate()
+                        .map(|(i, w)| format!("{:>2}. {w}", i + 1))
+                        .collect();
+                    for row in n.chunks(4) {
+                        t.push_str(&row.join("   "));
+                        t.push('\n');
+                    }
+                }
+            }
+            t.push_str("\nRestore a lost vault: varsto join --words \"<vault words>\" --recovery-words - ...\n");
+        }
+        None => t.push_str(
+            "\nThe recovery key is not on this kit: print it with --with-recovery-key (or make a new one with --new-recovery-key). Without it, losing every device loses the folders.\n",
+        ),
+    }
+    Ok(t)
+}
+
 /// The printable kit.
 pub fn kit_text(vault_id: &str, key_hex: &str, shares: Option<(u8, Vec<Share>)>) -> Result<String> {
     let words = words_from_key(key_hex)?;
@@ -216,6 +273,41 @@ pub fn kit_text(vault_id: &str, key_hex: &str, shares: Option<(u8, Vec<Share>)>)
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_kit_carries_both_word_sets_with_their_checks() {
+        let vault = hex::encode([3u8; 32]);
+        let rec = hex::encode([4u8; 32]);
+        let rshares = split(&rec, 2, 3).unwrap();
+        let t = kit_text_full(
+            "abcd",
+            &vault,
+            None,
+            Some((&rec, Some((2, rshares.clone())))),
+        )
+        .unwrap();
+        assert!(t.contains(
+            &*words_from_key(&vault)
+                .unwrap()
+                .split(' ')
+                .next()
+                .unwrap()
+                .to_string()
+        ));
+        assert!(t.contains("RECOVERY KEY"));
+        assert!(t.contains(&key_check(&vault).unwrap()));
+        assert!(t.contains(&key_check(&rec).unwrap()));
+        assert_ne!(key_check(&vault).unwrap(), key_check(&rec).unwrap());
+        // The recovery key's shares rebuild it, checked by its own key check.
+        let two = vec![rshares[0].clone(), rshares[2].clone()];
+        assert_eq!(
+            *combine(&two, 2, Some(&key_check(&rec).unwrap())).unwrap(),
+            rec
+        );
+        assert!(combine(&two, 2, Some(&key_check(&vault).unwrap())).is_err());
+        let without = kit_text_full("abcd", &vault, None, None).unwrap();
+        assert!(without.contains("not on this kit"));
+    }
 
     #[test]
     fn words_roundtrip_and_catch_mistakes() {

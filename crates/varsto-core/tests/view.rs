@@ -71,6 +71,7 @@ fn view_decrypts_ranges_in_memory_only() {
 
     // The phone keeps the folder encrypted: only a placeholder is on disk.
     let mut b = Engine::join(&b_home, "phone", PASS, &key, storage).unwrap();
+    Engine::grant_all_for_tests(&mut a, &mut b).unwrap();
     b.attach_folder("photos", &b_dir, true).unwrap();
     b.set_encrypted_here("photos", true).unwrap();
     b.pull("photos").unwrap();

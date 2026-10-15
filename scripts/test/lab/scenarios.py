@@ -170,15 +170,33 @@ def s_reset():
     lab.cmd_services(None)
 
 
+def approve(owner, new, name, folders=("docs",)):
+    """Format 2: `new` (joined with the vault key) asks for `folders` and
+    `owner` approves each request by hand."""
+    v(new, "sync", check_rc=False)
+    for f in folders:
+        v(new, f"folder request {f}")
+    v(owner, "sync")
+    reqs = v(owner, "folder requests")
+    for f in folders:
+        check(any(r["folder"] == f and r["device"] == name for r in reqs), f"{owner} does not see {name}'s request for {f}: {reqs}")
+        v(owner, f"folder approve {f} {name}")
+    v(new, "sync", check_rc=False)
+
+
 @scenario("init-and-s3-through-nat")
 def s_init():
     out = v("vl-laptop", "init --name laptop")
     check(len(out["vault_key"]) == 64, "no vault key")
+    check(len(out["recovery_words"].split()) == 24, "no recovery words")
     CTX["vault_key"] = out["vault_key"]
+    CTX["recovery_words"] = out["recovery_words"]
     v("vl-laptop", f"storage add-s3 cloud --insecure-http --endpoint {lab.S3['endpoint']} --region us-east-1 --bucket {BUCKET} "
                     f"--access-key-id {lab.S3['key']} --place cloud", json_out=False)
     gen_data("vl-laptop", "/home/varsto/data/docs", seed=1)
     v("vl-laptop", "folder add docs /home/varsto/data/docs", json_out=False)
+    # Format 2: the recovery copy of the new folder key needs the words.
+    run("vl-laptop", f"{ENV} VARSTO_RECOVERY_WORDS={shlex.quote(CTX['recovery_words'])} varsto --json recovery escrow")
     push = v("vl-laptop", "push docs")
     check(push["files_changed"] >= 150, f"pushed {push['files_changed']} files")
     st = v("vl-laptop", "status")
@@ -190,7 +208,8 @@ def s_init():
 
 @scenario("pair-over-lan")
 def s_pair():
-    run("vl-laptop", f"{ENV} nohup varsto pair offer > ~/pair.log 2>&1 &")
+    # Format 2: the person at the laptop chooses the folders the new device gets.
+    run("vl-laptop", f"{ENV} nohup varsto pair offer --folders docs > ~/pair.log 2>&1 &")
     code = None
     for _ in range(30):
         m = re.search(r"Pairing code: (\d{3}-\d{3}-\d{3})", run("vl-laptop", "cat ~/pair.log").stdout)
@@ -205,7 +224,9 @@ def s_pair():
     check("joined vault" in out, out[-300:])
     check("cloud: joined through it" in out, "desktop did not join through the S3 storage: " + out)
     time.sleep(1)
-    check("Sent the vault to desktop" in run("vl-laptop", "cat ~/pair.log").stdout, "offer did not report the pairing")
+    pair_log = run("vl-laptop", "cat ~/pair.log").stdout
+    check("Sent the vault to desktop" in pair_log, "offer did not report the pairing")
+    check("Gave it the folders: docs" in pair_log, "the chosen folder was not granted: " + pair_log[-300:])
     # A wrong code is refused and the offer is closed after it.
     run("vl-laptop", f"{ENV} nohup varsto pair offer > ~/pair2.log 2>&1 &")
     time.sleep(2)
@@ -230,8 +251,11 @@ def s_words():
     kit = v("vl-laptop", "recovery kit", json_out=False)
     words = " ".join(re.findall(r"\d+\. (\w+)", kit.split("SHARES")[0]))
     check(len(words.split()) == 24, f"kit has {len(words.split())} words")
-    out = v("vl-pub", f"join --name pub --s3-bucket {BUCKET} --s3-endpoint {lab.S3['endpoint']} --s3-insecure-http "
-                      f"--s3-access-key-id {lab.S3['key']} --storage-name cloud", env=f"VARSTO_VAULT_KEY={shlex.quote(words)}")
+    # Format 2: the vault words and the recovery words together restore
+    # every folder (no other device needed).
+    out = v("vl-pub", f"join --name pub --recovery-words --s3-bucket {BUCKET} --s3-endpoint {lab.S3['endpoint']} --s3-insecure-http "
+                      f"--s3-access-key-id {lab.S3['key']} --storage-name cloud",
+            env=f"VARSTO_VAULT_KEY={shlex.quote(words)} VARSTO_RECOVERY_WORDS={shlex.quote(CTX['recovery_words'])}")
     check("docs" in out.get("folders", []), f"pub sees {out}")
     v("vl-pub", "folder attach docs /home/varsto/data/docs", json_out=False)
     v("vl-pub", "sync")
@@ -344,7 +368,8 @@ def s_org():
     fp = req["fingerprint"]
     bad = v("vl-laptop", f"org approve {shlex.quote(req['request_code'])} --user ville --fingerprint 'wrong words here a b'", check_rc=False)
     check(isinstance(bad, dict) and bad.get("_failed"), "a wrong fingerprint was accepted")
-    ap = v("vl-laptop", f"org approve {shlex.quote(req['request_code'])} --user ville --fingerprint {shlex.quote(fp)}")
+    ap = v("vl-laptop", f"org approve {shlex.quote(req['request_code'])} --user ville --fingerprint {shlex.quote(fp)} --folders docs")
+    check(ap.get("folders") == ["docs"], f"the approval did not carry the folder: {ap}")
     j = v("vl-work", f"org join --name work --token {shlex.quote(ap['token'])}")
     check(j["user"] == "ville" and j["organization"] == "LabCo", f"join: {j}")
     v("vl-work", "folder attach docs /home/varsto/data/docs", json_out=False)
@@ -460,6 +485,7 @@ def s_p2p_setup():
     for vm, name in (("vl-desktop", "desktop"), ("vl-pub", "pub"), ("vl-work", "work")):
         v(vm, f"join --name {name} --s3-bucket {BUCKET} --s3-endpoint {lab.S3['endpoint']} --s3-insecure-http "
               f"--s3-access-key-id {lab.S3['key']} --storage-name cloud", env=f"VARSTO_VAULT_KEY={shlex.quote(words)}")
+        approve("vl-laptop", vm, name, folders=("media",))
     stun = " ".join(f"--stun {x}" for x in lab.STUN)
     for vm in lab.DEVICES:
         extra = " --public 198.51.100.20:17893" if vm == "vl-pub" else ""
@@ -1012,8 +1038,94 @@ def fresh_pair():
     words = " ".join(re.findall(r"\d+\. (\w+)", kit.split("SHARES")[0]))
     v("vl-desktop", f"join --name desktop --s3-bucket {BUCKET} --s3-endpoint {lab.S3['endpoint']} --s3-insecure-http "
                     f"--s3-access-key-id {lab.S3['key']} --storage-name cloud", env=f"VARSTO_VAULT_KEY={shlex.quote(words)}")
+    approve("vl-laptop", "vl-desktop", "desktop")
     v("vl-desktop", "folder attach docs /home/varsto/data/docs", json_out=False)
     v("vl-desktop", "sync")
+
+
+@scenario("folder-approval")
+def s_folder_approval():
+    """Format 2, section 4. A device that joins with the vault words sees the
+    folder's name and size but no content; its request shows on the
+    laptop, where only a person approves it (the background service never
+    does); a denied request gives nothing; after approval it reads."""
+    fresh_pair()
+    words = " ".join(re.findall(r"\d+\. (\w+)", v("vl-laptop", "recovery kit", json_out=False).split("SHARES")[0]))
+    s3 = (f"--s3-bucket {BUCKET} --s3-endpoint {lab.S3['endpoint']} --s3-insecure-http "
+          f"--s3-access-key-id {lab.S3['key']} --storage-name cloud")
+    run("vl-pub", "rm -rf ~/.local/share/varsto ~/data; mkdir -p ~/data", check_rc=False)
+    v("vl-pub", f"join --name pub {s3}", env=f"VARSTO_VAULT_KEY={shlex.quote(words)}")
+    st = v("vl-pub", "status")
+    check(st.get("folders_without_key") == ["docs"], f"pub holds keys it was not given: {st.get('folders_without_key')}")
+    bad = v("vl-pub", "folder attach docs /home/varsto/data/docs", json_out=False, check_rc=False)
+    check(isinstance(bad, dict) and bad.get("_failed"), "pub attached a folder without its key")
+    # With the service running on the laptop, the request is shown, not granted.
+    start_service("vl-laptop")
+    try:
+        v("vl-pub", "folder request docs")
+        time.sleep(20)
+        reqs = api("vl-laptop", "GET", "/api/folder/requests")
+        check(any(r["device"] == "pub" for r in reqs), f"the laptop's interface does not show the request: {reqs}")
+        v("vl-pub", "sync", check_rc=False)
+        check(v("vl-pub", "status").get("folders_without_key") == ["docs"], "the service approved on its own")
+        # Denied: nothing.
+        api("vl-laptop", "POST", "/api/folder/deny", {"folder": "docs", "device": "pub"})
+        v("vl-pub", "sync", check_rc=False)
+        check(v("vl-pub", "status").get("folders_without_key") == ["docs"], "a denied request gave the key")
+        # Asked again and approved by a person: pub reads the folder.
+        v("vl-pub", "folder request docs")
+        v("vl-laptop", "sync", check_rc=False)
+        api("vl-laptop", "POST", "/api/folder/approve", {"folder": "docs", "device": "pub", "confirm": True})
+    finally:
+        run("vl-laptop", "pkill -x varsto; true", check_rc=False)
+    v("vl-pub", "sync", check_rc=False)
+    v("vl-pub", "folder attach docs /home/varsto/data/docs", json_out=False)
+    v("vl-pub", "sync")
+    same_tree(tree_hashes("vl-pub", "/home/varsto/data/docs"), tree_hashes("vl-laptop", "/home/varsto/data/docs"), "pub after approval")
+    # The signed participants list names both as owners, on either device.
+    for vm in ("vl-pub", "vl-laptop"):
+        roles = {p["device"]: p["role"] for p in v(vm, "folder participants docs")["participants"]}
+        check(roles.get("pub") == "owner" and roles.get("laptop") == "owner", f"{vm}: participants {roles}")
+
+
+@scenario("format2-recovery")
+def s_format2_recovery():
+    """Format 2, section 5. Every device is lost: a new device with the vault
+    words and the recovery words gets every folder back; with the vault
+    words alone it gets none."""
+    s_reset()
+    out = v("vl-laptop", "init --name laptop")
+    rwords = out["recovery_words"]
+    v("vl-laptop", f"storage add-s3 cloud --insecure-http --endpoint {lab.S3['endpoint']} --region us-east-1 --bucket {BUCKET} "
+                    f"--access-key-id {lab.S3['key']} --place cloud", json_out=False)
+    gen_data("vl-laptop", "/home/varsto/data/docs", seed=11, big_mb=2, small=30)
+    gen_data("vl-laptop", "/home/varsto/data/photos", seed=12, big_mb=2, small=10)
+    renv = f"VARSTO_RECOVERY_WORDS={shlex.quote(rwords)}"
+    run("vl-laptop", f"{ENV} {renv} varsto --with-recovery-key folder add docs /home/varsto/data/docs")
+    run("vl-laptop", f"{ENV} {renv} varsto --with-recovery-key folder add photos /home/varsto/data/photos")
+    v("vl-laptop", "sync")
+    check(not v("vl-laptop", "status").get("folders_without_escrow"), "a folder has no recovery copy")
+    docs = tree_hashes("vl-laptop", "/home/varsto/data/docs")
+    photos = tree_hashes("vl-laptop", "/home/varsto/data/photos")
+    words = " ".join(re.findall(r"\d+\. (\w+)", v("vl-laptop", "recovery kit", json_out=False).split("SHARES")[0]))
+    # Every device is lost.
+    run("vl-laptop", "pkill -x varsto; rm -rf ~/.local/share/varsto ~/data", check_rc=False)
+    s3 = (f"--s3-bucket {BUCKET} --s3-endpoint {lab.S3['endpoint']} --s3-insecure-http "
+          f"--s3-access-key-id {lab.S3['key']} --storage-name cloud")
+    # The vault words alone: names, no content.
+    run("vl-desktop", "rm -rf ~/.local/share/varsto ~/data; mkdir -p ~/data", check_rc=False)
+    v("vl-desktop", f"join --name desktop {s3}", env=f"VARSTO_VAULT_KEY={shlex.quote(words)}")
+    st = v("vl-desktop", "status")
+    check(sorted(st.get("folders_without_key", [])) == ["docs", "photos"], f"the vault words alone opened folders: {st.get('folders_without_key')}")
+    # The vault words and the recovery words: everything.
+    run("vl-pub", "rm -rf ~/.local/share/varsto ~/data; mkdir -p ~/data", check_rc=False)
+    v("vl-pub", f"join --name pub --recovery-words {s3}", env=f"VARSTO_VAULT_KEY={shlex.quote(words)} {renv}")
+    check(not v("vl-pub", "status").get("folders_without_key"), "folders missing after recovery")
+    v("vl-pub", "folder attach docs /home/varsto/data/docs", json_out=False)
+    v("vl-pub", "folder attach photos /home/varsto/data/photos", json_out=False)
+    v("vl-pub", "sync")
+    same_tree(tree_hashes("vl-pub", "/home/varsto/data/docs"), docs, "docs after recovery")
+    same_tree(tree_hashes("vl-pub", "/home/varsto/data/photos"), photos, "photos after recovery")
 
 
 @scenario("storage-outage-and-recovery")
@@ -1163,6 +1275,7 @@ PY""")
     words = " ".join(re.findall(r"\d+\. (\w+)", kit.split("SHARES")[0]))
     v("vl-desktop", f"join --name desktop --s3-bucket {BUCKET} --s3-endpoint {lab.S3['endpoint']} --s3-insecure-http "
                     f"--s3-access-key-id {lab.S3['key']} --storage-name cloud", env=f"VARSTO_VAULT_KEY={shlex.quote(words)}")
+    approve("vl-laptop", "vl-desktop", "desktop", folders=("many", "large"))
     v("vl-desktop", "folder attach many /home/varsto/data/many", json_out=False)
     v("vl-desktop", "folder attach large /home/varsto/data/large", json_out=False)
     res["pull_20k"] = timed_rss("vl-desktop", "pull many")[:2]
@@ -1597,12 +1710,14 @@ def s_restic():
         run(vm, "pkill -x varsto; true", check_rc=False)
 
 
+# s_mixed (alpha.9 beside this build) is left out: storage format 2 is read
+# by nothing older, so a vault cannot be shared with an older version.
 SCENARIOS = [s_reset, s_init, s_pair, s_sync, s_words, s_conflict, s_selective, s_repair, s_policy,
              s_strongroom, s_org, s_remove_user, s_revoke,
-             s_p2p_setup, s_p2p_lan, s_p2p_pub, s_p2p_sym, s_p2p_stop, s_share, s_disks, s_mixed,
+             s_p2p_setup, s_p2p_lan, s_p2p_pub, s_p2p_sym, s_p2p_stop, s_share, s_disks,
              s_outage, s_blackhole, s_crash, s_clock, s_clock_behind, s_p2p_upload, s_scale,
              s_backup, s_activity, s_disk_init, s_disk_fetch_plan, s_staged_move, s_scrub, s_restic, s_ledger_loss,
-             s_ledger_withhold]
+             s_ledger_withhold, s_folder_approval, s_format2_recovery]
 
 
 def main():

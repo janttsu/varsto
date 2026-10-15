@@ -318,17 +318,8 @@ fn record_key(meta: &SecretKey, folder: &FolderId) -> SecretKey {
     meta.derive("trash-record", &[folder.as_str().as_bytes()])
 }
 
-fn record_aad(vault: &VaultId, folder: &FolderId, device: &DeviceId, written: i64) -> Vec<u8> {
-    crypto::aad(
-        "trash-record",
-        &[
-            vault.as_str().as_bytes(),
-            folder.as_str().as_bytes(),
-            device.as_str().as_bytes(),
-            &written.to_le_bytes(),
-        ],
-    )
-}
+/// Kind name of trash records in ledger announcements.
+pub(super) const TRASH_KIND: &str = "trash";
 
 fn record_storage_key(folder: &FolderId, device: &DeviceId, written: i64) -> String {
     format!("{RECORD_PREFIX}{folder}/{device}/{written:020}.enc")
@@ -720,11 +711,29 @@ impl Engine {
             versions: cache.own_versions.clone(),
         };
         let packed = zstd::bulk::compress(&serde_json::to_vec(&body)?, 3)?;
-        let blob = crypto::encrypt(
+        // A signed record of kind `trash` (format 2), announced in the
+        // ledger: only the announced copy counts for other devices.
+        let key_id = crate::record::meta_key_id(fk.epoch);
+        let env = crate::record::Header {
+            kind: crate::record::RecordKind::Trash,
+            vault: &self.vault.vault_id,
+            scope: rec.folder_id.as_str(),
+            device: &me,
+            seq: written.max(0) as u64,
+            key_id: &key_id,
+        }
+        .seal(
             &record_key(&fk.meta, &rec.folder_id),
-            &record_aad(&self.vault.vault_id, &rec.folder_id, &me, written),
             &packed,
+            &self.keys.signer,
         )?;
+        let blob = env.to_bytes();
+        self.pending.push(crate::ledger::Event::RecordPublished {
+            kind: TRASH_KIND.into(),
+            scope: rec.folder_id.to_string(),
+            seq: written.max(0) as u64,
+            hash: env.body_hash.clone(),
+        });
         let key = record_storage_key(&rec.folder_id, &me, written);
         let own = format!("{}{me}/", record_prefix(&rec.folder_id));
         for (_, b) in &storages {
@@ -769,7 +778,8 @@ impl Engine {
                 }
             }
         }
-        let metas = fk.meta_keys();
+        let view = self.view()?;
+        let rec = self.keyring.folders.get(&fk.folder).cloned();
         let mut read = 0;
         for (dev, (t, i, key)) in newest {
             let known =
@@ -777,16 +787,54 @@ impl Engine {
             if dev == self.vault.device_id || !known || self.is_revoked(&dev) {
                 continue;
             }
+            // Only a device that may write the folder (not a viewer, not an
+            // untrusted device of the vault) has its trash record read.
+            if rec.as_ref().is_some_and(|r| !self.share_writer_ok(r, &dev))
+                || (self.devices.devices.contains_key(&dev) && !self.trusted(&dev))
+            {
+                continue;
+            }
             if cache.remote.get(&dev).is_some_and(|r| r.written_utc >= t) {
                 continue;
             }
+            // The record the device announced in its ledger, and only that.
+            let Some((aseq, ahash)) =
+                view.records
+                    .get(&(TRASH_KIND.to_string(), fk.folder.to_string(), dev.clone()))
+            else {
+                continue;
+            };
+            if *aseq != t.max(0) as u64 {
+                continue;
+            }
+            let Some(writer) = self.writer_key(&dev) else {
+                continue;
+            };
             let Some(blob) = storages[i].1.get(&key)? else {
                 continue;
             };
-            let a = record_aad(&self.vault.vault_id, &fk.folder, &dev, t);
-            let Some(packed) = metas
-                .iter()
-                .find_map(|m| crypto::decrypt(&record_key(m, &fk.folder), &a, &blob).ok())
+            let Ok(env) = crate::record::SignedRecord::parse(&blob) else {
+                continue;
+            };
+            if env
+                .expect(
+                    &crate::record::Expect::new(
+                        crate::record::RecordKind::Trash,
+                        &self.vault.vault_id,
+                    )
+                    .scope(fk.folder.as_str())
+                    .device(&dev)
+                    .seq(*aseq),
+                )
+                .is_err()
+                || &env.body_hash != ahash
+                || env.verify(&writer).is_err()
+            {
+                continue;
+            }
+            let Some(packed) = crate::record::parse_meta_key_id(&env.key_id)
+                .and_then(|e| fk.meta_key_for(e))
+                .and_then(|m| env.open(&record_key(&m, &fk.folder)).ok())
             else {
                 continue;
             };
@@ -823,12 +871,24 @@ impl Engine {
         Ok(read)
     }
 
+    /// Read every device's trash records again now, whenever they were
+    /// last read (tests and `varsto trash list --refresh`).
+    #[doc(hidden)]
+    pub fn trash_reread(&mut self) -> Result<()> {
+        self.trash_refresh(true)
+    }
+
     /// Read the other devices' trash records (every folder whose key is at
     /// hand) and the vault's trash settings, when the last reading is older
     /// than a few minutes or `force`.
     pub(super) fn trash_refresh(&mut self, force: bool) -> Result<()> {
         if self.removal.is_some() {
             return Ok(());
+        }
+        // A trash record counts once its writer's ledger announced it
+        // (format 2): a forced read brings the ledger up to date first.
+        if force {
+            let _ = self.pull_ledger();
         }
         let now = util::now_utc();
         let storages: OpenStorages = self

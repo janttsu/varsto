@@ -4,9 +4,10 @@
 //! other's manifests with version vectors; concurrent edits produce a
 //! deterministic winner and a conflict copy, never silent data loss (F-003).
 
-use crate::crypto::{self, SecretKey};
+use crate::crypto::{self, SecretKey, SigningKey, VerifyingKey};
 use crate::fsmeta::FileMeta;
 use crate::ids::{ChunkId, DeviceId, FolderId, ObjectName, VaultId};
+use crate::record::{self, RecordKind, SignedRecord};
 use anyhow::{bail, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -102,42 +103,62 @@ impl Manifest {
         format!("manifests/{}/{}/", folder, device)
     }
 
-    fn aad(vault: &VaultId, folder: &FolderId, device: &DeviceId, seq: u64) -> Vec<u8> {
-        crypto::aad(
-            "manifest",
-            &[
-                vault.as_str().as_bytes(),
-                folder.as_str().as_bytes(),
-                device.as_str().as_bytes(),
-                &seq.to_le_bytes(),
-            ],
-        )
+    /// Seal under the folder metadata key of `epoch` and sign: a signed
+    /// record of kind `manifest`, scope the folder, key id `meta@<epoch>`
+    /// (`crate::record`). Its `body_hash` is what the ledger announces.
+    pub fn seal(
+        &self,
+        vault: &VaultId,
+        epoch: u32,
+        meta_key: &SecretKey,
+        signer: &SigningKey,
+    ) -> Result<SignedRecord> {
+        let key_id = record::meta_key_id(epoch);
+        let header = record::Header {
+            kind: RecordKind::Manifest,
+            vault,
+            scope: self.folder.as_str(),
+            device: &self.device,
+            seq: self.seq,
+            key_id: &key_id,
+        };
+        header.seal(meta_key, &serde_json::to_vec(self)?, signer)
     }
 
-    pub fn seal(&self, vault: &VaultId, meta_key: &SecretKey) -> Result<Vec<u8>> {
-        let plain = serde_json::to_vec(self)?;
-        crypto::encrypt(
-            meta_key,
-            &Self::aad(vault, &self.folder, &self.device, self.seq),
-            &plain,
-        )
-    }
-
+    /// Open a stored manifest of `device`, sequence number `seq`: a signed
+    /// record that names exactly that folder, device and number, signed by
+    /// `writer` (the device's key), whose body opens under the metadata key
+    /// of the epoch its key id names (`meta_for`), and whose entries pass
+    /// `validate`. Whether the ledger announced it is the caller's check
+    /// (`SignedRecord::body_hash` against the announcement).
     pub fn open(
         blob: &[u8],
         vault: &VaultId,
         folder: &FolderId,
         device: &DeviceId,
         seq: u64,
-        meta_key: &SecretKey,
-    ) -> Result<Manifest> {
-        let plain = crypto::decrypt(meta_key, &Self::aad(vault, folder, device, seq), blob)?;
+        writer: &VerifyingKey,
+        meta_for: &dyn Fn(u32) -> Option<SecretKey>,
+    ) -> Result<(Manifest, SignedRecord)> {
+        let env = SignedRecord::parse(blob)?;
+        env.expect(
+            &record::Expect::new(RecordKind::Manifest, vault)
+                .scope(folder.as_str())
+                .device(device)
+                .seq(seq),
+        )?;
+        env.verify(writer)?;
+        let epoch = record::parse_meta_key_id(&env.key_id)
+            .ok_or_else(|| anyhow::anyhow!("manifest names no metadata key"))?;
+        let key = meta_for(epoch)
+            .ok_or_else(|| anyhow::anyhow!("no metadata key of epoch {epoch} on this device"))?;
+        let plain = env.open(&key)?;
         let m: Manifest = serde_json::from_slice(&plain)?;
         if &m.folder != folder || &m.device != device || m.seq != seq {
             bail!("manifest body does not match its name");
         }
         m.validate()?;
-        Ok(m)
+        Ok((m, env))
     }
 
     /// Refuse a manifest whose entries could not have come from an honest
@@ -381,9 +402,71 @@ mod tests {
         // A path that leaves the folder is refused when the manifest is opened.
         let vault = VaultId::from_bytes(&[5; 16]);
         let key = SecretKey::random();
-        let bad = manifest_with(vec![entry("../../.ssh/authorized_keys", &[10])]);
-        let blob = bad.seal(&vault, &key).unwrap();
-        assert!(Manifest::open(&blob, &vault, &bad.folder, &bad.device, 1, &key).is_err());
+        let signer = SigningKey::generate();
+        let mut bad = manifest_with(vec![entry("../../.ssh/authorized_keys", &[10])]);
+        bad.device = crate::ledger::device_id_for(&signer.public());
+        let blob = bad.seal(&vault, 0, &key, &signer).unwrap().to_bytes();
+        let k = key.clone();
+        let meta_for = move |e: u32| (e == 0).then(|| k.clone());
+        assert!(Manifest::open(
+            &blob,
+            &vault,
+            &bad.folder,
+            &bad.device,
+            1,
+            &signer.public(),
+            &meta_for
+        )
+        .is_err());
+        // The same manifest with a valid path opens, and only as written:
+        // another sequence number, another signer or another epoch's key
+        // id is refused.
+        let mut good = manifest_with(vec![entry("docs/a.txt", &[10])]);
+        good.device = bad.device.clone();
+        let blob = good.seal(&vault, 0, &key, &signer).unwrap().to_bytes();
+        let (m, env) = Manifest::open(
+            &blob,
+            &vault,
+            &good.folder,
+            &good.device,
+            1,
+            &signer.public(),
+            &meta_for,
+        )
+        .unwrap();
+        assert_eq!(m.files.len(), 1);
+        assert_eq!(env.body_hash.len(), 64);
+        assert!(Manifest::open(
+            &blob,
+            &vault,
+            &good.folder,
+            &good.device,
+            2,
+            &signer.public(),
+            &meta_for
+        )
+        .is_err());
+        assert!(Manifest::open(
+            &blob,
+            &vault,
+            &good.folder,
+            &good.device,
+            1,
+            &SigningKey::generate().public(),
+            &meta_for
+        )
+        .is_err());
+        let other = good.seal(&vault, 1, &key, &signer).unwrap().to_bytes();
+        assert!(Manifest::open(
+            &other,
+            &vault,
+            &good.folder,
+            &good.device,
+            1,
+            &signer.public(),
+            &meta_for
+        )
+        .is_err());
         let abs = manifest_with(vec![entry("/etc/passwd", &[10])]);
         assert!(abs.validate().is_err());
         // The map key must be the entry's path.

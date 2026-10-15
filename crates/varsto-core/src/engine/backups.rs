@@ -253,10 +253,13 @@ impl Engine {
         self.ensure_unique_folder_name(name)?;
         let now = util::now_utc();
         let me = self.vault.device_id.clone();
+        let folder_id = FolderId::random();
+        let folder_key = SecretKey::random();
         let rec = FolderRecord {
-            folder_id: FolderId::random(),
+            key_check: super::folder_grants::folder_key_check(&folder_key, &folder_id),
+            folder_id,
             name: name.trim().to_string(),
-            key_hex: SecretKey::random().to_hex(),
+            key_hex: folder_key.to_hex(),
             created_by: me.clone(),
             created_utc: now,
             shared: false,
@@ -296,6 +299,13 @@ impl Engine {
         self.config.save(&self.home)?;
         self.pending.push(Event::FolderAdded { folder: id.clone() });
         self.publish_registry()?;
+        self.escrow_if_possible();
+        // The signed participants list: this device, the owner.
+        if let Some(rec) = self.keyring.folders.get(&id).cloned() {
+            if let Err(e) = self.ensure_participants(&rec, &[]) {
+                log::debug!(error:% = e; "participants list not published yet");
+            }
+        }
         self.commit_batch()?;
         Ok(id)
     }
@@ -623,7 +633,9 @@ impl Engine {
             files,
             skipped: skipped.into_iter().collect(),
         };
-        let blob = snap.seal(&self.vault.vault_id, &self.folder_keys(&rec)?.meta)?;
+        let fk = self.folder_keys(&rec)?;
+        let env = snap.seal(&self.vault.vault_id, fk.epoch, &fk.meta, &self.keys.signer)?;
+        let blob = env.to_bytes();
         let key = Snapshot::storage_key(&rec.folder_id, &me, seq);
         for (_, backend) in &metadata {
             backend.put_if_absent(&key, &blob)?;
@@ -635,7 +647,7 @@ impl Engine {
             expires_utc: snap.expires_utc,
             files: snap.files.len() as u64,
             bytes: snap.bytes(),
-            snapshot_hash: hex::encode(crypto::hash(&blob)),
+            snapshot_hash: env.body_hash.clone(),
         });
         self.save_state(&rec.folder_id, &state)?;
         src.last_taken_utc = now;
@@ -724,7 +736,11 @@ impl Engine {
         include_cold: bool,
     ) -> Result<Snapshot> {
         let key = Snapshot::storage_key(&rec.folder_id, device, seq);
-        let metas = self.folder_keys(rec)?.meta_keys();
+        let fk = self.folder_keys(rec)?;
+        let meta_for = |e: u32| fk.meta_key_for(e);
+        let writer = self
+            .writer_key(device)
+            .ok_or_else(|| anyhow!("snapshot {seq} of {} has an unknown writer", rec.name))?;
         let mut altered = false;
         for (spec, backend) in self.metadata_storages(include_cold)? {
             if spec.is_carrier() {
@@ -733,18 +749,22 @@ impl Engine {
             let Ok(Some(blob)) = backend.get(&key) else {
                 continue;
             };
-            if hex::encode(crypto::hash(&blob)) != record.hash {
-                altered = true;
-                continue;
-            }
-            return Snapshot::open(
+            // The signed copy the writer announced, and nothing else.
+            match Snapshot::open(
                 &blob,
                 &self.vault.vault_id,
                 &rec.folder_id,
                 device,
                 seq,
-                &metas,
-            );
+                &writer,
+                &meta_for,
+            ) {
+                Ok((snap, env)) if env.body_hash == record.hash => return Ok(snap),
+                _ => {
+                    altered = true;
+                    continue;
+                }
+            }
         }
         if altered {
             bail!(
@@ -1128,15 +1148,27 @@ impl Engine {
                     return Ok(());
                 }
             }
-            let metas = self.folder_keys(rec)?.meta_keys();
+            let fk = self.folder_keys(rec)?;
+            let meta_for = |e: u32| fk.meta_key_for(e);
             for (key, (d, s)) in &listed {
                 if known(&view, d, *s) {
                     continue;
                 }
                 // Not in the ledger yet: its blocks stay.
+                let writer = self.writer_key(d);
                 let opened = metadata.iter().find_map(|(_, b)| {
                     let blob = b.get(key).ok()??;
-                    Snapshot::open(&blob, &self.vault.vault_id, &rec.folder_id, d, *s, &metas).ok()
+                    Snapshot::open(
+                        &blob,
+                        &self.vault.vault_id,
+                        &rec.folder_id,
+                        d,
+                        *s,
+                        writer.as_ref()?,
+                        &meta_for,
+                    )
+                    .ok()
+                    .map(|(snap, _)| snap)
                 });
                 match opened {
                     Some(snap) => live.extend(blocks_of(&snap).into_iter().map(|(_, o)| o)),

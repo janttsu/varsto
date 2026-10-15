@@ -48,8 +48,9 @@ pub struct LocalVault {
     pub member: bool,
 }
 
-/// Token the owner gives to another Varsto user to share one folder (F-047):
-/// `<vault-id>.<folder-id>.<folder-key-hex>.<name>`.
+/// What the owner gives another Varsto user to share one folder (F-047),
+/// in memory. It only ever travels sealed to the recipient's request code
+/// (`SealedShareToken`, `vst2.`); storage format 2 has no plain text form.
 #[derive(Clone, Serialize, Deserialize)]
 pub struct ShareToken {
     pub vault_id: VaultId,
@@ -78,9 +79,40 @@ pub struct ShareToken {
     pub invite: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub join_secret_hex: String,
+    /// When the owner made the token (seconds); a sealed token is refused
+    /// `TOKEN_LIFETIME_SECS` after it.
+    #[serde(default)]
+    pub issued_utc: i64,
 }
 
-crate::redacted_debug!(ShareToken { vault_id, folder_id, name, fingerprint, owners, role, invite ; key_hex, epoch_keys, join_secret_hex });
+crate::redacted_debug!(ShareToken { vault_id, folder_id, name, fingerprint, owners, role, invite, issued_utc ; key_hex, epoch_keys, join_secret_hex });
+
+/// How long a sealed share token (`vst2.`) or an organization approval
+/// token (`vot1.`) can be opened after it was made: 14 days. A hygiene
+/// limit against tokens kept in old chats, not a security boundary (the
+/// token only opens with the recipient's request key).
+pub const TOKEN_LIFETIME_SECS: i64 = 14 * 86_400;
+
+/// Refuse a token made more than `TOKEN_LIFETIME_SECS` ago, or more than a
+/// day in the future (a wrong clock on one side).
+pub fn check_token_age(what: &str, issued_utc: i64, now: i64) -> Result<()> {
+    if issued_utc <= 0 {
+        bail!("this {what} carries no time it was made; ask for a new one");
+    }
+    if now - issued_utc > TOKEN_LIFETIME_SECS {
+        bail!(
+            "this {what} expired: it was made on {} and is valid for 14 days; ask for a new one",
+            util::format_date(issued_utc)
+        );
+    }
+    if issued_utc - now > 86_400 {
+        bail!(
+            "this {what} was made on {}, in the future: check the clock of this device or of the one that made it",
+            util::format_date(issued_utc)
+        );
+    }
+    Ok(())
+}
 
 impl Drop for ShareToken {
     fn drop(&mut self) {
@@ -90,45 +122,6 @@ impl Drop for ShareToken {
         for v in self.epoch_keys.values_mut() {
             v.zeroize();
         }
-    }
-}
-
-impl ShareToken {
-    pub fn encode(&self) -> String {
-        format!(
-            "{}.{}.{}.{}",
-            self.vault_id, self.folder_id, self.key_hex, self.name
-        )
-    }
-    pub fn decode(s: &str) -> Result<Self> {
-        let parts: Vec<&str> = s.trim().splitn(4, '.').collect();
-        if parts.len() != 4 {
-            bail!("share token must be <vault-id>.<folder-id>.<key-hex>.<name>");
-        }
-        SecretKey::from_hex(parts[2])?;
-        Ok(ShareToken {
-            vault_id: VaultId::from_hex(parts[0])?,
-            folder_id: FolderId::from_hex(parts[1])?,
-            key_hex: parts[2].to_string(),
-            name: parts[3].to_string(),
-            epoch_keys: BTreeMap::new(),
-            fingerprint: String::new(),
-            owners: Vec::new(),
-            role: Default::default(),
-            invite: String::new(),
-            join_secret_hex: String::new(),
-        })
-    }
-    /// The plain form, refused when the folder has keys of later epochs
-    /// (the plain format has no room for them).
-    pub fn encode_plain(&self) -> Result<String> {
-        if !self.epoch_keys.is_empty() {
-            bail!(
-                "{} has newer folder keys than a plain token can carry; ask the recipient for a request code (varsto share request) and seal the token to it",
-                self.name
-            );
-        }
-        Ok(self.encode())
     }
 }
 
@@ -148,6 +141,7 @@ struct TokenPayload {
     invite: String,
     #[serde(default)]
     join_secret_hex: String,
+    issued_utc: i64,
 }
 
 impl Drop for TokenPayload {
@@ -168,7 +162,6 @@ impl ShareToken {
     pub fn seal(&self, to: &crate::kem::EncapsKey) -> Result<SealedShareToken> {
         let (kem_ct, key) = to.encapsulate()?;
         let mut t = SealedShareToken {
-            version: 1,
             vault_id: self.vault_id.clone(),
             folder_id: self.folder_id.clone(),
             name: self.name.clone(),
@@ -176,31 +169,25 @@ impl ShareToken {
             kem_ct_hex: hex::encode(&kem_ct),
             sealed_key_hex: String::new(),
         };
-        let sealed = if self.epoch_keys.is_empty()
-            && self.fingerprint.is_empty()
-            && self.owners.is_empty()
-            && self.role.is_editor()
-            && self.join_secret_hex.is_empty()
-        {
-            // Version 1: the folder key alone, readable by older versions.
-            crypto::encrypt(&key, &t.aad(), &hex::decode(&self.key_hex)?)?
-        } else {
-            t.version = 2;
-            let payload = TokenPayload {
-                key_hex: self.key_hex.clone(),
-                epoch_keys: self.epoch_keys.clone(),
-                fingerprint: self.fingerprint.clone(),
-                owners: self.owners.clone(),
-                role: self.role,
-                invite: self.invite.clone(),
-                join_secret_hex: self.join_secret_hex.clone(),
-            };
-            crypto::encrypt(
-                &key,
-                &t.aad(),
-                &Zeroizing::new(serde_json::to_vec(&payload)?),
-            )?
+        let payload = TokenPayload {
+            key_hex: self.key_hex.clone(),
+            epoch_keys: self.epoch_keys.clone(),
+            fingerprint: self.fingerprint.clone(),
+            owners: self.owners.clone(),
+            role: self.role,
+            invite: self.invite.clone(),
+            join_secret_hex: self.join_secret_hex.clone(),
+            issued_utc: if self.issued_utc > 0 {
+                self.issued_utc
+            } else {
+                util::now_utc()
+            },
         };
+        let sealed = crypto::encrypt(
+            &key,
+            &t.aad(),
+            &Zeroizing::new(serde_json::to_vec(&payload)?),
+        )?;
         t.sealed_key_hex = hex::encode(sealed);
         Ok(t)
     }
@@ -208,14 +195,13 @@ impl ShareToken {
 
 /// A share token whose folder key is encapsulated to one recipient
 /// (hybrid X25519 + ML-KEM-768). Encoded as
-/// `vst1.<vault-id>.<folder-id>.<kem-alg>.<kem-ct-hex>.<sealed-key-hex>.<name>`;
-/// version 2 (`vst2.`, same fields) seals a JSON payload instead of the bare
-/// key: the folder key, the keys of later epochs and the fingerprint the
-/// owner confirmed.
+/// `vst2.<vault-id>.<folder-id>.<kem-alg>.<kem-ct-hex>.<sealed-hex>.<name>`;
+/// the sealed JSON payload carries the folder key, the keys of later
+/// epochs, the fingerprint the owner confirmed, the owners, the role, the
+/// invitation and the time the token was made (it expires 14 days later).
+/// Plain tokens and `vst1.` tokens of storage format 1 are refused.
 #[derive(Clone, Serialize, Deserialize)]
 pub struct SealedShareToken {
-    #[serde(default = "one")]
-    pub version: u8,
     pub vault_id: VaultId,
     pub folder_id: FolderId,
     pub name: String,
@@ -224,47 +210,28 @@ pub struct SealedShareToken {
     pub sealed_key_hex: String,
 }
 
-crate::redacted_debug!(SealedShareToken { version, vault_id, folder_id, name, kem_alg ; kem_ct_hex, sealed_key_hex });
+crate::redacted_debug!(SealedShareToken { vault_id, folder_id, name, kem_alg ; kem_ct_hex, sealed_key_hex });
 
-fn one() -> u8 {
-    1
-}
-
-pub const SEALED_SHARE_PREFIX: &str = "vst1.";
-pub const SEALED_SHARE_PREFIX_V2: &str = "vst2.";
+/// The prefix of the sealed share tokens of storage format 1, refused.
+pub const OLD_SEALED_SHARE_PREFIX: &str = "vst1.";
+pub const SEALED_SHARE_PREFIX: &str = "vst2.";
 pub const SHARE_REQUEST_PREFIX: &str = "vsr1.";
 
 impl SealedShareToken {
     fn aad(&self) -> Vec<u8> {
-        if self.version >= 2 {
-            crypto::aad(
-                "share-token-v2",
-                &[
-                    self.vault_id.as_str().as_bytes(),
-                    self.folder_id.as_str().as_bytes(),
-                    self.name.as_bytes(),
-                    self.kem_ct_hex.as_bytes(),
-                ],
-            )
-        } else {
-            crypto::aad(
-                "share-token",
-                &[
-                    self.vault_id.as_str().as_bytes(),
-                    self.folder_id.as_str().as_bytes(),
-                    self.name.as_bytes(),
-                ],
-            )
-        }
+        crypto::aad(
+            "share-token-v2",
+            &[
+                self.vault_id.as_str().as_bytes(),
+                self.folder_id.as_str().as_bytes(),
+                self.name.as_bytes(),
+                self.kem_ct_hex.as_bytes(),
+            ],
+        )
     }
     pub fn encode(&self) -> String {
         format!(
-            "{}{}.{}.{}.{}.{}.{}",
-            if self.version >= 2 {
-                SEALED_SHARE_PREFIX_V2
-            } else {
-                SEALED_SHARE_PREFIX
-            },
+            "{SEALED_SHARE_PREFIX}{}.{}.{}.{}.{}.{}",
             self.vault_id,
             self.folder_id,
             self.kem_alg,
@@ -281,7 +248,7 @@ impl SealedShareToken {
                 .to_ascii_lowercase()
                 .starts_with("share/token");
         }
-        s.starts_with(SEALED_SHARE_PREFIX) || s.starts_with(SEALED_SHARE_PREFIX_V2)
+        s.starts_with(SEALED_SHARE_PREFIX) || s.starts_with(OLD_SEALED_SHARE_PREFIX)
     }
     /// Decode a token, given as text or as a `varsto://share/token` link.
     pub fn decode(s: &str) -> Result<Self> {
@@ -292,21 +259,17 @@ impl SealedShareToken {
                 other => bail!("this is a {} link, not a share token", other.kind()),
             };
         }
-        let (version, rest) = if let Some(r) = s.strip_prefix(SEALED_SHARE_PREFIX_V2) {
-            (2, r)
-        } else {
-            (
-                1,
-                s.strip_prefix(SEALED_SHARE_PREFIX)
-                    .ok_or_else(|| anyhow!("not a sealed share token"))?,
-            )
-        };
+        if s.starts_with(OLD_SEALED_SHARE_PREFIX) {
+            bail!("this share token (vst1.) is from an older Varsto that storage format 2 does not read; ask the owner for a new token");
+        }
+        let rest = s.strip_prefix(SEALED_SHARE_PREFIX).ok_or_else(|| {
+            anyhow!("not a sealed share token (expected the vst2. prefix); plain share tokens are not accepted: run `varsto share request` and give its code to the owner")
+        })?;
         let parts: Vec<&str> = rest.splitn(6, '.').collect();
         if parts.len() != 6 {
             bail!("sealed share token has the wrong shape");
         }
         Ok(SealedShareToken {
-            version,
             vault_id: VaultId::from_hex(parts[0])?,
             folder_id: FolderId::from_hex(parts[1])?,
             kem_alg: parts[2].to_string(),
@@ -326,19 +289,8 @@ impl SealedShareToken {
                 |_| anyhow!("this share token was not sealed to this device's request code"),
             )?,
         );
-        let payload = if self.version >= 2 {
-            serde_json::from_slice::<TokenPayload>(&plain)?
-        } else {
-            TokenPayload {
-                key_hex: hex::encode(&*plain),
-                epoch_keys: BTreeMap::new(),
-                fingerprint: String::new(),
-                owners: Vec::new(),
-                role: Default::default(),
-                invite: String::new(),
-                join_secret_hex: String::new(),
-            }
-        };
+        let payload = serde_json::from_slice::<TokenPayload>(&plain)?;
+        check_token_age("share token", payload.issued_utc, util::now_utc())?;
         SecretKey::from_hex(&payload.key_hex)?;
         for k in payload.epoch_keys.values() {
             SecretKey::from_hex(k)?;
@@ -354,6 +306,7 @@ impl SealedShareToken {
             role: payload.role,
             invite: payload.invite.clone(),
             join_secret_hex: payload.join_secret_hex.clone(),
+            issued_utc: payload.issued_utc,
         })
     }
 }
@@ -513,180 +466,56 @@ impl PolicyRecord {
             self.updated_utc
         )
     }
-    fn aad(vault: &VaultId, folder: &FolderId) -> Vec<u8> {
-        crypto::aad(
-            "policy-record",
-            &[vault.as_str().as_bytes(), folder.as_str().as_bytes()],
-        )
-    }
-    pub fn seal(&self, vault: &VaultId, key: &SecretKey) -> Result<Vec<u8>> {
-        crypto::encrypt(
-            key,
-            &Self::aad(vault, &self.folder_id),
-            &serde_json::to_vec(self)?,
-        )
-    }
-    pub fn open(blob: &[u8], vault: &VaultId, folder: &FolderId, key: &SecretKey) -> Result<Self> {
-        let plain = crypto::decrypt(key, &Self::aad(vault, folder), blob)?;
-        let rec: PolicyRecord = serde_json::from_slice(&plain)?;
-        if &rec.folder_id != folder {
-            bail!("policy record folder mismatch");
-        }
-        Ok(rec)
-    }
-    /// Seal and sign (alpha.10): the device that sets a policy signs the
-    /// envelope, so a holder of the vault key cannot pass a policy off as
-    /// another device's (an administrator's, in an organization).
+    /// Seal and sign (storage format 2: every policy record is a signed
+    /// record of kind `policy`, scope the folder, sequence number the time
+    /// in its name): a holder of the vault key cannot pass a policy off as
+    /// another device's.
     pub fn seal_signed(
         &self,
         vault: &VaultId,
+        key_id: &str,
         key: &SecretKey,
         signer: &SigningKey,
     ) -> Result<Vec<u8>> {
-        let ct = self.seal(vault, key)?;
-        SignedRecord::wrap(
-            "policy-record-signature",
+        let header = crate::record::Header {
+            kind: crate::record::RecordKind::Policy,
             vault,
-            &self.folder_id,
-            &self.device,
-            self.updated_utc,
-            ct,
-            signer,
-        )
+            scope: self.folder_id.as_str(),
+            device: &self.device,
+            seq: self.updated_utc.max(0) as u64,
+            key_id,
+        };
+        Ok(header
+            .seal(key, &serde_json::to_vec(self)?, signer)?
+            .to_bytes())
     }
-    /// Open a signed envelope or, when `allow_unsigned`, a bare record from
-    /// before alpha.10. `verify` gives the writer's key; a signed envelope
-    /// whose issuer is unknown or whose signature fails is refused. The
-    /// `<device>` in the object name must be the writer.
+    /// Open a signed policy record found under `named_device`'s part of its
+    /// object name; the writer's key comes from `verify`, the body's key
+    /// from `key_for`.
     pub fn open_any(
         blob: &[u8],
         vault: &VaultId,
         folder: &FolderId,
         named_device: &DeviceId,
-        keys: &[SecretKey],
+        key_for: &dyn Fn(&str) -> Option<SecretKey>,
         verify: &dyn Fn(&DeviceId) -> Option<VerifyingKey>,
-        allow_unsigned: bool,
     ) -> Result<Self> {
-        match SignedRecord::parse(blob) {
-            Some(env) => {
-                let pk = verify(&env.device).ok_or_else(|| anyhow!("unknown writer"))?;
-                let ct = env.verify("policy-record-signature", vault, folder, &pk)?;
-                let rec = keys
-                    .iter()
-                    .find_map(|k| Self::open(&ct, vault, folder, k).ok())
-                    .ok_or_else(|| anyhow!("policy record does not open"))?;
-                if rec.device != env.device
-                    || &rec.device != named_device
-                    || rec.updated_utc != env.updated_utc
-                {
-                    bail!("policy record does not match its envelope");
-                }
-                Ok(rec)
-            }
-            None if allow_unsigned => {
-                let rec = keys
-                    .iter()
-                    .find_map(|k| Self::open(blob, vault, folder, k).ok())
-                    .ok_or_else(|| anyhow!("policy record does not open"))?;
-                if &rec.device != named_device {
-                    bail!("policy record does not match its name");
-                }
-                Ok(rec)
-            }
-            None => bail!("unsigned policy record"),
-        }
-    }
-}
-
-/// A signed envelope around a sealed per-folder record (policies and
-/// placement): the writer's device signature over vault, folder, device,
-/// time and the ciphertext hash.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct SignedRecord {
-    pub format_version: u16,
-    pub folder: FolderId,
-    pub device: DeviceId,
-    pub updated_utc: i64,
-    pub body_hex: String,
-    pub sig_alg: String,
-    pub sig_hex: String,
-}
-
-impl SignedRecord {
-    fn message(
-        kind: &str,
-        vault: &VaultId,
-        folder: &FolderId,
-        device: &DeviceId,
-        updated_utc: i64,
-        body_hash: &[u8],
-    ) -> Vec<u8> {
-        crypto::aad(
-            kind,
-            &[
-                vault.as_str().as_bytes(),
-                folder.as_str().as_bytes(),
-                device.as_str().as_bytes(),
-                &updated_utc.to_le_bytes(),
-                body_hash,
-            ],
-        )
-    }
-    pub fn wrap(
-        kind: &str,
-        vault: &VaultId,
-        folder: &FolderId,
-        device: &DeviceId,
-        updated_utc: i64,
-        ct: Vec<u8>,
-        signer: &SigningKey,
-    ) -> Result<Vec<u8>> {
-        let sig = signer.sign(&Self::message(
-            kind,
-            vault,
-            folder,
-            device,
-            updated_utc,
-            &crypto::hash(&ct),
-        ));
-        Ok(serde_json::to_vec(&SignedRecord {
-            format_version: crate::FORMAT_VERSION,
-            folder: folder.clone(),
-            device: device.clone(),
-            updated_utc,
-            body_hex: hex::encode(ct),
-            sig_alg: signer.alg().to_string(),
-            sig_hex: hex::encode(sig),
-        })?)
-    }
-    pub fn parse(blob: &[u8]) -> Option<SignedRecord> {
-        serde_json::from_slice(blob).ok()
-    }
-    /// Verify and return the ciphertext inside.
-    pub fn verify(
-        &self,
-        kind: &str,
-        vault: &VaultId,
-        folder: &FolderId,
-        pk: &VerifyingKey,
-    ) -> Result<Vec<u8>> {
-        if &self.folder != folder {
-            bail!("signed record names another folder");
-        }
-        let ct = hex::decode(&self.body_hex)?;
-        pk.verify(
-            &self.sig_alg,
-            &Self::message(
-                kind,
-                vault,
-                folder,
-                &self.device,
-                self.updated_utc,
-                &crypto::hash(&ct),
-            ),
-            &hex::decode(&self.sig_hex)?,
+        let env = crate::record::SignedRecord::parse(blob)?;
+        let plain = env.accept(
+            &crate::record::Expect::new(crate::record::RecordKind::Policy, vault)
+                .scope(folder.as_str())
+                .device(named_device),
+            verify,
+            key_for,
         )?;
-        Ok(ct)
+        let rec: PolicyRecord = serde_json::from_slice(&plain)?;
+        if &rec.folder_id != folder
+            || rec.device != env.device
+            || rec.updated_utc.max(0) as u64 != env.seq
+        {
+            bail!("policy record does not match its envelope");
+        }
+        Ok(rec)
     }
 }
 
@@ -759,11 +588,18 @@ struct KeyFile {
 struct KeyMaterial {
     master_hex: String,
     signing_hex: String,
+    /// The device root key: random per device, never leaves it; the local
+    /// keyring (granted folder keys), the vault keys of every epoch and
+    /// the storage secrets are sealed under keys derived from it, so the
+    /// vault key alone opens none of them.
+    local_hex: String,
 }
 
 pub struct Keys {
     pub master: SecretKey,
     pub signer: SigningKey,
+    /// The device root key (see `KeyMaterial::local_hex`).
+    pub local: SecretKey,
 }
 
 crate::redacted_opaque!(Keys);
@@ -779,7 +615,16 @@ impl Keys {
         self.master.derive("folder-record", &[])
     }
     pub fn local_keyring_key(&self) -> SecretKey {
-        self.master.derive("local-keyring", &[])
+        self.local.derive("local-keyring", &[])
+    }
+    /// Keys for a new device: the vault key it was given and a fresh
+    /// signing key and device root key.
+    pub fn new_device(master: SecretKey, signer: SigningKey) -> Keys {
+        Keys {
+            master,
+            signer,
+            local: SecretKey::random(),
+        }
     }
 
     fn keyfile_aad(vault: &VaultId, device: &DeviceId) -> Vec<u8> {
@@ -802,6 +647,7 @@ impl Keys {
         let material = KeyMaterial {
             master_hex: self.master.to_hex(),
             signing_hex: hex::encode(self.signer.to_bytes()),
+            local_hex: self.local.to_hex(),
         };
         let plain = Zeroizing::new(serde_json::to_vec(&material)?);
         let blob = crypto::encrypt(&wrap, &Self::keyfile_aad(vault, device), &plain)?;
@@ -819,16 +665,7 @@ impl Keys {
         let blob = hex::decode(&kf.blob_hex)?;
         let aad = Self::keyfile_aad(vault, device);
         let wrap = crypto::passphrase_key(passphrase, &kf.params)?;
-        let opened = crypto::decrypt(&wrap, &aad, &blob).or_else(|e| {
-            // A key file from before alpha.10, written with the passphrase as
-            // typed: try it unnormalised when normalisation changed it.
-            if crypto::normalize_passphrase(passphrase) != passphrase {
-                let raw = crypto::passphrase_key_raw(passphrase, &kf.params)?;
-                crypto::decrypt(&raw, &aad, &blob)
-            } else {
-                Err(e)
-            }
-        });
+        let opened = crypto::decrypt(&wrap, &aad, &blob);
         let plain =
             Zeroizing::new(opened.context("unlock failed: wrong passphrase or damaged key file")?);
         let material: KeyMaterial = serde_json::from_slice(&plain)?;
@@ -840,6 +677,7 @@ impl Keys {
         Ok(Keys {
             master: SecretKey::from_hex(&material.master_hex)?,
             signer: SigningKey::from_bytes(&hex::decode(&material.signing_hex)?)?,
+            local: SecretKey::from_hex(&material.local_hex)?,
         })
     }
 }
@@ -886,13 +724,24 @@ impl DeviceRecord {
     }
 }
 
-/// Encrypted folder record published to `vault/folders/<device>/<folder>.enc`
-/// by the device that created the folder (single writer per device).
+/// A folder as this device knows it (`keyring.enc`), and as published to
+/// `vault/folders/<device>/<folder>.enc` by the device that created it: a
+/// signed record of kind `folder` under the registry key that carries **no
+/// key** (format 2, section 4), only `key_check`, a commitment to the
+/// folder's first-epoch key. The keys reach a device only as grants and
+/// stay in its local keyring.
 #[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct FolderRecord {
     pub folder_id: FolderId,
     pub name: String,
+    /// The folder's first-epoch key on this device (empty: not granted to
+    /// this device, or a Strongroom). Local only, never published.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub key_hex: String,
+    /// Commitment to the first-epoch key (`folder_grants::folder_key_check`),
+    /// signed by the creator: a grant whose key does not match it is refused.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub key_check: String,
     pub created_by: DeviceId,
     pub created_utc: i64,
     /// Shared with other users: member records and batches live under
@@ -953,7 +802,7 @@ impl Drop for ShareJoin {
     }
 }
 
-crate::redacted_debug!(FolderRecord { folder_id, name, created_by, created_utc, shared, strongroom, removed_utc, backup, placement, policy, share_join ; key_hex, epoch_keys });
+crate::redacted_debug!(FolderRecord { folder_id, name, key_check, created_by, created_utc, shared, strongroom, removed_utc, backup, placement, policy, share_join ; key_hex, epoch_keys });
 
 impl Drop for FolderRecord {
     fn drop(&mut self) {
@@ -1010,44 +859,76 @@ impl FolderRecord {
     }
     pub const PREFIX: &'static str = "vault/folders/";
 
-    fn aad(vault: &VaultId, device: &DeviceId, folder: &FolderId) -> Vec<u8> {
-        crypto::aad(
-            "folder-record",
-            &[
-                vault.as_str().as_bytes(),
-                device.as_str().as_bytes(),
-                folder.as_str().as_bytes(),
-            ],
-        )
+    /// The form that is published: no key, no later keys, nothing local.
+    pub fn published(&self) -> FolderRecord {
+        let mut p = self.clone();
+        p.key_hex.clear();
+        p.epoch_keys.clear();
+        p.share_join = None;
+        p.shared = false;
+        p.removed_utc = 0;
+        p
     }
-    pub fn seal(&self, vault: &VaultId, key: &SecretKey) -> Result<Vec<u8>> {
-        // Keys of later epochs travel in their own records.
-        let mut published = self.clone();
-        published.epoch_keys.clear();
-        crypto::encrypt(
-            key,
-            &Self::aad(vault, &self.created_by, &self.folder_id),
-            &serde_json::to_vec(&published)?,
-        )
+    /// Seal the published form under the registry key `key_id` names and
+    /// sign it (the creator's device key).
+    pub fn seal(
+        &self,
+        vault: &VaultId,
+        key_id: &str,
+        key: &SecretKey,
+        signer: &SigningKey,
+    ) -> Result<Vec<u8>> {
+        let header = crate::record::Header {
+            kind: crate::record::RecordKind::Folder,
+            vault,
+            scope: self.folder_id.as_str(),
+            device: &self.created_by,
+            seq: self.created_utc.max(0) as u64,
+            key_id,
+        };
+        Ok(header
+            .seal(key, &serde_json::to_vec(&self.published())?, signer)?
+            .to_bytes())
     }
+    /// Open a published folder record found under `device`'s name: signed
+    /// by that device (`writer`), opened under the key its key id names,
+    /// and carrying no key.
     pub fn open(
         blob: &[u8],
         vault: &VaultId,
         device: &DeviceId,
         folder: &FolderId,
-        key: &SecretKey,
+        writer: &VerifyingKey,
+        key_for: &dyn Fn(&str) -> Option<SecretKey>,
     ) -> Result<Self> {
-        let plain = crypto::decrypt(key, &Self::aad(vault, device, folder), blob)?;
+        let env = crate::record::SignedRecord::parse(blob)?;
+        env.expect(
+            &crate::record::Expect::new(crate::record::RecordKind::Folder, vault)
+                .scope(folder.as_str())
+                .device(device),
+        )?;
+        env.verify(writer)?;
+        let plain = env.open_with(key_for)?;
         let rec: FolderRecord = serde_json::from_slice(&plain)?;
         if &rec.folder_id != folder || &rec.created_by != device {
             bail!("folder record does not match its name");
         }
+        if !rec.key_hex.is_empty() || !rec.epoch_keys.is_empty() {
+            bail!("a published folder record carries no key");
+        }
         Ok(rec)
     }
     pub fn keys(&self) -> Result<FolderKeys> {
-        FolderKeys::from_folder_key(&self.folder_id, SecretKey::from_hex(&self.key_hex)?)
+        FolderKeys::from_folder_key(&self.folder_id, self.folder_key()?)
     }
     pub fn folder_key(&self) -> Result<SecretKey> {
+        if self.key_hex.is_empty() {
+            bail!(
+                "this device does not hold the key of {}: ask for it with `varsto folder request {}` and have an owner approve",
+                self.name,
+                self.name
+            );
+        }
         SecretKey::from_hex(&self.key_hex)
     }
     pub fn share_token(&self, vault: &VaultId) -> ShareToken {
@@ -1062,6 +943,7 @@ impl FolderRecord {
             role: Default::default(),
             invite: String::new(),
             join_secret_hex: String::new(),
+            issued_utc: util::now_utc(),
         }
     }
 }
@@ -1146,6 +1028,14 @@ impl FolderKeys {
                 "folder key epoch {epoch} is not known on this device yet (it arrives with the next sync)"
             )
         })
+    }
+
+    /// The metadata key of one epoch, when this key set knows it: what a
+    /// record's `meta@<epoch>` key id names.
+    pub fn meta_key_for(&self, epoch: u32) -> Option<SecretKey> {
+        self.epoch_base(epoch)
+            .ok()
+            .map(|k| k.derive("folder-metadata", &[self.folder.as_str().as_bytes()]))
     }
 
     /// Metadata keys of every known epoch, newest first: manifests and
@@ -1440,7 +1330,7 @@ impl std::fmt::Debug for SecretStore {
 impl SecretStore {
     const FILE: &'static str = "secrets.enc";
     fn key(keys: &Keys) -> SecretKey {
-        keys.master.derive("storage-secrets", &[])
+        keys.local.derive("storage-secrets", &[])
     }
     fn aad(vault: &VaultId, device: &DeviceId) -> Vec<u8> {
         crypto::aad(
@@ -1697,6 +1587,7 @@ mod tests {
             role: Default::default(),
             invite: "inv".into(),
             join_secret_hex: secret.clone(),
+            issued_utc: 1,
         };
         let shown = format!("{token:?}");
         assert!(shown.contains("docs") && shown.contains("inv"), "{shown}");

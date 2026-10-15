@@ -62,6 +62,7 @@ fn devices(lab: &Lab, others: &[&str]) -> Vec<Engine> {
             lab.storage.clone(),
         )
         .unwrap();
+        Engine::grant_all_for_tests(&mut out[0], &mut e).unwrap();
         e.chunker = ChunkerParams::SMALL;
         e.attach_folder("docs", &lab.dir(who), false).unwrap();
         e.sync(None).unwrap();
@@ -227,6 +228,7 @@ fn pruning_waits_for_every_reader() {
         lab.storage.clone(),
     )
     .unwrap();
+    Engine::grant_all_for_tests(&mut devs[0], &mut d).unwrap();
     d.chunker = ChunkerParams::SMALL;
     d.attach_folder("docs", &lab.dir("d"), false).unwrap();
     d.sync(None).unwrap();

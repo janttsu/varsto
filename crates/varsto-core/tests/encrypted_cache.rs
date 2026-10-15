@@ -132,9 +132,10 @@ fn setup() -> Setup {
 }
 
 /// The phone: joined, "docs" attached and kept encrypted here.
-fn phone(s: &Setup, selective: bool) -> (Engine, PathBuf, PathBuf) {
+fn phone(s: &mut Setup, selective: bool) -> (Engine, PathBuf, PathBuf) {
     let (home, dir) = (s.root.join("b-home"), s.root.join("b-docs"));
     let mut b = Engine::join(&home, "phone", PASS, &s.key, s.storage.clone()).unwrap();
+    Engine::grant_all_for_tests(&mut s.a, &mut b).unwrap();
     b.chunker = ChunkerParams::SMALL;
     b.attach_folder("docs", &dir, selective).unwrap();
     b.set_encrypted_here("docs", true).unwrap();
@@ -143,8 +144,8 @@ fn phone(s: &Setup, selective: bool) -> (Engine, PathBuf, PathBuf) {
 
 #[test]
 fn not_selective_caches_every_block_and_no_plaintext() {
-    let s = setup();
-    let (mut b, home, dir) = phone(&s, false);
+    let mut s = setup();
+    let (mut b, home, dir) = phone(&mut s, false);
     b.sync(None).unwrap();
     // Every object of the folder is in the block cache, as stored.
     let stored = common::object_names(&s.root.join("storage"));
@@ -179,8 +180,8 @@ fn not_selective_caches_every_block_and_no_plaintext() {
 
 #[test]
 fn selective_caches_fetched_files_only_and_frees_them() {
-    let s = setup();
-    let (mut b, home, dir) = phone(&s, true);
+    let mut s = setup();
+    let (mut b, home, dir) = phone(&mut s, true);
     b.sync(None).unwrap();
     assert_eq!(state_of(&b, "docs", "trip/photo.bin"), "placeholder");
     assert_eq!(state_of(&b, "docs", "notes.bin"), "placeholder");
@@ -233,8 +234,8 @@ fn free_refuses_blocks_without_a_storage_copy() {
 
 #[test]
 fn viewer_reads_from_the_cache_with_storages_unreachable() {
-    let s = setup();
-    let (mut b, home, dir) = phone(&s, false);
+    let mut s = setup();
+    let (mut b, home, dir) = phone(&mut s, false);
     b.sync(None).unwrap();
     // The storage goes away (offline phone).
     fs::rename(s.root.join("storage"), s.root.join("storage-away")).unwrap();
@@ -256,7 +257,7 @@ fn viewer_reads_from_the_cache_with_storages_unreachable() {
 #[test]
 fn files_added_on_the_phone_reach_other_devices_without_plaintext_here() {
     let mut s = setup();
-    let (mut b, home, dir) = phone(&s, true);
+    let (mut b, home, dir) = phone(&mut s, true);
     b.sync(None).unwrap();
     // Small file through write_file, a large one streamed through a writer
     // (as /api/upload does, without the engine while the bytes arrive).
@@ -311,6 +312,7 @@ fn plain_copies_from_the_previous_layout_are_converted() {
     // files while unlocked, one file was freed to a placeholder file, one
     // was changed on the phone and one added, neither synced yet.
     let mut b = Engine::join(&home, "phone", PASS, &s.key, s.storage.clone()).unwrap();
+    Engine::grant_all_for_tests(&mut s.a, &mut b).unwrap();
     b.chunker = ChunkerParams::SMALL;
     b.attach_folder("docs", &dir, true).unwrap();
     b.sync(None).unwrap();
@@ -346,8 +348,8 @@ fn plain_copies_from_the_previous_layout_are_converted() {
 
 #[test]
 fn locking_deletes_nothing_and_exports_are_removed() {
-    let s = setup();
-    let (mut b, home, dir) = phone(&s, false);
+    let mut s = setup();
+    let (mut b, home, dir) = phone(&mut s, false);
     b.sync(None).unwrap();
     // "Open in another app": the only decrypted copy, on explicit request.
     let out = b.export_file("docs", "trip/photo.bin").unwrap();

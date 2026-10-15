@@ -10,7 +10,8 @@
 //! device other than the writer has fetched it and checked the hash.
 
 use crate::crypto::{self, SecretKey, SigningKey, VerifyingKey};
-use crate::ids::{ChunkId, DeviceId, FolderId, ObjectName};
+use crate::ids::{ChunkId, DeviceId, FolderId, ObjectName, VaultId};
+use crate::record::{self, RecordKind, SignedRecord};
 use crate::util;
 use anyhow::{anyhow, bail, Context, Result};
 use serde::{Deserialize, Serialize};
@@ -102,6 +103,15 @@ pub enum Event {
     /// No more snapshots of the backup are taken; the backup goes once its
     /// last snapshot has expired.
     BackupStopped { backup: FolderId },
+    /// This device published a signed record that counts only once its
+    /// writer announced it (storage format 2, section 3): trash records and
+    /// pack indexes. `hash` is the record's `body_hash`.
+    RecordPublished {
+        kind: String,
+        scope: String,
+        seq: u64,
+        hash: String,
+    },
     /// An event type this version does not know (written by a newer one):
     /// read and ignored, so the rest of its batch still counts. Never written.
     #[serde(other)]
@@ -158,6 +168,7 @@ impl EventScope {
                 | Event::ManifestPublished { folder, .. }
                 | Event::ChunkDropped { folder, .. },
             ) => folder == f,
+            (EventScope::Member(f), Event::RecordPublished { scope, .. }) => scope == f.as_str(),
             // Never storage retirements, folders, snapshots or backups.
             (EventScope::Member(_), _) => false,
         }
@@ -181,95 +192,69 @@ pub struct Batch {
     pub seen: BTreeMap<DeviceId, u64>,
 }
 
-/// What is stored and replicated. The signature covers `device || seq || hash`
-/// where `hash` is the hash of the encrypted body, so payloads can later be
-/// cryptographically erased without breaking the chain.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct SignedBatch {
-    pub format_version: u16,
-    pub sig_alg: String,
-    /// Which key encrypts the body: "ledger" (own devices), "replica", or "share:<folder>".
-    #[serde(default = "default_key_id")]
-    pub key_id: String,
-    pub device: DeviceId,
-    pub seq: u64,
-    pub body_hex: String,
-    pub hash: String,
-    pub sig_hex: String,
-}
+/// What is stored and replicated: a signed record of kind `batch`
+/// (`crate::record`, `docs/spec/format-2-design.md` section 3). The
+/// signature covers vault, device, sequence number, key id and the hash of
+/// the encrypted body (`body_hash`, the batch's chain hash), so a storage
+/// cannot relabel a batch's key and payloads can later be erased without
+/// breaking the chain.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(transparent)]
+pub struct SignedBatch(pub SignedRecord);
 
-fn default_key_id() -> String {
-    KEY_LEDGER.to_string()
+impl std::ops::Deref for SignedBatch {
+    type Target = SignedRecord;
+    fn deref(&self) -> &SignedRecord {
+        &self.0
+    }
 }
 
 impl SignedBatch {
-    fn signed_message(device: &DeviceId, seq: u64, hash: &str) -> Vec<u8> {
-        crypto::aad(
-            "ledger-batch-signature",
-            &[
-                device.as_str().as_bytes(),
-                &seq.to_le_bytes(),
-                hash.as_bytes(),
-            ],
-        )
-    }
-
     pub fn storage_key(device: &DeviceId, seq: u64) -> String {
         format!("ledger/{}/{:016}.json", device, seq)
     }
 
-    pub fn seal(batch: &Batch, ledger_key: &SecretKey, signer: &SigningKey) -> Result<Self> {
-        Self::seal_with(batch, ledger_key, KEY_LEDGER, signer)
+    pub fn seal(
+        vault: &VaultId,
+        batch: &Batch,
+        ledger_key: &SecretKey,
+        signer: &SigningKey,
+    ) -> Result<Self> {
+        Self::seal_with(vault, batch, ledger_key, KEY_LEDGER, signer)
     }
 
     pub fn seal_with(
+        vault: &VaultId,
         batch: &Batch,
         ledger_key: &SecretKey,
         key_id: &str,
         signer: &SigningKey,
     ) -> Result<Self> {
         let plain = serde_json::to_vec(batch)?;
-        let aad = crypto::aad(
-            "ledger-batch",
-            &[batch.device.as_str().as_bytes(), &batch.seq.to_le_bytes()],
-        );
-        let ct = crypto::encrypt(ledger_key, &aad, &plain)?;
-        let hash = hex::encode(crypto::hash(&ct));
-        let sig = signer.sign(&Self::signed_message(&batch.device, batch.seq, &hash));
-        Ok(SignedBatch {
-            format_version: crate::FORMAT_VERSION,
-            sig_alg: signer.alg().to_string(),
-            key_id: key_id.to_string(),
-            device: batch.device.clone(),
+        let header = record::Header {
+            kind: RecordKind::Batch,
+            vault,
+            scope: "",
+            device: &batch.device,
             seq: batch.seq,
-            body_hex: hex::encode(ct),
-            hash,
-            sig_hex: hex::encode(sig),
-        })
+            key_id,
+        };
+        Ok(SignedBatch(header.seal(ledger_key, &plain, signer)?))
     }
 
-    /// Check signature and hash; does not decrypt.
+    /// Check kind, signature and hash; does not decrypt.
     pub fn verify(&self, pubkey: &VerifyingKey) -> Result<()> {
-        let ct = hex::decode(&self.body_hex)?;
-        if hex::encode(crypto::hash(&ct)) != self.hash {
-            bail!("batch hash does not match body");
+        if self.kind != RecordKind::Batch || !self.scope.is_empty() {
+            bail!("not a ledger batch");
         }
-        // The algorithm identifier travels with the batch; the key decides
-        // which identifiers it accepts (hybrid keys never accept Ed25519 alone).
-        pubkey.verify(
-            &self.sig_alg,
-            &Self::signed_message(&self.device, self.seq, &self.hash),
-            &hex::decode(&self.sig_hex)?,
-        )
+        self.0.verify(pubkey)
     }
 
     pub fn open(&self, ledger_key: &SecretKey) -> Result<Batch> {
-        let ct = hex::decode(&self.body_hex)?;
-        let aad = crypto::aad(
-            "ledger-batch",
-            &[self.device.as_str().as_bytes(), &self.seq.to_le_bytes()],
-        );
-        let plain = crypto::decrypt(ledger_key, &aad, &ct)?;
+        if self.kind != RecordKind::Batch {
+            bail!("not a ledger batch");
+        }
+        let plain = self.0.open(ledger_key)?;
         let batch: Batch = serde_json::from_slice(&plain)?;
         if batch.device != self.device || batch.seq != self.seq {
             bail!("batch body does not match its envelope");
@@ -348,6 +333,8 @@ struct PushedFile {
 /// Local copy of every device's batches, plus heads.
 pub struct LedgerStore {
     dir: PathBuf,
+    /// The vault every batch and checkpoint held here must name.
+    vault: VaultId,
     heads: HeadsFile,
     pushed: PushedFile,
     /// The heads file did not exist when the store was opened.
@@ -409,7 +396,7 @@ pub(crate) fn set_aside(path: &Path) -> Result<PathBuf> {
 }
 
 impl LedgerStore {
-    pub fn open(dir: &Path) -> Result<Self> {
+    pub fn open(dir: &Path, vault: &VaultId) -> Result<Self> {
         std::fs::create_dir_all(dir)?;
         let mut damaged = Vec::new();
         let heads_path = dir.join("heads.json");
@@ -418,6 +405,7 @@ impl LedgerStore {
         let pushed = read_or_set_aside(&dir.join("pushed.json"), &mut damaged)?;
         Ok(LedgerStore {
             dir: dir.to_path_buf(),
+            vault: vault.clone(),
             heads,
             pushed,
             heads_absent,
@@ -481,7 +469,7 @@ impl LedgerStore {
         h.hash = if h.seq == 0 {
             None
         } else if let Some(b) = self.get(device, h.seq)? {
-            Some(b.hash)
+            Some(b.0.body_hash)
         } else {
             h.base
                 .as_ref()
@@ -492,6 +480,11 @@ impl LedgerStore {
         self.save_heads()
     }
 
+    /// The vault this store belongs to.
+    pub fn vault(&self) -> &VaultId {
+        &self.vault
+    }
+
     /// Hash of batch `seq` of `device` as held here: the batch's, or the
     /// newest checkpoint's when it ends there; `None` for 0 or unknown.
     pub fn hash_at(&self, device: &DeviceId, seq: u64) -> Result<Option<String>> {
@@ -499,7 +492,7 @@ impl LedgerStore {
             return Ok(None);
         }
         if let Some(b) = self.get(device, seq)? {
-            return Ok(Some(b.hash));
+            return Ok(Some(b.0.body_hash));
         }
         Ok(self
             .head(device)
@@ -536,7 +529,7 @@ impl LedgerStore {
                 match obj {
                     LedgerObject::Batch(seq) => match util::read_json::<SignedBatch>(&f.path()) {
                         Ok(b) if b.device == device && b.seq == seq => {
-                            batches.insert(seq, b.hash);
+                            batches.insert(seq, b.0.body_hash);
                         }
                         _ => {
                             set_aside(&f.path())?;
@@ -565,7 +558,7 @@ impl LedgerStore {
             let base = checkpoints.values().next_back().map(|c| Base {
                 seq: c.seq,
                 key_id: c.key_id.clone(),
-                head_hash: c.head_hash.clone(),
+                head_hash: c.head_hash().to_string(),
             });
             let start = base.as_ref().map(|b| b.seq).unwrap_or(0);
             let mut seq = start;
@@ -711,13 +704,13 @@ impl LedgerStore {
             events,
             seen,
         };
-        let signed = SignedBatch::seal_with(&batch, ledger_key, key_id, signer)?;
+        let signed = SignedBatch::seal_with(&self.vault, &batch, ledger_key, key_id, signer)?;
         util::write_json(&self.batch_path(device, signed.seq), &signed)?;
         self.heads.heads.insert(
             device.clone(),
             Head {
                 seq: signed.seq,
-                hash: Some(signed.hash.clone()),
+                hash: Some(signed.body_hash.clone()),
                 forked: false,
                 ..head
             },
@@ -790,6 +783,9 @@ impl LedgerStore {
         lamport_limit: u64,
         over_gap: bool,
     ) -> Result<Ingest> {
+        if signed.vault != self.vault {
+            bail!("batch {}/{} names another vault", signed.device, signed.seq);
+        }
         signed
             .verify(pubkey)
             .with_context(|| format!("batch {}/{}", signed.device, signed.seq))?;
@@ -801,19 +797,19 @@ impl LedgerStore {
         if let Some(base) = base.as_ref().filter(|b| signed.seq <= b.seq) {
             if self.get(&signed.device, signed.seq)?.is_none() {
                 // Covered by a checkpoint: not kept, but it must agree with it.
-                if signed.seq == base.seq && signed.hash != base.head_hash {
+                if signed.seq == base.seq && signed.body_hash != base.head_hash {
                     return self.mark_fork(&signed.device);
                 }
                 return Ok(Ingest::Known);
             }
         }
         if let Some(existing) = self.get(&signed.device, signed.seq)? {
-            if existing.hash == signed.hash {
+            if existing.body_hash == signed.body_hash {
                 // Heads are written after the batch: catch up after a crash.
                 let mut h = self.head(&signed.device);
                 if signed.seq > h.seq {
                     h.seq = signed.seq;
-                    h.hash = Some(signed.hash.clone());
+                    h.hash = Some(signed.body_hash.clone());
                     self.heads.heads.insert(signed.device.clone(), h);
                     self.save_heads()?;
                 }
@@ -826,7 +822,7 @@ impl LedgerStore {
             return Ok(Ingest::Fork);
         }
         if let Some(waiting) = self.pending(&signed.device, signed.seq)? {
-            if waiting.signed.hash == signed.hash {
+            if waiting.signed.body_hash == signed.body_hash {
                 return Ok(Ingest::Known);
             }
             return self.mark_fork(&signed.device);
@@ -842,7 +838,7 @@ impl LedgerStore {
         }
         if let (true, Some(batch)) = (signed.seq > 1, &batch) {
             let prev = match self.get(&signed.device, signed.seq - 1)? {
-                Some(prev) => Some(prev.hash),
+                Some(prev) => Some(prev.0.body_hash),
                 None => base
                     .filter(|b| b.seq == signed.seq - 1)
                     .map(|b| b.head_hash),
@@ -870,7 +866,7 @@ impl LedgerStore {
         let mut h = self.head(&signed.device);
         if signed.seq > h.seq {
             h.seq = signed.seq;
-            h.hash = Some(signed.hash.clone());
+            h.hash = Some(signed.body_hash.clone());
         }
         self.heads.heads.insert(signed.device.clone(), h);
         self.save_heads()?;
@@ -943,12 +939,12 @@ impl LedgerStore {
                 let _ = std::fs::remove_file(self.pending_path(device, seq));
                 if let Some(w) = covered {
                     let agrees = match self.get(device, seq)? {
-                        Some(b) => b.hash == w.signed.hash,
+                        Some(b) => b.body_hash == w.signed.body_hash,
                         None => h
                             .base
                             .as_ref()
                             .filter(|b| b.seq == seq)
-                            .is_none_or(|b| b.head_hash == w.signed.hash),
+                            .is_none_or(|b| b.head_hash == w.signed.body_hash),
                     };
                     if !agrees {
                         self.mark_fork(device)?;
@@ -969,7 +965,7 @@ impl LedgerStore {
             util::write_json(&self.batch_path(device, seq), &w.signed)?;
             let _ = std::fs::remove_file(self.pending_path(device, seq));
             h.seq = seq;
-            h.hash = Some(w.signed.hash.clone());
+            h.hash = Some(w.signed.body_hash.clone());
             self.heads.heads.insert(device.clone(), h);
             self.save_heads()?;
         }
@@ -1021,17 +1017,21 @@ impl LedgerStore {
         cp: SignedCheckpoint,
         anchor: Option<&SignedBatch>,
     ) -> Result<Ingest> {
+        if cp.vault != self.vault {
+            bail!("checkpoint {}/{} names another vault", cp.device, cp.seq);
+        }
         let device = cp.device.clone();
         let mut h = self.head(&device);
         let floor = h.seq.max(h.base.as_ref().map(|b| b.seq).unwrap_or(0));
-        let anchored =
-            anchor.is_some_and(|b| b.device == device && b.seq == cp.seq && b.hash == cp.head_hash);
+        let anchored = anchor.is_some_and(|b| {
+            b.device == device && b.seq == cp.seq && b.body_hash == cp.head_hash()
+        });
         if cp.seq > floor.saturating_add(MAX_AHEAD) && !anchored {
             return Ok(Ingest::Refused);
         }
         if let Some(base) = &h.base {
             if base.seq == cp.seq {
-                if base.head_hash == cp.head_hash {
+                if base.head_hash == cp.head_hash() {
                     return Ok(Ingest::Known);
                 }
                 return self.mark_fork(&device);
@@ -1041,7 +1041,7 @@ impl LedgerStore {
             }
         }
         if let Some(b) = self.get(&device, cp.seq)? {
-            if b.hash != cp.head_hash {
+            if b.body_hash != cp.head_hash() {
                 return self.mark_fork(&device);
             }
         }
@@ -1052,11 +1052,11 @@ impl LedgerStore {
         h.base = Some(Base {
             seq: cp.seq,
             key_id: cp.key_id.clone(),
-            head_hash: cp.head_hash.clone(),
+            head_hash: cp.head_hash().to_string(),
         });
         if cp.seq > h.seq {
             h.seq = cp.seq;
-            h.hash = Some(cp.head_hash.clone());
+            h.hash = Some(cp.head_hash().to_string());
         }
         self.heads.heads.insert(device.clone(), h);
         self.save_heads()?;
@@ -1125,7 +1125,8 @@ impl LedgerStore {
         let head_hash = self
             .get(device, seq)?
             .ok_or_else(|| anyhow!("batch {seq} of {device} is missing"))?
-            .hash;
+            .0
+            .body_hash;
         let cp = Checkpoint {
             device: device.clone(),
             seq,
@@ -1133,7 +1134,7 @@ impl LedgerStore {
             created_utc: util::now_utc(),
             view,
         };
-        let signed = SignedCheckpoint::seal(&cp, ledger_key, key_id, signer)?;
+        let signed = SignedCheckpoint::seal(&self.vault, &cp, ledger_key, key_id, signer)?;
         if self.ingest_checkpoint(signed.clone())? == Ingest::Fork {
             bail!("checkpoint {seq} of {device} contradicts this device's ledger");
         }
@@ -1659,6 +1660,11 @@ pub struct LedgerView {
     /// gives it: a manifest read from a storage is verified against it.
     #[serde(default, with = "pairs")]
     pub manifest_hashes: BTreeMap<(FolderId, DeviceId), (u64, String)>,
+    /// The newest announced record of each (kind, scope, device), with its
+    /// body hash (`Event::RecordPublished`): such a record read from a
+    /// storage counts only when it is that one.
+    #[serde(default, with = "pairs")]
+    pub records: BTreeMap<(String, String, DeviceId), (u64, String)>,
     pub devices: BTreeMap<DeviceId, String>,
     /// Which enrolment event set each device name.
     #[serde(default)]
@@ -1801,9 +1807,25 @@ impl LedgerView {
                             .manifest_hashes
                             .entry((folder.clone(), batch.device.clone()))
                             .or_insert((0, String::new()));
-                        if *seq > h.0 {
+                        // A later announcement of the same number (the
+                        // writer sealed its copy again) replaces it.
+                        if *seq >= h.0 {
                             *h = (*seq, manifest_hash.clone());
                         }
+                    }
+                }
+                Event::RecordPublished {
+                    kind,
+                    scope,
+                    seq,
+                    hash,
+                } => {
+                    let h = self
+                        .records
+                        .entry((kind.clone(), scope.clone(), batch.device.clone()))
+                        .or_insert((0, String::new()));
+                    if *seq >= h.0 {
+                        *h = (*seq, hash.clone());
                     }
                 }
                 Event::StorageRetired { storage } => {
@@ -1900,6 +1922,24 @@ impl LedgerView {
             let e = self.manifests.entry(key.clone()).or_insert(0);
             *e = (*e).max(*seq);
         }
+        for (key, (seq, hash)) in &other.manifest_hashes {
+            let e = self
+                .manifest_hashes
+                .entry(key.clone())
+                .or_insert((0, String::new()));
+            if *seq > e.0 {
+                *e = (*seq, hash.clone());
+            }
+        }
+        for (key, (seq, hash)) in &other.records {
+            let e = self
+                .records
+                .entry(key.clone())
+                .or_insert((0, String::new()));
+            if *seq > e.0 {
+                *e = (*seq, hash.clone());
+            }
+        }
         for (device, at) in &other.devices_at {
             if self.devices_at.get(device).is_none_or(|s| s < at) {
                 if let Some(name) = other.devices.get(device) {
@@ -1994,6 +2034,12 @@ impl LedgerView {
                 .manifest_hashes
                 .iter()
                 .filter(|((_, d), _)| by_signer(d))
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect(),
+            records: self
+                .records
+                .iter()
+                .filter(|((_, _, d), _)| by_signer(d))
                 .map(|(k, v)| (k.clone(), v.clone()))
                 .collect(),
             devices: self
@@ -2161,7 +2207,8 @@ mod tests {
         DeviceId,
     ) {
         let dir = tempfile::tempdir().unwrap();
-        let store = LedgerStore::open(&dir.path().join("ledger")).unwrap();
+        let store =
+            LedgerStore::open(&dir.path().join("ledger"), &VaultId::from_bytes(&[7; 16])).unwrap();
         let key = SecretKey::random();
         let signer = SigningKey::generate();
         let device = device_id_for(&signer.public());
@@ -2184,11 +2231,12 @@ mod tests {
         assert_eq!(b2.seq, 2);
         assert_eq!(
             b2.open(&key).unwrap().prev.as_deref(),
-            Some(b1.hash.as_str())
+            Some(b1.body_hash.as_str())
         );
 
         let dir2 = tempfile::tempdir().unwrap();
-        let mut b = LedgerStore::open(&dir2.path().join("ledger")).unwrap();
+        let mut b =
+            LedgerStore::open(&dir2.path().join("ledger"), &VaultId::from_bytes(&[7; 16])).unwrap();
         let pk = signer.public();
         assert_eq!(b.ingest(b1.clone(), &pk, &key).unwrap(), Ingest::New);
         assert_eq!(b.ingest(b1.clone(), &pk, &key).unwrap(), Ingest::Known);
@@ -2203,7 +2251,8 @@ mod tests {
         let b1 = a.append_own(&device, vec![], 1, &key, &signer).unwrap();
         // A second copy of the same device (restored from backup) signs seq 1 again.
         let dir2 = tempfile::tempdir().unwrap();
-        let mut restored = LedgerStore::open(&dir2.path().join("ledger")).unwrap();
+        let mut restored =
+            LedgerStore::open(&dir2.path().join("ledger"), &VaultId::from_bytes(&[7; 16])).unwrap();
         let b1_again = restored
             .append_own(
                 &device,
@@ -2213,9 +2262,10 @@ mod tests {
                 &signer,
             )
             .unwrap();
-        assert_ne!(b1.hash, b1_again.hash);
+        assert_ne!(b1.body_hash, b1_again.body_hash);
         let dir3 = tempfile::tempdir().unwrap();
-        let mut observer = LedgerStore::open(&dir3.path().join("ledger")).unwrap();
+        let mut observer =
+            LedgerStore::open(&dir3.path().join("ledger"), &VaultId::from_bytes(&[7; 16])).unwrap();
         let pk = signer.public();
         assert_eq!(observer.ingest(b1, &pk, &key).unwrap(), Ingest::New);
         assert_eq!(observer.ingest(b1_again, &pk, &key).unwrap(), Ingest::Fork);
@@ -2236,7 +2286,8 @@ mod tests {
             )
             .unwrap();
         let dir2 = tempfile::tempdir().unwrap();
-        let mut b = LedgerStore::open(&dir2.path().join("ledger")).unwrap();
+        let mut b =
+            LedgerStore::open(&dir2.path().join("ledger"), &VaultId::from_bytes(&[7; 16])).unwrap();
         let pk = signer.public();
         assert_eq!(b.ingest_with(b1, &pk, None).unwrap(), Ingest::New);
         assert_eq!(b.ingest(b2.clone(), &pk, &key).unwrap(), Ingest::New);
@@ -2244,7 +2295,7 @@ mod tests {
         assert_eq!(b.view(&key).unwrap().batches, 2);
         // The signature is still checked.
         let mut forged = b2;
-        forged.seq = 3;
+        forged.0.seq = 3;
         assert!(b.ingest_with(forged, &pk, None).is_err());
     }
 
@@ -2252,17 +2303,17 @@ mod tests {
     fn tampered_batch_is_rejected() {
         let (_d, mut a, key, signer, device) = setup();
         let mut b1 = a.append_own(&device, vec![], 1, &key, &signer).unwrap();
-        b1.seq = 2;
+        b1.0.seq = 2;
         assert!(b1.verify(&signer.public()).is_err());
     }
 
     #[test]
-    fn legacy_batches_verify_and_hybrid_batches_resist_downgrade() {
+    fn batches_resist_downgrade_and_relabelling() {
         let key = SecretKey::random();
-        let legacy = SigningKey::from_bytes(&[9u8; 32]).unwrap();
-        let dev = device_id_for(&legacy.public());
+        let vault = VaultId::from_bytes(&[7; 16]);
+        let hybrid = SigningKey::generate();
         let batch = Batch {
-            device: dev.clone(),
+            device: device_id_for(&hybrid.public()),
             seq: 1,
             prev: None,
             lamport: 1,
@@ -2270,24 +2321,25 @@ mod tests {
             events: vec![],
             seen: BTreeMap::new(),
         };
-        let sealed = SignedBatch::seal(&batch, &key, &legacy).unwrap();
-        assert_eq!(sealed.sig_alg, crypto::SIG_ALG_LEGACY);
-        sealed.verify(&legacy.public()).unwrap();
-
-        let hybrid = SigningKey::generate();
-        let dev2 = device_id_for(&hybrid.public());
-        let batch2 = Batch {
-            device: dev2,
-            ..batch
-        };
-        let mut sealed2 = SignedBatch::seal(&batch2, &key, &hybrid).unwrap();
-        assert_eq!(sealed2.sig_alg, crypto::SIG_ALG);
-        sealed2.verify(&hybrid.public()).unwrap();
-        // Strip the post-quantum half and relabel: must be rejected.
-        let sig = hex::decode(&sealed2.sig_hex).unwrap();
-        sealed2.sig_hex = hex::encode(&sig[..64]);
-        sealed2.sig_alg = crypto::SIG_ALG_LEGACY.to_string();
-        assert!(sealed2.verify(&hybrid.public()).is_err());
+        let sealed = SignedBatch::seal(&vault, &batch, &key, &hybrid).unwrap();
+        assert_eq!(sealed.sig_alg, crypto::SIG_ALG);
+        sealed.verify(&hybrid.public()).unwrap();
+        // Strip the post-quantum half and relabel: rejected.
+        let mut stripped = sealed.clone();
+        let sig = hex::decode(&stripped.0.sig).unwrap();
+        stripped.0.sig = hex::encode(&sig[..64]);
+        stripped.0.sig_alg = "ed25519".to_string();
+        assert!(stripped.verify(&hybrid.public()).is_err());
+        // A storage relabelling the key id breaks the signature (format 2:
+        // the key id is signed).
+        let mut relabelled = sealed.clone();
+        relabelled.0.key_id = KEY_REPLICA.to_string();
+        assert!(relabelled.verify(&hybrid.public()).is_err());
+        // A batch of another vault is not taken into this one's store.
+        let dir = tempfile::tempdir().unwrap();
+        let mut other =
+            LedgerStore::open(&dir.path().join("l"), &VaultId::from_bytes(&[8; 16])).unwrap();
+        assert!(other.ingest(sealed, &hybrid.public(), &key).is_err());
     }
 
     /// Small deterministic generator for the property test.
@@ -2397,7 +2449,7 @@ mod tests {
             let other = SecretKey::random();
             let dir = tempfile::tempdir().unwrap();
             let signers: Vec<SigningKey> = (0..3)
-                .map(|i| SigningKey::from_bytes(&[i as u8 + 1; 32]).unwrap())
+                .map(|i| SigningKey::from_bytes(&[i as u8 + 1; 64]).unwrap())
                 .collect();
             let ids: Vec<DeviceId> = signers.iter().map(|s| device_id_for(&s.public())).collect();
             // Every device writes its own chain.
@@ -2412,7 +2464,11 @@ mod tests {
                 _ => None,
             };
             for (i, signer) in signers.iter().enumerate() {
-                let mut own = LedgerStore::open(&dir.path().join(format!("own{i}"))).unwrap();
+                let mut own = LedgerStore::open(
+                    &dir.path().join(format!("own{i}")),
+                    &VaultId::from_bytes(&[7; 16]),
+                )
+                .unwrap();
                 let mut lamport = 0;
                 let n = 5 + rng.below(25);
                 for _ in 0..n {
@@ -2441,7 +2497,9 @@ mod tests {
             let cutoff = 3 + rng.below(10);
             let key_for = |id: &str| (id == KEY_LEDGER).then(|| key.clone());
             let keep = |d: &DeviceId, seq: u64| d != &ids[2] || seq <= cutoff;
-            let mut reader = LedgerStore::open(&dir.path().join("reader")).unwrap();
+            let mut reader =
+                LedgerStore::open(&dir.path().join("reader"), &VaultId::from_bytes(&[7; 16]))
+                    .unwrap();
             let mut cache = ViewCache::new("ctx".into());
             while !pending.is_empty() {
                 match pending.remove(rng.below(pending.len() as u64) as usize) {
@@ -2553,7 +2611,14 @@ mod tests {
             created_utc: 0,
             view: forged,
         };
-        let signed = SignedCheckpoint::seal(&cp, &key, KEY_LEDGER, &signer).unwrap();
+        let signed = SignedCheckpoint::seal(
+            &VaultId::from_bytes(&[7; 16]),
+            &cp,
+            &key,
+            KEY_LEDGER,
+            &signer,
+        )
+        .unwrap();
         signed.verify(&signer.public()).unwrap();
         assert_eq!(reader.ingest_checkpoint(signed).unwrap(), Ingest::New);
         let key_for = |id: &str| (id == KEY_LEDGER).then(|| key.clone());
@@ -2583,15 +2648,24 @@ mod tests {
             created_utc: 0,
             view: LedgerView::default(),
         };
-        let far = SignedCheckpoint::seal(&cp, &key, KEY_LEDGER, &signer).unwrap();
+        let far = SignedCheckpoint::seal(
+            &VaultId::from_bytes(&[7; 16]),
+            &cp,
+            &key,
+            KEY_LEDGER,
+            &signer,
+        )
+        .unwrap();
         let dir = tempfile::tempdir().unwrap();
-        let mut reader = LedgerStore::open(&dir.path().join("ledger")).unwrap();
+        let mut reader =
+            LedgerStore::open(&dir.path().join("ledger"), &VaultId::from_bytes(&[7; 16])).unwrap();
         assert_eq!(reader.ingest_checkpoint(far).unwrap(), Ingest::Refused);
         assert_eq!(reader.head(&device).seq, 0);
         assert!(reader.head(&device).base.is_none());
         // A checkpoint at MAX_AHEAD + 5 (a device with a long history that
         // pruned its old batches), with the batch it ends at beside it.
         let last = SignedBatch::seal(
+            &VaultId::from_bytes(&[7; 16]),
             &Batch {
                 device: device.clone(),
                 seq: MAX_AHEAD + 5,
@@ -2608,11 +2682,18 @@ mod tests {
         let cp = Checkpoint {
             device: device.clone(),
             seq: last.seq,
-            head_hash: last.hash.clone(),
+            head_hash: last.body_hash.clone(),
             created_utc: 0,
             view: LedgerView::default(),
         };
-        let real = SignedCheckpoint::seal(&cp, &key, KEY_LEDGER, &signer).unwrap();
+        let real = SignedCheckpoint::seal(
+            &VaultId::from_bytes(&[7; 16]),
+            &cp,
+            &key,
+            KEY_LEDGER,
+            &signer,
+        )
+        .unwrap();
         assert_eq!(
             reader.ingest_checkpoint(real.clone()).unwrap(),
             Ingest::Refused
@@ -2649,14 +2730,16 @@ mod tests {
             .unwrap();
         // The writer's own view is unchanged by its checkpoint.
         let pk = signer.public();
-        let mut full = LedgerStore::open(&dir.path().join("full")).unwrap();
+        let mut full =
+            LedgerStore::open(&dir.path().join("full"), &VaultId::from_bytes(&[7; 16])).unwrap();
         for b in &batches {
             full.ingest(b.clone(), &pk, &key).unwrap();
         }
         let expected = full.view_filtered(key_for, keep).unwrap();
         assert_eq!(own.view_filtered(key_for, keep).unwrap(), expected);
 
-        let mut fresh = LedgerStore::open(&dir.path().join("fresh")).unwrap();
+        let mut fresh =
+            LedgerStore::open(&dir.path().join("fresh"), &VaultId::from_bytes(&[7; 16])).unwrap();
         cp.verify(&pk).unwrap();
         assert_eq!(fresh.ingest_checkpoint(cp.clone()).unwrap(), Ingest::New);
         assert_eq!(fresh.head(&device).seq, 20);
@@ -2682,14 +2765,17 @@ mod tests {
 
         // A copy of the device restored to seq 20 signs another batch 21.
         let restored_dir = dir.path().join("restored");
-        let mut restored = LedgerStore::open(&restored_dir).unwrap();
+        let mut restored =
+            LedgerStore::open(&restored_dir, &VaultId::from_bytes(&[7; 16])).unwrap();
         for b in &batches[..20] {
             restored.ingest(b.clone(), &pk, &key).unwrap();
         }
         let other21 = restored
             .append_own(&device, vec![], 99, &key, &signer)
             .unwrap();
-        let mut observer = LedgerStore::open(&dir.path().join("observer")).unwrap();
+        let mut observer =
+            LedgerStore::open(&dir.path().join("observer"), &VaultId::from_bytes(&[7; 16]))
+                .unwrap();
         observer.ingest_checkpoint(cp.clone()).unwrap();
         assert_eq!(observer.ingest(other21, &pk, &key).unwrap(), Ingest::New);
         assert_eq!(
@@ -2705,7 +2791,8 @@ mod tests {
             Ingest::Fork,
             "it contradicts batch 21"
         );
-        let mut third = LedgerStore::open(&dir.path().join("third")).unwrap();
+        let mut third =
+            LedgerStore::open(&dir.path().join("third"), &VaultId::from_bytes(&[7; 16])).unwrap();
         third.ingest(batches[20].clone(), &pk, &key).unwrap();
         let cp21 = own
             .make_checkpoint(&device, 21, key_for, &key, KEY_LEDGER, &signer)
