@@ -179,6 +179,10 @@ struct FolderState {
     /// ffmpeg was not found) were let go, so that they are tried again.
     #[serde(default)]
     thumbs_rev: u32,
+    /// Storages that were given every thumbnail already stored elsewhere (a
+    /// storage added later would otherwise only get thumbnails made after it).
+    #[serde(default)]
+    thumbs_replicated: BTreeSet<String>,
     /// Varsto's own "last accessed" record per path (seconds since the Unix
     /// epoch): updated when a file is fetched, opened or read through Varsto
     /// (interface, CLI, MCP) and from the filesystem access time seen at scan.
@@ -4186,6 +4190,12 @@ impl Engine {
             }
             state.thumbs_rev = 2;
         }
+        let storages: Vec<(StorageSpec, Box<dyn Storage>)> = self
+            .metadata_storages(false)?
+            .into_iter()
+            .filter(|(s, _)| !s.is_carrier())
+            .collect();
+        self.replicate_thumbnails(rec, state, &storages);
         let videos_here = thumbs::video_tool_available();
         let candidates: Vec<(String, String)> = state
             .files
@@ -4201,11 +4211,6 @@ impl Engine {
         if candidates.is_empty() {
             return Ok(0);
         }
-        let storages: Vec<(StorageSpec, Box<dyn Storage>)> = self
-            .metadata_storages(false)?
-            .into_iter()
-            .filter(|(s, _)| !s.is_carrier())
-            .collect();
         let fk = self.folder_keys(rec)?;
         let meta = fk.meta.clone();
         let encrypted_here = self.mount_is_encrypted(&rec.folder_id);
@@ -4235,6 +4240,16 @@ impl Engine {
                 if !state.local_index.contains_key(&path) {
                     continue;
                 }
+                // Blocks evicted from the cache: try again when they are back,
+                // do not give the picture up for good.
+                let cached = state.files.get(&path).is_some_and(|f| {
+                    f.chunks
+                        .iter()
+                        .all(|c| self.cached_object(&c.object).is_some())
+                });
+                if !cached {
+                    continue;
+                }
                 self.thumbnail_from_cache(&fk, state, &path)
             } else {
                 let disk = self.disk_of(root, state, &path);
@@ -4255,6 +4270,65 @@ impl Engine {
             made += 1;
         }
         Ok(made)
+    }
+
+    /// Copy the thumbnails other storages hold to a storage that was added
+    /// later: the encrypted blob is the same everywhere. A device that only
+    /// reaches the new storage (a phone with a bucket) sees no previews
+    /// otherwise. Best effort: a storage that cannot be reached now is tried
+    /// again at the next sync.
+    fn replicate_thumbnails(
+        &self,
+        rec: &FolderRecord,
+        state: &mut FolderState,
+        storages: &[(StorageSpec, Box<dyn Storage>)],
+    ) {
+        if storages.len() < 2 {
+            for (spec, _) in storages {
+                state.thumbs_replicated.insert(spec.name().to_string());
+            }
+            return;
+        }
+        let hashes: BTreeSet<String> = state
+            .files
+            .values()
+            .filter(|f| {
+                !f.deleted
+                    && !f.content_hash.is_empty()
+                    && (thumbs::is_image(&f.path) || thumbs::is_video(&f.path))
+            })
+            .map(|f| f.content_hash.clone())
+            .collect();
+        for (spec, backend) in storages {
+            if state.thumbs_replicated.contains(spec.name()) {
+                continue;
+            }
+            let mut complete = true;
+            for h in &hashes {
+                let key = thumbs::storage_key(&rec.folder_id, h);
+                match backend.exists(&key) {
+                    Ok(true) => continue,
+                    Ok(false) => {}
+                    Err(_) => {
+                        complete = false;
+                        break;
+                    }
+                }
+                let blob = storages
+                    .iter()
+                    .filter(|(s, _)| s.name() != spec.name())
+                    .find_map(|(_, b)| b.get(&key).ok().flatten());
+                if let Some(blob) = blob {
+                    if backend.put_if_absent(&key, &blob).is_err() {
+                        complete = false;
+                        break;
+                    }
+                }
+            }
+            if complete {
+                state.thumbs_replicated.insert(spec.name().to_string());
+            }
+        }
     }
 
     /// Videos in plain folders on this device that have no thumbnail yet,
@@ -4325,27 +4399,34 @@ impl Engine {
         }
         let key = thumbs::storage_key(&rec.folder_id, &file.content_hash);
         let metas = self.folder_keys(&rec)?.meta_keys();
+        // One unreachable or damaged storage must not hide a thumbnail another has.
+        let mut last_err = None;
         for (_, backend) in self.metadata_storages(false)? {
-            if let Some(blob) = backend.get(&key)? {
-                let mut last = None;
-                for meta in &metas {
-                    match thumbs::open(
-                        &blob,
-                        &self.vault.vault_id,
-                        &rec.folder_id,
-                        &file.content_hash,
-                        meta,
-                    ) {
-                        Ok(t) => return Ok(Some(t)),
-                        Err(e) => last = Some(e),
-                    }
+            let blob = match backend.get(&key) {
+                Ok(Some(b)) => b,
+                Ok(None) => continue,
+                Err(e) => {
+                    last_err = Some(e);
+                    continue;
                 }
-                if let Some(e) = last {
-                    return Err(e);
+            };
+            for meta in &metas {
+                match thumbs::open(
+                    &blob,
+                    &self.vault.vault_id,
+                    &rec.folder_id,
+                    &file.content_hash,
+                    meta,
+                ) {
+                    Ok(t) => return Ok(Some(t)),
+                    Err(e) => last_err = Some(e),
                 }
             }
         }
-        Ok(None)
+        match last_err {
+            Some(e) => Err(e),
+            None => Ok(None),
+        }
     }
 
     /// Storages added after a manifest was published get the latest manifest.
@@ -5292,12 +5373,16 @@ impl Engine {
                 progress.advance(plain.len() as u64);
                 report.chunks_downloaded += 1;
                 report.bytes_downloaded += plain.len() as u64;
-                self.pending.push(Event::ChunkVerified {
-                    folder: rec.folder_id.clone(),
-                    chunk: cref.chunk.clone(),
-                    object: cref.object.clone(),
-                    storage: storage_name,
-                });
+                // A block that came from a peer says nothing about a storage: "peer:<id>"
+                // is not one (it would show up as a storage holding the block).
+                if !storage_name.starts_with("peer:") {
+                    self.pending.push(Event::ChunkVerified {
+                        folder: rec.folder_id.clone(),
+                        chunk: cref.chunk.clone(),
+                        object: cref.object.clone(),
+                        storage: storage_name,
+                    });
+                }
                 if !rec.is_backup() {
                     self.pending.push(Event::ChunkOnDevice {
                         folder: rec.folder_id.clone(),
