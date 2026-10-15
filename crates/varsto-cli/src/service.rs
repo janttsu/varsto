@@ -1568,6 +1568,21 @@ pub fn has_display() -> bool {
         || std::env::var_os("WAYLAND_DISPLAY").is_some_and(|v| !v.is_empty())
 }
 
+/// What `remember` says when no desktop keyring can be used here.
+#[cfg(target_os = "linux")]
+const NO_DESKTOP_REMEMBER: &str = "`varsto service remember` needs a desktop session: no keyring can be reached from this session (over SSH, for example). Instead, set the VARSTO_PASSPHRASE environment variable for the service, or unlock it with `varsto unlock`";
+
+/// No desktop keyring can be reached from this process: no display, and
+/// either a remote login (SSH) or no session bus.
+#[cfg(target_os = "linux")]
+fn no_desktop_keyring() -> bool {
+    if has_display() {
+        return false;
+    }
+    let set = |k: &str| std::env::var_os(k).is_some_and(|v| !v.is_empty());
+    set("SSH_CONNECTION") || set("SSH_TTY") || !set("DBUS_SESSION_BUS_ADDRESS")
+}
+
 #[cfg(target_os = "linux")]
 const TIMED_OUT: &str = "secret-tool timed out";
 /// Long enough to type a password into an unlock window.
@@ -1682,6 +1697,9 @@ pub fn remember_passphrase(home: &Path, pass: &str) -> Result<String> {
     }
     #[cfg(target_os = "linux")]
     {
+        if no_desktop_keyring() {
+            return Err(anyhow!(NO_DESKTOP_REMEMBER));
+        }
         let _ = std::io::stdout().flush();
         eprintln!("Storing it in your keyring. If a window asks to unlock the keyring, enter your login password there.");
         let out = match run_secret_tool(
@@ -1699,16 +1717,18 @@ pub fn remember_passphrase(home: &Path, pass: &str) -> Result<String> {
             Ok(out) => out,
             Err(e) if e.to_string() == TIMED_OUT => {
                 return Err(anyhow!(
-                    "the keyring did not answer within {} seconds: it is probably locked and could not show its unlock window (no desktop session here, for example over SSH). Unlock it from your desktop session and run `varsto service remember` there",
-                    SECRET_TOOL_STORE_TIMEOUT.as_secs()
+                    "the keyring did not answer within {} seconds. {}",
+                    SECRET_TOOL_STORE_TIMEOUT.as_secs(),
+                    NO_DESKTOP_REMEMBER
                 ))
             }
             Err(e) => return Err(e),
         };
         if !out.status.success() {
             return Err(anyhow!(
-                "secret-tool could not store it (no keyring in this session?): {}",
-                String::from_utf8_lossy(&out.stderr).trim()
+                "secret-tool could not store it: {}. {}",
+                String::from_utf8_lossy(&out.stderr).trim(),
+                NO_DESKTOP_REMEMBER
             ));
         }
         return Ok("kept in your keyring".into());
