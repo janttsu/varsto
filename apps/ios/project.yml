@@ -15,6 +15,12 @@ targets:
       properties:
         CFBundleDisplayName: Varsto
         UILaunchScreen: {}
+        # Overridden on the xcodebuild command line by make-ipa.sh.
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        # Plain TLS from the core only (no export-compliance paperwork prompt for sideloading).
+        ITSAppUsesNonExemptEncryption: false
+        UISupportedInterfaceOrientations~ipad: [UIInterfaceOrientationPortrait, UIInterfaceOrientationPortraitUpsideDown, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
         UIBackgroundModes: [fetch]
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
@@ -38,4 +44,8 @@ targets:
         ARCHS: arm64
         ONLY_ACTIVE_ARCH: "NO"
         OTHER_LDFLAGS: ["-lvarsto_ffi"]
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        TARGETED_DEVICE_FAMILY: "1,2"
+        MARKETING_VERSION: "0.0.1"
+        CURRENT_PROJECT_VERSION: "1"
         PRODUCT_BUNDLE_IDENTIFIER: in.soderlund.varsto.ios

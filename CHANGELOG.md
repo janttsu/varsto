@@ -31,6 +31,11 @@ spec still names them because sections were written as the work was done.
   alerts. Full screen (button or F) renders at the display's native size,
   background follows the theme or is Light or pure black. New
   `GET /api/viz` snapshot; sprites from `website/tools/render/viz_sprites.py`.
+- iOS: an unsigned `.ipa` for AltStore, SideStore and Sideloadly, built by
+  `apps/ios/make-ipa.sh` or the manually started GitHub workflow `ios-ipa.yml`
+  (also on `ios-v*` tags); app icon asset catalog, iPad orientations, version
+  numbers in `Info.plist`; build, install and cost notes (GitHub, Scaleway Mac
+  mini) in `docs/ios-build.md`.
 
 ### Changed
 
