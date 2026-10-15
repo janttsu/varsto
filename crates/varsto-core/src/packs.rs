@@ -28,7 +28,7 @@
 //! old one goes); cold packs are never rewritten.
 
 use crate::crypto::SecretKey;
-use crate::record_shim::Records;
+use crate::record::Records;
 use crate::storage::Storage;
 use anyhow::{anyhow, bail, Result};
 use serde::{Deserialize, Serialize};
@@ -51,7 +51,7 @@ pub const MAX_OBJECT: u64 =
 /// A listing of a storage's packs is trusted this long before a miss
 /// lists again.
 const STALE: Duration = Duration::from_secs(30);
-/// Record kinds of the envelope (`crate::record_shim`).
+/// Record kinds of the signed envelope (`crate::record::Records`).
 pub const KIND_INDEX: &str = "pack-index";
 pub const KIND_TOMBSTONES: &str = "tombstones";
 /// Version byte of the binary bodies of indexes and tombstone lists.
@@ -1346,13 +1346,26 @@ mod tests {
     use crate::ids::{DeviceId, VaultId};
     use crate::storage::LocalDirStorage;
 
+    /// The signed envelope of test device `device` (2, 3 or 4), which
+    /// reads the records of the others.
+    fn records(device: u8) -> Records {
+        let key = |d: u8| crate::crypto::SigningKey::from_bytes(&[d; 64]).unwrap();
+        let writers = [2u8, 3, 4]
+            .iter()
+            .map(|d| (DeviceId::from_bytes(&[*d; 16]), key(*d).public()))
+            .collect();
+        Records::new(
+            VaultId::from_bytes(&[1; 16]),
+            DeviceId::from_bytes(&[device; 16]),
+            std::sync::Arc::new(key(device)),
+            writers,
+        )
+    }
+
     fn ctx(device: u8) -> Caches {
         let c: Caches = Default::default();
         c.set_tombstone_keys(
-            Records::new(
-                VaultId::from_bytes(&[1; 16]),
-                DeviceId::from_bytes(&[device; 16]),
-            ),
+            records(device),
             SecretKey([9; 32]),
         );
         c
@@ -1522,10 +1535,7 @@ mod tests {
         // A member of the folder: another vault key, the same folder key.
         let member: Caches = Default::default();
         member.set_tombstone_keys(
-            Records::new(
-                crate::ids::VaultId::from_bytes(&[1; 16]),
-                crate::ids::DeviceId::from_bytes(&[4; 16]),
-            ),
+            records(4),
             SecretKey([8; 32]),
         );
         let objs = objects(&[100, 200, 300]);

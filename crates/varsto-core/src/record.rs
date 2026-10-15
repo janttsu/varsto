@@ -455,6 +455,122 @@ pub fn kem_key_id(recipient: &str) -> String {
     format!("{KEM_KEY_PREFIX}{recipient}")
 }
 
+/// The envelope as the block layer uses it for pack indexes and tombstone
+/// lists (`crate::packs`, design section 2): this device seals and signs;
+/// a reader opens a record only when its header is the one its name says,
+/// its writer is a device it knows (`writers`: the vault's devices and the
+/// members of shared folders) and the signature holds. The key id is a
+/// short keyed hash of the key, so a reader skips a key that is not the
+/// record's without trying it.
+#[derive(Clone)]
+pub struct Records {
+    vault: VaultId,
+    device: DeviceId,
+    signer: std::sync::Arc<SigningKey>,
+    writers: std::sync::Arc<std::collections::BTreeMap<DeviceId, VerifyingKey>>,
+}
+
+impl std::fmt::Debug for Records {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Records")
+            .field("vault", &self.vault)
+            .field("device", &self.device)
+            .field("writers", &self.writers.len())
+            .finish()
+    }
+}
+
+/// The record kind of a block-layer record name.
+fn block_kind(kind: &str) -> Result<RecordKind> {
+    match kind {
+        "pack-index" => Ok(RecordKind::PackIndex),
+        "tombstones" => Ok(RecordKind::Tombstones),
+        other => bail!("{other} is not a record kind of the block layer"),
+    }
+}
+
+/// The key id of a block-layer record: a keyed hash of the key itself.
+pub fn key_fingerprint_id(key: &SecretKey) -> String {
+    format!(
+        "k:{}",
+        hex::encode(&crypto::keyed_hash(key, b"varsto record key id")[..8])
+    )
+}
+
+impl Records {
+    /// `signer` is this device's signing key; `writers` the keys of the
+    /// devices whose records this device accepts (itself included).
+    pub fn new(
+        vault: VaultId,
+        device: DeviceId,
+        signer: std::sync::Arc<SigningKey>,
+        writers: std::collections::BTreeMap<DeviceId, VerifyingKey>,
+    ) -> Records {
+        Records {
+            vault,
+            device,
+            signer,
+            writers: std::sync::Arc::new(writers),
+        }
+    }
+
+    /// The device that writes this device's records.
+    pub fn device(&self) -> &DeviceId {
+        &self.device
+    }
+
+    /// Seal and sign record `seq` of `kind` in `scope` (a folder id, or
+    /// empty for the vault) written by this device.
+    pub fn seal(
+        &self,
+        kind: &str,
+        scope: &str,
+        seq: u64,
+        key: &SecretKey,
+        body: &[u8],
+    ) -> Result<Vec<u8>> {
+        let key_id = key_fingerprint_id(key);
+        Ok(Header {
+            kind: block_kind(kind)?,
+            vault: &self.vault,
+            scope,
+            device: &self.device,
+            seq,
+            key_id: &key_id,
+        }
+        .seal(key, body, &self.signer)?
+        .to_bytes())
+    }
+
+    /// Open record `seq` of `kind` in `scope` that `writer` published.
+    pub fn open(
+        &self,
+        kind: &str,
+        scope: &str,
+        writer: &DeviceId,
+        seq: u64,
+        key: &SecretKey,
+        blob: &[u8],
+    ) -> Result<Vec<u8>> {
+        let env = SignedRecord::parse(blob)?;
+        env.expect(
+            &Expect::new(block_kind(kind)?, &self.vault)
+                .scope(scope)
+                .device(writer)
+                .seq(seq),
+        )?;
+        if env.key_id != key_fingerprint_id(key) {
+            bail!("the record is sealed under another key");
+        }
+        let pk = self
+            .writers
+            .get(writer)
+            .ok_or_else(|| anyhow!("record of an unknown writer"))?;
+        env.verify(pk)?;
+        env.open(key)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -612,5 +728,35 @@ mod tests {
         assert_eq!(parse_meta_key_id(&meta_key_id(5)), Some(5));
         assert_eq!(parse_meta_key_id("meta@x"), None);
         assert_eq!(parse_meta_key_id("ledger"), None);
+    }
+
+    #[test]
+    fn block_records_open_only_under_their_name_writer_and_key() {
+        let (vault, sk, a) = ids();
+        let (_, other_sk, b) = ids();
+        let mut writers = std::collections::BTreeMap::new();
+        writers.insert(a.clone(), sk.public());
+        writers.insert(b.clone(), other_sk.public());
+        let r = Records::new(vault.clone(), a.clone(), std::sync::Arc::new(sk), writers.clone());
+        let key = SecretKey([4; 32]);
+        let blob = r.seal("pack-index", "f", 7, &key, b"body").unwrap();
+        assert_eq!(r.open("pack-index", "f", &a, 7, &key, &blob).unwrap(), b"body");
+        assert!(r.open("pack-index", "f", &a, 8, &key, &blob).is_err());
+        assert!(r.open("pack-index", "f", &b, 7, &key, &blob).is_err());
+        assert!(r.open("tombstones", "f", &a, 7, &key, &blob).is_err());
+        assert!(r.open("pack-index", "g", &a, 7, &key, &blob).is_err());
+        assert!(r
+            .open("pack-index", "f", &a, 7, &SecretKey([5; 32]), &blob)
+            .is_err());
+        assert!(r.seal("manifest", "f", 1, &key, b"x").is_err());
+        // B signs a record as A (its own key): refused.
+        let forged = Records::new(vault.clone(), a.clone(), std::sync::Arc::new(other_sk), writers);
+        let blob = forged.seal("tombstones", "", 3, &key, b"dead").unwrap();
+        assert!(r.open("tombstones", "", &a, 3, &key, &blob).is_err());
+        // A writer this device does not know: refused.
+        let (_, sk3, c) = ids();
+        let stranger = Records::new(vault, c.clone(), std::sync::Arc::new(sk3), Default::default());
+        let blob = stranger.seal("tombstones", "", 1, &key, b"dead").unwrap();
+        assert!(r.open("tombstones", "", &c, 1, &key, &blob).is_err());
     }
 }

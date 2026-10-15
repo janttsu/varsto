@@ -1804,14 +1804,40 @@ impl Engine {
     /// deleted, `crate::packs`).
     fn ensure_pack_keys(&self) {
         if !self.pack_caches.has_tombstone_keys() {
-            self.pack_caches.set_tombstone_keys(
-                crate::record_shim::Records::new(
-                    self.vault.vault_id.clone(),
-                    self.vault.device_id.clone(),
-                ),
-                self.root_key().derive("pack-tombstones", &[]),
-            );
+            self.pack_caches
+                .set_tombstone_keys(self.pack_records(), self.pack_tombstone_key());
         }
+    }
+
+    /// The vault-wide key of tombstone lists of blocks in no folder.
+    pub(super) fn pack_tombstone_key(&self) -> SecretKey {
+        self.root_key().derive("pack-tombstones", &[])
+    }
+
+    /// The signed envelope of pack indexes and tombstone lists: this
+    /// device signs; records of the vault's devices and of the members of
+    /// its shared folders (their keys as this device knows them) are read.
+    pub(super) fn pack_records(&self) -> crate::record::Records {
+        let mut writers = BTreeMap::new();
+        writers.insert(self.vault.device_id.clone(), self.keys.signer.public());
+        for (d, r) in &self.devices.devices {
+            if let Ok(pk) = r.pubkey() {
+                writers.insert(d.clone(), pk);
+            }
+        }
+        for (d, r) in &self.devices.members {
+            if let Ok(pk) = r.pubkey() {
+                writers.entry(d.clone()).or_insert(pk);
+            }
+        }
+        let signer = crate::crypto::SigningKey::from_bytes(&self.keys.signer.to_bytes())
+            .expect("this device's own signing key");
+        crate::record::Records::new(
+            self.vault.vault_id.clone(),
+            self.vault.device_id.clone(),
+            std::sync::Arc::new(signer),
+            writers,
+        )
     }
 
     /// Count every call this engine makes to its storages from now on
