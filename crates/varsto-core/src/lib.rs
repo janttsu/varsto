@@ -66,6 +66,7 @@ pub mod strongroom;
 pub mod thumbs;
 pub mod util;
 pub mod vault;
+pub mod viz;
 
 /// Storage format version written into every object header. See
 /// `docs/spec/format-versions.md`.

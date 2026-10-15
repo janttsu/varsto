@@ -83,6 +83,7 @@ mod strongroom_ops;
 mod trash;
 mod verify;
 mod view;
+mod viz;
 mod where_data;
 pub use access_sync::AccessExchangeReport;
 pub use backups::{

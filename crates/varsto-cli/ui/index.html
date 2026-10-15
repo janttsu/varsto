@@ -6,9 +6,11 @@
 <meta name="color-scheme" content="light dark">
 <title>Varsto</title>
 <link rel="stylesheet" href="/app.css">
+<link rel="stylesheet" href="/viz.css">
 <script src="/i18n.js"></script>
 <script src="/app.js" defer></script>
 <script src="/folders.js" defer></script>
+<script src="/viz.js" defer></script>
 </head>
 <body data-view="loading" data-mobile="0">
 <svg class="sprite" aria-hidden="true" focusable="false">
@@ -18,6 +20,7 @@
   <symbol id="i-image" viewBox="0 0 20 20"><rect x="3" y="4" width="14" height="12" rx="1.5"/><circle cx="7.5" cy="8" r="1.3"/><path d="m3.5 14.5 4-4 3 3 2-2 4 4"/></symbol>
   <symbol id="i-storages" viewBox="0 0 20 20"><ellipse cx="10" cy="5" rx="6" ry="2.3"/><path d="M4 5v5c0 1.3 2.7 2.3 6 2.3s6-1 6-2.3V5"/><path d="M4 10v5c0 1.3 2.7 2.3 6 2.3s6-1 6-2.3v-5"/></symbol>
   <symbol id="i-policies" viewBox="0 0 20 20"><path d="M10 2.5 16 5v4.5c0 3.8-2.6 6.6-6 8-3.4-1.4-6-4.2-6-8V5z"/><path d="m7.5 10 1.8 1.8L12.8 8"/></symbol>
+  <symbol id="i-viz" viewBox="0 0 20 20"><path d="M10 2.5 17 6.2v7.6L10 17.5 3 13.8V6.2z"/><path d="M3 6.2 10 10l7-3.8M10 10v7.5"/></symbol>
   <symbol id="i-peers" viewBox="0 0 20 20"><rect x="2.5" y="4" width="10" height="7" rx="1.2"/><path d="M5.5 14h4"/><rect x="13" y="8" width="4.5" height="8" rx="1.2"/><path d="M14.5 14h1.5"/></symbol>
   <symbol id="i-sharing" viewBox="0 0 20 20"><circle cx="14.5" cy="4.5" r="2"/><circle cx="5.5" cy="10" r="2"/><circle cx="14.5" cy="15.5" r="2"/><path d="m7.3 9 5.4-3.5M7.3 11l5.4 3.5"/></symbol>
   <symbol id="i-settings" viewBox="0 0 20 20"><circle cx="10" cy="10" r="2.5"/><path d="M10 2.5v2M10 15.5v2M2.5 10h2M15.5 10h2M4.7 4.7l1.4 1.4M13.9 13.9l1.4 1.4M4.7 15.3l1.4-1.4M13.9 6.1l1.4-1.4"/></symbol>
@@ -70,6 +73,7 @@
     <button type="button" class="nav-item" data-nav="trash"><svg class="icon"><use href="#i-trash"/></svg><span>Trash</span></button>
     <button type="button" class="nav-item" data-nav="policies"><svg class="icon"><use href="#i-policies"/></svg><span>Policies</span></button>
     <button type="button" class="nav-item" data-nav="peers"><svg class="icon"><use href="#i-peers"/></svg><span>Peers</span></button>
+    <button type="button" class="nav-item" data-nav="viz"><svg class="icon"><use href="#i-viz"/></svg><span>Visualization</span></button>
     <button type="button" class="nav-item hidden" data-nav="organization" data-org-only="1"><svg class="icon"><use href="#i-org"/></svg><span>Organization</span></button>
     <button type="button" class="nav-item" data-nav="recovery"><svg class="icon"><use href="#i-key"/></svg><span>Recovery package</span></button>
     <button type="button" class="nav-item" data-nav="settings"><svg class="icon"><use href="#i-settings"/></svg><span>Settings</span></button>
@@ -727,6 +731,9 @@
       </div>
     </div>
 
+    <!-- Visualization (viz.js draws into this page) -->
+    <div class="page hidden" data-page="viz"></div>
+
     <!-- Peers -->
     <div class="page hidden" data-page="peers">
       <div class="card">
@@ -979,6 +986,7 @@
         <button type="button" class="more-item" data-nav="help"><svg class="icon"><use href="#i-help"/></svg><span>Help</span><svg class="icon chev"><use href="#i-chevron"/></svg></button>
         <button type="button" class="more-item" data-nav="shared"><svg class="icon"><use href="#i-sharing"/></svg><span>Shared</span><svg class="icon chev"><use href="#i-chevron"/></svg></button>
         <button type="button" class="more-item" data-nav="backups"><svg class="icon"><use href="#i-backup"/></svg><span>Backups</span><svg class="icon chev"><use href="#i-chevron"/></svg></button>
+        <button type="button" class="more-item" data-nav="viz"><svg class="icon"><use href="#i-viz"/></svg><span>Visualization</span><svg class="icon chev"><use href="#i-chevron"/></svg></button>
         <button type="button" class="more-item" data-nav="import"><svg class="icon"><use href="#i-backup"/></svg><span>Import</span><svg class="icon chev"><use href="#i-chevron"/></svg></button>
         <button type="button" class="more-item" data-nav="trash"><svg class="icon"><use href="#i-trash"/></svg><span>Trash</span><svg class="icon chev"><use href="#i-chevron"/></svg></button>
         <button type="button" class="more-item" data-nav="policies"><svg class="icon"><use href="#i-policies"/></svg><span>Policies</span><svg class="icon chev"><use href="#i-chevron"/></svg></button>

@@ -35,6 +35,7 @@ mod tray;
 mod update;
 mod upkeep;
 mod view;
+mod viz;
 
 #[derive(Parser)]
 #[command(

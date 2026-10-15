@@ -24,6 +24,13 @@ spec still names them because sections were written as the work was done.
   percentage) or only on devices. It is computed from the ledger and carried
   in `protection` of every folder in `/api/status` (spec 63). File lists have
   a compact (default) and a comfortable density, kept in the browser.
+- Visualization page (spec 63): an isometric live board of devices, storages,
+  the disk pool and the cloud with animated flows (bytes per second, folder,
+  estimated finish), verification and repair rings, protection per folder,
+  the offline disk stack with the docked disk's phase, cost estimates and
+  alerts. Full screen (button or F) renders at the display's native size,
+  background follows the theme or is Light or pure black. New
+  `GET /api/viz` snapshot; sprites from `website/tools/render/viz_sprites.py`.
 
 ### Changed
 
