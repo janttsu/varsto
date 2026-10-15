@@ -1517,7 +1517,9 @@
   "Attach a new disk to continue moving {folder}": "Anslut en ny disk för att fortsätta flytta {folder}",
   "{left} of {folder} are still on {from}. The move to {to} stops when the pool has no room and carries on by itself when a disk is attached.": "{left} av {folder} ligger kvar på {from}. Flytten till {to} stannar när poolen saknar plats och fortsätter av sig själv när en disk ansluts.",
   "Plug the disk in. Nothing else is needed; `varsto move status` shows how far the move has come.": "Anslut disken. Inget mer behövs; `varsto move status` visar hur långt flytten har kommit.",
-  "The administrator command asks for the 24 root words without echo.": "Administratörskommandot frågar efter de 24 rotorden utan eko."
+  "The administrator command asks for the 24 root words without echo.": "Administratörskommandot frågar efter de 24 rotorden utan eko.",
+  "Check for updates every day": "Sök efter uppdateringar varje dag",
+  "Where Varsto can install a new version by itself (Windows) it does, after checking the Varsto release signature; elsewhere it tells you.": "Där Varsto kan installera en ny version själv (Windows) gör den det efter att ha kontrollerat Varstos utgivningssignatur; på andra system talar den om det."
  },
  "patterns": [
   [

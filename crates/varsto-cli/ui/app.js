@@ -2675,6 +2675,9 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
       return api("POST", "/api/update", {}).then(function (r) { log(r.message); if (r.updated) { log("the service is restarting; this page reconnects in a few seconds"); $("update").classList.add("hidden"); } busy(false); });
     }).catch(function (e) { log("update failed: " + e.message); busy(false); });
   };
+  // Daily check and automatic installation (off: only the button above, when a version is out).
+  api("GET", "/api/update/settings").then(function (r) { $("auto-update").checked = !!r.auto; }).catch(function () {});
+  $("auto-update").onchange = function () { api("POST", "/api/update/settings", { auto: $("auto-update").checked }).catch(function (e) { log("error: " + e.message); }); };
   $("quit").onclick = function () {
     confirmBox("Folders stop syncing until the service is started again.", { title: "Quit Varsto?", ok: "Quit", danger: true }).then(function (yes) {
       if (!yes) { return; }

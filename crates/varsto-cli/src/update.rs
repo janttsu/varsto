@@ -20,6 +20,14 @@
 //! Then the archive for this platform is downloaded, its SHA-256 checked
 //! against the signed list, and the running binary replaced. Downloads use
 //! the system `curl` so that the binary carries no TLS stack of its own.
+//!
+//! Copies put in place by the Windows setup program (`Varsto-<version>-setup.exe`)
+//! update through that program: the signed setup file is downloaded, checked
+//! like any archive and run silently from a private folder, and it replaces
+//! the installation, closes and restarts the running parts. Portable
+//! (zip) copies replace their own binaries as before. The service looks for
+//! a new version once a day (`auto-update` setting) and installs it by itself
+//! where it can (Windows), or tells the user where it cannot.
 
 use anyhow::{anyhow, bail, Context, Result};
 use base64::Engine as _;
@@ -328,6 +336,17 @@ pub struct Check {
     pub target: String,
 }
 
+impl Check {
+    /// The update is the Windows setup program, which restarts Varsto itself.
+    pub fn installer(&self) -> bool {
+        self.archive.as_deref().is_some_and(is_setup_file)
+    }
+}
+
+fn is_setup_file(name: &str) -> bool {
+    name.starts_with("Varsto-") && name.ends_with("-setup.exe")
+}
+
 /// Parse "0.0.1-alpha.3" into a comparable tuple.
 fn version_key(v: &str) -> (u64, u64, u64, u8, u64) {
     let (core, pre) = v.split_once('-').unwrap_or((v, ""));
@@ -384,16 +403,14 @@ fn check_with(fetch: &dyn Fetch, base: &str, key: &PublicKey) -> Result<Check> {
     }
     let current = env!("CARGO_PKG_VERSION").to_string();
     let target = target_triple().to_string();
-    // Inside Varsto.app the whole bundle is replaced from the disk image;
-    // elsewhere the archive for this platform carries the binary.
-    let dmg = format!("Varsto-{latest}-macos.dmg");
     let archive = manifest.as_object().and_then(|m| {
-        if app_bundle().is_some() {
-            return m.contains_key(&dmg).then(|| dmg.clone());
-        }
-        m.keys()
-            .find(|k| k.contains(&target) && (k.ends_with(".tar.gz") || k.ends_with(".zip")))
-            .cloned()
+        pick_archive(
+            m.keys().map(String::as_str),
+            &latest,
+            &target,
+            app_bundle().is_some(),
+            installed_by_setup(),
+        )
     });
     let newer = version_key(&latest) > version_key(&current)
         && version_key(&latest) > version_key(MIN_ACCEPTED_VERSION);
@@ -406,6 +423,47 @@ fn check_with(fetch: &dyn Fetch, base: &str, key: &PublicKey) -> Result<Check> {
         archive,
         target,
     })
+}
+
+/// The file name of the Windows setup program of a release.
+pub fn setup_name(version: &str) -> String {
+    format!("Varsto-{version}-setup.exe")
+}
+
+/// Whether this copy was installed by the Windows setup program: its
+/// uninstaller (`unins000.exe`) sits next to the binary.
+pub fn installed_by_setup() -> bool {
+    cfg!(windows)
+        && std::env::current_exe()
+            .ok()
+            .and_then(|e| e.parent().map(|d| d.join("unins000.exe")))
+            .is_some_and(|u| u.is_file())
+}
+
+/// Which file of the release replaces this copy. Inside Varsto.app the whole
+/// bundle comes from the disk image; a copy installed by the Windows setup
+/// program takes the setup program (when the release has one); elsewhere the
+/// archive for this platform carries the binary.
+fn pick_archive<'a>(
+    names: impl Iterator<Item = &'a str>,
+    latest: &str,
+    target: &str,
+    in_bundle: bool,
+    by_setup: bool,
+) -> Option<String> {
+    let names: Vec<&str> = names.collect();
+    let dmg = format!("Varsto-{latest}-macos.dmg");
+    if in_bundle {
+        return names.contains(&dmg.as_str()).then_some(dmg);
+    }
+    let setup = setup_name(latest);
+    if by_setup && names.contains(&setup.as_str()) {
+        return Some(setup);
+    }
+    names
+        .into_iter()
+        .find(|k| k.contains(target) && (k.ends_with(".tar.gz") || k.ends_with(".zip")))
+        .map(str::to_string)
 }
 
 /// A downloaded archive whose checksum the signed list vouches for.
@@ -438,7 +496,8 @@ pub fn download_verified(
         .clone()
         .ok_or_else(|| anyhow!("no archive for {}", check.target))?;
     let expected_name = archive.starts_with(&format!("varsto-{}-", check.latest))
-        || archive == format!("Varsto-{}-macos.dmg", check.latest);
+        || archive == format!("Varsto-{}-macos.dmg", check.latest)
+        || archive == setup_name(&check.latest);
     if !expected_name || archive.contains(['/', '\\']) {
         bail!("the manifest names an unexpected archive {archive}; refusing to update");
     }
@@ -536,11 +595,77 @@ pub fn apply(check: &Check, policy: &Policy) -> Result<String> {
     }
     // A fresh directory with a random name and mode 0700 (tempfile creates
     // it exclusively): nobody can pre-create it or plant a binary inside.
+    remove_stale_update_dirs();
     let tmp = tempfile::Builder::new()
-        .prefix("varsto-update-")
+        .prefix(UPDATE_DIR_PREFIX)
         .tempdir()
         .context("create a temporary directory for the update")?;
+    if check.installer() {
+        // The setup program runs after this process is gone: its folder must
+        // outlive us (the next update removes it).
+        let dir = tmp.keep();
+        return install_from(check, &dir, policy);
+    }
     install_from(check, tmp.path(), policy)
+}
+
+const UPDATE_DIR_PREFIX: &str = "varsto-update-";
+
+/// Setup programs of earlier updates stay in their private folders until
+/// the next update; folders older than a day go now.
+fn remove_stale_update_dirs() {
+    let Ok(rd) = fs::read_dir(std::env::temp_dir()) else {
+        return;
+    };
+    for e in rd.flatten() {
+        let old = e
+            .metadata()
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| t.elapsed().ok())
+            .is_some_and(|age| age > std::time::Duration::from_secs(86_400));
+        if old
+            && e.file_name()
+                .to_string_lossy()
+                .starts_with(UPDATE_DIR_PREFIX)
+            && e.file_type().is_ok_and(|t| t.is_dir())
+        {
+            let _ = fs::remove_dir_all(e.path());
+        }
+    }
+}
+
+/// The command line that runs a setup program without asking anything: no
+/// windows, no message boxes, no reboot, and the running Varsto closed (and,
+/// by the script's own entries, started again afterwards).
+pub fn setup_args(log: &Path) -> Vec<String> {
+    vec![
+        "/VERYSILENT".into(),
+        "/SUPPRESSMSGBOXES".into(),
+        "/NORESTART".into(),
+        "/CLOSEAPPLICATIONS".into(),
+        format!("/LOG={}", log.display()),
+    ]
+}
+
+/// Start the verified setup program and let it go: it replaces files of the
+/// process that started it, so it must not wait for it.
+fn start_setup(setup: &Path, dir: &Path) -> Result<()> {
+    let mut cmd = std::process::Command::new(setup);
+    cmd.args(setup_args(&dir.join("setup.log")))
+        .current_dir(dir)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const DETACHED_PROCESS: u32 = 0x0000_0008;
+        const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+        cmd.creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP);
+    }
+    cmd.spawn().context("start the setup program")?;
+    Ok(())
 }
 
 /// The Varsto.app bundle this binary runs from (macOS), if any.
@@ -635,6 +760,21 @@ fn install_from(check: &Check, tmp: &Path, policy: &Policy) -> Result<String> {
             v.notes.join("; ")
         ));
     }
+    if v.path
+        .file_name()
+        .is_some_and(|n| is_setup_file(&n.to_string_lossy()))
+    {
+        if !cfg!(windows) {
+            bail!("the setup program only runs on Windows");
+        }
+        start_setup(&v.path, tmp)?;
+        return Ok(format!(
+            "updating {} -> {} with the setup program ({}); Varsto closes, is replaced and starts again in a moment",
+            check.current,
+            check.latest,
+            v.notes.join("; ")
+        ));
+    }
     let extract = tmp.join("x");
     fs::create_dir_all(&extract)?;
     let tar = std::process::Command::new("tar")
@@ -670,6 +810,17 @@ fn install_from(check: &Check, tmp: &Path, policy: &Policy) -> Result<String> {
     };
     let exe = std::env::current_exe()?;
     replace_binary(&new_bin, &exe)?;
+    // The Windows window program beside the binary is replaced with it.
+    let window_exe = exe.with_file_name("varsto-window.exe");
+    if cfg!(windows) && window_exe.is_file() {
+        if let Some(w) = walkdir::WalkDir::new(&extract)
+            .into_iter()
+            .filter_map(|e| e.ok())
+            .find(|e| e.file_type().is_file() && e.file_name() == "varsto-window.exe")
+        {
+            replace_binary(w.path(), &window_exe)?;
+        }
+    }
     Ok(format!(
         "updated {} -> {} ({}; {}); restart the service or app to use it",
         check.current,
@@ -700,6 +851,161 @@ fn replace_binary(new_bin: &Path, exe: &Path) -> Result<()> {
         }
     }
     Ok(())
+}
+
+// ----- automatic updates ----------------------------------------------------------
+
+/// The setting file in the device directory: `off` turns the daily check off.
+const AUTO_FILE: &str = "auto-update";
+/// When the last successful daily check ran, and for which version the user
+/// was told already (one notification per version).
+const AUTO_CHECKED: &str = "auto-update-checked";
+const AUTO_TOLD: &str = "auto-update-told";
+/// The daily check, and the wait after a failure.
+const AUTO_EVERY_SECS: i64 = 86_400;
+const AUTO_RETRY_SECS: u64 = 3_600;
+
+/// Is the daily check on? It is, unless `varsto config auto-update off` or the
+/// switch in the interface turned it off.
+pub fn auto_update_enabled(home: &Path) -> bool {
+    fs::read_to_string(home.join(AUTO_FILE))
+        .map(|t| t.trim() != "off")
+        .unwrap_or(true)
+}
+
+pub fn set_auto_update(home: &Path, on: bool) -> Result<()> {
+    fs::create_dir_all(home)?;
+    fs::write(home.join(AUTO_FILE), if on { "on\n" } else { "off\n" })?;
+    Ok(())
+}
+
+/// Whether this copy installs a new version by itself: on Windows (the setup
+/// program or the portable zip); elsewhere the user is told and installs it
+/// from the interface or the menu.
+pub fn can_install_by_itself() -> bool {
+    cfg!(windows)
+}
+
+fn read_number(path: &Path) -> i64 {
+    fs::read_to_string(path)
+        .ok()
+        .and_then(|t| t.trim().parse().ok())
+        .unwrap_or(0)
+}
+
+/// What one pass of the daily check did.
+#[derive(Debug, PartialEq, Eq)]
+pub enum AutoStep {
+    /// Not due, or switched off.
+    Idle,
+    /// Up to date.
+    Current,
+    /// A newer version exists and the user was told (once per version).
+    Told(String),
+    /// A newer version is being installed (setup program started or binary replaced).
+    Installing(String),
+    /// Nothing could be done; try again in an hour (`reason` for the log).
+    Retry(String),
+}
+
+/// One pass of the daily check: look for a newer version (at most once a day)
+/// and, when this copy can, install it. The signature chain of `apply` is the
+/// only way in; nothing is installed without it. `tell` shows a notification
+/// (title, text); `installed` is called after a binary was replaced in place
+/// (not for the setup program, which restarts Varsto itself).
+pub fn auto_step(
+    home: &Path,
+    now: i64,
+    tell: &dyn Fn(&str, &str),
+    installed: &dyn Fn(&Check),
+) -> AutoStep {
+    if !auto_update_enabled(home) {
+        return AutoStep::Idle;
+    }
+    if now - read_number(&home.join(AUTO_CHECKED)) < AUTO_EVERY_SECS {
+        return AutoStep::Idle;
+    }
+    let c = match check() {
+        Ok(c) => c,
+        Err(e) => return AutoStep::Retry(format!("{e:#}")),
+    };
+    let stamp = |name: &str, v: &str| {
+        let _ = fs::write(home.join(name), v);
+    };
+    if !c.newer {
+        stamp(AUTO_CHECKED, &now.to_string());
+        return AutoStep::Current;
+    }
+    let told_before = fs::read_to_string(home.join(AUTO_TOLD))
+        .map(|t| t.trim() == c.latest)
+        .unwrap_or(false);
+    if c.available && can_install_by_itself() {
+        if !told_before {
+            stamp(AUTO_TOLD, &c.latest);
+            tell(
+                "Varsto update available",
+                &format!(
+                    "Varsto {} is out (you have {}). Installing it now.",
+                    c.latest, c.current
+                ),
+            );
+        }
+        let policy = Policy::new(home, false);
+        return match apply(&c, &policy) {
+            Ok(_) => {
+                stamp(AUTO_CHECKED, &now.to_string());
+                if !c.installer() {
+                    installed(&c);
+                    tell(
+                        "Varsto updated",
+                        &format!("Varsto {} is installed; the service restarts.", c.latest),
+                    );
+                }
+                AutoStep::Installing(c.latest)
+            }
+            // A cross-check that cannot be made yet, a bad network: later.
+            Err(e) => AutoStep::Retry(format!("{e:#}")),
+        };
+    }
+    stamp(AUTO_CHECKED, &now.to_string());
+    if !told_before {
+        stamp(AUTO_TOLD, &c.latest);
+        tell(
+            "Varsto update available",
+            &format!(
+                "Varsto {} is out (you have {}). Open Varsto to install it.",
+                c.latest, c.current
+            ),
+        );
+    }
+    AutoStep::Told(c.latest)
+}
+
+/// The daily check as a background thread of the service. `tell` shows a
+/// notification, `installed` asks the service to restart onto a replaced binary.
+pub fn spawn_auto_update(
+    home: PathBuf,
+    tell: impl Fn(&str, &str) + Send + 'static,
+    installed: impl Fn(&Check) + Send + 'static,
+) {
+    let _ = std::thread::Builder::new()
+        .name("auto-update".into())
+        .spawn(move || {
+            // Let the service settle first; a restart loop must not hammer the site.
+            std::thread::sleep(std::time::Duration::from_secs(120));
+            loop {
+                let now = varsto_core::util::now_utc();
+                match auto_step(&home, now, &tell, &installed) {
+                    AutoStep::Retry(why) => log::info!("automatic update check: {why}"),
+                    AutoStep::Installing(v) => log::info!("automatic update to {v} started"),
+                    AutoStep::Told(v) => log::info!("automatic update check: {v} is out"),
+                    AutoStep::Idle | AutoStep::Current => {}
+                }
+                // Hourly pass; the check itself runs once a day (AUTO_CHECKED).
+                let wait = AUTO_RETRY_SECS;
+                std::thread::sleep(std::time::Duration::from_secs(wait));
+            }
+        });
 }
 
 // ----- verify-release ---------------------------------------------------------------
@@ -1038,6 +1344,126 @@ mod tests {
         fake.files
             .insert(github_url(), b"aa  something-else.zip\n".to_vec());
         assert!(download_verified(&fake, BASE, &pk, &check, dir.path(), &pol(false)).is_err());
+    }
+
+    #[test]
+    fn the_setup_program_is_picked_only_for_installed_copies() {
+        let names = [
+            "varsto-9.9.9-x86_64-pc-windows-gnu.zip",
+            "Varsto-9.9.9-setup.exe",
+            "varsto-9.9.9-x86_64-unknown-linux-musl.tar.gz",
+        ];
+        let pick = |setup: bool, bundle: bool, target: &str| {
+            pick_archive(names.iter().copied(), "9.9.9", target, bundle, setup)
+        };
+        let win = "x86_64-pc-windows-gnu";
+        assert_eq!(
+            pick(true, false, win).as_deref(),
+            Some("Varsto-9.9.9-setup.exe")
+        );
+        // A portable copy keeps the zip.
+        assert_eq!(
+            pick(false, false, win).as_deref(),
+            Some("varsto-9.9.9-x86_64-pc-windows-gnu.zip")
+        );
+        // An installed copy of a release without a setup program takes the zip too.
+        let only_zip = ["varsto-9.9.9-x86_64-pc-windows-gnu.zip"];
+        assert_eq!(
+            pick_archive(only_zip.into_iter(), "9.9.9", win, false, true).as_deref(),
+            Some("varsto-9.9.9-x86_64-pc-windows-gnu.zip")
+        );
+        // The setup program never serves another platform.
+        assert_eq!(
+            pick(false, false, "x86_64-unknown-linux-musl").as_deref(),
+            Some("varsto-9.9.9-x86_64-unknown-linux-musl.tar.gz")
+        );
+        assert_eq!(pick(false, true, win), None);
+    }
+
+    #[test]
+    fn a_signed_setup_program_is_accepted_and_a_swapped_one_is_not() {
+        let (sk, pk) = test_key(7);
+        let dir = tempfile::tempdir().unwrap();
+        let setup = "Varsto-9.9.9-setup.exe";
+        let body = b"setup program".to_vec();
+        let sums = format!("{}  {setup}\n", hex::encode(Sha256::digest(&body)));
+        let sig = sign(
+            &sk,
+            sums.as_bytes(),
+            "timestamp:1\tfile:SHA256SUMS\tversion:9.9.9",
+        );
+        let mut files = HashMap::new();
+        files.insert(format!("{BASE}{setup}"), body);
+        files.insert(format!("{BASE}SHA256SUMS"), sums.into_bytes());
+        files.insert(format!("{BASE}SHA256SUMS.sig"), sig.into_bytes());
+        let fake = Fake {
+            files,
+            downloaded: RefCell::new(false),
+        };
+        let check = Check {
+            current: "0.0.1".into(),
+            latest: "9.9.9".into(),
+            available: true,
+            newer: true,
+            download_page: BASE.into(),
+            archive: Some(setup.into()),
+            target: "x86_64-pc-windows-gnu".into(),
+        };
+        assert!(check.installer());
+        let v = download_verified(&fake, BASE, &pk, &check, dir.path(), &pol(true)).unwrap();
+        assert_eq!(fs::read(&v.path).unwrap(), b"setup program");
+        // The same file name for another version is refused.
+        let mut other = check.clone();
+        other.archive = Some("Varsto-9.9.8-setup.exe".into());
+        assert!(download_verified(&fake, BASE, &pk, &other, dir.path(), &pol(true)).is_err());
+        // A swapped download does not match the signed checksum.
+        let mut swapped = Fake {
+            files: fake.files.clone(),
+            downloaded: RefCell::new(false),
+        };
+        swapped
+            .files
+            .insert(format!("{BASE}{setup}"), b"evil".to_vec());
+        let e = download_verified(&swapped, BASE, &pk, &check, dir.path(), &pol(true)).unwrap_err();
+        assert!(format!("{e:#}").contains("checksum mismatch"), "{e:#}");
+    }
+
+    #[test]
+    fn the_setup_program_runs_silently_and_closes_varsto() {
+        let args = setup_args(Path::new("C:\\t\\setup.log"));
+        for want in [
+            "/VERYSILENT",
+            "/SUPPRESSMSGBOXES",
+            "/NORESTART",
+            "/CLOSEAPPLICATIONS",
+        ] {
+            assert!(args.iter().any(|a| a == want), "{want}");
+        }
+        assert!(args.iter().any(|a| a.starts_with("/LOG=")));
+    }
+
+    #[test]
+    fn the_daily_check_can_be_turned_off() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(auto_update_enabled(dir.path()));
+        set_auto_update(dir.path(), false).unwrap();
+        assert!(!auto_update_enabled(dir.path()));
+        // Off: not even a network call (the step returns before check()).
+        let told = RefCell::new(0);
+        let step = auto_step(
+            dir.path(),
+            10_000_000,
+            &|_, _| *told.borrow_mut() += 1,
+            &|_| {},
+        );
+        assert_eq!(step, AutoStep::Idle);
+        assert_eq!(*told.borrow(), 0);
+        set_auto_update(dir.path(), true).unwrap();
+        assert!(auto_update_enabled(dir.path()));
+        // On, but checked a moment ago: idle as well.
+        fs::write(dir.path().join(AUTO_CHECKED), "9999990").unwrap();
+        let step = auto_step(dir.path(), 10_000_000, &|_, _| {}, &|_| {});
+        assert_eq!(step, AutoStep::Idle);
     }
 
     #[test]

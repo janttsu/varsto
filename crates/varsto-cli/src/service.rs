@@ -1443,8 +1443,44 @@ pub fn notify(title: &str, body: &str) {
     }
     #[cfg(target_os = "windows")]
     {
-        let _ = (title, body);
+        windows_toast(title, body);
     }
+}
+
+/// A toast notification through PowerShell, which every Windows 10/11 has.
+/// The text goes in through the environment, never into the script. The
+/// setup program registers the sender name "Varsto" (with the icon); without
+/// it the toast comes from Windows PowerShell.
+#[cfg(target_os = "windows")]
+fn windows_toast(title: &str, body: &str) {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    const SCRIPT: &str = r#"
+$id = 'Varsto.Notifier'
+if (-not (Test-Path "HKCU:\Software\Classes\AppUserModelId\$id")) { $id = '{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\WindowsPowerShell\v1.0\powershell.exe' }
+[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null
+$x = [Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent([Windows.UI.Notifications.ToastTemplateType]::ToastText02)
+$t = $x.GetElementsByTagName('text')
+$t.Item(0).AppendChild($x.CreateTextNode($env:VARSTO_NOTE_TITLE)) | Out-Null
+$t.Item(1).AppendChild($x.CreateTextNode($env:VARSTO_NOTE_BODY)) | Out-Null
+[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier($id).Show([Windows.UI.Notifications.ToastNotification]::new($x))
+"#;
+    let _ = std::process::Command::new("powershell.exe")
+        .args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-WindowStyle",
+            "Hidden",
+            "-Command",
+            SCRIPT,
+        ])
+        .env("VARSTO_NOTE_TITLE", title)
+        .env("VARSTO_NOTE_BODY", body)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .creation_flags(CREATE_NO_WINDOW)
+        .spawn();
 }
 
 pub fn service_file(home: &Path) -> PathBuf {
@@ -1840,6 +1876,15 @@ pub fn run(opts: Options) -> Result<()> {
     std::thread::Builder::new()
         .name("http".into())
         .spawn(move || desktop::serve_arc(http_server, http_state))?;
+    // Looks for a new version once a day (the `auto-update` setting) and
+    // installs it where this copy can; the signature chain of `varsto update`
+    // is the only way in.
+    {
+        let restart_state = state.clone();
+        crate::update::spawn_auto_update(opts.home.clone(), notify, move |_| {
+            restart_state.lock().unwrap().service.restart_requested = true
+        });
+    }
 
     // Peer-to-peer: serve our chunks, announce on the LAN, learn peers.
     // Peer-to-peer starts as soon as the vault is open and the setting is on: a

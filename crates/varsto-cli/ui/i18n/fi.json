@@ -1517,7 +1517,9 @@
   "Attach a new disk to continue moving {folder}": "Liitä uusi levy jatkaaksesi kansion {folder} siirtoa",
   "{left} of {folder} are still on {from}. The move to {to} stops when the pool has no room and carries on by itself when a disk is attached.": "{left} kansiosta {folder} on yhä kohteessa {from}. Siirto kohteeseen {to} pysähtyy, kun levyvarastossa ei ole tilaa, ja jatkuu itsestään, kun levy liitetään.",
   "Plug the disk in. Nothing else is needed; `varsto move status` shows how far the move has come.": "Liitä levy. Muuta ei tarvita; `varsto move status` näyttää, kuinka pitkällä siirto on.",
-  "The administrator command asks for the 24 root words without echo.": "Ylläpitäjäkomento kysyy 24 juurisanaa ilman kaikua."
+  "The administrator command asks for the 24 root words without echo.": "Ylläpitäjäkomento kysyy 24 juurisanaa ilman kaikua.",
+  "Check for updates every day": "Päivitykset tarkistetaan päivittäin",
+  "Where Varsto can install a new version by itself (Windows) it does, after checking the Varsto release signature; elsewhere it tells you.": "Missä Varsto voi asentaa uuden version itse (Windows), se tekee sen tarkistettuaan Varston julkaisuallekirjoituksen; muualla se kertoo asiasta."
  },
  "patterns": [
   [
