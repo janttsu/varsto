@@ -2358,6 +2358,42 @@ pub fn restart_running(home: &Path) -> bool {
     }
 }
 
+/// Restart the running service and wait until a new one answers. A
+/// supervisor (launchd, systemd, the tray app) starts it again after exit
+/// code 75; without one, the service is started here. Returns whether a
+/// service runs afterwards (false when none ran before).
+pub fn restart_and_wait(home: &Path) -> bool {
+    let Some((old, _)) = status(home) else {
+        return false;
+    };
+    if !restart_running(home) {
+        return false;
+    }
+    let new_service_up = |secs: u64| {
+        for _ in 0..(secs * 5) {
+            std::thread::sleep(Duration::from_millis(200));
+            if status(home).is_some_and(|(f, _)| f.pid != old.pid) {
+                return true;
+            }
+        }
+        false
+    };
+    if new_service_up(15) {
+        return true;
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        let _ = std::process::Command::new(exe)
+            .arg("--home")
+            .arg(home)
+            .args(["service", "run"])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn();
+    }
+    new_service_up(10)
+}
+
 pub fn install(home: &Path, interval_secs: u64) -> Result<String> {
     let exe = std::env::current_exe()?;
     // Through a link on PATH, run the file it points to (inside Varsto.app,

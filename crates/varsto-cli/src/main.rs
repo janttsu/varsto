@@ -4787,6 +4787,7 @@ fn run(cli: &Cli) -> Result<()> {
             if !*yes {
                 bail_usage::<()>("this removes keys, ledger, state and configuration from this device (files in folders stay); run again with --yes")?;
             }
+            let running = service::status(&home).is_some();
             if let Some((sf, _)) = service::status(&home) {
                 let url = format!("http://127.0.0.1:{}/api/reset", sf.port);
                 service::http_call(
@@ -4796,9 +4797,21 @@ fn run(cli: &Cli) -> Result<()> {
                     Some(&serde_json::json!({"confirm": "reset"}).to_string()),
                 )?;
                 println!("device reset through the running service");
-            } else {
-                let removed = varsto_core::engine::reset_device(&home)?;
-                println!("device reset; removed: {}", removed.join(", "));
+            }
+            // Whatever the service did, nothing that marks this device as
+            // holding a vault may be left (`ensure_no_vault` looks at vault.json).
+            let removed = varsto_core::engine::reset_device(&home)?;
+            if !removed.is_empty() {
+                println!("removed: {}", removed.join(", "));
+            }
+            if running {
+                // The old service keeps no state now; start it again so it
+                // runs without the old vault.
+                if service::restart_and_wait(&home) {
+                    println!("the background service restarted");
+                } else {
+                    eprintln!("could not restart the background service: start it with `varsto service run` or `varsto install`");
+                }
             }
         }
         Cmd::Device { cmd } => match cmd {
