@@ -777,6 +777,16 @@ impl Engine {
         if opts.budget_bytes_per_day == Some(0) {
             bail!("a daily budget must be more than zero");
         }
+        if self.storage_settings(name).drain.is_none() {
+            let folders = self.folders_placed_on(name);
+            if !folders.is_empty() {
+                bail!(
+                    "{name} is still where {} {} written to: change their placement first (Policies > Placement, or `varsto folder placement <folder> --storage <other>`), then drain {name}",
+                    folders.join(", "),
+                    if folders.len() == 1 { "is" } else { "are" }
+                );
+            }
+        }
         let mut settings = self.storage_settings(name);
         let prev = settings.drain.clone();
         settings.drain = Some(DrainSetting {
@@ -799,6 +809,34 @@ impl Engine {
         }
         self.save_drain_state(name, Some(&st))?;
         self.drain_plan(name, opts)
+    }
+
+    /// Folders whose placement names `name` (or the only open storage of
+    /// its place), so a drain would leave them with nowhere to write.
+    fn folders_placed_on(&self, name: &str) -> Vec<String> {
+        let Some(spec) = self.config.storages.iter().find(|s| s.name() == name) else {
+            return Vec::new();
+        };
+        let place = spec.place();
+        let closed = self.closed_storages();
+        let only_in_place = !self.config.storages.iter().any(|s| {
+            s.name() != name && !s.is_carrier() && s.place() == place && !closed.contains(s.name())
+        });
+        let mut out: Vec<String> = self
+            .keyring
+            .folders
+            .values()
+            .filter(|r| !r.is_removed())
+            .filter(|r| {
+                r.placement.as_ref().is_some_and(|p| {
+                    p.storages.iter().any(|s| s == name)
+                        || (only_in_place && p.places.iter().any(|x| *x == place))
+                })
+            })
+            .map(|r| r.name.clone())
+            .collect();
+        out.sort();
+        out
     }
 
     /// Stop draining: the storage takes new blocks again. Copies already
