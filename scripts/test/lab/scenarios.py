@@ -1082,6 +1082,10 @@ def s_folder_approval():
     v("vl-pub", "folder attach docs /home/varsto/data/docs", json_out=False)
     v("vl-pub", "sync")
     same_tree(tree_hashes("vl-pub", "/home/varsto/data/docs"), tree_hashes("vl-laptop", "/home/varsto/data/docs"), "pub after approval")
+    # The signed participants list names both as owners, on either device.
+    for vm in ("vl-pub", "vl-laptop"):
+        roles = {p["device"]: p["role"] for p in v(vm, "folder participants docs")["participants"]}
+        check(roles.get("pub") == "owner" and roles.get("laptop") == "owner", f"{vm}: participants {roles}")
 
 
 @scenario("format2-recovery")

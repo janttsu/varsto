@@ -72,6 +72,7 @@ mod membership;
 mod notes;
 mod org_ops;
 mod pack_upkeep;
+mod participants;
 mod placement;
 mod quotas;
 mod repair;
@@ -132,6 +133,9 @@ pub use notes::{
 pub use org_ops::{
     LogView, OrgApproved, OrgBrief, OrgCreated, OrgDevice, OrgRemoveReport, OrgSummary, OrgUser,
     UnlistedDevice,
+};
+pub use participants::{
+    FolderParticipant, FolderParticipants, ParticipantEntry, PARTICIPANTS_PREFIX,
 };
 pub use quotas::QuotaStatus;
 pub use repair::{
@@ -1340,6 +1344,9 @@ impl Engine {
     ) -> Result<Engine> {
         crypto::check_passphrase(passphrase)?;
         crate::names::check_display_name(device_name)?;
+        if token.owners.is_empty() {
+            bail!("this share token names none of the owner's devices: only a sealed token (vst2.) made by `varsto share create --to <request code>` is accepted");
+        }
         ensure_no_vault(home)?;
         let backend = storage.open_with(&|_| secret.clone())?;
         let meta: VaultMeta = serde_json::from_slice(
@@ -2343,6 +2350,12 @@ impl Engine {
         self.pending.push(Event::FolderAdded { folder: id.clone() });
         self.publish_registry()?;
         self.commit_batch()?;
+        // The signed participants list: this device, the owner.
+        if let Some(rec) = self.keyring.folders.get(&id).cloned() {
+            if let Err(e) = self.ensure_participants(&rec, &[]) {
+                log::debug!(error:% = e; "participants list not published yet");
+            }
+        }
         // A recovery copy of the new key, when the recovery words are at hand.
         self.escrow_if_possible();
         Ok(id)

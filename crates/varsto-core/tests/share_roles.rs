@@ -314,14 +314,10 @@ fn role_changes_take_effect_and_only_the_owner_makes_them() {
 }
 
 #[test]
-fn plain_tokens_are_refused_once_a_folder_has_viewers() {
+fn a_pending_viewer_token_lists_its_role() {
     let lab = Lab::new();
     let mut a = owner(&lab);
-    assert!(a.share_create_plain("project").is_ok());
     let _v = invite(&lab, &mut a, "vic", ShareRole::Viewer);
-    let err = a.share_create_plain("project").unwrap_err();
-    assert!(format!("{err:#}").contains("request code"), "{err:#}");
-    // The pending token lists its role.
     let list = a.share_members("project").unwrap();
     assert!(list.roles_in_use);
 }

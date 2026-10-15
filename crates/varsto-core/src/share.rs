@@ -99,9 +99,9 @@ pub fn invite_id(ek: &EncapsKey) -> String {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct InviteRecord {
     pub folder: FolderId,
-    /// `invite_id` of the request key, or a random id for a plain token.
+    /// `invite_id` of the request key.
     pub invite: String,
-    /// The request code's KEM key (hex); empty for a plain token.
+    /// The request code's KEM key (hex).
     #[serde(default)]
     pub request_hex: String,
     /// Name the requester bound to the code, if any.
@@ -115,7 +115,7 @@ pub struct InviteRecord {
     #[serde(default)]
     pub role: ShareRole,
     /// The secret inside the sealed token from which the member derives
-    /// its join proof (hex; empty for a plain token).
+    /// its join proof (hex; removed once a member has used the token).
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub join_secret_hex: String,
 }

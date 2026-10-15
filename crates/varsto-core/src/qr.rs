@@ -7,7 +7,7 @@
 //! - `varsto://share/request?c=<request>`: a recipient asks for a share; the
 //!   value is its request code (public key and name, nothing secret).
 //! - `varsto://share/token?t=<token>`: the owner answers with a sealed token
-//!   (`vst1`/`vst2`), which only the requesting device opens.
+//!   (`vst2`), which only the requesting device opens.
 //! - `varsto://pair?c=<nine digits>&a=<host:port>,…`: one of your devices
 //!   offers pairing; the code is the pairing password.
 //!
@@ -50,7 +50,7 @@ const REQUEST_FORMAT: u8 = 1;
 pub enum Link {
     /// A share request code, `vsr1.<key hex>[.<name>]`.
     ShareRequest(String),
-    /// A sealed share token, `vst1.…` or `vst2.…`.
+    /// A sealed share token, `vst2.…`.
     ShareToken(String),
     /// A pairing offer: the nine digits and the addresses it listens on.
     Pair {
@@ -118,9 +118,6 @@ impl Link {
                 code: crate::pair::normalize(s)?,
                 addresses: Vec::new(),
             });
-        }
-        if s.split('.').count() == 4 {
-            bail!("a plain share token carries the folder key itself and is never shown as a QR code; seal it to the recipient's request code instead");
         }
         bail!("not a Varsto request code, sealed share token or pairing code")
     }
@@ -382,7 +379,7 @@ fn request_from_bytes(b: &[u8]) -> Result<String> {
 /// KEM ciphertext (u16) | sealed payload (u16) | name (UTF-8, the rest)`.
 fn token_to_bytes(token: &str) -> Result<Vec<u8>> {
     let t = SealedShareToken::decode(token)?;
-    let mut out = vec![t.version];
+    let mut out = vec![2u8];
     let short = |out: &mut Vec<u8>, b: &[u8]| -> Result<()> {
         out.push(u8::try_from(b.len()).map_err(|_| anyhow!("field too long for a link"))?);
         out.extend_from_slice(b);
@@ -412,8 +409,8 @@ fn token_to_bytes(token: &str) -> Result<Vec<u8>> {
 fn token_from_bytes(b: &[u8]) -> Result<String> {
     let mut r = Reader(b);
     let version = r.u8()?;
-    if !(1..=2).contains(&version) {
-        bail!("unknown token version {version} in the link");
+    if version != 2 {
+        bail!("token version {version} in the link is not read by storage format 2; ask the owner for a new token");
     }
     let vault = r.short()?;
     let folder = r.short()?;
@@ -424,7 +421,6 @@ fn token_from_bytes(b: &[u8]) -> Result<String> {
     let sealed = r.take(n)?;
     let name = std::str::from_utf8(r.0).map_err(|_| anyhow!("the folder name is not UTF-8"))?;
     let t = SealedShareToken {
-        version,
         vault_id: crate::ids::Id::from_bytes(vault),
         folder_id: crate::ids::Id::from_bytes(folder),
         name: name.to_string(),

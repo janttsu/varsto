@@ -48,8 +48,9 @@ pub struct LocalVault {
     pub member: bool,
 }
 
-/// Token the owner gives to another Varsto user to share one folder (F-047):
-/// `<vault-id>.<folder-id>.<folder-key-hex>.<name>`.
+/// What the owner gives another Varsto user to share one folder (F-047),
+/// in memory. It only ever travels sealed to the recipient's request code
+/// (`SealedShareToken`, `vst2.`); storage format 2 has no plain text form.
 #[derive(Clone, Serialize, Deserialize)]
 pub struct ShareToken {
     pub vault_id: VaultId,
@@ -78,9 +79,40 @@ pub struct ShareToken {
     pub invite: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub join_secret_hex: String,
+    /// When the owner made the token (seconds); a sealed token is refused
+    /// `TOKEN_LIFETIME_SECS` after it.
+    #[serde(default)]
+    pub issued_utc: i64,
 }
 
-crate::redacted_debug!(ShareToken { vault_id, folder_id, name, fingerprint, owners, role, invite ; key_hex, epoch_keys, join_secret_hex });
+crate::redacted_debug!(ShareToken { vault_id, folder_id, name, fingerprint, owners, role, invite, issued_utc ; key_hex, epoch_keys, join_secret_hex });
+
+/// How long a sealed share token (`vst2.`) or an organization approval
+/// token (`vot1.`) can be opened after it was made: 14 days. A hygiene
+/// limit against tokens kept in old chats, not a security boundary (the
+/// token only opens with the recipient's request key).
+pub const TOKEN_LIFETIME_SECS: i64 = 14 * 86_400;
+
+/// Refuse a token made more than `TOKEN_LIFETIME_SECS` ago, or more than a
+/// day in the future (a wrong clock on one side).
+pub fn check_token_age(what: &str, issued_utc: i64, now: i64) -> Result<()> {
+    if issued_utc <= 0 {
+        bail!("this {what} carries no time it was made; ask for a new one");
+    }
+    if now - issued_utc > TOKEN_LIFETIME_SECS {
+        bail!(
+            "this {what} expired: it was made on {} and is valid for 14 days; ask for a new one",
+            util::format_date(issued_utc)
+        );
+    }
+    if issued_utc - now > 86_400 {
+        bail!(
+            "this {what} was made on {}, in the future: check the clock of this device or of the one that made it",
+            util::format_date(issued_utc)
+        );
+    }
+    Ok(())
+}
 
 impl Drop for ShareToken {
     fn drop(&mut self) {
@@ -90,45 +122,6 @@ impl Drop for ShareToken {
         for v in self.epoch_keys.values_mut() {
             v.zeroize();
         }
-    }
-}
-
-impl ShareToken {
-    pub fn encode(&self) -> String {
-        format!(
-            "{}.{}.{}.{}",
-            self.vault_id, self.folder_id, self.key_hex, self.name
-        )
-    }
-    pub fn decode(s: &str) -> Result<Self> {
-        let parts: Vec<&str> = s.trim().splitn(4, '.').collect();
-        if parts.len() != 4 {
-            bail!("share token must be <vault-id>.<folder-id>.<key-hex>.<name>");
-        }
-        SecretKey::from_hex(parts[2])?;
-        Ok(ShareToken {
-            vault_id: VaultId::from_hex(parts[0])?,
-            folder_id: FolderId::from_hex(parts[1])?,
-            key_hex: parts[2].to_string(),
-            name: parts[3].to_string(),
-            epoch_keys: BTreeMap::new(),
-            fingerprint: String::new(),
-            owners: Vec::new(),
-            role: Default::default(),
-            invite: String::new(),
-            join_secret_hex: String::new(),
-        })
-    }
-    /// The plain form, refused when the folder has keys of later epochs
-    /// (the plain format has no room for them).
-    pub fn encode_plain(&self) -> Result<String> {
-        if !self.epoch_keys.is_empty() {
-            bail!(
-                "{} has newer folder keys than a plain token can carry; ask the recipient for a request code (varsto share request) and seal the token to it",
-                self.name
-            );
-        }
-        Ok(self.encode())
     }
 }
 
@@ -148,6 +141,7 @@ struct TokenPayload {
     invite: String,
     #[serde(default)]
     join_secret_hex: String,
+    issued_utc: i64,
 }
 
 impl Drop for TokenPayload {
@@ -168,7 +162,6 @@ impl ShareToken {
     pub fn seal(&self, to: &crate::kem::EncapsKey) -> Result<SealedShareToken> {
         let (kem_ct, key) = to.encapsulate()?;
         let mut t = SealedShareToken {
-            version: 1,
             vault_id: self.vault_id.clone(),
             folder_id: self.folder_id.clone(),
             name: self.name.clone(),
@@ -176,31 +169,25 @@ impl ShareToken {
             kem_ct_hex: hex::encode(&kem_ct),
             sealed_key_hex: String::new(),
         };
-        let sealed = if self.epoch_keys.is_empty()
-            && self.fingerprint.is_empty()
-            && self.owners.is_empty()
-            && self.role.is_editor()
-            && self.join_secret_hex.is_empty()
-        {
-            // Version 1: the folder key alone, readable by older versions.
-            crypto::encrypt(&key, &t.aad(), &hex::decode(&self.key_hex)?)?
-        } else {
-            t.version = 2;
-            let payload = TokenPayload {
-                key_hex: self.key_hex.clone(),
-                epoch_keys: self.epoch_keys.clone(),
-                fingerprint: self.fingerprint.clone(),
-                owners: self.owners.clone(),
-                role: self.role,
-                invite: self.invite.clone(),
-                join_secret_hex: self.join_secret_hex.clone(),
-            };
-            crypto::encrypt(
-                &key,
-                &t.aad(),
-                &Zeroizing::new(serde_json::to_vec(&payload)?),
-            )?
+        let payload = TokenPayload {
+            key_hex: self.key_hex.clone(),
+            epoch_keys: self.epoch_keys.clone(),
+            fingerprint: self.fingerprint.clone(),
+            owners: self.owners.clone(),
+            role: self.role,
+            invite: self.invite.clone(),
+            join_secret_hex: self.join_secret_hex.clone(),
+            issued_utc: if self.issued_utc > 0 {
+                self.issued_utc
+            } else {
+                util::now_utc()
+            },
         };
+        let sealed = crypto::encrypt(
+            &key,
+            &t.aad(),
+            &Zeroizing::new(serde_json::to_vec(&payload)?),
+        )?;
         t.sealed_key_hex = hex::encode(sealed);
         Ok(t)
     }
@@ -208,14 +195,13 @@ impl ShareToken {
 
 /// A share token whose folder key is encapsulated to one recipient
 /// (hybrid X25519 + ML-KEM-768). Encoded as
-/// `vst1.<vault-id>.<folder-id>.<kem-alg>.<kem-ct-hex>.<sealed-key-hex>.<name>`;
-/// version 2 (`vst2.`, same fields) seals a JSON payload instead of the bare
-/// key: the folder key, the keys of later epochs and the fingerprint the
-/// owner confirmed.
+/// `vst2.<vault-id>.<folder-id>.<kem-alg>.<kem-ct-hex>.<sealed-hex>.<name>`;
+/// the sealed JSON payload carries the folder key, the keys of later
+/// epochs, the fingerprint the owner confirmed, the owners, the role, the
+/// invitation and the time the token was made (it expires 14 days later).
+/// Plain tokens and `vst1.` tokens of storage format 1 are refused.
 #[derive(Clone, Serialize, Deserialize)]
 pub struct SealedShareToken {
-    #[serde(default = "one")]
-    pub version: u8,
     pub vault_id: VaultId,
     pub folder_id: FolderId,
     pub name: String,
@@ -224,47 +210,28 @@ pub struct SealedShareToken {
     pub sealed_key_hex: String,
 }
 
-crate::redacted_debug!(SealedShareToken { version, vault_id, folder_id, name, kem_alg ; kem_ct_hex, sealed_key_hex });
+crate::redacted_debug!(SealedShareToken { vault_id, folder_id, name, kem_alg ; kem_ct_hex, sealed_key_hex });
 
-fn one() -> u8 {
-    1
-}
-
-pub const SEALED_SHARE_PREFIX: &str = "vst1.";
-pub const SEALED_SHARE_PREFIX_V2: &str = "vst2.";
+/// The prefix of the sealed share tokens of storage format 1, refused.
+pub const OLD_SEALED_SHARE_PREFIX: &str = "vst1.";
+pub const SEALED_SHARE_PREFIX: &str = "vst2.";
 pub const SHARE_REQUEST_PREFIX: &str = "vsr1.";
 
 impl SealedShareToken {
     fn aad(&self) -> Vec<u8> {
-        if self.version >= 2 {
-            crypto::aad(
-                "share-token-v2",
-                &[
-                    self.vault_id.as_str().as_bytes(),
-                    self.folder_id.as_str().as_bytes(),
-                    self.name.as_bytes(),
-                    self.kem_ct_hex.as_bytes(),
-                ],
-            )
-        } else {
-            crypto::aad(
-                "share-token",
-                &[
-                    self.vault_id.as_str().as_bytes(),
-                    self.folder_id.as_str().as_bytes(),
-                    self.name.as_bytes(),
-                ],
-            )
-        }
+        crypto::aad(
+            "share-token-v2",
+            &[
+                self.vault_id.as_str().as_bytes(),
+                self.folder_id.as_str().as_bytes(),
+                self.name.as_bytes(),
+                self.kem_ct_hex.as_bytes(),
+            ],
+        )
     }
     pub fn encode(&self) -> String {
         format!(
-            "{}{}.{}.{}.{}.{}.{}",
-            if self.version >= 2 {
-                SEALED_SHARE_PREFIX_V2
-            } else {
-                SEALED_SHARE_PREFIX
-            },
+            "{SEALED_SHARE_PREFIX}{}.{}.{}.{}.{}.{}",
             self.vault_id,
             self.folder_id,
             self.kem_alg,
@@ -281,7 +248,7 @@ impl SealedShareToken {
                 .to_ascii_lowercase()
                 .starts_with("share/token");
         }
-        s.starts_with(SEALED_SHARE_PREFIX) || s.starts_with(SEALED_SHARE_PREFIX_V2)
+        s.starts_with(SEALED_SHARE_PREFIX) || s.starts_with(OLD_SEALED_SHARE_PREFIX)
     }
     /// Decode a token, given as text or as a `varsto://share/token` link.
     pub fn decode(s: &str) -> Result<Self> {
@@ -292,21 +259,17 @@ impl SealedShareToken {
                 other => bail!("this is a {} link, not a share token", other.kind()),
             };
         }
-        let (version, rest) = if let Some(r) = s.strip_prefix(SEALED_SHARE_PREFIX_V2) {
-            (2, r)
-        } else {
-            (
-                1,
-                s.strip_prefix(SEALED_SHARE_PREFIX)
-                    .ok_or_else(|| anyhow!("not a sealed share token"))?,
-            )
-        };
+        if s.starts_with(OLD_SEALED_SHARE_PREFIX) {
+            bail!("this share token (vst1.) is from an older Varsto that storage format 2 does not read; ask the owner for a new token");
+        }
+        let rest = s.strip_prefix(SEALED_SHARE_PREFIX).ok_or_else(|| {
+            anyhow!("not a sealed share token (expected the vst2. prefix); plain share tokens are not accepted: run `varsto share request` and give its code to the owner")
+        })?;
         let parts: Vec<&str> = rest.splitn(6, '.').collect();
         if parts.len() != 6 {
             bail!("sealed share token has the wrong shape");
         }
         Ok(SealedShareToken {
-            version,
             vault_id: VaultId::from_hex(parts[0])?,
             folder_id: FolderId::from_hex(parts[1])?,
             kem_alg: parts[2].to_string(),
@@ -326,19 +289,8 @@ impl SealedShareToken {
                 |_| anyhow!("this share token was not sealed to this device's request code"),
             )?,
         );
-        let payload = if self.version >= 2 {
-            serde_json::from_slice::<TokenPayload>(&plain)?
-        } else {
-            TokenPayload {
-                key_hex: hex::encode(&*plain),
-                epoch_keys: BTreeMap::new(),
-                fingerprint: String::new(),
-                owners: Vec::new(),
-                role: Default::default(),
-                invite: String::new(),
-                join_secret_hex: String::new(),
-            }
-        };
+        let payload = serde_json::from_slice::<TokenPayload>(&plain)?;
+        check_token_age("share token", payload.issued_utc, util::now_utc())?;
         SecretKey::from_hex(&payload.key_hex)?;
         for k in payload.epoch_keys.values() {
             SecretKey::from_hex(k)?;
@@ -354,6 +306,7 @@ impl SealedShareToken {
             role: payload.role,
             invite: payload.invite.clone(),
             join_secret_hex: payload.join_secret_hex.clone(),
+            issued_utc: payload.issued_utc,
         })
     }
 }
@@ -990,6 +943,7 @@ impl FolderRecord {
             role: Default::default(),
             invite: String::new(),
             join_secret_hex: String::new(),
+            issued_utc: util::now_utc(),
         }
     }
 }
@@ -1633,6 +1587,7 @@ mod tests {
             role: Default::default(),
             invite: "inv".into(),
             join_secret_hex: secret.clone(),
+            issued_utc: 1,
         };
         let shown = format!("{token:?}");
         assert!(shown.contains("docs") && shown.contains("inv"), "{shown}");

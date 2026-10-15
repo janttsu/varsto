@@ -305,41 +305,6 @@ impl Engine {
         ShareRequest::parse(code)
     }
 
-    /// Owner: a plain token (the folder key is inside it). Recorded as an
-    /// invitation so it can be revoked before it is accepted.
-    pub fn share_create_plain(&mut self, folder: &str) -> Result<ShareToken> {
-        crate::logged_op_plain!("share create plain", folder, {
-            self.share_create_plain_inner(folder)
-        })
-    }
-
-    fn share_create_plain_inner(&mut self, folder: &str) -> Result<ShareToken> {
-        if let Some(rec) = self.keyring.find(folder) {
-            if self.share_roles(&rec.folder_id).is_some() {
-                bail!(
-                    "{} has read-only members, and a plain token cannot say what its holder may do; ask the recipient for a request code (varsto share request) and seal the token to it",
-                    rec.name
-                );
-            }
-        }
-        let t = self.share_prepare(folder)?;
-        t.encode_plain()?;
-        let mut tag = [0u8; 8];
-        rand::RngCore::fill_bytes(&mut rand::rngs::OsRng, &mut tag);
-        self.publish_invite(InviteRecord {
-            folder: t.folder_id.clone(),
-            invite: format!("plain-{}", hex::encode(tag)),
-            request_hex: String::new(),
-            name: String::new(),
-            fingerprint: String::new(),
-            issuer: self.vault.device_id.clone(),
-            issued_utc: util::now_utc(),
-            role: ShareRole::Editor,
-            join_secret_hex: String::new(),
-        })?;
-        Ok(t)
-    }
-
     /// Owner: a token sealed to a request code. `confirmed` is the
     /// fingerprint the person compared with the requester; when given it must
     /// match the code's. The token carries the fingerprint, and the
@@ -638,7 +603,77 @@ impl Engine {
         let adopted = self.pull_folder_grants(storages, book)?;
         // And go out to holders that missed an epoch while locked out.
         self.regrant_holders(storages)?;
+        self.retire_used_invites(storages, book)?;
+        self.keep_participants()?;
         Ok((marked, adopted))
+    }
+
+    /// Owner devices: retire the invitation record of every token a member
+    /// has used (its join proof verifies with the invitation's secret, its
+    /// key-exchange record is published and, when the folder has roles, its
+    /// role is pinned): the record is written again without its join
+    /// secret, so the secret is on no storage any more; the name, the
+    /// fingerprint and the role stay for `share members`. Returns how many
+    /// records were retired.
+    pub(super) fn retire_used_invites(
+        &self,
+        storages: &OpenStorages,
+        book: &ShareBook,
+    ) -> Result<usize> {
+        if self.vault.member {
+            return Ok(0);
+        }
+        let mut retired = 0;
+        for (folder, st) in &book.folders {
+            if st.members.is_empty() || !self.device_may_grant(folder, &self.vault.device_id) {
+                continue;
+            }
+            let invites = self.invites(folder)?;
+            if invites.is_empty() {
+                continue;
+            }
+            for d in &st.members {
+                if st.removed.contains_key(d) {
+                    continue;
+                }
+                if st.roles.as_ref().is_some_and(|r| !r.roles.contains_key(d)) {
+                    continue;
+                }
+                let key = share::JoinProof::storage_key(folder, d);
+                let mut proof = None;
+                for (_, b) in storages {
+                    if let Some(blob) = b.get(&key)? {
+                        proof = serde_json::from_slice::<share::JoinProof>(&blob).ok();
+                        if proof.is_some() {
+                            break;
+                        }
+                    }
+                }
+                let Some(p) = proof.filter(|p| &p.folder == folder && &p.device == d) else {
+                    continue;
+                };
+                let Some(inv) = invites.get(&p.invite) else {
+                    continue;
+                };
+                let Ok(secret) = SecretKey::from_hex(&inv.join_secret_hex) else {
+                    continue;
+                };
+                if !p.verify(&secret) || self.member_kem_key(storages, folder, d)?.is_none() {
+                    continue;
+                }
+                let mut used = inv.clone();
+                used.join_secret_hex.clear();
+                let path = InviteRecord::storage_key(folder, &p.invite);
+                let blob = used.seal(&self.vault.vault_id, &self.folder_record_key_now())?;
+                for (_, b) in storages {
+                    b.delete(&path)?;
+                    b.put_if_absent(&path, &blob)?;
+                }
+                log::info!(folder:% = folder, member:% = d; "invitation used: its join secret is removed");
+                retired += 1;
+            }
+        }
+        Ok(retired)
     }
 
     /// Member devices: adopt share epochs whose grant to this device (or to
@@ -1306,7 +1341,7 @@ impl Engine {
             .collect();
         for d in &stay {
             if let Some(ek) = self.device_kem_key(&readable_now, d)? {
-                self.grant_folder_to(&rec, d, &ek)?;
+                self.grant_folder_to(&rec, d, &ek, crate::share::ShareRole::Owner)?;
             }
         }
         let readable = self.metadata_storages(false)?;
@@ -1539,11 +1574,7 @@ impl Engine {
             out.push(ShareMember {
                 id: id.clone(),
                 name: if inv.name.is_empty() {
-                    if inv.request_hex.is_empty() {
-                        "plain token".into()
-                    } else {
-                        "sealed token".into()
-                    }
+                    "sealed token".into()
                 } else {
                     inv.name.clone()
                 },

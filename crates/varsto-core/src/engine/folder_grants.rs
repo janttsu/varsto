@@ -401,7 +401,12 @@ impl Engine {
         if read_only {
             self.set_own_device_role(&rec, &dev, crate::share::ShareRole::Viewer)?;
         }
-        let epoch = self.grant_folder_to(&rec, &dev, &ek)?;
+        let role = if read_only {
+            crate::share::ShareRole::Viewer
+        } else {
+            crate::share::ShareRole::Owner
+        };
+        let epoch = self.grant_folder_to(&rec, &dev, &ek, role)?;
         for (_, b) in self.metadata_storages(true)? {
             let _ = b.delete(&request_key(&rec.folder_id, &dev));
         }
@@ -514,8 +519,22 @@ impl Engine {
     }
 
     /// Seal every key this device holds of a folder to `dev`: one grant at
-    /// the newest epoch. Returns that epoch.
+    /// the newest epoch, after the folder's signed participants list names
+    /// this device as an owner and `dev` (with `role` unless it is listed
+    /// already). Returns that epoch.
     pub(super) fn grant_folder_to(
+        &mut self,
+        rec: &FolderRecord,
+        dev: &DeviceId,
+        ek: &crate::kem::EncapsKey,
+        role: crate::share::ShareRole,
+    ) -> Result<u32> {
+        self.ensure_participants(rec, &[(dev.clone(), role)])?;
+        self.write_grant(rec, dev, ek)
+    }
+
+    /// The grant itself (see `grant_folder_to`).
+    pub(super) fn write_grant(
         &mut self,
         rec: &FolderRecord,
         dev: &DeviceId,
@@ -633,6 +652,12 @@ impl Engine {
                     let Ok(c) = g.open_contents(&self.vault.vault_id, &pk, &dk) else {
                         continue;
                     };
+                    // Only from a device the folder's signed participants
+                    // list names as an owner (a viewer holds the key too).
+                    if !self.grant_issuer_listed(storages, &rec, e, &g.issuer, &c)? {
+                        log::warn!(folder:% = rec.folder_id, issuer:% = g.issuer; "a grant from a device that is not an owner of the folder: refused");
+                        continue;
+                    }
                     if self.adopt_granted(storages, book, &rec, e, &c)? {
                         changed = true;
                         break 'epochs;
@@ -760,7 +785,7 @@ impl Engine {
                     continue;
                 }
                 if let Some(ek) = self.device_kem_key(storages, &d)? {
-                    self.grant_folder_to(&rec, &d, &ek)?;
+                    self.grant_folder_to(&rec, &d, &ek, crate::share::ShareRole::Owner)?;
                     wrote = true;
                 }
             }
@@ -809,7 +834,7 @@ impl Engine {
         };
         let mut names = Vec::new();
         for rec in recs {
-            self.grant_folder_to(&rec, &dev, &ek)?;
+            self.grant_folder_to(&rec, &dev, &ek, crate::share::ShareRole::Owner)?;
             names.push(rec.name.clone());
         }
         Ok(names)

@@ -8,6 +8,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use varsto_core::chunking::ChunkerParams;
+use varsto_core::share::ShareRole;
 use varsto_core::storage::StorageSpec;
 use varsto_core::Engine;
 
@@ -438,6 +439,30 @@ fn vault_and_recovery_words_restore_every_folder_and_vault_words_alone_none() {
         read(&lab.root.join("d-photos"), "cat.jpg").as_deref(),
         Some(&b"a cat"[..])
     );
+    // The recovered device is an owner now: it publishes the participants
+    // list with a proof that it holds the key, and its approval counts.
+    d.sync(None).unwrap();
+    let mut e = join(&lab, "e", &current);
+    e.folder_request("docs").unwrap();
+    d.sync(None).unwrap();
+    d.folder_approve("docs", "e", false).unwrap();
+    e.sync(None).unwrap();
+    e.attach_folder("docs", &lab.dir("e"), false).unwrap();
+    e.sync(None).unwrap();
+    assert_eq!(
+        read(&lab.dir("e"), "after.txt").as_deref(),
+        Some(&b"under the new folder key"[..])
+    );
+    let p = e.folder_participants("docs").unwrap();
+    let role = |name: &str| {
+        p.participants
+            .iter()
+            .find(|x| x.device == name)
+            .map(|x| x.role)
+    };
+    assert_eq!(role("d"), Some(ShareRole::Owner), "{p:?}");
+    assert_eq!(role("e"), Some(ShareRole::Owner), "{p:?}");
+    assert_eq!(role("b"), None, "a revoked device left the list: {p:?}");
 }
 
 #[test]
@@ -460,4 +485,84 @@ fn a_folder_without_a_recovery_copy_is_reported_until_one_is_written() {
         .set_recovery_key(&varsto_core::crypto::SecretKey::random().to_hex())
         .is_err());
     again.set_recovery_key(&rk).unwrap();
+}
+
+/// Design section 4: every device of the vault reads the folder's signed
+/// participants list, and a grant counts only from a device it names as an
+/// owner. A viewer holds the key (it reads) but cannot hand it on, not even
+/// with a list of its own that names it an owner; a device with the vault
+/// words only cannot put itself on the list.
+#[test]
+fn only_an_owner_on_the_signed_participants_list_can_hand_a_key_on() {
+    let lab = Lab::new();
+    let (mut a, key) = owner(&lab);
+    let mut b = join(&lab, "b", &key);
+    let mut v = join(&lab, "v", &key);
+    let mut x = join(&lab, "x", &key);
+    b.folder_request("docs").unwrap();
+    v.folder_request("docs").unwrap();
+    a.sync(None).unwrap();
+    a.folder_approve("docs", "b", false).unwrap();
+    a.folder_approve("docs", "v", true).unwrap();
+    b.sync(None).unwrap();
+    v.sync(None).unwrap();
+    x.sync(None).unwrap();
+    // X holds no key and reads the list all the same.
+    let p = x.folder_participants("docs").unwrap();
+    let role = |p: &varsto_core::engine::FolderParticipants, name: &str| {
+        p.participants
+            .iter()
+            .find(|d| d.device == name)
+            .map(|d| d.role)
+    };
+    assert_eq!(role(&p, "laptop"), Some(ShareRole::Owner), "{p:?}");
+    assert_eq!(role(&p, "b"), Some(ShareRole::Owner), "{p:?}");
+    assert_eq!(role(&p, "v"), Some(ShareRole::Viewer), "{p:?}");
+    assert_eq!(role(&p, "x"), None);
+
+    // X lists itself as an owner (it cannot make the key proof).
+    let (fid, e, _) = a.folder_epoch_key_for_tests("docs").unwrap();
+    x.forge_participants_for_tests(
+        &fid,
+        e,
+        &varsto_core::crypto::SecretKey::random(),
+        &[(x.device_id().clone(), ShareRole::Owner)],
+    )
+    .unwrap();
+    // The viewer lists itself as an owner, with a valid proof (it holds
+    // the key), and seals the key to X.
+    let (_, ve, vkey) = v.folder_epoch_key_for_tests("docs").unwrap();
+    v.forge_participants_for_tests(
+        &fid,
+        ve,
+        &vkey,
+        &[
+            (v.device_id().clone(), ShareRole::Owner),
+            (a.device_id().clone(), ShareRole::Viewer),
+        ],
+    )
+    .unwrap();
+    v.grant_regardless_for_tests("docs", x.device_id()).unwrap();
+    x.sync(None).unwrap();
+    assert_eq!(
+        x.status().unwrap().folders_without_key,
+        vec!["docs".to_string()],
+        "a viewer's grant was taken"
+    );
+    assert!(x.attach_folder("docs", &lab.dir("x"), false).is_err());
+    for who in [&a, &b, &x] {
+        let p = who.folder_participants("docs").unwrap();
+        assert_eq!(role(&p, "laptop"), Some(ShareRole::Owner), "{p:?}");
+        assert_eq!(role(&p, "v"), Some(ShareRole::Viewer), "{p:?}");
+        assert_eq!(role(&p, "x"), None, "{p:?}");
+    }
+
+    // B, an owner, approves X: that grant counts.
+    x.folder_request("docs").unwrap();
+    b.sync(None).unwrap();
+    b.folder_approve("docs", "x", false).unwrap();
+    x.sync(None).unwrap();
+    x.attach_folder("docs", &lab.dir("x"), false).unwrap();
+    x.sync(None).unwrap();
+    assert!(read(&lab.dir("x"), "plan.txt").is_some());
 }

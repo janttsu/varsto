@@ -300,6 +300,12 @@ impl Engine {
         self.pending.push(Event::FolderAdded { folder: id.clone() });
         self.publish_registry()?;
         self.escrow_if_possible();
+        // The signed participants list: this device, the owner.
+        if let Some(rec) = self.keyring.folders.get(&id).cloned() {
+            if let Err(e) = self.ensure_participants(&rec, &[]) {
+                log::debug!(error:% = e; "participants list not published yet");
+            }
+        }
         self.commit_batch()?;
         Ok(id)
     }

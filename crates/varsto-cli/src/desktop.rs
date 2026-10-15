@@ -1634,11 +1634,7 @@ fn api(st: &mut State, method: Method, path: &str, query: &str, input: &Value) -
         }
         (Method::Post, "/api/share/accept") => {
             let raw = s(input, "token")?;
-            let token = if varsto_core::vault::SealedShareToken::is_sealed(&raw) {
-                varsto_core::vault::ShareRequest::open_token(&st.home, &raw)?
-            } else {
-                varsto_core::vault::ShareToken::decode(&raw)?
-            };
+            let token = varsto_core::vault::ShareRequest::open_token(&st.home, &raw)?;
             let storage_name = opt(input, "storage_name")
                 .filter(|n| !n.trim().is_empty())
                 .unwrap_or_else(|| "shared".into());
@@ -1863,23 +1859,17 @@ fn api_unlocked(
                 Some(r) => varsto_core::share::ShareRole::parse(&r)?,
                 None => varsto_core::share::ShareRole::Editor,
             };
-            match opt(input, "to").filter(|c| !c.trim().is_empty()) {
-                Some(code) => {
-                    // The interface sends the words the user confirmed; they
-                    // must be the code's.
-                    let confirmed = opt(input, "fingerprint").filter(|f| !f.trim().is_empty());
-                    let (sealed, req) =
-                        engine.share_create_sealed_as(&folder, &code, confirmed.as_deref(), role)?;
-                    Ok(json!({"ok": true, "token": sealed.encode(), "folder": sealed.name, "sealed": true, "fingerprint": req.fingerprint, "name": req.name, "role": role.as_str()}))
-                }
-                None if !role.is_editor() => {
-                    bail!("a viewer's token must be sealed to their request code: paste it (a plain token cannot say what its holder may do)")
-                }
-                None => {
-                    let t = engine.share_create_plain(&folder)?;
-                    Ok(json!({"ok": true, "token": t.encode_plain()?, "folder": t.name, "sealed": false}))
-                }
-            }
+            // Format 2: a token is always sealed to the recipient's request
+            // code; there is no plain token.
+            let code = opt(input, "to")
+                .filter(|c| !c.trim().is_empty())
+                .ok_or_else(|| anyhow!("paste the recipient's request code: a share token is always sealed to it"))?;
+            // The interface sends the words the user confirmed; they must
+            // be the code's.
+            let confirmed = opt(input, "fingerprint").filter(|f| !f.trim().is_empty());
+            let (sealed, req) =
+                engine.share_create_sealed_as(&folder, &code, confirmed.as_deref(), role)?;
+            Ok(json!({"ok": true, "token": sealed.encode(), "folder": sealed.name, "sealed": true, "fingerprint": req.fingerprint, "name": req.name, "role": role.as_str()}))
         }
         (Method::Get, "/api/share/members") => {
             let folder = query_param(query, "folder")
@@ -3258,6 +3248,7 @@ mod tests {
             traffic: Arc::default(),
             service: ServiceState::default(),
             pair: None,
+            pair_folders: None,
             link: None,
         }));
         let server = Arc::new(server);

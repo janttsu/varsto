@@ -848,9 +848,9 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   function shareFolder(f) {
     dialog({
       title: (f.shared ? "New token for " : "Share ") + f.name,
-      text: (f.shared ? "" : "An editor reads and writes this folder; a viewer only reads it: nothing a viewer changes is accepted by your devices or the editors. ") + "Paste the recipient's request code or scan its QR code to seal the token to their device, or leave it empty for a plain token that carries the folder key itself (editors only).",
+      text: (f.shared ? "" : "An editor reads and writes this folder; a viewer only reads it: nothing a viewer changes is accepted by your devices or the editors. ") + "Paste the recipient's request code or scan its QR code: the token is sealed to their device and can be accepted for 14 days.",
       fields: [
-        { name: "to", label: "Recipient's request code (optional)", placeholder: "vsr1…" },
+        { name: "to", label: "Recipient's request code", placeholder: "vsr1…" },
         { name: "role", label: "Role", options: [["editor", "Editor: read and write"], ["viewer", "Viewer: read only"]], value: "editor", hint: "A viewer can still copy what it reads; a key cannot prevent that." }
       ],
       ok: f.shared ? "Create token" : "Share",
@@ -860,8 +860,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
       var role = r.values.role || "editor";
       if (r.action === "extra") { return scanQr("request").then(function (info) { if (info) { return sealTo(f, info.text, role); } }); }
       var code = (r.values.to || "").trim();
-      if (!code && role === "viewer") { return alertBox("A viewer's token must be sealed to their request code: paste it or scan it. A plain token cannot say what its holder may do."); }
-      if (!code) { return createToken(f, "", "", role); }
+      if (!code) { return alertBox("Paste the recipient's request code or scan it: a share token is always sealed to it."); }
       return sealTo(f, code, role);
     }).catch(function (e) { alertBox(e.message); });
   }

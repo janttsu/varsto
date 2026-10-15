@@ -723,7 +723,12 @@ impl Engine {
             let mut approved = self.org_approve_inner(code, user, confirmed)?;
             let info: RequestInfo = OrgRequest::parse(code)?;
             for rec in recs {
-                self.grant_folder_to(&rec, &info.device, &info.key)?;
+                self.grant_folder_to(
+                    &rec,
+                    &info.device,
+                    &info.key,
+                    crate::share::ShareRole::Owner,
+                )?;
                 approved.folders.push(rec.name.clone());
             }
             Ok(approved)
@@ -808,6 +813,7 @@ impl Engine {
             user: user.to_string(),
             approver: me,
             fingerprint: info.fingerprint.clone(),
+            issued_utc: util::now_utc(),
         };
         let token = SealedApproval::seal(&approval, &info.key)?.encode();
         Ok(OrgApproved {

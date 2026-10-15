@@ -984,9 +984,8 @@ enum ShareCmd {
         qr: bool,
     },
     /// Show a request code, a sealed token or a varsto:// link as a QR code in the terminal.
-    /// Plain tokens are refused: they carry the folder key.
     Qr {
-        /// The request code, sealed token (vst1…/vst2…) or varsto:// link.
+        /// The request code, sealed token (vst2…) or varsto:// link.
         text: String,
         /// Show it as a sequence of smaller codes, one after another, for cameras that cannot read
         /// the dense one (the Varsto scanner collects them; Ctrl-C stops).
@@ -996,15 +995,16 @@ enum ShareCmd {
         #[arg(long)]
         light: bool,
     },
-    /// (Owner) Print a share token for a folder. With --to <request-code> the folder key is
-    /// encapsulated to the recipient (hybrid X25519 + ML-KEM-768) and the token is safe to send
-    /// over any channel; without it the key is in the token and the channel must be secure.
-    /// Before sealing, compare the code's six-word fingerprint with the requester (call them,
-    /// or meet): it proves the code is theirs.
+    /// (Owner) Print a share token for a folder, sealed to the recipient's request code: the
+    /// folder key is encapsulated to the recipient (hybrid X25519 + ML-KEM-768), so the token is
+    /// safe to send over any channel, and it can be accepted for 14 days. Before sealing,
+    /// compare the code's six-word fingerprint with the requester (call them, or meet): it
+    /// proves the code is theirs.
     Create {
         folder: String,
+        /// The recipient's request code (`varsto share request` on their device).
         #[arg(long)]
-        to: Option<String>,
+        to: String,
         /// The fingerprint the requester read to you; it must match the code's (skips the question).
         #[arg(long)]
         fingerprint: Option<String>,
@@ -1015,7 +1015,7 @@ enum ShareCmd {
         #[arg(long)]
         qr: bool,
         /// What the recipient may do: editor (read and write) or viewer (read only: nothing it
-        /// changes is accepted by your devices or the editors). A viewer needs --to.
+        /// changes is accepted by your devices or the editors).
         #[arg(long, default_value = "editor")]
         role: String,
     },
@@ -1440,6 +1440,11 @@ enum FolderCmd {
     Deny {
         folder: String,
         device: String,
+    },
+    /// The devices of the vault that hold a folder's key, with their roles, as
+    /// the folder's signed participants list says (owners grant the key).
+    Participants {
+        folder: String,
     },
     /// Stop syncing a folder on this device; its files stay where they are.
     Detach {
@@ -2151,7 +2156,12 @@ pub(crate) fn open_engine(home: &Path) -> Result<Engine> {
 
 /// The recovery words, from VARSTO_RECOVERY_WORDS or typed (not echoed).
 fn recovery_words_input() -> Result<zeroize::Zeroizing<String>> {
-    secret_input(None, "VARSTO_RECOVERY_WORDS", "Recovery words (24): ", false)
+    secret_input(
+        None,
+        "VARSTO_RECOVERY_WORDS",
+        "Recovery words (24): ",
+        false,
+    )
 }
 
 /// A one-line warning about the ledger on stderr, unless it is fine.
@@ -3985,6 +3995,25 @@ fn run(cli: &Cli) -> Result<()> {
                         },
                     )?;
                 }
+                FolderCmd::Participants { folder } => {
+                    let p = engine.folder_participants(folder)?;
+                    print(cli, &p, |p| {
+                        if p.participants.is_empty() {
+                            return format!("{}: no signed participants list yet", p.folder);
+                        }
+                        let mut out = format!("{} (key epoch {}):", p.folder, p.epoch);
+                        for d in &p.participants {
+                            out.push_str(&format!(
+                                "\n  {} ({}){}: {}",
+                                show(&d.device),
+                                &d.device_id[..8],
+                                if d.this_device { ", this device" } else { "" },
+                                d.role.as_str()
+                            ));
+                        }
+                        out
+                    })?;
+                }
                 FolderCmd::Requests => {
                     let rows = engine.folder_requests()?;
                     print(cli, &rows, |rows| {
@@ -4644,53 +4673,36 @@ fn run(cli: &Cli) -> Result<()> {
                 role,
             } => {
                 let role = varsto_core::share::ShareRole::parse(role)?;
-                if !role.is_editor() && to.is_none() {
-                    bail_usage::<()>("a viewer's token must be sealed to their request code: give --to <request-code> (a plain token cannot say what its holder may do)")?;
-                }
                 let mut engine = open_engine(&home)?;
-                match to {
-                    Some(code) => {
-                        let req = Engine::share_request_info(code)?;
-                        let confirmed = match fingerprint {
-                            Some(f) => Some(f.clone()),
-                            None if *yes => None,
-                            None => {
-                                eprintln!(
-                                    "Request from {}\nfingerprint: {}\nAsk the requester to read their fingerprint (varsto share request shows it).",
-                                    if req.name.is_empty() { "(no name given)".into() } else { show(&req.name) },
-                                    req.fingerprint
-                                );
-                                if !confirm("Do the six words match exactly?")? {
-                                    bail!("not shared: the fingerprint was not confirmed");
-                                }
-                                Some(req.fingerprint.clone())
-                            }
-                        };
-                        let (sealed, req) = engine.share_create_sealed_as(
-                            folder,
-                            code,
-                            confirmed.as_deref(),
-                            role,
-                        )?;
-                        if *qr && !cli.json {
-                            show_qr(&sealed.encode(), false, false)?;
-                        }
-                        if cli.json {
-                            println!(
-                                "{}",
-                                serde_json::json!({"folder": sealed.name, "token": sealed.encode(), "sealed": true, "fingerprint": req.fingerprint, "name": req.name, "role": role.as_str()})
-                            );
-                        } else {
-                            println!("sealed share token for folder {} as {} (only the device that made the request code can open it; fingerprint {}):\n  {}", show(&sealed.name), if role.is_editor() { "an editor (read and write)" } else { "a viewer (read only)" }, req.fingerprint, sealed.encode());
-                        }
-                    }
+                let code = to;
+                let req = Engine::share_request_info(code)?;
+                let confirmed = match fingerprint {
+                    Some(f) => Some(f.clone()),
+                    None if *yes => None,
                     None => {
-                        let t = engine.share_create_plain(folder)?;
-                        let encoded = t.encode_plain()?;
-                        print(cli, &t, |t| {
-                            format!("share token for folder {} (the folder key is INSIDE this token: anyone holding it can read and write the folder; prefer `share create --to <request-code>`):\n  {encoded}", t.name)
-                        })?
+                        eprintln!(
+                            "Request from {}\nfingerprint: {}\nAsk the requester to read their fingerprint (varsto share request shows it).",
+                            if req.name.is_empty() { "(no name given)".into() } else { show(&req.name) },
+                            req.fingerprint
+                        );
+                        if !confirm("Do the six words match exactly?")? {
+                            bail!("not shared: the fingerprint was not confirmed");
+                        }
+                        Some(req.fingerprint.clone())
                     }
+                };
+                let (sealed, req) =
+                    engine.share_create_sealed_as(folder, code, confirmed.as_deref(), role)?;
+                if *qr && !cli.json {
+                    show_qr(&sealed.encode(), false, false)?;
+                }
+                if cli.json {
+                    println!(
+                        "{}",
+                        serde_json::json!({"folder": sealed.name, "token": sealed.encode(), "sealed": true, "fingerprint": req.fingerprint, "name": req.name, "role": role.as_str()})
+                    );
+                } else {
+                    println!("sealed share token for folder {} as {} (only the device that made the request code can open it, within 14 days; fingerprint {}):\n  {}", show(&sealed.name), if role.is_editor() { "an editor (read and write)" } else { "a viewer (read only)" }, req.fingerprint, sealed.encode());
                 }
             }
             ShareCmd::Accept {
@@ -4711,11 +4723,7 @@ fn run(cli: &Cli) -> Result<()> {
                     .as_ref()
                     .or(token_arg.as_ref())
                     .ok_or_else(|| anyhow!("give the share token"))?;
-                let token = if varsto_core::vault::SealedShareToken::is_sealed(token) {
-                    varsto_core::vault::ShareRequest::open_token(&home, token)?
-                } else {
-                    varsto_core::vault::ShareToken::decode(token)?
-                };
+                let token = varsto_core::vault::ShareRequest::open_token(&home, token)?;
                 let (spec, secret) = match (s3_bucket, storage_path) {
                     (Some(bucket), _) => (
                         StorageSpec::S3 {
