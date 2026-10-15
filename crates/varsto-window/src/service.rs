@@ -35,14 +35,14 @@ pub fn call(f: &ServiceFile, method: &str, path: &str, body: &str) -> Result<Str
         TcpStream::connect_timeout(&addr, Duration::from_secs(2)).map_err(|e| e.to_string())?;
     s.set_read_timeout(Some(Duration::from_secs(10)))
         .map_err(|e| e.to_string())?;
-    write!(
-        s,
+    // One write: the request goes out in a single segment.
+    let request = format!(
         "{method} {path} HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nX-Varsto-Token: {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
         f.port,
         f.token,
         body.len()
-    )
-    .map_err(|e| e.to_string())?;
+    );
+    s.write_all(request.as_bytes()).map_err(|e| e.to_string())?;
     let mut raw = Vec::new();
     s.read_to_end(&mut raw).map_err(|e| e.to_string())?;
     parse_response(&String::from_utf8_lossy(&raw))
@@ -107,9 +107,14 @@ mod tests {
         let port = listener.local_addr().unwrap().port();
         let t = std::thread::spawn(move || {
             let (mut c, _) = listener.accept().unwrap();
+            // Read the whole request (head and the two-byte body) before answering.
+            let mut req = String::new();
             let mut buf = [0u8; 2048];
-            let n = c.read(&mut buf).unwrap();
-            let req = String::from_utf8_lossy(&buf[..n]).to_string();
+            while !req.ends_with("\r\n\r\n{}") {
+                let n = c.read(&mut buf).unwrap();
+                assert!(n > 0, "connection closed early");
+                req.push_str(&String::from_utf8_lossy(&buf[..n]));
+            }
             let body = r#"{"boot":"c0de"}"#;
             write!(
                 c,
