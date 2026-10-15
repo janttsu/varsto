@@ -5551,9 +5551,15 @@ fn run(cli: &Cli) -> Result<()> {
                 })?;
             } else {
                 let policy = update::Policy::new(&home, *allow_single_source);
+                let running = service::status(&home).is_some();
                 println!("{}", update::apply(&c, &policy)?);
-                if c.available && service::restart_running(&home) {
-                    println!("the background service restarts with {}", c.latest);
+                if c.available && running {
+                    // The service runs the binary that was replaced: start it again.
+                    if service::restart_and_wait(&home) {
+                        println!("the background service restarted with {}", c.latest);
+                    } else {
+                        eprintln!("could not restart the background service: start it with `varsto service run` or `varsto install`");
+                    }
                 }
             }
         }
@@ -6845,7 +6851,7 @@ fn folder_via_service(home: &std::path::Path, cmd: &FolderCmd) -> Result<Option<
 
 fn transfers(home: &std::path::Path, watch: bool, json: bool) -> Result<()> {
     let sf = service::read_service_file(home).ok_or_else(|| {
-        anyhow!("the background service is not running, so nothing is being transferred (start it with `varsto service run` or `varsto install`)")
+        anyhow!("the background service is not running, so nothing is being transferred (start it with `varsto service run` or `varsto install`; `varsto service status` shows whether it runs)")
     })?;
     let base = format!("http://127.0.0.1:{}", sf.port);
     loop {
