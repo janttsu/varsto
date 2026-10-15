@@ -2910,6 +2910,10 @@ fn api_unlocked(
             Ok(serde_json::to_value(engine.disk_groups()?)?)
         }
         (Method::Get, "/api/data/locations") => Ok(serde_json::to_value(engine.data_locations()?)?),
+        // Every storage of the vault: configured here or only known from other devices.
+        (Method::Get, "/api/storage/known") => {
+            Ok(serde_json::to_value(engine.storage_directory()?)?)
+        }
         (Method::Get, "/api/storage/costs") => Ok(serde_json::to_value(engine.storage_estimates()?)?),
         (Method::Post, "/api/storage/price") => {
             let name = s(input, "name")?;

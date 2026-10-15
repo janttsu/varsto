@@ -435,6 +435,53 @@ impl StorageSpec {
     pub fn is_data_only(&self) -> bool {
         matches!(self, StorageSpec::Pool { .. })
     }
+    /// Where the storage really is, spelled one way: S3 by endpoint host,
+    /// bucket and prefix (scheme, default port, case and slashes ignored),
+    /// rclone by remote name and path, a directory by its path. Two entries
+    /// with the same key are the same place. `None` for a disk pool.
+    pub fn location_key(&self) -> Option<String> {
+        fn trim_slashes(s: &str) -> String {
+            s.split('/')
+                .filter(|p| !p.is_empty())
+                .collect::<Vec<_>>()
+                .join("/")
+        }
+        match self {
+            StorageSpec::S3 {
+                endpoint,
+                bucket,
+                prefix,
+                ..
+            } => {
+                let e = endpoint.trim().to_lowercase();
+                let e = e
+                    .strip_prefix("https://")
+                    .or_else(|| e.strip_prefix("http://"))
+                    .unwrap_or(&e)
+                    .trim_end_matches('/')
+                    .to_string();
+                let e = e
+                    .strip_suffix(":443")
+                    .or_else(|| e.strip_suffix(":80"))
+                    .unwrap_or(&e)
+                    .to_string();
+                Some(format!(
+                    "s3:{e}|{}|{}",
+                    bucket.trim().to_lowercase(),
+                    trim_slashes(prefix)
+                ))
+            }
+            StorageSpec::Rclone { remote, .. } => {
+                let (name, path) = remote.trim().split_once(':')?;
+                Some(format!("rclone:{}:{}", name.trim(), trim_slashes(path)))
+            }
+            StorageSpec::LocalDir { path, .. } => Some(format!(
+                "dir:{}",
+                trim_slashes(&path.to_string_lossy().replace('\\', "/"))
+            )),
+            StorageSpec::Pool { .. } => None,
+        }
+    }
     /// One-line description for listings (no secrets).
     pub fn describe(&self) -> String {
         match self {

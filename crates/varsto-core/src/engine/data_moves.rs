@@ -434,6 +434,9 @@ impl Engine {
                     if spec.is_carrier() {
                         bail!("{name} is a transferrer: it carries blocks between devices and cannot be a folder's storage");
                     }
+                    if self.closed_storages().contains(name) {
+                        bail!("{name} is being drained or has been drained: it takes no new blocks, so it cannot be where a folder is written (stop the drain first, or pick another storage)");
+                    }
                 }
                 for place in &p.places {
                     if !self
@@ -544,9 +547,6 @@ impl Engine {
     /// from one storage to another: copy, record, check, record the drop,
     /// delete. With `dry_run`, only report what would happen and what it
     /// costs. Moving a whole folder also changes its placement, so new
-                    if self.closed_storages().contains(name) {
-                        bail!("{name} is being drained or has been drained: it takes no new blocks, so it cannot be where a folder is written (stop the drain first, or pick another storage)");
-                    }
     /// blocks go to the new storage.
     pub fn move_data(&mut self, req: &MoveRequest) -> Result<MoveReport> {
         crate::logged_op!("move data", "", { self.move_data_inner(req) })

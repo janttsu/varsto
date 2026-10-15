@@ -510,11 +510,10 @@ fn quotas_and_drains_are_the_same_on_every_device() {
     )
     .unwrap();
     b.chunker = ChunkerParams::SMALL;
-    b.add_storage(dir("other", &lab.path("s2"), "cloud"))
-        .unwrap();
+    b.add_storage(dir("s2", &lab.path("s2"), "cloud")).unwrap();
     b.sync(None).unwrap();
     assert_eq!(b.storage_settings("box").quota_bytes, Some(quota));
-    assert_eq!(b.storage_settings("other").quota_bytes, None);
+    assert_eq!(b.storage_settings("s2").quota_bytes, None);
     let bdir = lab.path("b-files");
     b.attach_folder("docs", &bdir, false).unwrap();
     b.sync(None).unwrap();

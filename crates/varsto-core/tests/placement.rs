@@ -286,9 +286,11 @@ fn placement_writes_only_to_the_chosen_storages_on_every_device() {
     )
     .unwrap();
     b.chunker = ChunkerParams::SMALL;
-    b.add_storage(dir("second", &p("s2"), false, "cloud"))
+    // The same storages must keep the name the vault knows them by; only
+    // the one B joined through may be called differently.
+    b.add_storage(dir("two", &p("s2"), false, "cloud")).unwrap();
+    b.add_storage(dir("three", &p("s3"), false, "offsite"))
         .unwrap();
-    b.add_storage(dir("third", &p("s3"), false, "far")).unwrap();
     fs::create_dir_all(p("docs-b")).unwrap();
     b.sync(None).unwrap();
     b.attach_folder("docs", &p("docs-b"), false).unwrap();
@@ -357,8 +359,6 @@ fn move_lab() -> MoveLab {
     fs::write(docs.join("old.bin"), pseudo_random(80_000, 7)).unwrap();
     write_in_use(&docs.join("new.bin"), &pseudo_random(40_000, 8), 30);
     a.add_folder("docs", &docs).unwrap();
-    a.sync(None).unwrap();
-    MoveLab {
     // These tests move blocks between the storages of one place.
     a.set_placement(
         "docs",
@@ -368,6 +368,8 @@ fn move_lab() -> MoveLab {
         }),
     )
     .unwrap();
+    a.sync(None).unwrap();
+    MoveLab {
         _t: t,
         root,
         a,

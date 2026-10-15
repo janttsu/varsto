@@ -629,6 +629,30 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
       });
     }).catch(function () {});
   }
+  // Storages other devices have that are not set up here (credentials are per device and never shared),
+  // and storages listed twice here. Looked up at most once a minute: it reads the storages' identities.
+  var knownAt = 0;
+  function loadKnownStorages() {
+    var ul = $("storages"); if (!ul || Date.now() - knownAt < 60000) { return; }
+    knownAt = Date.now();
+    api("GET", "/api/storage/known").then(function (list) {
+      ul.querySelectorAll("li[data-known]").forEach(function (x) { x.remove(); });
+      list.forEach(function (k) {
+        if (k.configured) {
+          if (k.same_as && k.same_as.length) {
+            ul.querySelectorAll("li").forEach(function (li) { if (li.dataset.storage === k.name && !li.querySelector(".same-warning")) { var w = el("div", "li-sub same-warning", "Same storage as " + k.same_as.join(", ") + ": keep one of them."); li.querySelector(".li-body").appendChild(w); } });
+          }
+          return;
+        }
+        var li = el("li"); li.dataset.known = "1"; var ic = el("span", "li-icon"); ic.appendChild(icon("storages")); li.appendChild(ic);
+        var body = el("div", "li-body"); var title = el("div", "li-title", k.name); title.appendChild(pill("grey", "not set up here"));
+        body.appendChild(title); body.appendChild(el("div", "li-sub", "On " + k.devices.join(", ") + ". Add its credentials here to use it on this device.")); li.appendChild(body);
+        var ra = el("div", "li-actions"); var ab = el("button", "secondary", "Add credentials\u2026"); ab.type = "button";
+        ab.onclick = function () { var f = $("addstorage"); if (f) { f.querySelector("[name=name]").value = k.name; f.scrollIntoView(); f.querySelector("[name=name]").focus(); } };
+        ra.appendChild(ab); li.appendChild(ra); ul.appendChild(li);
+      });
+    }).catch(function () {});
+  }
   // Folder placement: which storages a folder's blocks are written to (all
   // by default). Published like the policy, so every device writes it the same way.
   function editPlacement(folder) {
@@ -645,13 +669,26 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
         storages.push([s.name, s.name, onS(s.name), true, placeShort(s.place) + (s.cold ? ", cold" : "")]);
       });
       names = Object.keys(places);
+      var onP = function (n) { return !!(pl && pl.places.indexOf(n) >= 0); };
       return dialog({
         title: "Where " + folder + " is written",
-        text: "By default every block goes to every storage. Tick storages or places to write this folder only there; a place means every storage in it, now and later. Blocks already stored stay where they are until you move them; policies still count every copy." + (cur && cur.warnings.length ? " Note: " + cur.warnings.join(" ") : ""),
+        text: "Tick storages or places to write this folder only there; a place means every storage in it, now and later. A place with a ticked storage is always on. Blocks already stored stay where they are until you move them; policies still count every copy." + (cur && cur.warnings.length ? " Note: " + cur.warnings.join(" ") : ""),
         fields: [
           { name: "storages", label: "Storages", checks: storages, empty: "No storage yet" },
           { name: "places", label: "Places", checks: names.map(function (n) { return [n, placeLabel(n), onP(n)]; }) }
         ],
+        onopen: function (root) {
+          var sync = function () {
+            var forced = {};
+            root.querySelectorAll("input[data-group=storages]").forEach(function (i) { if (i.checked) { forced[placeOf[i.value]] = 1; } });
+            root.querySelectorAll("input[data-group=places]").forEach(function (i) {
+              var f = !!forced[i.value]; if (f) { i.checked = true; } else if (i.dataset.forced) { i.checked = onP(i.value); }
+              i.dataset.forced = f ? "1" : ""; i.disabled = f;
+            });
+          };
+          root.querySelectorAll("input[data-group=storages]").forEach(function (i) { i.addEventListener("change", sync); });
+          sync();
+        },
         ok: "Save", extra: pl ? "Every storage" : null
       });
     }).then(function (r) {
@@ -683,18 +720,6 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     }, Promise.resolve()).catch(function (e) { alertBox(e.message); }).then(function () { busy(false); return refreshStatus(); });
   };
   // Transferrers: which devices one travels to. It then carries what those
-        onopen: function (root) {
-          var sync = function () {
-            var forced = {};
-            root.querySelectorAll("input[data-group=storages]").forEach(function (i) { if (i.checked) { forced[placeOf[i.value]] = 1; } });
-            root.querySelectorAll("input[data-group=places]").forEach(function (i) {
-              var f = !!forced[i.value]; if (f) { i.checked = true; } else if (i.dataset.forced) { i.checked = onP(i.value); }
-              i.dataset.forced = f ? "1" : ""; i.disabled = f;
-            });
-          };
-          root.querySelectorAll("input[data-group=storages]").forEach(function (i) { i.addEventListener("change", sync); });
-          sync();
-        },
   // devices lack and is emptied as they receive it.
   function otherDeviceNames() {
     var me = lastStatus ? lastStatus.device_name : "";
@@ -1473,6 +1498,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
         ul.appendChild(li);
       });
       $("storages-empty").classList.toggle("hidden", s.storages.length > 0);
+      loadKnownStorages();
       loadStorageCosts();
       loadStorageUsage();
       renderPools(s.storages);

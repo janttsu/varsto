@@ -912,7 +912,6 @@ impl Engine {
                 }
                 self.config.save(&self.home)?;
             }
-            self.config.save(&self.home)?;
             self.gc_block_cache(&view)?;
         }
         Ok(kept)

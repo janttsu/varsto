@@ -3522,6 +3522,26 @@ fn run(cli: &Cli) -> Result<()> {
                             .collect::<Vec<_>>()
                             .join("\n")
                     })?;
+                    // Storages other devices have, and the same storage listed twice.
+                    if !cli.json {
+                        if let Ok(known) = engine.storage_directory() {
+                            for k in known {
+                                if !k.configured {
+                                    println!(
+                                        "{} | known from {}, not configured here: add it with the same name and its credentials",
+                                        k.name,
+                                        k.devices.join(", ")
+                                    );
+                                } else if !k.same_as.is_empty() {
+                                    eprintln!(
+                                        "warning: {} is the same storage as {}: keep one of them",
+                                        k.name,
+                                        k.same_as.join(", ")
+                                    );
+                                }
+                            }
+                        }
+                    }
                 }
                 StorageCmd::Price {
                     name,

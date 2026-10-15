@@ -77,6 +77,7 @@ mod scrub;
 mod share_ops;
 mod share_roles;
 mod staged_moves;
+mod storage_directory;
 mod strongroom_ops;
 mod trash;
 mod verify;
@@ -137,6 +138,7 @@ pub use scrub::ScrubOptions;
 pub use share_ops::{ShareMember, ShareMembers, ShareRevokeReport};
 pub use share_roles::{ShareRoleReport, KEPT_ASIDE_DIR};
 pub use staged_moves::{JobRunLimits, MoveJobRequest, MoveJobRun, SERVICE_RUN_GROUPS};
+pub use storage_directory::KnownStorage;
 pub use strongroom_ops::{CleanupReport, ConvertReport, StrongroomKeySummary};
 pub use trash::{
     restored_name, RestoredFile, TrashItem, TrashPurgeReport, TrashRestorePlan, TrashRestoreReport,
@@ -1881,13 +1883,22 @@ impl Engine {
         secret: Option<String>,
     ) -> Result<()> {
         self.org_allows(|p| p.members_may_add_storages, "add storages")?;
-        self.add_storage_internal(spec, secret)
+        self.add_storage_checked(spec, secret, true)
     }
 
     /// `add_storage_with_secret` without the organization's policy check:
     /// for joining, where the storages come from the device that approved
     /// or paired this one.
     fn add_storage_internal(&mut self, spec: StorageSpec, secret: Option<String>) -> Result<()> {
+        self.add_storage_checked(spec, secret, false)
+    }
+
+    fn add_storage_checked(
+        &mut self,
+        spec: StorageSpec,
+        secret: Option<String>,
+        refuse_duplicates: bool,
+    ) -> Result<()> {
         if self.config.storages.iter().any(|s| s.name() == spec.name()) {
             bail!("a storage named {} already exists", spec.name());
         }
@@ -1911,6 +1922,7 @@ impl Engine {
             self.config.save(&self.home)?;
             return Ok(());
         }
+        let mut stored_secret: Option<String> = None;
         if let Some(secret) = secret {
             let reference = match &spec {
                 StorageSpec::S3 {
@@ -1919,6 +1931,7 @@ impl Engine {
                 _ => spec.name().to_string(),
             };
             let mut store = self.secret_store()?;
+            stored_secret = Some(reference.clone());
             store.secrets.insert(reference, secret);
             self.forget_storages();
             store.save(
@@ -1929,6 +1942,22 @@ impl Engine {
             )?;
         }
         let backend = self.open_spec(&spec)?;
+        if refuse_duplicates {
+            if let Err(e) = self.refuse_duplicate_storage(&spec, backend.as_ref()) {
+                self.forget_storages();
+                // The credentials given with it are not kept.
+                if let (Some(r), Ok(mut store)) = (stored_secret, self.secret_store()) {
+                    store.secrets.remove(&r);
+                    let _ = store.save(
+                        &self.home,
+                        &self.keys,
+                        &self.vault.vault_id,
+                        &self.vault.device_id,
+                    );
+                }
+                return Err(e);
+            }
+        }
         let meta = VaultMeta {
             format_version: crate::FORMAT_VERSION,
             vault_id: self.vault.vault_id.clone(),
@@ -1945,6 +1974,8 @@ impl Engine {
         self.config.storages.push(spec);
         self.config.save(&self.home)?;
         self.publish_registry()?;
+        // The other devices list this storage too (not configured there).
+        self.publish_storage_names();
         Ok(())
     }
 
