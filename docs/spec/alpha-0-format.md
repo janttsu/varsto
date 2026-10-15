@@ -1671,3 +1671,34 @@ No block is an object of its own any more: `chunks/` is not written. A block kee
 - `.idx` files and `.del.` markers of format 1 are not read.
 
 Tests: `chunk_seal::tests` (no two encodings of a chunk share a nonce over 200 chunks and six encodings each, the same bytes give the same nonce, a chosen nonce is refused), `pack::tests` (round trips of 1, 63, 64, 4095, 4096, 300 000 and 16 MiB bytes; the probe), `chunking::tests` (different seeds cut differently, the same seed alike; size tiers), `packs::tests` (blocks of those sizes through a pack, packs cut at the target, tombstones and an emptied pack, rewriting a mostly dead pack, index and tombstone bodies, one request per pack, folder-scoped tombstone lists read by another device of the folder, a hostile tombstone that cannot kill a claimed block, places outside the read limits refused), `storage::bounded_read_tests` (a pack is read up to `MAX_PACK`), `s3::tests::large_objects_are_uploaded_in_parts`, `tests/packs.rs` (the same 10 MiB file in two folders gives other pack layouts and no block objects; a mostly dead pack is rewritten and a device that joins afterwards reads the moved block), `tests/chunk_sizes.rs`, and every test that damages, loses or counts blocks through `tests/common` (packs are found through the record of packs a debug build keeps of what it wrote, `packs::debug_registry`).
+
+## 63. Folder protection: the safety indicator of the interface
+
+**Why.** The folder list and the navigation show, for every folder, whether its files are safe. The answer is computed by the service from the ledger view, not guessed by the page, and is part of every folder in `GET /api/status` (`FolderStatus.protection`; a key limited to some folders sees it for those only). Nothing is stored; no format changes.
+
+**What counts.** For a folder, the unique blocks of its current files (a block used by several files counts once; a deleted file counts nothing), weighted by their plaintext size (the same bytes as the folder's `bytes`, deduplicated). A block has a copy in a *class* when the ledger shows a claim on a storage of that class (`Location.claimed_by` not empty):
+
+- `cloud`: external storage, an S3 or rclone storage by its kind (the storage's `place` label does not change this).
+- `disks`: the user's own disks, a directory storage or a disk pool. A pool disk that is away still counts: the copy exists, only its reading waits.
+- `devices`: a device holds the plaintext (this device's files, judged from the local index like the data map; other devices as the ledger lists them for the block) or an untrusted replica (`replica:` storages) holds the block. A storage that is not configured on this device and is not a replica is counted here too, never as external: the safe reading.
+
+Transferrers (carriers) keep no copy and count nowhere. A block can count in several classes.
+
+**Fields.** `protection` has `state`, `pct`, `total_bytes`, `total_blocks`, the classes `cloud`, `disks`, `devices` (each `bytes`, `pct`, `blocks`, `verified_bytes`, `verified_pct`), `external_bytes`, `unprotected_bytes`, `unprotected_blocks`, `missing_bytes` and `policy_state`. A percentage is rounded down to one decimal and is 100 only when every byte is covered. `pct` is the share of bytes with a copy in `cloud` or `disks`. *Verified* is the part that a device other than the writer has read back (`Location::independently_verified`); the state is decided by claimed copies, so a vault with one device is not shown as unsafe for lack of a second checker, and the interface shows the verified share beside it. `unprotected_*` are the blocks with a copy in neither `cloud` nor `disks`; `missing_bytes` are those that no device holds either. `policy_state` is the folder's durability policy verdict (section 14: `ok`, `at_risk`, `violated`, `unknown`) or absent without a policy. `FolderStatus.last_change_utc` is the newest modification time of a current file.
+
+**States.** `state` is the first that holds:
+
+| `state` | meaning | interface colour |
+|---|---|---|
+| `empty` | no current file in the ledger | grey |
+| `cloud` | every byte has a copy in external storage | green, "100 % in external storage" |
+| `disks` | every byte has a copy on own disks, not all in the cloud | blue, "100 % on your own disks only (no cloud copy)" |
+| `mixed` | every byte has an external copy, but neither class has them all | blue, dashed |
+| `partial` | some bytes have an external copy | amber, "Partly protected: N %" |
+| `device` | no byte has an external copy | red, "Only on devices: no external copy" |
+
+The interface (`ui/folders.js`) uses colour-blind-safe hues (Okabe-Ito), an icon and words for each state, in both themes. The badge is shown in the navigation, in the folder overview on the Files page and on a phone's folder cards; a tooltip (and the folder header) lists the classes with their verified shares, what has no copy outside devices and the policy verdict.
+
+**Limits.** The ledger is what this device knows: claims of devices it has not pulled yet are not counted. A folder whose file list this device never fetched is `empty`. A file published but not yet pushed to any storage is `device`.
+
+Tests: `crates/varsto-core/tests/protection.rs` (unpushed, directory, transferrer, cloud via rclone, disk pool, claimed versus verified on two devices), `engine::protection::tests`, and `desktop::tests::status_carries_the_protection_of_each_folder` (the API field).

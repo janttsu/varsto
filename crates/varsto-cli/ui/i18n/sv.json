@@ -1531,7 +1531,38 @@
   "Photos already on this phone": "Foton som redan finns på telefonen",
   "Videos already on this phone (they can be large)": "Videor som redan finns på telefonen (de kan vara stora)",
   "Not now": "Inte nu",
-  "this device can only add S3-compatible buckets and rclone remotes as storages": "den här enheten kan bara lägga till S3-kompatibla hinkar och rclone-fjärrar som lagringar"
+  "this device can only add S3-compatible buckets and rclone remotes as storages": "den här enheten kan bara lägga till S3-kompatibla hinkar och rclone-fjärrar som lagringar",
+  "Compact rows (click for comfortable rows)": "Kompakta rader (klicka för luftiga rader)",
+  "Comfortable rows (click for compact rows)": "Luftiga rader (klicka för kompakta rader)",
+  "Compact rows": "Kompakta rader",
+  "Comfortable rows": "Luftiga rader",
+  "100 % in external storage": "100 % i extern lagring",
+  "100 % on your own disks only (no cloud copy)": "100 % endast på dina egna diskar (ingen molnkopia)",
+  "100 % external, split between cloud and disks": "100 % externt, fördelat mellan moln och diskar",
+  "Only on devices: no external copy": "Endast på enheter: ingen extern kopia",
+  "No files yet": "Inga filer ännu",
+  "Disks": "Diskar",
+  "None": "Ingen",
+  "Cloud": "Moln",
+  "Policy met": "Regeln uppfylls",
+  "Policy at risk": "Regeln är i fara",
+  "Policy not met": "Regeln uppfylls inte",
+  "Policy not checked": "Regeln har inte kontrollerats",
+  "External storage (S3, rclone)": "Extern lagring (S3, rclone)",
+  "Own disks (directories, disk pools)": "Egna diskar (kataloger, diskpooler)",
+  "Devices (this device, others, replicas)": "Enheter (den här enheten, andra, repliker)",
+  "No copy outside devices": "Ingen kopia utanför enheter",
+  "Not on any device either": "Inte heller på någon enhet",
+  "Shares of the folder's bytes, from the ledger. Verified: another device has read the copy back.": "Andelar av mappens byte, räknade från liggaren. Kontrollerad: en annan enhet har läst tillbaka kopian.",
+  "Safety": "Säkerhet",
+  "Mode": "Läge",
+  "Last change": "Senaste ändring",
+  "Normal": "Normal",
+  "shared": "delad",
+  "Strongroom": "Strongroom",
+  "Show folders": "Visa mappar",
+  "Hide folders": "Dölj mappar",
+  "Safety shows where the copies of a folder's files are, counted from the ledger: in external storage (S3, rclone), on your own disks, or only on devices.": "Säkerhet visar var kopiorna av mappens filer finns, räknat från liggaren: i extern lagring (S3, rclone), på dina egna diskar eller bara på enheter."
  },
  "patterns": [
   [
@@ -2152,7 +2183,17 @@
   ],
   [
    "^(\\d+) older photos and videos are waiting to be uploaded, newest first\\.$",
-   "$1 äldre foton och videor väntar på överföring, nyaste först."
+   "$1 äldre foton och videor väntar på överföring, nyaste först.",
+   "^Partly protected: (\\d+) %$",
+   "Delvis skyddad: $1 %"
+  ],
+  [
+   "^verified (\\d+) %$",
+   "kontrollerad $1 %"
+  ],
+  [
+   "^(\\d+) blocks · (.+)$",
+   "$1 block · $2"
   ]
  ],
  "review": [

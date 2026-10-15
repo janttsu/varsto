@@ -1531,7 +1531,38 @@
   "Photos already on this phone": "Puhelimessa jo olevat valokuvat",
   "Videos already on this phone (they can be large)": "Puhelimessa jo olevat videot (ne voivat olla suuria)",
   "Not now": "Ei nyt",
-  "this device can only add S3-compatible buckets and rclone remotes as storages": "tähän laitteeseen voi lisätä tallennuspaikaksi vain S3-yhteensopivia ämpäreitä ja rclone-etäkohteita"
+  "this device can only add S3-compatible buckets and rclone remotes as storages": "tähän laitteeseen voi lisätä tallennuspaikaksi vain S3-yhteensopivia ämpäreitä ja rclone-etäkohteita",
+  "Compact rows (click for comfortable rows)": "Tiiviit rivit (napsauta väljille riveille)",
+  "Comfortable rows (click for compact rows)": "Väljät rivit (napsauta tiiviille riveille)",
+  "Compact rows": "Tiiviit rivit",
+  "Comfortable rows": "Väljät rivit",
+  "100 % in external storage": "100 % ulkoisessa tallennuspaikassa",
+  "100 % on your own disks only (no cloud copy)": "100 % vain omilla levyillä (ei pilvikopiota)",
+  "100 % external, split between cloud and disks": "100 % ulkoisesti, jaettuna pilven ja levyjen kesken",
+  "Only on devices: no external copy": "Vain laitteilla: ei ulkoista kopiota",
+  "No files yet": "Ei vielä tiedostoja",
+  "Disks": "Levyt",
+  "None": "Ei mitään",
+  "Cloud": "Pilvi",
+  "Policy met": "Sääntö täyttyy",
+  "Policy at risk": "Sääntö on vaarassa",
+  "Policy not met": "Sääntö ei täyty",
+  "Policy not checked": "Sääntöä ei ole tarkistettu",
+  "External storage (S3, rclone)": "Ulkoinen tallennuspaikka (S3, rclone)",
+  "Own disks (directories, disk pools)": "Omat levyt (hakemistot, levypoolit)",
+  "Devices (this device, others, replicas)": "Laitteet (tämä laite, muut, replikat)",
+  "No copy outside devices": "Ei kopiota laitteiden ulkopuolella",
+  "Not on any device either": "Ei myöskään millään laitteella",
+  "Shares of the folder's bytes, from the ledger. Verified: another device has read the copy back.": "Osuudet kansion tavuista kirjanpidosta laskettuna. Tarkistettu: toinen laite on lukenut kopion takaisin.",
+  "Safety": "Turvallisuus",
+  "Mode": "Tila",
+  "Last change": "Viimeisin muutos",
+  "Normal": "Normaali",
+  "shared": "jaettu",
+  "Strongroom": "Strongroom",
+  "Show folders": "Näytä kansiot",
+  "Hide folders": "Piilota kansiot",
+  "Safety shows where the copies of a folder's files are, counted from the ledger: in external storage (S3, rclone), on your own disks, or only on devices.": "Turvallisuus näyttää, missä kansion tiedostojen kopiot ovat kirjanpidosta laskettuna: ulkoisessa tallennuspaikassa (S3, rclone), omilla levyillä tai vain laitteilla."
  },
  "patterns": [
   [
@@ -2152,7 +2183,17 @@
   ],
   [
    "^(\\d+) older photos and videos are waiting to be uploaded, newest first\\.$",
-   "$1 vanhempaa valokuvaa ja videota odottaa siirtoa, uusimmat ensin."
+   "$1 vanhempaa valokuvaa ja videota odottaa siirtoa, uusimmat ensin.",
+   "^Partly protected: (\\d+) %$",
+   "Osittain suojattu: $1 %"
+  ],
+  [
+   "^verified (\\d+) %$",
+   "tarkistettu $1 %"
+  ],
+  [
+   "^(\\d+) blocks · (.+)$",
+   "$1 lohkoa · $2"
   ]
  ],
  "review": [
