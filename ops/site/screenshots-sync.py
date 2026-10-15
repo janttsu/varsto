@@ -68,11 +68,12 @@ if data:
     state.write_text(json.dumps(known))
     print(f"screenshots of {known['version']} ({known['commit'][:7]}): {len(files)} files")
 
-# The caption per language; the English page and its Finnish and Swedish copies.
+# The caption per language; the English page and its Finnish, Swedish and French copies.
 CAPTION = {
     "en": ("Captured automatically from version {v}{c} on {d}{s}.", "GitHub Actions run"),
     "fi": ("Kuvattu automaattisesti versiosta {v}{c} {d}{s}.", "GitHub Actions -ajo"),
     "sv": ("Tagna automatiskt från version {v}{c} den {d}{s}.", "GitHub Actions-körning"),
+    "fr": ("Capturées automatiquement depuis la version {v}{c} le {d}{s}.", "exécution GitHub Actions"),
 }
 def stamp(lang, version, commit, date, source, esc=lambda s: s):
     text, run = CAPTION[lang]
@@ -83,7 +84,8 @@ def stamp(lang, version, commit, date, source, esc=lambda s: s):
 esc = lambda s: s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 for lang, page in [("en", site / "screenshots/index.html"),
                    ("fi", site / "fi/screenshots/index.html"),
-                   ("sv", site / "sv/screenshots/index.html")]:
+                   ("sv", site / "sv/screenshots/index.html"),
+                   ("fr", site / "fr/screenshots/index.html")]:
     if not (known.get("version") and page.exists()):
         continue
     html = page.read_text()

@@ -98,7 +98,7 @@ def version_images(body: str) -> str:
 # Website languages: English at the root, the others under /<lang>/ with
 # pages translated in website/src/i18n/<lang>/pages/. Docs, blog and forum
 # stay English (internal documentation is English only).
-LANGS = [("en", "English"), ("fi", "Suomi"), ("sv", "Svenska")]
+LANGS = [("en", "English"), ("fi", "Suomi"), ("sv", "Svenska"), ("fr", "Français")]
 NAV_I18N = {
     "fi": {"Project": "Projekti", "Features": "Ominaisuudet", "Use cases": "Käyttötapaukset", "Compare": "Vertailu",
            "How it works": "Miten se toimii", "Screenshots": "Kuvakaappaukset", "Docs": "Dokumentaatio (en)",
@@ -106,11 +106,15 @@ NAV_I18N = {
     "sv": {"Project": "Projekt", "Features": "Funktioner", "Use cases": "Användningsfall", "Compare": "Jämförelse",
            "How it works": "Så fungerar det", "Screenshots": "Skärmbilder", "Docs": "Dokumentation (en)",
            "Downloads": "Nedladdningar", "Blog": "Blogg (en)", "Forum": "Forum (en)", "Contribute": "Bidra", "GitHub": "GitHub"},
+    "fr": {"Project": "Projet", "Features": "Fonctionnalités", "Use cases": "Cas d'usage", "Compare": "Comparaison",
+           "How it works": "Fonctionnement", "Screenshots": "Captures d'écran", "Docs": "Documentation (en)",
+           "Downloads": "Téléchargements", "Blog": "Blog (en)", "Forum": "Forum (en)", "Contribute": "Contribuer", "GitHub": "GitHub"},
 }
 ENGLISH_ONLY = ("docs/", "blog/", "forum/")
 ALPHA_I18N = {
     "fi": "<strong>Alpha-ohjelmisto, ei tuotantodatalle.</strong> Virheet voivat hävittää dataa, tallennusmuoto voi muuttua ilman siirtotyökalua, eikä salausta ole vielä auditoitu. Pidä omat varmuuskopiosi ja varmista, että voit palauttaa niistä.",
     "sv": "<strong>Alfaprogramvara, inte för produktionsdata.</strong> Fel kan leda till dataförlust, formatet kan ändras utan migrering och krypteringen har ännu inte granskats av utomstående. Behåll egna säkerhetskopior och kontrollera att du kan återställa från dem.",
+    "fr": "<strong>Logiciel alpha, pas pour des données de production.</strong> Des erreurs peuvent entraîner une perte de données, le format de stockage peut changer sans outil de migration et le chiffrement n'a pas encore été audité. Conservez vos propres sauvegardes et vérifiez que vous pouvez en restaurer.",
 }
 FOOTER_I18N = {
     "fi": [
@@ -123,15 +127,22 @@ FOOTER_I18N = {
         "Inga kakor, ingen spårning. Webbservern sparar en vanlig åtkomstlogg i högst sju dagar.",
         '<a href="{p}docs/security-policy.html">Säkerhetspolicy</a> · <a href="{p}docs/licence.html">Licens</a> · <a href="{p}docs/trademark.html">Varumärke</a> (på engelska)',
     ],
+    "fr": [
+        f'{BRAND} est un nom de travail. Code source : <a href="{REPO}">github.com/janttsu/varsto</a>, sous licence PolyForm Shield License 1.0.0 (code source disponible).',
+        "Pas de cookies, pas de suivi. Le serveur web conserve un journal d'accès ordinaire pendant sept jours au plus.",
+        '<a href="{p}docs/security-policy.html">Politique de sécurité</a> · <a href="{p}docs/licence.html">Licence</a> · <a href="{p}docs/trademark.html">Marque</a> (en anglais)',
+    ],
 }
-SKIP_I18N = {"en": "Skip to content", "fi": "Siirry sisältöön", "sv": "Hoppa till innehållet"}
+SKIP_I18N = {"en": "Skip to content", "fi": "Siirry sisältöön", "sv": "Hoppa till innehållet",
+             "fr": "Aller au contenu"}
 # The home page title: what people search for.
 TAGLINE = {"en": "encrypted file sync and backup on your own storage",
            "fi": "salattu tiedostojen synkronointi ja varmuuskopiointi omaan tallennustilaan",
-           "sv": "krypterad filsynkronisering och säkerhetskopiering till din egen lagring"}
+           "sv": "krypterad filsynkronisering och säkerhetskopiering till din egen lagring",
+           "fr": "synchronisation et sauvegarde de fichiers chiffrées sur votre propre stockage"}
 
 
-OG_LOCALE = {"en": "en_GB", "fi": "fi_FI", "sv": "sv_SE"}
+OG_LOCALE = {"en": "en_GB", "fi": "fi_FI", "sv": "sv_SE", "fr": "fr_FR"}
 
 
 def absolute(lang: str, page_rel: str) -> str:
