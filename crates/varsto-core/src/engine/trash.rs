@@ -722,7 +722,11 @@ impl Engine {
             seq: written.max(0) as u64,
             key_id: &key_id,
         }
-        .seal(&record_key(&fk.meta, &rec.folder_id), &packed, &self.keys.signer)?;
+        .seal(
+            &record_key(&fk.meta, &rec.folder_id),
+            &packed,
+            &self.keys.signer,
+        )?;
         let blob = env.to_bytes();
         self.pending.push(crate::ledger::Event::RecordPublished {
             kind: TRASH_KIND.into(),
@@ -785,9 +789,7 @@ impl Engine {
             }
             // Only a device that may write the folder (not a viewer, not an
             // untrusted device of the vault) has its trash record read.
-            if rec
-                .as_ref()
-                .is_some_and(|r| !self.share_writer_ok(r, &dev))
+            if rec.as_ref().is_some_and(|r| !self.share_writer_ok(r, &dev))
                 || (self.devices.devices.contains_key(&dev) && !self.trusted(&dev))
             {
                 continue;
@@ -796,11 +798,10 @@ impl Engine {
                 continue;
             }
             // The record the device announced in its ledger, and only that.
-            let Some((aseq, ahash)) = view.records.get(&(
-                TRASH_KIND.to_string(),
-                fk.folder.to_string(),
-                dev.clone(),
-            )) else {
+            let Some((aseq, ahash)) =
+                view.records
+                    .get(&(TRASH_KIND.to_string(), fk.folder.to_string(), dev.clone()))
+            else {
                 continue;
             };
             if *aseq != t.max(0) as u64 {

@@ -120,6 +120,7 @@ impl Lab {
             self.storage.clone(),
         )
         .unwrap();
+        Engine::grant_all_for_tests(&mut a, &mut b).unwrap();
         b.chunker = ChunkerParams::SMALL;
         b.set_local_rules(rules);
         b.attach_folder("docs", &self.dir("b-docs"), false).unwrap();

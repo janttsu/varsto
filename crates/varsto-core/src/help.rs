@@ -274,6 +274,16 @@ pub struct Inputs {
     /// that stayed over several pulls).
     #[serde(default)]
     pub ledger_withheld: Vec<String>,
+    /// Requests for folders this device may grant: (device name, folder).
+    #[serde(default)]
+    pub folder_requests: Vec<(String, String)>,
+    /// Folders whose key this device does not hold.
+    #[serde(default)]
+    pub folders_without_key: Vec<String>,
+    /// Folders with a key epoch that has no recovery copy (format 2,
+    /// section 5).
+    #[serde(default)]
+    pub folders_without_escrow: Vec<String>,
     pub repair_queued: u64,
     pub repair_losses: u64,
     pub scrub_damaged: u64,
@@ -959,6 +969,39 @@ fn attention(h: &mut HelpState, i: &Inputs, storages: &[&StorageIn]) {
             tx(
                 "The ledger needs attention: {problem}",
                 &[("problem", p.clone())],
+            ),
+        );
+    }
+    for (device, folder) in &i.folder_requests {
+        att(
+            h,
+            &format!("folder-request:{folder}:{device}"),
+            "warn",
+            tx(
+                "{device} asks for folder {folder}. Nothing is shared until you approve it on this device or another of your devices; deny it if you do not know the device.",
+                &[("device", device.clone()), ("folder", folder.clone())],
+            ),
+        );
+    }
+    for folder in &i.folders_without_key {
+        att(
+            h,
+            &format!("folder-key:{folder}"),
+            "info",
+            tx(
+                "This device does not hold folder {folder}: it sees the name and size only. Ask for it under Folders (or `varsto folder request {folder}`) and approve the request on a device that holds it.",
+                &[("folder", folder.clone())],
+            ),
+        );
+    }
+    for folder in &i.folders_without_escrow {
+        att(
+            h,
+            &format!("folder-escrow:{folder}"),
+            "warn",
+            tx(
+                "Folder {folder} has no recovery copy: if every device that holds it is lost, the recovery words cannot restore it. Run `varsto recovery escrow` on a device that holds it: it asks for the recovery words and writes the copy.",
+                &[("folder", folder.clone())],
             ),
         );
     }

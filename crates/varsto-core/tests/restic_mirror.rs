@@ -77,7 +77,7 @@ fn two_devices() -> (Lab, Engine, Engine) {
     fs::write(lab.p("a-docs/sub/b.txt"), vec![7u8; 200_000]).unwrap();
     fs::write(lab.p("a-photos/p.jpg"), b"not really a photo").unwrap();
     a.sync(None).unwrap();
-    let b = Engine::join(
+    let mut b = Engine::join(
         &lab.p("b-home"),
         "nas",
         PASS,
@@ -85,6 +85,7 @@ fn two_devices() -> (Lab, Engine, Engine) {
         store(&lab.p("storage")),
     )
     .unwrap();
+    Engine::grant_all_for_tests(&mut a, &mut b).unwrap();
     fs::write(lab.p("pw"), b"secret").unwrap();
     (lab, a, b)
 }
@@ -206,10 +207,12 @@ fn mirror_setup_completeness_cache_and_fixes() {
     b.sync(None).unwrap();
     assert!(b.restic_check(&opts(false, false)).unwrap().complete);
 
-    // A folder added later is attached in the mirror at the next sync.
+    // A folder added later is attached in the mirror at the next sync, once
+    // the mirror device has it (format 2: it asks, the owner approves).
     a.add_folder("music", &lab.p("a-music")).unwrap();
     fs::write(lab.p("a-music/song.ogg"), b"la la").unwrap();
     a.sync(None).unwrap();
+    Engine::grant_all_for_tests(&mut a, &mut b).unwrap();
     b.sync(None).unwrap();
     assert_eq!(fs::read(root.join("music/song.ogg")).unwrap(), b"la la");
     let c = b.restic_check(&opts(false, false)).unwrap();

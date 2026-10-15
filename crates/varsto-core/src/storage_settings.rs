@@ -249,9 +249,8 @@ mod tests {
         let k = key.clone();
         let key_for = move |i: &str| (i == "folder-record@0").then(|| k.clone());
         let pk = signer.public();
-        let known = move |d: &DeviceId| {
-            (d == &crate::ledger::device_id_for(&pk)).then(|| pk.clone())
-        };
+        let known =
+            move |d: &DeviceId| (d == &crate::ledger::device_id_for(&pk)).then(|| pk.clone());
         let opened =
             StorageSettingsRecord::open_any(&blob, &vault, &storage, &dev, &key_for, &known)
                 .unwrap();

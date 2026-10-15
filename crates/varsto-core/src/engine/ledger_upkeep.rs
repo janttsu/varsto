@@ -563,7 +563,7 @@ impl Engine {
 
     fn view_cache_key(&self) -> (SecretKey, Vec<u8>) {
         (
-            self.keys.master.derive("ledger-view-cache", &[]),
+            self.keys.local.derive("ledger-view-cache", &[]),
             crypto::aad(
                 "ledger-view-cache",
                 &[
@@ -1365,6 +1365,11 @@ pub(super) mod tests {
             &[("one.jpg", &[7u8; 20_000])],
         );
         devs[0].sync(None).unwrap();
+        {
+            // Format 2: dev1 gets the folder's key by approval.
+            let (a, rest) = devs.split_at_mut(1);
+            Engine::grant_all_for_tests(&mut a[0], &mut rest[0]).unwrap();
+        }
         let b = &mut devs[1];
         b.pull_ledger().unwrap();
         b.attach_folder("photos", &lab.root.join("b-photos"), true)

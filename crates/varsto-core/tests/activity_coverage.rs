@@ -69,6 +69,7 @@ fn fetching_a_file_and_purging_a_folder_are_tasks() {
     a.push("docs").unwrap();
 
     let mut b = Engine::join(&root.join("b"), "b", PASS, &key, storage).unwrap();
+    Engine::grant_all_for_tests(&mut a, &mut b).unwrap();
     b.attach_folder("docs", &root.join("docs-b"), true).unwrap();
     b.sync(Some("docs")).unwrap();
     assert!(!root.join("docs-b/big.bin").exists(), "a placeholder first");

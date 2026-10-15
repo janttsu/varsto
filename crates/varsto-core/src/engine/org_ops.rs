@@ -117,9 +117,12 @@ pub struct OrgApproved {
     pub name: String,
     pub user: String,
     pub fingerprint: String,
+    /// Folders whose keys were sealed to the device with the approval.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub folders: Vec<String>,
 }
 
-crate::redacted_debug!(OrgApproved { device_id, name, user, fingerprint ; token });
+crate::redacted_debug!(OrgApproved { device_id, name, user, fingerprint, folders ; token });
 
 /// What `org_remove_user` did.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -686,8 +689,44 @@ impl Engine {
         user: &str,
         confirmed: Option<&str>,
     ) -> Result<OrgApproved> {
+        self.org_approve_folders(code, user, confirmed, &[])
+    }
+
+    /// Approve a request and give the device the keys of `folders` (names
+    /// or ids) with it (format 2: without them it sees names and sizes only
+    /// until an owner approves its requests).
+    pub fn org_approve_folders(
+        &mut self,
+        code: &str,
+        user: &str,
+        confirmed: Option<&str>,
+        folders: &[String],
+    ) -> Result<OrgApproved> {
         crate::logged_op_plain!("org approve", user, {
-            self.org_approve_inner(code, user, confirmed)
+            // Check the folders first: nothing is approved for a typo.
+            let mut recs = Vec::new();
+            for f in folders {
+                let rec = self
+                    .keyring
+                    .find(f)
+                    .or_else(|| self.keyring.find_backup(f))
+                    .cloned()
+                    .ok_or_else(|| anyhow!("unknown folder {f}"))?;
+                if !self.may_grant(&rec) {
+                    bail!(
+                        "this device cannot grant {}: it does not hold it as an owner",
+                        rec.name
+                    );
+                }
+                recs.push(rec);
+            }
+            let mut approved = self.org_approve_inner(code, user, confirmed)?;
+            let info: RequestInfo = OrgRequest::parse(code)?;
+            for rec in recs {
+                self.grant_folder_to(&rec, &info.device, &info.key)?;
+                approved.folders.push(rec.name.clone());
+            }
+            Ok(approved)
         })
     }
 
@@ -777,6 +816,7 @@ impl Engine {
             name: info.name,
             user: user.to_string(),
             fingerprint: info.fingerprint,
+            folders: Vec::new(),
         })
     }
 
@@ -803,6 +843,8 @@ impl Engine {
         let (approval, signer) = org::open_approval(home, token)?;
         crate::crypto::check_passphrase(passphrase)?;
         crate::names::check_display_name(device_name)?;
+        // Folder grants sealed with the approval went to the request's key.
+        let (request_kem, _, _) = OrgRequest::keys(home)?;
         super::ensure_no_vault(home)?;
         // Pin the organization before anything is read from the storages:
         // a manifest chain under another root key is then never adopted.
@@ -822,6 +864,7 @@ impl Engine {
             passphrase,
             &approval.bundle,
             Some(signer),
+            Some(request_kem),
         );
         let (engine, notes) = match joined {
             Ok(j) => j,

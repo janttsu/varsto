@@ -65,9 +65,11 @@ fn seed(lab: &Lab, who: &str) -> (Engine, String, Vec<u8>) {
     (a, key, big)
 }
 
-fn join(lab: &Lab, who: &str, name: &str, key: &str) -> Engine {
+/// A device of the vault that the seeding device approved for "docs".
+fn join(lab: &Lab, owner: &mut Engine, who: &str, name: &str, key: &str) -> Engine {
     let mut e = Engine::join(&lab.home(who), name, PASS, key, lab.storage.clone()).unwrap();
     e.chunker = ChunkerParams::SMALL;
+    Engine::grant_all_for_tests(owner, &mut e).unwrap();
     e.attach_folder("docs", &lab.dir(who), false).unwrap();
     e
 }
@@ -104,10 +106,10 @@ fn empty() -> Snap {
 #[test]
 fn quic_direct_transfer_with_pinned_certificates() {
     let lab = lab();
-    let (a, key, big) = seed(&lab, "a");
+    let (mut a, key, big) = seed(&lab, "a");
     let snap_a: Snap = Arc::new(Mutex::new(Some(Arc::new(a.peer_snapshot().unwrap()))));
     let node_a = node(&a, snap_a);
-    let mut b = join(&lab, "b", "desk", &key);
+    let mut b = join(&lab, &mut a, "b", "desk", &key);
     let node_b = node(&b, empty());
     let (rec_a, rec_b) = (record(&a, &node_a, true), record(&b, &node_b, true));
     assert_eq!(rec_a.version, PeerRecord::VERSION);
@@ -145,7 +147,7 @@ fn quic_direct_transfer_with_pinned_certificates() {
 
     // A third vault device whose certificate the laptop has never seen in a
     // record cannot complete the handshake, even with the right token.
-    let c = join(&lab, "c", "phone", &key);
+    let c = join(&lab, &mut a, "c", "phone", &key);
     let node_c = node(&c, empty());
     let peers_c = Peers::build(
         c.peer_key(),
@@ -190,12 +192,12 @@ fn quic_direct_transfer_with_pinned_certificates() {
 fn relayed_fetch_through_a_reachable_device() {
     let lab = lab();
     // B holds the data, R is reachable and relays, A fetches.
-    let (b, key, big) = seed(&lab, "b");
+    let (mut b, key, big) = seed(&lab, "b");
     let snap_b: Snap = Arc::new(Mutex::new(Some(Arc::new(b.peer_snapshot().unwrap()))));
     let node_b = node(&b, snap_b);
-    let mut r = join(&lab, "r", "home-server", &key);
+    let mut r = join(&lab, &mut b, "r", "home-server", &key);
     let node_r = node(&r, empty());
-    let mut a = join(&lab, "a", "travel", &key);
+    let mut a = join(&lab, &mut b, "a", "travel", &key);
     let node_a = node(&a, empty());
 
     let mut rec_b = record(&b, &node_b, false); // behind NAT: no direct address
@@ -301,7 +303,7 @@ fn relayed_fetch_through_a_reachable_device() {
 #[test]
 fn wildcard_server_answers_from_the_address_it_was_reached_at() {
     let lab = lab();
-    let (a, key, _big) = seed(&lab, "a");
+    let (mut a, key, _big) = seed(&lab, "a");
     let snap_a: Snap = Arc::new(Mutex::new(Some(Arc::new(a.peer_snapshot().unwrap()))));
     let node_a = quic::Node::start(
         "0.0.0.0:0".parse().unwrap(),
@@ -312,7 +314,7 @@ fn wildcard_server_answers_from_the_address_it_was_reached_at() {
         Arc::default(),
     )
     .unwrap();
-    let b = join(&lab, "b", "desk", &key);
+    let b = join(&lab, &mut a, "b", "desk", &key);
     let node_b = node(&b, empty());
     let (mut rec_a, rec_b) = (record(&a, &node_a, true), record(&b, &node_b, true));
     let second: std::net::SocketAddr = format!("127.0.0.2:{}", node_a.local_addr.port())

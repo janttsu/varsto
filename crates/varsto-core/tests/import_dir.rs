@@ -187,6 +187,7 @@ fn files_wait_until_another_device_verified_them() {
         storage(&lab.root),
     )
     .unwrap();
+    Engine::grant_all_for_tests(&mut lab.a, &mut b).unwrap();
     b.attach_folder("archive", &lab.root.join("b-archive"), false)
         .unwrap();
     b.pull("archive").unwrap();

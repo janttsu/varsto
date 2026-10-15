@@ -635,11 +635,18 @@ struct KeyFile {
 struct KeyMaterial {
     master_hex: String,
     signing_hex: String,
+    /// The device root key: random per device, never leaves it; the local
+    /// keyring (granted folder keys), the vault keys of every epoch and
+    /// the storage secrets are sealed under keys derived from it, so the
+    /// vault key alone opens none of them.
+    local_hex: String,
 }
 
 pub struct Keys {
     pub master: SecretKey,
     pub signer: SigningKey,
+    /// The device root key (see `KeyMaterial::local_hex`).
+    pub local: SecretKey,
 }
 
 crate::redacted_opaque!(Keys);
@@ -655,7 +662,16 @@ impl Keys {
         self.master.derive("folder-record", &[])
     }
     pub fn local_keyring_key(&self) -> SecretKey {
-        self.master.derive("local-keyring", &[])
+        self.local.derive("local-keyring", &[])
+    }
+    /// Keys for a new device: the vault key it was given and a fresh
+    /// signing key and device root key.
+    pub fn new_device(master: SecretKey, signer: SigningKey) -> Keys {
+        Keys {
+            master,
+            signer,
+            local: SecretKey::random(),
+        }
     }
 
     fn keyfile_aad(vault: &VaultId, device: &DeviceId) -> Vec<u8> {
@@ -678,6 +694,7 @@ impl Keys {
         let material = KeyMaterial {
             master_hex: self.master.to_hex(),
             signing_hex: hex::encode(self.signer.to_bytes()),
+            local_hex: self.local.to_hex(),
         };
         let plain = Zeroizing::new(serde_json::to_vec(&material)?);
         let blob = crypto::encrypt(&wrap, &Self::keyfile_aad(vault, device), &plain)?;
@@ -707,6 +724,7 @@ impl Keys {
         Ok(Keys {
             master: SecretKey::from_hex(&material.master_hex)?,
             signer: SigningKey::from_bytes(&hex::decode(&material.signing_hex)?)?,
+            local: SecretKey::from_hex(&material.local_hex)?,
         })
     }
 }
@@ -753,13 +771,24 @@ impl DeviceRecord {
     }
 }
 
-/// Encrypted folder record published to `vault/folders/<device>/<folder>.enc`
-/// by the device that created the folder (single writer per device).
+/// A folder as this device knows it (`keyring.enc`), and as published to
+/// `vault/folders/<device>/<folder>.enc` by the device that created it: a
+/// signed record of kind `folder` under the registry key that carries **no
+/// key** (format 2, section 4), only `key_check`, a commitment to the
+/// folder's first-epoch key. The keys reach a device only as grants and
+/// stay in its local keyring.
 #[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct FolderRecord {
     pub folder_id: FolderId,
     pub name: String,
+    /// The folder's first-epoch key on this device (empty: not granted to
+    /// this device, or a Strongroom). Local only, never published.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub key_hex: String,
+    /// Commitment to the first-epoch key (`folder_grants::folder_key_check`),
+    /// signed by the creator: a grant whose key does not match it is refused.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub key_check: String,
     pub created_by: DeviceId,
     pub created_utc: i64,
     /// Shared with other users: member records and batches live under
@@ -820,7 +849,7 @@ impl Drop for ShareJoin {
     }
 }
 
-crate::redacted_debug!(FolderRecord { folder_id, name, created_by, created_utc, shared, strongroom, removed_utc, backup, placement, policy, share_join ; key_hex, epoch_keys });
+crate::redacted_debug!(FolderRecord { folder_id, name, key_check, created_by, created_utc, shared, strongroom, removed_utc, backup, placement, policy, share_join ; key_hex, epoch_keys });
 
 impl Drop for FolderRecord {
     fn drop(&mut self) {
@@ -877,44 +906,76 @@ impl FolderRecord {
     }
     pub const PREFIX: &'static str = "vault/folders/";
 
-    fn aad(vault: &VaultId, device: &DeviceId, folder: &FolderId) -> Vec<u8> {
-        crypto::aad(
-            "folder-record",
-            &[
-                vault.as_str().as_bytes(),
-                device.as_str().as_bytes(),
-                folder.as_str().as_bytes(),
-            ],
-        )
+    /// The form that is published: no key, no later keys, nothing local.
+    pub fn published(&self) -> FolderRecord {
+        let mut p = self.clone();
+        p.key_hex.clear();
+        p.epoch_keys.clear();
+        p.share_join = None;
+        p.shared = false;
+        p.removed_utc = 0;
+        p
     }
-    pub fn seal(&self, vault: &VaultId, key: &SecretKey) -> Result<Vec<u8>> {
-        // Keys of later epochs travel in their own records.
-        let mut published = self.clone();
-        published.epoch_keys.clear();
-        crypto::encrypt(
-            key,
-            &Self::aad(vault, &self.created_by, &self.folder_id),
-            &serde_json::to_vec(&published)?,
-        )
+    /// Seal the published form under the registry key `key_id` names and
+    /// sign it (the creator's device key).
+    pub fn seal(
+        &self,
+        vault: &VaultId,
+        key_id: &str,
+        key: &SecretKey,
+        signer: &SigningKey,
+    ) -> Result<Vec<u8>> {
+        let header = crate::record::Header {
+            kind: crate::record::RecordKind::Folder,
+            vault,
+            scope: self.folder_id.as_str(),
+            device: &self.created_by,
+            seq: self.created_utc.max(0) as u64,
+            key_id,
+        };
+        Ok(header
+            .seal(key, &serde_json::to_vec(&self.published())?, signer)?
+            .to_bytes())
     }
+    /// Open a published folder record found under `device`'s name: signed
+    /// by that device (`writer`), opened under the key its key id names,
+    /// and carrying no key.
     pub fn open(
         blob: &[u8],
         vault: &VaultId,
         device: &DeviceId,
         folder: &FolderId,
-        key: &SecretKey,
+        writer: &VerifyingKey,
+        key_for: &dyn Fn(&str) -> Option<SecretKey>,
     ) -> Result<Self> {
-        let plain = crypto::decrypt(key, &Self::aad(vault, device, folder), blob)?;
+        let env = crate::record::SignedRecord::parse(blob)?;
+        env.expect(
+            &crate::record::Expect::new(crate::record::RecordKind::Folder, vault)
+                .scope(folder.as_str())
+                .device(device),
+        )?;
+        env.verify(writer)?;
+        let plain = env.open_with(key_for)?;
         let rec: FolderRecord = serde_json::from_slice(&plain)?;
         if &rec.folder_id != folder || &rec.created_by != device {
             bail!("folder record does not match its name");
         }
+        if !rec.key_hex.is_empty() || !rec.epoch_keys.is_empty() {
+            bail!("a published folder record carries no key");
+        }
         Ok(rec)
     }
     pub fn keys(&self) -> Result<FolderKeys> {
-        FolderKeys::from_folder_key(&self.folder_id, SecretKey::from_hex(&self.key_hex)?)
+        FolderKeys::from_folder_key(&self.folder_id, self.folder_key()?)
     }
     pub fn folder_key(&self) -> Result<SecretKey> {
+        if self.key_hex.is_empty() {
+            bail!(
+                "this device does not hold the key of {}: ask for it with `varsto folder request {}` and have an owner approve",
+                self.name,
+                self.name
+            );
+        }
         SecretKey::from_hex(&self.key_hex)
     }
     pub fn share_token(&self, vault: &VaultId) -> ShareToken {
@@ -1315,7 +1376,7 @@ impl std::fmt::Debug for SecretStore {
 impl SecretStore {
     const FILE: &'static str = "secrets.enc";
     fn key(keys: &Keys) -> SecretKey {
-        keys.master.derive("storage-secrets", &[])
+        keys.local.derive("storage-secrets", &[])
     }
     fn aad(vault: &VaultId, device: &DeviceId) -> Vec<u8> {
         crypto::aad(

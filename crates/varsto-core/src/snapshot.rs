@@ -7,9 +7,9 @@
 //! does not match it.
 
 use crate::crypto::{SecretKey, SigningKey, VerifyingKey};
-use crate::record::{self, RecordKind, SignedRecord};
 use crate::ids::{DeviceId, FolderId, VaultId};
 use crate::manifest::FileState;
+use crate::record::{self, RecordKind, SignedRecord};
 use anyhow::{bail, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;

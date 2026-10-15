@@ -253,10 +253,13 @@ impl Engine {
         self.ensure_unique_folder_name(name)?;
         let now = util::now_utc();
         let me = self.vault.device_id.clone();
+        let folder_id = FolderId::random();
+        let folder_key = SecretKey::random();
         let rec = FolderRecord {
-            folder_id: FolderId::random(),
+            key_check: super::folder_grants::folder_key_check(&folder_key, &folder_id),
+            folder_id,
             name: name.trim().to_string(),
-            key_hex: SecretKey::random().to_hex(),
+            key_hex: folder_key.to_hex(),
             created_by: me.clone(),
             created_utc: now,
             shared: false,
@@ -296,6 +299,7 @@ impl Engine {
         self.config.save(&self.home)?;
         self.pending.push(Event::FolderAdded { folder: id.clone() });
         self.publish_registry()?;
+        self.escrow_if_possible();
         self.commit_batch()?;
         Ok(id)
     }

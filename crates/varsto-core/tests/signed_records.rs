@@ -72,7 +72,10 @@ fn two(lab: &Lab) -> (Engine, Engine, FolderId) {
     b.attach_folder("docs", &lab.dir("b"), false).unwrap();
     b.sync(None).unwrap();
     a.sync(None).unwrap();
-    assert_eq!(read(&lab.dir("b"), "plan.txt").as_deref(), Some(&b"the plan"[..]));
+    assert_eq!(
+        read(&lab.dir("b"), "plan.txt").as_deref(),
+        Some(&b"the plan"[..])
+    );
     let fid = a.folders()[0].0.folder_id.clone();
     (a, b, fid)
 }
@@ -80,9 +83,15 @@ fn two(lab: &Lab) -> (Engine, Engine, FolderId) {
 mod common {
     use varsto_core::Engine;
     /// Give `to` the folder key the way the vault does it: a request from
-    /// `to`, approved on `from`.
+    /// `to`, approved by hand on `from`.
     pub fn grant_folder(from: &mut Engine, to: &mut Engine, folder: &str) {
-        let _ = (from, to, folder);
+        to.sync(None).unwrap();
+        from.sync(None).unwrap();
+        to.sync(None).unwrap();
+        to.folder_request(folder).unwrap();
+        from.folder_approve(folder, to.device_id().as_str(), false)
+            .unwrap();
+        to.sync(None).unwrap();
     }
 }
 
@@ -163,11 +172,11 @@ fn a_manifest_signed_by_anyone_else_is_refused() {
         .unwrap();
     fs::write(&path, forged.to_bytes()).unwrap();
     let r = b.sync(None).unwrap();
-    assert!(
-        r.iter().any(|(p, _)| !p.writes_refused.is_empty()),
-        "{r:?}"
+    assert!(r.iter().any(|(p, _)| !p.writes_refused.is_empty()), "{r:?}");
+    assert_eq!(
+        read(&lab.dir("b"), "plan.txt").as_deref(),
+        Some(&b"the plan"[..])
     );
-    assert_eq!(read(&lab.dir("b"), "plan.txt").as_deref(), Some(&b"the plan"[..]));
     // The genuine copy comes back: B takes it.
     fs::write(&path, &genuine).unwrap();
     b.sync(None).unwrap();
@@ -192,15 +201,24 @@ fn a_replayed_or_relabelled_manifest_is_refused() {
     let genuine = fs::read(&path).unwrap();
     fs::write(&path, &old).unwrap();
     b.sync(None).unwrap();
-    assert_eq!(read(&lab.dir("b"), "plan.txt").as_deref(), Some(&b"the plan"[..]));
+    assert_eq!(
+        read(&lab.dir("b"), "plan.txt").as_deref(),
+        Some(&b"the plan"[..])
+    );
     // Relabelled: the genuine manifest with another key id or number.
     fs::write(&path, &genuine).unwrap();
     edit(&path, |v| v["key_id"] = "meta@1".into());
     b.sync(None).unwrap();
-    assert_eq!(read(&lab.dir("b"), "plan.txt").as_deref(), Some(&b"the plan"[..]));
+    assert_eq!(
+        read(&lab.dir("b"), "plan.txt").as_deref(),
+        Some(&b"the plan"[..])
+    );
     fs::write(&path, &genuine).unwrap();
     b.sync(None).unwrap();
-    assert_eq!(read(&lab.dir("b"), "plan.txt").as_deref(), Some(&b"second"[..]));
+    assert_eq!(
+        read(&lab.dir("b"), "plan.txt").as_deref(),
+        Some(&b"second"[..])
+    );
 }
 
 #[test]
@@ -216,7 +234,10 @@ fn a_manifest_without_its_ledger_announcement_waits() {
     let held = fs::read(&batch).unwrap();
     fs::remove_file(&batch).unwrap();
     b.sync(None).unwrap();
-    assert_eq!(read(&lab.dir("b"), "plan.txt").as_deref(), Some(&b"the plan"[..]));
+    assert_eq!(
+        read(&lab.dir("b"), "plan.txt").as_deref(),
+        Some(&b"the plan"[..])
+    );
     // Even when the listing finds it: the manifest waits for its batch.
     let mut b = small(Engine::open(&lab.home("b"), PASS).unwrap());
     b.set_manifest_policy(varsto_core::engine::ManifestPolicy {
@@ -225,7 +246,10 @@ fn a_manifest_without_its_ledger_announcement_waits() {
     });
     let r = b.sync(None).unwrap();
     assert!(r.iter().any(|(p, _)| p.records_waiting > 0), "{r:?}");
-    assert_eq!(read(&lab.dir("b"), "plan.txt").as_deref(), Some(&b"the plan"[..]));
+    assert_eq!(
+        read(&lab.dir("b"), "plan.txt").as_deref(),
+        Some(&b"the plan"[..])
+    );
     // Once the batch is there, the manifest counts.
     fs::write(&batch, held).unwrap();
     b.sync(None).unwrap();
@@ -247,7 +271,10 @@ fn a_relabelled_ledger_batch_is_refused() {
     // make it unreadable, or to give it another scope) breaks it.
     let orig = edit(&batch, |v| v["key_id"] = "replica".into());
     b.sync(None).unwrap();
-    assert_eq!(read(&lab.dir("b"), "plan.txt").as_deref(), Some(&b"the plan"[..]));
+    assert_eq!(
+        read(&lab.dir("b"), "plan.txt").as_deref(),
+        Some(&b"the plan"[..])
+    );
     assert!(b.ledger_health().batches_malformed > 0);
     fs::write(&batch, orig).unwrap();
     b.sync(None).unwrap();

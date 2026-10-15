@@ -77,6 +77,7 @@ fn three_devices(lab: &Lab) -> (Engine, Engine, Engine, String) {
     for who in ["b", "c"] {
         let mut e =
             small(Engine::join(&lab.home(who), who, PASS, &key, lab.storage.clone()).unwrap());
+        Engine::grant_all_for_tests(&mut a, &mut e).unwrap();
         e.attach_folder("docs", &lab.dir(who), false).unwrap();
         e.sync(None).unwrap();
         assert!(lab.dir(who).join("one.txt").exists());
@@ -259,6 +260,7 @@ fn revoked_device_is_cut_off_and_new_data_needs_new_keys() {
     let mut d =
         small(Engine::join(&lab.home("d"), "d", PASS, &new_key, lab.storage.clone()).unwrap());
     assert_eq!(d.key_epoch(), 1);
+    Engine::grant_all_for_tests(&mut a, &mut d).unwrap();
     d.attach_folder("docs", &lab.dir("d"), false).unwrap();
     d.sync(None).unwrap();
     assert!(lab.dir("d").join("one.txt").exists());

@@ -143,6 +143,13 @@ fn restic_backup_of_the_mirror_restores_byte_for_byte() {
             storage.to_str().unwrap(),
         ],
     );
+    // Format 2: the NAS asks for both folders and the laptop approves.
+    ok(&b, &["sync"]);
+    ok(&b, &["folder", "request", "docs"]);
+    ok(&b, &["folder", "request", "photos"]);
+    ok(&a, &["sync"]);
+    ok(&a, &["folder", "approve", "docs", "nas"]);
+    ok(&a, &["folder", "approve", "photos", "nas"]);
 
     let mirror = root.join("mirror");
     let repo = root.join("repo");

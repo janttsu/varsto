@@ -285,6 +285,7 @@ fn role_changes_take_effect_and_only_the_owner_makes_them() {
     let key = a.export_vault_key().unwrap();
     let mut a2 =
         small(Engine::join(&lab.home("a2"), "desk", PASS, &key, lab.storage.clone()).unwrap());
+    Engine::grant_all_for_tests(&mut a, &mut a2).unwrap();
     a2.attach_folder("project", &lab.dir("a2"), false).unwrap();
     a2.sync(None).unwrap();
     a2.sync(None).unwrap();

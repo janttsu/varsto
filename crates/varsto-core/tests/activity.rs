@@ -44,7 +44,9 @@ fn a_device_sees_another_devices_long_task_with_its_progress() {
     laptop.add_folder("docs", &docs).unwrap();
     laptop.push("docs").unwrap();
     activity::set_identity(laptop.device_id(), laptop.own_device_name());
-    let desktop = Engine::join(&root.join("desktop-home"), "desktop", PASS, &key, storage).unwrap();
+    let mut desktop =
+        Engine::join(&root.join("desktop-home"), "desktop", PASS, &key, storage).unwrap();
+    Engine::grant_all_for_tests(&mut laptop, &mut desktop).unwrap();
 
     // The laptop serves its snapshot over TCP.
     let server = p2p::Server::bind("127.0.0.1:0".parse::<SocketAddr>().unwrap()).unwrap();

@@ -414,6 +414,7 @@ impl Engine {
             folder_id: new_id.clone(),
             name: rec.name.clone(),
             key_hex: folder_key.to_hex(),
+            key_check: String::new(),
             created_by: me.clone(),
             created_utc: util::now_utc(),
             shared: false,
@@ -1089,7 +1090,9 @@ impl Engine {
         let key = record.storage_key();
         let prefix = format!("{}{}/", KeysRecord::PREFIX, rec.folder_id);
         let folder_key = FolderRecord::storage_key(&new_rec.created_by, &new_rec.folder_id);
-        let folder_blob = new_rec.seal(&self.vault.vault_id, &fr_key)?;
+        let (reg_id, reg_key) = self.registry_key_id_now();
+        let folder_blob =
+            new_rec.seal(&self.vault.vault_id, &reg_id, &reg_key, &self.keys.signer)?;
         for (_, backend) in self.metadata_storages(true)? {
             backend.put_if_absent(&key, &blob)?;
             // Older lists, and the folder record's first copy, hold wraps

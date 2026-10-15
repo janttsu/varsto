@@ -145,6 +145,7 @@ fn removed_member_reads_nothing_new_and_the_others_read_on() {
     // A second device of the owner.
     let mut a2 =
         small(Engine::join(&lab.home("a2"), "desk", PASS, &key, lab.storage.clone()).unwrap());
+    Engine::grant_all_for_tests(&mut a, &mut a2).unwrap();
     a2.attach_folder("project", &lab.dir("a2"), false).unwrap();
     a2.sync(None).unwrap();
     let mut b = invite(&lab, &mut a, "bea");
@@ -424,6 +425,7 @@ fn a_folder_re_keyed_by_a_device_removal_can_be_shared() {
     let (mut a, key) = owner(&lab);
     let mut lost =
         small(Engine::join(&lab.home("lost"), "lost", PASS, &key, lab.storage.clone()).unwrap());
+    Engine::grant_all_for_tests(&mut a, &mut lost).unwrap();
     lost.attach_folder("project", &lab.dir("lost"), false)
         .unwrap();
     lost.sync(None).unwrap();
@@ -453,6 +455,7 @@ fn last_access_is_merged_across_devices() {
     // B keeps placeholders only: it never used plan.txt itself.
     let mut b =
         small(Engine::join(&lab.home("b"), "phone", PASS, &key, lab.storage.clone()).unwrap());
+    Engine::grant_all_for_tests(&mut a, &mut b).unwrap();
     b.attach_folder("project", &lab.dir("b"), true).unwrap();
     b.sync(None).unwrap();
     let used_on_a = a.list_files("project").unwrap()[0]

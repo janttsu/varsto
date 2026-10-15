@@ -34,11 +34,10 @@ pub const SHARE_EPOCH_BASE: u32 = 1 << 20;
 
 /// `vault/share-epochs/<folder>/<epoch>.enc`: the epoch record, under the new key.
 pub const EPOCH_PREFIX: &str = "vault/share-epochs/";
-/// `vault/share-keys/<folder>/<epoch>.enc`: the epoch key for the owner's devices.
-pub const KEY_PREFIX: &str = "vault/share-keys/";
-/// `vault/share-grants/<folder>/<epoch>/<recipient>/<issuer>.json`: the epoch
-/// key for one member, sealed by one of the owner's devices.
-pub const GRANT_PREFIX: &str = "vault/share-grants/";
+/// `vault/grants/<folder>/<epoch>/<recipient>/<issuer>.json`: a folder's keys
+/// for one device (the owner's own or a member's) or one open invitation,
+/// sealed by a device that may grant them (format 2, section 4).
+pub const GRANT_PREFIX: &str = "vault/grants/";
 /// `vault/share-members/<folder>/<epoch>/<device>.enc`: member records written
 /// under a share epoch's registry key (epoch-0 records stay in `vault/shares/`).
 pub const MEMBER_PREFIX: &str = "vault/share-members/";
@@ -196,6 +195,25 @@ pub struct ShareEpochRecord {
     /// Invitations still open: they get a grant addressed to the invitation.
     #[serde(default)]
     pub kept_invites: Vec<String>,
+    /// Shared with other people (an epoch of a folder only the owner's
+    /// devices hold does not make it a shared folder).
+    #[serde(default)]
+    pub shared: bool,
+    /// Proof that the issuer holds the folder (format 2): a MAC of the
+    /// folder and epoch under the folder's first-epoch key
+    /// (`epoch_chain_mac`). A device of the vault that never held the
+    /// folder cannot start an epoch of it.
+    #[serde(default)]
+    pub chain_mac: String,
+}
+
+/// The MAC a share epoch record carries: only a holder of the folder's
+/// first-epoch key can make it.
+pub fn epoch_chain_mac(base: &SecretKey, folder: &FolderId, epoch: u32) -> String {
+    hex::encode(crypto::keyed_hash(
+        &base.derive("epoch-chain", &[folder.as_str().as_bytes()]),
+        &epoch.to_le_bytes(),
+    ))
 }
 
 impl ShareEpochRecord {
@@ -261,53 +279,6 @@ impl ShareEpochRecord {
     }
 }
 
-/// A share epoch key for the owner's own devices, sealed under the
-/// folder-record key of the vault.
-pub struct ShareKeyRecord;
-
-impl ShareKeyRecord {
-    pub fn storage_key(folder: &FolderId, epoch: u32) -> String {
-        format!("{KEY_PREFIX}{folder}/{epoch:010}.enc")
-    }
-    fn aad(vault: &VaultId, folder: &FolderId, epoch: u32) -> Vec<u8> {
-        crypto::aad(
-            "share-key",
-            &[
-                vault.as_str().as_bytes(),
-                folder.as_str().as_bytes(),
-                &epoch.to_le_bytes(),
-            ],
-        )
-    }
-    pub fn seal(
-        vault: &VaultId,
-        folder: &FolderId,
-        epoch: u32,
-        epoch_key: &SecretKey,
-        record_key: &SecretKey,
-    ) -> Result<Vec<u8>> {
-        crypto::encrypt(
-            record_key,
-            &Self::aad(vault, folder, epoch),
-            epoch_key.as_bytes(),
-        )
-    }
-    pub fn open(
-        blob: &[u8],
-        vault: &VaultId,
-        folder: &FolderId,
-        epoch: u32,
-        record_key: &SecretKey,
-    ) -> Result<SecretKey> {
-        let k = Zeroizing::new(crypto::decrypt(
-            record_key,
-            &Self::aad(vault, folder, epoch),
-            blob,
-        )?);
-        SecretKey::from_bytes(&k)
-    }
-}
-
 /// Parse `<epoch, 10 digits>.enc` or `<epoch>/...` names.
 pub fn epoch_from_name(name: &str) -> Option<u32> {
     let head = name.split('/').next()?;
@@ -334,14 +305,48 @@ pub struct ShareGrant {
 #[derive(Serialize, Deserialize)]
 struct GrantBody {
     key_hex: String,
-    /// `body_hash` of the epoch's signed record.
+    /// `body_hash` of the epoch's signed record (empty for the first epoch).
     epoch_record_hash: String,
+    /// The folder's first-epoch key (its dedup-hash key and the key check
+    /// come from it), for a device that joins late; empty when not given.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    base_hex: String,
+    /// Every later key the issuer holds, hex by epoch.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    older: BTreeMap<u32, String>,
 }
 
 impl Drop for GrantBody {
     fn drop(&mut self) {
         use zeroize::Zeroize;
         self.key_hex.zeroize();
+        self.base_hex.zeroize();
+        for v in self.older.values_mut() {
+            v.zeroize();
+        }
+    }
+}
+
+/// What a grant brings.
+pub struct GrantContents {
+    /// The key of the grant's epoch.
+    pub key: SecretKey,
+    /// `body_hash` of that epoch's signed record (empty for the first).
+    pub epoch_record_hash: String,
+    /// The first-epoch key, when the grant carries it.
+    pub base: Option<SecretKey>,
+    /// Later keys, hex by epoch.
+    pub older: BTreeMap<u32, String>,
+}
+
+crate::redacted_opaque!(GrantContents);
+
+impl Drop for GrantContents {
+    fn drop(&mut self) {
+        use zeroize::Zeroize;
+        for v in self.older.values_mut() {
+            v.zeroize();
+        }
     }
 }
 
@@ -406,10 +411,38 @@ impl ShareGrant {
         issuer: &DeviceId,
         signer: &SigningKey,
     ) -> Result<Self> {
+        let contents = GrantContents {
+            key: key.clone(),
+            epoch_record_hash: epoch_record_hash.to_string(),
+            base: None,
+            older: BTreeMap::new(),
+        };
+        Self::seal_contents(
+            vault, folder, epoch, recipient, to, &contents, issuer, signer,
+        )
+    }
+    /// Seal a grant with every key it carries.
+    #[allow(clippy::too_many_arguments)]
+    pub fn seal_contents(
+        vault: &VaultId,
+        folder: &FolderId,
+        epoch: u32,
+        recipient: &str,
+        to: &EncapsKey,
+        contents: &GrantContents,
+        issuer: &DeviceId,
+        signer: &SigningKey,
+    ) -> Result<Self> {
         let key_id = record::kem_key_id(recipient);
         let body = GrantBody {
-            key_hex: key.to_hex(),
-            epoch_record_hash: epoch_record_hash.to_string(),
+            key_hex: contents.key.to_hex(),
+            epoch_record_hash: contents.epoch_record_hash.clone(),
+            base_hex: contents
+                .base
+                .as_ref()
+                .map(|k| k.to_hex())
+                .unwrap_or_default(),
+            older: contents.older.clone(),
         };
         let record = record::Header {
             kind: RecordKind::Grant,
@@ -430,6 +463,17 @@ impl ShareGrant {
         issuer_key: &VerifyingKey,
         dk: &DecapsKey,
     ) -> Result<(SecretKey, String)> {
+        let c = self.open_contents(vault, issuer_key, dk)?;
+        Ok((c.key.clone(), c.epoch_record_hash.clone()))
+    }
+    /// Check the issuer's signature and open with the recipient's KEM key:
+    /// every key the grant carries.
+    pub fn open_contents(
+        &self,
+        vault: &VaultId,
+        issuer_key: &VerifyingKey,
+        dk: &DecapsKey,
+    ) -> Result<GrantContents> {
         self.verify(vault, issuer_key)?;
         let plain = Zeroizing::new(
             self.record
@@ -437,10 +481,19 @@ impl ShareGrant {
                 .map_err(|_| anyhow!("share grant does not open with this device's key"))?,
         );
         let body: GrantBody = serde_json::from_slice(&plain)?;
-        Ok((
-            SecretKey::from_hex(&body.key_hex)?,
-            body.epoch_record_hash.clone(),
-        ))
+        for k in body.older.values() {
+            SecretKey::from_hex(k)?;
+        }
+        Ok(GrantContents {
+            key: SecretKey::from_hex(&body.key_hex)?,
+            epoch_record_hash: body.epoch_record_hash.clone(),
+            base: if body.base_hex.is_empty() {
+                None
+            } else {
+                Some(SecretKey::from_hex(&body.base_hex)?)
+            },
+            older: body.older.clone(),
+        })
     }
 }
 
@@ -460,6 +513,10 @@ pub enum ShareRole {
     Editor,
     /// Reads only: nothing it publishes for the folder is accepted.
     Viewer,
+    /// Reads, writes, grants the folder's keys to other devices and starts
+    /// its epochs (format 2): the owner's own devices unless a role record
+    /// lists them otherwise.
+    Owner,
 }
 
 impl ShareRole {
@@ -467,17 +524,20 @@ impl ShareRole {
         match s.trim().to_ascii_lowercase().as_str() {
             "editor" | "write" | "read-write" | "rw" => Ok(ShareRole::Editor),
             "viewer" | "read" | "read-only" | "ro" => Ok(ShareRole::Viewer),
-            other => bail!("unknown role {other}: use viewer or editor"),
+            "owner" => Ok(ShareRole::Owner),
+            other => bail!("unknown role {other}: use viewer, editor or owner"),
         }
     }
     pub fn as_str(&self) -> &'static str {
         match self {
             ShareRole::Editor => "editor",
             ShareRole::Viewer => "viewer",
+            ShareRole::Owner => "owner",
         }
     }
+    /// Writes (an editor or an owner).
     pub fn is_editor(&self) -> bool {
-        *self == ShareRole::Editor
+        matches!(self, ShareRole::Editor | ShareRole::Owner)
     }
 }
 
@@ -761,6 +821,8 @@ mod tests {
             removed: vec![],
             revoked_invites: vec![],
             kept_invites: vec![],
+            shared: true,
+            chain_mac: String::new(),
         };
         let blob = r.seal(&vault, &key, &owner).unwrap().to_bytes();
         let (back, env) =

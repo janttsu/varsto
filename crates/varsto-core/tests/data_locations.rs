@@ -58,6 +58,7 @@ fn data_locations_add_up_across_storages_and_devices() {
 
     // The phone shares only the home storage and only the docs folder.
     let mut b = Engine::join(&root.join("b-home"), "phone", PASS, &key, shelf.clone()).unwrap();
+    Engine::grant_all_for_tests(&mut a, &mut b).unwrap();
     b.chunker = ChunkerParams::SMALL;
     b.attach_folder("docs", &root.join("b-docs"), false)
         .unwrap();

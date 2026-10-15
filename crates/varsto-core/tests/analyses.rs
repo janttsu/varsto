@@ -66,9 +66,10 @@ fn device_a(lab: &Lab) -> (Engine, String) {
     (a, key)
 }
 
-fn device_b(lab: &Lab, key: &str) -> Engine {
+fn device_b(lab: &Lab, a: &mut Engine, key: &str) -> Engine {
     let mut b =
         small(Engine::join(&lab.home("b"), "phone", PASS, key, lab.storage.clone()).unwrap());
+    Engine::grant_all_for_tests(a, &mut b).unwrap();
     b.attach_folder("docs", &lab.dir("b"), false).unwrap();
     b.sync(None).unwrap();
     b
@@ -162,7 +163,7 @@ fn set_read_list_and_limits() {
 fn analyses_merge_across_devices_newest_first() {
     let lab = Lab::new();
     let (mut a, key) = device_a(&lab);
-    let mut b = device_b(&lab, &key);
+    let mut b = device_b(&lab, &mut a, &key);
     a.set_analysis(
         "docs",
         "trip.txt",
@@ -263,7 +264,7 @@ fn analyses_follow_renames_and_moves_and_go_stale_or_away() {
     );
 
     // The other device sees both where the files are now.
-    let mut b = device_b(&lab, &key);
+    let mut b = device_b(&lab, &mut a, &key);
     b.exchange_notes().unwrap();
     assert_eq!(
         b.analysis("docs", "2026/receipt.txt")

@@ -201,6 +201,7 @@ fn steps_follow_the_vault_as_it_grows() {
     let b_home = root.join("b-home");
     let b_docs = root.join("b-docs");
     let mut b = Engine::join(&b_home, "phone", PASS, &key, dir(root, "box", "home")).unwrap();
+    Engine::grant_all_for_tests(&mut a, &mut b).unwrap();
     b.chunker = ChunkerParams::SMALL;
     let hb = b.help_state(running()).unwrap();
     assert!(ids(&hb).contains(&"attach"), "{:?}", ids(&hb));

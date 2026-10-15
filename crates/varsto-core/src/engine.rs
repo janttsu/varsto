@@ -26,8 +26,8 @@ use crate::ledger::{
 use crate::manifest::{self, ChunkRef, FileState, Manifest, Merge};
 use crate::policy::{Policy, PolicyReport};
 use crate::pool::{self, DiskStatus, PoolDisk, PoolError, PoolIdentity, PoolStorage};
-use crate::replica::{self, ReplicaToken, REPLICA_PREFIX};
 use crate::record::SignedRecord;
+use crate::replica::{self, ReplicaToken, REPLICA_PREFIX};
 use crate::storage::{Storage, StorageSpec};
 use crate::thumbs;
 use crate::util;
@@ -55,7 +55,9 @@ mod disk_groups;
 mod disk_insert;
 mod disk_suggest;
 mod drain;
+mod escrow;
 mod fetch;
+mod folder_grants;
 mod folder_rules;
 mod folder_safety;
 mod guide;
@@ -98,6 +100,8 @@ pub use disk_fetch::{
 pub use disk_groups::DiskGroupStatus;
 pub use disk_insert::{DiskInsertReport, DiskProgress, FillOutcome, InsertOptions};
 pub use drain::{DrainOptions, DrainPlan, DrainRunLimits, DrainRunReport, DrainStatus};
+pub use escrow::{recovery_wrap_key, RecoverReport};
+pub use folder_grants::{FolderApproveReport, FolderRequestInfo, REKEY_BUDGET};
 pub use folder_rules::IgnoreInfo;
 pub use folder_safety::{
     paused_error, ChangeKind, DiscardReport, FolderChanges, FolderPaused, HeldDeletions,
@@ -505,6 +509,18 @@ pub struct StatusReport {
     pub org: Option<OrgBrief>,
     /// Whether this device's ledger needs a rebuild (`ledger_recovery`).
     pub ledger_health: LedgerHealth,
+    /// Requests for folders this device may grant, as the last sync found
+    /// them (`varsto folder requests`, approve or deny by hand).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub folder_requests: Vec<folder_grants::FolderRequestInfo>,
+    /// Folders of the vault whose key this device does not hold (names and
+    /// sizes only until an owner approves a request).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub folders_without_key: Vec<String>,
+    /// Folders this device holds whose newest key has no recovery copy
+    /// (`varsto recovery escrow`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub folders_without_escrow: Vec<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Default)]
@@ -687,6 +703,9 @@ pub struct Engine {
     fetch_stats: std::sync::Arc<FetchStats>,
     /// Strongroom folder keys held in memory until the expiry time (UTC seconds).
     unlocked: BTreeMap<FolderId, (SecretKey, i64)>,
+    /// K2 (format 2, section 5) for this session only, while the recovery
+    /// words are at hand: escrows of new folder keys are written with it.
+    recovery: Option<SecretKey>,
     home: PathBuf,
     vault: LocalVault,
     keys: Keys,
@@ -926,10 +945,7 @@ impl Engine {
         crate::names::check_display_name(device_name)?;
         ensure_no_vault(home)?;
         util::private_home(home)?;
-        let keys = Keys {
-            master: SecretKey::random(),
-            signer: crypto::SigningKey::generate(),
-        };
+        let keys = Keys::new_device(SecretKey::random(), crypto::SigningKey::generate());
         let device_id = ledger::device_id_for(&keys.signer.public());
         let vault = LocalVault {
             format_version: crate::FORMAT_VERSION,
@@ -995,12 +1011,14 @@ impl Engine {
             storage,
             secret,
             None,
+            None,
         )
     }
 
     /// Like `join_with_secret`, with the signing key the device already made
     /// (an organization request): its device id is then the one the admin
     /// approved. Without one a fresh key is generated.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn join_with_signer(
         home: &Path,
         device_name: &str,
@@ -1009,6 +1027,7 @@ impl Engine {
         storage: StorageSpec,
         secret: Option<String>,
         signer: Option<crypto::SigningKey>,
+        kem: Option<crate::kem::DecapsKey>,
     ) -> Result<Engine> {
         crypto::check_passphrase(passphrase)?;
         crate::names::check_display_name(device_name)?;
@@ -1026,10 +1045,7 @@ impl Engine {
         let master = SecretKey::from_hex(vault_key_hex)?;
         let epochs = membership::discover_epochs(backend.as_ref(), &meta.vault_id, &master)?;
         util::private_home(home)?;
-        let keys = Keys {
-            master,
-            signer: signer.unwrap_or_else(crypto::SigningKey::generate),
-        };
+        let keys = Keys::new_device(master, signer.unwrap_or_else(crypto::SigningKey::generate));
         let device_id = ledger::device_id_for(&keys.signer.public());
         let vault = LocalVault {
             format_version: crate::FORMAT_VERSION,
@@ -1039,6 +1055,12 @@ impl Engine {
             created_utc: meta.created_utc,
             member: false,
         };
+        let mut epochs = epochs;
+        if let Some(k) = kem {
+            // The key-exchange key this device sent while pairing (or with
+            // its organization request): grants were sealed to it.
+            epochs.kem = Some(k);
+        }
         let mut engine = Self::write_new(home, vault, keys, passphrase, epochs)?;
         engine.add_storage_internal(storage, secret)?;
         engine.pull_registry()?;
@@ -1056,20 +1078,19 @@ impl Engine {
         home: &Path,
         device_name: &str,
         passphrase: &str,
-        bundle: &crate::pair::Bundle,
+        received: crate::pair::Received,
     ) -> Result<(Engine, Vec<String>)> {
         crate::logged_op_plain!("join paired", device_name, {
-            Self::join_paired_inner(home, device_name, passphrase, bundle)
+            let crate::pair::Received { bundle, keys } = received;
+            Self::join_paired_with(
+                home,
+                device_name,
+                passphrase,
+                &bundle,
+                Some(keys.signer),
+                Some(keys.kem),
+            )
         })
-    }
-
-    fn join_paired_inner(
-        home: &Path,
-        device_name: &str,
-        passphrase: &str,
-        bundle: &crate::pair::Bundle,
-    ) -> Result<(Engine, Vec<String>)> {
-        Self::join_paired_with(home, device_name, passphrase, bundle, None)
     }
 
     pub(crate) fn join_paired_with(
@@ -1078,6 +1099,7 @@ impl Engine {
         passphrase: &str,
         bundle: &crate::pair::Bundle,
         signer: Option<crypto::SigningKey>,
+        kem: Option<crate::kem::DecapsKey>,
     ) -> Result<(Engine, Vec<String>)> {
         crate::names::check_display_name(device_name)?;
         let mut notes = Vec::new();
@@ -1107,6 +1129,7 @@ impl Engine {
             chosen.spec.clone(),
             chosen.secret.clone(),
             signer,
+            kem,
         )?;
         if engine.vault.vault_id.to_string() != bundle.vault_id {
             bail!(
@@ -1216,6 +1239,7 @@ impl Engine {
             local_rules: None,
             fetch_stats: Default::default(),
             unlocked: BTreeMap::new(),
+            recovery: None,
             home: home.to_path_buf(),
             vault,
             keys,
@@ -1333,10 +1357,7 @@ impl Engine {
         util::private_home(home)?;
         // The "master" of a member is a local random root used only for the
         // local keyring; it never leaves the device and opens nothing shared.
-        let keys = Keys {
-            master: SecretKey::random(),
-            signer: crypto::SigningKey::generate(),
-        };
+        let keys = Keys::new_device(SecretKey::random(), crypto::SigningKey::generate());
         let device_id = ledger::device_id_for(&keys.signer.public());
         let vault = LocalVault {
             format_version: crate::FORMAT_VERSION,
@@ -1352,6 +1373,7 @@ impl Engine {
             folder_id: token.folder_id.clone(),
             name: token.name.clone(),
             key_hex: token.key_hex.clone(),
+            key_check: String::new(),
             created_by: device_id,
             created_utc: util::now_utc(),
             shared: true,
@@ -1446,6 +1468,7 @@ impl Engine {
             local_rules: None,
             fetch_stats: Default::default(),
             unlocked: BTreeMap::new(),
+            recovery: None,
             config: Config::load(home)?,
             ledger: LedgerStore::open(&home.join("ledger"), &vault_id_for_ledger)?,
             clock: clock.clone(),
@@ -2276,10 +2299,13 @@ impl Engine {
         }
         self.ensure_unique_folder_name(name)?;
         fs::create_dir_all(path)?;
+        let folder_id = FolderId::random();
+        let folder_key = SecretKey::random();
         let rec = FolderRecord {
-            folder_id: FolderId::random(),
+            key_check: folder_grants::folder_key_check(&folder_key, &folder_id),
+            folder_id,
             name: name.to_string(),
-            key_hex: SecretKey::random().to_hex(),
+            key_hex: folder_key.to_hex(),
             created_by: self.vault.device_id.clone(),
             created_utc: util::now_utc(),
             shared: false,
@@ -2317,6 +2343,8 @@ impl Engine {
         self.pending.push(Event::FolderAdded { folder: id.clone() });
         self.publish_registry()?;
         self.commit_batch()?;
+        // A recovery copy of the new key, when the recovery words are at hand.
+        self.escrow_if_possible();
         Ok(id)
     }
 
@@ -2349,6 +2377,20 @@ impl Engine {
             .find(name_or_id)
             .cloned()
             .ok_or_else(|| anyhow!("unknown folder {name_or_id}; run pull first"))?;
+        let rec = if self.has_folder_key(&rec) {
+            rec
+        } else {
+            // A grant may be waiting on the storages: take it first.
+            let _ = self.pull_registry();
+            let rec = self
+                .keyring
+                .find(name_or_id)
+                .cloned()
+                .ok_or_else(|| anyhow!("unknown folder {name_or_id}; run pull first"))?;
+            // Names and sizes only until an owner approves (format 2).
+            rec.folder_key()?;
+            rec
+        };
         if self
             .config
             .folders
@@ -2840,6 +2882,9 @@ impl Engine {
     /// The record with a usable key: a Strongroom folder must be unlocked.
     fn with_key(&self, rec: &FolderRecord) -> Result<FolderRecord> {
         if !rec.is_strongroom() {
+            // Format 2: a folder whose key was not granted to this device
+            // is known by name only, like a locked Strongroom.
+            rec.folder_key()?;
             return Ok(rec.clone());
         }
         match self.unlocked.get(&rec.folder_id) {
@@ -2905,7 +2950,7 @@ impl Engine {
     fn publish_registry(&mut self) -> Result<()> {
         let rec = self.own_record();
         let reg_key = self.registry_key_now();
-        let fr_key = self.folder_record_key_now();
+        let (fr_id, fr_key) = self.registry_key_id_now();
         for (_, backend) in self.metadata_storages(true)? {
             if !self.vault.member {
                 backend.put_if_absent(
@@ -2918,9 +2963,10 @@ impl Engine {
                     .values()
                     .filter(|f| f.created_by == self.vault.device_id && !self.vault.member)
                 {
+                    // Signed, keyless (format 2): the key goes out in grants.
                     backend.put_if_absent(
                         &FolderRecord::storage_key(&f.created_by, &f.folder_id),
-                        &f.seal(&self.vault.vault_id, &fr_key)?,
+                        &f.seal(&self.vault.vault_id, &fr_id, &fr_key, &self.keys.signer)?,
                     )?;
                 }
             }
@@ -2936,7 +2982,6 @@ impl Engine {
 
     fn pull_registry(&mut self) -> Result<()> {
         let reg_keys = self.registry_keys();
-        let fr_keys = self.folder_record_keys();
         let mut changed_devices = false;
         let mut changed_folders = false;
         for (_, backend) in self.metadata_storages(false)? {
@@ -3015,10 +3060,24 @@ impl Engine {
                 if self.vault.member {
                     continue;
                 }
+                // Only a trusted device's own signed record: what folders
+                // exist, their names and settings, never a key.
+                if !self.trusted(&dev) {
+                    continue;
+                }
+                let Some(writer) = self.device_key(&dev) else {
+                    continue;
+                };
                 if let Some(blob) = backend.get(&key)? {
-                    if let Some(rec) = fr_keys.iter().find_map(|k| {
-                        FolderRecord::open(&blob, &self.vault.vault_id, &dev, &fid, k).ok()
-                    }) {
+                    let key_for = |id: &str| self.registry_key_for(id);
+                    if let Ok(rec) = FolderRecord::open(
+                        &blob,
+                        &self.vault.vault_id,
+                        &dev,
+                        &fid,
+                        &writer,
+                        &key_for,
+                    ) {
                         self.keyring.folders.insert(fid, rec);
                         changed_folders = true;
                     }
@@ -3090,6 +3149,7 @@ impl Engine {
         }
         // Folders removed from the vault: stop syncing them here (files stay).
         if !self.vault.member {
+            let fr_keys = self.folder_record_keys();
             for (_, backend) in self.metadata_storages(false)? {
                 for key in backend.list(vault::FolderRemoval::PREFIX)? {
                     let Some(fid) = key
@@ -3118,10 +3178,21 @@ impl Engine {
                 }
             }
         }
-        // Member records, epochs and grants of shared folders.
+        // Member records, epochs and grants of shared folders, and folder
+        // keys granted to this device.
         let (devs, folders) = self.pull_share_state()?;
         changed_devices |= devs;
         changed_folders |= folders;
+        // Requests waiting for this device's decision (shown, never acted on).
+        self.note_folder_requests();
+        // Recovery copies: written when the words are at hand, else noted.
+        self.escrow_on_sync();
+        // Folders a revoked device held that still need a new key.
+        if !self.vault.member && self.folder_rekeys_pending() > 0 {
+            if let Err(e) = self.run_folder_rekeys(folder_grants::REKEY_BUDGET) {
+                log::warn!("re-keying folders after a revocation: {e:#}");
+            }
+        }
         // Placement records: newest per folder wins, as for policies.
         changed_folders |= self.pull_placement_records()?;
         // Quotas and drains of the storages (`quotas`): newest per storage wins.
@@ -3196,7 +3267,7 @@ impl Engine {
                     self.keyring
                         .folders
                         .get(f)
-                        .is_some_and(|r| r.shared && !r.is_removed())
+                        .is_some_and(|r| r.shared && !r.is_removed() && !r.key_hex.is_empty())
                 }) {
                     shared.entry(f).or_default().push(ev.clone());
                 }
@@ -6069,6 +6140,7 @@ impl Engine {
             folder_id: folder_id.clone(),
             name: name.to_string(),
             key_hex: String::new(),
+            key_check: String::new(),
             created_by: self.vault.device_id.clone(),
             created_utc: util::now_utc(),
             shared: false,
@@ -6952,6 +7024,23 @@ impl Engine {
 
     // ----- reporting ----------------------------------------------------------
 
+    /// Create a vault with a recovery key as well (format 2, section 5):
+    /// returns the vault key and the recovery key (hex). The recovery key
+    /// stays in this session only, so folders added now get their recovery
+    /// copies at once; it is never written to disk.
+    pub fn init_with_recovery(
+        home: &Path,
+        device_name: &str,
+        passphrase: &str,
+    ) -> Result<(Engine, String, String)> {
+        let (mut e, vault_key) = Self::init(home, device_name, passphrase)?;
+        let recovery = SecretKey::random();
+        let hex_key = recovery.to_hex();
+        crate::logging::register_secret(&hex_key);
+        e.recovery = Some(escrow::recovery_wrap_key(&recovery));
+        Ok((e, vault_key, hex_key))
+    }
+
     pub fn status(&self) -> Result<StatusReport> {
         let view = self.view()?;
         let mut folders = Vec::new();
@@ -6966,6 +7055,16 @@ impl Engine {
                 for c in &f.chunks {
                     chunks.insert(c.chunk.clone());
                 }
+            }
+            if !self.has_folder_key(&rec) {
+                // Format 2: without the folder key only the ledger says how
+                // big the folder is (its blocks' sizes), never what is in it.
+                bytes = view
+                    .chunks
+                    .iter()
+                    .filter(|((f, _), _)| f == &rec.folder_id)
+                    .map(|(_, r)| r.size)
+                    .sum();
             }
             // Blocks of files that are on this device (not placeholders).
             let here: HashSet<&ChunkId> = match &mount {
@@ -7143,6 +7242,15 @@ impl Engine {
                 })
                 .collect(),
             ledger_health: self.ledger_health(),
+            folder_requests: self.folder_requests_seen(),
+            folders_without_escrow: self.folders_without_escrow(),
+            folders_without_key: self
+                .keyring
+                .folders
+                .values()
+                .filter(|r| !r.is_removed() && !self.has_folder_key(r))
+                .map(|r| r.name.clone())
+                .collect(),
         })
     }
 

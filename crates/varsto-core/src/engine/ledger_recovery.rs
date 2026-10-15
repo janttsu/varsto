@@ -448,6 +448,7 @@ pub struct LedgerStatus {
 }
 
 /// The copies of one own batch on the storages.
+#[allow(clippy::large_enum_variant)]
 enum Fetched {
     None,
     One(SignedBatch),

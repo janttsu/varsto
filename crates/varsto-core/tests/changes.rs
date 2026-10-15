@@ -80,6 +80,7 @@ fn who_changed_what_and_when() {
     a.sync(None).unwrap();
     let mut b =
         small(Engine::join(&lab.home("b"), "desk", PASS, &key, lab.storage.clone()).unwrap());
+    Engine::grant_all_for_tests(&mut a, &mut b).unwrap();
     b.attach_folder("docs", &lab.dir("b"), false).unwrap();
     b.sync(None).unwrap();
 
@@ -237,6 +238,12 @@ fn who_changed_what_and_when() {
         )
         .unwrap(),
     );
+    // In the organization, an administrator lists it before it is trusted
+    // with a folder key.
+    c.sync(None).unwrap();
+    a.sync(None).unwrap();
+    a.org_add_device(c.device_id().as_str(), "alice").unwrap();
+    Engine::grant_all_for_tests(&mut a, &mut c).unwrap();
     c.attach_folder("docs", &lab.dir("c"), false).unwrap();
     c.sync(None).unwrap();
     let r = of(&c, Some("notes/monday.txt"));

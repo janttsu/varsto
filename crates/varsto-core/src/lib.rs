@@ -50,10 +50,10 @@ pub mod progress;
 pub mod providers;
 pub mod qr;
 pub mod rclone;
+pub mod record;
 pub mod record_shim;
 pub mod recovery;
 pub mod recovery_guide;
-pub mod record;
 pub mod replica;
 pub mod restic;
 pub mod s3;
@@ -101,7 +101,9 @@ mod tests {
     fn older_and_newer_formats_are_refused() {
         assert!(super::check_format(super::FORMAT_VERSION, "x").is_ok());
         for old in [0, 1] {
-            let e = super::check_format(old, "the vault").unwrap_err().to_string();
+            let e = super::check_format(old, "the vault")
+                .unwrap_err()
+                .to_string();
             assert!(e.contains(&format!("format {old}")), "{e}");
             assert!(e.contains("created fresh"), "{e}");
         }

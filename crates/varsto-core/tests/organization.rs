@@ -62,6 +62,7 @@ fn three_devices(lab: &Lab) -> (Engine, Engine, Engine, String) {
     for who in ["b", "c"] {
         let mut e =
             small(Engine::join(&lab.home(who), who, PASS, &key, lab.storage.clone()).unwrap());
+        Engine::grant_all_for_tests(&mut a, &mut e).unwrap();
         e.attach_folder("docs", &lab.dir(who), false).unwrap();
         e.sync(None).unwrap();
         others.push(e);
@@ -151,6 +152,7 @@ fn create_approve_and_remove_a_user() {
     assert_eq!(approval.user, "dana");
     assert!(notes.iter().any(|n| n.contains("joined")));
     assert_eq!(d.device_id().to_string(), approved.device_id);
+    Engine::grant_all_for_tests(&mut a, &mut d).unwrap();
     d.attach_folder("docs", &lab.dir("d"), false).unwrap();
     d.sync(None).unwrap();
     assert!(lab.dir("d").join("one.txt").exists());
@@ -171,28 +173,37 @@ fn create_approve_and_remove_a_user() {
     assert!(lab.dir("b").join("from-d.txt").exists());
     assert_eq!(a.org_summary().unwrap().users.len(), 2);
 
-    // E joins with the vault key itself, without approval: nobody trusts it.
+    // E joins with the vault key itself, without approval: nobody trusts
+    // it, and (format 2) the vault key opens no folder.
     let mut e = small(Engine::join(&lab.home("e"), "e", PASS, &key, lab.storage.clone()).unwrap());
-    e.attach_folder("docs", &lab.dir("e"), false).unwrap();
     e.sync(None).unwrap();
     assert!(
-        lab.dir("e").join("one.txt").exists(),
-        "it holds the key, so it reads"
+        e.attach_folder("docs", &lab.dir("e"), false).is_err(),
+        "the vault key alone opens no folder"
     );
     assert!(!e.org_summary().unwrap().this_device_listed);
-    fs::write(lab.dir("e").join("from-e.txt"), b"not approved").unwrap();
-    e.push("docs").unwrap();
+    e.folder_request("docs").unwrap();
     a.sync(None).unwrap();
     assert!(
-        !lab.dir("a").join("from-e.txt").exists(),
-        "an unlisted device's manifests are ignored"
+        a.folder_requests().unwrap().is_empty(),
+        "an unlisted device's request is not shown"
     );
+    assert!(a.folder_approve("docs", "e", false).is_err());
     assert!(!a.devices_list().iter().any(|x| x.name == "e"));
     let sa = a.org_summary().unwrap();
     assert_eq!(sa.unlisted.len(), 1);
     assert_eq!(sa.unlisted[0].name, "e");
-    // Until an admin adds it.
+    // Until an admin adds it, and an owner approves its request.
     a.org_add_device("e", "erin").unwrap();
+    a.sync(None).unwrap();
+    assert_eq!(a.folder_requests().unwrap().len(), 1);
+    a.folder_approve("docs", "e", false).unwrap();
+    e.sync(None).unwrap();
+    e.attach_folder("docs", &lab.dir("e"), false).unwrap();
+    e.sync(None).unwrap();
+    assert!(lab.dir("e").join("one.txt").exists());
+    fs::write(lab.dir("e").join("from-e.txt"), b"approved").unwrap();
+    e.push("docs").unwrap();
     a.sync(None).unwrap();
     assert!(lab.dir("a").join("from-e.txt").exists());
     assert!(a.org_summary().unwrap().unlisted.is_empty());

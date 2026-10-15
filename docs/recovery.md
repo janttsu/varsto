@@ -18,7 +18,8 @@ The guide never contains a secret. It names the secrets (the recovery words, sto
 
 | What | Why | Without it |
 | --- | --- | --- |
-| **Recovery kit**: the vault key as 24 words (`varsto recovery kit`), or three shares of which any two rebuild it (`--shares`). | It is the only thing that opens the vault. There is no account, no reset and no copy anywhere else. | Nobody can read the vault, including the makers of Varsto. |
+| **Recovery kit, vault key**: 24 words (`varsto recovery kit`), or three shares of which any two rebuild it (`--shares`). | It opens the vault: the list of devices and folders and the ledger. There is no account, no reset and no copy anywhere else. | Nobody can read the vault, including the makers of Varsto. |
+| **Recovery kit, recovery key**: the second 24 words, shown once by `varsto init` (print them again with `varsto recovery kit --with-recovery-key`, or make new ones with `--new-recovery-key`), also as shares. Keep them apart from the vault key. | Since storage format 2 a folder's key is not derived from the vault key: the recovery key opens the recovery copy of every folder key. It is never stored on a device. | The vault key alone restores no folder: you see the names and sizes and nothing else. |
 | **Storage credentials**: for each S3 bucket the endpoint, bucket and region (in the guide) plus the access key ID and secret key (keep them yourself); the login to the provider account. | A new device reads your encrypted data from the storages. Varsto keeps the secret key only in the encrypted secret store of each device. | You need the provider account to make new keys; without it the bucket cannot be reached. |
 | **rclone configuration** (`rclone.conf`) for rclone remotes, kept like a password. | rclone, not Varsto, holds the remote's token. | Set the remote up again from the provider account. |
 | **NAS and network shares**: where they are and how to reach them. A directory on a computer's own disk is lost with it. | A directory storage is only a recovery source if it survives. | Data that only that directory held is lost. |
@@ -28,6 +29,8 @@ The guide never contains a secret. It names the secrets (the recovery words, sto
 | **restic password** and the repository's credentials (if you keep a restic backup). | The restic repository can be restored with restic alone, without Varsto. | restic cannot read the repository. |
 
 Not needed: the passphrase of a device. A new device gets its own.
+
+A folder gets its recovery copy when the recovery words are at hand: in the session that made the vault, with `--with-recovery-key` on any command, or with `varsto recovery escrow` (it asks for the words). Until then `varsto status` (`folders_without_escrow`) and the Help page warn about it. A new key epoch of a folder (after a device was removed) needs a new copy the same way.
 
 Folders that **someone else shares with you** are not in your package: their key came from the person who shared them. On a new device you send them a new request code (`varsto share request`) and they share the folder again.
 
@@ -46,7 +49,7 @@ The guide gives the exact commands for your vault. In outline:
 
 1. Install Varsto from the download page and check the download with `varsto verify-release`.
 2. If you kept shares, rebuild the words: `varsto recovery combine --check <key check>` (it asks for two shares, one `<index>: <words>` per line, or reads them from standard input or `--file`) (the key check is printed on the kit; with it a share from another kit or a copying mistake is caught).
-3. Join through a bucket or a directory that holds the vault: `varsto join --storage-path ... ` (or the `--s3-*` options); it asks for the 24 words without echo. `VARSTO_VAULT_KEY` or `--key-file` supply them in scripts; they are never taken from the command line.
+3. Join through a bucket or a directory that holds the vault with both word sets: `varsto join --recovery-words --storage-path ...` (or the `--s3-*` options); it asks for the 24 vault words and then the 24 recovery words without echo (`VARSTO_VAULT_KEY` or `--key-file`, and `VARSTO_RECOVERY_WORDS` or `--recovery-words-file`, supply them in scripts; they are never taken from the command line). The folder keys come back from their recovery copies. `varsto status` lists any folder without one (`folders_without_key`).
 4. Add the other storages under the same names (`varsto storage add-s3`, `add-rclone`, `add-local`, `add-pool`).
 5. Connect the pool disks one at a time (`varsto disk insert` on Linux).
 6. Attach the folders (`varsto folder attach <folder> <directory>`), unlock Strongroom folders with a security key, restore backups (`varsto backup restore`).

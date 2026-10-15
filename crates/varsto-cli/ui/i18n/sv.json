@@ -1517,7 +1517,23 @@
   "Attach a new disk to continue moving {folder}": "Anslut en ny disk för att fortsätta flytta {folder}",
   "{left} of {folder} are still on {from}. The move to {to} stops when the pool has no room and carries on by itself when a disk is attached.": "{left} av {folder} ligger kvar på {from}. Flytten till {to} stannar när poolen saknar plats och fortsätter av sig själv när en disk ansluts.",
   "Plug the disk in. Nothing else is needed; `varsto move status` shows how far the move has come.": "Anslut disken. Inget mer behövs; `varsto move status` visar hur långt flytten har kommit.",
-  "The administrator command asks for the 24 root words without echo.": "Administratörskommandot frågar efter de 24 rotorden utan eko."
+  "The administrator command asks for the 24 root words without echo.": "Administratörskommandot frågar efter de 24 rotorden utan eko.",
+  "A device asks for a folder:": "En enhet ber om en mapp:",
+  "Approve": "Godkänn",
+  "Approve read-only": "Godkänn endast läsning",
+  "Deny": "Avslå",
+  "Ask for it": "Be om den",
+  "Give this device the folder's key, read-only? It can read everything in the folder; what it writes there is not taken.": "Ge den här enheten mappens nyckel med endast läsrätt? Den kan läsa allt i mappen; det den skriver där tas inte emot.",
+  "Give this device the folder's key? It can then read and change everything in the folder. Approve only a device you know.": "Ge den här enheten mappens nyckel? Den kan då läsa och ändra allt i mappen. Godkänn bara en enhet du känner.",
+  "This device does not hold this folder's key; an owner approves a request on one of their devices:": "Den här enheten har inte mappens nyckel; en ägare godkänner en begäran på någon av sina enheter:",
+  "{device} asks for folder {folder}. Nothing is shared until you approve it on this device or another of your devices; deny it if you do not know the device.": "{device} ber om mappen {folder}. Inget delas förrän du godkänner det på den här eller någon annan av dina enheter; avslå om du inte känner enheten.",
+  "This device does not hold folder {folder}: it sees the name and size only. Ask for it under Folders (or `varsto folder request {folder}`) and approve the request on a device that holds it.": "Den här enheten har inte mappen {folder}: den ser bara namnet och storleken. Be om den under Mappar (eller `varsto folder request {folder}`) och godkänn begäran på en enhet som har den.",
+  "Folder {folder} has no recovery copy: if every device that holds it is lost, the recovery words cannot restore it. Run `varsto recovery escrow` on a device that holds it: it asks for the recovery words and writes the copy.": "Mappen {folder} har ingen återställningskopia: om alla enheter som har den går förlorade kan återställningsorden inte återställa den. Kör `varsto recovery escrow` på en enhet som har den: den frågar efter återställningsorden och skriver kopian.",
+  "Which folders may the new device read at once? It sees the names of the others and can ask for them later.": "Vilka mappar får den nya enheten läsa direkt? Namnen på de andra ser den och kan be om dem senare.",
+  "Show the code": "Visa koden",
+  "No folder yet": "Inga mappar än",
+  "Your recovery words": "Dina återställningsord",
+  "Write them down too and keep them offline, apart from the vault key: with the vault key they restore every folder if all your devices are lost. They are never stored on a device and are shown once.": "Skriv ner dem också och förvara dem offline, åtskilda från valvnyckeln: tillsammans med valvnyckeln återställer de varje mapp om alla dina enheter går förlorade. De lagras aldrig på en enhet och visas bara en gång."
  },
  "patterns": [
   [

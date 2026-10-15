@@ -102,7 +102,7 @@ impl Lab {
     }
 
     /// Device B attached to "docs" and pulled.
-    fn device_b(&self, key: &str) -> Engine {
+    fn device_b(&self, a: &mut Engine, key: &str) -> Engine {
         let mut b = Engine::join(
             &self.root.join("b-home"),
             "phone",
@@ -111,6 +111,7 @@ impl Lab {
             self.storage.clone(),
         )
         .unwrap();
+        Engine::grant_all_for_tests(a, &mut b).unwrap();
         b.chunker = ChunkerParams::SMALL;
         b.attach_folder("docs", &self.b_dir, false).unwrap();
         b.sync(None).unwrap();
@@ -135,13 +136,13 @@ fn status_of(e: &Engine) -> varsto_core::engine::FolderStatus {
 #[test]
 fn adding_and_attaching_write_the_marker() {
     let lab = Lab::new();
-    let (a, key) = lab.device_a(2);
+    let (mut a, key) = lab.device_a(2);
     let id = a.folders()[0].0.folder_id.to_string();
     let marker: serde_json::Value =
         serde_json::from_slice(&fs::read(lab.a_dir.join(FOLDER_MARKER)).unwrap()).unwrap();
     assert_eq!(marker["folder_id"], id.as_str());
     assert_eq!(marker["name"], "docs");
-    let _b = lab.device_b(&key);
+    let _b = lab.device_b(&mut a, &key);
     assert!(lab.b_dir.join(FOLDER_MARKER).is_file());
     // The marker is not a file of the folder.
     assert_eq!(tree(&lab.a_dir), tree(&lab.b_dir));
@@ -152,7 +153,7 @@ fn adding_and_attaching_write_the_marker() {
 fn empty_root_without_marker_pauses_and_nothing_is_deleted() {
     let lab = Lab::new();
     let (mut a, key) = lab.device_a(5);
-    let mut b = lab.device_b(&key);
+    let mut b = lab.device_b(&mut a, &key);
     let before = tree(&lab.a_dir);
     assert_eq!(before.len(), 5);
 
@@ -232,7 +233,7 @@ fn another_folders_marker_pauses_until_repaired() {
 fn pull_does_not_fill_an_unmarked_root() {
     let lab = Lab::new();
     let (mut a, key) = lab.device_a(3);
-    let mut b = lab.device_b(&key);
+    let mut b = lab.device_b(&mut a, &key);
     // B's disk is unmounted; A adds files meanwhile.
     let away = lab.root.join("b-docs-away");
     fs::rename(&lab.b_dir, &away).unwrap();
@@ -286,7 +287,7 @@ fn older_mounts_get_a_marker_only_when_their_files_are_there() {
 fn mass_deletion_is_held_and_discard_restores() {
     let lab = Lab::new();
     let (mut a, key) = lab.device_a(150);
-    let mut b = lab.device_b(&key);
+    let mut b = lab.device_b(&mut a, &key);
     let before = tree(&lab.a_dir);
     for i in 0..120 {
         fs::remove_file(lab.a_dir.join(format!("f{i:04}.txt"))).unwrap();
@@ -340,7 +341,7 @@ fn files_coming_back_release_a_hold() {
 fn confirmed_mass_deletion_is_held_again_on_the_other_device() {
     let lab = Lab::new();
     let (mut a, key) = lab.device_a(150);
-    let mut b = lab.device_b(&key);
+    let mut b = lab.device_b(&mut a, &key);
     for i in 0..120 {
         fs::remove_file(lab.a_dir.join(format!("f{i:04}.txt"))).unwrap();
     }
@@ -378,7 +379,7 @@ fn confirmed_mass_deletion_is_held_again_on_the_other_device() {
 fn remote_mass_deletion_discarded_restores_on_every_device() {
     let lab = Lab::new();
     let (mut a, key) = lab.device_a(150);
-    let mut b = lab.device_b(&key);
+    let mut b = lab.device_b(&mut a, &key);
     let before = tree(&lab.a_dir);
     for i in 0..120 {
         fs::remove_file(lab.a_dir.join(format!("f{i:04}.txt"))).unwrap();
@@ -401,7 +402,7 @@ fn remote_mass_deletion_discarded_restores_on_every_device() {
 fn deletions_below_the_threshold_sync_normally() {
     let lab = Lab::new();
     let (mut a, key) = lab.device_a(150);
-    let mut b = lab.device_b(&key);
+    let mut b = lab.device_b(&mut a, &key);
     // 40 of 150: under half.
     for i in 0..40 {
         fs::remove_file(lab.a_dir.join(format!("f{i:04}.txt"))).unwrap();
@@ -470,7 +471,7 @@ fn the_guard_is_set_per_folder() {
 fn send_only_ignores_remote_changes_until_override() {
     let lab = Lab::new();
     let (mut a, key) = lab.device_a(4);
-    let mut b = lab.device_b(&key);
+    let mut b = lab.device_b(&mut a, &key);
     b.set_folder_mode("docs", FolderMode::SendOnly).unwrap();
     assert_eq!(status_of(&b).mode, FolderMode::SendOnly);
     let b_before = tree(&lab.b_dir);
@@ -519,7 +520,7 @@ fn send_only_ignores_remote_changes_until_override() {
 fn send_only_back_to_normal_applies_what_waited() {
     let lab = Lab::new();
     let (mut a, key) = lab.device_a(2);
-    let mut b = lab.device_b(&key);
+    let mut b = lab.device_b(&mut a, &key);
     b.set_folder_mode("docs", FolderMode::SendOnly).unwrap();
     fs::write(lab.a_dir.join("f0000.txt"), b"edited on A").unwrap();
     a.sync(None).unwrap();
@@ -538,7 +539,7 @@ fn send_only_back_to_normal_applies_what_waited() {
 fn receive_only_keeps_local_edits_private_and_revert_restores() {
     let lab = Lab::new();
     let (mut a, key) = lab.device_a(4);
-    let mut b = lab.device_b(&key);
+    let mut b = lab.device_b(&mut a, &key);
     b.set_folder_mode("docs", FolderMode::ReceiveOnly).unwrap();
     let vault = tree(&lab.a_dir);
 
@@ -588,7 +589,7 @@ fn receive_only_keeps_local_edits_private_and_revert_restores() {
 fn receive_only_remote_update_keeps_the_local_edit_in_the_trash() {
     let lab = Lab::new();
     let (mut a, key) = lab.device_a(2);
-    let mut b = lab.device_b(&key);
+    let mut b = lab.device_b(&mut a, &key);
     b.set_folder_mode("docs", FolderMode::ReceiveOnly).unwrap();
     fs::write(lab.b_dir.join("f0000.txt"), b"edited on B").unwrap();
     b.sync(None).unwrap();
@@ -609,7 +610,7 @@ fn receive_only_remote_update_keeps_the_local_edit_in_the_trash() {
 fn receive_only_back_to_normal_publishes_the_changes() {
     let lab = Lab::new();
     let (mut a, key) = lab.device_a(2);
-    let mut b = lab.device_b(&key);
+    let mut b = lab.device_b(&mut a, &key);
     b.set_folder_mode("docs", FolderMode::ReceiveOnly).unwrap();
     fs::write(lab.b_dir.join("f0000.txt"), b"edited on B").unwrap();
     b.sync(None).unwrap();
@@ -658,6 +659,7 @@ fn downloads_go_newest_first() {
         lab.storage.clone(),
     )
     .unwrap();
+    Engine::grant_all_for_tests(&mut a, &mut b).unwrap();
     b.chunker = ChunkerParams::SMALL;
     let log = Arc::new(Mutex::new(Vec::new()));
     b.record_downloads(log.clone());
@@ -679,6 +681,7 @@ fn downloads_go_newest_first() {
         lab.storage.clone(),
     )
     .unwrap();
+    Engine::grant_all_for_tests(&mut a, &mut c).unwrap();
     c.chunker = ChunkerParams::SMALL;
     c.attach_folder("docs", &lab2.b_dir, true).unwrap();
     c.sync(None).unwrap();

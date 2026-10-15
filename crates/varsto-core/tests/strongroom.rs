@@ -96,6 +96,7 @@ fn two_devices_with_docs(lab: &Lab) -> (Engine, Engine) {
     a.push("docs").unwrap();
 
     let mut b = Engine::join(&lab.b_home, "desk", PASS, &key, lab.storage.clone()).unwrap();
+    Engine::grant_all_for_tests(&mut a, &mut b).unwrap();
     b.chunker = ChunkerParams::SMALL;
     b.attach_folder("docs", &lab.b_dir, false).unwrap();
     b.pull("docs").unwrap();
@@ -327,6 +328,7 @@ fn backup_key_opens_the_strongroom_and_the_last_key_stays() {
 
     // Another device: only the spare key's file is there, and it opens.
     let mut b = Engine::join(&lab.b_home, "desk", PASS, &key, lab.storage.clone()).unwrap();
+    Engine::grant_all_for_tests(&mut a, &mut b).unwrap();
     b.chunker = ChunkerParams::SMALL;
     b.attach_folder("vault", &lab.b_dir, true).unwrap();
     assert_eq!(b.strongroom_keys("vault").unwrap().len(), 2);
@@ -365,7 +367,8 @@ fn backup_key_opens_the_strongroom_and_the_last_key_stays() {
     };
     assert!(b.unlock_strongroom("vault", &only_first, 5).is_err());
     let c_home = lab.root.join("c-home");
-    let c = Engine::join(&c_home, "tablet", PASS, &key, lab.storage.clone()).unwrap();
+    let mut c = Engine::join(&c_home, "tablet", PASS, &key, lab.storage.clone()).unwrap();
+    Engine::grant_all_for_tests(&mut a, &mut c).unwrap();
     let ck = c.strongroom_keys("vault").unwrap();
     assert_eq!(ck.len(), 1);
     assert_eq!(ck[0].label, "safe");
@@ -390,6 +393,7 @@ fn rekeying_a_strongroom_re_encrypts_it_under_a_new_key_for_every_enrolled_key()
         .unwrap();
 
     let mut b = Engine::join(&lab.b_home, "desk", PASS, &key, lab.storage.clone()).unwrap();
+    Engine::grant_all_for_tests(&mut a, &mut b).unwrap();
     b.chunker = ChunkerParams::SMALL;
     b.attach_folder("vault", &lab.b_dir, true).unwrap();
     let spare_name = spare.path.file_name().unwrap().to_owned();

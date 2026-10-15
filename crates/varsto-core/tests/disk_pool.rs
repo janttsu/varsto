@@ -200,6 +200,11 @@ fn detached_disk_is_reported_and_recognised_again_elsewhere() {
     // the attached disk from its index.
     let b_home = lab.root.join("b-home");
     let mut b = Engine::join(&b_home, "desk", PASS, &vault_key, lab.box_spec()).unwrap();
+    {
+        // A approves B for "docs" (format 2), then is gone again.
+        let mut a = Engine::open(&lab.root.join("a-home"), PASS).unwrap();
+        Engine::grant_all_for_tests(&mut a, &mut b).unwrap();
+    }
     b.chunker = ChunkerParams::SMALL;
     b.add_storage(lab.pool_spec("shelf")).unwrap();
     let disks = b.disks().unwrap();

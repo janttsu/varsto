@@ -139,6 +139,68 @@ fn field(v: &serde_json::Value, k: &str) -> Result<String> {
 
 // ----- offering device ------------------------------------------------------
 
+/// The joining device as it identifies itself once the code is confirmed,
+/// inside the SPAKE2-protected channel (format 2): its device signing key
+/// (whose hash is its device id) and its key-exchange key, so the offering
+/// device can seal the folders the person chose to it.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Joiner {
+    pub device_id: String,
+    pub name: String,
+    pub signing_key_hex: String,
+    pub kem_key_hex: String,
+}
+
+impl Joiner {
+    /// Check that the device id is the hash of the signing key and that the
+    /// key-exchange key parses.
+    pub fn check(&self) -> Result<crate::kem::EncapsKey> {
+        let pk = crate::crypto::VerifyingKey::from_bytes(&hex::decode(&self.signing_key_hex)?)?;
+        if crate::ledger::device_id_for(&pk).as_str() != self.device_id {
+            bail!("the joining device's id is not its key's");
+        }
+        crate::kem::EncapsKey::from_bytes(&hex::decode(&self.kem_key_hex)?)
+    }
+}
+
+/// Keys a joining device makes before it pairs: it signs with this key and
+/// receives folder keys with this key-exchange key from then on.
+pub struct JoinKeys {
+    pub signer: crate::crypto::SigningKey,
+    pub kem: crate::kem::DecapsKey,
+}
+
+crate::redacted_opaque!(JoinKeys);
+
+impl JoinKeys {
+    pub fn generate() -> JoinKeys {
+        JoinKeys {
+            signer: crate::crypto::SigningKey::generate(),
+            kem: crate::kem::DecapsKey::generate(),
+        }
+    }
+    fn joiner(&self, name: &str) -> Joiner {
+        let pk = self.signer.public();
+        Joiner {
+            device_id: crate::ledger::device_id_for(&pk).to_string(),
+            name: name.to_string(),
+            signing_key_hex: hex::encode(pk.to_bytes()),
+            kem_key_hex: hex::encode(self.kem.public().to_bytes()),
+        }
+    }
+}
+
+/// What a joining device takes away from a pairing: the bundle, and the
+/// keys it sent (it must join with them).
+pub struct Received {
+    pub bundle: Bundle,
+    pub keys: JoinKeys,
+}
+
+fn hello_key(key: &SecretKey) -> SecretKey {
+    key.derive("pair-hello", &[])
+}
+
 #[derive(Clone, Serialize)]
 pub struct OfferStatus {
     pub open: bool,
@@ -150,6 +212,10 @@ pub struct OfferStatus {
     pub failed_attempts: u32,
     /// Name of the device that received the vault, once one has.
     pub paired_with: Option<String>,
+    /// That device's identity and key-exchange key (format 2): the offering
+    /// device seals the folders the person chose to it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub joiner: Option<Joiner>,
     /// Why the offer closed, if it closed without pairing.
     pub closed_reason: Option<String>,
 }
@@ -186,6 +252,7 @@ impl Offer {
                 expires_in_secs: OFFER_TTL.as_secs(),
                 failed_attempts: 0,
                 paired_with: None,
+                joiner: None,
                 closed_reason: None,
             },
             expires: Instant::now() + OFFER_TTL,
@@ -276,10 +343,13 @@ fn serve(
     inner: &Mutex<OfferInner>,
     stop: &AtomicBool,
 ) {
-    let close = |reason: Option<&str>, paired: Option<String>| {
+    let close = |reason: Option<&str>, paired: Option<(String, Option<Joiner>)>| {
         let mut g = inner.lock().unwrap();
         g.status.open = false;
-        g.status.paired_with = paired;
+        if let Some((name, joiner)) = paired {
+            g.status.paired_with = Some(name);
+            g.status.joiner = joiner;
+        }
         g.status.closed_reason = reason.map(str::to_string);
         stop.store(true, Ordering::SeqCst);
     };
@@ -297,8 +367,8 @@ fn serve(
             Err(_) => continue,
         };
         match offer_exchange(stream, digits, bundle) {
-            Ok(name) => {
-                close(None, Some(name));
+            Ok(paired) => {
+                close(None, Some(paired));
                 return;
             }
             Err(Attempt::Wrong) => {
@@ -323,7 +393,11 @@ enum Attempt {
     Broken,
 }
 
-fn offer_exchange(stream: TcpStream, digits: &str, bundle: &Bundle) -> Result<String, Attempt> {
+fn offer_exchange(
+    stream: TcpStream,
+    digits: &str,
+    bundle: &Bundle,
+) -> Result<(String, Option<Joiner>), Attempt> {
     let broken = |_| Attempt::Broken;
     stream.set_nonblocking(false).map_err(broken)?;
     stream.set_read_timeout(Some(IO_TIMEOUT)).map_err(broken)?;
@@ -348,15 +422,24 @@ fn offer_exchange(stream: TcpStream, digits: &str, bundle: &Bundle) -> Result<St
     .map_err(|_| Attempt::Broken)?;
     // Past this point the joining device has made its guess: anything but
     // the right confirmation (a wrong one, an error line, silence) counts.
-    let theirs = read_line(&mut r)
-        .ok()
-        .and_then(|reply| field(&reply, "confirm").ok());
+    let reply = read_line(&mut r).ok();
+    let theirs = reply
+        .as_ref()
+        .and_then(|reply| field(reply, "confirm").ok());
     if !theirs
         .as_deref()
         .is_some_and(|t| crypto::ct_eq(t.as_bytes(), confirm(&key, "join").as_bytes()))
     {
         return Err(Attempt::Wrong);
     }
+    // The joining device's keys, under the confirmed session key.
+    let joiner = reply
+        .as_ref()
+        .and_then(|reply| field(reply, "keys").ok())
+        .and_then(|h| hex::decode(h).ok())
+        .and_then(|ct| crypto::decrypt(&hello_key(&key), b"varsto-pair-hello", &ct).ok())
+        .and_then(|plain| serde_json::from_slice::<Joiner>(&plain).ok())
+        .filter(|j| j.check().is_ok());
     let plain = serde_json::to_vec(bundle).map_err(|_| Attempt::Broken)?;
     let sealed = crypto::encrypt(
         &key.derive("pair-bundle", &[]),
@@ -371,7 +454,7 @@ fn offer_exchange(stream: TcpStream, digits: &str, bundle: &Bundle) -> Result<St
     if done.get("ok").and_then(|v| v.as_bool()) != Some(true) {
         return Err(Attempt::Broken);
     }
-    Ok(name)
+    Ok((name, joiner))
 }
 
 // ----- joining device -------------------------------------------------------
@@ -434,8 +517,15 @@ pub fn discover(code: &str, timeout: Duration) -> Result<Vec<SocketAddr>> {
     Ok(found)
 }
 
-/// Run the exchange with an offering device and return what it sent.
+/// Run the exchange with an offering device and return what it sent (with
+/// a fresh pair of keys this device then forgets: tests).
 pub fn fetch(code: &str, my_name: &str, addr: SocketAddr) -> Result<Bundle> {
+    fetch_with(code, my_name, addr, &JoinKeys::generate())
+}
+
+/// Run the exchange, identifying this device with `keys` once the code is
+/// confirmed, and return what the offering device sent.
+pub fn fetch_with(code: &str, my_name: &str, addr: SocketAddr, keys: &JoinKeys) -> Result<Bundle> {
     let digits = normalize(code)?;
     let stream = TcpStream::connect_timeout(&addr, IO_TIMEOUT)
         .with_context(|| format!("cannot reach {addr}"))?;
@@ -463,9 +553,11 @@ pub fn fetch(code: &str, my_name: &str, addr: SocketAddr) -> Result<Bundle> {
         let _ = write_line(&mut w, &serde_json::json!({"error": "wrong code"}));
         bail!("wrong pairing code");
     }
+    let hello = serde_json::to_vec(&keys.joiner(my_name))?;
+    let sealed_hello = crypto::encrypt(&hello_key(&key), b"varsto-pair-hello", &hello)?;
     write_line(
         &mut w,
-        &serde_json::json!({"confirm": confirm(&key, "join")}),
+        &serde_json::json!({"confirm": confirm(&key, "join"), "keys": hex::encode(sealed_hello)}),
     )?;
     let sealed = hex::decode(field(&read_line(&mut r)?, "bundle")?)?;
     let plain = crypto::decrypt(
@@ -478,8 +570,20 @@ pub fn fetch(code: &str, my_name: &str, addr: SocketAddr) -> Result<Bundle> {
     Ok(bundle)
 }
 
-/// Discover (unless `address` is given) and fetch.
-pub fn receive(code: &str, my_name: &str, address: Option<&str>) -> Result<Bundle> {
+/// Discover (unless `address` is given) and fetch, with keys made for this
+/// device now: join with `Received::keys`.
+pub fn receive(code: &str, my_name: &str, address: Option<&str>) -> Result<Received> {
+    let keys = JoinKeys::generate();
+    let bundle = receive_with(code, my_name, address, &keys)?;
+    Ok(Received { bundle, keys })
+}
+
+fn receive_with(
+    code: &str,
+    my_name: &str,
+    address: Option<&str>,
+    keys: &JoinKeys,
+) -> Result<Bundle> {
     let addrs: Vec<SocketAddr> = match address.map(str::trim).filter(|a| !a.is_empty()) {
         Some(a) => {
             use std::net::ToSocketAddrs;
@@ -491,7 +595,7 @@ pub fn receive(code: &str, my_name: &str, address: Option<&str>) -> Result<Bundl
     };
     let mut last = None;
     for a in addrs {
-        match fetch(code, my_name, a) {
+        match fetch_with(code, my_name, a, keys) {
             Ok(b) => return Ok(b),
             Err(e) => last = Some(e),
         }
@@ -558,6 +662,10 @@ mod tests {
         let s = o.status();
         assert!(!s.open);
         assert_eq!(s.paired_with.as_deref(), Some("phone"));
+        // The joining device's keys arrived with it, checked.
+        let j = s.joiner.expect("the joiner identified itself");
+        assert_eq!(j.name, "phone");
+        j.check().unwrap();
         // Single use.
         assert!(fetch(&code, "other", addr(&o)).is_err());
     }
@@ -591,7 +699,13 @@ mod tests {
             found.iter().any(|a| a.port() == o.status().port),
             "{found:?}"
         );
-        let b = receive(&code, "phone", None).unwrap();
-        assert_eq!(b.from, "laptop");
+        let r = receive(&code, "phone", None).unwrap();
+        assert_eq!(r.bundle.from, "laptop");
+        std::thread::sleep(Duration::from_millis(300));
+        let j = o.status().joiner.unwrap();
+        assert_eq!(
+            j.device_id,
+            crate::ledger::device_id_for(&r.keys.signer.public()).to_string()
+        );
     }
 }

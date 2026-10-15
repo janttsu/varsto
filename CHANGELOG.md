@@ -16,6 +16,15 @@ spec still names them because sections were written as the work was done.
 
 ## Unreleased
 
+### Added
+
+- Storage format 2 (spec 61): every record a device publishes is signed and
+  counts only as its writer's ledger announced it; folder keys reach a
+  device only as grants an owner approves by hand (`varsto folder request`,
+  `approve`, `deny`; pairing with `--folders`); a second recovery word set
+  restores every folder when all devices are lost. Vaults of format 0 and 1
+  are refused: create a fresh vault.
+
 ### Changed
 
 - Format 2 blocks (spec 62): chunk nonces follow the packed bytes, chunks are

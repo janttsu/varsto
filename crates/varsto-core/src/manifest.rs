@@ -5,9 +5,9 @@
 //! deterministic winner and a conflict copy, never silent data loss (F-003).
 
 use crate::crypto::{self, SecretKey, SigningKey, VerifyingKey};
-use crate::record::{self, RecordKind, SignedRecord};
 use crate::fsmeta::FileMeta;
 use crate::ids::{ChunkId, DeviceId, FolderId, ObjectName, VaultId};
+use crate::record::{self, RecordKind, SignedRecord};
 use anyhow::{bail, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;

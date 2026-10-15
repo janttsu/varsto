@@ -201,7 +201,10 @@ impl Engine {
             ) else {
                 continue;
             };
-            match view.manifest_hashes.get(&(rec.folder_id.clone(), dev.clone())) {
+            match view
+                .manifest_hashes
+                .get(&(rec.folder_id.clone(), dev.clone()))
+            {
                 Some((a, h)) if *a == seq && *h != env.body_hash => continue,
                 Some((a, _)) if *a < seq && !mine => continue,
                 None if !mine => continue,

@@ -307,6 +307,19 @@ impl Engine {
             .filter(|b| b.pulls >= ledger_recovery::WITHHOLD_PULLS)
             .map(|b| b.name.clone())
             .collect();
+        inputs.folder_requests = self
+            .folder_requests_seen()
+            .into_iter()
+            .map(|r| (r.device, r.folder))
+            .collect();
+        inputs.folders_without_escrow = self.folders_without_escrow();
+        inputs.folders_without_key = self
+            .keyring
+            .folders
+            .values()
+            .filter(|r| !r.is_removed() && !self.has_folder_key(r))
+            .map(|r| r.name.clone())
+            .collect();
         let view = self.view()?;
         inputs.forked = self.forked_self || !view.forked.is_empty();
         let repair = observed

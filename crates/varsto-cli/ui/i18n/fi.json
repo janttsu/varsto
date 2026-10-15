@@ -1517,7 +1517,23 @@
   "Attach a new disk to continue moving {folder}": "Liitä uusi levy jatkaaksesi kansion {folder} siirtoa",
   "{left} of {folder} are still on {from}. The move to {to} stops when the pool has no room and carries on by itself when a disk is attached.": "{left} kansiosta {folder} on yhä kohteessa {from}. Siirto kohteeseen {to} pysähtyy, kun levyvarastossa ei ole tilaa, ja jatkuu itsestään, kun levy liitetään.",
   "Plug the disk in. Nothing else is needed; `varsto move status` shows how far the move has come.": "Liitä levy. Muuta ei tarvita; `varsto move status` näyttää, kuinka pitkällä siirto on.",
-  "The administrator command asks for the 24 root words without echo.": "Ylläpitäjäkomento kysyy 24 juurisanaa ilman kaikua."
+  "The administrator command asks for the 24 root words without echo.": "Ylläpitäjäkomento kysyy 24 juurisanaa ilman kaikua.",
+  "A device asks for a folder:": "Laite pyytää kansiota:",
+  "Approve": "Hyväksy",
+  "Approve read-only": "Hyväksy vain luku",
+  "Deny": "Hylkää",
+  "Ask for it": "Pyydä",
+  "Give this device the folder's key, read-only? It can read everything in the folder; what it writes there is not taken.": "Annetaanko tälle laitteelle kansion avain vain lukuoikeudella? Se voi lukea kaiken kansiossa; mitä se kirjoittaa sinne, ei oteta vastaan.",
+  "Give this device the folder's key? It can then read and change everything in the folder. Approve only a device you know.": "Annetaanko tälle laitteelle kansion avain? Se voi sitten lukea ja muuttaa kaikkea kansiossa. Hyväksy vain laite, jonka tunnet.",
+  "This device does not hold this folder's key; an owner approves a request on one of their devices:": "Tällä laitteella ei ole tämän kansion avainta; omistaja hyväksyy pyynnön jollakin laitteistaan:",
+  "{device} asks for folder {folder}. Nothing is shared until you approve it on this device or another of your devices; deny it if you do not know the device.": "{device} pyytää kansiota {folder}. Mitään ei jaeta ennen kuin hyväksyt pyynnön tällä tai jollakin muulla laitteellasi; hylkää se, jos et tunne laitetta.",
+  "This device does not hold folder {folder}: it sees the name and size only. Ask for it under Folders (or `varsto folder request {folder}`) and approve the request on a device that holds it.": "Tällä laitteella ei ole kansiota {folder}: se näkee vain nimen ja koon. Pyydä sitä Kansiot-sivulla (tai `varsto folder request {folder}`) ja hyväksy pyyntö laitteella, jolla kansio on.",
+  "Folder {folder} has no recovery copy: if every device that holds it is lost, the recovery words cannot restore it. Run `varsto recovery escrow` on a device that holds it: it asks for the recovery words and writes the copy.": "Kansiolla {folder} ei ole palautuskopiota: jos jokainen laite, jolla se on, katoaa, palautussanat eivät palauta sitä. Aja `varsto recovery escrow` laitteella, jolla kansio on: se kysyy palautussanat ja kirjoittaa kopion.",
+  "Which folders may the new device read at once? It sees the names of the others and can ask for them later.": "Mitä kansioita uusi laite saa lukea heti? Muiden nimet se näkee ja voi pyytää niitä myöhemmin.",
+  "Show the code": "Näytä koodi",
+  "No folder yet": "Ei vielä kansioita",
+  "Your recovery words": "Palautussanasi",
+  "Write them down too and keep them offline, apart from the vault key: with the vault key they restore every folder if all your devices are lost. They are never stored on a device and are shown once.": "Kirjoita nekin muistiin ja säilytä offline-tilassa, erillään holviavaimesta: holviavaimen kanssa ne palauttavat jokaisen kansion, jos kaikki laitteesi katoavat. Niitä ei koskaan tallenneta laitteelle, ja ne näytetään vain kerran."
  },
  "patterns": [
   [

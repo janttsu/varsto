@@ -131,7 +131,7 @@ impl VaultEpochs {
     }
 
     fn file_key(keys: &Keys) -> SecretKey {
-        keys.master.derive("local-vault-keys", &[])
+        keys.local.derive("local-vault-keys", &[])
     }
 
     fn aad(vault: &VaultId, device: &DeviceId) -> Vec<u8> {
@@ -956,47 +956,21 @@ impl Engine {
         (id, self.current_vault_key().derive("ledger", &[]))
     }
 
-    /// Folders that keep writing under their epoch-0 key: shared with other
-    /// users (members only hold that key), or Strongroom (its key is never
-    /// derived from the vault key).
-    pub(super) fn is_frozen(&self, rec: &FolderRecord) -> bool {
-        rec.is_strongroom() || rec.shared || self.epochs.frozen.contains(&rec.folder_id)
-    }
-
-    /// The keys of a folder for every epoch this device knows. Frozen folders
-    /// still read later vault epochs (a device that did not know the folder
-    /// was shared may have used one) but write under epoch 0, or under the
-    /// folder's newest share epoch once a member was removed (`share_ops`).
+    /// The keys of a folder for every epoch this device holds (format 2: a
+    /// folder key is random and reaches the device only in a grant; a vault
+    /// key epoch derives no folder key). New data is written under the
+    /// folder's newest epoch.
     pub(super) fn folder_keys(&self, rec: &FolderRecord) -> Result<FolderKeys> {
         let fk = rec.keys()?;
         let mut later: BTreeMap<u32, SecretKey> = BTreeMap::new();
-        if !self.vault.member {
-            let scope: [&[u8]; 2] = [
-                self.vault.vault_id.as_str().as_bytes(),
-                rec.folder_id.as_str().as_bytes(),
-            ];
-            later.extend(
-                self.epochs
-                    .keys
-                    .iter()
-                    .filter(|(e, _)| **e > 0)
-                    .map(|(e, k)| (*e, k.derive("folder-epoch", &scope))),
-            );
-        }
         for (e, k) in &rec.epoch_keys {
             later.insert(*e, SecretKey::from_hex(k)?);
         }
-        let share_epoch = rec
-            .epoch_keys
-            .keys()
-            .copied()
-            .filter(|e| *e >= crate::share::SHARE_EPOCH_BASE)
-            .max();
+        let newest = later.keys().next_back().copied();
         let fk = fk.with_epochs(later);
-        Ok(match share_epoch {
+        Ok(match newest {
             Some(e) => fk.write_at(e),
-            None if self.vault.member || self.is_frozen(rec) => fk.write_at_base(),
-            None => fk,
+            None => fk.write_at_base(),
         })
     }
 
@@ -1388,30 +1362,10 @@ impl Engine {
         let target_name = target_names[0].clone();
         let new = highest + 1;
         let new_key = SecretKey::random();
-        // Folders that keep their key: Strongroom, and anything shared with
-        // other users (by the local flag or by member records in storage).
-        let mut shared_on_storage: BTreeSet<FolderId> = BTreeSet::new();
-        for (_, b) in self.metadata_storages(false)? {
-            for k in b.list(SHARE_PREFIX)? {
-                if let Some(f) = k
-                    .strip_prefix(SHARE_PREFIX)
-                    .and_then(|r| r.split('/').next())
-                    .and_then(|f| FolderId::from_hex(f).ok())
-                {
-                    shared_on_storage.insert(f);
-                }
-            }
-        }
-        let mut frozen = self.epochs.frozen.clone();
-        let (mut rekeyed, mut kept) = (Vec::new(), Vec::new());
-        for rec in self.keyring.folders.values() {
-            if self.is_frozen(rec) || shared_on_storage.contains(&rec.folder_id) {
-                frozen.insert(rec.folder_id.clone());
-                kept.push(rec.name.clone());
-            } else {
-                rekeyed.push(rec.name.clone());
-            }
-        }
+        // Format 2: no folder key comes from the vault key, so a new vault
+        // key re-keys no folder by itself; the folders the removed devices
+        // held get folder epochs of their own below.
+        let frozen: BTreeSet<FolderId> = BTreeSet::new();
         let record = EpochRecord {
             epoch: new,
             previous_hex: self.current_vault_key().to_hex(),
@@ -1476,6 +1430,16 @@ impl Engine {
         self.save_epochs()?;
         let (sent, pending) = self.issue_grants()?;
         self.reseal_own_peer_record();
+        // Every folder a removed device held gets a new folder key, granted
+        // to everyone who stays: a few now, the rest on the next syncs.
+        let targets_v: Vec<DeviceId> = targets.iter().cloned().collect();
+        let rekeyed = self.rekey_after_revocation(&targets_v)?;
+        let pending_rekeys = self.folder_rekeys_pending();
+        let kept: Vec<String> = if pending_rekeys > 0 {
+            vec![format!("{pending_rekeys} more on the next syncs")]
+        } else {
+            Vec::new()
+        };
         Ok(RevokeReport {
             device_id: target.to_string(),
             name: target_name,
@@ -1571,7 +1535,10 @@ impl Engine {
                         .device_key(&env.issuer)
                         .is_some_and(|pk| env.verify(&self.vault.vault_id, &pk).is_ok());
                 if genuine {
-                    seen.insert(crypto::hash(env.record.body.as_bytes()).to_vec(), env.issuer);
+                    seen.insert(
+                        crypto::hash(env.record.body.as_bytes()).to_vec(),
+                        env.issuer,
+                    );
                 }
             }
             if seen.len() > 1 {
@@ -2166,14 +2133,12 @@ mod tests {
         // device): the signed header no longer verifies.
         let mut t = s.clone();
         t.record.key_id = crate::record::registry_key_id(1);
-        let t: SignedRevocation =
-            serde_json::from_slice(&serde_json::to_vec(&t).unwrap()).unwrap();
+        let t: SignedRevocation = serde_json::from_slice(&serde_json::to_vec(&t).unwrap()).unwrap();
         assert_eq!(t.key_epoch, 1);
         assert!(t.open(&vault, &key, &issuer.public()).is_err());
         let mut t = s.clone();
         t.record.scope = DeviceId::random().to_string();
-        let t: SignedRevocation =
-            serde_json::from_slice(&serde_json::to_vec(&t).unwrap()).unwrap();
+        let t: SignedRevocation = serde_json::from_slice(&serde_json::to_vec(&t).unwrap()).unwrap();
         assert!(t.open(&vault, &key, &issuer.public()).is_err());
     }
 

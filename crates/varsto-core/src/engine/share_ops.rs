@@ -15,8 +15,7 @@
 
 use super::*;
 use crate::share::{
-    self, InviteRecord, RemovedMember, ShareEpochRecord, ShareGrant, ShareKeyRecord, ShareRole,
-    SHARE_EPOCH_BASE,
+    self, InviteRecord, RemovedMember, ShareEpochRecord, ShareGrant, ShareRole, SHARE_EPOCH_BASE,
 };
 use crate::vault::{RequestCode, SealedShareToken, ShareRequest};
 
@@ -200,20 +199,9 @@ impl Engine {
     }
 
     /// Folder keys of every epoch after 0 that this device holds for a
-    /// folder: vault-epoch keys (owner devices) and share epochs.
+    /// folder (format 2: a folder's epochs only, never vault-key epochs).
     fn later_folder_keys(&self, rec: &FolderRecord) -> BTreeMap<u32, String> {
-        let mut out = BTreeMap::new();
-        if !self.vault.member {
-            let scope: [&[u8]; 2] = [
-                self.vault.vault_id.as_str().as_bytes(),
-                rec.folder_id.as_str().as_bytes(),
-            ];
-            for (e, k) in self.epochs.keys.iter().filter(|(e, _)| **e > 0) {
-                out.insert(*e, k.derive("folder-epoch", &scope).to_hex());
-            }
-        }
-        out.extend(rec.epoch_keys.iter().map(|(e, k)| (*e, k.clone())));
-        out
+        rec.epoch_keys.clone()
     }
 
     /// A member keeps its share-request key as its KEM key (grants of later
@@ -249,8 +237,6 @@ impl Engine {
         if rec.is_strongroom() {
             bail!("a Strongroom folder cannot be shared");
         }
-        let needs_epoch =
-            self.key_epoch() > 0 && !self.is_frozen(&rec) && Self::newest_share_epoch(&rec) == 0;
         if let Some(r) = self.keyring.folders.get_mut(&rec.folder_id) {
             r.shared = true;
         }
@@ -267,9 +253,6 @@ impl Engine {
                 });
                 self.commit_batch()?;
             }
-        }
-        if needs_epoch {
-            self.start_share_epoch(&rec.folder_id, Vec::new(), BTreeSet::new())?;
         }
         self.publish_registry()?;
         let rec = self.keyring.folders[&rec.folder_id].clone();
@@ -492,7 +475,7 @@ impl Engine {
             .keyring
             .folders
             .values()
-            .filter(|f| f.shared && !f.is_removed())
+            .filter(|f| f.shared && !f.is_removed() && !f.key_hex.is_empty())
         {
             let base = vault::share_registry_key(&f.folder_key()?, &f.folder_id);
             backend.put_if_absent(
@@ -603,7 +586,7 @@ impl Engine {
                 .keyring
                 .folders
                 .values()
-                .filter(|f| f.shared && !f.is_removed())
+                .filter(|f| f.shared && !f.is_removed() && !f.key_hex.is_empty())
                 .cloned()
                 .collect();
             for f in &shared {
@@ -633,9 +616,7 @@ impl Engine {
         storages: &OpenStorages,
         book: &mut ShareBook,
     ) -> Result<(bool, bool)> {
-        let fr_keys = self.folder_record_keys();
         let mut marked = false;
-        let mut keys: BTreeMap<(FolderId, u32), SecretKey> = BTreeMap::new();
         for (_, backend) in storages {
             for key in backend.list(share::INVITE_PREFIX)? {
                 let Some(fid) = key
@@ -652,36 +633,11 @@ impl Engine {
                     }
                 }
             }
-            for key in backend.list(share::KEY_PREFIX)? {
-                let Some((fid, rest)) = key
-                    .strip_prefix(share::KEY_PREFIX)
-                    .and_then(|r| r.split_once('/'))
-                else {
-                    continue;
-                };
-                let (Ok(fid), Some(e)) = (FolderId::from_hex(fid), share::epoch_from_name(rest))
-                else {
-                    continue;
-                };
-                let Some(rec) = self.keyring.folders.get(&fid) else {
-                    continue;
-                };
-                if rec.epoch_keys.contains_key(&e) || keys.contains_key(&(fid.clone(), e)) {
-                    continue;
-                }
-                if let Some(blob) = backend.get(&key)? {
-                    if let Some(k) = fr_keys.iter().find_map(|rk| {
-                        ShareKeyRecord::open(&blob, &self.vault.vault_id, &fid, e, rk).ok()
-                    }) {
-                        keys.insert((fid, e), k);
-                    }
-                }
-            }
         }
-        let mut adopted = false;
-        for ((fid, e), k) in keys {
-            adopted |= self.adopt_share_epoch(storages, book, &fid, e, &k, None)?;
-        }
+        // Folder keys and their later epochs come as grants (format 2).
+        let adopted = self.pull_folder_grants(storages, book)?;
+        // And go out to holders that missed an epoch while locked out.
+        self.regrant_holders(storages)?;
         Ok((marked, adopted))
     }
 
@@ -704,7 +660,7 @@ impl Engine {
             .keyring
             .folders
             .values()
-            .filter(|f| f.shared && !f.is_removed())
+            .filter(|f| f.shared && !f.is_removed() && !f.key_hex.is_empty())
             .map(|f| f.folder_id.clone())
             .collect();
         let mut adopted = false;
@@ -829,7 +785,7 @@ impl Engine {
             .keyring
             .folders
             .values()
-            .filter(|f| f.shared && !f.is_removed())
+            .filter(|f| f.shared && !f.is_removed() && !f.key_hex.is_empty())
             .cloned()
             .collect();
         for f in &shared {
@@ -949,13 +905,18 @@ impl Engine {
     /// adopted so far named. A record from anyone else is never applied,
     /// so the list of owners never grows from a record that is not an
     /// owner's.
-    fn share_epoch_issuer_ok(&self, book: &ShareBook, folder: &FolderId, issuer: &DeviceId) -> bool {
+    fn share_epoch_issuer_ok(
+        &self,
+        book: &ShareBook,
+        folder: &FolderId,
+        issuer: &DeviceId,
+    ) -> bool {
         if self.vault.member {
             book.folders
                 .get(folder)
                 .is_some_and(|s| s.owners.contains(issuer))
         } else {
-            self.trusted(issuer)
+            self.trusted(issuer) && self.device_may_grant(folder, issuer)
         }
     }
 
@@ -963,7 +924,7 @@ impl Engine {
     /// (signed by one of the owner's devices and, when the key came in a
     /// grant, the very record the grant names), keep the key and every older
     /// one it names, and apply the removals.
-    fn adopt_share_epoch(
+    pub(super) fn adopt_share_epoch(
         &mut self,
         storages: &OpenStorages,
         book: &mut ShareBook,
@@ -983,6 +944,23 @@ impl Engine {
                 if record_hash.is_some_and(|h| h != env.body_hash)
                     || !self.share_epoch_issuer_ok(book, folder, &r.issuer)
                 {
+                    continue;
+                }
+                // The issuer held the folder: its record proves the
+                // first-epoch key this device holds too.
+                let proven = self
+                    .keyring
+                    .folders
+                    .get(folder)
+                    .and_then(|f| f.folder_key().ok())
+                    .is_some_and(|base| {
+                        crypto::ct_eq(
+                            share::epoch_chain_mac(&base, folder, e).as_bytes(),
+                            r.chain_mac.as_bytes(),
+                        )
+                    });
+                if !proven {
+                    log::warn!(folder:% = folder, epoch = e; "a folder epoch whose issuer does not hold the folder: refused");
                     continue;
                 }
                 let Some(pk) = self.share_issuer_key(&r.issuer) else {
@@ -1012,7 +990,9 @@ impl Engine {
         let Some(rec) = self.keyring.folders.get_mut(&r.folder) else {
             return Ok(());
         };
-        rec.shared = true;
+        if r.shared || member {
+            rec.shared = true;
+        }
         rec.epoch_keys.insert(r.epoch, key.to_hex());
         for (oe, ok) in &r.older {
             // Vault-epoch keys are derived on owner devices; members keep them.
@@ -1030,7 +1010,11 @@ impl Engine {
                 epoch: r.epoch,
             });
             st.participants.remove(&m.device);
-            if m.device == self.vault.device_id {
+            // A member's batches end at its cut-off. A device of the vault
+            // is removed by the vault's own revocation (section 21), never
+            // by a folder epoch: an owner device cannot remove another
+            // device of the vault this way.
+            if m.device == self.vault.device_id || self.devices.devices.contains_key(&m.device) {
                 continue;
             }
             self.devices
@@ -1216,7 +1200,7 @@ impl Engine {
     /// Start a new share epoch of a folder: a random key for everything
     /// written from now on, published for the owner's devices and sealed to
     /// the members that stay. Returns the epoch and the grants report.
-    fn start_share_epoch(
+    pub(super) fn start_share_epoch(
         &mut self,
         folder: &FolderId,
         removed: Vec<RemovedMember>,
@@ -1277,16 +1261,18 @@ impl Engine {
             removed: removed.clone(),
             revoked_invites: revoke_invites.iter().cloned().collect(),
             kept_invites,
+            shared: rec.shared,
+            chain_mac: String::new(),
         };
+        let base = rec.folder_key()?;
         let mut tries = 0;
         let blob = loop {
             record.epoch = e;
+            record.chain_mac = share::epoch_chain_mac(&base, folder, e);
             let blob = record
                 .seal(&self.vault.vault_id, &key, &self.keys.signer)?
                 .to_bytes();
-            if !first.exists(&ShareKeyRecord::storage_key(folder, e))?
-                && first.put_if_absent(&ShareEpochRecord::storage_key(folder, e), &blob)?
-            {
+            if first.put_if_absent(&ShareEpochRecord::storage_key(folder, e), &blob)? {
                 break blob;
             }
             tries += 1;
@@ -1301,18 +1287,28 @@ impl Engine {
         for (_, b) in storages.iter().skip(1) {
             b.put_if_absent(&ShareEpochRecord::storage_key(folder, e), &blob)?;
         }
-        let key_blob = ShareKeyRecord::seal(
-            &self.vault.vault_id,
-            folder,
-            e,
-            &key,
-            &self.folder_record_key_now(),
-        )?;
-        for (_, b) in &storages {
-            b.put_if_absent(&ShareKeyRecord::storage_key(folder, e), &key_blob)?;
-        }
         self.apply_share_epoch(&mut book, &record, &key)?;
+        self.escrow_if_possible();
         let rec = self.keyring.folders[folder].clone();
+        // The owner's other devices that held the folder (and stay) get the
+        // new key as grants, like everyone else (format 2: no folder key
+        // under the vault key).
+        let readable_now = self.metadata_storages(false)?;
+        let holders = self.folder_holders(&readable_now, &rec)?;
+        let stay: Vec<DeviceId> = holders
+            .into_iter()
+            .filter(|d| {
+                *d != self.vault.device_id
+                    && !gone.contains(d)
+                    && self.devices.devices.contains_key(d)
+                    && self.trusted(d)
+            })
+            .collect();
+        for d in &stay {
+            if let Some(ek) = self.device_kem_key(&readable_now, d)? {
+                self.grant_folder_to(&rec, d, &ek)?;
+            }
+        }
         let readable = self.metadata_storages(false)?;
         self.issue_share_grants(&readable, &mut book, &rec)?;
         self.save_share_book(&book)?;

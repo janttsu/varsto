@@ -274,7 +274,11 @@ impl SignedRecord {
     /// algorithm is accepted.
     pub fn verify(&self, pk: &VerifyingKey) -> Result<()> {
         if self.sig_alg != crypto::SIG_ALG {
-            bail!("record signed with {}, not {}", self.sig_alg, crypto::SIG_ALG);
+            bail!(
+                "record signed with {}, not {}",
+                self.sig_alg,
+                crypto::SIG_ALG
+            );
         }
         let body = self.body_bytes()?;
         if hex::encode(crypto::hash(&body)) != self.body_hash {
@@ -295,7 +299,11 @@ impl SignedRecord {
     /// name says.
     pub fn expect(&self, e: &Expect<'_>) -> Result<()> {
         if self.kind != e.kind {
-            bail!("a {} record where a {} record was expected", self.kind, e.kind);
+            bail!(
+                "a {} record where a {} record was expected",
+                self.kind,
+                e.kind
+            );
         }
         if &self.vault != e.vault {
             bail!("record of another vault");
@@ -364,7 +372,12 @@ impl SignedRecord {
 
     /// The whole acceptance of an envelope: header as expected, hash and
     /// signature valid against `pk`, body opens under `key`.
-    pub fn verify_open(&self, e: &Expect<'_>, pk: &VerifyingKey, key: &SecretKey) -> Result<Vec<u8>> {
+    pub fn verify_open(
+        &self,
+        e: &Expect<'_>,
+        pk: &VerifyingKey,
+        key: &SecretKey,
+    ) -> Result<Vec<u8>> {
         self.expect(e)?;
         self.verify(pk)?;
         self.open(key)
@@ -487,7 +500,8 @@ mod tests {
         };
         let r = h.seal(&key, b"x", &sk).unwrap();
         r.verify(&sk.public()).unwrap();
-        let tamper: Vec<Box<dyn Fn(&mut SignedRecord)>> = vec![
+        type Tamper = Box<dyn Fn(&mut SignedRecord)>;
+        let tamper: Vec<Tamper> = vec![
             Box::new(|r| r.kind = RecordKind::Manifest),
             Box::new(|r| r.vault = VaultId::random()),
             Box::new(|r| r.scope = "g".into()),
