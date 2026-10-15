@@ -299,7 +299,23 @@ struct Locator {
     view: HashMap<String, Vec<PackLoc>>,
     /// Written or learned by this process.
     own: HashMap<String, Vec<PackLoc>>,
+    /// (storage, pack, offset) of every place a live claim of the view
+    /// names: a tombstone of another device never makes one of them dead.
+    claimed: HashSet<(String, String, u64)>,
     generation: Option<u64>,
+}
+
+/// The folders this device holds the keys of, for folder-scoped tombstone
+/// lists (format 2: under the folder's metadata key K10, so every device
+/// of the folder, members of a shared folder too, reads them).
+#[derive(Default)]
+struct Folders {
+    /// Folder id -> its metadata keys, the one written under first.
+    keys: HashMap<String, Vec<SecretKey>>,
+    /// Object name -> the folder whose block it is (from the view).
+    of_object: HashMap<String, String>,
+    /// Changes whenever `keys` does: lists no key opened are tried again.
+    generation: u64,
 }
 
 impl Locator {
@@ -320,8 +336,12 @@ struct StoreState {
     /// Packs listed on the storage (and written since).
     packs: HashSet<String>,
     listed: Option<Instant>,
-    /// Dead members by pack: offset -> length.
-    dead: HashMap<String, BTreeMap<u64, u64>>,
+    /// Dead members by pack: offset -> (length, deleted by this device).
+    dead: HashMap<String, BTreeMap<u64, (u64, bool)>>,
+    /// Tombstone lists no key of this device opened, and the folder key
+    /// generation they were tried with.
+    unreadable: BTreeSet<String>,
+    unreadable_generation: u64,
     tombstones_seen: BTreeSet<String>,
     /// This device's highest tombstone list sequence number seen.
     own_tombstone_seq: u64,
@@ -337,16 +357,31 @@ impl StoreState {
             .is_some_and(|d| d.contains_key(&l.offset))
     }
 
-    fn dead_bytes(&self, pack: &str) -> u64 {
-        self.dead.get(pack).map_or(0, |d| d.values().sum())
+    /// Dead members of `pack` that may go: deleted by this device, or by
+    /// another device and not claimed live by the view on `storage`.
+    fn gone(&self, ctx: &PackContext, storage: &str, pack: &str) -> BTreeMap<u64, u64> {
+        self.dead
+            .get(pack)
+            .into_iter()
+            .flatten()
+            .filter(|(off, (_, own))| *own || !ctx.claims(storage, pack, **off))
+            .map(|(off, (len, _))| (*off, *len))
+            .collect()
     }
 
-    fn mark_dead(&mut self, t: &Tombstone) {
-        self.dead
+    fn gone_bytes(&self, ctx: &PackContext, storage: &str, pack: &str) -> u64 {
+        self.gone(ctx, storage, pack).values().sum()
+    }
+
+    fn mark_dead(&mut self, storage: &str, t: &Tombstone, own: bool) {
+        let e = self
+            .dead
             .entry(t.loc.pack.clone())
             .or_default()
-            .insert(t.loc.offset, t.loc.len);
-        debug_registry::dead(&t.loc);
+            .entry(t.loc.offset)
+            .or_insert((t.loc.len, own));
+        e.1 |= own;
+        debug_registry::dead(storage, &t.loc);
     }
 }
 
@@ -357,7 +392,15 @@ pub struct PackContext {
     locator: RwLock<Locator>,
     stores: Mutex<HashMap<String, Arc<Mutex<StoreState>>>>,
     tombstones: RwLock<Option<(Records, SecretKey)>>,
+    folders: RwLock<Folders>,
+    /// Pack indexes read (storage, key), and the ones no folder key opened
+    /// with the folder key generation they were tried at.
+    indexes: Mutex<IndexesRead>,
 }
+
+/// (storage, key) of pack indexes read, of those no folder key opened, and
+/// the folder key generation the latter were tried at.
+type IndexesRead = (HashSet<(String, String)>, HashSet<(String, String)>, u64);
 
 /// One context per engine (the name is older than packs for everything).
 pub type Caches = Arc<PackContext>;
@@ -378,11 +421,86 @@ impl PackContext {
         self.locator.read().unwrap().generation
     }
 
-    /// Replace the locations taken from the ledger view.
-    pub fn set_view_locations(&self, generation: u64, view: HashMap<String, Vec<PackLoc>>) {
+    /// Replace what was taken from the ledger view: the locations of
+    /// blocks, the places a live claim names (storage, pack, offset), and
+    /// the folder of each block.
+    pub fn set_view_locations(
+        &self,
+        generation: u64,
+        view: HashMap<String, Vec<PackLoc>>,
+        claimed: HashSet<(String, String, u64)>,
+        of_object: HashMap<String, String>,
+    ) {
         let mut l = self.locator.write().unwrap();
+        // A place the view drops (a block just dropped from the ledger) is
+        // kept: deleting the block after its drop is sealed still finds it.
+        let old = std::mem::take(&mut l.view);
+        for (object, locs) in old {
+            let now = view.get(&object);
+            for loc in locs {
+                if now.is_some_and(|n| n.contains(&loc)) {
+                    continue;
+                }
+                let e = l.own.entry(object.clone()).or_default();
+                if !e.contains(&loc) {
+                    e.push(loc);
+                }
+            }
+        }
         l.view = view;
+        l.claimed = claimed;
         l.generation = Some(generation);
+        self.folders.write().unwrap().of_object = of_object;
+    }
+
+    /// The metadata keys (K10, the one to write under first) of the folders
+    /// this device holds: tombstones of their blocks are listed per folder
+    /// under them.
+    pub fn set_folder_keys(&self, keys: HashMap<String, Vec<SecretKey>>) {
+        let mut f = self.folders.write().unwrap();
+        let same = f.keys.len() == keys.len()
+            && keys.iter().all(|(id, ks)| {
+                f.keys.get(id).is_some_and(|old| {
+                    old.len() == ks.len() && old.iter().zip(ks).all(|(a, b)| a.0 == b.0)
+                })
+            });
+        if !same {
+            f.keys = keys;
+            f.generation += 1;
+        }
+    }
+
+    /// Whether pack index `key` on `storage` is still to be read: not read
+    /// yet, and not refused by every folder key this device holds now.
+    pub fn index_unread(&self, storage: &str, key: &str) -> bool {
+        let generation = self.folders.read().unwrap().generation;
+        let mut i = self.indexes.lock().unwrap();
+        if i.2 != generation {
+            i.1.clear();
+            i.2 = generation;
+        }
+        let k = (storage.to_string(), key.to_string());
+        !i.0.contains(&k) && !i.1.contains(&k)
+    }
+
+    /// Pack index `key` on `storage` was read (`opened`) or no key of this
+    /// device opens it.
+    pub fn index_done(&self, storage: &str, key: &str, opened: bool) {
+        let k = (storage.to_string(), key.to_string());
+        let mut i = self.indexes.lock().unwrap();
+        if opened {
+            i.0.insert(k);
+        } else {
+            i.1.insert(k);
+        }
+    }
+
+    fn claims(&self, storage: &str, pack: &str, offset: u64) -> bool {
+        self.locator.read().unwrap().claimed.contains(&(
+            storage.to_string(),
+            pack.to_string(),
+            offset,
+        ))
     }
 
     /// A location learned outside the view (a write, a pack index).
@@ -509,14 +627,23 @@ impl PackStore {
         let me = keys_for
             .as_ref()
             .map(|(r, _)| r.device().as_str().to_string());
+        let (folder_keys, folder_gen) = {
+            let f = self.ctx.folders.read().unwrap();
+            (f.keys.clone(), f.generation)
+        };
         let unseen: Vec<String> = {
-            let st = self.state.lock().unwrap();
+            let mut st = self.state.lock().unwrap();
+            if st.unreadable_generation != folder_gen {
+                st.unreadable.clear();
+                st.unreadable_generation = folder_gen;
+            }
             tomb_keys
                 .into_iter()
-                .filter(|k| !st.tombstones_seen.contains(k))
+                .filter(|k| !st.tombstones_seen.contains(k) && !st.unreadable.contains(k))
                 .collect()
         };
         let mut read: Vec<(String, Vec<Tombstone>)> = Vec::new();
+        let mut unreadable: Vec<String> = Vec::new();
         let mut own_seq = 0;
         for k in unseen {
             let Some((device, seq)) = parse_record_key(TOMBSTONE_PREFIX, &k) else {
@@ -531,14 +658,30 @@ impl PackStore {
                 // engine with the key reads it.
                 continue;
             };
-            let entries = (|| -> Result<Vec<Tombstone>> {
+            let entries = (|| -> Result<Option<Vec<Tombstone>>> {
                 let blob = self.inner.get(&k)?.ok_or_else(|| anyhow!("gone"))?;
                 let writer = crate::ids::DeviceId::from_hex(device)?;
-                let body = records.open(KIND_TOMBSTONES, "", &writer, seq, key, &blob)?;
-                decode_tombstones(&body)
+                // Vault-scoped (blocks of no folder this device knows), or
+                // scoped to a folder whose metadata key this device holds.
+                let body = records
+                    .open(KIND_TOMBSTONES, "", &writer, seq, key, &blob)
+                    .ok()
+                    .or_else(|| {
+                        folder_keys.iter().find_map(|(folder, keys)| {
+                            keys.iter().find_map(|fk| {
+                                records
+                                    .open(KIND_TOMBSTONES, folder, &writer, seq, fk, &blob)
+                                    .ok()
+                            })
+                        })
+                    });
+                body.map(|b| decode_tombstones(&b)).transpose()
             })();
             match entries {
-                Ok(e) => read.push((k, e)),
+                Ok(Some(e)) => read.push((k, e)),
+                // Under a key this device does not hold (yet): read again
+                // when its folder keys change.
+                Ok(None) => unreadable.push(k),
                 Err(e) => {
                     log::debug!(storage = self.inner.name(); "packs: tombstone list {k} skipped: {e:#}");
                     read.push((k, Vec::new()));
@@ -551,12 +694,15 @@ impl PackStore {
         st.packs = packs;
         st.packs.extend(written);
         st.own_tombstone_seq = st.own_tombstone_seq.max(own_seq);
+        let me_writer = me.unwrap_or_default();
         for (k, entries) in read {
+            let own = parse_record_key(TOMBSTONE_PREFIX, &k).is_some_and(|(d, _)| d == me_writer);
             for t in &entries {
-                st.mark_dead(t);
+                st.mark_dead(self.inner.name(), t, own);
             }
             st.tombstones_seen.insert(k);
         }
+        st.unreadable.extend(unreadable);
         st.listed = Some(Instant::now());
         Ok(())
     }
@@ -600,15 +746,16 @@ impl PackStore {
         self.state.lock().unwrap().packs.remove(pack);
     }
 
-    /// Places of `object` in packs the last listing of this storage did
-    /// not show (written since by another device, or held elsewhere): a
-    /// request tells.
+    /// Every live place of `object`, also in packs the last listing of this
+    /// storage did not show (written since by another device, or held
+    /// elsewhere): a request tells. Listed packs are included, since another
+    /// thread may have added one since `locate` looked.
     fn unlisted(&self, object: &str) -> Vec<PackLoc> {
         let st = self.state.lock().unwrap();
         self.ctx
             .candidates(object)
             .into_iter()
-            .filter(|l| l.valid() && !st.packs.contains(&l.pack) && !st.is_dead(l))
+            .filter(|l| l.valid() && !st.is_dead(l))
             .collect()
     }
 
@@ -674,20 +821,46 @@ impl PackStore {
         let Some((records, key)) = self.ctx.tombstones.read().unwrap().clone() else {
             return Ok(());
         };
-        let body = encode_tombstones(&pending)?;
-        let device = records.device().as_str().to_string();
-        let mut seq = self.state.lock().unwrap().own_tombstone_seq + 1;
-        loop {
-            let k = record_key(TOMBSTONE_PREFIX, &device, seq);
-            let blob = records.seal(KIND_TOMBSTONES, "", seq, &key, &body)?;
-            if self.inner.put_if_absent(&k, &blob)? {
-                let mut st = self.state.lock().unwrap();
-                st.own_tombstone_seq = seq;
-                st.tombstones_seen.insert(k);
-                return Ok(());
+        // One list per folder whose key this device holds (under its
+        // metadata key, readable by every device of the folder), one under
+        // the vault key for the rest.
+        let mut lists: BTreeMap<String, Vec<Tombstone>> = BTreeMap::new();
+        let mut scoped: HashMap<String, SecretKey> = HashMap::new();
+        {
+            let f = self.ctx.folders.read().unwrap();
+            for t in pending {
+                let folder = f
+                    .of_object
+                    .get(&t.object)
+                    .and_then(|id| Some((id, f.keys.get(id)?.first()?)));
+                let scope = match folder {
+                    Some((id, k)) => {
+                        scoped.entry(id.clone()).or_insert_with(|| k.clone());
+                        id.clone()
+                    }
+                    None => String::new(),
+                };
+                lists.entry(scope).or_default().push(t);
             }
-            seq += 1;
         }
+        let device = records.device().as_str().to_string();
+        for (scope, list) in lists {
+            let body = encode_tombstones(&list)?;
+            let key = scoped.get(&scope).unwrap_or(&key);
+            let mut seq = self.state.lock().unwrap().own_tombstone_seq + 1;
+            loop {
+                let k = record_key(TOMBSTONE_PREFIX, &device, seq);
+                let blob = records.seal(KIND_TOMBSTONES, &scope, seq, key, &body)?;
+                if self.inner.put_if_absent(&k, &blob)? {
+                    let mut st = self.state.lock().unwrap();
+                    st.own_tombstone_seq = seq;
+                    st.tombstones_seen.insert(k);
+                    break;
+                }
+                seq += 1;
+            }
+        }
+        Ok(())
     }
 
     /// Write packs of the fresh members; returns their locations.
@@ -734,7 +907,7 @@ impl PackStore {
             }
             packs
                 .into_iter()
-                .filter(|(p, len)| st.dead_bytes(p) * 2 > *len)
+                .filter(|(p, len)| st.gone_bytes(&self.ctx, self.inner.name(), p) * 2 > *len)
                 .collect()
         };
         let mut moved = Vec::new();
@@ -743,14 +916,18 @@ impl PackStore {
             // device does not know would be lost.
             let all = self.ctx.all_objects();
             let (live, dead): (Vec<(String, PackLoc)>, BTreeMap<u64, u64>) = {
-                let st = self.state.lock().unwrap();
+                let gone = self
+                    .state
+                    .lock()
+                    .unwrap()
+                    .gone(&self.ctx, self.inner.name(), &pack);
                 let live = all
                     .iter()
                     .flat_map(|(o, locs)| locs.iter().map(move |l| (o, l)))
-                    .filter(|(_, l)| l.pack == pack && !st.is_dead(l))
+                    .filter(|(_, l)| l.pack == pack && !gone.contains_key(&l.offset))
                     .map(|(o, l)| (o.clone(), l.clone()))
                     .collect();
-                (live, st.dead.get(&pack).cloned().unwrap_or_default())
+                (live, gone)
             };
             let mut spans: BTreeMap<u64, u64> = dead;
             let mut live_unique: BTreeMap<u64, (String, PackLoc)> = BTreeMap::new();
@@ -775,7 +952,10 @@ impl PackStore {
             if pack_len > self.pack_limit() {
                 continue; // not a pack written with this target
             }
-            let Some(bytes) = self.inner.get_bounded(&pack_key(&pack), self.pack_limit())? else {
+            let Some(bytes) = self
+                .inner
+                .get_bounded(&pack_key(&pack), self.pack_limit())?
+            else {
                 self.forget_pack(&pack);
                 continue;
             };
@@ -914,13 +1094,21 @@ impl Storage for PackStore {
             };
             let empty = {
                 let mut st = self.state.lock().unwrap();
-                st.mark_dead(&t);
+                st.mark_dead(self.inner.name(), &t, true);
                 st.pending.push(t);
-                st.dead_bytes(&loc.pack) >= loc.pack_len
+                st.gone_bytes(&self.ctx, self.inner.name(), &loc.pack) >= loc.pack_len
             };
             if empty {
-                self.inner.delete(&pack_key(&loc.pack))?;
-                self.forget_pack(&loc.pack);
+                // The block is dead either way (its tombstone is recorded);
+                // a pack that cannot go now is garbage `collect_garbage`
+                // removes later.
+                match self.inner.delete(&pack_key(&loc.pack)) {
+                    Ok(()) => self.forget_pack(&loc.pack),
+                    Err(e) => log::warn!(
+                        storage = self.inner.name();
+                        "packs: an emptied pack stays until garbage collection: {e:#}"
+                    ),
+                }
             }
         }
         Ok(())
@@ -1036,9 +1224,7 @@ pub fn read_members(
     // only for valid places in one pack.
     if packed.len() == members.len()
         && !members.is_empty()
-        && packed
-            .iter()
-            .all(|l| l.valid() && l.pack == packed[0].pack)
+        && packed.iter().all(|l| l.valid() && l.pack == packed[0].pack)
     {
         let start = packed.iter().map(|l| l.offset).min().unwrap_or(0);
         let end = packed.iter().map(|l| l.offset + l.len).max().unwrap_or(0);
@@ -1067,6 +1253,9 @@ pub mod debug_registry {
     use super::PackLoc;
     #[cfg(debug_assertions)]
     use std::collections::{HashMap, HashSet};
+    use std::path::Path;
+    #[cfg(debug_assertions)]
+    use std::path::PathBuf;
     #[cfg(debug_assertions)]
     use std::sync::Mutex;
 
@@ -1074,7 +1263,10 @@ pub mod debug_registry {
     #[derive(Default)]
     struct Registry {
         members: HashMap<String, Vec<(String, PackLoc)>>,
-        dead: HashSet<(String, u64)>,
+        /// (storage, pack, offset): one pack id can be on several storages.
+        dead: HashSet<(String, String, u64)>,
+        /// Directory of a local storage -> its name.
+        roots: HashMap<PathBuf, String>,
     }
 
     #[cfg(debug_assertions)]
@@ -1094,34 +1286,56 @@ pub mod debug_registry {
         }
     }
 
-    pub(super) fn dead(_loc: &PackLoc) {
+    pub(super) fn dead(_storage: &str, _loc: &PackLoc) {
+        #[cfg(debug_assertions)]
+        registry().lock().unwrap().dead.insert((
+            _storage.to_string(),
+            _loc.pack.clone(),
+            _loc.offset,
+        ));
+    }
+
+    /// The directory a local storage named `name` keeps (debug builds).
+    pub fn root(_name: &str, _path: &Path) {
         #[cfg(debug_assertions)]
         registry()
             .lock()
             .unwrap()
-            .dead
-            .insert((_loc.pack.clone(), _loc.offset));
+            .roots
+            .insert(_path.to_path_buf(), _name.to_string());
     }
 
-    /// The live members of a pack this process wrote (debug builds).
-    #[cfg(debug_assertions)]
-    pub fn members(pack: &str) -> Vec<(String, PackLoc)> {
-        let r = registry().lock().unwrap();
-        r.members
-            .get(pack)
-            .map(|m| {
-                m.iter()
-                    .filter(|(_, l)| !r.dead.contains(&(l.pack.clone(), l.offset)))
-                    .cloned()
-                    .collect()
-            })
-            .unwrap_or_default()
-    }
-
-    /// The live members of a pack this process wrote (nothing in release
+    /// The live members of a pack this process wrote, as the storage kept
+    /// in directory `root` sees them (debug builds; nothing in release
     /// builds).
-    #[cfg(not(debug_assertions))]
-    pub fn members(_pack: &str) -> Vec<(String, PackLoc)> {
+    pub fn members_on(_root: &Path, _pack: &str) -> Vec<(String, PackLoc)> {
+        #[cfg(debug_assertions)]
+        {
+            let r = registry().lock().unwrap();
+            let name = r.roots.get(_root).cloned().or_else(|| {
+                let canon = _root.canonicalize().ok()?;
+                r.roots
+                    .iter()
+                    .find(|(p, _)| p.canonicalize().ok().as_ref() == Some(&canon))
+                    .map(|(_, n)| n.clone())
+            });
+            r.members
+                .get(_pack)
+                .map(|m| {
+                    m.iter()
+                        .filter(|(_, l)| {
+                            !r.dead.iter().any(|(s, p, o)| {
+                                *p == l.pack
+                                    && *o == l.offset
+                                    && name.as_ref().is_none_or(|n| n == s)
+                            })
+                        })
+                        .cloned()
+                        .collect()
+                })
+                .unwrap_or_default()
+        }
+        #[cfg(not(debug_assertions))]
         Vec::new()
     }
 }
@@ -1283,6 +1497,164 @@ mod tests {
         assert!(!lists.is_empty());
         drop(b);
         assert_eq!(b_lists_after_drop(t.path()), lists.len() + 1);
+    }
+
+    /// The view of a device: every block of `objs` in folder `f1`, and
+    /// the places in `claimed` held by a live claim on storage `box`.
+    fn view_of(c: &Caches, objs: &[(String, Vec<u8>)], claimed: &[PackLoc], generation: u64) {
+        let of_object = objs
+            .iter()
+            .map(|(o, _)| (o.clone(), "f1".to_string()))
+            .collect();
+        let claimed = claimed
+            .iter()
+            .map(|l| ("box".to_string(), l.pack.clone(), l.offset))
+            .collect();
+        c.set_view_locations(generation, HashMap::new(), claimed, of_object);
+    }
+
+    #[test]
+    fn folder_tombstones_are_read_by_every_device_of_the_folder() {
+        let t = tempfile::tempdir().unwrap();
+        let folder_keys: HashMap<String, Vec<SecretKey>> =
+            [("f1".to_string(), vec![SecretKey([5; 32])])].into();
+        let (ca, cb) = (ctx(2), ctx(3));
+        // A member of the folder: another vault key, the same folder key.
+        let member: Caches = Default::default();
+        member.set_tombstone_keys(
+            Records::new(
+                crate::ids::VaultId::from_bytes(&[1; 16]),
+                crate::ids::DeviceId::from_bytes(&[4; 16]),
+            ),
+            SecretKey([8; 32]),
+        );
+        let objs = objects(&[100, 200, 300]);
+        for c in [&ca, &cb, &member] {
+            view_of(c, &objs, &[], 1);
+        }
+        ca.set_folder_keys(folder_keys.clone());
+        member.set_folder_keys(folder_keys.clone());
+        let a = store(t.path(), &ca, HOT_TARGET);
+        let refs: Vec<(String, &[u8])> = objs
+            .iter()
+            .map(|(o, b)| (o.clone(), b.as_slice()))
+            .collect();
+        a.put_pack(&refs).unwrap();
+        let new = a.take_new_packs();
+        for c in [&cb, &member] {
+            for p in &new {
+                for (o, l) in &p.members {
+                    c.learn(o, l.clone());
+                }
+            }
+        }
+        a.delete(&chunk_key(&objs[0].0)).unwrap();
+        a.flush_deletions().unwrap();
+        // Written under the folder's metadata key, scoped to the folder.
+        let tomb = a.inner.list(TOMBSTONE_PREFIX).unwrap().remove(0);
+        let (_, seq) = parse_record_key(TOMBSTONE_PREFIX, &tomb).unwrap();
+        let blob = a.inner.get(&tomb).unwrap().unwrap();
+        let (records, vault_key) = ca.tombstones.read().unwrap().clone().unwrap();
+        let writer = records.device().clone();
+        assert!(records
+            .open(KIND_TOMBSTONES, "", &writer, seq, &vault_key, &blob)
+            .is_err());
+        assert!(records
+            .open(
+                KIND_TOMBSTONES,
+                "f1",
+                &writer,
+                seq,
+                &SecretKey([5; 32]),
+                &blob
+            )
+            .is_ok());
+        // A member reads it with the folder key alone.
+        let m = store(t.path(), &member, HOT_TARGET);
+        assert!(!m.exists(&chunk_key(&objs[0].0)).unwrap());
+        assert!(m.exists(&chunk_key(&objs[1].0)).unwrap());
+        // A device without the folder key does not, until it gets the key.
+        let b = store(t.path(), &cb, HOT_TARGET);
+        assert!(b.exists(&chunk_key(&objs[0].0)).unwrap());
+        cb.set_folder_keys(folder_keys);
+        b.refresh().unwrap();
+        assert!(!b.exists(&chunk_key(&objs[0].0)).unwrap());
+    }
+
+    #[test]
+    fn a_tombstone_of_another_device_cannot_kill_a_claimed_block() {
+        let t = tempfile::tempdir().unwrap();
+        let (owner, hostile) = (ctx(2), ctx(3));
+        let objs = objects(&[1000, 1000, 1000, 1000, 500]);
+        let o = store(t.path(), &owner, HOT_TARGET);
+        let refs: Vec<(String, &[u8])> = objs
+            .iter()
+            .map(|(o, b)| (o.clone(), b.as_slice()))
+            .collect();
+        o.put_pack(&refs).unwrap();
+        let new = share(&o, &hostile);
+        let pack = new[0].pack.clone();
+        let places: Vec<PackLoc> = new[0].members.iter().map(|(_, l)| l.clone()).collect();
+        // The owner's ledger holds a live claim of every block.
+        view_of(&owner, &objs, &places, 1);
+        // Another device marks four of five blocks dead.
+        let h = store(t.path(), &hostile, HOT_TARGET);
+        for (obj, _) in &objs[..4] {
+            h.delete(&chunk_key(obj)).unwrap();
+        }
+        drop(h);
+        // The owner deletes the last one: the pack stays, nothing is
+        // rewritten away, and the claimed blocks are still in it.
+        o.refresh().unwrap();
+        o.delete(&chunk_key(&objs[4].0)).unwrap();
+        assert!(o.inner.exists(&pack_key(&pack)).unwrap());
+        assert!(o.collect_garbage(&|_| true).unwrap().is_empty());
+        let bytes = o.inner.get(&pack_key(&pack)).unwrap().unwrap();
+        for ((_, b), l) in objs.iter().zip(&places).take(4) {
+            assert_eq!(
+                &bytes[l.offset as usize..(l.offset + l.len) as usize],
+                b.as_slice()
+            );
+        }
+        // Once the ledger drops the claims, the dead pack goes.
+        view_of(&owner, &objs, &[], 2);
+        assert!(o.collect_garbage(&|_| true).unwrap().is_empty());
+        assert!(!o.inner.exists(&pack_key(&pack)).unwrap());
+    }
+
+    #[test]
+    fn places_outside_the_read_limits_are_refused() {
+        let ok = PackLoc {
+            pack: "ab".repeat(32),
+            offset: crate::storage::MAX_PACK - 10,
+            len: 10,
+            pack_len: crate::storage::MAX_PACK,
+        };
+        assert!(ok.valid());
+        for bad in [
+            PackLoc {
+                pack_len: crate::storage::MAX_PACK + 1,
+                ..ok.clone()
+            },
+            PackLoc {
+                len: MAX_OBJECT + 1,
+                offset: 0,
+                ..ok.clone()
+            },
+            PackLoc {
+                offset: u64::MAX,
+                ..ok.clone()
+            },
+            PackLoc {
+                pack: "\u{e4}".repeat(32),
+                ..ok.clone()
+            },
+        ] {
+            assert!(!bad.valid(), "{bad:?}");
+        }
+        // A name that is not ASCII never panics a key.
+        assert_eq!(pack_key("\u{e4}"), "packs/\u{e4}/\u{e4}");
+        assert_eq!(chunk_key("\u{e4}x"), "chunks/\u{e4}/\u{e4}x");
     }
 
     fn b_lists_after_drop(dir: &std::path::Path) -> usize {

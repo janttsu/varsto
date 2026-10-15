@@ -43,7 +43,7 @@ pub fn pack_files(root: &Path) -> Vec<(PathBuf, String)> {
 pub fn blocks(root: &Path) -> Vec<(String, PathBuf, PackLoc)> {
     let mut out = Vec::new();
     for (path, id) in pack_files(root) {
-        for (object, loc) in packs::debug_registry::members(&id) {
+        for (object, loc) in packs::debug_registry::members_on(root, &id) {
             out.push((object, path.clone(), loc));
         }
     }
@@ -64,6 +64,11 @@ fn find(root: &Path, object: &str) -> Option<(PathBuf, PackLoc)> {
         .into_iter()
         .find(|(o, _, _)| o == object)
         .map(|(_, p, l)| (p, l))
+}
+
+/// The pack file that holds a block object.
+pub fn pack_path(root: &Path, object: &str) -> Option<PathBuf> {
+    find(root, object).map(|(p, _)| p)
 }
 
 /// The bytes of a block object.

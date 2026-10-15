@@ -214,14 +214,26 @@ fn an_interrupted_conversion_deletes_nothing_and_resumes_with_the_same_key() {
     let old_chunks = objects(&storage, "chunks");
     let away = lab.root.join("away");
     fs::create_dir_all(&away).unwrap();
+    // The packs holding its large blocks are taken away (with whatever
+    // else they hold).
+    let mut moved: Vec<(PathBuf, PathBuf)> = Vec::new();
+    let mut moved_blocks: BTreeSet<String> = BTreeSet::new();
     for k in &old_chunks {
         let name = k.rsplit('/').next().unwrap();
-        let bytes = common::read_object(&storage, name).unwrap();
+        let Some(bytes) = common::read_object(&storage, name) else {
+            continue; // its pack is away already
+        };
         if bytes.len() > 1000 {
-            fs::write(away.join(k.replace('/', "_")), bytes).unwrap();
-            common::lose_object(&storage, name);
+            let pack = common::pack_path(&storage, name).unwrap();
+            for o in common::pack_mates(&storage, name) {
+                moved_blocks.insert(format!("chunks/{}/{o}", &o[..2]));
+            }
+            let to = away.join(pack.file_name().unwrap());
+            fs::rename(&pack, &to).unwrap();
+            moved.push((pack, to));
         }
     }
+    assert!(!moved.is_empty());
     let sk = SoftwareKey {
         path: lab.a_home.join("software-security-key"),
     };
@@ -242,20 +254,15 @@ fn an_interrupted_conversion_deletes_nothing_and_resumes_with_the_same_key() {
     );
     let present = objects(&storage, "chunks");
     for k in &old_chunks {
-        let moved = away.join(k.replace('/', "_"));
-        assert!(present.contains(k) || moved.exists());
+        assert!(present.contains(k) || moved_blocks.contains(k), "{k} gone");
     }
     b.sync(None).unwrap();
     assert!(!b.folders()[0].0.is_strongroom(), "B was not told anything");
     assert!(lab.b_dir.join("hello.txt").exists());
 
     // The blocks come back; the same command resumes under the same key.
-    for k in &old_chunks {
-        let moved = away.join(k.replace('/', "_"));
-        if moved.exists() {
-            fs::create_dir_all(storage.join(k).parent().unwrap()).unwrap();
-            fs::rename(&moved, storage.join(k)).unwrap();
-        }
+    for (pack, to) in &moved {
+        fs::rename(to, pack).unwrap();
     }
     let (pending_id, _) = a.strongroom_conversion("docs").unwrap();
     let r = a

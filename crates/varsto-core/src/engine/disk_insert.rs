@@ -272,7 +272,8 @@ impl Engine {
         // Further copies (disk groups) copy whole packs the pool holds;
         // blocks the pool lacks go into new packs of up to 64 MiB, written
         // to this disk.
-        let mut copied_packs: HashSet<String> = HashSet::new();
+        // Pack -> whether this fill copied it (its blocks count as written).
+        let mut copied_packs: HashMap<String, bool> = HashMap::new();
         let mut batch: Vec<(ObjectName, Vec<u8>)> = Vec::new();
         let mut batch_bytes = 0usize;
         for object in chosen {
@@ -281,10 +282,12 @@ impl Engine {
             p.bytes_done += estimate(need.size);
             crate::activity::advance_current(estimate(need.size));
             if let Some(loc) = need.pack.clone() {
-                if !copied_packs.insert(loc.pack.clone()) {
+                if let Some(copied) = copied_packs.get(&loc.pack) {
+                    out.objects += u64::from(*copied);
                     progress(&p);
                     continue;
                 }
+                copied_packs.insert(loc.pack.clone(), false);
                 let key = crate::packs::pack_key(&loc.pack);
                 let Some(bytes) = pool
                     .get(&key)
@@ -298,8 +301,10 @@ impl Engine {
                 };
                 match pool.add_copy_on_disk(disk_id, &key, &bytes) {
                     Ok(true) => {
+                        // Counted in blocks, like a new pack.
                         out.objects += 1;
                         out.bytes += bytes.len() as u64;
+                        copied_packs.insert(loc.pack.clone(), true);
                     }
                     Ok(false) => {}
                     Err(e) if matches!(pool::pool_error(&e), Some(PoolError::NoRoom { .. })) => {}

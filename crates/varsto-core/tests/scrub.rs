@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: PolyForm-Shield-1.0.0
-//! Bit-rot checks (scrub): damaged and missing objects on a storage (single
-//! and packed, written by this very device), on a pool disk, and synced
+//! Bit-rot checks (scrub): damaged and missing objects on a storage (in
+//! packs, written by this very device), on a pool disk, and synced
 //! files on this device whose content changed under an unchanged size and
 //! time; the budget, the rolling pass, and cold storage left out unless
 //! included.
@@ -60,7 +60,7 @@ impl Lab {
 }
 
 /// Device A with the given storages and a folder "docs": one large file
-/// (blocks stored one per object) and small ones (blocks packed together).
+/// (several blocks) and small ones (one block each), all in one pack.
 fn device(lab: &Lab, storages: &[StorageSpec]) -> Engine {
     let (mut a, _) = Engine::init(&lab.p("a-home"), "laptop", PASS).unwrap();
     for s in storages {
@@ -79,11 +79,9 @@ fn device(lab: &Lab, storages: &[StorageSpec]) -> Engine {
     a
 }
 
-/// Block objects of a storage directory: (single, packed).
-fn split_objects(root: &Path) -> (Vec<String>, Vec<String>) {
-    common::object_names(root)
-        .into_iter()
-        .partition(|o| root.join("chunks").join(&o[..2]).join(o).exists())
+/// Block objects of a storage directory (all in packs).
+fn objects(root: &Path) -> Vec<String> {
+    common::object_names(root).into_iter().collect()
 }
 
 /// Copy a directory tree (files only, no clobber of other files).
@@ -122,13 +120,13 @@ fn damaged_objects_this_device_wrote_are_found_and_repaired() {
             dir("spare", &lab.p("spare"), false),
         ],
     );
-    let (single, packed) = split_objects(&lab.p("box"));
-    assert!(single.len() >= 3, "single objects: {single:?}");
-    assert!(packed.len() >= 2, "packed objects: {packed:?}");
-    common::corrupt_object(&lab.p("box"), &single[0]);
-    common::corrupt_object(&lab.p("box"), &packed[0]);
-    common::lose_object(&lab.p("box"), &single[1]);
-    let total = common::object_count(&lab.p("box")) as u64 + 1;
+    // Every block is in a pack: two are damaged in place.
+    let all = objects(&lab.p("box"));
+    assert!(all.len() >= 5, "objects: {all:?}");
+    assert!(!lab.p("box").join("chunks").exists());
+    common::corrupt_object(&lab.p("box"), &all[0]);
+    common::corrupt_object(&lab.p("box"), &all[1]);
+    let total = common::object_count(&lab.p("box")) as u64;
     let batches = a.ledger_entries().unwrap().len();
 
     let r = a
@@ -141,16 +139,16 @@ fn damaged_objects_this_device_wrote_are_found_and_repaired() {
     // Every object the ledger places on "box", all written by this device.
     assert_eq!(r.objects_checked, total, "{r:?}");
     assert_eq!(r.corrupt.len(), 2, "{r:?}");
-    assert_eq!(r.missing.len(), 1, "{r:?}");
-    assert_eq!(r.queued_for_repair, 3);
+    assert_eq!(r.missing.len(), 0, "{r:?}");
+    assert_eq!(r.queued_for_repair, 2);
     assert_eq!(r.files_checked, 0, "--storage alone reads no local files");
     // Nothing recorded: the writer's own check is no verification.
     assert_eq!(a.ledger_entries().unwrap().len(), batches);
-    assert_eq!(a.repair_status().queued, 3);
+    assert_eq!(a.repair_status().queued, 2);
 
     let rep = a.repair(&RepairOptions::service()).unwrap();
-    assert_eq!(rep.repaired.len(), 3, "{rep:?}");
-    for o in [&single[0], &single[1], &packed[0]] {
+    assert_eq!(rep.repaired.len(), 2, "{rep:?}");
+    for o in [&all[0], &all[1]] {
         assert!(common::intact(&lab.p("box"), o), "{o} not repaired");
     }
     let again = a
@@ -164,7 +162,7 @@ fn damaged_objects_this_device_wrote_are_found_and_repaired() {
     assert!(again.targets.iter().any(|t| t.label == "storage spare"));
     assert!(again.files_checked >= 7);
     let st = a.scrub_status();
-    assert_eq!(st.totals.problems_found, 3);
+    assert_eq!(st.totals.problems_found, 2);
     assert!(st.targets.contains_key("storage:box"));
 }
 
@@ -224,7 +222,7 @@ fn cold_storage_is_read_only_when_included() {
         ],
     );
     assert!(common::object_count(&lab.p("deep")) > 0);
-    common::corrupt_object(&lab.p("deep"), &split_objects(&lab.p("deep")).0[0]);
+    common::corrupt_object(&lab.p("deep"), &objects(&lab.p("deep"))[0]);
     let r = a
         .scrub(&ScrubOptions {
             full: true,
@@ -449,7 +447,7 @@ fn a_bad_copy_on_a_pool_disk_is_dropped_and_written_again() {
     a.add_folder("docs", &lab.p("a-docs")).unwrap();
     fs::write(lab.p("a-docs/one.bin"), pseudo_random(600_000, 3)).unwrap();
     a.sync(None).unwrap();
-    let on_disk: Vec<PathBuf> = walkdir::WalkDir::new(d1.join(pool::DATA_DIR).join("chunks"))
+    let on_disk: Vec<PathBuf> = walkdir::WalkDir::new(d1.join(pool::DATA_DIR).join("packs"))
         .into_iter()
         .flatten()
         .filter(|e| e.file_type().is_file())

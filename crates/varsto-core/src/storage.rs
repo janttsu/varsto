@@ -260,6 +260,33 @@ mod bounded_read_tests {
     }
 
     #[test]
+    fn a_pack_is_read_up_to_the_largest_pack_and_a_range_spans_blocks() {
+        let t = tempfile::tempdir().unwrap();
+        let s = LocalDirStorage::new("box".into(), t.path().to_path_buf()).unwrap();
+        // Larger than a block object: a pack, a pack index and a record may be.
+        let big = vec![3u8; (MAX_BLOCK_OBJECT + 1) as usize];
+        let pack = format!("packs/ab/{}", "ab".repeat(32));
+        s.put_if_absent(&pack, &big).unwrap();
+        assert_eq!(read_limit(&pack), MAX_PACK);
+        assert_eq!(read_limit("packs/index/d/0000000000000001.enc"), MAX_RECORD);
+        assert_eq!(
+            read_limit("packs/tombstones/d/0000000000000001.enc"),
+            MAX_RECORD
+        );
+        assert_eq!(read_limit("chunks/ab/cd"), MAX_BLOCK_OBJECT);
+        assert_eq!(s.get(&pack).unwrap().unwrap().len(), big.len());
+        // A span of several blocks is one ranged read.
+        assert_eq!(
+            s.get_range(&pack, 1, MAX_BLOCK_OBJECT)
+                .unwrap()
+                .unwrap()
+                .len(),
+            MAX_BLOCK_OBJECT as usize
+        );
+        assert!(s.get_bounded(&pack, MAX_BLOCK_OBJECT).is_err());
+    }
+
+    #[test]
     fn a_panic_in_a_read_is_an_error_for_that_object() {
         let r: Result<()> = guarded("chunks/ab/x", || panic!("bad name"));
         assert!(format!("{:#}", r.unwrap_err()).contains("internal error"));

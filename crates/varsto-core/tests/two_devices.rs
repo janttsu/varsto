@@ -313,7 +313,8 @@ fn untrusted_replica_holds_copies_without_keys() {
     assert_eq!(rep.objects_corrupt, 0);
     assert_eq!(rep.skipped_junk, 2, "{rep:?}");
     assert!(!b_disk.join("chunks").join("zz").exists());
-    assert!(rep.chunks_verified >= 2);
+    // One claim per pack copied (the push wrote one).
+    assert!(rep.chunks_verified >= 1);
     // Nothing on B's disk or in B's home is plaintext.
     for root in [&b_disk, &b_home] {
         for e in walkdir::WalkDir::new(root)
@@ -403,13 +404,7 @@ fn carrier_disk_only_carries_what_is_missing_and_empties_itself() {
     a.add_folder("docs", &lab.a_dir).unwrap();
     fs::write(lab.a_dir.join("report.txt"), pseudo_random(50_000, 9)).unwrap();
     a.push("docs").unwrap();
-    let usb_objects = |p: &Path| {
-        walkdir::WalkDir::new(p.join("chunks"))
-            .into_iter()
-            .filter_map(|e| e.ok())
-            .filter(|e| e.file_type().is_file())
-            .count()
-    };
+    let usb_objects = |p: &Path| common::pack_files(p).len();
     assert!(
         usb_objects(&lab.a_home.with_file_name("usb")) > 0,
         "the carrier holds the chunks in transit"
@@ -888,8 +883,11 @@ fn many_chunk_files_arrive_in_order_and_a_missing_chunk_fails_the_file() {
     let objects: Vec<String> = common::object_names(&store).into_iter().collect();
     assert!(objects.len() > 20, "{} chunks", objects.len());
     let hidden = &objects[objects.len() / 2];
-    let hidden_bytes = common::read_object(&store, hidden).unwrap();
-    common::lose_object(&store, hidden);
+    // The pack is away (a storage loses blocks with their pack).
+    let (pack, _) = common::pack_files(&store).remove(0);
+    let away = store.join("away.pack");
+    fs::rename(&pack, &away).unwrap();
+    assert!(common::read_object(&store, hidden).is_none());
 
     let mut b = Engine::join(&lab.b_home, "desk", PASS, &key, lab.storage.clone()).unwrap();
     b.chunker = ChunkerParams::SMALL;
@@ -901,9 +899,7 @@ fn many_chunk_files_arrive_in_order_and_a_missing_chunk_fails_the_file() {
         "a partial file was left behind"
     );
 
-    let back = store.join("chunks").join(&hidden[..2]).join(hidden);
-    fs::create_dir_all(back.parent().unwrap()).unwrap();
-    fs::write(back, hidden_bytes).unwrap();
+    fs::rename(&away, &pack).unwrap();
     let r = b.pull("docs").unwrap();
     assert!(r.files_unavailable.is_empty(), "{:?}", r.files_unavailable);
     assert_eq!(r.chunks_downloaded as usize, objects.len());
@@ -954,20 +950,11 @@ fn small_files_travel_in_packs() {
     fs::write(lab.a_dir.join("big.bin"), vec![7u8; 600_000]).unwrap();
     a.sync(None).unwrap();
     let store = lab.a_home.with_file_name("storage");
-    let count = |sub: &str, ext: &str| {
-        walkdir::WalkDir::new(store.join(sub))
-            .into_iter()
-            .filter_map(|e| e.ok())
-            .filter(|e| e.file_type().is_file() && e.path().to_string_lossy().ends_with(ext))
-            .count()
-    };
-    // 200 small blocks in one pack, the large file's block on its own.
-    assert_eq!(count("packs", ".pack"), 1);
-    assert!(
-        count("chunks", "") <= 2,
-        "{} single objects",
-        count("chunks", "")
-    );
+    // 200 small blocks and the large file's block in one pack, no block
+    // object of its own.
+    assert_eq!(common::pack_files(&store).len(), 1);
+    assert_eq!(common::object_count(&store), 201);
+    assert!(!store.join("chunks").exists());
     // Another device reads every file from the pack.
     let mut b = Engine::join(&lab.b_home, "desk", PASS, &key, lab.storage.clone()).unwrap();
     b.attach_folder("docs", &lab.b_dir, false).unwrap();

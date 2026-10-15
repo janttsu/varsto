@@ -908,10 +908,7 @@ impl Engine {
         let to_box: Box<dyn Storage> = match &to_pool {
             Some(p) => {
                 let shared: Arc<dyn Storage> = p.clone();
-                Box::new(self.pack_store(
-                    &to_spec,
-                    Box::new(crate::storage::SharedStorage(shared)),
-                ))
+                Box::new(self.pack_store(&to_spec, Box::new(crate::storage::SharedStorage(shared))))
             }
             None => self.open_spec(&to_spec)?,
         };

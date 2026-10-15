@@ -1714,6 +1714,16 @@ impl Engine {
         inner: Box<dyn Storage>,
     ) -> crate::packs::PackStore {
         self.ensure_pack_keys();
+        // Reads find blocks at the places the ledger gives: a fresh engine
+        // hands them over before its first storage is used.
+        if self.pack_caches.view_generation().is_none() {
+            if let Err(e) = self.view() {
+                log::debug!("packs: no ledger places yet: {e:#}");
+            }
+        }
+        if let StorageSpec::LocalDir { name, path, .. } = spec {
+            crate::packs::debug_registry::root(name, path);
+        }
         let target = if spec.is_cold() {
             crate::packs::COLD_TARGET
         } else {
@@ -2145,7 +2155,13 @@ impl Engine {
                 activity::Unit::Items,
             );
             task.set_phase("copy");
-            for c in &plan.copies {
+            // Per target, the copies go out together as packs
+            // (`crate::packs`), a pack's worth at a time.
+            // Target -> (copy index, bytes) waiting, and their size.
+            type Waiting = (Vec<(usize, Vec<u8>)>, usize);
+            let mut waiting: BTreeMap<String, Waiting> = BTreeMap::new();
+            let last = plan.copies.len();
+            for (i, c) in plan.copies.iter().enumerate() {
                 task.advance(1);
                 let key = chunk_storage_key(&c.object);
                 let bytes = source
@@ -2154,17 +2170,35 @@ impl Engine {
                 if !targets.contains_key(&c.target) {
                     targets.insert(c.target.clone(), self.open_storage(&c.target)?);
                 }
-                targets[&c.target].put_if_absent(&key, &bytes)?;
-                self.pending.push(Event::ChunkStored {
-                    folder: c.folder.clone(),
-                    chunk: c.chunk.clone(),
-                    object: c.object.clone(),
-                    storage: c.target.clone(),
-                    size: bytes.len() as u64,
-                    pack: None,
-                });
-                report.blocks_copied += 1;
-                report.bytes_copied += bytes.len() as u64;
+                let w = waiting.entry(c.target.clone()).or_default();
+                w.1 += bytes.len();
+                w.0.push((i, bytes));
+                let full: Vec<String> = waiting
+                    .iter()
+                    .filter(|(_, (_, n))| i + 1 == last || *n >= crate::packs::HOT_TARGET)
+                    .map(|(t, _)| t.clone())
+                    .collect();
+                for t in full {
+                    let (list, _) = waiting.remove(&t).unwrap_or_default();
+                    let members: Vec<(String, &[u8])> = list
+                        .iter()
+                        .map(|(j, b)| (plan.copies[*j].object.as_str().to_string(), b.as_slice()))
+                        .collect();
+                    targets[&t].put_pack(&members)?;
+                    for (j, b) in &list {
+                        let c = &plan.copies[*j];
+                        self.pending.push(Event::ChunkStored {
+                            folder: c.folder.clone(),
+                            chunk: c.chunk.clone(),
+                            object: c.object.clone(),
+                            storage: c.target.clone(),
+                            size: b.len() as u64,
+                            pack: None,
+                        });
+                        report.blocks_copied += 1;
+                        report.bytes_copied += b.len() as u64;
+                    }
+                }
             }
             self.commit_batch()?;
             let again = self.plan_storage_removal(name)?;
@@ -4441,6 +4475,9 @@ impl Engine {
         }
         let fk = self.folder_keys(&rec)?;
         let storages = self.open_storages(false)?;
+        if self.vault.member || rec.share_join.is_some() {
+            self.learn_folder_pack_indexes(&rec, &storages);
+        }
         // Counted by the files' downloads (`progress`); the total is not known.
         let _task = activity::start(activity::DOWNLOAD, &rec.name, 0, activity::Unit::Bytes);
         let encrypted_here = self.mount_is_encrypted(&rec.folder_id);

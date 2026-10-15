@@ -87,7 +87,7 @@ fn the_same_file_in_two_folders_gives_other_packs_and_no_block_objects() {
     assert!(!after_first.is_empty() && !new.is_empty());
     let layout = |ids: &mut dyn Iterator<Item = &String>| -> Vec<(u64, u64)> {
         let mut v: Vec<(u64, u64)> = ids
-            .flat_map(|id| varsto_core::packs::debug_registry::members(id))
+            .flat_map(|id| varsto_core::packs::debug_registry::members_on(&store, id))
             .map(|(_, l)| (l.offset, l.len))
             .collect();
         v.sort();
@@ -119,7 +119,12 @@ fn a_mostly_dead_pack_is_rewritten_and_every_device_still_reads() {
     a.add_storage(dir("box", &store)).unwrap();
     a.add_folder("docs", &a_dir).unwrap();
     for i in 0..6u64 {
-        fs::write(a_dir.join(format!("f{i}.bin")), random(200_000, 100 + i)).unwrap();
+        // Distinct seeds (`random` sets the low bit): six different files.
+        fs::write(
+            a_dir.join(format!("f{i}.bin")),
+            random(200_000, 100 + 2 * i),
+        )
+        .unwrap();
     }
     a.sync(None).unwrap();
     let before = common::pack_files(&store);

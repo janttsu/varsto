@@ -45,17 +45,36 @@ impl Engine {
             return;
         }
         let mut map: HashMap<String, Vec<PackLoc>> = HashMap::new();
-        for rec in view.chunks.values() {
-            for loc in rec.storages.values() {
+        let mut claimed: HashSet<(String, String, u64)> = HashSet::new();
+        let mut of_object: HashMap<String, String> = HashMap::new();
+        for ((folder, _), rec) in &view.chunks {
+            if !folder.as_str().is_empty() {
+                of_object.insert(rec.object.as_str().to_string(), folder.as_str().to_string());
+            }
+            for (storage, loc) in &rec.storages {
                 if let Some(p) = &loc.pack {
                     let e = map.entry(rec.object.as_str().to_string()).or_default();
                     if !e.contains(p) {
                         e.push(p.clone());
                     }
+                    if !loc.claimed_by.is_empty() {
+                        claimed.insert((storage.clone(), p.pack.clone(), p.offset));
+                    }
                 }
             }
         }
-        self.pack_caches.set_view_locations(generation, map);
+        self.pack_caches
+            .set_view_locations(generation, map, claimed, of_object);
+        // Tombstones of a folder's blocks are listed under its metadata key.
+        let mut keys: HashMap<String, Vec<SecretKey>> = HashMap::new();
+        for rec in self.keyring.folders.values() {
+            if let Ok(fk) = self.folder_keys(rec) {
+                let mut all = vec![fk.meta.clone()];
+                all.extend(fk.meta_keys().into_iter().filter(|k| k.0 != fk.meta.0));
+                keys.insert(rec.folder_id.as_str().to_string(), all);
+            }
+        }
+        self.pack_caches.set_folder_keys(keys);
     }
 
     /// Give every `chunk_stored` event waiting for the next batch the place
@@ -232,6 +251,64 @@ impl Engine {
             }
         }
         Ok(out)
+    }
+
+    /// On a member of a shared folder, which does not hold the vault ledger
+    /// and so not every claim: learn where the folder's blocks are from the
+    /// pack indexes on `storages` it has not read yet (each opens only
+    /// under the folder's metadata key).
+    pub(super) fn learn_folder_pack_indexes(&self, rec: &FolderRecord, storages: &OpenStorages) {
+        let Ok(fk) = self.folder_keys(rec) else {
+            return;
+        };
+        let metas = fk.meta_keys();
+        let records = crate::record_shim::Records::new(
+            self.vault.vault_id.clone(),
+            self.vault.device_id.clone(),
+        );
+        for (spec, backend) in storages {
+            if spec.is_data_only() {
+                continue;
+            }
+            let Ok(keys) = backend.list(packs::INDEX_PREFIX) else {
+                continue;
+            };
+            for key in keys {
+                if !self.pack_caches.index_unread(spec.name(), &key) {
+                    continue;
+                }
+                let Some((device, seq)) = packs::parse_record_key(packs::INDEX_PREFIX, &key) else {
+                    self.pack_caches.index_done(spec.name(), &key, true);
+                    continue;
+                };
+                let (Ok(writer), Ok(Some(blob))) = (DeviceId::from_hex(device), backend.get(&key))
+                else {
+                    continue;
+                };
+                let body = metas.iter().find_map(|k| {
+                    records
+                        .open(
+                            packs::KIND_INDEX,
+                            rec.folder_id.as_str(),
+                            &writer,
+                            seq,
+                            k,
+                            &blob,
+                        )
+                        .ok()
+                });
+                let Some(body) = body else {
+                    self.pack_caches.index_done(spec.name(), &key, false);
+                    continue;
+                };
+                if let Ok(entries) = packs::decode_index(&body) {
+                    for e in entries {
+                        self.pack_caches.learn(&e.object, e.loc);
+                    }
+                }
+                self.pack_caches.index_done(spec.name(), &key, true);
+            }
+        }
     }
 
     /// Rewrite the hot packs that are more than half dead (`crate::packs`):

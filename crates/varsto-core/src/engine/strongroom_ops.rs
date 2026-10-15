@@ -340,6 +340,9 @@ impl Engine {
             state.files.values().filter(|f| !f.deleted).count() as u64,
             crate::activity::Unit::Items,
         );
+        // The re-encrypted blocks of many files go into one pack per
+        // storage (`crate::packs`), not one pack per file.
+        let mut batch = ConvertBatch::default();
         for file in state.files.values() {
             if file.deleted {
                 new_state.files.insert(file.path.clone(), file.clone());
@@ -375,12 +378,14 @@ impl Engine {
                 report.files_fetched += 1;
                 tmp
             };
-            let result =
-                self.reencrypt_file(&source, &old_keys, &new_keys, file, &targets, &mut report);
+            let result = self.reencrypt_file(&source, &old_keys, &new_keys, file, &mut batch);
             if source != disk {
                 let _ = fs::remove_file(&source);
             }
             let (chunks, content_hash) = result?;
+            if batch.bytes >= crate::packs::HOT_TARGET {
+                self.store_converted(&mut batch, &new_keys.folder, &targets, &mut report)?;
+            }
             if let Some(md) = local {
                 new_state.local_index.insert(
                     file.path.clone(),
@@ -403,6 +408,7 @@ impl Engine {
             );
             report.files += 1;
         }
+        self.store_converted(&mut batch, &new_keys.folder, &targets, &mut report)?;
         let _ = fs::remove_dir_all(&tmp_dir);
         let mut new_rec = FolderRecord {
             folder_id: new_id.clone(),
@@ -483,17 +489,72 @@ impl Engine {
         Ok(report)
     }
 
+    /// Write the blocks collected in `batch` to every target as packs and
+    /// claim them. A pool with no disk attached (or no room) gets them from
+    /// a later push, like any other new block; some storage must take them.
+    fn store_converted(
+        &mut self,
+        batch: &mut ConvertBatch,
+        folder: &FolderId,
+        targets: &[(StorageSpec, Box<dyn Storage>)],
+        report: &mut ConvertReport,
+    ) -> Result<()> {
+        let blocks = std::mem::take(&mut batch.blocks);
+        batch.bytes = 0;
+        batch.seen.clear();
+        if blocks.is_empty() {
+            return Ok(());
+        }
+        let members: Vec<(String, &[u8])> = blocks
+            .iter()
+            .map(|(_, o, ct)| (o.as_str().to_string(), ct.as_slice()))
+            .collect();
+        let mut held = false;
+        for (spec, backend) in targets {
+            let written = match backend.put_pack(&members) {
+                Ok(w) => w,
+                Err(e)
+                    if matches!(
+                        pool::pool_error(&e),
+                        Some(PoolError::NoDiskAttached { .. } | PoolError::NoRoom { .. })
+                    ) =>
+                {
+                    continue;
+                }
+                Err(e) => return Err(e),
+            };
+            held = true;
+            for ((chunk, object, ct), new) in blocks.iter().zip(written) {
+                if new {
+                    report.chunks_uploaded += 1;
+                    report.bytes_uploaded += ct.len() as u64;
+                }
+                self.pending.push(Event::ChunkStored {
+                    folder: folder.clone(),
+                    chunk: chunk.clone(),
+                    object: object.clone(),
+                    storage: spec.name().to_string(),
+                    size: ct.len() as u64,
+                    pack: None,
+                });
+            }
+        }
+        if !held {
+            bail!("no storage took the re-encrypted blocks; attach a disk or add a storage and run again");
+        }
+        Ok(())
+    }
+
     /// Re-encrypt one file under the new key, checking it against the old
-    /// content hash on the way, and store every chunk. Returns the new chunk
-    /// list and content hash.
+    /// content hash on the way, and add every chunk to `batch`. Returns the
+    /// new chunk list and content hash.
     fn reencrypt_file(
         &mut self,
         source: &Path,
         old: &FolderKeys,
         new: &FolderKeys,
         file: &FileState,
-        targets: &[(StorageSpec, Box<dyn Storage>)],
-        report: &mut ConvertReport,
+        batch: &mut ConvertBatch,
     ) -> Result<(Vec<ChunkRef>, String)> {
         let handle = fs::File::open(source)?;
         let mut old_hash = KeyedHasher::new(&old.hash);
@@ -515,42 +576,9 @@ impl Engine {
                 &chunk,
             )?;
             let object = ObjectName::from_bytes(&crypto::hash(&ct));
-            let key = chunk_storage_key(&object);
-            let mut held = false;
-            for (spec, backend) in targets {
-                match backend.put_if_absent(&key, &ct) {
-                    Ok(true) => {
-                        report.chunks_uploaded += 1;
-                        report.bytes_uploaded += ct.len() as u64;
-                    }
-                    Ok(false) => {}
-                    // A pool with no disk attached (or no room) gets the
-                    // chunk from a later push, like any other new chunk.
-                    Err(e)
-                        if matches!(
-                            pool::pool_error(&e),
-                            Some(PoolError::NoDiskAttached { .. } | PoolError::NoRoom { .. })
-                        ) =>
-                    {
-                        continue;
-                    }
-                    Err(e) => return Err(e),
-                }
-                held = true;
-                self.pending.push(Event::ChunkStored {
-                    folder: new.folder.clone(),
-                    chunk: chunk_id.clone(),
-                    object: object.clone(),
-                    storage: spec.name().to_string(),
-                    size: ct.len() as u64,
-                    pack: None,
-                });
-            }
-            if !held {
-                bail!(
-                    "no storage took a block of {}; attach a disk or add a storage and run again",
-                    file.path
-                );
+            if batch.seen.insert(object.clone()) {
+                batch.bytes += ct.len();
+                batch.blocks.push((chunk_id.clone(), object.clone(), ct));
             }
             self.pending.push(Event::ChunkOnDevice {
                 folder: new.folder.clone(),
@@ -1067,4 +1095,13 @@ impl Engine {
         }
         Ok(n)
     }
+}
+
+/// Re-encrypted blocks of a Strongroom conversion not written yet: (chunk,
+/// object, bytes).
+#[derive(Default)]
+struct ConvertBatch {
+    blocks: Vec<(ChunkId, ObjectName, Vec<u8>)>,
+    bytes: usize,
+    seen: HashSet<ObjectName>,
 }
