@@ -1517,7 +1517,21 @@
   "Attach a new disk to continue moving {folder}": "Liitä uusi levy jatkaaksesi kansion {folder} siirtoa",
   "{left} of {folder} are still on {from}. The move to {to} stops when the pool has no room and carries on by itself when a disk is attached.": "{left} kansiosta {folder} on yhä kohteessa {from}. Siirto kohteeseen {to} pysähtyy, kun levyvarastossa ei ole tilaa, ja jatkuu itsestään, kun levy liitetään.",
   "Plug the disk in. Nothing else is needed; `varsto move status` shows how far the move has come.": "Liitä levy. Muuta ei tarvita; `varsto move status` näyttää, kuinka pitkällä siirto on.",
-  "The administrator command asks for the 24 root words without echo.": "Ylläpitäjäkomento kysyy 24 juurisanaa ilman kaikua."
+  "The administrator command asks for the 24 root words without echo.": "Ylläpitäjäkomento kysyy 24 juurisanaa ilman kaikua.",
+  "Also back up photos already on this phone": "Varmuuskopioi myös puhelimessa jo olevat valokuvat",
+  "Also back up videos already on this phone": "Varmuuskopioi myös puhelimessa jo olevat videot",
+  "Which of the photos and videos already on this phone": "Mitkä puhelimessa jo olevista valokuvista ja videoista",
+  "Everything": "Kaikki",
+  "The last 3 months": "Viimeiset 3 kuukautta",
+  "The last 12 months": "Viimeiset 12 kuukautta",
+  "Since a date": "Tietystä päivästä alkaen",
+  "Back up what is already on this phone?": "Varmuuskopioidaanko myös se, mitä puhelimessa jo on?",
+  "Camera upload always takes new photos and videos. It can also upload the ones already here, newest first, in the background; you can change this under Camera upload.": "Kamerasiirto vie aina uudet valokuvat ja videot. Se voi viedä taustalla myös jo olemassa olevat, uusimmat ensin; voit muuttaa tätä Kamerasiirto-kohdassa.",
+  "Older items": "Vanhemmat",
+  "Photos already on this phone": "Puhelimessa jo olevat valokuvat",
+  "Videos already on this phone (they can be large)": "Puhelimessa jo olevat videot (ne voivat olla suuria)",
+  "Not now": "Ei nyt",
+  "this device can only add S3-compatible buckets and rclone remotes as storages": "tähän laitteeseen voi lisätä tallennuspaikaksi vain S3-yhteensopivia ämpäreitä ja rclone-etäkohteita"
  },
  "patterns": [
   [
@@ -2135,6 +2149,10 @@
   [
    "^Sync settings of (.+)$",
    "Kansion $1 synkronoinnin asetukset"
+  ],
+  [
+   "^(\\d+) older photos and videos are waiting to be uploaded, newest first\\.$",
+   "$1 vanhempaa valokuvaa ja videota odottaa siirtoa, uusimmat ensin."
   ]
  ],
  "review": [

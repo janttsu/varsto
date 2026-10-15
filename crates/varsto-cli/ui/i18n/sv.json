@@ -1517,7 +1517,21 @@
   "Attach a new disk to continue moving {folder}": "Anslut en ny disk för att fortsätta flytta {folder}",
   "{left} of {folder} are still on {from}. The move to {to} stops when the pool has no room and carries on by itself when a disk is attached.": "{left} av {folder} ligger kvar på {from}. Flytten till {to} stannar när poolen saknar plats och fortsätter av sig själv när en disk ansluts.",
   "Plug the disk in. Nothing else is needed; `varsto move status` shows how far the move has come.": "Anslut disken. Inget mer behövs; `varsto move status` visar hur långt flytten har kommit.",
-  "The administrator command asks for the 24 root words without echo.": "Administratörskommandot frågar efter de 24 rotorden utan eko."
+  "The administrator command asks for the 24 root words without echo.": "Administratörskommandot frågar efter de 24 rotorden utan eko.",
+  "Also back up photos already on this phone": "Säkerhetskopiera även foton som redan finns på telefonen",
+  "Also back up videos already on this phone": "Säkerhetskopiera även videor som redan finns på telefonen",
+  "Which of the photos and videos already on this phone": "Vilka av de foton och videor som redan finns på telefonen",
+  "Everything": "Allt",
+  "The last 3 months": "De senaste 3 månaderna",
+  "The last 12 months": "De senaste 12 månaderna",
+  "Since a date": "Sedan ett datum",
+  "Back up what is already on this phone?": "Säkerhetskopiera även det som redan finns på telefonen?",
+  "Camera upload always takes new photos and videos. It can also upload the ones already here, newest first, in the background; you can change this under Camera upload.": "Kameraöverföring tar alltid nya foton och videor. Den kan även överföra de som redan finns, nyaste först, i bakgrunden; du kan ändra detta under Kameraöverföring.",
+  "Older items": "Äldre",
+  "Photos already on this phone": "Foton som redan finns på telefonen",
+  "Videos already on this phone (they can be large)": "Videor som redan finns på telefonen (de kan vara stora)",
+  "Not now": "Inte nu",
+  "this device can only add S3-compatible buckets and rclone remotes as storages": "den här enheten kan bara lägga till S3-kompatibla hinkar och rclone-fjärrar som lagringar"
  },
  "patterns": [
   [
@@ -2135,6 +2149,10 @@
   [
    "^Sync settings of (.+)$",
    "Synkroniseringsinställningar för $1"
+  ],
+  [
+   "^(\\d+) older photos and videos are waiting to be uploaded, newest first\\.$",
+   "$1 äldre foton och videor väntar på överföring, nyaste först."
   ]
  ],
  "review": [

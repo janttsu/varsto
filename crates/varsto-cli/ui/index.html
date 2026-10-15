@@ -877,7 +877,14 @@
           <label class="inline"><input id="cam-wifi" type="checkbox"> Only on Wi-Fi</label>
           <label class="inline"><input id="cam-charging" type="checkbox"> Only while charging</label>
           <label class="inline"><input id="cam-shots" type="checkbox"> Also screenshots</label>
+          <label class="inline"><input id="cam-old-photos" type="checkbox"> Also back up photos already on this phone</label>
+          <label class="inline"><input id="cam-old-videos" type="checkbox"> Also back up videos already on this phone</label>
+          <div id="cam-range-row" class="row cam-row hidden">
+            <select id="cam-range" aria-label="Which of the photos and videos already on this phone"><option value="all">Everything</option><option value="3">The last 3 months</option><option value="12">The last 12 months</option><option value="date">Since a date</option></select>
+            <input id="cam-since" type="date" class="hidden" aria-label="Since">
+          </div>
           <p id="cam-state" class="muted small"></p>
+          <p id="cam-backlog" class="muted small hidden"></p>
         </div>
         <div class="card">
           <h2 class="card-title">Service</h2>
