@@ -24,20 +24,20 @@
 .viz-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; transition: opacity .4s; }
 .viz-bar .grow { flex: 1 1 auto; }
 .viz-seg { display: inline-flex; border: 1px solid var(--vz-border); border-radius: 999px; overflow: hidden; background: var(--vz-surface); }
-.viz-seg button { border: 0; background: transparent; color: var(--vz-muted); padding: 5px 12px; font: inherit; cursor: pointer; border-radius: 0; box-shadow: none; }
+.viz-seg button { height: auto; border: 0; background: transparent; color: var(--vz-muted); padding: .36em .86em; font: inherit; cursor: pointer; border-radius: 0; box-shadow: none; }
 .viz-seg button[aria-pressed="true"] { background: var(--vz-accent); color: #04140f; font-weight: 600; }
 .viz-seg button:focus-visible, .viz-btn:focus-visible { outline: 2px solid var(--vz-accent); outline-offset: 2px; }
-.viz-btn { border: 1px solid var(--vz-border); background: var(--vz-surface); color: var(--vz-text); border-radius: 999px; padding: 5px 14px; font: inherit; cursor: pointer; display: inline-flex; gap: 6px; align-items: center; box-shadow: none; }
+.viz-btn { height: auto; border: 1px solid var(--vz-border); background: var(--vz-surface); color: var(--vz-text); border-radius: 999px; padding: .36em 1em; font: inherit; cursor: pointer; display: inline-flex; gap: 6px; align-items: center; box-shadow: none; }
 .viz-btn:hover { border-color: var(--vz-accent); }
 .viz-status { color: var(--vz-muted); font-size: .86em; display: inline-flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-.viz-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--vz-muted); display: inline-block; }
+.viz-dot { width: .65em; height: .65em; border-radius: 50%; background: var(--vz-muted); display: inline-block; }
 .viz-dot[data-s="live"] { background: var(--vz-ok); box-shadow: 0 0 0 3px rgba(31, 169, 113, .22); }
 .viz-dot[data-s="stale"] { background: var(--vz-warn); }
 .viz-dot[data-s="demo"] { background: var(--vz-info); }
 .viz-dot[data-s="error"] { background: var(--vz-bad); }
 
 .viz-chips { display: grid; grid-template-columns: repeat(auto-fit, minmax(9.5em, 1fr)); gap: 8px; }
-.viz-chip { background: var(--vz-surface); border: 1px solid var(--vz-border); border-radius: 12px; padding: 8px 12px; min-width: 0; }
+.viz-chip { background: var(--vz-surface); border: 1px solid var(--vz-border); border-radius: .85em; padding: .57em .86em; min-width: 0; }
 .viz-chip .k { color: var(--vz-muted); font-size: .78em; text-transform: uppercase; letter-spacing: .04em; }
 .viz-chip .v { font-size: 1.35em; font-weight: 650; line-height: 1.25; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .viz-chip .s { color: var(--vz-muted); font-size: .8em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -50,10 +50,10 @@
 .viz[data-bg="auto"] .viz-stage { background: linear-gradient(135deg, var(--vz-surface-2), var(--vz-bg)); }
 .viz.is-full .viz-stage, .viz.pseudo-full .viz-stage { aspect-ratio: auto; height: calc(100vh - 8.5em); min-height: 0; }
 .viz-stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
-.viz-demo { position: absolute; left: 12px; top: 12px; background: var(--vz-info); color: #fff; border-radius: 999px; padding: 3px 12px; font-size: .8em; font-weight: 600; }
+.viz-demo { position: absolute; left: 12px; top: 12px; background: var(--vz-info); color: #fff; border-radius: 999px; padding: .2em .8em; font-size: .8em; font-weight: 600; }
 .viz-side { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 .viz.is-full .viz-side, .viz.pseudo-full .viz-side { max-height: calc(100vh - 8.5em); overflow: auto; }
-.viz-card { background: var(--vz-surface); border: 1px solid var(--vz-border); border-radius: 14px; padding: 10px 12px; min-width: 0; }
+.viz-card { background: var(--vz-surface); border: 1px solid var(--vz-border); border-radius: 1em; padding: .7em .86em; min-width: 0; }
 .viz-card h3 { margin: 0 0 8px; font-size: .95em; display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
 .viz-card h3 .n { color: var(--vz-muted); font-weight: 400; font-size: .9em; }
 .viz-empty { color: var(--vz-muted); font-size: .9em; margin: 0; }
@@ -74,6 +74,15 @@
 .viz-legend { display: flex; flex-wrap: wrap; gap: 4px 12px; color: var(--vz-muted); font-size: .8em; margin-top: 6px; }
 .viz-legend span::before { content: ""; display: inline-block; width: .7em; height: .7em; border-radius: 3px; background: var(--c); margin-right: 5px; }
 
+/* Full screen on a wide display (a TV, a monitor): the canvas is the whole window and everything else is drawn over it. */
+@media (min-width: 1101px) {
+  .viz.is-full, .viz.pseudo-full { position: fixed; inset: 0; box-sizing: border-box; overflow: hidden; padding: calc(12px * var(--vz-scale, 1)); gap: calc(10px * var(--vz-scale, 1)); }
+  .viz.is-full > .viz-bar, .viz.pseudo-full > .viz-bar, .viz.is-full > .viz-chips, .viz.pseudo-full > .viz-chips { position: relative; z-index: 1; }
+  .viz.is-full .viz-side, .viz.pseudo-full .viz-side { position: relative; z-index: 1; grid-column: 2; }
+  .viz.is-full .viz-main, .viz.pseudo-full .viz-main { flex: 1 1 auto; min-height: 0; grid-template-columns: minmax(0, 1fr) clamp(19em, 22%, 40em); grid-template-rows: minmax(0, 1fr); align-items: stretch; }
+  .viz.is-full .viz-stage, .viz.pseudo-full .viz-stage { position: absolute; inset: 0; height: auto; min-height: 0; aspect-ratio: auto; border: 0; border-radius: 0; background: transparent; z-index: 0; }
+  .viz.is-full .viz-side, .viz.pseudo-full .viz-side { max-height: none; min-height: 0; overflow: hidden; }
+}
 @media (max-width: 1100px) {
   .viz-main { grid-template-columns: minmax(0, 1fr); }
   .viz-stage { aspect-ratio: 4 / 3; min-height: 18em; }
@@ -82,10 +91,13 @@
   .viz-side { display: grid; grid-template-columns: repeat(auto-fit, minmax(17em, 1fr)); }
 }
 @media (max-width: 560px) {
+  .viz.is-full, .viz.pseudo-full { padding: 8px 0; }
+  .viz.is-full .viz-bar, .viz.pseudo-full .viz-bar, .viz.is-full .viz-chips, .viz.pseudo-full .viz-chips, .viz.is-full .viz-side, .viz.pseudo-full .viz-side { margin: 0 8px; }
+  .viz.is-full .viz-stage, .viz.pseudo-full .viz-stage { border-left: 0; border-right: 0; border-radius: 0; }
   .viz-main { order: 1; }
   .viz-chips { order: 2; }
   .viz-stage { aspect-ratio: 1 / 1; min-height: 0; }
-  .viz.is-full .viz-stage, .viz.pseudo-full .viz-stage { height: 58vh; }
+  .viz.is-full .viz-stage, .viz.pseudo-full .viz-stage { height: 46vh; }
   .viz-chips { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .viz-side { grid-template-columns: minmax(0, 1fr); }
 }
