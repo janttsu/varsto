@@ -162,6 +162,18 @@ fn device(lab: &Lab, storages: &[(&str, &str)]) -> (Engine, String) {
     }
     let files = lab.path("files");
     a.add_folder("docs", &files).unwrap();
+    // These tests are about spreading blocks over all storages of a place.
+    let mut places: Vec<String> = storages.iter().map(|(_, p)| p.to_string()).collect();
+    places.sort();
+    places.dedup();
+    a.set_placement(
+        "docs",
+        Some(varsto_core::placement::Placement {
+            places,
+            ..Default::default()
+        }),
+    )
+    .unwrap();
     for i in 0..6u64 {
         fs::write(
             files.join(format!("f{i}.bin")),

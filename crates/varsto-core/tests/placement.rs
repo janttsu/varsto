@@ -282,7 +282,7 @@ fn placement_writes_only_to_the_chosen_storages_on_every_device() {
         "desk",
         PASS,
         &key,
-        dir("one", &p("s1"), false, "home"),
+        dir("first", &p("s1"), false, "home"),
     )
     .unwrap();
     b.chunker = ChunkerParams::SMALL;
@@ -295,7 +295,7 @@ fn placement_writes_only_to_the_chosen_storages_on_every_device() {
     b.sync(None).unwrap();
     assert_eq!(
         b.placement("docs").unwrap().targets,
-        vec!["one".to_string(), "third".to_string()]
+        vec!["first".to_string(), "three".to_string()]
     );
     let before = objects(&p("s3"));
     fs::write(p("docs-b").join("b.bin"), pseudo_random(60_000, 2)).unwrap();
@@ -359,6 +359,15 @@ fn move_lab() -> MoveLab {
     a.add_folder("docs", &docs).unwrap();
     a.sync(None).unwrap();
     MoveLab {
+    // These tests move blocks between the storages of one place.
+    a.set_placement(
+        "docs",
+        Some(Placement {
+            places: vec!["cloud".into()],
+            ..Default::default()
+        }),
+    )
+    .unwrap();
         _t: t,
         root,
         a,
