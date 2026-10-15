@@ -36,6 +36,8 @@ pub fn ui_language(home: &std::path::Path) -> String {
         .unwrap_or_else(|| "en".to_string())
 }
 const APP_CSS: &str = include_str!("../ui/app.css");
+const VIZ_JS: &str = include_str!("../ui/viz.js");
+const VIZ_CSS: &str = include_str!("../ui/viz.css");
 /// Largest single upload through /api/upload (a phone video, not a disk image).
 /// The body is streamed to disk (or encrypted into the block cache as it
 /// arrives), never held in memory as a whole.
@@ -185,6 +187,7 @@ pub fn serve_arc(server: Arc<Server>, state: Shared) {
             bound: st.bound.clone(),
             token: st.token.clone(),
             traffic: st.traffic.clone(),
+            state: state.clone(),
         }
     };
     let (tx, rx) = std::sync::mpsc::channel::<Request>();
@@ -261,6 +264,7 @@ struct Fixed {
     bound: String,
     token: String,
     traffic: Arc<varsto_core::p2p::Traffic>,
+    state: Shared,
 }
 
 /// Answer a request that needs no state, or hand it back for the worker.
@@ -388,6 +392,15 @@ fn handle_unlocked(fixed: &Fixed, request: Request) -> Result<Option<Request>> {
         crate::sse::serve(request, &query, fixed.traffic.clone());
         return Ok(None);
     }
+    if let Some((bytes, ctype)) = crate::viz::asset(&path) {
+        // The visualization's sprites: static, no token.
+        request.respond(
+            Response::from_data(bytes)
+                .with_header(header("Content-Type", ctype))
+                .with_header(header("Cache-Control", "private, max-age=300")),
+        )?;
+        return Ok(None);
+    }
     match path.as_str() {
         "/" => request.respond(html(INDEX_HTML))?,
         "/app.js" => request.respond(text(APP_JS, "text/javascript; charset=utf-8"))?,
@@ -395,6 +408,19 @@ fn handle_unlocked(fixed: &Fixed, request: Request) -> Result<Option<Request>> {
         "/i18n/fi.json" => request.respond(text(I18N_FI, "application/json; charset=utf-8"))?,
         "/i18n/sv.json" => request.respond(text(I18N_SV, "application/json; charset=utf-8"))?,
         "/app.css" => request.respond(text(APP_CSS, "text/css; charset=utf-8"))?,
+        "/viz.js" => request.respond(text(VIZ_JS, "text/javascript; charset=utf-8"))?,
+        "/viz.css" => request.respond(text(VIZ_CSS, "text/css; charset=utf-8"))?,
+        "/api/viz" => {
+            if !header_token_ok(&request, &fixed.token) {
+                request.respond(json_response(
+                    401,
+                    &json!({"error": "missing or wrong token; reopen the start URL"}),
+                ))?;
+            } else {
+                let v = crate::viz::snapshot(&fixed.state, &fixed.traffic);
+                request.respond(json_response(200, &v))?;
+            }
+        }
         "/api/p2p/traffic" | "/api/progress" | "/api/activity" => {
             let token_ok = header_token_ok(&request, &fixed.token);
             if !token_ok {
