@@ -35,7 +35,9 @@ function Show-Logs {
 }
 function Run-Setup($exe, $log, [string[]]$extra = @()) {
   $a = @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CLOSEAPPLICATIONS", "/LOG=$log") + $extra
-  $p = Start-Process -FilePath $exe -ArgumentList $a -PassThru -Wait
+  # Not Start-Process -Wait: that waits for every process the setup started too (the tray).
+  $p = Start-Process -FilePath $exe -ArgumentList $a -PassThru
+  if (-not $p.WaitForExit(300000)) { throw "setup did not finish in 5 minutes" }
   return $p.ExitCode
 }
 function Wait-Until([scriptblock]$test, [string]$what, [int]$seconds = 90) {
@@ -117,7 +119,7 @@ Check ((Get-ItemProperty $uninstKey).DisplayVersion -eq $NewerVersion) "still ve
 
 Step "uninstall keeps the data folder"
 $unins = "$app\unins000.exe"
-Start-Process -FilePath $unins -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/LOG=$Work\unins1.log" -Wait
+Start-Process -FilePath $unins -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/LOG=$Work\unins1.log" | Out-Null
 Wait-Until { -not (Test-Path "$app\varsto.exe") } "the program files to go"
 Wait-Until { -not (Test-Path $app) -or -not (Get-ChildItem $app -ErrorAction SilentlyContinue) } "the folder to empty"
 Check (@(Installed-Procs).Count -eq 0) "no Varsto process left"
@@ -131,7 +133,7 @@ Check (Test-Path "$home1\smoke-marker.txt") "the data folder is kept"
 Step "uninstall with /DELETEDATA=1 removes the data folder"
 $code = Run-Setup $Setup "$Work\setup5.log" @("/DIR=`"$app`"")
 Check ($code -eq 0) "fresh install again (exit code $code)"
-Start-Process -FilePath "$app\unins000.exe" -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/DELETEDATA=1", "/LOG=$Work\unins2.log" -Wait
+Start-Process -FilePath "$app\unins000.exe" -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/DELETEDATA=1", "/LOG=$Work\unins2.log" | Out-Null
 Wait-Until { -not (Test-Path "$app\varsto.exe") } "the program files to go"
 Wait-Until { -not (Test-Path $home1) } "the data folder to go" 60
 Write-Host "== installer smoke test finished"

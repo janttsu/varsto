@@ -169,6 +169,7 @@ jobs:
       - name: Build a setup of a newer version (to test the upgrade in place)
         run: installer\windows\build.ps1 -Version 99.0.0 -Source dist\windows\app -Out dist\installer-newer
       - name: Smoke test the installer (install, upgrade, repair, window, uninstall)
+        timeout-minutes: 15
         run: |
           installer\windows\smoke-test.ps1 -Setup "dist\installer\Varsto-$env:VARSTO_VERSION-setup.exe" `
             -Newer dist\installer-newer\Varsto-99.0.0-setup.exe -Version $env:VARSTO_VERSION -NewerVersion 99.0.0 -Work C:\smoke
