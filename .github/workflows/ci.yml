@@ -1,6 +1,6 @@
 # Every platform is built and tested on GitHub-hosted runners (free for a
 # public repository): Linux and the cross-compiled Windows package on Ubuntu,
-# the Windows package tested and photographed on Windows Server 2025, the
+# the Windows package and its installer (Inno Setup) tested and photographed on Windows Server 2025, the
 # Android app in the emulator, the native macOS app and the iOS shell on
 # Apple Silicon. Two collecting jobs put the packages together as one download
 # set (an unsigned SHA256SUMS; the maintainer signs it offline, RELEASING.md)
@@ -140,6 +140,50 @@ jobs:
           name: shots-windows
           path: dist/shots
           if-no-files-found: warn
+
+  windows-installer:
+    name: Windows installer (build, smoke test)
+    needs: linux
+    runs-on: windows-2025
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: packages-linux-windows
+          path: pkg
+      - name: Unpack the Windows package
+        run: |
+          $zip = (Get-ChildItem pkg\varsto-*-x86_64-pc-windows-gnu.zip | Select-Object -First 1).FullName
+          $version = (Get-Content Cargo.toml | Select-String -Pattern '^version\s*=\s*"(.*)"' | Select-Object -First 1).Matches[0].Groups[1].Value
+          Expand-Archive $zip -DestinationPath unpacked
+          New-Item -ItemType Directory -Force dist\windows\app | Out-Null
+          Copy-Item (Get-ChildItem unpacked -Recurse -File).FullName dist\windows\app
+          Get-ChildItem dist\windows\app | Format-Table Name, Length
+          "VARSTO_VERSION=$version" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+      - name: Build the installer
+        run: installer\windows\build.ps1 -Version $env:VARSTO_VERSION -Source dist\windows\app -Out dist\installer
+      - name: Build a setup of a newer version (to test the upgrade in place)
+        run: installer\windows\build.ps1 -Version 99.0.0 -Source dist\windows\app -Out dist\installer-newer
+      - name: Smoke test the installer (install, upgrade, repair, window, uninstall)
+        timeout-minutes: 15
+        run: |
+          installer\windows\smoke-test.ps1 -Setup "dist\installer\Varsto-$env:VARSTO_VERSION-setup.exe" `
+            -Newer dist\installer-newer\Varsto-99.0.0-setup.exe -Version $env:VARSTO_VERSION -NewerVersion 99.0.0 -Work C:\smoke
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: installer-windows-logs
+          path: C:\smoke\*.log
+          if-no-files-found: ignore
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installer-windows
+          path: dist/installer/Varsto-*-setup.exe
+          if-no-files-found: error
 
   android:
     name: Android (APK, emulator, screenshots)
@@ -326,7 +370,7 @@ jobs:
 
   downloads:
     name: Download set (and draft release on tags)
-    needs: [linux, android, macos]
+    needs: [linux, windows-installer, android, macos]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -338,7 +382,7 @@ jobs:
       - name: Assemble
         run: |
           mkdir -p dist/downloads
-          find art/packages-linux-windows art/packages-android -type f -exec cp {} dist/downloads/ \;
+          find art/packages-linux-windows art/installer-windows art/packages-android -type f -exec cp {} dist/downloads/ \;
           cp art/Varsto-macos/dist/Varsto-*-macos.dmg dist/downloads/ 2>/dev/null || find art/Varsto-macos -name 'Varsto-*-macos.dmg' -exec cp {} dist/downloads/ \;
           website/assemble-release.sh dist/downloads
           ls -la dist/downloads

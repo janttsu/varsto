@@ -102,6 +102,32 @@ Spec sections 32 to 60. Storage format 1 unchanged; every device must run alpha.
 
 ### Added
 
+- Windows installer (`Varsto-<version>-setup.exe`, Inno Setup, spec 63):
+  per-user in `%LOCALAPPDATA%\Programs\Varsto` without administrator rights
+  (or for all users with elevation), Start menu and desktop shortcuts with the
+  Varsto icon, the background service and tray at login, an uninstaller that
+  keeps the data folder unless asked, and a check for the Microsoft Edge
+  WebView2 Runtime. Running the installer again upgrades or repairs the
+  installation in place: it closes the window, tray and service, replaces the
+  files and starts Varsto again; a downgrade needs a confirmation (and is
+  refused when silent). The portable zip stays, now with the window program.
+  [docs/windows.md](docs/windows.md).
+- Varsto's own window on Windows (`varsto-window.exe`, WebView2 through `wry`
+  and `tao`): the local interface in a native window with the Varsto icon, one
+  window per user (a second launch focuses it), size and position remembered,
+  closing it leaves the service and tray running, and the tray's "Open Varsto"
+  opens it. Without WebView2 the interface opens in the default browser and a
+  message says how to install the runtime. Linux and macOS are unchanged.
+- Automatic updates: the service looks for a new version once a day and, on
+  Windows, installs it by itself (the installed copy downloads the signed
+  `Varsto-<version>-setup.exe`, checks it like every archive and runs it
+  silently from a private folder); elsewhere it shows a notification. Switch
+  it off in the interface (Settings, Service) or with
+  `varsto config auto-update off`. New command `varsto config`.
+- Windows notifications from the service (toast), for example "update
+  available".
+- Tray: one tray per device directory and Windows session.
+
 - Live activity between devices (spec 32).
 - Bit-rot check (scrub) with restores from good copies (spec 33).
 - Whole drives for disk pools: init, insert, unmount, verified writes (spec 34).

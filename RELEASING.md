@@ -38,7 +38,10 @@ Ed25519).
 ### What `varsto update` checks
 
 1. `manifest.json` names the latest version and the archive for this platform
-   (`varsto-<version>-<target>.tar.gz` or `.zip`). `manifest.json.minisig`
+   (`varsto-<version>-<target>.tar.gz` or `.zip`; for a Windows copy installed
+   by the setup program, `Varsto-<version>-setup.exe`, which is then run
+   silently after step 5 and restarts Varsto itself; the macOS app takes the
+   disk image). `manifest.json.minisig`
    must verify against the built-in public key and name that same version;
    an unsigned or differently signed manifest is refused, so the download
    site cannot name an older release.
@@ -86,7 +89,9 @@ folded into the next tag. Do not create them afterwards.
 
 Every package is built and tested on GitHub-hosted runners
 (`.github/workflows/ci.yml`): Linux (musl) and the cross-compiled Windows zip
-on Ubuntu, the Windows zip smoke-tested on Windows Server 2025, the Android
+on Ubuntu, the Windows zip smoke-tested on Windows Server 2025, the Windows
+installer (Inno Setup, `installer/windows`) built there and smoke-tested
+(install, upgrade in place, repair, uninstall), the Android
 APK in the emulator, the macOS disk image and the iOS shell on Apple
 Silicon. CI never holds the release key.
 

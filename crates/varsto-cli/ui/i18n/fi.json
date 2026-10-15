@@ -1692,7 +1692,9 @@
   "Fetching": "Haku",
   "Preparing": "Valmistelu",
   "Ejecting": "Irrotus",
-  "average copies per block": "kopioita lohkoa kohti keskimäärin"
+  "average copies per block": "kopioita lohkoa kohti keskimäärin",
+  "Check for updates every day": "Päivitykset tarkistetaan päivittäin",
+  "Where Varsto can install a new version by itself (Windows) it does, after checking the Varsto release signature; elsewhere it tells you.": "Missä Varsto voi asentaa uuden version itse (Windows), se tekee sen tarkistettuaan Varston julkaisuallekirjoituksen; muualla se kertoo asiasta."
  },
  "patterns": [
   [

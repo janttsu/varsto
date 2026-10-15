@@ -1447,10 +1447,20 @@ fn api(st: &mut State, method: Method, path: &str, query: &str, input: &Value) -
             let c = crate::update::check()?;
             let policy = crate::update::Policy::new(&st.home, false);
             let message = crate::update::apply(&c, &policy)?;
-            if c.available {
+            // The Windows setup program restarts Varsto itself.
+            if c.available && !c.installer() {
                 st.service.restart_requested = true;
             }
             Ok(json!({"ok": true, "updated": c.available, "message": message}))
+        }
+        (Method::Get, "/api/update/settings") => Ok(json!({
+            "auto": crate::update::auto_update_enabled(&st.home),
+            "installs": crate::update::can_install_by_itself(),
+        })),
+        (Method::Post, "/api/update/settings") => {
+            let on = input.get("auto").and_then(|b| b.as_bool()).unwrap_or(true);
+            crate::update::set_auto_update(&st.home, on)?;
+            Ok(json!({"ok": true, "auto": on}))
         }
         // Phones make video frames with their own media framework.
         (Method::Get, "/api/thumbnails/wanted") => {
