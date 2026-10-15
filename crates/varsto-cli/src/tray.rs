@@ -188,6 +188,11 @@ impl Supervisor {
     }
 
     pub fn open_ui(&self) {
+        // Windows: Varsto's own window (varsto-window.exe beside this binary);
+        // a second launch only brings the open window to the front.
+        if open_window(&self.home) {
+            return;
+        }
         if let Some(f) = self.file() {
             if let Ok(url) = service::boot_url(&f) {
                 crate::desktop::open_in_browser(&url);
@@ -254,7 +259,71 @@ impl Supervisor {
 
 pub type Shared = Arc<Mutex<Supervisor>>;
 
+/// The program that shows the interface in a window of its own, when it is
+/// installed beside this binary (Windows).
+fn window_program() -> Option<PathBuf> {
+    if !cfg!(windows) {
+        return None;
+    }
+    let p = std::env::current_exe()
+        .ok()?
+        .with_file_name("varsto-window.exe");
+    p.is_file().then_some(p)
+}
+
+/// Start the window program; false when there is none (the browser opens then).
+fn open_window(home: &Path) -> bool {
+    let Some(program) = window_program() else {
+        return false;
+    };
+    let mut cmd = Command::new(program);
+    cmd.arg("--home")
+        .arg(home)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const DETACHED_PROCESS: u32 = 0x0000_0008;
+        cmd.creation_flags(DETACHED_PROCESS);
+    }
+    cmd.spawn().is_ok()
+}
+
+/// Windows: one tray per device directory and user session (the installer
+/// starts it at login and `varsto install` leaves a starter of its own).
+/// True when this process is the first.
+#[cfg(windows)]
+fn first_tray(home: &Path) -> bool {
+    use windows_sys::Win32::Foundation::{GetLastError, ERROR_ALREADY_EXISTS};
+    use windows_sys::Win32::System::Threading::CreateMutexW;
+    let hash = home
+        .to_string_lossy()
+        .to_lowercase()
+        .bytes()
+        .fold(0xcbf2_9ce4_8422_2325u64, |h, b| {
+            (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3)
+        });
+    let name: Vec<u16> = format!("Local\\VarstoTray-{hash:016x}\0")
+        .encode_utf16()
+        .collect();
+    // SAFETY: a named mutex with default security; the handle stays open for
+    // the life of the process on purpose (the mutex is the lock).
+    unsafe {
+        let h = CreateMutexW(std::ptr::null(), 0, name.as_ptr());
+        h.is_null() || GetLastError() != ERROR_ALREADY_EXISTS
+    }
+}
+
 pub fn run(home: PathBuf, interval: u64, open_at_start: bool) -> Result<()> {
+    #[cfg(windows)]
+    if !first_tray(&home) {
+        if open_at_start {
+            open_window(&home);
+        }
+        return Ok(());
+    }
     let sup: Shared = Arc::new(Mutex::new(Supervisor::new(home.clone(), interval)));
     sup.lock().unwrap().ensure_running()?;
     if open_at_start {
