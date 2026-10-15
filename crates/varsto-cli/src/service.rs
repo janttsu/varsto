@@ -922,6 +922,9 @@ impl P2p {
                 return None;
             }
             st.traffic.set_me(e.device_id(), e.own_device_name());
+            let names = e.known_device_names();
+            st.traffic
+                .learn_names(names.iter().map(|(d, n)| (d, n.as_str())));
             varsto_core::activity::set_identity(e.device_id(), e.own_device_name());
             let identity = match e.p2p_identity() {
                 Ok(id) => Some(id),

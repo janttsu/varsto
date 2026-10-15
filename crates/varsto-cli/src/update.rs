@@ -32,7 +32,7 @@ use std::path::{Path, PathBuf};
 
 /// The download site; the one place to change it (or override with
 /// `VARSTO_UPDATE_URL`, e.g. for a mirror; the signature check stays). The old
-/// address, varsto.soderlund.in, keeps serving /downloads/ for old clients.
+/// address keeps serving /downloads/ for old clients.
 pub const DEFAULT_SITE: &str = "https://varsto.net";
 pub const SITE_ENV: &str = "VARSTO_UPDATE_URL";
 /// Second channel: the checksum list attached to each GitHub release.
