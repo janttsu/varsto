@@ -2138,6 +2138,10 @@ fn api_unlocked(
             if !plain {
                 engine.set_encrypted_here(&name, true)?;
             }
+            // E.g. camera upload: a folder that sends and never applies others' changes.
+            if let Some(mode) = opt(input, "mode").filter(|m| !m.trim().is_empty()) {
+                engine.set_folder_mode(&name, mode.parse()?)?;
+            }
             service.folders_changed = true;
             service.request_sync();
             Ok(json!({"ok": true, "id": id.to_string()}))
@@ -2924,6 +2928,10 @@ fn api_unlocked(
             Ok(serde_json::to_value(engine.disk_groups()?)?)
         }
         (Method::Get, "/api/data/locations") => Ok(serde_json::to_value(engine.data_locations()?)?),
+        // Every storage of the vault: configured here or only known from other devices.
+        (Method::Get, "/api/storage/known") => {
+            Ok(serde_json::to_value(engine.storage_directory()?)?)
+        }
         (Method::Get, "/api/storage/costs") => Ok(serde_json::to_value(engine.storage_estimates()?)?),
         (Method::Post, "/api/storage/price") => {
             let name = s(input, "name")?;

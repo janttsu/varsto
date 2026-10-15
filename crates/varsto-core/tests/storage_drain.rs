@@ -162,6 +162,18 @@ fn device(lab: &Lab, storages: &[(&str, &str)]) -> (Engine, String) {
     }
     let files = lab.path("files");
     a.add_folder("docs", &files).unwrap();
+    // These tests are about spreading blocks over all storages of a place.
+    let mut places: Vec<String> = storages.iter().map(|(_, p)| p.to_string()).collect();
+    places.sort();
+    places.dedup();
+    a.set_placement(
+        "docs",
+        Some(varsto_core::placement::Placement {
+            places,
+            ..Default::default()
+        }),
+    )
+    .unwrap();
     for i in 0..6u64 {
         fs::write(
             files.join(format!("f{i}.bin")),
@@ -498,11 +510,10 @@ fn quotas_and_drains_are_the_same_on_every_device() {
     )
     .unwrap();
     b.chunker = ChunkerParams::SMALL;
-    b.add_storage(dir("other", &lab.path("s2"), "cloud"))
-        .unwrap();
+    b.add_storage(dir("s2", &lab.path("s2"), "cloud")).unwrap();
     b.sync(None).unwrap();
     assert_eq!(b.storage_settings("box").quota_bytes, Some(quota));
-    assert_eq!(b.storage_settings("other").quota_bytes, None);
+    assert_eq!(b.storage_settings("s2").quota_bytes, None);
     let bdir = lab.path("b-files");
     b.attach_folder("docs", &bdir, false).unwrap();
     b.sync(None).unwrap();
@@ -545,4 +556,40 @@ fn quotas_and_drains_are_the_same_on_every_device() {
     a.set_storage_quota("s1", Some(None), None).unwrap();
     b.sync(None).unwrap();
     assert_eq!(b.storage_settings("box").quota_bytes, None);
+}
+
+#[test]
+fn after_a_drain_no_file_and_no_status_lists_the_storage() {
+    let lab = Lab::new();
+    let (mut a, _) = device(&lab, &[("old", "cloud"), ("home", "home")]);
+    a.add_storage(dir("new", &lab.path("new"), "cloud"))
+        .unwrap();
+    a.drain_start("old", &DrainOptions::default()).unwrap();
+    for _ in 0..50 {
+        if a.drain_run("old", &DrainRunLimits::default())
+            .unwrap()
+            .drained
+        {
+            break;
+        }
+    }
+    // Neither the ledger view ...
+    let view = a.view().unwrap();
+    assert!(view
+        .chunks
+        .values()
+        .all(|c| !c.storages.contains_key("old")));
+    // ... nor the "where your data is" status lists it.
+    let loc = a.data_locations().unwrap();
+    let old = loc.storages.iter().find(|s| s.name == "old").unwrap();
+    assert_eq!((old.bytes, old.blocks), (0, 0));
+    assert!(loc.folders.iter().all(|f| !f.storages.contains_key("old")));
+    // A later sync does not bring it back.
+    a.sync(None).unwrap();
+    assert!(a
+        .view()
+        .unwrap()
+        .chunks
+        .values()
+        .all(|c| !c.storages.contains_key("old")));
 }

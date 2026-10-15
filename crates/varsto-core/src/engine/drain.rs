@@ -777,6 +777,16 @@ impl Engine {
         if opts.budget_bytes_per_day == Some(0) {
             bail!("a daily budget must be more than zero");
         }
+        if self.storage_settings(name).drain.is_none() {
+            let folders = self.folders_placed_on(name);
+            if !folders.is_empty() {
+                bail!(
+                    "{name} is still where {} {} written to: change their placement first (Policies > Placement, or `varsto folder placement <folder> --storage <other>`), then drain {name}",
+                    folders.join(", "),
+                    if folders.len() == 1 { "is" } else { "are" }
+                );
+            }
+        }
         let mut settings = self.storage_settings(name);
         let prev = settings.drain.clone();
         settings.drain = Some(DrainSetting {
@@ -799,6 +809,34 @@ impl Engine {
         }
         self.save_drain_state(name, Some(&st))?;
         self.drain_plan(name, opts)
+    }
+
+    /// Folders whose placement names `name` (or the only open storage of
+    /// its place), so a drain would leave them with nowhere to write.
+    fn folders_placed_on(&self, name: &str) -> Vec<String> {
+        let Some(spec) = self.config.storages.iter().find(|s| s.name() == name) else {
+            return Vec::new();
+        };
+        let place = spec.place();
+        let closed = self.closed_storages();
+        let only_in_place = !self.config.storages.iter().any(|s| {
+            s.name() != name && !s.is_carrier() && s.place() == place && !closed.contains(s.name())
+        });
+        let mut out: Vec<String> = self
+            .keyring
+            .folders
+            .values()
+            .filter(|r| !r.is_removed())
+            .filter(|r| {
+                r.placement.as_ref().is_some_and(|p| {
+                    p.storages.iter().any(|s| s == name)
+                        || (only_in_place && p.places.contains(&place))
+                })
+            })
+            .map(|r| r.name.clone())
+            .collect();
+        out.sort();
+        out
     }
 
     /// Stop draining: the storage takes new blocks again. Copies already
@@ -1013,6 +1051,7 @@ impl Engine {
                 push_reason(&mut st.blocked, why);
             } else {
                 report.objects_deleted += self.delete_leftovers(&spec);
+                self.retire_stale_locations(name)?;
                 report.records_copied = self.drain_records(&spec)?;
                 let mut settings = self.storage_settings(name);
                 if let Some(d) = settings.drain.as_mut() {
@@ -1273,6 +1312,46 @@ impl Engine {
             }
         }
         n
+    }
+
+    /// Locations the view still lists on `name` although no claim counts
+    /// there (a verification a device made before it saw the drop, an old
+    /// record): dropped for every file, so no status lists the storage.
+    fn retire_stale_locations(&mut self, name: &str) -> Result<()> {
+        let names = self.drain_resolver();
+        let configured: BTreeSet<String> = self
+            .config
+            .storages
+            .iter()
+            .map(|s| s.name().to_string())
+            .collect();
+        let view = self.view()?;
+        let mut any = false;
+        for ((folder, chunk), r) in &view.chunks {
+            if folder.as_str().is_empty() {
+                continue;
+            }
+            for (n, l) in &r.storages {
+                let who = if l.claimed_by.is_empty() {
+                    &l.verified_by
+                } else {
+                    &l.claimed_by
+                };
+                if names.resolve_any(n, who, &configured).as_deref() == Some(name) {
+                    self.pending.push(Event::ChunkDropped {
+                        folder: folder.clone(),
+                        chunk: chunk.clone(),
+                        object: r.object.clone(),
+                        storage: n.clone(),
+                    });
+                    any = true;
+                }
+            }
+        }
+        if any {
+            self.commit_batch()?;
+        }
+        Ok(())
     }
 
     /// Make sure every record, ledger batch, manifest and thumbnail on

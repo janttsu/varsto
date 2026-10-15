@@ -29,12 +29,12 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
-const STORAGE_ID_KEY: &str = "vault/storage-id.json";
+pub(super) const STORAGE_ID_KEY: &str = "vault/storage-id.json";
 const NAMES_PREFIX: &str = "vault/storage-names/";
 
 #[derive(Serialize, Deserialize)]
-struct StorageIdentity {
-    storage_id: String,
+pub(super) struct StorageIdentity {
+    pub(super) storage_id: String,
 }
 
 /// One device's storage names and the identity of each storage.
@@ -94,6 +94,19 @@ impl NameResolver {
             }
         }
         (!known && self.readable.contains(name)).then(|| name.to_string())
+    }
+
+    /// Other devices' names for storages, with the identity of each.
+    pub(super) fn others(&self) -> &BTreeMap<DeviceId, BTreeMap<String, String>> {
+        &self.theirs
+    }
+
+    /// Local storage name -> identity.
+    pub(super) fn local_ids(&self) -> BTreeMap<String, String> {
+        self.local_by_id
+            .iter()
+            .map(|(id, n)| (n.clone(), id.clone()))
+            .collect()
     }
 
     /// Other devices' storage names that match a storage here by

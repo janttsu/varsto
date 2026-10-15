@@ -2078,12 +2078,21 @@ impl LedgerView {
                 storages, dropped, ..
             } = rec;
             storages.retain(|name, loc| {
+                let Some(at) = dropped.get(name) else {
+                    return true;
+                };
+                // A verification alone (a device that had not seen the drop
+                // read the copy back) is no claim: nothing counts there any
+                // more, and it must not bring the storage back into the view.
+                if loc.claimed_by.is_empty() {
+                    return false;
+                }
                 let claimed = if loc.claimed_lamport == 0 {
                     loc.lamport
                 } else {
                     loc.claimed_lamport
                 };
-                dropped.get(name).is_none_or(|at| claimed > *at)
+                claimed > *at
             });
         }
     }
@@ -2172,6 +2181,69 @@ mod tests {
         let signer = SigningKey::generate();
         let device = device_id_for(&signer.public());
         (dir, store, key, signer, device)
+    }
+
+    /// A verification made after a drop (by a device that had not seen it)
+    /// does not bring the storage back into the view.
+    #[test]
+    fn a_late_verification_does_not_undo_a_drop() {
+        let x = DeviceId::from_bytes(&[1; 16]);
+        let y = DeviceId::from_bytes(&[2; 16]);
+        let folder = FolderId::from_bytes(&[3; 16]);
+        let chunk = ChunkId::from_bytes(&[4; 16]);
+        let object = ObjectName::from_bytes(&[5; 32]);
+        let mut v = LedgerView::default();
+        let mut seq = 0;
+        let mut put = |v: &mut LedgerView, dev: &DeviceId, lamport: u64, ev: Event| {
+            seq += 1;
+            v.apply(&Batch {
+                device: dev.clone(),
+                seq,
+                prev: None,
+                lamport,
+                created_utc: 0,
+                events: vec![ev],
+                seen: BTreeMap::new(),
+            });
+        };
+        let (f, c, o) = (folder.clone(), chunk.clone(), object.clone());
+        let stored = Event::ChunkStored {
+            folder: f.clone(),
+            chunk: c.clone(),
+            object: o.clone(),
+            storage: "s3".into(),
+            size: 10,
+            pack: None,
+        };
+        put(&mut v, &x, 1, stored);
+        put(
+            &mut v,
+            &x,
+            5,
+            Event::ChunkDropped {
+                folder: f.clone(),
+                chunk: c.clone(),
+                object: o.clone(),
+                storage: "s3".into(),
+            },
+        );
+        put(
+            &mut v,
+            &y,
+            7,
+            Event::ChunkVerified {
+                folder: f.clone(),
+                chunk: c.clone(),
+                object: o.clone(),
+                storage: "s3".into(),
+            },
+        );
+        v.apply_drops();
+        assert!(!v
+            .locate(&folder, &chunk)
+            .unwrap()
+            .storages
+            .contains_key("s3"));
     }
 
     #[test]

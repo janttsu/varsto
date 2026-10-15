@@ -653,7 +653,7 @@
   "Checking disk «{s}» for bit rot": "Tarkistaa levyn «{s}» bittimädän varalta",
   "Checking the files of folder «{s}» for bit rot": "Tarkistaa kansion «{s}» tiedostot bittimädän varalta",
   "Checking the block cache for bit rot": "Tarkistaa lohkovälimuistin bittimädän varalta",
-  "By default every block goes to every storage. Tick storages or places to write this folder only there; a place means every storage in it, now and later. Blocks already stored stay where they are until you move them; policies still count every copy.": "Oletuksena jokainen lohko menee jokaiseen tallennuspaikkaan. Rastita tallennuspaikat tai paikat, niin tämä kansio kirjoitetaan vain niihin; paikka tarkoittaa kaikkia sen tallennuspaikkoja, nyt ja myöhemmin. Jo tallennetut lohkot pysyvät paikallaan, kunnes siirrät ne; säännöt laskevat silti jokaisen kopion.",
+  "Tick storages or places to write this folder only there; a place means every storage in it, now and later. A place with a ticked storage is always on. Blocks already stored stay where they are until you move them; policies still count every copy.": "Rastita tallennuspaikat tai paikat, niin tämä kansio kirjoitetaan vain niihin; paikka tarkoittaa kaikkia sen tallennuspaikkoja, nyt ja myöhemmin. Paikka, jonka tallennuspaikka on rastitettu, on aina päällä. Jo tallennetut lohkot pysyvät paikallaan, kunnes siirrät ne; säännöt laskevat silti jokaisen kopion.",
   "Tick the device (or devices) this transferrer is taken to. It then carries the blocks they still lack and is emptied as they receive them. Tick none to carry what any device lacks.": "Rastita laite (tai laitteet), jolle tämä siirtolevy viedään. Se kuljettaa lohkot, jotka niiltä vielä puuttuvat, ja tyhjenee sitä mukaa kuin ne saavat ne. Jätä kaikki rastimatta, niin se kuljettaa sen, mitä miltä tahansa laitteelta puuttuu.",
   "No other device yet": "Ei vielä muita laitteita",
   "at home": "kotona",
@@ -2801,5 +2801,14 @@
    ", (\\d+) paused",
    ", $1 keskeytetty"
   ]
- ]
+ ],
+  "not set up here": "ei käytössä täällä",
+  "Add credentials…": "Lisää tunnukset…",
+  "Same storage as ": "Sama tallennuspaikka kuin ",
+  ": keep one of them.": ": säilytä vain toinen.",
+  ". Add its credentials here to use it on this device.": ". Lisää sen tunnukset tähän, niin voit käyttää sitä tällä laitteella.",
+  "On ": "Laitteilla ",
+  "Photos and videos are uploaded from this phone and never changed by other devices. By default they are kept encrypted on the phone and open in Varsto only; tick the box to keep them as plain files that other apps can see (needs all files access).": "Valokuvat ja videot ladataan tästä puhelimesta, eikä muut laitteet muuta niitä. Oletuksena ne säilytetään puhelimessa salattuina ja ne avautuvat vain Varstossa; rastita ruutu, jos haluat pitää ne tavallisina tiedostoina, jotka muut sovellukset näkevät (vaatii pääsyn kaikkiin tiedostoihin).",
+  "Keep plain files on this phone": "Pidä tavalliset tiedostot tässä puhelimessa",
+  "Options": "Valinnat"
 }

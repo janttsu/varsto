@@ -646,7 +646,7 @@
   "Checking disk «{s}» for bit rot": "Kontrollerar disken «{s}» för bitröta",
   "Checking the files of folder «{s}» for bit rot": "Kontrollerar filerna i mappen «{s}» för bitröta",
   "Checking the block cache for bit rot": "Kontrollerar blockcachen för bitröta",
-  "By default every block goes to every storage. Tick storages or places to write this folder only there; a place means every storage in it, now and later. Blocks already stored stay where they are until you move them; policies still count every copy.": "Som standard skrivs varje block till alla lagringsplatser. Kryssa i lagringsplatser eller platser för att bara skriva den här mappen dit; en plats betyder alla lagringsplatser i den, nu och senare. Block som redan har lagrats ligger kvar där de är tills du flyttar dem; reglerna räknar ändå varje kopia.",
+  "Tick storages or places to write this folder only there; a place means every storage in it, now and later. A place with a ticked storage is always on. Blocks already stored stay where they are until you move them; policies still count every copy.": "Kryssa i lagringsplatser eller platser för att bara skriva den här mappen dit; en plats betyder alla lagringsplatser i den, nu och senare. En plats med en ikryssad lagringsplats är alltid på. Block som redan har lagrats ligger kvar där de är tills du flyttar dem; reglerna räknar ändå varje kopia.",
   "Tick the device (or devices) this transferrer is taken to. It then carries the blocks they still lack and is emptied as they receive them. Tick none to carry what any device lacks.": "Kryssa i enheten (eller enheterna) som den här överföringsdisken tas till. Den bär de block som de fortfarande saknar och töms i takt med att de tar emot dem. Kryssa inte i någon för att bära det som någon enhet saknar.",
   "No other device yet": "Inga andra enheter ännu",
   "at home": "hemma",
@@ -2855,5 +2855,14 @@
    ", (\\d+) paused",
    ", $1 pausade"
   ]
- ]
+ ],
+  "not set up here": "inte inställd här",
+  "Add credentials…": "Lägg till inloggning…",
+  "Same storage as ": "Samma lagringsplats som ",
+  ": keep one of them.": ": behåll bara en av dem.",
+  ". Add its credentials here to use it on this device.": ". Lägg till dess inloggning här för att använda den på den här enheten.",
+  "On ": "På ",
+  "Photos and videos are uploaded from this phone and never changed by other devices. By default they are kept encrypted on the phone and open in Varsto only; tick the box to keep them as plain files that other apps can see (needs all files access).": "Foton och videor laddas upp från den här telefonen och ändras aldrig av andra enheter. Som standard ligger de krypterade på telefonen och öppnas bara i Varsto; kryssa i rutan för att behålla dem som vanliga filer som andra appar kan se (kräver åtkomst till alla filer).",
+  "Keep plain files on this phone": "Behåll vanliga filer på den här telefonen",
+  "Options": "Alternativ"
 }

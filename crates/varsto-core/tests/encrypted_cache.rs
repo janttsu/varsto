@@ -399,3 +399,20 @@ fn streamed_pictures_keep_a_thumbnail_after_their_blocks_are_freed() {
     assert!(b.thumbnail("docs", "2026/10/IMG_1.jpg").unwrap().is_some());
     assert!(files(&dir).is_empty());
 }
+
+#[test]
+fn freeing_a_file_does_not_turn_a_send_only_folder_selective() {
+    // Camera upload frees each uploaded file; the send-only folder stays an
+    // ordinary (not selective) folder kept encrypted on the phone.
+    let s = setup();
+    let (mut b, _home, dir) = phone(&s, false);
+    b.set_folder_mode("docs", varsto_core::vault::FolderMode::SendOnly)
+        .unwrap();
+    fs::write(dir.join("cam.bin"), vec![5u8; 30_000]).unwrap();
+    b.sync(None).unwrap();
+    b.free_file("docs", "cam.bin").unwrap();
+    let st = b.status().unwrap();
+    let f = st.folders.iter().find(|f| f.name == "docs").unwrap();
+    assert!(!f.plain, "plain");
+    assert!(!f.selective, "selective");
+}

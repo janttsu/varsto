@@ -39,6 +39,16 @@ pub(super) struct WriteTargets {
     trash: Option<String>,
     /// Storages being drained or drained: they take nothing new.
     closed: BTreeSet<String>,
+    /// With no placement: the fewest storages that keep the folder's policy
+    /// (section 23). `None`: every storage.
+    minimal: Option<MinimalSet>,
+}
+
+/// The default write set of a folder without a placement.
+pub(super) struct MinimalSet {
+    /// Storages written: every storage except the surplus ones among those
+    /// of a place the policy counts copies in.
+    chosen: BTreeSet<String>,
 }
 
 impl WriteTargets {
@@ -53,6 +63,13 @@ impl WriteTargets {
             return true;
         }
         if self.names.as_ref().is_some_and(|n| !n.contains(name)) {
+            return false;
+        }
+        if self
+            .minimal
+            .as_ref()
+            .is_some_and(|m| !m.chosen.contains(name))
+        {
             return false;
         }
         let trash = self.trash.as_deref();
@@ -173,12 +190,99 @@ impl Engine {
                 "placement: write targets (none = every storage)"
             );
         }
+        let minimal = if names.is_none() {
+            self.minimal_set(rec, &closed)
+        } else {
+            None
+        };
         WriteTargets {
             names,
             carriers,
             trash: self.trash_storage_here(),
             closed,
+            minimal,
         }
+    }
+
+    /// The default placement (section 23): a storage is written unless the
+    /// policy counts copies in its place and the place has more storages
+    /// than the policy asks for ("home" is never pruned). Of those the best are kept: first a
+    /// storage that already holds the folder's blocks, then a warm one over
+    /// a cold one, then the cheaper (price per GB-month, unknown last), then
+    /// by name. Places the policy does not name (own disks, pools, other
+    /// labels) are written in full. More storages join when the policy's
+    /// `min_copies` needs them. `None` (every storage) when the folder has
+    /// no policy.
+    fn minimal_set(&self, rec: &FolderRecord, closed: &BTreeSet<String>) -> Option<MinimalSet> {
+        let policy = rec.effective_policy()?;
+        let trash = self.trash_storage_here();
+        let usable: Vec<&StorageSpec> = self
+            .config
+            .storages
+            .iter()
+            .filter(|s| !s.is_carrier() && !closed.contains(s.name()))
+            .filter(|s| trash.as_deref() != Some(s.name()))
+            .collect();
+        let mut holds: BTreeSet<String> = BTreeSet::new();
+        if let Ok(view) = self.view() {
+            for ((f, _), r) in view.chunks.iter() {
+                if f == &rec.folder_id {
+                    for (n, l) in &r.storages {
+                        if !l.claimed_by.is_empty() {
+                            holds.insert(n.clone());
+                        }
+                    }
+                }
+            }
+        }
+        let rank = |s: &&StorageSpec| {
+            (
+                !holds.contains(s.name()),
+                s.is_cold(),
+                self.storage_price(s.name())
+                    .and_then(|p| p.storage_per_gb_month)
+                    .unwrap_or(f64::MAX)
+                    .to_bits(),
+                s.name().to_string(),
+            )
+        };
+        let mut chosen: BTreeSet<String> = BTreeSet::new();
+        let mut surplus: Vec<&StorageSpec> = Vec::new();
+        // "home" (own disks and directories) is never pruned: they cost nothing
+        // to keep and a second disk is added to be written.
+        for (place, n) in policy
+            .min_per_place
+            .iter()
+            .filter(|(p, n)| **n > 0 && p.as_str() != "home")
+        {
+            let mut in_place: Vec<&StorageSpec> = usable
+                .iter()
+                .copied()
+                .filter(|s| &s.place() == place)
+                .collect();
+            in_place.sort_by_key(rank);
+            for (i, s) in in_place.into_iter().enumerate() {
+                if i < *n as usize {
+                    chosen.insert(s.name().to_string());
+                } else {
+                    surplus.push(s);
+                }
+            }
+        }
+        for s in &usable {
+            if !surplus.iter().any(|x| x.name() == s.name()) {
+                chosen.insert(s.name().to_string());
+            }
+        }
+        // Enough copies in all.
+        surplus.sort_by_key(rank);
+        for s in surplus {
+            if chosen.len() >= policy.min_copies as usize {
+                break;
+            }
+            chosen.insert(s.name().to_string());
+        }
+        Some(MinimalSet { chosen })
     }
 
     /// Local names of the storages a placement takes (transferrers aside).
@@ -220,6 +324,12 @@ impl Engine {
                     .storages
                     .iter()
                     .filter(|s| !s.is_carrier() && !targets.closed.contains(s.name()))
+                    .filter(|s| {
+                        targets
+                            .minimal
+                            .as_ref()
+                            .is_none_or(|m| m.chosen.contains(s.name()))
+                    })
                     .map(|s| s.name().to_string())
                     .collect()
             }
@@ -323,6 +433,9 @@ impl Engine {
                     };
                     if spec.is_carrier() {
                         bail!("{name} is a transferrer: it carries blocks between devices and cannot be a folder's storage");
+                    }
+                    if self.closed_storages().contains(name) {
+                        bail!("{name} is being drained or has been drained: it takes no new blocks, so it cannot be where a folder is written (stop the drain first, or pick another storage)");
                     }
                 }
                 for place in &p.places {
