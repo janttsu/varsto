@@ -70,6 +70,7 @@ mod notes;
 mod org_ops;
 mod pack_upkeep;
 mod placement;
+mod protection;
 mod quotas;
 mod repair;
 mod restic_mirror;
@@ -128,6 +129,7 @@ pub use org_ops::{
     LogView, OrgApproved, OrgBrief, OrgCreated, OrgDevice, OrgRemoveReport, OrgSummary, OrgUser,
     UnlistedDevice,
 };
+pub use protection::{ClassCoverage, Protection};
 pub use quotas::QuotaStatus;
 pub use repair::{
     Damage, DamageKind, RepairOptions, RepairReport, RepairStatus, RepairedCopy, Unrepairable,
@@ -385,11 +387,15 @@ pub struct FolderStatus {
     pub path: Option<PathBuf>,
     pub files: u64,
     pub bytes: u64,
+    /// Newest modification time of a current file (UTC seconds), if any.
+    pub last_change_utc: Option<i64>,
     pub chunks: u64,
     /// Chunks of current files that no storage claims to hold.
     pub chunks_without_storage_copy: u64,
     /// Chunks that at least one device other than the writer has verified on a storage.
     pub chunks_verified_elsewhere: u64,
+    /// How well the folder is protected (see `Engine::protection`).
+    pub protection: Protection,
     pub published_seq: u64,
     pub shared: bool,
     /// Shared with this device read-only (a viewer): nothing is published.
@@ -6786,6 +6792,7 @@ impl Engine {
 
     pub fn status(&self) -> Result<StatusReport> {
         let view = self.view()?;
+        let mut protection = self.protection()?;
         let mut folders = Vec::new();
         for (rec, mount) in self.folders() {
             let state = self.load_state(&rec.folder_id)?;
@@ -6875,9 +6882,18 @@ impl Engine {
                 path: mount.clone(),
                 files,
                 bytes,
+                last_change_utc: state
+                    .files
+                    .values()
+                    .filter(|f| !f.deleted && f.mtime > 0)
+                    .map(|f| f.mtime / 1_000_000_000)
+                    .max(),
                 chunks: chunks.len() as u64,
                 chunks_without_storage_copy: without,
                 chunks_verified_elsewhere: verified,
+                protection: protection
+                    .remove(&rec.folder_id.to_string())
+                    .unwrap_or_else(Protection::empty),
                 published_seq: state.published_seq,
                 shared: rec.shared,
                 read_only: self.share_read_only(&rec),

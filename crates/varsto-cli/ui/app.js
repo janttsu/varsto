@@ -1297,6 +1297,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     return (known && known.folders ? Promise.resolve(known) : api("GET", "/api/status")).then(function (s) {
       lastStatus = s;
       setTimeout(function () { helpAfterStatus(s); }, 0);
+      setTimeout(function () { if (window.varstoFolders) { window.varstoFolders.update(s); } }, 0);
       renderLedger(s.ledger_health);
       renderFolderSafety(s);
       $("who").textContent = s.device_name + " · vault " + s.vault_id.slice(0, 8) + " · " + s.ledger_batches + " ledger batches";

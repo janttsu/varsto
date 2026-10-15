@@ -16,6 +16,15 @@ spec still names them because sections were written as the work was done.
 
 ## Unreleased
 
+### Added
+
+- Files page: a folder overview (name, size, files, mode, last change) and a
+  colour-coded safety indicator per folder, also in the navigation: 100 % in
+  external storage, 100 % on your own disks only, partly protected (with the
+  percentage) or only on devices. It is computed from the ledger and carried
+  in `protection` of every folder in `/api/status` (spec 63). File lists have
+  a compact (default) and a comfortable density, kept in the browser.
+
 ### Changed
 
 - Format 2 blocks (spec 62): chunk nonces follow the packed bytes, chunks are

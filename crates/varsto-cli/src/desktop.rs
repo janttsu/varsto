@@ -22,6 +22,7 @@ use varsto_core::Engine;
 
 const INDEX_HTML: &str = include_str!("../ui/index.html");
 const APP_JS: &str = include_str!("../ui/app.js");
+const FOLDERS_JS: &str = include_str!("../ui/folders.js");
 const I18N_JS: &str = include_str!("../ui/i18n.js");
 const I18N_FI: &str = include_str!("../ui/i18n/fi.json");
 const I18N_SV: &str = include_str!("../ui/i18n/sv.json");
@@ -391,6 +392,7 @@ fn handle_unlocked(fixed: &Fixed, request: Request) -> Result<Option<Request>> {
     match path.as_str() {
         "/" => request.respond(html(INDEX_HTML))?,
         "/app.js" => request.respond(text(APP_JS, "text/javascript; charset=utf-8"))?,
+        "/folders.js" => request.respond(text(FOLDERS_JS, "text/javascript; charset=utf-8"))?,
         "/i18n.js" => request.respond(text(I18N_JS, "text/javascript; charset=utf-8"))?,
         "/i18n/fi.json" => request.respond(text(I18N_FI, "application/json; charset=utf-8"))?,
         "/i18n/sv.json" => request.respond(text(I18N_SV, "application/json; charset=utf-8"))?,
@@ -548,6 +550,9 @@ fn handle(state: &Shared, mut request: Request) -> Result<()> {
         (Method::Get, "/") => return Ok(request.respond(html(INDEX_HTML))?),
         (Method::Get, "/app.js") => {
             return Ok(request.respond(text(APP_JS, "text/javascript; charset=utf-8"))?)
+        }
+        (Method::Get, "/folders.js") => {
+            return Ok(request.respond(text(FOLDERS_JS, "text/javascript; charset=utf-8"))?)
         }
         (Method::Get, "/app.css") => {
             return Ok(request.respond(text(APP_CSS, "text/css; charset=utf-8"))?)
@@ -3645,6 +3650,63 @@ mod tests {
     /// Every sentence the Help page can show has a Finnish and a Swedish
     /// translation (the templates are the English string literals of
     /// `help.rs` given to `t0`/`tx` and the buttons' labels).
+    #[test]
+    fn status_carries_the_protection_of_each_folder() {
+        use varsto_core::storage::StorageSpec;
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().join("home");
+        let (mut engine, _) = Engine::init(&home, "laptop", "pass phrase 123").unwrap();
+        engine
+            .add_storage(StorageSpec::LocalDir {
+                name: "box".into(),
+                path: tmp.path().join("box"),
+                cold: false,
+                carrier: false,
+                place: String::new(),
+                min_free: None,
+            })
+            .unwrap();
+        let docs = tmp.path().join("docs");
+        std::fs::create_dir_all(&docs).unwrap();
+        std::fs::write(docs.join("a.bin"), vec![7u8; 50_000]).unwrap();
+        engine.add_folder("docs", &docs).unwrap();
+        engine.push("docs").unwrap();
+        let mut st = State {
+            home,
+            engine: Some(engine),
+            token: "t".into(),
+            bound: "127.0.0.1:0".into(),
+            traffic: Arc::default(),
+            service: ServiceState::default(),
+            pair: None,
+            link: None,
+        };
+        let v = api(&mut st, Method::Get, "/api/status", "", &json!({})).unwrap();
+        let f = &v["folders"][0];
+        assert_eq!(f["name"], "docs");
+        let p = &f["protection"];
+        // One directory is one of the user's own disks: all there, no cloud.
+        assert_eq!(p["state"], "disks");
+        assert_eq!(p["pct"], json!(100.0));
+        assert_eq!(p["disks"]["pct"], json!(100.0));
+        assert_eq!(p["cloud"]["pct"], json!(0.0));
+        assert_eq!(p["cloud"]["bytes"], json!(0));
+        let (total, size) = (
+            p["total_bytes"].as_u64().unwrap(),
+            f["bytes"].as_u64().unwrap(),
+        );
+        assert!(total > 0 && total <= size, "{total} of {size}");
+        assert!(p["total_blocks"].as_u64().unwrap() >= 1);
+        for k in ["verified_pct", "verified_bytes", "blocks"] {
+            assert!(p["disks"].get(k).is_some(), "disks lacks {k}: {p}");
+        }
+        assert!(f["last_change_utc"].is_i64());
+        assert_eq!(
+            p["policy_state"], "violated",
+            "default policy wants a cloud copy: {p}"
+        );
+    }
+
     #[test]
     fn help_sentences_are_translated() {
         let src = include_str!("../../varsto-core/src/help.rs");
