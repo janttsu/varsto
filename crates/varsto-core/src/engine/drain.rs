@@ -1013,6 +1013,7 @@ impl Engine {
                 push_reason(&mut st.blocked, why);
             } else {
                 report.objects_deleted += self.delete_leftovers(&spec);
+                self.retire_stale_locations(name)?;
                 report.records_copied = self.drain_records(&spec)?;
                 let mut settings = self.storage_settings(name);
                 if let Some(d) = settings.drain.as_mut() {
@@ -1273,6 +1274,46 @@ impl Engine {
             }
         }
         n
+    }
+
+    /// Locations the view still lists on `name` although no claim counts
+    /// there (a verification a device made before it saw the drop, an old
+    /// record): dropped for every file, so no status lists the storage.
+    fn retire_stale_locations(&mut self, name: &str) -> Result<()> {
+        let names = self.drain_resolver();
+        let configured: BTreeSet<String> = self
+            .config
+            .storages
+            .iter()
+            .map(|s| s.name().to_string())
+            .collect();
+        let view = self.view()?;
+        let mut any = false;
+        for ((folder, chunk), r) in &view.chunks {
+            if folder.as_str().is_empty() {
+                continue;
+            }
+            for (n, l) in &r.storages {
+                let who = if l.claimed_by.is_empty() {
+                    &l.verified_by
+                } else {
+                    &l.claimed_by
+                };
+                if names.resolve_any(n, who, &configured).as_deref() == Some(name) {
+                    self.pending.push(Event::ChunkDropped {
+                        folder: folder.clone(),
+                        chunk: chunk.clone(),
+                        object: r.object.clone(),
+                        storage: n.clone(),
+                    });
+                    any = true;
+                }
+            }
+        }
+        if any {
+            self.commit_batch()?;
+        }
+        Ok(())
     }
 
     /// Make sure every record, ledger batch, manifest and thumbnail on

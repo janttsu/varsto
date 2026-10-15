@@ -546,3 +546,39 @@ fn quotas_and_drains_are_the_same_on_every_device() {
     b.sync(None).unwrap();
     assert_eq!(b.storage_settings("box").quota_bytes, None);
 }
+
+#[test]
+fn after_a_drain_no_file_and_no_status_lists_the_storage() {
+    let lab = Lab::new();
+    let (mut a, _) = device(&lab, &[("old", "cloud"), ("home", "home")]);
+    a.add_storage(dir("new", &lab.path("new"), "cloud"))
+        .unwrap();
+    a.drain_start("old", &DrainOptions::default()).unwrap();
+    for _ in 0..50 {
+        if a.drain_run("old", &DrainRunLimits::default())
+            .unwrap()
+            .drained
+        {
+            break;
+        }
+    }
+    // Neither the ledger view ...
+    let view = a.view().unwrap();
+    assert!(view
+        .chunks
+        .values()
+        .all(|c| !c.storages.contains_key("old")));
+    // ... nor the "where your data is" status lists it.
+    let loc = a.data_locations().unwrap();
+    let old = loc.storages.iter().find(|s| s.name == "old").unwrap();
+    assert_eq!((old.bytes, old.blocks), (0, 0));
+    assert!(loc.folders.iter().all(|f| !f.storages.contains_key("old")));
+    // A later sync does not bring it back.
+    a.sync(None).unwrap();
+    assert!(a
+        .view()
+        .unwrap()
+        .chunks
+        .values()
+        .all(|c| !c.storages.contains_key("old")));
+}
