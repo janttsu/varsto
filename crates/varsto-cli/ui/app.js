@@ -4856,14 +4856,16 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     droid.setCameraUpload(JSON.stringify({ enabled: enabled, folder: $("cam-folder").value === camNew ? "" : $("cam-folder").value, wifi_only: $("cam-wifi").checked, charging_only: $("cam-charging").checked, screenshots: $("cam-shots").checked }));
     refreshCamera();
   }
-  // A new folder for the uploads (kept encrypted on the phone, like any folder added here).
+  // A new folder for the uploads. It only sends: this phone never receives other devices' changes into
+  // it. By default the photos are kept encrypted on the phone (open in Varsto only); the user may keep plain files instead.
   function cameraFolder() {
     if ($("cam-folder").value !== camNew) { return Promise.resolve($("cam-folder").value); }
-    return dialog({ title: "Folder for camera upload", fields: [{ name: "name", label: "Name", value: folderByName("Camera") ? "" : "Camera", required: true }], ok: "Create" }).then(function (r) {
+    return dialog({ title: "Folder for camera upload", text: "Photos and videos are uploaded from this phone and never changed by other devices. By default they are kept encrypted on the phone and open in Varsto only; tick the box to keep them as plain files that other apps can see (needs all files access).", fields: [{ name: "name", label: "Name", value: folderByName("Camera") ? "" : "Camera", required: true }, { name: "plain", label: "Options", checks: [["plain", "Keep plain files on this phone", false]] }], ok: "Create" }).then(function (r) {
       if (!r) { return null; }
       var name = r.values.name.trim();
       if (folderByName(name)) { return name; }
-      return api("POST", "/api/folder", { name: name }).then(function () { log("folder added: " + name); return refreshStatus(); }).then(function () { return name; });
+      var plain = r.values.plain === "plain";
+      return api("POST", "/api/folder", { name: name, plain: plain, mode: "send-only" }).then(function () { log("folder added: " + name + " (send-only)"); return refreshStatus(); }).then(function () { return name; });
     });
   }
   var camPending = null;

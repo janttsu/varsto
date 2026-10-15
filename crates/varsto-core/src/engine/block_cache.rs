@@ -899,13 +899,18 @@ impl Engine {
         }
         self.save_state(&rec.folder_id, &state)?;
         if freed > 0 {
-            for m in self
-                .config
-                .folders
-                .iter_mut()
-                .filter(|m| m.folder_id == rec.folder_id)
-            {
-                m.selective = true;
+            // Not in a send-only folder (camera upload): it never applies
+            // other devices' files, so what is kept here is not a choice.
+            if self.mount_mode(&rec.folder_id) != crate::vault::FolderMode::SendOnly {
+                for m in self
+                    .config
+                    .folders
+                    .iter_mut()
+                    .filter(|m| m.folder_id == rec.folder_id)
+                {
+                    m.selective = true;
+                }
+                self.config.save(&self.home)?;
             }
             self.config.save(&self.home)?;
             self.gc_block_cache(&view)?;

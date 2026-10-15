@@ -2120,6 +2120,10 @@ fn api_unlocked(
             if !plain {
                 engine.set_encrypted_here(&name, true)?;
             }
+            // E.g. camera upload: a folder that sends and never applies others' changes.
+            if let Some(mode) = opt(input, "mode").filter(|m| !m.trim().is_empty()) {
+                engine.set_folder_mode(&name, mode.parse()?)?;
+            }
             service.folders_changed = true;
             service.request_sync();
             Ok(json!({"ok": true, "id": id.to_string()}))

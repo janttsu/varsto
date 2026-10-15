@@ -373,3 +373,20 @@ fn locking_deletes_nothing_and_exports_are_removed() {
         s.notes
     );
 }
+
+#[test]
+fn freeing_a_file_does_not_turn_a_send_only_folder_selective() {
+    // Camera upload frees each uploaded file; the send-only folder stays an
+    // ordinary (not selective) folder kept encrypted on the phone.
+    let s = setup();
+    let (mut b, _home, dir) = phone(&s, false);
+    b.set_folder_mode("docs", varsto_core::vault::FolderMode::SendOnly)
+        .unwrap();
+    fs::write(dir.join("cam.bin"), vec![5u8; 30_000]).unwrap();
+    b.sync(None).unwrap();
+    b.free_file("docs", "cam.bin").unwrap();
+    let st = b.status().unwrap();
+    let f = st.folders.iter().find(|f| f.name == "docs").unwrap();
+    assert!(!f.plain, "plain");
+    assert!(!f.selective, "selective");
+}

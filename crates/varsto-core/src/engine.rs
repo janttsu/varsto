@@ -5652,8 +5652,12 @@ impl Engine {
         state.local_index.remove(path);
         state.pinned.remove(path);
         self.save_state(&rec.folder_id, &state)?;
-        // A freed file turns a folder selective.
-        if !self.mount_is_selective(&rec.folder_id) {
+        // A freed file turns a folder selective, except in a send-only
+        // folder (camera upload frees each file it has uploaded): it never
+        // applies other devices' files, so what is kept here is not a choice.
+        if !self.mount_is_selective(&rec.folder_id)
+            && self.mount_mode(&rec.folder_id) != crate::vault::FolderMode::SendOnly
+        {
             self.set_selective(folder, true)?;
         }
         Ok(())

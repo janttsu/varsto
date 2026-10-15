@@ -2837,5 +2837,14 @@
    ", (\\d+) paused",
    ", $1 pausade"
   ]
- ]
+ ],
+  "not set up here": "inte inställd här",
+  "Add credentials…": "Lägg till inloggning…",
+  "Same storage as ": "Samma lagringsplats som ",
+  ": keep one of them.": ": behåll bara en av dem.",
+  ". Add its credentials here to use it on this device.": ". Lägg till dess inloggning här för att använda den på den här enheten.",
+  "On ": "På ",
+  "Photos and videos are uploaded from this phone and never changed by other devices. By default they are kept encrypted on the phone and open in Varsto only; tick the box to keep them as plain files that other apps can see (needs all files access).": "Foton och videor laddas upp från den här telefonen och ändras aldrig av andra enheter. Som standard ligger de krypterade på telefonen och öppnas bara i Varsto; kryssa i rutan för att behålla dem som vanliga filer som andra appar kan se (kräver åtkomst till alla filer).",
+  "Keep plain files on this phone": "Behåll vanliga filer på den här telefonen",
+  "Options": "Alternativ"
 }
