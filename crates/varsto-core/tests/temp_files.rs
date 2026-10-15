@@ -36,6 +36,8 @@ fn a_planted_link_under_the_old_temporary_name_is_not_written_through() {
 
     let mut b = Engine::join(&root.join("b-home"), "desk", PASS, &key, storage).unwrap();
     b.chunker = ChunkerParams::SMALL;
+    // Format 2: the folder key comes as a grant.
+    Engine::grant_all_for_tests(&mut a, &mut b).unwrap();
     b.attach_folder("docs", &b_docs, false).unwrap();
     // Another local user plants links where the temporary files used to go.
     let victim = root.join("victim.txt");

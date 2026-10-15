@@ -789,6 +789,15 @@ pub fn global() -> &'static PeerCache {
 mod tests {
     use super::*;
 
+    /// The tests that read the process-wide task list and its timing run
+    /// one at a time: under a loaded test run, another test's tasks and a
+    /// slow scheduler made them flaky.
+    static SERIAL: Mutex<()> = Mutex::new(());
+
+    fn serial() -> std::sync::MutexGuard<'static, ()> {
+        SERIAL.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
     fn mine(id: u64) -> Option<TaskView> {
         tasks_older_than(Duration::ZERO)
             .into_iter()
@@ -797,6 +806,7 @@ mod tests {
 
     #[test]
     fn a_guard_lists_its_task_until_dropped() {
+        let _serial = serial();
         let id;
         {
             let g = start(DISK_CHECK, "Blue 4TB", 0, Unit::Bytes);
@@ -830,14 +840,17 @@ mod tests {
 
     #[test]
     fn nested_tasks_count_on_the_innermost_and_young_ones_are_quiet() {
+        let _serial = serial();
         let outer = start(BACKUP_SNAPSHOT, "pics", 0, Unit::Items);
         {
             let inner = start(UPLOAD, "pics", 1000, Unit::Bytes);
             advance_bytes(300);
             assert_eq!(mine(inner.id()).unwrap().done, 300);
             assert_eq!(mine(outer.id()).unwrap().done, 0);
-            // Just started: not listed for the interface and the peers.
-            assert!(tasks().iter().all(|t| t.id != inner.id()));
+            // Just started: not listed for the interface and the peers
+            // (unless a loaded machine took longer than QUIET to get here).
+            let listed = tasks().iter().any(|t| t.id == inner.id());
+            assert!(!listed || inner.task.started.elapsed() >= QUIET);
         }
         advance_current(2);
         assert_eq!(mine(outer.id()).unwrap().done, 2);
@@ -848,6 +861,7 @@ mod tests {
 
     #[test]
     fn tasks_of_other_processes_are_merged_and_forgotten() {
+        let _serial = serial();
         let t = TaskView {
             id: 7,
             kind: DISK_CHECK.into(),
@@ -894,6 +908,7 @@ mod tests {
 
     #[test]
     fn samples_are_throttled() {
+        let _serial = serial();
         let g = start(VERIFY, "", 1_000_000, Unit::Items);
         for _ in 0..10_000 {
             g.advance(1);
