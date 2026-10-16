@@ -123,6 +123,7 @@ impl Engine {
                 policy_warnings: pol.map(|p| p.warnings.clone()).unwrap_or_default(),
                 blocks_short_of_copies: pol.map_or(0, |p| p.chunks_short_of_copies),
                 blocks_unverified_in_window: pol.map_or(0, |p| p.chunks_unverified_in_window),
+                blocks_verification_pending: pol.map_or(0, |p| p.chunks_verification_pending),
                 oldest_verification_days: pol.and_then(|p| p.oldest_verification_days),
                 unprotected_blocks: f.chunks_without_storage_copy,
                 verified_blocks: f.blocks.verified_here + f.blocks.verified_away,

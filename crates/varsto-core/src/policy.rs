@@ -102,10 +102,20 @@ impl PolicyState {
     }
 }
 
+/// Grace for new data (spec section 14.7): a block is not counted against a
+/// verification condition until it has been stored for longer than the
+/// larger of this and the policy's verification window. Until then it is
+/// "stored, verification pending", which is neutral. The default is 24 hours;
+/// this is the one place to change it.
+pub const NEW_DATA_GRACE_SECS: i64 = 24 * 3600;
+
 /// One chunk's standing against the policy.
 pub struct ChunkFacts {
     /// Storage name -> (place, verified by someone other than the writer, newest verification time).
     pub copies: Vec<(String, String, bool, i64)>,
+    /// When the block was first stored on any storage (UTC seconds); 0 when
+    /// unknown, which counts as old data (no grace).
+    pub stored_utc: i64,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -117,11 +127,38 @@ pub struct PolicyReport {
     pub chunks_short_of_copies: u64,
     pub chunks_short_per_place: BTreeMap<String, u64>,
     pub chunks_unverified_in_window: u64,
+    /// Blocks not yet verified that are still inside the grace for new data:
+    /// neutral, not a violation.
+    #[serde(default)]
+    pub chunks_verification_pending: u64,
     /// Days since the oldest verification that still satisfies the window.
     pub oldest_verification_days: Option<i64>,
     pub reasons: Vec<String>,
     /// What will break the policy if nothing is done.
     pub warnings: Vec<String>,
+}
+
+impl PolicyReport {
+    /// Met with nothing pending: what actions that give up another copy of
+    /// the data (an import removing its source files) wait for. The grace for
+    /// new data keeps the state `ok`, but is no proof of a verification.
+    pub fn fully_met(&self) -> bool {
+        self.state == PolicyState::Ok && self.chunks_verification_pending == 0
+    }
+
+    /// Why the policy is not fully met, in a sentence.
+    pub fn why_not_met(&self) -> String {
+        if !self.reasons.is_empty() {
+            self.reasons.join("; ")
+        } else if !self.warnings.is_empty() {
+            self.warnings.join("; ")
+        } else {
+            format!(
+                "{} blocks are stored but no other device has verified them yet",
+                self.chunks_verification_pending
+            )
+        }
+    }
 }
 
 pub fn evaluate(
@@ -132,6 +169,28 @@ pub fn evaluate(
     storages_unknown: &[String],
     now_utc: i64,
 ) -> PolicyReport {
+    evaluate_with_grace(
+        folder,
+        policy,
+        chunks,
+        unreadable_places,
+        storages_unknown,
+        now_utc,
+        NEW_DATA_GRACE_SECS,
+    )
+}
+
+/// `evaluate` with an explicit grace for new data (seconds).
+pub fn evaluate_with_grace(
+    folder: &str,
+    policy: &Policy,
+    chunks: &[ChunkFacts],
+    unreadable_places: &BTreeMap<String, Vec<String>>,
+    storages_unknown: &[String],
+    now_utc: i64,
+    grace_secs: i64,
+) -> PolicyReport {
+    let mut pending = 0u64;
     let mut short_copies = 0u64;
     let mut short_place: BTreeMap<String, u64> = BTreeMap::new();
     let mut unverified = 0u64;
@@ -173,7 +232,15 @@ pub fn evaluate(
                         ageing += 1;
                     }
                 }
-                _ => unverified += 1,
+                _ => {
+                    // New data: it cannot have been verified yet.
+                    let fresh = c.stored_utc > 0 && now_utc - c.stored_utc < w.max(grace_secs);
+                    if fresh {
+                        pending += 1;
+                    } else {
+                        unverified += 1;
+                    }
+                }
             }
         }
     }
@@ -232,6 +299,7 @@ pub fn evaluate(
         chunks_short_of_copies: short_copies,
         chunks_short_per_place: short_place,
         chunks_unverified_in_window: unverified,
+        chunks_verification_pending: pending,
         oldest_verification_days: oldest_ok.map(|t| (now_utc - t) / 86_400),
         reasons,
         warnings,
@@ -254,6 +322,7 @@ mod tests {
                 .iter()
                 .map(|(n, p, v, t)| (n.to_string(), p.to_string(), *v, *t))
                 .collect(),
+            stored_utc: 0,
         }
     }
 
@@ -348,5 +417,76 @@ mod tests {
         );
         assert_eq!(r.state, PolicyState::Unknown);
         assert_eq!(parse_place_spec("cloud=2"), Some(("cloud".to_string(), 2)));
+    }
+
+    #[test]
+    fn new_data_has_a_grace_before_verification_counts() {
+        let now = 2_000_000_000;
+        let day = 86_400;
+        let policy = Policy {
+            min_copies: 1,
+            min_per_place: BTreeMap::new(),
+            verified_within_days: Some(7),
+        };
+        let none = BTreeMap::new();
+        let stored_at = |t: i64| ChunkFacts {
+            stored_utc: t,
+            ..chunk(&[("box", "home", false, 0)])
+        };
+        let run = |c: ChunkFacts, grace: i64| {
+            evaluate_with_grace("f", &policy, &[c], &none, &[], now, grace)
+        };
+        // Just stored: pending, neutral.
+        let r = run(stored_at(now - 60), NEW_DATA_GRACE_SECS);
+        assert_eq!(r.state, PolicyState::Ok);
+        assert_eq!(r.chunks_verification_pending, 1);
+        assert_eq!(r.chunks_unverified_in_window, 0);
+        // Still inside the 7-day window: pending.
+        assert_eq!(run(stored_at(now - 6 * day), 3600).state, PolicyState::Ok);
+        // Older than the window with no verification: violated.
+        let r = run(stored_at(now - 8 * day), NEW_DATA_GRACE_SECS);
+        assert_eq!(r.state, PolicyState::Violated);
+        assert_eq!(r.chunks_unverified_in_window, 1);
+        assert_eq!(r.chunks_verification_pending, 0);
+        // Old data of unknown age is not given a grace.
+        assert_eq!(
+            run(chunk(&[("box", "home", false, 0)]), NEW_DATA_GRACE_SECS).state,
+            PolicyState::Violated
+        );
+        // A policy with a short window: the default grace is the larger.
+        let short = Policy {
+            verified_within_days: Some(0),
+            ..policy.clone()
+        };
+        let r = evaluate_with_grace(
+            "f",
+            &short,
+            &[stored_at(now - 3600)],
+            &none,
+            &[],
+            now,
+            24 * 3600,
+        );
+        assert_eq!(r.state, PolicyState::Ok);
+        let r = evaluate_with_grace(
+            "f",
+            &short,
+            &[stored_at(now - 30 * 3600)],
+            &none,
+            &[],
+            now,
+            24 * 3600,
+        );
+        assert_eq!(r.state, PolicyState::Violated);
+        // A condition that cannot be met still warns at once: two copies
+        // wanted, one storage.
+        let two = Policy {
+            min_copies: 2,
+            ..policy.clone()
+        };
+        let r = evaluate("f", &two, &[stored_at(now - 60)], &none, &[], now);
+        assert_eq!(r.state, PolicyState::Violated);
+        assert_eq!(r.chunks_short_of_copies, 1);
+        assert_eq!(r.chunks_verification_pending, 1);
     }
 }

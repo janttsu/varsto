@@ -88,7 +88,16 @@ fn another_device_verifies_automatically_and_the_policy_becomes_ok() {
     .unwrap();
     let chunks = chunks_of(&a);
     assert!(chunks > 2, "several chunks: {chunks}");
-    assert_eq!(a.policy_check().unwrap()[0].state, PolicyState::Violated);
+    // Just stored: verification pending (the grace for new data), no alert;
+    // after the window with nobody verifying it is a violation.
+    let r = a.policy_check().unwrap();
+    assert_eq!(r[0].state, PolicyState::Ok);
+    assert_eq!(r[0].chunks_verification_pending, chunks);
+    let late = varsto_core::util::now_utc() + 31 * 86_400;
+    assert_eq!(
+        a.policy_check_at(late).unwrap()[0].state,
+        PolicyState::Violated
+    );
     // The writer's own run has nothing to do: its own copies do not count.
     let r = a.auto_verify().unwrap();
     assert_eq!((r.due, r.blocks_verified), (0, 0));
@@ -114,7 +123,12 @@ fn another_device_verifies_automatically_and_the_policy_becomes_ok() {
     assert!(!b.auto_verify_due(now + 3600), "next run a day later");
     assert!(b.auto_verify_due(now + 25 * 3600));
     a.sync(None).unwrap();
-    assert_eq!(a.policy_check().unwrap()[0].state, PolicyState::Violated);
+    let r = a.policy_check().unwrap();
+    assert_eq!(r[0].chunks_verification_pending, chunks - 1);
+    assert_eq!(
+        a.policy_check_at(late).unwrap()[0].state,
+        PolicyState::Violated
+    );
 
     // Default budget: the rest is verified, oldest first, and the policy holds.
     b.set_verify_schedule(VerifySchedule::default()).unwrap();
