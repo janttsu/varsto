@@ -43,7 +43,8 @@ build_target() {
       cargo build --release --target "$t" -p varsto-cli 2>&1 | grep -vE "^\s+(Compiling|Downloaded|Downloading)" | tail -40 ;;
     *windows-gnu*)
       export CC_x86_64_pc_windows_gnu="${CC_x86_64_pc_windows_gnu:-x86_64-w64-mingw32-gcc}" AR_x86_64_pc_windows_gnu="${AR_x86_64_pc_windows_gnu:-x86_64-w64-mingw32-ar}"
-      cargo build --release --target "$t" -p varsto-cli 2>&1 | grep -vE "^\s+(Compiling|Downloaded|Downloading)" | tail -40 ;;
+      # varsto.exe (service, tray, command line) and varsto-window.exe (the native window, WebView2).
+      cargo build --release --target "$t" -p varsto-cli -p varsto-window 2>&1 | grep -vE "^\s+(Compiling|Downloaded|Downloading)" | tail -40 ;;
     *)
       cargo build --release --target "$t" -p varsto-cli 2>&1 | grep -vE "^\s+(Compiling|Downloaded|Downloading)" | tail -40 ;;
   esac
@@ -58,9 +59,9 @@ for t in "${targets[@]}"; do
   cp "$root/README.md" "$root/LICENSE" "$root/NOTICE" "$root/TRADEMARK.md" "$stage/$name/"
   case "$t" in
     *windows*)
-      cp "$root/target/$t/release/varsto.exe" "$stage/$name/"
+      cp "$root/target/$t/release/varsto.exe" "$root/target/$t/release/varsto-window.exe" "$stage/$name/"
       printf '@echo off\r\nstart "" /B "%%~dp0varsto.exe" tray --open\r\n' > "$stage/$name/Varsto.cmd"
-      printf 'Varsto for Windows (alpha; cross-compiled, tested on Windows Server 2025 by the build pipeline).\r\n\r\nDouble-click Varsto.cmd: a tray icon appears, the background service starts and the\r\nlocal interface opens in your browser. Start at login: varsto.exe service install\r\nCommand line: varsto.exe --help. Updates: tray menu or varsto.exe update.\r\n' > "$stage/$name/README-Windows.txt"
+      printf 'Varsto for Windows, portable zip (alpha; cross-compiled, tested on Windows Server 2025 by the build pipeline).\r\n\r\nMost people want the installer instead (Varsto-<version>-setup.exe): Start menu entry, icons, start at login, automatic updates.\r\n\r\nDouble-click Varsto.cmd: a tray icon appears, the background service starts and the\r\ninterface opens in its own window (varsto-window.exe; without the Microsoft Edge WebView2 Runtime, in your browser).\r\nStart at login: varsto.exe service install. Command line: varsto.exe --help. Updates: tray menu or varsto.exe update.\r\n' > "$stage/$name/README-Windows.txt"
       (cd "$stage" && zip -qr "$out/$name.zip" "$name")
       ;;
     *apple-darwin*)

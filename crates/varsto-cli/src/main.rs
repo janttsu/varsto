@@ -365,6 +365,15 @@ enum Cmd {
         #[arg(long)]
         allow_single_source: bool,
     },
+    /// Show or change settings of this device. `varsto config` lists them;
+    /// `varsto config auto-update off` stops the daily check for a new version
+    /// (and, on Windows, its installation); `on` turns it back on.
+    Config {
+        /// Setting name: auto-update.
+        key: Option<String>,
+        /// New value: on or off.
+        value: Option<String>,
+    },
     /// Check a downloaded release file: the release signature on SHA256SUMS
     /// (next to the file, or fetched from the download page), then the file's SHA-256.
     VerifyRelease {
@@ -5539,10 +5548,42 @@ fn run(cli: &Cli) -> Result<()> {
             } else {
                 let policy = update::Policy::new(&home, *allow_single_source);
                 println!("{}", update::apply(&c, &policy)?);
-                if c.available && service::restart_running(&home) {
+                // The Windows setup program restarts Varsto itself.
+                if c.available && !c.installer() && service::restart_running(&home) {
                     println!("the background service restarts with {}", c.latest);
                 }
             }
+        }
+        Cmd::Config { key, value } => {
+            match (key.as_deref(), value.as_deref()) {
+                (None, _) | (Some("auto-update"), None) => {}
+                (Some("auto-update"), Some(v)) => {
+                    let on = match v {
+                        "on" | "true" | "yes" | "1" => true,
+                        "off" | "false" | "no" | "0" => false,
+                        _ => bail!("auto-update takes on or off"),
+                    };
+                    update::set_auto_update(&home, on)?;
+                }
+                (Some(other), _) => bail!("unknown setting {other} (known: auto-update)"),
+            }
+            let on = update::auto_update_enabled(&home);
+            let installs = update::can_install_by_itself();
+            print(
+                cli,
+                &serde_json::json!({"auto-update": on, "installs-by-itself": installs}),
+                |_| {
+                    format!(
+                        "auto-update: {} (looks for a new version once a day; {})",
+                        if on { "on" } else { "off" },
+                        if installs {
+                            "installs it by itself after checking the signature"
+                        } else {
+                            "tells you when one is out"
+                        }
+                    )
+                },
+            )?;
         }
         Cmd::VerifyRelease {
             file,

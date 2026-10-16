@@ -18,3 +18,4 @@ apps/android/local.properties
 apps/android/app/src/main/jniLibs/
 __pycache__/
 /target
+installer/windows/build/

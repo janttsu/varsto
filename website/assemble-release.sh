@@ -27,7 +27,8 @@ out, v = pathlib.Path(sys.argv[1]), sys.argv[2]
 NOTES = [
     (f"varsto-{v}-x86_64-unknown-linux-musl.tar.gz", "Linux x86_64", "tray app + background service + command line; static binary (musl)"),
     (f"varsto-{v}-aarch64-unknown-linux-musl.tar.gz", "Linux arm64", "tray app + background service + command line; static binary (musl)"),
-    (f"varsto-{v}-x86_64-pc-windows-gnu.zip", "Windows x86_64", "tray app + background service + command line; cross-compiled, tested on Windows Server 2025 by the build pipeline"),
+    (f"Varsto-{v}-setup.exe", "Windows x86_64 (installer)", "recommended: installs for your user without administrator rights (or for everyone), Start menu and desktop icons, own window, starts at login, updates itself; upgrades an existing installation in place and keeps your data; built and tested on Windows Server 2025 by the build pipeline, not code-signed"),
+    (f"varsto-{v}-x86_64-pc-windows-gnu.zip", "Windows x86_64 (portable)", "no installer: unzip anywhere; tray app + background service + own window + command line; cross-compiled, tested on Windows Server 2025 by the build pipeline"),
     (f"Varsto-{v}-macos.dmg", "macOS app (Apple Silicon)", "disk image: drag Varsto to Applications. Native app with its own window, menu-bar item, Finder actions, background service and the varsto command line inside the bundle; built and ad-hoc signed on a Mac, not notarised"),
     (f"varsto-{v}-aarch64-apple-darwin.tar.gz", "macOS (Apple Silicon) command line", "service + browser interface; cross-compiled, unsigned"),
     (f"varsto-{v}-x86_64-apple-darwin.tar.gz", "macOS (Intel) command line", "service + browser interface; cross-compiled, unsigned"),

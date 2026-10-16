@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/varsto-core", "crates/varsto-cli", "crates/varsto-ffi"]
+members = ["crates/varsto-core", "crates/varsto-cli", "crates/varsto-ffi", "crates/varsto-window"]
 
 [workspace.package]
 version = "0.0.1-alpha.14"
