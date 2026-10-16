@@ -2,15 +2,15 @@
 title: Daily builds
 nav: Downloads
 output: daily/index.html
-description: Unsigned development builds of Varsto from the main line. Not releases, not for production data, and never installed by varsto update.
+description: Development builds of Varsto from the main line, with a checksum list signed by a separate daily key. Not releases, not for production data.
 ---
     <h1>Daily builds</h1>
     <div class="daily-warn" role="note">
       <p><strong>These are development builds from the main line, not releases.</strong></p>
       <ul>
-        <li>They are not signed and have not been through release testing. Do not use them for production data.</li>
+        <li>They are not releases and have not been through release testing. They carry no release signature and no Apple or Microsoft code signing. Do not use them for production data.</li>
         <li>The storage format can change from one build to the next without any migration. Format 2 will require vaults to be recreated.</li>
-        <li><code>varsto update</code> never installs them and never reads this page. To move to a newer daily build, download it again.</li>
+        <li><code>varsto update --daily</code> installs the latest daily build for your platform (the Linux and Windows command-line builds; the macOS app and the Android APK are installed by hand). Plain <code>varsto update</code> stays on releases and never installs a daily build.</li>
         <li>Keep your own backups.</li>
       </ul>
       <p>Looking for something to rely on? Use the <a href="{{P}}downloads/">stable downloads</a> instead.</p>
@@ -20,10 +20,10 @@ description: Unsigned development builds of Varsto from the main line. Not relea
     <h2>Verify</h2>
     <p>Put <a href="{{P}}daily/latest/SHA256SUMS">SHA256SUMS</a> next to the files you downloaded (the file names are the stable ones in the table) and run</p>
     <pre><code>sha256sum -c SHA256SUMS --ignore-missing</code></pre>
-    <p>Leave out <code>--ignore-missing</code> if you downloaded every file. This list is not signed; it only shows that a download is complete and intact.</p>
+    <p>Leave out <code>--ignore-missing</code> if you downloaded every file. The list is signed with a separate daily key (<a href="{{P}}daily/latest/SHA256SUMS.sig">SHA256SUMS.sig</a>, public key <a href="{{P}}daily-key.pub">daily-key.pub</a>), which <code>varsto update --daily</code> checks. The daily key only works for the daily channel: it is never accepted for a release, and the release key is never accepted for a daily build.</p>
     <h2>What is in it</h2>
     {{DAILY_INCLUDED}}
-    <p>The iOS file can come from a later commit than the others; the table shows the commit of each file.</p>
+    <p>Each platform is published as soon as its file is ready, so the rows can come from different builds; the table names the build and the commit of each file.</p>
     <h2>Known gaps</h2>
     {{DAILY_GAPS}}
     <h2>Previous builds</h2>

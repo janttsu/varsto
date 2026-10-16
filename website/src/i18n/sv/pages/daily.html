@@ -2,15 +2,15 @@
 title: Dagliga byggen
 nav: Downloads
 output: daily/index.html
-description: Osignerade utvecklingsbyggen av Varsto från huvudgrenen. Inga releaser, inte för produktionsdata, och varsto update installerar dem aldrig.
+description: Utvecklingsbyggen av Varsto från huvudgrenen, med kontrollsummelistan signerad av en separat daglig nyckel. Inga releaser, inte för produktionsdata.
 ---
     <h1>Dagliga byggen</h1>
     <div class="daily-warn" role="note">
       <p><strong>Det här är utvecklingsbyggen från huvudgrenen, inte releaser.</strong></p>
       <ul>
-        <li>De är inte signerade och har inte gått igenom någon releasetestning. Använd dem inte för produktionsdata.</li>
+        <li>De är inte releaser och har inte gått igenom någon releasetestning. De saknar releasesignatur och kodsignering från Apple eller Microsoft. Använd dem inte för produktionsdata.</li>
         <li>Lagringsformatet kan ändras mellan byggen utan någon migrering. Format 2 kommer att kräva att valv skapas på nytt.</li>
-        <li><code>varsto update</code> installerar dem aldrig och läser inte den här sidan. Om du vill byta till ett nyare dagligt bygge laddar du ner det på nytt.</li>
+        <li><code>varsto update --daily</code> installerar det senaste dagliga bygget för din plattform (kommandoradsbyggena för Linux och Windows; macOS-appen och Android-APK:n installeras för hand). Vanliga <code>varsto update</code> håller sig till releaser och installerar aldrig ett dagligt bygge.</li>
         <li>Behåll egna säkerhetskopior.</li>
       </ul>
       <p>Behöver du något att lita på? Använd de <a href="{{L}}downloads/">stabila nedladdningarna</a> i stället.</p>
@@ -20,10 +20,10 @@ description: Osignerade utvecklingsbyggen av Varsto från huvudgrenen. Inga rele
     <h2>Verifiera</h2>
     <p>Lägg <a href="{{P}}daily/latest/SHA256SUMS">SHA256SUMS</a> bredvid filerna du laddade ner (filnamnen i tabellen är de fasta namnen) och kör</p>
     <pre><code>sha256sum -c SHA256SUMS --ignore-missing</code></pre>
-    <p>Utelämna <code>--ignore-missing</code> om du laddade ner alla filer. Listan är inte signerad; den visar bara att en nedladdning är komplett och oskadd.</p>
+    <p>Utelämna <code>--ignore-missing</code> om du laddade ner alla filer. Listan är signerad med en separat daglig nyckel (<a href="{{P}}daily/latest/SHA256SUMS.sig">SHA256SUMS.sig</a>, publik nyckel <a href="{{P}}daily-key.pub">daily-key.pub</a>) som <code>varsto update --daily</code> kontrollerar. Den dagliga nyckeln gäller bara den dagliga kanalen: den godtas aldrig för en release, och releasenyckeln godtas aldrig för ett dagligt bygge.</p>
     <h2>Vad som ingår</h2>
     {{DAILY_INCLUDED}}
-    <p>iOS-filen kan komma från en senare commit än de andra; tabellen visar commit för varje fil.</p>
+    <p>Varje plattform publiceras så fort dess fil är klar, så raderna kan komma från olika bygge; tabellen visar bygge och commit för varje fil.</p>
     <h2>Kända brister</h2>
     {{DAILY_GAPS}}
     <h2>Tidigare byggen</h2>
