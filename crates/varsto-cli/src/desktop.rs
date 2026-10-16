@@ -4250,6 +4250,215 @@ mod tests {
         }
     }
 
+    /// Double-quoted string literals of a script (escapes resolved for `\"`
+    /// only), leaving out `//` comments.
+    fn js_literals(src: &str) -> Vec<String> {
+        let b: Vec<char> = src.chars().collect();
+        let (mut out, mut i) = (Vec::new(), 0);
+        while i < b.len() {
+            if b[i] == '/' && b.get(i + 1) == Some(&'/') && (i == 0 || b[i - 1] != ':') {
+                while i < b.len() && b[i] != '\n' {
+                    i += 1;
+                }
+            } else if b[i] == '"' {
+                let mut lit = String::new();
+                i += 1;
+                while i < b.len() && b[i] != '"' && b[i] != '\n' {
+                    if b[i] == '\\' && i + 1 < b.len() {
+                        i += 1;
+                    }
+                    lit.push(b[i]);
+                    i += 1;
+                }
+                out.push(lit);
+                i += 1;
+            } else {
+                i += 1;
+            }
+        }
+        out
+    }
+
+    /// Visible text and `title`, `placeholder`, `aria-label` and `alt` values
+    /// of the static page.
+    fn html_texts(page: &str) -> Vec<String> {
+        let mut page = page.to_string();
+        for tag in ["script", "style"] {
+            while let Some(a) = page.find(&format!("<{tag}")) {
+                let end = page[a..].find(&format!("</{tag}>")).unwrap() + a + tag.len() + 3;
+                page.replace_range(a..end, "");
+            }
+        }
+        let norm = |t: &str| {
+            t.replace("&amp;", "&")
+                .replace("&middot;", "\u{b7}")
+                .replace("&larr;", "\u{2190}")
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ")
+        };
+        let mut out = Vec::new();
+        for chunk in page.split('<').skip(1) {
+            let (tag, text) = chunk.split_once('>').unwrap_or((chunk, ""));
+            out.push(norm(text));
+            for attr in ["title", "placeholder", "aria-label", "alt"] {
+                if let Some(a) = tag.find(&format!(" {attr}=\"")) {
+                    let rest = &tag[a + attr.len() + 3..];
+                    out.push(norm(&rest[..rest.find('"').unwrap_or(rest.len())]));
+                }
+            }
+        }
+        out.retain(|t| t.chars().filter(|c| c.is_ascii_alphabetic()).count() >= 2);
+        out
+    }
+
+    /// A sentence-like literal the interface might show: capitalised words
+    /// with ordinary punctuation, no code or paths.
+    fn looks_like_ui_text(l: &str) -> bool {
+        let mut c = l.chars();
+        let (a, b) = (c.next(), c.next());
+        // A literal ending in a space is the start of a message the script completes.
+        matches!((a, b), (Some(a), Some(b)) if a.is_ascii_uppercase() && b.is_ascii_lowercase())
+            && l.contains(' ')
+            && !l.ends_with(' ')
+            && l.chars()
+                .all(|c| c.is_ascii_alphabetic() || " ',.()-:?!".contains(c))
+    }
+
+    #[test]
+    fn interface_translations_cover_the_page() {
+        // Names, examples and technical terms that stay as they are, and
+        // literals that are not shown (comments, fonts, browser errors) or
+        // that the script completes with a pattern (a prefix before a
+        // number or a name).
+        const SAME: &[&str] = &[
+            "*.tmp",
+            "Android",
+            "DEEP_ARCHIVE, GLACIER_IR, STANDARD_IA",
+            "Documents",
+            "Linux",
+            "OK",
+            "Varsto",
+            "Varsto v",
+            "Windows",
+            "box",
+            "dana",
+            "data-01",
+            "eu-central-1",
+            "fr-par",
+            "hetzner:backup/varsto",
+            "iOS",
+            "laptop",
+            "macOS",
+            "my-laptop",
+            "phone",
+            "reset",
+            "shelf",
+            "varsto",
+            "varsto mcp grant",
+            "varsto org request",
+            "work-laptop",
+            "Archive is almost full",
+            "Attach disk C",
+            "Could not reach the Varsto service (",
+            "Every file in the trash (",
+            "Failed to fetch",
+            "Helvetica Neue",
+            "Home NAS",
+            "Laptop backup",
+            "Load failed",
+            "Segoe UI",
+            "Suggested next",
+            "The camera could not be opened (",
+            "/Volumes/box",
+            "https://s3.fr-par.scw.cloud",
+            "/Users/me/Documents",
+            "/media/me/data-01",
+            "https://s3.eu-central-1.amazonaws.com",
+            "/Users/me/Pictures",
+            "/Volumes/Old drive/Photos",
+            "/Users/me/Varsto/Photos",
+            "stun.example.net:3478",
+            "Documents: a verification is about to age out",
+        ];
+        // Messages put together from parts are translated by patterns (a
+        // whole text) or parts (inside a text); the ones the page builds
+        // from counts and names must stay covered.
+        const COMPOSED: &[&str] = &[
+            r"^1 file$",
+            r"^(\d+) files$",
+            r"^(\d+) blocks$",
+            r"^(\d+) folders$",
+            r"^(\d+) storages$",
+            r"^(\d+) devices$",
+            r"^(\d+) active$",
+            "^via ([^\u{b7}]+)$",
+            r"^(\d+) ledger batches$",
+            r"^added ([\d.\-/: ]+)$",
+            r"next in (\d+) s",
+            "this device is an administrator",
+            r"(\d+) people\b",
+            r"(\d+) administrators\b",
+            "(^|; )not on this device(?=;|$)",
+            "(^|; )on this device(?=;|$)",
+            r"every block of this folder is on storage ([^;]+)",
+        ];
+        let page_texts = html_texts(INDEX_HTML);
+        assert!(page_texts.len() > 400, "{}", page_texts.len());
+        let mut used: Vec<String> = page_texts;
+        for src in [APP_JS, FOLDERS_JS, VIZ_JS] {
+            used.extend(
+                js_literals(src)
+                    .into_iter()
+                    .filter(|l| looks_like_ui_text(l)),
+            );
+        }
+        assert!(used.len() > 800, "{}", used.len());
+        for (lang, dict) in [("fi", I18N_FI), ("sv", I18N_SV)] {
+            let d: Value = serde_json::from_str(dict).unwrap();
+            let top: Vec<&String> = d.as_object().unwrap().keys().collect();
+            // i18n.js reads only these three; a string next to them is never shown.
+            assert_eq!(
+                top,
+                ["parts", "patterns", "strings"],
+                "{lang}: keys outside the known three"
+            );
+            let strings = d["strings"].as_object().unwrap();
+            assert!(
+                strings
+                    .values()
+                    .all(|v| v.as_str().is_some_and(|t| !t.is_empty())),
+                "{lang}"
+            );
+            let pairs: Vec<&str> = ["patterns", "parts"]
+                .iter()
+                .flat_map(|k| d[*k].as_array().unwrap())
+                .map(|p| {
+                    let p = p.as_array().unwrap();
+                    assert!(
+                        p.len() == 2 && p.iter().all(Value::is_string),
+                        "{lang}: {p:?}"
+                    );
+                    p[0].as_str().unwrap()
+                })
+                .collect();
+            let missing: Vec<&String> = used
+                .iter()
+                .filter(|t| !SAME.contains(&t.as_str()) && !strings.contains_key(t.as_str()))
+                // Messages with a number or name in them are matched by a pattern.
+                .filter(|t| {
+                    !pairs
+                        .iter()
+                        .any(|p| p.starts_with('^') && p.contains(t.trim_end_matches(['(', ' '])))
+                })
+                .collect();
+            assert!(missing.is_empty(), "{lang} lacks {missing:?}");
+            for c in COMPOSED {
+                assert!(pairs.contains(c), "{lang} lacks the pattern {c}");
+            }
+        }
+    }
+
     #[test]
     fn providers_list_for_the_storage_form() {
         let now = 1_791_849_600; // 2026-10-13

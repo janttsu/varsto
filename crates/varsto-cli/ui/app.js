@@ -1438,7 +1438,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
       setTimeout(function () { if (window.varstoFolders) { window.varstoFolders.update(s); } }, 0);
       renderLedger(s.ledger_health);
       renderFolderSafety(s);
-      $("who").textContent = s.device_name + " · vault " + s.vault_id.slice(0, 8) + " · " + s.ledger_batches + " ledger batches";
+      $("who").textContent = s.device_name + " · vault " + s.vault_id.slice(0, 8) + " · " + s.ledger_batches + (s.ledger_batches === 1 ? " ledger batch" : " ledger batches");
       var tb = $("folders").querySelector("tbody"); tb.innerHTML = "";
       var sel = $("dupefolder"); sel.innerHTML = "";
       var fsel = $("filesfolder"); var prev = fsel.value; fsel.innerHTML = "";
