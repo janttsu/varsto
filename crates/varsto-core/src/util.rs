@@ -305,6 +305,15 @@ pub fn human_bytes(n: u64) -> String {
     }
 }
 
+/// A count with its noun phrase: `plural(1, "file", "files")` is "1 file",
+/// `plural(3, "file", "files")` is "3 files". Only exactly one takes `one`.
+pub fn plural<N>(n: N, one: &str, many: &str) -> String
+where
+    N: Copy + PartialEq + From<u8> + std::fmt::Display,
+{
+    format!("{n} {}", if n == N::from(1) { one } else { many })
+}
+
 /// Normalise a relative path to the manifest form: forward slashes, no
 /// leading `./`. Returns `None` for paths that escape the folder and for
 /// names that are not UTF-8 (those are not synced).

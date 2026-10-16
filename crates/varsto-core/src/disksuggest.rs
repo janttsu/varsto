@@ -32,7 +32,7 @@
 use crate::blockdev::FsckVerdict;
 use crate::pool::DiskStatus;
 use crate::staged_move::MoveWait;
-use crate::util;
+use crate::util::{self, plural};
 use serde::{Deserialize, Serialize};
 
 /// Below this score nothing is suggested ("no disk needs docking").
@@ -176,10 +176,6 @@ pub fn ago(now: i64, t: i64) -> String {
         60..=729 => format!("{} months ago", days / 30),
         _ => format!("{} years ago", days / 365),
     }
-}
-
-fn plural(n: u64, one: &str, many: &str) -> String {
-    format!("{n} {}", if n == 1 { one } else { many })
 }
 
 /// The reasons (and points) of one disk at `now`.

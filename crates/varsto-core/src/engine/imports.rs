@@ -27,6 +27,7 @@ use crate::import::{
     self, hashes::Hasher, Check, Damage, Delivery, Holder, ImportBook, ImportSource, Imported,
     ListedItem, Note, Removal, RunRecord, SourceInfo, TreeEntry, Verdict, Wanted,
 };
+use crate::util::plural;
 use sha2::Digest;
 use std::io::Read;
 
@@ -1830,21 +1831,24 @@ impl Engine {
             }
         }
         if v.files_awaiting > 0 {
-            v.reasons.push(format!(
-                "{} file(s) still await their content: insert a disk that has them and import again",
-                v.files_awaiting
+            v.reasons.push(plural(
+                v.files_awaiting,
+                "file still awaits its content: insert a disk that has it and import again",
+                "files still await their content: insert a disk that has them and import again",
             ));
         }
         if v.files_changed_in_varsto > 0 {
-            v.reasons.push(format!(
-                "{} file(s) were changed or deleted in Varsto since the import (not counted as imported)",
-                v.files_changed_in_varsto
+            v.reasons.push(plural(
+                v.files_changed_in_varsto,
+                "file was changed or deleted in Varsto since the import (not counted as imported)",
+                "files were changed or deleted in Varsto since the import (not counted as imported)",
             ));
         }
         if v.blocks_without_storage_copy > 0 {
-            v.reasons.push(format!(
-                "{} block(s) are on no storage yet (run a sync)",
-                v.blocks_without_storage_copy
+            v.reasons.push(plural(
+                v.blocks_without_storage_copy,
+                "block is on no storage yet (run a sync)",
+                "blocks are on no storage yet (run a sync)",
             ));
         }
         let policy = self
