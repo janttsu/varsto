@@ -139,9 +139,11 @@
         <label>Code <input name="code" type="tel" inputmode="numeric" pattern="[0-9 -]*" maxlength="11" autocomplete="one-time-code" placeholder="123-456-789" required></label>
         <label>Name for this device <input name="name" placeholder="phone" required></label>
         <label>Passphrase for this device <input name="passphrase" type="password" minlength="12" placeholder="At least 12 characters" required></label>
-        <details class="small"><summary>The other device is not found</summary>
-          <label>Its address, shown under the code <input name="address" placeholder="192.168.1.20:41234" autocapitalize="none"></label>
+        <details class="small" id="pairdetails"><summary>The other device is not found</summary>
+          <label>Its address, shown under the code (optional) <input name="address" placeholder="192.168.1.20:41234" autocapitalize="none"></label>
+          <p class="muted small">If this address does not work, Varsto tries the other addresses of the QR code and then looks for the device on the network.</p>
         </details>
+        <p class="muted small" id="pairprogress" role="status" aria-live="polite"></p>
         <div class="actions"><button type="submit">Pair</button></div>
       </form>
       <form id="init" class="card">

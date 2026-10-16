@@ -37,6 +37,7 @@ pub mod logging;
 pub mod manifest;
 pub mod media;
 pub mod names;
+pub mod netif;
 pub mod org;
 pub mod p2p;
 pub mod pack;

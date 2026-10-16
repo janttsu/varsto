@@ -128,7 +128,7 @@
       .then(function (r) {
         return r.text().then(function (t) {
           var j = null; try { j = t ? JSON.parse(t) : {}; } catch (x) { j = null; }
-          if (!r.ok) { throw new Error((j && j.error) || ("The Varsto service answered " + r.status + " to " + what)); }
+          if (!r.ok) { var err = new Error((j && j.error) || ("The Varsto service answered " + r.status + " to " + what)); err.body = j; throw err; }
           if (j === null) { throw new Error("The Varsto service sent an unreadable answer to " + what); }
           return j;
         });
@@ -1093,9 +1093,13 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     var uri = pendingLink; pendingLink = null;
     api("POST", "/api/link/parse", { text: uri }).then(function (info) { return applyLink(info, view); }).catch(function (e) { alertBox(e.message); });
   }
+  // All addresses of a scanned pairing link, best first: the field shows the
+  // first, and joining tries the others when it fails.
+  var pairOffered = [];
   function fillPair(info) {
     var form = $("pair"); form.querySelector("input[name=code]").value = info.code;
-    if (info.addresses && info.addresses.length) { form.querySelector("input[name=address]").value = info.addresses[0]; }
+    pairOffered = (info.addresses || []).slice();
+    if (pairOffered.length) { form.querySelector("input[name=address]").value = pairOffered[0]; $("pairdetails").open = true; }
     var n = form.querySelector("input[name=name]"); if (n) { n.focus(); }
   }
   function applyLink(info, view) {
@@ -3439,8 +3443,26 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   });
   $("pair").onsubmit = function (ev) {
     ev.preventDefault(); var d = formData(ev.target); busy(true); log("looking for the device showing code " + d.code);
-    api("POST", "/api/pair/join", d).then(function (r) { ev.target.reset(); log("paired with " + r.from + ": " + r.storages.join("; ")); nav("files"); return refreshState(); }).catch(function (e) { alertBox(e.message); }).then(function () { busy(false); });
+    d.addresses = pairOffered;
+    // The service tells which address it is trying while the request runs.
+    var shown = ""; var prog = $("pairprogress");
+    function showStep(v) {
+      var msg = !v.active ? "" : v.step === "trying" ? "Trying " + v.address + " …" : v.step === "looking" ? "Looking for the device on the network …" : "";
+      if (msg !== shown) { shown = msg; prog.textContent = msg; if (msg) { log(msg.charAt(0).toLowerCase() + msg.slice(1)); } }
+    }
+    var poll = setInterval(function () { api("GET", "/api/pair/join-status").then(showStep).catch(function () {}); }, 500);
+    api("POST", "/api/pair/join", d).then(function (r) { ev.target.reset(); pairOffered = []; log("paired with " + r.from + ": " + r.storages.join("; ")); nav("files"); return refreshState(); }).catch(pairFailed).then(function () { clearInterval(poll); prog.textContent = ""; busy(false); });
   };
+  // Nothing answered: name every address tried and what the user can check.
+  function pairFailed(e) {
+    var b = e.body;
+    if (!b || !b.tried) { return alertBox(e.message); }
+    var tried = b.tried.map(function (t) { return t.what + " (" + actTr(t.why) + ")"; });
+    var facts = [];
+    if (tried.length) { facts.push(["Tried", tried.join("; ")]); }
+    facts.push(["Network search", actTr(b.found ? "found the device but could not connect to it" : "nothing answered")]);
+    return dialog({ title: "Could not pair", text: "Could not reach the device showing the code. Check that both devices are on the same Wi-Fi network, that the router does not isolate wireless clients (guest network, client isolation) and that no VPN or firewall is in the way.", facts: facts, cancel: false });
+  }
   // Adding a device: show the code until the new device has fetched the vault.
   var pairTimer = null;
   function pairButtons(open) { $("pairstart").classList.toggle("hidden", open); $("pairstop").classList.toggle("hidden", !open); }
@@ -3448,7 +3470,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     $("pairbox").classList.remove("hidden"); pairButtons(s.open); $("paircode").textContent = s.open ? s.code : "";
     renderQr($("pairqr"), s.open ? s.uri : "").catch(function () {});
     if (s.open) {
-      $("pairinfo").textContent = "On the new device choose Pair with your other device and type this code. It works once, for " + Math.max(1, Math.ceil(s.expires_in_secs / 60)) + " more minute(s)." + (s.addresses.length ? " If the new device does not find this one, give it the address " + s.addresses.join(" or ") + "." : "") + (s.failed_attempts ? " Wrong codes so far: " + s.failed_attempts + " of 3." : "");
+      $("pairinfo").textContent = "On the new device choose Pair with your other device and type this code. It works once, for " + Math.max(1, Math.ceil(s.expires_in_secs / 60)) + " more minute(s)." + (s.addresses.length ? " If the new device does not find this one, give it the address " + s.addresses.slice(0, 3).join(" or ") + "." : "") + (s.failed_attempts ? " Wrong codes so far: " + s.failed_attempts + " of 3." : "");
       return;
     }
     if (pairTimer) { clearInterval(pairTimer); pairTimer = null; }

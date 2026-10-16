@@ -807,10 +807,19 @@ fn handle(state: &Shared, mut request: Request) -> Result<()> {
         // Pairing talks to the other device for up to ~25 seconds; do that
         // without holding the state, then join under it.
         let result = pair_join(state, &input);
+        set_join_step(json!({"active": false}));
         return match result {
             Ok(v) => Ok(request.respond(json_response(200, &v))?),
-            Err(e) => Ok(request.respond(json_response(400, &json!({"error": format!("{e:#}")})))?),
+            Err(e) => Ok(request.respond(json_response(400, &pair_join_error(&e)))?),
         };
+    }
+    if method == Method::Get && path == "/api/pair/join-status" {
+        let v = JOIN_STEP
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+            .unwrap_or_else(|| json!({"active": false}));
+        return Ok(request.respond(json_response(200, &v))?);
     }
     if method == Method::Post && path == "/api/quit" {
         request.respond(json_response(200, &json!({"ok": true})))?;
@@ -985,6 +994,39 @@ fn upload(state: &Shared, request: &mut Request, folder: String, path: String) -
     Ok(json!({"ok": true, "folder": folder, "path": path, "bytes": body.read, "push": push}))
 }
 
+/// What `pair_join` is doing now, for `GET /api/pair/join-status`.
+static JOIN_STEP: Mutex<Option<Value>> = Mutex::new(None);
+
+fn set_join_step(v: Value) {
+    *JOIN_STEP.lock().unwrap_or_else(|e| e.into_inner()) = Some(v);
+}
+
+/// Nothing answered: the message plus what the page lists in its language.
+#[derive(Debug)]
+struct PairJoinFailed {
+    message: String,
+    tried: Value,
+    found: usize,
+}
+
+impl std::fmt::Display for PairJoinFailed {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for PairJoinFailed {}
+
+/// The JSON body of a failed `/api/pair/join`.
+fn pair_join_error(e: &anyhow::Error) -> Value {
+    let mut v = json!({"error": format!("{e:#}")});
+    if let Some(f) = e.downcast_ref::<PairJoinFailed>() {
+        v["tried"] = f.tried.clone();
+        v["found"] = json!(f.found);
+    }
+    v
+}
+
 fn pair_join(state: &Shared, input: &Value) -> Result<Value> {
     let (name, passphrase, code) = (
         s(input, "name")?,
@@ -1003,7 +1045,44 @@ fn pair_join(state: &Shared, input: &Value) -> Result<Value> {
     {
         bail!("this device already holds a vault");
     }
-    let bundle = varsto_core::pair::receive(&code, &name, opt(input, "address").as_deref())?;
+    // The typed address first, then the addresses of the scanned link, then
+    // a search of the network; the page polls /api/pair/join-status.
+    let offered = str_list(input, "addresses");
+    set_join_step(json!({"active": true, "step": "start", "tried": []}));
+    let mut tried: Vec<String> = Vec::new();
+    let result = varsto_core::pair::receive_with_progress(
+        &code,
+        &name,
+        opt(input, "address").as_deref(),
+        &offered,
+        &mut |step| match step {
+            varsto_core::pair::Step::Trying(a) => {
+                tried.push(a.to_string());
+                set_join_step(
+                    json!({"active": true, "step": "trying", "address": a.to_string(), "tried": tried}),
+                );
+            }
+            varsto_core::pair::Step::Looking => {
+                set_join_step(json!({"active": true, "step": "looking", "tried": tried}));
+            }
+        },
+    );
+    set_join_step(json!({"active": false}));
+    let bundle = match result {
+        Ok(b) => b,
+        Err(e) => {
+            // The page lists what was tried in its own language.
+            if let Some(nf) = e.downcast_ref::<varsto_core::pair::NotFound>() {
+                return Err(PairJoinFailed {
+                    message: e.to_string(),
+                    tried: serde_json::to_value(&nf.tried)?,
+                    found: nf.found,
+                }
+                .into());
+            }
+            return Err(e);
+        }
+    };
     let mut st = state.lock().unwrap_or_else(|e| e.into_inner());
     let (e, notes) = Engine::join_paired(&st.home, &name, &passphrase, &bundle)?;
     st.engine = Some(e);
