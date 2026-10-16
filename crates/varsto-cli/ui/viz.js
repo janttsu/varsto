@@ -5,6 +5,9 @@
 // Data: GET /api/viz once a second while the page is shown (spec section 63).
 (function () {
   "use strict";
+  var LABEL_PATIENCE = 3;   // seconds a label may overlap something before it moves to another place
+  // The pure rules (function declarations, hoisted) are exposed even without the page, for the tests of scripts/test/viz-rules.test.js.
+  window.varstoVizRules = { particleSpeed: particleSpeed, flowKey: flowKey, labelRank: labelRank, labelNeedsMove: labelNeedsMove, stickyWidth: stickyWidth, LABEL_PATIENCE: LABEL_PATIENCE };
   var page = document.querySelector('.page[data-page="viz"]');
   if (!page) { return; }
 
@@ -77,6 +80,34 @@
   var reduced = false;
   try { reduced = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches; } catch (e) { reduced = false; }
   var token = function () { try { return sessionStorage.getItem("varsto-token") || ""; } catch (e) { return ""; } };
+
+  // ---------------------------------------------------------------- rules (pure functions, exposed through varstoViz.rules for the tests)
+  // Speed of the particles of a flow in CSS pixels per second. It depends on the size of the board, never on the canvas bitmap, the
+  // device pixel ratio or the frame rate: busier flows are a little faster (a board width in 14 s up to 7 s), a small screen is
+  // slower in pixels, no particle passes a point more than twice a second (`gap` is the distance between particles), nothing
+  // is ever faster than 240 px/s, and with reduced motion they hardly move.
+  function particleSpeed(bps, boardW, gap, reducedMotion) {
+    if (reducedMotion) { return 4; }
+    var u = clamp(0.07 + (Math.log10(Math.max(bps || 0, 1000)) - 3) * 0.012, 0.07, 0.15);
+    return Math.max(6, Math.min(u * Math.max(boardW, 1), 2 * Math.max(gap, 1), 240));
+  }
+  // A flow is the same flow while it connects the same two nodes with the same kind and folder.
+  function flowKey(f) { return [f.from, f.to, f.kind || "", f.folder || ""].join("|"); }
+  // Which flows get a label: the busiest, but one that had a label keeps it against a slightly busier newcomer.
+  function labelRank(bps, hadLabel) { return (bps || 0) * (hadLabel ? 1.5 : 1); }
+  // Move a label only when it has no place yet, or it has overlapped something for LABEL_PATIENCE seconds in a row.
+  function labelNeedsMove(st, overlapping, dt) {
+    if (!st.slot) { return true; }
+    if (!overlapping) { st.bad = 0; return false; }
+    st.bad += dt;
+    return st.bad >= LABEL_PATIENCE;
+  }
+  // The width of a label: it grows at once and shrinks only after the text has been narrower for 10 seconds, so numbers of
+  // changing width do not make the pill breathe.
+  function stickyWidth(st, w, t) {
+    if (!st.w || w >= st.w || t - st.wT > 10) { st.w = w; st.wT = t; }
+    return st.w;
+  }
 
   // ---------------------------------------------------------------- demo data (nothing real)
   function demoSnap() {
@@ -176,29 +207,85 @@
   }
 
   // ---------------------------------------------------------------- full screen and display detection
-  var pseudoFull = false, idleTimer = 0;
+  // Full screen, in layers. (1) The page's own cover mode ("pseudo full screen"): the board moves to <body> and covers the whole
+  // viewport, everything else hidden, so it fills the window or screen wherever it runs. (2) The real thing on top: in an app shell
+  // the window itself goes full screen through the shell's bridge (Android, macOS, Windows), in a browser the Fullscreen API.
+  // Esc, the button and, on phones, Back leave it again.
+  var pseudoFull = false, idleTimer = 0, apiFull = false, homeMark = null, historyMark = false;
   function fullEl() { return document.fullscreenElement || document.webkitFullscreenElement || null; }
   function canFull() { return !!(root && (root.requestFullscreen || root.webkitRequestFullscreen)); }
-  function toggleFull() {
-    if (fullEl()) { (document.exitFullscreen || document.webkitExitFullscreen).call(document); return; }
-    if (pseudoFull) { setPseudo(false); return; }
-    if (canFull()) {
-      var p = (root.requestFullscreen || root.webkitRequestFullscreen).call(root);
-      if (p && p.catch) { p.catch(function () { setPseudo(true); }); }
-    } else { setPseudo(true); }
+  function inFull() { return !!fullEl() || pseudoFull; }
+  // The shell around the page, if any: a function that asks it for window full screen on or off.
+  function shellFullscreen() {
+    try { if (window.VarstoAndroid && typeof window.VarstoAndroid.setFullscreen === "function") { return function (on) { window.VarstoAndroid.setFullscreen(!!on); }; } } catch (e) { /* none */ }
+    try {
+      var h = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.varstoShell;
+      if (h) { return function (on) { h.postMessage({ fullscreen: !!on }); }; }
+    } catch (e) { /* none */ }
+    try { if (window.ipc && typeof window.ipc.postMessage === "function") { return function (on) { window.ipc.postMessage("varsto:fullscreen:" + (on ? "1" : "0")); }; } } catch (e) { /* none */ }
+    return null;
   }
-  function setPseudo(on) { pseudoFull = on; root.classList.toggle("pseudo-full", on); onFullChange(); }
+  function toggleFull() { if (inFull()) { exitFull(false); } else { enterFull(); } }
+  function enterFull() {
+    var shell = shellFullscreen();
+    setPseudo(true);
+    if (shell) { try { shell(true); } catch (e) { /* the cover mode stays */ } return; }
+    if (canFull()) {
+      try {
+        var p = (root.requestFullscreen || root.webkitRequestFullscreen).call(root);
+        if (p && p.catch) { p.catch(function () { /* the cover mode stays */ }); }
+      } catch (e) { /* the cover mode stays */ }
+    }
+  }
+  // Leave every layer. `fromShell`: the shell already left full screen and told the page.
+  function exitFull(fromShell) {
+    apiFull = false;
+    if (fullEl()) { try { (document.exitFullscreen || document.webkitExitFullscreen).call(document); } catch (e) { /* none */ } }
+    if (pseudoFull) { setPseudo(false); }
+    if (!fromShell) { var shell = shellFullscreen(); if (shell) { try { shell(false); } catch (e) { /* none */ } } }
+  }
+  // The shells call this when the window's full-screen state changes (also by their own buttons and gestures).
+  window.varstoShellFullscreen = function (on) {
+    if (!root) { return; }
+    if (on && !pseudoFull && active) { setPseudo(true); }
+    else if (!on && inFull()) { exitFull(true); }
+  };
+  function setPseudo(on) {
+    if (on === pseudoFull) { onFullChange(); return; }
+    pseudoFull = on;
+    var de = document.documentElement;
+    if (on) {
+      // Out of every ancestor that could clip it or make "fixed" relative to something smaller than the viewport.
+      homeMark = document.createComment("viz");
+      if (root.parentNode) { root.parentNode.insertBefore(homeMark, root); }
+      document.body.appendChild(root);
+      de.classList.add("viz-fullscreen");
+      // Back (phones, the Back key of a browser) leaves full screen instead of the page.
+      try { history.pushState({ varstoVizFull: 1 }, ""); historyMark = true; } catch (e) { historyMark = false; }
+    } else {
+      de.classList.remove("viz-fullscreen");
+      if (homeMark && homeMark.parentNode) { homeMark.parentNode.insertBefore(root, homeMark); homeMark.parentNode.removeChild(homeMark); }
+      homeMark = null;
+      if (historyMark) { historyMark = false; try { if (history.state && history.state.varstoVizFull) { history.back(); } } catch (e) { /* none */ } }
+    }
+    root.classList.toggle("pseudo-full", on);
+    onFullChange();
+  }
   function onFullChange() {
-    var full = !!fullEl() || pseudoFull;
-    root.classList.toggle("is-full", !!fullEl());
+    var real = fullEl();
+    // The browser left real full screen by itself (Esc is the browser's own key): the whole mode ends.
+    if (real) { apiFull = true; } else if (apiFull) { apiFull = false; if (pseudoFull) { exitFull(false); return; } }
+    var full = !!real || pseudoFull;
+    root.classList.toggle("is-full", !!real);
     fsBtn.textContent = T(full ? "Exit full screen" : "Full screen");
     if (full) { wake(); } else { clearTimeout(idleTimer); root.classList.remove("viz-idle"); }
     detectDisplay(); dirty = true; schedule(0);
   }
+  // The mouse pointer and the bar go away after a few idle seconds in full screen.
   function wake() {
     root.classList.remove("viz-idle");
     clearTimeout(idleTimer);
-    if (fullEl() || pseudoFull) { idleTimer = setTimeout(function () { root.classList.add("viz-idle"); }, 4000); }
+    if (inFull()) { idleTimer = setTimeout(function () { root.classList.add("viz-idle"); }, 4000); }
   }
   var dprQuery = null;
   function bindDisplayEvents() {
@@ -215,8 +302,16 @@
       var t = ev.target, tag = t && t.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || (t && t.isContentEditable)) { return; }
       if (ev.key === "f" || ev.key === "F") { ev.preventDefault(); toggleFull(); }
-      else if (ev.key === "Escape" && pseudoFull) { setPseudo(false); }
+      else if (ev.key === "Escape" && inFull()) { ev.preventDefault(); exitFull(false); }
     });
+    // Back on a phone (the history entry full screen pushed) leaves full screen.
+    window.addEventListener("popstate", function () { if (pseudoFull) { historyMark = false; exitFull(false); } });
+    // The Android shell asks the page first when Back is pressed.
+    var prevBack = window.varstoBack;
+    window.varstoBack = function () {
+      if (active && inFull()) { exitFull(false); return true; }
+      return prevBack ? prevBack.apply(this, arguments) : false;
+    };
     var th = document.documentElement;
     new MutationObserver(function () { dirty = true; schedule(0); }).observe(th, { attributes: true, attributeFilter: ["data-theme"] });
     try { window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", function () { dirty = true; schedule(0); }); } catch (e) { /* none */ }
@@ -399,12 +494,13 @@
     o = o || {};
     var size = o.size, padX = size * 0.62, h = size * 1.7;
     c.font = fs(size, o.weight || 600);
-    var tw = c.measureText(text).width, w = tw + padX * 2 + (o.dot ? size * 1 : 0);
+    var tw = c.measureText(text).width, w = tw + padX * 2 + (o.dot ? size * 1 : 0), extra = 0;
+    if (o.minW && o.minW > w) { extra = o.minW - w; w = o.minW; }
     var left = o.anchor === "l" ? x : o.anchor === "r" ? x - w : x - w / 2, top = y - h / 2;
     rr(c, left, top, w, h, h / 2);
     c.fillStyle = o.bg; c.fill();
     if (o.border) { c.lineWidth = 1; c.strokeStyle = o.border; c.stroke(); }
-    var tx = left + padX;
+    var tx = left + padX + extra / 2;
     if (o.dot) { c.fillStyle = o.dot; c.beginPath(); c.arc(tx + size * 0.32, y, size * 0.3, 0, 6.2832); c.fill(); tx += size * 1; }
     c.fillStyle = o.fg; c.textBaseline = "middle"; c.textAlign = "left"; c.fillText(text, tx, y + size * 0.04);
     var rect = { x: left, y: top, w: w, h: h };
@@ -441,6 +537,7 @@
   }
 
   var anyMotion = false, curSn = null, placed = [];
+  var labels = {}, phases = {}, lastLabelT = 0;   // per flow: where its label sits, and how far its particles have travelled
   function hits(r) { for (var i = 0; i < placed.length; i++) { var q = placed[i]; if (r.x < q.x + q.w + 4 && r.x + r.w + 4 > q.x && r.y < q.y + q.h + 2 && r.y + r.h + 2 > q.y) { return true; } } return false; }
   function draw(t) {
     if (!ctx) { return; }
@@ -452,7 +549,7 @@
     // Layout in CSS pixels.
     var key = JSON.stringify([sn.devices.map(function (d) { return d.id; }), sn.storages.map(function (s) { return s.name + s.kind; }), (sn.disks && sn.disks.list || []).map(function (d) { return d.pool + d.label; }), cssW, cssH, T("Home"), area.x, area.y, area.w, area.h]);
     if (!layout || key !== layoutKey) {
-      var model = buildModel(sn); doLayout(model); layout = model; layoutKey = key;
+      var model = buildModel(sn); doLayout(model); layout = model; layoutKey = key; labels = {}; phases = {};
     } else {
       // Keep positions, refresh node data.
       var fresh = buildModel(sn);
@@ -472,7 +569,8 @@
       var lp = S(z.x0 + 0.3, z.y0 + 0.1, 0); ctx.save(); ctx.translate(lp[0], lp[1]); ctx.fillText(z.name.toUpperCase(), 4, -fontS * 0.4); ctx.restore();
     });
     // Flows under the nodes.
-    var flows = (sn.flows || []).filter(function (f) { return f.from && f.to; });
+    // In a fixed order (not the order of the data), so that parallel flows keep their lanes.
+    var flows = (sn.flows || []).filter(function (f) { return f.from && f.to; }).sort(function (a, b) { var x = flowKey(a), y = flowKey(b); return x < y ? -1 : x > y ? 1 : 0; });
     var lanes = {};
     var drawn = [];
     flows.forEach(function (f) {
@@ -486,15 +584,19 @@
     anyMotion = drawn.length > 0;
     var labelBoxes = [];
     drawn.forEach(function (d) {
+      d.key = flowKey(d.f);
       var f = d.f, col = f.folder && m.folderColor[f.folder] ? m.folderColor[f.folder] : (f.kind === "p2p" || f.kind === "relay" ? pal.blue : "#14a98e");
       var bps = f.bps || 0, w = clamp(2.2 + Math.log10(Math.max(bps, 1)) * 0.7, 2.5, 8) * clamp(k / 90, 0.8, 2.2);
       ctx.lineCap = "round"; ctx.lineJoin = "round";
       ctx.beginPath(); d.path.forEach(function (p, i) { if (i) { ctx.lineTo(p[0], p[1]); } else { ctx.moveTo(p[0], p[1]); } });
       ctx.globalAlpha = dark ? 0.2 : 0.16; ctx.strokeStyle = col; ctx.lineWidth = w * 2.4; ctx.stroke();
       ctx.globalAlpha = dark ? 0.5 : 0.42; ctx.lineWidth = w; ctx.stroke(); ctx.globalAlpha = 1;
-      // Particles run from the sender to the receiver; the speed follows bytes per second.
-      var L = polyLen(d.path), gap = Math.max(26, k * 0.5), speed = clamp(30 + Math.log10(Math.max(bps, 10)) * 22, 30, 210) * clamp(k / 90, 0.8, 2.2);
-      var n = Math.max(1, Math.floor(L / gap)), off = reduced ? 0 : (t * speed) % gap;
+      // Particles run from the sender to the receiver at a speed that depends on the size of the board (see particleSpeed), advanced by
+      // the time since the last frame and kept per flow, so a change of rate never makes them jump.
+      var L = polyLen(d.path), gap = Math.max(26, k * 0.5), speed = particleSpeed(bps, Math.min(area.w, area.h * 1.6), gap, reduced);
+      var n = Math.max(1, Math.floor(L / gap)), ph = phases[d.key] || (phases[d.key] = { p: 0, t: t });
+      ph.p = (ph.p + speed * clamp(t - ph.t, 0, 0.12)) % gap; ph.t = t;
+      var off = ph.p;
       for (var i = 0; i <= n; i++) {
         var s = i * gap + off; if (s > L) { continue; }
         var p = along(d.path, s), r = w * 0.95;
@@ -511,29 +613,45 @@
     var sorted = m.nodes.filter(function (n) { return n.x !== undefined; }).sort(function (a, b) { return S(a.x, a.y, 0)[1] - S(b.x, b.y, 0)[1]; });
     var rings = ringTargets(sn);
     sorted.forEach(function (n) { drawNode(n, t, pal, dark, fontS, rings); });
-    // Flow labels on top.
-    var top = drawn.slice().sort(function (a, b) { return (b.f.bps || 0) - (a.f.bps || 0); }).slice(0, layout.k < 62 ? 3 : 12);
-    top.forEach(function (d) {
+    // Flow labels on top. Each flow keeps its place (see labelNeedsMove); an update changes the text only.
+    // Not before the sprites' sizes are known: the nodes' boxes change when the manifest arrives and would push the labels about.
+    var limit = MAN ? (layout.k < 62 ? 3 : 12) : 0, dtl = clamp(t - lastLabelT, 0, 1);
+    lastLabelT = t;
+    var top = drawn.slice().sort(function (a, b) {
+      var ra = labelRank(a.f.bps, !!(labels[a.key] && labels[a.key].shown)), rb = labelRank(b.f.bps, !!(labels[b.key] && labels[b.key].shown));
+      return rb - ra || (a.key < b.key ? -1 : 1);
+    }).slice(0, limit);
+    Object.keys(labels).forEach(function (kk) { labels[kk].shown = false; });
+    top.sort(function (a, b) { return a.key < b.key ? -1 : 1; }).forEach(function (d) {
       var f = d.f, L = polyLen(d.path);
       var parts = [];
       if (f.folder) { parts.push(f.folder); } else if (f.kind === "p2p") { parts.push(T("Peer-to-peer")); } else if (f.kind === "relay") { parts.push(T("Relay")); }
       if (f.bps > 0) { parts.push(rate(f.bps)); }
       var eta = f.eta_utc ? etaText(f.eta_utc) : "";
-      if (eta && eta !== "\u2014") { parts.push("\u23f1 " + eta); }
+      if (eta && eta !== "—") { parts.push("⏱ " + eta); }
       if (f.kind === "disk_fill" && !f.folder) { parts.unshift(kindText("disk_fill")); }
       if (!parts.length) { return; }
-      var sz = fontS * 0.86, tx = parts.join(" \u00b7 ");
+      var sz = fontS * 0.86, tx = parts.join(" · ");
       ctx.font = fs(sz, 600);
-      var w = ctx.measureText(tx).width + sz * 2.2, h = sz * 1.7;
-      // First free place along the path, middle first.
-      var cand = [0.5, 0.4, 0.6, 0.3, 0.7, 0.2, 0.8, 0.1, 0.9], dys = [0, -1.1, 1.1, -2.2, 2.2], done = false;
-      for (var di = 0; di < dys.length && !done; di++) {
-        for (var ci = 0; ci < cand.length; ci++) {
-          var mid = along(d.path, L * cand[ci]), my = mid[1] + dys[di] * h, r = { x: mid[0] - w / 2, y: my - h / 2, w: w, h: h };
-          if (!hits(r)) { pill(ctx, mid[0], my, tx, { size: sz, bg: pal.pill, fg: pal.text, border: d.col, dot: d.col }); done = true; break; }
+      var st = labels[d.key] || (labels[d.key] = { slot: null, bad: 0, w: 0, wT: t });
+      st.shown = true; st.seen = t;
+      var h = sz * 1.7, w = stickyWidth(st, ctx.measureText(tx).width + sz * 0.62 * 2 + sz, t);
+      var cand = [0.5, 0.4, 0.6, 0.3, 0.7, 0.2, 0.8, 0.1, 0.9], dys = [0, -1.1, 1.1, -2.2, 2.2];
+      function at(slot) { var mid = along(d.path, L * cand[slot[0]]), my = mid[1] + dys[slot[1]] * h; return { x: mid[0], y: my, r: { x: mid[0] - w / 2, y: my - h / 2, w: w, h: h } }; }
+      if (labelNeedsMove(st, st.slot ? hits(at(st.slot).r) : false, dtl)) {
+        // First free place along the path, middle first; the old place stays when none is free.
+        var found = null;
+        for (var di = 0; di < dys.length && !found; di++) {
+          for (var ci = 0; ci < cand.length; ci++) { if (!hits(at([ci, di]).r)) { found = [ci, di]; break; } }
         }
+        if (found) { st.slot = found; }
+        st.bad = 0;
       }
+      if (!st.slot) { return; }
+      var pos = at(st.slot);
+      pill(ctx, pos.x, pos.y, tx, { size: sz, bg: pal.pill, fg: pal.text, border: d.col, dot: d.col, minW: w });
     });
+    Object.keys(labels).forEach(function (kk) { if (t - (labels[kk].seen || 0) > 30) { delete labels[kk]; } });
     if (!sn.devices.length && !sn.storages.length) { emptyHint(pal); }
   }
   function emptyHint(pal) {
@@ -557,7 +675,9 @@
 
   function drawNode(n, t, pal, dark, fontS, rings) {
     var k = layout.k, foot = S(n.x, n.y, 0);
-    var name = n.sprite, scaleBoost = n.kind === "dock" ? 1 : 1;
+    var name = n.sprite, scaleBoost = 1;
+    // A dock with a drive in it is one picture (the drive stands in the slot), its LEDs in the drive's state.
+    if (n.kind === "dock" && n.cur) { name = n.cur.failing ? "dock-disk-bad" : n.cur.phase === "idle" ? "dock-disk" : "dock-disk-busy"; }
     // Docked disk on its dock: the disk sprite lifted a little, in its state.
     var alpha = n.online ? 1 : 0.5;
     var man = MAN && MAN[name];
@@ -637,13 +757,9 @@
     if (d.eta_utc) { s += " · " + etaText(d.eta_utc); }
     return s;
   }
+  // The progress of what the docked drive does, above it (the drive itself is part of the dock's picture).
   function drawDockDisk(n, foot, k, t, pal, dark, fontS) {
     var d = n.cur; if (!d) { return; }
-    var name = d.failing ? "disk-bad" : d.phase === "idle" ? "disk" : "disk-busy";
-    var man = MAN && MAN[name]; if (!man) { return; }
-    var w = man.span_m * k * 0.72, bob = reduced || d.phase === "idle" ? 0 : Math.sin(t * 2.2) * k * 0.03;
-    var im = sprite(name, w * dpr);
-    if (im) { ctx.drawImage(im, foot[0] - man.ax * w, foot[1] - k * 0.42 - man.ay * w + bob, w, w); }
     if (d.progress !== null && d.progress !== undefined) {
       var bw = k * 1.1, bh = Math.max(4, fontS * 0.3), bx = foot[0] - bw / 2, by = foot[1] - k * 1.0;
       rr(ctx, bx, by, bw, bh, bh / 2); ctx.fillStyle = pal.track; ctx.fill();
@@ -804,8 +920,8 @@
   function frame(ts) {
     raf = 0;
     if (!active) { return; }
-    var animated = anyMotion && !reduced;
-    var gap = animated ? 33 : 1000;
+    var animated = anyMotion;
+    var gap = animated ? (reduced ? 120 : 33) : 1000;
     if (dirty || ts - lastDraw >= gap - 3) {
       lastDraw = ts; dirty = false;
       try { draw(ts / 1000); } catch (e) { if (window.console) { console.error("viz draw", e); } }
@@ -823,8 +939,7 @@
     active = false; clearTimeout(pollTimer); clearTimeout(timer); timer = 0;
     if (abort) { try { abort.abort(); } catch (e) { /* done */ } }
     if (raf) { cancelAnimationFrame(raf); raf = 0; }
-    if (fullEl()) { try { (document.exitFullscreen || document.webkitExitFullscreen).call(document); } catch (e) { /* none */ } }
-    if (pseudoFull) { setPseudo(false); }
+    if (inFull()) { exitFull(false); }
   }
   function sync() {
     var shown = !page.classList.contains("hidden") && document.body.dataset.view === "app";
@@ -835,5 +950,6 @@
   document.addEventListener("visibilitychange", function () { if (active && document.visibilityState === "visible") { dirty = true; poll(); schedule(0); } });
   sync();
   // Exposed for tests: the snapshot the page draws and a way to feed one in.
-  window.varstoViz = { feed: function (j) { snap = j; demo = !j; status = "live"; afterData(); }, demo: demoSnap };
+  window.varstoViz = { state: function () { return { pseudoFull: pseudoFull, inFull: inFull(), labels: JSON.parse(JSON.stringify(labels)), phases: JSON.parse(JSON.stringify(phases)) }; },
+    feed: function (j) { snap = j; demo = !j; status = "live"; afterData(); }, demo: demoSnap };
 })();

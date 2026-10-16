@@ -21,6 +21,7 @@
 
 mod geometry;
 mod service;
+mod shell;
 
 #[cfg(windows)]
 mod app;
