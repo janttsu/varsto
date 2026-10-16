@@ -38,6 +38,8 @@ REPO = "https://github.com/janttsu/varsto"
 # "released" with this value, while {{VERSION}} follows Cargo.toml (main).
 RELEASED_VERSION = "0.0.1-alpha.14"
 RELEASE_KEY = ROOT / "release-key.pub"
+# The daily channel has its own key; it signs only daily/latest/SHA256SUMS.
+DAILY_KEY = ROOT / "daily-key.pub"
 FOOTER = [
     f'{BRAND} is a working name. Source: <a href="{REPO}">github.com/janttsu/varsto</a>, under the PolyForm Shield License 1.0.0 (source-available).',
     "No cookies, no tracking. The web server keeps a standard access log for at most seven days.",
@@ -618,6 +620,8 @@ def main() -> None:
     OUT.mkdir(parents=True, exist_ok=True)
     if RELEASE_KEY.exists():
         shutil.copyfile(RELEASE_KEY, OUT / "release-key.pub")
+    if DAILY_KEY.exists():
+        shutil.copyfile(DAILY_KEY, OUT / "daily-key.pub")
     slugs = build_docs()
     build_blog(slugs)
     build_pages(slugs)

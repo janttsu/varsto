@@ -77,6 +77,13 @@ You can always update by hand: `varsto update` (or `varsto update --check`),
 the update button in the interface or the tray menu. A portable copy (the
 zip) replaces its own files instead of running the installer.
 
+`varsto update --daily` takes the newest daily (test) build instead of a
+release: the signed `varsto-daily-windows-setup.exe` for a copy installed by the
+setup program, `varsto-daily-windows-x86_64.zip` for a portable one. It is
+checked against the separate daily key ([RELEASING.md](../RELEASING.md),
+Daily builds), never happens by itself, and `varsto --version` then names the
+daily build. `varsto update --stable` goes back to releases once one is newer.
+
 ## Uninstalling
 
 Settings > Apps > Installed apps > Varsto > Uninstall (or the "Uninstall

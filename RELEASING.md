@@ -128,6 +128,68 @@ pre-release `screenshots-latest`; the web server pulls them every 15 minutes
 (`ops/site`). `scripts/screenshots/update-site.sh [run id | --dir DIR]` copies
 a run's (or a local test's) pictures into the repository's copy of the site.
 
+## Daily builds: signing and publishing
+
+The daily channel (<https://varsto.net/daily/>) carries development builds of
+the main line under stable file names (`daily/latest/varsto-daily-*`) and dated
+copies (`daily/builds/<id>/`). `varsto update --daily` installs from it. It has
+its **own key**, separate from the release key: a signature made with the
+daily key is never accepted for a release, and a release signature is never
+accepted for the daily channel (different key and key id; the daily
+verifier also requires `channel:daily` in the signed comment).
+
+The **public key** is [`daily-key.pub`](daily-key.pub) (built into every
+`varsto` binary next to the release key, published at
+`https://varsto.net/daily-key.pub`). The **private key** is an OpenSSL Ed25519
+PEM with its 8-byte key id in hex (`daily-key.pem`, `daily-key.id`), by default
+in `~/.config/varsto-release/` (`VARSTO_DAILY_KEY` overrides), mode 600, never
+in this repository, in CI or on the web server. Create one with
+`openssl genpkey -algorithm ed25519 -out daily-key.pem` and 8 random bytes in
+hex for the `.id`; `scripts/sign-daily.sh --public-key` prints the public key
+file. Replacing the key means shipping a binary with the new `daily-key.pub`;
+daily installs then need a new build installed by hand once.
+
+What is signed: `daily/latest/SHA256SUMS`, the list with the stable names, in
+the same minisign-compatible format as releases, signature file
+`daily/latest/SHA256SUMS.sig`. The trusted comment is
+`timestamp:<unix time> file:SHA256SUMS channel:daily build:<build id>`
+(tab separated; the build id is `YYYYMMDD-<commit>` as in `daily/latest.json`).
+`daily/latest.json` and the page are not signed and the updater does not read
+them.
+
+Publishing a build (where the daily key is):
+
+1. Prepare the build with `website/tools/daily/make_daily.py` and upload it
+   with the rsync command in its header (never `--delete`, never touching
+   `downloads/` or `testbuilds/`). It rewrites `daily/latest/`, so the old
+   signature is gone from the server until the next step; updaters refuse the
+   unsigned list in between.
+2. Fetch the list that is now live, sign it and put only the signature next to it:
+
+   ```
+   curl -fsS https://varsto.net/daily/latest/SHA256SUMS -o SHA256SUMS
+   scripts/sign-daily.sh --build-id 20261016-316c579 SHA256SUMS
+   rsync SHA256SUMS.sig <host>:<web root>/daily/latest/
+   ```
+
+   The script refuses a list that names anything but `varsto-daily-*` files
+   with SHA-256 sums, checks that the key matches `daily-key.pub` and verifies
+   its own signature. `--verify` re-checks a signature file.
+3. `varsto update --check --daily` on any machine shows the new build.
+
+What `varsto update --daily` checks: the list's signature against the daily
+key; `channel:daily`, `file:SHA256SUMS` and a valid build id in the signed
+comment; a signing time not older than the last daily list accepted
+(`update-state-daily.json`, separate from `update-state.json`), not more than
+a day ahead of the clock and not more than 30 days old; a build not older
+than the installed daily build (`update-channel.json`, written after a daily
+install; compared by the date in the build id, and by signing time within one
+day); and the SHA-256 of the download against the signed list. Daily builds
+have no second channel (no GitHub copy). The macOS disk image and the Android
+and iOS packages are not installed by the command line. A build installed this
+way shows as `daily build <id>` in `varsto --version` and `varsto status`; the
+background updater stays on releases and never installs a daily build.
+
 ## Rotating or losing the key
 
 A new key needs a release signed with the old key that carries the new public
