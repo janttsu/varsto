@@ -1,0 +1,149 @@
+{
+  "channel": {
+    "name": "daily",
+    "url": "https://varsto.net/daily/",
+    "updater": false,
+    "keep": 7
+  },
+  "current": {
+    "id": "20261016-d4d1f14",
+    "date": "2026-10-16",
+    "version": "0.0.1-alpha.14",
+    "main_commit": "656bc1f",
+    "prs": [
+      39,
+      41,
+      44,
+      42,
+      43,
+      38,
+      40,
+      46,
+      50,
+      51,
+      52,
+      53,
+      54,
+      55,
+      56
+    ],
+    "note": "Integration branch daily-20261016: the open PRs plus the fixes for drive format, visualization, daily updates, pairing address, forwarding, thumbnail grace period and UI responsiveness.",
+    "ci_run": "https://github.com/janttsu/varsto/actions/runs/38903232809",
+    "platforms": [
+      {
+        "key": "linux-x86_64",
+        "label": "Linux x86_64 (static, musl)",
+        "file": "varsto-daily-20261016-d4d1f14-linux-x86_64.tar.gz",
+        "latest": "varsto-daily-linux-x86_64.tar.gz",
+        "size": 15010970,
+        "sha256": "288c997c17eece9f01e1a78cf31091824552157f46ab4e9fdccab7e84506f51a",
+        "commit": "d4d1f14",
+        "signed": false,
+        "build": "20261016-d4d1f14"
+      },
+      {
+        "key": "android",
+        "label": "Android (debug APK)",
+        "file": "varsto-daily-20261016-d4d1f14-android-debug.apk",
+        "latest": "varsto-daily-android-debug.apk",
+        "size": 33137542,
+        "sha256": "ca3958c73abe7b17f9b1f49c070b5502f32563e7f2381b71b778a896c676c391",
+        "commit": "d4d1f14",
+        "signed": false,
+        "build": "20261016-d4d1f14"
+      },
+      {
+        "key": "windows-setup",
+        "label": "Windows installer",
+        "file": "varsto-testbuild-20261016-316c579-windows-setup.exe",
+        "latest": "varsto-daily-windows-setup.exe",
+        "size": 14285212,
+        "sha256": "21030bd4b1e8a1985e517cba30cba92f8f23f9f60a38ec9372658298bd82c24d",
+        "commit": "316c579",
+        "signed": false,
+        "build": "20261016-316c579"
+      },
+      {
+        "key": "windows-zip",
+        "label": "Windows portable zip",
+        "file": "varsto-testbuild-20261016-316c579-windows-x86_64.zip",
+        "latest": "varsto-daily-windows-x86_64.zip",
+        "size": 14523288,
+        "sha256": "33af812cf359115867bbd16ac66919e6162a41b3bc63aa5780cbf81664578487",
+        "commit": "316c579",
+        "signed": false,
+        "build": "20261016-316c579"
+      },
+      {
+        "key": "macos",
+        "label": "macOS Apple Silicon (dmg)",
+        "file": "varsto-daily-20261016-d4d1f14-macos-apple-silicon.dmg",
+        "latest": "varsto-daily-macos-apple-silicon.dmg",
+        "size": 15230732,
+        "sha256": "2c5933911e9ea2329f84f0b8ab64c583104656bb2ace5dca8eb716bf9b3c754f",
+        "commit": "d4d1f14",
+        "signed": false,
+        "build": "20261016-d4d1f14"
+      },
+      {
+        "key": "ios",
+        "label": "iOS (unsigned ipa)",
+        "file": "varsto-testbuild-20261016-8f57797-ios-unsigned.ipa",
+        "latest": "varsto-daily-ios-unsigned.ipa",
+        "size": 10437164,
+        "sha256": "e6d57201ca60c8e813160b359c62cb0372b1e46b9a30570382dd98235712a64b",
+        "commit": "8f57797",
+        "signed": false,
+        "build": "20261016-316c579"
+      }
+    ]
+  },
+  "history": [
+    {
+      "id": "20261016-316c579",
+      "date": "2026-10-16"
+    }
+  ],
+  "known_gaps": [
+    {
+      "id": "unsigned",
+      "text": "The builds carry no release signature and no Apple or Microsoft code signing. Only the checksum list is signed, with a separate daily key that works for the daily channel only."
+    },
+    {
+      "id": "not-format-2",
+      "text": "Format 2 (the records work) is not included; when it lands, vaults created with these builds must be recreated."
+    },
+    {
+      "id": "os-warnings",
+      "text": "macOS, Windows and iOS warn about unsigned software; expect right-click and Open on macOS, and SmartScreen on Windows."
+    },
+    {
+      "id": "windows-ci-only",
+      "text": "The Windows installer has been smoke-tested on CI only (install, upgrade, repair, downgrade refusal, uninstall), not on a real machine."
+    },
+    {
+      "id": "ios-untested",
+      "text": "The iOS ipa has not been run on a real device. Sideload it with AltStore, SideStore or Sideloadly."
+    },
+    {
+      "id": "ui-strings",
+      "text": "Some strings in the app interface are not translated yet; they are logged."
+    },
+    {
+      "id": "windows-ios-previous",
+      "text": "Windows and iOS are still from the previous build 20261016-316c579; they were not rebuilt this round."
+    },
+    {
+      "id": "grace-default",
+      "text": "The grace period before a storage that has fallen behind is given up (package E) defaults to 30 days."
+    },
+    {
+      "id": "devices-unverified",
+      "text": "The Kotlin, Swift and Windows full-screen code and the pairing fix have not been verified on real devices."
+    },
+    {
+      "id": "first-daily-update",
+      "text": "The first update with --daily needs a binary that already contains the feature, so install this build by hand once; after that varsto update --daily can take over."
+    }
+  ]
+}
