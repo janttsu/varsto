@@ -234,3 +234,33 @@ fn verified_is_told_from_claimed() {
     assert_eq!(p.disks.verified_bytes, p.disks.bytes);
     assert_eq!(p.state, "disks");
 }
+
+#[test]
+fn the_status_reads_each_folder_once_and_agrees_with_protection() {
+    // `status` builds the protection and the policy states from one view
+    // and one read of each folder's state: the same answer as asking
+    // `protection` (and its policy check) on its own.
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    let (mut a, _) = make(root, "a-home");
+    a.add_storage(dir(root, "usb", false)).unwrap();
+    for (i, name) in ["docs", "pics", "notes"].iter().enumerate() {
+        let d = write(root, name, "a.bin", 40_000 + i * 1000, i as u64 + 7);
+        write(root, name, "b.bin", 9_000, i as u64 + 70);
+        a.add_folder(name, &d).unwrap();
+        a.push(name).unwrap();
+    }
+    let alone = a.protection().unwrap();
+    let st = a.status().unwrap();
+    assert_eq!(st.folders.len(), 3);
+    for f in &st.folders {
+        assert_eq!(
+            serde_json::to_value(&f.protection).unwrap(),
+            serde_json::to_value(&alone[&f.folder_id]).unwrap(),
+            "{}",
+            f.name
+        );
+        assert!(f.protection.policy_state.is_some(), "{}", f.name);
+        assert_eq!(f.files, 2);
+    }
+}

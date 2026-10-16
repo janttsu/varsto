@@ -897,6 +897,11 @@ body[data-mobile="1"] .sel-count { font-size: 14px; }
 .modal-text .strong { font-weight: 600; }
 
 /* Progress of this device's long tasks, under the top bar. */
+.connnote { flex: none; padding: 6px 32px; font-size: 13px; background: var(--surface-2); color: var(--text-2); border-bottom: 1px solid var(--border); }
+.connnote[data-kind="down"] { color: var(--text); }
+body[data-mobile="1"] .connnote { padding: 6px 16px; font-size: 12px; }
+.files-more td { text-align: center; padding: 12px; }
+.files-more .muted { margin-left: 8px; }
 .taskbar { position: sticky; top: 64px; z-index: 4; flex: none; background: var(--surface); border-bottom: 1px solid var(--border); padding: 6px 32px 0; font-size: 13px; }
 .tb-line { display: flex; gap: 4px 12px; align-items: baseline; min-width: 0; }
 .tb-text { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
